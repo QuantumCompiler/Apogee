@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -38,6 +39,7 @@
 #include "support/gguf_builder.h"
 #include "support/mlx_model.h"
 #include "support/pipeline_model.h"
+#include "support/towered_configs.h"
 #include "training/python_env.h"
 
 /// The doctor, against a matrix of deliberately broken installs.
@@ -2310,7 +2312,8 @@ TEST_CASE(
     CHECK(elsewhere.detail.find("Apple silicon macOS only") != std::string::npos);
     inputs.host_target = "macos-arm64";
 
-    // A transcription role on an mlx entry: no audio here, said as such.
+    // A transcription role on an mlx entry that hears nothing: its rung said
+    // (since M23 by 53g's ladder, which an omni model mlx-vlm built passes).
     install.write("config/config.yaml",
                   "models:\n  default: chat\n  default_transcription: local\n" +
                       mlx_entry(install) + "  chat:\n    type: mock\n");
@@ -2319,7 +2322,9 @@ TEST_CASE(
     const apogee::commands::CheckRow* deaf = row_in(report, "Config", "default_transcription");
     REQUIRE(deaf != nullptr);
     CHECK(deaf->status == Status::Warn);
-    CHECK(deaf->detail.find("an mlx backend hears no audio") != std::string::npos);
+    CHECK(deaf->detail.starts_with("local -- not mlx-vlm's build: "));
+    CHECK(deaf->remedy.find("an mlx backend over an omni model mlx-vlm built") !=
+          std::string::npos);
 }
 
 TEST_CASE(
@@ -3533,3 +3538,442 @@ TEST_CASE("an MLX embedding entry is checked as one: its width, mlx-embeddings, 
         CHECK(entry->remedy == "apogee check --fix");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Every MLX set's version (M23): each row says what the environment's
+// distribution records state -- `*.dist-info/METADATA`'s `Version`, and for
+// mlx-video PEP 610's `direct_url.json` -- against the set's floor or pin.
+// The environments are files the test writes, and nothing is run.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// The environment's site-packages, as the fake runtime lays it out.
+[[nodiscard]] std::filesystem::path site_of(const Install& install) {
+    return install.root / "training" / "venv" / "lib" / "python3.14" / "site-packages";
+}
+
+[[nodiscard]] std::filesystem::path venv_of(const Install& install) {
+    return install.root / "training" / "venv";
+}
+
+/// `module`'s package and the distribution record pip writes beside it:
+/// `<module>-<version>.dist-info/METADATA` naming `name` at `version` (a
+/// header left out when `version` is empty) and, for a VCS install, a
+/// `direct_url.json` naming `commit` -- files only.
+void install_distribution(const Install& install, const std::string& module,
+                          const std::string& name, const std::string& version,
+                          const std::string& commit = {}) {
+    const std::filesystem::path site = site_of(install);
+    std::error_code code;
+    for (const auto& entry : std::filesystem::directory_iterator(site, code)) {
+        if (entry.path().filename().string().starts_with(module + "-")) {
+            std::filesystem::remove_all(entry.path(), code);  // one record, as pip leaves it
+        }
+    }
+    install.write(site_of(install).lexically_relative(install.root) / module / "__init__.py", "");
+    const std::filesystem::path record =
+        site_of(install).lexically_relative(install.root) /
+        (module + "-" + (version.empty() ? std::string{"0"} : version) + ".dist-info");
+    install.write(record / "METADATA",
+                  "Metadata-Version: 2.1\nName: " + name + "\n" +
+                      (version.empty() ? std::string{} : "Version: " + version + "\n") +
+                      "Summary: a stub\n\nIts long description.\nVersion: 9.9.9\n");
+    if (!commit.empty()) {
+        install.write(record / "direct_url.json",
+                      R"({"url": "https://github.com/Blaizzy/mlx-video.git", )"
+                      R"("vcs_info": {"vcs": "git", "commit_id": ")" +
+                          commit + R"(", "requested_revision": ")" + commit + R"("}})");
+    }
+}
+
+constexpr std::string_view kPinnedCommit = "87db56a51758fefb748a359b90a5283bb8ba4837";
+
+}  // namespace
+
+TEST_CASE(
+    "each MLX set's row says its version against its floor: current passes, below it warns "
+    "naming the setup, a record that states none is held to nothing",
+    "[commands][check][mlx][m23]") {
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    inputs.host_target = "macos-arm64";
+    const std::string venv = venv_of(install).string();
+    const std::string files = " is present in " + venv + " (its files, not imported by check)";
+    const auto mlx_row = [&inputs](std::string_view name) {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        CHECK(report.passed());  // a warning, never a failure
+        const apogee::commands::CheckRow* row = row_in(report, "MLX", name);
+        REQUIRE(row != nullptr);
+        return *row;
+    };
+
+    // mlx-lm's own files, no record (the fake runtime's, and the e2e stubs'):
+    // its declared version said, and held to nothing.
+    apogee::commands::CheckRow runtime = mlx_row("runtime");
+    CHECK(runtime.status == Status::Ok);
+    CHECK(runtime.detail == "mlx-lm 0.32.0" + files +
+                                "; no distribution record of it is there, so it is not held to "
+                                "its floor, >=0.21");
+
+    // Present and current, by its record.
+    install_distribution(install, "mlx_lm", "mlx-lm", "0.32.0");
+    runtime = mlx_row("runtime");
+    CHECK(runtime.status == Status::Ok);
+    CHECK(runtime.detail == "mlx-lm 0.32.0" + files + ", at or above its floor, >=0.21");
+    CHECK(runtime.remedy.empty());
+    // Below its floor: a warning naming the setup that brings it up.
+    install_distribution(install, "mlx_lm", "mlx-lm", "0.20.5");
+    runtime = mlx_row("runtime");
+    CHECK(runtime.status == Status::Warn);
+    CHECK(runtime.detail == "mlx-lm 0.20.5" + files +
+                                ", below its floor, >=0.21 -- kept from an earlier setup until "
+                                "the 'mlx' set is installed again");
+    CHECK(runtime.remedy == "apogee train setup --with mlx");
+    install_distribution(install, "mlx_lm", "mlx-lm", "0.32.0");
+
+    // mlx-vlm set up before 53f raised its floor: 0.3.x warns.
+    install_distribution(install, "mlx_vlm", "mlx-vlm", "0.3.9");
+    apogee::commands::CheckRow vision = mlx_row("vision");
+    CHECK(vision.status == Status::Warn);
+    CHECK(vision.detail == "mlx-vlm 0.3.9" + files +
+                               ", below its floor, >=0.6.1 -- kept from an earlier setup until "
+                               "the 'mlx-vlm' set is installed again");
+    CHECK(vision.remedy == "apogee train setup --with mlx-vlm");
+    // A candidate of the floor is below it; the floor and a post release meet it.
+    install_distribution(install, "mlx_vlm", "mlx-vlm", "0.6.1rc1");
+    CHECK(mlx_row("vision").status == Status::Warn);
+    install_distribution(install, "mlx_vlm", "mlx-vlm", "0.6.1");
+    vision = mlx_row("vision");
+    CHECK(vision.status == Status::Ok);
+    CHECK(vision.detail == "mlx-vlm 0.6.1" + files +
+                               ", at or above its floor, >=0.6.1 -- an MLX vision model reads "
+                               "images as they are");
+    install_distribution(install, "mlx_vlm", "mlx-vlm", "0.6.1.post1");
+    CHECK(mlx_row("vision").status == Status::Ok);
+    // A record that states no version, or none that is a release number:
+    // said, and compared with nothing.
+    install_distribution(install, "mlx_vlm", "mlx-vlm", "");
+    vision = mlx_row("vision");
+    CHECK(vision.status == Status::Ok);
+    CHECK(vision.detail.find("; its distribution record states no version, so it is not held to "
+                             "its floor, >=0.6.1") != std::string::npos);
+    install_distribution(install, "mlx_vlm", "mlx-vlm", "0.0-vlm-stub");
+    vision = mlx_row("vision");
+    CHECK(vision.status == Status::Ok);
+    CHECK(vision.detail == "mlx-vlm 0.0-vlm-stub" + files +
+                               "; its distribution record's version, '0.0-vlm-stub', is not a "
+                               "release number, so it is not held to its floor, >=0.6.1 -- an "
+                               "MLX vision model reads images as they are");
+
+    // mlx-embeddings, bootstrapped on Apple silicon: absent reads as before.
+    apogee::commands::CheckRow embeddings = mlx_row("embeddings");
+    CHECK(embeddings.status == Status::Skipped);
+    CHECK(embeddings.detail.starts_with("not set up -- only an MLX embedding model needs it"));
+    install_distribution(install, "mlx_embeddings", "mlx-embeddings", "0.0.5");
+    embeddings = mlx_row("embeddings");
+    CHECK(embeddings.status == Status::Warn);
+    CHECK(embeddings.detail.find(", below its floor, >=0.1.0") != std::string::npos);
+    CHECK(embeddings.remedy == "apogee train setup --with mlx-embeddings");
+    install_distribution(install, "mlx_embeddings", "mlx-embeddings", "0.1.0");
+    embeddings = mlx_row("embeddings");
+    CHECK(embeddings.status == Status::Ok);
+    CHECK(embeddings.detail == "mlx-embeddings 0.1.0" + files +
+                                   ", at or above its floor, >=0.1.0 -- an MLX embedding model "
+                                   "embeds through it");
+}
+
+TEST_CASE(
+    "mlx-video's row holds its commit to the pin: on it passes, another commit or none warns, "
+    "and absent it is a skip, opt-in",
+    "[commands][check][mlx][mlx_video][m23]") {
+    const Install install;
+    install.seed();
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    inputs.host_target = "macos-arm64";
+    const auto video_row = [&inputs] {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        CHECK(report.passed());
+        const apogee::commands::CheckRow* row = row_in(report, "MLX", "video");
+        REQUIRE(row != nullptr);
+        return *row;
+    };
+    constexpr std::string_view kAbsent =
+        "not installed (opt-in) -- only 'models convert --mlx' of a Wan set and 'video generate' "
+        "on MLX need it; pip builds mlx-video from GitHub at its pin, commit 87db56a51758 "
+        "(2026-05-13)";
+    // No environment at all, then one without it: nobody asked, so a skip.
+    apogee::commands::CheckRow video = video_row();
+    CHECK(video.status == Status::Skipped);
+    CHECK(video.detail == kAbsent);
+    CHECK(video.remedy == "apogee train setup --with mlx-video");
+    write_fake_mlx_runtime(install);
+    video = video_row();
+    CHECK(video.status == Status::Skipped);
+    CHECK(video.detail == kAbsent);
+
+    const std::string files =
+        " is present in " + venv_of(install).string() + " (its files, not imported by check)";
+    constexpr std::string_view kUse =
+        " -- 'models convert --mlx' of a Wan set and 'video generate' on MLX run through it";
+    // Built from the pinned commit, as pip records it.
+    install_distribution(install, "mlx_video", "mlx-video", "0.1.0", std::string{kPinnedCommit});
+    video = video_row();
+    CHECK(video.status == Status::Ok);
+    CHECK(video.detail == "mlx-video 0.1.0 at commit 87db56a51758" + files +
+                              ", the commit Apogee pins (2026-05-13)" + std::string{kUse});
+    // Another commit: off its pin, a warning naming the setup.
+    install_distribution(install, "mlx_video", "mlx-video", "0.1.0",
+                         "0123456789abcdef0123456789abcdef01234567");
+    video = video_row();
+    CHECK(video.status == Status::Warn);
+    CHECK(video.detail == "mlx-video 0.1.0 at commit 0123456789ab" + files +
+                              ", off its pin, commit 87db56a51758 (2026-05-13) -- the one commit "
+                              "this Apogee trusts");
+    CHECK(video.remedy == "apogee train setup --with mlx-video");
+    // A record naming no commit -- not a VCS install -- is not the pin either.
+    install_distribution(install, "mlx_video", "mlx-video", "0.1.0");
+    video = video_row();
+    CHECK(video.status == Status::Warn);
+    CHECK(video.detail == "mlx-video 0.1.0" + files +
+                              ", but its record names no commit it was built from, so it is not "
+                              "its pin, commit 87db56a51758 (2026-05-13) -- the one commit this "
+                              "Apogee trusts");
+    // The package with no record at all (the e2e stubs'): held to nothing.
+    std::filesystem::remove_all(site_of(install) / "mlx_video-0.1.0.dist-info");
+    video = video_row();
+    CHECK(video.status == Status::Ok);
+    CHECK(video.detail == "mlx-video (version unstated)" + files +
+                              "; no distribution record of it is there, so it is not held to its "
+                              "pin, commit 87db56a51758 (2026-05-13)" +
+                              std::string{kUse});
+}
+
+TEST_CASE(
+    "mlx-audio's row holds it to its floor, and absent it is a skip that names the rebuild where "
+    "the environment's Python cannot take it",
+    "[commands][check][mlx][mlx_audio][m23]") {
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    inputs.host_target = "macos-arm64";
+    const auto voice_row = [&inputs] {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        CHECK(report.passed());
+        const apogee::commands::CheckRow* row = row_in(report, "MLX", "voice");
+        REQUIRE(row != nullptr);
+        return *row;
+    };
+    constexpr std::string_view kAbsent =
+        "not installed (opt-in) -- only 'models convert --mlx' of a voice model and 'voice say' "
+        "on MLX need it; mlx-audio's floor is >=0.4.0";
+    apogee::commands::CheckRow voice = voice_row();
+    CHECK(voice.status == Status::Skipped);
+    CHECK(voice.detail == kAbsent);
+    CHECK(voice.remedy == "apogee train setup --with mlx-audio");
+    // On a Python its set does not run on (M19): the rebuild is the way.
+    install.write("training/venv/pyvenv.cfg", "home = /x\nversion = 3.14.5\n");
+    install.write("training/venv/apogee.json", R"({"base_python": "/x", "sets": ["mlx"]})");
+    voice = voice_row();
+    CHECK(voice.status == Status::Skipped);
+    CHECK(voice.detail == std::string{kAbsent} +
+                              "; the Python environment is on Python 3.14.5, and the 'mlx-audio' "
+                              "set runs on >=3.10,<3.13");
+    CHECK(voice.remedy == "apogee train setup --rebuild --with mlx-audio");
+    install.write("training/venv/pyvenv.cfg", "home = /x\nversion = 3.12.13\n");
+    CHECK(voice_row().remedy == "apogee train setup --with mlx-audio");
+
+    const std::string files =
+        " is present in " + venv_of(install).string() + " (its files, not imported by check)";
+    install_distribution(install, "mlx_audio", "mlx-audio", "0.3.1");
+    voice = voice_row();
+    CHECK(voice.status == Status::Warn);
+    CHECK(voice.detail == "mlx-audio 0.3.1" + files +
+                              ", below its floor, >=0.4.0 -- kept from an earlier setup until the "
+                              "'mlx-audio' set is installed again");
+    CHECK(voice.remedy == "apogee train setup --with mlx-audio");
+    install_distribution(install, "mlx_audio", "mlx-audio", "0.6.1");
+    voice = voice_row();
+    CHECK(voice.status == Status::Ok);
+    CHECK(voice.detail == "mlx-audio 0.6.1" + files +
+                              ", at or above its floor, >=0.4.0 -- 'models convert --mlx' of a "
+                              "voice model and 'voice say' on MLX run through it");
+}
+
+TEST_CASE(
+    "an environment with every bootstrapped MLX set current and no opt-in set warns nothing in "
+    "the MLX section",
+    "[commands][check][mlx][m23][m11]") {
+    // M11's rule for what this item adds: the install's bootstrap brings
+    // mlx-lm, mlx-vlm and mlx-embeddings and never an opt-in set, so their
+    // rows pass and the opt-in rows skip.
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    install_distribution(install, "mlx_lm", "mlx-lm", "0.32.0");
+    install_distribution(install, "mlx_vlm", "mlx-vlm", "0.6.1");
+    install_distribution(install, "mlx_embeddings", "mlx-embeddings", "0.1.0");
+    CheckInputs inputs = inputs_for(install);
+    inputs.host_target = "macos-arm64";
+    const CheckReport report = run_checks(inputs);
+    INFO(render_report(report, false));
+    std::size_t mlx_rows = 0;
+    for (const apogee::commands::CheckRow& row : report.rows) {
+        if (row.section == "MLX") {
+            ++mlx_rows;
+            INFO(row.name << ": " << row.detail);
+            CHECK(row.status != Status::Warn);
+            CHECK(row.status != Status::Fail);
+        }
+    }
+    CHECK(mlx_rows == 8);  // runtime, vision, embeddings, video, voice, three drivers
+    const apogee::commands::CheckRow* video = row_in(report, "MLX", "video");
+    const apogee::commands::CheckRow* voice = row_in(report, "MLX", "voice");
+    REQUIRE(video != nullptr);
+    REQUIRE(voice != nullptr);
+    CHECK(video->status == Status::Skipped);
+    CHECK(voice->status == Status::Skipped);
+    // Off Apple silicon the section is the one skip, as before.
+    inputs.host_target = "linux-x64";
+    const CheckReport elsewhere = run_checks(inputs);
+    CHECK(row_in(elsewhere, "MLX", "video") == nullptr);
+    CHECK(row_in(elsewhere, "MLX", "voice") == nullptr);
+}
+
+TEST_CASE(
+    "an mlx entry's hearing is said beside its sight, and a transcription role on one hears as "
+    "its provider's rungs say",
+    "[commands][check][mlx][audio][m23]") {
+    // 53g: an omni model mlx-vlm built hears through it; M23 says so where
+    // its sight is said, by the same file facts `accepts_audio` reads.
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml",
+                  "models:\n  default: chat\n  default_transcription: local\n" +
+                      mlx_entry(install) + "  chat:\n    type: mock\n");
+    load_into(inputs);
+    inputs.host_target = "macos-arm64";
+    install.write("mlx-model/config.json", apogee::testing::kGemma4Config);
+    install.write("mlx-model/processor_config.json", "{}");
+    install.write("mlx-model/apogee-snapshot.json",
+                  R"({"source": "convert", "transform": "mlx_vlm.convert 4bit", "files": [], )"
+                  R"("kind": "vision"})");
+    install_distribution(install, "mlx_vlm", "mlx-vlm", "0.6.1");
+    const auto rows = [&inputs] {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        const apogee::commands::CheckRow* pointer =
+            row_in(report, "Config", "default_transcription");
+        const apogee::commands::CheckRow* audio = row_in(report, "Attachments", "audio");
+        REQUIRE(entry != nullptr);
+        REQUIRE(pointer != nullptr);
+        REQUIRE(audio != nullptr);
+        return std::tuple{*entry, *pointer, *audio};
+    };
+    {
+        // An mlx-vlm without its type's module: the tower said, and why not.
+        const auto [entry, pointer, audio] = rows();
+        CHECK(entry.status == Status::Ok);
+        CHECK(entry.detail.find("; a vision model, reading images through mlx-vlm; it has an "
+                                "audio tower, but does not hear recordings as they are -- no "
+                                "mlx-vlm module for its type: the installed mlx-vlm 0.6.1 has no "
+                                "module for its type, gemma4, so it cannot build the model to "
+                                "hear with -- apogee train setup --with mlx-vlm; its runtime is "
+                                "present") != std::string::npos);
+        CHECK(pointer.status == Status::Warn);
+        CHECK(pointer.detail.starts_with("local -- no mlx-vlm module for its type: "));
+        CHECK(pointer.remedy == "apogee train setup --with mlx-vlm");
+        CHECK(audio.detail.find("transcribed by local") == std::string::npos);
+    }
+    install.write(site_of(install).lexically_relative(install.root) / "mlx_vlm" / "models" /
+                      "gemma4" / "__init__.py",
+                  "");
+    {
+        const auto [entry, pointer, audio] = rows();
+        CHECK(entry.detail.find("; it hears recordings as they are, through mlx-vlm; its runtime "
+                                "is present") != std::string::npos);
+        CHECK(pointer.status == Status::Ok);
+        CHECK(pointer.detail == "local");
+        CHECK(audio.detail.starts_with("transcribed by local"));
+    }
+    // mlx-vlm's build of a set that only sees: no tower, so no hearing said.
+    install.write("mlx-model/config.json", apogee::testing::kQwen3VlConfig);
+    install.write(site_of(install).lexically_relative(install.root) / "mlx_vlm" / "models" /
+                      "qwen3_vl" / "__init__.py",
+                  "");
+    {
+        const auto [entry, pointer, audio] = rows();
+        CHECK(entry.detail.find("hear") == std::string::npos);
+        CHECK(pointer.status == Status::Warn);
+        CHECK(pointer.detail.starts_with("local -- no audio tower: its config.json declares none"));
+    }
+}
+
+#if !defined(_WIN32)
+TEST_CASE("the MLX rows read files and start no Python: neither the environment's nor PATH's",
+          "[commands][check][mlx][m23]") {
+    // The rows' one rule (27a, M23): what is installed, and at what version
+    // or commit, is read from files. Here every interpreter that could be
+    // asked leaves a mark if it runs at all.
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    const std::filesystem::path mark = install.root / "a-python-ran";
+    const std::string marker = "#!/bin/sh\n/usr/bin/touch '" + mark.string() + "'\n";
+    const apogee::testing::TempDir path{"check-python-" + std::to_string(std::random_device{}())};
+    for (const std::filesystem::path& python :
+         {venv_of(install) / "bin" / "python", path.path() / "python3", path.path() / "python"}) {
+        std::filesystem::create_directories(python.parent_path());
+        std::ofstream{python, std::ios::binary} << marker;
+        std::filesystem::permissions(python, std::filesystem::perms::owner_all);
+    }
+    const apogee::testing::EnvGuard on_path{"PATH", path.path().string()};
+    install.write("training/venv/pyvenv.cfg", "home = /x\nversion = 3.12.13\n");
+    install_distribution(install, "mlx_lm", "mlx-lm", "0.32.0");
+    install_distribution(install, "mlx_vlm", "mlx-vlm", "0.3.9");
+    install_distribution(install, "mlx_embeddings", "mlx-embeddings", "0.1.0");
+    install_distribution(install, "mlx_video", "mlx-video", "0.1.0", std::string{kPinnedCommit});
+    install_distribution(install, "mlx_audio", "mlx-audio", "0.6.1");
+    CheckInputs inputs = inputs_for(install);
+    install.write(
+        "config/config.yaml",
+        "models:\n  default: local\n  default_transcription: local\n" + mlx_entry(install));
+    load_into(inputs);
+    inputs.host_target = "macos-arm64";
+    const CheckReport report = run_checks(inputs);
+    INFO(render_report(report, false));
+    // Every row there, each read: the warning and the versions prove it.
+    const apogee::commands::CheckRow* vision = row_in(report, "MLX", "vision");
+    const apogee::commands::CheckRow* video = row_in(report, "MLX", "video");
+    const apogee::commands::CheckRow* voice = row_in(report, "MLX", "voice");
+    const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+    REQUIRE(vision != nullptr);
+    REQUIRE(video != nullptr);
+    REQUIRE(voice != nullptr);
+    REQUIRE(entry != nullptr);
+    CHECK(vision->status == Status::Warn);
+    CHECK(video->status == Status::Ok);
+    CHECK(voice->detail.starts_with("mlx-audio 0.6.1 is present"));
+    CHECK(entry->status == Status::Ok);
+    CHECK_FALSE(std::filesystem::exists(mark));
+    // The marker is live: the interpreter it was written into does run.
+    const std::string run = "'" + (venv_of(install) / "bin" / "python").string() + "'";
+    REQUIRE(std::system(run.c_str()) == 0);  // NOLINT(cert-env33-c)
+    CHECK(std::filesystem::exists(mark));
+}
+#endif

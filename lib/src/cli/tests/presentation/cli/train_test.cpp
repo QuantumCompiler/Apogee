@@ -1,5 +1,6 @@
 #include "cli/train.h"
 
+#include <CLI/CLI.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdlib>
@@ -19,6 +20,7 @@
 #include "modelstore/snapshot.h"
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
+#include "training/python_env.h"
 
 /// `apogee train setup` refusals -- an interpreter named in the config that
 /// does not exist, an unknown requirement set, a bad trainer name -- each
@@ -92,6 +94,42 @@ TEST_CASE("train setup refuses an unknown requirement set and a bad trainer by n
     CHECK(fixture.run({"train", "setup", "--trainer", "bogus"}, &err) == 1);
     CHECK((err.find("--trainer must be") != std::string::npos ||
            err.find("python") != std::string::npos));
+}
+
+TEST_CASE("train setup --with's help names every requirement set, from the one set list",
+          "[commands][train][setup][m23]") {
+    // M23: the help was a hand-written list that went stale as the MLX track
+    // added sets. Built from the table, every set is named in its order, with
+    // what it is for, the opt-in ones said to be.
+    CLI::App app{"apogee"};
+    const apogee::commands::RootContext context;
+    apogee::commands::TrainCommand{}.bind(app, context);
+    const CLI::Option* with =
+        app.get_subcommand("train")->get_subcommand("setup")->get_option("--with");
+    REQUIRE(with != nullptr);
+    const std::string help = with->get_description();
+    CHECK(help == apogee::commands::setup_with_help());
+    std::size_t at = 0;
+    for (const std::string_view name : apogee::training::requirement_set_names()) {
+        const apogee::training::RequirementSet set =
+            *apogee::training::requirement_set_from_string(name);
+        const std::string said = std::string{name} + " (" +
+                                 std::string{apogee::training::set_purpose(set)} +
+                                 (apogee::training::set_opt_in(set) ? "; opt-in)" : ")");
+        INFO(said);
+        const std::size_t found = help.find(said, at);
+        REQUIRE(found != std::string::npos);  // each one, in the table's order
+        at = found + said.size();
+    }
+    // The track's sets, by name, so the walk above cannot pass over an empty list.
+    for (const std::string_view set :
+         {"mlx-vlm (", "mlx-embeddings (", "mlx-video (", "mlx-audio (", "voice (", "video ("}) {
+        CHECK(help.find(set) != std::string::npos);
+    }
+    CHECK(help.find("mlx-video (Wan on MLX, built from GitHub; opt-in)") != std::string::npos);
+    CHECK(help.find("mlx-audio (Kokoro on MLX; opt-in)") != std::string::npos);
+    // Its value list is the table's too.
+    CHECK(with->get_type_name().find("mlx-audio") != std::string::npos);
 }
 
 TEST_CASE("the trainer detection names its reason when nothing fits", "[commands][train][setup]") {

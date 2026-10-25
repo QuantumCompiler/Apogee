@@ -133,6 +133,78 @@ struct PinnedSource {
 /// `set`'s pinned source, or nullopt for a set whose packages are all PyPI's.
 [[nodiscard]] std::optional<PinnedSource> pinned_source(RequirementSet set) noexcept;
 
+/// What `set` is for, in a few words (M23) -- the table's own column, so
+/// `train setup --with`'s help names every set from the one list and cannot
+/// go stale beside it.
+[[nodiscard]] std::string_view set_purpose(RequirementSet set) noexcept;
+
+/// A set's own package and what it is held to (M23): the first of
+/// `packages_for(set)` -- the set's own, for every MLX set -- read apart as
+/// pip reads it (`mlx-vlm>=0.6.1` is `mlx-vlm` at a floor of `0.6.1`), or,
+/// for a set built from a commit (53k), its pinned source's package and that
+/// commit, with no floor.
+struct SetRequirement {
+    std::string package{};
+    /// The floor's version, `0.6.1`; empty for a pinned set.
+    std::string floor{};
+    std::optional<PinnedSource> pin{};
+
+    /// `>=0.6.1`, or `commit 87db56a51758 (2026-05-13)`.
+    [[nodiscard]] std::string describe() const;
+};
+
+[[nodiscard]] SetRequirement set_requirement(RequirementSet set);
+
+/// How a set's installed package stands against its floor or its pin (M23).
+enum class SetStanding : std::uint8_t {
+    /// No distribution record of it in the environment's site-packages.
+    NoRecord,
+    /// At or above its floor, or at its pinned commit.
+    Current,
+    /// Below its floor.
+    BelowFloor,
+    /// A pinned package at another commit, or installed from none.
+    OffPin,
+    /// A record that states no version, or none that is a release number:
+    /// nothing to compare.
+    Unstated,
+};
+
+[[nodiscard]] std::string_view to_string(SetStanding standing) noexcept;
+
+/// What the environment's files say of one set's own package (M23): the
+/// distribution record pip wrote for it in the environment's site-packages
+/// -- `<name>-<version>.dist-info`, whose `METADATA` states its `Version`
+/// -- and, for a package built from a commit (53k), PEP 610's
+/// `direct_url.json` beside it, whose `vcs_info.commit_id` names the commit.
+/// Set against the set's floor or its pin. Read from files alone, never by
+/// importing anything or starting Python.
+struct InstalledSet {
+    RequirementSet set{};
+    SetRequirement requirement{};
+    /// The record's directory; empty when there is none.
+    std::filesystem::path record{};
+    /// `METADATA`'s `Version`, as written; empty when it states none.
+    std::string version{};
+    /// `direct_url.json`'s `vcs_info.commit_id`; empty when it names none.
+    std::string commit{};
+    SetStanding standing = SetStanding::NoRecord;
+
+    /// Below its floor or off its pin: `train setup --with <set>` brings it
+    /// up.
+    [[nodiscard]] bool behind() const noexcept {
+        return standing == SetStanding::BelowFloor || standing == SetStanding::OffPin;
+    }
+};
+
+[[nodiscard]] InstalledSet read_installed_set(const std::filesystem::path& venv,
+                                              RequirementSet set);
+
+/// `a` against `b` in PEP 440's order of release numbers -- `0.6.1` above
+/// `0.6.1rc1` and below `0.6.1.post1`, a local `+cu121` part ignored --
+/// negative, zero or positive; nullopt when either is not one.
+[[nodiscard]] std::optional<int> compare_versions(std::string_view a, std::string_view b);
+
 /// A Python's version, as `sys.version_info` states it (M19).
 struct PythonVersion {
     int major = 0;

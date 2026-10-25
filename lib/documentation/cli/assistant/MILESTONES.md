@@ -10165,3 +10165,58 @@ The refusal was true but incomplete. The set is Wan's original layout, and its r
 **Not done:**
 - `video generate` on a pulled Wan set is still refused for want of a tokenizer: 53l's runtime finds it in the source set a conversion's record names, and a pull names none.
 - Whether mlx-embeddings loads `embedding_gemma2` is a load-time question.
+
+### 2026-10-24 — `mlx-runtimes-in-check` (maintenance item M23): `check` says every MLX runtime and its version
+
+**Why.** The MLX track added three Python sets and moved a floor: mlx-vlm to `>=0.6.1` (53f), `mlx-embeddings>=0.1.0` (53h), `mlx-video` pinned to a GitHub commit (53k, opt-in) and `mlx-audio>=0.4.0` (53m, opt-in). `check` did not follow:
+- it had no rows for mlx-video or mlx-audio;
+- it compared no installed version with its floor, nor the GitHub install with its pin, so an environment from before 53f kept an mlx-vlm below 0.6.1 unsaid;
+- it said a backend's sight but never its hearing (53g);
+- `train setup --with`'s help listed the sets as they were.
+
+- [x] **One reader of a set's installed version** (`python_env`'s `read_installed_set`, files only, never an import):
+  - **The version:** `*.dist-info/METADATA`'s `Version`.
+  - **The commit:** pip's PEP 610 `direct_url.json` (`vcs_info.commit_id`), for the GitHub install.
+  - **What it is held to:** `set_requirement`, the floor parsed from the set table or the pin.
+  - **The comparison:** `compare_versions`, PEP 440 ordering.
+  - **What it's for:** `set_purpose`.
+- [x] **`check`'s MLX section says each set:**
+  - mlx-lm's runtime, mlx-vlm's vision, mlx-embeddings', and new `video` (mlx-video) and `voice` (mlx-audio) rows;
+  - each with its installed version or commit against its floor or pin: `mlx-vlm 0.6.1 is present … at or above its floor, >=0.6.1`, `mlx-video 0.1.0 at commit 87db56a51758 is present … the commit Apogee pins (2026-05-13)`.
+  - **Below a floor or off a pin** is a warning naming `apogee train setup --with <set>`. For example: `mlx-vlm 0.3.9 … below its floor, >=0.6.1 -- kept from an earlier setup until the 'mlx-vlm' set is installed again`.
+  - **An opt-in set absent** reads `not installed (opt-in)`, skipped, so a fresh install's `check` still ends with no warning (M11).
+- [x] **Hearing is said beside sight:**
+  - `check`'s backend row for a model with an audio tower: `it hears recordings as they are, through mlx-vlm`, or why not, by 53g's rungs;
+  - `models info`'s `hearing:` line, also in its JSON;
+  - `models status`'s transcription tag;
+  - the transcription role judged by 53g's checks, so an omni model passes.
+
+  `MlxAudio` gained a `tower` flag, so the rule lives once.
+- [x] **`train setup --with`'s help is built from the set list** (`setup_with_help()`): all ten sets in table order, each with what it is for, the opt-in ones marked.
+- [x] **A fix folded in** after the build's MinGW scan: `MlxRegisterRequest`'s members gained default initializers (the house rule). GCC's `-Wmissing-field-initializers` had flagged a designated initializer in `models_mlx_test.cpp:957` that left them out, a warning on CI's Windows compilers since M16.
+
+**Decisions made while building** (2026-10-24, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - below a floor or off a pin is a warning, never a failure;
+  - an opt-in set absent is skipped.
+- **A set with no record,** or a version that is no release number (the e2e stubs' `0.0-stub`), reads `ok` with that said: `no distribution record of it is there, so it is not held to its floor`. `check` never warns on what it cannot read.
+- **mlx-video with no commit on record** (no `direct_url.json`, or not from git) counts as off its pin.
+- **An absent opt-in set whose Python the environment cannot run** names `train setup --rebuild --with <set>`, as the Video section's voice row already did.
+- **Hearing is said only for a model with an audio tower,** as sight is said only for a vision model.
+
+**Verified.**
+- 12 new cases (`[m23]`, 296 assertions):
+  - floors and pins parsed from the table, PEP 440 ordering, and the record's states (current, below the floor, unstated, no record, Windows layout, name matching), the pin against `direct_url.json`;
+  - `check`'s rows: versions against floors, mlx-video's pin, mlx-audio with the rebuild remedy, bootstrapped sets current with no MLX warning, and hearing beside sight;
+  - `check` spawns no Python (POSIX): every Python it could start writes a marker, none is found, and one run proves the marker works;
+  - the `hearing:` line, the status tag and the JSON field;
+  - the help holding every set in order.
+- One earlier assertion changed: the transcription role's "an mlx backend hears no audio", false since 53g.
+- Mutation: nine deliberate breaks were each caught, among them the floor ignored, the pin always passing, a Python spawn in `check`, an opt-in absence warning, and hand-written help.
+- The neighbouring suites pass: `[check]`, `[python]`, `[training]`, `[mlx]`, `[models]`, `[train]`, `[audio]`, `[vision]`, `[completion]`, `[commands]`, `[mlx_video]`, `[mlx_audio]`, `[media]` and `[bootstrap]`.
+- These ctest cases pass: `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity` (M11's `"warnings":0` gate), `cli.install_is_ours_only`, `cli.train_lifecycle`, `cli.mlx_lifecycle`, `cli.mlx_models_lifecycle`, `cli.video_lifecycle`, `cli.machine_schema_conformance`, `cli.complete_lifecycle` and `cli.shell_completion`.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,875 tests and the macOS app's 449 cases passed, with no warning.
+
+**Not done:**
+- No row reports the `mlx` library's own version, so mlx-audio's exact `mlx==0.32.4` pin moving `mlx` under the other sets is still unsaid.
+- `train setup`'s "Nothing installed yet" hint is still a hand-written list.

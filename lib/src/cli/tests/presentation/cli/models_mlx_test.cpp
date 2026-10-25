@@ -669,6 +669,74 @@ TEST_CASE(
     CHECK(out.find("vision:       no -- it is not a vision model") != std::string::npos);
 }
 
+TEST_CASE(
+    "models info and status say whether an mlx entry hears, beside whether it sees, by the rungs "
+    "its provider answers from",
+    "[commands][models][mlx][audio][m23]") {
+    // 53g's ladder, said as 27c's is (M23): an omni model mlx-vlm built,
+    // with the installed mlx-vlm holding its type's module, hears.
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    const std::filesystem::path text = home.home() / "text-model";
+    write_mlx_model(text);
+    const std::filesystem::path omni = home.home() / "omni-model";
+    write_mlx_model(omni, {.model_type = "gemma4"});
+    apogee::testing::write_fixture_file(omni / "config.json", apogee::testing::kGemma4Config);
+    apogee::testing::write_fixture_file(omni / "processor_config.json", "{}");
+    apogee::testing::write_fixture_file(
+        omni / "apogee-snapshot.json",
+        R"({"source": "convert", "transform": "mlx_vlm.convert 4bit", "files": [], )"
+        R"("kind": "vision"})");
+    std::string out;
+    REQUIRE(
+        home.run({"config", "add-backend", "words", "--type", "mlx", "--model-path", text.string()},
+                 &out) == 0);
+    REQUIRE(
+        home.run({"config", "add-backend", "ears", "--type", "mlx", "--model-path", omni.string()},
+                 &out) == 0);
+    REQUIRE(home.run({"config", "set-default-transcription", "ears"}, &out) == 0);
+
+    REQUIRE(home.run({"models", "info", "words", "-q"}, &out) == 0);
+    CHECK(out.find("hearing:      no -- not mlx-vlm's build: no record says mlx-vlm built it") !=
+          std::string::npos);
+    REQUIRE(home.run({"models", "info", "ears", "-q"}, &out) == 0);
+    CHECK(out.find("hearing:      no -- no mlx-vlm: it hears through mlx-vlm, which is not "
+                   "installed in the Python environment at ") != std::string::npos);
+    CHECK(out.find("(apogee train setup --with mlx-vlm)") != std::string::npos);
+    REQUIRE(home.run({"models", "status", "-q"}, &out) == 0);
+    CHECK(out.find("transcription: ears   [mlx: cannot hear recordings -- no mlx-vlm: it hears "
+                   "through mlx-vlm") != std::string::npos);
+
+    const std::filesystem::path site =
+        home.home() / "training" / "venv" / "lib" / "python3.14" / "site-packages";
+    apogee::testing::write_fixture_file(site / "mlx_vlm" / "__init__.py", "");
+    std::filesystem::create_directories(site / "mlx_vlm-0.6.1.dist-info");
+    REQUIRE(home.run({"models", "info", "ears", "-q"}, &out) == 0);
+    CHECK(out.find("hearing:      no -- no mlx-vlm module for its type: the installed mlx-vlm "
+                   "0.6.1 has no module for its type, gemma4") != std::string::npos);
+    apogee::testing::write_fixture_file(site / "mlx_vlm" / "models" / "gemma4" / "__init__.py", "");
+    REQUIRE(home.run({"models", "info", "ears", "-q"}, &out) == 0);
+    // Said right after its sight, as the provider answers both.
+    CHECK(out.find("vision:       reads images as they are -- mlx-vlm 0.6.1\n"
+                   "hearing:      hears recordings as they are -- mlx-vlm 0.6.1\n") !=
+          std::string::npos);
+    REQUIRE(home.run({"models", "status", "-q"}, &out) == 0);
+    CHECK(out.find("transcription: ears   [mlx: hears recordings as they are]") !=
+          std::string::npos);
+    // The JSON record carries it as one more field, additively (ADR 0006).
+    std::string err;
+    REQUIRE(home.run({"models", "info", "ears", "--output-format", "json"}, &out, &err) == 0);
+    const nlohmann::json document = nlohmann::json::parse(out);
+    bool vision = false;
+    bool heard = false;
+    for (const nlohmann::json& field : document.at("fields")) {
+        vision = vision || field.at("field") == "vision";
+        heard = heard || (field.at("field") == "hearing" &&
+                          field.at("value") == "hears recordings as they are -- mlx-vlm 0.6.1");
+    }
+    CHECK(vision);
+    CHECK(heard);
+}
+
 // ---- the command line, over the real driver ------------------------------------------
 
 namespace {

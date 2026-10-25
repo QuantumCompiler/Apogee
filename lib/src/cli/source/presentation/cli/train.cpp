@@ -14,6 +14,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -1524,6 +1525,19 @@ void print_cycle_history(const training::CycleHistory& history, bool active) {
 
 }  // namespace
 
+std::string setup_with_help() {
+    std::string sets;
+    const std::span<const std::string_view> names = training::requirement_set_names();
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        const training::RequirementSet set = *training::requirement_set_from_string(names[i]);
+        sets += (i == 0 ? "" : (i + 1 == names.size() ? " and " : ", ")) + std::string{names[i]} +
+                " (" + std::string{training::set_purpose(set)} +
+                (training::set_opt_in(set) ? "; opt-in" : "") + ")";
+    }
+    return "Install a requirement set: " + sets +
+           " -- an opt-in set is installed only by this, never by the install's bootstrap";
+}
+
 // --- the resolvers ------------------------------------------------------------------
 
 std::string detect_trainer(std::string& reason) {
@@ -2008,11 +2022,7 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         ->add_option("--trainer", *setup_trainer,
                      "Install a trainer's stack: auto (detect this host), mlx, or peft")
         ->type_name(words_value(installable_trainers()));
-    setup
-        ->add_option("--with", *setup_with,
-                     "Install a requirement set: prepare (Parquet), mlx, peft, convert -- and "
-                     "mlx-video (Wan to MLX, from GitHub) and mlx-audio (Kokoro on MLX), which "
-                     "only this installs")
+    setup->add_option("--with", *setup_with, setup_with_help())
         ->type_name(words_value(training::requirement_set_names()));
     setup
         ->add_option("--python", *setup_python,

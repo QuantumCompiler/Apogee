@@ -494,18 +494,18 @@ using MlxConverterFor = std::function<training::MlxConverter(const training::Mlx
 
 /// One command from SafeTensors to runnable `mlx` backends (M16).
 struct MlxRegisterRequest {
-    models::StoreRoots roots;
-    std::filesystem::path config_path;
+    models::StoreRoots roots{};
+    std::filesystem::path config_path{};
     /// The SafeTensors set, as `convert` takes it.
-    std::string snapshot;
-    std::string snapshot_from;
+    std::string snapshot{};
+    std::string snapshot_from{};
     /// The MLX precisions: one conversion each -- MLX quantizes as it
     /// converts -- and each its own backend.
-    std::vector<std::string> precisions;
+    std::vector<std::string> precisions{};
     /// What each backend's name begins with; empty: the model's own name.
-    std::string base_name;
+    std::string base_name{};
     /// `--model-type` (M15): every conversion made as that type.
-    std::string model_type;
+    std::string model_type{};
     /// Typed as `--register-with <list>` rather than `--register --type`:
     /// the resume line says it the same way.
     bool listed = false;

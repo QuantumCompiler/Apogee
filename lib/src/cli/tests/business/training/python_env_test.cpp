@@ -528,3 +528,212 @@ TEST_CASE("installing mlx-video runs pip with the pinned commit, and needs git t
         REQUIRE(env.install(RequirementSet::Prepare).empty());
     }
 }
+
+// ---------------------------------------------------------------------------
+// One reader of a set's installed version (M23): the distribution record
+// pip writes -- `*.dist-info/METADATA`'s `Version`, and for a package built
+// from a commit PEP 610's `direct_url.json` -- set against the floor or the
+// pin the sets' table declares. Files the test writes; nothing is run.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+using apogee::training::compare_versions;
+using apogee::training::InstalledSet;
+using apogee::training::read_installed_set;
+using apogee::training::SetStanding;
+
+/// A record pip would write under `site`: `<dir>/METADATA` with `headers`
+/// and a body that must never be read as one, and `direct_url.json` when
+/// given.
+void write_record(const std::filesystem::path& site, const std::string& dir,
+                  const std::string& headers, const std::string& direct_url = {}) {
+    const std::filesystem::path record = site / dir;
+    std::filesystem::create_directories(record);
+    std::ofstream{record / "METADATA", std::ios::binary} << "Metadata-Version: 2.1\n"
+                                                         << headers
+                                                         << "\nThe description.\nVersion: 99.0\n";
+    if (!direct_url.empty()) {
+        std::ofstream{record / "direct_url.json", std::ios::binary} << direct_url;
+    }
+}
+
+[[nodiscard]] std::string vcs_url(std::string_view commit) {
+    return R"({"url": "https://github.com/Blaizzy/mlx-video.git", "vcs_info": {"vcs": "git", )"
+           R"("commit_id": ")" +
+           std::string{commit} + R"("}})";
+}
+
+}  // namespace
+
+TEST_CASE("each set's own package and floor are read from the table's own requirement",
+          "[training][python][m23]") {
+    // The floors are declared once, in packages_for; the reader parses them.
+    const auto requirement = [](RequirementSet set) {
+        return apogee::training::set_requirement(set);
+    };
+    CHECK(requirement(RequirementSet::Mlx).package == "mlx-lm");
+    CHECK(requirement(RequirementSet::Mlx).floor == "0.21");
+    CHECK(requirement(RequirementSet::MlxVlm).package == "mlx-vlm");
+    CHECK(requirement(RequirementSet::MlxVlm).floor == "0.6.1");
+    CHECK(requirement(RequirementSet::MlxVlm).describe() == ">=0.6.1");
+    CHECK(requirement(RequirementSet::MlxEmbeddings).package == "mlx-embeddings");
+    CHECK(requirement(RequirementSet::MlxEmbeddings).floor == "0.1.0");
+    CHECK(requirement(RequirementSet::MlxAudio).package == "mlx-audio");
+    CHECK(requirement(RequirementSet::MlxAudio).floor == "0.4.0");
+    CHECK_FALSE(requirement(RequirementSet::MlxAudio).pin.has_value());
+    // mlx-video: its pin, no floor.
+    const apogee::training::SetRequirement video = requirement(RequirementSet::MlxVideo);
+    CHECK(video.package == "mlx-video");
+    CHECK(video.floor.empty());
+    REQUIRE(video.pin.has_value());
+    CHECK(video.pin->commit == "87db56a51758fefb748a359b90a5283bb8ba4837");
+    CHECK(video.describe() == "commit 87db56a51758 (2026-05-13)");
+    for (const std::string_view name : requirement_set_names()) {
+        const RequirementSet set = *requirement_set_from_string(name);
+        INFO(name);
+        CHECK_FALSE(requirement(set).package.empty());
+        // A name alone: no extra, specifier or URL.
+        CHECK(requirement(set).package.find_first_of("[>= @") == std::string::npos);
+        // Every set says what it is for, for the help built from the list.
+        CHECK_FALSE(apogee::training::set_purpose(set).empty());
+    }
+}
+
+TEST_CASE("versions order as PEP 440 orders release numbers", "[training][python][m23]") {
+    CHECK(compare_versions("0.6.1", "0.6.1") == 0);
+    CHECK(compare_versions("0.6", "0.6.0") == 0);
+    CHECK(compare_versions("0.3.9", "0.6.1") < 0);
+    CHECK(compare_versions("0.10.0", "0.9.9") > 0);  // numbers, not text
+    CHECK(compare_versions("0.32.0", "0.21") > 0);
+    CHECK(compare_versions("v1.0", "1.0") == 0);
+    // Pre-releases sort below their release, a post release above it, and a
+    // development release below its pre-release.
+    CHECK(compare_versions("0.6.1rc1", "0.6.1") < 0);
+    CHECK(compare_versions("0.6.1a2", "0.6.1b1") < 0);
+    CHECK(compare_versions("0.6.1b1", "0.6.1rc1") < 0);
+    CHECK(compare_versions("0.6.1.post1", "0.6.1") > 0);
+    CHECK(compare_versions("0.6.1-1", "0.6.1") > 0);
+    CHECK(compare_versions("0.6.1.dev3", "0.6.1a1") < 0);
+    CHECK(compare_versions("0.6.1rc1.dev2", "0.6.1rc1") < 0);
+    CHECK(compare_versions("0.6.1", "0.6.0.post9") > 0);
+    // A local part never orders; an epoch always does.
+    CHECK(compare_versions("2.6.0+cu121", "2.6.0") == 0);
+    CHECK(compare_versions("1!0.1", "2.0") > 0);
+    // What is no release number is compared with nothing.
+    CHECK_FALSE(compare_versions("0.0-stub", "0.21").has_value());
+    CHECK_FALSE(compare_versions("", "0.21").has_value());
+    CHECK_FALSE(compare_versions("main", "0.21").has_value());
+    CHECK_FALSE(compare_versions("0.6.1", "x").has_value());
+}
+
+TEST_CASE(
+    "a set's installed version is read from its record: current, below its floor, unstated, or "
+    "no record at all",
+    "[training][python][m23]") {
+    Fixture fixture;
+    const std::filesystem::path venv = fixture.root.path() / "venv";
+    const std::filesystem::path site = venv / "lib" / "python3.12" / "site-packages";
+    std::filesystem::create_directories(site);
+
+    // No record: nothing said, and nothing compared.
+    InstalledSet vlm = read_installed_set(venv, RequirementSet::MlxVlm);
+    CHECK(vlm.standing == SetStanding::NoRecord);
+    CHECK(vlm.record.empty());
+    CHECK(vlm.version.empty());
+    CHECK_FALSE(vlm.behind());
+    // A package's own files are no record: the version is the record's.
+    std::filesystem::create_directories(site / "mlx_vlm");
+    std::ofstream{site / "mlx_vlm" / "__init__.py"};
+    CHECK(read_installed_set(venv, RequirementSet::MlxVlm).standing == SetStanding::NoRecord);
+    // Nor is another distribution whose name starts the same.
+    write_record(site, "mlx_vlm_extras-1.0.dist-info", "Name: mlx-vlm-extras\nVersion: 1.0\n");
+    CHECK(read_installed_set(venv, RequirementSet::MlxVlm).standing == SetStanding::NoRecord);
+
+    // Set up before 53f: 0.3.9, below the 0.6.1 floor.
+    write_record(site, "mlx_vlm-0.3.9.dist-info", "Name: mlx-vlm\nVersion: 0.3.9\n");
+    vlm = read_installed_set(venv, RequirementSet::MlxVlm);
+    CHECK(vlm.record == site / "mlx_vlm-0.3.9.dist-info");
+    CHECK(vlm.version == "0.3.9");  // the header's, never the body's
+    CHECK(vlm.standing == SetStanding::BelowFloor);
+    CHECK(vlm.behind());
+    CHECK(vlm.commit.empty());
+    std::filesystem::remove_all(site / "mlx_vlm-0.3.9.dist-info");
+
+    // At the floor, its header's case and spacing as METADATA allows.
+    write_record(site, "mlx_vlm-0.6.1.dist-info", "Name: mlx-vlm\nversion:   0.6.1  \r\n");
+    vlm = read_installed_set(venv, RequirementSet::MlxVlm);
+    CHECK(vlm.version == "0.6.1");
+    CHECK(vlm.standing == SetStanding::Current);
+    CHECK_FALSE(vlm.behind());
+    std::filesystem::remove_all(site / "mlx_vlm-0.6.1.dist-info");
+
+    // A record whose METADATA states no version, or one that is no number.
+    write_record(site, "mlx_vlm-0.6.1.dist-info", "Name: mlx-vlm\n");
+    CHECK(read_installed_set(venv, RequirementSet::MlxVlm).standing == SetStanding::Unstated);
+    std::filesystem::remove_all(site / "mlx_vlm-0.6.1.dist-info");
+    write_record(site, "mlx_vlm-0.0.dist-info", "Name: mlx-vlm\nVersion: 0.0-vlm-stub\n");
+    vlm = read_installed_set(venv, RequirementSet::MlxVlm);
+    CHECK(vlm.standing == SetStanding::Unstated);
+    CHECK(vlm.version == "0.0-vlm-stub");
+    CHECK_FALSE(vlm.behind());
+
+    // The name is compared as PEP 503 compares names: an older pip's record
+    // keeps the project's own spelling.
+    write_record(site, "MLX_Embeddings-0.1.0.dist-info", "Name: MLX-Embeddings\nVersion: 0.1.0\n");
+    CHECK(read_installed_set(venv, RequirementSet::MlxEmbeddings).standing == SetStanding::Current);
+    // mlx-lm's floor: 0.21.
+    write_record(site, "mlx_lm-0.20.0.dist-info", "Name: mlx-lm\nVersion: 0.20.0\n");
+    CHECK(read_installed_set(venv, RequirementSet::Mlx).standing == SetStanding::BelowFloor);
+    // mlx-audio's: 0.4.0, on Windows' one site-packages too.
+    const std::filesystem::path windows = fixture.root.path() / "win" / "Lib" / "site-packages";
+    write_record(windows, "mlx_audio-0.6.1.dist-info", "Name: mlx-audio\nVersion: 0.6.1\n");
+    const InstalledSet audio =
+        read_installed_set(fixture.root.path() / "win", RequirementSet::MlxAudio);
+    CHECK(audio.standing == SetStanding::Current);
+    CHECK(audio.version == "0.6.1");
+}
+
+TEST_CASE("mlx-video's installed commit is read from PEP 610's direct_url.json and held to its pin",
+          "[training][python][mlx_video][m23]") {
+    Fixture fixture;
+    const std::filesystem::path venv = fixture.root.path() / "venv";
+    const std::filesystem::path site = venv / "lib" / "python3.12" / "site-packages";
+    const std::string record = "mlx_video-0.1.0.dist-info";
+    const std::string headers = "Name: mlx-video\nVersion: 0.1.0\n";
+    CHECK(read_installed_set(venv, RequirementSet::MlxVideo).standing == SetStanding::NoRecord);
+
+    // Built from the pinned commit: current, whatever its version says.
+    write_record(site, record, headers, vcs_url("87db56a51758fefb748a359b90a5283bb8ba4837"));
+    InstalledSet video = read_installed_set(venv, RequirementSet::MlxVideo);
+    CHECK(video.standing == SetStanding::Current);
+    CHECK(video.commit == "87db56a51758fefb748a359b90a5283bb8ba4837");
+    CHECK(video.version == "0.1.0");
+    CHECK_FALSE(video.behind());
+    std::filesystem::remove_all(site / record);
+
+    // Another commit: off its pin.
+    write_record(site, record, headers, vcs_url("0123456789abcdef0123456789abcdef01234567"));
+    video = read_installed_set(venv, RequirementSet::MlxVideo);
+    CHECK(video.standing == SetStanding::OffPin);
+    CHECK(video.commit == "0123456789abcdef0123456789abcdef01234567");
+    CHECK(video.behind());
+    std::filesystem::remove_all(site / record);
+
+    // No direct_url.json (an index's install), one for a directory, or one
+    // that does not parse: no commit named, so not the pin.
+    for (const std::string& url :
+         {std::string{}, std::string{R"({"url": "file:///src/mlx-video", "dir_info": {}})"},
+          std::string{"{not json"}}) {
+        INFO(url);
+        write_record(site, record, headers, url);
+        video = read_installed_set(venv, RequirementSet::MlxVideo);
+        CHECK(video.standing == SetStanding::OffPin);
+        CHECK(video.commit.empty());
+        std::filesystem::remove_all(site / record);
+    }
+    // A floor set never reads a commit.
+    write_record(site, "mlx_vlm-0.6.1.dist-info", "Name: mlx-vlm\nVersion: 0.6.1\n",
+                 vcs_url("0123456789abcdef0123456789abcdef01234567"));
+    CHECK(read_installed_set(venv, RequirementSet::MlxVlm).commit.empty());
+}

@@ -16,6 +16,7 @@
 #include <span>
 #include <sstream>
 #include <system_error>
+#include <tuple>
 
 #include "agent/fetch_url.h"
 #include "agent/web_search.h"
@@ -183,19 +184,21 @@ struct MediumGap {
 [[nodiscard]] MediumGap medium_gap(const harness::BackendConfig& backend, Medium medium,
                                    const backends::MlxHost& host) {
     if (backend.type == harness::BackendType::Mlx) {
-        if (medium == Medium::Audio) {
-            return {.reason =
-                        "an mlx backend hears no audio -- only a llamacpp model's audio "
-                        "projector transcribes here",
-                    .remedy = {}};
-        }
         if (host.target != backends::kMlxTarget) {
             return {.reason = "the mlx backend runs on Apple silicon macOS only", .remedy = {}};
         }
-        const backends::MlxVision vision = backends::probe_mlx_vision(
-            backends::inspect_mlx_model(
-                std::filesystem::path{harness::expand_env_and_home(backend.model_path)}),
-            host);
+        const backends::MlxModelInfo info = backends::inspect_mlx_model(
+            std::filesystem::path{harness::expand_env_and_home(backend.model_path)});
+        if (medium == Medium::Audio) {
+            // Whether it hears (53g), by the rungs its provider answers
+            // `accepts_audio` from (M23): an omni model mlx-vlm built does.
+            const backends::MlxAudio audio = backends::probe_mlx_audio(info, host);
+            return {.reason = audio.hears() ? std::string{}
+                                            : std::string{backends::to_string(audio.refusal)} +
+                                                  ": " + audio.reason,
+                    .remedy = audio.remedy};
+        }
+        const backends::MlxVision vision = backends::probe_mlx_vision(info, host);
         return {.reason = vision.reason, .remedy = vision.remedy};
     }
     return {.reason = medium_gap_text(backend, medium), .remedy = {}};
@@ -225,7 +228,7 @@ void check_role_pointer(CheckReport& report, const harness::Config& config,
             if (remedy.empty()) {
                 remedy = *medium == Medium::Audio
                              ? "point it at a llamacpp backend whose mmproj_path has an audio "
-                               "encoder"
+                               "encoder, or an mlx backend over an omni model mlx-vlm built"
                              : "point it at a backend with an mmproj_path, an mlx backend over a "
                                "vision model, or a cloud one";
             }
@@ -556,13 +559,26 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
                                 : "; a vision model, but mlx-vlm is not installed, so it "
                                   "does not read images as they are";
                 }
+                // And whether it hears (53g), said beside its sight for a
+                // directory with an audio tower (M23): the provider's own
+                // rungs, the one that refuses named with its way.
+                std::string hearing;
+                if (const backends::MlxAudio audio =
+                        backends::probe_mlx_audio(info, mlx_host(inputs));
+                    audio.tower) {
+                    hearing = audio.hears()
+                                  ? "; it hears recordings as they are, through mlx-vlm"
+                                  : "; it has an audio tower, but does not hear recordings as "
+                                    "they are -- " +
+                                        audio.message();
+                }
                 add(report, Status::Ok, "Config", label,
                     std::string{type} + " -- " +
                         (info.model_type.empty() ? std::string{"a"} : info.model_type) +
                         " model directory" +
                         (info.chat_template ? "" : " with no chat template (a base model)") + ", " +
                         files.quantization.describe() + "; " +
-                        models::describe(models::mlx_window(files, backend)) + sight +
+                        models::describe(models::mlx_window(files, backend)) + sight + hearing +
                         "; its runtime is present");
                 continue;
             }
@@ -1965,11 +1981,90 @@ void check_graphs(CheckReport& report, const CheckInputs& inputs) {
     }
 }
 
+/// The setup that installs `set` into an environment on Python `on` (M19's
+/// rule): one its Python cannot take names the rebuild that can.
+[[nodiscard]] std::string setup_remedy(training::RequirementSet set,
+                                       const training::PythonVersion& on) {
+    const std::string name{training::to_string(set)};
+    return on.known() && !training::python_range(set).contains(on)
+               ? "apogee train setup --rebuild --with " + name
+               : "apogee train setup --with " + name;
+}
+
+/// One MLX set's row, once its package is there (M23).
+struct SetRow {
+    Status status = Status::Ok;
+    std::string detail{};
+    std::string remedy{};
+};
+
+/// An MLX set present in the environment, as its row says it (M23): the
+/// version -- or, for one built from a commit, the commit -- its
+/// distribution record states, against its floor or its pin, read from the
+/// record's files alone. Below its floor or off its pin is a warning naming
+/// the setup that brings it up; never a failure, since the older library
+/// still runs what it ran. A record that states nothing comparable is said
+/// as such and held to nothing. `declared` is the version the package's own
+/// files declare, said where no record states one; `use` closes a row that
+/// is not a warning.
+[[nodiscard]] SetRow present_set_row(const training::InstalledSet& installed,
+                                     const std::filesystem::path& venv, std::string_view declared,
+                                     std::string_view use, const training::PythonVersion& on) {
+    const training::SetRequirement& wants = installed.requirement;
+    std::string shown = !installed.version.empty() ? installed.version : std::string{declared};
+    if (wants.pin.has_value() && !installed.commit.empty()) {
+        shown +=
+            (shown.empty() ? "" : " ") + std::string{"at commit "} + installed.commit.substr(0, 12);
+    }
+    std::string detail = wants.package + " " + (shown.empty() ? "(version unstated)" : shown) +
+                         " is present in " + venv.string() + " (its files, not imported by check)";
+    const std::string against =
+        wants.pin.has_value() ? "its pin, " + wants.describe() : "its floor, " + wants.describe();
+    const std::string name{training::to_string(installed.set)};
+    switch (installed.standing) {
+        case training::SetStanding::Current:
+            detail += wants.pin.has_value()
+                          ? ", the commit Apogee pins (" + std::string{wants.pin->committed} + ")"
+                          : ", at or above " + against;
+            break;
+        case training::SetStanding::BelowFloor:
+            return {.status = Status::Warn,
+                    .detail = detail + ", below " + against +
+                              " -- kept from an earlier setup until the '" + name +
+                              "' set is installed again",
+                    .remedy = setup_remedy(installed.set, on)};
+        case training::SetStanding::OffPin:
+            return {.status = Status::Warn,
+                    .detail = detail +
+                              (installed.commit.empty()
+                                   ? ", but its record names no commit it was built from, so "
+                                     "it is not " +
+                                         against
+                                   : ", off " + against) +
+                              " -- the one commit this Apogee trusts",
+                    .remedy = setup_remedy(installed.set, on)};
+        case training::SetStanding::Unstated:
+            detail +=
+                installed.version.empty()
+                    ? "; its distribution record states no version, so it is not held to " + against
+                    : "; its distribution record's version, '" + installed.version +
+                          "', is not a release number, so it is not held to " + against;
+            break;
+        case training::SetStanding::NoRecord:
+            detail += "; no distribution record of it is there, so it is not held to " + against;
+            break;
+    }
+    return {.status = Status::Ok, .detail = detail + std::string{use}, .remedy = {}};
+}
+
 /// The MLX runtime (27a): whether this host can run an `mlx` backend at all,
 /// and the seeded driver against its compiled-in copy. Off Apple silicon it
 /// is skipped, never passed; an environment without mlx-lm is a warning only
 /// where an `mlx` entry needs it. A pass says what was found -- the package's
-/// files, never an import -- and nothing more.
+/// files, never an import -- and nothing more. Since M23 every MLX set's row
+/// says its version, or mlx-video's commit, against its floor or pin; and
+/// the opt-in sets, mlx-video and mlx-audio, have rows of their own, a skip
+/// while they are not installed, since nobody asked for them (M11).
 void check_mlx(CheckReport& report, const CheckInputs& inputs) {
     const backends::MlxHost host = mlx_host(inputs);
     if (host.target != backends::kMlxTarget) {
@@ -1983,6 +2078,9 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
                             return entry.second.type == harness::BackendType::Mlx;
                         });
     const backends::MlxReadiness runtime = backends::probe_mlx_runtime(host);
+    // The Python the environment is on (M19), so a set it cannot take names
+    // the rebuild -- read from its record and pyvenv.cfg, never asked.
+    const training::PythonVersion on = training::PythonEnv{host.venv}.status().base_version;
     switch (runtime.refusal) {
         case backends::MlxRefusal::NoEnvironment:
         case backends::MlxRefusal::NoMlxLm:
@@ -1992,13 +2090,13 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
                 runtime.remedy);
             break;
         case backends::MlxRefusal::None:
-        case backends::MlxRefusal::NoDriver:
-            add(report, Status::Ok, "MLX", "runtime",
-                "mlx-lm " +
-                    (runtime.version.empty() ? std::string{"(version unstated)"}
-                                             : runtime.version) +
-                    " is present in " + host.venv.string() + " (its files, not imported by check)");
+        case backends::MlxRefusal::NoDriver: {
+            const SetRow row = present_set_row(
+                training::read_installed_set(host.venv, training::RequirementSet::Mlx), host.venv,
+                runtime.version, "", on);
+            add(report, row.status, "MLX", "runtime", row.detail, row.remedy);
             break;
+        }
         case backends::MlxRefusal::Platform:
         case backends::MlxRefusal::NoModelPath:
         case backends::MlxRefusal::ModelMissing:
@@ -2026,11 +2124,10 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
         }
     }
     if (vlm.installed()) {
-        add(report, Status::Ok, "MLX", "vision",
-            "mlx-vlm " + (vlm.version.empty() ? std::string{"(version unstated)"} : vlm.version) +
-                " is present in " + host.venv.string() +
-                " (its files, not imported by check) -- an MLX vision model reads images as "
-                "they are");
+        const SetRow row = present_set_row(
+            training::read_installed_set(host.venv, training::RequirementSet::MlxVlm), host.venv,
+            vlm.version, " -- an MLX vision model reads images as they are", on);
+        add(report, row.status, "MLX", "vision", row.detail, row.remedy);
     } else if (!sighted.empty()) {
         add(report, Status::Warn, "MLX", "vision",
             "mlx-vlm is not installed in " + host.venv.string() + ", so " + sighted +
@@ -2057,12 +2154,10 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
         }
     }
     if (embeddings.installed()) {
-        add(report, Status::Ok, "MLX", "embeddings",
-            "mlx-embeddings " +
-                (embeddings.version.empty() ? std::string{"(version unstated)"}
-                                            : embeddings.version) +
-                " is present in " + host.venv.string() +
-                " (its files, not imported by check) -- an MLX embedding model embeds through it");
+        const SetRow row = present_set_row(
+            training::read_installed_set(host.venv, training::RequirementSet::MlxEmbeddings),
+            host.venv, embeddings.version, " -- an MLX embedding model embeds through it", on);
+        add(report, row.status, "MLX", "embeddings", row.detail, row.remedy);
     } else if (!embedders.empty()) {
         add(report, Status::Warn, "MLX", "embeddings",
             "mlx-embeddings is not installed in " + host.venv.string() + ", so " + embedders +
@@ -2074,6 +2169,40 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
             "in " +
                 host.venv.string() + ")",
             std::string{backends::kMlxEmbeddingsRemedy});
+    }
+
+    // The opt-in sets (M23): mlx-video, built from its pinned commit (53k),
+    // and mlx-audio (53m), each found by its package's files and held to its
+    // pin or floor. Absent is a skip and never a warning -- nobody asked for
+    // either, and `check --fix` installs neither -- so a fresh install stays
+    // green (M11).
+    for (const auto& [set, label, package, use] :
+         {std::tuple{training::RequirementSet::MlxVideo, "video", "mlx_video",
+                     "'models convert --mlx' of a Wan set and 'video generate' on MLX"},
+          std::tuple{training::RequirementSet::MlxAudio, "voice", "mlx_audio",
+                     "'models convert --mlx' of a voice model and 'voice say' on MLX"}}) {
+        if (const std::filesystem::path found = training::find_site_package(host.venv, package);
+            !found.empty()) {
+            const SetRow row =
+                present_set_row(training::read_installed_set(host.venv, set), host.venv,
+                                training::installed_package_version(found),
+                                " -- " + std::string{use} + " run through it", on);
+            add(report, row.status, "MLX", label, row.detail, row.remedy);
+            continue;
+        }
+        const training::SetRequirement wants = training::set_requirement(set);
+        const training::PythonRange range = training::python_range(set);
+        add(report, Status::Skipped, "MLX", label,
+            "not installed (opt-in) -- only " + std::string{use} + " need it; " +
+                (wants.pin.has_value() ? "pip builds " + wants.package +
+                                             " from GitHub at its pin, " + wants.describe()
+                                       : wants.package + "'s floor is " + wants.describe()) +
+                (on.known() && !range.contains(on)
+                     ? "; the Python environment is on Python " + on.str() + ", and the '" +
+                           std::string{training::to_string(set)} + "' set runs on " +
+                           range.describe()
+                     : std::string{}),
+            setup_remedy(set, on));
     }
 
     // The seeded drivers: the backend's, `convert --mlx`'s (27b), and the

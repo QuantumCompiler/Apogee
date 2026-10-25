@@ -1913,6 +1913,19 @@ std::string render_model_info(const harness::Config& config, std::string_view na
                         : "no -- " + vision.reason +
                               (vision.remedy.empty() ? std::string{} : " (" + vision.remedy + ")"))
                 << "\n";
+            // And whether a recording is heard as it is (53g), by the rungs
+            // the provider's `accepts_audio` answers from (M23).
+            const backends::MlxAudio audio =
+                backends::probe_mlx_audio(info, backends::MlxHost::current());
+            out << "hearing:      "
+                << (audio.hears()
+                        ? "hears recordings as they are -- mlx-vlm " +
+                              (audio.vlm.version.empty() ? std::string{"(version unstated)"}
+                                                         : audio.vlm.version)
+                        : "no -- " + std::string{backends::to_string(audio.refusal)} + ": " +
+                              audio.reason +
+                              (audio.remedy.empty() ? std::string{} : " (" + audio.remedy + ")"))
+                << "\n";
             if (!value.draft.empty()) {
                 // The drafter beside it (53i): what it is, the block it drafts
                 // in, and whether it pairs -- the ladder's own question.
@@ -2296,6 +2309,20 @@ std::string render_role_status(const harness::Config& config, const BusyProgress
                         ? "   [mlx: reads images as they are]"
                         : "   [mlx: cannot read images -- " + vision.reason +
                               (vision.remedy.empty() ? std::string{} : "; " + vision.remedy) + "]");
+        } else if (role == harness::ModelRole::Transcription &&
+                   entry->second.type == harness::BackendType::Mlx) {
+            // Whether this model hears a recording at all (53g, M23), as the
+            // vision role says whether it sees.
+            const backends::MlxAudio audio = backends::probe_mlx_audio(
+                backends::inspect_mlx_model(
+                    std::filesystem::path{harness::expand_env_and_home(entry->second.model_path)}),
+                backends::MlxHost::current());
+            out << (audio.hears()
+                        ? "   [mlx: hears recordings as they are]"
+                        : "   [mlx: cannot hear recordings -- " +
+                              std::string{backends::to_string(audio.refusal)} + ": " +
+                              audio.reason +
+                              (audio.remedy.empty() ? std::string{} : "; " + audio.remedy) + "]");
         } else if (entry->second.type == harness::BackendType::LlamaCpp &&
                    !entry->second.model_path.empty()) {
             // What loading it costs: a helper is a second model resident

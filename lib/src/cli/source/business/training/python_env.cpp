@@ -4,9 +4,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
+#include <cstdint>
 #include <ctime>
 #include <fstream>
+#include <limits>
 #include <system_error>
 
 #include "contracts/config.h"
@@ -33,6 +36,20 @@ constexpr std::array<SetHost, kSetNames.size()> kSetHosts{
 /// mlx-audio` and never unasked").
 constexpr std::array<bool, kSetNames.size()> kSetOptIn{false, false, false, false, false,
                                                        false, false, false, true,  true};
+
+/// What each set is for, in the names' order (M23): the words `train setup
+/// --with`'s help gives each.
+constexpr std::array<std::string_view, kSetNames.size()> kSetPurposes{
+    "Parquet in 'datasets prepare'",
+    "the Apple silicon trainer and the mlx backend",
+    "the CUDA trainer",
+    "the GGUF converter, for promote",
+    "an mlx backend's images and recordings, and MLX conversions that keep a set's towers",
+    "torch and diffusers, for video",
+    "Kokoro, for speech",
+    "embedding models on MLX",
+    "Wan on MLX, built from GitHub",
+    "Kokoro on MLX"};
 
 /// The Pythons each set runs on, in the names' order (M19): the tightest of
 /// its packages' `requires_python` as PyPI publishes them for the current
@@ -377,6 +394,346 @@ std::optional<PinnedSource> pinned_source(RequirementSet set) noexcept {
         return kMlxVideoSource;
     }
     return std::nullopt;
+}
+
+std::string_view set_purpose(RequirementSet set) noexcept {
+    return kSetPurposes.at(static_cast<std::size_t>(set));
+}
+
+std::string SetRequirement::describe() const {
+    if (pin.has_value()) {
+        return "commit " + std::string{pin->commit.substr(0, 12)} + " (" +
+               std::string{pin->committed} + ")";
+    }
+    return floor.empty() ? std::string{"no floor"} : ">=" + floor;
+}
+
+SetRequirement set_requirement(RequirementSet set) {
+    SetRequirement out;
+    if (std::optional<PinnedSource> source = pinned_source(set)) {
+        out.package = std::string{source->package};
+        out.pin = source;
+        return out;
+    }
+    const std::span<const std::string_view> packages = packages_for(set);
+    if (packages.empty()) {
+        return out;
+    }
+    // `name[extra]>=floor`, as the table writes every one.
+    const std::string_view spec = packages.front();
+    const std::size_t at = spec.find(">=");
+    const std::string_view name = spec.substr(0, std::min(at, spec.find('[')));
+    out.package = std::string{name};
+    if (at != std::string_view::npos) {
+        out.floor = std::string{spec.substr(at + 2)};
+    }
+    return out;
+}
+
+std::string_view to_string(SetStanding standing) noexcept {
+    switch (standing) {
+        case SetStanding::NoRecord:
+            return "no record";
+        case SetStanding::Current:
+            return "current";
+        case SetStanding::BelowFloor:
+            return "below its floor";
+        case SetStanding::OffPin:
+            return "off its pin";
+        case SetStanding::Unstated:
+            return "unstated";
+    }
+    return "unknown";
+}
+
+namespace {
+
+/// A release number as PEP 440 orders it: the epoch, the release, and the
+/// pre-, post- and development parts folded into one sort key.
+struct ReleaseKey {
+    std::int64_t epoch = 0;
+    std::vector<std::int64_t> release{};
+    /// -1 a development release of the final, 0 to 2 an alpha, beta or
+    /// candidate, 3 the final.
+    int phase = 3;
+    std::int64_t phase_number = 0;
+    /// -1 none.
+    std::int64_t post = -1;
+    /// The largest for none: a development release sorts before its own.
+    std::int64_t dev = std::numeric_limits<std::int64_t>::max();
+};
+
+/// `text` from `at` on: digits, consumed; nullopt when there are none.
+[[nodiscard]] std::optional<std::int64_t> digits_at(std::string_view text, std::size_t& at) {
+    std::size_t end = at;
+    while (end < text.size() && text[end] >= '0' && text[end] <= '9' && end - at < 12) {
+        ++end;
+    }
+    if (end == at) {
+        return std::nullopt;
+    }
+    const std::int64_t value = std::stoll(std::string{text.substr(at, end - at)});
+    at = end;
+    return value;
+}
+
+/// Consumes one of `words` at `at`, after an optional `-`, `_` or `.`.
+[[nodiscard]] std::optional<std::size_t> word_at(std::string_view text, std::size_t& at,
+                                                 std::span<const std::string_view> words) {
+    std::size_t from = at;
+    if (from < text.size() && (text[from] == '-' || text[from] == '_' || text[from] == '.')) {
+        ++from;
+    }
+    // Longest first, so `rc` is never read as `r`.
+    std::optional<std::size_t> best;
+    for (std::size_t i = 0; i < words.size(); ++i) {
+        if (text.substr(from).starts_with(words[i]) &&
+            (!best.has_value() || words[i].size() > words[*best].size())) {
+            best = i;
+        }
+    }
+    if (best.has_value()) {
+        at = from + words[*best].size();
+        if (at < text.size() && (text[at] == '-' || text[at] == '_' || text[at] == '.')) {
+            ++at;
+        }
+    }
+    return best;
+}
+
+[[nodiscard]] std::optional<ReleaseKey> parse_release(std::string_view raw) {
+    std::string text{raw};
+    std::ranges::transform(text, text.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::erase_if(text, [](char c) { return c == ' ' || c == '\t' || c == '\r'; });
+    if (const std::size_t plus = text.find('+'); plus != std::string::npos) {
+        text.resize(plus);  // a local part never orders a release
+    }
+    std::string_view view = text;
+    if (view.starts_with('v')) {
+        view.remove_prefix(1);
+    }
+    ReleaseKey key;
+    std::size_t at = 0;
+    if (const std::size_t bang = view.find('!'); bang != std::string_view::npos) {
+        std::optional<std::int64_t> epoch = digits_at(view, at);
+        if (!epoch.has_value() || at != bang) {
+            return std::nullopt;
+        }
+        key.epoch = *epoch;
+        at = bang + 1;
+    }
+    while (true) {
+        const std::optional<std::int64_t> part = digits_at(view, at);
+        if (!part.has_value()) {
+            return std::nullopt;
+        }
+        key.release.push_back(*part);
+        if (at + 1 < view.size() && view[at] == '.' && view[at + 1] >= '0' && view[at + 1] <= '9') {
+            ++at;
+            continue;
+        }
+        break;
+    }
+    constexpr std::array<std::string_view, 8> kPre{"a",  "alpha", "b",   "beta",
+                                                   "rc", "c",     "pre", "preview"};
+    constexpr std::array<int, kPre.size()> kPreRank{0, 0, 1, 1, 2, 2, 2, 2};
+    bool pre = false;
+    if (const std::optional<std::size_t> word = word_at(view, at, kPre)) {
+        pre = true;
+        key.phase = kPreRank.at(*word);
+        key.phase_number = digits_at(view, at).value_or(0);
+    }
+    constexpr std::array<std::string_view, 3> kPost{"post", "rev", "r"};
+    if (word_at(view, at, kPost).has_value()) {
+        key.post = digits_at(view, at).value_or(0);
+    } else if (at + 1 < view.size() && view[at] == '-' && view[at + 1] >= '0' &&
+               view[at + 1] <= '9') {
+        ++at;
+        key.post = digits_at(view, at).value_or(0);  // `1.0-1`, an implicit post release
+    }
+    constexpr std::array<std::string_view, 1> kDev{"dev"};
+    if (word_at(view, at, kDev).has_value()) {
+        key.dev = digits_at(view, at).value_or(0);
+        if (!pre && key.post < 0) {
+            key.phase = -1;
+        }
+    }
+    if (at != view.size()) {
+        return std::nullopt;  // anything else is not a release number
+    }
+    // Trailing zeros do not count: `0.6` is `0.6.0`.
+    while (key.release.size() > 1 && key.release.back() == 0) {
+        key.release.pop_back();
+    }
+    return key;
+}
+
+/// Every site-packages directory under `venv`: Windows' one under `Lib/`,
+/// POSIX's per version under `lib/python3.N/`.
+[[nodiscard]] std::vector<std::filesystem::path> site_packages(const std::filesystem::path& venv) {
+    std::vector<std::filesystem::path> out;
+    std::error_code code;
+    if (const std::filesystem::path windows = venv / "Lib" / "site-packages";
+        std::filesystem::is_directory(windows, code)) {
+        out.push_back(windows);
+    }
+    const std::filesystem::path lib = venv / "lib";
+    if (std::filesystem::is_directory(lib, code)) {
+        for (const auto& entry : std::filesystem::directory_iterator(lib, code)) {
+            if (entry.path().filename().string().starts_with("python") &&
+                std::filesystem::is_directory(entry.path() / "site-packages", code)) {
+                out.push_back(entry.path() / "site-packages");
+            }
+        }
+    }
+    std::ranges::sort(out);
+    return out;
+}
+
+/// A distribution's name as PEP 503 compares them: lower case, each run of
+/// `-`, `_` and `.` one `-`.
+[[nodiscard]] std::string normalized_name(std::string_view name) {
+    std::string out;
+    for (const char c : name) {
+        if (c == '-' || c == '_' || c == '.') {
+            if (!out.ends_with('-')) {
+                out += '-';
+            }
+        } else {
+            out += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+    }
+    return out;
+}
+
+/// `package`'s `.dist-info` directory in `venv`, or empty: the name before
+/// its first `-` is the distribution's (pip escapes every other `-` in it),
+/// compared as PEP 503 compares names. Of several, the first by name.
+[[nodiscard]] std::filesystem::path find_dist_info(const std::filesystem::path& venv,
+                                                   std::string_view package) {
+    constexpr std::string_view kSuffix = ".dist-info";
+    const std::string wanted = normalized_name(package);
+    std::vector<std::filesystem::path> found;
+    std::error_code code;
+    for (const std::filesystem::path& site : site_packages(venv)) {
+        for (const auto& entry : std::filesystem::directory_iterator(site, code)) {
+            const std::string name = entry.path().filename().string();
+            if (!name.ends_with(kSuffix) || !entry.is_directory(code)) {
+                continue;
+            }
+            const std::string stem = name.substr(0, name.size() - kSuffix.size());
+            if (normalized_name(stem.substr(0, stem.find('-'))) == wanted) {
+                found.push_back(entry.path());
+            }
+        }
+    }
+    std::ranges::sort(found);
+    return found.empty() ? std::filesystem::path{} : found.front();
+}
+
+/// `METADATA`'s `Version` header in `record`, or empty: its headers end at
+/// the first blank line, and a header's name is matched without its case.
+[[nodiscard]] std::string metadata_version(const std::filesystem::path& record) {
+    std::ifstream in{record / "METADATA", std::ios::binary};
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        if (line.empty()) {
+            break;
+        }
+        const std::size_t colon = line.find(':');
+        if (colon == std::string::npos || line.front() == ' ' || line.front() == '\t') {
+            continue;
+        }
+        std::string name = normalized_name(line.substr(0, colon));
+        if (name != "version") {
+            continue;
+        }
+        std::string value = line.substr(colon + 1);
+        const std::size_t first = value.find_first_not_of(" \t");
+        const std::size_t last = value.find_last_not_of(" \t");
+        return first == std::string::npos ? std::string{} : value.substr(first, last - first + 1);
+    }
+    return {};
+}
+
+/// PEP 610's `direct_url.json` in `record`: the commit a VCS install names
+/// (`vcs_info.commit_id`), or empty.
+[[nodiscard]] std::string direct_url_commit(const std::filesystem::path& record) {
+    std::ifstream in{record / "direct_url.json", std::ios::binary};
+    if (!in) {
+        return {};
+    }
+    const nlohmann::json url = nlohmann::json::parse(in, nullptr, false);
+    if (!url.is_object()) {
+        return {};
+    }
+    const auto vcs = url.find("vcs_info");
+    if (vcs == url.end() || !vcs->is_object()) {
+        return {};
+    }
+    const auto commit = vcs->find("commit_id");
+    return commit != vcs->end() && commit->is_string() ? commit->get<std::string>() : std::string{};
+}
+
+}  // namespace
+
+std::optional<int> compare_versions(std::string_view a, std::string_view b) {
+    const std::optional<ReleaseKey> left = parse_release(a);
+    const std::optional<ReleaseKey> right = parse_release(b);
+    if (!left.has_value() || !right.has_value()) {
+        return std::nullopt;
+    }
+    const auto sign = [](auto x, auto y) { return x < y ? -1 : (y < x ? 1 : 0); };
+    if (left->epoch != right->epoch) {
+        return sign(left->epoch, right->epoch);
+    }
+    const std::size_t parts = std::max(left->release.size(), right->release.size());
+    for (std::size_t i = 0; i < parts; ++i) {
+        const std::int64_t x = i < left->release.size() ? left->release[i] : 0;
+        const std::int64_t y = i < right->release.size() ? right->release[i] : 0;
+        if (x != y) {
+            return sign(x, y);
+        }
+    }
+    if (left->phase != right->phase) {
+        return sign(left->phase, right->phase);
+    }
+    if (left->phase_number != right->phase_number) {
+        return sign(left->phase_number, right->phase_number);
+    }
+    if (left->post != right->post) {
+        return sign(left->post, right->post);
+    }
+    return sign(left->dev, right->dev);
+}
+
+InstalledSet read_installed_set(const std::filesystem::path& venv, RequirementSet set) {
+    InstalledSet out;
+    out.set = set;
+    out.requirement = set_requirement(set);
+    out.record = find_dist_info(venv, out.requirement.package);
+    if (out.record.empty()) {
+        return out;
+    }
+    out.version = metadata_version(out.record);
+    if (out.requirement.pin.has_value()) {
+        // Pip records the commit it built from (PEP 610): the pin's or not.
+        out.commit = direct_url_commit(out.record);
+        out.standing =
+            out.commit == out.requirement.pin->commit ? SetStanding::Current : SetStanding::OffPin;
+        return out;
+    }
+    const std::optional<int> order = out.version.empty() || out.requirement.floor.empty()
+                                         ? std::nullopt
+                                         : compare_versions(out.version, out.requirement.floor);
+    out.standing = !order.has_value() ? SetStanding::Unstated
+                   : *order < 0       ? SetStanding::BelowFloor
+                                      : SetStanding::Current;
+    return out;
 }
 
 std::optional<RequirementSet> requirement_set_from_string(std::string_view name) noexcept {

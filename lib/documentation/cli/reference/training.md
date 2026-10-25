@@ -136,6 +136,25 @@ them, and -- for a version `train promote --adapter` made, when its base
 changed -- that run promoted again, its gate scoring it over the base the
 entry serves now.
 
+On Apple silicon its `MLX` section (since M23) has a row for every MLX set --
+`runtime` (`mlx`), `vision` (`mlx-vlm`), `embeddings` (`mlx-embeddings`),
+`video` (`mlx-video`) and `voice` (`mlx-audio`) -- each saying the version
+the environment's distribution record states (`*.dist-info/METADATA`'s
+`Version`) against the set's floor in the table above, or for `mlx-video`
+the commit pip recorded it was built from (PEP 610's `direct_url.json`,
+`vcs_info.commit_id`) against the pinned one. All of it is read from files;
+no Python is started and nothing is imported. A set below its floor -- an
+`mlx-vlm` 0.3.x installed before 53f raised its floor to `0.6.1` -- or
+`mlx-video` at another commit, or from none, is a warning naming `apogee train
+setup --with <set>`, never a failure: the older library still runs what it
+ran. A record that states no version, or none that is a release number, is
+said as such and held to nothing. An opt-in set that is not installed reads
+`not installed (opt-in)` and is skipped, never warned about, since nobody
+asked for it -- `check --fix` never installs one -- so a fresh install still
+ends green; a set the bootstrap installs reads as it always has when it is
+absent. `train setup --with`'s help names every set in this table, built from
+it.
+
 ### The script protocol
 
 Every shipped driver speaks one line protocol on stdout -- one JSON object

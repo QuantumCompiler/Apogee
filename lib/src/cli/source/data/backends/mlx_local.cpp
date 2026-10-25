@@ -740,6 +740,7 @@ MlxDraft probe_mlx_draft(const std::filesystem::path& base, std::string_view dra
 
 MlxAudio probe_mlx_audio(const MlxModelInfo& info, const MlxHost& host) {
     MlxAudio audio;
+    audio.tower = declares_audio_tower(info.towers);
     // Only mlx-vlm's build of a set keeps its towers (53f), and only a record
     // says a directory is that build: one with no record is taken for
     // mlx-lm's layout, as every turn of it is.
@@ -765,7 +766,7 @@ MlxAudio probe_mlx_audio(const MlxModelInfo& info, const MlxHost& host) {
         }
         return audio;
     }
-    if (!declares_audio_tower(info.towers)) {
+    if (!audio.tower) {
         audio.refusal = MlxAudioRefusal::NoAudioTower;
         audio.reason =
             "its config.json declares none -- no audio_config, nor an omni model's "

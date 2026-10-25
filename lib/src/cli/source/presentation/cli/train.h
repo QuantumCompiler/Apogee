@@ -87,6 +87,11 @@ struct SetupRequest {
 /// Runs a setup, printing each step. Throws the CLI's user error on failure.
 void run_train_setup(const harness::Config& config, const SetupRequest& request);
 
+/// `train setup --with`'s help (M23): every requirement set, in the table's
+/// order, with what it is for and whether only this installs it -- built
+/// from the one set list, so it cannot go stale beside it.
+[[nodiscard]] std::string setup_with_help();
+
 /// The snapshot `name` resolves to: a directory path as given, else a
 /// snapshot of that name under `paths.hf_dir` or `models/`. A backend
 /// entry's name, a GGUF, or anything that is not a snapshot is refused

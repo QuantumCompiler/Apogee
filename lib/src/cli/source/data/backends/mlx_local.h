@@ -328,6 +328,10 @@ enum class MlxAudioRefusal : std::uint8_t {
 /// before anything starts, the rung said.
 struct MlxAudio {
     MlxAudioRefusal refusal = MlxAudioRefusal::None;
+    /// Its `config.json` declares an audio tower, whichever rung refused
+    /// (M23): what `check` says hearing of, as it says sight of a vision
+    /// model alone.
+    bool tower = false;
     MlxVlmPackage vlm{};
     /// Why it does not hear, in a sentence; and the fix, when one command is
     /// it. Both empty when it does.

@@ -1027,8 +1027,12 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
 - **`models info`** and **`models status`**: their `label: value` record as
   `fields`, in order, each label as printed and a value's indented continuation
   joined to it with a newline. The values are the same words the human view
-  prints. Since 52e `models info` on one stored set (`<model>/<format>/<id>`,
-  or its id) adds a typed **`data`** beside the unchanged `fields`: `format`
+  prints. Since M23 an `mlx` backend's `models info` record has a `hearing`
+  field after its `vision` one -- `hears recordings as they are -- mlx-vlm
+  <version>`, or `no -- <rung>: <why>` -- and `models status`'s
+  `transcription` line on an `mlx` entry says whether it hears, as its
+  `vision` line says whether it sees. Since 52e `models info` on one stored
+  set (`<model>/<format>/<id>`, or its id) adds a typed **`data`** beside the unchanged `fields`: `format`
   (`gguf`, `mlx`, `safetensors`, `pipeline`, `voice`), `handle`, `bytes` (every
   file of the set on disk), `architecture`, `window` (`tokens`, `source`
   `default` or `context_size`, `trained` — the trained window the files state),
@@ -1151,7 +1155,15 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   scale the loader refuses, or pinned to other weights than the base holds
   now; `skipped` when the base cannot be read to check its pin -- each failure's
   `remedy` its doors, `, or `-joined, each a command before ` to <what it
-  does>`.
+  does>`. Since M23 the `MLX` section's `runtime`, `vision` and `embeddings`
+  rows say each set's installed version against its floor, and two rows join
+  them, `video` (mlx-video, its commit against its pin) and `voice`
+  (mlx-audio) -- read from the environment's `*.dist-info` records, nothing
+  run: `warn` below a floor or off the pin, its `remedy` `apogee train setup
+  --with <set>`; `skipped`, detail `not installed (opt-in) -- …`, for an
+  opt-in set not installed. An `mlx` entry's `Config` row says whether it
+  hears beside whether it sees, and `default_transcription` on an `mlx`
+  entry is held to the same rungs, its detail the one that refuses.
 - **`providers scan`** (since 37b): a row per provider in the knowledge table, as the human scan prints them -- `provider` (`claude`), `type` (`claude-cli`), `label` (`Claude CLI`), `tier` (`credentials found`, `verified 2026-10-06`, `not found`), `backend` (which configured backends reach it, `not registered` when it could be, else empty) and `evidence`, a line each. It is the explicit scan, so it may start a vendor's binary for its version as the human scan does. With `--register`, what registering did is the document's `registration` and the rosters it fetched its `rosters`, a line each; with `--refresh`, the rosters re-fetched are `rosters` too.
 - **`knowledge list`** and **`knowledge info`** (since 37c): the records the
   human list counts, newest first and kept to `--status`/`--discipline` as it
