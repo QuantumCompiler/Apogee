@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <filesystem>
 #include <memory>
 #include <random>
 #include <string>
@@ -18,6 +19,7 @@
 #include "support/env_guard.h"
 #include "support/fake_mlx_driver.h"
 #include "support/fake_transport.h"
+#include "support/mlx_model.h"
 
 /// The resolution rules, encoded as an exhaustive table. Every
 /// row is one turn: what the user said (flag, pin), what exists (embedder,
@@ -395,6 +397,72 @@ TEST_CASE(
     CHECK(demoted.note.find("re-run") != std::string::npos);
     const TurnRetrieval refused = resolve_turn_retriever("vector", "", gguf_facts, facts);
     CHECK(refused.error.find("lexical") != std::string::npos);
+}
+
+TEST_CASE(
+    "a collection's space is its embedder's model and adapter set, so a change falls to lexical",
+    "[agentloop][retrieval][embedder][adapters][space]") {
+    // 55e: the binding named the model alone while `embed` applied the
+    // entry's adapters, so a register, a clear or a promote left it the same
+    // and vectors were queried across two spaces. The adapter set is in the
+    // name now; the one retriever rule is unchanged and catches the change.
+    const apogee::testing::TempDir dir{"retrieval-space-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path model = dir.path() / "model";
+    apogee::testing::write_fixture_file(model / "model.safetensors", "weights");
+    const auto adapter = [&](const std::string& name, const std::string& weights) {
+        const std::filesystem::path path = dir.path() / name;
+        apogee::testing::write_fixture_file(path / "adapter_config.json", "{}");
+        apogee::testing::write_fixture_file(path / "adapters.safetensors", weights);
+        return apogee::harness::AdapterConfig{.path = path.string()};
+    };
+    const apogee::harness::AdapterConfig tone = adapter("tone", "tone delta");
+    const apogee::harness::AdapterConfig v2 = adapter("v2.lora", "a promoted delta");
+    const apogee::harness::AdapterConfig copied = adapter("elsewhere", "tone delta");
+    // The space an mlx embedding entry over `model` names, under `adapters`.
+    const auto space = [&](std::vector<apogee::harness::AdapterConfig> adapters) {
+        apogee::backends::MlxEmbedProvider::Options options;
+        options.model = "Gemma-Embedding-300M";
+        options.model_dir = model;
+        options.adapters = std::move(adapters);
+        options.weight_hashing.memo = dir.path() / "cache" / "weight-hashes.json";
+        const apogee::backends::MlxEmbedProvider provider{
+            options, [](const apogee::platform::ChildCommand&, std::string&) {
+                return std::unique_ptr<apogee::platform::ChildProcess>{};
+            }};
+        return provider.embedding_model_name();
+    };
+    const auto turn = [](const std::string& asked, const std::string& recorded) {
+        return resolve_turn_retriever("", "", EmbedderFacts{.available = true, .model = asked},
+                                      vector_store(recorded));
+    };
+
+    const std::string bound = space({tone});
+    // The same set asks the same space: vector, as it always was.
+    CHECK(turn(space({tone}), bound).retriever == Retriever::Vector);
+    // The same adapter's bytes elsewhere are the same space.
+    CHECK(turn(space({copied}), bound).retriever == Retriever::Vector);
+    // Another adapter -- a promote's next version -- or none: lexical, with
+    // the re-ingest hint, never a query across the two.
+    for (const std::string& asked : {space({v2}), space({})}) {
+        INFO(asked);
+        const TurnRetrieval demoted = turn(asked, bound);
+        CHECK(demoted.retriever == Retriever::Lexical);
+        CHECK(demoted.note.find("re-run") != std::string::npos);
+    }
+    // An explicit vector ask across the change is refused naming lexical.
+    CHECK(resolve_turn_retriever("vector", "",
+                                 EmbedderFacts{.available = true, .model = space({v2})},
+                                 vector_store(bound))
+              .error.find("lexical") != std::string::npos);
+
+    // ADR 0006: a collection bound before 55e recorded the model alone. With
+    // no adapters it is the space it always was, read as before; under an
+    // adapter set it cannot be told from the bare model's, so it falls to
+    // lexical until it is ingested again -- readable, never mis-scored.
+    const std::string before_55e = "mlx:Gemma-Embedding-300M";
+    CHECK(space({}) == before_55e);
+    CHECK(turn(space({}), before_55e).retriever == Retriever::Vector);
+    CHECK(turn(space({tone}), before_55e).retriever == Retriever::Lexical);
 }
 
 TEST_CASE("each retriever's strength is read on its own scale, and each has its floor",

@@ -69,6 +69,10 @@ class Tokenizer:
 def load(path_or_hf_repo, tokenizer_config=None, model_config=None, adapter_path=None,
          lazy=False):
     record(f"embeddings load {os.path.basename(os.path.normpath(path_or_hf_repo))}")
+    if adapter_path is not None:
+        # The adapter mlx-embeddings would apply over the weights (55e),
+        # recorded as the loader was handed it -- the stub mlx_lm's rule.
+        record(f"embeddings adapter {os.path.basename(os.path.normpath(adapter_path))}")
     noise = os.environ.get("STUB_MLX_NOISE")
     if noise:
         record("embeddings noise")  # so a test knows the narration was made

@@ -548,6 +548,28 @@ TEST_CASE("an entry joining a loaded base fits its own default window, as its ow
     }
 }
 
+TEST_CASE("each entry on a shared base embeds in a space of its own: its model and adapters",
+          "[backends][llamacpp][shared-base][adapters][space]") {
+    // 55e: `embed` applies the entry's adapters (53a), so a collection's
+    // binding names them too -- vectors made through one set are never
+    // queried through another, nor through the bare base.
+    const Bench bench;
+    const Entry styled{bench, "styled", {bench.pinned(bench.style, 0.5)}};
+    const Entry bare{bench, "bare", {}};
+    const std::string style_id = apogee::models::file_sha256(bench.style).substr(0, 12);
+    // Named with no model loaded: a probe never pages weights in.
+    CHECK(styled.provider->embedding_model_name() ==
+          "styled-model + adapters " + style_id + ":0.5");
+    CHECK(bare.provider->embedding_model_name() == "bare-model");
+    CHECK(styled.runtime->loads == 0);
+    CHECK(bare.runtime->loads == 0);
+    // Both embed over the one base, each under its own name.
+    CHECK(styled.embed("hello") == 1);
+    CHECK(bare.embed("hello") == 1);
+    CHECK(styled.runtime->loads + bare.runtime->loads == 1);
+    CHECK(styled.provider->embedding_model_name() != bare.provider->embedding_model_name());
+}
+
 TEST_CASE("an adapter that will not load over a shared base fails its entry alone",
           "[backends][llamacpp][shared-base][refusal]") {
     const Bench bench;

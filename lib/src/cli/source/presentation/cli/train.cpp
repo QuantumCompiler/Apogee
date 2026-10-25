@@ -262,11 +262,12 @@ struct Providers {
 }
 
 /// An MLX adapter version's check (53b): the directory mlx-lm loads an
-/// adapter from -- its `adapter_config.json` and `adapters.safetensors`.
+/// adapter from -- its `adapter_config.json` and `adapters.safetensors`, the
+/// one list a load's gate asks too (55e).
 [[nodiscard]] training::Verifier mlx_adapter_verifier() {
     return [](const std::filesystem::path& dir) {
         std::error_code code;
-        for (const std::string_view file : {"adapter_config.json", "adapters.safetensors"}) {
+        for (const std::string_view file : backends::kMlxAdapterFiles) {
             if (!std::filesystem::is_regular_file(dir / file, code)) {
                 return "it holds no " + std::string{file};
             }
@@ -866,6 +867,65 @@ struct PromoteOutcome {
         adapters.push_back(std::move(adapter));
     }
     return adapters;
+}
+
+/// Why rolling `key` back to adapter version `target` would leave its pin
+/// stale (55e), or empty when it would not: the version's adapter asked its
+/// file facts, then the pin its ledger recorded against the weights the entry
+/// runs now -- the check promote makes as it pins (53a), read once per change
+/// of those weights and remembered. A re-pull, a requantize or a model_path
+/// move since the version was registered is refused here, by name, never left
+/// for the next load to find. The door, where the version's run is still
+/// there to promote from, promotes it again over today's weights.
+[[nodiscard]] std::string rollback_pin_refusal(const std::string& key,
+                                               const harness::BackendConfig& entry,
+                                               const training::VersionEntry& target,
+                                               const training::TrainingStore& store) {
+    const std::string version = "v" + std::to_string(target.version);
+    const bool mlx = entry.type == harness::BackendType::Mlx;
+    if (entry.model_path.empty()) {
+        return "backend '" + key + "' names no model_path, the weights " + version +
+               "'s adapter applies over -- nothing was repointed";
+    }
+    const std::filesystem::path base{harness::expand_env_and_home(entry.model_path)};
+    const backends::AdapterCheck check{.backend = key,
+                                       .base = base,
+                                       .directories = mlx,
+                                       .hashing = {.memo = harness::weight_hash_cache_path()}};
+    const harness::AdapterConfig adapter{.path = target.adapter_path,
+                                         .base_sha256 = target.base_sha256};
+    if (backends::adapter_files(adapter, check) == backends::AdapterFiles::WrongKind) {
+        return version + "'s adapter " + target.adapter_path + " is not what '" + key +
+               "' applies (" + backends::adapter_kind_gap(adapter, check) +
+               ") -- nothing was repointed";
+    }
+    std::string again;
+    std::string error;
+    if (training::valid_run_id(target.run_id) &&
+        training::read_manifest(store.run_dir(target.run_id), error).has_value()) {
+        again = "; promote its run again over these weights: apogee train promote " +
+                target.run_id + " --as " + key + " --adapter";
+    }
+    if (target.base_sha256.empty()) {
+        return version + "'s adapter " + target.adapter_path +
+               " was recorded with no pin to the weights it applies over, so it cannot be "
+               "checked against " +
+               base.string() + " -- nothing was repointed" + again;
+    }
+    const std::string now = backends::weights_sha256(base, check.hashing);
+    if (now.empty()) {
+        return "the base weights at " + base.string() + " could not be read to check " + version +
+               "'s pin against -- nothing was repointed";
+    }
+    if (now != target.base_sha256) {
+        return version + "'s adapter " + target.adapter_path +
+               " was pinned to other base weights (sha256 " + target.base_sha256.substr(0, 12) +
+               ") than " + base.string() + " holds now (" + now.substr(0, 12) +
+               ") -- an adapter applies only over the weights it was trained on, so nothing was "
+               "repointed: point model_path back at the weights it was pinned to" +
+               again;
+    }
+    return {};
 }
 
 /// Why an mlx entry cannot take `adapters` (53b): mlx-lm loads one adapter
@@ -2581,6 +2641,12 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
                 entry.adapters, active != nullptr ? active->adapter_path : std::string{},
                 harness::AdapterConfig{.path = weights, .base_sha256 = target.entry->base_sha256});
             if (const std::string refusal = one_mlx_adapter(key, entry, adapters, weights);
+                !refusal.empty()) {
+                fail_user(refusal);
+            }
+            // The pin it was registered under, checked against the weights
+            // the entry runs now before anything is written (55e).
+            if (const std::string refusal = rollback_pin_refusal(key, entry, *target.entry, store);
                 !refusal.empty()) {
                 fail_user(refusal);
             }

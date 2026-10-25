@@ -730,6 +730,26 @@ TEST_CASE("adapters pinned over HTTP are byte-identical to the CLI's, and the vi
     const nlohmann::json view = parsed(admin_get_backend(fixture.context(), "tuned"));
     CHECK(view.dump().find(apogee::models::file_sha256(base)) != std::string::npos);
     CHECK(view.dump().find(R"("scale":0.5)") != std::string::npos);
+
+    // 55e: moving the base under them is refused the CLI's way over HTTP,
+    // the file untouched -- and a move to the same weights is byte-identical.
+    const std::filesystem::path other = fixture.home.path() / "other.gguf";
+    std::ofstream{other, std::ios::binary} << "other weights";
+    const std::string before = Fixture::bytes(fixture.http_config);
+    HttpRequest move = post(nlohmann::json{{"model_path", other.string()}});
+    move.method = "PATCH";
+    const HttpResponse refused = admin_set_backend_fields(fixture.context(), "tuned", move);
+    CHECK(refused.status == 400);
+    CHECK(refused.body.find("'tuned' applies adapters pinned to other weights than") !=
+          std::string::npos);
+    CHECK(Fixture::bytes(fixture.http_config) == before);
+    const std::filesystem::path copy = fixture.home.path() / "copy.gguf";
+    std::ofstream{copy, std::ios::binary} << "base weights";
+    fixture.cli({"config", "set-backend", "tuned", "--model-path", copy.string()});
+    HttpRequest same = post(nlohmann::json{{"model_path", copy.string()}});
+    same.method = "PATCH";
+    REQUIRE(admin_set_backend_fields(fixture.context(), "tuned", same).status == 200);
+    CHECK(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
 }
 
 TEST_CASE("config set's twin moves the same scalars the CLI moves, byte for byte",

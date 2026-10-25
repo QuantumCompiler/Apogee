@@ -272,8 +272,11 @@ public:
     /// the session.
     [[nodiscard]] std::size_t embedding_dimensions() const noexcept override;
 
-    /// The configured name, else the GGUF's file name: what a collection
-    /// records as the space its vectors live in.
+    /// The configured name, else the GGUF's file name, with the adapters
+    /// every embedding applies (55e, `embedding_space`): what a collection
+    /// records as the space its vectors live in, so vectors made under one
+    /// adapter set are never queried under another. With no adapters, the
+    /// name alone, as every collection bound before 55e recorded it.
     [[nodiscard]] std::string embedding_model_name() const override;
 
     /// Local weights cost nothing per call.

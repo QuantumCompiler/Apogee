@@ -1124,9 +1124,11 @@ void check_adapters(CheckReport& report, const CheckInputs& inputs) {
                             take_off);
                     continue;
                 case backends::AdapterFiles::WrongKind:
+                    // What the directory lacks, said as a load refuses it
+                    // (55e): its configuration, or the weights mlx-lm applies.
                     add(report, Status::Fail, "Adapters", label,
-                        (mlx ? "not an mlx-lm adapter directory (it holds no "
-                               "adapter_config.json): "
+                        (mlx ? "not an mlx-lm adapter directory (" +
+                                   backends::adapter_kind_gap(adapter, check) + "): "
                              : "not a file -- a llamacpp entry applies a GGUF LoRA file: ") +
                             adapter.path,
                         take_off);

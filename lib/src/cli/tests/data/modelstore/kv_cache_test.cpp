@@ -428,6 +428,106 @@ TEST_CASE("a sliding layer keeps its window and a batch, padded, never past the 
     CHECK(apogee::models::cache_values(shape, 1000) == 10 * 1024 + 3 * 1024);
 }
 
+TEST_CASE("a base already resident is priced once: a joiner's window has the first one's budget",
+          "[models][kv][shared-base]") {
+    // 55e: an entry joining a base another entry loaded (53d) measures free
+    // memory with the base's weights already in it. The header's check used
+    // to add those weights again, so a second member fitted only where memory
+    // held the weights twice, and fell to llama.cpp's fitter otherwise --
+    // which projects them a second time too. A Llama-3.2-1B-shaped cache:
+    // 16 layers of 8 key-value heads, 64 wide each way.
+    using apogee::models::header_window_fit;
+    using apogee::models::WindowRoom;
+    apogee::models::CacheShape shape;
+    shape.full = 16 * 8 * (64 + 64);
+    const std::int64_t weights = 2048 * kMiB;
+    const std::int64_t margin = 1024 * kMiB;
+    const std::int64_t trained = 131072;
+    const std::int64_t floor = 4096;
+    const std::int64_t cache =
+        apogee::models::cache_bytes(apogee::models::cache_values(shape, 32768), KvCacheType::Q8_0);
+    REQUIRE(cache == 544 * kMiB);
+    // The most positions -- a multiple of 256 -- a load measured at `free`
+    // before the weights fits beside the weights and the margin: the window
+    // budget the first member had.
+    const auto first_budget = [&](std::int64_t free) {
+        std::int64_t best = 0;
+        for (std::int64_t positions = 256; positions <= 32768; positions += 256) {
+            if (weights +
+                    apogee::models::cache_bytes(apogee::models::cache_values(shape, positions),
+                                                KvCacheType::Q8_0) +
+                    margin <=
+                free) {
+                best = positions;
+            }
+        }
+        return best;
+    };
+
+    SECTION("memory that holds the weights once holds both members' default windows") {
+        const std::int64_t before_load = weights + cache + margin + 256 * kMiB;
+        // The first member's load: the weights to bring, and the default fits.
+        CHECK(
+            header_window_fit(shape, trained, KvCacheType::Q8_0,
+                              WindowRoom{.free = before_load, .weights = weights, .margin = margin},
+                              floor) == 0);
+        // The second member joins with the weights resident: what is free
+        // lacks them now.
+        const std::int64_t joined = before_load - weights;
+        CHECK(
+            header_window_fit(
+                shape, trained, KvCacheType::Q8_0,
+                WindowRoom{.free = joined, .weights = weights, .resident = true, .margin = margin},
+                floor) == 0);
+        // The finding's probe: the same measure with the weights counted
+        // again finds no room and hands the joiner to the fitter.
+        CHECK_FALSE(header_window_fit(
+                        shape, trained, KvCacheType::Q8_0,
+                        WindowRoom{.free = joined, .weights = weights, .margin = margin}, floor)
+                        .has_value());
+    }
+    SECTION("memory too tight for the default lowers the joiner by the same arithmetic") {
+        const std::int64_t before_load = weights + margin + 128 * kMiB;
+        // The first member's load is the fitter's to lower, as it always was.
+        CHECK_FALSE(
+            header_window_fit(shape, trained, KvCacheType::Q8_0,
+                              WindowRoom{.free = before_load, .weights = weights, .margin = margin},
+                              floor)
+                .has_value());
+        // The joiner's is the header's, never the fitter's: the window the
+        // first member's budget holds, priced once.
+        const std::optional<std::int64_t> joined =
+            header_window_fit(shape, trained, KvCacheType::Q8_0,
+                              WindowRoom{.free = before_load - weights,
+                                         .weights = weights,
+                                         .resident = true,
+                                         .margin = margin},
+                              floor);
+        REQUIRE(joined.has_value());
+        CHECK(*joined == first_budget(before_load));
+        CHECK(*joined == 7680);
+        CHECK(*joined % 256 == 0);
+    }
+    SECTION("a joiner whose cache fits nowhere asks for the floor, as the fitter would") {
+        CHECK(header_window_fit(
+                  shape, trained, KvCacheType::Q8_0,
+                  WindowRoom{
+                      .free = margin / 2, .weights = weights, .resident = true, .margin = margin},
+                  floor) == floor);
+    }
+    SECTION("the trained window bounds the default, joined or not") {
+        // Trained for 8192: its cache at 8192, not 32768, is what must fit.
+        const std::int64_t small = apogee::models::cache_bytes(
+            apogee::models::cache_values(shape, 8192), KvCacheType::Q8_0);
+        CHECK(
+            header_window_fit(
+                shape, 8192, KvCacheType::Q8_0,
+                WindowRoom{
+                    .free = small + margin, .weights = weights, .resident = true, .margin = margin},
+                floor) == 0);
+    }
+}
+
 TEST_CASE("a backend's window and cache are stated as they will be allocated", "[models][kv]") {
     GgufInfo info;
     info.parsed = true;

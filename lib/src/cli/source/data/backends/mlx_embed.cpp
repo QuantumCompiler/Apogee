@@ -7,6 +7,7 @@
 #include "backends/embedding_batch.h"
 #include "backends/llamacpp_embed.h"
 #include "contracts/errors.h"
+#include "contracts/layout.h"
 #include "contracts/paths.h"
 #include "modelstore/mlx_info.h"
 
@@ -71,6 +72,11 @@ MlxEmbedProvider::Options MlxEmbedProvider::options_from(const std::string& back
     if (config.idle_unload_seconds.has_value() && *config.idle_unload_seconds > 0) {
         options.idle_unload = std::chrono::seconds{*config.idle_unload_seconds};
     }
+    // The adapter, as the loader read it, applied as the chat driver applies
+    // one (55e); and where the model's hash its pin is checked against is
+    // remembered.
+    options.adapters = config.adapters;
+    options.weight_hashing.memo = harness::weight_hash_cache_path();
     return options;
 }
 
@@ -129,7 +135,7 @@ std::size_t MlxEmbedProvider::embedding_dimensions() const noexcept {
 }
 
 std::string MlxEmbedProvider::embedding_model_name() const {
-    return "mlx:" + options_.model;
+    return embedding_space("mlx:" + options_.model, options_.adapters, options_.weight_hashing);
 }
 
 int MlxEmbedProvider::spawn_count() const noexcept {
@@ -196,6 +202,12 @@ void MlxEmbedProvider::drain_stderr() {
             stderr_tail_.erase(0, stderr_tail_.size() - kStderrTailBytes);
         }
     }
+}
+
+std::string MlxEmbedProvider::older_copy() const {
+    return "the MLX embedding driver at " + options_.driver.string() +
+           " does not apply adapters -- it is an older copy: 'apogee check --fix' brings an "
+           "earlier Apogee's up to this build's, and an edited one is kept, so delete it first";
 }
 
 std::string MlxEmbedProvider::with_tail(const std::string& message) const {
@@ -288,6 +300,18 @@ void MlxEmbedProvider::ensure_child(const harness::StatusSink& on_status,
     if (child_ != nullptr) {
         drop_child();  // it died between calls; a fresh one reloads the model
     }
+    // The adapter's file facts before a driver is started (55e, 53a's
+    // gate): not there, not an adapter directory with its weights, pinned to
+    // no base, or pinned to weights the model directory no longer holds --
+    // each refused by name.
+    if (const std::string refused =
+            adapter_refusal(options_.adapters, AdapterCheck{.backend = options_.backend_name,
+                                                            .base = options_.model_dir,
+                                                            .directories = true,
+                                                            .hashing = options_.weight_hashing});
+        !refused.empty()) {
+        throw harness::ProviderError(options_.backend_name, refused);
+    }
     stderr_tail_.clear();
     say(on_status, harness::StatusEvent::Type::ModelLoading, harness::StatusEvent::Phase::Start,
         "through mlx-embeddings, which built it");
@@ -295,6 +319,11 @@ void MlxEmbedProvider::ensure_child(const harness::StatusSink& on_status,
     platform::ChildCommand command;
     command.program = options_.interpreter.string();
     command.arguments = {options_.driver.string(), "--model", options_.model_dir.string()};
+    // mlx-embeddings' own `adapter_path`, applied at load and never fused.
+    for (const harness::AdapterConfig& adapter : options_.adapters) {
+        command.arguments.emplace_back("--adapter");
+        command.arguments.push_back(adapter.path);
+    }
     ++spawns_;
     std::string error;
     child_ = spawner_(command, error);
@@ -314,11 +343,20 @@ void MlxEmbedProvider::ensure_child(const harness::StatusSink& on_status,
                 " did not load an embedding model -- it is not the shipped mlx_embed.py: "
                 "delete it and run 'apogee check --fix' to restore it");
     }
+    if (!options_.adapters.empty() && ready_->adapter.empty()) {
+        // A driver that ignored --adapter and loaded the bare model, whose
+        // vectors would be filed as the adapter's.
+        drop_child();
+        throw harness::ProviderError(options_.backend_name, older_copy());
+    }
     say(on_status, harness::StatusEvent::Type::ModelReady, harness::StatusEvent::Phase::Done,
         "mlx-embeddings " +
             (ready_->mlx_embeddings_version.empty() ? std::string{"(version unstated)"}
                                                     : ready_->mlx_embeddings_version) +
-            ", " + (ready_->model_type.empty() ? std::string{"unknown"} : ready_->model_type));
+            ", " + (ready_->model_type.empty() ? std::string{"unknown"} : ready_->model_type) +
+            (ready_->adapter.empty()
+                 ? std::string{}
+                 : ", adapter " + std::filesystem::path{ready_->adapter}.filename().string()));
 }
 
 void MlxEmbedProvider::await_ready(const harness::CancellationToken& cancellation) {
@@ -341,9 +379,12 @@ void MlxEmbedProvider::await_ready(const harness::CancellationToken& cancellatio
         }
         if (event->kind == mlx::Event::Kind::Error) {
             // A missing dependency names its own fix; a load failure names
-            // the directory and mlx-embeddings' reason.
+            // the directory and mlx-embeddings' reason. A usage refusal of an
+            // `--adapter` is a driver from before 55e, which takes none.
             const std::string message =
-                event->text.empty() ? with_tail("the MLX embedding driver failed") : event->text;
+                event->error_kind == "protocol" && !options_.adapters.empty() ? older_copy()
+                : event->text.empty() ? with_tail("the MLX embedding driver failed")
+                                      : event->text;
             drop_child();
             throw harness::ProviderError(options_.backend_name, message);
         }

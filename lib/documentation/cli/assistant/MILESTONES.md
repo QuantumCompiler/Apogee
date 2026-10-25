@@ -10575,3 +10575,56 @@ The refusal was true but incomplete. The set is Wan's original layout, and its r
 - MLX families now complete under `models rename`.
 
 **Not done:** `models delete` and `models rename` still have no HTTP twins.
+
+### 2026-10-25 — `adapters-and-shared-bases-closed` (backlog item 55e): every path honors the adapter set and the pin
+
+**Why.** Track 53 (runtime adapters, one base many roles) shipped 2026-10-21. The audit found paths outside its core that never learned about adapters, and one shared-base path pricing memory as if sharing didn't exist:
+- **A sharer joining a resident base** fitted its window as if the weights loaded twice.
+- **An MLX embedding entry** ignored its pinned adapters, while `check` said they applied.
+- **`set-backend --model-path`** moved the base under pinned adapters silently.
+- **An MLX adapter directory without `adapters.safetensors`** passed every gate, then failed as mlx-lm's raw exception.
+- **`train rollback`** repointed an adapter version without checking its pin.
+- **A collection's embedding space** was named by the model alone, so vectors made with and without an adapter mixed.
+
+- [x] **A base already resident is priced once.** `modelstore/kv_cache`'s `WindowRoom` and `header_window_fit` count the resident weights once for a joiner. It gets the window budget the first member had, lowered by the same arithmetic and never by the fitter. With memory holding the weights once plus 256 MiB, it gets the default window, or 7,680 positions when tight, where it had fallen to "no room".
+- [x] **An MLX embedding entry applies its adapter.** It is checked before the driver starts, passed to mlx-embeddings as `adapter_path`, and named back in the driver's `ready` line. An older driver is refused with `check --fix`. The doctor reports the adapter applied only when it is. `mlx_embed.py`'s earlier digest joined `retired-scripts.txt`.
+- [x] **`set-backend --model-path`** (and a `--type` move, as the drafter re-pair already does) re-pins the entry's adapters when the new weights match every pin: `set model_path; adapters still pinned to …`. Otherwise it refuses naming the adapters and two runnable doors: re-pin in the same edit, or `--adapters ""`. Clearing `model_path` under adapters is refused, and the admin PATCH twin answers the same refusal as a 400.
+- [x] **An MLX adapter directory needs its weights** (`kMlxAdapterFiles`, `adapter_kind_gap`): `…half is not an mlx-lm adapter directory (it holds no adapters.safetensors)`, refused before load. The doctor's row names what is missing.
+- [x] **`train rollback` verifies the version's own adapter** (its kind and pin) before writing: `v1's adapter … was pinned to other base weights … -- … nothing was repointed`.
+- [x] **A collection's space is its embedder's model plus its adapter set** (`embedding_space`): each adapter's content hash, its scale and their order. The pin doesn't count, so a copy elsewhere is the same space. Ingest with an adapter, query without it: `using lexical search: … from model 'mlx:… + adapters 187658d0b3b9' but … would use 'mlx:…'`.
+
+**Decisions made while building** (2026-10-25, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - MLX embedding applies adapters, not refuses them;
+  - a model_path move re-pins when the weights match and refuses naming the adapters otherwise.
+- **Old collections stay readable (ADR 0006).** An entry with no adapters names its space exactly as before.
+  - A collection bound earlier under an entry *with* adapters recorded only the model name, and its vectors can't be told apart. llama.cpp applied adapters since 53a, MLX never did.
+  - So it now falls to lexical, with the re-ingest hint: still readable, never mis-scored.
+  - **Consequence:** collections on llama.cpp embedding entries with adapters lose vector search until re-ingested.
+- **A hand-written adapter with no pin counts as not matching** a model_path move.
+- **Rollback checks only the version's own adapter,** not adapters added by hand. Its "promote the run again" remedy is offered only while the run exists.
+
+**Verified.**
+- **10 new cases:**
+  - the resident base priced once (14 assertions);
+  - an MLX adapter directory short of its weights (11);
+  - the embedding space, as the model and the adapters' content (13);
+  - each entry on a shared base embedding in its own space (8);
+  - a collection's space, with retrieval falling to lexical (10);
+  - the MLX embedder applying its adapter (24), and the real driver applying it (30);
+  - `set-backend` moving the base (16) and refusing an adapter it cannot check (9);
+  - `train rollback` checking the pin (27).
+- **Four earlier cases extended:** the doctor's MLX row, the admin PATCH parity, and two fixtures gaining `adapters.safetensors`.
+- **Every fix is pinned:** reverting each of the seven fixes in turn was caught.
+- **`mlx_models_e2e.sh` gained a 55e phase,** failing on the old binary at the half-directory and the adapter-handed checks.
+- **No compiler warnings:** MinGW finds none with the project's full warning set (a planted one was caught).
+- **ctest:** these pass:
+  - `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`;
+  - `cli.mlx_models_lifecycle`, `cli.mlx_lifecycle`, `cli.config_lifecycle`, `cli.train_lifecycle`;
+  - `cli.knowledge_lifecycle`, `cli.auto_rag`, `cli.suites_lifecycle`;
+  - `cli.machine_schema_conformance`, `cli.http_api_conformance`, and the 23 asset cases.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,950 tests and the macOS app's 449 cases passed, with no warning.
+
+**Not done:**
+- A joiner whose cache size the GGUF header can't work out (latent attention, a missing block count) still asks llama.cpp's fitter, which has no way to say the weights are already resident.
+- The real passes are the user's run: the window budget, real mlx-embeddings applying an adapter, and RAM. `mlx_embeddings.utils.load`'s `adapter_path` is mirrored from 0.1.0 by the stub, and the driver checks the signature and refuses by name if it differs.

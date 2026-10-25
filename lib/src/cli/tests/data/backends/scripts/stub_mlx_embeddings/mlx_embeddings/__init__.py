@@ -14,8 +14,10 @@ it, so the same runtime can be had with mlx-embeddings and without.
 `load` hands back a model whose vectors are fixed by each text alone -- its
 characters counted into WIDTH slots, normalized -- so the same text is the
 same vector, a different one another, and a vector search finds the chunk
-that shares its words. Each load is recorded as `embeddings load <dir>` and
-each batch as `embeddings batch <n> max_length=<m>` (STUB_MLX_RECORD).
+that shares its words. Each load is recorded as `embeddings load <dir>` --
+followed by `embeddings adapter <dir>` when it was handed an `adapter_path`
+(55e) -- and each batch as `embeddings batch <n> max_length=<m>`
+(STUB_MLX_RECORD).
 
 It converts too (`convert.py`), and says which types it builds the way a real
 mlx-embeddings does: a module under `models/` defining its `Model` --

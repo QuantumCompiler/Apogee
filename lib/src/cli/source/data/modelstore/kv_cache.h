@@ -100,6 +100,36 @@ struct LocalWindow {
     std::int64_t sliding_positions = 0;
 };
 
+/// What a load has to find room for on the devices it offloads to, for the
+/// header's measure of a default window (26a).
+struct WindowRoom {
+    /// What those devices have free now.
+    std::int64_t free = 0;
+    /// The weights' bytes, a projector's among them.
+    std::int64_t weights = 0;
+    /// Whether those weights are already in memory -- an entry joining a
+    /// base another entry loaded (53d) -- so `free` was measured without
+    /// them and they are counted once, never again (55e).
+    bool resident = false;
+    /// What is left free beside it all: llama-server's 1 GiB.
+    std::int64_t margin = 0;
+};
+
+/// The header's answer to what free memory holds of a model's default
+/// window (26a), counting shared weights once (55e): 0 when the weights
+/// still to load, the default window's cache and the margin fit in
+/// `room.free`. When they do not and the weights are resident, the most
+/// positions whose cache does fit beside the margin -- a multiple of 256,
+/// the cache's own padding, never below `minimum` -- since llama.cpp's
+/// fitter projects the weights onto memory that already holds them and
+/// would count them twice. Nullopt when they do not and the weights are the
+/// load's own to bring: llama.cpp's fitter answers then, as it always has.
+[[nodiscard]] std::optional<std::int64_t> header_window_fit(const CacheShape& shape,
+                                                            std::int64_t trained,
+                                                            harness::KvCacheType type,
+                                                            const WindowRoom& room,
+                                                            std::int64_t minimum);
+
 /// The window `backend` gets over the model `info` describes. Free memory can
 /// lower an unset window further at load; that is not known here.
 [[nodiscard]] LocalWindow local_window(const GgufInfo& info, const harness::BackendConfig& backend);

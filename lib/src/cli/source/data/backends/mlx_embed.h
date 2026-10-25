@@ -12,6 +12,7 @@
 #include <string_view>
 #include <vector>
 
+#include "backends/adapters.h"
 #include "backends/mlx_local.h"
 #include "backends/mlx_protocol.h"
 #include "contracts/config.h"
@@ -38,11 +39,19 @@
 /// any child starts, saying what it is and what uses it (2026-10-21, the
 /// conservative call: never a silent fallback to another backend).
 ///
+/// **Its adapter applies** (55e, 53a's contract: "chat and embedding
+/// alike"): the entry's one adapter -- an mlx-lm adapter directory, pinned to
+/// the model directory's weights -- is checked before the driver starts and
+/// handed to it as mlx-embeddings' own `adapter_path`, and a driver that
+/// does not name it back in its `ready` is refused, never left to embed
+/// through the bare model while the config says otherwise.
+///
 /// **Its vectors are its own space** (one retriever, resolved once): it names
 /// them `mlx:<model>`, so a collection built through it is bound to this
 /// backend and a GGUF build of the same set -- whose llamacpp embedder names
 /// its own -- is another model to the store, demoting the collection to
-/// lexical rather than scoring across the two.
+/// lexical rather than scoring across the two. Its adapter is part of the
+/// space (`embedding_space`, 55e).
 namespace apogee::backends {
 
 /// Texts per `embed` request: the in-process local embedder's slice
@@ -77,6 +86,14 @@ public:
         /// How wide its vectors are, as the directory's own config says
         /// (`models::read_mlx_embedding_width`); 0 when it says nothing.
         std::size_t width = 0;
+        /// The adapter the driver applies over the model (55e): at most one
+        /// -- mlx-embeddings' `adapter_path`, the directory mlx-lm's training
+        /// wrote -- with the pin to the weights it was registered against.
+        /// Empty, the default, starts the driver exactly as before.
+        std::vector<harness::AdapterConfig> adapters{};
+        /// Where the model directory's hash, which each start checks the pin
+        /// against, comes from: `cache/weight-hashes.json` from `options_from`.
+        WeightHashing weight_hashing{};
         /// Ends the child after this long with no request; zero never does.
         std::chrono::seconds idle_unload{0};
         /// How long a load may take before the driver is given up on.
@@ -151,7 +168,8 @@ public:
     [[nodiscard]] std::size_t embedding_dimensions() const noexcept override;
 
     /// `mlx:<model>`: keyed by the backend, so a GGUF build of the same set
-    /// is never taken for the same vector space.
+    /// is never taken for the same vector space -- and with its adapter,
+    /// when it applies one (55e, `embedding_space`).
     [[nodiscard]] std::string embedding_model_name() const override;
 
     /// Local weights: unmetered, so a collection may be vectorised through it
@@ -216,6 +234,9 @@ private:
                                                        bool& timed_out);
     void drain_stderr();
     [[nodiscard]] std::string with_tail(const std::string& message) const;
+    /// Why a driver that applies no adapter is refused one (55e): it is an
+    /// earlier Apogee's copy, which `check --fix` brings up to this build's.
+    [[nodiscard]] std::string older_copy() const;
     void drop_child();
     void expire_if_idle();
     void say(const harness::StatusSink& on_status, harness::StatusEvent::Type type,

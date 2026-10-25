@@ -7,6 +7,7 @@
 #include <deque>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <random>
@@ -272,6 +273,68 @@ TEST_CASE(
     CHECK(std::ranges::count(record, std::string{"embeddings load model"}) == 1);
     CHECK(std::ranges::find(record, std::string{"embeddings batch 1 max_length=512"}) !=
           record.end());
+}
+
+TEST_CASE("the embedding driver applies an adapter through mlx-embeddings' adapter_path",
+          "[mlx][embedding][driver][adapters]") {
+    // 55e: `--adapter` handed to the loader as its own adapter_path, as the
+    // generation driver hands mlx-lm's (53a), and named in `ready` only then.
+    REQUIRE_PYTHON();
+    const Model model;
+    const std::filesystem::path tone = model.root.path() / "tone";
+    apogee::testing::write_fixture_file(tone / "adapter_config.json", R"({"rank": 8})");
+    apogee::testing::write_fixture_file(tone / "adapters.safetensors", "delta");
+
+    SECTION("applied, and said") {
+        Driver driver{
+            model,
+            {},
+            "stub_mlx:stub_mlx_embeddings",
+            {kDriver.string(), "--model", model.dir.string(), "--adapter", tone.string()}};
+        const json ready = driver.next();
+        CHECK(ready.at("type") == "ready");
+        CHECK(ready.at("adapter") == tone.string());
+        driver.send(embed(1, {"the cat sat"}));
+        CHECK(driver.next().at("type") == "vectors");
+        CHECK(driver.close() == 0);
+        const std::vector<std::string> record = model.recorded();
+        const auto load = std::ranges::find(record, std::string{"embeddings load model"});
+        REQUIRE(load != record.end());
+        REQUIRE(std::next(load) != record.end());
+        CHECK(*std::next(load) == "embeddings adapter tone");
+    }
+    SECTION("none asked, none applied, none said") {
+        Driver driver{model};
+        CHECK_FALSE(driver.next().contains("adapter"));
+        CHECK(driver.close() == 0);
+        const std::vector<std::string> record = model.recorded();
+        CHECK(std::ranges::none_of(record, [](const std::string& line) {
+            return line.starts_with("embeddings adapter");
+        }));
+    }
+    SECTION("a directory short of its weights is refused by name, never loaded") {
+        std::filesystem::remove(tone / "adapters.safetensors");
+        Driver driver{
+            model,
+            {},
+            "stub_mlx:stub_mlx_embeddings",
+            {kDriver.string(), "--model", model.dir.string(), "--adapter", tone.string()}};
+        const json error = driver.next();
+        CHECK(error.at("kind") == "load");
+        CHECK(error.at("message").get<std::string>().find(
+                  "is not an mlx-lm adapter directory: it has no adapters.safetensors") !=
+              std::string::npos);
+        CHECK(driver.exit_code() == 4);
+        CHECK(model.recorded().empty());
+    }
+    SECTION("--adapter with nothing after it is a usage error") {
+        Driver driver{model,
+                      {},
+                      "stub_mlx:stub_mlx_embeddings",
+                      {kDriver.string(), "--model", model.dir.string(), "--adapter"}};
+        CHECK(driver.next().at("kind") == "protocol");
+        CHECK(driver.exit_code() == 2);
+    }
 }
 
 TEST_CASE("the embedding driver's fatal errors name their fix", "[mlx][embedding][driver]") {

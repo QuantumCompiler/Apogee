@@ -25,9 +25,11 @@ namespace {
 
 namespace fs = std::filesystem;
 using apogee::backends::adapter_files;
+using apogee::backends::adapter_kind_gap;
 using apogee::backends::adapter_refusal;
 using apogee::backends::AdapterCheck;
 using apogee::backends::AdapterFiles;
+using apogee::backends::embedding_space;
 using apogee::backends::pin_adapters;
 using apogee::backends::spell_adapters;
 using apogee::backends::WeightHashing;
@@ -271,6 +273,7 @@ TEST_CASE("an adapter's own facts are read one by one, its base never",
     write(lora, "lora");
     const fs::path directory = scratch.dir.path() / "tone";
     write(directory / "adapter_config.json", "{}");
+    write(directory / "adapters.safetensors", "tone delta");
     const std::string pin = apogee::models::sha256_hex("base weights");
     CHECK(adapter_files({.path = lora.string(), .base_sha256 = pin}, scratch.check()) ==
           AdapterFiles::Pinned);
@@ -285,6 +288,112 @@ TEST_CASE("an adapter's own facts are read one by one, its base never",
     CHECK(adapter_files({.path = directory.string(), .base_sha256 = pin}, scratch.check(true)) ==
           AdapterFiles::Pinned);
     CHECK(scratch.reads.empty());
+}
+
+TEST_CASE("an mlx adapter directory short of its weights is refused before any load, by name",
+          "[backends][adapters][refusal]") {
+    // 55e: the directory case asked only for adapter_config.json, while
+    // mlx-lm reads adapters.safetensors beside it too -- so a half directory
+    // passed every gate and failed as the loader's raw FileNotFoundError.
+    Scratch scratch;
+    const fs::path model = scratch.dir.path() / "model";
+    write(model / "model.safetensors", "weights");
+    AdapterCheck check = scratch.check(true);
+    check.base = model;
+    const fs::path half = scratch.dir.path() / "half";
+    write(half / "adapter_config.json", "{}");
+    const std::string pin = weights_sha256(model, scratch.hashing);
+    const AdapterConfig pinned{.path = half.string(), .base_sha256 = pin};
+    CHECK(adapter_files(pinned, check) == AdapterFiles::WrongKind);
+    CHECK(adapter_kind_gap(pinned, check) == "it holds no adapters.safetensors");
+    CHECK_THAT(adapter_refusal({pinned}, check),
+               ContainsSubstring("the adapter " + half.string() +
+                                 " is not an mlx-lm adapter directory (it holds no "
+                                 "adapters.safetensors) -- name the directory its training "
+                                 "wrote, with apogee config set-backend local --adapters"));
+    // Registering it is refused the same way, nothing pinned.
+    std::vector<AdapterConfig> adapters{{.path = half.string()}};
+    CHECK_THAT(pin_adapters(adapters, check),
+               ContainsSubstring("(it holds no adapters.safetensors)"));
+    CHECK(adapters.front().base_sha256.empty());
+    // Its weights alone, the configuration missing, are named the other way.
+    const fs::path weights_only = scratch.dir.path() / "weights-only";
+    write(weights_only / "adapters.safetensors", "delta");
+    CHECK(adapter_kind_gap({.path = weights_only.string()}, check) ==
+          "it holds no adapter_config.json");
+    // A file where a directory is read, and a directory where a file is.
+    CHECK(adapter_kind_gap({.path = scratch.base.string()}, check) ==
+          "it is a file, not a directory");
+    CHECK(adapter_kind_gap({.path = half.string()}, scratch.check()) == "it is not a file");
+    // Whole, it is the kind, and nothing is said; not there, nothing either.
+    write(half / "adapters.safetensors", "delta");
+    CHECK(adapter_kind_gap(pinned, check).empty());
+    CHECK(adapter_files(pinned, check) == AdapterFiles::Pinned);
+    CHECK(adapter_kind_gap({.path = "/gone/adapter"}, check).empty());
+}
+
+TEST_CASE("an embedding space is the model and the content of every adapter it applies",
+          "[backends][adapters][space]") {
+    // 55e: a collection's binding is this name, so vectors made through one
+    // adapter set fall to lexical under any other.
+    Scratch scratch;
+    const fs::path style = scratch.dir.path() / "style.gguf";
+    const fs::path tone = scratch.dir.path() / "tone.gguf";
+    write(style, "style delta");
+    write(tone, "tone delta");
+    const std::string style_id = apogee::models::sha256_hex("style delta").substr(0, 12);
+    const std::string tone_id = apogee::models::sha256_hex("tone delta").substr(0, 12);
+
+    // None: the name alone, byte for byte what an earlier binding recorded.
+    CHECK(embedding_space("nomic-embed", {}, scratch.hashing) == "nomic-embed");
+    CHECK(scratch.reads.empty());
+    // One, then two in order, a scale other than 1 after a colon.
+    CHECK(embedding_space("nomic-embed", {{.path = style.string()}}, scratch.hashing) ==
+          "nomic-embed + adapters " + style_id);
+    CHECK(embedding_space(
+              "nomic-embed", {{.path = style.string()}, {.path = tone.string(), .scale = 0.5}},
+              scratch.hashing) == "nomic-embed + adapters " + style_id + "," + tone_id + ":0.5");
+    // Another order, another scale, another adapter: another space each.
+    const std::string both = embedding_space(
+        "nomic-embed", {{.path = style.string()}, {.path = tone.string()}}, scratch.hashing);
+    CHECK(embedding_space("nomic-embed", {{.path = tone.string()}, {.path = style.string()}},
+                          scratch.hashing) != both);
+    CHECK(
+        embedding_space("nomic-embed", {{.path = style.string(), .scale = 1.5}}, scratch.hashing) !=
+        embedding_space("nomic-embed", {{.path = style.string()}}, scratch.hashing));
+    // The same bytes elsewhere are the same space; the pin is not part of it.
+    const fs::path copy = scratch.dir.path() / "elsewhere" / "style.gguf";
+    write(copy, "style delta");
+    CHECK(embedding_space("nomic-embed", {{.path = copy.string(), .base_sha256 = "ab"}},
+                          scratch.hashing) == "nomic-embed + adapters " + style_id);
+    // A file re-trained in place is another; each file read once per change.
+    const std::size_t reads = scratch.reads.size();
+    (void)embedding_space("nomic-embed", {{.path = style.string()}}, scratch.hashing);
+    CHECK(scratch.reads.size() == reads);
+    write(style, "style delta, retrained");
+    CHECK(embedding_space("nomic-embed", {{.path = style.string()}}, scratch.hashing) !=
+          "nomic-embed + adapters " + style_id);
+    // An mlx-lm directory: its configuration and its weights, never a
+    // numbered checkpoint beside them.
+    const fs::path directory = scratch.dir.path() / "lora";
+    write(directory / "adapter_config.json", R"({"rank": 8})");
+    write(directory / "adapters.safetensors", "delta");
+    apogee::models::Sha256 digest;
+    digest.update("adapter_config.json\t" + apogee::models::sha256_hex(R"({"rank": 8})") + "\n");
+    digest.update("adapters.safetensors\t" + apogee::models::sha256_hex("delta") + "\n");
+    const std::string directory_space =
+        "mlx:/models/e + adapters " + digest.hex_digest().substr(0, 12);
+    CHECK(embedding_space("mlx:/models/e", {{.path = directory.string()}}, scratch.hashing) ==
+          directory_space);
+    write(directory / "0000100_adapters.safetensors", "a checkpoint");
+    CHECK(embedding_space("mlx:/models/e", {{.path = directory.string()}}, scratch.hashing) ==
+          directory_space);
+    write(directory / "adapter_config.json", R"({"rank": 16})");
+    CHECK(embedding_space("mlx:/models/e", {{.path = directory.string()}}, scratch.hashing) !=
+          directory_space);
+    // One that cannot be read matches no space a store recorded.
+    CHECK(embedding_space("nomic-embed", {{.path = "/gone/x.gguf"}}, scratch.hashing) ==
+          "nomic-embed + adapters unread");
 }
 
 TEST_CASE("a set is spelled as set-backend takes it back, an empty one as a quoted nothing",

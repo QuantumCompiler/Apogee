@@ -3307,6 +3307,8 @@ TEST_CASE("an mlx entry's adapter is a directory, pinned to the model directory'
     install.write("loras/tone/adapter_config.json", "{}");
     install.write("loras/tone/adapters.safetensors", "the delta");
     install.write("loras/flat.safetensors", "not a directory");
+    // 55e: a directory short of the weights mlx-lm applies.
+    install.write("loras/half/adapter_config.json", "{}");
     const std::filesystem::path model = install.root / "models" / "m" / "mlx" / "0123456789ab";
     const std::string pin = apogee::backends::weights_sha256(model);
     CheckInputs inputs = inputs_for(install);
@@ -3315,13 +3317,14 @@ TEST_CASE("an mlx entry's adapter is a directory, pinned to the model directory'
                "\n    adapters: [{path: " + (install.root / "loras" / adapter).string() +
                ", base_sha256: " + pin + "}]\n";
     };
-    install.write("config/config.yaml",
-                  "backends:\n" + entry("fast", "tone") + entry("flat", "flat.safetensors"));
+    install.write("config/config.yaml", "backends:\n" + entry("fast", "tone") +
+                                            entry("flat", "flat.safetensors") +
+                                            entry("half", "half"));
     load_into(inputs);
     REQUIRE(inputs.config_error.empty());
     const CheckReport report = run_checks(inputs);
     const std::vector<apogee::commands::CheckRow> rows = adapters_section(report);
-    REQUIRE(rows.size() == 2);
+    REQUIRE(rows.size() == 3);
     CHECK(rows[0].name == "fast: tone");
     CHECK(rows[0].status == Status::Ok);
     CHECK(rows[0].detail ==
@@ -3331,9 +3334,14 @@ TEST_CASE("an mlx entry's adapter is a directory, pinned to the model directory'
     CHECK(rows[1].name == "flat: flat.safetensors");
     CHECK(rows[1].status == Status::Fail);
     CHECK(
-        rows[1].detail.starts_with("not an mlx-lm adapter directory (it holds no "
-                                   "adapter_config.json)"));
+        rows[1].detail.starts_with("not an mlx-lm adapter directory (it is a file, not a "
+                                   "directory)"));
     CHECK(rows[1].remedy == "apogee config set-backend flat --adapters \"\" to take it off");
+    // Never an ok row for a directory a load would fail to read whole.
+    CHECK(rows[2].name == "half: half");
+    CHECK(rows[2].status == Status::Fail);
+    CHECK(rows[2].detail == "not an mlx-lm adapter directory (it holds no adapters.safetensors): " +
+                                (install.root / "loras" / "half").string());
 }
 
 namespace {

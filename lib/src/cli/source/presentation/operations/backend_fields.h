@@ -39,6 +39,14 @@ struct BackendFieldsOutcome {
 /// same edit leaves it -- recorded beside every one (`backends::pin_adapters`),
 /// written through `set_backend_adapters`.
 ///
+/// An edit moving `model_path`, or the type, under adapters the entry keeps
+/// (55e) -- with no `adapters` among the edits -- is asked as a drafter is:
+/// every adapter's pin against the weights the edit leaves it over. The
+/// same weights elsewhere keep every pin, and the edit says so; other
+/// weights refuse the edit naming each adapter and its pin, with the two
+/// edits that carry the move through -- the same one re-pinning the set
+/// (`--adapters`), or taking it off (`--adapters ""`).
+///
 /// `draft` (53i) takes a drafter's MLX directory, its stored handle
 /// (`<model>/mlx/<id>`) or a model storing one drafter, written as the
 /// drafter's absolute directory -- after it is paired with the model the

@@ -561,7 +561,13 @@ at a time.
 Runs under the Python environment Apogee owns, never the system Python.
 Requires `mlx-embeddings` there:  apogee train setup --with mlx-embeddings
 
-    mlx_embed.py --model <model directory>
+    mlx_embed.py --model <model directory> [--adapter <directory>]
+
+`--adapter` applies a LoRA adapter over the model at load, never fused into
+it (55e, as the generation driver applies one): the directory mlx-lm's
+training wrote -- adapter_config.json and adapters.safetensors -- handed to
+mlx-embeddings' loader as its own `adapter_path`. The backend has checked it
+is pinned to these weights before starting the driver.
 
 A batch is tokenized together, padded to its longest text and cut at the
 model's own `max_seq_length` (its `sentence_bert_config.json`, else 512), and
@@ -576,8 +582,10 @@ In, on stdin:
 
 Out, on stdout:
   {"type": "ready", "protocol": 1, "embedding": true, "model_type": "...",
-   "mlx_embeddings": "...", "max_length": N}
-      Once, after the model loads.
+   "mlx_embeddings": "...", "max_length": N, "adapter": "..."}
+      Once, after the model loads. `adapter` names the adapter applied over
+      it, and is there only when one was (55e): the backend refuses a driver
+      that was asked for one and never names it -- one older than adapters.
   {"type": "vectors", "id": N, "vectors": [[F, ...], ...]}
       One vector per text, in the order sent.
   {"type": "error", "id": N|null, "kind": "missing_dependency"|"load"|
@@ -590,6 +598,7 @@ protocol's stdout is a duplicate of the original descriptor, and descriptor 1
 itself is pointed at stderr before anything is imported.
 """
 
+import inspect
 import json
 import math
 import os
@@ -741,14 +750,33 @@ def version_of(module):
     return str(version)
 
 
-USAGE = "usage: mlx_embed.py --model <model directory>"
+USAGE = "usage: mlx_embed.py --model <model directory> [--adapter <directory>]"
+
+# What mlx-lm's training writes into an adapter directory, both read to apply
+# it: one missing is refused by name here, never left to the loader's raise.
+ADAPTER_FILES = ("adapter_config.json", "adapters.safetensors")
+
+
+def takes_adapters(load):
+    """Whether this mlx-embeddings' loader takes an `adapter_path`."""
+    try:
+        return "adapter_path" in inspect.signature(load).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def with_adapter(adapter):
+    """How a load failure names the adapter it was asked to apply."""
+    return f" with the adapter {adapter}" if adapter else ""
 
 
 def main(argv):
-    if len(argv) != 3 or argv[1] != "--model" or not argv[2]:
+    if (len(argv) not in (3, 5) or argv[1] != "--model" or not argv[2]
+            or (len(argv) == 5 and (argv[3] != "--adapter" or not argv[4]))):
         error("protocol", USAGE)
         return 2
     model_dir = argv[2]
+    adapter = argv[4] if len(argv) == 5 else None
 
     try:
         import mlx.core as mx
@@ -764,17 +792,33 @@ def main(argv):
     if config is None:
         error("load", f"{model_dir} is not a model directory: it has no config.json")
         return 4
+    if adapter:
+        for name in ADAPTER_FILES:
+            if not os.path.isfile(os.path.join(adapter, name)):
+                error("load", f"{adapter} is not an mlx-lm adapter directory: it has no {name}")
+                return 4
+        if not takes_adapters(load):
+            error("load", f"the installed mlx-embeddings ({version_of(mlx_embeddings)}) takes no "
+                  f"adapter_path, so it cannot apply {adapter}. Run: apogee train setup --with "
+                  "mlx-embeddings")
+            return 4
     try:
-        model, tokenizer = load(model_dir)
+        # The loader's own adapter_path: applied over the weights, never fused.
+        model, tokenizer = load(model_dir, adapter_path=adapter) if adapter else load(model_dir)
     except Exception as e:  # noqa: BLE001 -- the reason is the message
-        error("load", f"could not load {model_dir} through mlx-embeddings: "
-              f"{type(e).__name__}: {e}")
+        error("load", f"could not load {model_dir}{with_adapter(adapter)} through "
+              f"mlx-embeddings: {type(e).__name__}: {e}")
         return 4
 
     max_length = max_length_of(model_dir)
-    emit({"type": "ready", "protocol": PROTOCOL, "embedding": True,
-          "model_type": config.get("model_type"), "mlx_embeddings": version_of(mlx_embeddings),
-          "max_length": max_length})
+    ready = {"type": "ready", "protocol": PROTOCOL, "embedding": True,
+             "model_type": config.get("model_type"), "mlx_embeddings": version_of(mlx_embeddings),
+             "max_length": max_length}
+    # Said only when applied: the backend refuses a driver that was asked for
+    # an adapter and never names one.
+    if adapter:
+        ready["adapter"] = adapter
+    emit(ready)
     return Embedder(mx, model, tokenizer, max_length).serve()
 
 

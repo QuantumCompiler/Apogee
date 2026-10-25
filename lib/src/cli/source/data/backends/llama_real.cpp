@@ -1374,9 +1374,17 @@ constexpr std::uint32_t kMinimumFittedWindow = 4096;
 /// machine that holds the default it only ever says so. So a check that costs
 /// nothing goes first: the weights, the default window's cache from the
 /// header, and llama-server's 1 GiB margin, against what the devices have
-/// free. Only a model that fails it, or whose cache the header cannot size,
-/// is handed to the fitter.
-[[nodiscard]] std::int64_t fit_default_window(const ModelLoad& request) {
+/// free (`models::header_window_fit`). Only a model that fails it, or whose
+/// cache the header cannot size, is handed to the fitter.
+///
+/// **A base already resident is priced once** (55e): an entry joining a base
+/// another entry loaded (53d) measures free memory with those weights in it,
+/// so `resident` counts them as taken rather than to load -- its own cache and
+/// the margin are what it needs, the budget the first member's load had --
+/// and a window that does not fit is lowered by the same arithmetic, never by
+/// the fitter, whose projection would count the weights a second time. Only a
+/// joiner whose cache the header cannot size still asks the fitter.
+[[nodiscard]] std::int64_t fit_default_window(const ModelLoad& request, bool resident) {
     constexpr std::int64_t kMargin = std::int64_t{1024} * 1024 * 1024;
     const std::int64_t free = free_device_memory(request.gpu_layers);
     if (free <= 0) {
@@ -1387,17 +1395,19 @@ constexpr std::uint32_t kMinimumFittedWindow = 4096;
     if (const std::optional<models::CacheShape> shape =
             info.parsed ? models::cache_shape(info.architecture, info.attention) : std::nullopt;
         shape.has_value()) {
-        const std::int64_t window = models::default_local_window(info.attention.context_length, 0);
-        std::int64_t needed =
-            info.file_size +
-            models::cache_bytes(models::cache_values(*shape, window), request.cache_type) + kMargin;
+        std::int64_t weights = info.file_size;
         if (!request.mmproj_path.empty()) {
             std::error_code code;
             const std::uintmax_t projector = std::filesystem::file_size(request.mmproj_path, code);
-            needed += code ? 0 : static_cast<std::int64_t>(projector);
+            weights += code ? 0 : static_cast<std::int64_t>(projector);
         }
-        if (needed <= free) {
-            return 0;
+        if (const std::optional<std::int64_t> fitted = models::header_window_fit(
+                *shape, info.attention.context_length, request.cache_type,
+                models::WindowRoom{
+                    .free = free, .weights = weights, .resident = resident, .margin = kMargin},
+                kMinimumFittedWindow);
+            fitted.has_value()) {
+            return *fitted;
         }
     }
     const std::int64_t fitted = llama_chat::fit_window(
@@ -1419,7 +1429,7 @@ public:
         settings.cache_type = request.cache_type;
         settings.cache_type_named = request.cache_type_named;
         if (request.fit_window) {
-            settings.fitted_window = fit_default_window(request);
+            settings.fitted_window = fit_default_window(request, /*resident=*/false);
         }
 
         llama_model_params params = llama_model_default_params();
@@ -1456,9 +1466,11 @@ public:
         return std::make_unique<RealModel>(std::move(model), std::move(vision), settings);
     }
 
+    /// Asked only by an entry joining a base already loaded (53d), whose
+    /// weights are resident (55e).
     [[nodiscard]] std::int64_t fit_window(const ModelLoad& request) override {
         ensure_backend_init();
-        return fit_default_window(request);
+        return fit_default_window(request, /*resident=*/true);
     }
 };
 

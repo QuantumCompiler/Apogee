@@ -13,7 +13,10 @@
 #include <thread>
 #include <vector>
 
+#include "backends/adapters.h"
 #include "contracts/errors.h"
+#include "contracts/layout.h"
+#include "contracts/sha256.h"
 #include "support/env_guard.h"
 #include "support/fake_mlx_driver.h"
 #include "support/mlx_model.h"
@@ -313,6 +316,94 @@ TEST_CASE("a cancelled embed settles the batch in flight, and a deaf driver is e
         fixture.drivers.front()->embed_width = 4;
         CHECK(fixture.provider->embed({"x"}, {}).size() == 1);
         CHECK(fixture.provider->spawn_count() == 2);
+    }
+}
+
+TEST_CASE("an mlx embedder applies its entry's adapter through the driver, or refuses by name",
+          "[mlx][embedding][backends][adapters]") {
+    // 55e: the entry's registered, pinned adapter used to be dropped -- the
+    // driver started on the bare model while the config, the pin and the
+    // doctor said it applied. 53a's contract: chat and embedding alike.
+    const apogee::testing::TempDir root{"mlx-embed-adapter-" +
+                                        std::to_string(std::random_device{}())};
+    const std::filesystem::path model = root.path() / "model";
+    const std::filesystem::path tone = root.path() / "tone";
+    apogee::testing::write_fixture_file(model / "model.safetensors", "the model's weights");
+    apogee::testing::write_fixture_file(tone / "adapter_config.json", R"({"rank": 8})");
+    apogee::testing::write_fixture_file(tone / "adapters.safetensors", "the tone delta");
+    const std::string pin = apogee::backends::weights_sha256(model);
+    REQUIRE_FALSE(pin.empty());
+    MlxEmbedProvider::Options options = Fixture::defaults();
+    options.model = model.string();
+    options.model_dir = model;
+    options.adapters = {{.path = tone.string(), .base_sha256 = pin}};
+    options.weight_hashing.memo = root.path() / "cache" / "weight-hashes.json";
+    DriverState applying = embedding_driver();
+    nlohmann::json ready = nlohmann::json::parse(apogee::testing::kEmbeddingReady);
+    ready["adapter"] = tone.string();
+    applying.startup = ready.dump() + "\n";
+
+    SECTION("pinned to the model's weights: handed to the driver, named back, embedded through") {
+        Fixture fixture{applying, options};
+        CHECK(fixture.provider->embed({"hello"}, {}).size() == 1);
+        REQUIRE(fixture.commands.size() == 1);
+        CHECK(fixture.commands.front().arguments ==
+              std::vector<std::string>{"/home/training/scripts/mlx_embed.py", "--model",
+                                       model.string(), "--adapter", tone.string()});
+        REQUIRE(fixture.provider->driver_ready().has_value());
+        CHECK(fixture.provider->driver_ready()->adapter == tone.string());
+        // Its vectors are the adapter's space, not the bare model's.
+        CHECK(fixture.provider->embedding_model_name() ==
+              apogee::backends::embedding_space("mlx:" + model.string(), options.adapters));
+        CHECK(fixture.provider->embedding_model_name() != "mlx:" + model.string());
+    }
+    SECTION("a driver from before 55e names none: refused, nothing embedded through it") {
+        Fixture fixture{embedding_driver(), options};
+        CHECK_THROWS_WITH(fixture.provider->embed({"hello"}, {}),
+                          Catch::Matchers::ContainsSubstring(
+                              "does not apply adapters -- it is an older copy: 'apogee check "
+                              "--fix' brings an earlier Apogee's up to this build's"));
+        CHECK(fixture.drivers.front()->embedded.empty());
+        CHECK_FALSE(fixture.provider->has_live_child());
+    }
+    SECTION("the 53h driver refuses --adapter as a usage error: said as the older copy it is") {
+        DriverState older;
+        older.startup =
+            R"({"type":"error","id":null,"kind":"protocol","message":"usage: mlx_embed.py --model <model directory>"})"
+            "\n";
+        older.die_after_startup = true;
+        Fixture fixture{older, options};
+        CHECK_THROWS_WITH(
+            fixture.provider->embed({"hello"}, {}),
+            Catch::Matchers::ContainsSubstring("does not apply adapters -- it is an older copy"));
+        CHECK_FALSE(fixture.provider->has_live_child());
+    }
+    SECTION("pinned to other weights: refused before any driver starts") {
+        options.adapters.front().base_sha256 = apogee::models::sha256_hex("other weights");
+        Fixture fixture{applying, options};
+        CHECK_THROWS_WITH(fixture.provider->embed({"hello"}, {}),
+                          Catch::Matchers::ContainsSubstring("was pinned to other base weights"));
+        CHECK(fixture.provider->spawn_count() == 0);
+    }
+    SECTION("a directory short of its weights: refused before any driver starts") {
+        std::filesystem::remove(tone / "adapters.safetensors");
+        Fixture fixture{applying, options};
+        CHECK_THROWS_WITH(
+            fixture.provider->embed({"hello"}, {}),
+            Catch::Matchers::ContainsSubstring("is not an mlx-lm adapter directory (it holds no "
+                                               "adapters.safetensors)"));
+        CHECK(fixture.provider->spawn_count() == 0);
+    }
+    SECTION("read from the entry, with the memo its pin is checked through") {
+        write_embedding_dir(model);
+        apogee::harness::BackendConfig entry;
+        entry.type = apogee::harness::BackendType::Mlx;
+        entry.model_path = model.string();
+        entry.adapters = options.adapters;
+        const MlxEmbedProvider::Options read =
+            MlxEmbedProvider::options_from("embed", entry, fake_host(root.path() / "host"));
+        CHECK(read.adapters == options.adapters);
+        CHECK(read.weight_hashing.memo == apogee::harness::weight_hash_cache_path());
     }
 }
 

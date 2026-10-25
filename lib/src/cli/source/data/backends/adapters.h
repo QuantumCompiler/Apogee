@@ -1,9 +1,11 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "contracts/config.h"
@@ -53,6 +55,13 @@ struct WeightHashing {
 [[nodiscard]] std::string weights_sha256(const std::filesystem::path& weights,
                                          const WeightHashing& hashing = {});
 
+/// What an mlx-lm adapter directory holds, both read when mlx-lm applies it
+/// (55e): its configuration and its weights -- one list for the gate a load
+/// passes, the doctor's row and what `train promote --adapter` checks it
+/// copied.
+inline constexpr std::array<std::string_view, 2> kMlxAdapterFiles{"adapter_config.json",
+                                                                  "adapters.safetensors"};
+
 /// How an entry's adapters are checked against its base (53a).
 struct AdapterCheck {
     /// The entry's name, for the command each refusal names.
@@ -76,7 +85,9 @@ enum class AdapterFiles : std::uint8_t {
     /// Not there.
     Missing,
     /// There, but not what its runtime reads: a llamacpp entry applies a
-    /// GGUF LoRA file, an mlx entry a directory holding `adapter_config.json`.
+    /// GGUF LoRA file, an mlx entry a directory holding `kMlxAdapterFiles`
+    /// -- a directory short of its weights is refused before a load, never
+    /// left to fail as mlx-lm's own exception (55e).
     WrongKind,
     /// The kind its runtime reads, pinned to no base: written by hand.
     Unpinned,
@@ -86,6 +97,13 @@ enum class AdapterFiles : std::uint8_t {
 /// base never read.
 [[nodiscard]] AdapterFiles adapter_files(const harness::AdapterConfig& adapter,
                                          const AdapterCheck& check);
+
+/// Why `adapter`, there, is not the kind its runtime reads, as the clause a
+/// refusal puts after its path -- "it holds no adapters.safetensors", "it is
+/// a file, not a directory" -- or empty when it is that kind or not there
+/// at all (55e).
+[[nodiscard]] std::string adapter_kind_gap(const harness::AdapterConfig& adapter,
+                                           const AdapterCheck& check);
 
 /// `adapters` as `config set-backend --adapters` spells them (53c):
 /// `<path>[:<scale>]`, comma-joined, quoted where a shell would split them,
@@ -101,6 +119,24 @@ enum class AdapterFiles : std::uint8_t {
 /// anything is read into memory.
 [[nodiscard]] std::string adapter_refusal(const std::vector<harness::AdapterConfig>& adapters,
                                           const AdapterCheck& check);
+
+/// The vector space an entry embeds in through `adapters` (55e): `model`, the
+/// name its embedder gives its vectors, alone when there are none -- byte for
+/// byte the name every collection bound before 55e recorded -- and otherwise
+/// that name and each adapter's own content, ` + adapters <id>[:<scale>],...`,
+/// in the order they apply: an id the first 12 characters of a sha256 over
+/// what its runtime reads -- a GGUF LoRA file's bytes; an mlx-lm directory's
+/// `kMlxAdapterFiles`, each `<name>\t<sha256>\n` -- and a scale other than 1
+/// after a colon, as `spell_adapters` writes one. So the same adapter copied
+/// elsewhere is the same space, and another adapter, another scale, another
+/// order, a re-trained file in place or none at all is another: a collection
+/// a store binds under one set falls to lexical under any other, through the
+/// one retriever rule, where it used to be queried across the two. An
+/// adapter that cannot be read is `unread`, matching no recorded space. The
+/// files are hashed once per change of them, through `hashing`'s memo.
+[[nodiscard]] std::string embedding_space(const std::string& model,
+                                          const std::vector<harness::AdapterConfig>& adapters,
+                                          const WeightHashing& hashing = {});
 
 /// `adapters` pinned to the base at `check.base` as it is now (53a) -- what
 /// `config set-backend --adapters` records: each path made absolute (`~` and

@@ -322,7 +322,11 @@ stored through the credential routes alone. `adapters` takes what
 mlx entry -- and records beside each adapter the sha256 of the weights at
 the entry's `model_path` as they are now, the pin every load checks; the
 entry's view then lists them, each with its `path`, `scale` and
-`base_sha256`. `draft` takes what `--draft` takes (53i) -- a drafter's MLX
+`base_sha256`. A `model_path` or `type` moved under adapters the entry
+keeps (55e), with no `adapters` in the body, keeps them only where the
+weights it leaves are the ones they were pinned to; otherwise it is a `400`
+naming each adapter and its pin, the file untouched -- send `adapters` with
+it to pin them again, or `""` to take them off. `draft` takes what `--draft` takes (53i) -- a drafter's MLX
 directory, its stored handle, or a model storing one drafter, on an mlx
 entry -- and pairs it with the entry's model before it is written: a base of
 the drafter's family and width, mlx-vlm's build, the one its record names,

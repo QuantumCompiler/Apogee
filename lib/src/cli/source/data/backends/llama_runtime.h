@@ -692,10 +692,12 @@ public:
     /// What free memory holds for `request`'s default window, measured as
     /// `load` measures it with `fit_window` set: 0 when the default fits.
     /// Asked by an entry joining a base another entry already loaded (53d),
-    /// whose cache is its own: the measure its own load would have taken,
-    /// with every byte already resident counted as taken -- the base's
-    /// weights among them, and counted again, so it never finds more room
-    /// than a load of its own would have. The default finds the default fits.
+    /// whose cache is its own: every byte already resident counted as
+    /// taken, and the base's weights -- resident, so missing from what is
+    /// free -- counted that once and never again (55e). Its own cache and
+    /// the margin are what it needs: the budget the first member's load
+    /// measured, the weights priced once, as the footprint prices a shared
+    /// base. The default finds the default fits.
     [[nodiscard]] virtual std::int64_t fit_window(const ModelLoad& request) {
         (void)request;
         return 0;

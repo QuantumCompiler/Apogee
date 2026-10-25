@@ -4,11 +4,13 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <fstream>
 #include <optional>
 #include <sstream>
+#include <string_view>
 #include <system_error>
 #include <utility>
 
@@ -148,10 +150,10 @@ private:
                    " \"\"";
         case AdapterFiles::WrongKind:
             if (check.directories) {
-                return "the adapter " + adapter.path +
-                       " is not an mlx-lm adapter directory (it holds no adapter_config.json) -- "
-                       "name the directory its training wrote, with " +
-                       retake(check) + " <directory>";
+                return "the adapter " + adapter.path + " is not an mlx-lm adapter directory (" +
+                       adapter_kind_gap(adapter, check) +
+                       ") -- name the directory its training wrote, with " + retake(check) +
+                       " <directory>";
             }
             return "the adapter " + adapter.path +
                    " is not a file -- a llamacpp entry applies a GGUF LoRA file, named with " +
@@ -199,6 +201,25 @@ private:
     return digest.hex_digest();
 }
 
+/// What an adapter's runtime reads of it, as one sha256 over `memo` (55e):
+/// a file's own bytes; for an mlx-lm directory, `<name>\t<sha256>\n` over
+/// `kMlxAdapterFiles`. Empty when any of it cannot be read.
+[[nodiscard]] std::string content_id(const fs::path& path, Memo& memo) {
+    std::error_code code;
+    if (!fs::is_directory(path, code)) {
+        return memo.sha256_of(path);
+    }
+    models::Sha256 digest;
+    for (const std::string_view file : kMlxAdapterFiles) {
+        const std::string sha256 = memo.sha256_of(path / file);
+        if (sha256.empty()) {
+            return {};
+        }
+        digest.update(std::string{file} + "\t" + sha256 + "\n");
+    }
+    return digest.hex_digest();
+}
+
 }  // namespace
 
 AdapterFiles adapter_files(const harness::AdapterConfig& adapter, const AdapterCheck& check) {
@@ -207,14 +228,32 @@ AdapterFiles adapter_files(const harness::AdapterConfig& adapter, const AdapterC
     if (!fs::exists(path, code)) {
         return AdapterFiles::Missing;
     }
-    const bool kind = check.directories
-                          ? fs::is_directory(path, code) &&
-                                fs::is_regular_file(path / "adapter_config.json", code)
-                          : fs::is_regular_file(path, code);
-    if (!kind) {
+    if (!adapter_kind_gap(adapter, check).empty()) {
         return AdapterFiles::WrongKind;
     }
     return adapter.base_sha256.empty() ? AdapterFiles::Unpinned : AdapterFiles::Pinned;
+}
+
+std::string adapter_kind_gap(const harness::AdapterConfig& adapter, const AdapterCheck& check) {
+    const fs::path path{adapter.path};
+    std::error_code code;
+    if (!fs::exists(path, code)) {
+        return {};
+    }
+    if (!check.directories) {
+        return fs::is_regular_file(path, code) ? std::string{} : "it is not a file";
+    }
+    if (!fs::is_directory(path, code)) {
+        return "it is a file, not a directory";
+    }
+    // Both files mlx-lm reads to apply it: a directory short of its weights
+    // passes for an adapter until its load raises (55e).
+    for (const std::string_view file : kMlxAdapterFiles) {
+        if (!fs::is_regular_file(path / file, code)) {
+            return "it holds no " + std::string{file};
+        }
+    }
+    return {};
 }
 
 std::string spell_adapters(const std::vector<harness::AdapterConfig>& adapters) {
@@ -240,6 +279,28 @@ std::string weights_sha256(const fs::path& weights, const WeightHashing& hashing
     // What was read is kept even when a later shard could not be.
     memo.save();
     return sha256;
+}
+
+std::string embedding_space(const std::string& model,
+                            const std::vector<harness::AdapterConfig>& adapters,
+                            const WeightHashing& hashing) {
+    if (adapters.empty()) {
+        return model;
+    }
+    Memo memo{hashing};
+    std::string out = model + " + adapters ";
+    for (std::size_t index = 0; index < adapters.size(); ++index) {
+        const harness::AdapterConfig& adapter = adapters[index];
+        const std::string id = content_id(fs::path{adapter.path}, memo);
+        out += (index == 0 ? "" : ",") + (id.empty() ? std::string{"unread"} : short_hash(id));
+        if (adapter.scale != 1.0) {
+            std::ostringstream scale;
+            scale << adapter.scale;
+            out += ":" + scale.str();
+        }
+    }
+    memo.save();
+    return out;
 }
 
 std::string adapter_refusal(const std::vector<harness::AdapterConfig>& adapters,

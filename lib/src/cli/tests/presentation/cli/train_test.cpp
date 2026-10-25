@@ -965,6 +965,61 @@ TEST_CASE(
     CHECK(err.find("its adapter is gone") != std::string::npos);
 }
 
+TEST_CASE("train rollback checks an adapter version's pin against the weights the entry runs now",
+          "[commands][train][rollback][adapter]") {
+    // 55e: rollback wrote the ledger's recorded pin without comparing it to
+    // the base the entry runs now, so after a re-pull it printed "rolled
+    // back" and the next load refused by hash. Promote pins as it registers;
+    // rollback now checks before it writes.
+    const RunFixture fixture;
+    const std::filesystem::path base = add_base_entry(fixture, "based");
+    const std::string first_pin = apogee::models::sha256_hex(read_file(base));
+    const std::string id = fixture.trained();
+    (void)fixture.evaluated(id);
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"train", "promote", id, "--as", "based", "--adapter"}, &out, &err) == 0);
+    const std::string id2 = fixture.trained(3);
+    (void)fixture.evaluated(id2);
+    REQUIRE(fixture.run({"train", "promote", id2, "--as", "based", "--adapter"}, &out, &err) == 0);
+    const std::filesystem::path v1 = fixture.training / "versions" / "based" / "v1.lora.gguf";
+    const std::filesystem::path v2 = fixture.training / "versions" / "based" / "v2.lora.gguf";
+
+    // A re-pull: other weights where model_path points, the active version
+    // re-pinned over them by the door the doctor names.
+    write_file(base, "GGUF the base weights, pulled again");
+    const std::string now_pin = apogee::models::sha256_hex(read_file(base));
+    REQUIRE(fixture.run({"config", "set-backend", "based", "--adapters", v2.string()}, &out,
+                        &err) == 0);
+    const std::string before = read_file(fixture.base.config_path);
+    CHECK(fixture.run({"train", "rollback", "based"}, &out, &err) == 1);
+    CHECK(err.find("v1's adapter " + v1.string() + " was pinned to other base weights (sha256 " +
+                   first_pin.substr(0, 12) + ") than " + base.string() + " holds now (" +
+                   now_pin.substr(0, 12) + ")") != std::string::npos);
+    CHECK(err.find("nothing was repointed") != std::string::npos);
+    CHECK(err.find("promote its run again over these weights: apogee train promote " + id +
+                   " --as based --adapter") != std::string::npos);
+    CHECK(out.find("rolled back") == std::string::npos);
+    // Nothing written: the config and the ledger as they were.
+    CHECK(read_file(fixture.base.config_path) == before);
+    CHECK(ledger_of(fixture, "based").active_version == 2);
+
+    // The door, run as printed: v1's run promoted again, pinned to today's.
+    REQUIRE(fixture.run({"train", "promote", id, "--as", "based", "--adapter"}, &out, &err) == 0);
+    CHECK(out.find("updated backend based -> v3 (adapter)") != std::string::npos);
+    CHECK(ledger_of(fixture, "based").find(3)->base_sha256 == now_pin);
+
+    // Back on the weights v2 was registered over, its pin holds, and the
+    // rollback goes through with it.
+    write_file(base, "GGUF the base weights");
+    REQUIRE(fixture.run({"train", "rollback", "based"}, &out, &err) == 0);
+    CHECK(out.find("rolled back based: v3 -> v2") != std::string::npos);
+    const apogee::harness::Config rolled = apogee::harness::load_config(fixture.base.config_path);
+    REQUIRE(rolled.find_backend("based")->adapters.size() == 1);
+    CHECK(rolled.find_backend("based")->adapters.front().path == v2.string());
+    CHECK(rolled.find_backend("based")->adapters.front().base_sha256 == first_pin);
+}
+
 TEST_CASE(
     "train promote --adapter onto an mlx entry registers the run's adapter directory as it is, "
     "converting nothing; formats never cross, said by name",

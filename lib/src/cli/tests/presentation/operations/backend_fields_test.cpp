@@ -240,6 +240,7 @@ TEST_CASE("set-backend pins adapters to the base as it is now, in place, and cle
     const std::filesystem::path adapter = files.dir.path() / "mlx-adapter";
     std::filesystem::create_directories(adapter);
     std::ofstream{adapter / "adapter_config.json"} << "{}";
+    std::ofstream{adapter / "adapters.safetensors"} << "delta";
     REQUIRE(home.run({"config", "set-backend", "mlx", "--adapters", adapter.string()}, &out,
                      &err) == 0);
     const apogee::harness::Config read = apogee::harness::load_config(home.config_path());
@@ -277,6 +278,102 @@ TEST_CASE("set-backend refuses adapters it cannot pin, the file untouched",
             "is not an mlx-lm adapter directory");
     refused({"config", "set-backend", "local", "--adapters", files.dir.path().string()},
             "is not a file -- a llamacpp entry applies a GGUF LoRA file");
+}
+
+TEST_CASE("set-backend moving the base under pinned adapters re-pins them or refuses by name",
+          "[set-backend][cli][adapters][repin]") {
+    // 55e: a model_path edit used to move the base under the entry's pinned
+    // adapters and say only "set model_path"; the next turn refused by hash
+    // and the doctor failed. The same edit re-pairs a drafter (53i).
+    const AdapterFiles files;
+    const apogee::testing::CliHome home{files.config()};
+    const std::filesystem::path copy = files.dir.path() / "copy" / "base.gguf";
+    const std::filesystem::path other = files.dir.path() / "other.gguf";
+    std::filesystem::create_directories(copy.parent_path());
+    std::ofstream{copy, std::ios::binary} << "base weights";
+    std::ofstream{other, std::ios::binary} << "other weights";
+    const std::string pin = apogee::models::file_sha256(files.base);
+    const std::string other_pin = apogee::models::file_sha256(other);
+    std::string out;
+    std::string err;
+    REQUIRE(
+        home.run({"config", "set-backend", "local", "--adapters", files.style.string() + ":0.5"},
+                 &out, &err) == 0);
+
+    // The same weights elsewhere: every pin holds, said, only model_path moved.
+    const std::string pinned = slurp(home.config_path());
+    REQUIRE(home.run({"config", "set-backend", "local", "--model-path", copy.string()}, &out,
+                     &err) == 0);
+    CHECK_THAT(out, ContainsSubstring("set model_path; adapters still pinned to " + copy.string() +
+                                      " (sha256 " + pin.substr(0, 12) + ")"));
+    CHECK(slurp(home.config_path()) ==
+          apogee::harness::set_backend_field(pinned, "local", "model_path", copy.string()));
+
+    // Other weights: refused naming the adapter and both hashes, nothing
+    // edited, and each way out a command that runs as printed.
+    const std::string moved = slurp(home.config_path());
+    CHECK(home.run({"config", "set-backend", "local", "--model-path", other.string()}, &out,
+                   &err) == 1);
+    CHECK_THAT(err, ContainsSubstring("'local' applies adapters pinned to other weights than " +
+                                      other.string() + " holds (sha256 " + other_pin.substr(0, 12) +
+                                      "): " + files.style.string() + " (sha256 " +
+                                      pin.substr(0, 12) + ")"));
+    CHECK_THAT(err, ContainsSubstring("nothing was edited"));
+    const std::string repin = "apogee config set-backend local --model-path " + other.string() +
+                              " --adapters " + files.style.string() + ":0.5";
+    const std::string take_off =
+        "apogee config set-backend local --model-path " + other.string() + " --adapters \"\"";
+    CHECK_THAT(err, ContainsSubstring("re-pin them in the same edit: " + repin));
+    CHECK_THAT(err, ContainsSubstring("take them off: " + take_off));
+    CHECK(slurp(home.config_path()) == moved);
+
+    // The re-pin door, run as printed: the set pinned to the new weights.
+    REQUIRE(home.run({"config", "set-backend", "local", "--model-path", other.string(),
+                      "--adapters", files.style.string() + ":0.5"},
+                     &out, &err) == 0);
+    CHECK_THAT(out, ContainsSubstring("adapters pinned to " + other.string() + " (sha256 " +
+                                      other_pin.substr(0, 12) + ")"));
+    const apogee::harness::Config repinned = apogee::harness::load_config(home.config_path());
+    REQUIRE(repinned.find_backend("local")->adapters.size() == 1);
+    CHECK(repinned.find_backend("local")->adapters.front().base_sha256 == other_pin);
+
+    // The take-off door, run as printed: the base moves, the set is gone.
+    REQUIRE(home.run({"config", "set-backend", "local", "--model-path", files.base.string(),
+                      "--adapters", ""},
+                     &out, &err) == 0);
+    CHECK(apogee::harness::load_config(home.config_path()).find_backend("local")->adapters.empty());
+}
+
+TEST_CASE("set-backend refuses to move the base under an adapter it cannot check",
+          "[set-backend][cli][adapters][repin]") {
+    // 55e: a hand-written adapter pinned to nothing cannot be shown to apply
+    // over the new weights; one gone cannot apply at all.
+    const AdapterFiles files;
+    const std::filesystem::path other = files.dir.path() / "other.gguf";
+    std::ofstream{other, std::ios::binary} << "other weights";
+    std::string config = files.config();
+    const std::string under = "    model_path: " + files.base.string() + "   # the base\n";
+    config.insert(config.find(under) + under.size(),
+                  "    adapters: [{path: " + files.style.string() + "}]\n");
+    const apogee::testing::CliHome home{config};
+    std::string out;
+    std::string err;
+    CHECK(home.run({"config", "set-backend", "local", "--model-path", other.string()}, &out,
+                   &err) == 1);
+    CHECK_THAT(err, ContainsSubstring(files.style.string() + " (pinned to no base)"));
+    CHECK(slurp(home.config_path()) == config);
+    std::filesystem::remove(files.style);
+    CHECK(home.run({"config", "set-backend", "local", "--model-path", other.string()}, &out,
+                   &err) == 1);
+    CHECK_THAT(err, ContainsSubstring("the adapter " + files.style.string() + " is not there"));
+    // Clearing model_path leaves them nothing to apply over.
+    CHECK(home.run({"config", "set-backend", "local", "--model-path", ""}, &out, &err) == 1);
+    CHECK_THAT(err, ContainsSubstring("'local' applies adapters over its model_path, and this "
+                                      "edit leaves it none"));
+    CHECK(slurp(home.config_path()) == config);
+    // An edit that touches neither the base nor its type is no move.
+    REQUIRE(home.run({"config", "set-backend", "local", "--context-size", "8192"}, &out, &err) ==
+            0);
 }
 
 TEST_CASE("set-backend completes --adapters with files",

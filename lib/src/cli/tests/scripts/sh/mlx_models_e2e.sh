@@ -17,7 +17,8 @@
 # `config scan`, and named as the embedding role: a collection ingested and a
 # retrieval turn answered on vectors from the real seeded `mlx_embed.py`, a
 # chat on it refused, and another embedder's space demoting the collection to
-# lexical. Since 53i the user's E4B assistant, a draft head: refused as GGUF
+# lexical; since 55e an adapter on it applied through the real driver, its
+# vectors filed under the model and the adapter, lexical once it is taken off. Since 53i the user's E4B assistant, a draft head: refused as GGUF
 # and as a backend, converted through the stub `mlx_vlm.convert` to a drafter
 # recorded beside its base, named as that base's entry's draft, and a turn
 # answered through mlx-vlm's speculative path with the base's own answer --
@@ -323,6 +324,43 @@ if "$APOGEE_BIN" complete -m Gemma-Embedding-300M-8bit "hello?" >"$WORK_DIR/chat
 fi
 grep -q "answers no chat or completion" "$WORK_DIR/chat.txt" \
     || fail "the refusal did not say what the entry is: $(cat "$WORK_DIR/chat.txt")"
+
+# An adapter on the embedding entry (55e): handed to mlx-embeddings by the real
+# seeded driver, its vectors filed under the model and the adapter, the doctor
+# saying it applies -- and taken off, the collection falls to lexical. A
+# directory short of its weights is refused before anything is pinned.
+mkdir -p "$WORK_DIR/loras/tone" "$WORK_DIR/loras/half"
+printf '{"fine_tune_type": "lora"}' >"$WORK_DIR/loras/tone/adapter_config.json"
+printf 'the tone delta' >"$WORK_DIR/loras/tone/adapters.safetensors"
+printf '{"fine_tune_type": "lora"}' >"$WORK_DIR/loras/half/adapter_config.json"
+if "$APOGEE_BIN" config set-backend Gemma-Embedding-300M-8bit --adapters "$WORK_DIR/loras/half" \
+    >/dev/null 2>"$WORK_DIR/half.err"; then
+    fail "an adapter directory with no weights was registered"
+fi
+grep -q "it holds no adapters.safetensors" "$WORK_DIR/half.err" \
+    || fail "the half adapter was not refused by name: $(cat "$WORK_DIR/half.err")"
+"$APOGEE_BIN" config set-backend Gemma-Embedding-300M-8bit --adapters "$WORK_DIR/loras/tone" \
+    >/dev/null || fail "set-backend --adapters on the embedding entry"
+: >"$STUB_MLX_RECORD"
+"$APOGEE_BIN" embed ingest tuned "$WORK_DIR/corpus" >"$WORK_DIR/tuned.txt" 2>&1 \
+    || fail "embed ingest through the adapter failed: $(cat "$WORK_DIR/tuned.txt")"
+grep -q '^embeddings adapter tone$' "$STUB_MLX_RECORD" \
+    || fail "the adapter was never handed to mlx-embeddings: $(cat "$STUB_MLX_RECORD")"
+grep -qF "vector(s) [mlx:${EMB_SETS[0]%/} + adapters " "$WORK_DIR/tuned.txt" \
+    || fail "the vectors were not filed under the adapter: $(cat "$WORK_DIR/tuned.txt")"
+"$APOGEE_BIN" check --no-color -q >"$WORK_DIR/tuned-check.txt" 2>&1
+report_has "$WORK_DIR/tuned-check.txt" "Gemma-Embedding-300M-8bit: tone  applies over" \
+    || fail "the doctor did not say the adapter applies: $(cat "$WORK_DIR/tuned-check.txt")"
+"$APOGEE_BIN" config set-backend Gemma-Embedding-300M-8bit --adapters "" >/dev/null \
+    || fail "set-backend --adapters \"\""
+"$APOGEE_BIN" embed query tuned "zarquon mat" >"$WORK_DIR/untuned.txt" 2>&1 \
+    || fail "embed query with the adapter off failed: $(cat "$WORK_DIR/untuned.txt")"
+grep -q "\[lexical\]" "$WORK_DIR/untuned.txt" && grep -q "re-run" "$WORK_DIR/untuned.txt" \
+    || fail "vectors made through the adapter were queried without it: $(cat "$WORK_DIR/untuned.txt")"
+"$APOGEE_BIN" embed query notes "zarquon mat" >"$WORK_DIR/bare.txt" 2>&1 \
+    || fail "embed query on the bare collection failed: $(cat "$WORK_DIR/bare.txt")"
+grep -q "\[vector\]" "$WORK_DIR/bare.txt" \
+    || fail "the bare model's collection lost its space: $(cat "$WORK_DIR/bare.txt")"
 
 # Another embedder's space: the collection is another model's to it, demoted
 # to lexical with the re-ingest hint -- never queried across the two.

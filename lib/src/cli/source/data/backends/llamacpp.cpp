@@ -864,10 +864,11 @@ std::vector<std::vector<float>> LlamaCppProvider::embed(
 }
 
 std::string LlamaCppProvider::embedding_model_name() const {
-    if (!options_.model.empty()) {
-        return options_.model;
-    }
-    return std::filesystem::path{options_.model_path}.filename().string();
+    // The adapters `embed` applies (53a) are part of the space (55e).
+    return embedding_space(options_.model.empty()
+                               ? std::filesystem::path{options_.model_path}.filename().string()
+                               : options_.model,
+                           options_.adapters, options_.weight_hashing);
 }
 
 std::size_t LlamaCppProvider::embedding_dimensions() const noexcept {
@@ -1004,8 +1005,9 @@ bool LlamaCppProvider::attach(std::string& error) {
     }
 
     // The default window fitted to what is free: the load's own measure when
-    // this entry made it; joining a base already resident, this entry's own,
-    // taken as its own load would have -- its cache is its own (26a).
+    // this entry made it; joining a base already resident, this entry's own
+    // -- its cache is its own (26a) -- with the base's weights counted once,
+    // as resident, never as a second load of them (55e).
     std::int64_t fitted = 0;
     if (load.fit_window) {
         fitted = loaded ? base->model().fitted_window() : runtime_->fit_window(load);
