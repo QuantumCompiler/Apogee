@@ -28,4 +28,4 @@
 - [ ] A typo'd backend key is a named `check` row; the template documents `draft`/`draft_block_size`.
 - [ ] `config upgrade` adds a release's new commented options to a config missing them; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.0 (track 55); ungated. Sibling of [`config-editor-correctness.md`](config-editor-correctness.md) (55f, the write side).
+**Scope note.** Earmarked for v0.2.0 (track 55); ungated. Sibling of [55f](../../assistant/MILESTONES.md#milestone-ar--the-audits-cli-findings) (the write side, shipped 2026-10-25: `field_extent`, the quote-aware `comment_start`, the add name rule and the edit lock).

@@ -11,6 +11,8 @@ apogee_add_module(platform
     platform/child_process.cpp
     platform/ffmpeg.h
     platform/ffmpeg.cpp
+    platform/file_lock.h
+    platform/file_lock.cpp
     platform/pid_lock.h
     platform/pid_lock.cpp
     platform/platform.h

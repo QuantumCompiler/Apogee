@@ -59,20 +59,6 @@ using Json = nlohmann::ordered_json;
     return i == text.size();
 }
 
-/// A key YAML reads back as exactly its text when written plain.
-[[nodiscard]] bool plain_key(std::string_view key) {
-    if (key.empty() || null_word(key)) {
-        return false;
-    }
-    return std::ranges::all_of(key,
-                               [](char c) {
-                                   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                                          (c >= '0' && c <= '9') || c == '_' || c == '-' ||
-                                          c == '.' || c == '/';
-                               }) &&
-           key.front() != '-' && key.front() != '.';
-}
-
 /// `text` as a YAML double-quoted scalar.
 [[nodiscard]] std::string double_quoted(std::string_view text) {
     std::string out = "\"";
@@ -109,7 +95,7 @@ using Json = nlohmann::ordered_json;
 }
 
 [[nodiscard]] std::string key_text(const std::string& key) {
-    return plain_key(key) ? key : double_quoted(key);
+    return yaml_plain_key(key) ? key : double_quoted(key);
 }
 
 [[nodiscard]] std::string scalar_text(const Json& value) {
@@ -216,6 +202,19 @@ Json convert(const YAML::Node& node, const Json& hint) {
 }
 
 }  // namespace
+
+bool yaml_plain_key(std::string_view key) {
+    if (key.empty() || null_word(key)) {
+        return false;
+    }
+    return std::ranges::all_of(key,
+                               [](char c) {
+                                   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                                          (c >= '0' && c <= '9') || c == '_' || c == '-' ||
+                                          c == '.' || c == '/';
+                               }) &&
+           key.front() != '-' && key.front() != '.';
+}
 
 std::string yaml_of_json(const Json& value) {
     std::string out;

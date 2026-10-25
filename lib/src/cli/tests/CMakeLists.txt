@@ -22,6 +22,7 @@ include(Catch)
 add_library(apogee_tests_infrastructure OBJECT
     infrastructure/platform/platform_test.cpp
     infrastructure/platform/pid_lock_test.cpp
+    infrastructure/platform/file_lock_test.cpp
     infrastructure/platform/child_process_test.cpp
     infrastructure/platform/ffmpeg_test.cpp
     infrastructure/platform/ffmpeg_assembly_test.cpp

@@ -10628,3 +10628,45 @@ The refusal was true but incomplete. The set is Wan's original layout, and its r
 **Not done:**
 - A joiner whose cache size the GGUF header can't work out (latent attention, a missing block count) still asks llama.cpp's fitter, which has no way to say the weights are already resident.
 - The real passes are the user's run: the window budget, real mlx-embeddings applying an adapter, and RAM. `mlx_embeddings.utils.load`'s `adapter_path` is mirrored from 0.1.0 by the stub, and the driver checks the signature and refuses by name if it differs.
+
+### 2026-10-25 — `config-editor-correctness` (backlog item 55f): the config editor writes only what it means
+
+**Why.** The one config mutation path (`contracts/config_edit`, the ⚠ invariant) promises an edit touches its key and nothing else. The audit found four ways an accepted edit corrupted or stranded the file. Each reproduced first on the old binary:
+- **A YAML block-list `server_tools`.** Clearing it left an item under the neighbouring key (`api_key: ${ANTHROPIC_API_KEY}\n      - web_search`), and replacing it failed as invalid YAML.
+- **A `#` inside a value.** `url: "http://127.0.0.1:8888/#frag"  # my instance` became `url: "http://10.0.0.2:8080"#frag"  # my instance`.
+- **Names one format couldn't edit.** `add-backend 'qwen@home'` was accepted on a JSONC config that set and delete then could not find.
+- **Concurrent edits lost writes.** Of 16 parallel `config add-backend`s, each printed `added`, but 9 remained.
+
+- [x] **Whole-value replace and remove at every value edit,** through one helper (`field_extent`, merging `suite_field_extent` and `field_value_end`):
+  - a block-list `server_tools` clears with its items, neighbours byte for byte, and replaces as `server_tools: [web_search, code_execution]`;
+  - a YAML block scalar (`system_prompt: |`) is no longer folded into its replacement;
+  - an indentless block list clears.
+- [x] **A quote-aware comment scan everywhere** (`comment_start`): `with_value`, `set_section_rendered`, `set_backend_path_field` (a `model_path` holding `#`), and the MCP, graph and allowed-hosts scans. A `key:   # comment` line whose value sits below it gets the new value after the colon, its comment kept.
+- [x] **One name rule at every add** (`yaml_plain_key`'s set: letters, digits, `_ - . /`, first neither `-` nor `.`, not `null`), in the shared add path, so agents, MCP servers, collections, graphs, suites and review targets are covered too. A refused add reads `backend name 'qwen@home' is not one both config formats can edit -- …; a backend already named otherwise is reached by 'apogee config rename-backend'`. `rename-backend`'s new name follows it, and the YAML rename writes the key plain.
+- [x] **An advisory lock around every edit** (`platform/file_lock`, one declaration: `flock` on POSIX, `LockFileEx` on Windows, each acquire opening afresh so `serve`'s threads exclude each other too). `edit_config_file` holds it from read to rename, on a sibling `config.json.lock`.
+  - **The lock file** is created on the first edit and never removed, so a waiter can't be split onto a new file.
+  - **No config, no lock:** a missing config creates no lock file.
+  - **After the fix:** 16 parallel adds landed 16 of 16 in five rounds, and 64 of 64 in one; parallel deletes returned the file to its original bytes.
+  - **A timeout** (10 s, `kConfigLockWait`) writes nothing and says `another edit of <config> is still running -- <config>.lock stayed locked for all of the 10 s this waited; nothing was changed`. Over HTTP it is a 400, as every editor refusal is.
+- [x] **A new section key goes after its neighbour's whole block,** so `config set training.python` on a JSONC config whose section ended with a nested object no longer fails.
+
+**Decisions made while building** (2026-10-25, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - names are restricted at add to the set both formats edit, with existing odd names reached by `rename-backend`;
+  - the lock is advisory, bounded, and its failure always said.
+- **The lock refuses rather than proceeding unlocked** on a filesystem that won't lock, giving the reason.
+- **`config migrate` and `config init --force` are not locked:** the first would leave a stray `config.yaml.lock`, and the second is a blind overwrite with no read.
+- **Not fixed: symphony names.** `is_symphony_name` allows a leading `-`, which the JSONC bridge would quote, and `append_symphony` into an existing section skips the shared name check. They were outside the findings.
+
+**Verified.**
+- **16 new cases:**
+  - in `config_edit_test` (9): a block list cleared and replaced; a multi-line scalar; `#` inside values; a section scalar after a nested block; a name refused at add; a hand-written odd YAML name; 12 concurrent threads in each format; the lock held past its bound; no config, no lock file;
+  - in `config_jsonc_test` (3): every accepted name's full lifecycle; an odd existing JSONC name reached by rename; a list field and a `#` value edited identically in both formats;
+  - in `file_lock_test` (4): exclusive until released; a waiter gets it on release; an open failure is not a timeout; 8 threads × 12 read-and-increment rounds losing nothing.
+- **`config_e2e.cmake` runs 16 real processes at once** (add, then delete, back to the original bytes) and the `@` refusal. It fails on the old binary.
+- **Mutation:** re-breaking each fix (lock, comment scan, block extent, name rule) failed its test.
+- **Compilers:** MinGW compiles the `LockFileEx` branch with no warning; clang for the Windows target agrees.
+- **ctest:** these pass: `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`, `cli.config_lifecycle`, `cli.http_api_conformance`, `cli.machine_schema_conformance`, and the 22 `cli.*` cases that write configs.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,966 tests and the macOS app's 449 cases passed, with no warning.
+
+**Not done:** the lock has not been run on Windows.

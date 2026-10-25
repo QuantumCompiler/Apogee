@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -8,6 +9,7 @@
 #include <vector>
 
 #include "contracts/config.h"
+#include "platform/file_lock.h"
 
 /// The config engine's write path: line-oriented text surgery.
 ///
@@ -37,9 +39,12 @@
 /// at all, and it is what makes the two guarantees below implementable:
 ///
 ///   * every edit is validated by RE-PARSING its own output before it lands;
-///   * a failed edit leaves the file untouched (write-temp-then-rename).
+///   * a failed edit leaves the file untouched (write-temp-then-rename);
+///   * two edits at once take turns under a lock beside the file, so neither
+///     writes over the other's change (55f).
 ///
-/// Both live in edit_config_file(), which is the only thing here that writes.
+/// All three live in edit_config_file(), which is the only thing here that
+/// writes.
 namespace apogee::harness {
 
 /// Raised when an edit cannot be applied: entry missing, name collision,
@@ -452,8 +457,24 @@ struct SettableScalar {
 void write_file_atomically(const std::filesystem::path& path, std::string_view content,
                            bool private_mode = false);
 
+/// How long a config edit waits for another to finish before it fails (55f).
+/// An edit holds the lock for milliseconds; this is the bound past which one
+/// is stuck, not busy.
+inline constexpr std::chrono::milliseconds kConfigLockWait{10000};
+
+/// The lock a config edit holds across its whole read, transform and rename
+/// (55f): an advisory lock (`platform/file_lock.h`) on `<config>.lock` beside
+/// `path` -- `config.json.lock` -- created on the first edit and left there.
+/// Two editors -- two processes, or two threads of `serve` -- take turns, so
+/// neither writes over what the other just wrote. Waits up to `wait` for
+/// another edit to finish; throws ConfigEditError when it does not, or when
+/// the lock cannot be made -- said, and nothing written.
+[[nodiscard]] platform::FileLock lock_config_file(const std::filesystem::path& path,
+                                                  std::chrono::milliseconds wait = kConfigLockWait);
+
 /// Reads `path`, applies `transform`, re-parses the result, and writes it
-/// atomically.
+/// atomically, holding the config's lock (`lock_config_file`) from the read
+/// to the rename.
 ///
 /// The re-parse is the safety net that makes text surgery acceptable: if a
 /// transform ever produces something the loader cannot read, the edit is
@@ -462,8 +483,14 @@ void write_file_atomically(const std::filesystem::path& path, std::string_view c
 ///
 /// The file is also parsed BEFORE the transform, so "your config is already
 /// broken" and "this edit would break it" are different messages.
+///
+/// The lock is what makes two edits at once both land (55f): without it, each
+/// read the file before the other wrote, and the second rename dropped the
+/// first's change. `lock_wait` bounds the wait for another edit to finish.
 template <typename Transform>
-void edit_config_file(const std::filesystem::path& path, Transform&& transform) {
+void edit_config_file(const std::filesystem::path& path, Transform&& transform,
+                      std::chrono::milliseconds lock_wait = kConfigLockWait) {
+    const platform::FileLock lock = lock_config_file(path, lock_wait);
     const std::string original = read_config_file(path);
     (void)parse_config(original, path.string());
 

@@ -293,7 +293,10 @@ its model reasons first, `thinking` (`on`, `off` or `auto`) and `thinking_budget
 (`type: conflict`) on a name collision without `force`; `400` on a bad type,
 cache type or body, or -- since 55d, in the CLI's own words -- an `mlx` entry
 over a set whose kind no `mlx` entry runs (a drafter, a video or voice model,
-by its record or its files).
+by its record or its files), or -- since 55f -- a `name` both config formats
+cannot edit (one is letters, digits, `_`, `-`, `.` and `/`, first neither `-`
+nor `.`, and not null; an existing backend named otherwise is reached through
+the rename route).
 
 A **literal** `api_key` is accepted from loopback peers only (`403` otherwise),
 judged from the connection's own peer address and never from a forwarded
@@ -352,7 +355,8 @@ since 55d, its adapters among them, and each stored drafter whose record names i
 rewritten to name it as it is now called, so a pairing that held still holds
 (M25). The config it leaves is byte for byte the CLI's. `200 {renamed, to, said, restart_required}`, `said`
 the lines the CLI prints; `404` when unknown; `400` naming why for a name
-that is taken or cannot name a backend.
+that is taken or cannot name a backend -- since 55f, the names the add route
+takes; the old name may be any, which is how an odd one is reached.
 
 ### `POST /v1/admin/backends/default`
 
@@ -392,7 +396,10 @@ folded, one final newline. Content untouched; `200 {formatted, restart_required}
 
 Every one of these writes goes through the same comment-preserving edit the
 CLI uses, so a file edited here is **byte-identical** to one edited from the
-terminal.
+terminal. Since 55f two writes at once -- two requests, or a request and a
+command -- take turns under the config's lock (`config.json.lock` beside it),
+so both land; one that waits more than 10 s for another is a `400` saying so,
+the file untouched.
 
 ### `GET /v1/admin/mcp-servers`
 

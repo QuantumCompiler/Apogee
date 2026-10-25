@@ -3,14 +3,17 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <optional>
+#include <random>
 #include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "contracts/config.h"
@@ -1808,10 +1811,18 @@ TEST_CASE("rename_backend refuses an unknown name, a taken one, and a name no ke
     CHECK_THROWS_WITH(rename_backend(kRenameYaml, "gemma", "Claude"),
                       "a backend named 'claude' already exists");
     CHECK_THROWS_WITH(rename_backend(kRenameYaml, "gemma", "gemma"), "'gemma' is already its name");
+    // The name add-backend would take (55f): one both formats edit.
+    constexpr std::string_view kRule =
+        "a name is letters, digits, '_', '-', '.' and '/', first "
+        "neither '-' nor '.', and not null";
     CHECK_THROWS_WITH(rename_backend(kRenameYaml, "gemma", "two words"),
-                      "'two words' cannot name a backend -- a name is one word, no colon");
+                      "'two words' cannot name a backend -- " + std::string{kRule});
     CHECK_THROWS_WITH(rename_backend(kRenameYaml, "gemma", "a:b"),
-                      "'a:b' cannot name a backend -- a name is one word, no colon");
+                      "'a:b' cannot name a backend -- " + std::string{kRule});
+    CHECK_THROWS_WITH(rename_backend(kRenameYaml, "gemma", "qwen@home"),
+                      "'qwen@home' cannot name a backend -- " + std::string{kRule});
+    CHECK_THROWS_WITH(rename_backend(kRenameYaml, "gemma", ".hidden"),
+                      "'.hidden' cannot name a backend -- " + std::string{kRule});
     // A change of case is the backend's own name: allowed.
     CHECK_NOTHROW(rename_backend(kRenameYaml, "gemma", "Gemma"));
 }
@@ -2071,4 +2082,361 @@ TEST_CASE("config set refuses every key outside its table, naming the right door
         CHECK(seen.insert(scalar.key).second);
         CHECK(scalar_refusal(scalar.key).empty());
     }
+}
+
+// --- 55f: an edit writes only what it means ---------------------------------
+//
+// Four ways an accepted edit corrupted or stranded a config (the 2026-10-22
+// audit): a block list's items left behind to fold into the field above, a
+// `#` inside a value read as a comment, a name added that no later edit could
+// find, and two edits at once each writing over the other.
+
+namespace {
+
+/// An entry whose `server_tools:` is a block list -- a shape the loader
+/// accepts -- with comments inside and around it.
+constexpr std::string_view kBlockList = R"(backends:
+  claude:
+    type: anthropic   # the vendor's own API
+    model: claude-sonnet-5
+    api_key: sk-test-literal
+    server_tools:   # the vendor's tools
+      # its search
+      - web_search
+      - code_execution
+    # the cap
+    max_tokens: 1024
+  other:
+    type: mock
+)";
+
+/// `text` with the run from `from`'s first byte to the end of `to`'s line
+/// replaced by `with`.
+[[nodiscard]] std::string spliced(std::string_view text, std::string_view from, std::string_view to,
+                                  std::string_view with) {
+    std::string out{text};
+    const std::size_t start = out.find(from);
+    REQUIRE(start != std::string::npos);
+    const std::size_t stop = out.find(to, start);
+    REQUIRE(stop != std::string::npos);
+    out.replace(start, stop + to.size() - start, with);
+    return out;
+}
+
+/// One backend entry, `e`, holding `fields`.
+[[nodiscard]] std::string with_backend_lines(std::string_view fields) {
+    return "backends:\n  e:\n" + std::string{fields};
+}
+
+/// A config file of its own, under a directory named with a random draw.
+struct EditFixture {
+    apogee::testing::TempDir dir{"edit-55f-" + std::to_string(std::random_device{}())};
+    std::filesystem::path path = dir.path() / "config.json";
+
+    [[nodiscard]] std::string bytes() const {
+        std::ifstream in{path, std::ios::binary};
+        std::ostringstream out;
+        out << in.rdbuf();
+        return out.str();
+    }
+};
+
+}  // namespace
+
+TEST_CASE("a block-list field cleared or replaced takes its own lines and no neighbour's",
+          "[config_edit][block-list][golden]") {
+    using apogee::harness::parse_config;
+    using apogee::harness::set_backend_field;
+    // Cleared: the key and every item, the comment among them with it; the
+    // comment after the list is the next field's and stays.
+    const std::string cleared = set_backend_field(kBlockList, "claude", "server_tools", "");
+    CHECK(cleared == spliced(kBlockList, "    server_tools:", "      - code_execution\n", ""));
+    const apogee::harness::Config after = parse_config(cleared, "<cleared>");
+    CHECK(after.find_backend("claude")->api_key == "sk-test-literal");
+    CHECK(after.find_backend("claude")->server_tools.empty());
+    CHECK(after.find_backend("claude")->max_tokens == 1024);
+
+    // Replaced: one flow list on the key's line, its comment kept where it
+    // stood; nothing of the old items left.
+    const std::string replaced =
+        set_backend_field(kBlockList, "claude", "server_tools", "web_search,code_execution");
+    CHECK(replaced ==
+          spliced(kBlockList, "    server_tools:", "      - code_execution\n",
+                  "    server_tools: [web_search, code_execution]   # the vendor's tools\n"));
+    const apogee::harness::Config again = parse_config(replaced, "<replaced>");
+    CHECK(again.find_backend("claude")->server_tools ==
+          std::vector<std::string>{"web_search", "code_execution"});
+    CHECK(again.find_backend("claude")->api_key == "sk-test-literal");
+
+    // A list written at the key's own indent, and one carried over two lines.
+    const std::string flat = with_backend_lines(
+        "    type: anthropic\n    server_tools:\n    - web_search\n    max_tokens: 9\n");
+    CHECK(set_backend_field(flat, "e", "server_tools", "") ==
+          with_backend_lines("    type: anthropic\n    max_tokens: 9\n"));
+    CHECK(set_backend_field(flat, "e", "server_tools", "code_execution") ==
+          with_backend_lines(
+              "    type: anthropic\n    server_tools: [code_execution]\n    max_tokens: 9\n"));
+    const std::string carried = with_backend_lines(
+        "    type: anthropic\n    server_tools: [web_search,\n      code_execution]\n"
+        "    max_tokens: 9\n");
+    CHECK(set_backend_field(carried, "e", "server_tools", "web_search") ==
+          with_backend_lines(
+              "    type: anthropic\n    server_tools: [web_search]\n    max_tokens: 9\n"));
+
+    // The file's line endings and its unterminated end, kept.
+    const std::string crlf =
+        "backends:\r\n  e:\r\n    type: anthropic\r\n    server_tools:\r\n      - web_search\r\n";
+    CHECK(set_backend_field(crlf, "e", "server_tools", "") ==
+          "backends:\r\n  e:\r\n    type: anthropic\r\n");
+    const std::string open =
+        "backends:\n  e:\n    type: anthropic\n    server_tools:\n      - web_search";
+    CHECK(set_backend_field(open, "e", "server_tools", "") ==
+          "backends:\n  e:\n    type: anthropic\n");
+    require_parses(set_backend_field(open, "e", "server_tools", "code_execution"));
+}
+
+TEST_CASE("a multi-line scalar replaced or cleared takes every line of its text",
+          "[config_edit][block-list][golden]") {
+    // The same fold through a block scalar: the new value on the key's line
+    // and the old text's lines left under it read as one run-on value.
+    using apogee::harness::set_backend_field;
+    const std::string block = with_backend_lines(
+        "    type: mock\n    system_prompt: |   # house style\n      You are terse.\n"
+        "      Answer in one line.\n    max_tokens: 64\n");
+    const std::string set = set_backend_field(block, "e", "system_prompt", "Be kind.");
+    CHECK(set == with_backend_lines("    type: mock\n    system_prompt: Be kind.   # house style\n"
+                                    "    max_tokens: 64\n"));
+    CHECK(apogee::harness::parse_config(set, "<set>").find_backend("e")->system_prompt ==
+          "Be kind.");
+    CHECK(set_backend_field(block, "e", "system_prompt", "") ==
+          with_backend_lines("    type: mock\n    max_tokens: 64\n"));
+    // A field the entry lacks lands under the one it follows -- below that
+    // one's own lines, never between them.
+    const std::string drafted =
+        set_backend_field(with_backend_lines("    type: mlx\n    model_path: |\n      /models/m\n"),
+                          "e", "draft", "/models/d");
+    CHECK(drafted ==
+          with_backend_lines(
+              "    type: mlx\n    model_path: |\n      /models/m\n    draft: /models/d\n"));
+}
+
+TEST_CASE("a hash inside a value survives every edit that moves its line",
+          "[config_edit][hash][golden]") {
+    using apogee::harness::parse_config;
+    using apogee::harness::set_backend_field;
+    using apogee::harness::set_scalar;
+    constexpr std::string_view kHashes = R"(tools:
+  search:
+    provider: searxng
+    url: "http://127.0.0.1:8888/#frag"  # my instance
+training:
+  python: "/opt/py #3/bin/python3"  # the one I built
+backends:
+  local:
+    type: llamacpp
+    model_path: "/models/run #1/a.gguf"  # first run
+    mmproj_path: /models/p.gguf#2   # a hash after a non-space
+)";
+    // A quoted fragment: only the value moves; the comment, and its spacing,
+    // stay exactly where they were.
+    const std::string url = set_scalar(kHashes, "tools.search.url", "http://10.0.0.2:8080");
+    std::string expected{kHashes};
+    expected.replace(expected.find("\"http://127.0.0.1:8888/#frag\""), 29,
+                     "\"http://10.0.0.2:8080\"");
+    CHECK(url == expected);
+    // Durable: a later set starts from a clean line, and a `#` written in is
+    // the value's too.
+    const std::string fragment = set_scalar(url, "tools.search.url", "http://10.0.0.3/#top");
+    CHECK(parse_config(fragment, "<test>").tools.search.url == "http://10.0.0.3/#top");
+    CHECK_THAT(fragment, ContainsSubstring("url: \"http://10.0.0.3/#top\"  # my instance\n"));
+    CHECK(set_scalar(fragment, "tools.search.url", "http://10.0.0.2:8080") == url);
+    // An unquoted `#` after a non-space is the value's too.
+    const std::string plain =
+        spliced(kHashes, "    url:", "\n", "    url: http://127.0.0.1:8888/#frag  # my instance\n");
+    CHECK(set_scalar(plain, "tools.search.url", "http://10.0.0.2:8080") == url);
+
+    // A section's own scalar (`set_section_rendered`).
+    const std::string python = set_scalar(kHashes, "training.python", "/usr/bin/python3");
+    CHECK(python ==
+          spliced(kHashes, "  python:", "\n", "  python: /usr/bin/python3  # the one I built\n"));
+    // A backend's field (`set_backend_field`), quoted and unquoted.
+    const std::string weights = set_backend_field(kHashes, "local", "model_path", "/models/b.gguf");
+    CHECK(weights == spliced(kHashes, "    model_path:", "\n",
+                             "    model_path: /models/b.gguf  # first run\n"));
+    const std::string projector =
+        set_backend_field(kHashes, "local", "mmproj_path", "/models/q.gguf");
+    CHECK(projector == spliced(kHashes, "    mmproj_path:", "\n",
+                               "    mmproj_path: /models/q.gguf   # a hash after a non-space\n"));
+    for (const std::string& edited : {url, python, weights, projector}) {
+        require_parses(edited);
+    }
+    // A quote inside a comment opens nothing.
+    const std::string server =
+        "mcp_servers:\n  fs:\n    command: npx\n    enabled: true  # don't \"quote\" me\n";
+    CHECK(set_mcp_server_enabled(server, "fs", false) ==
+          "mcp_servers:\n  fs:\n    command: npx\n    enabled: false  # don't \"quote\" me\n");
+}
+
+TEST_CASE("a new section scalar lands after its neighbour's whole block, never inside it",
+          "[config_edit][block-list]") {
+    // What the JSONC bridge writes for a nested object: the new key used to
+    // go between `cycle:` and its fields, and the edit failed to parse.
+    using apogee::harness::set_scalar;
+    const std::string nested =
+        "training:\n  cycle:\n    backend: x\nbackends:\n  x:\n"
+        "    type: mock\n";
+    const std::string set = set_scalar(nested, "training.python", "/usr/bin/python3");
+    CHECK(set ==
+          "training:\n  cycle:\n    backend: x\n  python: /usr/bin/python3\nbackends:\n"
+          "  x:\n    type: mock\n");
+    CHECK(apogee::harness::parse_config(set, "<test>").training.python == "/usr/bin/python3");
+}
+
+TEST_CASE("an entry name both formats cannot edit is refused at add, naming the rule",
+          "[config_edit][names]") {
+    constexpr std::string_view kRule =
+        "a name is letters, digits, '_', '-', '.' and '/', first "
+        "neither '-' nor '.', and not null";
+    CHECK_THROWS_WITH(
+        append_backend(kCommented, "qwen@home", anthropic_backend(), false),
+        "backend name 'qwen@home' is not one both config formats can edit -- " +
+            std::string{kRule} +
+            "; a backend already named otherwise is reached by 'apogee config rename-backend'");
+    for (const std::string_view name :
+         {"two words", "a:b", "x#y", "-x", ".x", "null", "NULL", "~", "a\"b", "é", "a,b", "[x]"}) {
+        INFO(name);
+        CHECK_THROWS_AS(append_backend(kCommented, name, anthropic_backend(), false),
+                        ConfigEditError);
+    }
+    // Every section's add holds the same rule; the rename hint is a backend's.
+    CHECK_THROWS_WITH(
+        append_agent("", "x@y", apogee::harness::AgentConfig{}, false),
+        "agent name 'x@y' is not one both config formats can edit -- " + std::string{kRule});
+    CHECK_THROWS_AS(append_embedding("", ".notes", EmbeddingConfig{}, false), ConfigEditError);
+
+    // Every name it accepts is edited and deleted, the file back to its bytes.
+    for (const std::string_view name :
+         {"qwen-home", "qwen_home", "Qwen3.5-9B-Q4KM", "org/model", "_x", "9b", "true", "a.b"}) {
+        INFO(name);
+        const std::string added = append_backend(kCommented, name, anthropic_backend(), false);
+        const std::string edited =
+            apogee::harness::set_backend_field(added, name, "max_tokens", "512");
+        CHECK(apogee::harness::parse_config(edited, "<test>").find_backend(name)->max_tokens ==
+              512);
+        CHECK(apogee::harness::set_backend_field(edited, name, "max_tokens", "") == added);
+        CHECK(delete_backend(added, name) == kCommented);
+        // And renamed to: the renamed entry is one the editor still finds.
+        const std::string renamed = apogee::harness::rename_backend(added, name, "renamed");
+        CHECK(apogee::harness::rename_backend(renamed, "renamed", name) == added);
+    }
+}
+
+TEST_CASE("a hand-written odd name in a YAML config is edited, and renamed into the rule",
+          "[config_edit][names]") {
+    // Legal YAML, written by hand: the YAML editor finds it by its text, and
+    // rename-backend is the way to a name every format edits.
+    const std::string odd = "backends:\n  qwen@home:\n    type: openai\n";
+    const std::string set = apogee::harness::set_backend_field(odd, "qwen@home", "max_tokens", "9");
+    CHECK(set == "backends:\n  qwen@home:\n    type: openai\n    max_tokens: 9\n");
+    CHECK(apogee::harness::rename_backend(odd, "qwen@home", "qwen-home") ==
+          "backends:\n  qwen-home:\n    type: openai\n");
+}
+
+TEST_CASE("concurrent config edits all land, each under the lock beside the file",
+          "[config_edit][lock][concurrent]") {
+    // The completeness pass's probe (55f), over the real function: several
+    // editors at once, each reading, editing and renaming into place. Without
+    // the lock each read the file before another wrote it, and the last
+    // rename kept only its own entry.
+    for (const bool jsonc : {true, false}) {
+        INFO((jsonc ? "jsonc" : "yaml"));
+        const EditFixture fixture;
+        apogee::harness::write_file_atomically(
+            fixture.path, jsonc ? std::string{"// mine\n{\n  \"backends\": {} // none yet\n}\n"}
+                                : std::string{kCommented});
+        constexpr int kEditors = 12;
+        std::vector<std::thread> editors;
+        editors.reserve(kEditors);
+        std::vector<std::string> failures(kEditors);
+        for (int i = 0; i < kEditors; ++i) {
+            editors.emplace_back([&fixture, &failures, i] {
+                try {
+                    BackendConfig backend;
+                    backend.type = BackendType::Mock;
+                    apogee::harness::edit_config_file(
+                        fixture.path, [i, &backend](std::string_view content) {
+                            return append_backend(content, "b" + std::to_string(i), backend, false);
+                        });
+                } catch (const std::exception& e) {
+                    failures[static_cast<std::size_t>(i)] = e.what();
+                }
+            });
+        }
+        for (std::thread& editor : editors) {
+            editor.join();
+        }
+        for (const std::string& failure : failures) {
+            CHECK(failure.empty());
+        }
+        const apogee::harness::Config config =
+            apogee::harness::parse_config(fixture.bytes(), "<test>");
+        for (int i = 0; i < kEditors; ++i) {
+            INFO(i);
+            CHECK(config.find_backend("b" + std::to_string(i)) != nullptr);
+        }
+        CHECK_THAT(fixture.bytes(),
+                   ContainsSubstring(jsonc ? "// mine" : "# Uses the Messages API"));
+        // The lock file stays beside the config; no temporary file is left.
+        std::filesystem::path lock = fixture.path;
+        lock += ".lock";
+        CHECK(std::filesystem::exists(lock));
+        std::size_t files = 0;
+        for (const auto& entry : std::filesystem::directory_iterator{fixture.dir.path()}) {
+            (void)entry;
+            ++files;
+        }
+        CHECK(files == 2);
+    }
+}
+
+TEST_CASE("an edit that cannot take the lock in time is refused, said, and writes nothing",
+          "[config_edit][lock]") {
+    const EditFixture fixture;
+    apogee::harness::write_file_atomically(fixture.path, kCommented);
+    const apogee::platform::FileLock held = apogee::harness::lock_config_file(fixture.path);
+    bool transformed = false;
+    const auto start = std::chrono::steady_clock::now();
+    try {
+        apogee::harness::edit_config_file(
+            fixture.path,
+            [&transformed](std::string_view content) {
+                transformed = true;
+                return delete_backend(content, "local");
+            },
+            std::chrono::milliseconds{150});
+        FAIL("the edit went through a held lock");
+    } catch (const ConfigEditError& e) {
+        const std::string said = e.what();
+        CHECK_THAT(said, ContainsSubstring("another edit of " + fixture.path.string() +
+                                           " is still running"));
+        CHECK_THAT(said, ContainsSubstring("config.json.lock stayed locked for all of the 150 ms"));
+        CHECK_THAT(said, ContainsSubstring("nothing was changed"));
+    }
+    CHECK(std::chrono::steady_clock::now() - start >= std::chrono::milliseconds{100});
+    CHECK_FALSE(transformed);
+    CHECK(fixture.bytes() == kCommented);
+}
+
+TEST_CASE("an edit of a config that is not there says so, and leaves no lock behind",
+          "[config_edit][lock]") {
+    const EditFixture fixture;
+    CHECK_THROWS_WITH(
+        apogee::harness::edit_config_file(
+            fixture.path, [](std::string_view content) { return std::string{content}; }),
+        ContainsSubstring("cannot open config file"));
+    CHECK_THROWS_AS(
+        apogee::harness::edit_config_file(
+            fixture.path, [](std::string_view content) { return std::string{content}; }),
+        apogee::harness::ConfigError);
+    CHECK(std::filesystem::is_empty(fixture.dir.path()));
 }

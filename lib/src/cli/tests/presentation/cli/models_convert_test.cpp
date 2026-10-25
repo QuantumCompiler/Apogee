@@ -529,9 +529,9 @@ TEST_CASE(
     for (const Row& row : {
              Row{.args = {"models", "convert", "org--text", "--register", "--base-name",
                           "My Model"},
-                 .said = "cannot contain spaces"},
+                 .said = "is not one both config formats can edit"},
              Row{.args = {"models", "convert", "org--text", "--register", "--base-name", "a:b"},
-                 .said = "cannot contain spaces, tabs, colons"},
+                 .said = "a name is letters, digits, '_', '-', '.' and '/'"},
              Row{.args = {"models", "convert", "org--text", "--register", "--base-name", ""},
                  .said = "--base-name cannot be empty"},
              Row{.args = {"models", "convert", "org--text", "--base-name", "Text"},

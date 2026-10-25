@@ -8,6 +8,25 @@
 # read values back, delete, and confirm the file returned to its initial bytes.
 # Everything lands under a throwaway APOGEE_HOME, so the suite stays hermetic.
 
+# One editor of the concurrent-edits section below, run as a process of its
+# own: `-DAPOGEE_ONE_EDIT=<name> -DAPOGEE_ONE_VERB=add|delete` adds or deletes
+# one backend and prints nothing on stdout -- execute_process runs a
+# pipeline's commands all at once, and an editor writing to a neighbour that
+# had already exited would be killed by the pipe.
+if(DEFINED APOGEE_ONE_EDIT)
+    if(APOGEE_ONE_VERB STREQUAL "add")
+        set(edit config add-backend "${APOGEE_ONE_EDIT}" --type mock --model m)
+    else()
+        set(edit config delete-backend "${APOGEE_ONE_EDIT}")
+    endif()
+    execute_process(COMMAND "${APOGEE_BIN}" ${edit}
+        RESULT_VARIABLE code OUTPUT_VARIABLE out ERROR_VARIABLE err)
+    if(NOT code EQUAL 0)
+        message(FATAL_ERROR "apogee ${edit}: exit ${code}\n${out}${err}")
+    endif()
+    return()
+endif()
+
 if(NOT DEFINED APOGEE_BIN OR NOT DEFINED APOGEE_WORK_DIR)
     message(FATAL_ERROR "APOGEE_BIN and APOGEE_WORK_DIR must be set")
 endif()
@@ -587,6 +606,58 @@ if(NOT AFTER_FORGET STREQUAL BEFORE_ALWAYS)
 endif()
 apogee_run(1 config delete-allowed-host 127.0.0.1)
 apogee_run(1 config add-allowed-host https://example.com/)
+
+# --- concurrent edits all land (55f) ---------------------------------------
+# Sixteen editors at once, each a process of its own, on the shipped template:
+# the lock beside the config makes them take turns, so every entry lands --
+# before it, each read the file before another wrote it and the last rename
+# won (the completeness pass's probe kept 6 of 16). Then all sixteen deleted
+# at once, and the file is its pristine bytes again.
+function(apogee_run_at_once verb)
+    set(editors "")
+    foreach(i RANGE 1 16)
+        list(APPEND editors COMMAND "${CMAKE_COMMAND}" "-DAPOGEE_BIN=${APOGEE_BIN}"
+             "-DAPOGEE_ONE_EDIT=b${i}" "-DAPOGEE_ONE_VERB=${verb}"
+             -P "${CMAKE_CURRENT_FUNCTION_LIST_FILE}")
+    endforeach()
+    execute_process(${editors} RESULTS_VARIABLE codes ERROR_VARIABLE err)
+    foreach(code IN LISTS codes)
+        if(NOT code STREQUAL "0")
+            message(FATAL_ERROR "16 editors at once (${verb}): exits ${codes}\n${err}")
+        endif()
+    endforeach()
+endfunction()
+
+file(WRITE "${CONFIG_FILE}" "${PRISTINE}")
+apogee_run_at_once(add)
+apogee_run(0 config get backends)
+foreach(i RANGE 1 16)
+    if(NOT "\n${APOGEE_OUT}" MATCHES "\nb${i}\n")
+        message(FATAL_ERROR "16 concurrent add-backends: b${i} did not land:\n${APOGEE_OUT}")
+    endif()
+endforeach()
+apogee_run_at_once(delete)
+file(READ "${CONFIG_FILE}" AFTER_CONCURRENT)
+if(NOT AFTER_CONCURRENT STREQUAL PRISTINE)
+    message(FATAL_ERROR "16 concurrent adds then deletes did not restore the bytes:\n"
+                        "${AFTER_CONCURRENT}")
+endif()
+if(NOT EXISTS "${CONFIG_FILE}.lock")
+    message(FATAL_ERROR "no lock file beside the config after the edits")
+endif()
+
+# A name both formats cannot edit is refused at add, naming the rule and the
+# way to an existing one (55f) -- before, add took it and set/delete then
+# could not find it.
+apogee_run(1 config add-backend "qwen@home" --type mock --model m)
+if(NOT APOGEE_ERR MATCHES "is not one both config formats can edit" OR
+   NOT APOGEE_ERR MATCHES "config rename-backend")
+    message(FATAL_ERROR "add-backend qwen@home was not refused by the rule:\n${APOGEE_ERR}")
+endif()
+file(READ "${CONFIG_FILE}" AFTER_REFUSAL)
+if(NOT AFTER_REFUSAL STREQUAL PRISTINE)
+    message(FATAL_ERROR "a refused add-backend changed the config")
+endif()
 
 # --- delete restores the original bytes ------------------------------------
 # Rebuild from pristine so the role edits above do not muddy the comparison.
