@@ -172,6 +172,13 @@ inline constexpr std::string_view kMlxDrafter = "drafter";
 inline constexpr std::string_view kMlxVideo = "video";
 inline constexpr std::string_view kMlxVoice = "voice";
 
+/// mlx-video's package (53k), as the first word of the `transform` its
+/// conversion records begins -- `mlx_video.models.wan_2.convert 4bit`, the
+/// converter's entry (`training::mlx_converter_entry`) then the precision:
+/// what an MLX video model made from a set is known by (M24), whichever
+/// module of the package a pin holds the converter in.
+inline constexpr std::string_view kMlxVideoConverterPackage = "mlx_video";
+
 /// Where a directory's kind came from.
 enum class MlxKindSource {
     /// Its record names it: the conversion that made it wrote it.

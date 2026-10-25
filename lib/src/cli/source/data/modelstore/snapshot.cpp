@@ -426,6 +426,29 @@ std::optional<DiffusionModel> snapshot_diffusion_model(const std::filesystem::pa
     return model;
 }
 
+namespace {
+
+/// What fetches a Wan set's missing components: the pull of its repository,
+/// at its revision, else the words for one with no record.
+[[nodiscard]] std::string completing_pull(const DiffusionModel& model) {
+    return model.ref.empty() ? std::string{"pulling its repository again with --safetensors"}
+                             : "'apogee models pull " + model.ref + " --safetensors'";
+}
+
+/// What runs a Wan set on each of `video generate`'s engines (M24): the
+/// pipeline Wan publishes beside the original layout, by its repository's
+/// name and without its revision, on PyTorch -- and the set's MLX conversion
+/// through mlx-video, its state the caller's to say.
+[[nodiscard]] std::string wan_engines(const DiffusionModel& model) {
+    const std::string repository = model.ref.substr(0, model.ref.find('@'));
+    return "its Diffusers pipeline on PyTorch, pulled whole" +
+           (repository.empty() ? std::string{" (a repository with model_index.json at its root)"}
+                               : " with 'apogee models pull " + repository + "-Diffusers'") +
+           ", or its MLX conversion on MLX through mlx-video";
+}
+
+}  // namespace
+
 std::string describe_diffusion_model(const DiffusionModel& model) {
     if (!model.wan.has_value()) {
         return "a diffusion model's weights (" + model.class_name +
@@ -443,9 +466,7 @@ std::string describe_diffusion_model(const DiffusionModel& model) {
         out += ", complete -- its transformer beside " + said_together(files);
     } else {
         const std::vector<std::string> missing = wan.missing();
-        out += ", missing " + said_together(missing) + " -- " +
-               (model.ref.empty() ? std::string{"pulling its repository again with --safetensors"}
-                                  : "'apogee models pull " + model.ref + " --safetensors'") +
+        out += ", missing " + said_together(missing) + " -- " + completing_pull(model) +
                " fetches " + (missing.size() == 1 ? "it" : "them") + " into this set";
     }
     // How it converts (53k): through mlx-video to MLX once it is whole --
@@ -462,20 +483,43 @@ std::string describe_diffusion_model(const DiffusionModel& model) {
                 "--with mlx-video'";
         }
     }
-    // And what runs the model today: the pipeline Wan publishes beside the
-    // original layout, by its repository's name and without its revision.
-    const std::string repository = model.ref.substr(0, model.ref.find('@'));
+    // And what runs the model, on each of `video generate`'s engines (M24):
+    // its MLX conversion said made where one converted from this set stands.
     out +=
         "; llama.cpp's converter takes no diffusion model -- it finds a model by its "
-        "architectures; what runs this model today is its Diffusers pipeline in 'apogee video "
-        "generate', pulled whole";
-    out += repository.empty() ? std::string{" (a repository with model_index.json at its root)"}
-                              : " with 'apogee models pull " + repository + "-Diffusers'";
+        "architectures; what runs this model in 'apogee video generate' is " +
+        wan_engines(model) +
+        (model.mlx_conversions.empty() ? std::string{", once made"}
+                                       : ", made as " + said_together(model.mlx_conversions));
     return out;
 }
 
 std::string diffusion_model_refusal(std::string_view subject, const DiffusionModel& model) {
     return std::string{subject} + " is " + describe_diffusion_model(model);
+}
+
+std::string wan_layout_run_refusal(std::string_view subject, std::string_view handle,
+                                   const DiffusionModel& model) {
+    if (!model.wan.has_value()) {
+        return {};
+    }
+    const WanLayout& wan = *model.wan;
+    std::string out = std::string{subject} + " Wan's original layout (" + wan.class_name +
+                      "), not a pipeline or an MLX video model -- what runs it is " +
+                      wan_engines(model);
+    // The MLX route as it stands for this set: made, to make, or to make once
+    // it is whole -- the description's facts.
+    if (!model.mlx_conversions.empty()) {
+        return out + ", made as " + said_together(model.mlx_conversions) + " -- name " +
+               (model.mlx_conversions.size() == 1 ? "it" : "one") + " with --model";
+    }
+    out += ", made with 'apogee models convert " + std::string{handle} + " --mlx'";
+    if (!wan.whole()) {
+        const std::vector<std::string> missing = wan.missing();
+        out += " once the set is complete: it lacks " + said_together(missing) + ", which " +
+               completing_pull(model) + " fetches";
+    }
+    return out;
 }
 
 std::optional<EmbeddingModel> snapshot_embedding_model(const std::filesystem::path& dir) {

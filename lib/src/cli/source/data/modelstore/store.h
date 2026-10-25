@@ -414,6 +414,24 @@ struct StoredVoice {
 [[nodiscard]] std::vector<std::string> draft_head_bases(const StoreRoots& roots,
                                                         const DraftHead& head);
 
+/// The MLX video models converted from the SafeTensors set at `dir` that
+/// stand in the store under `roots` (M24), by handle (`<model>/mlx/<id>`),
+/// sorted: each stored MLX directory whose own record says so -- its `ref`
+/// naming that set, by the handle `models convert --mlx` records (or, for a
+/// set converted from outside the store, its path), and its `transform`
+/// mlx-video's converter (`kMlxVideoConverterPackage`) -- the way 53l finds
+/// the set's tokenizer from the other end. Never matched by a name.
+[[nodiscard]] std::vector<std::string> mlx_video_conversions(const StoreRoots& roots,
+                                                             const std::filesystem::path& dir);
+
+/// The diffusion model the set at `dir` holds, read with the store under
+/// `roots` (M24): `snapshot_diffusion_model`'s reading and, for Wan's
+/// original layout, the MLX video models converted from it there
+/// (`mlx_video_conversions`) -- what every surface with the store at hand
+/// describes one from.
+[[nodiscard]] std::optional<DiffusionModel> stored_diffusion_model(
+    const StoreRoots& roots, const std::filesystem::path& dir, const VideoConverts& mlx_video = {});
+
 /// The model's most recent SafeTensors set -- what `convert` and `train`
 /// read when no id is named.
 [[nodiscard]] std::optional<StoredSnapshot> newest_snapshot(const StoreRoots& roots,

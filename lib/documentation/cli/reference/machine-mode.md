@@ -46,7 +46,7 @@ document last (see [A long job's run](#a-long-jobs-run)).
 One JSON object per line on stdout. Every object has a `type`.
 
 ```jsonl
-{"type":"session","protocol_version":1,"model":"claude-sonnet-5","next_turn":1,"capabilities":{"events":["session","thinking","…"],"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"tools":true,"ask":true,"schema":"2026-10-20"}}
+{"type":"session","protocol_version":1,"model":"claude-sonnet-5","next_turn":1,"capabilities":{"events":["session","thinking","…"],"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"tools":true,"ask":true,"schema":"2026-10-24"}}
 {"type":"thinking"}
 {"type":"thinking_delta","text":"…"}
 {"type":"memory","chats":1,"decisions":1,"sessions":[{"id":"20261019-142233-a1b2c3","name":"asyncio timeouts in the scraper","updated":"2026-10-19T14:40:02Z"}]}
@@ -239,7 +239,7 @@ diagnostics, as ever. Without the flag every verb prints exactly what it did
 before.
 
 ```jsonl
-{"type":"job","verb":"models pull","protocol_version":1,"schema":"2026-10-20"}
+{"type":"job","verb":"models pull","protocol_version":1,"schema":"2026-10-24"}
 {"type":"notice","text":"pulling org/model, then converting it to F16 and registering it"}
 {"type":"stage","index":1,"count":3,"label":"pull org/model's full weights","state":"started"}
 {"type":"bytes","done":67108864,"total":4971201024,"file":"model-00001-of-00002.safetensors","index":1,"count":4}
@@ -250,14 +250,14 @@ before.
 ```
 
 ```jsonl
-{"type":"job","verb":"video compose","protocol_version":1,"schema":"2026-10-20"}
+{"type":"job","verb":"video compose","protocol_version":1,"schema":"2026-10-24"}
 {"type":"notice","text":"plan: \"Tides\" -- 2 scenes, about 5.5 s of video"}
 {"type":"scene","scene":1,"scenes":2,"state":"speaking"}
-{"type":"ready","device":"mps","scene":1}
+{"type":"ready","device":"mps","engine":"torch","scene":1}
 {"type":"segment","index":1,"of":1,"seconds":2.4,"scene":1}
 …
 {"type":"scene","scene":1,"scenes":2,"state":"rendering"}
-{"type":"ready","device":"mps","dtype":"bfloat16","mode":"t2v","scene":1}
+{"type":"ready","device":"mps","dtype":"bfloat16","mode":"t2v","engine":"torch","scene":1}
 {"type":"step","step":1,"steps":50,"scene":1}
 …
 {"type":"frames","frames":73,"width":1280,"height":704,"scene":1}
@@ -271,7 +271,7 @@ before.
 | `job` | First: the `verb`, `protocol_version` and `schema` — the same versions a session's announce. |
 | `stage` | A step of `models pull`'s chain (`--safetensors --register[-with]`): `index` of `count`, its `label` in the chain's words, `state` `started`, `done` or `failed`. A failed stage is followed by the chain's own `notice`s saying where it stopped and the one command that resumes it. |
 | `bytes` | Bytes a pull has moved — a download, a copy from the Ollama store, a hash: `done`, and `total` **only when known** (never guessed). In a tree of files (a snapshot, an MLX model, a pipeline, a voice model), the `file` moving and its `index` of `count`. Sent at each file's start, at each whole percent of a known total (each 16 MiB of an unknown one), and at its end. |
-| `ready` | A runtime loaded: `device`, and `dtype` and `mode` (`t2v`, `i2v`) when the driver says them. |
+| `ready` | A runtime loaded: `device`, and `dtype` and `mode` (`t2v`, `i2v`) when the driver says them. Since M24 `video generate`'s, `voice say`'s and a composition's also carry `engine`, the engine the run takes — `torch` or `mlx` — the same word the final document's `engine` says, so a run is known as MLX's while it runs. A `ready` without it (an older build) is PyTorch's. |
 | `step` | A denoising step done: `step` of `steps`. |
 | `frames` | A clip's frames written: `frames`, `width`, `height`. |
 | `assembling` | Those `frames` going into the clip. |
@@ -1119,7 +1119,11 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   --safetensors` on such a set fetches what is missing into it, its id
   unchanged. It is `null` for every other set and on every other format; the
   text says the same in the `diffusion:` line, with the pull that completes
-  the set and what runs the model today. A backend's document has no `data`.
+  the set and what runs the model on each of `video generate`'s engines: its
+  Diffusers pipeline on PyTorch, and its MLX conversion through mlx-video --
+  said made, by handle, where an MLX video model converted from the set (its
+  record's `ref` naming the set, its `transform` mlx-video's converter) stands
+  in the store (M24). A backend's document has no `data`.
 - **`chats list`**: newest first, each conversation's `id`, `updated`, `turns`
   and `name`, and since 52a the `backend` it runs on and the roster `model` it
   pinned there with `-m` or `/model` — empty when it runs on the backend's own

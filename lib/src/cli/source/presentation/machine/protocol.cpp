@@ -237,10 +237,11 @@ constexpr std::array<FieldSpec, 5> kBytes{{
 constexpr FieldSpec kScene{
     "scene", "integer", false, "In a composition: the scene this belongs to, from 1.", {}, {}};
 
-constexpr std::array<FieldSpec, 4> kReady{{
+constexpr std::array<FieldSpec, 5> kReady{{
     {"device", "string", true, "Where the runtime runs: cuda, mps, cpu.", {}, {}},
     {"dtype", "string", false, "The precision it loaded in, when the driver says.", {}, {}},
     {"mode", "string", false, "A clip's: t2v or i2v.", {}, {}},
+    {"engine", "string", false, "The engine the run takes: torch or mlx.", {}, {}},
     kScene,
 }};
 

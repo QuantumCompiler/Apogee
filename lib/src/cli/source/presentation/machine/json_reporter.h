@@ -217,9 +217,10 @@ public:
                     std::size_t count);
 
     /// `ready`: a runtime loaded -- its device, and its dtype and mode where
-    /// the driver says them.
+    /// the driver says them, and since M24 the engine the run takes (`torch`,
+    /// `mlx`) where the job says it.
     void emit_ready(std::string_view device, std::string_view dtype, std::string_view mode,
-                    std::size_t scene);
+                    std::size_t scene, std::string_view engine = {});
 
     /// `step`: a denoising step, `step` of `steps`.
     void emit_step(int step, int steps, std::size_t scene);

@@ -641,6 +641,13 @@ TEST_CASE("Wan's original layout is mlx-video's to convert, at the precisions it
     // The module the pinned commit holds its converter in -- neither README's.
     CHECK(apogee::training::mlx_converter_entry(MlxConverterKind::MlxVideo) ==
           "mlx_video.models.wan_2.convert");
+    // The package its record's transform begins with is the one the store
+    // knows an MLX video model made from a set by (M24): one word, both ends.
+    CHECK(apogee::training::mlx_converter_package(MlxConverterKind::MlxVideo) ==
+          apogee::models::kMlxVideoConverterPackage);
+    CHECK(
+        std::string{apogee::training::mlx_converter_entry(MlxConverterKind::MlxVideo)}.starts_with(
+            std::string{apogee::models::kMlxVideoConverterPackage} + "."));
     CHECK(apogee::training::mlx_converter_set(MlxConverterKind::MlxVideo) ==
           apogee::training::RequirementSet::MlxVideo);
     // Its argv is the one table's, led by its route.

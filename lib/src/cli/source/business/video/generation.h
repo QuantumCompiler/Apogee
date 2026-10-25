@@ -82,7 +82,8 @@ struct VideoReady {
     std::string diffusers;
     /// The engine the driver says it runs (53l) -- `mlx` from the MLX
     /// driver, empty from the PyTorch one, which predates the word -- and on
-    /// MLX the versions that ran.
+    /// MLX the versions that ran. A generation's own events say the engine
+    /// its request takes, `torch` or `mlx`, whatever the driver wrote (M24).
     std::string engine{};
     std::string mlx{};
     std::string mlx_video{};

@@ -9,9 +9,11 @@
 #include <memory>
 #include <random>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
+#include "cli/job_stream.h"
 #include "contracts/video_run.h"
 #include "modelstore/snapshot.h"
 #include "platform/ffmpeg.h"
@@ -287,6 +289,51 @@ TEST_CASE("voice say speaks an MLX voice model on MLX, its record saying so",
     CHECK(apogee::commands::narrate_voice_event({.kind = apogee::video::VoiceEvent::Kind::Ready,
                                                  .ready = {.device = "gpu", .engine = "mlx"}}) ==
           "speaking on MLX (gpu)");
+}
+
+TEST_CASE("the streamed ready says the engine a speech runs on, on both engines",
+          "[cli][voice][say][engine][job]") {
+    // M24: the `ready` event the stream relays (52b) carries the speech's
+    // engine, its device as it was -- the same word the record says.
+    const auto streamed = [](Run& run) {
+        std::ostringstream out;
+        apogee::commands::JsonReporter events{out};
+        VoiceSaySeams seams = run.seams();
+        seams.on_event = [&events](const apogee::video::VoiceEvent& event) {
+            apogee::commands::relay_voice_event(events, event, 0);
+        };
+        const VoiceSayResult result = apogee::commands::say_text(run.roots, run.options, seams, {});
+        INFO(result.error);
+        REQUIRE(result.exit_code == 0);
+        std::vector<nlohmann::json> ready;
+        std::istringstream lines{out.str()};
+        for (std::string line; std::getline(lines, line);) {
+            const nlohmann::json event = nlohmann::json::parse(line);
+            if (event.at("type") == "ready") {
+                ready.push_back(event);
+            }
+        }
+        REQUIRE(ready.size() == 1);
+        CHECK(ready.front().at("engine") == result.document.at("engine"));
+        return ready.front();
+    };
+    // PyTorch's driver says no engine: the speech's is said for it.
+    Run torch;
+    CHECK(streamed(torch) ==
+          nlohmann::json{{"type", "ready"}, {"device", "cpu"}, {"engine", "torch"}});
+    // mlx-audio's build of Kokoro, as 53m's case runs it.
+    Run mlx;
+    apogee::testing::write_mlx_voice_model(mlx.roots.models / "hexgrad--Kokoro-82M" / "mlx" /
+                                           "bbbbbbbbbbbb");
+    mlx.options.model = "hexgrad--Kokoro-82M/mlx/bbbbbbbbbbbb";
+    mlx.readiness = apogee::video::VideoReadiness{.interpreter = "/venv/bin/python",
+                                                  .driver = "/scripts/voice_say_mlx.py",
+                                                  .engine = apogee::video::VideoEngine::Mlx,
+                                                  .mlx_version = "0.32.4",
+                                                  .mlx_audio_version = "0.6.1"};
+    mlx.ready_line =
+        R"({"event": "ready", "device": "gpu", "engine": "mlx", "mlx": "0.32.4", "mlx_audio": "0.6.1", "sample_rate": 24000})";
+    CHECK(streamed(mlx) == nlohmann::json{{"type", "ready"}, {"device", "gpu"}, {"engine", "mlx"}});
 }
 
 TEST_CASE("voice say's --engine only names the model's engine, or is refused before anything",

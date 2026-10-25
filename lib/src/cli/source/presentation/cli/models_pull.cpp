@@ -361,10 +361,12 @@ namespace {
 
 /// How a pull of a SafeTensors set ends, standalone: what to do next with
 /// what it is. A diffusion model's weights say what they are and what runs
-/// them (M20, 53j) -- no conversion takes them.
-void print_snapshot_next(const std::filesystem::path& dir, const std::string& repo_id) {
+/// them (M20, 53j) -- its MLX conversion said made where one stands in the
+/// store under `roots` (M24).
+void print_snapshot_next(const models::StoreRoots& roots, const std::filesystem::path& dir,
+                         const std::string& repo_id) {
     if (const std::optional<models::DiffusionModel> diffusion =
-            models::snapshot_diffusion_model(dir, installed_mlx_video_converts())) {
+            models::stored_diffusion_model(roots, dir, installed_mlx_video_converts())) {
         std::cout << "\nThe set is " << models::describe_diffusion_model(*diffusion) << "\n";
         return;
     }
@@ -529,7 +531,7 @@ PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& r
                 pulled.completed =
                     complete_stored_snapshot(client, *parsed, existing, gaps, token, cancellation);
                 if (!chained) {
-                    print_snapshot_next(existing, parsed->repo_id());
+                    print_snapshot_next(roots, existing, parsed->repo_id());
                 }
             }
             return pulled;
@@ -603,7 +605,7 @@ PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& r
               << "verified: " << result.files << " file(s), " << human_size(result.bytes) << ", "
               << digests << " checked against a published sha256\n";
     if (!chained) {
-        print_snapshot_next(final_dir, parsed->repo_id());
+        print_snapshot_next(roots, final_dir, parsed->repo_id());
     }
     return PulledSnapshot{
         .model = model, .id = final_dir.filename().string(), .dir = final_dir, .completed = {}};
@@ -891,7 +893,8 @@ SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view
                                                   models::draft_head_bases(roots, *head));
         choice.path.clear();
     } else if (const std::optional<models::DiffusionModel> diffusion =
-                   models::snapshot_diffusion_model(choice.path, installed_mlx_video_converts());
+                   models::stored_diffusion_model(roots, choice.path,
+                                                  installed_mlx_video_converts());
                diffusion.has_value() && !(videos && diffusion->mlx_convertible())) {
         // Neither language model's converter takes one (M20): refused before
         // any Python starts, saying what it is -- for Wan's original layout,

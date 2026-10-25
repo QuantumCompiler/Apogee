@@ -245,16 +245,19 @@ const std::string kMissingLine =
     "into this set; once it is complete, mlx-video converts it to an MLX video model (--mlx), "
     "and is not installed in Apogee's Python environment -- 'apogee train setup --with "
     "mlx-video'; llama.cpp's converter takes no diffusion model -- it finds a model by its "
-    "architectures; what runs this model today is its Diffusers pipeline in 'apogee video "
-    "generate', pulled whole with 'apogee models pull Wan-AI/Wan2.2-TI2V-5B-Diffusers'\n";
+    "architectures; what runs this model in 'apogee video generate' is its Diffusers pipeline "
+    "on PyTorch, pulled whole with 'apogee models pull Wan-AI/Wan2.2-TI2V-5B-Diffusers', or its "
+    "MLX conversion on MLX through mlx-video, once made\n";
 
 const std::string kCompleteLine =
     "diffusion:    Wan's original layout (WanModel), complete -- its transformer beside "
     "models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth; mlx-video converts it to an MLX video "
     "model (--mlx), and is not installed in Apogee's Python environment -- 'apogee train setup "
     "--with mlx-video'; llama.cpp's converter takes no diffusion model -- it finds a model by "
-    "its architectures; what runs this model today is its Diffusers pipeline in 'apogee video "
-    "generate', pulled whole with 'apogee models pull Wan-AI/Wan2.2-TI2V-5B-Diffusers'\n";
+    "its architectures; what runs this model in 'apogee video generate' is its Diffusers "
+    "pipeline on PyTorch, pulled whole with 'apogee models pull "
+    "Wan-AI/Wan2.2-TI2V-5B-Diffusers', or its MLX conversion on MLX through mlx-video, once "
+    "made\n";
 
 }  // namespace
 
@@ -499,9 +502,10 @@ TEST_CASE(
         "into this set; once it is complete, mlx-video converts it to an MLX video model "
         "(--mlx), and is not installed in Apogee's Python environment -- 'apogee train setup "
         "--with mlx-video'; llama.cpp's converter takes no diffusion model -- it finds a model "
-        "by its architectures; what runs this model today is its Diffusers pipeline in 'apogee "
-        "video generate', pulled whole with 'apogee models pull "
-        "Wan-AI/Wan2.2-TI2V-5B-Diffusers'\n";
+        "by its architectures; what runs this model in 'apogee video generate' is its Diffusers "
+        "pipeline on PyTorch, pulled whole with 'apogee models pull "
+        "Wan-AI/Wan2.2-TI2V-5B-Diffusers', or its MLX conversion on MLX through mlx-video, once "
+        "made\n";
     std::string out;
     // The user's command, and the GGUF form, refused alike before anything runs.
     CHECK(pull.home.run({"models", "convert", handle, "--mlx"}, &out) != 0);
@@ -579,8 +583,10 @@ TEST_CASE(
     const std::string handle = "Wan-AI--Wan2.2-TI2V-5B/safetensors/" + dir.filename().string();
     const std::string tail =
         "llama.cpp's converter takes no diffusion model -- it finds a model by its "
-        "architectures; what runs this model today is its Diffusers pipeline in 'apogee video "
-        "generate', pulled whole with 'apogee models pull Wan-AI/Wan2.2-TI2V-5B-Diffusers'\n";
+        "architectures; what runs this model in 'apogee video generate' is its Diffusers "
+        "pipeline on PyTorch, pulled whole with 'apogee models pull "
+        "Wan-AI/Wan2.2-TI2V-5B-Diffusers', or its MLX conversion on MLX through mlx-video, once "
+        "made\n";
     std::string out;
 
     // mlx-video installed, the set not whole: the checkpoints alone named.

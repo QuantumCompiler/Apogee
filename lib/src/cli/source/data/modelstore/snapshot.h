@@ -204,6 +204,12 @@ struct DiffusionModel {
     /// read it (`VideoConverts`): nullopt when not asked, and then the wording
     /// names mlx-video's conversion without saying whether it is there.
     std::optional<bool> mlx_video{};
+    /// The MLX video models converted from this set that stand in the store
+    /// (M24), by handle (`<model>/mlx/<id>`) -- found by their own records,
+    /// never by a name (`mlx_video_conversions`, `store.h`). Empty when none
+    /// stands, and when the store was not asked: the wording then says the
+    /// conversion is to be made.
+    std::vector<std::string> mlx_conversions{};
 
     /// Wan's original layout, whole, with mlx-video installed (53k): what
     /// `models convert --mlx` takes to an MLX video model.
@@ -225,20 +231,35 @@ struct DiffusionModel {
 /// complete or what it lacks and the pull that fetches it; that mlx-video
 /// converts it to MLX once it is complete, and whether mlx-video is installed
 /// with the setup that installs it (53k); that llama.cpp's converter takes
-/// none; and what runs the model today: "Wan's original layout (WanModel),
-/// missing models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth -- 'apogee
-/// models pull <ref> --safetensors' fetches them into this set; once it is
-/// complete, mlx-video converts it to an MLX video model (--mlx), and is not
-/// installed in Apogee's Python environment -- 'apogee train setup --with
-/// mlx-video'; llama.cpp's converter takes no diffusion model -- it finds a
-/// model by its architectures; what runs this model today is its Diffusers
-/// pipeline in 'apogee video generate', pulled whole with 'apogee models pull
-/// <ref>-Diffusers'".
+/// none; and what runs the model on each of `video generate`'s engines (M24)
+/// -- its Diffusers pipeline on PyTorch, and its MLX conversion through
+/// mlx-video, said made by handle where one stands (`mlx_conversions`):
+/// "Wan's original layout (WanModel), missing
+/// models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth -- 'apogee models pull
+/// <ref> --safetensors' fetches them into this set; once it is complete,
+/// mlx-video converts it to an MLX video model (--mlx), and is not installed
+/// in Apogee's Python environment -- 'apogee train setup --with mlx-video';
+/// llama.cpp's converter takes no diffusion model -- it finds a model by its
+/// architectures; what runs this model in 'apogee video generate' is its
+/// Diffusers pipeline on PyTorch, pulled whole with 'apogee models pull
+/// <ref>-Diffusers', or its MLX conversion on MLX through mlx-video, once
+/// made".
 [[nodiscard]] std::string describe_diffusion_model(const DiffusionModel& model);
 
 /// The refusal a conversion of one says, `subject` its name or path.
 [[nodiscard]] std::string diffusion_model_refusal(std::string_view subject,
                                                   const DiffusionModel& model);
+
+/// The refusal a run of Wan's original layout says (M24): `video generate`
+/// handed the set itself, which no engine runs as it lies. `subject` names
+/// what was given with its verb -- "'<name>' is", "'<model>' holds" -- and
+/// `handle` the set as `models convert` takes it. Then, in the description's
+/// words: its Diffusers pipeline on PyTorch, and its MLX conversion through
+/// mlx-video -- made, by handle, or `apogee models convert <handle> --mlx`,
+/// after the pull of what the set lacks when it is not whole. Empty for a
+/// diffusion model that is no Wan layout.
+[[nodiscard]] std::string wan_layout_run_refusal(std::string_view subject, std::string_view handle,
+                                                 const DiffusionModel& model);
 
 /// An **embedding model** (M21, 2026-10-21): a checkpoint sentence-transformers
 /// publishes as a pipeline -- the transformer, then pooling and, for some,

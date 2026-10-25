@@ -182,11 +182,14 @@ VoiceOutcome speak(const VideoReadiness& readiness, const VoiceRequest& request,
     const training::ScriptOutcome ran = training::run_script(
         script,
         [&](const training::ScriptEvent& line) {
-            const std::optional<VoiceEvent> event = read_voice_event(line);
+            std::optional<VoiceEvent> event = read_voice_event(line);
             if (!event.has_value()) {
                 return;
             }
             if (event->kind == VoiceEvent::Kind::Ready) {
+                // The engine the speech takes, said from the moment it is
+                // ready (M24): the request's, as its record says it.
+                event->ready.engine = std::string{to_string(request.engine)};
                 out.ready = event->ready;
             } else if (event->kind == VoiceEvent::Kind::Segment) {
                 segments.push_back(*event);

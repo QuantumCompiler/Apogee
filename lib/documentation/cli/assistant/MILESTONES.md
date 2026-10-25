@@ -10220,3 +10220,39 @@ The refusal was true but incomplete. The set is Wan's original layout, and its r
 **Not done:**
 - No row reports the `mlx` library's own version, so mlx-audio's exact `mlx==0.32.4` pin moving `mlx` under the other sets is still unsaid.
 - `train setup`'s "Nothing installed yet" hint is still a hand-written list.
+
+### 2026-10-24 — `mlx-engine-said-everywhere` (maintenance item M24): the MLX engine said wherever a run is described
+
+**Why.** Since 53l and 53m, `video generate` and `voice say` each run on two engines, and the record says which. Three places still spoke as if PyTorch were the only one:
+- **A Wan set's description** ended "what runs this model today is its Diffusers pipeline". That is the same text as `models info`'s `diffusion:` line, the conversion's refusal and the pull's hint.
+- **The streamed events** carried no engine.
+- **`video generate` handed a Wan original layout** didn't name the conversion that makes it runnable.
+
+- [x] **The description names both engines, true to the store** (`describe_diffusion_model`). It closes: "what runs this model in 'apogee video generate' is its Diffusers pipeline on PyTorch, pulled whole with '… -Diffusers', or its MLX conversion on MLX through mlx-video". That ends ", once made", or ", made as <handle>" (and "made as A and B") where a conversion stands.
+  - **How a conversion is found:** by the converted directory's own record. Its `ref` resolves to the set as a store handle or a path, and its `transform` starts with `mlx_video.` (`kMlxVideoConverterPackage`, tied by test to the training layer's converter name).
+  - **Where it searches:** every MLX directory in the store, never by a name.
+  - **Which callers can say "made":** only those that pass the store (`stored_diffusion_model`).
+- [x] **The streamed `ready` event carries `engine`** (`torch` or `mlx`) for `video generate`, `voice say` and `video compose`. It comes from the run's request, so the stream agrees with the final document. It is declared optional in the protocol and documented in `machine-mode.md`.
+  - Before: `{"type":"ready","device":"mps","dtype":"bfloat16","mode":"t2v"}`.
+  - After: the same with `"engine":"torch"`, or `"engine":"mlx"` on MLX.
+- [x] **`video generate -m <a Wan original layout>`,** by handle, name or path, refuses naming both ways. Not whole, it reads "'H' is Wan's original layout (WanModel), not a pipeline or an MLX video model -- what runs it is its Diffusers pipeline on PyTorch, pulled whole with 'apogee models pull Wan-AI/Wan2.2-TI2V-5B-Diffusers', or its MLX conversion on MLX through mlx-video, made with 'apogee models convert H --mlx' once the set is complete: it lacks … which 'apogee models pull … --safetensors' fetches". Once converted, it names the conversion: "made as <handle> -- name it with --model".
+
+**Decisions made while building** (2026-10-24, each recorded for veto):
+- **The open call's default, taken:** a conversion is found by its record (`ref` and `transform`), never by name.
+- **The protocol's vocabulary date moved to `2026-10-24`,** by its rule that a new field moves it. The two machine goldens and `machine-mode.md`'s examples follow. The macOS app's `schema >= "2026-10-20"` check still passes.
+- **The `video generate` refusal doesn't ask whether mlx-video is installed,** so it stays deterministic. `models convert --mlx` names the setup itself.
+- **A converted set's earlier clause still reads "--mlx converts it…"** beside the closing "made as …". Only the closing sentence changed, as the item scoped it.
+
+**Verified.**
+- 5 new cases:
+  - the user's Wan set described not whole, convertible and converted (16 assertions);
+  - a conversion known by its record, never by a name (10);
+  - the `video generate` refusal by handle, name and path (12);
+  - the streamed `ready` naming the engine for a clip and for a speech, on both engines (20).
+- Two checks joined `mlx_convert_test`. The old wording was updated in 10 places.
+- `video_e2e.sh` checks `engine` in the streamed generation and speech on both engines, and the Wan refusal on the real binary. `mlx_models_e2e.sh` checks "once made" before a conversion and "made as" after.
+- The neighbouring suites pass: `[engines]`, `[wan]`, `[diffusion]`, `[mlx_video]`, `[video]`, `[voice]`, `[job]`, `[machine]`, `[golden]` and `[convert]`.
+- These ctest cases pass: `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`, `cli.video_lifecycle` (its MLX sections run), `cli.mlx_models_lifecycle`, `cli.machine_schema_conformance` and `cli.machine_mode`.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,880 tests and the macOS app's 449 cases passed, with no warning.
+
+**Not done:** `models info --output-format json` has no typed field for the conversions. The description says them, and "made from it" lists their handles.

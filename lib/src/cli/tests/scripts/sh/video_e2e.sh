@@ -165,6 +165,8 @@ assert types[0] == "job" and events[0]["verb"] == "video generate", types
 assert types[-1] == "document", types
 ready = [e for e in events if e["type"] == "ready"]
 assert ready and ready[0]["device"] == "cpu" and ready[0]["dtype"] == "float32", ready
+# The engine the run takes, said as it runs (M24): the record's own word.
+assert ready[0]["engine"] == "torch" == events[-1]["document"]["engine"], ready
 steps = [(e["step"], e["steps"]) for e in events if e["type"] == "step"]
 assert steps == [(1, 2), (2, 2)], steps
 assert types.index("ready") < types.index("step") < types.index("frames") < types.index("assembling"), types
@@ -386,6 +388,8 @@ assert "ready" in types and "segment" in types and types[-1] == "document", type
 segment = next(e for e in events if e["type"] == "segment")
 assert segment["index"] == 1 and segment["of"] >= 1 and segment["seconds"] > 0, segment
 assert events[-1]["document"] == json.load(open(sys.argv[2])), "the document is not the record"
+ready = next(e for e in events if e["type"] == "ready")
+assert ready["engine"] == "torch" == events[-1]["document"]["engine"], ready
 PY
 # Ctrl-C mid-stream: 130, every line whole, the last an error.
 rm -f "$VOICE_RECORD"
@@ -700,6 +704,27 @@ for stream in out err; do
 done
 [ -z "$(ls -A "$APOGEE_HOME/cache/video")" ] || fail "an MLX run left its working directory"
 
+# The same run as events (M24): its ready says MLX while it runs.
+generate mlx_stream -o "$WORK_DIR/out/mlx-stream.mp4" --model "$MLX_HANDLE" --output-format stream-json
+[ "$STATUS" -eq 0 ] || fail "the streamed MLX generation failed ($STATUS): $(cat "$WORK_DIR/mlx_stream.err")"
+python3 - "$WORK_DIR/mlx_stream.out" <<'PY' || fail "the MLX generation's stream: $(cat "$WORK_DIR/mlx_stream.out")"
+import json, sys
+events = [json.loads(line) for line in open(sys.argv[1])]
+types = [e["type"] for e in events]
+ready = [e for e in events if e["type"] == "ready"]
+assert len(ready) == 1 and ready[0]["engine"] == "mlx" and ready[0]["device"] == "gpu", ready
+assert types.index("ready") < types.index("step") and types[-1] == "document", types
+assert events[-1]["document"]["engine"] == "mlx", events[-1]
+PY
+
+# The Wan set itself is no model a run takes (M24): the refusal names the
+# MLX conversion made of it, by its handle, and the pipeline it could pull.
+generate wan_set -o "$WORK_DIR/out/wan-set.mp4" --model "Wan-AI--Wan2.2-TI2V-5B/safetensors/dddddddddddd"
+[ "$STATUS" -eq 1 ] || fail "the Wan set itself ran ($STATUS)"
+grep -qF "'Wan-AI--Wan2.2-TI2V-5B/safetensors/dddddddddddd' is Wan's original layout (WanModel), not a pipeline or an MLX video model -- what runs it is its Diffusers pipeline on PyTorch, pulled whole with 'apogee models pull Wan-AI/Wan2.2-TI2V-5B-Diffusers', or its MLX conversion on MLX through mlx-video, made as $MLX_HANDLE -- name it with --model" \
+    "$WORK_DIR/wan_set.err" || fail "the Wan set's refusal: $(cat "$WORK_DIR/wan_set.err")"
+[ ! -e "$WORK_DIR/out/wan-set.mp4" ] || fail "a refused run wrote a clip"
+
 # An engine its model does not run on: refused before anything runs.
 generate mlx_torch -o "$WORK_DIR/out/mlx-torch.mp4" --model "$MLX_HANDLE" --engine torch
 [ "$STATUS" -eq 1 ] || fail "an MLX video model ran on --engine torch ($STATUS)"
@@ -842,6 +867,21 @@ for stream in out err; do
     fi
 done
 [ -z "$(ls -A "$APOGEE_HOME/cache/video")" ] || fail "an MLX speech left its working directory"
+
+# The same speech as events (M24): its ready says MLX while it speaks.
+set +e
+"$APOGEE_BIN" voice say "Hello there." --model "$VOICE_MLX_HANDLE" -o "$WORK_DIR/out/hello-mlx-stream.wav" \
+    --output-format stream-json </dev/null >"$WORK_DIR/voice-mlx-stream.out" 2>"$WORK_DIR/voice-mlx-stream.err"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 0 ] || fail "the streamed MLX speech failed ($STATUS): $(cat "$WORK_DIR/voice-mlx-stream.err")"
+python3 - "$WORK_DIR/voice-mlx-stream.out" <<'PY' || fail "the MLX speech's stream: $(cat "$WORK_DIR/voice-mlx-stream.out")"
+import json, sys
+events = [json.loads(line) for line in open(sys.argv[1])]
+ready = [e for e in events if e["type"] == "ready"]
+assert len(ready) == 1 and ready[0] == {"type": "ready", "device": "gpu", "engine": "mlx"}, ready
+assert events[-1]["type"] == "document" and events[-1]["document"]["engine"] == "mlx", events[-1]
+PY
 
 # An engine its model does not speak on: refused before anything runs.
 set +e

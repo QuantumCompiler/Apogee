@@ -334,7 +334,7 @@ void with_scene(nlohmann::json& object, std::size_t scene) {
 }  // namespace
 
 void JsonReporter::emit_ready(std::string_view device, std::string_view dtype,
-                              std::string_view mode, std::size_t scene) {
+                              std::string_view mode, std::size_t scene, std::string_view engine) {
     nlohmann::json object = event("ready");
     object["device"] = std::string{device};
     if (!dtype.empty()) {
@@ -342,6 +342,9 @@ void JsonReporter::emit_ready(std::string_view device, std::string_view dtype,
     }
     if (!mode.empty()) {
         object["mode"] = std::string{mode};
+    }
+    if (!engine.empty()) {
+        object["engine"] = std::string{engine};
     }
     with_scene(object, scene);
     write(object);

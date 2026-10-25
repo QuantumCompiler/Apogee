@@ -317,6 +317,38 @@ private:
     return {};
 }
 
+/// The refusal of Wan's original layout handed to a run (M24) -- the set at
+/// `dir`, `handle` as `models convert` takes it, `subject` what was given
+/// with its verb -- or empty when the set there is none.
+[[nodiscard]] std::string wan_refusal(const models::StoreRoots& roots, std::string_view subject,
+                                      std::string_view handle, const std::filesystem::path& dir) {
+    const std::optional<models::DiffusionModel> diffusion =
+        models::stored_diffusion_model(roots, dir);
+    return diffusion.has_value() ? models::wan_layout_run_refusal(subject, handle, *diffusion)
+                                 : std::string{};
+}
+
+/// The same for a model's SafeTensors set named in the store: the one its
+/// id names, else its newest -- the one `models convert` reads.
+[[nodiscard]] std::string stored_wan_refusal(const models::StoreRoots& roots,
+                                             std::string_view subject,
+                                             const models::StoreTarget& target) {
+    if (!target.id.empty()) {
+        return wan_refusal(
+            roots, subject,
+            models::weights_handle(target.model, models::kSafetensorsFormat, target.id),
+            target.path);
+    }
+    const std::optional<models::StoredSnapshot> newest =
+        models::newest_snapshot(roots, target.model);
+    return newest.has_value()
+               ? wan_refusal(
+                     roots, subject,
+                     models::weights_handle(newest->model, models::kSafetensorsFormat, newest->id),
+                     newest->dir)
+               : std::string{};
+}
+
 }  // namespace
 
 std::string parse_lora(std::string_view given, std::filesystem::path& path, double& scale) {
@@ -419,6 +451,12 @@ std::string resolve_video_pipeline(const models::StoreRoots& roots, std::string_
         // A directory outside the store runs on what it is (53l).
         const std::optional<video::VideoEngine> engine = video::engine_of_directory(target.path);
         if (!engine.has_value()) {
+            // Wan's original layout is said with what runs it (M24).
+            if (std::string wan = wan_refusal(roots, target.path.string() + " is",
+                                              target.path.string(), target.path);
+                !wan.empty()) {
+                return wan;
+            }
             return target.path.string() +
                    " is not a pipeline (no model_index.json), nor an MLX video model";
         }
@@ -438,6 +476,14 @@ std::string resolve_video_pipeline(const models::StoreRoots& roots, std::string_
         out.engine = video::VideoEngine::Mlx;
     } else if (!target.format.empty() && target.format != models::kPipelineFormat &&
                target.format != models::kMlxFormat) {
+        // Wan's original layout (53j) is said with what runs it (M24).
+        if (target.format == models::kSafetensorsFormat) {
+            if (std::string wan =
+                    stored_wan_refusal(roots, "'" + std::string{name} + "' is", target);
+                !wan.empty()) {
+                return wan;
+            }
+        }
         return "'" + std::string{name} + "' is " +
                (target.format == models::kGgufFormat ? std::string{"a GGUF"}
                                                      : "a " + target.format + " model") +
@@ -463,6 +509,13 @@ std::string resolve_video_pipeline(const models::StoreRoots& roots, std::string_
             }
         }
         if (found.empty()) {
+            // Its Wan set, as Wan publishes it beside the pipeline, said with
+            // what runs it (M24).
+            if (std::string wan =
+                    stored_wan_refusal(roots, "'" + std::string{name} + "' holds", target);
+                !wan.empty()) {
+                return wan;
+            }
             return "'" + std::string{name} +
                    "' holds no pipeline and no MLX video model -- 'apogee models list' shows "
                    "the store's";

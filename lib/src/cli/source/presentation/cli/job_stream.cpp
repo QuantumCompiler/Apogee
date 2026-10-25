@@ -137,7 +137,8 @@ void relay_video_event(JsonReporter& events, const video::VideoEvent& event, std
             events.on_notice(event.text);
             return;
         case Kind::Ready:
-            events.emit_ready(event.ready.device, event.ready.dtype, event.ready.mode, scene);
+            events.emit_ready(event.ready.device, event.ready.dtype, event.ready.mode, scene,
+                              event.ready.engine);
             return;
         case Kind::Step:
             events.emit_step(event.step, event.steps, scene);
@@ -158,7 +159,7 @@ void relay_voice_event(JsonReporter& events, const video::VoiceEvent& event, std
             events.on_notice(event.text);
             return;
         case Kind::Ready:
-            events.emit_ready(event.ready.device, {}, {}, scene);
+            events.emit_ready(event.ready.device, {}, {}, scene, event.ready.engine);
             return;
         case Kind::Segment:
             events.emit_segment(event.index, event.of, event.seconds, scene);

@@ -461,6 +461,9 @@ if "$APOGEE_BIN" models convert "$WAN_HANDLE" --mlx >"$WORK_DIR/wan.txt" 2>&1; t
 fi
 grep -q "complete -- its transformer beside models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth; mlx-video converts it to an MLX video model (--mlx), and is not installed" \
     "$WORK_DIR/wan.txt" || fail "the refusal of the whole set did not name mlx-video alone: $(cat "$WORK_DIR/wan.txt")"
+# Both engines that run it named, the MLX conversion still to make (M24).
+grep -qF "what runs this model in 'apogee video generate' is its Diffusers pipeline on PyTorch, pulled whole (a repository with model_index.json at its root), or its MLX conversion on MLX through mlx-video, once made" \
+    "$WORK_DIR/wan.txt" || fail "the refusal did not name both engines: $(cat "$WORK_DIR/wan.txt")"
 "$APOGEE_BIN" models info "$WAN_HANDLE" --output-format json >"$WORK_DIR/wan-info.json" 2>&1 \
     || fail "models info of the Wan set"
 grep -q '"converts_to":\[\]' "$WORK_DIR/wan-info.json" \
@@ -499,6 +502,13 @@ grep -q "kind:         video (recorded) -- a video model" "$WORK_DIR/wan-mlx.txt
     || fail "models info did not say it is a video model: $(cat "$WORK_DIR/wan-mlx.txt")"
 grep -q "files:        whole -- config.json, the T5 text encoder" "$WORK_DIR/wan-mlx.txt" \
     || fail "models info did not read it whole: $(cat "$WORK_DIR/wan-mlx.txt")"
+# The set's own description now says its MLX conversion made, by handle (M24).
+"$APOGEE_BIN" models info "$WAN_HANDLE" >"$WORK_DIR/wan-made.txt" 2>&1 \
+    || fail "models info of the converted Wan set: $(cat "$WORK_DIR/wan-made.txt")"
+grep -qF "diffusion:    Wan's original layout (WanModel), complete" "$WORK_DIR/wan-made.txt" \
+    || fail "models info did not describe the set: $(cat "$WORK_DIR/wan-made.txt")"
+grep -qF "is its Diffusers pipeline on PyTorch, pulled whole (a repository with model_index.json at its root), or its MLX conversion on MLX through mlx-video, made as $WAN_MLX" \
+    "$WORK_DIR/wan-made.txt" || fail "models info did not name the conversion made: $(cat "$WORK_DIR/wan-made.txt")"
 # Never a chat backend: the scan says it apart, and registers nothing of it.
 "$APOGEE_BIN" config scan --register >"$WORK_DIR/wan-scan.txt" 2>&1 || fail "config scan --register"
 grep -q "not registered -- a video model" "$WORK_DIR/wan-scan.txt" \

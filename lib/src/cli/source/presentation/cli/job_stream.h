@@ -81,12 +81,13 @@ private:
 /// the verb has a document.
 void add_job_format(CLI::App* command, const std::shared_ptr<JobFormat>& format, bool document);
 
-/// A clip's driver event as the stream says it: `ready`, `step`, `frames`,
-/// `assembling`, a message as a `notice`. `scene` is 0 outside a composition.
+/// A clip's driver event as the stream says it: `ready` (with the run's
+/// engine since M24), `step`, `frames`, `assembling`, a message as a
+/// `notice`. `scene` is 0 outside a composition.
 void relay_video_event(JsonReporter& events, const video::VideoEvent& event, std::size_t scene);
 
-/// A voice driver's event as the stream says it: `ready`, `segment`, a
-/// message as a `notice`.
+/// A voice driver's event as the stream says it: `ready` (with the speech's
+/// engine since M24), `segment`, a message as a `notice`.
 void relay_voice_event(JsonReporter& events, const video::VoiceEvent& event, std::size_t scene);
 
 }  // namespace apogee::commands

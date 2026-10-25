@@ -9,9 +9,11 @@
 #include <iterator>
 #include <memory>
 #include <random>
+#include <sstream>
 #include <string>
 #include <vector>
 
+#include "cli/job_stream.h"
 #include "contracts/sha256.h"
 #include "contracts/video_run.h"
 #include "modelstore/mlx_info.h"
@@ -1005,6 +1007,126 @@ TEST_CASE("the engine is chosen by the model's kind, named every way the store n
               "' holds 2 video models -- name one:\n  " + fixture.handle + "\n  " +
               std::string{apogee::testing::kWanModel} + "/pipeline/dddddddddddd");
     CHECK(resolved.dir.empty());
+}
+
+TEST_CASE(
+    "video generate handed Wan's original layout names the conversion that runs it, and the "
+    "pipeline it could pull",
+    "[cli][video][generate][wan]") {
+    // M24, over 53j's fixture and 53k's converted directory: the refusal of
+    // the set itself says what runs it on each engine, true to the store.
+    Run run;
+    const std::filesystem::path source = apogee::testing::write_user_wan_set(run.roots);
+    const std::string set =
+        std::string{apogee::testing::kWanModel} + "/safetensors/" + source.filename().string();
+    apogee::commands::ResolvedPipeline resolved;
+    const auto resolve = [&](std::string_view given) {
+        resolved = {};
+        return apogee::commands::resolve_video_pipeline(run.roots, given, {}, resolved);
+    };
+    const std::string engines =
+        "Wan's original layout (WanModel), not a pipeline or an MLX video model -- what runs it "
+        "is its Diffusers pipeline on PyTorch, pulled whole with 'apogee models pull "
+        "Wan-AI/Wan2.2-TI2V-5B-Diffusers', or its MLX conversion on MLX through mlx-video, ";
+    const std::string convert = "made with 'apogee models convert " + set + " --mlx'";
+
+    // Not whole: the conversion, once the pull fetches what it lacks.
+    const std::string lacks =
+        " once the set is complete: it lacks models_t5_umt5-xxl-enc-bf16.pth and "
+        "Wan2.2_VAE.pth, which 'apogee models pull Wan-AI/Wan2.2-TI2V-5B --safetensors' fetches";
+    CHECK(resolve(set) == "'" + set + "' is " + engines + convert + lacks);
+    CHECK(resolved.dir.empty());
+    // By its id alone, and by its model's name, the same set said.
+    CHECK(resolve(source.filename().string()) ==
+          "'" + source.filename().string() + "' is " + engines + convert + lacks);
+    CHECK(resolve(apogee::testing::kWanRepo) ==
+          "'" + std::string{apogee::testing::kWanRepo} + "' holds " + engines + convert + lacks);
+
+    // Whole: the conversion to make.
+    apogee::testing::complete_user_wan_set(source);
+    CHECK(resolve(set) == "'" + set + "' is " + engines + convert);
+
+    // Converted: the MLX video model made of it, by its handle, to name.
+    (void)apogee::testing::write_converted_wan(run.roots, source);
+    const std::string made = std::string{apogee::testing::kWanModel} + "/mlx/bbbbbbbbbbbb";
+    CHECK(resolve(set) ==
+          "'" + set + "' is " + engines + "made as " + made + " -- name it with --model");
+    // ...which runs, on MLX.
+    CHECK(resolve(made).empty());
+    CHECK(resolved.engine == apogee::video::VideoEngine::Mlx);
+
+    // A set outside the store, with no record: named by its path, no
+    // repository to pull from.
+    const std::filesystem::path outside = run.dir.path() / "elsewhere" / "wan";
+    apogee::testing::write_fixture_file(outside / "config.json",
+                                        std::string{apogee::testing::kWanTi2vConfig});
+    apogee::testing::write_fixture_file(outside / "diffusion_pytorch_model.safetensors",
+                                        "fake bytes, never weights\n");
+    CHECK(resolve(outside.string()) ==
+          outside.string() +
+              " is Wan's original layout (WanModel), not a pipeline or an MLX video model -- what "
+              "runs it is its Diffusers pipeline on PyTorch, pulled whole (a repository with "
+              "model_index.json at its root), or its MLX conversion on MLX through mlx-video, "
+              "made with 'apogee models convert " +
+              outside.string() +
+              " --mlx' once the set is complete: it lacks models_t5_umt5-xxl-enc-bf16.pth and "
+              "Wan2.2_VAE.pth, which pulling its repository again with --safetensors fetches");
+
+    // Nothing else is said this way: another SafeTensors set, and a model
+    // holding none, keep their refusals.
+    const std::filesystem::path llama =
+        run.roots.models / "org--llama" / "safetensors" / "111111111111";
+    apogee::testing::write_fixture_file(llama / "config.json",
+                                        R"({"architectures": ["LlamaForCausalLM"]})");
+    apogee::testing::write_fixture_file(llama / "model.safetensors", "fake\n");
+    CHECK(resolve("org--llama/safetensors/111111111111") ==
+          "'org--llama/safetensors/111111111111' is a safetensors model, not a pipeline or an MLX "
+          "video model");
+    CHECK(resolve("org--llama") ==
+          "'org--llama' holds no pipeline and no MLX video model -- 'apogee models list' shows "
+          "the store's");
+}
+
+TEST_CASE("the streamed ready says the engine a clip runs on, on both engines",
+          "[cli][video][generate][engine][job]") {
+    // M24: the `ready` event the stream relays (52b) carries the run's
+    // engine, its other fields as they were -- the same word the record says.
+    const auto streamed = [](Run& run) {
+        std::ostringstream out;
+        apogee::commands::JsonReporter events{out};
+        VideoGenerateSeams seams = run.seams();
+        seams.on_event = [&events](const apogee::video::VideoEvent& event) {
+            apogee::commands::relay_video_event(events, event, 0);
+        };
+        const VideoGenerateResult result =
+            apogee::commands::generate_clip(run.config, run.roots, run.options, seams, {});
+        INFO(result.error);
+        REQUIRE(result.exit_code == 0);
+        std::vector<nlohmann::json> ready;
+        std::istringstream lines{out.str()};
+        for (std::string line; std::getline(lines, line);) {
+            const nlohmann::json event = nlohmann::json::parse(line);
+            if (event.at("type") == "ready") {
+                ready.push_back(event);
+            }
+        }
+        REQUIRE(ready.size() == 1);
+        CHECK(ready.front().at("engine") == result.document.at("engine"));
+        return ready.front();
+    };
+    // PyTorch's driver says no engine: the run's is said for it.
+    Run torch;
+    CHECK(streamed(torch) == nlohmann::json{{"type", "ready"},
+                                            {"device", "mps"},
+                                            {"dtype", "bfloat16"},
+                                            {"mode", "t2v"},
+                                            {"engine", "torch"}});
+    MlxRun mlx;
+    CHECK(streamed(mlx.run) == nlohmann::json{{"type", "ready"},
+                                              {"device", "gpu"},
+                                              {"dtype", "4-bit"},
+                                              {"mode", "t2v"},
+                                              {"engine", "mlx"}});
 }
 
 TEST_CASE("an explicit engine that cannot run is refused before a spawn, naming the setup",

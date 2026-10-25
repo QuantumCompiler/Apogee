@@ -508,9 +508,10 @@ TEST_CASE("a diffusion model is refused by both ladders before any converter run
                      "repository again with --safetensors fetches them into this set; once it "
                      "is complete, mlx-video converts it to an MLX video model (--mlx); "
                      "llama.cpp's converter takes no diffusion model -- it finds a model by its "
-                     "architectures; what runs this model today is its Diffusers pipeline in "
-                     "'apogee video generate', pulled whole (a repository with model_index.json "
-                     "at its root)");
+                     "architectures; what runs this model in 'apogee video generate' is its "
+                     "Diffusers pipeline on PyTorch, pulled whole (a repository with "
+                     "model_index.json at its root), or its MLX conversion on MLX through "
+                     "mlx-video, once made");
     CHECK(apogee::models::conversion_refusal(work.snapshot, work.root.path() / "out.gguf") == mlx);
 }
 

@@ -109,7 +109,7 @@ footprint: suite fast
 {"type":"user","text":"/symphonies"}
 --- exit 0
 --- stdout
-{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":false,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","document"],"schema":"2026-10-20","tools":false},"model":"root","next_turn":1,"protocol_version":1,"type":"session"}
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":false,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","document"],"schema":"2026-10-24","tools":false},"model":"root","next_turn":1,"protocol_version":1,"type":"session"}
 {"text":"stage 1/2 first — asking utility (helper): One: hello","turn":1,"type":"tool_status"}
 {"text":"stage 2/2 second — asking chat (root): Two: HELPER<One: hello>","turn":1,"type":"tool_status"}
 {"turn":1,"type":"answer_start"}

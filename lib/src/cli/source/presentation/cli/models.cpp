@@ -1413,7 +1413,7 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     out << "path:         " << stored.dir.string() << "\n";
     const std::optional<models::DraftHead> head = models::snapshot_draft_head(stored.dir);
     const std::optional<models::DiffusionModel> diffusion =
-        models::snapshot_diffusion_model(stored.dir, installed_mlx_video_converts());
+        models::stored_diffusion_model(roots, stored.dir, installed_mlx_video_converts());
     std::optional<MlxOffer> offer;
     if (head.has_value()) {
         // An MLX drafter, where the installed mlx-vlm drafts its type (53i);

@@ -1118,4 +1118,44 @@ std::vector<std::string> draft_head_bases(const StoreRoots& roots, const DraftHe
     return {found.begin(), found.end()};
 }
 
+std::vector<std::string> mlx_video_conversions(const StoreRoots& roots,
+                                               const std::filesystem::path& dir) {
+    // The same directory however it is spelled: one file on disk, else one
+    // path lexically.
+    const auto same = [](const std::filesystem::path& a, const std::filesystem::path& b) {
+        std::error_code code;
+        return std::filesystem::equivalent(a, b, code) ||
+               a.lexically_normal() == b.lexically_normal();
+    };
+    const std::string made_by = std::string{kMlxVideoConverterPackage} + ".";
+    std::vector<std::string> out;
+    for (const StoredMlx& stored : list_store_mlx(roots)) {
+        const std::optional<Snapshot> record = load_snapshot(stored.dir);
+        if (!record.has_value() || record->ref.empty() || !record->transform.starts_with(made_by)) {
+            continue;
+        }
+        // The set its record names: a handle in the store, or a path.
+        std::filesystem::path source{record->ref};
+        if (const std::optional<WeightsHandle> handle = parse_weights_handle(record->ref)) {
+            source = find_weights_dir(roots, handle->format, handle->model, handle->id);
+        }
+        if (same(source, dir)) {
+            out.push_back(weights_handle(stored.model, kMlxFormat, stored.id));
+        }
+    }
+    std::ranges::sort(out);
+    return out;
+}
+
+std::optional<DiffusionModel> stored_diffusion_model(const StoreRoots& roots,
+                                                     const std::filesystem::path& dir,
+                                                     const VideoConverts& mlx_video) {
+    std::optional<DiffusionModel> model = snapshot_diffusion_model(dir, mlx_video);
+    // Only Wan's original layout converts (53k): nothing else is looked for.
+    if (model.has_value() && model->wan.has_value()) {
+        model->mlx_conversions = mlx_video_conversions(roots, dir);
+    }
+    return model;
+}
+
 }  // namespace apogee::models

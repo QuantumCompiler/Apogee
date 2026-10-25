@@ -196,11 +196,14 @@ VideoOutcome generate_video(const VideoReadiness& readiness, const VideoRequest&
     const training::ScriptOutcome ran = training::run_script(
         script,
         [&](const training::ScriptEvent& line) {
-            const std::optional<VideoEvent> event = read_video_event(line);
+            std::optional<VideoEvent> event = read_video_event(line);
             if (!event.has_value()) {
                 return;
             }
             if (event->kind == VideoEvent::Kind::Ready) {
+                // The engine the run takes, said from the moment it is ready
+                // (M24): the request's, as its record says it.
+                event->ready.engine = std::string{to_string(request.engine)};
                 out.ready = event->ready;
             } else if (event->kind == VideoEvent::Kind::Done) {
                 done = true;
