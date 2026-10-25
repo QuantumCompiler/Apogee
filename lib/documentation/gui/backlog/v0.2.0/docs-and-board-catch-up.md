@@ -13,7 +13,7 @@ This item reconciles them. The board flips each shipped gap to landed after conf
 
 **Seam + files.** `lib/design/spec/html/BuildContract.dc.html` (+ the canvas publish); `lib/documentation/gui/assistant/ROADMAP.md`, `SPEC.md`, `CLAUDE.md`. Checks: the design's node health check green after the edit; a link sweep over the GUI docs.
 
-**Reference.** The design CLAUDE's update law; GUI MILESTONES:718 (gaps flip in ship docs passes); CLI Milestone AO (track 52's ships); [`docs-at-the-release-boundary.md`](../../../cli/backlog/v0.2.0/docs-at-the-release-boundary.md) (CLI 55i, the CLI docs' twin); the CLI/GUI audit (2026-10-22).
+**Reference.** The design CLAUDE's update law; GUI MILESTONES:718 (gaps flip in ship docs passes); CLI Milestone AO (track 52's ships); [CLI 55i](../../../cli/assistant/MILESTONES.md#milestone-ar--the-audits-cli-findings) (the CLI docs' twin, shipped 2026-10-25); the CLI/GUI audit (2026-10-22).
 
 **Decisions made** (dated):
 - 2026-10-22: Specced from the CLI/GUI audit (the user's call). G14's flip lands here, and the app's use of it is [`media-studio-finished.md`](media-studio-finished.md) (4f).

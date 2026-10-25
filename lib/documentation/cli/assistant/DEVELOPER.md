@@ -22,7 +22,7 @@ Requirements: CMake ≥ 3.25, a C++20 compiler, and git. `format` / `lint` addit
 
 Two exist: `lib/src/cli`, a CMake project, and since 2026-10-20 `lib/src/darwin`, the macOS application, an Xcode project whose one entry point from outside is its `scripts/build.sh` (the [GUI docs](../../gui/assistant/DEVELOPER.md) describe it). Both are in the `APPS` list in `lib/scripts/cicd.sh` (`cli darwin`), which knows each one's targets -- the CLI all five, darwin macos-arm64 alone -- and builds every application unless `--app` names some. **Each pipeline names its deliverable**: the CLI's calls `cicd.sh --app cli`, so its macOS jobs never build the app. The Linux and Windows GUI applications join the list the same way.
 
-The build-related files outside an app directory are the one workflow and the one packaging action under `.github/`, because GitHub requires them there. They are deliberately thin callers into `lib/scripts/` — `cicd.sh` to build, `release-from-pr.sh` to release — for exactly that reason.
+The build-related files outside an app directory are the two workflows and the one packaging action under `.github/`, because GitHub requires them there: `ci.yml`, the CLI's pipeline and the only one that releases, and since 2026-10-20 `darwin.yml`, the macOS application's. They are deliberately thin callers into `lib/scripts/` — `cicd.sh` to build, `release-from-pr.sh` to release — for exactly that reason.
 
 ---
 

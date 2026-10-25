@@ -10757,3 +10757,45 @@ The refusal was true but incomplete. The set is Wan's original layout, and its r
 **Not done:**
 - `train status` and `train versions` are still read-only in the HTTP parity table, though served. They are not this item's verbs.
 - A quirk kept for byte-identity: text-mode `train cycle run` prints an empty `-- stage 0/1: ` line before each `[cycle]` line. The golden records it.
+
+### 2026-10-25 — `docs-at-the-release-boundary` (backlog item 55i): v0.1.9 shipped, v0.2.0 is the branch
+
+**Why.** The v0.1.9 → v0.2.0 boundary pass never ran. `lib/release/VERSION` and the CLI's CMake version still read `0.1.9` on the v0.2.0 branch, though `v0.1.9` was tagged at the 2026-10-20 merge of PR #10. So `version-check.sh` was red ("v0.1.9 is already released"), and the v0.2.0 merge would have published nothing. ROADMAP, the root README, CLAUDE.md and DEVELOPER.md still described v0.1.9 as in development, or stated stale facts.
+
+- [x] **The release pointer moved through the repo's own procedure** (`/apogee-maintenance-update-release`, a boundary roll). `lib/release/VERSION` and `lib/src/cli/CMakeLists.txt` read `0.2.0` together, and the binary prints `apogee 0.2.0 (…)`.
+  - `version-check.sh` is green: "merging publishes v0.2.0, with the CLI 0.2.0 this run builds".
+  - One number holds in four places: VERSION, CMake, ROADMAP's In progress header and the earliest backlog table.
+- [x] **ROADMAP's state swap.**
+  - v0.1.9 moved to Shipped releases, headed `(released 2026-10-20 · [release notes](…/releases/tag/v0.1.9))`, all 17 boxes already checked. The lightweight tag `v0.1.9` sits on merge `81b0da7d`, and the release was published 2026-10-20T15:26Z.
+  - In progress holds v0.2.0 alone. The live branch is named v0.2.0.
+  - The queue line under v0.2.1 reads "Nothing is queued past v0.2.1 yet".
+  - The GUI idea points at `lib/documentation/gui/`, its docs home since 2026-10-20.
+- [x] **The rest, stated as today's facts:**
+  - **The root README:** v0.1.9 is shipped, and v0.2.0 is in development.
+  - **CLI `CLAUDE.md`:**
+    - The "brand-new" wording now reads "shipped in releases since v0.1.0 (2026-09-22)".
+    - The CI row has measured counts: 60 `add_test()` entries, 48 running the executable (41 through `$<TARGET_FILE:apogee>` and 7 as `COMMAND apogee`), and 3,932 `TEST_CASE`s, which `--list-tests` confirms.
+    - The reference row names `training.md`.
+    - The backlog directories read `v0.<x>.<y>/`.
+  - **`DEVELOPER.md`:** names the two workflows, `ci.yml`, the only one that releases, and `darwin.yml`.
+  - **The backlog index:** its shipped-tracks paragraph names v0.1.9 with its link and date, and v0.2.0 as the earliest table open.
+- [x] **The gate checks:**
+  - v0.1.9's backlog table was already retired.
+  - Both carried model lists are current against their vendors. Claude Code's 13 rows match Anthropic's overview, all Active on its deprecations page. The Gemini CLI's aliases (`pro`, `flash`, `flash-lite`) match upstream's `models.ts`.
+
+**Decisions made while building** (2026-10-25, each recorded for veto):
+- **The open call's default, taken:** v0.2.0 is the version. The procedure's preflight found nothing else claiming it.
+- **Every remaining hit of `0.1.9` is history and stays:** SPEC, ROADMAP's shipped section, MILESTONES, and the dated spike measurements.
+- **The model lists' `…Reviewed` dates stay 2026-10-19,** though ADR 0009 moves them on a check. Moving them is a `model_roster.cpp` edit in its own commit, on the user's word.
+- **Two Claude models, left out by the recipe's rule:** Mythos 5.1 and Mythos 5 are Active on the deprecations page but absent from the overview. Taylor may see it differently.
+
+**Verified.**
+- `[version]` and `[config][upgrade]` pass.
+- These ctest cases pass: `harness.layer_context`, `cli.install_parity`, `cli.test_names`, `harness.layering`, `cli.machine_schema_conformance`, `cli.version_flag` and `cli.version_subcommand`.
+- The link sweep finds only the five known false positives.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,992 tests and the macOS app's 449 cases passed, with no warning.
+
+**Not done:**
+- The vendors' server-side tool lists (`server_tools.cpp`, reviewed 2026-10-18), which the DEVELOPER.md recipe also checks at a roll, were not checked.
+- The GUI's docs drift is the GUI's 4l.
+- Publishing is the merge's, and the release notes are `/apogee-maintenance-summarize-release`'s.
