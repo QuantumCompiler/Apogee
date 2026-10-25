@@ -17,7 +17,8 @@
 /// through the one writer (`contracts/config_edit.h`): the key and every
 /// reference to it land together, comments kept, re-parsed before the file
 /// is replaced. A store directory moved for it is moved back when the edit
-/// is refused.
+/// is refused. A drafter's record naming a moved directory as its base is
+/// rewritten once the edit has landed (M25), and said when it cannot be.
 ///
 /// **The coupling** (the spike's rule (a)): automatic where the mapping is
 /// one to one -- a backend named the M3 way after the model it alone runs,
@@ -67,7 +68,9 @@ struct RenameOutcome {
 /// reference renamed in one edit; the saved chats naming it swept; and the
 /// store directory moved with it when the coupling holds -- the backend its
 /// sole referrer, named the M3 way, the new name too -- else left, said with
-/// why.
+/// why. A moved directory takes every path the entry holds into it with it,
+/// its `draft:` too, and each stored drafter whose record names it as a base
+/// names it as it is now called (M25).
 [[nodiscard]] RenameOutcome rename_backend_everywhere(const std::filesystem::path& config_path,
                                                       const models::StoreRoots& roots,
                                                       std::string_view old_name,
@@ -78,10 +81,13 @@ struct RenameOutcome {
 /// renamed `<new>-<level>`, their references and chats with them, and the
 /// directory they run from moved to `<new>` when they alone run it -- else
 /// left, said with why. Otherwise `old` is a stored model's directory: moved,
-/// records riding inside; every backend pointing into it repointed; the
-/// backends named the M3 way after it renamed to the new base. A name
-/// already taken is left, said. Refused for a model being written (a
-/// `.partial` inside it).
+/// records riding inside; every backend pointing into it repointed -- its
+/// `model_path`, `mmproj_path` or `draft:` (M25); the backends named the M3
+/// way after the model they run from it renamed to the new base. A name
+/// already taken is left, said. Either way, a moved directory is renamed in
+/// the record of every stored drafter naming it as a base, and in no other
+/// (M25): a pairing that held still holds, and none is made that did not.
+/// Refused for a model being written (a `.partial` inside it).
 [[nodiscard]] RenameOutcome rename_stored_model(const std::filesystem::path& config_path,
                                                 const models::StoreRoots& roots,
                                                 std::string_view old_model,

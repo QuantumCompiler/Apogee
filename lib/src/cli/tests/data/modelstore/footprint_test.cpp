@@ -15,6 +15,7 @@
 #include "modelstore/gguf_inspect.h"
 #include "modelstore/kv_cache.h"
 #include "modelstore/sidecar.h"
+#include "support/draft_head_configs.h"
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
 
@@ -477,5 +478,110 @@ suites:
         CHECK(member(footprint, "second").unknown.empty());
         CHECK(member(footprint, "second").bytes() == 68 * kMiB);
         CHECK(footprint.saved_bytes() == 0);
+    }
+}
+
+TEST_CASE("a member that drafts counts its drafter by its weights' bytes on disk, and only it",
+          "[models][footprint][drafter]") {
+    // M25: 53i's drafter loads beside its base, so a suite that fits on
+    // paper may not once its member drafts. The E4B pair's drafter, as
+    // mlx-vlm's conversion lays it out: its config, a tokenizer that is no
+    // weight, and two shards.
+    const Store store;
+    const std::string root = store.model("root", llama_3b(), 1926 * kMiB);
+    const std::filesystem::path base =
+        store.dir.path() / "Gemma4-E4B-Instruct" / "mlx" / "bbbbbbbbbbbb";
+    const std::filesystem::path drafter =
+        store.dir.path() / "Gemma4-E4B-Assistant" / "mlx" / "aaaaaaaaaaaa";
+    std::filesystem::create_directories(base);
+    std::filesystem::create_directories(drafter);
+    std::ofstream{base / "config.json"} << apogee::testing::kGemma4BaseE4BConfig;
+    std::ofstream{drafter / "config.json"} << apogee::testing::kGemma4AssistantE4BConfig;
+    sized(drafter / "tokenizer.json", kMiB);
+    sized(drafter / "model-00001-of-00002.safetensors", 2 * kMiB);
+    sized(drafter / "model-00002-of-00002.safetensors", kMiB);
+    const Config config = parse(R"(models:
+  default: root
+backends:
+  root:
+    type: llamacpp
+    model_path: )" + root + R"(
+  e4b:
+    type: mlx
+    model_path: )" + base.string() +
+                                R"(
+    draft: )" + drafter.string() +
+                                R"(
+  plain:
+    type: mlx
+    model_path: )" + base.string() +
+                                R"(
+  lost:
+    type: mlx
+    model_path: )" + base.string() +
+                                R"(
+    draft: )" + (store.dir.path() / "gone").string() +
+                                R"(
+suites:
+  drafting:
+    members:
+      chat: e4b
+      utility: root
+  plain:
+    members:
+      chat: plain
+      utility: root
+  lost:
+    members:
+      chat: lost
+      utility: root
+)");
+    // root at the default 32K: what each suite knows without a drafter.
+    const std::int64_t rooted = (1926 + 1904) * kMiB;
+
+    SECTION("a member drafting with nothing is as it was") {
+        const SuiteFootprint footprint =
+            apogee::models::suite_footprint(config, "plain", MachineBudget{.bytes = 96 * kGiB});
+        const MemberFootprint plain = member(footprint, "plain");
+        CHECK(plain.drafter.empty());
+        CHECK(plain.drafter_bytes == 0);
+        CHECK_FALSE(plain.bytes().has_value());
+        CHECK(plain.counted_bytes() == 0);
+        CHECK(plain.unknown == "an MLX model's footprint is not stated yet");
+        CHECK(footprint.known_bytes() == rooted);
+        CHECK(member(footprint, "root").drafter_bytes == 0);
+        CHECK(member(footprint, "root").bytes() == rooted);
+    }
+    SECTION("its drafter's shards are counted, its base still unknown") {
+        const SuiteFootprint footprint =
+            apogee::models::suite_footprint(config, "drafting", MachineBudget{.bytes = 96 * kGiB});
+        const MemberFootprint e4b = member(footprint, "e4b");
+        CHECK(e4b.drafter == drafter.string());
+        CHECK(e4b.drafter_bytes == 3 * kMiB);  // the shards, never the tokenizer
+        CHECK_FALSE(e4b.bytes().has_value());
+        CHECK(e4b.counted_bytes() == 3 * kMiB);
+        CHECK(e4b.unknown == "an MLX model's footprint is not stated yet");
+        CHECK(footprint.known_bytes() == rooted + 3 * kMiB);
+        CHECK(footprint.has_unknown());
+        CHECK(footprint.admission() == Admission::FitsAsFarAsKnown);
+    }
+    SECTION("what fits on paper does not once its member drafts") {
+        const std::int64_t budget = rooted + apogee::models::kFitMargin + kMiB;
+        CHECK(apogee::models::suite_footprint(config, "plain", MachineBudget{.bytes = budget})
+                  .admission() == Admission::FitsAsFarAsKnown);
+        CHECK(apogee::models::suite_footprint(config, "drafting", MachineBudget{.bytes = budget})
+                  .admission() == Admission::OverBudget);
+    }
+    SECTION("a drafter whose weights cannot be read is unknown, never guessed") {
+        const SuiteFootprint footprint =
+            apogee::models::suite_footprint(config, "lost", MachineBudget{.bytes = 96 * kGiB});
+        const MemberFootprint lost = member(footprint, "lost");
+        CHECK(lost.drafter == (store.dir.path() / "gone").string());
+        CHECK_FALSE(lost.drafter_bytes.has_value());
+        CHECK(lost.counted_bytes() == 0);
+        CHECK(lost.unknown ==
+              "an MLX model's footprint is not stated yet; its drafter's weights could not be "
+              "read");
+        CHECK(footprint.known_bytes() == rooted);
     }
 }

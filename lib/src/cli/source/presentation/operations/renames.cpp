@@ -14,6 +14,7 @@
 #include "contracts/layout.h"
 #include "logger/session.h"
 #include "modelstore/hf_ref.h"
+#include "modelstore/snapshot.h"
 
 namespace apogee::commands {
 
@@ -72,6 +73,92 @@ namespace {
         }
     }
     return path;
+}
+
+// --- what points into a stored folder (M25) --------------------------------------------
+
+/// `backends.<name>.draft` set to `path`, through the one editor.
+[[nodiscard]] std::string set_backend_draft(std::string_view content, std::string_view name,
+                                            std::string_view path) {
+    return harness::set_backend_field(content, name, "draft", path);
+}
+
+/// One path a backend entry holds into the model store, and the editor's
+/// transform that writes it.
+struct StorePath {
+    const std::string harness::BackendConfig::* value = nullptr;
+    /// The entry runs from the folder it names -- its weights, which a
+    /// coupled rename follows -- rather than loading something beside them.
+    bool weights = false;
+    std::string (*write)(std::string_view content, std::string_view name,
+                         std::string_view path) = nullptr;
+};
+
+/// Every path a backend entry holds into the model store (M25): the weights
+/// it runs, `model_path` and its projector `mmproj_path`, and the drafter an
+/// mlx entry loads beside them, `draft:` (53i). Each rename that moves a
+/// stored folder repoints every one of them that points into it, through this
+/// list alone -- the list 55d's one reference walk, which `models delete`
+/// shares, is to absorb.
+constexpr std::array<StorePath, 3> kStorePaths{{
+    {.value = &harness::BackendConfig::model_path,
+     .weights = true,
+     .write = &harness::set_backend_model_path},
+    {.value = &harness::BackendConfig::mmproj_path,
+     .weights = true,
+     .write = &harness::set_backend_mmproj_path},
+    {.value = &harness::BackendConfig::draft, .weights = false, .write = &set_backend_draft},
+}};
+
+/// Whether `backend` holds a path into stored model `model` -- its weights
+/// alone, with `weights_only`.
+[[nodiscard]] bool points_into(const models::StoreRoots& roots,
+                               const harness::BackendConfig& backend, std::string_view model,
+                               bool weights_only = false) {
+    return std::ranges::any_of(kStorePaths, [&](const StorePath& path) {
+        return (path.weights || !weights_only) &&
+               stored_model_at(roots, backend.*path.value) == model;
+    });
+}
+
+/// `text` with every path backend `name` holds into stored model `model`
+/// repointed into `renamed`, each through its own transform.
+[[nodiscard]] std::string repointed(std::string text, std::string_view name,
+                                    const harness::BackendConfig& backend,
+                                    const models::StoreRoots& roots, std::string_view model,
+                                    std::string_view renamed) {
+    for (const StorePath& path : kStorePaths) {
+        if (stored_model_at(roots, backend.*path.value) == model) {
+            text = path.write(text, name, rebased(backend.*path.value, model, renamed));
+        }
+    }
+    return text;
+}
+
+/// Every stored drafter whose record names `model` as its base, once that
+/// folder is `renamed` (M25): its `bases` rewritten in place, so the pairing
+/// that held still holds -- rather than falling back to family and width --
+/// and a record naming any other base is never touched. Said, a line each.
+void rename_drafter_bases(RenameOutcome& out, const models::StoreRoots& roots,
+                          std::string_view model, std::string_view renamed) {
+    for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
+        const std::string handle =
+            models::weights_handle(stored.model, models::kMlxFormat, stored.id);
+        switch (models::rename_snapshot_base(stored.dir, model, renamed)) {
+            case models::BaseRename::Unnamed:
+                break;
+            case models::BaseRename::Renamed:
+                out.said.push_back("drafter " + handle + " now names '" + std::string{renamed} +
+                                   "' as its base");
+                break;
+            case models::BaseRename::Failed:
+                out.said.push_back("drafter " + handle +
+                                   "'s record could not be rewritten -- it still names '" +
+                                   std::string{model} + "' as its base, and pairs with '" +
+                                   std::string{renamed} + "' once converted again");
+                break;
+        }
+    }
 }
 
 /// Moves each of `moves`, in order; on the first failure the moved ones are
@@ -194,8 +281,7 @@ RenameOutcome rename_backend_everywhere(const std::filesystem::path& config_path
     if (!model.empty()) {
         std::string other;
         for (const auto& [name, backend] : config.backends) {
-            if (name != old_name && (stored_model_at(roots, backend.model_path) == model ||
-                                     stored_model_at(roots, backend.mmproj_path) == model)) {
+            if (name != old_name && points_into(roots, backend, model)) {
                 other = name;
                 break;
             }
@@ -241,18 +327,12 @@ RenameOutcome rename_backend_everywhere(const std::filesystem::path& config_path
         out.refusal = "could not move store '" + model + "': " + error;
         return out;
     }
-    const std::string model_path = entry->model_path;
-    const std::string mmproj_path = entry->mmproj_path;
+    const harness::BackendConfig& backend = *entry;
     try {
         harness::edit_config_file(config_path, [&](std::string_view content) {
             std::string text{content};
             if (!renamed_model.empty()) {
-                text = harness::set_backend_model_path(text, old_name,
-                                                       rebased(model_path, model, renamed_model));
-                if (stored_model_at(roots, mmproj_path) == model) {
-                    text = harness::set_backend_mmproj_path(
-                        text, old_name, rebased(mmproj_path, model, renamed_model));
-                }
+                text = repointed(std::move(text), old_name, backend, roots, model, renamed_model);
             }
             return harness::rename_backend(text, old_name, new_name);
         });
@@ -267,6 +347,7 @@ RenameOutcome rename_backend_everywhere(const std::filesystem::path& config_path
     if (!renamed_model.empty()) {
         out.said.push_back("moved store '" + model + "' to '" + renamed_model +
                            "', its records inside it");
+        rename_drafter_bases(out, roots, model, renamed_model);
     } else if (!store_said.empty()) {
         out.said.push_back(store_said);
     }
@@ -290,12 +371,17 @@ namespace {
                       "' cannot name a model -- one word: no spaces, no / : @ \\";
         return out;
     }
-    // Where the family runs from, and who else runs from there.
+    // Where the family runs from -- its weights; a drafter beside them is
+    // another model's folder -- and who else points there.
     std::set<std::string> dirs;
     for (const std::string& name : family) {
         const harness::BackendConfig& backend = *config.find_backend(name);
-        for (const std::string& path : {backend.model_path, backend.mmproj_path}) {
-            if (const std::string model = stored_model_at(roots, path); !model.empty()) {
+        for (const StorePath& path : kStorePaths) {
+            if (!path.weights) {
+                continue;
+            }
+            if (const std::string model = stored_model_at(roots, backend.*path.value);
+                !model.empty()) {
                 dirs.insert(model);
             }
         }
@@ -305,8 +391,11 @@ namespace {
         if (std::ranges::find(family, name) != family.end()) {
             continue;
         }
-        if (dirs.contains(stored_model_at(roots, backend.model_path)) ||
-            dirs.contains(stored_model_at(roots, backend.mmproj_path))) {
+        // `backend` is a structured binding: CI's AppleClang 15 takes one
+        // into a lambda only through a variable of its own.
+        if (std::ranges::any_of(dirs, [&roots, &entry = backend](const std::string& dir) {
+                return points_into(roots, entry, dir);
+            })) {
             outsider = name;
             break;
         }
@@ -372,15 +461,8 @@ namespace {
             std::string text{content};
             if (move) {
                 for (const std::string& name : family) {
-                    const harness::BackendConfig& backend = *config.find_backend(name);
-                    if (stored_model_at(roots, backend.model_path) == dir) {
-                        text = harness::set_backend_model_path(
-                            text, name, rebased(backend.model_path, dir, new_name));
-                    }
-                    if (stored_model_at(roots, backend.mmproj_path) == dir) {
-                        text = harness::set_backend_mmproj_path(
-                            text, name, rebased(backend.mmproj_path, dir, new_name));
-                    }
+                    text = repointed(std::move(text), name, *config.find_backend(name), roots, dir,
+                                     new_name);
                 }
             }
             for (const auto& [from, to] : renames) {
@@ -400,6 +482,7 @@ namespace {
     if (move) {
         out.said.push_back("moved store '" + dir + "' to '" + std::string{new_name} +
                            "', its records inside it");
+        rename_drafter_bases(out, roots, dir, new_name);
     } else if (!store_said.empty()) {
         out.said.push_back(store_said);
     }
@@ -551,11 +634,14 @@ RenameOutcome rename_stored_model(const std::filesystem::path& config_path,
     std::vector<std::string> left;
     if (config.has_value()) {
         for (const auto& [name, backend] : config->backends) {
-            if (stored_model_at(roots, backend.model_path) != model &&
-                stored_model_at(roots, backend.mmproj_path) != model) {
+            if (!points_into(roots, backend, model)) {
                 continue;
             }
             pointing.push_back(name);
+            // Named after the model it runs, never after a drafter beside it.
+            if (!points_into(roots, backend, model, /*weights_only=*/true)) {
+                continue;
+            }
             if (const std::optional<std::string> level = derived_level(name, model)) {
                 const std::string renamed = model_base_name(new_model) + "-" + *level;
                 if (renamed == name) {
@@ -606,15 +692,8 @@ RenameOutcome rename_stored_model(const std::filesystem::path& config_path,
                     text = harness::set_default_video(text, *video);
                 }
                 for (const std::string& name : pointing) {
-                    const harness::BackendConfig& backend = *config->find_backend(name);
-                    if (stored_model_at(roots, backend.model_path) == model) {
-                        text = harness::set_backend_model_path(
-                            text, name, rebased(backend.model_path, model, new_model));
-                    }
-                    if (stored_model_at(roots, backend.mmproj_path) == model) {
-                        text = harness::set_backend_mmproj_path(
-                            text, name, rebased(backend.mmproj_path, model, new_model));
-                    }
+                    text = repointed(std::move(text), name, *config->find_backend(name), roots,
+                                     model, new_model);
                 }
                 for (const auto& [from, to] : renames) {
                     text = harness::rename_backend(text, from, to);
@@ -641,6 +720,7 @@ RenameOutcome rename_stored_model(const std::filesystem::path& config_path,
         out.said.push_back("repointed models.default_video: " + config->models.default_video +
                            " -> " + *video);
     }
+    rename_drafter_bases(out, roots, model, new_model);
     for (const auto& [from, to] : renames) {
         out.said.push_back("renamed backend '" + from + "' to '" + to +
                            "', every reference to it with it");

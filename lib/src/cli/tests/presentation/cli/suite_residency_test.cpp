@@ -238,6 +238,67 @@ TEST_CASE("a base two members share is said once, and what sharing it saves",
           "tokens, 2 MiB of adapters");
 }
 
+TEST_CASE("a member's drafter is said on its line and added to the sum, its base known or not",
+          "[commands][suites][residency][drafter]") {
+    using apogee::commands::admission_line;
+    using apogee::commands::admission_refusal;
+    // M25: research with an MLX member drafting beside its base (53i) -- the
+    // base's own numbers unknown, its drafter's 300 MiB of weights known.
+    SuiteFootprint footprint = research(96 * kGiB);
+    MemberFootprint e4b;
+    e4b.backend = "e4b";
+    e4b.roles = {"vision"};
+    e4b.local = true;
+    e4b.unknown = "an MLX model's footprint is not stated yet";
+    e4b.drafter = "/models/Gemma4-E4B-Assistant/mlx/aaaaaaaaaaaa";
+    e4b.drafter_bytes = 300 * kMiB;
+    footprint.members.push_back(e4b);
+    REQUIRE(footprint.known_bytes() == (3830 + 838 + 300) * kMiB);
+    CHECK(admission_line(footprint) ==
+          "suite research needs at least 5992 MiB of this machine's 98304 MiB: root 3830 + "
+          "helper 838 + e4b unknown (an MLX model's footprint is not stated yet) + e4b's drafter "
+          "300 + 1024 margin -- fits as far as known");
+    const std::vector<std::string> lines = apogee::commands::footprint_lines(footprint);
+    REQUIRE(lines.size() == 6);
+    CHECK(lines[4] ==
+          "  e4b (vision): unknown -- an MLX model's footprint is not stated yet; its drafter's "
+          "300 MiB of weights counted");
+
+    // The drafter alone tips it over: refused, the drafter named in the sum.
+    footprint.machine.bytes = 5800 * kMiB;
+    CHECK(admission_refusal(footprint, "--force") ==
+          "suite research needs at least 5992 MiB of this machine's 5800 MiB: root 3830 + helper "
+          "838 + e4b unknown (an MLX model's footprint is not stated yet) + e4b's drafter 300 + "
+          "1024 margin -- it does not fit; --force runs it anyway");
+    footprint.members.back().drafter.clear();
+    footprint.members.back().drafter_bytes = 0;
+    CHECK(admission_refusal(footprint, "--force").empty());
+
+    // A drafter whose weights cannot be read adds nothing, and is said.
+    footprint.members.back().drafter = "/models/gone";
+    footprint.members.back().drafter_bytes.reset();
+    footprint.members.back().unknown =
+        "an MLX model's footprint is not stated yet; its drafter's weights could not be read";
+    CHECK(admission_line(footprint) ==
+          "suite research needs at least 5692 MiB of this machine's 5800 MiB: root 3830 + helper "
+          "838 + e4b unknown (an MLX model's footprint is not stated yet; its drafter's weights "
+          "could not be read) + 1024 margin -- fits as far as known");
+
+    // A member whose own numbers are known carries its drafter in its figure.
+    SuiteFootprint known = research(96 * kGiB);
+    known.members[0].drafter = "/models/Gemma4-E4B-Assistant/mlx/aaaaaaaaaaaa";
+    known.members[0].drafter_bytes = 300 * kMiB;
+    CHECK(admission_line(known) ==
+          "suite research needs 5992 MiB of this machine's 98304 MiB: root 4130 + helper 838 + "
+          "1024 margin -- fits");
+    CHECK(apogee::commands::footprint_lines(known)[1] ==
+          "  root (chat): 4130 MiB -- 1926 MiB of weights, 1904 MiB of q8_0 cache at 32768 "
+          "tokens, 300 MiB of its drafter's weights");
+    // And a member drafting with nothing reads as it always has.
+    CHECK(apogee::commands::footprint_lines(research(96 * kGiB))[1] ==
+          "  root (chat): 3830 MiB -- 1926 MiB of weights, 1904 MiB of q8_0 cache at 32768 tokens");
+}
+
 TEST_CASE("/suite's argument: a suite, then --force and --warm", "[commands][suites][residency]") {
     using apogee::commands::parse_suite_argument;
     const apogee::commands::SuiteArgument plain = parse_suite_argument("research");

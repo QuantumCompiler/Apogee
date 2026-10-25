@@ -56,6 +56,27 @@ struct Snapshot {
 [[nodiscard]] bool write_snapshot(const std::filesystem::path& dir, const Snapshot& snapshot);
 [[nodiscard]] std::optional<Snapshot> load_snapshot(const std::filesystem::path& dir);
 
+/// What `rename_snapshot_base` did with a record.
+enum class BaseRename : std::uint8_t {
+    /// No record, or one naming no such base: nothing written.
+    Unnamed,
+    /// The base renamed where it stood, the record written again.
+    Renamed,
+    /// It names the base, and could not be rewritten with only that change:
+    /// it holds what `write_snapshot` would not write back byte for byte, or
+    /// the write failed. Left as it was.
+    Failed,
+};
+
+/// A drafter's record once a base it names is stored under a new name (M25):
+/// `from` replaced by `to` in its `bases` where it stands -- one `to` kept
+/// where the record already names it -- and written back through
+/// `write_snapshot`, every other byte of the record as it was. The set keeps
+/// its id, a digest over its shards. A rename never adds a base a record did
+/// not name, and never empties one into pairing by family and width alone.
+[[nodiscard]] BaseRename rename_snapshot_base(const std::filesystem::path& dir,
+                                              std::string_view from, std::string_view to);
+
 /// Whether `dir` looks like a snapshot: a `config.json` and at least one
 /// `*.safetensors` shard.
 [[nodiscard]] bool is_snapshot_dir(const std::filesystem::path& dir);

@@ -1583,6 +1583,68 @@ TEST_CASE("a drafter's record names its bases, written only when there are any, 
 }
 
 TEST_CASE(
+    "a drafter's record has a renamed base rewritten where it stands, every other byte as it was",
+    "[models][store][drafter][rename]") {
+    // M25: a base's folder renamed leaves its drafter's record naming it as
+    // it is now called -- `bases` alone, through write_snapshot.
+    using apogee::models::BaseRename;
+    using apogee::models::rename_snapshot_base;
+    const Store store;
+    const std::filesystem::path dir =
+        store.root.path() / "Gemma4-E4B-Assistant" / "mlx" / "aaaaaaaaaaaa";
+    std::filesystem::create_directories(dir);
+    apogee::models::Snapshot record;
+    record.ref = "Gemma4-E4B-Assistant/safetensors/aaaaaaaaaaaa";
+    record.source = "convert";
+    record.pulled_at = "2026-10-21T09:00:00Z";
+    record.transform = "mlx_vlm.convert bf16";
+    record.kind = "drafter";
+    record.bases = {"Gemma4-E4B-Instruct", "Gemma4-E4B-Custom"};
+    record.files = {{.path = "config.json", .size = 412, .sha256 = std::string(64, 'c')},
+                    {.path = "model.safetensors", .size = 4096, .sha256 = std::string(64, 'w')}};
+    REQUIRE(apogee::models::write_snapshot(dir, record));
+    const std::filesystem::path path = apogee::models::snapshot_record_path(dir);
+    const auto slurp = [&path] {
+        std::ifstream in{path, std::ios::binary};
+        return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    };
+    const std::string before = slurp();
+
+    // Renamed where it stands: the one name's bytes, nothing else.
+    REQUIRE(rename_snapshot_base(dir, "Gemma4-E4B-Instruct", "Gemma4-E4B-Base") ==
+            BaseRename::Renamed);
+    std::string expected = before;
+    const std::string named = "\"Gemma4-E4B-Instruct\"";
+    REQUIRE(expected.find(named) != std::string::npos);
+    expected.replace(expected.find(named), named.size(), "\"Gemma4-E4B-Base\"");
+    CHECK(slurp() == expected);
+    CHECK(apogee::models::load_snapshot(dir)->bases ==
+          std::vector<std::string>{"Gemma4-E4B-Base", "Gemma4-E4B-Custom"});
+
+    // A base it does not name: nothing written.
+    const std::string settled = slurp();
+    CHECK(rename_snapshot_base(dir, "Gemma4-E4B-Instruct", "Elsewhere") == BaseRename::Unnamed);
+    CHECK(rename_snapshot_base(dir, "Gemma4-E2B-Instruct", "Gemma4-E4B-Base") ==
+          BaseRename::Unnamed);
+    CHECK(slurp() == settled);
+    CHECK(rename_snapshot_base(store.root.path() / "no-record", "a", "b") == BaseRename::Unnamed);
+
+    // Onto a name it already holds: kept once, never twice.
+    REQUIRE(rename_snapshot_base(dir, "Gemma4-E4B-Custom", "Gemma4-E4B-Base") ==
+            BaseRename::Renamed);
+    CHECK(apogee::models::load_snapshot(dir)->bases == std::vector<std::string>{"Gemma4-E4B-Base"});
+
+    // A record this build would not write back as it reads -- a field it
+    // does not know -- is left whole, and said to have failed.
+    const std::string foreign =
+        R"({"ref": "x", "source": "convert", "kind": "drafter", "bases": ["Gemma4-E4B-Base"],)"
+        R"( "made_by": "a later apogee", "files": []})";
+    write_file(path, foreign);
+    CHECK(rename_snapshot_base(dir, "Gemma4-E4B-Base", "Gemma4-E4B-Other") == BaseRename::Failed);
+    CHECK(slurp() == foreign);
+}
+
+TEST_CASE(
     "a set's towers are what its config declares beside its language model: vision, audio, an "
     "omni model's thinker, never a name",
     "[models][store][towers]") {

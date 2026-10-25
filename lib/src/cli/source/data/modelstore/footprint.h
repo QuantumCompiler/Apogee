@@ -31,6 +31,11 @@
 /// **One base, counted once** (53d): members whose entries run the same base
 /// (`BaseKey`) are served by one loaded model, so its weights are counted for
 /// the first of them and every other adds its own cache and adapters alone.
+///
+/// **A drafter counts** (M25): a member whose entry drafts (53i's `draft:`)
+/// loads the drafter's weights beside its base, so they are counted by their
+/// bytes on disk -- in the sum even while the base's own numbers are unknown,
+/// since they are a load of their own.
 namespace apogee::models {
 
 /// What one loaded llama.cpp base is (53d): its model file, the projector
@@ -95,12 +100,26 @@ struct MemberFootprint {
     /// Nullopt when a file cannot be read.
     std::size_t adapters = 0;
     std::optional<std::int64_t> adapter_bytes{0};
+    /// The drafter its entry loads beside its base (53i, M25): the directory
+    /// an mlx entry's `draft:` names, expanded, and its weights by their
+    /// bytes on disk -- each `*.safetensors` file's size, what mlx-vlm reads
+    /// into memory beside the base, as an adapter is counted by its file.
+    /// Empty and 0 for a member that drafts with nothing; nullopt when the
+    /// directory's weights cannot be read.
+    std::string drafter{};
+    std::optional<std::int64_t> drafter_bytes{0};
     /// Why a number is unknown, for a person; empty when none is.
     std::string unknown;
 
-    /// Weights -- unless it shares another member's -- cache and adapters: 0
-    /// for a member holding nothing here, nullopt when a number is unknown.
+    /// Weights -- unless it shares another member's -- cache, adapters and
+    /// drafter: 0 for a member holding nothing here, nullopt when a number is
+    /// unknown.
     [[nodiscard]] std::optional<std::int64_t> bytes() const;
+    /// What the suite's sum counts of it: `bytes()` when every number is
+    /// known; else its drafter's weights where those are known -- a load of
+    /// their own beside the base, whatever the base's own numbers (M25) --
+    /// and 0 otherwise.
+    [[nodiscard]] std::int64_t counted_bytes() const;
 };
 
 /// What a member costs beside its own weights and cache (53d), as the suite
@@ -136,7 +155,8 @@ struct SuiteFootprint {
     std::vector<MemberFootprint> members;
     MachineBudget machine;
 
-    /// The sum of every known member's bytes.
+    /// The sum of every member's counted bytes (`counted_bytes`): each known
+    /// member's, and an unknown one's drafter where its size is known.
     [[nodiscard]] std::int64_t known_bytes() const;
     /// The weights a shared base keeps from being loaded twice (53d): each
     /// sharing member's, where known.
@@ -170,8 +190,9 @@ struct SuiteFootprint {
 /// members name, read from the store's records and its header where it is a
 /// local GGUF, at the window `suite` pins -- whether or not it is the active
 /// suite -- with its adapters' files' sizes, and a base two members share
-/// counted for the first (53d). An empty footprint (no members) when `config`
-/// has no such suite.
+/// counted for the first (53d); an MLX member's own numbers unknown, and the
+/// drafter its entry names counted by its weights' bytes on disk (M25). An
+/// empty footprint (no members) when `config` has no such suite.
 [[nodiscard]] SuiteFootprint suite_footprint(const harness::Config& config, std::string_view suite,
                                              const MachineBudget& machine);
 

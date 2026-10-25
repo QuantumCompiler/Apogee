@@ -44,6 +44,32 @@ namespace {
     return sizes;
 }
 
+/// A drafter's weights by their bytes on disk (M25): each `*.safetensors`
+/// file's size in its directory, what mlx-vlm reads into memory beside the
+/// base. Nullopt when the directory cannot be read or holds no weights.
+[[nodiscard]] std::optional<std::int64_t> drafter_size(const std::filesystem::path& dir) {
+    std::error_code code;
+    std::int64_t total = 0;
+    bool weighed = false;
+    for (auto it = std::filesystem::directory_iterator{dir, code};
+         !code && it != std::filesystem::directory_iterator{}; it.increment(code)) {
+        std::error_code type;
+        if (!it->is_regular_file(type) || it->path().extension() != ".safetensors") {
+            continue;
+        }
+        const std::uintmax_t size = std::filesystem::file_size(it->path(), type);
+        if (type) {
+            return std::nullopt;
+        }
+        total += static_cast<std::int64_t>(size);
+        weighed = true;
+    }
+    if (code || !weighed) {
+        return std::nullopt;
+    }
+    return total;
+}
+
 /// A member whose memory is not in this process and is not on the machine
 /// in a form Apogee can price.
 [[nodiscard]] MemberFootprint unpriced(const harness::SuiteBackend& member, bool local,
@@ -80,16 +106,25 @@ std::optional<std::int64_t> MemberFootprint::bytes() const {
     // A member on another's base adds no weights of its own (53d).
     const bool own = shares.empty();
     if ((own && !weights.has_value()) || !window.has_value() || !window->cache_bytes.has_value() ||
-        !adapter_bytes.has_value()) {
+        !adapter_bytes.has_value() || !drafter_bytes.has_value()) {
         return std::nullopt;
     }
-    return (own ? *weights : 0) + *window->cache_bytes + *adapter_bytes;
+    return (own ? *weights : 0) + *window->cache_bytes + *adapter_bytes + *drafter_bytes;
+}
+
+std::int64_t MemberFootprint::counted_bytes() const {
+    if (const std::optional<std::int64_t> all = bytes(); all.has_value()) {
+        return *all;
+    }
+    // The drafter's weights are a load of their own (M25): known whatever
+    // the base's numbers are.
+    return local ? drafter_bytes.value_or(0) : 0;
 }
 
 std::int64_t SuiteFootprint::known_bytes() const {
     std::int64_t total = 0;
     for (const MemberFootprint& member : members) {
-        total += member.bytes().value_or(0);
+        total += member.counted_bytes();
     }
     return total;
 }
@@ -245,12 +280,25 @@ SuiteFootprint suite_footprint(const harness::Config& config, std::string_view s
                     inspect_gguf(file), extras));
                 break;
             }
-            case harness::BackendType::Mlx:
+            case harness::BackendType::Mlx: {
                 // 27b's windows slot into the same arithmetic when that track
                 // prices them; until then, unknown -- and it still runs.
-                out.members.push_back(
-                    unpriced(member, true, "an MLX model's footprint is not stated yet"));
+                MemberFootprint priced =
+                    unpriced(member, true, "an MLX model's footprint is not stated yet");
+                // Its drafter, loaded beside it (53i): counted by its bytes
+                // on disk (M25).
+                const harness::BackendConfig as_run =
+                    harness::backend_as_run(under, member.backend);
+                if (!as_run.draft.empty()) {
+                    priced.drafter = harness::expand_env_and_home(as_run.draft);
+                    priced.drafter_bytes = drafter_size(priced.drafter);
+                    if (!priced.drafter_bytes.has_value()) {
+                        priced.unknown += "; its drafter's weights could not be read";
+                    }
+                }
+                out.members.push_back(std::move(priced));
                 break;
+            }
             case harness::BackendType::OllamaCli:
                 out.members.push_back(
                     unpriced(member, true, "held by the Ollama server, which states no size here"));

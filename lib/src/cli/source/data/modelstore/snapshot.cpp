@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdint>
 #include <fstream>
+#include <iterator>
 #include <random>
 #include <set>
 #include <system_error>
@@ -19,7 +20,10 @@ std::filesystem::path snapshot_record_path(const std::filesystem::path& dir) {
     return dir / "apogee-snapshot.json";
 }
 
-bool write_snapshot(const std::filesystem::path& dir, const Snapshot& snapshot) {
+namespace {
+
+/// The record's text, as `write_snapshot` writes it.
+[[nodiscard]] std::string snapshot_record_text(const Snapshot& snapshot) {
     nlohmann::json files = nlohmann::json::array();
     for (const SnapshotFile& file : snapshot.files) {
         files.push_back({{"path", file.path}, {"size", file.size}, {"sha256", file.sha256}});
@@ -38,6 +42,12 @@ bool write_snapshot(const std::filesystem::path& dir, const Snapshot& snapshot) 
     if (!snapshot.bases.empty()) {
         record["bases"] = snapshot.bases;
     }
+    return record.dump(2) + "\n";
+}
+
+}  // namespace
+
+bool write_snapshot(const std::filesystem::path& dir, const Snapshot& snapshot) {
     std::filesystem::path temp = snapshot_record_path(dir);
     temp += ".tmp-" + std::to_string(std::random_device{}());
     {
@@ -45,7 +55,7 @@ bool write_snapshot(const std::filesystem::path& dir, const Snapshot& snapshot) 
         if (!out) {
             return false;
         }
-        out << record.dump(2) << "\n";
+        out << snapshot_record_text(snapshot);
     }
     std::error_code code;
     std::filesystem::rename(temp, snapshot_record_path(dir), code);
@@ -99,6 +109,30 @@ std::optional<Snapshot> load_snapshot(const std::filesystem::path& dir) {
         }
     }
     return snapshot;
+}
+
+BaseRename rename_snapshot_base(const std::filesystem::path& dir, std::string_view from,
+                                std::string_view to) {
+    std::optional<Snapshot> record = load_snapshot(dir);
+    if (!record.has_value() || std::ranges::find(record->bases, from) == record->bases.end()) {
+        return BaseRename::Unnamed;
+    }
+    // Only `bases` may change: a record this build would not write back as
+    // it reads is left, never trimmed to what it understands.
+    std::ifstream in{snapshot_record_path(dir), std::ios::binary};
+    const std::string bytes{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    if (snapshot_record_text(*record) != bytes) {
+        return BaseRename::Failed;
+    }
+    std::vector<std::string> bases;
+    for (const std::string& base : record->bases) {
+        const std::string named = base == from ? std::string{to} : base;
+        if (std::ranges::find(bases, named) == bases.end()) {
+            bases.push_back(named);
+        }
+    }
+    record->bases = std::move(bases);
+    return write_snapshot(dir, *record) ? BaseRename::Renamed : BaseRename::Failed;
 }
 
 bool is_snapshot_dir(const std::filesystem::path& dir) {

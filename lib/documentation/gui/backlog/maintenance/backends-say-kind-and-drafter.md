@@ -45,4 +45,4 @@ The CLI states all of it already:
 - [ ] A pairing that can no longer draft is drawn with the CLI's words.
 - [ ] Previews, `check-previews`, the layering check and `lib/scripts/cicd.sh --test` pass, with no Swift warning.
 
-**Scope note.** GUI Maintenance, claimable by name, no gate. Repairing a pairing a rename broke is the CLI's [M25](../../../cli/backlog/maintenance/drafters-follow-renames.md). This item only draws what the CLI says.
+**Scope note.** GUI Maintenance, claimable by name, no gate. A rename no longer breaks a pairing: the CLI's [M25](../../../cli/assistant/MILESTONES.md#milestone-aq--mlx-for-every-kind), shipped 2026-10-24. This item only draws what the CLI says.

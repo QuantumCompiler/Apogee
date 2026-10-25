@@ -10256,3 +10256,42 @@ The refusal was true but incomplete. The set is Wan's original layout, and its r
 - `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,880 tests and the macOS app's 449 cases passed, with no warning.
 
 **Not done:** `models info --output-format json` has no typed field for the conversions. The description says them, and "made from it" lists their handles.
+
+### 2026-10-24 — `drafters-follow-renames` (maintenance item M25): a drafter's pairing survives renames, and its weights count
+
+**Why.** 53i pairs a drafter with its base by `draft: <path>` on the base's entry and by the `bases` the drafter's record names. `models rename` rebased only `model_path` and `mmproj_path` (`renames.cpp`), so renaming either folder broke the pairing. The ladder then refused it, naming the stale path or base, and only converting again mended it. 27e's suite footprint also left a member's drafter out.
+
+- [x] **One list of what points into a stored folder** (`kStorePaths` in `presentation/operations/renames.cpp`, under "what points into a stored folder (M25)").
+  - **What it holds:** `model_path`, `mmproj_path` and `draft`, each with the editor call that writes it and whether it is the backend's own weights.
+  - **Who reads it:** `points_into`, `repointed` and `rename_drafter_bases`, which every rename path calls: `rename_backend_everywhere`, `rename_model_family` and `rename_stored_model`. That covers `config rename-backend`, `models rename` by family or folder, and the admin plane's rename.
+  - **55d:** its single list of references can absorb this one whole.
+- [x] **A drafter's recorded `bases` follow a renamed base.**
+  - `models::rename_snapshot_base` rewrites them in place, in only the records that name the old folder, never adding a base or emptying the list.
+  - A record that wouldn't re-serialize byte for byte is left untouched and said, so the rest of every record is byte-identical by check, not assumption.
+  - Records are rewritten after the config edit lands. A failure is said, as the saved-chat sweep says one, and not rolled back.
+- [x] **A suite's footprint counts a member's drafter** by its `*.safetensors` on disk (`modelstore/footprint`, printed by `suite_residency`), as `e4b unknown (...) + e4b's drafter 300`.
+  - MLX members' own sizes are still not stated, so the drafter is its own figure, and the total counts it even then. A suite that fits without the drafter can now be refused with it.
+  - Members that don't draft print as before.
+
+**Decisions made while building** (2026-10-24, each recorded for veto):
+- **The open call's default, taken:** a rename rewrites the drafter's `bases`, rather than falling back to family and width.
+- **A record that already names the new folder** (left by a rename before M25) is left alone, so it pairs with whatever now holds that name, as 53i would pair a fresh base stored there.
+- **Only a backend's own weights decide which folder a family or coupled rename moves,** so a drafting family is never refused as "weights in 2 stored models". Another backend's `draft:` into the folder blocks a coupled move, as another backend's `model_path` does ("'X' also runs from it"). A backend that only drafts from a folder is repointed, never renamed after it.
+- **The admin plane's `POST /v1/admin/backends/{id}/rename`** runs the same core, said in `http-api.md`.
+
+**Verified.**
+- 8 new cases (154 assertions):
+  - a record's renamed base rewritten in place, every other byte unchanged;
+  - a drafting member's footprint counting its drafter (4 sections), and the drafter shown on its member's line and in the total;
+  - five rename cases: the drafter's folder, the base's folder, a model by its backends' shared name (46a), `config rename-backend` taking its folder and the drafter's base, and a rename touching no drafter, writing the config and every record as before.
+
+  Each pairing still holds by 53i's rule, by the readiness ladder, and by `models info`'s runtime line.
+- Mutation: four breaks were each caught, then put back: `draft:` not repointed, no `bases` rewrite, the drafter not counted, a lossy record rewrite.
+- MinGW GCC (`-Wall -Wextra`) finds nothing in the changed files.
+- The neighbouring suites pass: `[renames]`, `[footprint]`, `[residency]`, `[drafter]`, `[store]`, `[snapshot]`, `[models]`, `[mlx]`, `[suites]`, `[config]`, `[pipeline]` and the HTTP admin set.
+- These ctest cases pass: `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.install_parity`, `cli.mlx_models_lifecycle`, `cli.config_lifecycle`, `cli.suites_lifecycle` and `cli.http_api_conformance`.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,888 tests and the macOS app's 449 cases passed, with no warning.
+
+**Not done:**
+- 55d's items: its single list of references, MLX level spellings in the family rename, and the unguarded `config->models.default_video` in `rename_stored_model`, which sits beside this change.
+- The footprint has no JSON or HTTP view.

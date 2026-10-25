@@ -22,8 +22,9 @@ constexpr std::string_view kSuiteShape = "/suite <name|off> [--force] [--warm]";
 }
 
 /// A member's MiB as shown: its weights -- unless another member's base
-/// holds them (53d) -- its cache and its adapters each rounded, so the parts
-/// on a member's line add up to its figure, and the figures to the sum.
+/// holds them (53d) -- its cache, its adapters and its drafter (M25) each
+/// rounded, so the parts on a member's line add up to its figure, and the
+/// figures to the sum.
 [[nodiscard]] std::optional<std::int64_t> shown_mib(const models::MemberFootprint& member) {
     if (!member.local) {
         return 0;
@@ -31,11 +32,22 @@ constexpr std::string_view kSuiteShape = "/suite <name|off> [--force] [--warm]";
     // `bytes()`'s rule, read part by part.
     const bool own = member.shares.empty();
     if ((own && !member.weights.has_value()) || !member.window.has_value() ||
-        !member.window->cache_bytes.has_value() || !member.adapter_bytes.has_value()) {
+        !member.window->cache_bytes.has_value() || !member.adapter_bytes.has_value() ||
+        !member.drafter_bytes.has_value()) {
         return std::nullopt;
     }
     return (own ? whole_mib(*member.weights) : 0) + whole_mib(*member.window->cache_bytes) +
-           whole_mib(*member.adapter_bytes);
+           whole_mib(*member.adapter_bytes) + whole_mib(*member.drafter_bytes);
+}
+
+/// The MiB an unknown member's drafter adds to the sum (M25), known whatever
+/// the rest of the member is; nullopt when it drafts with nothing or its
+/// drafter's size is unknown too.
+[[nodiscard]] std::optional<std::int64_t> drafter_mib(const models::MemberFootprint& member) {
+    if (!member.local || member.drafter.empty() || !member.drafter_bytes.has_value()) {
+        return std::nullopt;
+    }
+    return whole_mib(*member.drafter_bytes);
 }
 
 /// What a member on another's base says beside its figure (53d): whose
@@ -90,6 +102,11 @@ std::string admission_line(const models::SuiteFootprint& footprint, bool forced)
             sum += *mib;
         } else {
             parts += member.backend + " unknown (" + member.unknown + ")";
+            // Its drafter is a load of its own, counted all the same (M25).
+            if (const std::optional<std::int64_t> drafter = drafter_mib(member)) {
+                parts += " + " + member.backend + "'s drafter " + std::to_string(*drafter);
+                sum += *drafter;
+            }
         }
     }
     const std::int64_t margin = whole_mib(models::kFitMargin);
@@ -160,8 +177,15 @@ std::vector<std::string> footprint_lines(const models::SuiteFootprint& footprint
                 line += ", " + std::to_string(whole_mib(member.adapter_bytes.value_or(0))) +
                         " MiB of adapters";
             }
+            if (!member.drafter.empty()) {
+                line += ", " + std::to_string(whole_mib(member.drafter_bytes.value_or(0))) +
+                        " MiB of its drafter's weights";
+            }
         } else {
             line += "unknown -- " + member.unknown;
+            if (const std::optional<std::int64_t> drafter = drafter_mib(member)) {
+                line += "; its drafter's " + std::to_string(*drafter) + " MiB of weights counted";
+            }
         }
         if (resident) {
             if (const std::optional<bool> loaded = resident(member.backend); loaded.has_value()) {

@@ -339,8 +339,11 @@ backend and every reference to it in one edit -- the role pointers, the
 suites' members, the collections, graphs, agents and training settings that
 name it -- comments kept, then rewrites the saved chats that name it, and
 moves its store directory with it when it alone runs that stored model and
-both names are the model's own (`<model>-<level>`). The config it leaves is
-byte for byte the CLI's. `200 {renamed, to, said, restart_required}`, `said`
+both names are the model's own (`<model>-<level>`). A moved directory takes
+every path the entry holds into it with it, an mlx entry's `draft` among
+them, and each stored drafter whose record names it as its base is
+rewritten to name it as it is now called, so a pairing that held still holds
+(M25). The config it leaves is byte for byte the CLI's. `200 {renamed, to, said, restart_required}`, `said`
 the lines the CLI prints; `404` when unknown; `400` naming why for a name
 that is taken or cannot name a backend.
 
