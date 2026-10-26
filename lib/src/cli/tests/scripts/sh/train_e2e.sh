@@ -17,8 +17,9 @@
 # resumed. Between them (53b), `promote --adapter`: the fuse skipped, a
 # small GGUF LoRA registered on an entry's adapters over its untouched base,
 # repointed in place, retained, and an mlx run's adapter refused on a
-# llamacpp entry naming both formats. Last (55h), the pipeline and the cycle
-# as streams and their reads as documents.
+# llamacpp entry naming both formats. Then (55h), the pipeline and the cycle
+# as streams and their reads as documents; last (M30), the named specs' reads,
+# a pass halted while held on its lock, and a failed pass's stderr.
 #
 # POSIX only, like the other shell checks.
 set -eu
@@ -503,5 +504,96 @@ for event in pipe + cycle:
     errors = list(valid.iter_errors(event))
     assert not errors, f"{json.dumps(event)[:200]} -- {errors[0].message}"
 PY
+
+# --- M30: the pipelines and the cycle tell the truth ----------------------------
+# The named specs read as text and as a document. Then a pass held on its
+# lock -- its stream into a FIFO nobody reads yet, so it blocks mid-training
+# -- halted from another process: the pass finishes, says the halt is kept,
+# its document halted, and the next run is refused. Last, a failed pass
+# under stream-json says so on stderr too.
+"$APOGEE_BIN" train pipeline list </dev/null >"$WORK_DIR/specs.out" 2>&1 || fail "pipeline list: $(cat "$WORK_DIR/specs.out")"
+grep -qx "nightly  1       tiny" "$WORK_DIR/specs.out" || fail "pipeline list: $(cat "$WORK_DIR/specs.out")"
+"$APOGEE_BIN" train pipeline show nightly </dev/null >"$WORK_DIR/spec.out" 2>&1 || fail "pipeline show: $(cat "$WORK_DIR/spec.out")"
+grep -qx "1  base   starter  hello" "$WORK_DIR/spec.out" || fail "pipeline show: $(cat "$WORK_DIR/spec.out")"
+"$APOGEE_BIN" train pipeline show nightly --output-format json </dev/null >"$WORK_DIR/spec.json" || fail "pipeline show --output-format json"
+python3 - "$WORK_DIR/spec.json" <<'PY2' || fail "pipeline show's document: $(cat "$WORK_DIR/spec.json")"
+import json, sys
+spec = json.load(open(sys.argv[1]))
+assert spec["object"] == "training.pipeline" and spec["name"] == "nightly", spec
+assert spec["path"] is None and spec["student"] == "tiny", spec
+assert [(s["name"], s["gate"]) for s in spec["stages"]] == [("base", ["hello"])], spec
+PY2
+
+# The held pass: nightly's stage takes the queued data's iteration count, so
+# the stream outgrows the pipe and the pass blocks there, lock held.
+python3 - "$CONFIG" <<'PY2' || fail "could not drop nightly's iters"
+import sys
+path = sys.argv[1]
+text = open(path).read()
+old = '"eval_suite": "hello", "iters": 2}'
+assert text.count(old) == 1, text
+open(path, "w").write(text.replace(old, '"eval_suite": "hello"}'))
+PY2
+printf '{"mock": {"iters": 2000}}\n' > "$WORK_DIR/queue/day4.jsonl"
+mkfifo "$WORK_DIR/pass.fifo"
+# The FIFO's reader that reads nothing; off ctest's pipe, so nothing left
+# behind holds the run open.
+( exec 3<"$WORK_DIR/pass.fifo"; exec sleep 60 ) </dev/null >/dev/null 2>&1 &
+HOLDER=$!
+"$APOGEE_BIN" train cycle run --output-format stream-json </dev/null >"$WORK_DIR/pass.fifo" 2>"$WORK_DIR/held.err" &
+PASS=$!
+trap 'kill "$PASS" "$HOLDER" 2>/dev/null || true; rm -rf "$WORK_DIR"' EXIT
+for _ in $(seq 1 100); do
+    [ -f "$TRAINING/cycle/cycle.lock" ] && break
+    sleep 0.1
+done
+sleep 1
+[ -f "$TRAINING/cycle/cycle.lock" ] || fail "the pass never held its lock"
+kill -0 "$PASS" 2>/dev/null || fail "the pass was not held: $(cat "$WORK_DIR/held.err")"
+"$APOGEE_BIN" train cycle halt </dev/null >"$WORK_DIR/halt.out" 2>&1 || fail "halt during a pass: $(cat "$WORK_DIR/halt.out")"
+grep -q "the pass running now finishes, and keeps the halt" "$WORK_DIR/halt.out" || fail "halt wording: $(cat "$WORK_DIR/halt.out")"
+cat "$WORK_DIR/pass.fifo" >"$WORK_DIR/held.jsonl"
+wait "$PASS" || fail "the held pass failed: $(cat "$WORK_DIR/held.err")"
+kill "$HOLDER" 2>/dev/null || true
+wait "$HOLDER" 2>/dev/null || true
+[ ! -s "$WORK_DIR/held.err" ] || fail "the held pass wrote to stderr: $(cat "$WORK_DIR/held.err")"
+if "$APOGEE_BIN" train cycle run </dev/null >/dev/null 2>"$WORK_DIR/after-halt.err"; then
+    fail "the pass after a halt taken during the last one ran"
+fi
+grep -q "the cycle is halted: halted by 'apogee train cycle halt'" "$WORK_DIR/after-halt.err" || fail "after-halt refusal: $(cat "$WORK_DIR/after-halt.err")"
+"$APOGEE_BIN" train cycle status --output-format json </dev/null >"$WORK_DIR/held-read.json" || fail "cycle status after the held pass"
+
+# A failed pass under stream-json: the error in the stream and on stderr.
+"$APOGEE_BIN" train cycle resume </dev/null >/dev/null || fail "resume after the held pass"
+printf '{"mock": {"answer": "nope"}}\n' > "$WORK_DIR/queue/day5.jsonl"
+if "$APOGEE_BIN" train cycle run --output-format stream-json </dev/null >"$WORK_DIR/failed.jsonl" 2>"$WORK_DIR/failed.err"; then
+    fail "a regressing pass passed"
+fi
+python3 - "$WORK_DIR" <<'PY2' || fail "the held or the failed pass is wrong"
+import json, os, sys
+work = sys.argv[1]
+def stream(name):
+    return [json.loads(line) for line in open(os.path.join(work, name))]
+held, failed = stream("held.jsonl"), stream("failed.jsonl")
+passes = [e["state"] for e in held if e["type"] == "pass"]
+assert passes[-1] == "passed" and "halted" not in passes, passes
+assert held[-2] == {"type": "notice", "text": "[cycle] halted while this pass ran (halted by "
+                    "'apogee train cycle halt') -- the halt is kept: 'apogee train cycle run' "
+                    "refuses until 'apogee train cycle resume'"}, held[-2]
+assert held[-1]["type"] == "document" and held[-1]["document"]["halted"] is True, held[-1]
+assert held[-1]["document"] == json.load(open(os.path.join(work, "held-read.json"))), held[-1]
+error = failed[-1]
+assert error["type"] == "error" and error["message"].startswith("cycle FAILED -- "), error
+said = open(os.path.join(work, "failed.err")).read()
+assert said == "apogee train: " + error["message"] + "\n", said
+try:
+    from jsonschema import Draft202012Validator
+except ImportError:
+    sys.exit(0)
+valid = Draft202012Validator(json.load(open(os.path.join(work, "machine-schema.json"))))
+for event in held + failed:
+    errors = list(valid.iter_errors(event))
+    assert not errors, f"{json.dumps(event)[:200]} -- {errors[0].message}"
+PY2
 
 echo "apogee train end-to-end: OK"

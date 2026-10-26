@@ -460,3 +460,94 @@ TEST_CASE(
         apogee::training::read_pipeline_manifest(fixture.root.path() / "nope", error).has_value());
     CHECK(error.find("no pipeline manifest") != std::string::npos);
 }
+
+TEST_CASE(
+    "a stage trained again holds no score until it is evaluated again: its manifest keeps none "
+    "of the last attempt's eval, gate, adapter or fused checkpoint",
+    "[training][pipeline][resume][score]") {
+    // M30: resumed, the manifest -- and every surface relaying it -- said the
+    // last attempt's score while the stage trained again.
+    using apogee::training::PipelineStageRecord;
+
+    // A hard gate: b fails at 50% and the run aborts; fixed, resumed.
+    Fixture fixture;
+    fixture.add_stage("a", kPlain, {{"say hello", "hello"}});
+    fixture.add_stage("b", "{\"mock\": {\"answer\": \"nope\"}}\n", {{"say nope", "nope"}});
+    const PipelineOutcome first = apogee::training::run_pipeline(fixture.request("pipe-20"));
+    REQUIRE(first.manifest.stages[1].status == "failed");
+    REQUIRE(first.manifest.stages[1].eval.has_value());
+    REQUIRE(first.manifest.stages[1].cumulative_score == 0.5);
+    REQUIRE_FALSE(first.manifest.stages[1].adapter_dir.empty());
+    write(fixture.spec.stages[1].dataset, kPlain);
+    std::vector<PipelineStageRecord> training;
+    std::vector<PipelineStageRecord> evaluating;
+    PipelineRequest again = fixture.request("pipe-20");
+    again.on_manifest = [&](const PipelineRunManifest& manifest) {
+        // The file as it stands at each of b's moves.
+        const PipelineStageRecord b = fixture.on_disk("pipe-20").stages[1];
+        CHECK(b.status == manifest.stages[1].status);
+        if (b.status == "training") {
+            training.push_back(b);
+        } else if (b.status == "evaluating") {
+            evaluating.push_back(b);
+        }
+    };
+    const PipelineOutcome resumed =
+        apogee::training::resume_pipeline(again, fixture.on_disk("pipe-20"));
+    INFO(resumed.error);
+    REQUIRE(resumed.ok);
+    REQUIRE(training.size() == 1);
+    REQUIRE(evaluating.size() == 1);
+    for (const PipelineStageRecord& stage : {training.front(), evaluating.front()}) {
+        CHECK_FALSE(stage.eval.has_value());
+        CHECK(stage.cumulative_score == 0.0);
+        CHECK_FALSE(stage.cumulative_passed);
+        CHECK(stage.fused_dir.empty());
+    }
+    // Training, it has no adapter of this attempt's yet; evaluating, its own.
+    CHECK(training.front().adapter_dir.empty());
+    CHECK(evaluating.front().adapter_dir ==
+          (fixture.training / "runs" / "pipe-20-s1" / "adapters").string());
+    // Scored again, the new score.
+    const PipelineStageRecord& done = resumed.manifest.stages[1];
+    CHECK(done.status == "passed");
+    REQUIRE(done.eval.has_value());
+    CHECK(done.cumulative_score == 1.0);
+    CHECK(done.cumulative_passed);
+
+    // A soft gate: b fails and is fused for c; Ctrl-C during c. Resumed
+    // from b, its old checkpoint is not this attempt's either.
+    Fixture soft;
+    soft.add_stage("a", kPlain, {{"say hello", "hello"}});
+    soft.add_stage("b", "{\"mock\": {\"answer\": \"nope\"}}\n", {{"say nope", "nope"}});
+    soft.add_stage("c", kPlain, {{"say bye", "bye"}});
+    PipelineRequest stop = soft.request("pipe-21");
+    stop.gate_mode = apogee::training::GateMode::Soft;
+    stop.cancellation = apogee::harness::CancellationToken::create();
+    stop.on_progress = [&stop](const apogee::training::PipelineProgress& progress) {
+        if (progress.stage_index == 2 && progress.training != nullptr) {
+            stop.cancellation.cancel();
+        }
+    };
+    const PipelineOutcome stopped = apogee::training::run_pipeline(stop);
+    REQUIRE(stopped.cancelled);
+    REQUIRE(stopped.manifest.stages[1].status == "failed");
+    REQUIRE_FALSE(stopped.manifest.stages[1].fused_dir.empty());
+    std::vector<PipelineStageRecord> retrained;
+    PipelineRequest resume = soft.request("pipe-21");
+    resume.gate_mode = apogee::training::GateMode::Soft;
+    resume.on_manifest = [&](const PipelineRunManifest& manifest) {
+        if (manifest.stages[1].status == "training") {
+            retrained.push_back(manifest.stages[1]);
+        }
+    };
+    const PipelineOutcome finished =
+        apogee::training::resume_pipeline(resume, soft.on_disk("pipe-21"));
+    INFO(finished.error);
+    REQUIRE(finished.ok);
+    REQUIRE(retrained.size() == 1);
+    CHECK(retrained.front().fused_dir.empty());
+    CHECK(retrained.front().adapter_dir.empty());
+    CHECK_FALSE(retrained.front().eval.has_value());
+    CHECK(retrained.front().cumulative_score == 0.0);
+}

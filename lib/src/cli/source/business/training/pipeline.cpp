@@ -99,6 +99,14 @@ public:
                 }
             }
             record.dataset = dataset.string();
+            // A stage trained again -- a resume's first unpassed -- holds no
+            // score until it is evaluated again (M30): the last attempt's
+            // eval, its gate and the weights it left are not this attempt's.
+            record.eval.reset();
+            record.cumulative_score = 0.0;
+            record.cumulative_passed = false;
+            record.adapter_dir.clear();
+            record.fused_dir.clear();
             record.status = std::string{kStageTraining};
             if (const std::string failure = save(); !failure.empty()) {
                 return finish(kPipelineFailed, failure);

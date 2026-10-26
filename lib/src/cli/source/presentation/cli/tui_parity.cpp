@@ -44,7 +44,7 @@ constexpr std::array kSurfaces{
     // -- run on the exec line.
     ShellSurface{"train", View,
                  "Train (a run narrated through the progress seam: p a pipeline, c a cycle pass; "
-                 "their resume and status on the exec line)",
+                 "their resume and status, and the named specs' list and show, on the exec line)",
                  ShellDoor{.view = "Train"}},
     ShellSurface{"datasets", View, "Datasets", ShellDoor{.view = "Datasets"}},
     ShellSurface{"agents", View, "Agents (edit stays the $EDITOR's, refused below)",

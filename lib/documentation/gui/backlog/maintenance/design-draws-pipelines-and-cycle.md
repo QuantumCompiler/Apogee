@@ -26,7 +26,7 @@ The design is the reference the app is built from (`lib/design/spec/CLAUDE.md`).
   - `html/ScreenTrainingPipelines.dc.html`, start `training:pipelines`: a pipeline run stage by stage;
   - `html/ScreenTrainingCycle.dc.html`, start `training:cycle`: the cycle with its passes;
   - their `json/canvas.json` entries beside `ScreenTrainingDatasets.dc.html`, and their README rows.
-- **`html/BuildContract.dc.html`:** TRAINING rows for the pipeline and cycle reads and streams, ready where 55h states them. The one gap 4j found that the board should carry, no read listing the named pipeline specs (CLI [M30](../../../cli/backlog/maintenance/pipelines-and-cycle-tell-the-truth.md)), is listed with its fallback: the specs from completion.
+- **`html/BuildContract.dc.html`:** TRAINING rows for the pipeline and cycle reads and streams, ready where 55h states them, and the named specs listed by `train pipeline list` and `show`, ready since the CLI's [M30](../../../cli/assistant/MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths) (shipped 2026-10-26; 4j's app still names them from completion, its adoption a later GUI item).
 
 **Reference.**
 - The design's own precedents for a new tab and board: 2d's Training and Datasets boards (canvas version 39) and 2e's Library boards (version 40), recorded in [Milestone C](../../assistant/MILESTONES.md#milestone-c--cli-parity).
@@ -34,11 +34,12 @@ The design is the reference the app is built from (`lib/design/spec/CLAUDE.md`).
 - 4l's republish of the contract board: [Milestone E](../../assistant/MILESTONES.md#milestone-e--the-audits-gui-findings), canvas version 46.
 
 **Decisions made** (dated):
+- 2026-10-26 — **The pipeline-spec gap closed before this item was built.** The CLI's M30 shipped `train pipeline list` and `show` the same day, so the board maps them as ready.
 - 2026-10-26 — **Opened from the GUI v0.2.0 run's record** (the user's call: "spec them into the backlog"; placed in GUI Maintenance, the user's call the same day). 4j and 4l recorded the gap under "Not done".
 
 **Open calls:**
 - [default: two boards, a pipeline mid-run stage by stage and the cycle with its passes. The empty states, a failed stage's Resume and the run-once confirm are drawn in `main.html` and reached by the prototype, not boards of their own.]
-- [default: the pipeline-spec gap joins the ledger as the next G number, its owner CLI M30; it's flipped when M30 ships, in that item's own docs pass.]
+- [default: the Pipelines board draws the specs as `train pipeline list` states them (ready since the CLI's M30), and the contract board adds no gap for them.]
 
 **Guardrail(s).**
 - **The design's health check** (`lib/design/spec/CLAUDE.md`, every start screen for 30 ticks): no problems, the two new starts among them.

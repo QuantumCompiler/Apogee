@@ -333,8 +333,9 @@ on stderr as a `[resume]` line, as a chat's resume says it.
 
 Since 52b the four verbs that run for minutes — `models pull`, `video
 generate`, `video compose` and `voice say` — take `--output-format
-stream-json`: the progress each already narrates for people, as one JSON
-object a line on stdout, and the verb's own document last. It is a relay,
+stream-json`, and since M30 `datasets pull` too: the progress each already
+narrates for people, as one JSON object a line on stdout, and the verb's own
+document last. It is a relay,
 never a second narrator: the chain's steps, the download's counts and the
 drivers' events are the same producers the busy line and the `[i/n]` lines
 read, framed as events instead. Every line a verb prints for people on stdout
@@ -370,6 +371,15 @@ before.
 {"type":"document","document":{"object":"video.project","status":"done",…}}
 ```
 
+```jsonl
+{"type":"job","verb":"datasets pull","protocol_version":1,"schema":"2026-10-26"}
+{"type":"notice","text":"downloading 2 file(s), 1.2 MiB, into /Users/you/.apogee/training/datasets/raw/org--ds"}
+{"type":"bytes","done":524288,"total":1048576,"file":"data/train.jsonl","index":1,"count":2}
+…
+{"type":"notice","text":"Convert it with:  apogee datasets prepare /Users/you/.apogee/training/datasets/raw/org--ds"}
+{"type":"document","document":{"object":"dataset.pull","ref":"org/ds","path":"/Users/you/.apogee/training/datasets/raw/org--ds","files":2,"bytes":1258291}}
+```
+
 | Event | Meaning |
 |---|---|
 | `job` | First: the `verb`, `protocol_version` and `schema` — the same versions a session's announce. |
@@ -381,7 +391,7 @@ before.
 | `assembling` | Those `frames` going into the clip. |
 | `segment` | Speech made: segment `index` of `of`, its `seconds` as the driver counted. |
 | `scene` | A composition's scene begun: `scene` of `scenes`, `state` `speaking` (its narration), `rendering` (its clip) or `asset` (its asset taken as it is). Every `ready`, `step`, `frames`, `assembling` and `segment` inside a composition carries the `scene` it belongs to; outside one they carry none. |
-| `document` | Last on success: the verb's own document, whole. For `video generate`, `video compose` and `voice say` it is exactly what `--output-format json` prints -- on success, the record written beside the output. For `models pull`, which has no document of its own, one `document` per set of weights the run stored, in the order stored, each exactly what `apogee models info <model>/<format>/<id> --output-format json` prints for it. |
+| `document` | Last on success: the verb's own document, whole. For `video generate`, `video compose` and `voice say` it is exactly what `--output-format json` prints -- on success, the record written beside the output. For `models pull`, which has no document of its own, one `document` per set of weights the run stored, in the order stored, each exactly what `apogee models info <model>/<format>/<id> --output-format json` prints for it. For `datasets pull` (since M30), one `document` naming where the dataset landed -- `{"object":"dataset.pull","ref","path","files","bytes"}`: the `ref` as given, the folder its data files landed in (`path`, under `training/datasets/raw/`, what `apogee datasets prepare <path>` takes), how many files and their bytes. |
 
 A failure ends the stream with an `error` event, its `message` the words stderr
 gets -- the stream's last event, so a chain's `failed` stage and the `notice`s
@@ -402,8 +412,10 @@ exits `130` with the stream ending cleanly on its `error`, every line whole --
 `models pull` on every path too since 55c: a copy from the Ollama store, a
 GGUF, a SafeTensors snapshot, an MLX model, a pipeline, a voice model and the
 register chain's download, what it staged removed (`cancelled -- nothing was
-written`). `models pull` takes `text` or `stream-json` only; the three media
-verbs take `text`, `json` or `stream-json`.
+written`) -- and `datasets pull` since M30, the listing and the download
+alike, its staged folder removed (`cancelled -- nothing was written`).
+`models pull` and `datasets pull` take `text` or `stream-json` only; the
+three media verbs take `text`, `json` or `stream-json`.
 
 ### A training run: `train pipeline` and `train cycle`
 
@@ -420,6 +432,13 @@ status line shows, are `iteration`s; every other line the terminal would print
 -- the `[pipeline]` header, `[train]`, `[eval]`, `[gate]`, `[fuse]` and
 `[warn]` lines, and in a cycle the promotion's `[promote]` lines -- is a
 `notice` in the same words; a cycle pass's own narration is its `pass` events.
+Since M30 a halt taken while a pass runs -- `apogee train cycle halt` from
+another terminal -- is kept, as a `resume`'s reset failure count is: the pass
+finishes as it would have, its `pass` events unchanged, and a `notice` just
+before the document says so -- `[cycle] halted while this pass ran (halted by
+'apogee train cycle halt') -- the halt is kept: 'apogee train cycle run'
+refuses until 'apogee train cycle resume'` -- the document's `halted` `true`.
+It is never a `pass` of state `halted`, which is the breaker tripping.
 In the text view all of it goes to stderr; under `stream-json` it is on the
 stream and stderr keeps the diagnostics -- a refusal or a failure is said there
 as well as in the stream's `error`. Without the flag every verb prints exactly
@@ -459,7 +478,7 @@ what it did before.
 
 | Event | Meaning |
 |---|---|
-| `stage` | A pipeline's stage as its manifest records it: `index` of `count` (from 1), its `label` the stage's name, `state` the manifest's own word -- `pending`, `training`, `evaluating`, `fusing` (an intermediate stage merged into the next one's base), `passed` or `failed` -- with `pipeline_run_id`, the stage's own `run_id` once it has one (what `train eval` and `train promote` take), and `cumulative_score`, 0 to 1, once its cumulative gate has scored it. A run Ctrl-C stopped leaves its stage where the manifest left it; the pipeline's own status is the document's. |
+| `stage` | A pipeline's stage as its manifest records it: `index` of `count` (from 1), its `label` the stage's name, `state` the manifest's own word -- `pending`, `training`, `evaluating`, `fusing` (an intermediate stage merged into the next one's base), `passed` or `failed` -- with `pipeline_run_id`, the stage's own `run_id` once it has one (what `train eval` and `train promote` take), and `cumulative_score`, 0 to 1, once its cumulative gate has scored it -- this attempt's: a stage trained again (a resume's first unpassed) carries none from `training` until it is scored again, and its manifest holds none of the last attempt's `eval_results`, score, `adapter_dir` or `fused_dir` meanwhile (M30). A run Ctrl-C stopped leaves its stage where the manifest left it; the pipeline's own status is the document's. |
 | `iteration` | A training iteration, as the trainer reported it: `iteration` of `iterations` (absent when the trainer did not say), `loss`, `lr` and `throughput` (iterations a second) -- the status line's facts -- and the pipeline `stage` it belongs to, from 1. As often as the trainer reports, never more. |
 | `pass` | A line of a cycle pass's narration, `text` as the terminal says it, and `state`, where the pass is: `collecting` (its sources read), `merging`, `training` (its pipeline -- whose `stage`s, `iteration`s and `notice`s follow), `gating` (the dual gate against the last passing pass and the anchor), `promoting` -- or how it ended: `skipped` (no new data), `failed`, `halted` (the circuit breaker tripped on this pass) or `passed`. More states may be added. |
 
@@ -470,7 +489,8 @@ pipeline, what `apogee train pipeline status <id> --output-format json` prints
 --output-format json` prints, the history with the pass recorded. A run that
 failed, or was cancelled, sends it and then the `error` that ends the stream: a
 pipeline's gate failure in the words stderr gets, a cycle's `cycle FAILED --
-<reason>`, a Ctrl-C's `cancelled; recorded as aborted -- 'apogee train pipeline
+<reason>` (on stderr too since M30, as `apogee train: cycle FAILED --
+<reason>`), a Ctrl-C's `cancelled; recorded as aborted -- 'apogee train pipeline
 resume <id>' continues it` or `cancelled before an outcome was recorded`. A run
 refused before it starts -- a spec, a student or a dataset that does not
 resolve, the cycle's lock held, the loop halted, a source that cannot be read
@@ -1225,6 +1245,8 @@ apogee datasets info <name> --output-format json       # byte for byte GET /v1/a
 apogee datasets kits --output-format json   # byte for byte GET /v1/admin/datasets/kits
 apogee train regime list --output-format json        # {"object":"list","data":[…],"problems":[…]}
 apogee train regime show <name> --output-format json # {"object":"training.regime",…}
+apogee train pipeline list --output-format json      # {"object":"list","data":[…]}
+apogee train pipeline show <name> --output-format json   # {"object":"training.pipeline",…}
 apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: metadata only
 ```
 
@@ -1491,6 +1513,20 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   per spec file left out because it does not parse; `show` is one regime
   as `{"object":"training.regime",…}`. A name nothing answers is refused
   as the text refuses it.
+- **`train pipeline list`** and **`train pipeline show`** (since M30): the
+  pipelines a `train pipeline run --pipeline` can name, the config's
+  `training.pipelines:` entries, by name -- each `name` (the entry's, what a
+  run takes), `path` (`null` for an entry; `show` also reads a spec file, as
+  a run does, and names it here), `student` as the spec names it, and
+  `stages` in order: each `name`, `dataset`, `eval_suite`, `gate` -- the
+  suites its cumulative gate holds it to, every earlier stage's then its own,
+  at 100% -- and its tuning as written: `method` (`""`: lora), `iters`,
+  `batch_size` and `num_layers` (`0`: the trainer's default),
+  `grad_checkpoint`, `mask_prompt` and `rehearsal_fraction`. `list` is
+  `{"object":"list","data":[…]}`, `data` `[]` and never null when none is
+  named; `show` is one pipeline as `{"object":"training.pipeline",…}`. A name
+  nothing answers is refused as a run refuses it. No route serves them:
+  training is run, and read, on the host.
 - **`auth list`** (since 37g): the control plane's body -- each stored slot's
   `provider` and `stored_at`, which rung answers for each configured backend
   that takes a key (`backends`: `name`, `type`, `source`, and the `variable`

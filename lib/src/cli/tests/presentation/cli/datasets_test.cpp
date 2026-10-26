@@ -325,3 +325,310 @@ TEST_CASE("the teacher resolution and the parallel rule", "[commands][datasets][
     CHECK(apogee::commands::resolve_teacher(config, "").error.find("--teacher") !=
           std::string::npos);
 }
+
+// --- M30: `datasets pull` streams as a job ------------------------------------------
+//
+// The pull's progress as events, the text run's words as notices, and where
+// the dataset landed last -- over a scripted Hugging Face, the pull's own
+// transport seam. A Ctrl-C ends the stream on its error and leaves nothing.
+
+#include <CLI/CLI.hpp>
+
+#include <algorithm>
+#include <csignal>
+#include <map>
+#include <memory>
+#include <utility>
+
+#include "cli/helpers.h"
+#include "transport/http_client.h"
+
+namespace {
+
+using apogee::backends::HttpRequest;
+using apogee::backends::HttpResponse;
+
+/// A Hugging Face dataset repository in memory: its tree and each file --
+/// the one named `interrupted` met by a Ctrl-C halfway through its bytes, or
+/// the listing itself when `interrupted` is `listing`.
+class ScriptedDatasets final : public apogee::backends::HttpTransport {
+public:
+    ScriptedDatasets(std::string repo, std::map<std::string, std::string> files,
+                     std::string interrupted = {})
+        : repo_{std::move(repo)}, files_{std::move(files)}, interrupted_{std::move(interrupted)} {}
+
+    HttpResponse send(const HttpRequest& request, const apogee::backends::BodySink& sink,
+                      const apogee::harness::CancellationToken& cancellation) override {
+        cancellation.throw_if_cancelled();
+        HttpResponse response;
+        response.status = 200;
+        if (request.url ==
+            "https://huggingface.co/api/datasets/" + repo_ + "/tree/main?recursive=true") {
+            if (interrupted_ == "listing") {
+                (void)std::raise(SIGINT);
+                cancellation.throw_if_cancelled();
+            }
+            nlohmann::json tree = nlohmann::json::array();
+            for (const auto& [path, bytes] : files_) {
+                tree.push_back({{"type", "file"}, {"path", path}, {"size", bytes.size()}});
+            }
+            response.body = tree.dump();
+            return response;
+        }
+        const std::string prefix = "https://huggingface.co/datasets/" + repo_ + "/resolve/main/";
+        const auto file = request.url.starts_with(prefix)
+                              ? files_.find(request.url.substr(prefix.size()))
+                              : files_.end();
+        if (file == files_.end()) {
+            response.status = 404;
+            return response;
+        }
+        const std::string& bytes = file->second;
+        if (file->first == interrupted_) {
+            (void)sink(std::string_view{bytes}.substr(0, bytes.size() / 2));
+            (void)std::raise(SIGINT);
+            // The transport notices between chunks, as libcurl's does.
+            cancellation.throw_if_cancelled();
+        }
+        (void)sink(bytes);
+        return response;
+    }
+
+private:
+    std::string repo_;
+    std::map<std::string, std::string> files_;
+    std::string interrupted_;
+};
+
+/// One client's handle onto the one repository.
+class DatasetsHandle final : public apogee::backends::HttpTransport {
+public:
+    explicit DatasetsHandle(std::shared_ptr<ScriptedDatasets> hub) : hub_{std::move(hub)} {}
+
+    HttpResponse send(const HttpRequest& request, const apogee::backends::BodySink& sink,
+                      const apogee::harness::CancellationToken& cancellation) override {
+        return hub_->send(request, sink, cancellation);
+    }
+
+private:
+    std::shared_ptr<ScriptedDatasets> hub_;
+};
+
+/// What a pull ended with: its exit code (0 when it returned) and its streams.
+struct Pulled {
+    int code = 0;
+    std::string out{};
+    std::string err{};
+
+    [[nodiscard]] std::vector<nlohmann::json> events() const {
+        std::vector<nlohmann::json> found;
+        std::istringstream in{out};
+        for (std::string line; std::getline(in, line);) {
+            INFO(line);
+            const nlohmann::json event = nlohmann::json::parse(line, nullptr, false);
+            REQUIRE(event.is_object());
+            found.push_back(event);
+        }
+        return found;
+    }
+};
+
+[[nodiscard]] Pulled pull_dataset(const apogee::commands::DatasetPullRequest& request,
+                                  std::shared_ptr<ScriptedDatasets> hub) {
+    const std::ostringstream out;
+    const std::ostringstream err;
+    std::streambuf* const old_out = std::cout.rdbuf(out.rdbuf());
+    std::streambuf* const old_err = std::cerr.rdbuf(err.rdbuf());
+    Pulled pulled;
+    try {
+        apogee::commands::run_dataset_pull(
+            request, [hub]() -> std::unique_ptr<apogee::backends::HttpTransport> {
+                return std::make_unique<DatasetsHandle>(hub);
+            });
+    } catch (const CLI::RuntimeError& e) {
+        pulled.code = e.get_exit_code();
+    }
+    std::cout.rdbuf(old_out);
+    std::cerr.rdbuf(old_err);
+    pulled.out = out.str();
+    pulled.err = err.str();
+    return pulled;
+}
+
+/// Every entry under the raw datasets folder, relative to it.
+[[nodiscard]] std::vector<std::string> raw_entries(const std::filesystem::path& raw) {
+    std::vector<std::string> out;
+    std::error_code code;
+    if (std::filesystem::exists(raw, code)) {
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(raw)) {
+            out.push_back(entry.path().lexically_relative(raw).generic_string());
+        }
+    }
+    std::ranges::sort(out);
+    return out;
+}
+
+[[nodiscard]] std::vector<std::string> said_lines(const std::string& text) {
+    std::vector<std::string> out;
+    std::istringstream in{text};
+    for (std::string line; std::getline(in, line);) {
+        if (line.find_first_not_of(" \t") != std::string::npos) {
+            out.push_back(line);
+        }
+    }
+    return out;
+}
+
+const std::map<std::string, std::string> kDatasetFiles{
+    {"README.md", "# a card\n"},
+    {"data/train.jsonl", "{\"text\": \"one\"}\n{\"text\": \"two\"}\n"},
+    {"data/test.jsonl", std::string(4096, 'x') + "\n"}};
+
+}  // namespace
+
+TEST_CASE("datasets pull refused as a stream is its job and its error, the words on stderr too",
+          "[commands][datasets][pull][job]") {
+    // M30: `datasets pull` had no stream -- the flag was refused as an
+    // argument nobody expected.
+    const Fixture fixture;
+    std::string out;
+    std::string err;
+    CHECK(fixture.run({"datasets", "pull", "nope", "--output-format", "stream-json"}, &out, &err) ==
+          1);
+    INFO(out << err);
+    const Pulled refused{.code = 1, .out = out, .err = err};
+    const std::vector<nlohmann::json> events = refused.events();
+    REQUIRE(events.size() == 2);
+    CHECK(events[0].at("type") == "job");
+    CHECK(events[0].at("verb") == "datasets pull");
+    const std::string said = "'nope' is not a Hugging Face dataset ref (expected owner/name)";
+    CHECK(events[1] == nlohmann::json{{"type", "error"}, {"message", said}});
+    CHECK(err == "apogee datasets: " + said + "\n");
+    // A pull has no document to print alone.
+    CHECK(fixture.run({"datasets", "pull", "org/ds", "--output-format", "json"}, &out, &err) != 0);
+    CHECK(err.find("expected 'text' or 'stream-json'") != std::string::npos);
+    CHECK(out.empty());
+}
+
+TEST_CASE("datasets pull streams as a job: its bytes, the text run's words, where it landed last",
+          "[commands][datasets][pull][job]") {
+    const Fixture fixture;
+    const std::filesystem::path raw = fixture.home.path() / "training" / "datasets" / "raw";
+    const auto hub = std::make_shared<ScriptedDatasets>("org/ds", kDatasetFiles);
+    const Pulled pulled = pull_dataset({.ref = "org/ds", .stream = true}, hub);
+    INFO(pulled.out << pulled.err);
+    REQUIRE(pulled.code == 0);
+    CHECK(pulled.err.empty());
+    const std::vector<nlohmann::json> events = pulled.events();
+    REQUIRE(events.size() >= 3);
+    CHECK(events.front() == nlohmann::json{{"type", "job"},
+                                           {"verb", "datasets pull"},
+                                           {"protocol_version", 1},
+                                           {"schema", events.front().at("schema")}});
+    std::vector<nlohmann::json> moved;
+    std::vector<std::string> notices;
+    for (const nlohmann::json& event : events) {
+        if (event.at("type") == "bytes") {
+            moved.push_back(event);
+        } else if (event.at("type") == "notice") {
+            notices.push_back(event.at("text").get<std::string>());
+        }
+    }
+    // Each file's bytes to its total, said as the files move.
+    REQUIRE_FALSE(moved.empty());
+    CHECK(moved.back().at("done") == moved.back().at("total"));
+    CHECK(moved.back().at("count") == 2);
+    // Last: where the dataset landed, the folder `datasets prepare` takes.
+    const std::filesystem::path landed = raw / "org--ds";
+    CHECK(events.back() ==
+          nlohmann::json{{"type", "document"},
+                         {"document",
+                          {{"object", "dataset.pull"},
+                           {"ref", "org/ds"},
+                           {"path", landed.string()},
+                           {"files", 2},
+                           {"bytes", kDatasetFiles.at("data/train.jsonl").size() +
+                                         kDatasetFiles.at("data/test.jsonl").size()}}}});
+    CHECK(raw_entries(raw) == std::vector<std::string>{"org--ds", "org--ds/data",
+                                                       "org--ds/data/test.jsonl",
+                                                       "org--ds/data/train.jsonl"});
+    CHECK(bytes(landed / "data" / "train.jsonl") == kDatasetFiles.at("data/train.jsonl"));
+
+    // Pulled again as text: the same lines, by the same producers -- the
+    // stream's notices are the person's words, and the line naming each file
+    // as it moves is that file's bytes.
+    std::filesystem::remove_all(landed);
+    const Pulled text = pull_dataset({.ref = "org/ds"}, hub);
+    REQUIRE(text.code == 0);
+    CHECK(text.out.find("{\"") == std::string::npos);
+    std::vector<std::string> people = said_lines(text.out);
+    std::vector<std::string> files_said;
+    std::erase_if(people, [&files_said](const std::string& line) {
+        if (line.starts_with("  [")) {
+            files_said.push_back(line);
+            return true;
+        }
+        return false;
+    });
+    CHECK(people == notices);
+    CHECK(people.back() == "Convert it with:  apogee datasets prepare " + landed.string());
+    std::vector<std::string> files_moved;
+    for (const nlohmann::json& event : moved) {
+        const std::string line = "  [" + std::to_string(event.at("index").get<int>()) + "/" +
+                                 std::to_string(event.at("count").get<int>()) + "] " +
+                                 event.at("file").get<std::string>();
+        if (files_moved.empty() || files_moved.back() != line) {
+            files_moved.push_back(line);
+        }
+    }
+    CHECK(files_moved == files_said);
+}
+
+TEST_CASE("datasets pull Ctrl-C'd mid-download ends its stream on the cancel, nothing kept",
+          "[commands][datasets][pull][job][interrupt]") {
+    const Fixture fixture;
+    const std::filesystem::path raw = fixture.home.path() / "training" / "datasets" / "raw";
+    const std::string said = "cancelled -- nothing was written";
+    for (const std::string interrupted : {"data/train.jsonl", "listing"}) {
+        INFO(interrupted);
+        const Pulled pulled =
+            pull_dataset({.ref = "org/ds", .stream = true},
+                         std::make_shared<ScriptedDatasets>("org/ds", kDatasetFiles, interrupted));
+        INFO(pulled.out << pulled.err);
+        CHECK(pulled.code == apogee::commands::kCancelled);
+        CHECK(pulled.err == "apogee datasets: " + said + "\n");
+        const std::vector<nlohmann::json> events = pulled.events();
+        REQUIRE(events.size() >= 2);
+        CHECK(events.front().at("verb") == "datasets pull");
+        CHECK(events.back() == nlohmann::json{{"type", "error"}, {"message", said}});
+        for (const nlohmann::json& event : events) {
+            CHECK(event.at("type") != "document");
+        }
+        CHECK(raw_entries(raw).empty());
+    }
+
+    // As text: the same exit and words, nothing kept, stdout no stream.
+    const Pulled text = pull_dataset(
+        {.ref = "org/ds"},
+        std::make_shared<ScriptedDatasets>("org/ds", kDatasetFiles, "data/train.jsonl"));
+    CHECK(text.code == apogee::commands::kCancelled);
+    CHECK(text.err == "apogee datasets: " + said + "\n");
+    CHECK(text.out.find("{\"") == std::string::npos);
+    CHECK(raw_entries(raw).empty());
+}
+
+TEST_CASE("datasets pull's failures end its stream on their words, and nothing is kept",
+          "[commands][datasets][pull][job]") {
+    const Fixture fixture;
+    const std::filesystem::path raw = fixture.home.path() / "training" / "datasets" / "raw";
+    const Pulled empty = pull_dataset(
+        {.ref = "org/ds", .stream = true},
+        std::make_shared<ScriptedDatasets>(
+            "org/ds", std::map<std::string, std::string>{{"README.md", "# a card\n"}}));
+    CHECK(empty.code == 1);
+    const std::string said =
+        "'org/ds' holds no data files (Parquet, JSONL, JSON, CSV, Arrow, text)";
+    CHECK(empty.err == "apogee datasets: " + said + "\n");
+    CHECK(empty.events().back() == nlohmann::json{{"type", "error"}, {"message", said}});
+    CHECK(raw_entries(raw).empty());
+}

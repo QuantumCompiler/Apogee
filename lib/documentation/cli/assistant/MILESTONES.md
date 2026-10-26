@@ -9487,6 +9487,60 @@ The probe, run on two scripted mocks over a sandbox, showed both: `session` keys
 - Two machine-mode launch lines stay on stderr alone: orchestrate's "not offering" warning and the consult notes.
 - The macOS app reads the new `suite` field and notices from a later GUI item.
 
+### 2026-10-26 — `pipelines-and-cycle-tell-the-truth` (maintenance item M30): pipelines and the cycle tell the truth
+
+**Why.** The macOS app's 4j drew the Training place's Pipelines and Cycle tabs on 55h's documents and streams. Its probes found five places where the pipeline and cycle verbs said less than the truth, each reproduced on `apogee 0.2.0 (4b828e91)` and traced to its line before this item was written:
+- **A halt taken during a pass was lost.** `train cycle halt` answered `cycle halted`, and history.json said so, until the pass saved its stale copy over it (`cycle.cpp:403`, `:417`). The next `train cycle run` promoted again.
+- **A failed pass under `stream-json` wrote nothing to stderr,** though `machine-mode.md` says a failure is said there too.
+- **A resumed stage repeated the previous attempt's score:** `b training 0.5`, `b evaluating 0.5` (`pipeline.cpp:102`).
+- **No read listed the named pipeline specs,** only completion.
+- **`datasets pull` took no `--output-format`:** no stream, no Ctrl-C handling, and no seam for a hermetic test.
+
+- [x] **A halt taken during a pass is kept.** `update_history` (`training/cycle`) re-reads `history.json` under its own short lock, `training/cycle/history.lock`, applies a change and saves. The pass's three outcome saves, `cycle halt` and `cycle resume` all go through it, so the pass's record joins whatever was halted or reset while it ran.
+  - **The pass finishes.** It ends with a `notice`, `[cycle] halted while this pass ran (<reason>) -- the halt is kept: …`, never the `pass` state `halted` (the breaker's).
+  - **The next run is refused:** `the cycle is halted: halted by 'apogee train cycle halt'…`.
+  - **`cycle halt` during a pass** adds `the pass running now finishes, and keeps the halt`.
+- [x] **A failed pass is said on stderr too**, `apogee train: cycle FAILED -- …`, as the pipeline's failure is.
+- [x] **A stage trained again holds no score until it is evaluated again.** Entering `training` resets `eval`, `cumulative_score`, `cumulative_passed`, `adapter_dir` and `fused_dir`, so a resume's stream reads `b training -`, `b evaluating -`, `b passed 1.0`.
+- [x] **`train pipeline list` and `train pipeline show <name>`,** mirroring `train regime list|show`.
+  - **Formats:** text and `--output-format json` (`{"data":[{name, path, stages, student}], "object":"list"}`; `show` an `object: "training.pipeline"`), from `operations/training_reads`.
+  - **Around them:** completion, help, HTTP parity rows (`read_only`, beside the regimes), and their lines in `machine-mode.md` and `training.md`.
+- [x] **`datasets pull` streams as a job:** `add_job_format` (text or `stream-json`), a `JobStream` and `job_download_options`.
+  - **Refusals** tell the stream.
+  - **One `InterruptScope`** covers the listing and the download: Ctrl-C ends on `error`, exit 130, `cancelled -- nothing was written`, the raw folder left empty.
+  - **A test seam:** `run_dataset_pull(DatasetPullRequest, TransportMaker)`.
+  - **A closing `document`:** `{object: "dataset.pull", ref, path, files, bytes}`.
+
+**Decisions made while building** (2026-10-26, each recorded for veto):
+- **The defaults, taken:**
+  - a halt kept mid-pass is said as a `notice`;
+  - the specs are listed and shown as the regimes are;
+  - the pull's document names where the dataset landed.
+- **A second, short lock** rather than the cycle's own. A pass holds `cycle.lock` for its whole run, so the verbs would block or be refused. Tasks' separate request file was not used, keeping `history.json` the one place `status`, `check` and the admin route read.
+- **A halt doesn't stop the pass running;** it finishes and may promote, and Ctrl-C still stops it. The breaker counts a failed pass but leaves a person's halt reason alone.
+- **The pass no longer overwrites an unreadable history,** saying a warning instead.
+- **`update_history` waits up to 5 s** for another writer, and takes over a lock left by a dead process.
+- **`show` also takes a spec file's path,** since completion offers paths there. `list` adds a STUDENT column, and `show`'s GATE column shows the cumulative suites.
+- **A Ctrl-C landing after the dataset finished still removes it,** as `models pull` does. In text mode a Ctrl-C now exits 130 with its message, where the default handler used to leave the staging folder behind.
+- **The vocabulary date stays `2026-10-26`:** no new event or field, the document riding the existing `document` event.
+
+**Verified.**
+- **12 new Catch2 cases,** plus three `train_test` cases extended:
+  - `cycle_test` (4), among them a halt surviving the pass's save, a halt surviving a failing pass's breaker, and a resume's reset count kept;
+  - `pipeline_test` (1);
+  - `train_test` (3);
+  - `datasets_test` (4): the refusal, the stream, Ctrl-C mid-download and mid-listing.
+
+  `train_e2e.sh` holds a pass on its lock through a FIFO nobody reads, and `shell_completion_check.sh` gained the new verbs. Before the fix, 11 of the new and extended cases failed. After, 90 of 90, and the neighbouring tags 632 of 632.
+- **The full `apogee_tests`:** 3,961 cases, 3,960 passed, 1 skipped (`pdftotext`). `ctest -R '^(cli|harness)\.'`: 60 of 60, conformance among them.
+- **Zero warnings,** the MinGW scan clean over 11 changed `.cpp` files, clang-format clean over 14.
+- **The binary probe for Ctrl-C** sent its request through `HTTPS_PROXY` at a loopback socket that never answers, so nothing left the machine.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 4,021 tests and the macOS app's 834 cases passed, with no warning.
+
+**Not done:**
+- No HTTP route for the new reads; they are `read_only` in the parity table, as the regimes are.
+- The macOS app adopts the reads and the pull's stream in a later GUI item.
+
 ---
 
 ## Milestone AP — Runtime adapters

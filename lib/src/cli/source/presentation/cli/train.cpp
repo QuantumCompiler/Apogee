@@ -3049,6 +3049,83 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         print_pipeline_table(*manifest);
     });
 
+    // ---- pipeline list / show (M30) -------------------------------------------
+    // The specs a run can name, read as `train regime list|show` reads the
+    // regimes: completion alone named them before.
+    auto specs_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    CLI::App* pipe_list = pipeline->add_subcommand(
+        "list", "The named pipelines a run can take (training.pipelines), with their stages");
+    add_read_format(pipe_list, specs_format);
+    pipe_list->callback([&context, specs_format]() {
+        std::filesystem::path config_path;
+        const harness::Config config = load_config_strict(context, config_path);
+        if (*specs_format == ReadFormat::Json) {
+            write_document(std::cout, operations::training_pipeline_specs_document(config));
+            return;
+        }
+        if (config.training.pipelines.empty()) {
+            std::cout << "no named pipelines -- add one under training.pipelines, or run a spec "
+                         "file with 'apogee train pipeline run --pipeline <file>'\n";
+            return;
+        }
+        std::size_t width = 4;
+        for (const auto& [name, spec] : config.training.pipelines) {
+            width = std::max(width, name.size());
+        }
+        std::cout << pad("NAME", width) << "  " << pad("STAGES", 6) << "  STUDENT\n";
+        for (const auto& [name, spec] : config.training.pipelines) {
+            std::cout << pad(name, width) << "  " << pad(std::to_string(spec.stages.size()), 6)
+                      << "  " << spec.student << "\n";
+        }
+    });
+    auto spec_shown = std::make_shared<std::string>();
+    auto spec_show_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    CLI::App* pipe_show = pipeline->add_subcommand(
+        "show", "One pipeline whole -- a named one or a spec file: its stages, datasets and gates");
+    pipe_show->add_option("name", *spec_shown, "A name under training.pipelines, or a spec file")
+        ->type_name(kPipelineValue)
+        ->required();
+    add_read_format(pipe_show, spec_show_format);
+    pipe_show->callback([&context, spec_shown, spec_show_format]() {
+        std::filesystem::path config_path;
+        const harness::Config config = load_config_strict(context, config_path);
+        // Read as a run reads it: a spec file first, then an entry.
+        std::error_code code;
+        const std::filesystem::path file = std::filesystem::is_regular_file(*spec_shown, code)
+                                               ? std::filesystem::path{*spec_shown}
+                                               : std::filesystem::path{};
+        harness::PipelineSpec spec = resolve_pipeline_spec(config, *spec_shown);
+        if (file.empty()) {
+            spec.name = *spec_shown;  // the entry's name, which a run takes
+        }
+        if (*spec_show_format == ReadFormat::Json) {
+            write_document(std::cout, operations::training_pipeline_spec_document(spec, file));
+            return;
+        }
+        std::cout << spec.name << "  "
+                  << (file.empty() ? std::string{"(training.pipelines entry)"} : file.string())
+                  << "\nstudent: " << spec.student << "\n\n";
+        std::size_t number = 1;
+        std::size_t stage_width = 5;
+        std::size_t dataset_width = 7;
+        for (const harness::PipelineStageSpec& stage : spec.stages) {
+            stage_width = std::max(stage_width, stage.name.size());
+            dataset_width = std::max(dataset_width, stage.dataset.size());
+        }
+        const std::size_t index_width = std::to_string(spec.stages.size()).size();
+        std::cout << pad("#", index_width) << "  " << pad("STAGE", stage_width) << "  "
+                  << pad("DATASET", dataset_width) << "  GATE\n";
+        std::string gate;
+        for (const harness::PipelineStageSpec& stage : spec.stages) {
+            gate += (gate.empty() ? "" : " + ") + stage.eval_suite;
+            std::cout << pad(std::to_string(number++), index_width) << "  "
+                      << pad(stage.name, stage_width) << "  " << pad(stage.dataset, dataset_width)
+                      << "  " << gate << "\n";
+        }
+        std::cout << "\na stage passes when its GATE -- its own suite and every earlier stage's "
+                     "-- scores 100%\n";
+    });
+
     // ---- regime ------------------------------------------------------------
     CLI::App* regime = cmd->add_subcommand(
         "regime", "Distil a teacher into the student across kits: synth, pipeline, promote");
@@ -3505,6 +3582,17 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             if (console.has_value()) {
                 console->finish();
             }
+            if (outcome.halt_kept) {
+                // A halt taken while the pass ran (M30): said where the pass's
+                // narration goes, never as a `pass` of state `halted`, which is
+                // the breaker's.
+                const std::string kept = training::halt_kept_notice(outcome.history);
+                if (job != nullptr) {
+                    job->events().on_notice(kept);
+                } else {
+                    std::cerr << kept << "\n";
+                }
+            }
             if (job != nullptr && (outcome.ok || outcome.cancelled)) {
                 // The cycle's own read, once the pass got under way: what `train
                 // cycle status --output-format json` prints. A pass refused before
@@ -3536,7 +3624,10 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             }
             if (record.gate == training::kGateFail) {
                 if (job != nullptr) {
-                    job->failed("cycle FAILED -- " + record.gate_reason);
+                    // Said on stderr too, as a pipeline's failure is (M30).
+                    const std::string failed = "cycle FAILED -- " + record.gate_reason;
+                    std::cerr << "apogee train: " << failed << "\n";
+                    job->failed(failed);
                     throw CLI::RuntimeError(kBackendError);
                 }
                 std::cout << "cycle FAILED -- " << record.gate_reason
@@ -3602,24 +3693,32 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     cycle_halt->callback([&context]() {
         const harness::Config config = load_config_or_default(context);
         const std::filesystem::path cycle_dir = harness::training_cycle_dir();
-        std::string error;
-        training::CycleHistory history =
-            training::load_history(cycle_dir, config.training.cycle.backend, error);
-        if (!error.empty()) {
-            fail_user("the cycle history is unreadable: " + error);
+        // Written under the history's own lock, never the one a pass holds
+        // for as long as it runs: a pass running now keeps the halt (M30).
+        bool already = false;
+        std::string reason;
+        const training::HistoryUpdate update = training::update_history(
+            cycle_dir, config.training.cycle.backend, [&](training::CycleHistory& history) {
+                already = history.halted;
+                reason = history.halt_reason;
+                if (!already) {
+                    training::halt_cycle(history, "halted by 'apogee train cycle halt'");
+                }
+                return !already;
+            });
+        if (!update.error.empty()) {
+            fail_user(update.error);
         }
-        if (history.halted) {
-            std::cout << "already halted: " << history.halt_reason
+        if (already) {
+            std::cout << "already halted: " << reason
                       << "\n  'apogee train cycle resume' clears it\n";
             return;
         }
-        training::halt_cycle(history, "halted by 'apogee train cycle halt'");
-        if (const std::string failure = training::save_history(cycle_dir, history);
-            !failure.empty()) {
-            fail_user(failure);
-        }
         std::cout << "cycle halted -- 'apogee train cycle run' refuses until 'apogee train cycle "
                      "resume'\n";
+        if (training::cycle_lock_held(cycle_dir)) {
+            std::cout << "  the pass running now finishes, and keeps the halt\n";
+        }
     });
 
     CLI::App* cycle_resume = cycle->add_subcommand(
@@ -3627,21 +3726,22 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     cycle_resume->callback([&context]() {
         const harness::Config config = load_config_or_default(context);
         const std::filesystem::path cycle_dir = harness::training_cycle_dir();
-        std::string error;
-        training::CycleHistory history =
-            training::load_history(cycle_dir, config.training.cycle.backend, error);
-        if (!error.empty()) {
-            fail_user("the cycle history is unreadable: " + error);
-        }
         if (!training::history_exists(cycle_dir)) {
             std::cout << "no cycle history yet -- nothing to resume\n";
             return;
         }
-        const std::string reason = history.halt_reason;
-        const bool was_halted = training::resume_cycle(history);
-        if (const std::string failure = training::save_history(cycle_dir, history);
-            !failure.empty()) {
-            fail_user(failure);
+        // Under the history's own lock, as `halt` writes (M30): a pass
+        // running now keeps the reset count.
+        std::string reason;
+        bool was_halted = false;
+        const training::HistoryUpdate update = training::update_history(
+            cycle_dir, config.training.cycle.backend, [&](training::CycleHistory& history) {
+                reason = history.halt_reason;
+                was_halted = training::resume_cycle(history);
+                return true;
+            });
+        if (!update.error.empty()) {
+            fail_user(update.error);
         }
         if (was_halted) {
             std::cout << "cycle resumed (was halted: " << reason

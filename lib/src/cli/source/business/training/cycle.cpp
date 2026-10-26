@@ -8,6 +8,7 @@
 #include <ranges>
 #include <stdexcept>
 #include <system_error>
+#include <thread>
 #include <utility>
 
 #include "contracts/config_edit.h"
@@ -161,6 +162,46 @@ std::string save_history(const std::filesystem::path& cycle_dir, const CycleHist
     return {};
 }
 
+HistoryUpdate update_history(const std::filesystem::path& cycle_dir, std::string_view backend,
+                             const std::function<bool(CycleHistory&)>& change,
+                             std::chrono::milliseconds wait) {
+    HistoryUpdate update;
+    // A writer reads and writes one small file under it, so a short wait
+    // finds it free; a lock whose holder died is taken over, since nothing
+    // of a pass's is lost with it.
+    const std::filesystem::path path = cycle_dir / kHistoryLockFileName;
+    const auto deadline = std::chrono::steady_clock::now() + wait;
+    std::optional<platform::PidLock> lock;
+    platform::PidLock::Refusal refusal;
+    while (true) {
+        lock = platform::PidLock::acquire(path, {}, /*take_stale=*/true, refusal);
+        if (lock.has_value() || !refusal.holder.has_value() ||
+            std::chrono::steady_clock::now() >= deadline) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    }
+    if (!lock.has_value()) {
+        update.error = refusal.holder.has_value()
+                           ? "the cycle history is being written by process " +
+                                 std::to_string(refusal.holder->pid) + " (lock: " + path.string() +
+                                 "); try again"
+                           : refusal.error;
+        return update;
+    }
+    std::string unreadable;
+    update.history = load_history(cycle_dir, backend, unreadable);
+    if (!unreadable.empty()) {
+        update.error = "the cycle history is unreadable: " + unreadable;
+        return update;
+    }
+    if (!change(update.history)) {
+        return update;
+    }
+    update.error = save_history(cycle_dir, update.history);
+    return update;
+}
+
 // --- the lock -----------------------------------------------------------------
 
 std::optional<CycleLock> CycleLock::acquire(const std::filesystem::path& cycle_dir,
@@ -216,6 +257,14 @@ bool resume_cycle(CycleHistory& history) {
     history.halt_reason.clear();
     history.consecutive_fails = 0;
     return was_halted;
+}
+
+std::string halt_kept_notice(const CycleHistory& history) {
+    return "[cycle] halted while this pass ran (" +
+           (history.halt_reason.empty() ? std::string{"'apogee train cycle halt' was run"}
+                                        : history.halt_reason) +
+           ") -- the halt is kept: 'apogee train cycle run' refuses until 'apogee train cycle "
+           "resume'";
 }
 
 // --- the sources ----------------------------------------------------------------
@@ -414,12 +463,24 @@ CycleOutcome run_cycle(const CycleRequest& request) {
     }
     const std::string run_at = rfc3339_now();
     const std::filesystem::path work = request.cycle_dir / kWorkDirName;
-    auto save = [&](std::string_view state, const std::string& what) {
-        if (const std::string failure = save_history(request.cycle_dir, history);
-            !failure.empty()) {
-            say(state,
-                "[cycle] warning: could not save the history after " + what + ": " + failure);
+    // The pass's outcome is added to the history as it stands when the pass
+    // ends (M30), never to the copy read above: `cycle halt` and `cycle
+    // resume` write it while a pass runs, and what they wrote is kept. A
+    // history that cannot be written is said, the outcome still the pass's.
+    auto save = [&](std::string_view state, const std::string& what,
+                    const std::function<void(CycleHistory&)>& change) {
+        HistoryUpdate update = update_history(request.cycle_dir, request.config.backend,
+                                              [&change](CycleHistory& current) {
+                                                  change(current);
+                                                  return true;
+                                              });
+        if (update.error.empty()) {
+            history = std::move(update.history);
+            return;
         }
+        change(history);
+        say(state,
+            "[cycle] warning: could not save the history after " + what + ": " + update.error);
     };
 
     // --- collect ------------------------------------------------------------
@@ -506,11 +567,13 @@ CycleOutcome run_cycle(const CycleRequest& request) {
     if (collected.empty()) {
         record.gate = std::string{kGateSkipped};
         record.gate_reason = "no new training data in any source";
-        record_cycle_run(history, record);
-        if (!newest_session.empty()) {
-            history.sessions_until = newest_session;
-        }
-        save(kPassSkipped, "the skip");
+        save(kPassSkipped, "the skip", [&](CycleHistory& current) {
+            outcome.halt_kept = current.halted;
+            record_cycle_run(current, record);
+            if (!newest_session.empty()) {
+                current.sessions_until = newest_session;
+            }
+        });
         say(kPassSkipped, "[cycle] no new data -- skipped");
         outcome.ok = true;
         outcome.record = record;
@@ -565,12 +628,17 @@ CycleOutcome run_cycle(const CycleRequest& request) {
     auto fail = [&](std::string reason) {
         record.gate = std::string{kGateFail};
         record.gate_reason = std::move(reason);
-        record_cycle_run(history, record);
-        outcome.halted_now = trip_breaker(history, request.config.circuit_breaker_k);
-        if (outcome.halted_now) {
-            history.runs.back().note = history.halt_reason;
-        }
-        save(kPassFailed, "the failure");
+        save(kPassFailed, "the failure", [&](CycleHistory& current) {
+            // A halt taken while the pass ran stands in its own words: the
+            // breaker counts the failure and leaves the halt as it is.
+            outcome.halt_kept = current.halted;
+            record_cycle_run(current, record);
+            outcome.halted_now =
+                !outcome.halt_kept && trip_breaker(current, request.config.circuit_breaker_k);
+            if (outcome.halted_now) {
+                current.runs.back().note = current.halt_reason;
+            }
+        });
         say(kPassFailed, "[cycle] FAILED -- " + history.runs.back().gate_reason);
         if (outcome.halted_now) {
             say(kPassHalted, "[cycle] " + history.halt_reason +
@@ -637,22 +705,29 @@ CycleOutcome run_cycle(const CycleRequest& request) {
             say(kPassPromoting, "[cycle] warning: could not move the consumed files: " + failure);
         }
     }
-    if (!newest_session.empty()) {
-        history.sessions_until = newest_session;
-    }
-    if (history.anchor_version == 0 && request.config.anchor_version <= 0) {
-        history.anchor_version = promoted.version;
-        history.anchor_score = record.cycle_score;
+    // Only a pass moves the anchor, and only one pass runs at a time: the
+    // history read at the start still says it.
+    const bool sets_anchor = history.anchor_version == 0 && request.config.anchor_version <= 0;
+    if (sets_anchor) {
         say(kPassPassed, "[cycle] anchor set to v" + std::to_string(promoted.version) + " (" +
                              percent_of(record.cycle_score) + ")");
-    } else if (request.config.anchor_version > 0) {
-        history.anchor_version = anchor.version;
-        history.anchor_score = anchor.score;
     }
     record.gate = std::string{kGatePass};
     record.promoted_version = promoted.version;
-    record_cycle_run(history, record);
-    save(kPassPassed, "the pass");
+    save(kPassPassed, "the pass", [&](CycleHistory& current) {
+        outcome.halt_kept = current.halted;
+        if (!newest_session.empty()) {
+            current.sessions_until = newest_session;
+        }
+        if (sets_anchor) {
+            current.anchor_version = promoted.version;
+            current.anchor_score = record.cycle_score;
+        } else if (request.config.anchor_version > 0) {
+            current.anchor_version = anchor.version;
+            current.anchor_score = anchor.score;
+        }
+        record_cycle_run(current, record);
+    });
     say(kPassPassed, "[cycle] complete -- " + request.config.backend + " promoted to v" +
                          std::to_string(promoted.version) + " (" + promoted.weights_path + ")");
     outcome.ok = true;

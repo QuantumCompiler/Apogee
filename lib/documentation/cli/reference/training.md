@@ -282,6 +282,10 @@ against the size and the sha256 Hugging Face publishes for LFS files, the
 directory committed by rename so a half download never appears. Then
 `datasets prepare` that directory. `HF_TOKEN` in the environment unlocks a
 gated repository; it is read at the point of use and never written anywhere.
+Ctrl-C stops it with nothing kept (exit 130). `--output-format stream-json`
+(since M30) says the pull as a job's events -- the bytes as they move, the
+lines above as notices, and last a document naming the folder it landed in
+([machine-mode.md](machine-mode.md#a-long-jobs-run)).
 
 ### `datasets kits`, `list`, `info`, `delete`
 
@@ -618,6 +622,8 @@ reason; the anchor) and the pipelines (the running one, else the latest).
 apogee train pipeline run --pipeline <spec.yaml|name> [--continue-on-fail] [--judge <backend>] [--trainer …]
 apogee train pipeline resume <pipeline-id> [--pipeline <spec>] [--continue-on-fail] [--judge …]
 apogee train pipeline status [<pipeline-id>]
+apogee train pipeline list [--output-format json]          # the named pipelines, with their stage counts
+apogee train pipeline show <name|spec.yaml> [--output-format json]   # its stages: dataset and gate
 ```
 
 A pipeline teaches several skills **in sequence without forgetting**. Its
@@ -659,7 +665,9 @@ passed, the passed ones untouched. `--continue-on-fail` (or `training.gate_mode:
 soft`) goes on instead, the failed stage still fused for the next; the
 summary shows the mixed statuses. A resume refuses a complete run, and a
 spec whose stage count changed (the passed stages did so under a different
-plan). Ctrl-C leaves the run `aborted` and resumable.
+plan). Ctrl-C leaves the run `aborted` and resumable. A stage trained
+again holds no score until it is evaluated again: its last attempt's eval,
+score and weights are cleared from the manifest as it starts training.
 
 Every stage is an ordinary run `<pipeline-id>-s<N>` under `training/runs/`
 carrying `parent_run` and `pipeline_run_id`, so `train eval` (which finds
@@ -812,7 +820,11 @@ discards the candidate -- **nothing reaches inference** -- counts toward
 the breaker, and at `k` halts the loop with the reason in the record. The
 history is `cycle/history.json`, written atomically at every outcome, and
 `cycle halt` / `cycle resume` are the two edits to it, so nobody edits the
-file by hand. A failed or refused pass
+file by hand. Each write -- a pass's outcome, a halt, a resume -- is made to
+the file as it stands, under `cycle/history.lock`, held for that write
+alone: so either verb works while a pass runs, and the pass keeps what it
+wrote. A pass halted while it ran finishes, says the halt is kept, and the
+next `cycle run` refuses. A failed or refused pass
 exits non-zero, so a scheduler's log shows it.
 
 Schedule it with launchd:

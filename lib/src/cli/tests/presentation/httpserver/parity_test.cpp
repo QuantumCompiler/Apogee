@@ -309,6 +309,10 @@ const std::map<std::string, Classification>& table() {
         // own files, beside `datasets kits`.
         {"train regime list", read_only()},
         {"train regime show", read_only()},
+        // The named pipeline specs (M30): the config's own entries, read as
+        // the regimes are.
+        {"train pipeline list", read_only()},
+        {"train pipeline show", read_only()},
     };
     return rows;
 }

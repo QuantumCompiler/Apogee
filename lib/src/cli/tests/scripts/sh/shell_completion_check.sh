@@ -73,6 +73,8 @@ expect() {
 cases=(
     "models||pull"
     "train|pipeline||resume"
+    # M30: the named specs' reads, offered the day they exist.
+    "train|pipeline||show"
     "config||add-graph"
     "kn||capture"
     "config|set-default||claude"
