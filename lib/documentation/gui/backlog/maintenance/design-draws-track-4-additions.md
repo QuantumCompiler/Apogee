@@ -1,6 +1,6 @@
 # The design draws track 4's other additions
 
-**What / why.** Track 4 and the GUI Maintenance run (shipped 2026-10-25/26: [Milestone E](../../assistant/MILESTONES.md#milestone-e--the-audits-gui-findings), and M5 in [Milestone D](../../assistant/MILESTONES.md#milestone-d--mlx-kinds-in-the-app)) grew the app's existing screens with states and controls the design never drew. Each item recorded it under "Not done", and 4l listed them together. Training's two new tabs are their own item, [M11](design-draws-pipelines-and-cycle.md); this item is everything else, by place:
+**What / why.** Track 4 and the GUI Maintenance run (shipped 2026-10-25/26: [Milestone E](../../assistant/MILESTONES.md#milestone-e--the-audits-gui-findings), and M5 in [Milestone D](../../assistant/MILESTONES.md#milestone-d--mlx-kinds-in-the-app)) grew the app's existing screens with states and controls the design never drew. Each item recorded it under "Not done", and 4l listed them together. Training's two new tabs are their own item, [M11](../../assistant/MILESTONES.md#milestone-e--the-audits-gui-findings); this item is everything else, by place:
 - **Sessions:**
   - the keep-or-end question before a switch ends a private conversation (4a);
   - the strip saying which lines wait for the turn to end, a card closed by its turn ("not answered: the turn ended first"), and the read's warning row above the earlier turns (4b);
@@ -66,4 +66,4 @@ The design is the reference every app is built from (`lib/design/spec/CLAUDE.md`
 - [ ] The three new boards exist, on the canvas and in the repo, identical.
 - [ ] The health check passes, and the contract board stays consistent.
 
-**Scope note.** GUI Maintenance, claimable by name, no gate; design only, with no app code. Its sibling is [M11](design-draws-pipelines-and-cycle.md), Training's tabs. The CLI's M29–M33 shipped 2026-10-26 (a typed footprint, `providers register`, `suite` on `session` and more), but the app adopts them in later GUI items. So their states are drawn as the app draws them today, and redrawn when the app takes them.
+**Scope note.** GUI Maintenance, claimable by name, no gate; design only, with no app code. Its sibling is [M11](../../assistant/MILESTONES.md#milestone-e--the-audits-gui-findings), Training's tabs. The CLI's M29–M33 shipped 2026-10-26 (a typed footprint, `providers register`, `suite` on `session` and more), but the app adopts them in later GUI items. So their states are drawn as the app draws them today, and redrawn when the app takes them.

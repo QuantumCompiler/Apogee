@@ -1169,13 +1169,16 @@ a{color:inherit}a:hover{color:inherit}
 <span style="flex: 1 1 auto"></span>
 <div role="group" aria-label="Show" class="seg">
 <button type="button" aria-pressed="{{trn.runsOn}}" onClick="{{trn.showRuns}}" style="background: {{trn.runsBg}}; color: var(--text-primary)">Runs</button>
+<button type="button" aria-pressed="{{trn.plOn}}" onClick="{{trn.showPipelines}}" style="background: {{trn.plBg}}; color: var(--text-primary)">Pipelines</button>
+<button type="button" aria-pressed="{{trn.cyOn}}" onClick="{{trn.showCycle}}" style="background: {{trn.cyBg}}; color: var(--text-primary)">Cycle</button>
 <button type="button" aria-pressed="{{trn.regOn}}" onClick="{{trn.showRegimes}}" style="background: {{trn.regBg}}; color: var(--text-primary)">Regimes</button>
 <button type="button" aria-pressed="{{trn.dsOn}}" onClick="{{trn.showDatasets}}" style="background: {{trn.dsBg}}; color: var(--text-primary)">Datasets</button>
 </div>
-<sc-if value="{{trn.runsOn}}"><button type="button" class="btn-g" onClick="{{trn.newRun}}">New run…</button></sc-if>
+<sc-if value="{{trn.runsOn}}"><button type="button" class="btn-g" onClick="{{trn.newRun}}" disabled="{{trn.liveOn}}">New run…</button></sc-if>
+<sc-if value="{{trn.cyOn}}"><button type="button" class="btn-g" onClick="{{trn.cyRun}}" disabled="{{trn.cyCantRun}}" title="apogee train cycle run">Run one pass…</button><sc-if value="{{trn.cyHalted}}"><button type="button" class="btn-g" onClick="{{trn.cyResume}}" title="apogee train cycle resume">Resume…</button></sc-if><sc-if value="{{trn.cyNotHalted}}"><button type="button" class="btn-g" onClick="{{trn.cyHalt}}" title="apogee train cycle halt">Halt…</button></sc-if></sc-if>
 <sc-if value="{{trn.dsOn}}"><button type="button" class="btn-g" onClick="{{trn.newDataset}}">New dataset…</button><button type="button" class="btn-g" onClick="{{trn.synth}}">Synthesize…</button><button type="button" class="btn-g" onClick="{{trn.prepare}}">Prepare a file…</button></sc-if>
 </header>
-<sc-if value="{{trn.running}}"><div style="display: flex; align-items: center; gap: 10px; padding: 8px 24px; border-bottom: 1px solid var(--line-border)"><span style="font-size: var(--t-small)">Training</span><span class="mono" style="flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-meta); color: var(--text-secondary)">[train] iter 2/4 · loss 0.6200 · lr 1.00e-04 · 10.0 it/s</span><button type="button" class="btn-g" onClick="{{trn.stop}}" style="height: 26px">Stop</button></div></sc-if>
+<sc-if value="{{trn.barOn}}"><div style="display: flex; align-items: center; gap: 10px; padding: 8px 24px; border-bottom: 1px solid var(--line-border)"><span style="font-size: var(--t-small); white-space: nowrap">{{trn.barLabel}}</span><span class="mono" style="flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-meta); color: var(--text-secondary)">{{trn.barLine}}</span><button type="button" class="btn-g" onClick="{{trn.stop}}" style="height: 26px">Stop</button></div></sc-if>
 <sc-if value="{{trn.runsOn}}">
 <div style="flex: 1 1 0; min-height: 0; display: flex">
 <div style="flex: 1 1 0; min-width: 0; overflow-y: auto; padding: 12px 10px">
@@ -1193,6 +1196,54 @@ a{color:inherit}a:hover{color:inherit}
 <div style="display: flex; gap: 8px; margin-top: 18px"><button type="button" class="btn-g" onClick="{{trn.gate}}">Gate it</button><button type="button" class="btn-g" onClick="{{trn.promote}}">Promote…</button></div>
 </aside>
 </div>
+</sc-if>
+<sc-if value="{{trn.plOn}}">
+<div style="flex: 1 1 0; min-height: 0; display: flex">
+<nav aria-label="Pipelines" style="flex: 0 0 320px; min-height: 0; overflow-y: auto; padding: 12px 10px; background: var(--surface-sidebar); border-right: 1px solid var(--line-border)">
+<h3 class="lbl" style="margin: 6px 12px 6px">NAMED PIPELINES</h3>
+<sc-for list="{{trn.specs}}" as="p" hint-placeholder-count="2"><div style="display: flex; align-items: center; gap: 10px; padding: 8px 12px"><div style="flex: 1 1 auto; min-width: 0"><div>{{p.name}}</div><div style="font-size: var(--t-meta); color: var(--text-tertiary)">{{p.meta}}</div></div><button type="button" class="btn-g" onClick="{{p.run}}" disabled="{{p.cantRun}}" aria-label="{{p.label}}" title="{{p.command}}">Run…</button></div></sc-for>
+<sc-if value="{{trn.noSpecs}}"><p class="mono" style="margin: 2px 12px 0; font-size: var(--t-meta); line-height: 1.5; color: var(--text-tertiary); overflow-wrap: anywhere">no named pipelines -- add one under training.pipelines, or run a spec file with 'apogee train pipeline run --pipeline &lt;file&gt;'</p></sc-if>
+<h3 class="lbl" style="margin: 22px 12px 6px">RUNS</h3>
+<sc-if value="{{trn.plLiveOn}}"><button type="button" class="hv" onClick="{{trn.openLive}}" aria-current="{{trn.liveCurrent}}" style="width: 100%; display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; margin-bottom: 2px; border: 0; border-radius: 7px; background: {{trn.liveBg}}; text-align: left; color: var(--text-primary)"><span class="mono">{{trn.liveId}}</span><span style="font-size: var(--t-meta); color: var(--status-accent)">running here</span></button></sc-if>
+<sc-for list="{{trn.pruns}}" as="r" hint-placeholder-count="3"><button type="button" class="hv" onClick="{{r.pick}}" aria-current="{{r.current}}" style="width: 100%; display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; margin-bottom: 2px; border: 0; border-radius: 7px; background: {{r.bg}}; text-align: left; color: var(--text-primary)"><span class="mono">{{r.id}}</span><span style="max-width: 100%; font-size: var(--t-meta); color: {{r.color}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.line}}</span></button></sc-for>
+<sc-if value="{{trn.noRuns}}"><p class="mono" style="margin: 2px 12px 0; font-size: var(--t-meta); line-height: 1.5; color: var(--text-tertiary); overflow-wrap: anywhere">no pipeline runs yet ('apogee train pipeline run --pipeline &lt;spec&gt;')</p></sc-if>
+</nav>
+<div style="flex: 1 1 0; min-width: 0; overflow-y: auto; padding: 22px 28px 32px; background: var(--surface-inspector)"><div style="max-width: 760px">
+<sc-if value="{{trn.pgLive}}"><h2 class="mono" style="margin: 0; font-size: var(--t-title); font-weight: 600">{{trn.liveId}}</h2><p style="margin: 6px 0 0; font-size: var(--t-small); color: var(--text-secondary)">Running here, each stage as its manifest moves -- Stop is above; what passed stays.</p></sc-if>
+<sc-if value="{{trn.pgRun}}"><h2 class="mono" style="margin: 0; font-size: var(--t-title); font-weight: 600">{{trn.page.id}}</h2><div style="margin-top: 6px; font-size: var(--t-small); color: {{trn.page.color}}">{{trn.page.line}}</div><div class="mono" style="margin-top: 4px; font-size: var(--t-meta); color: var(--text-tertiary)">{{trn.page.when}}</div></sc-if>
+<sc-if value="{{trn.pgHasStages}}">
+<h3 class="lbl" style="margin: 20px 0 6px">STAGES</h3>
+<sc-for list="{{trn.stages}}" as="g"><div style="display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 0 12px; align-items: baseline; padding: 6px 0"><span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary); text-align: right">{{g.index}}</span><div><div>{{g.name}}</div><div class="mono" style="font-size: var(--t-meta); color: {{g.color}}">{{g.line}}</div><sc-if value="{{g.hasRun}}"><div class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">{{g.runLine}}</div></sc-if></div></div></sc-for>
+<sc-if value="{{trn.noStages}}"><p style="margin: 0; font-size: var(--t-small); color: var(--text-tertiary)">No stage reported yet.</p></sc-if>
+</sc-if>
+<sc-if value="{{trn.pgRun}}">
+<sc-if value="{{trn.page.resumable}}"><div style="display: flex; align-items: center; gap: 12px; margin-top: 18px"><span style="flex: 1 1 auto; font-size: var(--t-small)">{{trn.page.resumeLine}}</span><button type="button" class="btn-g" onClick="{{trn.page.resume}}" disabled="{{trn.page.cantResume}}" title="{{trn.page.resumeCommand}}">Resume…</button></div></sc-if>
+<p style="margin: 18px 0 0; font-size: var(--t-meta); color: var(--text-tertiary)">Each stage’s run is an ordinary run: gate it and promote it from Runs.</p>
+</sc-if>
+<sc-if value="{{trn.pgNone}}"><p style="margin: 0; font-size: var(--t-small); color: var(--text-tertiary)">Choose a pipeline run to see its stages.</p></sc-if>
+</div></div>
+</div>
+</sc-if>
+<sc-if value="{{trn.cyOn}}">
+<div style="flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 22px 28px 32px"><div style="max-width: 860px; display: flex; flex-direction: column; gap: 16px">
+<p style="margin: 0; font-size: var(--t-small); color: var(--text-secondary)">The cycle is unattended by design: your own scheduler -- launchd or cron -- runs <span class="mono">apogee train cycle run</span>. Nothing here schedules it; Run one pass is a single pass, now.</p>
+<sc-if value="{{trn.cyHasHold}}"><p role="status" style="margin: 0; font-size: var(--t-small); color: var(--status-warning); overflow-wrap: anywhere">{{trn.cyHold}}</p></sc-if>
+<sc-if value="{{trn.cyLiveOn}}">
+<div style="padding: 14px 16px; border-radius: 8px; background: var(--surface-card)">
+<h3 class="lbl" style="margin: 0 0 8px">THIS PASS, RUNNING HERE</h3>
+<sc-for list="{{trn.cyLines}}" as="l"><div style="display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 12px; align-items: baseline; padding: 2px 0"><span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">{{l.state}}</span><span style="font-size: var(--t-small); color: {{l.color}}; overflow-wrap: anywhere">{{l.text}}</span></div></sc-for>
+<sc-if value="{{trn.cyStarting}}"><p style="margin: 0; font-size: var(--t-small); color: var(--text-tertiary)">Starting…</p></sc-if>
+<sc-if value="{{trn.cyHasStages}}"><h3 class="lbl" style="margin: 14px 0 4px">STAGES</h3><sc-for list="{{trn.cyStages}}" as="g"><div style="display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 0 12px; align-items: baseline; padding: 6px 0"><span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary); text-align: right">{{g.index}}</span><div><div>{{g.name}}</div><div class="mono" style="font-size: var(--t-meta); color: {{g.color}}">{{g.line}}</div><sc-if value="{{g.hasRun}}"><div class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">{{g.runLine}}</div></sc-if></div></div></sc-for></sc-if>
+</div>
+</sc-if>
+<sc-if value="{{trn.cyNone}}"><p style="margin: 0; font-size: var(--t-small); color: var(--text-tertiary)">No pass has run yet, so the cycle has no history: its first pass writes one -- Run one pass here, or your scheduler’s first run. A pass needs training.cycle in your config; the run says so when it’s missing.</p></sc-if>
+<sc-if value="{{trn.cyHas}}">
+<div style="display: flex; flex-wrap: wrap; gap: 14px 36px"><sc-for list="{{trn.cyFacts}}" as="f"><div><h3 class="lbl" style="margin: 0 0 4px">{{f.label}}</h3><div>{{f.value}}</div></div></sc-for></div>
+<h3 class="lbl" style="margin: 8px 0 0">PASSES, NEWEST FIRST</h3>
+<sc-if value="{{trn.cyNoPasses}}"><p class="mono" style="margin: 0; font-size: var(--t-meta); color: var(--text-tertiary)">no cycle runs recorded yet</p></sc-if>
+<sc-for list="{{trn.cyPasses}}" as="p"><div style="padding: 2px 0"><div class="mono" style="display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: var(--t-meta); color: var(--text-tertiary)"><span>{{p.at}}</span><sc-if value="{{p.hasPipeline}}"><span>pipeline {{p.pipeline}}</span></sc-if></div><div style="margin-top: 2px; color: {{p.color}}">{{p.line}}</div><sc-if value="{{p.hasReason}}"><p style="margin: 2px 0 0; font-size: var(--t-small); color: var(--text-secondary); overflow-wrap: anywhere">{{p.reason}}</p></sc-if><sc-if value="{{p.hasNote}}"><p style="margin: 2px 0 0; font-size: var(--t-small); color: var(--status-warning)">{{p.note}}</p></sc-if></div></sc-for>
+</sc-if>
+</div></div>
 </sc-if>
 <sc-if value="{{trn.regOn}}">
 <div style="flex: 1 1 0; min-height: 0; display: flex">
@@ -2254,7 +2305,7 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{ui.toastOn}}"><div role="status" style="position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 80; max-width: calc(100% - 48px); padding: 9px 16px; border-radius: 8px; background: var(--text-primary); color: var(--surface-window); font-size: var(--t-small); box-shadow: 0 8px 24px rgba(0,0,0,.3)">{{ui.toastText}}</div></sc-if>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","chat:play","monitor","console","knowledge","knowledge:collections","graph:prose","training","training:datasets","library","library:symphonies","library:mcp","review","review:post","review:targets","review:skills","models","models:downloads","models:store","models:convert","models:register","models:roles","download","suites","tasks","newtask","newtask:recipe","execute","graph","video","video:run","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions"],"default":"chat"},"still":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
+<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","chat:play","monitor","console","knowledge","knowledge:collections","graph:prose","training","training:datasets","training:pipelines","training:cycle","library","library:symphonies","library:mcp","review","review:post","review:targets","review:skills","models","models:downloads","models:store","models:convert","models:register","models:roles","download","suites","tasks","newtask","newtask:recipe","execute","graph","video","video:run","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions"],"default":"chat"},"still":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
 class Component extends DCLogic {
   constructor(props) {
     super(props);
@@ -2453,6 +2504,7 @@ class Component extends DCLogic {
     else if (where === 'graph' && sub === 'prose') set({ screen: 'graph', gView: 'prose' });
     else if (where === 'review') set({ screen: 'review', rv: { tab: sub === 'targets' ? 'targets' : sub === 'skills' ? 'skills' : 'runs', skill: 'security' }, overlay: sub === 'post' ? 'reviewpost' : null });
     else if (where === 'library') set({ screen: 'library', lib: { tab: sub || 'agents', played: sub === 'symphonies' } });
+    else if (where === 'training' && (sub === 'pipelines' || sub === 'cycle')) set({ screen: 'training', tr: this.trainStart(sub) });
     else if (where === 'training') set({ screen: 'training', tr: sub === 'datasets' ? { tab: 'datasets', sel: '20261021-051826', regime: 'foundation', running: false } : { tab: 'runs', sel: '20261021-051826', regime: 'foundation', running: true } });
     else if (where === 'knowledge') set({ screen: 'knowledge', kn: sub === 'collections' ? { tab: 'collections', coll: 'notes', searched: true } : { tab: 'records', asked: true, branch: '', sel: 'kr-20261021T045944Z-1e2354', coll: 'notes', searched: false } });
     else if (where === 'suites' || where === 'tasks' || where === 'graph' || where === 'voice') set({ screen: where });
@@ -2603,6 +2655,16 @@ class Component extends DCLogic {
         } else next.crender = Object.assign({}, rj, { done: doneN });
       }
     }
+    if (s.tr && s.tr.live) {
+      const lv = s.tr.live;
+      if (lv.at < lv.steps.length) next.tr = Object.assign({}, s.tr, { live: this.trainStep(lv, lv.steps[lv.at]) });
+      else {
+        const end = this.trainEnd(s.tr);
+        next.tr = end.tr;
+        next.toast = end.toast;
+        next.toastAt = clock;
+      }
+    }
     if (s.toast && !next.toast && clock - s.toastAt > 12) next.toast = null;
     this.setState(next);
   }
@@ -2614,6 +2676,218 @@ class Component extends DCLogic {
 
   say(text, extra) {
     this.setState(Object.assign({ toast: text, toastAt: this.state.clock }, extra || {}));
+  }
+
+  /* Training's pipelines and cycle, replayed from what the app's 4j recorded
+     over its sandbox: the mock trainer; `nightly` (one stage) and `skills`
+     (two, the second's data regressing the first's suite until it was fixed)
+     named under training.pipelines; the cycle over a queue directory, its
+     breaker at 1. The reads are lib/src/darwin/tests/business/reads/Fixtures/
+     train-pipeline-*, train-cycle-* and train-status-*; the streams are
+     jobs/Fixtures/train-pipeline-run*.jsonl, train-pipeline-resume.jsonl and
+     train-cycle-run-*.jsonl. One step of a replay is one event, a tick each. */
+  trainRecorded() {
+    const stage = (name, state, run, score) => ({ name: name, state: state, run: run, score: score });
+    const run = (id, spec, status, completed, stages) => ({ id: id, spec: spec, status: status, student: 'tiny', started: this.trainAt(id), completed: completed, stages: stages });
+    const pass = (at, source, rows, pipeline, gate, reason, score, promoted, note) => ({ at: at, source: source, rows: rows, pipeline: pipeline, gate: gate, reason: reason, score: score, prev: 0, anchor: 0, promoted: promoted, note: note });
+    return {
+      specs: [
+        { name: 'nightly', stages: [{ name: 'base', on: 'aaaaaaaaaaaa', dataset: 'starter.jsonl', suites: 1 }] },
+        { name: 'skills', stages: [{ name: 'greetings', on: 'aaaaaaaaaaaa', dataset: 'starter.jsonl', suites: 1 }, { name: 'refusals', on: 'fused', dataset: 'regress.jsonl', suites: 2 }] }
+      ],
+      ids: { skills: ['pipe-20261026-074112', 'pipe-20261026-074116', 'pipe-20261026-074117'], nightly: ['pipe-20261026-074115'] },
+      done: { 'pipe-20261026-074112': '2026-10-26T07:41:13Z' },
+      runs: [
+        run('cycle-20261026-074119', 'nightly', 'complete', '2026-10-26T07:41:19Z', [stage('base', 'passed', 'cycle-20261026-074119-s0', 1)]),
+        run('pipe-20261026-074117', 'skills', 'aborted', '', [stage('greetings', 'passed', 'pipe-20261026-074117-s0', 1), stage('refusals', 'training', 'pipe-20261026-074117-s1', null)]),
+        run('pipe-20261026-074116', 'skills', 'complete', '2026-10-26T07:41:16Z', [stage('greetings', 'passed', 'pipe-20261026-074116-s0', 1), stage('refusals', 'passed', 'pipe-20261026-074116-s1', 1)]),
+        run('pipe-20261026-074115', 'nightly', 'complete', '2026-10-26T07:41:15Z', [stage('base', 'passed', 'pipe-20261026-074115-s0', 1)]),
+        run('pipe-20261026-074112', 'skills', 'complete', '2026-10-26T07:41:13Z', [stage('greetings', 'passed', 'pipe-20261026-074112-s0', 1), stage('refusals', 'passed', 'pipe-20261026-074112-s1', 1)])
+      ],
+      passes: [
+        pass('2026-10-26T07:41:18Z', '', 0, '', 'skipped', 'no new training data in any source', 0, 0, ''),
+        pass('2026-10-26T07:41:19Z', 'directory', 2, 'cycle-20261026-074119', 'pass', '', 1, 1, ''),
+        pass('2026-10-26T07:41:20Z', 'directory', 1, 'cycle-20261026-074120', 'fail', "pipeline aborted: pipeline aborted -- stage 'base' failed the cumulative eval gate (0% (0/1)). Fix the data or the suite and 'apogee train pipeline resume cycle-20261026-074120', or pass --continue-on-fail to go on regardless", 0, 0, 'circuit breaker: 1 consecutive failed cycle(s) reached circuit_breaker_k 1')
+      ],
+      unconfigured: "training.cycle is not configured: it needs 'pipeline' (a training.pipelines entry or a spec file), 'backend' (where a passing cycle promotes) and at least one entry under 'sources' -- see the training block in the starter config (apogee config init)"
+    };
+  }
+
+  trainState() {
+    return Object.assign({ tab: 'runs', named: false, fixed: false, pruns: [], psel: null, live: null, cycle: null, cnext: 0 }, this.state.tr || {});
+  }
+
+  trainAt(id) {
+    const m = /(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/.exec(id || '');
+    return m ? m[1] + '-' + m[2] + '-' + m[3] + 'T' + m[4] + ':' + m[5] + ':' + m[6] + 'Z' : '';
+  }
+
+  trainNextId(pruns) {
+    const secs = (id) => Number(id.slice(-6, -4)) * 3600 + Number(id.slice(-4, -2)) * 60 + Number(id.slice(-2));
+    const top = pruns.filter((m) => m.id.indexOf('pipe-') === 0).reduce((a, m) => Math.max(a, secs(m.id)), secs('074112')) + 1;
+    const two = (x) => String(x).padStart(2, '0');
+    return 'pipe-20261026-' + two(Math.floor(top / 3600)) + two(Math.floor(top / 60) % 60) + two(top % 60);
+  }
+
+  trainKeep(pruns, m) {
+    return [m].concat(pruns.filter((x) => x.id !== m.id)).sort((a, b) => (a.started < b.started ? 1 : a.started > b.started ? -1 : 0));
+  }
+
+  trainStart(sub) {
+    const rec = this.trainRecorded();
+    const base = { sel: '20261021-051826', regime: 'foundation', running: false, named: true, psel: null, live: null };
+    if (sub === 'cycle') return Object.assign(base, { tab: 'cycle', fixed: true, pruns: rec.runs, cycle: this.trainCycleAfter(this.trainCycleAfter(null, rec.passes[0]), rec.passes[1]), cnext: 2 });
+    let live = this.trainLive({ kind: 'pipeline', spec: 'skills', pid: 'pipe-20261026-074112', resume: false, steps: this.trainRunSteps(rec.specs[1], 'pipe-20261026-074112', false) });
+    const to = live.steps.findIndex((x) => x[0] === 'i' && x[1] === 2 && x[2] === 2);
+    while (live.at <= to) live = this.trainStep(live, live.steps[live.at]);
+    return Object.assign(base, { tab: 'pipelines', fixed: false, pruns: [], live: live, cycle: null, cnext: 0 });
+  }
+
+  trainLive(o) {
+    return Object.assign({ at: 0, stages: [], passes: [], notice: '', iter: null, err: '' }, o);
+  }
+
+  trainSegment(sp, i, pid, fail, dataset) {
+    const g = sp.stages[i - 1];
+    const n = sp.stages.length;
+    const dir = '/Users/someone/.apogee/training/runs/' + pid + '-s' + (i - 1) + '/adapters';
+    const out = [['s', i, g.name, 'training', true],
+      ['n', '[train] stage ' + i + '/' + n + " '" + g.name + "': mock lora on " + g.on + ', dataset ' + (dataset || g.dataset)],
+      ['n', '[train] mock trainer: 4 iteration(s), method lora'],
+      ['i', i, 1], ['i', i, 2], ['i', i, 3], ['i', i, 4],
+      ['n', '[train] adapter saved to ' + dir],
+      ['s', i, g.name, 'evaluating', true],
+      ['n', '[eval] cumulative suite: ' + g.suites + ' suite(s), ' + g.suites + ' item(s); no judge: unmatched items skip']];
+    if (fail) return out.concat([['n', "[gate] stage '" + g.name + "' FAILED the cumulative eval -- " + fail[0]], ['s', i, g.name, 'failed', true, fail[1]]]);
+    out.push(['n', "[gate] stage '" + g.name + "' PASSED the cumulative eval -- 100% (" + g.suites + '/' + g.suites + ')']);
+    if (i < n) out.push(['s', i, g.name, 'fusing', true, 1], ['n', '[fuse] merging stage ' + i + "'s adapter into its base for stage " + (i + 1)], ['n', '[fuse] mock fuse: ' + dir + ' into /Users/someone/.apogee/models/tiny/safetensors/aaaaaaaaaaaa']);
+    out.push(['s', i, g.name, 'passed', true, 1]);
+    return out;
+  }
+
+  trainRunSteps(sp, id, fixed) {
+    const n = sp.stages.length;
+    let steps = [['n', '[pipeline] ' + sp.name + ' as ' + id + ': ' + n + ' stage(s), mock on aaaaaaaaaaaa; no judge: unmatched items skip']];
+    sp.stages.forEach((g, i) => steps.push(['s', i + 1, g.name, 'pending']));
+    for (let i = 1; i <= n; i += 1) {
+      const fail = !fixed && sp.name === 'skills' && i === 2 ? ['50% (1/2)', 0.5] : null;
+      steps = steps.concat(this.trainSegment(sp, i, id, fail));
+      if (fail) return steps.concat([['e', "pipeline aborted -- stage '" + sp.stages[i - 1].name + "' failed the cumulative eval gate (" + fail[0] + "). Fix the data or the suite and 'apogee train pipeline resume " + id + "', or pass --continue-on-fail to go on regardless"]]);
+    }
+    return steps;
+  }
+
+  trainResumeSteps(sp, m) {
+    const n = sp.stages.length;
+    let steps = [['n', '[pipeline] resuming ' + sp.name + ' as ' + m.id + ': ' + n + ' stage(s), mock on aaaaaaaaaaaa; no judge: unmatched items skip']];
+    m.stages.forEach((g, i) => steps.push(['s', i + 1, g.name, g.state, !!g.run, g.score]));
+    const from = m.stages.findIndex((g) => g.state !== 'passed');
+    for (let i = from + 1; i <= n; i += 1) steps = steps.concat(this.trainSegment(sp, i, m.id, null, m.id.indexOf('cycle-') === 0 ? 'merged.jsonl' : ''));
+    return steps;
+  }
+
+  trainPass(k) {
+    const rec = this.trainRecorded();
+    const queue = '/Users/someone/work/queue';
+    if (k === 1 || k === 2) {
+      const r = rec.passes[k];
+      const pid = r.pipeline;
+      const head = [['p', 'collecting', '[cycle] directory: 1 file(s) in ' + queue], ['p', 'merging', '[cycle] ' + r.rows + ' example(s) from directory'], ['p', 'training', '[cycle] pipeline ' + pid + ' (nightly): 1 stage(s)'], ['s', 1, 'base', 'pending']];
+      if (k === 2) return { pid: pid, rec: r, steps: head.concat(this.trainSegment(rec.specs[0], 1, pid, ['0% (0/1)', 0], 'merged.jsonl'), [['p', 'failed', '[cycle] FAILED -- ' + r.reason], ['p', 'halted', "[cycle] circuit breaker: 1 consecutive failed cycle(s) reached circuit_breaker_k 1 -- the loop is halted; 'apogee train cycle resume' after fixing the data or the suite"], ['e', 'cycle FAILED -- ' + r.reason]]) };
+      const run = '/Users/someone/.apogee/training/runs/' + pid + '-s0';
+      return { pid: pid, rec: r, steps: head.concat(this.trainSegment(rec.specs[0], 1, pid, null, 'merged.jsonl'), [
+        ['p', 'gating', '[cycle] gate -- current 100%, previous 0%, anchor 0%, threshold 0%'],
+        ['p', 'promoting', '[cycle] gate PASSED (100%) -- promoting ' + pid + '-s0 into nightly-model'],
+        ['n', '[promote] run ' + pid + '-s0 -> nightly-model v1'],
+        ['n', '[promote] fusing the adapter into the base model'],
+        ['n', '[promote] mock fuse: ' + run + '/adapters into /Users/someone/.apogee/models/tiny/safetensors/aaaaaaaaaaaa'],
+        ['n', '[promote] converting the fused model to GGUF (F16): /Users/someone/.apogee/models/tiny/gguf/.incoming-1c387267417d/nightly-model-v1.gguf'],
+        ['n', '[promote] mock converter: writing a minimal GGUF'],
+        ['p', 'passed', '[cycle] anchor set to v1 (100%)'],
+        ['p', 'passed', '[cycle] complete -- nightly-model promoted to v1 (/Users/someone/.apogee/models/tiny/gguf/052b295c3e9b/nightly-model-v1.gguf)']]) };
+    }
+    const r = k === 0 ? rec.passes[0] : Object.assign({}, rec.passes[0], { at: new Date().toISOString().slice(0, 19) + 'Z' });
+    return { pid: '', rec: r, steps: [['p', 'collecting', '[cycle] directory: no new files in ' + queue], ['p', 'skipped', '[cycle] no new data -- skipped']] };
+  }
+
+  trainStep(lv, st) {
+    const out = Object.assign({}, lv, { at: lv.at + 1 });
+    if (st[0] === 'n') out.notice = st[1];
+    else if (st[0] === 'p') Object.assign(out, { passes: lv.passes.concat([{ state: st[1], text: st[2] }]), notice: st[2] });
+    else if (st[0] === 'i') out.iter = { stage: st[1], n: st[2] };
+    else if (st[0] === 'e') out.err = st[1];
+    else if (st[0] === 's') {
+      const i = st[1] - 1;
+      const was = lv.stages[i];
+      const stages = lv.stages.slice();
+      stages[i] = { name: st[2], state: st[3], run: st[4] ? lv.pid + '-s' + i : (was ? was.run : ''), score: st[5] == null ? null : st[5] };
+      out.stages = stages;
+    }
+    return out;
+  }
+
+  trainCycleAfter(h, r) {
+    const b = Object.assign({ backend: 'nightly-model', anchorV: 0, anchorScore: 0, fails: 0, halted: false, reason: '', runs: [] }, h || {});
+    const out = Object.assign({}, b, { backend: b.backend || 'nightly-model', runs: b.runs.concat([r]) });
+    if (r.gate === 'pass') {
+      out.fails = 0;
+      if (!b.anchorV) Object.assign(out, { anchorV: r.promoted, anchorScore: r.score });
+    } else if (r.gate === 'fail') {
+      out.fails = b.fails + 1;
+      if (!b.halted) Object.assign(out, { halted: true, reason: 'circuit breaker: ' + out.fails + ' consecutive failed cycle(s) reached circuit_breaker_k 1' });
+    }
+    return out;
+  }
+
+  trainEnd(tr) {
+    const lv = tr.live;
+    if (lv.kind === 'pipeline') {
+      const started = this.trainAt(lv.pid);
+      const m = { id: lv.pid, spec: lv.spec, status: lv.err ? 'aborted' : 'complete', student: 'tiny', started: started, completed: lv.err ? '' : this.trainRecorded().done[lv.pid] || started, stages: lv.stages };
+      return { tr: Object.assign({}, tr, { live: null, pruns: this.trainKeep(tr.pruns, m), psel: !tr.psel || tr.psel === m.id ? m.id : tr.psel }), toast: lv.err || 'Pipeline ' + (lv.resume ? lv.pid : lv.spec) + ': ' + m.status };
+    }
+    const pruns = lv.pid ? this.trainKeep(tr.pruns, { id: lv.pid, spec: 'nightly', status: lv.err ? 'aborted' : 'complete', student: 'tiny', started: this.trainAt(lv.pid), completed: lv.err ? '' : this.trainAt(lv.pid), stages: lv.stages }) : tr.pruns;
+    const kept = "[cycle] halted while this pass ran (halted by 'apogee train cycle halt') -- the halt is kept: 'apogee train cycle run' refuses until 'apogee train cycle resume'";
+    return { tr: Object.assign({}, tr, { live: null, cycle: this.trainCycleAfter(tr.cycle, lv.rec), pruns: pruns }), toast: lv.err || (lv.haltKept ? kept : lv.passes[lv.passes.length - 1].text) };
+  }
+
+  trainStop() {
+    const tr = this.trainState();
+    const lv = tr.live;
+    if (lv.kind === 'pipeline') {
+      const sp = this.trainRecorded().specs.find((p) => p.name === lv.spec);
+      const m = { id: lv.pid, spec: lv.spec, status: 'aborted', student: 'tiny', started: this.trainAt(lv.pid), completed: '', stages: sp.stages.map((g, i) => lv.stages[i] || { name: g.name, state: 'pending', run: '', score: null }) };
+      this.say("cancelled; recorded as aborted -- 'apogee train pipeline resume " + lv.pid + "' continues it", { tr: Object.assign({}, tr, { live: null, pruns: this.trainKeep(tr.pruns, m), psel: !tr.psel || tr.psel === m.id ? m.id : tr.psel }) });
+      return;
+    }
+    const pruns = lv.pid && lv.stages.length ? this.trainKeep(tr.pruns, { id: lv.pid, spec: 'nightly', status: 'aborted', student: 'tiny', started: this.trainAt(lv.pid), completed: '', stages: lv.stages }) : tr.pruns;
+    this.say('cancelled before an outcome was recorded', { tr: Object.assign({}, tr, { live: null, pruns: pruns, cnext: lv.k }) });
+  }
+
+  trainGo(c) {
+    const tr = this.trainState();
+    const rec = this.trainRecorded();
+    const done = (patch, toast) => this.setState(Object.assign({ confirm: null, tr: Object.assign({}, tr, patch) }, toast ? { toast: toast, toastAt: this.state.clock } : {}));
+    if (c.act === 'run') {
+      const sp = rec.specs.find((p) => p.name === c.spec);
+      const id = (rec.ids[sp.name] || []).find((x) => !tr.pruns.some((m) => m.id === x)) || this.trainNextId(tr.pruns);
+      done({ psel: null, live: this.trainLive({ kind: 'pipeline', spec: sp.name, pid: id, resume: false, steps: this.trainRunSteps(sp, id, tr.fixed) }) });
+    } else if (c.act === 'resume') {
+      const m = tr.pruns.find((x) => x.id === c.id);
+      const sp = rec.specs.find((p) => p.name === m.spec);
+      done({ psel: m.id, fixed: true, live: this.trainLive({ kind: 'pipeline', spec: sp.name, pid: m.id, resume: true, steps: this.trainResumeSteps(sp, m) }) });
+    } else if (c.act === 'pass') {
+      if (!tr.named) { done({}, rec.unconfigured); return; }
+      const p = this.trainPass(tr.cnext);
+      done({ cnext: tr.cnext + 1, live: this.trainLive({ kind: 'cycle', spec: 'nightly', pid: p.pid, rec: p.rec, k: tr.cnext, haltKept: false, steps: p.steps }) });
+    } else if (c.act === 'halt') {
+      const during = !!(tr.live && tr.live.kind === 'cycle');
+      const h = Object.assign({ backend: tr.named ? 'nightly-model' : '', anchorV: 0, anchorScore: 0, fails: 0, runs: [] }, tr.cycle || {}, { halted: true, reason: "halted by 'apogee train cycle halt'" });
+      done({ cycle: h, live: during ? Object.assign({}, tr.live, { haltKept: true }) : tr.live }, during ? 'the pass running now finishes, and keeps the halt' : "cycle halted -- 'apogee train cycle run' refuses until 'apogee train cycle resume'");
+    } else if (c.act === 'unhalt') {
+      const during = !!(tr.live && tr.live.kind === 'cycle');
+      done({ cycle: Object.assign({}, tr.cycle, { halted: false, reason: '', fails: 0 }), live: during ? Object.assign({}, tr.live, { haltKept: false }) : tr.live }, 'cycle resumed (was halted: ' + (tr.cycle ? tr.cycle.reason : '') + '); the failure count is reset');
+    }
   }
 
   csPatch(id, patch) {
@@ -4069,7 +4343,7 @@ class Component extends DCLogic {
     const runningJobs = s.jobs.filter((j) => j.state === 'running' && !j.finished).length;
     const runningTasks = s.tasks.filter((t) => t.status === 'running' && this.taskView(t).isRunning).length;
     const videoBusy = (s.vrun && !s.vrun.stopped ? 1 : 0) + (s.crender ? 1 : 0);
-    const places = [['chat', 'Sessions', '⌘1', 0], ['models', 'Models', '⌘2', runningJobs], ['suites', 'Suites', '⌘3', 0], ['tasks', 'Tasks', '⌘4', runningTasks], ['graph', 'Code graph', '⌘5', 0], ['video', 'Video', '⌘6', videoBusy], ['voice', 'Voice', '⌘7', s.vsay ? 1 : 0], ['knowledge', 'Knowledge', '⌘8', 0], ['training', 'Training', '⌘9', s.tr && s.tr.running ? 1 : 0], ['library', 'Library', '⌘0', 0], ['review', 'Review', '⇧⌘R', s.rv && s.rv.running ? 1 : 0]].map((p) => ({
+    const places = [['chat', 'Sessions', '⌘1', 0], ['models', 'Models', '⌘2', runningJobs], ['suites', 'Suites', '⌘3', 0], ['tasks', 'Tasks', '⌘4', runningTasks], ['graph', 'Code graph', '⌘5', 0], ['video', 'Video', '⌘6', videoBusy], ['voice', 'Voice', '⌘7', s.vsay ? 1 : 0], ['knowledge', 'Knowledge', '⌘8', 0], ['training', 'Training', '⌘9', s.tr && (s.tr.running || s.tr.live) ? 1 : 0], ['library', 'Library', '⌘0', 0], ['review', 'Review', '⇧⌘R', s.rv && s.rv.running ? 1 : 0]].map((p) => ({
       label: p[1], key: p[2], current: s.screen === p[0], bg: s.screen === p[0] ? 'var(--surface-selection)' : '', color: s.screen === p[0] ? 'var(--text-primary)' : 'var(--text-secondary)', weight: s.screen === p[0] ? 500 : 400,
       isChat: p[0] === 'chat', isModels: p[0] === 'models', isSuites: p[0] === 'suites', isTasks: p[0] === 'tasks', isGraph: p[0] === 'graph', isVideo: p[0] === 'video', isVoice: p[0] === 'voice', isKnowledge: p[0] === 'knowledge', isTraining: p[0] === 'training', isLibrary: p[0] === 'library', isReview: p[0] === 'review',
       hasBadge: p[3] > 0, badge: p[3] + ' running', badgeColor: 'var(--status-accent)',
@@ -4659,6 +4933,10 @@ class Component extends DCLogic {
     if (s.confirm && s.confirm.kind === 'forget') {
       cf = Object.assign(cf, { title: 'Forget all session summaries?', body: 'The ' + s.recallCount + ' summaries recall draws on are deleted from this Mac. Your sessions stay; only what later sessions can recall from them goes.', confirmLabel: 'Forget all', run: () => this.say('Forgot ' + this.state.recallCount + ' summaries', { recallCount: 0, confirm: null }) });
     }
+    if (s.confirm && s.confirm.kind === 'train') {
+      const tc = s.confirm;
+      cf = Object.assign(cf, { title: tc.title, body: tc.body, detail: tc.detail, hasDetail: true, confirmLabel: tc.label, runBg: '', runColor: '', run: () => this.trainGo(tc) });
+    }
 
     /* ---------- settings ---------- */
     const editTheme = eff;
@@ -4992,7 +5270,7 @@ class Component extends DCLogic {
     };
 
     /* ---------- training ---------- */
-    const trs = s.tr || { tab: 'runs' };
+    const trs = this.trainState();
     const trPatch = (p) => this.setState({ tr: Object.assign({}, trs, p) });
     const trRuns = [
       { id: '20261021-051826', status: 'complete', meta: 'lora · mock · loss 0.4200 · failed the gate (46%) -- promote refuses it unless forced', gate: 'failed the gate (46%) -- promote refuses it unless forced', failed: true, facts: [['TRAINED', '/Users/someone/work/student'], ['ON', '/Users/someone/work/data.jsonl'], ['HOW', 'lora · mock · 4 iterations'], ['FINAL LOSS', '0.4200'], ['RAN', '2026-10-21T05:18:26Z → 2026-10-21T05:18:26Z']] }
@@ -5004,12 +5282,94 @@ class Component extends DCLogic {
     ];
     const trCur = trRuns.find((r) => r.id === trs.sel) || trRuns[0];
     const trReg = trRegimes.find((g) => g.name === trs.regime) || trRegimes[0];
+    // The pipelines and the cycle: the named specs as `train pipeline list`
+    // states them, the runs as `train pipeline status` lists them, a run's
+    // stages live from its stream, the cycle as `train cycle status` reads.
+    const trRec = this.trainRecorded();
+    const trLive = trs.live;
+    const trPl = trLive && trLive.kind === 'pipeline' ? trLive : null;
+    const trCy = trLive && trLive.kind === 'cycle' ? trLive : null;
+    const trBusy = !!trs.running || !!trLive;
+    const trAsk = (c) => this.setState({ confirm: Object.assign({ kind: 'train' }, c) });
+    const trPct = (x) => Math.round(x * 100) + '%';
+    const trStages = (n) => n + (n === 1 ? ' stage' : ' stages');
+    const trResumable = (m) => (m.status === 'aborted' || m.status === 'failed') && m.stages.some((g) => g.state !== 'passed');
+    const trLosses = [0.72, 0.62, 0.52, 0.42];
+    const trStageRows = (stages, iter) => stages.map((g, i) => {
+      const parts = [g.state];
+      if (g.score != null && (g.state === 'fusing' || g.state === 'passed' || g.state === 'failed')) parts.push('cumulative ' + trPct(g.score));
+      if (iter && g.state === 'training' && iter.stage === i + 1) parts.push('iter ' + iter.n + '/4', 'loss ' + trLosses[iter.n - 1].toFixed(4), '10.0 it/s');
+      return { index: String(i + 1), name: g.name, line: parts.join(' · '), color: g.state === 'passed' ? 'var(--status-accent)' : g.state === 'failed' ? 'var(--status-error)' : g.state === 'pending' ? 'var(--text-tertiary)' : 'var(--text-primary)', hasRun: !!g.run, runLine: 'run ' + g.run };
+    });
+    const trShowLive = !!trPl && (!trs.psel || trs.psel === trPl.pid);
+    const trPage = !trShowLive && trs.psel ? trs.pruns.find((m) => m.id === trs.psel) || null : null;
+    const trFirst = trPage ? trPage.stages.findIndex((g) => g.state !== 'passed') : -1;
+    const trCanResume = !!trPage && trResumable(trPage) && trFirst >= 0;
+    const trHist = trs.cycle;
+    const trHalted = !!(trHist && trHist.halted);
     const trn = {
-      runsOn: (trs.tab || 'runs') === 'runs', regOn: trs.tab === 'regimes', dsOn: trs.tab === 'datasets',
-      runsBg: (trs.tab || 'runs') === 'runs' ? 'var(--surface-control)' : 'transparent', regBg: trs.tab === 'regimes' ? 'var(--surface-control)' : 'transparent', dsBg: trs.tab === 'datasets' ? 'var(--surface-control)' : 'transparent',
-      showRuns: () => trPatch({ tab: 'runs' }), showRegimes: () => trPatch({ tab: 'regimes' }), showDatasets: () => trPatch({ tab: 'datasets' }),
+      runsOn: (trs.tab || 'runs') === 'runs', plOn: trs.tab === 'pipelines', cyOn: trs.tab === 'cycle', regOn: trs.tab === 'regimes', dsOn: trs.tab === 'datasets',
+      runsBg: (trs.tab || 'runs') === 'runs' ? 'var(--surface-control)' : 'transparent', plBg: trs.tab === 'pipelines' ? 'var(--surface-control)' : 'transparent', cyBg: trs.tab === 'cycle' ? 'var(--surface-control)' : 'transparent', regBg: trs.tab === 'regimes' ? 'var(--surface-control)' : 'transparent', dsBg: trs.tab === 'datasets' ? 'var(--surface-control)' : 'transparent',
+      showRuns: () => trPatch({ tab: 'runs' }), showPipelines: () => trPatch({ tab: 'pipelines' }), showCycle: () => trPatch({ tab: 'cycle' }), showRegimes: () => trPatch({ tab: 'regimes' }), showDatasets: () => trPatch({ tab: 'datasets' }),
       running: !!trs.running,
-      stop: () => trPatch({ running: false }),
+      liveOn: !!trLive,
+      barOn: trBusy,
+      barLabel: trPl ? (trPl.resume ? 'Resuming ' + trPl.pid : 'Running ' + trPl.spec) : trCy ? 'Running one pass of the cycle' : 'Training',
+      barLine: trLive ? trLive.notice || 'Starting…' : '[train] iter 2/4 · loss 0.6200 · lr 1.00e-04 · 10.0 it/s',
+      stop: () => (trLive ? this.trainStop() : trPatch({ running: false })),
+      specs: (trs.named ? trRec.specs : []).map((p) => ({ name: p.name, meta: trStages(p.stages.length) + ' · student tiny', cantRun: trBusy, label: 'Run the pipeline ' + p.name, command: 'apogee train pipeline run --pipeline ' + p.name, run: () => trAsk({ act: 'run', spec: p.name, title: 'Run the pipeline ' + p.name + '?', body: 'Each stage is a training run, held to the cumulative gate -- this machine is held until it ends.', detail: 'apogee train pipeline run --pipeline ' + p.name, label: 'Start' }) })),
+      noSpecs: !trs.named,
+      plLiveOn: !!trPl,
+      liveId: trPl ? trPl.pid : '',
+      liveCurrent: trShowLive,
+      liveBg: trShowLive ? 'var(--surface-selection)' : '',
+      openLive: () => trPatch({ psel: null }),
+      pruns: trs.pruns.filter((m) => !trPl || m.id !== trPl.pid).map((m) => ({ id: m.id, line: [m.spec, m.status, m.stages.filter((g) => g.state === 'passed').length + ' of ' + trStages(m.stages.length) + ' passed'].join(' · '), color: trResumable(m) ? 'var(--status-error)' : 'var(--text-tertiary)', current: !!trPage && trPage.id === m.id, bg: trPage && trPage.id === m.id ? 'var(--surface-selection)' : '', pick: () => trPatch({ psel: m.id }) })),
+      noRuns: !trs.pruns.length && !trPl,
+      pgLive: trShowLive,
+      pgRun: !!trPage,
+      pgNone: !trShowLive && !trPage,
+      pgHasStages: trShowLive || !!trPage,
+      stages: trShowLive ? trStageRows(trPl.stages, trPl.iter) : trPage ? trStageRows(trPage.stages, null) : [],
+      noStages: trShowLive ? !trPl.stages.length : !!trPage && !trPage.stages.length,
+      page: trPage ? {
+        id: trPage.id,
+        line: [trPage.spec, trPage.status, 'on ' + trPage.student].join(' · '),
+        color: trResumable(trPage) ? 'var(--status-error)' : 'var(--text-secondary)',
+        when: trPage.started + (trPage.completed ? ' → ' + trPage.completed : ''),
+        resumable: trCanResume,
+        resumeLine: trCanResume ? 'Resume from stage ' + (trFirst + 1) + ', ' + trPage.stages[trFirst].name : '',
+        cantResume: trBusy,
+        resumeCommand: 'apogee train pipeline resume ' + trPage.id,
+        resume: () => trAsk({ act: 'resume', id: trPage.id, title: 'Resume ' + trPage.id + ' from stage ' + (trFirst + 1) + ', ' + trPage.stages[trFirst].name + '?', body: 'What passed stays; each stage from there is a training run, held to the cumulative gate -- this machine is held until it ends.', detail: 'apogee train pipeline resume ' + trPage.id, label: 'Resume' })
+      } : { id: '', line: '', color: 'var(--text-secondary)', when: '', resumable: false, resumeLine: '', cantResume: true, resumeCommand: '', resume: () => {} },
+      cyHalted: trHalted,
+      cyNotHalted: !trHalted,
+      cyCantRun: trBusy || trHalted,
+      cyRun: () => trAsk({ act: 'pass', title: 'Run the training cycle once?', body: 'It trains, gates and may promote -- this machine is held until it ends.', detail: 'apogee train cycle run', label: 'Run one pass' }),
+      cyHalt: () => trAsk({ act: 'halt', title: 'Halt the training cycle?', body: "Every 'cycle run' refuses until 'cycle resume' -- your scheduler’s passes too." + (trCy ? ' The pass running now finishes, and keeps the halt.' : ''), detail: 'apogee train cycle halt', label: 'Halt' }),
+      cyResume: () => trAsk({ act: 'unhalt', title: 'Resume the training cycle?', body: 'It clears the halt and the failure count: your scheduler’s next pass runs.', detail: 'apogee train cycle resume', label: 'Resume' }),
+      cyHasHold: trHalted,
+      cyHold: trHalted ? 'Halted: ' + (trHist.reason || "'apogee train cycle halt' was run") + '. Every pass refuses -- your scheduler’s too -- until Resume clears it.' : '',
+      cyLiveOn: !!trCy,
+      cyLines: trCy ? trCy.passes.map((l, i) => ({ state: l.state, text: l.text, color: i === trCy.passes.length - 1 ? 'var(--text-primary)' : 'var(--text-secondary)' })) : [],
+      cyStarting: !!trCy && !trCy.passes.length,
+      cyHasStages: !!trCy && trCy.stages.length > 0,
+      cyStages: trCy ? trStageRows(trCy.stages, trCy.iter) : [],
+      cyNone: !trHist,
+      cyHas: !!trHist,
+      cyFacts: trHist ? [['PROMOTES INTO', trHist.backend || '—'], ['ANCHOR', trHist.anchorV > 0 ? 'v' + trHist.anchorV + ' (' + trPct(trHist.anchorScore) + ')' : 'not set -- the first passing cycle sets it'], ['STATE', trHalted ? 'halted' : trCy ? 'running now' : 'idle'], ['FAILED IN A ROW', String(trHist.fails)], ['PASSES', String(trHist.runs.length)]].map((f) => ({ label: f[0], value: f[1] })) : [],
+      cyNoPasses: !!trHist && !trHist.runs.length,
+      cyPasses: trHist ? trHist.runs.slice().reverse().map((p) => {
+        const parts = [p.gate];
+        if (p.score) {
+          const against = [['previous', p.prev], ['anchor', p.anchor]].filter((x) => x[1]).map((x) => x[0] + ' ' + trPct(x[1]));
+          parts.push('scored ' + trPct(p.score) + (against.length ? ' (' + against.join(', ') + ')' : ''));
+        }
+        if (p.promoted) parts.push('promoted v' + p.promoted);
+        if (p.source) parts.push(p.rows + (p.rows === 1 ? ' example' : ' examples') + ' from ' + p.source);
+        return { at: p.at, hasPipeline: !!p.pipeline, pipeline: p.pipeline, line: parts.join(' · '), color: p.gate === 'fail' ? 'var(--status-error)' : p.gate === 'pass' ? 'var(--text-primary)' : 'var(--text-secondary)', hasReason: !!p.reason, reason: p.reason, hasNote: !!p.note, note: p.note };
+      }) : [],
       runs: trRuns.map((r) => ({ id: r.id, status: r.status, meta: r.meta, gateColor: r.failed ? 'var(--status-error)' : 'var(--text-tertiary)', current: r.id === trCur.id, bg: r.id === trCur.id ? 'var(--surface-selection)' : '', pick: () => trPatch({ sel: r.id }) })),
       cur: { id: trCur.id, gate: trCur.gate, gateColor: trCur.failed ? 'var(--status-error)' : 'var(--text-secondary)', facts: trCur.facts.map((f) => ({ label: f[0], value: f[1] })) },
       regimes: trRegimes.map((g) => ({ name: g.name, meta: g.kits.length + (g.kits.length === 1 ? ' kit' : ' kits') + ' · seeded', current: g.name === trReg.name, bg: g.name === trReg.name ? 'var(--surface-selection)' : '', pick: () => trPatch({ regime: g.name }) })),

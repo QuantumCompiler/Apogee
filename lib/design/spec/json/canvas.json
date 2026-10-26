@@ -569,6 +569,24 @@
       "y": 2720,
       "title": "Review · the skills",
       "page": "build"
+    },
+    "ScreenTrainingPipelines.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 36480,
+      "y": 2720,
+      "title": "Training · a pipeline run, stage by stage",
+      "page": "build"
+    },
+    "ScreenTrainingCycle.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 38000,
+      "y": 2720,
+      "title": "Training · the cycle and its passes",
+      "page": "build"
     }
   },
   "createdOnFiles": {
@@ -599,7 +617,7 @@
     },
     "library": {
       "kind": "title1",
-      "maxW": 36400,
+      "maxW": 39440,
       "text": "Screens — models, suites, tasks, the code graph, knowledge, training, the library and review",
       "x": 0,
       "y": 2420,
@@ -682,6 +700,8 @@
     "ScreenCollections.dc.html",
     "ScreenTraining.dc.html",
     "ScreenTrainingDatasets.dc.html",
+    "ScreenTrainingPipelines.dc.html",
+    "ScreenTrainingCycle.dc.html",
     "ScreenLibrary.dc.html",
     "ScreenLibrarySymphonies.dc.html",
     "ScreenLibraryMCP.dc.html",

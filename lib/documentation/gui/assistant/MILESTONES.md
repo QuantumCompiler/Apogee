@@ -2387,3 +2387,39 @@ Probed on the branch's binary over sandboxes:
   - `graph delete` keeps the graph's config entry;
   - `config add-backend` never sets a default;
   - `config get tools.allowed_hosts` reads nothing.
+
+### 2026-10-26 — `design-draws-pipelines-and-cycle` (maintenance item M11): the design draws Training's Pipelines and Cycle tabs
+
+**Why.** 4j gave the app's Training place two tabs the design didn't have: Runs · Pipelines · Cycle · Regimes · Datasets, where the prototype drew Runs · Regimes · Datasets. Neither tab had a board, and the contract board had no row for the CLI's pipeline and cycle reads and streams (4j's and 4l's "Not done"). The design is the reference every app is built from, so an app screen it never drew is drift.
+
+- [x] **The prototype's Training place** (`lib/design/spec/html/main.html`) has the five tabs.
+  - **The `trn` section** replays 4j's recordings one event per tick: a pipeline's stages pending, training (with its iteration), evaluating and passed, and the cycle's passes skipped, passed and failed, the breaker tripping.
+  - **What is reachable:** the empty states ("no named pipelines…", "no pipeline runs yet…", the cycle with no history), a failed stage's Resume and its confirm, and the run-once, halt and resume confirms.
+  - **The Cycle tab** says scheduling is the person's own (launchd or cron) and nothing in the app schedules it.
+- [x] **Two new boards:**
+  - `ScreenTrainingPipelines.dc.html`, start `training:pipelines`: `skills` running, stage 1 passed, stage 2 at iteration 2 of 4, as the app's own preview draws it;
+  - `ScreenTrainingCycle.dc.html`, start `training:cycle`: the cycle idle, anchor v1, its skipped and passed passes.
+
+  They sit at x 36480 and 38000 on the Training row (`json/canvas.json`, the row heading widened to 39440), and the README counts 50 boards.
+- [x] **The contract board** gains four ready TRAINING rows, each saying what the app uses: the named specs (`train pipeline list | show`, the CLI's M30), pipeline runs and Resume (`status [<id>]`, `resume`), a run live stage by stage (`run … stream-json`), and the cycle (`status`, `run`, `halt`, `resume`). Its stats went from 72 / 11 / 8 / 0 to 76 / 11 / 8 / 0, the chips matching. No gap was added; the map names the ledger's 8 open gaps.
+- [x] **The canvas,** read first: its `App.dc.html`, `BuildContract.dc.html` and `canvas.json` were byte-identical to the repo's. `main.html` (as `App.dc.html`), the contract board, the two new boards and `canvas.json` were published (canvas version 48) and read back identical to the repo's.
+
+**Decisions made while building** (2026-10-26, each recorded for veto):
+- **The defaults, taken:** two boards, the empty states and confirms drawn in `main.html` only; the specs drawn as `train pipeline list` states them, with no gap.
+- **Halt during a pass follows the CLI, not the app.** Since the CLI's M30 a halt taken while a pass runs is kept, so the design leaves Halt… enabled then, in the CLI's words. 4j's app disables it and says the halt is lost, which is now wrong: an app follow-up.
+- **The CLI's words over the app's** where they differ ("the pass running now finishes", "the first passing cycle", the empty-list lines).
+- **The empty states are reached from the older starts** (`training`, `training:datasets`, which now model a world with nothing named and no cycle), so the start options stay one-to-one with boards.
+- **A failed run or pass shows the CLI's message in a toast,** the prototype's convention, where the app opens an alert.
+- **The contract header adds** that the named pipelines' reads are the CLI's M30.
+
+**Verified.**
+- **The design's health check:** 50 start screens, no problems, `training:pipelines` and `training:cycle` among them.
+- **Markup** balanced in every changed file; all 123 holes in the Training block resolve.
+- **Served locally and opened:** each flow ran through, with no errors and no `undefined` or `NaN`.
+- **Words:** 71 strings are verbatim from the recordings or the CLI reference, and 32 from 4j's views. The rest are the app's templates filled with recorded values, CLI lines found in `train.cpp`, and one composed line ("2 stages · student tiny").
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 4,059 tests and the macOS app's 834 cases passed; no code changed in this item.
+
+**Not done:**
+- **The app's Halt during a pass** still says the halt is lost (4j); since the CLI's M30 it is kept.
+- **The app's Pipelines tab** still names specs from completion, not `train pipeline list`.
+- **The contract board** renders taller than its canvas frame (about 8,900 px against 5,600), as it already did before this change.
