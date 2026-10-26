@@ -29,9 +29,20 @@ public final class SessionViewModel {
     public private(set) var transcript = Transcript()
     /// What the user is typing.
     public var draft = ""
-    /// The saved conversation this is, by its id: the one it resumed, or the
-    /// one the library found it saved as. `nil` for a new one not yet known.
+    /// The conversation this is, by its id: the one it resumed, the one its
+    /// `session` event names (`chat_id`, the CLI's M28), or -- from a binary
+    /// before M28, which names none -- the one the library found it saved
+    /// as. `nil` for a new one not yet known, and for a private one, which
+    /// writes none.
     public private(set) var chatID: String?
+    /// Whether that conversation is written, so `--resume` can carry it on:
+    /// one resumed, or one the library found listed. A chat the CLI names is
+    /// written only once a turn of it is answered (M28), so one named and
+    /// left unsent is never resumed by its id -- the CLI would refuse it.
+    public private(set) var isSaved = false
+    /// The conversation's id once it is written: what a relaunch resumes and
+    /// reads back, and what Rename and Delete act on.
+    public var savedChatID: String? { isSaved ? chatID : nil }
     /// Told every event, after the transcript has folded it: how the library
     /// reads back what a turn changed.
     public var observer: (@MainActor (SessionEvent) -> Void)?
@@ -165,6 +176,7 @@ public final class SessionViewModel {
         self.reader = reader
         self.launch = launch
         chatID = launch.resume
+        isSaved = launch.resume != nil
         settings = launch.settings
         if let folder = launch.folder { self.folder = folder }
     }
@@ -254,11 +266,33 @@ public final class SessionViewModel {
         }
     }
 
-    /// The library found this session saved as `id`.
+    /// The library found this session saved as `id` -- listed by `chats
+    /// list` -- so it is written: the guess's chat on a binary before the
+    /// CLI's M28, or the chat its `session` event named, once it is listed.
+    /// An id, once known, stays.
     public func identify(_ id: String) {
         if chatID == nil {
             chatID = id
         }
+        if chatID == id {
+            isSaved = true
+        }
+    }
+
+    /// The chat this session's `session` event names (`chat_id`, the CLI's
+    /// M28): the binary's word, so it is the one this is, at once -- written
+    /// only once a turn of it is answered, which the library reads back.
+    private func named(_ id: String) {
+        guard chatID != id else { return }
+        chatID = id
+        isSaved = false
+    }
+
+    /// A new child opens on a fresh chat, not resuming one: a chat named
+    /// but never written is let go, so the child's own `session` event names
+    /// the one it writes.
+    private func forgetUnsaved() {
+        if !isSaved { chatID = nil }
     }
 
     // MARK: - The session
@@ -281,6 +315,7 @@ public final class SessionViewModel {
         setsSent = []
         attachments = []
         readsEarlier = true
+        forgetUnsaved()
         beginLaunch()
     }
 
@@ -321,7 +356,7 @@ public final class SessionViewModel {
         case .found(let found, _):
             connection = .connected(binary: found.url.path, version: found.version)
             var launch = self.launch
-            launch.resume = chatID
+            launch.resume = savedChatID
             // A saved conversation opened afresh: its earlier turns are read
             // beside the child starting, and handed to the transcript before
             // its first event -- the events wait in the stream until the read
@@ -353,9 +388,12 @@ public final class SessionViewModel {
                     transcript.apply(event)
                 }
                 if case .event(let event) = event {
-                    if case .session = event.kind {
+                    if case .session(let info) = event.kind {
                         spoke = true
                         switching = nil
+                        // The chat it writes, in the binary's word (M28) --
+                        // a private one writes none, whatever it says.
+                        if let id = info.chatID, privateMode != .nothingWritten { named(id) }
                     }
                     heard(event)
                 }
@@ -377,7 +415,7 @@ public final class SessionViewModel {
     /// before the CLI's M27 refuses it) or prints no chat: the session's own
     /// notice then says the earlier turns are kept, as before.
     private func readEarlier(binary: URL) -> Task<EarlierRead?, Never>? {
-        guard let reader, let id = chatID else { return nil }
+        guard let reader, let id = savedChatID else { return nil }
         return Task {
             let read = await reader.readKeepingStderr(binary: binary, SavedChat.arguments(id: id))
             guard let chat = read.outcome.document.flatMap(SavedChat.init(document:)) else { return nil }
@@ -453,11 +491,13 @@ public final class SessionViewModel {
     }
 
     /// Carries a paused session on: a new child resuming the saved
-    /// conversation. One that was never saved -- no turn sent, or its id never
-    /// found -- starts afresh instead, since nothing of it could be resumed.
+    /// conversation. One that was never saved -- no turn answered, or its id
+    /// never found -- starts afresh instead, since nothing of it could be
+    /// resumed.
     public func resume() {
         guard isPaused, !isShutDown else { return }
-        if chatID == nil {
+        if savedChatID == nil {
+            forgetUnsaved()
             transcript = Transcript()
         } else {
             transcript.reopening()
@@ -558,7 +598,7 @@ public final class SessionViewModel {
         }
         settings = settings.merging(change)
         launch.settings = settings
-        let carried = chatID != nil || !transcript.items.contains { if case .user = $0.content { true } else { false } }
+        let carried = savedChatID != nil || !transcript.items.contains { if case .user = $0.content { true } else { false } }
         transcript.note(
             carried
                 ? "restarting with \(Self.words(change)) -- this apogee changes settings by restarting the session; the conversation carries on, and a local model loads again"
@@ -578,7 +618,8 @@ public final class SessionViewModel {
             callOffLaunch()
         }
         guard !isShutDown else { return }
-        if chatID == nil {
+        if savedChatID == nil {
+            forgetUnsaved()
             let notes = transcript.items.filter { if case .notice = $0.content { true } else { false } }
             transcript = Transcript()
             for case .notice(let text) in notes.map(\.content) { transcript.note(text) }
@@ -643,7 +684,7 @@ public final class SessionViewModel {
         launch.name(suite: suite, force: force)
         settings.model = nil
         launch.settings.model = nil
-        transcript.note(Self.moveWords(suite, force: force, turns: hasTurns, carried: chatID != nil))
+        transcript.note(Self.moveWords(suite, force: force, turns: hasTurns, carried: savedChatID != nil))
         switching = before
         // Not running now -- paused, never started, or still locating its
         // binary -- the launch to come carries the flags; else a new child.
@@ -660,7 +701,8 @@ public final class SessionViewModel {
         transcript.note(
             "not moved to \(Self.suiteName(asked)): \(refusal) -- the session carries on under \(Self.suiteName(before.suite))")
         guard !isShutDown else { return }
-        if chatID == nil {
+        if savedChatID == nil {
+            forgetUnsaved()
             let notes = transcript.items.filter { if case .notice = $0.content { true } else { false } }
             transcript = Transcript()
             for case .notice(let text) in notes.map(\.content) { transcript.note(text) }
@@ -810,7 +852,7 @@ public final class SessionViewModel {
         case .compact: canCompact && outbox != nil
         case .detachAll: canDetach && !attachments.isEmpty
         case .stop: canCancel
-        case .library(.rename), .library(.delete): chatID != nil && privateMode == nil
+        case .library(.rename), .library(.delete): savedChatID != nil && privateMode == nil
         case .library(.chooseSuite): canSwitchSuite
         default: true
         }

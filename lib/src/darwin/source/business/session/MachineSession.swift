@@ -14,7 +14,8 @@ import Synchronization
 /// the session closes the child's input first and terminates it -- its whole
 /// process group -- only when it will not go (`stop(grace:)`). Started with
 /// a children registry, it is listed there from its spawn to its end, as
-/// `Session: <model>` once the session has said its model (GUI 4c).
+/// `Session: <model>` once the session has said its model (GUI 4c) -- and,
+/// once an answer says another model answered it, that one (GUI M10).
 public actor MachineSession {
     /// Everything the session says, in order, `.ended` last.
     public nonisolated let events: AsyncStream<SessionEvent>
@@ -35,6 +36,9 @@ public actor MachineSession {
     private var ended = false
     /// Its place in the children registry, from its spawn until its end.
     private nonisolated let registration = Mutex<ChildRegistry.Registration?>(nil)
+    /// The model its registry place names: the one the `session` event
+    /// named, then each one a `result` says answered.
+    private var labelled: String?
 
     /// What the registry shows a session as before it has said its model.
     static let startingLabel = "Session: starting"
@@ -104,10 +108,23 @@ public actor MachineSession {
                 return
             }
             info = session
-            registration.withLock { $0?.relabel("Session: \(session.model)") }
+            relabel(session.model)
+        }
+        if case .result(let result) = event.kind, let answered = result.model, !answered.isEmpty {
+            // The CLI's word for the model that answered: a switch by `set`
+            // takes effect from the next turn, and its answer says so (GUI M10).
+            relabel(answered)
         }
         tracker.apply(event)
         continuation.yield(.event(event))
+    }
+
+    /// Shows its place in the registry as `Session: <model>`, unless it
+    /// already says so.
+    private func relabel(_ model: String) {
+        guard model != labelled else { return }
+        labelled = model
+        registration.withLock { $0?.relabel("Session: \(model)") }
     }
 
     private func finish(exit: ChildExit, tail: BoundedTail) {

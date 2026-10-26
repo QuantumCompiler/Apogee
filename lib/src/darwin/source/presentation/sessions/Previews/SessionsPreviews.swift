@@ -28,6 +28,37 @@ enum SessionsPreview {
     static let noteTurn = "Write me a note."
     static let noteAnswers = ["todo.md", "yes"]
 
+    // MARK: - A model switched from the settings sheet (GUI M10)
+
+    /// The branch binary's recording over two scripted mocks: a new session
+    /// naming its chat, a turn on `claude`, the sheet's `set` to the local
+    /// model, the CLI's notice, a turn the local model answered -- and the
+    /// list read after it, the chat's row on the backend it switched to.
+    static let switchedToLocal = SessionsDocuments.switchedToLocal.split(separator: "\n").map(String.init)
+
+    /// What the recording sent, turn by turn, and the model it switched to.
+    static let switchTurns = ["Which port does the dev server use?", "And on the local model?"]
+    static let localModel = "Gemma4-26B-Instruct"
+
+    /// The library over that recording -- its list read after the switch --
+    /// each session said turn by turn. Not started.
+    static func switching() -> SessionLibraryViewModel {
+        library(chats: SessionsDocuments.chatsListSwitched, lines: switchedToLocal, byTurn: true)
+    }
+
+    /// The open session's first turn answered on claude, the local model
+    /// chosen in its settings sheet -- the `set` line sent, the CLI's notice
+    /// said -- then the next turn sent and answered on it.
+    static func switchToLocal(_ session: SessionViewModel) async {
+        await converse(session, typed: switchTurns[0])
+        await until { session.transcript.acceptsInput && session.transcript.items.count > 1 }
+        await session.apply(RunSettings(model: localModel))
+        await until { if case .notice = session.transcript.items.last?.content { true } else { false } }
+        session.draft = switchTurns[1]
+        session.submit()
+        await until { session.transcript.acceptsInput && session.transcript.model == localModel }
+    }
+
     // MARK: - Documents the library's tests hold
 
     /// Two saved conversations, each naming its backend (SessionLibraryTests'
@@ -101,11 +132,11 @@ enum SessionsPreview {
     /// open last time, and `models` what `models list` answers. Not started.
     static func library(
         chats: String = chatsList, lines: [String] = mockActor, missing: Bool = false, openChat: String? = nil,
-        defaultSuite: String = "", models: String = modelsList
+        defaultSuite: String = "", models: String = modelsList, byTurn: Bool = false
     ) -> SessionLibraryViewModel {
         let now = Self.now
         return SessionLibraryViewModel(
-            starter: PreviewChats(lines: lines, missing: missing ? passedOver : nil),
+            starter: PreviewChats(lines: lines, missing: missing ? passedOver : nil, byTurn: byTurn),
             runner: runner(chats: chats, defaultSuite: defaultSuite, models: models),
             preferences: Preferences(store: MemoryStore(openChat.map { ["openChat": $0] } ?? [:])),
             now: { now })

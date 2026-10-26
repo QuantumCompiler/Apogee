@@ -23,7 +23,9 @@ public enum EventDecoder {
                 SessionInfo(
                     protocolVersion: version, model: model, nextTurn: fields["next_turn"]?.intValue ?? 1,
                     capabilities: fields["capabilities"].flatMap(capabilities),
-                    isPrivate: fields["private"]?.boolValue ?? false))
+                    isPrivate: fields["private"]?.boolValue ?? false,
+                    // M28's: a value that is no id is none, never guessed at.
+                    chatID: string("chat_id").flatMap { $0.isEmpty ? nil : $0 }))
         case "thinking":
             return .thinking(budgetReached: fields["budget_reached"]?.boolValue ?? false)
         case "thinking_delta":

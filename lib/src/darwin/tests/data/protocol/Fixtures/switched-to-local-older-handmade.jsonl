@@ -1,0 +1,24 @@
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","document"],"schema":"2026-10-24","tools":true},"model":"claude","next_turn":1,"protocol_version":1,"type":"session"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"answer_start"}
+{"text":"The dev ","turn":1,"type":"answer_delta"}
+{"text":"server l","turn":1,"type":"answer_delta"}
+{"text":"istens o","turn":1,"type":"answer_delta"}
+{"text":"n port 8","turn":1,"type":"answer_delta"}
+{"text":"080.","turn":1,"type":"answer_delta"}
+{"turn":1,"type":"answer_end"}
+{"finish_reason":"stop","model":"claude","text":"The dev server listens on port 8080.","turn":1,"type":"result"}
+{"text":"switched to Gemma4-26B-Instruct -- from the next turn","type":"notice"}
+{"turn":2,"type":"thinking"}
+{"turn":2,"type":"answer_start"}
+{"text":"Gemma he","turn":2,"type":"answer_delta"}
+{"text":"re, on t","turn":2,"type":"answer_delta"}
+{"text":"his mach","turn":2,"type":"answer_delta"}
+{"text":"ine: the","turn":2,"type":"answer_delta"}
+{"text":" dev ser","turn":2,"type":"answer_delta"}
+{"text":"ver list","turn":2,"type":"answer_delta"}
+{"text":"ens on p","turn":2,"type":"answer_delta"}
+{"text":"ort 8080","turn":2,"type":"answer_delta"}
+{"text":".","turn":2,"type":"answer_delta"}
+{"turn":2,"type":"answer_end"}
+{"finish_reason":"stop","model":"Gemma4-26B-Instruct","text":"Gemma here, on this machine: the dev server listens on port 8080.","turn":2,"type":"result"}

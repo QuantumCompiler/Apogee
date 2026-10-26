@@ -40,31 +40,37 @@ struct PreviewRunner: CommandRunning {
 /// paces it: up to its `session` event, then -- once a turn is sent -- up to
 /// each `question`, the rest once it is answered. Given `silentFrom`, it
 /// stops short of the first line of that type, a turn left in flight as a
-/// person sees one mid-turn. What is written to it goes nowhere.
+/// person sees one mid-turn. `byTurn`, each turn is said only up to its
+/// `result`, and what the binary said between turns to a `set` line -- its
+/// notices -- only once a `set` is written (GUI M10's switch). What is
+/// written to it goes nowhere.
 actor PreviewChat: ChatSession {
     nonisolated let events: AsyncStream<SessionEvent>
     private let continuation: AsyncStream<SessionEvent>.Continuation
     /// The recorded events not said yet.
     private var unsaid: ArraySlice<ProtocolEvent>
+    private let byTurn: Bool
     private var turns = 0
 
-    init(saying lines: [String], silentFrom type: String? = nil) {
+    init(saying lines: [String], silentFrom type: String? = nil, byTurn: Bool = false) {
         let (events, continuation) = AsyncStream.makeStream(of: SessionEvent.self)
         let said = type.map { type in lines.prefix { JSONValue.parse($0)?["type"]?.stringValue != type } } ?? lines[...]
         var unsaid = said.map(EventDecoder.decode(line:))[...]
-        Self.say(&unsaid, to: continuation)
+        Self.say(&unsaid, to: continuation, byTurn: byTurn)
         self.events = events
         self.continuation = continuation
         self.unsaid = unsaid
+        self.byTurn = byTurn
     }
 
     /// Says the events up to the next the binary waits after: its `session`,
-    /// a `question`.
-    private static func say(_ unsaid: inout ArraySlice<ProtocolEvent>, to continuation: AsyncStream<SessionEvent>.Continuation) {
+    /// a `question` -- `byTurn`, a `result`.
+    private static func say(_ unsaid: inout ArraySlice<ProtocolEvent>, to continuation: AsyncStream<SessionEvent>.Continuation, byTurn: Bool) {
         while let event = unsaid.popFirst() {
             continuation.yield(.event(event))
             switch event.kind {
             case .session, .question: return
+            case .result where byTurn: return
             default: continue
             }
         }
@@ -72,17 +78,27 @@ actor PreviewChat: ChatSession {
 
     func send(user text: String) async throws -> Int {
         turns += 1
-        Self.say(&unsaid, to: continuation)
+        Self.say(&unsaid, to: continuation, byTurn: byTurn)
         return turns
     }
 
     func answer(_ text: String) async throws {
-        Self.say(&unsaid, to: continuation)
+        Self.say(&unsaid, to: continuation, byTurn: byTurn)
     }
 
     func attach(path: String, graph: String?) async throws {}
     func detach(path: String) async throws {}
-    func set(_ settings: RunSettings) async throws {}
+
+    /// `byTurn`, the notices the binary answered the recorded `set` with --
+    /// said between turns, so carrying none.
+    func set(_ settings: RunSettings) async throws {
+        guard byTurn else { return }
+        while let next = unsaid.first, next.turn == nil, case .notice = next.kind {
+            continuation.yield(.event(next))
+            unsaid.removeFirst()
+        }
+    }
+
     func compact() async throws {}
     func cancel() async throws {}
 
@@ -105,6 +121,8 @@ struct PreviewChats: ChatStarting {
     var lines: [String] = []
     var silentFrom: String?
     var missing: [SkippedCandidate]?
+    /// Each turn said up to its `result`, and a `set` answered (`PreviewChat`).
+    var byTurn = false
 
     /// The binary as the tests' scripted starter finds it
     /// (tests/presentation/sessions/Scripted.swift).
@@ -117,7 +135,7 @@ struct PreviewChats: ChatStarting {
     }
 
     func openChat(binary: URL, launch: ChatLaunch) -> any ChatSession {
-        PreviewChat(saying: lines, silentFrom: silentFrom)
+        PreviewChat(saying: lines, silentFrom: silentFrom, byTurn: byTurn)
     }
 }
 

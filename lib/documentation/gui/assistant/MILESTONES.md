@@ -458,6 +458,54 @@ That was the cost 1b recorded and deferred: "Widening the child's `PATH` is a la
 - Selection's rich-text colours, recorded above for the user's call.
 - No live pass of the app against the installed binary. The renders were offscreen.
 
+### 2026-10-26 — `session-label-follows-its-chat` (maintenance item M10): a session's window says the chat and the model it is running
+
+**Why.** The user, 2026-10-22, with a screenshot: "I am running a local model and it is not displaying it correctly. It just says claude, instead of the local model name." Their window was headed `claude`, and its inspector named the chat `20261022-214642-9a66`, 0 turns, model and backend `claude`. Meanwhile a Gemma conversation's eighth turn streamed in it. The saved records said `9a66` was `claude` with 0 turns, and the conversation was `20261022-214648-d3e2`, on `Gemma4-26B-Instruct-mixed_4_8`. Both defects reproduced on today's source as failing tests first:
+- **The label followed only the opening event.** `Transcript` set `model` from the `session` event alone and ignored each answer's `result.model`. A switch made from the settings sheet (since 4b a held `set` line) left the header and the inspector on the launch model all session (`SessionLabelTests`: `labelFollowsTheAnswer`, `headerFollowsTheSwitch`, `olderBinaryLabelsTheSame`).
+- **A new session was pinned to the wrong chat.** Its "listed before" snapshot came from the cached list, not a read after the left session had closed, and the guess took any chat that appeared, empty ones included.
+  - **On a binary before the CLI's M28,** which saves an unsent chat with 0 turns, a new session opened from an unsent one was named for the empty chat (`73de` in the recording).
+  - **Rename and Delete followed it:** they ran `chats title 73de` and `chats delete 73de`, and a relaunch reopened it (`SessionIdentityTests`, six of seven failing first).
+
+- [x] **The label follows the CLI's word.** A `result` naming a model moves `model`, and the header and the inspector's Model read it. A `set` notice is never read for a name.
+- [x] **So do the meter and the monitor.**
+  - **The context meter** re-reads the window (`models info <model>`) when a `result` names a different model, since neither `result` nor its `usage` carries one. A failed read shows unknown, a late read for a model no longer answering is let go, and an answer from the same model reads nothing again.
+  - **The monitor:** `MachineSession` renames the session's registry entry "Session: <model>" on such a result.
+- [x] **A session that names its chat is identified by it at once.** The `session` event's `chatID` (the CLI's M28) is decoded, an unknown field tolerated as before, and `preferences.openChat` records it.
+  - **Named versus written.** On M28 a new chat is written only once a turn is answered, so `--resume` of an unsent session's id would be refused. `SessionViewModel` keeps `isSaved` and `savedChatID`, learned from the list, not inferred. Relaunching, reading back, Rename, Delete and the inspector's Saved line use the saved id, and a chat named but unwritten starts afresh on a pause, suite switch or Start again.
+- [x] **Without `chat_id`, the guess is made right.** Its snapshot is a fresh `chats list` read in `SessionLibraryViewModel.replace(with:starter:)`, inside the close loop, as 4a left room for. If another opening arrives while the read waits, the loop closes it and reads again, and `make()` runs synchronously after the loop, so only one child is ever live. `identifyNewSession` passes over chats with 0 turns.
+
+**Decisions made while building** (2026-10-26, each recorded for veto):
+- **The defaults, taken:**
+  - between a switch and the next answer, the header (and the meter) keep the model that last answered, and the CLI's notice stands in the transcript;
+  - the inspector's Backend reads the session's own chat row, refreshed after each turn. After the switched turn it says `Gemma4-26B-Instruct`.
+- **A `--private` session ignores any `chat_id`,** keeping 4i's `whereItCannot`.
+- **The 0-turn skip has one exception:** the older private fallback's promised delete, so an unsent `--no-recall` chat on a pre-52d binary is still deleted.
+- **The snapshot is read only for a launch that may need a guess:** new, execute, the older private fallback. A failed read makes no guess. ⌘N and launch now read `chats list` twice.
+- **A relaunch reopens only a listed chat,** so an unsent one opens a new session.
+
+**Verified.**
+- **Recorded** from the branch's binary over a sandbox home, with mocks `claude` (the default) and `Gemma4-26B-Instruct`, each session driven as the app launches one, the home written `/Users/someone`:
+  - `switched-to-local.jsonl`, `new-unsent.jsonl` and `private-unsent.jsonl`;
+  - the lists around them;
+  - each model's `models info`, the local one over a stand-in GGUF header as 4i made them (8192 tokens).
+
+  **The older shapes are partly hand-made.** The installed binary is M28's own commit, so `switched-to-local-older-handmade.jsonl` and `new-unsent-older-handmade.jsonl` are its recordings with `chat_id` alone removed. The older lists are real, holding the empty chat a pre-M28 binary wrote during M28's probe (`20261025-050011-73de`, 0 turns).
+- **24 new cases:**
+  - `SessionChatTests` (2);
+  - `SessionLabelTests` (5);
+  - `SessionNamedChatTests` (3);
+  - `SessionIdentityTests` (9), among them `olderBinaryGuessesRight`, `olderBinaryActsOnTheRightChat`, `emptyChatPassedOver` and `namedAtOnce`;
+  - `SessionMeterTests` (3);
+  - `SessionRegistryLabelTests` (2).
+- **Repeat runs** over 10 iterations: `PresentationSession` 840 of 840, `PresentationSessions` 830 of 830 and `BusinessSessionTests` 310 of 310. `check-previews` finds nothing in session or sessions.
+- **Mutation:** removing the fresh snapshot, the 0-turn skip, the private delete's exception, the window re-read, its late-read check or failed-read fallback, or the rename each fails its own test.
+- **Three new previews:** the header after a switch has answered, the same switch not yet answered, and the inspector on the identified chat.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,992 tests and the macOS app's 834 cases passed, with no Swift warning.
+
+**Not done:**
+- No live pass of the app.
+- The user's own empty chats from before M28 (`9a66`, `7e1e`) stay listed until they delete them.
+
 ---
 
 ## Milestone B — The design's screens

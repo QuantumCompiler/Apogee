@@ -213,6 +213,36 @@ enum SessionPreview {
         model.suiteChoices = suiteChoices
     }
 
+    // MARK: - A model switched from the settings sheet (GUI M10)
+
+    /// The branch binary's recording over two scripted mocks: a session on
+    /// `claude`, a turn, the sheet's `set` to the local model, the CLI's
+    /// notice, a turn the local model answered.
+    static let switchedToLocal = lines(SessionDocuments.switchedToLocal)
+
+    /// What the recording sent, turn by turn, and the model it switched to.
+    static let switchTurns = ["Which port does the dev server use?", "And on the local model?"]
+    static let localModel = "Gemma4-26B-Instruct"
+
+    /// A new session over that recording, said turn by turn; not started.
+    static func switching() -> SessionViewModel {
+        SessionViewModel(starter: PreviewChats(lines: switchedToLocal, byTurn: true), launch: ChatLaunch(), reader: nil)
+    }
+
+    /// The first turn answered on claude, then the local model chosen in the
+    /// settings sheet -- its `set` line sent, the CLI's notice said -- and,
+    /// `answered`, the next turn sent and answered on it.
+    static func switchToLocal(_ model: SessionViewModel, answered: Bool) async {
+        await converse(model, typed: switchTurns[0])
+        await until { model.transcript.acceptsInput && model.transcript.items.count > 1 }
+        await model.apply(RunSettings(model: localModel))
+        await until { if case .notice = model.transcript.items.last?.content { true } else { false } }
+        guard answered else { return }
+        model.draft = switchTurns[1]
+        model.submit()
+        await until { model.transcript.acceptsInput && model.transcript.model == localModel }
+    }
+
     // MARK: - Driving a session as the person does
 
     /// Waits until `condition` holds -- five seconds at most, as the tests'

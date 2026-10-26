@@ -197,6 +197,20 @@ struct MissingBinaryView: View {
         }
 }
 
+#Preview("Switched to a local model, not answered yet: the header keeps claude, the CLI's notice stands") {
+    let model = SessionPreview.switching()
+    SessionWindow(model: model)
+        .frame(width: 900, height: 560)
+        .task { await SessionPreview.switchToLocal(model, answered: false) }
+}
+
+#Preview("Switched to a local model and answered: the header says the model that answered") {
+    let model = SessionPreview.switching()
+    SessionWindow(model: model)
+        .frame(width: 900, height: 620)
+        .task { await SessionPreview.switchToLocal(model, answered: true) }
+}
+
 #Preview("A new session") {
     let model = SessionPreview.session(SessionPreview.mockActor)
     SessionWindow(model: model)

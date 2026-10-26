@@ -45,7 +45,12 @@ public struct Transcript: Equatable {
 
     public private(set) var items: [TranscriptItem] = []
     public private(set) var status: Status = .connecting
-    /// The model the session named.
+    /// The model the session runs on, as the CLI says it: the one the last
+    /// answer said answered it (`result.model`), else the one the `session`
+    /// event named. A switch the `set` line made is said by the CLI's own
+    /// notice ("switched to … -- from the next turn"), which is never read
+    /// for the name: until the next answer says it, the model that last
+    /// answered stands (GUI M10).
     public private(set) var model: String?
     /// The line types the session reads, as its `session` event announced
     /// them: what decides whether `detach`, `set` and `compact` are offered.
@@ -349,6 +354,12 @@ public struct Transcript: Equatable {
                 append(.answer(Answer(text: result.text, finished: true, usage: nil)), turn: turn)
             }
             finishAnswers(turn, usage: result.usage)
+            // The CLI's word for the model that answered: the label follows
+            // it -- a switch by `set` takes effect only from the next turn,
+            // and only the answer proves it ran (GUI M10).
+            if let answered = result.model, !answered.isEmpty {
+                model = answered
+            }
             if result.wasCancelled {
                 append(.stopped, turn: turn)
             }

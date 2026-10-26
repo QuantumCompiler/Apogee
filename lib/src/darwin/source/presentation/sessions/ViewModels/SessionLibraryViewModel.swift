@@ -183,9 +183,14 @@ public final class SessionLibraryViewModel {
     /// A rename of the open session that waits for its turn to end, on a
     /// binary that would put its own title back (`keepsOutsideRenames`).
     private var renameWhenIdle: (chat: ChatSummary, name: String)?
-    /// The ids listed when a new session opened: the one it is saved as is
-    /// the one that appears.
+    /// The ids listed when a new session opened -- read afresh once the
+    /// session before it had closed -- for a binary that names no chat: the
+    /// one it is saved as is the one that appears. `nil` when nothing is to
+    /// be guessed: a chat reopened, one the session names, a `--private` one.
     private var listedBeforeNew: Set<String>?
+    /// The model the open session's meter window was last asked for: the one
+    /// its `session` event named, then each one a `result` said answered.
+    private var windowModel: String?
     /// The symphonies an execute session's `/play` offers.
     private var plays: [PlayChoice] = []
     /// What the quit's wait is measured on.
@@ -403,13 +408,26 @@ public final class SessionLibraryViewModel {
         current.modelChoices = backends
     }
 
-    /// The window of the model a session names, for its meter: `models info
-    /// <model>` -- a stored set's typed `data.window.tokens` (the CLI's 52e),
-    /// else the leading count of its `window` field ("8192 tokens (the
+    /// The window of the model a session runs on, for its meter: `models
+    /// info <model>` -- a stored set's typed `data.window.tokens` (the CLI's
+    /// 52e), else the leading count of its `window` field ("8192 tokens (the
     /// default)"). An API model states none: unknown, never guessed.
-    private func readWindow(of model: String, for session: SessionViewModel) async {
-        guard let found, let info = await runner.read(binary: found.url, ["models", "info", model]).document else { return }
-        session.contextWindow = Self.window(in: info)
+    ///
+    /// The model is the one the `session` event named, then each one a
+    /// `result` says answered (GUI M10): neither `result` nor its `usage`
+    /// carries a window, so it is read as the opening model's is. A read
+    /// that lands once an answer has named another model is let go; one for
+    /// a model that `replaces` another that fails leaves the meter unknown,
+    /// since the last model's window is not this one's.
+    private func readWindow(of model: String, for session: SessionViewModel, replaces: Bool = false) async {
+        guard let found else { return }
+        let info = await runner.read(binary: found.url, ["models", "info", model]).document
+        guard session.transcript.model == model else { return }
+        if let info {
+            session.contextWindow = Self.window(in: info)
+        } else if replaces {
+            session.contextWindow = nil
+        }
     }
 
     static func window(in info: ReadDocument) -> Int? {
@@ -431,12 +449,30 @@ public final class SessionLibraryViewModel {
         }
     }
 
-    /// A new session is saved by its first turn under an id the app did not
-    /// choose: the one id that appeared since it opened is it. Two at once
-    /// (another session saved meanwhile) name none, rather than guess.
-    private func identifyNewSession() {
-        guard current.chatID == nil, current.privateMode != .nothingWritten, let before = listedBeforeNew else { return }
-        let appeared = chats.map(\.id).filter { !before.contains($0) }
+    /// Which saved conversation the open session is, as the list just read
+    /// says.
+    ///
+    /// A session that names its chat (`chat_id`, the CLI's M28) is that chat
+    /// from its `session` event on; the list only says when it is written --
+    /// once a turn of it is answered -- so a relaunch, Rename and Delete can
+    /// act on it. Nothing is guessed for it.
+    ///
+    /// A binary before M28 names none, and saves a new session under an id
+    /// the app did not choose: the one id that appeared since it opened --
+    /// against the list read afresh once the session before it had closed
+    /// (`replace`) -- is it. A chat with no turns is passed over: it can't be
+    /// a session that has run a turn, and an older binary saves an unsent
+    /// session's chat empty when it closes. Two at once (another session
+    /// saved meanwhile) name none, rather than guess. `includingEmpty` takes
+    /// an empty chat too: a closing private session's own, whose promised
+    /// delete must find it.
+    private func identifyNewSession(includingEmpty: Bool = false) {
+        if let named = current.chatID {
+            if !current.isSaved, chats.contains(where: { $0.id == named }) { current.identify(named) }
+            return
+        }
+        guard current.privateMode != .nothingWritten, let before = listedBeforeNew else { return }
+        let appeared = chats.filter { !before.contains($0.id) && (includingEmpty || $0.turns > 0) }.map(\.id)
         if appeared.count == 1, let id = appeared.first {
             current.identify(id)
             listedBeforeNew = nil
@@ -633,18 +669,53 @@ public final class SessionLibraryViewModel {
     /// new one is made has been closed first -- its launch called off, its
     /// child gone -- even one another opening made meanwhile, so two openings
     /// at once leave the last one's child alone.
+    ///
+    /// A new session the binary may not name (one before the CLI's M28) is
+    /// later known by the id that appears in the list since it opened, so
+    /// what was listed is read afresh once what it replaces has closed --
+    /// whatever that saved on closing, an older binary's empty chat for an
+    /// unsent session among it, is then listed before, never taken for the
+    /// new one -- and never taken from the list as last read (GUI M10). The
+    /// read awaits, so it is made inside the loop: an opening made meanwhile
+    /// is closed in turn and the list read again, and only then is the next
+    /// made, so one child at a time still holds.
     private func replace(with target: Target, starter: any ChatStarting) async {
         var leaving: SessionViewModel
+        var listed: Set<String>?
         repeat {
             leaving = current
             await closeCurrent()
+            listed = guesses(target) ? await listedNow() : nil
         } while leaving !== current
-        make(target, starter: starter)
+        make(target, starter: starter, listed: listed)
         if inView && !shut { current.start() }
     }
 
-    private func make(_ target: Target, starter: any ChatStarting) {
+    /// Whether a session opened as `target` may need its chat guessed: a new
+    /// chat, an execute session, or the private fallback that is deleted on
+    /// closing -- never a saved chat reopened, or a `--private` one, which
+    /// writes nothing.
+    private func guesses(_ target: Target) -> Bool {
+        switch target {
+        case .new, .execute: true
+        case .privately: !privateIsNothingWritten
+        case .chat: false
+        }
+    }
+
+    /// The ids `chats list` lists now, read afresh; `nil` when it can't be
+    /// read -- no guess is then made, rather than one against a stale list.
+    private func listedNow() async -> Set<String>? {
+        guard found != nil else { return nil }
+        await refresh()
+        return listing == .read ? Set(chats.map(\.id)) : nil
+    }
+
+    /// The session `target` opens, made the open one; `listed` is what the
+    /// list held just before, which a new chat's guess is measured against.
+    private func make(_ target: Target, starter: any ChatStarting, listed: Set<String>?) {
         closed = false
+        windowModel = nil
         switch target {
         case .new:
             let model = nextModel
@@ -657,14 +728,14 @@ public final class SessionLibraryViewModel {
                     settings: model.map { RunSettings(model: $0) }, suite: suite?.name, forceSuite: suite?.force ?? false),
                 reader: runner)
             current.defaultSuite = defaultSuite
-            listedBeforeNew = Set(chats.map(\.id))
+            listedBeforeNew = listed
             preferences.openChat = nil
         case .privately:
             let nothingWritten = privateIsNothingWritten
             current = SessionViewModel(
                 starter: starter, launch: ChatLaunch(privately: nothingWritten, noRecall: !nothingWritten),
                 reader: runner)
-            listedBeforeNew = nothingWritten ? nil : Set(chats.map(\.id))
+            listedBeforeNew = nothingWritten ? nil : listed
             preferences.openChat = nil
         case .chat(let id):
             current = SessionViewModel(starter: starter, launch: ChatLaunch(resume: id), reader: runner)
@@ -674,7 +745,7 @@ public final class SessionLibraryViewModel {
             current = SessionViewModel(starter: starter, launch: launch, reader: runner)
             current.plays = plays
             current.defaultSuite = defaultSuite
-            listedBeforeNew = Set(chats.map(\.id))
+            listedBeforeNew = listed
             preferences.openChat = nil
         }
         current.observer = { [weak self] event in self?.observe(event) }
@@ -706,8 +777,12 @@ public final class SessionLibraryViewModel {
     @discardableResult
     private func deletePromised(of session: SessionViewModel) async -> String? {
         guard session.privateMode == .deletedOnClose, let found else { return nil }
-        if session.chatID == nil { await refresh() }
-        guard let id = session.chatID else { return nil }
+        if session.savedChatID == nil {
+            await refresh()
+            // Closed unsent, an older binary saved it empty: its own still.
+            if session === current { identifyNewSession(includingEmpty: true) }
+        }
+        guard let id = session.savedChatID else { return nil }
         if let begun = deletions[id] { return await begun.value }
         let deletion = Task { await delete(privately: id, binary: found.url) }
         deletions[id] = deletion
@@ -767,24 +842,47 @@ public final class SessionLibraryViewModel {
             lastEvents = info.capabilities?.events ?? []
             lastSchema = info.capabilities?.schema
             let session = current
-            Task { await readWindow(of: info.model, for: session) }
-        case .result, .error:
-            // A turn ended: what it changed is read back, a rename that waited
-            // for it is made, and a session out of view is paused now it is
-            // idle.
-            Task {
-                await refresh()
-                if let waiting = renameWhenIdle {
-                    renameWhenIdle = nil
-                    await rename(waiting.chat, to: waiting.name)
-                }
-                if pauseWhenIdle && !inView {
-                    pauseWhenIdle = false
-                    await current.pause()
-                }
+            if let id = info.chatID, session.chatID == id, session.privateMode == nil {
+                // The session names its chat (the CLI's M28): it is that
+                // one, at once -- no guess is made for it, and a relaunch
+                // reopens it once a turn has written it (`start` reopens a
+                // listed chat only).
+                listedBeforeNew = nil
+                preferences.openChat = id
             }
+            windowModel = info.model
+            Task { await readWindow(of: info.model, for: session) }
+        case .result:
+            // An answer naming another model than the meter's: that model's
+            // window, read as the opening one's was (GUI M10). Until then
+            // the meter keeps the last model's, as the header does.
+            let session = current
+            if let answered = session.transcript.model, answered != windowModel {
+                let replaces = windowModel != nil
+                windowModel = answered
+                Task { await readWindow(of: answered, for: session, replaces: replaces) }
+            }
+            turnEnded()
+        case .error:
+            turnEnded()
         default:
             break
+        }
+    }
+
+    /// A turn ended: what it changed is read back, a rename that waited for
+    /// it is made, and a session out of view is paused now it is idle.
+    private func turnEnded() {
+        Task {
+            await refresh()
+            if let waiting = renameWhenIdle {
+                renameWhenIdle = nil
+                await rename(waiting.chat, to: waiting.name)
+            }
+            if pauseWhenIdle && !inView {
+                pauseWhenIdle = false
+                await current.pause()
+            }
         }
     }
 
@@ -1017,7 +1115,7 @@ public final class SessionLibraryViewModel {
     /// The inspector's sections, from what the session said and the reads.
     public var inspector: Inspector {
         Inspector(
-            chat: currentChat, chatID: current.chatID, model: current.transcript.model,
+            chat: currentChat, chatID: current.savedChatID, model: current.transcript.model,
             kind: currentChat.flatMap(kind(of:)), lastTurn: lastUsage, roles: roles,
             rolesFailure: rolesFailure, recall: hasTrack52 ? recall : nil, recallFailure: hasTrack52 ? recallFailure : nil,
             canCompact: currentChat.map(canCompact) ?? false)
@@ -1087,9 +1185,15 @@ public struct ChatGroup: Equatable, Identifiable {
 
 /// What the inspector shows beside the open session.
 public struct Inspector: Equatable {
+    /// The session's own row, as `chats list` last read it -- after every
+    /// turn: its backend is the one the CLI saved the chat on.
     public let chat: ChatSummary?
+    /// The session's saved conversation, once it is written -- `nil` before
+    /// its first answered turn.
     public let chatID: String?
-    /// The model the session named in its `session` event.
+    /// The model the session runs on, as the CLI says it: the one its last
+    /// answer said answered (`result.model`), else the one its `session`
+    /// event named (GUI M10).
     public let model: String?
     public let kind: ModelKind?
     /// The last finished turn's tokens, when the provider reported them.

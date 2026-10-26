@@ -136,13 +136,23 @@ public struct SessionInfo: Sendable, Equatable {
     public let capabilities: Capabilities?
     /// A chat that writes nothing: `chat --private` (the CLI's 52d).
     public let isPrivate: Bool
+    /// The chat the session writes, by the id `chats list` lists it by and
+    /// `--resume` takes (`chat_id`, the CLI's M28): a new chat's own, a
+    /// resumed chat's. `nil` from a session that writes none (`--private`)
+    /// and from a binary before M28, which never says -- a host then guesses.
+    /// A new chat is written only once a turn of it is answered.
+    public let chatID: String?
 
-    public init(protocolVersion: Int, model: String, nextTurn: Int, capabilities: Capabilities?, isPrivate: Bool = false) {
+    public init(
+        protocolVersion: Int, model: String, nextTurn: Int, capabilities: Capabilities?, isPrivate: Bool = false,
+        chatID: String? = nil
+    ) {
         self.protocolVersion = protocolVersion
         self.model = model
         self.nextTurn = nextTurn
         self.capabilities = capabilities
         self.isPrivate = isPrivate
+        self.chatID = chatID
     }
 }
 

@@ -1032,5 +1032,32 @@ apogee chat: suite vast needs 247056 MiB of this machine's 110100 MiB: root 4109
     static let kindsRegistered = #"""
 {"data":[{"architecture":"gemma4_assistant","backend":"(not configured)","backend_type":"-","format":"mlx","group":"mlx","kind":"drafter","model":"Gemma4-E4B-Assistant/mlx/4d5e6f708192","note":"a drafter: it runs beside its base model, never alone","profile":"gemma3","quant":"bf16","roles":"","section":"local","source":"converted","state":"mlx","type":"model","verified":"5 file(s) on record","window":"32768-token window (the default)"},{"architecture":"kokoro","backend":"(not configured)","backend_type":"-","format":"mlx","group":"mlx","kind":"voice","model":"Kokoro-82M/mlx/6f708192a3b4","note":"a voice model: 'apogee voice say' speaks with it, never a chat backend","profile":"unprofiled","quant":"precision not stated","roles":"","section":"local","source":"converted","state":"mlx","type":"model","verified":"5 file(s) on record","window":"-"},{"architecture":"musicgen","backend":"(not configured)","backend_type":"-","format":"mlx","group":"mlx","kind":"music","model":"MusicGen-Small/mlx/708192a3b4c5","note":"kind 'music', not one this apogee knows: nothing here runs it","profile":"unprofiled","quant":"4-bit (affine, group 64)","roles":"","section":"local","source":"converted","state":"mlx","type":"model","verified":"5 file(s) on record","window":"32768-token window (the default)"},{"architecture":"ti2v","backend":"(not configured)","backend_type":"-","format":"mlx","group":"mlx","kind":"video","model":"Wan2.2-TI2V-5B/mlx/5e6f708192a3","note":"a video model: 'apogee video generate' runs it, never a chat backend","profile":"unprofiled","quant":"4-bit (affine, group 64)","roles":"","section":"local","source":"converted","state":"mlx","type":"model","verified":"4 file(s) on record","window":"-"},{"architecture":"gemma3_text","backend":"EmbeddingGemma-300M-bf16","backend_type":"mlx","format":"mlx","group":"mlx","kind":"embedding","model":"EmbeddingGemma-300M/mlx/3c4d5e6f7081","note":"there is no Python environment at /Users/someone/.apogee/training/venv -- the mlx backend runs mlx-lm there, never the system Python -- apogee train setup --with mlx","profile":"gemma3","quant":"bf16","roles":"","section":"local","source":"local","state":"no environment","type":"model","verified":"5 file(s) on record","window":"2048-token window (the default; trained for 2048)"},{"architecture":"gemma4","backend":"Gemma4-E4B-4bit","backend_type":"mlx","format":"mlx","group":"mlx","kind":"vision","model":"Gemma4-E4B/mlx/2b3c4d5e6f70","note":"there is no Python environment at /Users/someone/.apogee/training/venv -- the mlx backend runs mlx-lm there, never the system Python -- apogee train setup --with mlx","profile":"gemma3","quant":"4-bit (affine, group 64)","roles":"","section":"local","source":"local","state":"no environment","type":"model","verified":"6 file(s) on record","window":"32768-token window (the default; trained for 131072)"},{"architecture":"qwen3","backend":"Qwen3-8B-4bit","backend_type":"mlx","format":"mlx","group":"mlx","kind":"chat","model":"Qwen3-8B/mlx/1a2b3c4d5e6f","note":"there is no Python environment at /Users/someone/.apogee/training/venv -- the mlx backend runs mlx-lm there, never the system Python -- apogee train setup --with mlx","profile":"qwen3","quant":"4-bit (affine, group 64)","roles":"","section":"local","source":"local","state":"no environment","type":"model","verified":"5 file(s) on record","window":"32768-token window (the default; trained for 40960)"}],"folded":0,"object":"list"}
 """#
+    /// tests/data/protocol/Fixtures/switched-to-local.jsonl
+    static let switchedToLocal = #"""
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-10-25","tools":true},"chat_id":"20261026-172749-d4cb","model":"claude","next_turn":1,"protocol_version":1,"type":"session"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"answer_start"}
+{"text":"The dev ","turn":1,"type":"answer_delta"}
+{"text":"server l","turn":1,"type":"answer_delta"}
+{"text":"istens o","turn":1,"type":"answer_delta"}
+{"text":"n port 8","turn":1,"type":"answer_delta"}
+{"text":"080.","turn":1,"type":"answer_delta"}
+{"turn":1,"type":"answer_end"}
+{"finish_reason":"stop","model":"claude","text":"The dev server listens on port 8080.","turn":1,"type":"result"}
+{"text":"switched to Gemma4-26B-Instruct -- from the next turn","type":"notice"}
+{"turn":2,"type":"thinking"}
+{"turn":2,"type":"answer_start"}
+{"text":"Gemma he","turn":2,"type":"answer_delta"}
+{"text":"re, on t","turn":2,"type":"answer_delta"}
+{"text":"his mach","turn":2,"type":"answer_delta"}
+{"text":"ine: the","turn":2,"type":"answer_delta"}
+{"text":" dev ser","turn":2,"type":"answer_delta"}
+{"text":"ver list","turn":2,"type":"answer_delta"}
+{"text":"ens on p","turn":2,"type":"answer_delta"}
+{"text":"ort 8080","turn":2,"type":"answer_delta"}
+{"text":".","turn":2,"type":"answer_delta"}
+{"turn":2,"type":"answer_end"}
+{"finish_reason":"stop","model":"Gemma4-26B-Instruct","text":"Gemma here, on this machine: the dev server listens on port 8080.","turn":2,"type":"result"}
+"""#
 }
 #endif

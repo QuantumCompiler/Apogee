@@ -387,6 +387,16 @@ public struct SessionCommands: Commands {
         }
 }
 
+#Preview("A new session on its own chat, switched to a local model: the model that answered, the backend its chat was saved on") {
+    @Previewable @State var library = SessionsPreview.switching()
+    InspectorPane(inspector: library.inspector) {}
+        .frame(width: 360, height: 520)
+        .task {
+            await library.start(inView: true)
+            await SessionsPreview.switchToLocal(library.current)
+        }
+}
+
 #Preview("A saved session: what recall holds, Forget beside it") {
     @Previewable @State var library = SessionsPreview.library(
         chats: SessionsDocuments.chatsListTwo, openChat: SessionsPreview.savedTwo[0].id)
