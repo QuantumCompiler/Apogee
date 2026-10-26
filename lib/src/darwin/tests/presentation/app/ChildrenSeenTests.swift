@@ -78,6 +78,9 @@ struct ChildrenSeenTests {
     func composed(_ home: FakeApogeeHome, _ registry: ChildRegistry, route: String = "sessions") throws -> AppViewModel {
         let runner = AppRunner()
         runner.reading(["symphonies", "list"], try recorded("symphonies-list"))
+        // A store job reads the store before it runs, and runs nothing when
+        // that read fails (GUI 4e).
+        runner.reading(["models", "list", "--all"], try recorded("store-list-all"))
         let preferences = Preferences(store: MemoryStore(["route": route]))
         return AppViewModel(
             info: nil, preferences: preferences,

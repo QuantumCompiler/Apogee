@@ -18,6 +18,11 @@ final class ScriptedRunner: CommandRunning, @unchecked Sendable {
         reads.withLock { $0.insert((prefix, .document(ReadDocument(text: json)!)), at: 0) }
     }
 
+    /// A read answered by `outcome` -- a failure, as the binary's would be.
+    func reading(_ prefix: [String], outcome: ReadOutcome) {
+        reads.withLock { $0.insert((prefix, outcome), at: 0) }
+    }
+
     func commanding(_ prefix: [String], _ outcome: CommandOutcome) {
         commands.withLock { $0.insert((prefix, outcome), at: 0) }
     }

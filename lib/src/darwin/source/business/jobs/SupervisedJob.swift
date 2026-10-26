@@ -155,6 +155,13 @@ public struct JobEnd: Sendable, Equatable {
     }
 
     public var succeeded: Bool { exit?.succeeded ?? false }
+
+    /// A run that never started, `detail` saying why: a supervisor's own step
+    /// before the child failed -- a read the run depends on (GUI 4e) -- so
+    /// nothing ran. Folded, it is a failure in those words.
+    public static func notStarted(_ detail: String) -> JobEnd {
+        JobEnd(exit: nil, stderrTail: BoundedTail(), interrupted: false, detail: detail)
+    }
 }
 
 /// Where jobs come from: the app's starts real children; a test's is

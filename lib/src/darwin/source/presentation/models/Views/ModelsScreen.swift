@@ -45,7 +45,14 @@ public struct ModelsScreen<Downloads: View>: View {
                 StoreView(store: store, shell: shell) { backend in model.useInSession?(backend) }
             case .backends:
                 HStack(spacing: 0) {
-                    ModelTable(model: model)
+                    VStack(spacing: 0) {
+                        if let narration = model.narration {
+                            DeleteNarrationCard(narration: narration) { model.dismissNarration() }
+                                .padding(.horizontal, Spacing.l)
+                                .padding(.top, Spacing.m)
+                        }
+                        ModelTable(model: model)
+                    }
                     if model.selectedRow != nil && shell.layout.sidePanes {
                         Divider()
                         ModelDetails(model: model) { backend in
@@ -69,12 +76,15 @@ public struct ModelsScreen<Downloads: View>: View {
             titleVisibility: .visible
         ) {
             Button("Delete its files", role: .destructive) { Task { await model.confirmDelete(andBackends: false) } }
-            Button("Delete its files and the backends that use them", role: .destructive) {
-                Task { await model.confirmDelete(andBackends: true) }
+            // Only where the CLI's plan names a backend pointing in.
+            if model.offersAndBackends {
+                Button("Delete its files and the backends that use them", role: .destructive) {
+                    Task { await model.confirmDelete(andBackends: true) }
+                }
             }
             Button("Cancel", role: .cancel) { model.pendingDelete = nil }
         } message: {
-            Text("apogee models delete \(model.pendingDelete?.row.name ?? "") -- its files are removed from the store, and this can't be undone.")
+            Text(model.pendingDelete.map { $0.plan.question(running: "apogee models delete \($0.row.name) --yes") } ?? "")
         }
         .confirmationDialog(
             "Remove the backend \(model.removing ?? "")?",
@@ -272,7 +282,7 @@ struct ModelDetails: View {
                 if row.section == "local" {
                     Divider()
                     Button("Remove the backend…") { model.askToRemove(row) }
-                    Button("Delete with its weights…", role: .destructive) { model.askToDelete(row) }
+                    Button("Delete with its weights…", role: .destructive) { Task { await model.askToDelete(row) } }
                 }
             }
             .fixedSize()
@@ -543,6 +553,35 @@ struct RenameModelSheet: View {
         await store.connect(binary: previewBinary)
         if let gguf = models.rows.first(where: { $0.backend == "qwen3-8b-Q4KM" }) { await models.select(gguf) }
     }
+}
+
+#Preview("Delete a backend with its weights: the CLI's plan names the backend that uses its files") {
+    let models = ModelsViewModel(runner: ModelsPreview.backendsDeleteStore())
+    ModelsScreen(model: models, store: ModelsPreview.store(), shell: ModelsPreview.shell()) {
+        DownloadsView(model: ModelsPreview.jobs())
+    }
+    .frame(width: 1200, height: 640)
+    .task { await ModelsPreview.askToDeleteBackend(models, "Llama3.2-1B-Instruct-Q4KM") }
+}
+
+#Preview("Backends after a delete with its weights: the backend kept, with the CLI's two doors") {
+    let runner = ModelsPreview.backendsDeleteStore()
+    let models = ModelsViewModel(runner: runner)
+    ModelsScreen(model: models, store: ModelsPreview.store(), shell: ModelsPreview.shell()) {
+        DownloadsView(model: ModelsPreview.jobs())
+    }
+    .frame(width: 1200, height: 640)
+    .task { await ModelsPreview.deleteBackendKept(models, runner) }
+}
+
+#Preview("Backends after a delete with the backends: the backend removed, as the CLI said it") {
+    let runner = ModelsPreview.backendsDeleteStore()
+    let models = ModelsViewModel(runner: runner)
+    ModelsScreen(model: models, store: ModelsPreview.store(), shell: ModelsPreview.shell()) {
+        DownloadsView(model: ModelsPreview.jobs())
+    }
+    .frame(width: 1200, height: 640)
+    .task { await ModelsPreview.deleteBackendWithBackends(models, runner) }
 }
 
 #Preview("Stored weights, the registered Q4_K_M open") {

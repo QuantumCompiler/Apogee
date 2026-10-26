@@ -103,7 +103,8 @@ public struct StoredSet: Equatable, Identifiable, Sendable {
 /// its backend's `models info` and then `models info <its path>`, which names
 /// its handle. Each set's own `models info` is read after the table, bounded,
 /// never holding it up. Nothing is predicted: a name comes from `config
-/// scan`, a size from a document.
+/// scan`, a size from a document, what a delete strands from the delete's own
+/// plan (`models delete` without `--yes`), and what it did from its words.
 @MainActor
 @Observable
 public final class StoreViewModel {
@@ -211,10 +212,10 @@ public final class StoreViewModel {
 
     /// A change waiting on the person's word.
     public enum Pending: Equatable, Sendable {
-        /// `models delete <handle>`: one set.
-        case deleteSet(StoredSet)
-        /// `models delete <model>`: every set of it.
-        case deleteModel(String)
+        /// `models delete <handle>`: one set, as the CLI's plan says it.
+        case deleteSet(StoredSet, plan: DeletePlan)
+        /// `models delete <model>`: every set of it, as the CLI's plan says it.
+        case deleteModel(String, plan: DeletePlan)
         /// `config delete-backend <name>`: the entry; the weights stay.
         case removeBackend(String)
         /// `config scan --register`, its own report shown first.
@@ -247,6 +248,8 @@ public final class StoreViewModel {
     public var renaming: String?
     public private(set) var working: String?
     public private(set) var failure: String?
+    /// What the last delete said beyond what it removed, until dismissed.
+    public private(set) var narration: DeleteNarration?
     public var say: (@MainActor (String) -> Void)?
 
     private let runner: any CommandRunning
@@ -659,30 +662,68 @@ public final class StoreViewModel {
 
     // MARK: - Removing
 
-    public func askToDelete(_ set: StoredSet) {
+    /// Asks before `models delete <handle>`: the CLI's own plan read first,
+    /// so the question names what it names. A plan the CLI refuses is its
+    /// failure, and nothing is asked.
+    public func askToDelete(_ set: StoredSet) async {
+        guard let plan = await plan(set.handle) else { return }
         andBackends = false
-        pending = .deleteSet(set)
+        pending = .deleteSet(set, plan: plan)
     }
 
-    public func askToDeleteModel(_ model: String) {
+    /// Asks before `models delete <model>`, every set of it, its plan read
+    /// first as a set's is.
+    public func askToDeleteModel(_ model: String) async {
+        guard let plan = await plan(model) else { return }
         andBackends = false
-        pending = .deleteModel(model)
+        pending = .deleteModel(model, plan: plan)
+    }
+
+    /// `models delete <name>` without `--yes`: the plan, nothing removed.
+    private func plan(_ name: String) async -> DeletePlan? {
+        guard let binary, working == nil else { return nil }
+        working = DeletePlan.reading
+        let reading = await DeletePlan.read(name, runner: runner, binary: binary)
+        working = nil
+        switch reading {
+        case .plan(let plan):
+            return plan
+        case .refused(let why):
+            failure = why
+            return nil
+        }
+    }
+
+    /// Whether the delete waiting on the person's word offers to take the
+    /// backends that run from what goes: only where its plan names one.
+    public var offersAndBackends: Bool {
+        switch pending {
+        case .deleteSet(_, let plan)?, .deleteModel(_, let plan)?: !plan.backends.isEmpty
+        default: false
+        }
     }
 
     public func askToRemoveBackend(_ name: String) {
         pending = .removeBackend(name)
     }
 
-    /// The person's yes: the delete (with `--and-backends` only when chosen),
-    /// the removal, or the scan's registration -- each read back.
+    /// The person's yes: the delete (with `--and-backends` only when chosen,
+    /// and only where its plan named a backend), its words kept; the removal;
+    /// or the scan's registration -- each read back.
     public func confirm() async {
         guard let pending else { return }
+        // The backends go only where the plan named one and the person chose it.
+        let withBackends = andBackends && offersAndBackends
         self.pending = nil
         switch pending {
-        case .deleteSet(let set):
-            await run(["models", "delete", set.handle, "--yes"] + (andBackends ? ["--and-backends"] : []), doing: "Deleting", done: "Deleted \(set.handle)")
-        case .deleteModel(let model):
-            await run(["models", "delete", model, "--yes"] + (andBackends ? ["--and-backends"] : []), doing: "Deleting", done: "Deleted \(model)")
+        case .deleteSet(let set, _):
+            await run(
+                ["models", "delete", set.handle, "--yes"] + (withBackends ? ["--and-backends"] : []), doing: "Deleting",
+                done: "Deleted \(set.handle)", narrated: true)
+        case .deleteModel(let model, _):
+            await run(
+                ["models", "delete", model, "--yes"] + (withBackends ? ["--and-backends"] : []), doing: "Deleting",
+                done: "Deleted \(model)", narrated: true)
         case .removeBackend(let name):
             await run(["config", "delete-backend", name], doing: "Removing", done: "Removed the backend \(name)")
         case .registerAll:
@@ -707,7 +748,11 @@ public final class StoreViewModel {
         await run(["config", "set-default-video", set.handle], doing: "Setting", done: "Video generates with \(set.handle)")
     }
 
-    private func run(_ arguments: [String], doing: String, done: String?) async {
+    /// Runs a change and reads the store back, its result said: the `done`
+    /// line, else the CLI's last. `narrated`, what the CLI printed beyond
+    /// what it removed is kept too, never dropped for the `done` line (a
+    /// delete's, GUI 4e).
+    private func run(_ arguments: [String], doing: String, done: String?, narrated: Bool = false) async {
         guard let binary, working == nil else { return }
         working = doing
         let outcome = await runner.command(binary: binary, arguments)
@@ -718,6 +763,9 @@ public final class StoreViewModel {
             self.failure = failure
         } else {
             failure = nil
+            if narrated, case .done(let stdout) = outcome, let said = DeleteNarration(title: done ?? "Done", said: stdout) {
+                narration = said
+            }
             if let done {
                 say?(done)
             } else if case .done(let stdout) = outcome {
@@ -728,5 +776,10 @@ public final class StoreViewModel {
 
     public func dismissFailure() {
         failure = nil
+    }
+
+    /// Takes the last delete's words away, once read.
+    public func dismissNarration() {
+        narration = nil
     }
 }

@@ -21,9 +21,17 @@ final class ScriptedJob: JobRunning, @unchecked Sendable {
 
     func say(_ update: JobUpdate) { continuation.yield(update) }
 
-    func end(status: Int32 = 0, interrupted: Bool = false) {
-        continuation.yield(.ended(JobEnd(exit: ChildExit(reason: .exited, status: status), stderrTail: BoundedTail(), interrupted: interrupted)))
+    /// Ends it as the run exited, `stderr` its tail.
+    func end(status: Int32 = 0, interrupted: Bool = false, stderr: String = "") {
+        continuation.yield(.ended(JobEnd(
+            exit: ChildExit(reason: .exited, status: status), stderrTail: stderr.isEmpty ? BoundedTail() : tail(stderr),
+            interrupted: interrupted)))
         continuation.finish()
+    }
+
+    /// Says each line of `stdout` as the run printed it for people.
+    func print(_ stdout: String) {
+        for line in stdout.split(separator: "\n", omittingEmptySubsequences: false) { say(.said(String(line))) }
     }
 
     func stop(grace: Duration) async {
@@ -45,7 +53,9 @@ final class ScriptedJobs: JobStarting, @unchecked Sendable {
 
     func startJob(binary: URL, arguments: [String], streaming: Bool, folder: URL?) -> any JobRunning {
         started.withLock { $0.append((arguments, streaming)) }
-        return jobs.withLock { $0.removeFirst() }
+        // A start no test scripted gets a job that never speaks: the start is
+        // recorded, for the test to fail on, rather than crashing the run.
+        return jobs.withLock { $0.isEmpty ? ScriptedJob() : $0.removeFirst() }
     }
 }
 

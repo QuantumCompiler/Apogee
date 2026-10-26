@@ -126,17 +126,23 @@ struct StoreViewModelTests {
         #expect(runner.calls.contains("run config scan --register"))
     }
 
-    @Test("deletes and removals confirm; --and-backends only when chosen; a model renamed by its folder")
+    @Test("deletes and removals confirm; --and-backends only when chosen, and only where the plan names a backend; a model renamed by its folder")
     func removing() async throws {
         let (store, runner) = await store()
         let q4 = try #require(store.sets.first { $0.backend != nil })
-        store.askToDelete(q4)
+        await store.askToDelete(q4)
+        #expect(runner.calls.contains("run models delete Llama3.2-1B-Instruct/gguf/8d51e6c04a27"), "its plan read first")
         await store.confirm()
         #expect(runner.calls.contains("run models delete Llama3.2-1B-Instruct/gguf/8d51e6c04a27 --yes"))
-        store.askToDeleteModel("Llama3.2-1B-Instruct")
+        // The scripted plan says nothing, so it names no backend: the
+        // choice is not offered, and not passed (StoreDeleteTests has the
+        // CLI's own plans).
+        await store.askToDeleteModel("Llama3.2-1B-Instruct")
+        #expect(!store.offersAndBackends)
         store.andBackends = true
         await store.confirm()
-        #expect(runner.calls.contains("run models delete Llama3.2-1B-Instruct --yes --and-backends"))
+        #expect(runner.calls.contains("run models delete Llama3.2-1B-Instruct --yes"))
+        #expect(!runner.calls.contains { $0.contains("--and-backends") })
         store.askToRemoveBackend("llama3.2-1b-Q4KM")
         #expect(!runner.calls.contains("run config delete-backend llama3.2-1b-Q4KM"), "asked first")
         await store.confirm()

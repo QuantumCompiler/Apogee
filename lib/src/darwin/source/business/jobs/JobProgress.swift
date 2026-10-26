@@ -139,8 +139,17 @@ public struct JobProgress: Sendable, Equatable {
     }
 
     /// A command a notice names for carrying on -- "the one command that
-    /// resumes it", in the CLI's own words -- when it names one.
+    /// resumes it", in the CLI's own words -- when it names one, on a run
+    /// that stopped or failed. A run still going or done has none: a chain
+    /// says `from here on, if this stops, resume with: …` mid-run, and a
+    /// conversion its next step at its end, on success too (the CLI's
+    /// `model_chain.cpp`, `models convert`), and neither is a resume
+    /// (GUI 4e).
     public var resumeCommand: [String]? {
+        switch status {
+        case .stopped, .failed: break
+        case .running, .done: return nil
+        }
         for notice in notices.reversed() {
             guard let range = notice.range(of: "apogee ") else { continue }
             let rest = notice[range.upperBound...]

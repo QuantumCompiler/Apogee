@@ -261,4 +261,22 @@ struct DownloadCard: View {
             .frame(width: 760)
     }
 }
+
+#Preview("A chained pull done: no resume, though it named one on the way") {
+    @Previewable @State var jobs = ModelsPreview.chainDone()
+    if let download = jobs.downloads.first {
+        DownloadCard(download: download, model: jobs)
+            .id(jobs.revision)
+            .padding(Spacing.xl)
+            .frame(width: 760)
+    }
+}
+
+#Preview("A failed quantization run again: the quantization, registering what it made") {
+    let store = ModelsPreview.quantizeStore()
+    let jobs = ModelsPreview.quantizing(store)
+    DownloadsView(model: jobs)
+        .frame(width: 900, height: 620)
+        .task { await ModelsPreview.runAgain(jobs, store) }
+}
 #endif

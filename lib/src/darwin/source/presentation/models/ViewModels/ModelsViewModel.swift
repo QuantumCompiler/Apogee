@@ -39,9 +39,11 @@ public final class ModelsViewModel {
         case missing
     }
 
-    /// A destructive change waiting on the person's word.
+    /// A destructive change waiting on the person's word: the delete, and
+    /// the CLI's own plan for it, read before asking (GUI 4e).
     public struct PendingDelete: Equatable {
         public let row: ModelRow
+        public let plan: DeletePlan
     }
 
     /// A rename asked for: the backend alone, or the model its backends share.
@@ -90,6 +92,8 @@ public final class ModelsViewModel {
     public private(set) var working: String?
     /// The last change that failed, in the CLI's words.
     public private(set) var failure: String?
+    /// What the last delete said beyond what it removed, until dismissed.
+    public private(set) var narration: DeleteNarration?
     /// Says one line in the window's toast.
     public var say: (@MainActor (String) -> Void)?
     /// Checks a model's files as a job on the Jobs tab (2i): the
@@ -293,19 +297,37 @@ public final class ModelsViewModel {
 
     // MARK: - Changing
 
-    public func askToDelete(_ row: ModelRow) {
-        pendingDelete = PendingDelete(row: row)
+    /// Asks before `models delete <name>`: the CLI's own plan read first, so
+    /// the question names what it names, as Stored weights asks. A plan the
+    /// CLI refuses is its failure, and nothing is asked.
+    public func askToDelete(_ row: ModelRow) async {
+        guard let binary, working == nil else { return }
+        working = DeletePlan.reading
+        let reading = await DeletePlan.read(row.name, runner: runner, binary: binary)
+        working = nil
+        switch reading {
+        case .plan(let plan):
+            pendingDelete = PendingDelete(row: row, plan: plan)
+        case .refused(let why):
+            failure = why
+        }
     }
+
+    /// Whether the delete waiting on the person's word offers to take the
+    /// backends that use its files: only where its plan names one.
+    public var offersAndBackends: Bool { pendingDelete?.plan.backends.isEmpty == false }
 
     /// `models delete <name> --yes` -- the person said yes here -- with
     /// `--and-backends` only when they chose it too (the CLI's `--yes` never
-    /// implies it); read back.
+    /// implies it), and only where its plan named a backend; read back, its
+    /// words kept.
     public func confirmDelete(andBackends: Bool) async {
         guard let pending = pendingDelete else { return }
+        let withBackends = andBackends && offersAndBackends
         pendingDelete = nil
         var arguments = ["models", "delete", pending.row.name, "--yes"]
-        if andBackends { arguments.append("--and-backends") }
-        await run(arguments, doing: "Deleting \(pending.row.name)", done: "Deleted \(pending.row.name)")
+        if withBackends { arguments.append("--and-backends") }
+        await run(arguments, doing: "Deleting \(pending.row.name)", done: "Deleted \(pending.row.name)", narrated: true)
         if selected == pending.row.name { close() }
     }
 
@@ -363,7 +385,10 @@ public final class ModelsViewModel {
         await run(role.verb + [backend], doing: "Setting \(role.role)", done: "\(role.role) is \(backend)")
     }
 
-    private func run(_ arguments: [String], doing: String, done: String?) async {
+    /// Runs a change and reads back, its result said. `narrated`, what the
+    /// CLI printed beyond what it removed is kept too, never dropped for the
+    /// `done` line (a delete's, GUI 4e).
+    private func run(_ arguments: [String], doing: String, done: String?, narrated: Bool = false) async {
         guard let binary, working == nil else { return }
         working = doing
         let outcome = await runner.command(binary: binary, arguments)
@@ -374,6 +399,9 @@ public final class ModelsViewModel {
             say?("That didn't work: \(failure)")
         } else {
             failure = nil
+            if narrated, case .done(let stdout) = outcome, let said = DeleteNarration(title: done ?? "Done", said: stdout) {
+                narration = said
+            }
             if case .done(let stdout) = outcome, done == nil {
                 say?(stdout.split(separator: "\n").last.map(String.init) ?? "Done")
             } else if let done {
@@ -384,6 +412,11 @@ public final class ModelsViewModel {
 
     public func dismissFailure() {
         failure = nil
+    }
+
+    /// Takes the last delete's words away, once read.
+    public func dismissNarration() {
+        narration = nil
     }
 
     // MARK: - Roles

@@ -332,5 +332,175 @@ enum ModelsPreview {
         jobs.check(snapshot)
         return jobs
     }
+
+    /// A chained pull that finished, its stream the CLI's own pinned one
+    /// (hand-made: a real chain needs real weights) -- naming a resume on
+    /// the way, as `model_chain.cpp` does on success too
+    /// (tests/presentation/models/JobIdentityTests.swift).
+    static func chainDone() -> DownloadsViewModel {
+        let jobs = Self.jobs(saying: previewStream(ModelsDocuments.chainDone) + [previewEnd(status: 0)], finishes: true, streams: true)
+        jobs.reference = "org/model"
+        jobs.convert = true
+        jobs.start()
+        return jobs
+    }
+
+    // MARK: - A quantization run again (GUI 4e)
+
+    static let quantizeF16 = "Llama3.2-1B-Instruct/gguf/dfed3eebdfdb"
+    static let quantizePath = "/Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/5703795782eb/Llama3.2-1B-Instruct-Q4_K_M.gguf"
+
+    /// The store recorded from the branch's binary quantizing a tiny F16 for
+    /// real: before the run, and `models info` of the file it printed; its
+    /// registration as `config add-backend` answered.
+    static func quantizeStore() -> PreviewStore {
+        PreviewStore(
+            reads: [
+                (["models", "list", "--all"], ModelsDocuments.quantizeListBefore),
+                (["models", "info", quantizePath], ModelsDocuments.quantizeInfoLlamaPath),
+            ],
+            commands: [(["config", "add-backend"], ModelsDocuments.quantizeAddBackendLlama)])
+    }
+
+    /// A quantization asked to register what it makes: its first run failed,
+    /// the store not writable, in llama.cpp's words; the second, its own
+    /// output naming the GGUF it made (tests/presentation/models/JobIdentityTests.swift).
+    static func quantizing(_ store: PreviewStore) -> DownloadsViewModel {
+        let jobs = DownloadsViewModel(starter: PreviewJobQueue([
+            (said: [previewEnd(status: 1, stderr: ModelsDocuments.quantizeLlamaFailed)], finishes: true),
+            (said: previewSaid(ModelsDocuments.quantizeLlama) + [previewEnd(status: 0)], finishes: true),
+        ]))
+        jobs.connect(binary: previewBinary)
+        jobs.reader = store
+        jobs.quantize(QuantizeForm(handle: quantizeF16, base: "Llama3.2-1B-Instruct", bytes: nil))
+        return jobs
+    }
+
+    /// Run again on the failed quantization, once it has failed: the store
+    /// then as the binary read it after the second run.
+    static func runAgain(_ jobs: DownloadsViewModel, _ store: PreviewStore) async {
+        await until { jobs.downloads.first?.endedAt != nil }
+        guard let failed = jobs.downloads.first else { return }
+        store.change([(["models", "list", "--all"], ModelsDocuments.quantizeListBothLanded)])
+        jobs.again(failed)
+    }
+
+    /// Waits, a preview's way, for what its story needs next.
+    static func until(_ condition: @MainActor () -> Bool) async {
+        for _ in 0..<500 where !condition() {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    // MARK: - A delete, as the CLI plans and narrates it (GUI 4e)
+
+    static let deleteLlamaQ4 = "Llama3.2-1B-Instruct/gguf/5703795782eb"
+    static let deleteGemmaQ4 = "Gemma3-1B-Instruct/gguf/09f55af982ed"
+    static let deleteLlamaF16 = "Llama3.2-1B-Instruct/gguf/dfed3eebdfdb"
+    static let deleteGemmaPath = "/Users/someone/.apogee/models/Gemma3-1B-Instruct/gguf/09f55af982ed/Gemma3-1B-Instruct-Q4_K_M.gguf"
+
+    /// The store recorded from the branch's binary after both quantizations
+    /// were registered: Llama's and Gemma's F16s and Q4_K_Ms, each Q4_K_M a
+    /// backend; each delete's plan, printed without `--yes`, and each delete
+    /// (tests/presentation/models/StoreDeleteTests.swift).
+    static func deletesStore() -> PreviewStore {
+        PreviewStore(
+            reads: [
+                (["models", "list"], ModelsDocuments.deleteList),
+                (["models", "list", "--all"], ModelsDocuments.deleteListAll),
+                (["models", "info", "Llama3.2-1B-Instruct-Q4KM"], ModelsDocuments.deleteInfoBackendLlama),
+                (["models", "info", "Gemma3-1B-Instruct-Q4KM"], ModelsDocuments.deleteInfoBackendGemma),
+                (["models", "info", "/Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/5703795782eb/Llama3.2-1B-Instruct-Q4_K_M.gguf"],
+                 ModelsDocuments.deleteInfoPathLlama),
+                (["models", "info", deleteGemmaPath], ModelsDocuments.deleteInfoPathGemma),
+                (["models", "info", deleteLlamaQ4], ModelsDocuments.deleteInfoLlamaQ4),
+                (["models", "info", deleteGemmaQ4], ModelsDocuments.deleteInfoGemmaQ4),
+                (["models", "info", deleteLlamaF16], ModelsDocuments.deleteInfoLlamaF16),
+                (["models", "info", "Gemma3-1B-Instruct/gguf/cce9d2f99787"], ModelsDocuments.deleteInfoGemmaF16),
+            ],
+            commands: [
+                (["models", "delete", deleteLlamaQ4], ModelsDocuments.deletePlanBackend),
+                (["models", "delete", deleteGemmaQ4], ModelsDocuments.deletePlanGemma),
+                (["models", "delete", deleteLlamaF16], ModelsDocuments.deletePlanNone),
+                (["models", "delete", deleteGemmaQ4, "--yes"], ModelsDocuments.deleteKept),
+                (["models", "delete", deleteLlamaQ4, "--yes", "--and-backends"], ModelsDocuments.deleteAndBackends),
+            ])
+    }
+
+    /// Reads the store, then asks to delete `handle`, as a person does.
+    static func askToDelete(_ store: StoreViewModel, _ handle: String) async {
+        await store.connect(binary: previewBinary)
+        await store.refresh()
+        if let set = store.sets.first(where: { $0.handle == handle }) { await store.askToDelete(set) }
+    }
+
+    /// Gemma's Q4_K_M deleted, its backend kept: the store then as the
+    /// binary read it.
+    static func deleteKept(_ store: StoreViewModel, _ runner: PreviewStore) async {
+        await askToDelete(store, deleteGemmaQ4)
+        runner.change([
+            (["models", "list"], ModelsDocuments.deleteListAfterKept),
+            (["models", "list", "--all"], ModelsDocuments.deleteListAllAfterKept),
+            (["models", "info", "Gemma3-1B-Instruct-Q4KM"], ModelsDocuments.deleteInfoBackendGemmaAfterKept),
+            (["models", "info", deleteGemmaPath], nil),
+        ])
+        await store.confirm()
+    }
+
+    // MARK: - The Backends tab's Delete with its weights (GUI 4e)
+
+    /// The Backends tab over the same store, each Q4_K_M's backend deleted by
+    /// its name: the binary answered every plan, delete and list so byte for
+    /// byte as by the set's handle; `models status` and the rename
+    /// completion as it answered them there.
+    static func backendsDeleteStore() -> PreviewStore {
+        PreviewStore(
+            reads: [
+                (["models", "list"], ModelsDocuments.deleteList),
+                (["models", "status"], ModelsDocuments.backendsStatus),
+            ],
+            commands: [
+                (["__complete", "models", "rename"], ModelsDocuments.backendsCompleteRename),
+                (["models", "delete", "Llama3.2-1B-Instruct-Q4KM"], ModelsDocuments.deletePlanBackend),
+                (["models", "delete", "Gemma3-1B-Instruct-Q4KM"], ModelsDocuments.deletePlanGemma),
+                (["models", "delete", "Gemma3-1B-Instruct-Q4KM", "--yes"], ModelsDocuments.deleteKept),
+                (["models", "delete", "Llama3.2-1B-Instruct-Q4KM", "--yes", "--and-backends"], ModelsDocuments.deleteAndBackends),
+            ])
+    }
+
+    /// Reads the backends, then asks to delete `backend` with its weights, as
+    /// a person does.
+    static func askToDeleteBackend(_ models: ModelsViewModel, _ backend: String) async {
+        await models.connect(binary: previewBinary)
+        if let row = models.rows.first(where: { $0.backend == backend }) { await models.askToDelete(row) }
+    }
+
+    /// Gemma's backend deleted with its weights, the entry kept: the list
+    /// then as the binary read it.
+    static func deleteBackendKept(_ models: ModelsViewModel, _ runner: PreviewStore) async {
+        await askToDeleteBackend(models, "Gemma3-1B-Instruct-Q4KM")
+        runner.change([(["models", "list"], ModelsDocuments.deleteListAfterKept)])
+        await models.confirmDelete(andBackends: false)
+    }
+
+    /// Then Llama's, with the backend that uses its files.
+    static func deleteBackendWithBackends(_ models: ModelsViewModel, _ runner: PreviewStore) async {
+        await deleteBackendKept(models, runner)
+        if let row = models.rows.first(where: { $0.backend == "Llama3.2-1B-Instruct-Q4KM" }) { await models.askToDelete(row) }
+        runner.change([(["models", "list"], ModelsDocuments.deleteListAfterRemoved)])
+        await models.confirmDelete(andBackends: true)
+    }
+
+    /// Then Llama's, with the backend that runs from it.
+    static func deleteWithBackends(_ store: StoreViewModel, _ runner: PreviewStore) async {
+        await deleteKept(store, runner)
+        if let set = store.sets.first(where: { $0.handle == deleteLlamaQ4 }) { await store.askToDelete(set) }
+        store.andBackends = true
+        runner.change([
+            (["models", "list"], ModelsDocuments.deleteListAfterRemoved),
+            (["models", "list", "--all"], ModelsDocuments.deleteListAllAfterRemoved),
+        ])
+        await store.confirm()
+    }
 }
 #endif

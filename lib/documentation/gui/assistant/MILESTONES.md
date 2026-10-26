@@ -1668,3 +1668,61 @@ The CLI's 43 are its track 55 ([CLI Milestone AR](../../cli/assistant/MILESTONES
   - an empty fenced block in the middle of an answer;
   - `Text` then a lone `#`, finished;
   - a fence left open inside a list item or quote at an answer's end.
+
+### 2026-10-25 — `downloads-and-store-jobs` (backlog item 4e): store jobs keep their identity
+
+**Why.** The Models place's Jobs and Stored weights tabs (2h, 2i) run pulls, conversions and quantizations as supervised jobs. The audit found four defects, and all four reproduced on today's source as failing tests first:
+- **A quantization's registration could bind the wrong GGUF.** It took the first GGUF in a store-wide before/after difference, so with jobs running side by side `config add-backend Llama3.2-1B-Instruct-Q4KM` was given Gemma's file. A failed first read became an empty snapshot, after which every GGUF counted as landed.
+- **A finished chain offered a resume.** The CLI prints `from here on, if this stops, resume with: …` after the pull stage even on success (`model_chain.cpp:68`), and a standalone convert ends with a suggested quantize. The app offered either as a resume on a done job.
+- **Run again and the named resume re-entered store jobs as plain pulls:** no steps, no registration, no before-snapshot, and an elapsed time that ran forever.
+- **Delete swallowed the CLI's words.** The stranded-backend warning and its two doors (CLI M14) were dropped whenever a `done` string was passed, and the confirm dialog named no backend.
+
+Probed on the branch's binary over a sandbox:
+- **`models quantize` takes no `--output-format`.** Its plain output names the stored file on a line of its own (`already quantized:` and the path when asked again). The tiny F16 files it quantized were built as the CLI's own tests build them.
+- **`models delete <handle>` without `--yes` prints a plan** and exits 0, removing nothing and never prompting. When a backend points in, the plan says `backend 'X' points into this and will stop working until it is repointed.` and the `--and-backends` door.
+
+- [x] **A job registers what it made.** It takes the first line of its own output that is a path to a `.gguf`, asks `models info <that path>` for the set, and accepts it only as a GGUF in the job's own model folder. Then it registers that document's `model_path`. A failed first read fails the job in the read's words, with nothing run (`JobEnd.notStarted`).
+- [x] **Steps tick on the job's own work.** The store read-back counts a set in the job's own model folder, or a backend its own run registered: one its output names as `registered <name>` or `already registered: <name>`, or one the app registered after a quantization. Another job's backend never counts.
+- [x] **Resume only on stops.** `JobProgress.resumeCommand` answers only for a stopped or failed job.
+- [x] **Re-runs keep their identity.** A store job's again and resume keep its kind, steps, registration and model folder, followed by the store follower. They carry the first run's before-snapshot and what it made, so finished steps stay ticked. Pulls record `endedAt` too.
+- [x] **Delete says what it will do and what it did, on both tabs.** `DeletePlan` and `DeleteNarration` (`models/ViewModels/DeletePlan.swift`) are shared by Stored weights and Backends' **Delete with its weights…**:
+  - **Before:** asking runs the dry plan, and the confirm shows its lines.
+  - **The button:** the "and the backends that run from it" choice appears only when the plan names a backend, and `--and-backends` is passed only then.
+  - **After:** the CLI's output stays in `DeleteNarrationCard` above the table until dismissed, on every path.
+
+**Decisions made while building** (2026-10-25, each recorded for veto):
+- **The default, taken:** the confirm's affected backends come from the CLI's own plan, the delete run without `--yes`, so the app computes no references itself.
+- **The narration card shows only when the CLI said more than what it removed.** A plain delete keeps its toast alone.
+- **A delete that would strand only a drafter or the default video** offers no second button. The plan's words and the CLI's door afterwards still show.
+- **A backend counts only on the run's own words or the app's own registration,** never on the sheet's predicted names, keeping 2i's rule that nothing is predicted.
+- **The Backends tab's delete and the convert step's ticking** weren't in the document's files. They are the same defects at a neighbouring seam, closed in this change.
+- **A set the CLI found already quantized registers too,** found while fixing the first defect (`alreadyQuantizedRegisters`).
+
+**Verified.**
+- **Recorded** from the branch's binary over sandbox homes, the home written `/Users/someone`, re-recorded byte-identical: 36 documents in `tests/business/reads/Fixtures/` (13 `quantize-*`, 23 `delete-*`), plus `backends-status.json` and `backends-complete-rename.txt`.
+  - The failed quantization is real: the store was made read-only, so llama.cpp failed.
+  - The delete answers by backend name equal those by handle byte for byte, so the `delete-*` set stands for both tabs.
+  - **Hand-made:** `tests/business/jobs/Fixtures/pull-chain-done-handmade.jsonl`, transcribed from the events the CLI's `model_chain_test.cpp` pins, since a real chain needs the network and real weights.
+- 18 new cases:
+  - `JobResumeTests` (3);
+  - `JobIdentityTests` (8), among them `concurrentQuantizesRegisterTheirOwn`, `failedFirstReadFailsTheStep`, `doneChainOffersNoResume`, `againOnAFailedQuantizeRegisters`, `resumeKeepsTheStoreJob` and `convertTicksOnlyOnItsOwn`;
+  - `StoreDeleteTests` (3), `BackendsDeleteTests` (3) and `StoreJobsTests/quantizeNamesNothing`.
+
+  `StoreJobsTests/quantizeJob` now runs over the recorded quantization.
+- **Repeat runs:**
+  - the touched suites over 20 iterations, 960 of 960;
+  - the whole plan over 10 iterations, twice. One run had one failure, `MachineSessionTests/conversation()`, about 1 in 5,500, in code this item didn't touch (it passed 100 of 100 alone). The other was all green.
+- The module schemes: `PresentationModels` 72 of 72 and `BusinessJobsTests` 14 of 14. The layering check passes, and `check-previews` finds nothing in models.
+- 12 new previews:
+  - a finished chain with no resume;
+  - a failed quantization run again, now registering;
+  - each tab's confirm, with and without a backend named;
+  - each tab after a delete, the backend kept with its doors or removed;
+  - the narration card alone.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,992 tests and the macOS app's 557 cases passed, with no Swift warning.
+
+**Not done:**
+- No live pass of the app.
+- No preview of a failed store read, since none is recorded.
+- The design canvas doesn't draw the delete's plan in the confirm or the narration card.
+- `MachineSessionTests/conversation()` failed once under a 10-iteration load, a timing race this item didn't touch.

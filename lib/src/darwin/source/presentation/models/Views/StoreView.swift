@@ -44,7 +44,10 @@ struct StoreView: View {
             switch store.pending {
             case .deleteSet, .deleteModel:
                 Button("Delete", role: .destructive) { Task { store.andBackends = false; await store.confirm() } }
-                Button("Delete it and the backends that run from it", role: .destructive) { Task { store.andBackends = true; await store.confirm() } }
+                // Only where the CLI's plan names a backend pointing in.
+                if store.offersAndBackends {
+                    Button("Delete it and the backends that run from it", role: .destructive) { Task { store.andBackends = true; await store.confirm() } }
+                }
             case .removeBackend:
                 Button("Remove the backend", role: .destructive) { Task { await store.confirm() } }
             case .registerAll:
@@ -65,8 +68,8 @@ struct StoreView: View {
 
     private var pendingTitle: String {
         switch store.pending {
-        case .deleteSet(let set): "Delete \(set.handle)?"
-        case .deleteModel(let model): "Delete all of \(model)?"
+        case .deleteSet(let set, _): "Delete \(set.handle)?"
+        case .deleteModel(let model, _): "Delete all of \(model)?"
         case .removeBackend(let name): "Remove the backend \(name)?"
         case .registerAll: "Register every stored model not registered?"
         case nil: ""
@@ -75,10 +78,10 @@ struct StoreView: View {
 
     private var pendingMessage: String {
         switch store.pending {
-        case .deleteSet(let set):
-            return "apogee models delete \(set.handle) --yes -- its folder leaves this Mac, and this can't be undone. A backend that runs from it stays unless you choose to remove it too."
-        case .deleteModel(let model):
-            return "apogee models delete \(model) --yes -- every set of it leaves this Mac, and this can't be undone. Its backends stay unless you choose to remove them too."
+        case .deleteSet(let set, let plan):
+            return plan.question(running: "apogee models delete \(set.handle) --yes")
+        case .deleteModel(let model, let plan):
+            return plan.question(running: "apogee models delete \(model) --yes")
         case .removeBackend(let name):
             return "apogee config delete-backend \(name) -- its config entry goes; the weights stay under Stored weights, ready to register again."
         case .registerAll(let report):
@@ -106,6 +109,11 @@ struct StoreTable: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
+                if let narration = store.narration {
+                    DeleteNarrationCard(narration: narration) { store.dismissNarration() }
+                        .padding(.horizontal, Spacing.l)
+                        .padding(.top, Spacing.m)
+                }
                 HStack(spacing: Spacing.m) {
                     Text(store.summary).font(.apogeeSmall).foregroundStyle(Palette.textSecondary)
                     Spacer()
@@ -243,7 +251,7 @@ struct StoreDetails: View {
                     section("THE MODEL · \(set.model)") {
                         HStack {
                             Button("Rename…") { store.renaming = set.model }
-                            Button("Delete all of it…") { store.askToDeleteModel(set.model) }
+                            Button("Delete all of it…") { Task { await store.askToDeleteModel(set.model) } }
                         }
                     }
                     section("ON THE COMMAND LINE") {
@@ -336,7 +344,7 @@ struct StoreDetails: View {
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
             }
         case .delete:
-            Button("Delete…") { store.askToDelete(set) }
+            Button("Delete…") { Task { await store.askToDelete(set) } }
         }
     }
 
@@ -999,5 +1007,35 @@ struct StepsList: View {
     let store = ModelsPreview.routesStore()
     ConvertSheet(store: store)
         .task { await ModelsPreview.openConversion(store, ModelsPreview.routeEmbeddings) }
+}
+
+#Preview("Delete a registered GGUF: the CLI's plan names the backend that runs from it") {
+    let store = StoreViewModel(runner: ModelsPreview.deletesStore())
+    StoreView(store: store, shell: ModelsPreview.shell()) { _ in }
+        .frame(width: 1300, height: 680)
+        .task { await ModelsPreview.askToDelete(store, ModelsPreview.deleteLlamaQ4) }
+}
+
+#Preview("Delete a GGUF nothing runs from: Delete alone") {
+    let store = StoreViewModel(runner: ModelsPreview.deletesStore())
+    StoreView(store: store, shell: ModelsPreview.shell()) { _ in }
+        .frame(width: 1300, height: 680)
+        .task { await ModelsPreview.askToDelete(store, ModelsPreview.deleteLlamaF16) }
+}
+
+#Preview("After a delete: its backend kept, with the CLI's two doors") {
+    let runner = ModelsPreview.deletesStore()
+    let store = StoreViewModel(runner: runner)
+    StoreTable(store: store)
+        .frame(width: 900, height: 600)
+        .task { await ModelsPreview.deleteKept(store, runner) }
+}
+
+#Preview("After a delete with its backends: the backend removed, as the CLI said it") {
+    let runner = ModelsPreview.deletesStore()
+    let store = StoreViewModel(runner: runner)
+    StoreTable(store: store)
+        .frame(width: 900, height: 600)
+        .task { await ModelsPreview.deleteWithBackends(store, runner) }
 }
 #endif

@@ -1,0 +1,16 @@
+{"protocol_version":1,"schema":"2026-10-25","type":"job","verb":"models pull"}
+{"count":4,"index":1,"label":"pull org/model's full weights","state":"started","type":"stage"}
+{"count":4,"index":1,"label":"pull org/model's full weights","state":"done","type":"stage"}
+{"text":"from here on, if this stops, resume with:","type":"notice"}
+{"text":"  apogee models convert org--model/safetensors/a --register-with Q4_K_M","type":"notice"}
+{"count":4,"index":2,"label":"convert to F16","state":"started","type":"stage"}
+{"count":4,"index":2,"label":"convert to F16","state":"done","type":"stage"}
+{"count":4,"index":3,"label":"quantize to Q4_K_M","state":"started","type":"stage"}
+{"count":4,"index":3,"label":"quantize to Q4_K_M","state":"done","type":"stage"}
+{"count":4,"index":4,"label":"register 2 backends","state":"started","type":"stage"}
+{"count":4,"index":4,"label":"register 2 backends","state":"done","type":"stage"}
+{"text":"ready:","type":"notice"}
+{"text":"  model-F16","type":"notice"}
+{"text":"  model-Q4_K_M","type":"notice"}
+{"text":"note: a base model","type":"notice"}
+{"text":"chat with one:  apogee chat -m model-Q4_K_M","type":"notice"}

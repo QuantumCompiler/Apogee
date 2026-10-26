@@ -123,6 +123,9 @@ struct StoreJobsTests {
         #expect(await eventually { download.state(of: 0) == .done })
         #expect(download.state(of: 1) == .running && download.state(of: 2) == .waiting)
         runner.reading(["models", "list", "--all"], Self.list([Self.snapshot, "Llama3.2-1B-Instruct-F16", "Llama3.2-1B-Instruct-Q4KM"]))
+        // Registered, in the chain's words (`register_backends`): its own backends.
+        job.say(.said("registered Llama3.2-1B-Instruct-F16"))
+        job.say(.said("registered Llama3.2-1B-Instruct-Q4KM"))
         job.end()
         #expect(await eventually { !download.isRunning && download.endedAt != nil })
         #expect((0..<3).map(download.state(of:)) == [.done, .done, .done])
@@ -155,33 +158,63 @@ struct StoreJobsTests {
         second.end()
     }
 
-    @Test("a quantization registers what it made from the read-back, as asked; a refusal leaves the GGUF and is said")
+    @Test("a quantization registers what its own run made, as asked; a refusal leaves the GGUF and is said")
     func quantizeJob() async throws {
+        // Recorded from the branch's binary quantizing a tiny F16 for real
+        // (GUI 4e): what it printed, and `models info` of the file it named.
         for refused in [false, true] {
             let job = ScriptedJob()
             let runner = ScriptedRunner()
-            runner.reading(["models", "list", "--all"], Self.list([Self.f16]))
-            runner.reading(["models", "info", "Llama3.2-1B-Instruct/gguf/8d51e6c04a27"], recorded("store-info-q4"))
+            runner.reading(["models", "list", "--all"], recorded("quantize-list-before"))
+            runner.reading(["models", "info", JobIdentityTests.llamaPath], recorded("quantize-info-llama-path"))
             if refused {
-                runner.commanding(["config", "add-backend"], .failed(exit: ChildExit(reason: .exited, status: 1), stderrTail: tail("apogee config: a backend named 'Llama3.2-1B-Instruct-Q4KM' exists")))
+                runner.commanding(
+                    ["config", "add-backend"],
+                    .failed(exit: ChildExit(reason: .exited, status: 1), stderrTail: tail(recorded("quantize-add-backend-exists", "err"))))
             }
             let (model, starter) = jobs([job], runner)
-            model.quantize(QuantizeForm(handle: Self.f16, base: "Llama3.2-1B-Instruct", bytes: nil))
+            model.quantize(QuantizeForm(handle: JobIdentityTests.llamaF16, base: "Llama3.2-1B-Instruct", bytes: nil))
             #expect(await eventually { starter.starts.count == 1 })
-            #expect(starter.starts[0].0 == ["models", "quantize", Self.f16])
+            #expect(starter.starts[0].0 == ["models", "quantize", JobIdentityTests.llamaF16])
             let download = try #require(model.downloads.first)
-            runner.reading(["models", "list", "--all"], Self.list([Self.f16, "Llama3.2-1B-Instruct/gguf/8d51e6c04a27"]))
+            runner.reading(["models", "list", "--all"], recorded("quantize-list-both-landed"))
+            job.print(recorded("quantize-llama", "txt"))
             job.end()
             #expect(await eventually { download.endedAt != nil })
-            let registration = "run config add-backend Llama3.2-1B-Instruct-Q4KM --type llamacpp --model-path /Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/8d51e6c04a27/Llama3.2-1B-Instruct-Q4KM.gguf"
-            #expect(runner.calls.contains(registration), "the new file from the read-back's models info")
+            #expect(runner.calls.contains(JobIdentityTests.llamaRegistration), "the file its run printed, as models info names it")
             if refused {
-                #expect(download.outcome?.hasPrefix("The GGUF is made; registering it was refused: apogee config: a backend named 'Llama3.2-1B-Instruct-Q4KM' exists") == true)
+                #expect(download.outcome?.hasPrefix("The GGUF is made; registering it was refused: apogee config: backend 'Llama3.2-1B-Instruct-Q4KM' already exists; pass --force to replace it") == true)
                 #expect(download.state(of: 1) == .waiting, "not registered")
             } else {
                 #expect(download.state(of: 1) == .done)
             }
             #expect(download.state(of: 0) == .done)
+            #expect(download.made == JobIdentityTests.llamaQ4 && download.firstLanded == JobIdentityTests.llamaQ4)
+        }
+    }
+
+    @Test("a quantization's run that names no GGUF, or one the store doesn't list as its model's, registers nothing and says so")
+    func quantizeNamesNothing() async throws {
+        for named in [false, true] {
+            let job = ScriptedJob()
+            let runner = ScriptedRunner()
+            runner.reading(["models", "list", "--all"], recorded("quantize-list-before"))
+            // Gemma's GGUF, as the store names it: no set of Llama's.
+            runner.reading(["models", "info", JobIdentityTests.gemmaPath], recorded("quantize-info-gemma-path"))
+            let (model, starter) = jobs([job], runner)
+            model.quantize(QuantizeForm(handle: JobIdentityTests.llamaF16, base: "Llama3.2-1B-Instruct", bytes: nil))
+            #expect(await eventually { starter.starts.count == 1 })
+            let download = try #require(model.downloads.first)
+            runner.reading(["models", "list", "--all"], recorded("quantize-list-both-landed"))
+            if named { job.say(.said(JobIdentityTests.gemmaPath)) }
+            job.end()
+            #expect(await eventually { download.endedAt != nil })
+            #expect(!runner.calls.contains { $0.hasPrefix("run config add-backend") }, "nothing registered on a guess")
+            #expect(download.made == nil)
+            #expect(download.outcome == (named
+                ? "Not registered: the store doesn't list \(JobIdentityTests.gemmaPath), which its run named, as a GGUF of Llama3.2-1B-Instruct."
+                : "Not registered: its output names no GGUF it made."))
+            #expect(download.state(of: 1) == .waiting)
         }
     }
 

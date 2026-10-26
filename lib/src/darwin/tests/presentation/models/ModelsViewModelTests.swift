@@ -79,7 +79,7 @@ struct ModelsViewModelTests {
         #expect(model.typed.contains(Field("Memory", "not known: the files state no cache")))
     }
 
-    @Test("delete asks, then runs with --yes, --and-backends only when chosen, and reads back")
+    @Test("delete asks after the CLI's plan, then runs with --yes, --and-backends only when chosen and the plan names a backend, and reads back")
     func delete() async {
         let runner = ScriptedRunner()
         var said: [String] = []
@@ -87,16 +87,21 @@ struct ModelsViewModelTests {
         model.say = { said.append($0) }
         let row = model.rows.first { $0.backend == "qwen-mlx" }!
         await model.select(row)
-        model.askToDelete(row)
-        #expect(model.pendingDelete == .init(row: row))
-        #expect(!runner.calls.contains { $0.hasPrefix("run") && !$0.hasPrefix("run __complete") }, "asked first: nothing changed")
+        await model.askToDelete(row)
+        #expect(model.pendingDelete?.row == row)
+        #expect(runner.calls.filter { $0.hasPrefix("run") && !$0.hasPrefix("run __complete") } == ["run models delete qwen-mlx"],
+                "asked first: only the plan read, nothing changed")
         await model.confirmDelete(andBackends: false)
         let ran = runner.calls.firstIndex(of: "run models delete qwen-mlx --yes")!
         #expect(runner.calls[ran + 1 ... ran + 2] == ["read models list", "read models status"], "read back")
         #expect(said == ["Deleted qwen-mlx"])
-        model.askToDelete(row)
+        // The scripted plan says nothing, so it names no backend: the choice
+        // is not offered, and not passed (BackendsDeleteTests has the CLI's
+        // own plans).
+        await model.askToDelete(row)
+        #expect(!model.offersAndBackends)
         await model.confirmDelete(andBackends: true)
-        #expect(runner.calls.contains("run models delete qwen-mlx --yes --and-backends"))
+        #expect(!runner.calls.contains { $0.contains("--and-backends") })
     }
 
     @Test("a local backend's entry is removed on asking, its weights kept: config delete-backend, read back")
@@ -219,7 +224,7 @@ struct ModelsViewModelTests {
         #expect(runner.calls.contains("read models info Llama3.2-1B-Instruct/safetensors/edaba290ce7f"))
         #expect(model.selectedRow == set && model.info != nil)
         #expect(model.lineage.map(\.kind) == ["pulled"], "52e's typed data, read by the handle")
-        model.askToDelete(set)
+        await model.askToDelete(set)
         await model.confirmDelete(andBackends: false)
         #expect(runner.calls.contains("run models delete Llama3.2-1B-Instruct/safetensors/edaba290ce7f --yes"))
         var checked: [String] = []
