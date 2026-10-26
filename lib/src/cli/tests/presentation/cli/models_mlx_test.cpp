@@ -1473,6 +1473,13 @@ TEST_CASE("an MLX directory recorded as each kind lists, informs and scans as th
     CHECK(backends.at("talk-4bit").at("kind") == "chat");
     CHECK(backends.at("see-4bit").at("kind") == "vision");
     CHECK(backends.at("embed-4bit").at("kind") == "embedding");
+    // No entry names a drafter, so no row carries one (M32); nor does a
+    // stored drafter's own row, which is no backend's.
+    for (const auto& [name, row] : backends) {
+        INFO(name);
+        CHECK_FALSE(row.contains("draft"));
+    }
+    CHECK_FALSE(rows.at("org--draft/mlx/bbbbbbbbbbbb").contains("draft"));
     REQUIRE(home.run({"models", "info", "see-4bit", "-q"}, &out) == 0);
     CHECK(out.find("kind:         vision (recorded) -- a vision model: an mlx backend chats with "
                    "it, and shows it images through mlx-vlm\n") != std::string::npos);
@@ -2502,6 +2509,108 @@ void draft_unified(const CliHome& home, bool drafts) {
 
 }  // namespace
 
+TEST_CASE("an mlx backend's list row carries its drafter: where, whether it drafts, and why not",
+          "[commands][models][mlx][drafter][list]") {
+    // M32: the pairing an entry's `draft:` names, on the base's own row -- as
+    // `models info`'s draft line decides it (53i), from files -- so a driver
+    // marks a paired base without reading each entry's info. Nothing runs a
+    // driver, so every platform reads it.
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    fake_mlx_runtime(home.home());
+    const std::filesystem::path site = fake_mlx_vlm(home.home());
+    // The E4B as mlx-vlm builds it, and its assistant as a drafter beside it.
+    const std::filesystem::path base =
+        home.models() / "Gemma4-E4B-Instruct" / "mlx" / "bbbbbbbbbbbb";
+    write_mlx_model(base, {.bits = 0, .kind = "vision"});
+    apogee::testing::write_fixture_file(base / "config.json",
+                                        apogee::testing::kGemma4BaseE4BConfig);
+    const std::filesystem::path drafter =
+        home.models() / "Gemma4-E4B-Assistant" / "mlx" / "aaaaaaaaaaaa";
+    write_mlx_model(drafter, {.bits = 0, .kind = "drafter"});
+    apogee::testing::write_fixture_file(drafter / "config.json",
+                                        apogee::testing::kGemma4AssistantE4BConfig);
+    const auto configure = [&home, &base](const std::string& draft) {
+        std::ofstream{home.config_path()}
+            << "backends:\n  m:\n    type: mock\n  e4b:\n    type: mlx\n    model_path: '"
+            << base.string() << "'\n"
+            << (draft.empty() ? std::string{} : "    draft: '" + draft + "'\n");
+    };
+    // The entry's row in the document, its stream-json line the same object.
+    const auto row_of = [&home]() {
+        const std::map<std::string, nlohmann::json> rows = listed_by(home, "backend");
+        REQUIRE(rows.contains("e4b"));
+        CHECK_FALSE(rows.at("m").contains("draft"));
+        std::string out;
+        std::string err;
+        REQUIRE(home.run({"models", "list", "--output-format", "stream-json"}, &out, &err) == 0);
+        std::istringstream lines{out};
+        bool streamed = false;
+        for (std::string line; std::getline(lines, line);) {
+            const nlohmann::json row = nlohmann::json::parse(line);
+            if (row.value("backend", "") == "e4b") {
+                CHECK(row == rows.at("e4b"));
+                streamed = true;
+            }
+        }
+        CHECK(streamed);
+        return rows.at("e4b");
+    };
+    const auto draft_line = [&home]() {
+        std::string out;
+        REQUIRE(home.run({"models", "info", "e4b", "-q"}, &out) == 0);
+        return line_starting(out, "draft:");
+    };
+    const std::string said = "draft:        " + drafter.string() + " -- ";
+
+    // No drafter paired: no `draft`, as there is no draft line.
+    configure("");
+    CHECK_FALSE(row_of().contains("draft"));
+    CHECK(draft_line().empty());
+
+    // Paired, and it drafts: its path, and no refusal.
+    configure(drafter.string());
+    nlohmann::json row = row_of();
+    REQUIRE(row.contains("draft"));
+    CHECK(row.at("draft") == nlohmann::json{{"path", drafter.string()}, {"can_draft", true}});
+    CHECK(draft_line().starts_with(said + "drafts beside it through mlx-vlm's speculative path"));
+
+    // An mlx-vlm that drafts no gemma4_assistant: the ladder's words, as the
+    // draft line says them.
+    const std::filesystem::path drafters =
+        site / "mlx_vlm" / "speculative" / "drafters" / "gemma4_assistant";
+    std::filesystem::remove_all(drafters);
+    row = row_of();
+    REQUIRE(row.contains("draft"));
+    CHECK(row.at("draft").at("path") == drafter.string());
+    CHECK(row.at("draft").at("can_draft") == false);
+    const std::string unsupported = row.at("draft").value("refusal", "");
+    CHECK(
+        unsupported.starts_with("the installed mlx-vlm 0.0-vlm-stub drafts no gemma4_assistant "
+                                "model -- its speculative path holds no drafter of that type"));
+    CHECK(draft_line() == said + "cannot draft beside it: " + unsupported);
+    (void)fake_mlx_vlm(home.home());
+    CHECK(row_of().at("draft").at("can_draft") == true);
+
+    // The drafter deleted: refused, saying so -- the pairing stays the
+    // config's until it is cleared.
+    std::filesystem::remove_all(drafter);
+    row = row_of();
+    REQUIRE(row.contains("draft"));
+    CHECK(row.at("draft") ==
+          nlohmann::json{{"path", drafter.string()},
+                         {"can_draft", false},
+                         {"refusal", "there is no drafter at " + drafter.string() +
+                                         " -- 'apogee models convert <a draft head> --mlx' "
+                                         "makes one"}});
+    CHECK(draft_line() ==
+          said + "cannot draft beside it: " + row.at("draft").at("refusal").get<std::string>());
+
+    // Cleared: no `draft` again.
+    configure("");
+    CHECK_FALSE(row_of().contains("draft"));
+}
+
 TEST_CASE(
     "each of the user's assistants converts --mlx to a drafter recorded beside its base, and "
     "set-backend --draft pairs it with that base alone",
@@ -2583,9 +2692,14 @@ TEST_CASE(
     CHECK(alone.find("Speculative decoding: drafts, then one check.") != std::string::npos);
     CHECK(read_file(turns).find("vlm draft ") == std::string::npos);
 
+    // Unpaired, the base's row names no drafter (M32).
+    CHECK_FALSE(listed_by(home, "backend").at("e4b-4bit").contains("draft"));
     const std::string handle = mlx_handle(roots, "Gemma4-E4B-Assistant");
     REQUIRE(home.run({"config", "set-backend", "e4b-4bit", "--draft", handle}, &out) == 0);
     CHECK(out.find("set draft; drafter " + e4b_drafter.string() + " beside ") != std::string::npos);
+    // Paired, its row carries the drafter and that it drafts (M32).
+    CHECK(listed_by(home, "backend").at("e4b-4bit").at("draft") ==
+          nlohmann::json{{"path", e4b_drafter.string()}, {"can_draft", true}});
     const apogee::harness::Config paired = apogee::harness::load_config(home.config_path());
     CHECK(paired.backends.at("e4b-4bit").draft == e4b_drafter.string());
     REQUIRE(home.run({"models", "info", "e4b-4bit", "-q"}, &out) == 0);
@@ -2637,10 +2751,24 @@ TEST_CASE(
                          &out) == 0);
     }
 
-    // Cleared, it drafts with nothing again.
+    // The drafter deleted from under its pairing: the row says it cannot
+    // draft, and why, in `models info`'s words (M32).
+    std::filesystem::remove_all(e4b_drafter);
+    const nlohmann::json orphaned = listed_by(home, "backend").at("e4b-4bit").at("draft");
+    CHECK(orphaned.at("path") == e4b_drafter.string());
+    CHECK(orphaned.at("can_draft") == false);
+    CHECK(orphaned.at("refusal") == "there is no drafter at " + e4b_drafter.string() +
+                                        " -- 'apogee models convert <a draft head> --mlx' "
+                                        "makes one");
+    REQUIRE(home.run({"models", "info", "e4b-4bit", "-q"}, &out) == 0);
+    CHECK(out.find("draft:        " + e4b_drafter.string() + " -- cannot draft beside it: " +
+                   orphaned.at("refusal").get<std::string>() + "\n") != std::string::npos);
+
+    // Cleared, it drafts with nothing again, and its row names none.
     REQUIRE(home.run({"config", "set-backend", "e4b-4bit", "--draft", ""}, &out) == 0);
     CHECK(out.find("cleared draft") != std::string::npos);
     CHECK(apogee::harness::load_config(home.config_path()).backends.at("e4b-4bit").draft.empty());
+    CHECK_FALSE(listed_by(home, "backend").at("e4b-4bit").contains("draft"));
 }
 
 TEST_CASE(

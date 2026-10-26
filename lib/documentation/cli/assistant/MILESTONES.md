@@ -9587,6 +9587,34 @@ The probe, run on two scripted mocks over a sandbox, showed both: `session` keys
 - No HTTP routes for `chats info`, the recall listing or the typed footprint: recall stays off `serve` by rule, and the others are read-only in the parity table.
 - The macOS app adopts these reads in a later GUI item.
 
+### 2026-10-26 — `list-rows-carry-what-drivers-need` (maintenance item M32): list rows carry what drivers need
+
+**Why.** Two list reads left out a fact their detail read states, so a driver had to read each row's detail to draw the list honestly. The macOS app found both (4h, M5):
+- **`task list`'s rows carried no `interrupted`.** A task killed mid-round showed `interrupted: true` in `task status`, but its row read `{"status":"running",…}`, so the app's task list drew it as running.
+- **`models list` named no drafter pairing.** It was byte-identical before and after `config set-backend … --draft …`, so the app's Backends table read every `mlx` entry's `models info` on each refresh. 53i had declined a typed `draft_head` "for a client that needs one"; the app is that client.
+
+- [x] **A task row says it was interrupted,** on every row (`false` when not). The rule moved out of `make_task_view` into one private `liveness()` in `view.cpp`, which `make_task_view` and `make_task_summary` both call. `TaskSummary` gains `interrupted`. The CLI, the admin twin and the TUI's task list each pass `make_task_list` the lock holder, as they already do for `task status`.
+- [x] **An `mlx` row carries its drafter:** `draft: {path, can_draft, refusal?}`, absent when none is paired. It is filled by `backends::probe_mlx_draft`, the check `models info` already makes. One helper, `model_draft()`, now feeds the row and the info line, whose text is byte-identical. A deleted drafter's row reads `can_draft: false` with the refusal in the CLI's words.
+
+**Decisions made while building** (2026-10-26, each recorded for veto):
+- **The defaults, taken:** `interrupted` on every task row, and `draft` as `{path, can_draft, refusal?}`.
+- **The lock holder is a required argument,** with no default. A default of "no holder" would make a live task's row read interrupted wherever a caller forgot it.
+- **The text views are unchanged.** The text `task list` and the TUI's Tasks screen still print `running` for a killed task. Saying it to a person is a small follow-up.
+- **`draft` appears for any `mlx` entry that names a drafter,** whatever its kind and whether its runtime is ready, the path expanded as the draft line prints it.
+
+**Verified.**
+- **4 new Catch2 cases:** `view_test`, `task_test` and `admin_tasks_test` for the task row, and `models_mlx_test` for the drafter.
+  - **The guardrail cases extended:** the list goldens with `interrupted: false`, the kinds and 53i pairing cases with the row checked unpaired, paired, the drafter deleted and the pairing cleared, and `read_documents_test`'s non-`mlx` rows.
+  - **The end-to-end scripts:** `task_e2e.sh` checks the row while running, after `kill -9` and after resume. `mlx_models_e2e.sh` checks no `draft`, then `can_draft: true`, the refusal when the drafter is moved away, and drafting again once it's back. Both were shown to bite with altered expectations.
+  - **Failing first:** both CLI-level cases failed against the old code (8 assertions; the missing key).
+- **The full `apogee_tests`:** 3,979 cases, 3,978 passed, 1 skipped (`pdftotext`). `ctest -R '^(cli|harness)\.'`: 60 of 60.
+- **Zero warnings.** The MinGW scan (the `windows-x64` compile database's own flags, `-Wconversion` among them) was clean over 10 changed `.cpp` files, and clang-format clean over 12.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 4,039 tests and the macOS app's 834 cases passed, with no warning.
+
+**Not done:**
+- The text task list and the TUI still say `running` for a killed task.
+- The macOS app reads the new fields in a later GUI item.
+
 ---
 
 ## Milestone AP — Runtime adapters

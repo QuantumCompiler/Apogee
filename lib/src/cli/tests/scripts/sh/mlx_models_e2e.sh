@@ -443,6 +443,20 @@ if grep -q "added backend 'Gemma4-E4B-Assistant" "$WORK_DIR/drafter-scan.txt"; t
 fi
 no_driver_left
 
+# The E4B's `models list` row and its drafter (M32): the row's `draft`, as
+# JSON, or `null` when it names none.
+listed_draft() {
+    "$APOGEE_BIN" models list --output-format json </dev/null >"$WORK_DIR/draft-list.json" \
+        2>/dev/null || return 1
+    python3 - "$WORK_DIR/draft-list.json" <<'EOF'
+import json, sys
+rows = [r for r in json.load(open(sys.argv[1]))["data"] if r.get("backend") == "e4b-4bit"]
+print(json.dumps(rows[0].get("draft") if rows else "no row", sort_keys=True))
+EOF
+}
+[ "$(listed_draft)" = "null" ] \
+    || fail "the unpaired E4B's row names a drafter: $(cat "$WORK_DIR/draft-list.json")"
+
 # A turn on the base alone, then beside its drafter: the same answer.
 : >"$STUB_MLX_RECORD"
 "$APOGEE_BIN" complete -m e4b-4bit "Explain speculative decoding." >"$WORK_DIR/alone.txt" \
@@ -454,6 +468,9 @@ fi
     || fail "set-backend --draft did not pair them: $(cat "$WORK_DIR/pair.txt")"
 grep -qF "set draft; drafter $DRAFTER beside " "$WORK_DIR/pair.txt" \
     || fail "the pairing was not said: $(cat "$WORK_DIR/pair.txt")"
+# The base's row says its drafter, and that it drafts (M32).
+[ "$(listed_draft)" = "{\"can_draft\": true, \"path\": \"$DRAFTER\"}" ] \
+    || fail "the paired E4B's row does not carry its drafter: $(listed_draft)"
 : >"$STUB_MLX_RECORD"
 "$APOGEE_BIN" complete -m e4b-4bit "Explain speculative decoding." >"$WORK_DIR/drafted.txt" \
     2>"$WORK_DIR/drafted.err" || fail "a drafted turn failed: $(cat "$WORK_DIR/drafted.err")"
@@ -466,6 +483,26 @@ grep -q "^vlm draft $(basename "$DRAFTER") kind=mtp " "$STUB_MLX_RECORD" \
 if pgrep -f "$WORK_DIR/training/scripts/mlx_generate.py" >/dev/null 2>&1; then
     fail "a driver outlived its apogee: $(pgrep -fl "$WORK_DIR/training/scripts/mlx_generate.py")"
 fi
+# The drafter gone from under its pairing: the row says it cannot draft, and
+# why, in `models info`'s words (M32); back, it drafts again.
+mv "$DRAFTER" "$WORK_DIR/drafter-aside"
+listed_draft >"$WORK_DIR/draft-row.json" || fail "models list --output-format json"
+"$APOGEE_BIN" models info e4b-4bit -q </dev/null >"$WORK_DIR/draft-info.txt" 2>&1 \
+    || fail "models info e4b-4bit: $(cat "$WORK_DIR/draft-info.txt")"
+python3 - "$WORK_DIR/draft-row.json" "$WORK_DIR/draft-info.txt" "$DRAFTER" <<'EOF' \
+    || fail "the orphaned pairing's row: $(cat "$WORK_DIR/draft-row.json")"
+import json, sys
+draft = json.load(open(sys.argv[1]))
+info = open(sys.argv[2]).read()
+assert draft["path"] == sys.argv[3] and draft["can_draft"] is False, draft
+assert draft["refusal"] == ("there is no drafter at %s -- 'apogee models convert <a draft head> "
+                            "--mlx' makes one" % sys.argv[3]), draft
+line = "draft:        %s -- cannot draft beside it: %s\n" % (sys.argv[3], draft["refusal"])
+assert line in info, info
+EOF
+mv "$WORK_DIR/drafter-aside" "$DRAFTER"
+[ "$(listed_draft)" = "{\"can_draft\": true, \"path\": \"$DRAFTER\"}" ] \
+    || fail "the drafter put back does not draft again: $(listed_draft)"
 
 # --- Wan's original layout (53k): through mlx-video to an MLX video model ------------
 # The user's set as 53j names it: its own config, a transformer shard -- small

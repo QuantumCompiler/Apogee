@@ -1170,6 +1170,75 @@ TEST_CASE("task status, as a person and as a document, says which process runs a
     lock->release();
 }
 
+TEST_CASE(
+    "task list's rows say a task was interrupted, as task status does, and so does the admin "
+    "plane's",
+    "[commands][task][surfaces][read][list]") {
+    // M32: a task killed mid-round is `running` by its ledger with no process
+    // left. Its list row says so -- every row says whether, `false` when not
+    // -- by the view's own rule, so a driver draws the list without reading
+    // each task's status.
+    const Home home{R"({"text": "x"})"};
+    t::Task task;
+    task.id = "task-20261004-120000";
+    task.goal = "Keep going";
+    task.session_id = "20261004-120000-abcd";
+    task.working_directory = home.work().string();
+    task.status = std::string{t::kRunning};
+    task.created_at = "2026-10-04T12:00:00Z";
+    REQUIRE(t::save_task(home.tasks(), task).empty());
+    t::Task done = task;
+    done.id = "task-20261004-110000";
+    done.status = std::string{t::kDone};
+    done.created_at = "2026-10-04T11:00:00Z";
+    REQUIRE(t::save_task(home.tasks(), done).empty());
+
+    // The list's rows, the admin plane's the same bytes, and each task's own
+    // status document.
+    const auto listed = [&home]() {
+        std::string out;
+        std::string err;
+        REQUIRE(home.run({"task", "list", "--output-format", "json"}, &out, &err) == 0);
+        {
+            const apogee::testing::EnvGuard guard{"APOGEE_HOME", home.home.home().string()};
+            apogee::httpserver::HttpRequest request;
+            request.method = "GET";
+            request.path = "/v1/admin/tasks";
+            CHECK(out == apogee::httpserver::admin_list_tasks(request).body + "\n");
+        }
+        const nlohmann::json list = nlohmann::json::parse(out);
+        REQUIRE(list["data"].size() == 2);
+        return list["data"];
+    };
+    const auto status_of = [&home](const std::string& id) {
+        std::string out;
+        std::string err;
+        REQUIRE(home.run({"task", "status", id, "--output-format", "json"}, &out, &err) == 0);
+        return nlohmann::json::parse(out);
+    };
+
+    nlohmann::json rows = listed();
+    REQUIRE(rows[0]["id"] == task.id);
+    CHECK(rows[0]["status"] == "running");
+    CHECK(rows[0]["interrupted"] == true);
+    CHECK(rows[0]["interrupted"] == status_of(task.id)["interrupted"]);
+    REQUIRE(rows[1]["id"] == done.id);
+    CHECK(rows[1]["interrupted"] == false);
+    CHECK(rows[1]["interrupted"] == status_of(done.id)["interrupted"]);
+
+    // This process holds its lock: running now, interrupted on neither.
+    std::string error;
+    std::optional<t::TaskLock> lock = t::TaskLock::acquire(home.tasks(), task.id, error);
+    REQUIRE(lock.has_value());
+    rows = listed();
+    CHECK(rows[0]["interrupted"] == false);
+    CHECK(rows[0]["interrupted"] == status_of(task.id)["interrupted"]);
+    CHECK(rows[1]["interrupted"] == false);
+    lock->release();
+    // Released with the ledger still running: interrupted again.
+    CHECK(listed()[0]["interrupted"] == true);
+}
+
 TEST_CASE("task status pairs each answered question with its own answer",
           "[commands][task][surfaces][read]") {
     const Home home{R"({"text": "x"})"};

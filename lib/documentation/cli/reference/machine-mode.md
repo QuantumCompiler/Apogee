@@ -902,8 +902,13 @@ apogee task list --output-format json        # {"object":"list","data":[…],"to
 
 `task status`'s document is the view above, byte for byte the body of `GET
 /v1/admin/tasks/{id}`; `task list`'s is `GET /v1/admin/tasks`'s — `data` the
-newest 50 (`id`, `status`, `rounds_used`, `rounds_budget`, `goal`), `total` every
-task. A read given `stream-json`, or any word but `text` and `json`, is refused.
+newest 50 (`id`, `status`, `interrupted`, `rounds_used`, `rounds_budget`,
+`goal`), `total` every task. Since M32 every row carries `interrupted`, decided
+by the view's own rule: `true` for a task its ledger says is planning or
+running with no process left to run it (killed mid-round, and resumable), as
+`task status` says it, and `false` on every other row — so a host draws a
+killed task's row as interrupted, not running, without reading its status. A
+read given `stream-json`, or any word but `text` and `json`, is refused.
 
 Since 40c the task recipes — named goals with their checks baked in, which `task
 run --recipe <name> [--input "…"]` expands — read the same way:
@@ -1310,7 +1315,20 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   verbs refuse an `mlx` entry over any other kind, and the backend's own ladder
   turns away one written by hand -- its row's `state` `wrong kind` (a drafter's
   `a drafter`, as since 53i), its `note` the kind and what uses it. A backend
-  whose directory is missing, and every other row, has no `kind`.
+  whose directory is missing, and every other row, has no `kind`. Since M32
+  an `mlx` backend's row whose entry names a drafter (`draft:`, 53i) carries
+  `draft`: `{path, can_draft, refusal?}`, following `kind`'s shape. `path` is
+  the drafter's directory as the entry names it, `~` and variables expanded;
+  `can_draft` is whether it drafts beside the entry's model, decided by the
+  rule `models info`'s `draft` field and the backend's own ladder answer by --
+  a drafter there, beside a base mlx-vlm built of its family and width (the
+  one its record names, where it names one), and the installed mlx-vlm
+  drafting its type; and `refusal`, present only when it cannot, is why, with
+  its fix where one command is it -- the very words `models info`'s `draft`
+  field says after `cannot draft beside it: `. A drafter deleted from under
+  its pairing is `can_draft: false`, its `refusal` saying there is no drafter
+  at its path. An entry that names no drafter (or has no `model_path`), and
+  every other row, has no `draft`; each stream-json line carries it the same.
 - **`models info`** and **`models status`**: their `label: value` record as
   `fields`, in order, each label as printed and a value's indented continuation
   joined to it with a newline. The values are the same words the human view

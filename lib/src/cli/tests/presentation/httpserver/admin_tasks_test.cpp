@@ -89,11 +89,13 @@ TEST_CASE("the task list is newest first, fifty unless all, and never null",
     REQUIRE(body["data"].size() == 50);
     CHECK(body["data"][0]["id"] == "task-20261004-120061");
     CHECK(body["data"][0] == nlohmann::json::parse(R"({"id": "task-20261004-120061",
-        "status": "done", "rounds_used": 0, "rounds_budget": 8, "goal": "goal 51"})"));
+        "status": "done", "interrupted": false, "rounds_used": 0, "rounds_budget": 8,
+        "goal": "goal 51"})"));
     // The body is the listing's document -- the one `task list
     // --output-format json` prints.
-    CHECK(response.body ==
-          t::to_json(t::make_task_list(t::list_tasks(fixture.root), false)).dump());
+    CHECK(response.body == t::to_json(t::make_task_list(t::list_tasks(fixture.root), false,
+                                                        t::lock_holder(fixture.root)))
+                               .dump());
 
     HttpRequest all = Fixture::get("/v1/admin/tasks");
     all.query["all"] = "true";
@@ -142,6 +144,34 @@ TEST_CASE("a running task's view names the process that holds its lock",
     body = parsed(apogee::httpserver::admin_get_task(task.id));
     CHECK(body["process"].is_number_integer());
     CHECK(body["interrupted"] == false);
+    lock->release();
+}
+
+TEST_CASE("the task list's rows say which task was interrupted, as its view does",
+          "[httpserver][admin][tasks][list]") {
+    // M32: a row's `interrupted` is the view's, from the same lock.
+    Fixture fixture;
+    const t::Task task = fixture.save("task-20261004-120000", t::kRunning);
+    (void)fixture.save("task-20261004-110000", t::kHalted);
+    const auto rows = []() {
+        return parsed(apogee::httpserver::admin_list_tasks(Fixture::get("/v1/admin/tasks")))
+            .at("data");
+    };
+    nlohmann::json data = rows();
+    REQUIRE(data.size() == 2);
+    REQUIRE(data[0]["id"] == task.id);
+    CHECK(data[0]["interrupted"] == true);
+    CHECK(data[0]["interrupted"] ==
+          parsed(apogee::httpserver::admin_get_task(task.id))["interrupted"]);
+    CHECK(data[1]["interrupted"] == false);
+    std::string error;
+    std::optional<t::TaskLock> lock = t::TaskLock::acquire(fixture.root, task.id, error);
+    REQUIRE(lock.has_value());
+    data = rows();
+    CHECK(data[0]["interrupted"] == false);
+    CHECK(data[0]["interrupted"] ==
+          parsed(apogee::httpserver::admin_get_task(task.id))["interrupted"]);
+    CHECK(data[1]["interrupted"] == false);
     lock->release();
 }
 

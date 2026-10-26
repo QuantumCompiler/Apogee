@@ -329,6 +329,13 @@ void fill_provider_columns(ModelRow& row, const harness::BackendConfig& backend,
     row.state = std::string{backends::to_string(present.tier())};
 }
 
+/// A pairing's state in the CLI's words (M32): the ladder's answer (53i) as
+/// `models info`'s draft line and a `models list` row both say it.
+[[nodiscard]] ModelDraft model_draft(const backends::MlxDraft& draft) {
+    return ModelDraft{
+        .path = draft.dir.string(), .can_draft = draft.pairs(), .refusal = draft.message()};
+}
+
 }  // namespace
 
 std::vector<ModelRow> build_model_rows(const harness::Config& config,
@@ -501,6 +508,12 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
                     row.note = models::describe_mlx_kind(kind.word);
                 } else if (readiness.ready()) {
                     row.note = mlx_summary(files, backend);
+                }
+                if (!backend.draft.empty()) {
+                    // The drafter the entry names (M32): whether it drafts
+                    // beside the model, as its `models info` says it.
+                    row.draft = model_draft(backends::probe_mlx_draft(
+                        dir, backend.draft, backends::MlxHost::current()));
                 }
             }
             if (!readiness.ready()) {
@@ -1048,6 +1061,14 @@ nlohmann::json model_row_json(const ModelRow& row) {
         if (!value.empty()) {
             object[key] = value;
         }
+    }
+    if (row.draft.has_value()) {
+        // An `mlx` entry's drafter (M32): `refusal` only when it cannot draft.
+        nlohmann::json draft{{"path", row.draft->path}, {"can_draft", row.draft->can_draft}};
+        if (!row.draft->can_draft) {
+            draft["refusal"] = row.draft->refusal;
+        }
+        object["draft"] = std::move(draft);
     }
     if (row.components > 0) {
         object["components"] = row.components;
@@ -1931,10 +1952,12 @@ std::string render_model_info(const harness::Config& config, std::string_view na
                 // in, and whether it pairs -- the ladder's own question.
                 const backends::MlxDraft draft =
                     backends::probe_mlx_draft(dir, value.draft, backends::MlxHost::current());
+                // The words a `models list` row carries too (M32).
+                const ModelDraft said = model_draft(draft);
                 const std::int64_t block =
                     value.draft_block_size.value_or(backends::drafter_block_size(draft.dir));
-                out << "draft:        " << draft.dir.string() << " -- "
-                    << (draft.pairs()
+                out << "draft:        " << said.path << " -- "
+                    << (said.can_draft
                             ? "drafts beside it through mlx-vlm's speculative path "
                               "(mtp, " +
                                   (block > 0 ? "block " + std::to_string(block)
@@ -1943,7 +1966,7 @@ std::string render_model_info(const harness::Config& config, std::string_view na
                                    : block > 0                        ? ", the drafter's own"
                                                                       : "") +
                                   "); the answer is the base's"
-                            : "cannot draft beside it: " + draft.message())
+                            : "cannot draft beside it: " + said.refusal)
                     << "\n";
                 if (draft.drafter.has_value()) {
                     out << "drafter:      " << models::describe(*draft.drafter) << "\n";

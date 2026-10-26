@@ -1281,11 +1281,14 @@ answers `404`. `cycle run`, `halt` and `resume` have no route.
 ### `GET /v1/admin/tasks`
 
 The tasks under `tasks/`, newest first, as `apogee task list` shows them: `200
-{"object": "list", "data": [{id, status, rounds_used, rounds_budget, goal}],
-"total": N}` -- the newest 50, or with `?all=true` every one (any other value of
-`all` but `false` is `400`); `total` counts every task, and `data` is `[]` and
-never null. A ledger that cannot be read is left out. The body is byte for byte
-what `apogee task list --output-format json` prints.
+{"object": "list", "data": [{id, status, interrupted, rounds_used, rounds_budget,
+goal}], "total": N}` -- the newest 50, or with `?all=true` every one (any other
+value of `all` but `false` is `400`); `total` counts every task, and `data` is
+`[]` and never null. Since M32 every row carries `interrupted`, decided by the
+same rule as one task's view below, from the same lock: `true` for a task whose
+ledger says it is planning or running with no process left to run it, `false`
+on every other row. A ledger that cannot be read is left out. The body is byte
+for byte what `apogee task list --output-format json` prints.
 
 **Task control is CLI-only** -- the training track's split. `apogee task run`,
 `resume`, `halt` and `cancel` have no route: a task is an unattended run of the

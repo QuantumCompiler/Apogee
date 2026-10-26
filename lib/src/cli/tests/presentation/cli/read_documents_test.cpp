@@ -106,6 +106,8 @@ TEST_CASE("models list: the table's rows, one document", "[reads][json][models]"
         json_backends.insert(row.at("backend").get<std::string>());
         CHECK(row.contains("state"));
         CHECK(row.contains("verified"));
+        // A drafter is an `mlx` entry's alone (M32): absent everywhere else.
+        CHECK_FALSE(row.contains("draft"));
     }
     CHECK(json_backends == std::set<std::string>{"local", "spare"});
     // The rows the human table lists, the same.

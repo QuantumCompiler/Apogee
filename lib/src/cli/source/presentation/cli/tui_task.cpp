@@ -231,7 +231,8 @@ tui::ListOptions task_view_options(const RootContext& context,
         const std::filesystem::path root = harness::tasks_dir();
         std::vector<std::string> problems;
         std::vector<tasks::Task> all = tasks::list_tasks(root, &problems);
-        const nlohmann::json document = tasks::to_json(tasks::make_task_list(all, true));
+        const nlohmann::json document =
+            tasks::to_json(tasks::make_task_list(all, true, tasks::lock_holder(root)));
         std::vector<tui::ListRow> rows;
         for (const nlohmann::json& summary : document["data"]) {
             const std::string status = field(summary, "status");

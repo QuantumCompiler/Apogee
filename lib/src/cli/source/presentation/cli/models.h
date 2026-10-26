@@ -3,6 +3,7 @@
 #include <nlohmann/json_fwd.hpp>
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -30,6 +31,19 @@
 /// unprofiled model says *unprofiled*, an unreadable header says *why*, and a
 /// check that could not run says *skipped* rather than passing.
 namespace apogee::commands {
+
+/// An `mlx` entry's drafter (M32), as `models info`'s `draft:` line says it
+/// (53i): the ladder's own question (`backends::probe_mlx_draft`), asked once
+/// for both.
+struct ModelDraft {
+    /// The drafter's directory, as the entry's `draft:` names it, `~` and
+    /// `${VAR}` expanded.
+    std::string path{};
+    /// Whether it drafts beside the entry's model.
+    bool can_draft = false;
+    /// Why not, with its fix when one command is it; empty when it can.
+    std::string refusal{};
+};
 
 /// One row of `apogee models list`.
 struct ModelRow {
@@ -89,6 +103,10 @@ struct ModelRow {
     /// build does not know, as written -- from the store's one reader
     /// (`read_mlx_kind`). Empty for every other row, and then not in the JSON.
     std::string kind{};
+    /// For an `mlx` backend whose entry names a drafter (M32): where it is
+    /// and whether it drafts beside the entry's model. Absent for every other
+    /// row, and then not in the JSON.
+    std::optional<ModelDraft> draft{};
     /// For a diffusion pipeline (49a): its components counted and its size
     /// on disk, in bytes -- what it costs the disk, said as a number. Zero
     /// for every other row, and then not in the JSON.

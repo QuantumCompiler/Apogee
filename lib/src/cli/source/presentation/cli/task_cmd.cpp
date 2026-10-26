@@ -1311,7 +1311,8 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
         }
         // One listing, for a person or as the document a host reads -- the
         // body `GET /v1/admin/tasks` serves.
-        const tasks::TaskListView listed = tasks::make_task_list(all, list_flags->all);
+        const tasks::TaskListView listed =
+            tasks::make_task_list(all, list_flags->all, tasks::lock_holder(tasks_root));
         if (list_flags->read_format == ReadFormat::Json) {
             write_document(std::cout, tasks::to_json(listed));
             return;
