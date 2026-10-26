@@ -305,5 +305,50 @@ apogee train: /Users/someone/.apogee/config/config.json: not valid JSON: line 4,
     static let modelsBadConfig = #"""
 apogee models: /Users/someone/.apogee/config/config.json: not valid JSON: line 4, column 5: expected ',' or '}' after a member
 """#
+    /// tests/business/reads/Fixtures/train-status-passed.json
+    static let trainStatusPassed = #"""
+{"active_pipeline":null,"cycle":null,"cycle_active":false,"latest_pipeline":null,"pipelines":0,"recent_runs":[{"base_model":"/Users/someone/.apogee/models/tiny/safetensors/aaaaaaaaaaaa","dataset":"/Users/someone/.apogee/training/datasets/starter.jsonl","eval_passed":true,"eval_score":1.0,"final_loss":0.42,"finished_at":"2026-10-26T06:56:37Z","id":"20261026-065637","iterations":2,"kind":"run","method":"lora","started_at":"2026-10-26T06:56:37Z","status":"complete","trainer":"mock"}],"running":[],"runs":1,"versions":[]}
+"""#
+    /// tests/business/reads/Fixtures/train-versions-adapters.json
+    static let trainVersionsAdapters = #"""
+{"data":[{"active_version":1,"backend_name":"based","versions":[{"adapter_path":"/Users/someone/.apogee/training/versions/based/v1.lora.gguf","base_sha256":"ce5065b7f3dc1bcd98592fa57a11f0e9670f16f33f21abf043dd7c903ad0c98c","eval_passed":true,"eval_score":1.0,"promoted_at":"2026-10-26T06:56:37Z","run_id":"20261026-065637","version":1}]},{"active_version":1,"backend_name":"q4","versions":[{"adapter_path":"/Users/someone/.apogee/training/versions/q4/v1.lora.gguf","base_sha256":"a81cdd0551b6e79be2276ac019df1c98656527cbdc1829fc7fbf097253c31546","eval_passed":true,"eval_score":1.0,"eval_scored_on":"tiny-Q4_K_M.gguf (Q4_K_M)","promoted_at":"2026-10-26T06:56:39Z","run_id":"20261026-065638","version":1}]},{"active_version":1,"backend_name":"tuned","versions":[{"eval_passed":true,"eval_score":1.0,"gguf_path":"/Users/someone/.apogee/models/tiny/gguf/cf368ccf9b45/tuned-v1.gguf","promoted_at":"2026-10-26T06:56:37Z","run_id":"20261026-065637","version":1}]}],"object":"list"}
+"""#
+    /// tests/business/reads/Fixtures/models-list-adapters.json
+    static let modelsListAdapters = #"""
+{"data":[{"architecture":"Llama","backend":"(not configured)","backend_type":"-","format":"safetensors","group":"safetensors","model":"tiny/safetensors/aaaaaaaaaaaa","profile":"-","roles":"","section":"local","source":"local","state":"safetensors","type":"model","verified":"no record"},{"architecture":"-","backend":"based","backend_type":"llamacpp","format":"gguf","group":"gguf","model":"tiny-F16.gguf","note":"header runs past the end of the file (truncated or corrupt)","profile":"unprofiled","roles":"","section":"local","source":"converted","state":"unreadable","type":"model","verified":"no record"},{"architecture":"llama","backend":"q4","backend_type":"llamacpp","format":"gguf","group":"gguf","model":"tiny-Q4_K_M.gguf","profile":"llama3 (unverified)","roles":"","section":"local","source":"converted","state":"ok","type":"model","verified":"no record"},{"architecture":"llama","backend":"tuned","backend_type":"llamacpp","format":"gguf","group":"gguf","model":"tuned-v1.gguf","profile":"llama3 (unverified)","roles":"","section":"local","source":"local","state":"ok","type":"model","verified":"size ok, no digest published, header ok"}],"folded":0,"object":"list"}
+"""#
+    /// tests/business/reads/Fixtures/train-promote-names-adapter.err
+    static let promoteNamesAdapter = #"""
+apogee train: 'based' holds adapter versions (active v1) applied over its base, and a merged version would replace that base under them -- promote into it with --adapter, or merged under a new name
+"""#
+    /// tests/business/reads/Fixtures/train-promote-adapter.err
+    static let promoteAdapterSaid = #"""
+[promote] run 20261026-065637 -> based v1 (adapter)
+[promote] no fuse: the adapter is the version, applied over the entry's base when it loads
+[promote]   trained on: /Users/someone/.apogee/models/tiny/safetensors/aaaaaaaaaaaa
+[promote]   adapter:    /Users/someone/.apogee/training/runs/20261026-065637/adapters
+[promote] converting the adapter to a GGUF LoRA (F16): /Users/someone/.apogee/training/versions/based/v1.lora.gguf
+[promote] mock converter: writing a minimal GGUF LoRA
+[promote] pinning the adapter to the base it applies over: /Users/someone/.apogee/models/tiny/gguf/bbbbbbbbbbbb/tiny-F16.gguf
+"""#
+    /// tests/business/reads/Fixtures/train-promote-adapter-no-suite.err
+    static let promoteAdapterNoSuite = #"""
+apogee train: no eval suite to score run 20261026-065638 on tiny-Q4_K_M.gguf (Q4_K_M), the base 'q4' serves -- pass --suite <path|name>, or set training.eval_suite_path, or pass --force to skip the gate
+"""#
+    /// tests/business/reads/Fixtures/datasets-pull-handmade.txt
+    static let pullDone = #"""
+downloading 2 file(s), 3 MiB, into /Users/someone/.apogee/training/datasets/raw/someone--heat-notes
+  [1/2] data/train.jsonl
+  [2/2] data/test.jsonl
+
+/Users/someone/.apogee/training/datasets/raw/someone--heat-notes
+2 file(s), 3 MiB
+
+Convert it with:  apogee datasets prepare /Users/someone/.apogee/training/datasets/raw/someone--heat-notes
+"""#
+    /// tests/business/reads/Fixtures/datasets-pull-bad-ref.err
+    static let pullBadRef = #"""
+apogee datasets: 'nonsense' is not a Hugging Face dataset ref (expected owner/name)
+"""#
 }
 #endif

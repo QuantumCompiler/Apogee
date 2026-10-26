@@ -42,6 +42,20 @@ struct ParityTests {
         #expect(count { $0 == .plumbing } == 3)
     }
 
+    @Test("4i: the rows name what Training, Models, Suites and the session now cover -- adapters, pull, the CLI's fit, a chat under a suite")
+    func trainingAndSuitesRows() throws {
+        let train = try #require(ParityTable.place(of: "train"))
+        #expect(train.note.contains("--adapter") && train.note.contains("--suite") && train.note.contains("--judge"))
+        let datasets = try #require(ParityTable.place(of: "datasets"))
+        #expect(datasets.note.contains("pull"))
+        let chat = try #require(ParityTable.place(of: "chat"))
+        #expect(chat.note.contains("--suite") && chat.note.contains("/suite"))
+        let config = try #require(ParityTable.place(of: "config"))
+        #expect(config.note.contains("set-backend --adapters") && config.note.contains("PresentationModels"))
+        let models = try #require(ParityTable.place(of: "models"))
+        #expect(models.note.contains("models status --suite"))
+    }
+
     @Test("a verb an item placed is named on its family's row: chats show, a resumed chat's turns in the session window (M7)")
     func chatsShowPlaced() throws {
         let chats = try #require(ParityTable.place(of: "chats"))

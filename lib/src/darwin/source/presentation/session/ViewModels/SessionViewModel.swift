@@ -71,6 +71,9 @@ public final class SessionViewModel {
     /// The config's default suite, the one an `execute` opened without
     /// `--suite` runs under; empty when none is set, `nil` unread.
     public var defaultSuite: String?
+    /// The suites the chooser offers, each with the CLI's word on its fit,
+    /// as the library read them when the chooser was asked for.
+    public var suiteChoices: [SuiteChoice] = []
     /// The last turn sent, for Try again.
     public private(set) var lastSent: String?
 
@@ -101,6 +104,16 @@ public final class SessionViewModel {
     private var ending: Task<Void, Never>?
     /// The `set` lines sent whose replies are still to come.
     private var setsSent: [SetSent] = []
+    /// The suite a switch moved the session from, until the child it made
+    /// speaks: one that ends first -- the CLI refused the suite at launch --
+    /// is put back on it.
+    private var switching: SuiteFlags?
+
+    /// What a launch says of its suite: `--suite` and `--force`.
+    private struct SuiteFlags {
+        var suite: String?
+        var force: Bool
+    }
 
     /// A `set` line sent: the settings it moved, in the order the CLI answers
     /// them, and what each was before it.
@@ -175,6 +188,44 @@ public final class SessionViewModel {
         if execute.orchestrate { parts.append("orchestrating") }
         if let folder = launch.folder { parts.append("in \(folder.lastPathComponent)") }
         return parts.joined(separator: " · ")
+    }
+
+    /// The word for none: `--suite off`.
+    public static let noSuite = ChatLaunch.noSuite
+
+    /// The suite the session was launched under, as its flags said it: a
+    /// name, `off` for none, or `nil` -- left to the CLI.
+    public var suite: String? { launch.namedSuite }
+
+    /// What the session runs under, as far as its flags and the config say:
+    /// `suite pair`, `no suite`, `suite fast, the default`. `nil` where only
+    /// the CLI knows -- a saved chat resumed with no `--suite` runs under the
+    /// suite it last had, which neither the `session` event nor `chats show`
+    /// states.
+    public var suiteWords: String? {
+        switch launch.namedSuite {
+        case ChatLaunch.noSuite?:
+            return "no suite"
+        case let name?:
+            return "suite \(name)" + (launch.forceSuite ? ", forced past its memory" : "")
+        case nil:
+            guard launch.resume == nil, let defaultSuite else { return nil }
+            return defaultSuite.isEmpty ? "no suite" : "suite \(defaultSuite), the default"
+        }
+    }
+
+    /// Whether the session can move to another suite: one shut down or with
+    /// no binary cannot, nor a conversation nothing of which is written once
+    /// it has a turn -- no `--resume` could carry it on.
+    public var canSwitchSuite: Bool {
+        if isShutDown || isLostIfEnded { return false }
+        if case .missing = connection { return false }
+        return true
+    }
+
+    /// Whether a turn has been sent in what the window shows.
+    private var hasTurns: Bool {
+        transcript.items.contains { if case .user = $0.content { true } else { false } }
     }
 
     /// How this session is kept private, when it is.
@@ -281,10 +332,17 @@ public final class SessionViewModel {
             let (lines, outbox) = AsyncStream.makeStream(of: Outbound.self)
             self.outbox = outbox
             Task { await Self.write(lines, to: session) }
+            var spoke = false
+            var refusal: String?
             for await event in session.events {
                 if let read = earlier {
                     earlier = nil
                     if let read = await read.value { readBack(read) }
+                }
+                if case .ended(let end) = event, !pausing, !spoke, switching != nil {
+                    // The child a switch made ended before it spoke: the CLI
+                    // refused the suite at launch, in these words.
+                    refusal = end.stderrTail.lastLine ?? end.message
                 }
                 if case .ended = event, pausing {
                     // Freed, not finished: no ending card.
@@ -293,7 +351,13 @@ public final class SessionViewModel {
                 } else {
                     transcript.apply(event)
                 }
-                if case .event(let event) = event { heard(event) }
+                if case .event(let event) = event {
+                    if case .session = event.kind {
+                        spoke = true
+                        switching = nil
+                    }
+                    heard(event)
+                }
                 // The turn ended: what waited for it goes now, before any
                 // line the person makes next.
                 releaseHeld()
@@ -302,6 +366,7 @@ public final class SessionViewModel {
             outbox.finish()
             self.outbox = nil
             self.session = nil
+            if let refusal, let before = switching { putSuiteBack(before, refusal: refusal) }
         }
     }
 
@@ -527,12 +592,105 @@ public final class SessionViewModel {
         if takesLinesNow { sendLine(line) } else { held.append(line) }
     }
 
-    /// What was held, in the order made, once the session can take it.
+    /// What was held, in the order made, once the session can take it -- a
+    /// suite's move last, since it restarts the child the lines go to.
     private func releaseHeld() {
         guard !held.isEmpty, takesLinesNow else { return }
         let lines = held
         held = []
-        lines.forEach(sendLine)
+        let moves = lines.filter { if case .suite = $0 { true } else { false } }
+        lines.filter { !moves.contains($0) }.forEach(sendLine)
+        if case .suite(let suite, let force)? = moves.last {
+            Task { await moveSuite(to: suite, force: force) }
+        }
+    }
+
+    // MARK: - The suite
+
+    /// Moves the session under `suite` -- `off` for none -- as the CLI's
+    /// `/suite` does, `force` running one it prices over this machine's
+    /// memory. Machine mode has no line for it -- `set` refuses a suite whole,
+    /// and slash commands are the terminal's -- so the session restarts with
+    /// `--suite`, the conversation carried on by `--resume`, and the
+    /// transcript says so (the open call's default, GUI 4i). Made while a turn
+    /// runs or a card stands, it waits for the turn's end, as a line does.
+    /// The conversation moves to the suite's chat member, as `/suite` moves
+    /// it: the relaunch carries no `-m`, which would win over it. A suite the
+    /// CLI refuses at launch is put back, said in its words, and the session
+    /// carries on under the one before.
+    public func switchSuite(to suite: String, force: Bool = false) async {
+        guard canSwitchSuite, !(isExecute && suite == ChatLaunch.noSuite) else { return }
+        held.removeAll { if case .suite = $0 { true } else { false } }
+        guard suite != launch.namedSuite || force != launch.forceSuite else { return }
+        if midTurn {
+            held.append(.suite(suite, force: force))
+            return
+        }
+        await moveSuite(to: suite, force: force)
+    }
+
+    /// A turn runs, or is stopping, or a card waits on the person: a restart
+    /// now would end what the turn is doing.
+    private var midTurn: Bool {
+        if case .stopping = transcript.status { return true }
+        return transcript.turnInFlight || transcript.standingCard != nil
+    }
+
+    private func moveSuite(to suite: String, force: Bool) async {
+        guard !isShutDown else { return }
+        let before = SuiteFlags(suite: launch.namedSuite, force: launch.forceSuite)
+        launch.name(suite: suite, force: force)
+        settings.model = nil
+        launch.settings.model = nil
+        transcript.note(Self.moveWords(suite, force: force, turns: hasTurns, carried: chatID != nil))
+        switching = before
+        // Not running now -- paused, never started, or still locating its
+        // binary -- the launch to come carries the flags; else a new child.
+        if isPaused || connection == .idle || launching != nil { return }
+        await restart()
+    }
+
+    /// The suite put back after the CLI refused the one asked for, and the
+    /// session started again under it.
+    private func putSuiteBack(_ before: SuiteFlags, refusal: String) {
+        switching = nil
+        let asked = launch.namedSuite
+        launch.name(suite: before.suite, force: before.force)
+        transcript.note(
+            "not moved to \(Self.suiteName(asked)): \(refusal) -- the session carries on under \(Self.suiteName(before.suite))")
+        guard !isShutDown else { return }
+        if chatID == nil {
+            let notes = transcript.items.filter { if case .notice = $0.content { true } else { false } }
+            transcript = Transcript()
+            for case .notice(let text) in notes.map(\.content) { transcript.note(text) }
+        } else {
+            transcript.reopening()
+        }
+        beginLaunch()
+    }
+
+    /// A suite flag in words: `suite pair`, `no suite`, `the suite it had`.
+    nonisolated static func suiteName(_ suite: String?) -> String {
+        switch suite {
+        case ChatLaunch.noSuite?: "no suite"
+        case let name?: "suite \(name)"
+        case nil: "the suite it had"
+        }
+    }
+
+    /// What a move says in the transcript: where to, by which flags, and what
+    /// becomes of the conversation.
+    nonisolated static func moveWords(_ suite: String, force: Bool, turns: Bool, carried: Bool) -> String {
+        let flags = "--suite \(suite)" + (force ? " --force" : "")
+        let off = suite == ChatLaunch.noSuite
+        guard turns else {
+            return off ? "starting with no suite (\(flags))" : "starting under suite \(suite) (\(flags))"
+        }
+        let to = off ? "leaving the suite (\(flags))" : "switching to suite \(suite) (\(flags))"
+        let how = carried
+            ? "the conversation carries on" + (off ? " on its model" : " on the suite's chat member") + ", and a local model loads again"
+            : "the earlier turns can't be carried on: this session isn't in the saved list"
+        return "\(to) -- machine mode carries no suite, so the session restarts under it; \(how)"
     }
 
     /// Writes `line`, and shows what it does from now: the chip, the setting.
@@ -552,6 +710,8 @@ public final class SessionViewModel {
             outbox.yield(.set(change))
         case .compact:
             outbox.yield(.compact)
+        case .suite(let suite, let force):
+            Task { await moveSuite(to: suite, force: force) }
         }
     }
 
@@ -650,6 +810,7 @@ public final class SessionViewModel {
         case .detachAll: canDetach && !attachments.isEmpty
         case .stop: canCancel
         case .library(.rename), .library(.delete): chatID != nil && privateMode == nil
+        case .library(.chooseSuite): canSwitchSuite
         default: true
         }
     }

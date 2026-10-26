@@ -71,6 +71,31 @@ struct ChatLaunchTests {
             == base + ["--resume", "c1", "--suite", "duo"], "paused and resumed, it reopens as it opened")
     }
 
+    @Test("a chat's suite: --suite <name>, --suite off for none, --force only when forced; none named leaves it to the CLI (GUI 4i)")
+    func chatSuite() {
+        let head = ["chat", "--output-format", "stream-json", "--input-format", "stream-json", "--tools"]
+        #expect(ChatLaunch().arguments == head, "no --suite: a new chat runs under models.default_suite, a resumed one the suite it had")
+        #expect(ChatLaunch(suite: "pair").arguments == head + ["--suite", "pair"])
+        #expect(ChatLaunch(suite: ChatLaunch.noSuite).arguments == head + ["--suite", "off"])
+        #expect(ChatLaunch(suite: "vast", forceSuite: true).arguments == head + ["--suite", "vast", "--force"])
+        #expect(
+            ChatLaunch(resume: "20261026-065601-ab12", settings: RunSettings(model: "plain"), suite: "fast").arguments
+                == head + ["--resume", "20261026-065601-ab12", "-m", "plain", "--suite", "fast"])
+        #expect(ChatLaunch(suite: "pair").namedSuite == "pair")
+    }
+
+    @Test("a launch names its suite where its opening takes it: a chat's own, an execute session's door's")
+    func namingTheSuite() {
+        var chat = ChatLaunch(suite: "pair")
+        chat.name(suite: "fast", force: true)
+        #expect(chat.suite == "fast" && chat.forceSuite && chat.execute == nil)
+        var execute = ChatLaunch(execute: ChatLaunch.Execute(suite: "coding"))
+        execute.name(suite: "fast", force: false)
+        #expect(execute.execute?.suite == "fast" && execute.suite == nil && execute.namedSuite == "fast")
+        #expect(execute.arguments == ["execute", "--output-format", "stream-json", "--input-format", "stream-json", "--tools", "--suite", "fast"])
+        #expect(ChatLaunch(execute: ChatLaunch.Execute()).namedSuite == nil, "the door left it to the config")
+    }
+
     @Test("a launch's folder is where its child works: a project for execute")
     func folder() {
         let project = URL(fileURLWithPath: "/Users/someone/code/ingest")

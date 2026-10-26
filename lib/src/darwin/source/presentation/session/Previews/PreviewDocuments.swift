@@ -971,5 +971,62 @@ Run with --help for more information.
     static let chatsShowWarningsOlderErr = #"""
 apogee chats: a message could not be read and was skipped
 """#
+    /// tests/data/protocol/Fixtures/chat-under-suite.jsonl
+    static let chatUnderSuite = #"""
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-10-25","tools":true},"chat_id":"20261026-065701-9916","model":"plain","next_turn":1,"protocol_version":1,"type":"session"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"answer_start"}
+{"text":"PLAIN-SA","turn":1,"type":"answer_delta"}
+{"text":"YS hello","turn":1,"type":"answer_delta"}
+{"turn":1,"type":"answer_end"}
+{"finish_reason":"stop","model":"plain","text":"PLAIN-SAYS hello","turn":1,"type":"result"}
+"""#
+    /// tests/data/protocol/Fixtures/resumed-under-suite.jsonl
+    static let resumedUnderSuite = #"""
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-10-25","tools":true},"chat_id":"20261026-065701-9916","model":"fastroot","next_turn":2,"protocol_version":1,"type":"session"}
+{"text":"utility — restating the follow-up to rank the tools, with fasthelper","turn":2,"type":"tool_status"}
+{"turn":2,"type":"thinking"}
+{"turn":2,"type":"answer_start"}
+{"text":"FASTROOT","turn":2,"type":"answer_delta"}
+{"text":"-SAYS he","turn":2,"type":"answer_delta"}
+{"text":"llo","turn":2,"type":"answer_delta"}
+{"turn":2,"type":"answer_end"}
+{"finish_reason":"stop","model":"fastroot","text":"FASTROOT-SAYS hello","turn":2,"type":"result"}
+"""#
+    /// tests/data/protocol/Fixtures/resumed-suite-off.jsonl
+    static let resumedSuiteOff = #"""
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-10-25","tools":true},"chat_id":"20261026-065701-9916","model":"fastroot","next_turn":3,"protocol_version":1,"type":"session"}
+{"turn":3,"type":"thinking"}
+{"turn":3,"type":"answer_start"}
+{"text":"FASTROOT","turn":3,"type":"answer_delta"}
+{"text":"-SAYS he","turn":3,"type":"answer_delta"}
+{"text":"llo","turn":3,"type":"answer_delta"}
+{"turn":3,"type":"answer_end"}
+{"finish_reason":"stop","model":"fastroot","text":"FASTROOT-SAYS hello","turn":3,"type":"result"}
+"""#
+    /// tests/data/protocol/Fixtures/suite-over-budget.err
+    static let suiteOverBudget = #"""
+apogee chat: suite vast needs 247056 MiB of this machine's 110100 MiB: root 41096 + vast 204936 + 1024 margin -- it does not fit; --force runs it anyway
+"""#
+    /// tests/business/reads/Fixtures/suites-models-status-cloud.json
+    static let suiteStatusCloud = #"""
+{"fields":[{"field":"suite","value":"cloud"},{"field":"chat","value":"claude   (via suite cloud)"},{"field":"embedding","value":"helper   (via suite cloud)   [local: 40960 MiB of weights, 136 MiB of cache]"},{"field":"extraction","value":"plain   (via models.default)"},{"field":"vision","value":"(unset -- the chat's own backend)"},{"field":"transcription","value":"(unset -- the chat's own backend)"},{"field":"utility","value":"(unset -- the chat's own backend)"},{"field":"footprint","value":"suite cloud\nclaude (chat): nothing held here\nhelper (embedding): 41096 MiB -- 40960 MiB of weights, 136 MiB of q8_0 cache at 8192 tokens, 0 MiB of adapters\ntotal: suite cloud needs 42120 MiB of this machine's 110100 MiB: helper 41096 + 1024 margin -- fits"}]}
+"""#
+    /// tests/business/reads/Fixtures/suites-models-status-fast.json
+    static let suiteStatusFast = #"""
+{"fields":[{"field":"suite","value":"fast"},{"field":"chat","value":"fastroot   (via suite fast)"},{"field":"embedding","value":"plain   (via models.default)"},{"field":"extraction","value":"plain   (via models.default)"},{"field":"vision","value":"(unset -- the chat's own backend)"},{"field":"transcription","value":"(unset -- the chat's own backend)"},{"field":"utility","value":"fasthelper   (via suite fast)"},{"field":"footprint","value":"suite fast\nfastroot (chat): nothing held here\nfasthelper (utility): nothing held here\ntotal: suite fast: no member holds memory on this machine"}]}
+"""#
+    /// tests/business/reads/Fixtures/suites-models-status-pair.json
+    static let suiteStatusPair = #"""
+{"fields":[{"field":"suite","value":"pair"},{"field":"chat","value":"plain   (via suite pair)"},{"field":"embedding","value":"plain   (via models.default)"},{"field":"extraction","value":"plain   (via models.default)"},{"field":"vision","value":"(unset -- the chat's own backend)"},{"field":"transcription","value":"(unset -- the chat's own backend)"},{"field":"utility","value":"fasthelper   (via suite pair)"},{"field":"footprint","value":"suite pair\nplain (chat): nothing held here\nfasthelper (utility): nothing held here\ntotal: suite pair: no member holds memory on this machine"}]}
+"""#
+    /// tests/business/reads/Fixtures/suites-models-status-shared.json
+    static let suiteStatusShared = #"""
+{"fields":[{"field":"suite","value":"shared"},{"field":"chat","value":"root   (via suite shared)   [local: 40960 MiB of weights, 136 MiB of cache]"},{"field":"embedding","value":"plain   (via models.default)"},{"field":"extraction","value":"scribe   (via suite shared)   [local: 40960 MiB of weights, 136 MiB of cache]"},{"field":"vision","value":"(unset -- the chat's own backend)"},{"field":"transcription","value":"(unset -- the chat's own backend)"},{"field":"utility","value":"helper   (via suite shared)   [local: 40960 MiB of weights, 136 MiB of cache]"},{"field":"footprint","value":"suite shared\nroot (chat): 41096 MiB -- 40960 MiB of weights, 136 MiB of q8_0 cache at 8192 tokens\nscribe (extraction): 136 MiB -- shares root's 40960 MiB of weights, 136 MiB of q8_0 cache at 8192 tokens\nhelper (utility): 136 MiB -- shares root's 40960 MiB of weights, 136 MiB of q8_0 cache at 8192 tokens, 0 MiB of adapters\ntotal: suite shared needs 42392 MiB of this machine's 110100 MiB: root 41096 + scribe 136 (shares root's weights, 40960 MiB saved) + helper 136 (shares root's weights, 40960 MiB saved) + 1024 margin -- fits"}]}
+"""#
+    /// tests/business/reads/Fixtures/suites-models-status-vast.json
+    static let suiteStatusVast = #"""
+{"fields":[{"field":"suite","value":"vast"},{"field":"chat","value":"root   (via suite vast)   [local: 40960 MiB of weights, 136 MiB of cache]"},{"field":"embedding","value":"plain   (via models.default)"},{"field":"extraction","value":"vast   (via suite vast)   [local: 204800 MiB of weights, 136 MiB of cache]"},{"field":"vision","value":"(unset -- the chat's own backend)"},{"field":"transcription","value":"(unset -- the chat's own backend)"},{"field":"utility","value":"(unset -- the chat's own backend)"},{"field":"footprint","value":"suite vast\nroot (chat): 41096 MiB -- 40960 MiB of weights, 136 MiB of q8_0 cache at 8192 tokens\nvast (extraction): 204936 MiB -- 204800 MiB of weights, 136 MiB of q8_0 cache at 8192 tokens\ntotal: suite vast needs 247056 MiB of this machine's 110100 MiB: root 41096 + vast 204936 + 1024 margin -- it does not fit"}]}
+"""#
 }
 #endif

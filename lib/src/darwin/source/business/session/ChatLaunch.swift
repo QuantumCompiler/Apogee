@@ -44,13 +44,22 @@ public struct ChatLaunch: Sendable, Equatable {
     public var noRecall: Bool
     /// `execute` rather than `chat`, as its door says.
     public var execute: Execute?
+    /// A chat's suite (the CLI's 27d): `--suite <name>`, or `--suite off`
+    /// (`noSuite`) for none; `nil` leaves it to the CLI -- a new chat runs
+    /// under `models.default_suite`, a resumed one under the suite it last
+    /// had. An `execute` session's is its door's (`Execute.suite`).
+    public var suite: String?
+    /// `--force`: run the suite even when the CLI prices it over this
+    /// machine's memory, which it otherwise refuses at launch (27e).
+    public var forceSuite: Bool
     /// The folder the session works in; the client's own default (the home
     /// folder) when `nil`. An `execute` opened in a project reads it as one.
     public var folder: URL?
 
     public init(
         tools: Bool = true, resume: String? = nil, settings: RunSettings? = nil, privately: Bool = false,
-        noRecall: Bool = false, execute: Execute? = nil, folder: URL? = nil
+        noRecall: Bool = false, execute: Execute? = nil, folder: URL? = nil, suite: String? = nil,
+        forceSuite: Bool = false
     ) {
         self.tools = tools
         self.resume = resume
@@ -61,6 +70,29 @@ public struct ChatLaunch: Sendable, Equatable {
         self.noRecall = noRecall
         self.execute = execute
         self.folder = folder
+        self.suite = suite
+        self.forceSuite = forceSuite
+    }
+
+    /// The word `--suite` takes for none (`chat --suite off`); `execute`
+    /// refuses it, since it opens under a suite or bare.
+    public static let noSuite = "off"
+
+    /// The suite the launch names, whichever opening it is: a chat's
+    /// `suite`, or the execute door's.
+    public var namedSuite: String? {
+        execute.map(\.suite) ?? suite
+    }
+
+    /// Names `suite` for the next launch -- a chat's `--suite`, or the
+    /// execute door's -- forced or not.
+    public mutating func name(suite: String?, force: Bool) {
+        if execute != nil {
+            execute?.suite = suite
+        } else {
+            self.suite = suite
+        }
+        forceSuite = force
     }
 
     /// The arguments after `apogee`.
@@ -87,7 +119,10 @@ public struct ChatLaunch: Sendable, Equatable {
         if let execute {
             if let suite = execute.suite { arguments += ["--suite", suite] }
             if execute.orchestrate { arguments.append("--orchestrate") }
+        } else if let suite {
+            arguments += ["--suite", suite]
         }
+        if forceSuite { arguments.append("--force") }
         return arguments
     }
 

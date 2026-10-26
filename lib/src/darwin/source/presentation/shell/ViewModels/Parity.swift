@@ -51,11 +51,11 @@ public struct Refusal: Sendable, Equatable {
 public enum ParityTable {
     public static let places: [CommandPlace] = [
         // --- screens: drawn in the app today ------------------------------------
-        CommandPlace("chat", .screen(module: "PresentationSession"), "the session window: a conversation driven over machine mode"),
+        CommandPlace("chat", .screen(module: "PresentationSession"), "the session window: a conversation driven over machine mode, under a suite or none -- --suite at launch, and /suite or Suites' Switch the session to it relaunching it with --resume and --suite, as machine mode carries no suite"),
         CommandPlace("chats", .screen(module: "PresentationSessions"), "Sessions: the saved conversations, renamed, deleted, resumed -- and `chats show`, a resumed one's earlier turns drawn in the session window (PresentationSession)"),
         CommandPlace("execute", .screen(module: "PresentationSessions"), "Sessions' execute door: a suite or bare, a project folder, orchestrate; /play in the session"),
-        CommandPlace("models", .screen(module: "PresentationModels"), "Models: the library, a model's details, the roles, downloads"),
-        CommandPlace("config", .screen(module: "PresentationSettings"), "Settings' panes, and Suites (PresentationSuites)"),
+        CommandPlace("models", .screen(module: "PresentationModels"), "Models: the library, a model's details, the roles, downloads; and Suites' fit, each suite's footprint as models status --suite states it (PresentationSuites)"),
+        CommandPlace("config", .screen(module: "PresentationSettings"), "Settings' panes, Suites (PresentationSuites), and a backend's adapters listed with their pins and edited by config set-backend --adapters (PresentationModels)"),
         CommandPlace("version", .screen(module: "PresentationSettings"), "Settings › General, and the window's subtitle"),
         CommandPlace("tui", .screen(module: "PresentationShell"), "the window itself: the app is the full-screen shell's counterpart"),
         CommandPlace("system", .screen(module: "PresentationMonitor"), "the system monitor overlay"),
@@ -69,8 +69,8 @@ public enum ParityTable {
         CommandPlace("bootstrap", .screen(module: "PresentationSettings"), "Settings › Backends & keys: install runtimes and register providers"),
         CommandPlace("knowledge", .screen(module: "PresentationKnowledge"), "Knowledge › Records: list, ask, capture, link, move, delete, export"),
         CommandPlace("embed", .screen(module: "PresentationKnowledge"), "Knowledge › Collections: list, health, search, ingest, delete"),
-        CommandPlace("train", .screen(module: "PresentationTraining"), "Training › Runs and Regimes: runs launched, gated, promoted, rolled back"),
-        CommandPlace("datasets", .screen(module: "PresentationTraining"), "Training › Datasets: create, synthesize, prepare, delete; the kits"),
+        CommandPlace("train", .screen(module: "PresentationTraining"), "Training › Runs and Regimes: runs launched, gated, promoted -- merged, or the adapter alone (--adapter, gated on a quantized base by --suite and --judge) -- and rolled back"),
+        CommandPlace("datasets", .screen(module: "PresentationTraining"), "Training › Datasets: create, pull from Hugging Face, synthesize, prepare, delete; the kits"),
         CommandPlace("agents", .screen(module: "PresentationLibrary"), "Library › Agents: list, create, delete, the person's own files edited in place"),
         CommandPlace("mcp", .screen(module: "PresentationLibrary"), "Library › MCP servers: connect state, presets registered, enable, disable, a tool tried"),
         CommandPlace("symphonies", .screen(module: "PresentationLibrary"), "Library › Symphonies: the catalog, a play supervised, own spec files edited and checked"),

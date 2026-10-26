@@ -178,6 +178,17 @@ final class AppViewModel {
             shell?.go(.sessions)
             Task { await sessions?.newSession(on: backend) }
         }
+        // Suites' doors into Sessions (GUI 4i): a new chat under a suite, and
+        // the open session moved under one, each in Sessions' view.
+        suites.openChat = { [weak shell, weak sessions] suite, force in
+            shell?.go(.sessions)
+            Task { await sessions?.newSession(under: suite, force: force) }
+        }
+        suites.switchSession = { [weak shell, weak sessions] suite, force in
+            shell?.go(.sessions)
+            Task { await sessions?.switchSuite(to: suite, force: force) }
+        }
+        suites.sessionSwitchable = { [weak sessions] in sessions?.canSwitchSuite ?? false }
         // Sessions in view or not: the library keeps its one child to the
         // session on screen. A place coming into view reads again.
         shell.routeChanged = { [weak sessions, weak models, weak store, weak tasks, weak suites, weak graph, weak video, weak compose, weak voice, weak records, weak collections, weak training, weak agents, weak symphonies, weak mcp, weak review] destination in

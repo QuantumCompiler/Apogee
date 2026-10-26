@@ -58,6 +58,54 @@ enum TrainingPreview {
         return [.ended(JobEnd(exit: ChildExit(reason: .exited, status: 1), stderrTail: tail, interrupted: false))]
     }
 
+    /// The adapter sandbox's reads (GUI 4i): a run that passed its gate on
+    /// the mock trainer, `based` holding an adapter version, `q4` one gated on
+    /// its quantized base, `tuned` a merged one; the datasets and regimes as
+    /// above.
+    static let adapters = PreviewRunner(reads: [
+        (["train", "status"], TrainingDocuments.trainStatusPassed),
+        (["train", "versions"], TrainingDocuments.trainVersionsAdapters),
+        (["train", "regime", "list"], TrainingDocuments.trainRegimes),
+        (["datasets", "kits"], TrainingDocuments.datasetsKits),
+        (["datasets", "list"], TrainingDocuments.datasetsList),
+        (["models", "list"], TrainingDocuments.modelsListAdapters),
+    ])
+
+    /// The run that passed its gate, as that `train status` lists it.
+    static var passed: TrainingRun {
+        TrainingStatus(document: ReadDocument(text: TrainingDocuments.trainStatusPassed)!).recent.first!
+    }
+
+    /// A job's end as the CLI left it: exit 1, `stderr` its words.
+    static func refusal(_ stderr: String) -> [JobUpdate] {
+        var tail = BoundedTail()
+        tail.append(Data((stderr + "\n").utf8))
+        return [.ended(JobEnd(exit: ChildExit(reason: .exited, status: 1), stderrTail: tail, interrupted: false))]
+    }
+
+    /// The recorded pull's lines on its stdout -- the first `count`, or all
+    /// of them and its end.
+    static func pulling(_ count: Int? = nil) -> [JobUpdate] {
+        let lines = TrainingDocuments.pullDone.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let said = lines.prefix(count ?? lines.count).map { JobUpdate.said($0) }
+        guard count == nil else { return said }
+        return said + [.ended(JobEnd(exit: ChildExit(reason: .exited, status: 0), stderrTail: BoundedTail(), interrupted: false))]
+    }
+
+    /// The adapter promote sheet for the passed run, onto `based`.
+    static func promotingAdapter(_ training: TrainingViewModel) {
+        training.newPromotion(of: passed)
+        training.promoteForm.adapter = true
+        training.promoteForm.backend = "based"
+    }
+
+    /// Waits for what a finished preview job leaves behind.
+    static func settled(_ condition: @MainActor () -> Bool) async {
+        for _ in 0..<100 where !condition() {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     static func training(said: [JobUpdate] = [], finishes: Bool = false, runner: PreviewRunner = TrainingPreview.runner) -> TrainingViewModel {
         TrainingViewModel(runner: runner, starter: PreviewJobs(said: said, finishes: finishes))
     }

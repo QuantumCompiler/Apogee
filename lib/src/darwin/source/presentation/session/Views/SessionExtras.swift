@@ -36,6 +36,10 @@ struct EmptySessionView: View {
             HStack(spacing: Spacing.s) {
                 Button("Attach a folder") { model.presenting = .files }
                 Button("Choose a model") { model.presenting = .settings }
+                if !model.isExecute {
+                    Button("Choose a suite") { model.onAction?(.chooseSuite) }
+                        .disabled(!model.canSwitchSuite)
+                }
                 if model.privateMode == nil {
                     Button("Private session instead") { model.onAction?(.newPrivateSession) }
                 }

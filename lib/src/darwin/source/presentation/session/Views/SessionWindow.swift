@@ -30,6 +30,9 @@ public struct SessionWindow<Accessory: View>: View {
         .sheet(item: Binding(get: { model.presenting == .settings ? Presenting.settings : nil }, set: { if $0 == nil { model.presenting = nil } })) { _ in
             SettingsSheet(model: model)
         }
+        .sheet(item: Binding(get: { model.presenting == .suites ? Presenting.suites : nil }, set: { if $0 == nil { model.presenting = nil } })) { _ in
+            SuiteSheet(model: model)
+        }
         .fileImporter(
             isPresented: Binding(get: { model.presenting == .files }, set: { if !$0 { model.presenting = nil } }),
             allowedContentTypes: [.item, .folder], allowsMultipleSelection: true
@@ -99,6 +102,14 @@ struct ConversationView<Accessory: View>: View {
                     .foregroundStyle(Palette.textSecondary)
                     .lineLimit(1)
                     .help("Opened as apogee execute: its suite's symphonies play with /play")
+            } else if let suite = model.suiteWords {
+                Button(suite) { model.onAction?(.chooseSuite) }
+                    .buttonStyle(.plain)
+                    .font(.apogeeMeta)
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+                    .disabled(!model.canSwitchSuite)
+                    .help("The suite this session runs under -- /suite, or click, to run it under another, or none")
             }
             Spacer()
             if model.transcript.turnInFlight {
@@ -154,6 +165,36 @@ struct MissingBinaryView: View {
     SessionWindow(model: model)
         .frame(width: 900, height: 640)
         .task { model.start() }
+}
+
+#Preview("A chat under a suite") {
+    let session = SessionPreview.underSuite()
+    SessionWindow(model: session)
+        .frame(width: 900, height: 520)
+        .task { await SessionPreview.answered(session) }
+}
+
+#Preview("Switched to another suite: restarted under it, said") {
+    let session = SessionPreview.savedUnderSuite()
+    SessionWindow(model: session)
+        .frame(width: 900, height: 620)
+        .task {
+            await SessionPreview.answered(session)
+            await session.switchSuite(to: "fast")
+            await SessionPreview.until { session.transcript.acceptsInput }
+            session.draft = SessionPreview.suiteTurn
+            session.submit()
+        }
+}
+
+#Preview("A suite apogee refused at launch, put back") {
+    let session = SessionPreview.savedUnderSuite()
+    SessionWindow(model: session)
+        .frame(width: 900, height: 620)
+        .task {
+            await SessionPreview.answered(session)
+            await session.switchSuite(to: "vast")
+        }
 }
 
 #Preview("A new session") {

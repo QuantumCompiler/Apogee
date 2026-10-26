@@ -36,6 +36,52 @@ enum SuitesPreview {
         SuitesViewModel(runner: runner)
     }
 
+    // MARK: - The recorded sandbox (GUI 4i)
+
+    /// The suites recorded from the branch's binary over a sandbox: `shared`,
+    /// three members on one 40 GiB base, which the CLI counts once and admits;
+    /// `vast`, over a 200 GiB base, which does not fit; `cloud`; `fast` (the
+    /// default) and `pair`, mock members holding nothing.
+    static let recorded = PreviewRunner(
+        reads: [
+            (["models", "status"], SuitesDocuments.status),
+            (["models", "status", "--suite", "cloud"], SuitesDocuments.statusCloud),
+            (["models", "status", "--suite", "fast"], SuitesDocuments.statusFast),
+            (["models", "status", "--suite", "pair"], SuitesDocuments.statusPair),
+            (["models", "status", "--suite", "shared"], SuitesDocuments.statusShared),
+            (["models", "status", "--suite", "vast"], SuitesDocuments.statusVast),
+            (["models", "list"], SuitesDocuments.modelsList),
+            (["system"], SuitesDocuments.system),
+            (["models", "info", "root"], SuitesDocuments.infoRoot),
+            (["models", "info", "helper"], SuitesDocuments.infoHelper),
+            (["models", "info", "scribe"], SuitesDocuments.infoScribe),
+            (["models", "info", "vast"], SuitesDocuments.infoVast),
+        ],
+        commands: [
+            (["config", "get", "suites"], SuitesDocuments.configGetSuites),
+            (["config", "get", "suites.cloud"], SuitesDocuments.configGetCloud),
+            (["config", "get", "suites.fast"], SuitesDocuments.configGetFast),
+            (["config", "get", "suites.pair"], SuitesDocuments.configGetPair),
+            (["config", "get", "suites.shared"], SuitesDocuments.configGetShared),
+            (["config", "get", "suites.vast"], SuitesDocuments.configGetVast),
+        ])
+
+    /// The recorded suites, a session open or not.
+    static func recordedModel(sessionOpen: Bool = false) -> SuitesViewModel {
+        let suites = SuitesViewModel(runner: recorded)
+        suites.sessionSwitchable = { sessionOpen }
+        return suites
+    }
+
+    /// A recorded suite, as `config get suites.<name>` printed it.
+    static func recordedSuite(_ name: String) -> Suite {
+        let texts = [
+            "cloud": SuitesDocuments.configGetCloud, "fast": SuitesDocuments.configGetFast, "pair": SuitesDocuments.configGetPair,
+            "shared": SuitesDocuments.configGetShared, "vast": SuitesDocuments.configGetVast,
+        ]
+        return Suite(name: name, text: texts[name] ?? "")
+    }
+
     /// `config get suites` naming `names`, each one's `config get
     /// suites.<name>`, and the reads every suite's fit is worked out from.
     static func runner(_ names: [String]) -> PreviewRunner {

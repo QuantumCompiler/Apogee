@@ -107,8 +107,8 @@ struct SessionStatesTests {
         var acts: [SessionAction] = []
         model.onAction = { acts.append($0) }
         model.draft = "/"
-        #expect(model.slashSuggestions.map(\.name) == ["/new", "/private", "/model", "/attach", "/inspector"],
-            "no compact or detach before 52d, nothing to stop, nothing saved to rename or delete")
+        #expect(model.slashSuggestions.map(\.name) == ["/new", "/private", "/model", "/suite", "/attach", "/inspector"],
+            "no compact or detach before 52d, nothing to stop, nothing saved to rename or delete; /suite in any chat (GUI 4i)")
         model.draft = "/pr"
         #expect(model.slashSuggestions.map(\.name) == ["/private"])
         model.run(model.slashSuggestions[0])

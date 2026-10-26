@@ -151,4 +151,29 @@ struct PreviewReader: CommandRunning {
 
 /// Where a preview says the binary is; never run.
 let previewBinary = URL(fileURLWithPath: "/Users/someone/.local/bin/apogee")
+/// Hands each launch the stream the branch binary wrote under its suite
+/// flag (GUI 4i): `--suite pair` the chat opened under it, `--suite fast` the
+/// same chat resumed under that one, `--suite off` resumed under none -- and
+/// a suite the CLI refused at launch, its child ending on its words alone.
+struct PreviewSuiteChats: ChatStarting {
+    /// The recorded stream by the launch's `--suite`.
+    var streams: [String: [String]]
+    /// The recorded refusal by the launch's `--suite`: no stdout, exit 1.
+    var refusals: [String: String] = [:]
+
+    func locateBinary() async -> DiscoveryOutcome {
+        .found(PreviewChats.found, skipped: [])
+    }
+
+    func openChat(binary: URL, launch: ChatLaunch) -> any ChatSession {
+        let suite = launch.namedSuite ?? ""
+        if let refusal = refusals[suite] {
+            var tail = BoundedTail()
+            tail.append(Data(refusal.utf8))
+            return PreviewChat(
+                saying: [], ending: SessionEnd(reason: .failed, exit: ChildExit(reason: .exited, status: 1), stderrTail: tail))
+        }
+        return PreviewChat(saying: streams[suite] ?? [])
+    }
+}
 #endif

@@ -39,3 +39,15 @@ struct AppViewModelTests {
         #expect(store.string(forKey: "route") == "sessions")
     }
 }
+
+@Suite("Suites reach Sessions (GUI 4i)")
+@MainActor
+struct SuitesReachSessionsTests {
+    @Test("the composition gives Suites its doors into Sessions, and asks the library whether a session can be switched")
+    func doorsWired() {
+        let model = AppViewModel(info: nil, preferences: Preferences(store: MemoryStore()))
+        #expect(model.suites.openChat != nil && model.suites.switchSession != nil)
+        #expect(model.suites.sessionSwitchable != nil)
+        #expect(!model.suites.canSwitchSession, "nothing open before the library has started")
+    }
+}

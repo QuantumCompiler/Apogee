@@ -63,6 +63,41 @@ enum ModelsPreview {
         return shell
     }
 
+    // MARK: - A backend's adapters (GUI 4i)
+
+    /// The adapter sandbox recorded from the branch's binary: `based` applying
+    /// two adapters -- its promoted v1 and a hand-added one at scale 0.5 --
+    /// both pinned; `q4` one whose base was rewritten under it, so the doctor
+    /// fails its row and names the promote that mends it; `tuned` none.
+    static let adaptersRunner = PreviewRunner(
+        reads: [
+            (["models", "list"], ModelsDocuments.adaptersList),
+            (["models", "info", "based"], ModelsDocuments.adaptersInfoBased),
+            (["models", "info", "q4"], ModelsDocuments.adaptersInfoQ4),
+            (["check"], ModelsDocuments.adaptersCheck),
+        ],
+        commands: [
+            (["config", "get", "backends.based.adapters"], ModelsDocuments.adaptersGet),
+            (["config", "get", "backends.q4.adapters"], ModelsDocuments.adaptersGetQ4),
+            (["config", "set-backend"], ModelsDocuments.adaptersSet),
+        ])
+
+    static func adapters() -> ModelsViewModel {
+        ModelsViewModel(runner: adaptersRunner)
+    }
+
+    /// The adapter sandbox read, `backend` open.
+    static func showingAdapters(_ models: ModelsViewModel, of backend: String) async {
+        await models.connect(binary: previewBinary)
+        if let row = models.rows.first(where: { $0.backend == backend }) { await models.select(row) }
+    }
+
+    /// `based`'s adapters in the sheet, as they are.
+    static func editingAdapters(_ models: ModelsViewModel) async {
+        await showingAdapters(models, of: "based")
+        if let row = models.selectedRow { models.editAdapters(row) }
+    }
+
     // MARK: - The store
 
     static let snapshot = "Llama3.2-1B-Instruct/safetensors/edaba290ce7f"

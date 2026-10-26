@@ -94,6 +94,15 @@ public final class ModelsViewModel {
     public private(set) var failure: String?
     /// What the last delete said beyond what it removed, until dismissed.
     public private(set) var narration: DeleteNarration?
+    /// The selected backend's adapters and their pins, where it is a type
+    /// that takes them (llama.cpp, mlx; the CLI's 53a); `nil` for any other,
+    /// or unread.
+    public private(set) var adapters: AdaptersView?
+    /// Why the selected backend's adapters could not be read, in the CLI's
+    /// words.
+    public private(set) var adaptersFailure: String?
+    /// The adapters being edited: the sheet's.
+    public var editingAdapters: AdaptersForm?
     /// Says one line in the window's toast.
     public var say: (@MainActor (String) -> Void)?
     /// Checks a model's files as a job on the Jobs tab (2i): the
@@ -143,10 +152,51 @@ public final class ModelsViewModel {
         if let selected {
             if rows.contains(where: { $0.name == selected }) {
                 await readInfo(selected)
+                await readAdapters()
             } else {
                 close()
             }
         }
+    }
+
+    /// Whether `row` is a backend that takes adapters: a llama.cpp or mlx
+    /// entry (the CLI's `takes_adapters`).
+    public static func takesAdapters(_ row: ModelRow) -> Bool {
+        !row.isStored && (row.backendType == "llamacpp" || row.backendType == "mlx")
+    }
+
+    /// The selected backend's adapters: `config get backends.<name>.adapters`
+    /// (readable since the CLI's 55g) -- and, where it lists any, `check`'s
+    /// Adapters rows for their pins (53c), the doctor's document standing
+    /// whatever its exit, since it exits 1 when a row fails.
+    private func readAdapters() async {
+        guard let binary, let row = selectedRow, Self.takesAdapters(row) else {
+            adapters = nil
+            adaptersFailure = nil
+            return
+        }
+        let name = row.name
+        let listed = await runner.command(binary: binary, ["config", "get", "backends.\(row.backend).adapters"])
+        guard selected == name else { return }
+        guard case .done(let text) = listed else {
+            adapters = nil
+            adaptersFailure = listed.failure
+            return
+        }
+        adaptersFailure = nil
+        let list = BackendAdapter.list(text)
+        guard !list.isEmpty else {
+            adapters = AdaptersView(backend: row.backend, rows: [], checkFailure: nil)
+            return
+        }
+        let report = await runner.report(binary: binary, ["check"])
+        guard selected == name else { return }
+        let checks = report.document.map { AdapterCheck.rows(for: list, of: row.backend, in: $0.value) } ?? [:]
+        let failure = report.document == nil
+            ? "The doctor could not be read: \(report.failure ?? "apogee printed nothing")"
+            : checks.isEmpty ? "The doctor names none of them: this apogee's check has no Adapters section" : nil
+        adapters = AdaptersView(
+            backend: row.backend, rows: list.map { AdaptersView.Row(adapter: $0, check: checks[$0.path]) }, checkFailure: failure)
     }
 
     private func readRoles() async {
@@ -217,13 +267,18 @@ public final class ModelsViewModel {
         selected = row.name
         info = nil
         infoFailure = nil
+        adapters = nil
+        adaptersFailure = nil
         await readInfo(row.name)
+        await readAdapters()
     }
 
     public func close() {
         selected = nil
         info = nil
         infoFailure = nil
+        adapters = nil
+        adaptersFailure = nil
     }
 
     // MARK: - The details
@@ -349,6 +404,22 @@ public final class ModelsViewModel {
     /// drafter go, and answers alone again (the CLI's 53i). Read back.
     public func unpair(_ row: ModelRow) async {
         await run(["config", "set-backend", row.backend, "--draft", ""], doing: "Unpairing", done: "\(row.backend) drafts with nothing now")
+    }
+
+    /// The adapters sheet, over what `row` applies now.
+    public func editAdapters(_ row: ModelRow) {
+        guard Self.takesAdapters(row) else { return }
+        editingAdapters = AdaptersForm(
+            backend: row.backend, backendType: row.backendType, adapters: adapters?.rows.map(\.adapter) ?? [])
+    }
+
+    /// `config set-backend <name> --adapters …` as the sheet leaves it --
+    /// `""` takes them all off -- read back: the list and the doctor's pins
+    /// again, the CLI's own line said, a refusal in its words.
+    public func applyAdapters() async {
+        guard let form = editingAdapters else { return }
+        editingAdapters = nil
+        await run(form.arguments, doing: "Setting \(form.backend)'s adapters", done: nil)
     }
 
     /// Whether the model a backend belongs to can be renamed whole: the

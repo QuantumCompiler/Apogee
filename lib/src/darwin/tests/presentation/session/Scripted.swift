@@ -192,6 +192,16 @@ final class ScriptedSession: ChatSession, @unchecked Sendable {
         continuation.finish()
     }
 
+    /// It ends as a launch the CLI refused ends: no word on stdout, exit
+    /// `status`, `stderr` its words.
+    func end(failing stderr: String, status: Int32 = 1) {
+        life.withLock { $0.ended = true }
+        var tail = BoundedTail()
+        tail.append(Data((stderr + "\n").utf8))
+        continuation.yield(.ended(SessionEnd(reason: .failed, exit: ChildExit(reason: .exited, status: status), stderrTail: tail)))
+        continuation.finish()
+    }
+
     /// Lets a held stop end the child, and every later one at once.
     func releaseStop() {
         let waiting = life.withLock { life in

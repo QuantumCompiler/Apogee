@@ -48,12 +48,20 @@ public struct VersionLedger: Sendable, Equatable, Identifiable {
     public struct Version: Sendable, Equatable, Identifiable {
         public let version: Int
         public let runID: String
-        /// The GGUF file, or an MLX version's directory.
+        /// The GGUF file, an MLX version's directory -- or, for an adapter
+        /// version (the CLI's 53b), its adapter: a GGUF LoRA, or an mlx-lm
+        /// adapter directory.
         public let path: String
         public let promotedAt: String
         public let evalScore: Double?
         public let evalPassed: Bool?
         public let pruned: Bool
+        /// The adapter itself is the version (`train promote --adapter`),
+        /// applied over the entry's base rather than fused into it.
+        public let isAdapter: Bool
+        /// Where its gate scored it, when that was the base it serves on
+        /// (53c): `tiny-Q4_K_M.gguf (Q4_K_M)`.
+        public let evalScoredOn: String?
         public var id: Int { version }
     }
 
@@ -68,13 +76,24 @@ public struct VersionLedger: Sendable, Equatable, Identifiable {
         active = value["active_version"]?.intValue
         versions = (value["versions"]?.arrayValue ?? []).compactMap { v in
             guard let version = v["version"]?.intValue else { return nil }
+            let adapter = v["adapter_path"]?.stringValue
             return Version(
                 version: version, runID: v["run_id"]?.stringValue ?? "",
-                path: v["gguf_path"]?.stringValue ?? v["mlx_path"]?.stringValue ?? "",
+                path: v["gguf_path"]?.stringValue ?? v["mlx_path"]?.stringValue ?? adapter ?? "",
                 promotedAt: v["promoted_at"]?.stringValue ?? "",
                 evalScore: TrainingRun.number(v["eval_score"]), evalPassed: v["eval_passed"]?.boolValue,
-                pruned: v["pruned_at"] != nil)
+                pruned: v["pruned_at"] != nil, isAdapter: adapter != nil,
+                evalScoredOn: v["eval_scored_on"]?.stringValue)
         }
+    }
+
+    /// Whether the backend holds adapter versions -- its active one is an
+    /// adapter -- or merged ones; `nil` with none active. The CLI never mixes
+    /// the two on one backend (53b), and refuses a promote of the other kind
+    /// into it, naming the way.
+    public var holdsAdapters: Bool? {
+        guard let active, let version = versions.first(where: { $0.version == active }) else { return nil }
+        return version.isAdapter
     }
 
     public static func list(from document: ReadDocument) -> [VersionLedger] {

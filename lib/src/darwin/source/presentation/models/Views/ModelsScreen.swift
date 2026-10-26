@@ -96,6 +96,9 @@ public struct ModelsScreen<Downloads: View>: View {
         } message: {
             Text("apogee config delete-backend \(model.removing ?? "") -- its config entry goes; the weights stay under Stored weights, ready to register again.")
         }
+        .sheet(item: $model.editingAdapters) { _ in
+            AdaptersSheet(model: model)
+        }
         .sheet(item: $model.renaming) { renaming in
             RenameModelSheet(renaming: renaming) { name in Task { await model.rename(renaming, to: name) } }
         }
@@ -227,6 +230,9 @@ struct ModelDetails: View {
                     if let draft = model.draft {
                         drafter(draft, row)
                     }
+                    if ModelsViewModel.takesAdapters(row) {
+                        AdaptersSection(model: model, row: row)
+                    }
                     if !model.recordFacts.isEmpty {
                         section("Record", model.recordFacts)
                     }
@@ -335,6 +341,73 @@ struct ModelDetails: View {
             .font(.system(size: TypeScale.label, weight: .medium, design: .monospaced))
             .tracking(0.8)
             .foregroundStyle(Palette.textTertiary)
+    }
+}
+
+/// A backend's adapters (the CLI's 53a): each file and its scale, what the
+/// doctor says of its pin (53c) -- in its words, its way to mend one that
+/// fails -- and Edit adapters….
+struct AdaptersSection: View {
+    let model: ModelsViewModel
+    let row: ModelRow
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            Text("ADAPTERS")
+                .font(.system(size: TypeScale.label, weight: .medium, design: .monospaced))
+                .tracking(0.8)
+                .foregroundStyle(Palette.textTertiary)
+            if let failure = model.adaptersFailure {
+                Text(failure).font(.apogeeSmall).foregroundStyle(Palette.error).textSelection(.enabled)
+            } else if let adapters = model.adapters {
+                if adapters.rows.isEmpty {
+                    Text("None. An adapter applies over \(row.backend)'s weights at load, never merged into them.")
+                        .font(.apogeeSmall)
+                        .foregroundStyle(Palette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                ForEach(adapters.rows) { adapter in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(adapter.adapter.path)
+                            .font(.apogeeCode)
+                            .foregroundStyle(Palette.textPrimary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(adapter.scaleWords).font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textSecondary)
+                        if let check = adapter.check {
+                            Text(check.detail)
+                                .font(.apogeeSmall)
+                                .foregroundStyle(Self.color(check.status))
+                                .fixedSize(horizontal: false, vertical: true)
+                            if let remedy = check.remedy {
+                                Text(remedy)
+                                    .font(.apogeeMeta.monospaced())
+                                    .foregroundStyle(Palette.textTertiary)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+                if let failure = adapters.checkFailure {
+                    Text(failure).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Button("Edit adapters…") { model.editAdapters(row) }
+                .disabled(model.working != nil || model.adapters == nil)
+                .help("apogee config set-backend \(row.backend) --adapters <path>[:<scale>],… -- each pinned to the weights it runs now")
+        }
+    }
+
+    /// A pin's status in the design's colours: a failure the error's, a
+    /// warning the warning's.
+    static func color(_ status: String) -> Color {
+        switch status {
+        case "fail": Palette.error
+        case "warn": Palette.warning
+        case "ok": Palette.textSecondary
+        default: Palette.textTertiary
+        }
     }
 }
 
@@ -471,6 +544,44 @@ struct RenameModelSheet: View {
             await models.connect(binary: previewBinary)
             if let gguf = models.rows.first(where: { $0.backend == "qwen3-8b-Q4KM" }) { await models.select(gguf) }
         }
+}
+
+#Preview("Details: a backend's two adapters, pinned") {
+    let models = ModelsPreview.adapters()
+    ModelDetails(model: models)
+        .frame(width: 380, height: 700)
+        .task { await ModelsPreview.showingAdapters(models, of: "based") }
+}
+
+#Preview("Details: an adapter whose base changed under it") {
+    let models = ModelsPreview.adapters()
+    ModelDetails(model: models)
+        .frame(width: 380, height: 700)
+        .task { await ModelsPreview.showingAdapters(models, of: "q4") }
+}
+
+#Preview("Adapters: none on the backend") {
+    let models = ModelsPreview.adapters()
+    VStack(alignment: .leading) {
+        if let row = models.selectedRow {
+            AdaptersSection(model: models, row: row)
+        }
+    }
+    .padding(Spacing.l)
+    .frame(width: 380)
+    .task { await ModelsPreview.showingAdapters(models, of: "tuned") }
+}
+
+#Preview("Adapters: two pinned, one at half scale") {
+    let models = ModelsPreview.adapters()
+    VStack(alignment: .leading) {
+        if let row = models.selectedRow {
+            AdaptersSection(model: models, row: row)
+        }
+    }
+    .padding(Spacing.l)
+    .frame(width: 380)
+    .task { await ModelsPreview.showingAdapters(models, of: "based") }
 }
 
 #Preview("Details: a registered GGUF's record alone, as recorded") {

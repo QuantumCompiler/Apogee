@@ -141,6 +141,9 @@ public final class SessionLibraryViewModel {
     private var lastSchema: String?
     /// The model the next new session starts on, once.
     private var nextModel: String?
+    /// The suite the next new session starts under, once, and whether forced
+    /// past the CLI's memory refusal.
+    private var nextSuite: (name: String, force: Bool)?
     private var inView = false
     /// The open session leaves view mid-turn: pause it when the turn ends.
     private var pauseWhenIdle = false
@@ -401,6 +404,54 @@ public final class SessionLibraryViewModel {
         await open(.new)
     }
 
+    /// A new chat under `suite` -- `chat --suite <name>`, and `--force` where
+    /// the person forced one the CLI prices over this machine's memory --
+    /// from the Suites place's Open a chat under it (GUI 4i).
+    public func newSession(under suite: String, force: Bool = false) async {
+        nextSuite = (suite, force)
+        await open(.new)
+    }
+
+    /// Whether the open session can be moved to another suite: one there --
+    /// live, launching or paused -- that a relaunch can carry on.
+    public var canSwitchSuite: Bool {
+        guard !shut, current.canSwitchSuite else { return false }
+        return current.isLive || current.isPaused || current.transcript.status == .ended
+    }
+
+    /// The open session moved under `suite` -- `off` for none -- as `/suite`
+    /// moves it: a relaunch with `--resume` and `--suite`, said in its
+    /// transcript (`SessionViewModel.switchSuite`).
+    public func switchSuite(to suite: String, force: Bool = false) async {
+        guard canSwitchSuite else { return }
+        await current.switchSuite(to: suite, force: force)
+    }
+
+    /// The suite chooser for the open session (`/suite`, its header, the new
+    /// state's Choose a suite): the suites and the default read, and the
+    /// CLI's verdict on each -- `models status --suite <name>` -- then shown.
+    public func chooseSuite() async {
+        let session = current
+        await readSuiteChoices(for: session)
+        guard session === current else { return }
+        session.presenting = .suites
+    }
+
+    /// `config get suites` and the default, then each suite's footprint as
+    /// the CLI prices it, handed to `session` for its chooser.
+    private func readSuiteChoices(for session: SessionViewModel) async {
+        await readSuites()
+        guard let found else { return }
+        var choices: [SuiteChoice] = []
+        for name in suites {
+            let read = await runner.read(binary: found.url, ["models", "status", "--suite", name])
+            choices.append(SuiteChoice(
+                name: name, footprint: read.document.flatMap(SuiteFootprint.init(document:)), isDefault: name == defaultSuite))
+        }
+        session.suiteChoices = choices
+        session.defaultSuite = defaultSuite
+    }
+
     /// Whether the build streams a long job's events (52b), as the last
     /// session announced; `false` until one has -- the fallback.
     public var streamsJobs: Bool { lastEvents?.contains("job") ?? false }
@@ -488,6 +539,8 @@ public final class SessionLibraryViewModel {
     /// conversation asked about keeps running.
     public func dismissPending() {
         pending = nil
+        // A suite asked for a new chat goes with the question it waited on.
+        nextSuite = nil
     }
 
     /// Ends the open session's child -- a turn in it is cancelled the
@@ -516,9 +569,15 @@ public final class SessionLibraryViewModel {
         switch target {
         case .new:
             let model = nextModel
+            let suite = nextSuite
             nextModel = nil
+            nextSuite = nil
             current = SessionViewModel(
-                starter: starter, launch: ChatLaunch(settings: model.map { RunSettings(model: $0) }), reader: runner)
+                starter: starter,
+                launch: ChatLaunch(
+                    settings: model.map { RunSettings(model: $0) }, suite: suite?.name, forceSuite: suite?.force ?? false),
+                reader: runner)
+            current.defaultSuite = defaultSuite
             listedBeforeNew = Set(chats.map(\.id))
             preferences.openChat = nil
         case .privately:
@@ -594,6 +653,7 @@ public final class SessionLibraryViewModel {
         case .delete: if let chat = currentChat { askToDelete(chat) }
         case .toggleInspector: inspectorOpen.toggle()
         case .openChat(let id): Task { await open(.chat(id)) }
+        case .chooseSuite: Task { await chooseSuite() }
         }
     }
 

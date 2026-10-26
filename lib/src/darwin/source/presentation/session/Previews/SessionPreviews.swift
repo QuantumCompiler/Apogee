@@ -149,6 +149,62 @@ enum SessionPreview {
         ChatLaunch(execute: ChatLaunch.Execute(orchestrate: orchestrate))
     }
 
+    // MARK: - A chat under a suite (GUI 4i)
+
+    /// The recorded streams, by the suite each was launched under.
+    static let suiteChats = PreviewSuiteChats(
+        streams: [
+            "pair": lines(SessionDocuments.chatUnderSuite), "fast": lines(SessionDocuments.resumedUnderSuite),
+            ChatLaunch.noSuite: lines(SessionDocuments.resumedSuiteOff),
+        ],
+        refusals: ["vast": SessionDocuments.suiteOverBudget])
+
+    /// The turn the recorded chats were sent.
+    static let suiteTurn = "Which suite answers?"
+
+    /// A chat opened under `pair`; not started.
+    static func underSuite() -> SessionViewModel {
+        SessionViewModel(starter: suiteChats, launch: ChatLaunch(suite: "pair"))
+    }
+
+    /// The recorded chat's id, as its `session` event names it.
+    static var suiteChatID: String {
+        lines(SessionDocuments.chatUnderSuite).first.flatMap { JSONValue.parse($0)?["chat_id"]?.stringValue } ?? ""
+    }
+
+    /// That chat, known by its id -- as the library knows a saved one -- under
+    /// `pair`; not started.
+    static func savedUnderSuite() -> SessionViewModel {
+        SessionViewModel(starter: suiteChats, launch: ChatLaunch(resume: suiteChatID, suite: "pair"))
+    }
+
+    /// The suite turn sent and answered.
+    static func answered(_ model: SessionViewModel) async {
+        await converse(model, typed: suiteTurn)
+        await until { model.transcript.acceptsInput && model.transcript.items.count > 1 }
+    }
+
+    /// Every recorded suite, each with the CLI's footprint: `fast` the
+    /// default, `vast` over this machine's memory.
+    static var suiteChoices: [SuiteChoice] {
+        [
+            ("cloud", SessionDocuments.suiteStatusCloud), ("fast", SessionDocuments.suiteStatusFast),
+            ("pair", SessionDocuments.suiteStatusPair), ("shared", SessionDocuments.suiteStatusShared),
+            ("vast", SessionDocuments.suiteStatusVast),
+        ].map { name, status in
+            SuiteChoice(
+                name: name, footprint: ReadDocument(text: status).flatMap(SuiteFootprint.init(document:)), isDefault: name == "fast")
+        }
+    }
+
+    /// The recorded turn under `pair`, then the suites as the library reads
+    /// them for the chooser.
+    static func choosingSuite(_ model: SessionViewModel) async {
+        if !model.isExecute { await converse(model, typed: suiteTurn) } else { await ready(model) }
+        model.defaultSuite = "fast"
+        model.suiteChoices = suiteChoices
+    }
+
     // MARK: - Driving a session as the person does
 
     /// Waits until `condition` holds -- five seconds at most, as the tests'

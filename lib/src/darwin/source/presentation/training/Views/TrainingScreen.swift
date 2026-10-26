@@ -29,6 +29,9 @@ public struct TrainingScreen: View {
                 case .regimes: EmptyView()
                 case .datasets:
                     Button("New dataset…") { model.newDataset() }.disabled(model.missingText != nil)
+                    Button("Pull…") { model.newPull() }
+                        .disabled(model.isRunning || model.missingText != nil)
+                        .help("apogee datasets pull owner/name: a Hugging Face dataset's data files, for Prepare")
                     Button("Synthesize…") { model.newSynthesis() }.disabled(model.isRunning || model.missingText != nil)
                     Button("Prepare a file…") { preparing = true }.disabled(model.isRunning || model.missingText != nil)
                 }
@@ -62,6 +65,7 @@ public struct TrainingScreen: View {
             case .promote: PromoteSheet(model: model)
             case .synth: SynthSheet(model: model)
             case .create: CreateSheet(model: model)
+            case .pull: PullSheet(model: model)
             }
         }
         .confirmationDialog(
@@ -78,6 +82,11 @@ public struct TrainingScreen: View {
             if case .success(let url) = result { model.prepare(url.path) }
         }
         .alert("That didn't work", isPresented: Binding(get: { model.failure != nil }, set: { if !$0 { model.dismissFailure() } })) {
+            if model.refusedPromotion != nil {
+                // The CLI's words name the way: the sheet again, in the mode
+                // they name, with them above it.
+                Button("Change the promotion…") { model.changePromotion() }
+            }
             Button("OK") { model.dismissFailure() }
         } message: {
             Text(model.failure ?? "")
@@ -153,9 +162,10 @@ struct RunsView: View {
                                         .disabled(ledger.versions.count < 2)
                                 }
                                 ForEach(ledger.versions) { version in
-                                    Text("v\(version.version) · run \(version.runID)\(version.version == ledger.active ? " · active" : "")\(version.pruned ? " · pruned" : "")")
+                                    Text(RunsView.words(version, active: ledger.active))
                                         .font(.apogeeMeta.monospaced())
                                         .foregroundStyle(version.version == ledger.active ? Palette.textPrimary : Palette.textTertiary)
+                                        .help(version.path)
                                 }
                             }
                             .padding(Spacing.m)
@@ -180,6 +190,18 @@ struct RunsView: View {
             .background(Palette.inspector)
         }
     }
+
+    /// A promoted version in a line: its number and run, an adapter one said
+    /// so -- with where its gate scored it, over a quantized base (53c) --
+    /// active or pruned.
+    static func words(_ version: VersionLedger.Version, active: Int?) -> String {
+        var parts = ["v\(version.version)", "run \(version.runID)"]
+        if version.isAdapter { parts.append("adapter") }
+        if let scoredOn = version.evalScoredOn { parts.append("scored on \(scoredOn)") }
+        if version.version == active { parts.append("active") }
+        if version.pruned { parts.append("pruned") }
+        return parts.joined(separator: " · ")
+    }
 }
 
 /// One run: its facts, its gate, and Gate and Promote.
@@ -203,7 +225,7 @@ struct RunPage: View {
                     Button("Gate it") { model.gate(run) }
                         .help("apogee train eval \(run.id): the run's answers against its suite")
                     Button("Promote…") { model.newPromotion(of: run) }
-                        .help("apogee train promote: fuse, verify and register it as a backend")
+                        .help("apogee train promote: fuse, verify and register it as a backend -- or, with --adapter, the adapter alone on an entry's adapters")
                 }
                 .disabled(model.isRunning)
             }
@@ -287,6 +309,16 @@ struct DatasetsView: View {
     @Bindable var model: TrainingViewModel
 
     var body: some View {
+        VStack(spacing: 0) {
+            if let pulled = model.pulled {
+                PulledBanner(model: model, pulled: pulled)
+                Divider()
+            }
+            lists
+        }
+    }
+
+    private var lists: some View {
         HStack(spacing: 0) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1) {
@@ -350,6 +382,49 @@ struct DatasetsView: View {
     }
 }
 
+/// A pull that finished: where the CLI put the files, what it said of them,
+/// and its own next step -- `datasets prepare` on that directory.
+struct PulledBanner: View {
+    let model: TrainingViewModel
+    let pulled: TrainingViewModel.PulledDataset
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.m) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Pulled" + (pulled.summary.isEmpty ? "" : ": \(pulled.summary)")).font(.apogeeSmall)
+                Text(pulled.path)
+                    .font(.apogeeMeta.monospaced())
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
+            Spacer()
+            Button("Prepare it") { model.prepare(pulled.path) }
+                .disabled(model.isRunning)
+                .help("apogee datasets prepare \(pulled.path): the files made trainer-ready")
+            Button("Dismiss") { model.dismissPulled() }
+        }
+        .padding(.horizontal, Spacing.l)
+        .padding(.vertical, Spacing.s)
+    }
+}
+
+/// A Hugging Face dataset's files, downloaded for Prepare.
+struct PullSheet: View {
+    @Bindable var model: TrainingViewModel
+
+    var body: some View {
+        SheetFrame(title: "Pull a dataset", arguments: model.pullArguments, action: "Pull", act: model.pull, cancel: { model.sheet = nil }) {
+            Text("Downloads a Hugging Face dataset's data files -- Parquet, JSONL, JSON, CSV, Arrow or text -- for Prepare to make trainer-ready. A gated dataset needs your Hugging Face token.")
+                .font(.apogeeSmall)
+                .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            TextField("owner/name[@revision][:file]", text: $model.pullRef).textFieldStyle(.roundedBorder)
+        }
+    }
+}
+
 /// A new run: the stored set to train, the dataset, how.
 struct RunSheet: View {
     @Bindable var model: TrainingViewModel
@@ -386,29 +461,92 @@ struct RunSheet: View {
     }
 }
 
-/// A promotion: the run fused and registered as a backend, the gate honoured.
+/// A promotion: the run fused and registered as a backend -- or, with
+/// `--adapter`, its adapter alone on an entry's adapters -- the gate honoured,
+/// and the CLI's refusal above the fields when it sent the sheet back.
 struct PromoteSheet: View {
     @Bindable var model: TrainingViewModel
 
     var body: some View {
         SheetFrame(title: "Promote \(model.promoteForm.run)", arguments: model.promoteForm.arguments, action: "Promote", act: model.promote, cancel: { model.sheet = nil }) {
+            if let refusal = model.promoteRefusal {
+                Text(refusal)
+                    .font(.apogeeSmall)
+                    .foregroundStyle(Palette.error)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let run = model.runs.first(where: { $0.id == model.promoteForm.run }) {
                 Text("This run " + TrainingViewModel.gate(run) + ".")
                     .font(.apogeeSmall)
                     .foregroundStyle(run.evalPassed == false ? Palette.error : Palette.textSecondary)
             }
-            TextField("As backend (new, or an existing llamacpp or mlx entry)", text: $model.promoteForm.backend).textFieldStyle(.roundedBorder)
-            Picker("Target", selection: $model.promoteForm.target) {
-                Text("What the backend runs (else GGUF)").tag(String?.none)
-                Text("GGUF, for llama.cpp").tag(String?.some("gguf"))
-                Text("MLX, as fused").tag(String?.some("mlx"))
+            Toggle("The adapter alone (--adapter): no fuse -- registered on an existing entry's adapters, over the base it runs", isOn: $model.promoteForm.adapter)
+            if model.promoteForm.adapter {
+                adapterFields
+            } else {
+                mergeFields
             }
-            Picker("Quantize", selection: $model.promoteForm.quantize) {
-                Text("Keep F16").tag(String?.none)
-                ForEach(TrainingViewModel.PromoteForm.levels, id: \.self) { Text($0).tag(String?.some($0)) }
+            Picker("Trainer", selection: $model.promoteForm.trainer) {
+                Text("The run's recorded one").tag(String?.none)
+                ForEach(TrainingViewModel.PromoteForm.trainers, id: \.self) { Text($0).tag(String?.some($0)) }
             }
             Toggle("Skip the gate (--force): a failing candidate reaches inference", isOn: $model.promoteForm.force)
         }
+    }
+
+    /// An adapter version: the entry it goes on, and what its gate scores it
+    /// on where that entry's base is quantized (53c).
+    @ViewBuilder private var adapterFields: some View {
+        Picker("Onto", selection: $model.promoteForm.backend) {
+            Text("Choose an entry").tag("")
+            ForEach(entries, id: \.self) { Text($0).tag($0) }
+        }
+        if model.adapterBackends.isEmpty {
+            Text("No llamacpp or mlx entry is configured: an adapter goes on one that runs the base it was trained over.")
+                .font(.apogeeSmall)
+                .foregroundStyle(Palette.textTertiary)
+        }
+        ledger
+        TextField("Gate suite, where the base is quantized (--suite; else the run's recorded eval's)", text: $model.promoteForm.suite)
+            .textFieldStyle(.roundedBorder)
+        Picker("Judge", selection: $model.promoteForm.judge) {
+            Text("The recorded eval's, or the config's").tag(String?.none)
+            ForEach(model.backends, id: \.self) { Text($0).tag(String?.some($0)) }
+        }
+        Text("Over a quantized base the gate scores the candidate there, on this suite; over any other it is the run's recorded eval.")
+            .font(.apogeeMeta)
+            .foregroundStyle(Palette.textTertiary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// A merged version: fused, converted, registered.
+    @ViewBuilder private var mergeFields: some View {
+        TextField("As backend (new, or an existing llamacpp or mlx entry)", text: $model.promoteForm.backend).textFieldStyle(.roundedBorder)
+        ledger
+        Picker("Target", selection: $model.promoteForm.target) {
+            Text("What the backend runs (else GGUF)").tag(String?.none)
+            Text("GGUF, for llama.cpp").tag(String?.some("gguf"))
+            Text("MLX, as fused").tag(String?.some("mlx"))
+        }
+        Picker("Quantize", selection: $model.promoteForm.quantize) {
+            Text("Keep F16").tag(String?.none)
+            ForEach(TrainingViewModel.PromoteForm.levels, id: \.self) { Text($0).tag(String?.some($0)) }
+        }
+        Toggle("Keep the fused checkpoint (--keep-fused)", isOn: $model.promoteForm.keepFused)
+    }
+
+    /// What the named backend's ledger holds, as `train versions` read it.
+    @ViewBuilder private var ledger: some View {
+        if let words = model.ledgerWords(for: model.promoteForm.backend) {
+            Text(words).font(.apogeeSmall).foregroundStyle(Palette.textSecondary)
+        }
+    }
+
+    /// The entries an adapter can go on, and the one named if it is not one.
+    private var entries: [String] {
+        let named = model.promoteForm.backend.trimmingCharacters(in: .whitespaces)
+        return named.isEmpty || model.adapterBackends.contains(named) ? model.adapterBackends : [named] + model.adapterBackends
     }
 }
 
@@ -687,6 +825,125 @@ struct SheetFrame<Fields: View>: View {
             training.createName = "notes"
             training.createFrom = "sessions"
         }
+}
+
+#Preview("Promote: the adapter alone, onto an entry") {
+    let training = TrainingPreview.training(runner: TrainingPreview.adapters)
+    PromoteSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            TrainingPreview.promotingAdapter(training)
+        }
+}
+
+#Preview("Promote: the adapter onto a quantized base, its gate's suite named") {
+    let training = TrainingPreview.training(runner: TrainingPreview.adapters)
+    PromoteSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            TrainingPreview.promotingAdapter(training)
+            training.promoteForm.backend = "q4"
+            training.promoteForm.suite = "/Users/someone/suite.jsonl"
+        }
+}
+
+#Preview("Promote: sent back with the CLI's refusal, which names --adapter") {
+    let training = TrainingPreview.training(
+        said: TrainingPreview.refusal(TrainingDocuments.promoteNamesAdapter), finishes: true, runner: TrainingPreview.adapters)
+    PromoteSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newPromotion(of: TrainingPreview.passed)
+            training.promoteForm.backend = "based"
+            training.promote()
+            await TrainingPreview.settled { training.refusedPromotion != nil }
+            training.changePromotion()
+        }
+}
+
+#Preview("A promotion the CLI refused, its way offered") {
+    let training = TrainingPreview.training(
+        said: TrainingPreview.refusal(TrainingDocuments.promoteAdapterNoSuite), finishes: true, runner: TrainingPreview.adapters)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 640)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.selectedRun = TrainingPreview.passed.id
+            TrainingPreview.promotingAdapter(training)
+            training.promoteForm.backend = "q4"
+            training.promote()
+        }
+}
+
+#Preview("Runs: adapter versions promoted") {
+    let training = TrainingPreview.training(runner: TrainingPreview.adapters)
+    RunsView(model: training)
+        .frame(width: 900, height: 520)
+        .task { await training.connect(binary: previewBinary) }
+}
+
+#Preview("Pull: a reference typed") {
+    let training = TrainingPreview.training()
+    PullSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newPull()
+            training.pullRef = "someone/heat-notes"
+        }
+}
+
+#Preview("Datasets: a pull running") {
+    let training = TrainingPreview.training(said: TrainingPreview.pulling(2))
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 520)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.tab = .datasets
+            training.newPull()
+            training.pullRef = "someone/heat-notes"
+            training.pull()
+        }
+}
+
+#Preview("Datasets: pulled, Prepare offered") {
+    let training = TrainingPreview.training(said: TrainingPreview.pulling(), finishes: true)
+    DatasetsView(model: training)
+        .frame(width: 900, height: 520)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newPull()
+            training.pullRef = "someone/heat-notes"
+            training.pull()
+        }
+}
+
+#Preview("A pull refused: not a dataset reference") {
+    let training = TrainingPreview.training(said: TrainingPreview.refusal(TrainingDocuments.pullBadRef), finishes: true)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 520)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.tab = .datasets
+            training.newPull()
+            training.pullRef = "nonsense"
+            training.pull()
+        }
+}
+
+#Preview("A pulled dataset's banner") {
+    let training = TrainingPreview.training(said: TrainingPreview.pulling(), finishes: true)
+    VStack {
+        if let pulled = training.pulled {
+            PulledBanner(model: training, pulled: pulled)
+        }
+    }
+    .frame(width: 900)
+    .task {
+        await training.connect(binary: previewBinary)
+        training.newPull()
+        training.pullRef = "someone/heat-notes"
+        training.pull()
+    }
 }
 
 #Preview("A sheet's frame: its command as typed") {

@@ -5,14 +5,17 @@ import Foundation
 import InfrastructureProcess
 import Observation
 
-/// The Training place: runs and their gates and promotions, the regimes, and
-/// the datasets with their kits -- each view a document re-read after, each
-/// act the person's command.
+/// The Training place: runs and their gates and promotions -- merged, or the
+/// adapter alone (the CLI's 53b, gated on a quantized base where it will
+/// serve, 53c) -- the regimes, and the datasets with their kits, pulled from
+/// Hugging Face or made here -- each view a document re-read after, each act
+/// the person's command.
 ///
 /// SwiftUI-free (ADR 0002). A long act -- a run, a gate, a promotion, a
-/// regime, a synthesis, a prepare -- is supervised on the jobs core, its busy
-/// line the CLI's own words: `train run` takes no machine stream, so nothing
-/// is decided from them. No training starts without the person's launch.
+/// regime, a pull, a synthesis, a prepare -- is supervised on the jobs core,
+/// its busy line the CLI's own words: `train run` takes no machine stream, so
+/// nothing is decided from them. No training starts without the person's
+/// launch, and a refused promotion's sheet opens again with the CLI's words.
 @MainActor
 @Observable
 public final class TrainingViewModel {
@@ -53,7 +56,13 @@ public final class TrainingViewModel {
     }
 
     /// `train promote <run> --as <backend>`, the gate honoured unless the
-    /// person forces it.
+    /// person forces it: merged -- fused, converted, registered -- or, with
+    /// `--adapter` (the CLI's 53b), the run's adapter alone, registered on an
+    /// existing entry's adapters over the base it runs. Each mode carries only
+    /// the flags the CLI takes in it: a merge's `--target`, `--quantize` and
+    /// `--keep-fused`, and the adapter gate's `--suite` and `--judge` (53c,
+    /// which score the candidate where an entry's quantized base will serve
+    /// it) -- the CLI refuses each in the other mode.
     public struct PromoteForm: Equatable, Sendable {
         public var run = ""
         public var backend = ""
@@ -62,6 +71,21 @@ public final class TrainingViewModel {
         /// A GGUF level; nil keeps F16.
         public var quantize: String?
         public var force = false
+        /// `--adapter`: no fuse -- the adapter itself is the version.
+        public var adapter = false
+        /// `--suite`: the suite an adapter's gate scores it on, over an
+        /// entry's quantized base; empty leaves it to the CLI -- the run's
+        /// recorded eval's, else `training.eval_suite_path`.
+        public var suite = ""
+        /// `--judge`: the backend that judges items without `expected` in
+        /// that gate; nil leaves it to the CLI -- the recorded eval's, else
+        /// `training.judge_backend`.
+        public var judge: String?
+        /// `--trainer`: the run's recorded trainer overridden; nil keeps it.
+        public var trainer: String?
+        /// `--keep-fused`: a merge keeps its fused SafeTensors checkpoint
+        /// under the run.
+        public var keepFused = false
 
         public init() {}
 
@@ -69,13 +93,65 @@ public final class TrainingViewModel {
             let backend = backend.trimmingCharacters(in: .whitespaces)
             guard !run.isEmpty, !backend.isEmpty else { return nil }
             var arguments = ["train", "promote", run, "--as", backend]
-            if let target { arguments += ["--target", target] }
-            if let quantize { arguments += ["--quantize", quantize] }
+            if adapter {
+                arguments.append("--adapter")
+                let suite = suite.trimmingCharacters(in: .whitespaces)
+                if !suite.isEmpty { arguments += ["--suite", suite] }
+                if let judge { arguments += ["--judge", judge] }
+            } else {
+                if let target { arguments += ["--target", target] }
+                if let quantize { arguments += ["--quantize", quantize] }
+                if keepFused { arguments.append("--keep-fused") }
+            }
+            if let trainer { arguments += ["--trainer", trainer] }
             if force { arguments.append("--force") }
             return arguments
         }
 
+        /// The form the CLI's refusal points at: the other mode where the
+        /// refusal names it as the way -- `promote into it with --adapter`, or
+        /// `without --adapter` -- else this one, to change as the words say.
+        public func door(after refusal: String) -> PromoteForm {
+            var form = self
+            if !adapter && refusal.contains("with --adapter") {
+                form.adapter = true
+            } else if adapter && refusal.contains("without --adapter") {
+                form.adapter = false
+            }
+            return form
+        }
+
         public static let levels = ["Q2_K", "Q3_K_M", "Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0", "F16"]
+        /// `--trainer`'s choices, as the CLI lists them.
+        public static let trainers = ["auto", "mlx", "peft", "mock"]
+    }
+
+    /// A promotion the CLI refused or failed: the form as it was sent, and
+    /// the CLI's words, which the sheet opens again with.
+    public struct RefusedPromotion: Equatable, Sendable {
+        public let form: PromoteForm
+        public let refusal: String
+    }
+
+    /// `datasets pull owner/name[@revision][:file]` finished: where the CLI
+    /// put the files and what it said of them, from its own last lines --
+    /// `<n> file(s), <size>`, and the `datasets prepare` that makes them
+    /// trainer-ready, which the tab offers.
+    public struct PulledDataset: Equatable, Sendable {
+        /// The directory `datasets prepare` takes, as the CLI named it.
+        public let path: String
+        /// `2 file(s), 3 MiB`.
+        public let summary: String
+
+        /// From what the pull printed: its `Convert it with:  apogee datasets
+        /// prepare <path>` line, and the count line before it. `nil` when it
+        /// names no prepare.
+        public init?(said lines: [String]) {
+            let door = "apogee datasets prepare "
+            guard let line = lines.last(where: { $0.contains(door) }), let range = line.range(of: door) else { return nil }
+            path = String(line[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+            summary = lines.last(where: { $0.contains(" file(s), ") && !$0.hasPrefix("downloading ") }) ?? ""
+        }
     }
 
     /// `datasets synth <name> --teacher <b> --kit <k>`.
@@ -120,6 +196,7 @@ public final class TrainingViewModel {
         case promote
         case synth
         case create
+        case pull
     }
 
     /// Where one of the place's reads stands: not read yet, read, no apogee,
@@ -147,6 +224,9 @@ public final class TrainingViewModel {
     public private(set) var students: [String] = []
     /// The configured backends a teacher or a promotion can name.
     public private(set) var backends: [String] = []
+    /// The configured entries an adapter can go on: llama.cpp and mlx ones
+    /// (the CLI's 53a), the only types that take `adapters`.
+    public private(set) var adapterBackends: [String] = []
     public var selectedRun: String?
     public var selectedRegime: String?
     public var selectedDataset: String?
@@ -157,6 +237,17 @@ public final class TrainingViewModel {
     public var createName = ""
     /// `template`, `sessions` or `empty`.
     public var createFrom = "template"
+    /// `datasets pull`'s reference: `owner/name[@revision][:file]`.
+    public var pullRef = ""
+    /// The last pull that finished, until dismissed: where its files are, for
+    /// Prepare.
+    public private(set) var pulled: PulledDataset?
+    /// The promotion the CLI last refused, until the person changes it or
+    /// lets it go: what the alert's Change the promotion… reopens.
+    public private(set) var refusedPromotion: RefusedPromotion?
+    /// The CLI's refusal the promote sheet was opened again with, said above
+    /// its fields.
+    public private(set) var promoteRefusal: String?
     public var pending: Pending?
     /// Each read's standing: `train status` (the runs), `train versions`,
     /// `train regime list`, `datasets kits`, `datasets list`, and `models list
@@ -223,6 +314,7 @@ public final class TrainingViewModel {
             let rows = ModelRow.list(from: document)
             students = rows.filter { $0.isStored && $0.format == "safetensors" }.map(\.name)
             backends = rows.filter { !$0.isStored }.map(\.backend)
+            adapterBackends = rows.filter { !$0.isStored && Self.takesAdapters($0.backendType) }.map(\.backend)
         }
         modelsListing = .of(models)
     }
@@ -266,6 +358,23 @@ public final class TrainingViewModel {
     public var currentRegime: TrainingRegime? { selectedRegime.flatMap { n in regimes.first { $0.name == n } } }
     public var currentDataset: TrainingDataset? { selectedDataset.flatMap { n in datasets.first { $0.name == n } } }
 
+    /// Whether a backend of `type` takes `adapters`: llama.cpp and mlx (the
+    /// CLI's `takes_adapters`, 53a).
+    public static func takesAdapters(_ type: String) -> Bool {
+        type == "llamacpp" || type == "mlx"
+    }
+
+    /// What `backend`'s ledger holds, as `train versions` read it -- adapter
+    /// versions or merged ones, and which is active -- for the promote sheet
+    /// to say before the CLI is asked; `nil` with no version promoted.
+    public func ledgerWords(for backend: String) -> String? {
+        let backend = backend.trimmingCharacters(in: .whitespaces)
+        guard let ledger = ledgers.first(where: { $0.backend == backend }), let holds = ledger.holdsAdapters,
+            let active = ledger.active
+        else { return nil }
+        return "\(backend) holds \(holds ? "adapter" : "merged") versions (active v\(active) of \(ledger.versions.count))"
+    }
+
     /// The gate's verdict, said plainly.
     public static func gate(_ run: TrainingRun) -> String {
         switch run.evalPassed {
@@ -287,7 +396,31 @@ public final class TrainingViewModel {
     public func newPromotion(of run: TrainingRun) {
         promoteForm = PromoteForm()
         promoteForm.run = run.id
+        promoteRefusal = nil
         sheet = .promote
+    }
+
+    /// The refused promotion's sheet again, with the CLI's words above it and
+    /// the mode its refusal names as the way (`PromoteForm.door`).
+    public func changePromotion() {
+        guard let refused = refusedPromotion else { return }
+        refusedPromotion = nil
+        failure = nil
+        promoteForm = refused.form.door(after: refused.refusal)
+        promoteRefusal = refused.refusal
+        sheet = .promote
+    }
+
+    /// The pull sheet: a dataset's reference on Hugging Face.
+    public func newPull() {
+        pullRef = ""
+        sheet = .pull
+    }
+
+    /// `datasets pull <ref>`, as typed: nothing without a reference.
+    public var pullArguments: [String]? {
+        let ref = pullRef.trimmingCharacters(in: .whitespaces)
+        return ref.isEmpty ? nil : ["datasets", "pull", ref]
     }
 
     public func newSynthesis() {
@@ -319,7 +452,24 @@ public final class TrainingViewModel {
     public func promote() {
         guard let arguments = promoteForm.arguments else { return }
         sheet = nil
-        start(arguments, doing: "Promoting")
+        promoteRefusal = nil
+        refusedPromotion = nil
+        start(arguments, doing: "Promoting", act: .promote(promoteForm))
+    }
+
+    /// `datasets pull <ref>`: a Hugging Face dataset's data files downloaded
+    /// for `datasets prepare`, supervised -- its lines the CLI's, Stop as
+    /// Ctrl-C. Once done, Prepare is offered on the directory it names.
+    public func pull() {
+        guard let arguments = pullArguments else { return }
+        sheet = nil
+        pulled = nil
+        start(arguments, doing: "Pulling", act: .pull)
+    }
+
+    /// The pulled dataset's banner, once read.
+    public func dismissPulled() {
+        pulled = nil
     }
 
     /// `train regime run <name>`: synth, pipeline, promote -- the regime's own
@@ -376,7 +526,16 @@ public final class TrainingViewModel {
         await job?.stop(grace: .seconds(10))
     }
 
-    private func start(_ arguments: [String], doing: String) {
+    /// What a supervised act is, for what its end leaves behind.
+    private enum Act {
+        case other
+        /// A promotion, as its form sent it: a refusal keeps it to change.
+        case promote(PromoteForm)
+        /// A pull: its end names the directory to prepare.
+        case pull
+    }
+
+    private func start(_ arguments: [String], doing: String, act: Act = .other) {
         guard let binary, job == nil else { return }
         running = doing
         run = JobProgress()
@@ -390,15 +549,25 @@ public final class TrainingViewModel {
             running = nil
             await refresh()
             switch progress?.status {
-            case .done: say?(progress?.notices.first ?? "\(doing): done")
-            case .failed(let message): failure = message
+            case .done:
+                if case .pull = act, let pulled = PulledDataset(said: progress?.notices ?? []) {
+                    self.pulled = pulled
+                    say?("Pulled: \(pulled.summary.isEmpty ? pulled.path : pulled.summary)")
+                } else {
+                    say?(progress?.notices.first ?? "\(doing): done")
+                }
+            case .failed(let message):
+                if case .promote(let form) = act { refusedPromotion = RefusedPromotion(form: form, refusal: message) }
+                failure = message
             case .stopped: say?("Stopped: what was finished stays")
             default: break
             }
         }
     }
 
+    /// The failure read: a refused promotion is let go with it.
     public func dismissFailure() {
         failure = nil
+        refusedPromotion = nil
     }
 }

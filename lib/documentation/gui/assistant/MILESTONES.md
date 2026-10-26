@@ -1939,3 +1939,73 @@ Probed on the branch's binary over sandbox homes with the mock backend:
 **Not done:**
 - No live pass of the app.
 - A killed task's row in the task list still reads running, since `task list` carries no `interrupted` (a CLI gap); its page knows.
+
+### 2026-10-26 — `training-and-suites-parity` (backlog item 4i): training and suites reach the CLI's v0.2.0 surface
+
+**Why.** The full-parity law (the SPEC; ADR 0003) puts every CLI capability on a screen. The CLI's track 53 and the TUI's suite actions shipped after the Training and Suites screens, and the audit found four gaps. Each reproduced on today's source as a failing test first:
+- **Adapters were out of reach.** The promote sheet had no `--adapter`, so a ledger holding adapter versions was unpromotable from the screen. The version reader dropped `adapter_path`, and no screen listed or edited a backend's `adapters`.
+- **The Datasets tab had no `datasets pull`.**
+- **The Suites fit double-counted a shared base.** It added weights per backend, so on recorded data the app said "does not fit: 120.4 GB of 107.52 GB" where the CLI says fits.
+- **No chat ran under a suite of its choosing.** There was no `--suite` at launch, no switch and no `/suite`, so a plain chat ran under the global default only.
+
+Probed on the branch's binary over sandbox homes, with a mock trainer and stand-in GGUF headers:
+- **`train promote` has its adapter mode** (`--adapter`, `--suite`, `--judge`, `--trainer`, `--keep-fused`) and refuses six ways, from a plain promote into an adapter ledger to `--suite` without `--adapter`.
+- **Adapter reads:** `config get backends.<name>.adapters` prints `path[:scale]` per line and no pin. The pin is only in `check`'s Adapters rows. `set-backend --adapters` takes a comma list, and `""` clears it.
+- **`datasets pull`** takes no `--output-format`.
+- **The CLI states a suite's verdict:** `models status --suite <name> --output-format json` carries `footprint`, a line per member and a total ending `fits`, `fits as far as known`, `it does not fit`, `budget not known here` or `no member holds memory`.
+- **The protocol carries no suite.** A `set` naming one is refused whole, and a `/suite` user line is a prompt.
+- **A resumed chat runs under its last suite,** so "none" is always `--suite off`.
+
+- [x] **Adapters on the screens.** The promote sheet has an adapter mode, and each mode sends only the flags the CLI takes in it. A refused promote offers "Change the promotion…", which reopens the sheet in the mode the refusal names, the refusal shown. The sheet says what the backend's ledger holds, from `train versions`. Models lists a backend's adapters with scale and pin (`business/reads/Adapters.swift`, `models/ViewModels/BackendAdapters.swift`) and edits them as one list through `set-backend --adapters` (`Views/AdaptersSheet.swift`), read back after.
+- [x] **Datasets pull** is a Pull… sheet run as a supervised job. When it ends, **Prepare it** runs `datasets prepare` on the folder the CLI named.
+- [x] **The fit is the CLI's.** The Suites screen shows `models status --suite`'s verdict and member lines. Its own estimate, labelled "estimated here", is only the fallback: a weights file counted once, adapters priced by their files.
+- [x] **A chat under a suite.**
+  - New chats take `--suite` at launch.
+  - `/suite`, the session header's suite name and "Choose a suite" open `SuiteSheet`: each suite with the CLI's verdict, and None.
+  - An open session switches by stopping and resuming with `--resume` and `--suite`, said in the transcript. A switch made mid-turn waits for the turn.
+  - A suite the CLI refuses is put back in its words, the session going on under the old one.
+  - Suites gains **Open a chat under it** and **Switch the session to it**.
+- [x] **The parity rows** for `chat`, `models`, `config`, `train` and `datasets` name suites, the CLI's footprint, adapters and pull.
+
+**Decisions made while building** (2026-10-26, each recorded for veto):
+- **The default, taken:** a live session's suite switch is a pause and resume with `--suite`, said in the transcript; the protocol has no suite on `set`.
+- **A switch drops `-m` on the relaunch,** or the model flag would beat the suite's chat member.
+- **A refused switch relaunches under the previous suite** on its own.
+- **An execute session is offered named suites only,** since `execute` refuses `--suite off`.
+- **A private chat with a turn can't switch,** since it can't be resumed.
+- **`--force` goes only from a button labelled "anyway",** on a suite the CLI says doesn't fit.
+
+**Verified.**
+- **Recorded** from the branch's binary over sandbox homes, the home written `/Users/someone`: 47 documents under `tests/business/reads/Fixtures/` and 7 streams under `tests/data/protocol/Fixtures/`.
+  - The adapter reads and `check` rows.
+  - The six promote refusals.
+  - `models status --suite`'s footprints, a shared base among them.
+  - Sessions launched and switched under a suite.
+
+  The stand-in bases are sparse GGUF headers with size records, as the CLI's own tests make them. **Hand-made:** `datasets-pull-handmade.txt`, from `datasets.cpp`'s output lines, since a real pull needs the network.
+- **46 new cases:**
+  - reads +5, `ChatLaunch` +2;
+  - Suites 5, among them `SharedBaseFitTests/sharedBaseAdmitted`;
+  - Shell 1 (`trainingAndSuitesRows`);
+  - Session 12, `SuiteSessionTests` among them;
+  - Sessions 4, Training 9, Models 7, App 1.
+
+  Four existing cases that pinned the old reads or slash list were updated.
+- **The module schemes** each passed ten iterations (Session 760 of 760). The layering check passed 25 of 25, and `check-previews` finds nothing in training, models, suites, session, sessions or shell.
+- **26 new previews:**
+  - the adapter promote sheet and a refused promote reopened;
+  - a backend's adapters;
+  - datasets pull;
+  - a shared-base suite fitting;
+  - the suite chooser in a session.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,992 tests and the macOS app's 695 cases passed, with no Swift warning.
+
+**Not done:**
+- No live pass of the app.
+- `/suite --warm` isn't offered.
+- The fallback estimate ignores drafters and the parts of the shared-base key the app can't see.
+- **CLI gaps the probes found:**
+  - nothing reports which suite a resumed chat runs under;
+  - the footprint is text inside a field, not typed JSON;
+  - launch refusals and admission lines reach stderr only;
+  - `datasets pull` has no stream output.

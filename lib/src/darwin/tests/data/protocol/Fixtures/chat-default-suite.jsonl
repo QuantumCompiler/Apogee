@@ -1,0 +1,8 @@
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-10-25","tools":true},"chat_id":"20261026-065701-4ff9","model":"fastroot","next_turn":1,"protocol_version":1,"type":"session"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"answer_start"}
+{"text":"FASTROOT","turn":1,"type":"answer_delta"}
+{"text":"-SAYS he","turn":1,"type":"answer_delta"}
+{"text":"llo","turn":1,"type":"answer_delta"}
+{"turn":1,"type":"answer_end"}
+{"finish_reason":"stop","model":"fastroot","text":"FASTROOT-SAYS hello","turn":1,"type":"result"}

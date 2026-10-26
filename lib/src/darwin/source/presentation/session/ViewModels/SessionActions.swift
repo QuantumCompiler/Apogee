@@ -1,3 +1,5 @@
+import BusinessReads
+import BusinessSession
 import DataProtocol
 import Foundation
 
@@ -11,6 +13,9 @@ public enum SessionAction: Equatable, Sendable {
     case toggleInspector
     /// Open a past chat a turn recalled.
     case openChat(String)
+    /// Choose the suite the session runs under: the library reads the suites
+    /// and the CLI's verdict on each, then presents the chooser (GUI 4i).
+    case chooseSuite
 }
 
 /// What the window presents when an act needs the person: the file chooser,
@@ -18,6 +23,8 @@ public enum SessionAction: Equatable, Sendable {
 public enum Presenting: String, Identifiable, Sendable {
     case files
     case settings
+    /// The suite chooser: a suite, or none, for the session to run under.
+    case suites
 
     public var id: String { rawValue }
 }
@@ -29,6 +36,10 @@ public enum HeldLine: Equatable, Sendable {
     case detach(String)
     case set(RunSettings)
     case compact
+    /// A move to another suite -- or none -- made mid-turn: no line carries
+    /// it (machine mode has no suite), so the session restarts under it once
+    /// the turn ends (GUI 4i).
+    case suite(String, force: Bool)
 
     /// What it will do, in a few words: `attach report.pdf`, `temperature 0.9`.
     public var words: String {
@@ -37,8 +48,36 @@ public enum HeldLine: Equatable, Sendable {
         case .detach(let path): "detach \(path)"
         case .set(let change): SessionViewModel.words(change)
         case .compact: "compact"
+        case .suite(let suite, _): suite == ChatLaunch.noSuite ? "leave the suite" : "switch to suite \(suite)"
         }
     }
+}
+
+/// A suite the chooser offers: its name, and what the CLI says of its fit
+/// here (`models status --suite <name>`'s footprint), where it said it.
+public struct SuiteChoice: Equatable, Sendable, Identifiable {
+    public let name: String
+    /// The CLI's footprint of it; `nil` where the read stated none.
+    public let footprint: SuiteFootprint?
+    /// It is `models.default_suite`: a new chat with no `--suite` runs under it.
+    public let isDefault: Bool
+    public var id: String { name }
+
+    public init(name: String, footprint: SuiteFootprint?, isDefault: Bool) {
+        self.name = name
+        self.footprint = footprint
+        self.isDefault = isDefault
+    }
+
+    /// The CLI prices it over this machine's memory: it runs only forced.
+    public var overBudget: Bool { footprint?.verdict == .doesNotFit }
+
+    /// The CLI's verdict in its own few words -- `fits`, `it does not fit`,
+    /// `no member holds memory on this machine` -- or `nil` where it gave none.
+    public var verdict: String? { footprint?.verdictWords }
+
+    /// The CLI's whole total: the sum, the budget, each member's part.
+    public var total: String? { footprint?.total }
 }
 
 /// How a private session is kept from being written.
@@ -76,6 +115,7 @@ public struct SlashCommand: Equatable, Identifiable, Sendable {
         SlashCommand(name: "/new", summary: "Start a new session", act: .library(.newSession)),
         SlashCommand(name: "/private", summary: "Start a private session", act: .library(.newPrivateSession)),
         SlashCommand(name: "/model", summary: "Change the model, thinking, effort or system prompt", act: .present(.settings)),
+        SlashCommand(name: "/suite", summary: "Run this session under a suite, or none", act: .library(.chooseSuite)),
         SlashCommand(name: "/attach", summary: "Attach a file, folder, image, recording or video", act: .present(.files)),
         SlashCommand(name: "/detach", summary: "Detach everything attached", act: .detachAll),
         SlashCommand(name: "/compact", summary: "Summarize the earlier turns now", act: .compact),

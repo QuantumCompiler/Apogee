@@ -79,7 +79,8 @@ struct SuitesViewModelTests {
         #expect(runner.calls.contains("run config set-default-suite research"))
         await suites.makeDefault(nil)
         #expect(runner.calls.contains("run config set-default-suite off"))
-        #expect(runner.calls.last?.hasPrefix("read models info") == true || runner.calls.last == "read system", "read back")
+        let after = runner.calls.drop { $0 != "run config set-default-suite off" }
+        #expect(after.contains("run config get suites") && after.contains("read models status"), "read back")
     }
 
     @Test("no suites is said plainly; no binary is said")

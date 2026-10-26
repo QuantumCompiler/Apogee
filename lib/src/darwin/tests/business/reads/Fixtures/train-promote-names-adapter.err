@@ -1,0 +1,1 @@
+apogee train: 'based' holds adapter versions (active v1) applied over its base, and a merged version would replace that base under them -- promote into it with --adapter, or merged under a new name

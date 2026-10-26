@@ -1,0 +1,1 @@
+apogee train: --suite has nothing to act on: this promote is gated on run 20261026-065637's recorded eval -- only an adapter promote onto an entry whose base is quantized scores its candidate where it will serve. Drop it, or score the run with 'apogee train eval 20261026-065637 --suite <path|name>'

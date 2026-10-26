@@ -1,0 +1,1 @@
+apogee train: 'tuned' holds merged versions (active v1), so its model_path is a fine-tune, not the base an adapter was trained over -- promote into it without --adapter, or --adapter into an entry that runs the base

@@ -50,7 +50,9 @@ struct ModelsViewModelTests {
         let model = await connected(runner)
         runner.reading(["models", "info", "qwen-mlx"], #"{"name":"qwen-mlx","fields":[{"field":"backend","value":"qwen-mlx"},{"field":"path","value":"/Users/someone/.apogee/models/mlx/qwen"}]}"#)
         await model.select(model.rows.first { $0.backend == "qwen-mlx" }!)
-        #expect(runner.calls.last == "read models info qwen-mlx")
+        // Then its adapters, an mlx entry taking them (GUI 4i): none listed,
+        // so the doctor is not asked.
+        #expect(runner.calls.suffix(2) == ["read models info qwen-mlx", "run config get backends.qwen-mlx.adapters"])
         #expect(model.facts.map(\.label) == ["backend", "path"])
         #expect(model.typed.isEmpty, "no typed data: the record stands alone, as the board's fallback")
         #expect(model.path == "/Users/someone/.apogee/models/mlx/qwen")
@@ -89,8 +91,10 @@ struct ModelsViewModelTests {
         await model.select(row)
         await model.askToDelete(row)
         #expect(model.pendingDelete?.row == row)
-        #expect(runner.calls.filter { $0.hasPrefix("run") && !$0.hasPrefix("run __complete") } == ["run models delete qwen-mlx"],
-                "asked first: only the plan read, nothing changed")
+        #expect(
+            runner.calls.filter { $0.hasPrefix("run") && !$0.hasPrefix("run __complete") && !$0.hasPrefix("run config get") }
+                == ["run models delete qwen-mlx"],
+            "asked first: only the plan read -- and the adapters' list, a read -- nothing changed")
         await model.confirmDelete(andBackends: false)
         let ran = runner.calls.firstIndex(of: "run models delete qwen-mlx --yes")!
         #expect(runner.calls[ran + 1 ... ran + 2] == ["read models list", "read models status"], "read back")
