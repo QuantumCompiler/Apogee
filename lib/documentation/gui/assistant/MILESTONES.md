@@ -2170,3 +2170,63 @@ Probed on the branch's binary over sandboxes:
   - `chats info`, `chats recall`, `graph dedupe` and `knowledge info --raw` have no JSON;
   - `graph delete` keeps the graph's config entry, so the picker still lists it;
   - `config add-backend` never sets a default backend.
+
+### 2026-10-26 — `docs-and-board-catch-up` (backlog item 4l): the GUI docs and the contract board catch up
+
+**Why.** The audit found the GUI's planning docs and the design's contract board describing an earlier state:
+- **The contract board** (`lib/design/spec/html/BuildContract.dc.html`) marked only G9 and G17 closed. The gaps the CLI's track 52 shipped still read as open with their "Until then" fallbacks. The header said "22 gaps open" and "Checked against apogee 0.1.9", and the first call recommended landing G1, G8, G9, G11 and G12 before v1, though they had shipped. Flipping each gap was left to "each CLI ship's own docs pass" (1q), and that pass never happened.
+- **The ROADMAP** kept "The answer as Markdown … a deliberate later step" as an idea, though M8 and M9 shipped it.
+- **The SPEC had three stale gates:**
+  - its scope's TODO waited on the first spike's feature cut, which shipped as 1a–1q;
+  - parity was held mechanically "once 2a lands", which it did on 2026-10-20;
+  - its success-criteria TODO cited open, drive and cancel as examples, which 1c already shipped.
+- **CLAUDE.md** named Milestones A and B as shipped, missing C and D.
+
+- [x] **The board, each gap probed** on the branch's binary (`apogee 0.2.0`, `f72f05f6`) over a sandbox, the scripted mock and fixture-made video and voice sets.
+  - **16 of its 24 gaps are closed:** G1–G9 and G11–G17. Each probe's command and evidence is in the item's run: a permission `question` carrying its diff, `detach` and `set` answered as notices, `chat --private` writing nothing, `chats list` rows carrying `backend` and `model`, compose's dry run writing a plan alone, `check`'s ffmpeg rows, and so on.
+  - **Open:** G10 and G18–G24. G18–G20 are the store verbs taking no `--output-format`; G21 is `train run` with no stream (55h gave `train pipeline` and `train cycle` theirs); G22 is no `agents show`; G23 is no suite on the `session` event; G24 is no `review mr --post`.
+  - **The closed gaps** are dimmed in the board's way, each naming the CLI item that landed it (52a–52e) and what the app does now, in place of its "Until then". Every number and its original ask stay.
+  - **The contract map's 14 rows** that named them say what the app uses. The slash-commands row names the `set`, `detach` and `compact` lines first, no longer "a restart with flags".
+  - **The header** reads "Checked against apogee 0.2.0 (f72f05f6)". The stats went from 58 / 11 / 22 / 0 to 72 / 11 / 8 / 0, and now match the chips (before, two rows carried both an app chip and a gap).
+  - **The first call** reads answered, and names the four open gaps marked before v1: G18–G21.
+  - **G10 is corrected, not closed.** The fit read has existed since the CLI's 27e, so "offers no read" was never true. It stays open as "A suite's fit is text", narrowed to the typed form 4i recorded, its fallback what the app does.
+- [x] **The canvas**, read first: its `BuildContract.dc.html` and `canvas.json` were byte-identical to the repo's, so nobody had edited it since its last publish. The board alone was published (canvas version 46) and read back identical to the repo's (sha-256 `c5826f6b…`). `canvas.json`, the other boards, `support.js` and the `.md` files were not sent. The design's README line counts sixteen closed.
+- [x] **SPEC.md** (dated 2026-10-26):
+  - **The first release's cut** is stated from what shipped: the macOS application, Milestones A–E, with Linux and Windows waiting for their own work.
+  - **Full parity** is held by ADR 0003 and `ParityTable` since 2a.
+  - **The success criteria** are five behaviours the shipped app has, each traced to its milestone: a conversation the app's and the CLI's at once; every command placed; long work supervised; the binary's words shown; nothing lost to the app's own moves.
+- [x] **ROADMAP.md** drops the shipped Markdown idea.
+- [x] **CLAUDE.md** names Milestones A–E as what v0.2.0 carries.
+
+**Decisions made while building** (2026-10-26, each recorded for veto):
+- **The default, taken:** the success criteria are written from five behaviours the shipped app demonstrably has, each traceable to a milestone, as observable outcomes.
+- **G10 stays open, narrowed,** rather than flipped landed: no item landed it, since its read predates the board.
+- **The CLI gaps this run found aren't added to the board.** They are listed below for the CLI's queue: the board's flips were this item's scope, and its rows for the new pipeline and cycle tabs are a design change of their own.
+
+**Verified.**
+- **The design's health check:** 48 start screens, no problems.
+- **The board's markup** balances (497 `div`s, 495 `span`s). It holds no `{{hole}}`. Its stats match its chips, and its ledger's 8 open gaps are the 8 the map names.
+- **Served locally and opened,** the board renders with no console errors, its closed rows dimmed.
+- **The GUI docs' link sweep and the index validation** pass.
+- `lib/scripts/cicd.sh --test`: green on the second run, the CLI's 3,992 tests and the macOS app's 780 cases passing with no Swift warning. The first run lost `cli.busy_line` to a timeout: `apogee check` under a PTY ran past 60 s while the suite loaded the machine. The CLI is unchanged in this run, and the test passed alone three times in 11.6 s.
+
+**Not done:**
+- **The board has no rows** for the `train pipeline` and `train cycle` reads and streams the app uses since 4j.
+- **The design canvas doesn't draw this run's other additions:** 4e's delete plan and narration card, 4f's install card, 4i's suite sheet and adapters, 4j's tabs, and 4k's verbs.
+- **CLI gaps found across this run, for the CLI's queue:**
+  - a runtime refusal under `stream-json` emits no `error` event;
+  - compose's two-voice-models refusal names `--model`, where its flag is `--voice-model`;
+  - `task list` carries no `interrupted`;
+  - nothing says which suite a resumed chat runs under, and suite refusals and admission lines reach stderr only;
+  - the footprint is text, not typed JSON;
+  - `datasets pull` has no stream;
+  - no read lists the named pipeline specs;
+  - a `train cycle halt` taken during a pass is overwritten when the pass saves;
+  - a failed pass under `stream-json` writes nothing to stderr;
+  - a resume repeats the previous attempt's score;
+  - no verb registers one provider;
+  - no verb lists recall's summaries;
+  - `chats info`, `chats recall`, `graph dedupe` and `knowledge info --raw` have no JSON;
+  - `graph delete` keeps the graph's config entry;
+  - `config add-backend` never sets a default;
+  - `config get tools.allowed_hosts` reads nothing.

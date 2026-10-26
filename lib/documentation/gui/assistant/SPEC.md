@@ -22,7 +22,7 @@ Apogee was built CLI-first and docs-first, with the GUI designed in from the sta
 - **Rendering the reads:** the CLI's `--output-format json` documents (models, chats, suites, check, agents, MCP, tasks, graphs …) as native views.
 - **Long-running work:** the CLI's jobs (pulls, conversions, training, video) narrated with progress and cancel, through the protocol's own events.
 
-_TODO:_ the first release's concrete feature cut is the first spike's to propose and the user's to settle.
+**The first release's cut** *(stated 2026-10-26, from what shipped; 4l)*: v0.2.0 carries the macOS application -- the first spike's split as the user settled it (macOS first, Swift and SwiftUI, unsigned ad-hoc) and everything built on it: every screen of the design (Milestones A and B), a classified place for every CLI command (Milestone C), MLX kinds (Milestone D) and the CLI/GUI audit's findings fixed (Milestone E). Linux and Windows wait for their own work.
 
 ## Non-goals
 
@@ -34,8 +34,14 @@ _TODO:_ the first release's concrete feature cut is the first spike's to propose
 - **Thin client, honest renderer.** The GUI shows what the protocol says — states, errors and refusals in the CLI's own words — and invents nothing on top.
 - **Additive protocol, tolerant client.** Unknown events and fields are tolerated, never fatal; a GUI version never requires a breaking protocol change (the CLI's ADR 0006, consumed).
 - **Native per platform.** Each app feels at home on its OS — the macOS app is Swift and SwiftUI (the user's call, 2026-10-20). Whether linux/windows share anything beyond ADR 0001's shape is decided when their work opens.
-- **Full parity** *(added 2026-10-20 — the user's call, from the first hands-on run of the built app)*: the GUI is meant to do **everything and anything the CLI and TUI do**. Every capability the CLI offers a person has a classified place in the GUI — a screen, the console, or a recorded carve-out with its reason — held mechanically (ADR 0003, once 2a lands). "The design doesn't show it" is a reason to grow the design per its own new-screen law, never to drop a capability.
+- **Full parity** *(added 2026-10-20 — the user's call, from the first hands-on run of the built app)*: the GUI is meant to do **everything and anything the CLI and TUI do**. Every capability the CLI offers a person has a classified place in the GUI — a screen, the console, or a recorded carve-out with its reason — held mechanically by ADR 0003 and its `ParityTable` since 2a (2026-10-20). "The design doesn't show it" is a reason to grow the design per its own new-screen law, never to drop a capability.
 
 ## Success criteria
 
-_TODO:_ written when the first release's feature cut is settled — phrased as observable outcomes (a user can open a chat, drive a turn, and cancel it, entirely through the GUI, with the CLI's own session files as the record).
+*(Written 2026-10-26 from behaviors the shipped app has, each traceable to its milestone; 4l.)*
+
+- **A conversation is the app's and the CLI's at once.** A person opens a chat, drives a turn, answers the model's questions and stops it, entirely in the app, with the CLI's own session files as the record; a reopened conversation shows its earlier turns (1c, 1f, 1g and M7; Milestones A and B).
+- **Every command has its place.** Each command the CLI offers a person is a screen, the console or a carve-out with its reason, and the app's suite fails the day the binary grows one unclassified (2a, ADR 0003; Milestone C).
+- **Long work is supervised.** Pulls, conversions, quantizations, training runs, pipelines and media renders run as jobs with progress and Stop, are on the monitor, and end when stopped (1i, 2i, 4c and 4j; Milestones B, C and E).
+- **The app says what the binary says.** Refusals, warnings and capabilities reach the person in the CLI's words, read from the binary -- its capabilities at launch -- never assumed (4b and 4k; Milestone E).
+- **Nothing is lost to the app's own moves.** Leaving a place never ends a private conversation without the person's say, and quitting ends every child the app started (4a and 4c; Milestone E).

@@ -73,7 +73,7 @@ Opened 2026-10-22 (the user's call): a thorough bug and feature-disparity audit 
 - [x] **Training and suites parity** *(4i, shipped 2026-10-26 — [Milestone E](MILESTONES.md#milestone-e--the-audits-gui-findings))* — adapter promote and editing, datasets pull, the shared-base fit, a chat under any suite.
 - [x] **Pipeline and cycle screens** *(4j, shipped 2026-10-26 — [Milestone E](MILESTONES.md#milestone-e--the-audits-gui-findings))* — named pipelines run, resumed and watched stage by stage; the cycle's state, a pass run, halted and resumed; on the CLI's 55h JSON.
 - [x] **The remaining verbs** *(4k, shipped 2026-10-26 — [Milestone E](MILESTONES.md#milestone-e--the-audits-gui-findings))* — saved-chat compact/info/recall, one provider registered, `server_tools` shown, graph export/dedupe/delete, MCP remove, raw records, capabilities from launch.
-- [ ] **Docs and the board catch up** *([4l](../backlog/v0.2.0/docs-and-board-catch-up.md))* — shipped gaps flipped by probe; ROADMAP, SPEC and CLAUDE stating what shipped.
+- [x] **Docs and the board catch up** *(4l, shipped 2026-10-26 — [Milestone E](MILESTONES.md#milestone-e--the-audits-gui-findings))* — shipped gaps flipped by probe; ROADMAP, SPEC and CLAUDE stating what shipped.
 
 ---
 
@@ -94,7 +94,6 @@ Opened 2026-10-22 (the user's call): a thorough bug and feature-disparity audit 
 
 - **`Apogee.app` in releases** — the merge's release carrying the ad-hoc-signed app beside the CLI's archives. The user's 2026-10-20 call kept it a CI artifact until the session window shipped, which it now has (1c); how the release scripts take it is its own item, on the user's word.
 - **Setting the binary override from the not-found screen** — since 1p, Settings › General's "Use another apogee…" sets the `binaryOverride` default; a "Locate apogee…" chooser on the not-found screen itself would set it before any session starts (1c's note).
-- **The answer as Markdown** — the window shows an answer as its exact text; rendering its Markdown, as the CLI's terminal does, is a deliberate later step (1c's note).
 
 ## Ideas / candidate features
 

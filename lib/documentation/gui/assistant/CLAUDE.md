@@ -23,7 +23,7 @@ Project context for coding agents working on **the Apogee GUI** — the desktop 
 
 ## What this is
 
-The Apogee GUI: one native desktop application per platform (`lib/src/darwin/`, `lib/src/linux/`, `lib/src/windows/`), each a graphical front end that **drives the `apogee` CLI over its stdio machine mode** — the harness's capabilities rendered, never reimplemented. See [SPEC.md](SPEC.md) for scope and principles, and [MILESTONES.md](MILESTONES.md) for what has shipped -- since 2026-10-20 the macOS application and its session window (Milestone A) and every screen of the design (Milestone B): track 1, complete in v0.2.0.
+The Apogee GUI: one native desktop application per platform (`lib/src/darwin/`, `lib/src/linux/`, `lib/src/windows/`), each a graphical front end that **drives the `apogee` CLI over its stdio machine mode** — the harness's capabilities rendered, never reimplemented. See [SPEC.md](SPEC.md) for scope and principles, and [MILESTONES.md](MILESTONES.md) for what has shipped, all in v0.2.0: the macOS application and its session window (Milestone A) and every screen of the design (Milestone B), track 1; CLI parity (Milestone C, track 2 with M2 and M3); MLX kinds in the app (Milestone D, track 3); and the CLI/GUI audit's findings (Milestone E, track 4).
 
 ## Stack & environment
 
