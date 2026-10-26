@@ -163,10 +163,13 @@ inline constexpr const char* kConfigKeyValue = "KEY";
 inline constexpr const char* kToolValue = "TOOL";
 /// A host in `tools.allowed_hosts`.
 inline constexpr const char* kAllowedHostValue = "ALLOWED_HOST";
+/// A provider the last scan found to register (M33): `providers register`'s
+/// argument, read from the provider cache, never a scan.
+inline constexpr const char* kProviderValue = "PROVIDER";
 
 /// Every name kind above, for the protocol to recognise and a test to hold
 /// each to a source.
-inline constexpr std::array<std::string_view, 50> kNameValues{kCollectionValue,
+inline constexpr std::array<std::string_view, 51> kNameValues{kCollectionValue,
                                                               kCollectionListValue,
                                                               kGraphValue,
                                                               kNamedGraphValue,
@@ -204,6 +207,7 @@ inline constexpr std::array<std::string_view, 50> kNameValues{kCollectionValue,
                                                               kConfigKeyValue,
                                                               kToolValue,
                                                               kAllowedHostValue,
+                                                              kProviderValue,
                                                               kSymphonyValue,
                                                               kSymphonyNameValue,
                                                               kSymphonyEntryValue,

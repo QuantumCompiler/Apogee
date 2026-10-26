@@ -11,6 +11,7 @@
 #include <random>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "cli/root.h"
@@ -19,6 +20,7 @@
 #include "modelstore/sidecar.h"
 #include "support/cli_home.h"
 #include "support/env_guard.h"
+#include "support/mlx_model.h"
 
 /// `config set-backend` (46b) through the real command: one flag per editable
 /// field, spelled as `add-backend` spells it; only the named fields touched,
@@ -414,4 +416,110 @@ TEST_CASE("set-backend pins adapters in a JSONC config in place, its comments ke
                            .base_sha256 = apogee::models::file_sha256(files.base)}});
     REQUIRE(home.run({"config", "set-backend", "local", "--adapters", ""}, &out, &err) == 0);
     CHECK(slurp(home.config_path()) == config);
+}
+
+TEST_CASE("role_refusal: each role takes its own kind, every other entry as before",
+          "[commands][config][kind][roles]") {
+    // M33: the embedding role takes what embeds, every other role what chats
+    // -- an mlx entry held to the kind of the set it is over; a kind no mlx
+    // entry runs takes no role at all (55d); every other entry is unchanged.
+    const apogee::testing::TempDir dir{"role-refusal-" + std::to_string(std::random_device{}())};
+    const auto entry_over = [&dir](const std::string& kind) {
+        const std::filesystem::path set = dir.path() / kind;
+        apogee::testing::write_mlx_model(set, {.kind = kind});
+        apogee::harness::BackendConfig backend;
+        backend.type = apogee::harness::BackendType::Mlx;
+        backend.model_path = set.string();
+        return backend;
+    };
+    for (const std::string_view field : apogee::harness::models_role_fields()) {
+        INFO(field);
+        const bool embedding_role = field == "default_embedding";
+        for (const std::string kind : {"chat", "vision", "embedding"}) {
+            INFO(kind);
+            const std::string refused =
+                apogee::commands::role_refusal("e", entry_over(kind), field);
+            const bool embeds = kind == "embedding";
+            CHECK(refused.empty() == (embeds == embedding_role));
+            if (!refused.empty()) {
+                CHECK_THAT(refused, ContainsSubstring(" is kind " + kind + " (recorded)"));
+                CHECK_THAT(refused, ContainsSubstring("so models." + std::string{field} +
+                                                      " cannot name it"));
+                CHECK_THAT(refused,
+                           ContainsSubstring(embeds ? "apogee config set-default-embedding e"
+                                                    : "apogee config set-default e"));
+            }
+        }
+        // A kind no mlx entry runs takes no role, in 55d's words.
+        for (const std::string kind : {"drafter", "voice", "video"}) {
+            INFO(kind);
+            const apogee::harness::BackendConfig backend = entry_over(kind);
+            CHECK(apogee::commands::role_refusal("e", backend, field) ==
+                  apogee::commands::kind_refusal("e", backend));
+            CHECK_FALSE(apogee::commands::kind_refusal("e", backend).empty());
+        }
+        // Every other entry, and a directory that says nothing, as before.
+        apogee::harness::BackendConfig cloud;
+        cloud.type = apogee::harness::BackendType::Anthropic;
+        CHECK(apogee::commands::role_refusal("c", cloud, field).empty());
+        apogee::harness::BackendConfig bare;
+        bare.type = apogee::harness::BackendType::Mlx;
+        bare.model_path = (dir.path() / "nothing-here").string();
+        CHECK(apogee::commands::role_refusal("b", bare, field).empty());
+    }
+}
+
+TEST_CASE("add_backend_text points models.default at an entry that chats, only when none is set",
+          "[commands][config][add-backend][default]") {
+    apogee::harness::BackendConfig mock;
+    mock.type = apogee::harness::BackendType::Mock;
+    constexpr std::string_view kNone = "backends:\n  a:\n    type: mock\n";
+    const apogee::commands::AddedBackend set =
+        apogee::commands::add_backend_text(kNone, "b", mock, false, /*chats=*/true);
+    CHECK(set.default_set);
+    CHECK(set.text ==
+          apogee::harness::set_models_role(apogee::harness::append_backend(kNone, "b", mock, false),
+                                           "default", "b"));
+    const apogee::commands::AddedBackend embeds =
+        apogee::commands::add_backend_text(kNone, "b", mock, false, /*chats=*/false);
+    CHECK_FALSE(embeds.default_set);
+    CHECK(embeds.text == apogee::harness::append_backend(kNone, "b", mock, false));
+    const apogee::commands::AddedBackend kept =
+        apogee::commands::add_backend_text(kConfig, "b", mock, false, /*chats=*/true);
+    CHECK_FALSE(kept.default_set);
+    CHECK(kept.text == apogee::harness::append_backend(kConfig, "b", mock, false));
+    CHECK(apogee::commands::default_set_words("b") == "models.default set to 'b' (none was set)");
+}
+
+TEST_CASE("delete_backend_text clears every role that names the entry, and only those",
+          "[commands][config][delete-backend][default]") {
+    // M33: each of `models_role_fields()` -- a field the table missed would
+    // be a pointer left naming nothing.
+    std::string content = "backends:\n  gone:\n    type: mock\n  kept:\n    type: mock\n";
+    for (const std::string_view field : apogee::harness::models_role_fields()) {
+        content = apogee::harness::set_models_role(content, field, "gone");
+    }
+    const apogee::commands::DeletedBackend deleted =
+        apogee::commands::delete_backend_text(content, "gone");
+    std::vector<std::string> said;
+    std::string expected = apogee::harness::delete_backend(content, "gone");
+    for (const std::string_view field : apogee::harness::models_role_fields()) {
+        said.push_back("models." + std::string{field} + " cleared: it named 'gone'");
+        expected = apogee::harness::set_models_role(expected, field, "");
+    }
+    CHECK(deleted.cleared == said);
+    CHECK(deleted.text == expected);
+    const apogee::harness::Config after = apogee::harness::parse_config(deleted.text, "<after>");
+    CHECK(after.models.default_backend.empty());
+    CHECK(after.models.default_utility.empty());
+
+    // Case aside, as the roles resolve; another entry's pointer kept.
+    std::string mixed = "backends:\n  gone:\n    type: mock\n  kept:\n    type: mock\n";
+    mixed = apogee::harness::set_models_role(mixed, "default", "GONE");
+    mixed = apogee::harness::set_models_role(mixed, "default_utility", "kept");
+    const apogee::commands::DeletedBackend cased =
+        apogee::commands::delete_backend_text(mixed, "gone");
+    CHECK(cased.cleared == std::vector<std::string>{"models.default cleared: it named 'GONE'"});
+    CHECK(apogee::harness::parse_config(cased.text, "<after>").models.default_utility == "kept");
+    CHECK_THROWS(apogee::commands::delete_backend_text(mixed, "nothing"));
 }

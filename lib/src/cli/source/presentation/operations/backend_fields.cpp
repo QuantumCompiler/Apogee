@@ -1,9 +1,15 @@
 #include "operations/backend_fields.h"
 
 #include <algorithm>
+#include <array>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <string>
+#include <system_error>
+#include <utility>
+#include <vector>
 
 #include "backends/adapters.h"
 #include "backends/mlx_local.h"
@@ -261,6 +267,18 @@ namespace {
     }
 }
 
+/// Each `models:` role pointer (`models_role_fields()`, in its order) and
+/// where the loaded config holds it -- what a delete clears (M33).
+constexpr std::array<std::pair<std::string_view, std::string harness::ModelsConfig::*>, 6>
+    kRolePointers{{
+        {"default", &harness::ModelsConfig::default_backend},
+        {"default_embedding", &harness::ModelsConfig::default_embedding},
+        {"default_extraction", &harness::ModelsConfig::default_extraction},
+        {"default_vision", &harness::ModelsConfig::default_vision},
+        {"default_transcription", &harness::ModelsConfig::default_transcription},
+        {"default_utility", &harness::ModelsConfig::default_utility},
+    }};
+
 }  // namespace
 
 std::string kind_refusal(std::string_view name, const harness::BackendConfig& backend) {
@@ -270,6 +288,85 @@ std::string kind_refusal(std::string_view name, const harness::BackendConfig& ba
     const backends::MlxReadiness readiness = backends::probe_mlx_kind(
         name, std::filesystem::path{harness::expand_env_and_home(backend.model_path)});
     return readiness.message();
+}
+
+std::string role_refusal(std::string_view name, const harness::BackendConfig& backend,
+                         std::string_view field) {
+    if (std::string refused = kind_refusal(name, backend); !refused.empty()) {
+        return refused;
+    }
+    if (backend.type != harness::BackendType::Mlx || backend.model_path.empty()) {
+        return {};
+    }
+    const std::filesystem::path dir{harness::expand_env_and_home(backend.model_path)};
+    std::error_code code;
+    if (!std::filesystem::is_regular_file(dir / "config.json", code)) {
+        return {};
+    }
+    // Past `kind_refusal` the kind is one an mlx entry runs: it chats
+    // (`backend()`) or it embeds (`embeds()`), never both. The embedding
+    // role takes what embeds; every other role what chats.
+    const models::MlxKind kind = models::read_mlx_kind(dir);
+    const bool embedding_role = field == "default_embedding";
+    if (embedding_role == kind.embeds()) {
+        return {};
+    }
+    const std::string reason = dir.string() + " is kind " + models::describe(kind) +
+                               ", so models." + std::string{field} + " cannot name it";
+    // The words `MlxEmbedProvider::chat_refusal` says of a chat on it, and
+    // their mirror for the other way round: what the entry does, and the
+    // role it can take.
+    if (embedding_role) {
+        return reason +
+               " -- this mlx backend chats and embeds nothing; point the chat role at it "
+               "('apogee config set-default " +
+               std::string{name} + "') and the embedding role at a backend that embeds";
+    }
+    return reason +
+           " -- this mlx backend embeds through mlx-embeddings and answers no chat or "
+           "completion; point the embedding role at it ('apogee config set-default-embedding " +
+           std::string{name} + "') and models." + std::string{field} + " at a backend that chats";
+}
+
+AddedBackend add_backend_text(std::string_view content, std::string_view name,
+                              const harness::BackendConfig& backend, bool force, bool chats) {
+    AddedBackend added;
+    // "None was set" is read off the text the edit starts from -- under the
+    // editor's lock, so two adds at once cannot both find it empty.
+    const bool unset = harness::parse_config(content, "<config>").models.default_backend.empty();
+    added.text = harness::append_backend(content, name, backend, force);
+    if (unset && chats) {
+        added.text = harness::set_models_role(added.text, "default", name);
+        added.default_set = true;
+    }
+    return added;
+}
+
+std::string default_set_words(std::string_view name) {
+    return "models.default set to '" + std::string{name} + "' (none was set)";
+}
+
+DeletedBackend delete_backend_text(std::string_view content, std::string_view name) {
+    DeletedBackend deleted;
+    deleted.text = harness::delete_backend(content, name);
+    // The pointers as written, read off the text the edit starts from: a
+    // role names the entry when it finds the same entry the delete removed,
+    // case aside, as the roles resolve.
+    const harness::Config config = harness::parse_config(content, "<config>");
+    const harness::BackendConfig* gone = config.find_backend(name);
+    if (gone == nullptr) {
+        return deleted;
+    }
+    for (const auto& [field, member] : kRolePointers) {
+        const std::string& value = config.models.*member;
+        if (value.empty() || config.find_backend(value) != gone) {
+            continue;
+        }
+        deleted.text = harness::set_models_role(deleted.text, field, "");
+        deleted.cleared.push_back("models." + std::string{field} + " cleared: it named '" + value +
+                                  "'");
+    }
+    return deleted;
 }
 
 BackendFieldsOutcome set_backend_fields(const std::filesystem::path& path, std::string_view name,

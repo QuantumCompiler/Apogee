@@ -264,6 +264,41 @@ TEST_CASE("register from the Providers view writes the registration core's confi
     CHECK(slurp(home.config_path()) == before);
 }
 
+TEST_CASE("providers register writes the bytes the Providers view's r writes, in its words",
+          "[cli][tui][doctor][providers]") {
+    // M33's finding: the core the view's r runs had no verb --
+    // `providers register claude` answered `A subcommand is required` -- so
+    // a front end registered one provider through add-backend, which fetched
+    // no roster. The verb runs the same core over the same last scan.
+    std::string drawn;
+    std::string viewed;
+    {
+        const apogee::testing::CliHome view_home{kConfig};
+        store_scan(scanned());
+        const apogee::commands::RootContext context = context_of(view_home);
+        Stage stage{apogee::commands::providers_view_options(context)};
+        REQUIRE(has(stage.frame(), "r register"));  // read: the rows are there
+        stage.press(Key::character("r"));
+        stage.press(Key::character("y"));
+        drawn = stage.frame();
+        viewed = slurp(view_home.config_path());
+    }
+    CHECK(has(drawn, "registered claude (claude-cli)"));
+
+    const apogee::testing::CliHome home{kConfig};
+    store_scan(scanned());
+    std::string out;
+    REQUIRE(home.run({"providers", "register", "claude"}, &out) == 0);
+    CHECK(out == "registered claude (claude-cli)\n");
+    CHECK(slurp(home.config_path()) == viewed);
+
+    // Again: the core's own words, nothing written -- as the view says them.
+    const std::string before = slurp(home.config_path());
+    REQUIRE(home.run({"providers", "register", "claude"}, &out) == 0);
+    CHECK(out == "claude: already registered as 'claude' -- nothing written\nnothing written\n");
+    CHECK(slurp(home.config_path()) == before);
+}
+
 TEST_CASE("the System page is apogee system's table, read on show", "[cli][tui][doctor]") {
     const apogee::testing::TempDir home{"doctor-system"};
     const apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};

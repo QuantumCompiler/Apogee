@@ -44,8 +44,11 @@ struct WrittenDefaults {
                                               const std::string& name);
 
 /// Removes backend `name`'s entry from the config at `path` through the one
-/// editor -- `config delete-backend`, and the shell's remove (32d). Returns
-/// what was done: `removed backend 'local' from <path>`.
+/// editor -- `config delete-backend`, the shell's remove (32d) and `models
+/// delete --and-backends` (M14) -- every role pointer that named it cleared
+/// in the same edit (M33, `delete_backend_text`). Returns what was done:
+/// `removed backend 'local' from <path>`, then a line per role cleared,
+/// `models.default cleared: it named 'local'`.
 [[nodiscard]] std::string remove_backend(const std::filesystem::path& path,
                                          const std::string& name);
 

@@ -289,7 +289,12 @@ cache: `f16`, `q8_0` or `q4_0`), `max_tokens`, `temperature`, a local model's
 sampling beyond it -- `top_p`, `top_k`, `min_p`, `repeat_penalty`,
 `presence_penalty`, `seed` (each checked by the config's own rules) -- whether
 its model reasons first, `thinking` (`on`, `off` or `auto`) and `thinking_budget`
-(tokens) -- and `force` (the `--force` twin: replace an existing entry). `201` with the view; `409`
+(tokens) -- and `force` (the `--force` twin: replace an existing entry). `201` with the view,
+`restart_required` and -- since M33 -- `said`: when the config set no `models.default` and the
+new entry chats, the route points `models.default` at it in the same edit, as `config
+add-backend` and `config scan --register` do, and `said` is the CLI's line, `models.default set
+to '<name>' (none was set)`; otherwise it is empty, and a default already set never moves. An
+`mlx` entry over an embedding set is never made the default. `409`
 (`type: conflict`) on a name collision without `force`; `400` on a bad type,
 cache type or body, or -- since 55d, in the CLI's own words -- an `mlx` entry
 over a set whose kind no `mlx` entry runs (a drafter, a video or voice model,
@@ -309,8 +314,11 @@ One entry's view. `404` when unknown.
 
 ### `DELETE /v1/admin/backends/{id}`
 
-The twin of `apogee config delete-backend`. `200 {deleted, restart_required}`;
-`404` when unknown.
+The twin of `apogee config delete-backend`. `200 {deleted, said, restart_required}`;
+`404` when unknown. Since M33 every role pointer (`models.default`,
+`default_embedding` and the rest) that named the entry is cleared in the same
+edit, as the CLI clears it, and `said` is the CLI's lines, one per role --
+`models.default cleared: it named '<name>'` -- or empty.
 
 ### `PATCH /v1/admin/backends/{id}`
 
@@ -363,7 +371,10 @@ takes; the old name may be any, which is how an odd one is reached.
 The twin of `apogee config set-default`: `{"name": "<backend>"}` sets
 `models.default`. `400` when the backend is not configured, naming the ones that
 are, or -- since 55d, as the CLI refuses it -- when it is an `mlx` entry over a
-set whose kind no `mlx` entry runs.
+set whose kind no `mlx` entry runs, or -- since M33, in the CLI's words -- when
+its kind is not the role's: `default_embedding` takes an `mlx` entry over an
+embedding set and no other role does, and every other role takes one over a
+chat or vision set, which the embedding role does not.
 
 ### `POST /v1/admin/backends/default-embedding`
 
@@ -1360,7 +1371,8 @@ that route's verb — or a value the key does not take; the file is untouched.
 ### `GET /v1/admin/allowed-hosts`
 
 The websites `fetch_url` reaches without asking — `tools.allowed_hosts`, as
-written — as `{"object":"list","data":[{host, valid}]}`. `valid` is `false` for
+written — as `{"object":"list","data":[{host, valid}]}`. Its CLI read is
+`apogee config get tools.allowed_hosts`, one host per line (since M33). `valid` is `false` for
 an entry that is not a bare host name (a pasted URL, a pattern): it allows
 nothing, and `apogee check` names it. Hosts are compared exactly:
 `docs.python.org` admits neither `python.org` nor any other subdomain.

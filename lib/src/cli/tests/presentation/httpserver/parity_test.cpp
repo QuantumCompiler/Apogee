@@ -160,6 +160,11 @@ const std::map<std::string, Classification>& table() {
          carve_out("detects the vendor CLIs and keys of the host it runs on; host-local by nature, "
                    "and what --register writes a remote client writes through the add-backend "
                    "twin")},
+        // M33: scan --register for one provider, over the host's last scan.
+        {"providers register",
+         carve_out("registers one provider the last scan of the host it runs on found; "
+                   "host-local by nature, as providers scan is, and what it writes a remote "
+                   "client writes through the add-backend twin")},
         {"uninstall", carve_out("removes the binary and the data directory; host-local")},
         {"reset",
          carve_out("resets the data directory to a fresh install; host-local, like uninstall -- "

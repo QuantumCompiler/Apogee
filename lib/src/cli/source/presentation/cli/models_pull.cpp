@@ -44,6 +44,7 @@
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
 #include "modelstore/voice_info.h"
+#include "operations/backend_fields.h"
 #include "operations/renames.h"
 #include "operations/store_references.h"
 #include "platform/platform.h"
@@ -1892,9 +1893,9 @@ PulledPipeline pull_pipeline(const std::string& ref, const models::StoreRoots& r
     DownloadProgress progress{std::cout, job_download_options()};
     const models::AcquireTreeResult result = models::acquire_tree(
         staging, items,
-        [&progress](std::size_t index, std::size_t count, std::string_view relative,
+        [&progress](std::size_t nth, std::size_t count, std::string_view relative,
                     std::int64_t written,
-                    std::int64_t size) { progress.file(index, count, relative, written, size); });
+                    std::int64_t size) { progress.file(nth, count, relative, written, size); });
     progress.finish();
     if (cancellation.stop_requested()) {
         cancelled_nothing_written(staging);
@@ -2869,9 +2870,10 @@ struct Registration {
 
 /// Adds each as a `llamacpp` backend through the one config editor -- the
 /// very edit `config add-backend <name> --type llamacpp --model-path <file>
-/// [--mmproj-path <projector>]` makes, byte for byte. An entry already
-/// naming the same files is left as it is: a resumed chain registers what is
-/// missing and nothing twice.
+/// [--mmproj-path <projector>]` makes, byte for byte, `models.default` with
+/// the first when none is set, said (M33) -- never an embedding model's,
+/// which answers no chat. An entry already naming the same files is left as
+/// it is: a resumed chain registers what is missing and nothing twice.
 void register_backends(const std::filesystem::path& config_path,
                        const std::vector<Registration>& wanted, bool base_model, bool embedding,
                        ChainLog& log) {
@@ -2899,15 +2901,22 @@ void register_backends(const std::filesystem::path& config_path,
             backend.type = harness::BackendType::LlamaCpp;
             backend.model_path = entry.file.string();
             backend.mmproj_path = entry.projector.string();
+            bool default_set = false;
             try {
-                harness::edit_config_file(
-                    config_path, [&entry, &backend](std::string_view content) {
-                        return harness::append_backend(content, entry.name, backend, false);
-                    });
+                harness::edit_config_file(config_path, [&entry, &backend, embedding,
+                                                        &default_set](std::string_view content) {
+                    AddedBackend added =
+                        add_backend_text(content, entry.name, backend, false, !embedding);
+                    default_set = added.default_set;
+                    return std::move(added.text);
+                });
             } catch (const std::exception& e) {
                 fail(e.what());
             }
             std::cout << "registered " << entry.name << "\n";
+            if (default_set) {
+                std::cout << default_set_words(entry.name) << "\n";
+            }
         }
         log.ready.push_back(entry.name +
                             (base_model ? "  (a base model: it continues text rather than "
@@ -3119,8 +3128,9 @@ namespace {
 
 /// Adds `name` as an `mlx` backend on `dir` through the one config editor --
 /// the edit `config add-backend <name> --type mlx --model-path <dir>` makes,
-/// byte for byte (M16). An entry already naming the same directory is left
-/// as it is: a resumed chain registers what is missing and nothing twice.
+/// byte for byte (M16), `models.default` with it when none is set and it
+/// chats, said (M33). An entry already naming the same directory is left as
+/// it is: a resumed chain registers what is missing and nothing twice.
 void register_mlx_backend(const std::filesystem::path& config_path, const std::string& name,
                           const std::filesystem::path& dir, bool embedding, ChainLog& log) {
     harness::Config config;
@@ -3142,14 +3152,22 @@ void register_mlx_backend(const std::filesystem::path& config_path, const std::s
         harness::BackendConfig backend;
         backend.type = harness::BackendType::Mlx;
         backend.model_path = dir.string();
+        const bool chats = role_refusal(name, backend, "default").empty();
+        bool default_set = false;
         try {
-            harness::edit_config_file(config_path, [&name, &backend](std::string_view content) {
-                return harness::append_backend(content, name, backend, false);
-            });
+            harness::edit_config_file(
+                config_path, [&name, &backend, chats, &default_set](std::string_view content) {
+                    AddedBackend added = add_backend_text(content, name, backend, false, chats);
+                    default_set = added.default_set;
+                    return std::move(added.text);
+                });
         } catch (const std::exception& e) {
             fail(e.what());
         }
         std::cout << "registered " << name << "\n";
+        if (default_set) {
+            std::cout << default_set_words(name) << "\n";
+        }
     }
     log.ready.push_back(name);
     log.next = next_step(name, embedding);

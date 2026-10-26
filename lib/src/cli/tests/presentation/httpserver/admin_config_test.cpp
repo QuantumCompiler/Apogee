@@ -3,12 +3,15 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <random>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "cli/registry.h"
@@ -861,4 +864,153 @@ TEST_CASE("a set whose kind no mlx entry runs is refused over HTTP in the CLI's 
     // And no edit moves an entry over it: set-backend's core, both surfaces' one.
     CHECK(cli({"config", "set-backend", "vox", "--model-path", voice.string()}, &err) == 1);
     CHECK(err.find(" is kind voice (recorded)") != std::string::npos);
+}
+
+TEST_CASE("a role over HTTP takes its own kind, refused in the CLI's own words",
+          "[httpserver][admin][kind][roles]") {
+    // M33: the role gate knows the role at every door. An entry over an
+    // embedding set takes the embedding role and no other; one over a chat
+    // set every role but that one -- one predicate, one wording.
+    const Fixture fixture;
+    const std::filesystem::path embedding =
+        fixture.home.path() / "gemma-embedding" / "mlx" / "eeeeeeeeeeee";
+    apogee::testing::write_mlx_model(embedding, {.kind = "embedding"});
+    const std::filesystem::path chat = fixture.home.path() / "gemma" / "mlx" / "cccccccccccc";
+    apogee::testing::write_mlx_model(chat, {.kind = "chat"});
+    for (const std::filesystem::path& path : {fixture.cli_config, fixture.http_config}) {
+        for (const std::pair<std::string, std::filesystem::path>& entry :
+             {std::pair<std::string, std::filesystem::path>{"Emb-4bit", embedding},
+              std::pair<std::string, std::filesystem::path>{"Chat-4bit", chat}}) {
+            apogee::harness::BackendConfig backend;
+            backend.type = apogee::harness::BackendType::Mlx;
+            backend.model_path = entry.second.string();
+            apogee::harness::edit_config_file(path, [&](std::string_view content) {
+                return apogee::harness::append_backend(content, entry.first, backend, false);
+            });
+        }
+    }
+    const auto cli = [&fixture](const std::vector<std::string>& args, std::string* err) {
+        apogee::commands::RootCommand root{apogee::commands::default_registry()};
+        std::vector<std::string> full{"--config", fixture.cli_config.string()};
+        full.insert(full.end(), args.begin(), args.end());
+        std::vector<const char*> argv{"apogee"};
+        for (const std::string& arg : full) {
+            argv.push_back(arg.c_str());
+        }
+        std::ostringstream captured;
+        std::ostringstream said;
+        std::streambuf* old_err = std::cerr.rdbuf(captured.rdbuf());
+        std::streambuf* old_out = std::cout.rdbuf(said.rdbuf());
+        const int code = root.run(static_cast<int>(argv.size()), argv.data());
+        std::cerr.rdbuf(old_err);
+        std::cout.rdbuf(old_out);
+        *err = captured.str();
+        return code;
+    };
+    for (const std::string_view field : apogee::harness::models_role_fields()) {
+        INFO(field);
+        const bool embeds = field == "default_embedding";
+        const std::string refused_name = embeds ? "Chat-4bit" : "Emb-4bit";
+        std::string verb = "set-" + std::string{field};
+        std::ranges::replace(verb, '_', '-');
+        const std::string cli_before = Fixture::bytes(fixture.cli_config);
+        const std::string http_before = Fixture::bytes(fixture.http_config);
+        const HttpResponse pointed =
+            admin_set_role(fixture.context(), field, post(nlohmann::json{{"name", refused_name}}));
+        CHECK(pointed.status == 400);
+        const std::string refused = parsed(pointed)["error"]["message"].get<std::string>();
+        CHECK(refused.starts_with("backend '" + refused_name +
+                                  "' cannot take a role: " + (embeds ? chat : embedding).string() +
+                                  " is kind " + (embeds ? "chat" : "embedding") + " (recorded)"));
+        std::string err;
+        CHECK(cli({"config", verb, refused_name}, &err) == 1);
+        CHECK(err == "apogee config: " + refused + "\n");
+        CHECK(Fixture::bytes(fixture.cli_config) == cli_before);
+        CHECK(Fixture::bytes(fixture.http_config) == http_before);
+        // The entry of the role's own kind, taken on both, the same bytes.
+        const std::string taken = embeds ? "Emb-4bit" : "Chat-4bit";
+        REQUIRE(admin_set_role(fixture.context(), field, post(nlohmann::json{{"name", taken}}))
+                    .status == 200);
+        CHECK(cli({"config", verb, taken}, &err) == 0);
+        CHECK(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
+    }
+}
+
+TEST_CASE("an HTTP add-backend sets the default when none is set, as the CLI does, and says so",
+          "[httpserver][admin][parity][default]") {
+    // M33: the admin twin of `config add-backend` makes an entry that chats
+    // the default when the config sets none -- the CLI's bytes, said in its
+    // words -- and never moves one already set.
+    const Fixture fixture;
+    REQUIRE(apogee::harness::load_config(fixture.http_config).models.default_backend.empty());
+    fixture.cli({"config", "add-backend", "work", "--type", "mock", "--model", "mock-1"});
+    const HttpResponse created = admin_create_backend(
+        fixture.context(),
+        post(nlohmann::json{{"name", "work"}, {"type", "mock"}, {"model", "mock-1"}}));
+    REQUIRE(created.status == 201);
+    CHECK(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
+    CHECK(apogee::harness::load_config(fixture.http_config).models.default_backend == "work");
+    CHECK(parsed(created)["said"] == "models.default set to 'work' (none was set)");
+
+    fixture.cli({"config", "add-backend", "spare", "--type", "mock"});
+    const HttpResponse second = admin_create_backend(
+        fixture.context(), post(nlohmann::json{{"name", "spare"}, {"type", "mock"}}));
+    REQUIRE(second.status == 201);
+    CHECK(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
+    CHECK(apogee::harness::load_config(fixture.http_config).models.default_backend == "work");
+    CHECK(parsed(second)["said"] == "");
+
+    // An entry over an embedding set is no chat backend: never made the
+    // default on anyone's behalf.
+    const Fixture fresh;
+    const std::filesystem::path embedding =
+        fresh.home.path() / "gemma-embedding" / "mlx" / "eeeeeeeeeeee";
+    apogee::testing::write_mlx_model(embedding, {.kind = "embedding"});
+    const HttpResponse embedder = admin_create_backend(
+        fresh.context(),
+        post(nlohmann::json{
+            {"name", "Emb-4bit"}, {"type", "mlx"}, {"model_path", embedding.string()}}));
+    REQUIRE(embedder.status == 201);
+    CHECK(parsed(embedder)["said"] == "");
+    CHECK(apogee::harness::load_config(fresh.http_config).models.default_backend.empty());
+}
+
+TEST_CASE("an HTTP delete-backend clears the roles that named the entry, as the CLI does",
+          "[httpserver][admin][parity][default]") {
+    // M33: the twin of `config delete-backend` leaves no role pointer naming
+    // what it removed -- the CLI's bytes, its lines as `said`.
+    const Fixture fixture;
+    fixture.cli({"config", "add-backend", "work", "--type", "mock"});
+    fixture.cli({"config", "set-default-utility", "work"});
+    REQUIRE(admin_create_backend(fixture.context(),
+                                 post(nlohmann::json{{"name", "work"}, {"type", "mock"}}))
+                .status == 201);
+    REQUIRE(
+        admin_set_role(fixture.context(), "default_utility", post(nlohmann::json{{"name", "work"}}))
+            .status == 200);
+    REQUIRE(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
+
+    fixture.cli({"config", "delete-backend", "work"});
+    const HttpResponse deleted = admin_delete_backend(fixture.context(), "work");
+    REQUIRE(deleted.status == 200);
+    CHECK(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
+    const nlohmann::json body = parsed(deleted);
+    CHECK(body["deleted"] == "work");
+    CHECK(body["said"] ==
+          nlohmann::json::array({"models.default cleared: it named 'work'",
+                                 "models.default_utility cleared: it named 'work'"}));
+    const apogee::harness::Config after = apogee::harness::load_config(fixture.http_config);
+    CHECK(after.models.default_backend.empty());
+    CHECK(after.models.default_utility.empty());
+    // Nothing named: nothing said.
+    REQUIRE(admin_create_backend(fixture.context(),
+                                 post(nlohmann::json{{"name", "other"}, {"type", "mock"}}))
+                .status == 201);
+    REQUIRE(admin_set_role(fixture.context(), "default", post(nlohmann::json{{"name", "other"}}))
+                .status == 200);
+    REQUIRE(admin_create_backend(fixture.context(),
+                                 post(nlohmann::json{{"name", "spare"}, {"type", "mock"}}))
+                .status == 201);
+    CHECK(parsed(admin_delete_backend(fixture.context(), "spare"))["said"] ==
+          nlohmann::json::array());
 }

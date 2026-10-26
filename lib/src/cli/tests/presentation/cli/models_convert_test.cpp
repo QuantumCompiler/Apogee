@@ -363,6 +363,8 @@ TEST_CASE("convert --register makes the F16 and registers it, as add-backend wou
     CHECK(out.find("[1/2] convert to F16") != std::string::npos);
     CHECK(out.find("[2/2] register vision-F16") != std::string::npos);
     CHECK(out.find("registered vision-F16") != std::string::npos);
+    // With no default set, the entry becomes it, said as add-backend says it (M33).
+    CHECK(out.find("models.default set to 'vision-F16' (none was set)") != std::string::npos);
     CHECK(out.find("chat with one:  apogee chat -m vision-F16") != std::string::npos);
     // The chain's own words replace each verb's what-to-do-next.
     CHECK(out.find("Use it by adding a backend") == std::string::npos);

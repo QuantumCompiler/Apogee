@@ -1,6 +1,7 @@
 #include "cli/config_cmd.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -792,4 +793,148 @@ TEST_CASE("what set-backend writes, config get reads back as written",
         CHECK(home.run({"config", "get", "backends.claude." + field}, &out) == 0);
         CHECK(out == printed);
     }
+}
+
+// --- the default set when none is (M33) ---------------------------------------
+
+TEST_CASE("add-backend makes an entry that chats the default when none is set, and says so",
+          "[commands][config][add-backend][default]") {
+    // M33's finding: on a fresh home `config add-backend mock --type mock`
+    // left models.default empty, and `complete hi` then failed `no
+    // models.default is set` -- while `providers scan --register` sets it,
+    // said (28b). Every door that adds an entry now sets it the same way:
+    // only when none is set, only to an entry that chats, said.
+    const CliHome home{kConfig};
+    std::string out;
+    REQUIRE(home.run({"config", "add-backend", "mock", "--type", "mock", "--model", "mock-1"},
+                     &out) == 0);
+    CHECK(out == "added backend 'mock' to " + home.config_path().string() +
+                     "\nmodels.default set to 'mock' (none was set)\n");
+    // Byte for byte the entry, then the pointer, as the one editor writes each.
+    apogee::harness::BackendConfig mock;
+    mock.type = apogee::harness::BackendType::Mock;
+    mock.model = "mock-1";
+    CHECK(home.config_text() ==
+          apogee::harness::set_models_role(
+              apogee::harness::append_backend(kConfig, "mock", mock, false), "default", "mock"));
+    CHECK(home.config_text().starts_with("# my models\nbackends:\n  # the cloud one\n"));
+
+    // One already set is never moved.
+    const std::string with_default = home.config_text();
+    REQUIRE(home.run({"config", "add-backend", "other", "--type", "mock"}, &out) == 0);
+    CHECK(out == "added backend 'other' to " + home.config_path().string() + "\n");
+    apogee::harness::BackendConfig other;
+    other.type = apogee::harness::BackendType::Mock;
+    CHECK(home.config_text() ==
+          apogee::harness::append_backend(with_default, "other", other, false));
+    CHECK(apogee::harness::load_config(home.config_path()).models.default_backend == "mock");
+}
+
+TEST_CASE("config scan --register sets the default as add-backend sets it, byte for byte",
+          "[commands][config][scan][store][default]") {
+    // The batch add-backend (M12) and the hand-typed one stay one writer:
+    // with no default set, the first entry registered becomes it, said once.
+    const CliHome home{kConfig};
+    const std::filesystem::path f16 = scan_gguf(home, "org--a", "111111111111", "a-F16.gguf");
+    const std::filesystem::path q4 = scan_gguf(home, "org--a", "222222222222", "a-Q4_K_M.gguf");
+    std::string out;
+    REQUIRE(home.run({"config", "scan", "--register"}, &out) == 0);
+    INFO(out);
+    CHECK(out.find("added backend 'a-F16'\nmodels.default set to 'a-F16' (none was set)\nadded "
+                   "backend 'a-Q4KM'\nregistered 2 backend(s)") != std::string::npos);
+    CHECK(apogee::harness::load_config(home.config_path()).models.default_backend == "a-F16");
+
+    const CliHome typed{kConfig};
+    std::string said;
+    REQUIRE(typed.run({"config", "add-backend", "a-F16", "--type", "llamacpp", "--model-path",
+                       f16.lexically_normal().string()},
+                      &said) == 0);
+    CHECK(said.find("models.default set to 'a-F16' (none was set)\n") != std::string::npos);
+    REQUIRE(typed.run({"config", "add-backend", "a-Q4KM", "--type", "llamacpp", "--model-path",
+                       q4.lexically_normal().string()},
+                      &said) == 0);
+    CHECK(home.config_text() == typed.config_text());
+
+    // A default already set: the batch moves it no more than add-backend does.
+    const CliHome set{std::string{kConfig} + "models:\n  default: claude\n"};
+    (void)scan_gguf(set, "org--a", "111111111111", "a-F16.gguf");
+    REQUIRE(set.run({"config", "scan", "--register"}, &out) == 0);
+    CHECK(out.find("models.default") == std::string::npos);
+    CHECK(apogee::harness::load_config(set.config_path()).models.default_backend == "claude");
+}
+
+// --- config get tools.allowed_hosts (M33) -------------------------------------
+
+TEST_CASE("config get reads tools.allowed_hosts one per line, as the host verbs leave it",
+          "[commands][config][get][allowed-hosts]") {
+    // M33's finding: `config get tools.allowed_hosts` said `no such config
+    // key` even after `config add-allowed-host` wrote a host.
+    const CliHome home{kConfig};
+    std::string out;
+    // None yet is an answer: empty.
+    REQUIRE(home.run({"config", "get", "tools.allowed_hosts"}, &out) == 0);
+    CHECK(out == "\n");
+    REQUIRE(home.run({"config", "add-allowed-host", "docs.python.org"}, &out) == 0);
+    REQUIRE(home.run({"config", "add-allowed-host", "example.com"}, &out) == 0);
+    out.clear();
+    REQUIRE(home.run({"config", "get", "tools.allowed_hosts"}, &out) == 0);
+    CHECK(out == "docs.python.org\nexample.com\n");
+    REQUIRE(home.run({"config", "delete-allowed-host", "docs.python.org"}, &out) == 0);
+    out.clear();
+    REQUIRE(home.run({"config", "get", "tools.allowed_hosts"}, &out) == 0);
+    CHECK(out == "example.com\n");
+}
+
+// --- delete-backend leaves no role naming what it removed (M33) ----------------
+
+TEST_CASE("delete-backend clears every role that named the entry, said, and check stays green",
+          "[commands][config][delete-backend][default]") {
+    // M33's own consequence: an add on a config with no default now points
+    // models.default at the entry, and a delete used to leave the pointer
+    // naming nothing -- `check` then failed `names a backend that is not
+    // configured`. The delete clears each role that named it, as `models
+    // delete` clears the default_video it strands, and says so.
+    const CliHome home{kConfig};
+    std::string out;
+    REQUIRE(home.run({"config", "add-backend", "temp", "--type", "mock"}, &out) == 0);
+    REQUIRE(home.run({"config", "set-default-utility", "temp"}, &out) == 0);
+    REQUIRE(home.run({"config", "set-default-embedding", "claude"}, &out) == 0);
+    const std::string before = home.config_text();
+
+    REQUIRE(home.run({"config", "delete-backend", "temp"}, &out) == 0);
+    CHECK(out == "removed backend 'temp' from " + home.config_path().string() +
+                     "\nmodels.default cleared: it named 'temp'\nmodels.default_utility cleared: "
+                     "it named 'temp'\n");
+    // The one editor's edits, in one write: the entry gone, each pointer
+    // cleared as `set-default-video off` clears its own.
+    CHECK(home.config_text() ==
+          apogee::harness::set_models_role(
+              apogee::harness::set_models_role(apogee::harness::delete_backend(before, "temp"),
+                                               "default", ""),
+              "default_utility", ""));
+    const apogee::harness::Config config = apogee::harness::load_config(home.config_path());
+    CHECK(config.models.default_backend.empty());
+    CHECK(config.models.default_utility.empty());
+    CHECK(config.models.default_embedding == "claude");  // another entry's, kept
+
+    // The doctor finds no pointer naming nothing.
+    std::string err;
+    (void)home.run({"check", "--output-format", "json"}, &out, &err);
+    const nlohmann::json document = nlohmann::json::parse(out);
+    std::size_t roles = 0;
+    for (const nlohmann::json& row : document["rows"]) {
+        if (row["name"].get<std::string>().starts_with("default_")) {
+            INFO(row.dump());
+            CHECK(row["status"] != "fail");
+            ++roles;
+        }
+    }
+    CHECK(roles > 0);
+
+    // A delete naming no role says nothing more.
+    REQUIRE(home.run({"config", "add-backend", "spare", "--type", "mock"}, &out) == 0);
+    CHECK(out.find("models.default set to 'spare' (none was set)") != std::string::npos);
+    REQUIRE(home.run({"config", "set-default", "claude"}, &out) == 0);
+    REQUIRE(home.run({"config", "delete-backend", "spare"}, &out) == 0);
+    CHECK(out == "removed backend 'spare' from " + home.config_path().string() + "\n");
 }

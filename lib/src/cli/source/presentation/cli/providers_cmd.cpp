@@ -11,8 +11,11 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <span>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <vector>
 
 #include "backends/factory.h"
@@ -145,6 +148,93 @@ void say(const std::vector<std::string>& lines) {
     }
 }
 
+/// The knowledge table's ids, as a sentence lists them: "claude, codex, …
+/// or google".
+[[nodiscard]] std::string provider_ids(std::string_view last_joint) {
+    const std::span<const backends::ProviderFacts> table = backends::provider_table();
+    std::string out;
+    for (std::size_t i = 0; i < table.size(); ++i) {
+        out += i == 0 ? "" : (i + 1 == table.size() ? last_joint : ", ");
+        out += table[i].id;
+    }
+    return out;
+}
+
+/// `text` a line each, as a document carries what a person reads.
+[[nodiscard]] std::vector<std::string> lines_of(const std::string& text) {
+    std::vector<std::string> lines;
+    std::istringstream in{text};
+    for (std::string line; std::getline(in, line);) {
+        lines.push_back(line);
+    }
+    return lines;
+}
+
+/// The config file `context` names, refused as `scan --register` refuses a
+/// registration with none: creating the config is `config init`'s act.
+[[nodiscard]] std::filesystem::path registration_config(const RootContext& context) {
+    std::filesystem::path config_path;
+    try {
+        config_path = harness::resolve_config_path(context.config_path);
+    } catch (const std::exception& e) {
+        fail(e.what());
+    }
+    std::error_code missing;
+    if (!std::filesystem::exists(config_path, missing)) {
+        fail("no config file at " + config_path.string() +
+             " -- run 'apogee config init' first, then register");
+    }
+    return config_path;
+}
+
+/// `apogee providers register <provider>` (M33): one provider the last scan
+/// found, registered by the core the Providers view runs on `r`
+/// (`register_provider`) -- its words, its default, its roster fetched on
+/// this word. The last scan is read, never run: an id the knowledge table
+/// does not hold, or a machine never scanned, is refused naming the way on.
+/// `--output-format json` carries what it did as `scan --register`'s
+/// document does: `registration` and `rosters`, a line each.
+void bind_register(CLI::App& parent, const RootContext& context) {
+    auto provider = std::make_shared<std::string>();
+    auto format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    CLI::App* cmd = parent.add_subcommand(
+        "register",
+        "Register one provider the last scan found as a backend -- what 'scan --register' does "
+        "for each, its models fetched");
+    cmd->add_option("provider", *provider,
+                    "A provider the last scan found: " + provider_ids(" or "))
+        ->type_name(kProviderValue)
+        ->required();
+    add_read_format(cmd, format);
+    cmd->callback([&context, provider, format]() {
+        if (backends::find_provider(*provider) == nullptr) {
+            fail("no provider named '" + *provider +
+                 "' -- the ones apogee knows: " + provider_ids(", "));
+        }
+        const std::filesystem::path config_path = registration_config(context);
+        if (!backends::load_provider_cache().scanned()) {
+            fail(
+                "this machine has not been scanned for providers yet -- 'apogee providers "
+                "scan' looks, then 'apogee providers register " +
+                *provider + "' registers what it found");
+        }
+        ProviderRegistration done;
+        try {
+            done = register_provider(config_path, *provider);
+        } catch (const std::exception& e) {
+            fail(e.what());
+        }
+        if (*format == ReadFormat::Json) {
+            write_document(std::cout, nlohmann::json{{"object", "provider.registration"},
+                                                     {"provider", *provider},
+                                                     {"registration", done.registration},
+                                                     {"rosters", done.rosters}});
+            return;
+        }
+        std::cout << done.said();
+    });
+}
+
 }  // namespace
 
 std::vector<ProviderRow> provider_rows(const std::vector<backends::ProviderStatus>& statuses,
@@ -219,7 +309,19 @@ std::vector<backends::ProviderStatus> scan_providers_now(const std::filesystem::
     return backends::scan_host_providers(options, &store).providers;
 }
 
-std::string register_provider(const std::filesystem::path& config_path, std::string_view provider) {
+std::string ProviderRegistration::said() const {
+    std::string out;
+    for (const std::string& line : registration) {
+        out += line + "\n";
+    }
+    for (const std::string& line : rosters) {
+        out += line + "\n";
+    }
+    return out;
+}
+
+ProviderRegistration register_provider(const std::filesystem::path& config_path,
+                                       std::string_view provider) {
     const harness::Config config = harness::load_config(config_path);
     // The registration core over the last scan, for this provider alone: the
     // plan, its default and its words are the command's.
@@ -231,14 +333,13 @@ std::string register_provider(const std::filesystem::path& config_path, std::str
     }
     const RegistrationPlan plan = plan_registration(chosen, config, ollama_models_here());
     apply_registration(config_path, plan);
-    std::string said = render_registration(plan, /*applied=*/true);
+    ProviderRegistration done;
+    done.registration = lines_of(render_registration(plan, /*applied=*/true));
     // Registration brings the models (M13), on this -- the user's -- word.
     if (plan.registers() > 0) {
-        for (const std::string& line : fetch_rosters(config_path, /*refresh_all=*/false)) {
-            said += line + "\n";
-        }
+        done.rosters = fetch_rosters(config_path, /*refresh_all=*/false);
     }
-    return said;
+    return done;
 }
 
 std::string_view ProvidersCommand::name() const noexcept {
@@ -290,14 +391,6 @@ void ProvidersCommand::bind(CLI::App& root, const RootContext& context) {
         // fetching did, each beside them rather than printed around them.
         nlohmann::json document =
             provider_scan_document(provider_rows(report.providers, config ? &*config : nullptr));
-        const auto lines_of = [](const std::string& text) {
-            std::vector<std::string> lines;
-            std::istringstream in{text};
-            for (std::string line; std::getline(in, line);) {
-                lines.push_back(line);
-            }
-            return lines;
-        };
         if (!json) {
             std::cout << render_provider_scan(report.providers, config ? &*config : nullptr);
         }
@@ -353,6 +446,7 @@ void ProvidersCommand::bind(CLI::App& root, const RootContext& context) {
         std::cout << "\n" << registered;
         say(fetch_rosters(config_path, /*refresh_all=*/flags->refresh));
     });
+    bind_register(*cmd, context);
 }
 
 }  // namespace apogee::commands

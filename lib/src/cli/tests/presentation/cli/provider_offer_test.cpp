@@ -15,6 +15,7 @@
 #include "cli/providers_cmd.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
+#include "support/cli_home.h"
 #include "support/env_guard.h"
 
 /// Registration offers (28b): the pass `providers scan --register` runs and
@@ -198,6 +199,34 @@ TEST_CASE("the plan: one entry per detected provider that has none", "[providers
         CHECK(plan.steps[0].detail == "mock");
         CHECK(plan.default_backend.empty());
     }
+}
+
+TEST_CASE("the default a registration sets is add-backend's, byte for byte and word for word",
+          "[providers][register][default]") {
+    // M33: `config add-backend` now points models.default at a new entry that
+    // chats when none is set, as this pass always has (28b) -- one rule, one
+    // wording, the same bytes from either door.
+    constexpr const char* kNoDefault = R"(# my own notes, kept through every edit
+backends:
+  # the local one
+  mock:
+    type: mock
+    model: mock-1
+)";
+    const Sandbox box{kNoDefault};
+    const RegistrationPlan plan = apogee::commands::plan_registration(
+        scan_with({"codex"}), apogee::harness::load_config(box.config));
+    REQUIRE(plan.default_backend == "codex");
+    apogee::commands::apply_registration(box.config, plan);
+
+    const apogee::testing::CliHome typed{kNoDefault};
+    std::string said;
+    REQUIRE(typed.run({"config", "add-backend", "codex", "--type", "codex-cli"}, &said) == 0);
+    CHECK(read(box.config) == typed.config_text());
+    const std::string words = "models.default set to 'codex' (none was set)\n";
+    CHECK(said.ends_with(words));
+    CHECK(apogee::commands::render_registration(plan, /*applied=*/true) ==
+          "registered codex (codex-cli)\n" + words);
 }
 
 TEST_CASE("Ollama's one model registers it as add-backend would; several are named, none chosen",

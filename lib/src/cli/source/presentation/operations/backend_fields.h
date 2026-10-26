@@ -14,14 +14,14 @@ namespace apogee::commands {
 
 /// One field to set: `value` empty clears it.
 struct BackendFieldEdit {
-    std::string field;
-    std::string value;
+    std::string field{};
+    std::string value{};
 };
 
 /// What an edit did, or why it did nothing.
 struct BackendFieldsOutcome {
-    std::string said;
-    std::string refusal;
+    std::string said{};
+    std::string refusal{};
 };
 
 /// `edits` applied to backend `name` in the config at `path`, every one in
@@ -73,5 +73,63 @@ struct BackendFieldsOutcome {
 /// whose record says `voice` never becomes a chat backend by any of them.
 [[nodiscard]] std::string kind_refusal(std::string_view name,
                                        const harness::BackendConfig& backend);
+
+/// **A role is the kind's to take** (M33): why entry `name` may not be
+/// `models.<field>` -- one of `models_role_fields()` -- or empty when it may.
+/// `kind_refusal` first: a kind no mlx entry runs takes no role. Then the
+/// role: `default_embedding` takes what embeds, and every other role -- the
+/// chat default and the helpers -- what chats, so an mlx entry over an
+/// embedding set mlx-embeddings built takes the embedding role and no other,
+/// and one over a chat or vision set every role but that one, each refusal
+/// naming the kind, the role, and the role the entry can take. Every other
+/// entry, and an mlx directory with no `config.json`, may: the kind is the
+/// MLX directory's to say. The doors that point a role ask it -- `config
+/// set-default*`, their admin twins and the shell's make default -- and the
+/// doors that add an entry ask it for `default` before making it the default
+/// on someone's behalf (`add_backend_text`).
+[[nodiscard]] std::string role_refusal(std::string_view name, const harness::BackendConfig& backend,
+                                       std::string_view field);
+
+/// What adding an entry left (M33): the config's text, and whether
+/// `models.default` was pointed at the entry.
+struct AddedBackend {
+    std::string text{};
+    bool default_set = false;
+};
+
+/// The one add every door that writes a backend entry by name shares (M33)
+/// -- `config add-backend`, each entry `config scan --register` writes, the
+/// register chains' entries (pinned to add-backend byte for byte, M3 and
+/// M16) and the admin twin: `append_backend`, then, when `content` sets no
+/// `models.default` and the entry `chats` (`role_refusal` for `default`
+/// empty, asked by the caller before the edit), `models.default` pointed at
+/// it in the same edit -- 28b's rule for `providers scan --register`, so
+/// every door sets the default alike and says it alike (`default_set_words`).
+/// A pure transform, as the editor's are; throws as they do.
+[[nodiscard]] AddedBackend add_backend_text(std::string_view content, std::string_view name,
+                                            const harness::BackendConfig& backend, bool force,
+                                            bool chats);
+
+/// `models.default set to '<name>' (none was set)`: how a door says it made
+/// `name` the default on someone's behalf (28b, M33).
+[[nodiscard]] std::string default_set_words(std::string_view name);
+
+/// What deleting an entry left (M33): the config's text, and a line for
+/// each role pointer that named the entry and was cleared with it.
+struct DeletedBackend {
+    std::string text{};
+    std::vector<std::string> cleared{};
+};
+
+/// The one delete every door that removes a backend entry shares (M33) --
+/// `config delete-backend`, the shell's remove, `models delete
+/// --and-backends` and the admin twin: `delete_backend`, then every
+/// `models.<role>` (`models_role_fields()`) that named the entry cleared in
+/// the same edit, as `models delete` clears the `default_video` it strands
+/// (55d) -- so no role names an entry that is gone, and an add that made
+/// itself the default leaves none behind. Each clearing is said as
+/// `models.default cleared: it named '<name>'`. A pure transform, as the
+/// editor's are; throws as `delete_backend` does.
+[[nodiscard]] DeletedBackend delete_backend_text(std::string_view content, std::string_view name);
 
 }  // namespace apogee::commands

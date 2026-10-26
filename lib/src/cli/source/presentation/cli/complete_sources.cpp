@@ -16,6 +16,8 @@
 #include "cli/embed.h"
 #include "cli/graph.h"
 #include "cli/models_pull.h"
+#include "cli/provider_offer.h"
+#include "cli/providers_cmd.h"
 #include "cli/task_cmd.h"
 #include "contracts/assets.h"
 #include "contracts/cancellation.h"
@@ -770,6 +772,19 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
     } else if (kind == kAllowedHostValue) {
         list.names = config.tools.allowed_hosts;
         list.none = "no allowed hosts yet -- 'apogee config add-allowed-host'";
+    } else if (kind == kProviderValue) {
+        // What the last scan found to register (M33), read from the provider
+        // cache -- never a scan -- each with what the scan's row says of it.
+        const std::vector<backends::ProviderStatus> statuses = last_provider_scan();
+        const std::vector<ProviderRow> rows = provider_rows(statuses, &config);
+        for (std::size_t i = 0; i < statuses.size() && i < rows.size(); ++i) {
+            if (offerable(statuses[i])) {
+                list.names.push_back(rows[i].provider);
+                list.notes[rows[i].provider] = {.group = {}, .description = rows[i].backend};
+            }
+        }
+        list.as_listed = true;  // the knowledge table's order, as the scan lists them
+        list.none = "no provider the last scan found to register -- 'apogee providers scan' looks";
     } else {
         // A kind declared in `kNameValues` with no branch here: a test calls
         // every kind, so this is a failure there, never a silent nothing.

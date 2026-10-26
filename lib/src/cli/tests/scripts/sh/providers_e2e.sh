@@ -10,6 +10,9 @@
 #   - `providers scan --register` writes two entries through the editor and
 #     names each; the user's comment survives; a second run writes nothing
 #     and says so per provider;
+#   - `providers register <id>` (M33) registers one provider at a time over
+#     the last scan, the batch's bytes and words, its JSON the batch's lines,
+#     and an id apogee does not know refused;
 #   - with a backend already named `claude`, `--register` skips it, says so,
 #     and touches it not at all;
 #   - complete and machine mode, with the scan cached and both providers
@@ -97,6 +100,34 @@ grep -q '^nothing written$' "$WORK_DIR/again.txt" || fail "second pass did not s
 cmp -s "$CONFIG" "$WORK_DIR/registered.yaml" || fail "a second --register changed the config"
 "$APOGEE_BIN" check </dev/null >/dev/null 2>&1; true
 
+# --- one provider by name: providers register (M33) -----------------------------
+# The core the shell's r runs, over the last scan -- never a scan of its own.
+fresh_home three
+"$APOGEE_BIN" providers --help </dev/null 2>&1 | grep -qE '^ +register +' || fail "providers --help lists no register"
+"$APOGEE_BIN" providers register claude </dev/null >"$WORK_DIR/unscanned.txt" 2>&1 \
+    && fail "register on a machine never scanned succeeded"
+grep -q "'apogee providers scan' looks" "$WORK_DIR/unscanned.txt" \
+    || fail "the never-scanned refusal named no scan: $(cat "$WORK_DIR/unscanned.txt")"
+"$APOGEE_BIN" providers scan </dev/null >/dev/null 2>&1 || fail "scan (three) failed"
+"$APOGEE_BIN" providers register claude </dev/null >"$WORK_DIR/one.txt" 2>&1 \
+    || fail "register claude failed: $(cat "$WORK_DIR/one.txt")"
+grep -q '^registered claude (claude-cli)$' "$WORK_DIR/one.txt" \
+    || fail "claude not registered by name: $(cat "$WORK_DIR/one.txt")"
+grep -q '"codex-cli"' "$CONFIG" && fail "registering claude wrote codex too"
+"$APOGEE_BIN" providers register codex --output-format json </dev/null >"$WORK_DIR/one.json" \
+    2>"$WORK_DIR/one.err" || fail "register codex (json) failed: $(cat "$WORK_DIR/one.err")"
+grep -q '^{"object":"provider.registration","provider":"codex","registration":\["registered codex (codex-cli)"\],"rosters":\[' \
+    "$WORK_DIR/one.json" || fail "the JSON is not the batch's lines: $(cat "$WORK_DIR/one.json")"
+# One at a time, the batch's bytes.
+cmp -s "$CONFIG" "$WORK_DIR/registered.yaml" \
+    || fail "register claude, then codex, differs from scan --register: $(diff "$CONFIG" "$WORK_DIR/registered.yaml")"
+"$APOGEE_BIN" providers register claude </dev/null >"$WORK_DIR/one-again.txt" 2>&1 || fail "second register failed"
+grep -q "^claude: already registered as 'claude' -- nothing written$" "$WORK_DIR/one-again.txt" \
+    || fail "a second register did not say so: $(cat "$WORK_DIR/one-again.txt")"
+"$APOGEE_BIN" providers register nope </dev/null >"$WORK_DIR/nope.txt" 2>&1 && fail "an unknown provider was taken"
+grep -q "no provider named 'nope'" "$WORK_DIR/nope.txt" || fail "the unknown id was not named"
+cmp -s "$CONFIG" "$WORK_DIR/registered.yaml" || fail "a refused register changed the config"
+
 # --- a taken name is skipped, never suffixed ----------------------------------
 fresh_home two
 "$APOGEE_BIN" config add-backend claude --type mock --model other >/dev/null || fail "add taken"
@@ -117,4 +148,4 @@ grep -q "config init" "$WORK_DIR/none.txt" || fail "no pointer to config init"
 [ -e "$APOGEE_HOME/config/config.json" ] && fail "--register created a config"
 [ -e "$APOGEE_HOME/config/config.yaml" ] && fail "--register created a YAML config"
 
-echo "providers: scan, register, idempotence, a taken name and quiet surfaces - OK"
+echo "providers: scan, register, one by name, idempotence, a taken name and quiet surfaces - OK"

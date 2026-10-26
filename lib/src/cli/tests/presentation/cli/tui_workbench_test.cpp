@@ -14,6 +14,7 @@
 #include "cli/models.h"
 #include "logger/session.h"
 #include "support/cli_home.h"
+#include "support/mlx_model.h"
 #include "tui/list_view.h"
 #include "tui/pump.h"
 #include "tui/shell.h"
@@ -244,6 +245,32 @@ TEST_CASE("a stale row is refused as the command refuses it, and nothing is writ
     bench.press(Key::character("y"));
     CHECK(has(bench.frame(), "not done"));
     CHECK(slurp(home.config_path()) == after_cli);
+}
+
+TEST_CASE("make default refuses an entry of a kind the chat role cannot use, writing nothing",
+          "[cli][tui][workbench][kind]") {
+    // M33: the view's d runs `config set-default`'s own core, so the role
+    // gate that knows the role refuses here as there -- an entry over an
+    // embedding set is no chat backend.
+    const apogee::testing::CliHome home{kConfig};
+    const fs::path embedding = home.models() / "org--emb" / "mlx" / "aaaaaaaaaaaa";
+    apogee::testing::write_mlx_model(embedding, {.kind = "embedding"});
+    std::ofstream{home.config_path(), std::ios::binary | std::ios::trunc}
+        << "backends:\n  local:\n    type: mock\n    model: mock-1\n  Emb-4bit:\n    type: mlx\n"
+           "    model_path: "
+        << embedding.string() << "\nmodels:\n  default: local\n";
+    const std::string before = slurp(home.config_path());
+    std::string refused;
+    CHECK(home.run({"config", "set-default", "Emb-4bit"}, &refused) == 1);
+    CHECK(has(refused, "cannot take a role: " + embedding.string() + " is kind embedding"));
+    CHECK(slurp(home.config_path()) == before);
+
+    Bench bench{home, apogee::commands::config_view_options};
+    bench.select("Emb-4bit");
+    bench.press(Key::character("d"));
+    CHECK(has(bench.frame(), "not done"));
+    CHECK_FALSE(has(bench.frame(), "models.default = Emb-4bit"));
+    CHECK(slurp(home.config_path()) == before);
 }
 
 TEST_CASE("make default on a suite leaves the file config set-default-suite leaves",

@@ -13,7 +13,9 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include "cli/config_suites.h"
@@ -76,11 +78,13 @@ void apply_edit(const std::filesystem::path& path, Transform&& transform) {
 }
 
 /// Confirms a role pointer names a real backend before writing it -- and,
-/// since 55d, one that runs what it names (`kind_refusal`).
+/// since 55d, one that runs what it names (`kind_refusal`), and since M33 one
+/// of the kind the role `field` uses (`role_refusal`).
 ///
 /// Without this, `set-default typo` writes a config that loads fine and then
 /// fails on the next request with a far less obvious message.
-void require_backend_exists(const std::filesystem::path& path, const std::string& name) {
+void require_backend_exists(const std::filesystem::path& path, const std::string& name,
+                            std::string_view field) {
     try {
         const Config config = harness::load_config(path);
         if (config.find_backend(name) == nullptr) {
@@ -94,9 +98,11 @@ void require_backend_exists(const std::filesystem::path& path, const std::string
                                   "add-backend')"
                                 : " (known backends: " + known + ")"));
         }
-        // A role names an entry that runs what it names (55d): the kind of
-        // the set an mlx entry is over decides, by the one predicate.
-        if (const std::string refused = kind_refusal(name, *config.find_backend(name));
+        // A role names an entry that runs what it names (55d), of the kind
+        // the role uses (M33): the kind of the set an mlx entry is over
+        // decides, the embedding role taking what embeds and every other
+        // what chats.
+        if (const std::string refused = role_refusal(name, *config.find_backend(name), field);
             !refused.empty()) {
             fail("backend '" + name + "' cannot take a role: " + refused);
         }
@@ -170,6 +176,9 @@ const std::vector<FixedRead>& fixed_reads() {
         {"paths.embeddings_dir", [](const Config& c) { return render(c.paths.embeddings_dir); }},
         {"tools.fs_root", [](const Config& c) { return render(c.tools.fs_root); }},
         {"tools.disabled", [](const Config& c) { return one_per_line(c.tools.disabled); }},
+        // What `config add-allowed-host` and a website's `always` write (M33).
+        {"tools.allowed_hosts",
+         [](const Config& c) { return one_per_line(c.tools.allowed_hosts); }},
         // What `config set` moves (52e), each read back as it is written.
         {"memory.recall", [](const Config& c) { return flag_word(c.memory.recall); }},
         {"knowledge.auto_capture",
@@ -776,8 +785,15 @@ void bind_scan(CLI::App& parent, const RootContext& context) {
             if (!row.projector.empty()) {
                 backend.mmproj_path = row.projector.string();
             }
-            apply_edit(path, [&row, &backend](std::string_view content) {
-                return harness::append_backend(content, row.name, backend, /*force=*/false);
+            // Each entry as `add-backend` writes it (M33): the default too,
+            // when none is set and the entry chats.
+            const bool chats = role_refusal(row.name, backend, "default").empty();
+            bool default_set = false;
+            apply_edit(path, [&row, &backend, chats, &default_set](std::string_view content) {
+                AddedBackend added =
+                    add_backend_text(content, row.name, backend, /*force=*/false, chats);
+                default_set = added.default_set;
+                return std::move(added.text);
             });
             std::cout << "added backend '" << row.name << "'"
                       << (row.embeds ? " -- an embedding model, which answers no chat: 'apogee "
@@ -785,6 +801,9 @@ void bind_scan(CLI::App& parent, const RootContext& context) {
                                            row.name + "' points the embedding role at it"
                                      : std::string{})
                       << "\n";
+            if (default_set) {
+                std::cout << default_set_words(row.name) << "\n";
+            }
         }
         std::cout << "registered " << registerable << " backend(s) in " << path.string() << "\n";
     });
@@ -1017,10 +1036,20 @@ void bind_add_backend(CLI::App& parent, const RootContext& context) {
         if (const std::string refused = kind_refusal(flags->name, backend); !refused.empty()) {
             fail(refused);
         }
-        apply_edit(path, [flags, &backend](std::string_view content) {
-            return harness::append_backend(content, flags->name, backend, flags->force);
+        // The first entry that chats becomes the default when none is set,
+        // said (M33, 28b's rule): never one over an embedding set.
+        const bool chats = role_refusal(flags->name, backend, "default").empty();
+        bool default_set = false;
+        apply_edit(path, [flags, &backend, chats, &default_set](std::string_view content) {
+            AddedBackend added =
+                add_backend_text(content, flags->name, backend, flags->force, chats);
+            default_set = added.default_set;
+            return std::move(added.text);
         });
         std::cout << "added backend '" << flags->name << "' to " << path.string() << "\n";
+        if (default_set) {
+            std::cout << default_set_words(flags->name) << "\n";
+        }
     });
 }
 
@@ -1466,7 +1495,7 @@ WrittenDefaults written_defaults(const harness::Config& config) {
 
 std::string point_role(const std::filesystem::path& path, std::string_view field,
                        const std::string& name) {
-    require_backend_exists(path, name);
+    require_backend_exists(path, name, field);
     apply_edit(path, [field, &name](std::string_view content) {
         return harness::set_models_role(content, std::string{field}, name);
     });
@@ -1497,9 +1526,18 @@ std::string point_default_video(const std::filesystem::path& path, const std::st
 }
 
 std::string remove_backend(const std::filesystem::path& path, const std::string& name) {
-    apply_edit(
-        path, [&name](std::string_view content) { return harness::delete_backend(content, name); });
-    return "removed backend '" + name + "' from " + path.string();
+    // The roles that named it go with it, each said (M33).
+    std::vector<std::string> cleared;
+    apply_edit(path, [&name, &cleared](std::string_view content) {
+        DeletedBackend deleted = delete_backend_text(content, name);
+        cleared = std::move(deleted.cleared);
+        return std::move(deleted.text);
+    });
+    std::string said = "removed backend '" + name + "' from " + path.string();
+    for (const std::string& line : cleared) {
+        said += "\n" + line;
+    }
+    return said;
 }
 
 std::vector<std::string> config_keys(const harness::Config& config) {

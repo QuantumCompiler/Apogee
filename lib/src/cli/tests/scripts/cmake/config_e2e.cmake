@@ -185,6 +185,13 @@ file(WRITE "${CONFIG_FILE}" "${PRISTINE}")
 # --- add-backend -----------------------------------------------------------
 apogee_run(0 config add-backend claude --type anthropic
            --api-key "\${ANTHROPIC_API_KEY}" --model claude-sonnet-5 --context-size 200000)
+# The template sets no default: the first entry that chats becomes it, said
+# as `providers scan --register` says it (M33, 28b's rule).
+if(NOT APOGEE_OUT MATCHES "\nmodels\\.default set to 'claude' \\(none was set\\)\n")
+    message(FATAL_ERROR "add-backend on a config with no default did not set it:\n${APOGEE_OUT}")
+endif()
+apogee_run(0 config get models.default)
+expect_equal("${APOGEE_OUT}" "claude" "the first entry is the default")
 
 apogee_run(0 config get backends)
 expect_equal("${APOGEE_OUT}" "claude" "the added backend is listed")
@@ -581,6 +588,10 @@ string(REPLACE "\"allowed_hosts\": []" "\"allowed_hosts\": [\"127.0.0.1\"]" EXPE
 if(NOT AFTER_ALWAYS STREQUAL EXPECTED_ALWAYS)
     message(FATAL_ERROR "`always` did not add exactly the host:\n${AFTER_ALWAYS}")
 endif()
+# Read back as the host verbs leave it, one per line (M33) -- before, `no such
+# config key`.
+apogee_run(0 config get tools.allowed_hosts)
+expect_equal("${APOGEE_OUT}" "127.0.0.1" "config get tools.allowed_hosts")
 
 # Listed now, so the same pipe run reaches it (and fails to connect, which is
 # the proof it was attempted rather than refused).
@@ -604,6 +615,8 @@ file(READ "${CONFIG_FILE}" AFTER_FORGET)
 if(NOT AFTER_FORGET STREQUAL BEFORE_ALWAYS)
     message(FATAL_ERROR "delete-allowed-host did not restore the bytes")
 endif()
+apogee_run(0 config get tools.allowed_hosts)
+expect_equal("${APOGEE_OUT}" "" "no allowed hosts once the last is deleted")
 apogee_run(1 config delete-allowed-host 127.0.0.1)
 apogee_run(1 config add-allowed-host https://example.com/)
 
@@ -628,7 +641,12 @@ function(apogee_run_at_once verb)
     endforeach()
 endfunction()
 
+# A default set first: since M33 the first add on a config with none makes
+# itself the default, and which of sixteen at once wins the lock is the race's
+# to say -- the bytes compared are the file with its default.
 file(WRITE "${CONFIG_FILE}" "${PRISTINE}")
+apogee_run(0 config add-backend base --type mock --model m)
+file(READ "${CONFIG_FILE}" BEFORE_CONCURRENT)
 apogee_run_at_once(add)
 apogee_run(0 config get backends)
 foreach(i RANGE 1 16)
@@ -636,12 +654,15 @@ foreach(i RANGE 1 16)
         message(FATAL_ERROR "16 concurrent add-backends: b${i} did not land:\n${APOGEE_OUT}")
     endif()
 endforeach()
+apogee_run(0 config get models.default)
+expect_equal("${APOGEE_OUT}" "base" "sixteen adds left the default as it was")
 apogee_run_at_once(delete)
 file(READ "${CONFIG_FILE}" AFTER_CONCURRENT)
-if(NOT AFTER_CONCURRENT STREQUAL PRISTINE)
+if(NOT AFTER_CONCURRENT STREQUAL BEFORE_CONCURRENT)
     message(FATAL_ERROR "16 concurrent adds then deletes did not restore the bytes:\n"
                         "${AFTER_CONCURRENT}")
 endif()
+file(WRITE "${CONFIG_FILE}" "${PRISTINE}")
 if(NOT EXISTS "${CONFIG_FILE}.lock")
     message(FATAL_ERROR "no lock file beside the config after the edits")
 endif()
@@ -758,14 +779,27 @@ if(NOT APOGEE_OUT MATCHES "is current")
 endif()
 
 # --- delete restores the original bytes ------------------------------------
-# Rebuild from pristine so the role edits above do not muddy the comparison.
+# Rebuild from pristine so the role edits above do not muddy the comparison --
+# with a default already set, since M33's first add on a config with none
+# also points models.default at itself, and the delete that clears it again
+# leaves the pointer written empty, not the line gone.
 file(WRITE "${CONFIG_FILE}" "${PRISTINE}")
+apogee_run(0 config add-backend base --type mock --model m)
+file(READ "${CONFIG_FILE}" BEFORE_ROUND_TRIP)
 apogee_run(0 config add-backend temp --type mock --model m)
 apogee_run(0 config delete-backend temp)
 file(READ "${CONFIG_FILE}" AFTER_ROUND_TRIP)
-if(NOT AFTER_ROUND_TRIP STREQUAL PRISTINE)
+if(NOT AFTER_ROUND_TRIP STREQUAL BEFORE_ROUND_TRIP)
     message(FATAL_ERROR "add-then-delete was not byte-identical")
 endif()
+# The entry the default names, deleted: the pointer is cleared with it and
+# said, so no role names an entry that is gone (M33).
+apogee_run(0 config delete-backend base)
+if(NOT APOGEE_OUT MATCHES "\nmodels\\.default cleared: it named 'base'\n")
+    message(FATAL_ERROR "deleting the default's entry did not clear it:\n${APOGEE_OUT}")
+endif()
+apogee_run(0 config get models.default)
+expect_equal("${APOGEE_OUT}" "" "models.default after its entry was deleted")
 
 file(REMOVE_RECURSE "${APOGEE_WORK_DIR}")
 message(STATUS "apogee config end-to-end: OK")

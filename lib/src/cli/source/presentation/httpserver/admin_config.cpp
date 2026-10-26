@@ -330,9 +330,16 @@ HttpResponse admin_create_backend(const AdminConfigContext& context, const HttpR
     if (const std::string refused = commands::kind_refusal(name, backend); !refused.empty()) {
         return error_response(400, refused);
     }
+    // The CLI's own add (M33): the default too, when none is set and the
+    // entry chats -- the same bytes, said in the same words.
+    const bool chats = commands::role_refusal(name, backend, "default").empty();
+    bool default_set = false;
     try {
         harness::edit_config_file(context.config_path, [&](std::string_view content) {
-            return harness::append_backend(content, name, backend, force);
+            commands::AddedBackend added =
+                commands::add_backend_text(content, name, backend, force, chats);
+            default_set = added.default_set;
+            return std::move(added.text);
         });
     } catch (const harness::ConfigEditError& e) {
         const std::string what = e.what();
@@ -349,6 +356,7 @@ HttpResponse admin_create_backend(const AdminConfigContext& context, const HttpR
     }
     nlohmann::json out = backend_view(name, backend);
     out["restart_required"] = drifted(context, *loaded.config);
+    out["said"] = default_set ? commands::default_set_words(name) : std::string{};
     return json_response(201, out);
 }
 
@@ -373,9 +381,14 @@ HttpResponse admin_delete_backend(const AdminConfigContext& context, std::string
     if (loaded.config->find_backend(name) == nullptr) {
         return error_response(404, "no backend named '" + std::string{name} + "'", kNotFoundError);
     }
+    // The CLI's own delete (M33): the roles that named it cleared with it,
+    // its lines as `said`.
+    std::vector<std::string> cleared;
     try {
         harness::edit_config_file(context.config_path, [&](std::string_view content) {
-            return harness::delete_backend(content, name);
+            commands::DeletedBackend deleted = commands::delete_backend_text(content, name);
+            cleared = std::move(deleted.cleared);
+            return std::move(deleted.text);
         });
     } catch (const harness::ConfigEditError& e) {
         return error_response(400, e.what());
@@ -388,6 +401,7 @@ HttpResponse admin_delete_backend(const AdminConfigContext& context, std::string
     }
     return json_response(200,
                          nlohmann::json{{"deleted", std::string{name}},
+                                        {"said", cleared},
                                         {"restart_required", drifted(context, *after.config)}});
 }
 
@@ -838,9 +852,10 @@ HttpResponse admin_set_role(const AdminConfigContext& context, std::string_view 
                                   (known.empty() ? " (it has no backends yet)"
                                                  : " (known backends: " + join_names(known) + ")"));
     }
-    // And one that runs what it names (55d), as the CLI refuses it.
+    // And one that runs what it names (55d), of the kind the role uses
+    // (M33), as the CLI refuses it.
     if (const std::string refused =
-            commands::kind_refusal(name, *loaded.config->find_backend(name));
+            commands::role_refusal(name, *loaded.config->find_backend(name), field);
         !refused.empty()) {
         return error_response(400, "backend '" + name + "' cannot take a role: " + refused);
     }

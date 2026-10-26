@@ -334,7 +334,7 @@ The standing upkeep queue *(created 2026-10-03, the user's call)* — release-ag
 - [x] **Pipelines and the cycle tell the truth** — maintenance item M30, shipped 2026-10-26 *([Milestone AO](MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths))* — a halt taken during a pass was overwritten by the pass's save; a failed pass was silent on stderr; a resume repeated the old score; no read listed named pipelines; `datasets pull` had no stream.
 - [x] **Prose reads gain JSON** — maintenance item M31, shipped 2026-10-26 *([Milestone AO](MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths))* — `chats info`, recall's summaries, `graph dedupe`, `knowledge info --raw` and the suite footprint, readable as documents.
 - [x] **List rows carry what drivers need** — maintenance item M32, shipped 2026-10-26 *([Milestone AO](MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths))* — `task list` says a task was interrupted, and `models list` an `mlx` base's drafter.
-- [ ] **Config verbs finish their job** *([M33](../backlog/maintenance/config-verbs-finish-their-job.md))* — an embedding entry was accepted as the chat role; `add-backend` set no default; no verb registered one provider; `tools.allowed_hosts` couldn't be read.
+- [x] **Config verbs finish their job** — maintenance item M33, shipped 2026-10-26 *([Milestone AO](MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths))* — an embedding entry was accepted as the chat role; `add-backend` set no default; no verb registered one provider; `tools.allowed_hosts` couldn't be read.
 
 ## Up next
 

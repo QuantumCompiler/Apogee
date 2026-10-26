@@ -349,9 +349,10 @@ TEST_CASE("config get's completion offers every key it reads, each once",
         INFO(scalar.key);
         CHECK(has(keys, scalar.key));
     }
+    // M33: the allowed hosts are read as `tools.disabled` is, one per line.
     for (const std::string_view key :
          {"memory.recall", "knowledge.auto_capture", "tools.search.provider", "tools.search.url",
-          "tools.search.results"}) {
+          "tools.search.results", "tools.allowed_hosts"}) {
         INFO(key);
         CHECK(has(keys, key));
     }

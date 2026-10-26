@@ -587,6 +587,46 @@ TEST_CASE("deleting weights never touches the config without a word, and says th
     CHECK(out.find("kept backend 'kept'") == std::string::npos);
 }
 
+TEST_CASE("with --and-backends the roles the removed entries held are cleared, in its words",
+          "[commands][models][delete][backends][default]") {
+    // M33: `models delete --and-backends` removes an entry as `config
+    // delete-backend` does (M14) -- the same path, so the roles that named it
+    // are cleared with it and said in the same words, byte for byte.
+    Stranded flagged;
+    Stranded by_hand;
+    for (const Stranded* home : {&flagged, &by_hand}) {
+        std::ofstream{home->home.config_path(), std::ios::binary | std::ios::app}
+            << "models:\n  default: first\n  default_utility: second\n  default_extraction: "
+               "kept\n";
+    }
+    std::string out;
+    REQUIRE(flagged.home.run(
+                {"models", "delete", "org--m/gguf/aaaaaaaaaaaa", "--yes", "--and-backends"},
+                &out) == 0);
+    INFO(out);
+    CHECK(out.find("removed backend 'first' from " + flagged.home.config_path().string() +
+                   "\nmodels.default cleared: it named 'first'\n") != std::string::npos);
+    CHECK(out.find("removed backend 'second' from " + flagged.home.config_path().string() +
+                   "\nmodels.default_utility cleared: it named 'second'\n") != std::string::npos);
+    const apogee::harness::Config config = apogee::harness::load_config(flagged.home.config_path());
+    CHECK(config.models.default_backend.empty());
+    CHECK(config.models.default_utility.empty());
+    CHECK(config.models.default_extraction == "kept");
+
+    std::string said;
+    REQUIRE(by_hand.home.run({"config", "delete-backend", "first"}, &said) == 0);
+    CHECK(said.find("models.default cleared: it named 'first'\n") != std::string::npos);
+    REQUIRE(by_hand.home.run({"config", "delete-backend", "second"}, &said) == 0);
+    const auto strip = [](std::string text, const std::string& root) {
+        for (std::size_t at = text.find(root); at != std::string::npos; at = text.find(root)) {
+            text.replace(at, root.size(), "<home>");
+        }
+        return text;
+    };
+    CHECK(strip(flagged.config(), flagged.home.home().string()) ==
+          strip(by_hand.config(), by_hand.home.home().string()));
+}
+
 TEST_CASE(
     "with --and-backends exactly the affected entries go, as config delete-backend removes them",
     "[commands][models][delete][backends]") {

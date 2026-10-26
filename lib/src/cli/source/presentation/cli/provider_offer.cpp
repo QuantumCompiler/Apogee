@@ -9,6 +9,7 @@
 #include "backends/provider_table.h"
 #include "contracts/config_edit.h"
 #include "models/source_ollama.h"
+#include "operations/backend_fields.h"
 
 namespace apogee::commands {
 
@@ -195,8 +196,11 @@ std::string render_registration(const RegistrationPlan& plan, bool applied) {
         }
     }
     if (!plan.default_backend.empty()) {
-        out += std::string{applied ? "models.default set to '" : "models.default would be '"} +
-               plan.default_backend + "' (none was set)\n";
+        // The words every door that sets the default on someone's behalf
+        // says (M33).
+        out += (applied ? default_set_words(plan.default_backend)
+                        : "models.default would be '" + plan.default_backend + "' (none was set)") +
+               "\n";
     }
     if (plan.steps.empty()) {
         out += "nothing to register -- no provider was detected\n";

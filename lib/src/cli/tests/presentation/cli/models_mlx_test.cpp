@@ -12,6 +12,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -21,6 +22,7 @@
 #include "cli/models_pull.h"
 #include "contracts/assets.h"
 #include "contracts/config.h"
+#include "contracts/config_edit.h"
 #include "contracts/errors.h"
 #include "contracts/layout.h"
 #include "contracts/sha256.h"
@@ -1213,6 +1215,9 @@ TEST_CASE("convert --mlx --register converts once and registers what the hint wo
     CHECK(out.find("[1/2] convert to MLX 4bit") != std::string::npos);
     CHECK(out.find("[2/2] register m-4bit") != std::string::npos);
     CHECK(out.find("registered m-4bit") != std::string::npos);
+    // With no default set, the entry becomes it, said as add-backend says it (M33).
+    CHECK(out.find("registered m-4bit\nmodels.default set to 'm-4bit' (none was set)\n") !=
+          std::string::npos);
     CHECK(out.find("Use it by adding a backend") == std::string::npos);  // executed, not hinted
 
     // Byte for byte the hand-typed line's edit, in a twin home.
@@ -1520,8 +1525,15 @@ TEST_CASE("an entry over a kind no mlx backend chats with is listed as needing a
         home.run({"config", "add-backend", "talk", "--type", "mlx", "--model-path", talk.string()},
                  &out) == 0);
     {
-        std::ofstream file{home.config_path(), std::ios::binary | std::ios::app};
-        file << "  film:\n    type: mlx\n    model_path: " << film.string() << "\n";
+        // Past the doors, as the one editor writes an entry: since M33 the
+        // add above also wrote `models:` after `backends:`, so a line appended
+        // to the file would land under it.
+        apogee::harness::BackendConfig backend;
+        backend.type = apogee::harness::BackendType::Mlx;
+        backend.model_path = film.string();
+        apogee::harness::edit_config_file(home.config_path(), [&backend](std::string_view content) {
+            return apogee::harness::append_backend(content, "film", backend, false);
+        });
     }
     const apogee::harness::Config config = apogee::harness::load_config(home.config_path());
     const std::vector<apogee::commands::ModelRow> rows =
@@ -3138,6 +3150,9 @@ TEST_CASE("an MLX embedding chain ends on the embedding door, its note said with
     CHECK(out.find("\nnote: an embedding model -- the backend embeds and answers no chat; point "
                    "the embedding role at it: apogee config set-default-embedding "
                    "Gemma-Embedding-300M-4bit\n") != std::string::npos);
+    // An entry that answers no chat is never made the default (M33).
+    CHECK(out.find("models.default") == std::string::npos);
+    CHECK(apogee::harness::load_config(home.config_path()).models.default_backend.empty());
     // The door, as printed, on that state.
     std::string said;
     REQUIRE(home.run({"config", "set-default-embedding", "Gemma-Embedding-300M-4bit"}, &said) == 0);
@@ -3209,4 +3224,102 @@ TEST_CASE("a stored voice or video set is never a chat backend, refused by its k
         REQUIRE(home.run({"config", "set-default", "vox"}, &out) == 0);
         std::ofstream{home.config_path(), std::ios::binary | std::ios::trunc} << before;
     }
+}
+
+namespace {
+
+/// `set-default-embedding` for `default_embedding`: each role's verb, spelled
+/// as `config` binds it.
+[[nodiscard]] std::string role_verb(std::string_view field) {
+    std::string verb = "set-" + std::string{field};
+    std::ranges::replace(verb, '_', '-');
+    return verb;
+}
+
+/// A config holding the mock default and two mlx entries written by hand --
+/// past every door -- one over an embedding set and one over a chat set.
+void two_mlx_entries(const CliHome& home, const std::filesystem::path& embedding,
+                     const std::filesystem::path& chat) {
+    std::ofstream file{home.config_path(), std::ios::binary | std::ios::trunc};
+    file << "backends:\n  m:\n    type: mock\n  Emb-4bit:\n    type: mlx\n    model_path: "
+         << embedding.string() << "\n  Chat-4bit:\n    type: mlx\n    model_path: " << chat.string()
+         << "\nmodels:\n  default: m\n";
+}
+
+}  // namespace
+
+TEST_CASE("each role takes its own kind: the embedding role what embeds, every other what chats",
+          "[commands][models][mlx][kind][roles]") {
+    // M33's finding: 55d's gate asked `registers()`, which 53h had widened to
+    // embeddings, so `config set-default Emb-4bit` answered `models.default
+    // = Emb-4bit` and every chat on it was then refused; `set-default-utility`
+    // took it too, and `set-default-embedding` took a chat set. The gate now
+    // knows the role.
+    const CliHome home{"backends:\n  m:\n    type: mock\nmodels:\n  default: m\n"};
+    const std::filesystem::path embedding = home.models() / "org--emb" / "mlx" / "aaaaaaaaaaaa";
+    write_mlx_model(embedding, {.kind = "embedding"});
+    const std::filesystem::path chat = home.models() / "org--chat" / "mlx" / "bbbbbbbbbbbb";
+    write_mlx_model(chat, {.kind = "chat"});
+    two_mlx_entries(home, embedding, chat);
+    const std::string written = config_text(home);
+
+    for (const std::string_view field : apogee::harness::models_role_fields()) {
+        INFO(field);
+        const bool embeds = field == "default_embedding";
+        const std::string refused_name = embeds ? "Chat-4bit" : "Emb-4bit";
+        const std::filesystem::path refused_set = embeds ? chat : embedding;
+        const std::string kind = embeds ? "chat" : "embedding";
+        std::string out;
+        CHECK(home.run({"config", role_verb(field), refused_name}, &out) == 1);
+        CHECK(out.find(
+                  "backend '" + refused_name + "' cannot take a role: " + refused_set.string() +
+                  " is kind " + kind + " (recorded) -- " + apogee::models::describe_mlx_kind(kind) +
+                  ", so models." + std::string{field} + " cannot name it") != std::string::npos);
+        // The way out named: the role the entry can take.
+        CHECK(out.find(embeds
+                           ? "apogee config set-default Chat-4bit"
+                           : "apogee config set-default-embedding Emb-4bit") != std::string::npos);
+        CHECK(config_text(home) == written);
+        // The entry of the role's own kind is taken, as it always was.
+        const std::string taken = embeds ? "Emb-4bit" : "Chat-4bit";
+        REQUIRE(home.run({"config", role_verb(field), taken}, &out) == 0);
+        CHECK(out == "models." + std::string{field} + " = " + taken + "\n");
+        two_mlx_entries(home, embedding, chat);
+    }
+}
+
+TEST_CASE(
+    "an embedding entry never becomes the default: add-backend and scan set it for one "
+    "that chats",
+    "[commands][models][mlx][kind][default]") {
+    // M33: once add-backend sets models.default when none is, finding 1's
+    // rule holds there too -- an entry over an embedding set is no chat
+    // backend, so it is never made the default on anyone's behalf.
+    const CliHome home{"backends:\n  m:\n    type: mock\n"};
+    const std::filesystem::path embedding = home.models() / "org--emb" / "mlx" / "aaaaaaaaaaaa";
+    write_mlx_model(embedding, {.kind = "embedding"});
+    const std::filesystem::path chat = home.models() / "org--chat" / "mlx" / "bbbbbbbbbbbb";
+    write_mlx_model(chat, {.kind = "chat"});
+    std::string out;
+    REQUIRE(home.run({"config", "add-backend", "Emb-4bit", "--type", "mlx", "--model-path",
+                      embedding.string()},
+                     &out) == 0);
+    CHECK(out.find("models.default") == std::string::npos);
+    CHECK(apogee::harness::load_config(home.config_path()).models.default_backend.empty());
+    REQUIRE(home.run({"config", "add-backend", "Chat-4bit", "--type", "mlx", "--model-path",
+                      chat.string()},
+                     &out) == 0);
+    CHECK(out.find("models.default set to 'Chat-4bit' (none was set)\n") != std::string::npos);
+    CHECK(apogee::harness::load_config(home.config_path()).models.default_backend == "Chat-4bit");
+
+    // The batch: the embedding set registered, the default left for the one
+    // that chats.
+    const CliHome scanned{"backends:\n  m:\n    type: mock\n"};
+    const std::filesystem::path stored = scanned.models() / "org--emb" / "mlx" / "aaaaaaaaaaaa";
+    write_mlx_model(stored, {.kind = "embedding"});
+    REQUIRE(scanned.run({"config", "scan", "--register"}, &out) == 0);
+    INFO(out);
+    CHECK(out.find("an embedding model, which answers no chat") != std::string::npos);
+    CHECK(out.find("models.default") == std::string::npos);
+    CHECK(apogee::harness::load_config(scanned.config_path()).models.default_backend.empty());
 }

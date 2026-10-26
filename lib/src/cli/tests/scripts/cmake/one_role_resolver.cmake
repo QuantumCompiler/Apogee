@@ -45,6 +45,11 @@ endif()
 #                           share write, display and validate members (27d)
 #   cli/provider_offer.cpp -- registration (28b) sets models.default only
 #                           when it is EMPTY as written, never resolving it
+#   operations/backend_fields.cpp -- the one add (M33) every door that writes
+#                           an entry shares sets models.default by the same
+#                           rule, EMPTY as written, never resolving it; the
+#                           one delete clears each pointer that names, as
+#                           written, the entry it removes
 set(allowed
     "business/harness/roles.cpp"
     "data/contracts/config.cpp"
@@ -57,6 +62,7 @@ set(allowed
     "presentation/httpserver/admin_suites.cpp"
     "presentation/operations/suites.cpp"
     "presentation/cli/provider_offer.cpp"
+    "presentation/operations/backend_fields.cpp"
 )
 
 # Every allowance names a file that exists: one left behind by a move would

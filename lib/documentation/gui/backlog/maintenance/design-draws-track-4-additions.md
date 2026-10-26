@@ -36,7 +36,7 @@ The design is the reference every app is built from (`lib/design/spec/CLAUDE.md`
   - **A new state worth its own board** gets its start preset, its `html/Screen<Name>.dc.html`, its `json/canvas.json` entry and its README row.
   - **Every part maps to the CLI,** in the CLI's words, every colour is a token, keyboard first, copy in plain words.
 - **Draw what the app does, from the recordings.** Every word on a new state is the binary's, from the recorded documents its item kept under `lib/src/darwin/tests/**/Fixtures/`, never invented.
-- **The contract board stays true.** A new part whose command is already mapped needs no row. A part resting on a gap the GUI runs found (the CLI's [M29](../../../cli/assistant/MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths)–[M33](../../../cli/backlog/maintenance/config-verbs-finish-their-job.md)) names it, as the ledger draws gaps.
+- **The contract board stays true.** A new part whose command is already mapped needs no row. A part resting on a gap the GUI runs found (the CLI's [M29](../../../cli/assistant/MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths)–[M33](../../../cli/assistant/MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths)) names it, as the ledger draws gaps.
 
 **Seam + files.**
 - **`lib/design/spec/html/main.html`:** each place's markup block and its `renderVals()` section (`chat`, `ins`, `mdl`, `vid`, `comp`, `vox`, `trn` and the rest) gain the states above, with canned data from the recordings.
@@ -66,4 +66,4 @@ The design is the reference every app is built from (`lib/design/spec/CLAUDE.md`
 - [ ] The three new boards exist, on the canvas and in the repo, identical.
 - [ ] The health check passes, and the contract board stays consistent.
 
-**Scope note.** GUI Maintenance, claimable by name, no gate; design only, with no app code. Its sibling is [M11](design-draws-pipelines-and-cycle.md), Training's tabs. States the CLI's M29–M33 would change, such as a typed footprint or a single-provider register, are drawn as the app draws them today, and redrawn when those ship.
+**Scope note.** GUI Maintenance, claimable by name, no gate; design only, with no app code. Its sibling is [M11](design-draws-pipelines-and-cycle.md), Training's tabs. The CLI's M29–M33 shipped 2026-10-26 (a typed footprint, `providers register`, `suite` on `session` and more), but the app adopts them in later GUI items. So their states are drawn as the app draws them today, and redrawn when the app takes them.

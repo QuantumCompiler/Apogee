@@ -9615,6 +9615,53 @@ The probe, run on two scripted mocks over a sandbox, showed both: `session` keys
 - The text task list and the TUI still say `running` for a killed task.
 - The macOS app reads the new fields in a later GUI item.
 
+### 2026-10-26 — `config-verbs-finish-their-job` (maintenance item M33): config verbs finish their job
+
+**Why.** The macOS app's 4k and M4 reached four config verbs that stopped short, each reproduced on `apogee 0.2.0 (4b828e91)` before this item was written:
+- **`config set-default <embedding mlx entry>` was accepted** and made it the chat role, whose every chat is refused. So were `set-default-utility <embedding>` and `set-default-embedding <chat entry>`. 55d's role gate reused `MlxKind::registers()`, which 53h had widened to embeddings.
+- **`config add-backend` never set `models.default`,** where `providers scan --register` sets it when none is set (28b). A fresh home's first backend left `complete` failing with `no models.default is set`.
+- **No verb registered one scanned provider.** Only the TUI's `r` ran `register_provider`, so the app's Settings composed `config add-backend`, with no default and no roster.
+- **`config get tools.allowed_hosts`** said `no such config key`.
+
+- [x] **Roles by kind.** `role_refusal(name, backend, field)` (`operations/backend_fields`) applies `kind_refusal`, then lets `default_embedding` take what embeds and every other role what chats. `require_backend_exists`/`point_role`, the admin twin and the TUI's make-default all go through it. The refusal says what each role takes and where the entry belongs: `backend 'Emb-4bit' cannot take a role: … is kind embedding (recorded) -- … point the embedding role at it ('apogee config set-default-embedding Emb-4bit') and models.default at a backend that chats`.
+- [x] **A default when none is set.** One transform, `add_backend_text(…, chats)`, with `default_set_words`, says `models.default set to '<name>' (none was set)`. It is shared by `config add-backend`, `config scan --register`, the admin twin (its 201 gains `said`) and the `models convert`/`pull` register chains, all byte-equal. An entry that doesn't chat sets no default.
+- [x] **Delete clears the roles that named the entry.** `delete_backend_text` removes the entry and clears each of the six role fields naming it, in the same edit, saying `models.<field> cleared: it named '<name>'`. It is shared by `config delete-backend`, the TUI's remove, the admin twin (its 200 gains `said`) and `models delete --and-backends`. Before, add-then-delete left the default naming a deleted entry, failing `check`.
+- [x] **`providers register <id>`** runs `register_provider`, the same code as the TUI's `r`, now returning `{registration, rosters}`.
+  - **What it adds:** `--output-format json` (`object: "provider.registration"`), a `PROVIDER` completion kind read from the scan cache, help, and a parity carve-out row.
+  - **Refusals:** an unknown id, an unscanned machine, and no config.
+  - **A known provider the last scan didn't find** says the TUI's own `nothing to register`.
+- [x] **`config get tools.allowed_hosts`** reads one host per line, with completion.
+
+**Decisions made while building** (2026-10-26, each recorded for veto):
+- **The defaults, taken:**
+  - the default is set when none is, said, for an entry that chats, a dated revision of add-backend's and `scan --register`'s silence;
+  - `providers register` fetches the roster on the user's word, as M13 rules, and answers JSON.
+- **Delete clears the roles naming its entry,** a revision of delete's recorded behaviour, found while building. Without it, M33's own default made add-then-delete leave a dangling pointer.
+  - **Clearing leaves the role empty,** never pointed at another entry on the person's behalf.
+  - **Suites, collections and agents keep their pointers;** only the six role fields are cleared.
+- **The `models convert`/`pull` register chains moved with add-backend,** pinned byte for byte to it (M3, M16). A GGUF chain known to come from an embedding model passes `chats = false`.
+- **`one_role_resolver`'s allowlist gains `operations/backend_fields.cpp`,** which reads the raw `models.default` as `provider_offer.cpp` already does.
+- **A GGUF embedding entry isn't gated.** The CLI keeps no record that a llamacpp entry embeds: no config field, no sidecar kind, no pooling read. None was invented.
+
+**Verified.**
+- **20 new Catch2 cases,** 4 of them in the new `providers_cmd_test.cpp`:
+  - each role taking its own kind (and the admin, TUI workbench and `backend_fields` twins);
+  - add-backend, `scan --register` and the admin twin setting the default, byte for byte, and an embedding entry never becoming it;
+  - delete clearing the roles with `check` green (the CLI, the admin twin and `models delete --and-backends`);
+  - `providers register` writing the bytes the TUI's `r` writes;
+  - `config get tools.allowed_hosts`.
+
+  13 failed first. The rest needed the new functions to compile. `providers_e2e.sh`, `config_e2e.cmake` and `shell_completion_check.sh` gained assertions that fail on the old binary.
+- **The full `apogee_tests`:** 3,999 cases, 3,998 passed, 1 skipped (`pdftotext`). `ctest -R '^(cli|harness)\.'`: 60 of 60.
+- **Zero warnings,** the MinGW scan clean over 20 changed `.cpp` files (an older `-Wshadow` in `models_pull.cpp` fixed by a rename), clang-format clean over 24.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 4,059 tests and the macOS app's 834 cases passed, with no warning.
+
+**Not done:**
+- `train promote` still registers without setting a default.
+- `set-backend` or `add-backend --force` can still move a role-holding entry onto another kind.
+- `check` doesn't flag roles already pointing at the wrong kind.
+- A GGUF embedding entry can take a chat role, for lack of a record.
+
 ---
 
 ## Milestone AP — Runtime adapters

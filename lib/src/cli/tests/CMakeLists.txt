@@ -281,6 +281,7 @@ target_link_libraries(apogee_tests_business PRIVATE apogee_business apogee_data
 add_library(apogee_tests_presentation OBJECT
     presentation/cli/registry_test.cpp
     presentation/cli/provider_offer_test.cpp
+    presentation/cli/providers_cmd_test.cpp
     presentation/cli/read_documents_test.cpp
     presentation/cli/mcp_presets_cmd_test.cpp
     presentation/cli/review_cmd_test.cpp
