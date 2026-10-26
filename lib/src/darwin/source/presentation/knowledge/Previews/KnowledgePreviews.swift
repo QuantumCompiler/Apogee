@@ -19,6 +19,30 @@ enum KnowledgePreview {
             (["embed", "query", "notes"], KnowledgeDocuments.collectionQuery),
         ])
 
+    /// A record the branch's binary captured over GUI 4k's sandbox, and its
+    /// raw conversation as `knowledge info --raw` printed it -- or, its
+    /// archive removed, said unavailable.
+    static func rawRunner(unavailable: Bool = false) -> PreviewRunner {
+        PreviewRunner(
+            reads: [(["knowledge", "list"], KnowledgeDocuments.knowledgeListOne)],
+            commands: [
+                (["knowledge", "info"], unavailable ? KnowledgeDocuments.knowledgeInfoRawUnavailable : KnowledgeDocuments.knowledgeInfoRaw)
+            ])
+    }
+
+    /// That record, as `knowledge list` named it.
+    static var captured: KnowledgeRecord {
+        KnowledgeRecord.list(from: ReadDocument(text: KnowledgeDocuments.knowledgeListOne)!)[0]
+    }
+
+    /// The records read, the captured one open, and its conversation asked
+    /// for.
+    static func openRaw(_ records: RecordsViewModel) async {
+        await records.connect(binary: previewBinary)
+        records.select(captured)
+        await records.showRaw(captured)
+    }
+
     /// The questions the recorded answers were asked, as the view-models'
     /// tests ask them.
     static let recordsQuestion = "why was the cancel button removed"

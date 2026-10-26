@@ -424,5 +424,30 @@ enum GraphDocuments {
  ]
 }
 """#
+    /// tests/business/reads/Fixtures/graph-stats-deleted.json
+    static let statsDeleted = #"""
+{"built":false,"collections":[],"graph":"spare","kind":"named","object":"graph.stats","sources":["/Users/someone/code/ingest"]}
+"""#
+    /// tests/business/reads/Fixtures/graph-dedupe-dry-run.txt
+    static let dedupeDryRun = #"""
+Code entities: 9 -- merged by exact qualified name as they were built (0 stated at more than one place, one node each); never by resemblance.
+Prose entities: vector dedupe skipped -- no prose entities -- nothing to compare by vector; nothing to merge.
+"""#
+    /// tests/business/reads/Fixtures/graph-dedupe-dry-run-merges-handmade.txt
+    static let dedupeDryRunMerges = #"""
+Would merge into Compressor (component): compressor unit
+1 group(s), 1 entity(ies) would merge at threshold 0.92.
+Dry run -- nothing was changed.
+"""#
+    /// tests/business/reads/Fixtures/graph-dedupe-merged-handmade.txt
+    static let dedupeMerged = #"""
+Merged into Compressor (component): compressor unit
+1 group(s), 1 entity(ies) merged at threshold 0.92.
+Note: community memberships changed -- re-run `apogee graph communities notes` to refresh the summaries.
+"""#
+    /// tests/business/reads/Fixtures/graph-export-deleted.err
+    static let exportRefused = #"""
+apogee graph: graph 'spare' has not been built yet -- run: apogee graph build spare
+"""#
 }
 #endif

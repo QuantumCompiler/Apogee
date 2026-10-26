@@ -168,6 +168,10 @@ final class AppViewModel {
         let settings = SettingsViewModel(runner: runner ?? ReadRunner(), starter: jobs, preferences: preferences)
         settings.say = { [weak shell] text in shell?.say(text) }
         settings.hasTrack52 = { [weak sessions] in sessions?.hasTrack52 ?? false }
+        // What the binary can do is asked at launch, and again when its file
+        // changes (GUI 4k): Settings says what it lacks only once it has said.
+        settings.capabilitiesKnown = { [weak sessions] in sessions?.capabilitiesKnown ?? false }
+        settings.checkCapabilities = { [weak sessions] in await sessions?.checkBinary() }
         // General says which PATH the app's children run with (M6): the app's
         // resolver's answer, waited for at most until the shell's deadline.
         settings.childPathSource = { await ShellPath.app.answer() }
@@ -193,6 +197,9 @@ final class AppViewModel {
         // session on screen. A place coming into view reads again.
         shell.routeChanged = { [weak sessions, weak models, weak store, weak tasks, weak suites, weak graph, weak video, weak compose, weak voice, weak records, weak collections, weak training, weak agents, weak symphonies, weak mcp, weak review] destination in
             Task {
+                // A binary changed under the app is asked again before the
+                // place it opens reads or runs anything (GUI 4k).
+                await sessions?.checkBinary()
                 if destination == .sessions { await sessions?.cameIntoView() } else { await sessions?.leftView() }
                 if destination == .models {
                     await models?.appeared()
@@ -265,7 +272,10 @@ final class AppViewModel {
         self.init(info: bundle.infoDictionary, preferences: .standard())
     }
 
-    /// The app started: the library reads and opens what is in view.
+    /// The app started: the library finds the binary and asks what it can do
+    /// -- `__machine-schema`, before any session starts, whatever place is in
+    /// view (GUI 4k) -- then reads and opens what is in view, and every place
+    /// is handed the binary.
     func start() async {
         await sessions.start(inView: shell.route == .sessions)
         await models.connect(binary: sessions.binaryURL)

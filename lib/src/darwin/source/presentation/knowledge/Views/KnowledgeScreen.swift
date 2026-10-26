@@ -193,6 +193,9 @@ struct RecordPage: View {
                 fact("Linked to", record.link.isEmpty ? "nothing yet" : record.link)
                 if let supersedes = record.supersedes { fact("Replaces", supersedes) }
                 fact("Captured", record.timestamp)
+                if record.rawRef != nil {
+                    RawSection(model: model, record: record)
+                }
                 Divider()
                 HStack {
                     TextField("Link it to a ticket, a commit, a file", text: $link).textFieldStyle(.roundedBorder)
@@ -219,6 +222,46 @@ struct RecordPage: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label.uppercased()).font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary)
             Text(value.isEmpty ? "—" : value).font(.apogeeBody).textSelection(.enabled)
+        }
+    }
+}
+
+/// A record's archived raw conversation, asked of the CLI when the person
+/// wants it -- `knowledge info --raw` -- and shown as it printed it.
+struct RawSection: View {
+    let model: RecordsViewModel
+    let record: KnowledgeRecord
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack {
+                Text("RAW CONVERSATION").font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary)
+                Spacer()
+                if let raw = model.raw, raw.record == record.id, raw.state != .reading {
+                    Button("Hide") { model.hideRaw() }.font(.apogeeSmall)
+                }
+            }
+            switch model.raw?.record == record.id ? model.raw?.state : nil {
+            case .reading?:
+                ProgressView().controlSize(.small)
+            case .shown(.text(let text))?:
+                Text(text)
+                    .font(.apogeeCode)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(Spacing.m)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Palette.window, in: RoundedRectangle(cornerRadius: Radius.card))
+            case .shown(.unavailable)?:
+                Text("apogee can't read its archive: the raw conversation is unavailable.")
+                    .font(.apogeeSmall)
+                    .foregroundStyle(Palette.textTertiary)
+            case .failed(let message)?:
+                Text(message).font(.apogeeSmall).foregroundStyle(Palette.error).textSelection(.enabled)
+            case nil:
+                Button("Show the conversation it was distilled from") { Task { await model.showRaw(record) } }
+                    .font(.apogeeSmall)
+            }
         }
     }
 }
@@ -534,6 +577,35 @@ struct IngestSheet: View {
     RecordPage(model: KnowledgePreview.records(), record: KnowledgePreview.record("kr-20261021T045944Z-3346a9"))
         .frame(width: 380, height: 640)
         .background(Palette.inspector)
+}
+
+#Preview("A record's raw conversation, as the CLI printed it") {
+    let records = KnowledgePreview.records(runner: KnowledgePreview.rawRunner())
+    RecordPage(model: records, record: KnowledgePreview.captured)
+        .frame(width: 380, height: 760)
+        .task { await KnowledgePreview.openRaw(records) }
+}
+
+#Preview("Raw conversation: not asked for yet") {
+    RawSection(model: KnowledgePreview.records(runner: KnowledgePreview.rawRunner()), record: KnowledgePreview.captured)
+        .padding(Spacing.l)
+        .frame(width: 380)
+}
+
+#Preview("Raw conversation: shown") {
+    let records = KnowledgePreview.records(runner: KnowledgePreview.rawRunner())
+    RawSection(model: records, record: KnowledgePreview.captured)
+        .padding(Spacing.l)
+        .frame(width: 380)
+        .task { await KnowledgePreview.openRaw(records) }
+}
+
+#Preview("Raw conversation: its archive unavailable") {
+    let records = KnowledgePreview.records(runner: KnowledgePreview.rawRunner(unavailable: true))
+    RawSection(model: records, record: KnowledgePreview.captured)
+        .padding(Spacing.l)
+        .frame(width: 380)
+        .task { await KnowledgePreview.openRaw(records) }
 }
 
 #Preview("A rejected record, linked to nothing yet") {

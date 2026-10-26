@@ -60,6 +60,19 @@ public struct Field: Sendable, Equatable {
             return Field(label, entry["value"]?.stringValue ?? "")
         }
     }
+
+    /// A record a verb prints as text alone, one `label: value` a line --
+    /// `chats info` (GUI 4k), which takes no `--output-format`: each line
+    /// split at its first colon, both sides trimmed, in order. A line with
+    /// no colon, or nothing before it, is no field.
+    public static func lines(_ text: String) -> [Field] {
+        text.split(whereSeparator: \.isNewline).compactMap { line in
+            guard let colon = line.firstIndex(of: ":") else { return nil }
+            let label = line[..<colon].trimmingCharacters(in: .whitespaces)
+            guard !label.isEmpty else { return nil }
+            return Field(label, line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces))
+        }
+    }
 }
 
 /// Where a model runs, as the design marks it: on this machine, a cloud API

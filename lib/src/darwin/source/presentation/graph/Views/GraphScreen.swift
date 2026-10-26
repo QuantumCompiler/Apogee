@@ -1,3 +1,4 @@
+import AppKit
 import BusinessReads
 import PresentationShell
 import PresentationStyles
@@ -46,6 +47,22 @@ public struct GraphScreen: View {
                         Button("Rebuild") { model.rebuild() }.help("Parse the sources again where files changed -- no model")
                     }
                     Button("New graph…") { building = true }
+                    if model.graph != nil {
+                        Menu("More") {
+                            ForEach(GraphViewModel.ExportFormat.allCases) { format in
+                                Button("Export as \(format.title)…") { export(format) }
+                            }
+                            Button("Save the report…") { saveReport() }
+                            Divider()
+                            Button("Dedupe…") { Task { await model.planDedupe() } }
+                            Button("Delete the graph…", role: .destructive) { model.askToDelete() }
+                        }
+                        .fixedSize()
+                        .disabled(!(model.stats?.built ?? false) || model.working != nil)
+                    }
+                }
+                if let working = model.working {
+                    Text(working).font(.apogeeMeta).foregroundStyle(Palette.textSecondary)
                 }
             }
             Divider()
@@ -77,6 +94,113 @@ public struct GraphScreen: View {
         .sheet(isPresented: $building) {
             NewGraphSheet { name, folder in model.build(name: name, folder: folder) }
         }
+        .sheet(isPresented: Binding(get: { model.dedupe != nil }, set: { if !$0 { model.dismissDedupe() } })) {
+            DedupeSheet(model: model)
+        }
+        .confirmationDialog(
+            model.pendingDelete.map { "Delete the graph \($0)?" } ?? "",
+            isPresented: Binding(get: { model.pendingDelete != nil }, set: { if !$0 { model.pendingDelete = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete the graph", role: .destructive) { Task { await model.confirmDelete() } }
+            Button("Cancel", role: .cancel) { model.pendingDelete = nil }
+        } message: {
+            Text(deleteMessage)
+        }
+        .alert("That didn't work", isPresented: Binding(get: { model.problem != nil }, set: { if !$0 { model.dismissProblem() } })) {
+            Button("OK") { model.dismissProblem() }
+        } message: {
+            Text(model.problem ?? "")
+        }
+    }
+
+    /// What deleting keeps, as the CLI says it does.
+    private var deleteMessage: String {
+        let name = model.pendingDelete ?? ""
+        return model.stats?.isProse == true
+            ? "apogee graph delete \(name) -- the collection's graph is cleared; its chunks stay, and the next build starts from scratch."
+            : "apogee graph delete \(name) -- its database is removed; its config entry stays (apogee config delete-graph \(name) removes it), and Rebuild parses its sources again."
+    }
+
+    /// Where the export goes, asked of the person in a save panel -- the
+    /// CLI's own file name offered, never a place chosen for them -- then
+    /// the CLI writes it.
+    private func export(_ format: GraphViewModel.ExportFormat) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = model.exportName(format)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { await model.export(format, to: url) }
+    }
+
+    /// Where the report goes, asked the same way.
+    private func saveReport() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = model.reportName
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { await model.saveReport(to: url) }
+    }
+}
+
+/// A dedupe: its dry run as the CLI prints it, and the merge offered only
+/// where it names entities to merge.
+struct DedupeSheet: View {
+    let model: GraphViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.m) {
+            Text("Dedupe \(model.graph ?? "the graph")").font(.apogeeHeading)
+            switch model.dedupe {
+            case .planning?:
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text("apogee graph dedupe \(model.graph ?? "") --dry-run").font(.apogeeCode).foregroundStyle(Palette.textSecondary)
+                }
+            case .planned(let text)?:
+                Text("The dry run -- nothing changed yet:").font(.apogeeSmall).foregroundStyle(Palette.textSecondary)
+                printed(text)
+                if model.dedupeMerges {
+                    Text("apogee graph dedupe \(model.graph ?? "") -- the entities named merge into the one each is kept as. Re-run Find communities after, as the CLI says.")
+                        .font(.apogeeMeta)
+                        .foregroundStyle(Palette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            case .merging?:
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text(model.building?.busy ?? "merging").font(.apogeeSmall).foregroundStyle(Palette.textSecondary)
+                }
+            case .merged(let text)?:
+                printed(text)
+            case .failed(let message)?:
+                Text(message).font(.apogeeSmall).foregroundStyle(Palette.error).textSelection(.enabled)
+            case nil:
+                EmptyView()
+            }
+            HStack {
+                Spacer()
+                if model.dedupeMerges {
+                    Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                    Button("Merge them", role: .destructive) { model.confirmDedupe() }
+                } else {
+                    Button("Done") { dismiss() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(model.dedupe == .merging)
+                }
+            }
+        }
+        .padding(Spacing.xl)
+        .frame(width: 560)
+    }
+
+    private func printed(_ text: String) -> some View {
+        Text(text)
+            .font(.apogeeCode)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(Spacing.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Palette.window, in: RoundedRectangle(cornerRadius: Radius.card))
     }
 }
 
@@ -392,6 +516,61 @@ struct NewGraphSheet: View {
 #Preview("A report: summary, communities, decisions, busiest") {
     ReportView(model: GraphPreview.graph(GraphPreview.prose), report: GraphPreview.report)
         .frame(width: 800, height: 720)
+}
+
+#Preview("Deleting a graph, asked first") {
+    let graph = GraphPreview.graph()
+    GraphScreen(model: graph, shell: GraphPreview.shell())
+        .frame(width: 1100, height: 520)
+        .task {
+            await graph.connect(binary: previewBinary)
+            graph.askToDelete()
+        }
+}
+
+#Preview("A named graph deleted: Rebuild makes it again") {
+    let graph = GraphPreview.graph(GraphPreview.deleted)
+    GraphScreen(model: graph, shell: GraphPreview.shell())
+        .frame(width: 1100, height: 520)
+        .task { await graph.connect(binary: previewBinary) }
+}
+
+#Preview("An export refused, in the CLI's words") {
+    let graph = GraphPreview.graph(GraphPreview.exportRefused)
+    GraphScreen(model: graph, shell: GraphPreview.shell())
+        .frame(width: 1100, height: 520)
+        .task {
+            await graph.connect(binary: previewBinary)
+            await graph.export(.html, to: URL(fileURLWithPath: "/Users/someone/Documents/demo.html"))
+        }
+}
+
+#Preview("Dedupe: the dry run, nothing to merge") {
+    let graph = GraphPreview.graph()
+    DedupeSheet(model: graph)
+        .task {
+            await graph.connect(binary: previewBinary)
+            await graph.planDedupe()
+        }
+}
+
+#Preview("Dedupe: the dry run names merges, offered on the person's word") {
+    let graph = GraphPreview.graph(GraphPreview.merges)
+    DedupeSheet(model: graph)
+        .task {
+            await graph.connect(binary: previewBinary)
+            await graph.planDedupe()
+        }
+}
+
+#Preview("Dedupe: merging") {
+    let graph = GraphPreview.graph(GraphPreview.merges)
+    DedupeSheet(model: graph)
+        .task {
+            await graph.connect(binary: previewBinary)
+            await graph.planDedupe()
+            graph.confirmDedupe()
+        }
 }
 
 #Preview("New code graph: nothing chosen yet") {

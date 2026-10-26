@@ -60,8 +60,48 @@ public final class SettingsViewModel {
         public let provider: String
         public let label: String
         public let tier: String
+        /// What the scan says of its backend: `not registered` for one it
+        /// would register, `backend: <names>` for one registered, empty for
+        /// one it would not offer.
         public let backend: String
+        /// The backend type it registers as: `claude-cli`, `ollama-cli`, ….
+        public let type: String
         public var id: String { provider }
+
+        public init(provider: String, label: String, tier: String, backend: String, type: String = "") {
+            self.provider = provider
+            self.label = label
+            self.tier = tier
+            self.backend = backend
+            self.type = type
+        }
+
+        /// Whether the scan offers it for registering: detected, with no
+        /// backend yet -- the CLI's own `not registered` (`providers_cmd.cpp`).
+        public var registers: Bool { backend == "not registered" && !type.isEmpty }
+
+        /// Whether a backend of its type runs only with a model named: the
+        /// Ollama CLI's (the CLI's provider table, `needs_model`).
+        public var needsModel: Bool { type == "ollama-cli" }
+
+        /// What registering it runs, as a person types it: the entry the
+        /// TUI's `r` writes -- named for the provider, of its type -- through
+        /// the binary's own `config add-backend`, the model where its type
+        /// needs one.
+        public func registration(model: String = "") -> [String] {
+            let model = model.trimmingCharacters(in: .whitespaces)
+            return ["config", "add-backend", provider, "--type", type] + (model.isEmpty ? [] : ["--model", model])
+        }
+    }
+
+    /// A backend's recorded consent for its vendor to run tools of its own
+    /// (the CLI's 47a `server_tools`), as `config get` reads it (55g).
+    public enum ServerToolsConsent: Equatable, Sendable {
+        /// The tools consented to, in order; none when the list is empty.
+        case consented([String])
+        /// This apogee could not read it, in its own words -- a binary before
+        /// the CLI's 55g has no such key.
+        case unreadable(String)
     }
 
     public var pane: Pane = .general
@@ -71,6 +111,11 @@ public final class SettingsViewModel {
     /// The providers with a key stored (`auth list`): names only, never keys.
     public private(set) var keyed: Set<String> = []
     public private(set) var providers: [Provider] = []
+    /// Each vendor backend's `server_tools`, by its name (GUI 4k): only an
+    /// anthropic, openai or google entry holds one.
+    public private(set) var serverTools: [String: ServerToolsConsent] = [:]
+    /// The provider whose registering waits on the person's word.
+    public var registering: Provider?
     public private(set) var checks: [CheckRow] = []
     public private(set) var checkSummary: String?
     /// What Health draws of `check`, in order: what fails, what to look at,
@@ -95,6 +140,18 @@ public final class SettingsViewModel {
     public var say: (@MainActor (String) -> Void)?
     /// Whether the build has the CLI's 52e: `config set` and `chats recall --forget`.
     public var hasTrack52: @MainActor () -> Bool = { false }
+    /// Whether the binary has said what it can do -- its vocabulary read at
+    /// launch, or a session's word (GUI 4k). Until it has, Settings asserts
+    /// nothing of what it lacks.
+    public var capabilitiesKnown: @MainActor () -> Bool = { false }
+    /// Asks the binary again when its file changed since it was asked: run
+    /// before every read, so the panes follow the binary that runs now.
+    public var checkCapabilities: @MainActor () async -> Void = {}
+    /// What recall holds, as `chats recall` says it, on a build with 52e;
+    /// `nil` unread or on one without.
+    public private(set) var recallHolds: String?
+    /// Forgetting recall waits on the person's word, its holdings shown.
+    public var forgetting = false
 
     public let theme: ThemeSettings
     private let runner: any CommandRunning
@@ -205,11 +262,17 @@ public final class SettingsViewModel {
             return
         }
         failure = nil
+        await checkCapabilities()
         if let list = await runner.read(binary: binary, ["models", "list"]).document {
             let rows = ModelRow.list(from: list)
-            backends = rows.filter { !$0.isStored && $0.format != "pipeline" && $0.format != "voice" }
+            // The configured backends: a roster's models (`<backend>:<id>`,
+            // "built in" or "roster") are a backend's choices, not entries.
+            backends = rows.filter {
+                !$0.isStored && $0.format != "pipeline" && $0.format != "voice" && !Self.rosterSources.contains($0.source)
+            }
             pipelines = rows.filter { $0.format == "pipeline" }.map(\.name)
         }
+        await readServerTools(binary)
         if let auth = await runner.read(binary: binary, ["auth", "list"]).document {
             keyed = Set((auth.entries ?? []).compactMap { $0["provider"]?.stringValue })
         }
@@ -218,7 +281,7 @@ public final class SettingsViewModel {
                 guard let id = p["provider"]?.stringValue else { return nil }
                 return Provider(
                     provider: id, label: p["label"]?.stringValue ?? id, tier: p["tier"]?.stringValue ?? "",
-                    backend: p["backend"]?.stringValue ?? "")
+                    backend: p["backend"]?.stringValue ?? "", type: p["type"]?.stringValue ?? "")
             }
         }
         await readCheck(binary)
@@ -227,6 +290,64 @@ public final class SettingsViewModel {
         }
         webSearch = await value(binary, "tools.search.url")
         recall = await value(binary, "memory.recall")
+        await readRecallHolds(binary)
+    }
+
+    /// The provenance `models list` gives a roster's rows.
+    static let rosterSources: Set<String> = ["built in", "roster"]
+
+    /// Each vendor backend's consent: `config get backends.<name>.server_tools`,
+    /// one tool a line, none when unset (the CLI's 55g). A binary that
+    /// refuses the key says so in its words, never read as "none".
+    private func readServerTools(_ binary: URL) async {
+        var read: [String: ServerToolsConsent] = [:]
+        for row in backends where ServerTools.held(by: row.backendType) {
+            switch await runner.command(binary: binary, ["config", "get", ServerTools.key(of: row.backend)]) {
+            case .done(let text): read[row.backend] = .consented(ServerTools.list(text))
+            case let other: read[row.backend] = .unreadable(other.failure ?? "it could not be read")
+            }
+        }
+        serverTools = read
+    }
+
+    /// What a backend's row says of its vendor-run tools; `nil` for a type
+    /// whose vendor runs none.
+    public func serverToolsLine(_ row: ModelRow) -> String? {
+        guard ServerTools.held(by: row.backendType) else { return nil }
+        switch serverTools[row.backend] {
+        case .consented(let tools)?:
+            return tools.isEmpty
+                ? "Vendor-run tools: none consented"
+                : "Vendor-run tools consented: \(tools.joined(separator: ", ")) -- the vendor runs them under your key"
+        case .unreadable(let reason)?:
+            return "Vendor-run tools: this apogee can't read them -- \(reason)"
+        case nil:
+            return nil
+        }
+    }
+
+    /// `chats recall` -- what recall holds, as the CLI says it -- on a build
+    /// with 52e.
+    private func readRecallHolds(_ binary: URL) async {
+        guard hasTrack52() else {
+            recallHolds = nil
+            return
+        }
+        if case .done(let text) = await runner.command(binary: binary, ["chats", "recall"]) {
+            recallHolds = text.split(whereSeparator: \.isNewline).last.map { $0.trimmingCharacters(in: .whitespaces) }
+        } else {
+            recallHolds = nil
+        }
+    }
+
+    /// What Web search and Recall say under their values where the build
+    /// can't set them here; `nil` where it can. Only a binary that has said
+    /// what it can do is said to lack `config set` (GUI 4k).
+    public var configSetHint: String? {
+        if hasTrack52() { return nil }
+        return capabilitiesKnown()
+            ? "Read here, set in the config file: this apogee has no config set."
+            : "Read here, set in the config file: this apogee hasn't said what it can do, so setting it here isn't offered."
     }
 
     private func readCheck(_ binary: URL) async {
@@ -311,10 +432,32 @@ public final class SettingsViewModel {
         await change(binary, ["config", "set", key, value], done: "\(key) is \(value)")
     }
 
-    /// Forgets every recalled summary (52e's `chats recall --forget`).
-    public func forgetRecall() async {
+    /// Asks before forgetting: what recall holds is read first, and shown.
+    public func askToForget() async {
         guard let binary = binaryURL, hasTrack52() else { return }
-        await change(binary, ["chats", "recall", "--forget"], done: nil)
+        await readRecallHolds(binary)
+        forgetting = true
+    }
+
+    /// Forgets every recalled summary once the person said yes -- 52e's
+    /// `chats recall --forget --yes`: the CLI asks nothing on a pipe without
+    /// `--yes`, and refuses (GUI 4k). Every transcript stays.
+    public func forgetRecall() async {
+        forgetting = false
+        guard let binary = binaryURL, hasTrack52() else { return }
+        await change(binary, ["chats", "recall", "--forget", "--yes"], done: nil)
+    }
+
+    /// Registers one scanned provider once the person said yes -- `config
+    /// add-backend <provider> --type <type>`, the entry the TUI's `r` writes
+    /// (the CLI has no verb registering one provider; `providers scan
+    /// --register` registers every one) -- read back by the scan, the CLI's
+    /// words said.
+    public func register(_ provider: Provider, model: String = "") async {
+        registering = nil
+        guard let binary = binaryURL, provider.registers else { return }
+        guard !provider.needsModel || !model.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        await change(binary, provider.registration(model: model), done: nil)
     }
 
     private func change(_ binary: URL, _ arguments: [String], input: Data? = nil, done: String?) async {

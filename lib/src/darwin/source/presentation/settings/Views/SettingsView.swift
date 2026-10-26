@@ -160,17 +160,28 @@ struct AppearancePane: View {
 }
 
 struct BackendsPane: View {
-    let model: SettingsViewModel
+    @Bindable var model: SettingsViewModel
     @State private var keyFor: String?
 
     var body: some View {
         SettingRow(label: "Backends") {
             ForEach(model.backends) { row in
-                HStack {
-                    Text(row.backend).font(.apogeeBody)
-                    Text(row.backendType).font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary)
-                    Spacer()
-                    Text(row.state).font(.apogeeMeta).foregroundStyle(Palette.textSecondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text(row.backend).font(.apogeeBody)
+                        Text(row.backendType).font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary)
+                        Spacer()
+                        Text(row.state).font(.apogeeMeta).foregroundStyle(Palette.textSecondary)
+                    }
+                    // The vendor's own tools this entry consented to (the
+                    // CLI's 47a), shown where the backend is (GUI 4k).
+                    if let tools = model.serverToolsLine(row) {
+                        Text(tools)
+                            .font(.apogeeMeta)
+                            .foregroundStyle(Self.consentTint(model.serverTools[row.backend]))
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             if model.backends.isEmpty {
@@ -203,8 +214,19 @@ struct BackendsPane: View {
                 HStack {
                     Text(provider.label).font(.apogeeBody)
                     Spacer()
-                    Text(provider.tier + " · " + provider.backend).font(.apogeeMeta).foregroundStyle(Palette.textSecondary)
+                    Text(provider.tier + (provider.backend.isEmpty ? "" : " · " + provider.backend))
+                        .font(.apogeeMeta)
+                        .foregroundStyle(Palette.textSecondary)
+                    if provider.registers {
+                        Button("Register…") { model.registering = provider }
+                            .disabled(model.working != nil)
+                    }
                 }
+            }
+        }
+        .sheet(item: $model.registering) { provider in
+            RegisterProviderSheet(provider: provider) { chosen in
+                Task { await model.register(provider, model: chosen) }
             }
         }
         SettingRow(label: "Health") {
@@ -237,6 +259,16 @@ struct BackendsPane: View {
 }
 
 extension BackendsPane {
+    /// A backend's consent line's colour: the billed colour where a vendor
+    /// runs tools under the key, the warning's where it can't be read.
+    static func consentTint(_ consent: SettingsViewModel.ServerToolsConsent?) -> Color {
+        switch consent {
+        case .consented(let tools)? where !tools.isEmpty: Palette.api
+        case .unreadable?: Palette.warning
+        default: Palette.textTertiary
+        }
+    }
+
     /// A Health row's colour: a failure's, a warning's, or -- an optional
     /// row skipped -- the secondary text's.
     static func tint(_ status: String) -> Color {
@@ -250,6 +282,42 @@ extension BackendsPane {
 
 struct ProviderItem: Identifiable {
     let id: String
+}
+
+/// One scanned provider registered as a backend, asked in the TUI's words:
+/// the entry its `r` writes, through `config add-backend`, the command shown
+/// as typed -- and, for a type that runs only with one, its model.
+struct RegisterProviderSheet: View {
+    let provider: SettingsViewModel.Provider
+    let register: (String) -> Void
+    @State private var modelName = ""
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.m) {
+            Text("Found \(provider.provider) -- register it as a backend?").font(.apogeeHeading)
+            Text("\(provider.label) · \(provider.tier)").font(.apogeeSmall).foregroundStyle(Palette.textSecondary)
+            if provider.needsModel {
+                TextField("The model it runs, as the provider names it", text: $modelName).textFieldStyle(.roundedBorder)
+            }
+            Text("apogee " + provider.registration(model: modelName).joined(separator: " "))
+                .font(.apogeeCode)
+                .foregroundStyle(Palette.textTertiary)
+                .textSelection(.enabled)
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Register") {
+                    register(modelName)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(provider.needsModel && modelName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(Spacing.xl)
+        .frame(width: 520)
+    }
 }
 
 /// The key, typed once: held by this sheet only until it is sent.
@@ -315,7 +383,7 @@ struct MediaPane: View {
 }
 
 struct PermissionsPane: View {
-    let model: SettingsViewModel
+    @Bindable var model: SettingsViewModel
     @State private var host = ""
     @State private var webSearch = ""
 
@@ -348,30 +416,42 @@ struct PermissionsPane: View {
         }
         SettingRow(label: "Web search address") {
             Text(model.webSearch ?? "not set").font(.apogeeCode)
-            if model.hasTrack52() {
+            if let hint = model.configSetHint {
+                Text(hint)
+                    .font(.apogeeMeta)
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
                 HStack {
                     TextField("http://localhost:8888", text: $webSearch).textFieldStyle(.roundedBorder)
                     Button("Set") { Task { await model.setConfig("tools.search.url", webSearch) } }
                 }
-            } else {
-                Text("Read here, set in the config file: this apogee has no config set.")
-                    .font(.apogeeMeta)
-                    .foregroundStyle(Palette.textTertiary)
             }
         }
         SettingRow(label: "Recall earlier sessions") {
             Text(model.recall ?? "on (the default)").font(.apogeeCode)
-            if model.hasTrack52() {
+            if let hint = model.configSetHint {
+                Text(hint)
+                    .font(.apogeeMeta)
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                if let holds = model.recallHolds {
+                    Text(holds).font(.apogeeMeta).foregroundStyle(Palette.textSecondary).textSelection(.enabled)
+                }
                 HStack {
                     Button("On") { Task { await model.setConfig("memory.recall", "true") } }
                     Button("Off") { Task { await model.setConfig("memory.recall", "false") } }
-                    Button("Forget every recalled summary") { Task { await model.forgetRecall() } }
+                    Button("Forget every recalled summary…") { Task { await model.askToForget() } }
                 }
-            } else {
-                Text("Read here, set in the config file: this apogee has no config set.")
-                    .font(.apogeeMeta)
-                    .foregroundStyle(Palette.textTertiary)
             }
+        }
+        .confirmationDialog("Forget what recall holds?", isPresented: $model.forgetting, titleVisibility: .visible) {
+            Button("Forget every summary", role: .destructive) { Task { await model.forgetRecall() } }
+            Button("Cancel", role: .cancel) { model.forgetting = false }
+        } message: {
+            Text((model.recallHolds.map { "Now: \($0). " } ?? "")
+                + "apogee chats recall --forget --yes -- every chat's summary goes, so no later session recalls them; every transcript stays.")
         }
     }
 }
@@ -487,6 +567,50 @@ struct PermissionsPane: View {
         }
 }
 
+#Preview("Backends: each vendor backend's server_tools, a provider's Register") {
+    let model = SettingsPreview.settings(.backends, runner: SettingsPreview.vendorRunner())
+    ScrollView {
+        VStack(alignment: .leading, spacing: Spacing.xl) { BackendsPane(model: model) }
+            .padding(Spacing.xl)
+    }
+    .frame(width: 720, height: 900)
+    .task { await SettingsPreview.read(model) }
+}
+
+#Preview("Backends: server_tools on an apogee before 55g, said in its words") {
+    let model = SettingsPreview.settings(.backends, runner: SettingsPreview.vendorRunner(older: true))
+    ScrollView {
+        VStack(alignment: .leading, spacing: Spacing.xl) { BackendsPane(model: model) }
+            .padding(Spacing.xl)
+    }
+    .frame(width: 720, height: 900)
+    .task { await SettingsPreview.read(model) }
+}
+
+#Preview("Registering a scanned provider") {
+    @Previewable @State var model = SettingsPreview.settings(.backends, runner: SettingsPreview.vendorRunner())
+    Group {
+        if let claude = model.providers.first(where: { $0.provider == "claude" }) {
+            RegisterProviderSheet(provider: claude) { _ in }
+        } else {
+            ProgressView().padding(Spacing.xl)
+        }
+    }
+    .task { await SettingsPreview.read(model) }
+}
+
+#Preview("Registering Ollama: the model it runs named") {
+    @Previewable @State var model = SettingsPreview.settings(.backends, runner: SettingsPreview.vendorRunner())
+    Group {
+        if let ollama = model.providers.first(where: { $0.provider == "ollama" }) {
+            RegisterProviderSheet(provider: ollama) { _ in }
+        } else {
+            ProgressView().padding(Spacing.xl)
+        }
+    }
+    .task { await SettingsPreview.read(model) }
+}
+
 #Preview("An API key, typed once") {
     KeySheet(provider: "anthropic") { _ in }
 }
@@ -494,6 +618,25 @@ struct PermissionsPane: View {
 #Preview("Video & voice: the store's pipeline") {
     let model = SettingsPreview.settings(.media)
     VStack(alignment: .leading, spacing: Spacing.xl) { MediaPane(model: model) }
+        .padding(Spacing.xl)
+        .frame(width: 680)
+        .task { await SettingsPreview.read(model) }
+}
+
+#Preview("Permissions: Forget asked, with what recall holds") {
+    let model = SettingsPreview.settings(.permissions, track52: true, known: true)
+    VStack(alignment: .leading, spacing: Spacing.xl) { PermissionsPane(model: model) }
+        .padding(Spacing.xl)
+        .frame(width: 680, height: 520)
+        .task {
+            await SettingsPreview.read(model)
+            await model.askToForget()
+        }
+}
+
+#Preview("Permissions: the binary hasn't said what it can do") {
+    let model = SettingsPreview.settings(.permissions, known: false)
+    VStack(alignment: .leading, spacing: Spacing.xl) { PermissionsPane(model: model) }
         .padding(Spacing.xl)
         .frame(width: 680)
         .task { await SettingsPreview.read(model) }
@@ -507,7 +650,9 @@ struct PermissionsPane: View {
         .task { await SettingsPreview.read(model) }
 }
 
-#Preview("Permissions, with 52e: set here") {
+#Preview("Permissions on a capable binary, whatever place was restored: Set, On/Off, Forget") {
+    // The app asks the binary what it can do at launch (GUI 4k), so these
+    // stand before any session has spoken.
     let model = SettingsPreview.settings(.permissions, track52: true)
     VStack(alignment: .leading, spacing: Spacing.xl) { PermissionsPane(model: model) }
         .padding(Spacing.xl)

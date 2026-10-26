@@ -136,3 +136,53 @@ struct ParityTests {
         #expect(ParityTable.violations(words: words.filter { $0 != "symphonies" }).contains("the console refuses 'symphonies edit', which the binary no longer has"))
     }
 }
+
+/// GUI 4k: each family's row names the verbs its screen now reaches -- the
+/// seven gaps the CLI/GUI audit found (2026-10-22), each console-reachable
+/// only until then.
+@Suite("Parity rows reach the remaining verbs (GUI 4k)")
+struct RemainingVerbsRowTests {
+    @Test("chats: Sessions compacts a saved chat, shows its info and what recall holds, with Forget beside it")
+    func chatsRow() throws {
+        let chats = try #require(ParityTable.place(of: "chats"))
+        #expect(chats.note.contains("chats compact") && chats.note.contains("chats info") && chats.note.contains("chats recall"))
+    }
+
+    @Test("providers: one scanned provider registers from its row")
+    func providersRow() throws {
+        let providers = try #require(ParityTable.place(of: "providers"))
+        #expect(providers.note.contains("register") && providers.note.contains("config add-backend"))
+    }
+
+    @Test("config: a backend's server_tools consent is shown where the backend is")
+    func configRow() throws {
+        let config = try #require(ParityTable.place(of: "config"))
+        #expect(config.note.contains("server_tools") && config.note.contains("delete-mcp-server"))
+    }
+
+    @Test("graph: exported, its report saved, deduped and deleted")
+    func graphRow() throws {
+        let graph = try #require(ParityTable.place(of: "graph"))
+        #expect(graph.note.contains("graph export html|graphml|mermaid") && graph.note.contains("graph report --out"))
+        #expect(graph.note.contains("graph dedupe") && graph.note.contains("graph delete"))
+    }
+
+    @Test("mcp: a server removed from the Library")
+    func mcpRow() throws {
+        let mcp = try #require(ParityTable.place(of: "mcp"))
+        #expect(mcp.note.contains("removed"))
+    }
+
+    @Test("knowledge: a record's raw conversation, as knowledge info --raw prints it")
+    func knowledgeRow() throws {
+        let knowledge = try #require(ParityTable.place(of: "knowledge"))
+        #expect(knowledge.note.contains("knowledge info --raw"))
+    }
+
+    @Test("__machine-schema: the app reads it at launch for what the binary can do -- still plumbing, never a page")
+    func machineSchemaRow() throws {
+        let schema = try #require(ParityTable.place(of: "__machine-schema"))
+        #expect(schema.kind == .plumbing)
+        #expect(schema.note.contains("at launch"))
+    }
+}

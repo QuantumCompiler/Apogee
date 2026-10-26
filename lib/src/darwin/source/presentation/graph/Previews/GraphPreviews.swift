@@ -18,7 +18,31 @@ enum GraphPreview {
             (["graph", "query"], GraphDocuments.query),
             (["graph", "explain", "--graph", "demo", "--", "ingest.runner.Runner"], GraphDocuments.explain),
         ],
-        commands: [(["__complete", "graph", "stats"], "demo\n")])
+        commands: [
+            (["__complete", "graph", "stats"], "demo\n"),
+            // GUI 4k's recording: a code graph's dedupe dry run -- its
+            // entities merged by name as they were built, nothing to merge.
+            (["graph", "dedupe"], GraphDocuments.dedupeDryRun),
+        ])
+
+    /// The same graph, its dry run naming entities to merge -- hand-made to
+    /// `graph.cpp`'s dedupe lines, since no recorded store held two entities
+    /// the mock embedder makes agree.
+    static let merges = PreviewRunner(
+        reads: [(["graph", "stats"], GraphDocuments.stats)],
+        commands: [(["__complete", "graph", "stats"], "demo\n"), (["graph", "dedupe"], GraphDocuments.dedupeDryRunMerges)])
+
+    /// A named graph after `graph delete`: its config entry kept, so the
+    /// completion still names it, and its stats unbuilt (GUI 4k's recording).
+    static let deleted = PreviewRunner(
+        reads: [(["graph", "stats"], GraphDocuments.statsDeleted)],
+        commands: [(["__complete", "graph", "stats"], "spare\n")])
+
+    /// The code graph, its export refused in the CLI's recorded words.
+    static let exportRefused = PreviewRunner(
+        reads: [(["graph", "stats"], GraphDocuments.stats)],
+        commands: [(["__complete", "graph", "stats"], "demo\n")],
+        refusals: [(["graph", "export"], GraphDocuments.exportRefused)])
 
     /// A collection's prose graph, built: its stats, its report, an entity
     /// explained. Its name as GraphViewModelTests completes it.

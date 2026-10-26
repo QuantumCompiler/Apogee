@@ -13,10 +13,15 @@ struct PreviewRunner: CommandRunning {
     /// Argument prefixes and what they answer; the longest prefix wins.
     let reads: [([String], String)]
     let commands: [([String], String)]
+    /// Commands the binary refused in its recorded words: answered as a
+    /// refusal, its exit unknown to this module (it links no
+    /// InfrastructureProcess), so a run that could not start.
+    let refusals: [([String], String)]
 
-    init(reads: [([String], String)], commands: [([String], String)] = []) {
+    init(reads: [([String], String)], commands: [([String], String)] = [], refusals: [([String], String)] = []) {
         self.reads = reads
         self.commands = commands
+        self.refusals = refusals
     }
 
     func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
@@ -27,7 +32,10 @@ struct PreviewRunner: CommandRunning {
     }
 
     func command(binary: URL, _ arguments: [String]) async -> CommandOutcome {
-        .done(stdout: Self.answer(arguments, commands) ?? "")
+        if let refusal = Self.answer(arguments, refusals) {
+            return .couldNotStart(refusal.trimmingCharacters(in: .newlines))
+        }
+        return .done(stdout: Self.answer(arguments, commands) ?? "")
     }
 
     static func answer(_ arguments: [String], _ rules: [([String], String)]) -> String? {

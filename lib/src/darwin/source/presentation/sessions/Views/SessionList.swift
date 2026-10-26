@@ -166,11 +166,20 @@ public struct SessionList: View {
         .buttonStyle(.plain)
         .help(chat.backend.map { "\(chat.name) · \($0)" } ?? chat.name)
         .contextMenu {
-            // Both ask in the Sessions place, so it comes into view.
+            // Each asks or shows in the Sessions place, so it comes into view.
+            Button("Details…") {
+                shell.go(.sessions)
+                Task { await library.showInfo(chat) }
+            }
             Button("Rename…") {
                 shell.go(.sessions)
                 library.renaming = chat
             }
+            Button("Compact…") {
+                shell.go(.sessions)
+                library.askToCompact(chat)
+            }
+            .disabled(!library.canCompact(chat))
             Button("Delete…", role: .destructive) {
                 shell.go(.sessions)
                 library.askToDelete(chat)

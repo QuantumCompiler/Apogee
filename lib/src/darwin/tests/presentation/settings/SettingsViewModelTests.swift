@@ -140,7 +140,7 @@ struct SettingsViewModelTests {
         await model.setConfig("memory.recall", "false")
         await model.forgetRecall()
         #expect(runner.calls.contains("run config set memory.recall false"))
-        #expect(runner.calls.contains("run chats recall --forget"))
+        #expect(runner.calls.contains("run chats recall --forget --yes"), "the CLI refuses --forget alone on a pipe (GUI 4k)")
     }
 
     @Test("check --fix and bootstrap run as supervised jobs, and the health is read again")

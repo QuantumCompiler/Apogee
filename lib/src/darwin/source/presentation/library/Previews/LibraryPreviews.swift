@@ -15,7 +15,11 @@ enum LibraryPreview {
             (["mcp", "list"], LibraryDocuments.mcpList),
             (["mcp", "presets"], LibraryDocuments.mcpPresets),
         ],
-        commands: [(["config", "path"], "/Users/someone/.apogee/config/config.json\n")])
+        commands: [
+            (["config", "path"], "/Users/someone/.apogee/config/config.json\n"),
+            // GUI 4k's recording: a server removed by its config entry.
+            (["config", "delete-mcp-server"], LibraryDocuments.mcpDelete),
+        ])
 
     /// `critique-revise` played on a mock writer: its stage lines as the CLI
     /// says them (tests/business/reads/Fixtures/symphony-play.err), then its

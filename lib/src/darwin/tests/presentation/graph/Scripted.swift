@@ -21,6 +21,11 @@ final class ScriptedRunner: CommandRunning, @unchecked Sendable {
         commands.withLock { $0.insert((prefix, .done(stdout: stdout)), at: 0) }
     }
 
+    /// A command the binary refuses, as `outcome` says.
+    func refusing(_ prefix: [String], _ outcome: CommandOutcome) {
+        commands.withLock { $0.insert((prefix, outcome), at: 0) }
+    }
+
     func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
         log.withLock { $0.append("read " + arguments.joined(separator: " ")) }
         return reads.withLock { rules in rules.first { arguments.starts(with: $0.0) }?.1 }

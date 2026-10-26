@@ -1,0 +1,3 @@
+Merged into Compressor (component): compressor unit
+1 group(s), 1 entity(ies) merged at threshold 0.92.
+Note: community memberships changed -- re-run `apogee graph communities notes` to refresh the summaries.

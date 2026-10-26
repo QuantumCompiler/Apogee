@@ -425,6 +425,8 @@ public final class MCPViewModel {
     /// A tool's answer, as `mcp test` printed it.
     public private(set) var tried: String?
     public private(set) var failure: String?
+    /// The server whose removal waits on the person's word (GUI 4k).
+    public var pendingRemove: MCPServer?
     public var say: (@MainActor (String) -> Void)?
 
     private let runner: any CommandRunning
@@ -488,6 +490,25 @@ public final class MCPViewModel {
     /// `mcp enable | disable <name>`, read back.
     public func setEnabled(_ server: MCPServer, _ enabled: Bool) async {
         _ = await change(["mcp", enabled ? "enable" : "disable", server.name])
+    }
+
+    /// Asks before removing a server (GUI 4k).
+    public func askToRemove(_ server: MCPServer) {
+        pendingRemove = server
+    }
+
+    /// `config delete-mcp-server <name>` once the person said yes -- its
+    /// config entry removed, its files left alone, as the CLI says -- read
+    /// back by `mcp list`; the selection goes with a server that went.
+    public func confirmRemove() async {
+        guard let server = pendingRemove else { return }
+        pendingRemove = nil
+        let removed = await change(["config", "delete-mcp-server", server.name])
+        if removed, selected == server.name, !servers.contains(where: { $0.name == server.name }) {
+            selected = nil
+            tool = ""
+            tried = nil
+        }
     }
 
     /// `mcp test <server> <tool> <arguments>`: its answer as printed.

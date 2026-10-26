@@ -171,5 +171,40 @@ apogee knowledge: no knowledge collection named 'knowledge' -- capture a record 
     static let collectionsListFresh = #"""
 {"data":[],"object":"list"}
 """#
+    /// tests/business/reads/Fixtures/knowledge-list-one.json
+    static let knowledgeListOne = #"""
+{"data":[{"decision":"Remove the cancel button from checkout.","discipline":"ux","downstream_link":"","id":"kr-20261026T142411Z-2e8272","intent":"We dropped the cancel button because testers kept mistaking it for back.","provenance":{"attribution":"Ada Lovelace","source":"meeting"},"raw_ref":"/Users/someone/.apogee/knowledge/raw/kr-20261026T142411Z-2e8272.md","status":"shipped","timestamp":"2026-10-26T14:24:11.732993Z"}],"db":"knowledge","object":"list"}
+"""#
+    /// tests/business/reads/Fixtures/knowledge-info-raw.txt
+    static let knowledgeInfoRaw = #"""
+ID:          kr-20261026T142411Z-2e8272
+Intent:      We dropped the cancel button because testers kept mistaking it for back.
+Decision:    Remove the cancel button from checkout.
+Status:      shipped
+Discipline:  ux
+Link:        -
+Source:      meeting
+Attribution: Ada Lovelace
+Raw:         /Users/someone/.apogee/knowledge/raw/kr-20261026T142411Z-2e8272.md
+Captured:    2026-10-26T14:24:11.732993Z
+
+-- Raw conversation --
+Ada: testers keep hitting cancel when they mean back. Grace: then we drop the cancel button from checkout. Ada: agreed, ship it.
+"""#
+    /// tests/business/reads/Fixtures/knowledge-info-raw-unavailable.txt
+    static let knowledgeInfoRawUnavailable = #"""
+ID:          kr-20261026T142411Z-2e8272
+Intent:      We dropped the cancel button because testers kept mistaking it for back.
+Decision:    Remove the cancel button from checkout.
+Status:      shipped
+Discipline:  ux
+Link:        -
+Source:      meeting
+Attribution: Ada Lovelace
+Raw:         /Users/someone/.apogee/knowledge/raw/kr-20261026T142411Z-2e8272.md
+Captured:    2026-10-26T14:24:11.732993Z
+
+Raw conversation: (unavailable)
+"""#
 }
 #endif

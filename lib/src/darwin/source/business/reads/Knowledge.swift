@@ -17,6 +17,10 @@ public struct KnowledgeRecord: Sendable, Equatable, Identifiable {
     public let attribution: String
     public let timestamp: String
     public let supersedes: String?
+    /// Where the CLI archived the conversation the record was distilled
+    /// from: whether there is one to show. Never opened here -- the
+    /// conversation comes from `knowledge info --raw` (`RawConversation`).
+    public let rawRef: String?
 
     public init?(_ value: JSONValue) {
         guard let id = value["id"]?.stringValue, !id.isEmpty else { return nil }
@@ -30,6 +34,7 @@ public struct KnowledgeRecord: Sendable, Equatable, Identifiable {
         attribution = value["provenance"]?["attribution"]?.stringValue ?? ""
         timestamp = value["timestamp"]?.stringValue ?? ""
         supersedes = value["supersedes"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
+        rawRef = value["raw_ref"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
     }
 
     /// Every record of a `knowledge list` document, in its order (newest
@@ -107,5 +112,35 @@ public struct CollectionInfo: Sendable, Equatable {
         sources = (v["sources"]?.arrayValue ?? []).compactMap(\.stringValue)
         vectors = v["vectors"]?.intValue
         path = v["path"]?.stringValue ?? ""
+    }
+}
+
+/// A record's archived raw conversation, as `knowledge info <id> --raw`
+/// prints it -- in text mode only (`knowledge.cpp`): the record's fields,
+/// then a line `-- Raw conversation --` and the conversation, or the line
+/// `Raw conversation: (unavailable)` when the archive is gone. The app runs
+/// the verb as a command and shows what follows the CLI's own marker, never
+/// reading the archive's path itself (GUI 4k; ADR 0002).
+public enum RawConversation: Sendable, Equatable {
+    /// The conversation, as the CLI printed it.
+    case text(String)
+    /// The CLI could not read the archive.
+    case unavailable
+
+    static let marker = "-- Raw conversation --"
+    static let unavailableLine = "Raw conversation: (unavailable)"
+
+    /// What `knowledge info --raw` printed; `nil` when neither of the CLI's
+    /// lines is there to say.
+    public init?(printed: String) {
+        let lines = printed.components(separatedBy: "\n")
+        if let start = lines.firstIndex(of: Self.marker) {
+            let body = lines[(start + 1)...].joined(separator: "\n")
+            self = .text(body.trimmingCharacters(in: .newlines))
+        } else if lines.contains(Self.unavailableLine) {
+            self = .unavailable
+        } else {
+            return nil
+        }
     }
 }

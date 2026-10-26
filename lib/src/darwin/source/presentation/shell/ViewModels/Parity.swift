@@ -52,27 +52,27 @@ public enum ParityTable {
     public static let places: [CommandPlace] = [
         // --- screens: drawn in the app today ------------------------------------
         CommandPlace("chat", .screen(module: "PresentationSession"), "the session window: a conversation driven over machine mode, under a suite or none -- --suite at launch, and /suite or Suites' Switch the session to it relaunching it with --resume and --suite, as machine mode carries no suite"),
-        CommandPlace("chats", .screen(module: "PresentationSessions"), "Sessions: the saved conversations, renamed, deleted, resumed -- and `chats show`, a resumed one's earlier turns drawn in the session window (PresentationSession)"),
+        CommandPlace("chats", .screen(module: "PresentationSessions"), "Sessions: the saved conversations, renamed, deleted, resumed, their details (`chats info`), compacted when asked (`chats compact`), and what recall holds with Forget beside it (`chats recall`) -- and `chats show`, a resumed one's earlier turns drawn in the session window (PresentationSession)"),
         CommandPlace("execute", .screen(module: "PresentationSessions"), "Sessions' execute door: a suite or bare, a project folder, orchestrate; /play in the session"),
         CommandPlace("models", .screen(module: "PresentationModels"), "Models: the library, a model's details, the roles, downloads; and Suites' fit, each suite's footprint as models status --suite states it (PresentationSuites)"),
-        CommandPlace("config", .screen(module: "PresentationSettings"), "Settings' panes, Suites (PresentationSuites), and a backend's adapters listed with their pins and edited by config set-backend --adapters (PresentationModels)"),
+        CommandPlace("config", .screen(module: "PresentationSettings"), "Settings' panes -- a vendor backend's server_tools consent shown beside it, read by config get -- Suites (PresentationSuites), a backend's adapters listed with their pins and edited by config set-backend --adapters (PresentationModels), and an MCP server removed by config delete-mcp-server (PresentationLibrary)"),
         CommandPlace("version", .screen(module: "PresentationSettings"), "Settings › General, and the window's subtitle"),
         CommandPlace("tui", .screen(module: "PresentationShell"), "the window itself: the app is the full-screen shell's counterpart"),
         CommandPlace("system", .screen(module: "PresentationMonitor"), "the system monitor overlay"),
         CommandPlace("check", .screen(module: "PresentationSettings"), "Settings › Backends & keys: health, with each failing row's remedy"),
-        CommandPlace("providers", .screen(module: "PresentationSettings"), "Settings › Backends & keys: the providers on this machine"),
-        CommandPlace("graph", .screen(module: "PresentationGraph"), "Code graph, and a collection's prose graph: its communities, report and decisions"),
+        CommandPlace("providers", .screen(module: "PresentationSettings"), "Settings › Backends & keys: the providers on this machine, one scanned provider registered from its row as the TUI's r writes it (config add-backend, asked first)"),
+        CommandPlace("graph", .screen(module: "PresentationGraph"), "Code graph, and a collection's prose graph: its communities, report and decisions; exported to a file the person picks (graph export html|graphml|mermaid), its report saved the same way (graph report --out), deduped dry run first (graph dedupe) and deleted (graph delete), each asked"),
         CommandPlace("task", .screen(module: "PresentationTasks"), "Tasks, recipes in the new-task sheet"),
         CommandPlace("auth", .screen(module: "PresentationSettings"), "Settings › Backends & keys: keys added on stdin, kept nowhere"),
         CommandPlace("video", .screen(module: "PresentationVideo"), "Video: clips, and compositions (PresentationCompose)"),
         CommandPlace("voice", .screen(module: "PresentationVoice"), "Voice: speeches, say, playback by the timings"),
         CommandPlace("bootstrap", .screen(module: "PresentationSettings"), "Settings › Backends & keys: install runtimes and register providers"),
-        CommandPlace("knowledge", .screen(module: "PresentationKnowledge"), "Knowledge › Records: list, ask, capture, link, move, delete, export"),
+        CommandPlace("knowledge", .screen(module: "PresentationKnowledge"), "Knowledge › Records: list, ask, capture, link, move, delete, export, and a record's raw conversation as knowledge info --raw prints it"),
         CommandPlace("embed", .screen(module: "PresentationKnowledge"), "Knowledge › Collections: list, health, search, ingest, delete"),
         CommandPlace("train", .screen(module: "PresentationTraining"), "Training › Runs, Pipelines, Cycle and Regimes: runs launched, gated, promoted -- merged, or the adapter alone (--adapter, gated on a quantized base by --suite and --judge) -- and rolled back; the named pipelines run, resumed and watched stage by stage (train pipeline run|resume|status); the cycle's state, one pass run, halted and resumed (train cycle run|status|halt|resume) -- its schedule the person's own, launchd or cron"),
         CommandPlace("datasets", .screen(module: "PresentationTraining"), "Training › Datasets: create, pull from Hugging Face, synthesize, prepare, delete; the kits"),
         CommandPlace("agents", .screen(module: "PresentationLibrary"), "Library › Agents: list, create, delete, the person's own files edited in place"),
-        CommandPlace("mcp", .screen(module: "PresentationLibrary"), "Library › MCP servers: connect state, presets registered, enable, disable, a tool tried"),
+        CommandPlace("mcp", .screen(module: "PresentationLibrary"), "Library › MCP servers: connect state, presets registered, enable, disable, a tool tried, a server removed (config delete-mcp-server, asked first)"),
         CommandPlace("symphonies", .screen(module: "PresentationLibrary"), "Library › Symphonies: the catalog, a play supervised, own spec files edited and checked"),
         CommandPlace("review", .screen(module: "PresentationReview"), "Review, ⇧⌘R: a merge request dry run first, posted on consent; targets and sweeps; the skills"),
         // --- gaps: each named by its queued item (none since 2g) ------------------
@@ -86,7 +86,7 @@ public enum ParityTable {
         // --- plumbing: protocols, not pages -------------------------------------
         CommandPlace("__complete", .plumbing, "the completion protocol the console's Tab asks"),
         CommandPlace("__mcp-tools", .plumbing, "the MCP stdio server a client spawns"),
-        CommandPlace("__machine-schema", .plumbing, "the machine protocol's JSON Schema, for a driver to read"),
+        CommandPlace("__machine-schema", .plumbing, "the machine protocol's JSON Schema: read by the app at launch, and again when the binary changes, for what the binary can do -- never a page"),
     ]
 
     /// Every command the console refuses, by its words -- the set the CLI's

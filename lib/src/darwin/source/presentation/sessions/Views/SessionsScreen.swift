@@ -33,9 +33,17 @@ public struct SessionsScreen: View {
             .id(ObjectIdentifier(library.current))
             if showsInspector {
                 Divider()
-                InspectorPane(inspector: library.inspector) { shell.go(.models) }
+                InspectorPane(
+                    inspector: library.inspector,
+                    showInfo: { if let chat = library.currentChat { Task { await library.showInfo(chat) } } },
+                    compact: { if let chat = library.currentChat { library.askToCompact(chat) } },
+                    forgetRecall: { Task { await library.askToForgetRecall() } }
+                ) { shell.go(.models) }
                     .frame(width: 360)
-                    .task { await library.refreshRoles() }
+                    .task {
+                        await library.refreshRoles()
+                        await library.refreshRecall()
+                    }
             }
         }
         .confirmationDialog(
@@ -49,6 +57,10 @@ public struct SessionsScreen: View {
                 Button("End it and switch", role: .destructive) { Task { await library.confirm() } }
             case .delete:
                 Button("Delete", role: .destructive) { Task { await library.confirm() } }
+            case .compact:
+                Button("Compact it", role: .destructive) { Task { await library.confirm() } }
+            case .forgetRecall:
+                Button("Forget every summary", role: .destructive) { Task { await library.confirm() } }
             case nil:
                 EmptyView()
             }
@@ -58,6 +70,12 @@ public struct SessionsScreen: View {
         }
         .sheet(isPresented: $library.executeDoorOpen) {
             ExecuteDoorSheet(library: library)
+        }
+        .sheet(item: $library.info) { info in
+            ChatInfoSheet(info: info, canCompact: library.canCompact(info.chat)) {
+                library.info = nil
+                library.askToCompact(info.chat)
+            }
         }
         .sheet(item: $library.renaming) { chat in
             RenameSheet(chat: chat) { name in
@@ -80,6 +98,8 @@ public struct SessionsScreen: View {
         case .stopTurn: "A turn is running in this session"
         case .endPrivate: "This private conversation can't be reopened"
         case .delete(let chat): "Delete “\(chat.name)”?"
+        case .compact(let chat): "Compact “\(chat.name)”?"
+        case .forgetRecall: "Forget what recall holds?"
         case nil: ""
         }
     }
@@ -92,6 +112,13 @@ public struct SessionsScreen: View {
                 ? "Nothing of it is written: switching stops the turn running in it and ends this session's apogee, and the conversation goes with it. Keep it running, or end it?"
                 : "Nothing of it is written: switching ends this session's apogee, and the conversation goes with it. Keep it running, or end it?"
         case .delete(let chat): "apogee chats delete \(chat.id) -- the conversation and its turns are removed, and this can't be undone."
+        case .compact(let chat):
+            library.isOpen(chat) && library.current.isLive
+                ? "Its session compacts it, as /compact does: the history so far is folded into a summary the model carries on from. The turns before it aren't kept word for word."
+                : "apogee chats compact \(chat.id) --yes -- its history is folded into a summary the model carries on from. The turns before it aren't kept word for word, and this can't be undone."
+        case .forgetRecall:
+            (library.recall.map { "Now: \($0). " } ?? "")
+                + "apogee chats recall --forget --yes -- every chat's summary goes, so no later session recalls them; every transcript stays."
         case nil: ""
         }
     }
@@ -102,15 +129,30 @@ public struct SessionsScreen: View {
     }
 }
 
-/// The inspector: the session, its model, the last turn, the roles.
+/// The inspector: the session, its model, the last turn, the roles, and
+/// what recall holds of earlier chats.
 struct InspectorPane: View {
     let inspector: Inspector
+    /// The saved conversation's details (`chats info`).
+    var showInfo: (() -> Void)?
+    /// Its compaction, asked first.
+    var compact: (() -> Void)?
+    /// Recall's summaries forgotten, asked first.
+    var forgetRecall: (() -> Void)?
     let openModels: () -> Void
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                section("Session", inspector.session)
+                section("Session", inspector.session) {
+                    if inspector.chat != nil {
+                        HStack(spacing: Spacing.m) {
+                            if let showInfo { Button("Details…", action: showInfo) }
+                            if let compact, inspector.canCompact { Button("Compact…", action: compact) }
+                        }
+                        .font(.apogeeSmall)
+                    }
+                }
                 section("Model", inspector.modelFacts) {
                     Button("Open the models library", action: openModels)
                         .font(.apogeeSmall)
@@ -121,6 +163,27 @@ struct InspectorPane: View {
                         Text(failure)
                             .font(.apogeeMeta)
                             .foregroundStyle(Palette.error)
+                    }
+                }
+                if inspector.recall != nil || inspector.recallFailure != nil {
+                    section("Recall", []) {
+                        if let recall = inspector.recall {
+                            Text(recall)
+                                .font(.apogeeSmall)
+                                .foregroundStyle(Palette.textPrimary)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if let failure = inspector.recallFailure {
+                            Text(failure).font(.apogeeMeta).foregroundStyle(Palette.error)
+                        }
+                        Text("Each finished chat is summarised so later sessions can recall it. Forgetting removes the summaries; every transcript stays.")
+                            .font(.apogeeMeta)
+                            .foregroundStyle(Palette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let forgetRecall {
+                            Button("Forget every summary…", action: forgetRecall).font(.apogeeSmall)
+                        }
                     }
                 }
             }
@@ -153,6 +216,43 @@ struct InspectorPane: View {
         .padding(Spacing.l)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .bottom) { Divider() }
+    }
+}
+
+/// A saved conversation's details, as `chats info` prints them, with its
+/// compaction beside them.
+struct ChatInfoSheet: View {
+    let info: SessionLibraryViewModel.ChatInfo
+    let canCompact: Bool
+    let compact: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.m) {
+            Text(info.chat.name).font(.apogeeHeading)
+            if let failure = info.failure {
+                Text(failure).font(.apogeeSmall).foregroundStyle(Palette.error).textSelection(.enabled)
+            }
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Spacing.m, verticalSpacing: Spacing.xs) {
+                ForEach(Array(info.fields.enumerated()), id: \.offset) { _, field in
+                    GridRow {
+                        Text(field.label).foregroundStyle(Palette.textTertiary).gridColumnAlignment(.leading)
+                        Text(field.value).foregroundStyle(Palette.textPrimary).textSelection(.enabled)
+                    }
+                }
+            }
+            .font(.apogeeSmall)
+            Text("apogee chats info \(info.chat.id)")
+                .font(.apogeeCode)
+                .foregroundStyle(Palette.textTertiary)
+            HStack {
+                if canCompact { Button("Compact…", action: compact) }
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(Spacing.xl)
+        .frame(width: 460)
     }
 }
 
@@ -284,6 +384,53 @@ public struct SessionCommands: Commands {
             await library.start(inView: true)
             await SessionsPreview.converse(library.current, typed: SessionsPreview.noteTurn, answers: SessionsPreview.noteAnswers)
             await library.refreshRoles()
+        }
+}
+
+#Preview("A saved session: what recall holds, Forget beside it") {
+    @Previewable @State var library = SessionsPreview.library(
+        chats: SessionsDocuments.chatsListTwo, openChat: SessionsPreview.savedTwo[0].id)
+    InspectorPane(inspector: library.inspector, showInfo: {}, compact: {}, forgetRecall: {}) {}
+        .frame(width: 360, height: 760)
+        .task {
+            await library.start(inView: true)
+            await library.refreshRoles()
+            await library.refreshRecall()
+        }
+}
+
+#Preview("A saved chat's details, as chats info prints them") {
+    @Previewable @State var library = SessionsPreview.library(chats: SessionsDocuments.chatsListTwo)
+    Group {
+        if let info = library.info {
+            ChatInfoSheet(info: info, canCompact: library.canCompact(info.chat)) {}
+        } else {
+            ProgressView().padding(Spacing.xl)
+        }
+    }
+    .task {
+        await library.start(inView: false)
+        if let chat = library.chats.first { await library.showInfo(chat) }
+    }
+}
+
+#Preview("Compacting a saved chat, asked first") {
+    let library = SessionsPreview.library(chats: SessionsDocuments.chatsListTwo)
+    SessionsScreen(library: library, shell: SessionsPreview.shell())
+        .frame(width: 1100, height: 720)
+        .task {
+            await library.start(inView: true)
+            if let chat = library.chats.first { library.askToCompact(chat) }
+        }
+}
+
+#Preview("Forgetting what recall holds, asked first") {
+    let library = SessionsPreview.library(chats: SessionsDocuments.chatsListTwo)
+    SessionsScreen(library: library, shell: SessionsPreview.shell())
+        .frame(width: 1100, height: 720)
+        .task {
+            await library.start(inView: true)
+            await library.askToForgetRecall()
         }
 }
 

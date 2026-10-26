@@ -1,0 +1,1 @@
+Deleted graph "spare": 10 node(s), 13 edge(s), 0 mention(s). The graphs: config entry is untouched (`apogee config delete-graph spare` removes it).

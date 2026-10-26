@@ -2079,3 +2079,94 @@ Probed on the branch's binary over a sandbox with the mock trainer: two named pi
   - **A halt during a pass is lost.** `train cycle halt` taken while a pass holds the lock answers "cycle halted", then the pass's save overwrites it: loaded at `cycle.cpp:403`, written at the end.
   - **A failed pass under `stream-json` writes nothing to stderr,** though `machine-mode.md` says failures are said there too.
   - **A resume's stream and manifest carry the previous attempt's score** on the stage that trains again.
+
+### 2026-10-26 — `settings-sessions-graph-parity` (backlog item 4k): Settings, Sessions, Graph and Library reach their remaining verbs
+
+**Why.** Under the full-parity law, the audit found seven places where a classified screen didn't reach a verb its command owns. Each was console-reachable, the law's floor and not its bar:
+- **Saved chats** could not be compacted, inspected or have their recall reviewed from Sessions.
+- **Settings could not register one scanned provider** from its row.
+- **No surface showed a backend's `server_tools`,** its recorded consent for a vendor to run tools under the person's key (the CLI's 47a).
+- **Graph's export, report `--out`, dedupe and delete** had no button.
+- **Library could add an MCP server but never remove one.**
+- **Knowledge never showed a record's archived conversation** (`knowledge info --raw`, text only).
+- **Track-52 capabilities were learned only from a chat session's `session` event,** and a session starts only when Sessions is in view. A launch restored onto another place ran a capable binary on fallbacks, and Settings asserted "this apogee has no config set" without having asked.
+
+Each reproduced on today's source as a failing test first. Two more turned up:
+- **"Forget every recalled summary" never worked when recall held anything:** it ran `chats recall --forget` without `--yes`, which the CLI refuses on a pipe.
+- **No CLI verb registers one provider.** `register_provider` runs in-process, reached only by the TUI's `r`.
+
+Probed on the branch's binary over sandboxes:
+- **`__machine-schema`** answers with an empty home, writes nothing and refuses `--output-format`. It is a JSON Schema 2020-12 document whose `x-apogee` holds `{protocol_version: 1, schema: "2026-10-25"}`.
+  - **Its `$defs`:** 31 `event_<type>` and 8 `line_<type>` (answer, attach, cancel, compact, detach, hello, set, user).
+  - **The installed 0.1.9** answers `2026-10-24`.
+- **Text-only answers:** `chats info` prints `label: value` lines, and `chats recall` a count and a path, never the summaries. `graph dedupe` has `--dry-run`, text only. `knowledge info --raw` marks its part `-- Raw conversation --`.
+- **`config get backends.<name>.server_tools`** prints one tool per line, empty when unset. The installed binary refuses: `no such config key`.
+- **`graph delete`** asks nothing and keeps the graph's config entry.
+- **An MCP server is removed by `config delete-mcp-server <name>`.**
+
+- [x] **Capabilities are known from launch.**
+  - **The read:** the library runs `__machine-schema` (`data/protocol/MachineSchema.swift`) right after locating the binary, before any session starts. It runs again whenever the binary's file changes (`data/discovery/BinaryFingerprint.swift`: its number, size or modification date), checked on every place change and every Settings refresh.
+  - **The flags:**
+    - `streamsJobs` is `event_job`;
+    - `hasTrack52` a schema dated 2026-10-20 or later;
+    - `keepsOutsideRenames` 2026-10-25 or later;
+    - compact and detach their lines.
+  - **Per session,** detection stays as a refresh.
+  - **Settings** says "this apogee has no config set" only after the binary has said so, and otherwise "hasn't said what it can do".
+- [x] **Saved chats:** a row's menu and the inspector offer Details… (`chats info`) and Compact… (asked, then `--yes`, read back).
+  - **The open session's own chat** compacts through its session's `compact` line, so the CLI never rewrites a file under a running session.
+  - **The inspector's Recall section** shows `chats recall` as printed, with "Forget every summary…" asked first and run with `--yes`.
+  - **Compact and recall** are offered only on a track-52 binary.
+- [x] **One provider registers from its row.** A row the scan calls `not registered` gets Register…, asked in the TUI's words; Ollama asks for its model. It runs `config add-backend <id> --type <type>`, the entry `register_provider` writes.
+- [x] **Consent is visible.** Each anthropic, openai or google backend in Settings shows its consented tools through `config get` (`business/reads/ServerTools.swift`). An older binary's refusal is shown in its words, never as "none".
+- [x] **Graph's More menu:**
+  - **Export** (HTML, GraphML, Mermaid) and **Save the report**, each through an `NSSavePanel` in the view, offering the CLI's own file name.
+  - **Dedupe…**, the dry run first, Merge offered only when it names groups, the merge supervised.
+  - **Delete the graph…**, asked first.
+- [x] **MCP Remove…** asks first, runs `config delete-mcp-server`, and reads back.
+- [x] **A record's raw conversation:** a record with an archive (`raw_ref`, now decoded) offers its conversation from `knowledge info --raw`, run as a command and cut at the CLI's marker (`RawConversation`).
+- [x] **The parity rows** for `chats`, `config`, `providers`, `graph`, `knowledge` and `mcp` name what their screens now reach; `__machine-schema` stays plumbing.
+
+**Decisions made while building** (2026-10-26, each recorded for veto):
+- **The default, taken:** exports and the report write through a save panel to a path the person picks, never a default location.
+- **The startup schema read supersedes per-session detection** as the source of the flags (the document's decision). It lives where the binary is found, `SessionLibraryViewModel.start`, and `AppViewModel` wires the re-checks.
+- **Register composes `config add-backend`** because the CLI has no single-provider verb. Unlike the TUI's `r`, it neither sets `models.default` when none is set nor fetches the roster.
+- **Settings › Backends hides a roster's rows** (`<backend>:<id>`, listed there since M13), keeping the `server_tools` reads to config entries.
+- **The graph's acts** (export, report, delete and the dry run) are commands bounded at 60 s. The merge is supervised.
+
+**Verified.**
+- **Recorded** from the branch's binary over sandboxes, the home written `/Users/someone`:
+  - `machine-schema.json`;
+  - 32 documents in `tests/business/reads/Fixtures/`: chats, providers, `server_tools`, graph export, report, dedupe and delete, MCP delete, and knowledge `--raw`;
+  - **the older shapes,** from the installed binary over a sandbox: `machine-schema-older.json` and two `server_tools` refusals.
+
+  **Hand-made:**
+  - `machine-schema-pre52-handmade.json`, the 2026-10-24 schema cut back to v0.1.7's `protocol.cpp` line types, since no pre-52 binary is at hand;
+  - two dedupe answers written to `graph.cpp`'s lines, since the mock embedder can't make two entities agree.
+- **49 new cases:**
+  - `RemainingVerbsRowTests` (7);
+  - `CapabilitiesTests` (4), `CapabilitiesFromLaunchTests` (3), `MachineSchemaTests` (3) and `BinaryFingerprintTests` (1);
+  - `SavedChatActsTests` (7) and `RecallForgetTests` with `RecallSeenTests` (3);
+  - `SettingsParityTests` (7), `GraphActsTests` (6), `MCPRemoveTests` (2), `RawConversationTests` (3) and `RemainingVerbsReadsTests` (3).
+- **Repeat runs:** each touched scheme and bundle, ten iterations green (Sessions 660 of 660, Shell 400 of 400). The layering check passed 25 of 25, and `check-previews` finds nothing in sessions, settings, app, graph, library, knowledge or shell.
+- **21 new previews:**
+  - a saved chat's info and recall;
+  - the compact confirm;
+  - a provider row's Register;
+  - a backend's `server_tools`;
+  - Settings on a capable binary restored onto another place;
+  - graph export, dedupe and delete;
+  - MCP remove;
+  - a raw record.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,992 tests and the macOS app's 780 cases passed, with no Swift warning.
+
+**Not done:**
+- No live pass of the app.
+- `server_tools` shows in Settings only, not the Models place.
+- The dedupe's merged state has no preview: `PresentationGraph` doesn't reach `InfrastructureProcess`, which a finished preview job needs.
+- **CLI gaps the probes found:**
+  - no verb registers one provider;
+  - no verb lists recall's summaries;
+  - `chats info`, `chats recall`, `graph dedupe` and `knowledge info --raw` have no JSON;
+  - `graph delete` keeps the graph's config entry, so the picker still lists it;
+  - `config add-backend` never sets a default backend.

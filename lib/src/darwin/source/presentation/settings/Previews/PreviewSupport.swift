@@ -17,11 +17,17 @@ struct PreviewRunner: CommandRunning {
     let commands: [([String], String)]
     /// Argument prefixes the binary refuses, when no command answers first.
     let refused: [[String]]
+    /// Commands the binary refused in its recorded words, before any answer.
+    let refusals: [([String], String)]
 
-    init(reads: [([String], String)], commands: [([String], String)] = [], refused: [[String]] = []) {
+    init(
+        reads: [([String], String)], commands: [([String], String)] = [], refused: [[String]] = [],
+        refusals: [([String], String)] = []
+    ) {
         self.reads = reads
         self.commands = commands
         self.refused = refused
+        self.refusals = refusals
     }
 
     func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
@@ -33,6 +39,11 @@ struct PreviewRunner: CommandRunning {
     }
 
     func command(binary: URL, _ arguments: [String]) async -> CommandOutcome {
+        if let stderr = Self.answer(arguments, refusals) {
+            var tail = BoundedTail()
+            tail.append(Data(stderr.utf8))
+            return .failed(exit: ChildExit(reason: .exited, status: 1), stderrTail: tail)
+        }
         if let answer = Self.answer(arguments, commands) { return .done(stdout: answer) }
         if refused.contains(where: { arguments.starts(with: $0) }) {
             return .failed(exit: ChildExit(reason: .exited, status: 1), stderrTail: BoundedTail())

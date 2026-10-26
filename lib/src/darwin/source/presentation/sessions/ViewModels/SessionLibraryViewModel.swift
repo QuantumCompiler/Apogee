@@ -46,6 +46,23 @@ public final class SessionLibraryViewModel {
         case endPrivate(for: Target)
         /// Delete this saved conversation? It cannot be undone.
         case delete(ChatSummary)
+        /// Compact this saved conversation -- its history folded into a
+        /// summary -- as `chats compact` does (GUI 4k)?
+        case compact(ChatSummary)
+        /// Forget every chat summary recall holds -- every transcript stays --
+        /// as `chats recall --forget` does (GUI 4k)?
+        case forgetRecall
+    }
+
+    /// A saved conversation's details, as `chats info` prints them -- text
+    /// alone, so run as a command and read a `label: value` a line -- for
+    /// the sheet that shows them (GUI 4k).
+    public struct ChatInfo: Equatable, Identifiable {
+        public let chat: ChatSummary
+        public let fields: [Field]
+        /// Why they could not be read, in the CLI's words.
+        public let failure: String?
+        public var id: String { chat.id }
     }
 
     /// What to open.
@@ -115,6 +132,20 @@ public final class SessionLibraryViewModel {
     public private(set) var suites: [String] = []
     /// `models.default_suite`: empty when none is set, `nil` unread.
     public private(set) var defaultSuite: String?
+    /// A saved conversation's details, read for its sheet; `nil` when none is
+    /// shown.
+    public var info: ChatInfo?
+    /// What recall holds of earlier chats, as `chats recall` says it -- how
+    /// many summaries, and where; no verb of the CLI lists the summaries
+    /// themselves -- read for the inspector on a binary with the CLI's 52e;
+    /// `nil` unread.
+    public private(set) var recall: String?
+    /// Why recall's holdings could not be read, in the CLI's words.
+    public private(set) var recallFailure: String?
+    /// How a binary's file is told apart -- a rebuild installed where it
+    /// stood -- so its vocabulary is asked again (GUI 4k). A test hands in
+    /// its own.
+    public var fingerprint: @Sendable (URL) -> BinaryFingerprint? = { BinaryFingerprint(of: $0) }
     /// The person's override, passed over by discovery while another binary
     /// answered -- its path and why -- so the app says it runs another binary
     /// than the one it was pointed at: once at launch, and in Settings ›
@@ -139,6 +170,8 @@ public final class SessionLibraryViewModel {
     private var lastEvents: [String]?
     /// The vocabulary's date the last session announced.
     private var lastSchema: String?
+    /// The binary's file when its vocabulary was asked (`__machine-schema`).
+    private var askedOf: BinaryFingerprint?
     /// The model the next new session starts on, once.
     private var nextModel: String?
     /// The suite the next new session starts under, once, and whether forced
@@ -207,6 +240,9 @@ public final class SessionLibraryViewModel {
             skippedOverride = outcome.skippedOverride.map { ($0.candidate.url.path, $0.reason) }
             sayOnce(outcome)
         }
+        // What the binary can do, known before any session starts or any
+        // other place reads (GUI 4k).
+        await learnCapabilities()
         await refresh()
         await readModels()
         let last = preferences.openChat.flatMap { id in chats.contains { $0.id == id } ? id : nil }
@@ -296,6 +332,44 @@ public final class SessionLibraryViewModel {
             }
         }
     }
+
+    // MARK: - What the binary can do
+
+    /// Asks the binary found what it speaks -- `apogee __machine-schema`, run
+    /// as a command (it takes no `--output-format`), which answers with no
+    /// config and no backend -- and sets every capability flag from it before
+    /// any session starts (GUI 4k): whatever place a launch restores, no
+    /// screen runs on a fallback against a capable binary. What was known of
+    /// an earlier binary goes first, so a binary that doesn't answer leaves
+    /// them unknown -- the fallback, never asserted -- until a session says
+    /// (its `session` event, the refresh).
+    private func learnCapabilities() async {
+        guard let found else { return }
+        lastAccepts = nil
+        lastEvents = nil
+        lastSchema = nil
+        askedOf = fingerprint(found.url)
+        guard case .done(let text) = await runner.command(binary: found.url, ["__machine-schema"]),
+            let schema = MachineSchema(text: text)
+        else { return }
+        lastAccepts = schema.accepts
+        lastEvents = schema.events
+        lastSchema = schema.schema
+    }
+
+    /// Asks the binary again when its file changed since it was asked --
+    /// another build installed where it stood -- so a place never runs on
+    /// what the earlier build could do. Otherwise nothing runs: the file's
+    /// attributes are compared.
+    public func checkBinary() async {
+        guard let found, fingerprint(found.url) != askedOf else { return }
+        await learnCapabilities()
+    }
+
+    /// Whether the binary has said what it can do -- its vocabulary, or a
+    /// session's announcement. Until it has, every flag is the fallback and
+    /// no screen asserts what it cannot do.
+    public var capabilitiesKnown: Bool { lastSchema != nil }
 
     // MARK: - Reading
 
@@ -452,8 +526,9 @@ public final class SessionLibraryViewModel {
         session.defaultSuite = defaultSuite
     }
 
-    /// Whether the build streams a long job's events (52b), as the last
-    /// session announced; `false` until one has -- the fallback.
+    /// Whether the build streams a long job's events (52b), as its vocabulary
+    /// says -- read at launch, refreshed by each session's announcement;
+    /// `false` until it has said -- the fallback.
     public var streamsJobs: Bool { lastEvents?.contains("job") ?? false }
 
     /// Whether the build carries the CLI's whole track 52 (schema 2026-10-20
@@ -518,7 +593,8 @@ public final class SessionLibraryViewModel {
     }
 
     /// Whether a private session writes nothing (this build has `--private`),
-    /// or is deleted when it closes; unknown until a session has spoken.
+    /// or is deleted when it closes -- known once the build has said what it
+    /// reads (`set` arrived with `--private`, 52d).
     public var privateIsNothingWritten: Bool { lastAccepts?.contains("set") ?? false }
 
     /// ⇧⌘F.
@@ -532,6 +608,8 @@ public final class SessionLibraryViewModel {
         switch pending {
         case .stopTurn(let target), .endPrivate(let target): await switchTo(target)
         case .delete(let chat): await delete(chat)
+        case .compact(let chat): await compact(chat)
+        case .forgetRecall: await forgetRecall()
         }
     }
 
@@ -770,6 +848,112 @@ public final class SessionLibraryViewModel {
         failure = nil
     }
 
+    // MARK: - A saved conversation's details, compaction, recall (GUI 4k)
+
+    /// `chats info <id>` -- the details the CLI prints of a saved
+    /// conversation: when it started and changed, its turns and messages, how
+    /// often it was compacted -- run as a command (it prints text alone),
+    /// for its sheet.
+    public func showInfo(_ chat: ChatSummary) async {
+        guard let found else { return }
+        let outcome = await runner.command(binary: found.url, ["chats", "info", chat.id])
+        if case .done(let text) = outcome {
+            info = ChatInfo(chat: chat, fields: Field.lines(text), failure: nil)
+        } else {
+            info = ChatInfo(chat: chat, fields: [], failure: outcome.failure ?? "its details could not be read")
+        }
+    }
+
+    /// Whether `chat` can be compacted from here: on a binary with the CLI's
+    /// 52d (`chats compact`), and -- the open session's own conversation,
+    /// its child running -- by a session that takes the `compact` line, so
+    /// the CLI never rewrites a file the running session saves over.
+    public func canCompact(_ chat: ChatSummary) -> Bool {
+        guard hasTrack52 else { return false }
+        return compactsInSession(chat) ? current.canCompact : true
+    }
+
+    /// Asks before compacting: it rewrites the saved history as a summary.
+    public func askToCompact(_ chat: ChatSummary) {
+        guard canCompact(chat) else { return }
+        pending = .compact(chat)
+    }
+
+    /// The open session's conversation while its child runs: compacted by
+    /// that session, never under it.
+    private func compactsInSession(_ chat: ChatSummary) -> Bool {
+        chat.id == current.chatID && current.isLive
+    }
+
+    /// Compacts `chat` once the person said yes: in its own session when it
+    /// is the one running (the session's `compact` line, held while a turn
+    /// runs), else `chats compact <id> --yes` -- the CLI asks nothing on a
+    /// pipe without `--yes`, and refuses -- read back, its own words said.
+    private func compact(_ chat: ChatSummary) async {
+        guard let found else { return }
+        if compactsInSession(chat) {
+            current.compact()
+            say?("Compacting \(chat.name) in its session")
+            return
+        }
+        let outcome = await runner.command(binary: found.url, ["chats", "compact", chat.id, "--yes"])
+        await refresh()
+        if info?.chat.id == chat.id { await showInfo(chat) }
+        if let failure = outcome.failure {
+            self.failure = failure
+            say?("Not compacted: \(failure)")
+        } else if case .done(let stdout) = outcome {
+            failure = nil
+            say?(Self.lastLine(stdout) ?? "Compacted \(chat.name)")
+        }
+    }
+
+    /// `chats recall` -- what recall holds, said as the CLI says it -- on a
+    /// binary with the CLI's 52e; nothing on one without.
+    public func refreshRecall() async {
+        guard let found, hasTrack52 else {
+            recall = nil
+            recallFailure = nil
+            return
+        }
+        let outcome = await runner.command(binary: found.url, ["chats", "recall"])
+        if case .done(let text) = outcome {
+            recall = Self.lastLine(text)
+            recallFailure = nil
+        } else {
+            recallFailure = outcome.failure ?? "what recall holds could not be read"
+        }
+    }
+
+    /// Asks before forgetting: what recall holds is read first, so it is
+    /// seen before it goes.
+    public func askToForgetRecall() async {
+        guard hasTrack52 else { return }
+        await refreshRecall()
+        pending = .forgetRecall
+    }
+
+    /// `chats recall --forget --yes` once the person said yes -- every
+    /// chat's summary gone, every transcript kept -- read back, the CLI's own
+    /// words said.
+    private func forgetRecall() async {
+        guard let found, hasTrack52 else { return }
+        let outcome = await runner.command(binary: found.url, ["chats", "recall", "--forget", "--yes"])
+        await refreshRecall()
+        if let failure = outcome.failure {
+            self.failure = failure
+            say?("Not forgotten: \(failure)")
+        } else if case .done(let stdout) = outcome {
+            failure = nil
+            say?(Self.lastLine(stdout) ?? "Recall forgotten")
+        }
+    }
+
+    /// The last line a command printed, trimmed; `nil` for none.
+    static func lastLine(_ text: String) -> String? {
+        text.split(whereSeparator: \.isNewline).last.map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
     // MARK: - What the list shows
 
     /// The list, filtered and grouped by date, newest first.
@@ -834,7 +1018,8 @@ public final class SessionLibraryViewModel {
         Inspector(
             chat: currentChat, chatID: current.chatID, model: current.transcript.model,
             kind: currentChat.flatMap(kind(of:)), lastTurn: lastUsage, roles: roles,
-            rolesFailure: rolesFailure)
+            rolesFailure: rolesFailure, recall: hasTrack52 ? recall : nil, recallFailure: hasTrack52 ? recallFailure : nil,
+            canCompact: currentChat.map(canCompact) ?? false)
     }
 
     private var lastUsage: Usage? {
@@ -910,6 +1095,28 @@ public struct Inspector: Equatable {
     public let lastTurn: Usage?
     public let roles: [Field]
     public let rolesFailure: String?
+    /// What recall holds, as `chats recall` says it, on a binary with the
+    /// CLI's 52e; `nil` on one without, or unread.
+    public let recall: String?
+    public let recallFailure: String?
+    /// Whether the session's saved conversation can be compacted from here.
+    public let canCompact: Bool
+
+    public init(
+        chat: ChatSummary?, chatID: String?, model: String?, kind: ModelKind?, lastTurn: Usage?, roles: [Field],
+        rolesFailure: String?, recall: String? = nil, recallFailure: String? = nil, canCompact: Bool = false
+    ) {
+        self.chat = chat
+        self.chatID = chatID
+        self.model = model
+        self.kind = kind
+        self.lastTurn = lastTurn
+        self.roles = roles
+        self.rolesFailure = rolesFailure
+        self.recall = recall
+        self.recallFailure = recallFailure
+        self.canCompact = canCompact
+    }
 
     /// The session's own facts, label and value.
     public var session: [Field] {

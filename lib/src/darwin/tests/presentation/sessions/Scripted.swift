@@ -313,7 +313,9 @@ final class ScriptedRunner: CommandRunning, @unchecked Sendable {
 
     func command(binary: URL, _ arguments: [String]) async -> CommandOutcome {
         log.withLock { $0.append("run " + arguments.joined(separator: " ")) }
-        ledger?.note("run " + arguments.joined(separator: " "))
+        // The vocabulary asked at launch (GUI 4k) is a read, not an act the
+        // ledger orders.
+        if arguments != ["__machine-schema"] { ledger?.note("run " + arguments.joined(separator: " ")) }
         return commands.withLock { rules in
             rules.first { arguments.starts(with: $0.0) }?.1
         } ?? .done(stdout: "")

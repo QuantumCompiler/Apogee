@@ -1,0 +1,1181 @@
+{
+  "$defs": {
+    "event_answer_delta": {
+      "additionalProperties": true,
+      "description": "A chunk of answer text.",
+      "properties": {
+        "text": {
+          "description": "The text, to concatenate or display as it arrives.",
+          "type": "string"
+        },
+        "turn": {
+          "description": "In a driven chat or execute: the turn this event belongs to, the number of its user line.",
+          "type": "integer"
+        },
+        "type": {
+          "const": "answer_delta"
+        }
+      },
+      "required": [
+        "type",
+        "text"
+      ],
+      "type": "object"
+    },
+    "event_answer_end": {
+      "additionalProperties": true,
+      "description": "The answer ended.",
+      "properties": {
+        "turn": {
+          "description": "In a driven chat or execute: the turn this event belongs to, the number of its user line.",
+          "type": "integer"
+        },
+        "type": {
+          "const": "answer_end"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "event_answer_start": {
+      "additionalProperties": true,
+      "description": "An answer begins.",
+      "properties": {
+        "turn": {
+          "description": "In a driven chat or execute: the turn this event belongs to, the number of its user line.",
+          "type": "integer"
+        },
+        "type": {
+          "const": "answer_start"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "event_error": {
+      "additionalProperties": true,
+      "description": "A turn failed: ends it in place of a result.",
+      "properties": {
+        "message": {
+          "description": "Why the turn failed.",
+          "type": "string"
+        },
+        "turn": {
+          "description": "In a driven chat or execute: the turn this event belongs to, the number of its user line.",
+          "type": "integer"
+        },
+        "type": {
+          "const": "error"
+        }
+      },
+      "required": [
+        "type",
+        "message"
+      ],
+      "type": "object"
+    },
+    "event_memory": {
+      "additionalProperties": true,
+      "description": "What a turn was handed from earlier conversations.",
+      "properties": {
+        "chats": {
+          "description": "Past chats' summaries recalled for this turn.",
+          "type": "integer"
+        },
+        "decisions": {
+          "description": "Knowledge records recalled for this turn.",
+          "type": "integer"
+        },
+        "sessions": {
+          "description": "Each past chat recalled, in the order sent; absent when chats is 0.",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "description": "The chat's id, as chats list and --resume take it.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Its title when it was summarised; empty when it had none.",
+                "type": "string"
+              },
+              "updated": {
+                "description": "When it was last updated before that, ISO 8601.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "updated"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "turn": {
+          "description": "In a driven chat or execute: the turn this event belongs to, the number of its user line.",
+          "type": "integer"
+        },
+        "type": {
+          "const": "memory"
+        }
+      },
+      "required": [
+        "type",
+        "chats",
+        "decisions"
+      ],
+      "type": "object"
+    },
+    "event_notice": {
+      "additionalProperties": true,
+      "description": "A line for the user that is neither progress nor an error.",
+      "properties": {
+        "text": {
+          "description": "The text, to concatenate or display as it arrives.",
+          "type": "string"
+        },
+        "turn": {
+          "description": "In a driven chat or execute: the turn this event belongs to, the number of its user line.",
+          "type": "integer"
+        },
+        "type": {
+          "const": "notice"
+        }
+      },
+      "required": [
+        "type",
+        "text"
+      ],
+      "type": "object"
+    },
+    "event_question": {
+      "additionalProperties": true,
+      "description": "A question that waits for answer lines.",
+      "properties": {
+        "detail": {
+          "description": "An outbound question: the whole URL. A write_file or edit_file question: the change as a unified diff, cut at 32 KB with a last line saying so.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "permission for the permission gate's question; absent for ask_user.",
+          "type": "string"
+        },
+        "outbound": {
+          "description": "A permission question about data leaving the machine.",
+          "type": "boolean"
+        },
+        "questions": {
+          "description": "Each to be answered by one answer line, in order.",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "header": {
+                "description": "A short label for the question.",
+                "type": "string"
+              },
+              "multi_select": {
+                "description": "Whether more than one option may be chosen.",
+                "type": "boolean"
+              },
+              "options": {
+                "description": "Offered answers -- free text is always accepted too.",
+                "items": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "description": {
+                      "description": "What choosing it means.",
+                      "type": "string"
+                    },
+                    "label": {
+                      "description": "The option, as an answer would give it.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "description"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "question": {
+                "description": "The question.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "header",
+              "question",
+              "multi_select",
+              "options"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "target": {
+          "description": "A permission question: its path, command or host.",
+          "type": "string"
+        },
+        "tool": {
+          "description": "A permission question: the tool asking.",
+          "type": "string"
+        },
+        "turn": {
+          "description": "In a driven chat or execute: the turn this event belongs to, the number of its user line.",
+          "type": "integer"
+        },
+        "type": {
+          "const": "question"
+        }
+      },
+      "required": [
+        "type",
+        "questions"
+      ],
+      "type": "object"
+    },
+    "event_result": {
+      "additionalProperties": true,
+      "description": "Ends a turn, with the whole answer.",
+      "properties": {
+        "finish_reason": {
+          "description": "Why the turn ended: stop, length, tool_calls, content_filter, cancelled (a cancel ended it), other -- more may be added.",
+          "type": "string"
+        },
+        "model": {
+          "description": "The model that answered.",
+          "type": "string"
+        },
+        "text": {
+          "description": "The whole answer, reasoning never in it.",
+          "type": "string"
+        },
+        "turn": {
+          "description": "In a driven chat or execute: the turn this event belongs to, the number of its user line.",
+          "type": "integer"
+        },
+        "type": {
+          "const": "result"
+        },
+        "usage": {
+          "additionalProperties": true,
+          "description": "Absent when the provider reported none -- absent is not zero.",
+          "properties": {
+            "input_tokens": {
+              "description": "Tokens sent.",
+              "type": "integer"
+            },
+            "output_tokens": {
+              "description": "Tokens generated.",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "input_tokens",
+            "output_tokens"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "type",
+        "text",
+        "model",
+        "finish_reason"
+      ],
+      "type": "object"
+    },
+    "event_session": {
+      "additionalProperties": true,
+      "description": "Once, first, unprompted: the protocol version, the model, the session's capabilities.",
+      "properties": {
+        "capabilities": {
+          "additionalProperties": true,
+          "description": "What this session can do.",
+          "properties": {
+            "accepts": {
+              "description": "The line types this session reads on stdin.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "ask": {
+              "description": "Whether ask_user and the permission prompt reach the driver as question events.",
+              "type": "boolean"
+            },
+            "events": {
+              "description": "Every event type this build can write.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "schema": {
+              "description": "The vocabulary's version, a date.",
+              "type": "string"
+            },
+            "tools": {
+              "description": "Whether the model can call tools in this session.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "events",
+            "accepts",
+            "tools",
+            "ask",
+            "schema"
+          ],
+          "type": "object"
+        },
+        "chat_id": {
+          "description": "The chat this session writes, as chats list, chats show and --resume name it; absent when it writes none (chat --private).",
+          "type": "string"
+        },
+        "model": {
+          "description": "The backend answering.",
+          "type": "string"
+        },
+        "next_turn": {
+          "description": "A session of user lines: the number its next turn will carry.",
+          "type": "integer"
+        },
+        "private": {
+          "description": "true for chat --private: nothing of the session is ever written.",
+          "type": "boolean"
+        },
+        "protocol_version": {
+          "description": "Bumped only when an existing event's meaning changes.",
+          "type": "integer"
+        },
+        "type": {
+          "const": "session"
+        }
+      },
+      "required": [
+        "type",
+        "protocol_version",
+        "model",
+        "capabilities"
+      ],
+      "type": "object"
+    },
+    "event_task_finished": {
+      "additionalProperties": true,
+      "description": "A task ended.",
+      "properties": {
+        "reason": {
+          "description": "Why, in words.",
+          "type": "string"
+        },
+        "status": {
+          "description": "How the task ended.",
+          "type": "string"
+        },
+        "task": {
+          "description": "The task's final view.",
+          "type": "object"
+        },
+        "task_id": {
+          "description": "The task.",
+          "type": "string"
+        },
+        "transition": {
+          "description": "The transition, as the ledger wrote it.",
+          "type": "object"
+        },
+        "turn": {
+          "description": "In a driven chat or execute: the turn this event belongs to, the number of its user line.",
+          "type": "integer"
+        },
+        "type": {
+          "const": "task_finished"
+        }
+      },
+      "required": [
+        "type",
+        "status",
+        "reason",
+        "task",
+        "task_id",
+        "transition"
+      ],
+      "type": "object"
+    },
+    "event_task_grant": {
+      "additionalProperties": true,
+      "description": "A call a task's grant let through.",
+      "properties": {
+        "by": {
+          "description": "The authority: grant.",
+          "type": "string"
+        },
+        "round": {
+          "description": "The round the grant was used in.",
+          "type": "integer"
+        },
+        "target": {
+          "description": "What it was let at.",
+          "type": "string"
+        },
+        "task_id": {
+          "description": "The task.",
+          "type": "string"
+        },
+        "tool": {
+          "description": "The tool the grant let through.",
+          "type": "string"
+        },
+        "turn": {
+          "description": "In a driven chat or execute: the turn this event belongs to, the number of its user line.",
+          "type": "integer"
+        },
+        "type": {
+          "const": "task_grant"
+        }
+      },
+      "required": [
+        "type",
+        "task_id",
+        "round",
+        "tool",
+        "target",
+        "by"
+      ],
+      "type": "object"
+    },
+    "event_task_plan": {
+      "additionalProperties": true,
+      "description": "A task's plan turn started, or its plan was recorded.",
+      "properties": {
+        "plan": {
+          "description": "Once recorded: the plan.",
+          "type": "string"
+        },
+        "round": {
+          "description": "The plan turn.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "task_id": {
+          "description": "The task.",
+          "type": "string"
+        },
+        "transition": {
+          "description": "The transition, as the ledger wrote it.",
+          "type": "object"
+        },
+        "turn": {
+          "description": "In a driven chat or execute: the turn this event belongs to, the number of its user line.",
+          "type": "integer"
+        },
+        "type": {
+          "const": "task_plan"
+        }
+      },
+      "required": [
+        "type",
+        "round",
+        "task_id",
+        "transition"
+      ],
+      "type": "object"
+    },
+    "event_task_round": {
+      "additionalProperties": true,
+      "description": "A task's round started or ended.",
+      "properties": {
+        "checks": {
+          "description": "Once the round ended: each check's state.",
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "round": {
+          "description": "The round.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "rounds_used": {
+          "description": "Once the round ended: rounds used of the budget.",
+          "type": "integer"
+        },
+        "task_id": {
+          "description": "The task.",
+          "type": "string"
+        },
+        "transition": {
+          "description": "The transition, as the ledger wrote it.",
+          "type": "object"
+        },
+        "turn": {
+          "description": "In a driven chat or execute: the turn this event belongs to, the number of its user line.",
+          "type": "integer"
+        },
+        "type": {
+          "const": "task_round"
+        }
+      },
+      "required": [
+        "type",
+        "round",
+        "task_id",
+        "transition"
+      ],
+      "type": "object"
+    },
+    "event_task_started": {
+      "additionalProperties": true,
+      "description": "A task run started or resumed.",
+      "properties": {
+        "history": {
+          "description": "Every transition before this one.",
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "resumed": {
+          "description": "Whether this run resumed the task.",
+          "type": "boolean"
+        },
+        "task": {
+          "description": "The task's whole view.",
+          "type": "object"
+        },
+        "task_id": {
+          "description": "The task.",
+          "type": "string"
+        },
+        "transition": {
+          "description": "The transition, as the ledger wrote it.",
+          "type": "object"
+        },
+        "turn": {
+          "description": "In a driven chat or execute: the turn this event belongs to, the number of its user line.",
+          "type": "integer"
+        },
+        "type": {
+          "const": "task_started"
+        }
+      },
+      "required": [
+        "type",
+        "resumed",
+        "history",
+        "task",
+        "task_id",
+        "transition"
+      ],
+      "type": "object"
+    },
+    "event_thinking": {
+      "additionalProperties": true,
+      "description": "The model began reasoning; again with budget_reached when it ran out.",
+      "properties": {
+        "budget_reached": {
+          "description": "The reasoning reached its thinking budget and was ended there.",
+          "type": "boolean"
+        },
+        "turn": {
+          "description": "In a driven chat or execute: the turn this event belongs to, the number of its user line.",
+          "type": "integer"
+        },
+        "type": {
+          "const": "thinking"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "event_thinking_delta": {
+      "additionalProperties": true,
+      "description": "A chunk of reasoning -- droppable.",
+      "properties": {
+        "text": {
+          "description": "The text, to concatenate or display as it arrives.",
+          "type": "string"
+        },
+        "turn": {
+          "description": "In a driven chat or execute: the turn this event belongs to, the number of its user line.",
+          "type": "integer"
+        },
+        "type": {
+          "const": "thinking_delta"
+        }
+      },
+      "required": [
+        "type",
+        "text"
+      ],
+      "type": "object"
+    },
+    "event_todo": {
+      "additionalProperties": true,
+      "description": "The session's todo, whole, as the model last wrote it.",
+      "properties": {
+        "items": {
+          "description": "The whole list, in order; empty when cleared.",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "state": {
+                "description": "pending, active (being done now) or done.",
+                "type": "string"
+              },
+              "text": {
+                "description": "What is to be done, in a short line.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "text",
+              "state"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "turn": {
+          "description": "In a driven chat or execute: the turn this event belongs to, the number of its user line.",
+          "type": "integer"
+        },
+        "type": {
+          "const": "todo"
+        }
+      },
+      "required": [
+        "type",
+        "items"
+      ],
+      "type": "object"
+    },
+    "event_tool_status": {
+      "additionalProperties": true,
+      "description": "A tool running, or another model call the turn makes.",
+      "properties": {
+        "text": {
+          "description": "The text, to concatenate or display as it arrives.",
+          "type": "string"
+        },
+        "turn": {
+          "description": "In a driven chat or execute: the turn this event belongs to, the number of its user line.",
+          "type": "integer"
+        },
+        "type": {
+          "const": "tool_status"
+        }
+      },
+      "required": [
+        "type",
+        "text"
+      ],
+      "type": "object"
+    },
+    "inbound": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "user"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/line_user"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "answer"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/line_answer"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "attach"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/line_attach"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "hello"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/line_hello"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "cancel"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/line_cancel"
+          }
+        }
+      ],
+      "description": "A line a driver writes.",
+      "properties": {
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "line_answer": {
+      "additionalProperties": true,
+      "description": "An answer to a pending question.",
+      "properties": {
+        "text": {
+          "description": "The answer to the oldest unanswered question.",
+          "type": "string"
+        },
+        "type": {
+          "const": "answer"
+        }
+      },
+      "required": [
+        "type",
+        "text"
+      ],
+      "type": "object"
+    },
+    "line_attach": {
+      "additionalProperties": true,
+      "description": "Something to attach to the chat.",
+      "properties": {
+        "graph": {
+          "description": "A folder of code: code or off, over the config's.",
+          "type": "string"
+        },
+        "path": {
+          "description": "A file, folder or glob to attach.",
+          "type": "string"
+        },
+        "type": {
+          "const": "attach"
+        }
+      },
+      "required": [
+        "type",
+        "path"
+      ],
+      "type": "object"
+    },
+    "line_cancel": {
+      "additionalProperties": true,
+      "description": "Stop the turn in flight, as Ctrl-C would.",
+      "properties": {
+        "type": {
+          "const": "cancel"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "line_hello": {
+      "additionalProperties": true,
+      "description": "An optional first line: who is driving.",
+      "properties": {
+        "client": {
+          "additionalProperties": true,
+          "description": "Who is driving.",
+          "properties": {
+            "name": {
+              "description": "The host application.",
+              "type": "string"
+            },
+            "version": {
+              "description": "Its version.",
+              "type": "string"
+            }
+          },
+          "required": [],
+          "type": "object"
+        },
+        "type": {
+          "const": "hello"
+        },
+        "wants": {
+          "description": "Words for what the host wants -- recorded, not acted on.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "line_user": {
+      "additionalProperties": true,
+      "description": "A user turn.",
+      "properties": {
+        "text": {
+          "description": "The user's message: one turn.",
+          "type": "string"
+        },
+        "type": {
+          "const": "user"
+        }
+      },
+      "required": [
+        "type",
+        "text"
+      ],
+      "type": "object"
+    },
+    "outbound": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "session"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/event_session"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "thinking"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/event_thinking"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "thinking_delta"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/event_thinking_delta"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "memory"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/event_memory"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "tool_status"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/event_tool_status"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "notice"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/event_notice"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "todo"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/event_todo"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "answer_start"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/event_answer_start"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "answer_delta"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/event_answer_delta"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "answer_end"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/event_answer_end"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "result"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/event_result"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "question"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/event_question"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "error"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/event_error"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "task_started"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/event_task_started"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "task_plan"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/event_task_plan"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "task_round"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/event_task_round"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "task_grant"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/event_task_grant"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "task_finished"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/event_task_finished"
+          }
+        }
+      ],
+      "description": "A line Apogee writes.",
+      "properties": {
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/QuantumCompiler/Apogee/machine-schema/2026-10-13",
+  "$ref": "#/$defs/outbound",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "One JSON object per line. The root validates a line Apogee writes on stdout; #/$defs/inbound a line a driver writes on stdin. An unknown type validates, and every line admits fields it does not name: ignore what you do not know.",
+  "title": "Apogee machine mode",
+  "x-apogee": {
+    "protocol_version": 1,
+    "schema": "2026-10-13"
+  }
+}

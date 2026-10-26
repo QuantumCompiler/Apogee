@@ -236,7 +236,7 @@ struct SessionLibraryTests {
         library.askToDelete(library.chats[1])
         #expect(library.pending == .delete(library.chats[1]))
         library.dismissPending()
-        #expect(!runner.calls.contains { $0.hasPrefix("run") }, "nothing runs without the person's word")
+        #expect(!runner.calls.contains { $0.hasPrefix("run") && $0 != "run __machine-schema" }, "nothing runs without the person's word -- the vocabulary is a read")
         library.askToDelete(library.chats[0])
         runner.reading(["chats", "list"], #"{"object":"list","data":[{"id":"c1","name":"Recipes","turns":1,"updated":"2026-10-12T09:00:00Z"}]}"#)
         await library.confirm()

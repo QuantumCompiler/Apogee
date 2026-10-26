@@ -538,5 +538,9 @@ apogee symphonies: /Users/someone/.apogee/config/config.json: not valid JSON: li
     static let mcpListBadConfig = #"""
 apogee mcp: /Users/someone/.apogee/config/config.json: not valid JSON: line 4, column 5: expected ',' or '}' after a member
 """#
+    /// tests/business/reads/Fixtures/mcp-delete.txt
+    static let mcpDelete = #"""
+removed MCP server 'notes' from /Users/someone/.apogee/config/config.json
+"""#
 }
 #endif

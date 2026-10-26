@@ -81,8 +81,19 @@ enum SessionsPreview {
             commands: [
                 (["config", "get", "suites"], suites),
                 (["config", "get", "models.default_suite"], defaultSuite + "\n"),
+                // What the binary can do, asked at launch (GUI 4k): the
+                // branch's vocabulary, so every place is on a capable binary.
+                (["__machine-schema"], SessionsDocuments.machineSchema),
+                (["chats", "info"], SessionsDocuments.chatsInfo),
+                (["chats", "recall"], SessionsDocuments.chatsRecall),
+                (["chats", "compact"], SessionsDocuments.chatsCompact),
             ])
     }
+
+    /// The two saved chats the branch's binary listed over a sandbox (GUI
+    /// 4k's recording): the first is the one `chats info` and `chats
+    /// compact` were recorded on.
+    static var savedTwo: [ChatSummary] { ChatSummary.list(from: ReadDocument(text: SessionsDocuments.chatsListTwo)!) }
 
     /// The library over `chats`, each session it opens saying `lines` --
     /// or, `missing`, no binary found. `openChat` is the conversation left

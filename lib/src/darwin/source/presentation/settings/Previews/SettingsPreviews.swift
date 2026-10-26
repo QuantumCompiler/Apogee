@@ -20,8 +20,33 @@ enum SettingsPreview {
                 (["providers", "scan"], providersScan),
                 (["check"], check),
             ],
-            commands: [(["config", "get", "permissions"], permissions)],
+            commands: [(["config", "get", "permissions"], permissions), (["chats", "recall"], SettingsDocuments.chatsRecall)],
             refused: [["config", "get"]])
+    }
+
+    /// The branch's binary over GUI 4k's sandbox: a claude-cli, an anthropic
+    /// and an openai entry -- the anthropic one consenting to both of its
+    /// vendor's tools -- and the providers the scan found there. `older`, the
+    /// installed binary's refusal of the key (before the CLI's 55g).
+    static func vendorRunner(older: Bool = false) -> PreviewRunner {
+        PreviewRunner(
+            reads: [
+                (["models", "list"], SettingsDocuments.modelsListServerTools),
+                (["auth", "list"], authList),
+                (["providers", "scan"], SettingsDocuments.providersScan),
+                (["check"], check),
+            ],
+            commands: [
+                (["config", "get", "permissions"], permissions),
+                (["config", "get", "backends.claude-api.server_tools"], SettingsDocuments.configGetServerTools),
+                (["config", "get", "backends.gpt.server_tools"], SettingsDocuments.configGetServerToolsNone),
+                (["chats", "recall"], SettingsDocuments.chatsRecall),
+            ],
+            refused: [["config", "get"]],
+            refusals: older
+                ? [(["config", "get", "backends.claude-api.server_tools"], SettingsDocuments.configGetServerToolsOlder),
+                   (["config", "get", "backends.gpt.server_tools"], SettingsDocuments.configGetServerToolsOlderGpt)]
+                : [])
     }
 
     /// The documents tests/presentation/settings/SettingsViewModelTests.swift
@@ -53,18 +78,21 @@ enum SettingsPreview {
     static let skippedOverride = (path: "/Users/someone/tools/apogee", reason: "`version` exited with status 1: error: broken install")
 
     /// The view-model, not yet read; `track52` when the build has 52e,
-    /// `childPath` what the app's resolver answers, `override` the binary
-    /// the person pointed the app at, and `check` the document `check`
-    /// answers with.
+    /// `known` when the binary has said what it can do (its vocabulary read
+    /// at launch, GUI 4k), `childPath` what the app's resolver answers,
+    /// `override` the binary the person pointed the app at, `check` the
+    /// document `check` answers with, and `runner` the binary's answers.
     static func settings(
-        _ pane: SettingsViewModel.Pane = .general, track52: Bool = false,
-        childPath: ShellPath.Resolution = shellPath, override: String? = nil, check: String = check
+        _ pane: SettingsViewModel.Pane = .general, track52: Bool = false, known: Bool = true,
+        childPath: ShellPath.Resolution = shellPath, override: String? = nil, check: String = check,
+        runner: PreviewRunner? = nil
     ) -> SettingsViewModel {
         let preferences = Preferences(store: MemoryStore())
         preferences.binaryOverride = override.map { URL(fileURLWithPath: $0) }
-        let model = SettingsViewModel(runner: runner(check: check), starter: PreviewJobs(), preferences: preferences)
+        let model = SettingsViewModel(runner: runner ?? Self.runner(check: check), starter: PreviewJobs(), preferences: preferences)
         model.pane = pane
         model.hasTrack52 = { track52 }
+        model.capabilitiesKnown = { known }
         model.childPathSource = { childPath }
         return model
     }

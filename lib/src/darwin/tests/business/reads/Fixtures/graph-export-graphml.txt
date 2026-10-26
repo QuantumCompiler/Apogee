@@ -1,0 +1,1 @@
+Exported graph "demo" to /Users/someone/Documents/demo.graphml: every entity (10) and relation (13), uncapped, 8 KB.

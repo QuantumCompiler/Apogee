@@ -265,6 +265,7 @@ struct MCPView: View {
                             Text(server.name).font(.apogeeHeading)
                             Spacer()
                             Button(server.enabled ? "Disable" : "Enable") { Task { await model.setEnabled(server, !server.enabled) } }
+                            Button("Remove…", role: .destructive) { model.askToRemove(server) }
                         }
                         Text(([server.command] + server.args).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textSecondary).textSelection(.enabled)
                         Text("Environment: " + (server.envSet ? "set (its values are never shown)" : "none")).font(.apogeeSmall).foregroundStyle(Palette.textSecondary)
@@ -310,6 +311,16 @@ struct MCPView: View {
                 .padding(Spacing.xl)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+        }
+        .confirmationDialog(
+            "Remove the MCP server \(model.pendingRemove?.name ?? "")?",
+            isPresented: Binding(get: { model.pendingRemove != nil }, set: { if !$0 { model.pendingRemove = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Remove its entry", role: .destructive) { Task { await model.confirmRemove() } }
+            Button("Cancel", role: .cancel) { model.pendingRemove = nil }
+        } message: {
+            Text("apogee config delete-mcp-server \(model.pendingRemove?.name ?? "") -- its entry leaves the config, so no session connects to it; its files are left alone.")
         }
     }
 }
@@ -501,6 +512,18 @@ struct EditorSheet: View {
             mcp.use(binary: previewBinary)
             await mcp.refresh()
             mcp.selected = "code"
+        }
+}
+
+#Preview("MCP: a server's removal, asked first") {
+    let mcp = LibraryPreview.mcp()
+    MCPView(model: mcp)
+        .frame(width: 900, height: 600)
+        .task {
+            mcp.use(binary: previewBinary)
+            await mcp.refresh()
+            mcp.selected = "code"
+            if let server = mcp.current { mcp.askToRemove(server) }
         }
 }
 

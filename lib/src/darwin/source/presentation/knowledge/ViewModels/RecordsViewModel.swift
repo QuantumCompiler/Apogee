@@ -47,6 +47,21 @@ public final class RecordsViewModel {
         }
     }
 
+    /// Where a record's raw conversation stands, as `knowledge info --raw`
+    /// printed it (GUI 4k).
+    public enum Raw: Equatable, Sendable {
+        case reading
+        case shown(RawConversation)
+        /// The CLI's words, when it could not be read.
+        case failed(String)
+    }
+
+    /// A record's raw conversation, and whose.
+    public struct RawView: Equatable, Sendable {
+        public let record: String
+        public let state: Raw
+    }
+
     public private(set) var records: [KnowledgeRecord] = []
     public private(set) var listing: Listing = .notRead
     /// The branch the list shows; nil for every branch.
@@ -62,6 +77,8 @@ public final class RecordsViewModel {
     /// A command running now, by what it is doing.
     public private(set) var working: String?
     public private(set) var failure: String?
+    /// The open record's raw conversation, once asked for.
+    public private(set) var raw: RawView?
     public var say: (@MainActor (String) -> Void)?
 
     private let runner: any CommandRunning
@@ -132,7 +149,27 @@ public final class RecordsViewModel {
     }
 
     public func select(_ record: KnowledgeRecord) {
+        if selected != record.id { raw = nil }
         selected = record.id
+    }
+
+    /// A record's raw conversation -- `knowledge info <id> --raw`, which
+    /// prints it in text mode alone, run as a command -- shown as the CLI
+    /// printed it, never read from the archive's path (GUI 4k; ADR 0002).
+    public func showRaw(_ record: KnowledgeRecord) async {
+        guard let binary else { return }
+        raw = RawView(record: record.id, state: .reading)
+        let outcome = await runner.command(binary: binary, ["knowledge", "info", record.id, "--raw"])
+        guard raw?.record == record.id else { return }
+        if case .done(let text) = outcome, let conversation = RawConversation(printed: text) {
+            raw = RawView(record: record.id, state: .shown(conversation))
+        } else {
+            raw = RawView(record: record.id, state: .failed(outcome.failure ?? "apogee printed no raw conversation"))
+        }
+    }
+
+    public func hideRaw() {
+        raw = nil
     }
 
     public var emptyText: String? {
