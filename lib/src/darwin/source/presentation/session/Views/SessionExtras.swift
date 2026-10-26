@@ -77,8 +77,9 @@ struct MeterView: View {
     }
 }
 
-/// What was attached, as chips above the input, each detachable when the
-/// build takes `detach` (the CLI's 52d) -- hidden otherwise.
+/// What the session holds attached, as chips above the input -- a resumed
+/// chat's own among them -- each detachable when the build takes `detach`
+/// (the CLI's 52d), hidden otherwise.
 struct AttachmentChips: View {
     @Bindable var model: SessionViewModel
 
@@ -108,6 +109,25 @@ struct AttachmentChips: View {
                     }
                 }
             }
+        }
+    }
+}
+
+/// What waits for the turn to end -- a setting, an attach, a detach -- said
+/// above the input until it is sent: none of it is applied yet, since the CLI
+/// drops a line sent while a turn asks (52d).
+struct HeldLines: View {
+    @Bindable var model: SessionViewModel
+
+    var body: some View {
+        if !model.held.isEmpty {
+            Label(
+                "Sent when this turn ends: " + model.held.map(\.words).joined(separator: " · "),
+                systemImage: "clock.arrow.circlepath"
+            )
+            .font(.apogeeMeta)
+            .foregroundStyle(Palette.textTertiary)
+            .help("A session takes these between turns; sent now, the turn's question would drop them.")
         }
     }
 }
@@ -178,9 +198,10 @@ struct SuggestionList: View {
     }
 }
 
-/// The run settings: the model, thinking, effort, the system prompt -- and
-/// temperature where the build takes the `set` line. Applied as the line, or
-/// on an older build by restarting the session with `--resume`, which it says.
+/// The run settings: the model, thinking, effort, temperature, the system
+/// prompt. Applied as the `set` line -- held while a turn runs, sent when it
+/// ends -- or on an older build by restarting the session with the flags and
+/// `--resume`, which it says.
 struct SettingsSheet: View {
     @Bindable var model: SessionViewModel
     @State private var draft: RunSettings
@@ -188,7 +209,7 @@ struct SettingsSheet: View {
 
     init(model: SessionViewModel) {
         self.model = model
-        _draft = State(initialValue: model.settings)
+        _draft = State(initialValue: model.intendedSettings)
     }
 
     var body: some View {
@@ -212,15 +233,11 @@ struct SettingsSheet: View {
                     Text("As configured").tag("")
                     ForEach(["low", "medium", "high", "xhigh", "max"], id: \.self) { Text($0.capitalized).tag($0) }
                 }
-                if model.canSet {
-                    TextField("Temperature", value: $draft.temperature, format: .number)
-                }
+                TextField("Temperature", value: $draft.temperature, format: .number)
                 TextField("System prompt", text: binding(\.system), axis: .vertical)
                     .lineLimit(3...6)
             }
-            Text(model.canSet
-                ? "Applied from the next turn; apogee says each change."
-                : "This apogee changes these by restarting the session: the conversation carries on (--resume), and a local model loads again.")
+            Text(footer)
                 .font(.apogeeSmall)
                 .foregroundStyle(Palette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -228,16 +245,25 @@ struct SettingsSheet: View {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Apply") {
-                    let change = model.settings.changes(to: draft)
+                    let change = model.intendedSettings.changes(to: draft)
                     Task { await model.apply(change) }
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(model.settings.changes(to: draft).isEmpty)
+                .disabled(model.intendedSettings.changes(to: draft).isEmpty)
             }
         }
         .padding(Spacing.xl)
         .frame(width: 520)
+    }
+
+    private var footer: String {
+        guard model.canSet else {
+            return "This apogee changes these by restarting the session: the conversation carries on (--resume), and a local model loads again."
+        }
+        return model.takesLinesNow
+            ? "Applied from the next turn; apogee says each change."
+            : "A turn is running: the change is sent when it ends, and applied from the turn after; apogee says each change."
     }
 
     private func binding(_ key: WritableKeyPath<RunSettings, String?>) -> Binding<String> {
@@ -356,6 +382,22 @@ struct DiffView: View {
         }
 }
 
+#Preview("A resumed chat's own attachments, each detachable") {
+    let model = SessionPreview.session(SessionPreview.resumedDetach, launch: SessionPreview.resumeAttached, reader: .attached)
+    AttachmentChips(model: model)
+        .frame(width: 640)
+        .padding(Spacing.xl)
+        .task { await SessionPreview.ready(model) }
+}
+
+#Preview("A setting and a detach held for the turn's end") {
+    let model = SessionPreview.session(SessionPreview.setBetweenTurns, silentFrom: "result")
+    HeldLines(model: model)
+        .frame(width: 640)
+        .padding(Spacing.xl)
+        .task { await SessionPreview.holdingASetting(model) }
+}
+
 #Preview("Slash commands after /") {
     let model = SessionPreview.session([SessionPreview.newerBuild])
     SuggestionList(model: model)
@@ -389,6 +431,12 @@ struct DiffView: View {
     let model = SessionPreview.session([SessionPreview.olderBuild])
     SettingsSheet(model: model)
         .task { await SessionPreview.ready(model) }
+}
+
+#Preview("Settings while a question waits: held for the turn's end") {
+    let model = SessionPreview.session(SessionPreview.setBetweenTurns, silentFrom: "result")
+    SettingsSheet(model: model)
+        .task { await SessionPreview.holdingASetting(model) }
 }
 
 #Preview("A new file's change, folded") {

@@ -138,6 +138,9 @@ public final class SessionLibraryViewModel {
     private var inView = false
     /// The open session leaves view mid-turn: pause it when the turn ends.
     private var pauseWhenIdle = false
+    /// A rename of the open session that waits for its turn to end, on a
+    /// binary that would put its own title back (`keepsOutsideRenames`).
+    private var renameWhenIdle: (chat: ChatSummary, name: String)?
     /// The ids listed when a new session opened: the one it is saved as is
     /// the one that appears.
     private var listedBeforeNew: Set<String>?
@@ -395,6 +398,15 @@ public final class SessionLibraryViewModel {
     /// or later): a new brief planned alone (52c's dry run) among it.
     public var hasTrack52: Bool { (lastSchema ?? "") >= "2026-10-20" }
 
+    /// Whether a running session keeps a rename made from outside -- `chats
+    /// title` beside it -- rather than putting its own title back on its next
+    /// save (the CLI's 55b), as the last session's vocabulary says: 2026-10-25
+    /// or later. 55b shipped before the schema moved to that date (55h's
+    /// change), so every build announcing it keeps outside renames; one built
+    /// between the two announces 2026-10-24 and is taken as older -- the side
+    /// that still renames correctly, at the cost of a pause.
+    public var keepsOutsideRenames: Bool { (lastSchema ?? "") >= "2026-10-25" }
+
     /// The found binary's version, as `apogee version` said it.
     public var binaryVersion: String? { found?.version }
 
@@ -572,7 +584,15 @@ public final class SessionLibraryViewModel {
     }
 
     private func observe(_ event: SessionEvent) {
-        guard case .event(let event) = event else { return }
+        guard case .event(let event) = event else {
+            // The child ended before its turn did: a rename that waited for
+            // the turn is made now, its child gone, by `chats title` alone.
+            if let waiting = renameWhenIdle {
+                renameWhenIdle = nil
+                Task { await rename(waiting.chat, to: waiting.name) }
+            }
+            return
+        }
         switch event.kind {
         case .session(let info):
             lastAccepts = info.capabilities?.accepts ?? []
@@ -581,10 +601,15 @@ public final class SessionLibraryViewModel {
             let session = current
             Task { await readWindow(of: info.model, for: session) }
         case .result, .error:
-            // A turn ended: what it changed is read back, and a session out
-            // of view is paused now it is idle.
+            // A turn ended: what it changed is read back, a rename that waited
+            // for it is made, and a session out of view is paused now it is
+            // idle.
             Task {
                 await refresh()
+                if let waiting = renameWhenIdle {
+                    renameWhenIdle = nil
+                    await rename(waiting.chat, to: waiting.name)
+                }
                 if pauseWhenIdle && !inView {
                     pauseWhenIdle = false
                     await current.pause()
@@ -598,10 +623,26 @@ public final class SessionLibraryViewModel {
     // MARK: - Changing
 
     /// Renames a saved conversation: `chats title <id> <name>`, read back.
+    ///
+    /// The open session's own conversation, while its child runs, is renamed
+    /// so that its next turn keeps the name: in place on a binary that keeps
+    /// outside renames (the CLI's 55b); on an older one, whose running session
+    /// would save its own title back over it, the session is paused first and
+    /// resumed after -- an ordinary chat resumes by its id -- and mid-turn the
+    /// rename waits for the turn to end.
     public func rename(_ chat: ChatSummary, to name: String) async {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let found, !name.isEmpty, name != chat.name else { return }
+        let session = current
+        let pauses = chat.id == session.chatID && session.isLive && !keepsOutsideRenames
+        if pauses && busy {
+            renameWhenIdle = (chat, name)
+            say?("Renaming when this turn ends")
+            return
+        }
+        if pauses { await session.pause() }
         let outcome = await runner.command(binary: found.url, ["chats", "title", chat.id, name])
+        if pauses && session === current && inView && !shut { session.resume() }
         await refresh()
         if let failure = outcome.failure {
             self.failure = failure

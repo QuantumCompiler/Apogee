@@ -41,10 +41,21 @@ struct ChatLaunchTests {
         let base = ["chat", "--output-format", "stream-json", "--input-format", "stream-json", "--tools"]
         #expect(ChatLaunch(resume: "c1", settings: RunSettings(model: "claude", system: "Be brief.", think: "off", effort: "high")).arguments
             == base + ["--resume", "c1", "-m", "claude", "-s", "Be brief.", "--think", "off", "--effort", "high"])
-        #expect(ChatLaunch(settings: RunSettings(effort: "auto", temperature: 0.2)).arguments == base,
-            "auto effort is the default, and temperature has no launch flag")
+        #expect(ChatLaunch(settings: RunSettings(effort: "auto", temperature: 0.2)).arguments == base + ["-t", "0.2"],
+            "auto effort is the default; temperature is -t")
         #expect(ChatLaunch(privately: true).arguments == base + ["--private"])
         #expect(ChatLaunch(noRecall: true).arguments == base + ["--no-recall"])
+    }
+
+    @Test("temperature is a launch flag too: -t, on chat and on execute (the branch binary's `chat --help` and `execute --help`)")
+    func temperatureAtLaunch() {
+        let chat = ["chat", "--output-format", "stream-json", "--input-format", "stream-json", "--tools"]
+        #expect(ChatLaunch(settings: RunSettings(temperature: 0.2)).arguments == chat + ["-t", "0.2"])
+        #expect(ChatLaunch(resume: "c1", settings: RunSettings(model: "claude", effort: "high", temperature: 1)).arguments
+            == chat + ["--resume", "c1", "-m", "claude", "--effort", "high", "-t", "1"], "after the other settings, as set orders them")
+        let execute = ["execute", "--output-format", "stream-json", "--input-format", "stream-json", "--tools"]
+        #expect(ChatLaunch(settings: RunSettings(temperature: 0.7), execute: ChatLaunch.Execute()).arguments
+            == execute + ["-t", "0.7"])
     }
 
     @Test("the execute door: execute's word, the same two directions, then --suite and --orchestrate as chosen")

@@ -64,6 +64,21 @@ struct ReadRunnerTests {
         #expect(stdout == "Models:\n  none")
     }
 
+    @Test("a read that succeeds keeps what it said on stderr beside its document, asked; a plain read drops it")
+    func stderrBesideTheDocument() async throws {
+        let fake = try FakeRead()
+        let binary = try fake.binary(#"echo "apogee chats: a message could not be read and was skipped" >&2; echo '  ' >&2; echo '{"object":"chat","turns":[]}'"#)
+        let kept = await ReadRunner().runKeepingStderr(binary: binary, ["chats", "show", "c1"])
+        #expect(kept.outcome.document?.object == "chat")
+        #expect(kept.stderrLines == ["apogee chats: a message could not be read and was skipped"], "blank lines are none")
+        let read = await ReadRunner().readKeepingStderr(binary: binary, ["chats", "show", "c1"])
+        #expect(read == kept, "the runner's read is the same")
+        #expect(await ReadRunner().run(binary: binary, ["chats", "show", "c1"]) == kept.outcome)
+        let failed = await ReadRunner().runKeepingStderr(binary: try fake.binary("echo 'no chat named c9' >&2; exit 1"), ["chats", "show", "c9"])
+        #expect(failed.outcome.failure == "no chat named c9 (exited with status 1)")
+        #expect(failed.stderrLines == ["no chat named c9"])
+    }
+
     @Test("a read past its time is stopped, and one that cannot start says so")
     func timeoutAndCouldNotStart() async throws {
         let fake = try FakeRead()

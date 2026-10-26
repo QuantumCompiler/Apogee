@@ -1472,3 +1472,59 @@ The CLI's 43 are its track 55 ([CLI Milestone AR](../../cli/assistant/MILESTONES
 - No live pass of the app: running it would write the person's preferences and reach real discovery. Scratch AppKit probes covered the delegate's mechanism.
 - `newSession(on:)` leaves its chosen model pending when the question is dismissed, so the next ⌘N uses it. That predates this item, but the private question makes it easier to hit.
 - Supervised jobs at quit are 4c's.
+
+### 2026-10-25 — `session-lines-honest` (backlog item 4b): the session's lines and transcript stay honest
+
+**Why.** The audit found eight places where the app's view of a session drifted from the session. Each reproduced on today's source as a failing test first:
+- **A `set` or `detach` sent mid-turn was shown applied, and a pending question ate it.** The CLI drops every non-answer line while a card waits (52d; `machine-mode.md` says so since the CLI's 55b). On the branch binary, a `set` sent under a question produced no notice and left no `params` in the saved chat, while the sheet and chips claimed it.
+- **Pause/resume relaunched on the launch's settings.** A `set model` never reached `launch.settings`, so `--resume <id> -m <old>` won over the switch.
+- **A card orphaned by a cancelled or failed turn stayed answerable,** and its answer went out as a stray line.
+- **Temperature could never be set at launch,** though `chat` and `execute` both take `-t/--temperature`.
+- **Live events matched earlier rows by turn number alone.** The CLI's 55b reconciled the counts, but they still collide across children: after a stopped turn the live numbers run 1, 2, 3 while the saved chat counts [1, 2] and resumes at `next_turn` 3. A binary before 55b resumes a countless chat at 1 over earlier rows 1 and 2.
+- **A resumed chat's standing attachments had no chips,** so `/detach` stayed disabled though the CLI accepts it.
+- **`chats show`'s warning was lost.** The read kept the document only, so a chat with a dropped message looked unbroken. The resume `notice` events were already drawn.
+- **A rename of the open session was undone by its next turn** on a binary before 55b.
+
+- [x] **Lines wait for a moment the CLI takes them.** `set`, `attach`, `detach` and `compact` are held (`HeldLine`) while a turn runs or a card stands, and go in order once the status is ready (or connecting) with no card open, before anything the person sends next. Settings and chips change only when the line is sent. The sheet starts from the intended settings, and a strip under the input says what is waiting.
+- [x] **Relaunch carries what the session runs.** Every `set` sent updates `launch.settings`. A value the CLI refuses by name (`set model: no backend named 'nosuch'`) is put back, so a relaunch never carries it either.
+- [x] **A dead card closes.** Cards close on the turn's result or error, on the child's end, and on pause or reopen, and are drawn "not answered: the turn ended first". `answered(_:with:)` says whether it took the answer, and only a taken one is written.
+- [x] **`-t` at launch.** `ChatLaunch` passes the temperature, and the sheet always offers it; on a binary without `set`, applying it restarts the session with `-t`.
+- [x] **Rows know their range.** `TranscriptItem.range` is 0 for the turns read back, then 1, 2, … for each child, and live events match on (range, turn). No live usage or result lands on an earlier row, and a result-only live answer is never dropped.
+- [x] **A resumed chat's attachments have chips,** seeded from the names `chats show` lists. The branch binary took `detach` by that name.
+- [x] **The read's warnings are drawn.** `SavedChat.warnings` decodes the document's `warnings` (`nil` when the key is absent). A `.warning` row heads the earlier turns in the CLI's words. Only a document with no `warnings` key falls back to the read's stderr, which `ReadRunner` now keeps on success (`ReadWithStderr`, `CommandRunning.readKeepingStderr`).
+- [x] **A rename sticks.**
+  - **A binary that keeps outside renames:** one announcing schema `2026-10-25` or later. There Rename runs `chats title` in place and reads back. On the branch binary such a rename survived the session's next turn.
+  - **An older binary:** the open session is paused, renamed and resumed. The installed `2026-10-24` build put its own title back on its next turn. Mid-turn, the rename waits for the turn to end ("Renaming when this turn ends"); if the child ends first, `chats title` alone does it.
+
+**Decisions made while building** (2026-10-25, each recorded for veto):
+- **The defaults, taken:** lines queue rather than apply and roll back; Rename is conservative, in place only on a binary that keeps outside renames.
+- **The schema date tells the two apart.** 55b landed before 55h moved the date to `2026-10-25`, so a development build between them announces `2026-10-24` and takes the pause path, which still renames correctly.
+- **A refused value is put back**, or a relaunch would carry `-m nosuch`, which the binary accepts at launch while every turn fails.
+- **Ranges are per child, not only earlier and live,** since on the branch binary the collision is between children.
+- **Cards also close** when the child ends and on pause or reopen.
+- **`attach` and `compact` are held too,** and connecting counts as between turns.
+- **Chips reset on a fresh start,** so a dead session's chips don't carry over.
+- **A read's warning has its own row,** in the warning colour, rather than a quiet notice.
+- **Temperature is written as the `set` line writes it** (`1`, not `1.0`).
+
+**Verified.**
+- **Recorded** from the branch's binary over sandbox homes, against the scripted mock, the home written `/Users/someone`:
+  - **Session streams** (`tests/data/protocol/Fixtures/`): `question-then-set`, `set-between-turns`, `set-refused`, `set-model`, `question-cancelled`, `permission-cancelled`, `resumed-switched`, `stopped-turn`, `resumed-after-stop`, `resumed-warnings`, `resumed-detach` and `rename-outside`.
+  - **Reads** (`tests/business/reads/Fixtures/`): `chats-show-warnings.json`, `chats-show-after-stop.json`, `chats-show-attached.json` and `chats-list-renamed.json`.
+  - **The older shapes,** from the installed binary over a sandbox, the saved chats hand-edited to drop a field or a count:
+    - `chats-show-warnings-older.json` and its `.err`;
+    - `chats-show-countless.json` and `chats-list-renamed-older.json`;
+    - `resumed-warnings-older.jsonl`, `resumed-countless.jsonl` and `rename-outside-older.jsonl`.
+
+  The previews embed them byte for byte.
+- 25 new cases:
+  - `SessionLinesTests` (10), among them `theCLIDropsASetMidQuestion`, `setHeldUntilTheTurnEnds`, `relaunchCarriesTheSwitch`, `refusedValuePutBack`, `deadCardTakesNoAnswer`, `resumedChips` and `olderWarningsFromStderr`;
+  - `TranscriptHonestyTests` (6): `deadCardCloses`, `deadPermissionCloses`, `endedChildClosesItsCard`, `earlierRowsApart`, `usageOnTheLiveRow` and `childrenApart`;
+  - `SessionRenameTests` (5), among them `whatEachBinaryKeeps`, `renamedInPlace` and `pausedRenamedResumed`;
+  - `ChatLaunchTests` +1 (`temperatureAtLaunch`, the old "no launch flag" expectation updated), `SavedChatTests` +2 and `ReadRunnerTests` +1.
+- The module schemes: `PresentationSession` 64 of 64 and `PresentationSessions` 47 of 47; `BusinessReads` and `BusinessSession` 68 of 68. The layering check passed 25 of 25, and `check-previews` finds nothing in session or sessions.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,992 tests and the macOS app's 502 cases passed, with no Swift warning.
+
+**Not done:**
+- No live pass of the app.
+- On a binary without `set`, a settings change made mid-turn still restarts at once: that is a restart, not a line.

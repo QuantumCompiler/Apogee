@@ -24,6 +24,18 @@ enum SessionPreview {
     /// A turn the scripted mock answered with fenced code in several
     /// languages, a diff, an unnamed fence and an Elixir one.
     static let codeAnswer = lines(SessionDocuments.codeAnswer)
+    /// A turn that asks, answered, then a `set` between turns and its notice.
+    static let setBetweenTurns = lines(SessionDocuments.setBetweenTurns)
+    /// A turn stopped while its question waited, and while its permission
+    /// prompt did.
+    static let questionCancelled = lines(SessionDocuments.questionCancelled)
+    static let permissionCancelled = lines(SessionDocuments.permissionCancelled)
+    /// A chat holding an attachment resumed, and the attachment detached.
+    static let resumedDetach = lines(SessionDocuments.resumedDetach)
+    /// A chat with a message the loader dropped, resumed: the branch binary
+    /// says so in a notice, a binary before 55b on stderr alone.
+    static let resumedWarnings = lines(SessionDocuments.resumedWarnings)
+    static let resumedWarningsOlder = lines(SessionDocuments.resumedWarningsOlder)
 
     /// What the person sends and answers in the mock-actor conversation, as
     /// the window's end-to-end test does (SessionViewModelTests'
@@ -41,6 +53,17 @@ enum SessionPreview {
 
     /// Its launch: `--resume` with its id.
     static var resumeSaved: ChatLaunch { ChatLaunch(resume: savedChat.id) }
+
+    /// The chat holding an attachment, as `chats show` read it, and its launch.
+    static var attachedChat: SavedChat { SavedChat(document: ReadDocument(text: SessionDocuments.chatsShowAttached)!)! }
+    static var resumeAttached: ChatLaunch { ChatLaunch(resume: attachedChat.id) }
+
+    /// The chat with a message dropped, as the branch binary's `chats show`
+    /// read it -- and as one before 55b did, its stderr's line beside it.
+    static var warnedChat: SavedChat { SavedChat(document: ReadDocument(text: SessionDocuments.chatsShowWarnings)!)! }
+    static var warnedChatOlder: SavedChat {
+        SavedChat(document: ReadDocument(text: SessionDocuments.chatsShowWarningsOlder)!)!
+    }
 
     /// What the markdown turn was sent as, recorded with it (TranscriptTests'
     /// `markdownLiveAndReadBack`).
@@ -159,13 +182,21 @@ enum SessionPreview {
 
     /// The card that waits on the person, by its id.
     static func waiting(_ model: SessionViewModel) -> Int? {
-        model.transcript.items.last { item in
-            switch item.content {
-            case .question(let card): card.answers == nil
-            case .permission(let card): card.answer == nil
-            default: false
-            }
-        }?.id
+        model.transcript.standingCard
+    }
+
+    /// A chat that takes `set` and `detach`, an attachment sent, then a turn
+    /// whose question stands -- and, while it does, a setting and a detach
+    /// made: both held for the turn's end (SessionLinesTests'
+    /// `setHeldUntilTheTurnEnds` and `detachAndAttachHeld`).
+    static func holdingASetting(_ model: SessionViewModel) async {
+        await ready(model)
+        model.attach("Documents/report.md")
+        model.draft = noteTurn
+        model.submit()
+        await until { waiting(model) != nil }
+        await model.apply(RunSettings(temperature: 0.9))
+        model.detach("Documents/report.md")
     }
 
     // MARK: - Transcripts, folded as the window folds them
@@ -177,10 +208,10 @@ enum SessionPreview {
     /// window hands them over before the first event.
     static func folded(
         _ lines: [String], typed: String? = nil, answers: [String] = [], silentFrom type: String? = nil,
-        earlier: SavedChat? = nil
+        earlier: SavedChat? = nil, stderr: [String] = []
     ) -> Transcript {
         var transcript = Transcript()
-        if let earlier { transcript.earlier(earlier) }
+        if let earlier { transcript.earlier(earlier, stderr: stderr) }
         var answers = answers[...]
         for line in lines {
             if let type, JSONValue.parse(line)?["type"]?.stringValue == type { break }
@@ -205,6 +236,31 @@ enum SessionPreview {
         folded(mockActor, typed: noteTurn, answers: answers).items.lazy.compactMap { item -> QuestionCard? in
             if case .question(let card) = item.content { card } else { nil }
         }.first!
+    }
+
+    /// The question a stopped turn left standing, closed by its result.
+    static var closedQuestion: QuestionCard {
+        folded(questionCancelled, typed: noteTurn).items.lazy.compactMap { item -> QuestionCard? in
+            if case .question(let card) = item.content { card } else { nil }
+        }.first!
+    }
+
+    /// The permission prompt a stopped turn left standing -- its question
+    /// answered `todo.md` first -- closed by its result.
+    static var closedPermission: PermissionCard {
+        folded(permissionCancelled, typed: noteTurn, answers: [noteAnswers[0]]).items.lazy.compactMap { item -> PermissionCard? in
+            if case .permission(let card) = item.content { card } else { nil }
+        }.first!
+    }
+
+    /// The chat with a message dropped, read back and resumed: the warning
+    /// heads the earlier turns, and the resume's own notice follows the divider.
+    static var warned: Transcript { folded(resumedWarnings, earlier: warnedChat) }
+
+    /// The same chat read back by a binary before 55b: its stderr's line heads
+    /// the turns, and the resume says nothing (stderr alone).
+    static var warnedOlder: Transcript {
+        folded(resumedWarningsOlder, earlier: warnedChatOlder, stderr: [SessionDocuments.chatsShowWarningsOlderErr])
     }
 
     /// The mock-actor turn's permission card, its cards answered with `answers`.

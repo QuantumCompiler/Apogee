@@ -100,6 +100,30 @@ struct SavedChatTests {
         ])
     }
 
+    @Test("55b: what the loader dropped is the document's warnings, in the CLI's words; [] when it read all; none from a binary before it")
+    func warnings() throws {
+        // Recorded over sandbox homes from one saved chat whose second user
+        // message was made unreadable: by the branch binary, and by the
+        // installed one before 55b (Fixtures/chats-show-warnings*.json).
+        let warned = try #require(SavedChat(document: document("chats-show-warnings.json")))
+        #expect(warned.warnings == [SavedWarning(kind: "field_dropped", message: "a message could not be read and was skipped")])
+        #expect(warned.turns.count == 1, "the gap the warning says: the dropped message's turn is folded into the one before")
+        let older = try #require(SavedChat(document: document("chats-show-warnings-older.json")))
+        #expect(older.warnings == nil, "a binary before 55b has no warnings in its document")
+        #expect(older.turns == warned.turns)
+        #expect(fixture("chats-show-warnings-older.err") == "apogee chats: a message could not be read and was skipped\n", "it says it on stderr alone")
+        #expect(try #require(SavedChat(document: document("chats-show-attached.json"))).warnings == [])
+        #expect(SavedChat(document: document("chats-show.json"))?.warnings == nil, "M27's recording, before 55b")
+        let tolerant = try #require(ReadDocument(text: #"{"object":"chat","id":"c1","turns":[],"warnings":[{"kind":"field_dropped"},{"message":"later kind","kind":"new_kind","more":1}]}"#))
+        #expect(SavedChat(document: tolerant)?.warnings == [SavedWarning(kind: "new_kind", message: "later kind")], "one with no message is skipped")
+    }
+
+    @Test("a resumed chat's standing attachments are named as each attach gave its path -- what detach takes")
+    func attachedByTheirPaths() throws {
+        let chat = try #require(SavedChat(document: document("chats-show-attached.json")))
+        #expect(chat.attachments == [SavedAttachment(name: "Documents/report.md", files: 1, bytes: 30)])
+    }
+
     @Test("a document that is no chat reads as none: another read's, or one with no turns")
     func notAChat() throws {
         #expect(SavedChat(document: document("chats-list.json")) == nil)

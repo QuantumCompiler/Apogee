@@ -9,6 +9,7 @@ struct InputBar: View {
         VStack(alignment: .leading, spacing: Spacing.s) {
         SuggestionList(model: model)
         AttachmentChips(model: model)
+        HeldLines(model: model)
         HStack(alignment: .bottom, spacing: Spacing.m) {
             Button {
                 model.presenting = .files

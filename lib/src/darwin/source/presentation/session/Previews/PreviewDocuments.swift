@@ -902,5 +902,74 @@ Run with --help for more information.
     static let chatsShowCode = #"""
 {"attachments":[],"backend":"chatty","id":"20261022-203212-b200","model":"","name":"Retrying A Slow Host","object":"chat","title":"Retrying A Slow Host","turns":[{"answer":{"text":"## Retrying a slow host\n\nRetry the timeout where it happens, and keep `asyncio.timeout(10)` around one attempt. In the scraper:\n\n```python\nasync def fetch(self, url: str, retries: int = 3) -> bytes | None:\n    \"\"\"Fetch url, retrying a timeout.\"\"\"\n    for attempt in range(retries + 1):\n        try:\n            async with asyncio.timeout(10.5):\n                return await self.client.get(url)\n        except TimeoutError:\n            log.warning(\"attempt %d timed out: %s\", attempt, url)  # try again\n    return None\n```\n\nThe app's own helper, in Swift:\n\n```swift\n/// Asks again after a pause, up to `attempts` times.\nfunc retry<T>(_ attempts: Int = 3, _ body: () async throws -> T) async throws -> T {\n    for attempt in 1..<attempts {\n        do {\n            return try await body()\n        } catch {\n            print(\"attempt \\(attempt) failed: \\(error)\")\n            try await Task.sleep(for: .milliseconds(250 * attempt))\n        }\n    }\n    return try await body()\n}\n```\n\nThe browser client:\n\n```ts\n// Back off between attempts.\nexport async function fetchWithRetry(url: string, retries = 3): Promise<Response> {\n  for (let attempt = 0; attempt <= retries; attempt++) {\n    const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });\n    if (response.ok) return response;\n    console.warn(`attempt ${attempt} failed: ${response.status}`);\n  }\n  throw new Error('gave up after ' + retries + ' retries');\n}\n```\n\nThe worker's backoff, in Rust:\n\n```rust\nuse std::time::Duration;\n\n/* Doubles the pause after each failed attempt. */\nfn backoff(attempt: u32) -> Duration {\n    let base = 0x10u64; // 16 ms\n    Duration::from_millis(base * 2u64.pow(attempt))\n}\n\nfn main() {\n    for attempt in 0..3 {\n        println!(\"attempt {attempt}: wait {:?}\", backoff(attempt));\n    }\n}\n```\n\nTo check it by hand from the shell:\n\n```bash\n# Three tries, two seconds apart.\nretry() {\n  for i in 1 2 3; do\n    \"$@\" && return 0\n    echo \"attempt $i failed\" >&2\n    sleep 2\n  done\n  return 1\n}\n\nretry curl --max-time 10 'https://example.com/slow'\n```\n\nThe settings it reads, in `config.json`:\n\n```json\n{\n  \"retries\": 3,\n  \"timeout\": 10.5,\n  \"backoff_ms\": [250, 500, 1000],\n  \"hosts\": [\"example.com\"],\n  \"proxy\": null,\n  \"verbose\": false\n}\n```\n\nThe change to `runner.py`, as a patch:\n\n```diff\n--- a/src/ingest/runner.py\n+++ b/src/ingest/runner.py\n@@ -41,3 +41,6 @@ class Runner:\n     async def _fetch(self, url: str) -> bytes | None:\n-        async with asyncio.timeout(10):\n-            return await self.client.get(url)\n+        for attempt in range(self.retries + 1):\n+            with contextlib.suppress(TimeoutError):\n+                async with asyncio.timeout(10.5):\n+                    return await self.client.get(url)\n+        return None\n```\n\nWhat a slow host logs:\n\n```\nattempt 0 timed out: https://example.com/slow\nattempt 1 timed out: https://example.com/slow\n```\n\nAnd the same loop in Elixir:\n\n```elixir\nEnum.each(1..3, fn i -> IO.puts(\"attempt #{i}\") end)\n```","tools":[]},"answered":true,"turn":1,"user":{"attachments":[],"text":"Show me the retry everywhere it runs: the scraper, the app, the browser, the worker, the shell, the settings and the patch."}}]}
 """#
+    /// tests/data/protocol/Fixtures/set-between-turns.jsonl
+    static let setBetweenTurns = #"""
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-10-25","tools":true},"chat_id":"20261026-005338-3a74","model":"asker","next_turn":1,"protocol_version":1,"type":"session"}
+{"turn":1,"type":"thinking"}
+{"questions":[{"header":"Name","multi_select":false,"options":[{"description":"A to-do list","label":"todo.md"},{"description":"Loose ideas","label":"ideas.md"}],"question":"What should the note be called?"}],"turn":1,"type":"question"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"answer_start"}
+{"text":"I'll cal","turn":1,"type":"answer_delta"}
+{"text":"l it tod","turn":1,"type":"answer_delta"}
+{"text":"o.md.","turn":1,"type":"answer_delta"}
+{"turn":1,"type":"answer_end"}
+{"finish_reason":"stop","model":"asker","text":"I'll call it todo.md.","turn":1,"type":"result"}
+{"text":"temperature: 0.9 -- from the next turn","type":"notice"}
+"""#
+    /// tests/data/protocol/Fixtures/question-cancelled.jsonl
+    static let questionCancelled = #"""
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-10-25","tools":true},"chat_id":"20261026-005338-158d","model":"asker","next_turn":1,"protocol_version":1,"type":"session"}
+{"turn":1,"type":"thinking"}
+{"questions":[{"header":"Name","multi_select":false,"options":[{"description":"A to-do list","label":"todo.md"},{"description":"Loose ideas","label":"ideas.md"}],"question":"What should the note be called?"}],"turn":1,"type":"question"}
+{"finish_reason":"cancelled","model":"asker","text":"","turn":1,"type":"result"}
+"""#
+    /// tests/data/protocol/Fixtures/permission-cancelled.jsonl
+    static let permissionCancelled = #"""
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-10-25","tools":true},"chat_id":"20261026-005339-ea48","model":"actor","next_turn":1,"protocol_version":1,"type":"session"}
+{"turn":1,"type":"thinking"}
+{"text":"They wan","turn":1,"type":"thinking_delta"}
+{"text":"t a note","turn":1,"type":"thinking_delta"}
+{"text":" written","turn":1,"type":"thinking_delta"}
+{"text":". I shou","turn":1,"type":"thinking_delta"}
+{"text":"ld ask w","turn":1,"type":"thinking_delta"}
+{"text":"hat to c","turn":1,"type":"thinking_delta"}
+{"text":"all it.","turn":1,"type":"thinking_delta"}
+{"questions":[{"header":"Name","multi_select":false,"options":[{"description":"A to-do list","label":"todo.md"},{"description":"Loose ideas","label":"ideas.md"}],"question":"What should the note be called?"}],"turn":1,"type":"question"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"thinking"}
+{"detail":"--- /dev/null\n+++ b/todo.md\n@@ -0,0 +1 @@\n+- buy milk\n","kind":"permission","questions":[{"header":"Permission","multi_select":false,"options":[{"description":"Allow this once","label":"yes"},{"description":"Deny","label":"no"},{"description":"Allow, and remember it in the config","label":"always"},{"description":"Allow for the rest of this session","label":"session"}],"question":"Allow write_file on todo.md?"}],"target":"todo.md","tool":"write_file","turn":1,"type":"question"}
+{"finish_reason":"cancelled","model":"actor","text":"","turn":1,"type":"result"}
+"""#
+    /// tests/data/protocol/Fixtures/resumed-detach.jsonl
+    static let resumedDetach = #"""
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-10-25","tools":true},"chat_id":"20261026-005344-e8cc","model":"plain","next_turn":2,"protocol_version":1,"type":"session"}
+{"text":"detached Documents/report.md","type":"notice"}
+"""#
+    /// tests/business/reads/Fixtures/chats-show-attached.json
+    static let chatsShowAttached = #"""
+{"attachments":[{"bytes":30,"files":1,"name":"Documents/report.md"}],"backend":"plain","id":"20261026-005344-e8cc","model":"","name":"Dev Server Port","object":"chat","title":"Dev Server Port","turns":[{"answer":{"text":"The dev server listens on port 8080.","tools":[]},"answered":true,"turn":1,"user":{"attachments":[],"text":"What does the report I attached say?"}}],"warnings":[]}
+"""#
+    /// tests/data/protocol/Fixtures/resumed-warnings.jsonl
+    static let resumedWarnings = #"""
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-10-25","tools":true},"chat_id":"20261026-005342-bd06","model":"plain","next_turn":3,"protocol_version":1,"type":"session"}
+{"text":"resume: a message could not be read and was skipped","type":"notice"}
+"""#
+    /// tests/business/reads/Fixtures/chats-show-warnings.json
+    static let chatsShowWarnings = #"""
+{"attachments":[],"backend":"plain","id":"20261026-005342-bd06","model":"","name":"Dev Server Port","object":"chat","title":"Dev Server Port","turns":[{"answer":{"text":"The dev server listens on port 8080.\n\nNothing else: the launch is on 2026-11-12.","tools":[]},"answered":true,"turn":2,"user":{"attachments":[],"text":"Which port does the dev server use?"}}],"warnings":[{"kind":"field_dropped","message":"a message could not be read and was skipped"}]}
+"""#
+    /// tests/data/protocol/Fixtures/resumed-warnings-older.jsonl
+    static let resumedWarningsOlder = #"""
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","document"],"schema":"2026-10-24","tools":true},"chat_id":"20261026-005343-fff6","model":"plain","next_turn":3,"protocol_version":1,"type":"session"}
+"""#
+    /// tests/business/reads/Fixtures/chats-show-warnings-older.json
+    static let chatsShowWarningsOlder = #"""
+{"attachments":[],"backend":"plain","id":"20261026-005343-fff6","model":"","name":"Dev Server Port","object":"chat","title":"Dev Server Port","turns":[{"answer":{"text":"The dev server listens on port 8080.\n\nNothing else: the launch is on 2026-11-12.","tools":[]},"answered":true,"turn":2,"user":{"attachments":[],"text":"Which port does the dev server use?"}}]}
+"""#
+    /// tests/business/reads/Fixtures/chats-show-warnings-older.err
+    static let chatsShowWarningsOlderErr = #"""
+apogee chats: a message could not be read and was skipped
+"""#
 }
 #endif

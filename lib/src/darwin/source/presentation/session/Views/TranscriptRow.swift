@@ -36,6 +36,13 @@ struct TranscriptRow: View {
             }
         case .notice(let text):
             QuietLine(symbol: "info.circle", text: text)
+        case .warning(let text):
+            // What the read of the saved conversation could not carry over,
+            // in the CLI's words: a gap in the turns below.
+            Label(text, systemImage: "exclamationmark.triangle")
+                .font(.apogeeMeta)
+                .foregroundStyle(Palette.warning)
+                .textSelection(.enabled)
         case .recalled(let recall):
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 QuietLine(symbol: "clock.arrow.circlepath", text: recall.summary)
@@ -385,6 +392,24 @@ struct EndedCard: View {
     let model = SessionPreview.session(SessionPreview.resumedChat)
     VStack(alignment: .leading, spacing: Spacing.m) {
         ForEach(SessionPreview.folded(SessionPreview.resumedChat).items) { TranscriptRow(item: $0, model: model) }
+    }
+    .frame(width: 720)
+    .padding(Spacing.xl)
+}
+
+#Preview("Read back with a gap: the CLI's warning, then the resume's notice") {
+    let model = SessionPreview.session(SessionPreview.resumedWarnings)
+    VStack(alignment: .leading, spacing: Spacing.m) {
+        ForEach(SessionPreview.warned.items) { TranscriptRow(item: $0, model: model) }
+    }
+    .frame(width: 720)
+    .padding(Spacing.xl)
+}
+
+#Preview("Read back by an apogee before 55b: its stderr's warning") {
+    let model = SessionPreview.session(SessionPreview.resumedWarningsOlder)
+    VStack(alignment: .leading, spacing: Spacing.m) {
+        ForEach(SessionPreview.warnedOlder.items) { TranscriptRow(item: $0, model: model) }
     }
     .frame(width: 720)
     .padding(Spacing.xl)

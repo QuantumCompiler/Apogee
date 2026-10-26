@@ -28,10 +28,15 @@ public struct SavedChat: Sendable, Equatable {
     /// The whole conversation in order: its turns, and its compactions where
     /// they happened.
     public let turns: [SavedTurn]
+    /// What the loader could not read, as the document says it (the CLI's
+    /// 55b, `[]` when it read everything): a turn missing from `turns` is
+    /// said here, never only on stderr. `nil` from a binary before 55b, whose
+    /// document has no `warnings` and which says them on stderr alone.
+    public let warnings: [SavedWarning]?
 
     public init(
         id: String, name: String, title: String?, backend: String?, model: String?, attachments: [SavedAttachment],
-        turns: [SavedTurn]
+        turns: [SavedTurn], warnings: [SavedWarning]? = nil
     ) {
         self.id = id
         self.name = name
@@ -40,6 +45,7 @@ public struct SavedChat: Sendable, Equatable {
         self.model = model
         self.attachments = attachments
         self.turns = turns
+        self.warnings = warnings
     }
 
     /// The chat a `chats show` document reads as; `nil` when the document is
@@ -55,6 +61,7 @@ public struct SavedChat: Sendable, Equatable {
         model = Self.nonEmpty(document.value["model"])
         attachments = SavedAttachment.list(document.value["attachments"])
         self.turns = turns.compactMap(SavedTurn.init(entry:))
+        warnings = document.value["warnings"]?.arrayValue.map { $0.compactMap(SavedWarning.init(entry:)) }
     }
 
     /// The arguments of the read after `apogee`, for the chat `id`.
@@ -64,6 +71,24 @@ public struct SavedChat: Sendable, Equatable {
 
     static func nonEmpty(_ value: JSONValue?) -> String? {
         value?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
+    }
+}
+
+/// One thing `chats show`'s loader could not read (the CLI's 55b): its kind
+/// -- `field_dropped` -- and the CLI's sentence for it.
+public struct SavedWarning: Sendable, Equatable {
+    public let kind: String
+    public let message: String
+
+    public init(kind: String, message: String) {
+        self.kind = kind
+        self.message = message
+    }
+
+    /// An entry of the document's `warnings`; one with no message is skipped.
+    init?(entry: JSONValue) {
+        guard let message = entry["message"]?.stringValue, !message.isEmpty else { return nil }
+        self.init(kind: entry["kind"]?.stringValue ?? "", message: message)
     }
 }
 

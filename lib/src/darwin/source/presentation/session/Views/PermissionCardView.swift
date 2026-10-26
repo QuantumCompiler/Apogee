@@ -5,7 +5,8 @@ import SwiftUI
 /// The permission gate's question: exactly what would happen -- the tool and
 /// its whole target, and for a website the whole URL -- and the four answers
 /// the protocol takes. Denying is normal: the model is told and carries on.
-/// Answered, it collapses to its line.
+/// Answered, it collapses to its line; closed by its turn's end before an
+/// answer, to the line that says it went unanswered.
 struct PermissionCardView: View {
     let card: PermissionCard
     let answer: (String) -> Void
@@ -13,6 +14,8 @@ struct PermissionCardView: View {
     var body: some View {
         if let given = card.answer {
             QuietLine(symbol: given == "no" ? "hand.raised" : "checkmark.shield", text: "\(subject) — \(Self.said(given))")
+        } else if card.closed {
+            QuietLine(symbol: "shield.slash", text: "\(subject) — \(QuestionCardView.unanswered)")
         } else {
             Card(accent: Palette.warning) {
                 CardLabel(text: Self.label(card.question))
@@ -84,6 +87,12 @@ struct PermissionCardView: View {
 
 #Preview("Allowed once") {
     PermissionCardView(card: SessionPreview.permission(SessionPreview.noteAnswers)) { _ in }
+        .frame(width: 640)
+        .padding(Spacing.xl)
+}
+
+#Preview("Closed unanswered: the turn was stopped") {
+    PermissionCardView(card: SessionPreview.closedPermission) { _ in }
         .frame(width: 640)
         .padding(Spacing.xl)
 }

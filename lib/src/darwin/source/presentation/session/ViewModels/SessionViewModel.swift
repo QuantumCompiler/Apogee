@@ -37,10 +37,21 @@ public final class SessionViewModel {
     public var observer: (@MainActor (SessionEvent) -> Void)?
     /// Where the acts the library owns go: a new session, rename, delete ...
     public var onAction: (@MainActor (SessionAction) -> Void)?
-    /// What was attached this session, by the path given: the input's chips.
+    /// What the session holds attached, by the path given: the input's chips
+    /// -- each `attach` sent, and a saved conversation's own as `chats show`
+    /// names them (the path each `attach` gave), so `detach` reaches them.
     public private(set) var attachments: [String] = []
-    /// The run settings as last chosen: the launch's, then each change.
+    /// The run settings the session runs on: the launch's, then each change
+    /// it took -- a `set` line sent between turns and not refused by name, or
+    /// a restart's flags. A relaunch carries them (`launch.settings`).
     public private(set) var settings: RunSettings
+    /// The lines made while the session could not take them -- a turn
+    /// running or a card standing -- held, in order, until the turn ends.
+    /// While a question or permission prompt waits the CLI drops every line
+    /// but its answer, with no notice, one sent mid-turn before the question
+    /// included (52d; machine-mode.md -> The session's own doors): so nothing
+    /// is sent, and nothing shown applied, until the session can take it.
+    public private(set) var held: [HeldLine] = []
     /// The context window of the session's model in tokens, when the library
     /// could read it (a stored model's `window` in `models list`).
     public var contextWindow: Int?
@@ -84,6 +95,22 @@ public final class SessionViewModel {
     /// The shutdown, once asked: every later ask joins it, and nothing starts
     /// the session again.
     private var ending: Task<Void, Never>?
+    /// The `set` lines sent whose replies are still to come.
+    private var setsSent: [SetSent] = []
+
+    /// A `set` line sent: the settings it moved, in the order the CLI answers
+    /// them, and what each was before it.
+    private struct SetSent {
+        var keys: [String]
+        var before: RunSettings
+    }
+
+    /// A saved conversation read back: its turns, and what the read said on
+    /// stderr from a binary whose document carries no `warnings`.
+    private struct EarlierRead: Sendable {
+        let chat: SavedChat
+        let stderr: [String]
+    }
 
     /// The grace a child is given to go when asked -- its input closed, a turn
     /// in it cancelled -- before it is terminated (`ChatSession.stop`); the
@@ -191,6 +218,12 @@ public final class SessionViewModel {
         }
         connection = .locating
         transcript = Transcript()
+        // A new child on an empty transcript: nothing the last one held or
+        // was sent stands for it. A saved conversation's attachments come
+        // back with its read.
+        held = []
+        setsSent = []
+        attachments = []
         readsEarlier = true
         beginLaunch()
     }
@@ -246,7 +279,7 @@ public final class SessionViewModel {
             for await event in session.events {
                 if let read = earlier {
                     earlier = nil
-                    if let chat = await read.value { transcript.earlier(chat) }
+                    if let read = await read.value { readBack(read) }
                 }
                 if case .ended = event, pausing {
                     // Freed, not finished: no ending card.
@@ -255,6 +288,10 @@ public final class SessionViewModel {
                 } else {
                     transcript.apply(event)
                 }
+                if case .event(let event) = event { heard(event) }
+                // The turn ended: what waited for it goes now, before any
+                // line the person makes next.
+                releaseHeld()
                 observer?(event)
             }
             outbox.finish()
@@ -268,10 +305,24 @@ public final class SessionViewModel {
     /// no reader. It answers `nil` too when the binary has no such read (one
     /// before the CLI's M27 refuses it) or prints no chat: the session's own
     /// notice then says the earlier turns are kept, as before.
-    private func readEarlier(binary: URL) -> Task<SavedChat?, Never>? {
+    private func readEarlier(binary: URL) -> Task<EarlierRead?, Never>? {
         guard let reader, let id = chatID else { return nil }
         return Task {
-            await reader.read(binary: binary, SavedChat.arguments(id: id)).document.flatMap(SavedChat.init(document:))
+            let read = await reader.readKeepingStderr(binary: binary, SavedChat.arguments(id: id))
+            guard let chat = read.outcome.document.flatMap(SavedChat.init(document:)) else { return nil }
+            // A binary before the CLI's 55b says what it could not read on
+            // stderr alone; one with it says it in the document.
+            return EarlierRead(chat: chat, stderr: chat.warnings == nil ? read.stderrLines : [])
+        }
+    }
+
+    /// The saved conversation read back: its turns above the live ones, what
+    /// the read could not carry over at their head, and what it holds
+    /// attached as chips.
+    private func readBack(_ read: EarlierRead) {
+        transcript.earlier(read.chat, stderr: read.stderr)
+        for attachment in read.chat.attachments where !attachments.contains(attachment.name) {
+            attachments.append(attachment.name)
         }
     }
 
@@ -387,37 +438,57 @@ public final class SessionViewModel {
     public var canSet: Bool { transcript.accepts.contains("set") }
     public var canCompact: Bool { transcript.accepts.contains("compact") }
 
-    /// Attaches a file, folder or glob: its outcome arrives as notices.
+    /// Whether the session takes a line now: its child is there, no turn
+    /// runs and no card stands -- between turns, or before the first.
+    public var takesLinesNow: Bool {
+        guard outbox != nil, transcript.standingCard == nil else { return false }
+        switch transcript.status {
+        case .ready, .connecting: return true
+        default: return false
+        }
+    }
+
+    /// The settings the sheet starts from: what the session runs on, with
+    /// what is held for it laid over.
+    public var intendedSettings: RunSettings {
+        held.reduce(settings) { settings, line in
+            if case .set(let change) = line { settings.merging(change) } else { settings }
+        }
+    }
+
+    /// Attaches a file, folder or glob: its outcome arrives as notices. Made
+    /// mid-turn, it waits for the turn to end.
     public func attach(_ path: String) {
-        guard let outbox else { return }
-        if !attachments.contains(path) { attachments.append(path) }
-        outbox.yield(.attach(path))
+        guard outbox != nil else { return }
+        sendOrHold(.attach(path))
     }
 
     /// Detaches it, where the build takes `detach`; else there is no way to,
-    /// and the chip offers none (the design's G2 fallback).
+    /// and the chip offers none (the design's G2 fallback). Made mid-turn, it
+    /// waits for the turn to end, the chip as it was.
     public func detach(_ path: String) {
-        guard canDetach, let outbox else { return }
-        attachments.removeAll { $0 == path }
-        outbox.yield(.detach(path))
+        guard canDetach, outbox != nil else { return }
+        sendOrHold(.detach(path))
     }
 
     /// Compacts the conversation now, where the build takes `compact`.
     public func compact() {
-        guard canCompact, let outbox else { return }
-        outbox.yield(.compact)
+        guard canCompact, outbox != nil else { return }
+        sendOrHold(.compact)
     }
 
     /// Moves the run settings. A build that takes `set` moves them from the
-    /// next turn and says each; an older one is restarted with the new flags,
-    /// carrying the conversation on with `--resume`, and the app says so.
+    /// next turn and says each -- sent between turns, so held while a turn
+    /// runs; an older one is restarted with the new flags, carrying the
+    /// conversation on with `--resume`, and the app says so. Either way a
+    /// relaunch after carries them.
     public func apply(_ change: RunSettings) async {
         guard !change.isEmpty, !isShutDown else { return }
-        settings = settings.merging(change)
-        if canSet, let outbox {
-            outbox.yield(.set(change))
+        if canSet, outbox != nil {
+            sendOrHold(.set(change))
             return
         }
+        settings = settings.merging(change)
         launch.settings = settings
         let carried = chatID != nil || !transcript.items.contains { if case .user = $0.content { true } else { false } }
         transcript.note(
@@ -449,7 +520,93 @@ public final class SessionViewModel {
         beginLaunch()
     }
 
-    static func words(_ settings: RunSettings) -> String {
+    /// `line` now if the session takes it, else held for the turn's end.
+    private func sendOrHold(_ line: HeldLine) {
+        if takesLinesNow { sendLine(line) } else { held.append(line) }
+    }
+
+    /// What was held, in the order made, once the session can take it.
+    private func releaseHeld() {
+        guard !held.isEmpty, takesLinesNow else { return }
+        let lines = held
+        held = []
+        lines.forEach(sendLine)
+    }
+
+    /// Writes `line`, and shows what it does from now: the chip, the setting.
+    private func sendLine(_ line: HeldLine) {
+        guard let outbox else { return }
+        switch line {
+        case .attach(let path):
+            if !attachments.contains(path) { attachments.append(path) }
+            outbox.yield(.attach(path))
+        case .detach(let path):
+            attachments.removeAll { $0 == path }
+            outbox.yield(.detach(path))
+        case .set(let change):
+            setsSent.append(SetSent(keys: Self.keys(change), before: settings))
+            settings = settings.merging(change)
+            launch.settings = settings
+            outbox.yield(.set(change))
+        case .compact:
+            outbox.yield(.compact)
+        }
+    }
+
+    /// An event read while `set` replies are due. The CLI answers a `set`
+    /// line before it reads the next, one notice per setting in order --
+    /// `<what> -- from the next turn`, or `set <key>: <why>` for a value it
+    /// refused by name -- or one `set: <why>` for a line it refused whole
+    /// (machine-mode.md -> The session's own doors). A refused value is put
+    /// back: the session never took it, so neither the settings shown nor a
+    /// relaunch's flags carry it. Once a turn's events begin, every reply is in.
+    private func heard(_ event: ProtocolEvent) {
+        guard !setsSent.isEmpty else { return }
+        if event.turn != nil {
+            setsSent = []
+            return
+        }
+        guard case .notice(let text) = event.kind, var line = setsSent.first else { return }
+        if text.hasPrefix("set: ") {
+            setsSent.removeFirst()
+            line.keys.forEach { putBack($0, from: line.before) }
+            return
+        }
+        let refused = line.keys.first { text.hasPrefix("set \($0): ") }
+        if let refused {
+            line.keys.removeAll { $0 == refused }
+        } else if text.hasSuffix(" -- from the next turn"), !line.keys.isEmpty {
+            line.keys.removeFirst()
+        } else {
+            // A warning beside a reply, or a line of something else.
+            return
+        }
+        if line.keys.isEmpty { setsSent.removeFirst() } else { setsSent[0] = line }
+        if let refused { putBack(refused, from: line.before) }
+    }
+
+    /// The setting `key` as it was in `before`: on the session's settings,
+    /// unless a later `set` still to be answered moves it too -- then that
+    /// line's reply decides, from this value.
+    private func putBack(_ key: String, from before: RunSettings) {
+        if let later = setsSent.firstIndex(where: { $0.keys.contains(key) }) {
+            setsSent[later].before = setsSent[later].before.taking(key, from: before)
+        } else {
+            settings = settings.taking(key, from: before)
+            launch.settings = settings
+        }
+    }
+
+    /// The settings `change` moves, in the order the CLI applies and answers
+    /// them: the model first (`DriverLine.set`'s order).
+    static func keys(_ change: RunSettings) -> [String] {
+        [
+            change.model.map { _ in "model" }, change.system.map { _ in "system" }, change.think.map { _ in "think" },
+            change.effort.map { _ in "effort" }, change.temperature.map { _ in "temperature" },
+        ].compactMap { $0 }
+    }
+
+    nonisolated static func words(_ settings: RunSettings) -> String {
         var parts: [String] = []
         if let model = settings.model { parts.append("model \(model)") }
         if let think = settings.think { parts.append("thinking \(think)") }
@@ -540,10 +697,12 @@ public final class SessionViewModel {
         draft = String(draft.dropLast(typed.count)) + path + (path.hasSuffix("/") ? "" : " ")
     }
 
-    /// Answers the question or permission card `id`: one answer per item, in order.
+    /// Answers the question or permission card `id`: one answer per item, in
+    /// order -- only while it stands. A card answered already, or closed by
+    /// its turn's end, takes none, and no `answer` line is written: the CLI
+    /// would drop it, or read it as the answer to a later question.
     public func answer(_ id: Int, with answers: [String]) {
-        guard let outbox, !answers.isEmpty else { return }
-        transcript.answered(id, with: answers)
+        guard let outbox, !answers.isEmpty, transcript.answered(id, with: answers) else { return }
         for answer in answers {
             outbox.yield(.answer(answer))
         }
@@ -587,5 +746,21 @@ public final class SessionViewModel {
         case .connecting, .paused: "Starting apogee"
         default: "Message Apogee"
         }
+    }
+}
+
+extension RunSettings {
+    /// `self` with the setting `key` as `other` has it.
+    fileprivate func taking(_ key: String, from other: RunSettings) -> RunSettings {
+        var taken = self
+        switch key {
+        case "model": taken.model = other.model
+        case "system": taken.system = other.system
+        case "think": taken.think = other.think
+        case "effort": taken.effort = other.effort
+        case "temperature": taken.temperature = other.temperature
+        default: break
+        }
+        return taken
     }
 }

@@ -32,8 +32,9 @@ public struct ChatLaunch: Sendable, Equatable {
     /// The saved conversation to carry on -- `--resume <id>` -- or `nil` for
     /// a new one.
     public var resume: String?
-    /// The run settings to start with: `-m`, `-s`, `--think`, `--effort`.
-    /// (Temperature has no launch flag; only the `set` line moves it.)
+    /// The run settings to start with: `-m`, `-s`, `--think`, `--effort`,
+    /// `-t` -- the flags `chat` and `execute` take for what the `set` line
+    /// moves after. A relaunch carries the session's current ones.
     public var settings: RunSettings
     /// A chat that writes nothing (`--private`, the CLI's 52d) -- never with
     /// `resume`, which the CLI refuses.
@@ -79,6 +80,8 @@ public struct ChatLaunch: Sendable, Equatable {
         if let system = settings.system { arguments += ["-s", system] }
         if let think = settings.think { arguments += ["--think", think] }
         if let effort = settings.effort, effort != "auto" { arguments += ["--effort", effort] }
+        // As the `set` line writes it: 0.2, and 1 for 1.0.
+        if let temperature = settings.temperature { arguments += ["-t", JSONValue.number(temperature).serialized] }
         if privately { arguments.append("--private") }
         if noRecall { arguments.append("--no-recall") }
         if let execute {

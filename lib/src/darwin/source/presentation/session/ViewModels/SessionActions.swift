@@ -22,6 +22,25 @@ public enum Presenting: String, Identifiable, Sendable {
     public var id: String { rawValue }
 }
 
+/// A line held until the session can take it: made while a turn ran or a
+/// card stood, sent once the turn ends (`SessionViewModel.held`).
+public enum HeldLine: Equatable, Sendable {
+    case attach(String)
+    case detach(String)
+    case set(RunSettings)
+    case compact
+
+    /// What it will do, in a few words: `attach report.pdf`, `temperature 0.9`.
+    public var words: String {
+        switch self {
+        case .attach(let path): "attach \(path)"
+        case .detach(let path): "detach \(path)"
+        case .set(let change): SessionViewModel.words(change)
+        case .compact: "compact"
+        }
+    }
+}
+
 /// How a private session is kept from being written.
 public enum PrivateMode: Equatable, Sendable {
     /// `chat --private`: nothing of it is ever written (the CLI's 52d).

@@ -63,7 +63,7 @@ Opened 2026-10-21 from the CLI's MLX-for-every-kind spike (the user's call): the
 Opened 2026-10-22 (the user's call): a thorough bug and feature-disparity audit over the CLI and GUI, 14 dimensions, probes against the branch binary and a three-lens adversarial panel per finding. 111 of 112 findings survived; the GUI's 68 (11 high) land here as twelve items. The CLI's 43 are its track 55.
 
 - [x] **Private sessions survive** *(4a, shipped 2026-10-25 — [Milestone E](MILESTONES.md#milestone-e--the-audits-gui-findings))* — leaving Sessions never wipes a private conversation; ⌘Q completes the shutdown; a stop during launch reaps its child.
-- [ ] **Honest session lines** *([4b](../backlog/v0.2.0/session-lines-honest.md))* — lines queued between turns, relaunch on current settings, dead cards closed, earlier and live rows kept apart, resumed chips and warnings, renames that stick.
+- [x] **Honest session lines** *(4b, shipped 2026-10-25 — [Milestone E](MILESTONES.md#milestone-e--the-audits-gui-findings))* — lines queued between turns, relaunch on current settings, dead cards closed, earlier and live rows kept apart, resumed chips and warnings, renames that stick.
 - [ ] **Children end cleanly** *([4c](../backlog/v0.2.0/children-end-cleanly.md))* — Stop always ends a job; no leaks; a failing override said; PATH read safely; every child on the monitor.
 - [ ] **Markdown and code keep every line** *([4d](../backlog/v0.2.0/markdown-code-edges.md))* — link definitions, short math answers, pipe paragraphs, bare fences, heredoc shifts.
 - [ ] **Store jobs keep their identity** *([4e](../backlog/v0.2.0/downloads-and-store-jobs.md))* — a quantize registers its own GGUF; resumes only on stops; delete's warnings shown.

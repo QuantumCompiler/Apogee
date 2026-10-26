@@ -15,6 +15,9 @@ public protocol CommandRunning: Sendable {
     /// A read whose document stands whatever its exit: `check` exits
     /// non-zero when a row fails, and its document says which.
     func report(binary: URL, _ arguments: [String]) async -> ReadOutcome
+    /// A read, with the stderr it left beside its document: what an older
+    /// binary says there alone (`chats show`'s warnings before the CLI's 55b).
+    func readKeepingStderr(binary: URL, _ arguments: [String]) async -> ReadWithStderr
 }
 
 extension CommandRunning {
@@ -25,11 +28,20 @@ extension CommandRunning {
     public func report(binary: URL, _ arguments: [String]) async -> ReadOutcome {
         await read(binary: binary, arguments)
     }
+
+    /// A runner that keeps no stderr says none.
+    public func readKeepingStderr(binary: URL, _ arguments: [String]) async -> ReadWithStderr {
+        ReadWithStderr(outcome: await read(binary: binary, arguments), stderrTail: BoundedTail())
+    }
 }
 
 extension ReadRunner: CommandRunning {
     public func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
         await run(binary: binary, arguments)
+    }
+
+    public func readKeepingStderr(binary: URL, _ arguments: [String]) async -> ReadWithStderr {
+        await runKeepingStderr(binary: binary, arguments)
     }
 
     public func command(binary: URL, _ arguments: [String]) async -> CommandOutcome {

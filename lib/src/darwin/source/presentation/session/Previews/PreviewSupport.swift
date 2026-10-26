@@ -106,16 +106,27 @@ struct PreviewChats: ChatStarting {
 }
 
 /// Reads a resumed session's earlier turns back as the binary does: `chats
-/// show`'s recorded document -- or, with none, the recorded refusal of a
-/// binary before the CLI's M27, which has no such read (exit 106). Every
-/// other read and command answers as nothing ran. Nothing starts the binary.
+/// show`'s recorded document, with what that binary said on stderr beside
+/// it -- or, with none, the recorded refusal of a binary before the CLI's
+/// M27, which has no such read (exit 106). Every other read and command
+/// answers as nothing ran. Nothing starts the binary.
 struct PreviewReader: CommandRunning {
     var document: String?
+    var stderr = ""
 
     /// The binary that recorded the saved conversation.
     static let saved = PreviewReader(document: SessionDocuments.chatsShow)
     /// A binary before `chats show`.
     static let older = PreviewReader(document: nil)
+    /// The branch binary's read of a chat holding an attachment.
+    static let attached = PreviewReader(document: SessionDocuments.chatsShowAttached)
+    /// The branch binary's read of a chat with a message it could not read:
+    /// the document's `warnings` say so (the CLI's 55b).
+    static let warned = PreviewReader(document: SessionDocuments.chatsShowWarnings)
+    /// A binary before 55b reading the same: no `warnings`, the gap said on
+    /// stderr alone.
+    static let warnedOnStderr = PreviewReader(
+        document: SessionDocuments.chatsShowWarningsOlder, stderr: SessionDocuments.chatsShowWarningsOlderErr)
 
     func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
         guard arguments.starts(with: ["chats", "show"]) else {
@@ -129,6 +140,12 @@ struct PreviewReader: CommandRunning {
 
     func command(binary: URL, _ arguments: [String]) async -> CommandOutcome {
         .done(stdout: "")
+    }
+
+    func readKeepingStderr(binary: URL, _ arguments: [String]) async -> ReadWithStderr {
+        var tail = BoundedTail()
+        tail.append(Data(stderr.utf8))
+        return ReadWithStderr(outcome: await read(binary: binary, arguments), stderrTail: tail)
     }
 }
 

@@ -13,6 +13,13 @@ import Foundation
 /// and done -- testable with no window and no binary. The answer shown is
 /// exactly its deltas joined; states come from events, never timers; an event
 /// this client does not know is a quiet row, never dropped.
+///
+/// A row is known by its range and its turn, never its turn alone: the turns
+/// read back are one range, and each child that drives the conversation its
+/// own, since the numbers a resumed child gives its turns can repeat ones
+/// already drawn -- a binary before the CLI's 55b resumes a chat saved with
+/// no count at turn 1, and a live turn that failed or was stopped leaves the
+/// saved count behind the live numbers (55b's "not done").
 public struct Transcript: Equatable {
     public enum Status: Equatable {
         /// Spawned; the session has not spoken.
@@ -49,11 +56,29 @@ public struct Transcript: Equatable {
     public private(set) var revision = 0
     private var nextID = 0
     private var nextTurn = 1
+    /// The range the live child's events fold into: 1 for the first child,
+    /// one more for each that carries the conversation on.
+    private var range = 1
+
+    /// The range of the turns read back from the saved conversation.
+    public static let earlierRange = 0
 
     public init() {}
 
     /// Whether a turn may be sent now.
     public var acceptsInput: Bool { status == .ready }
+
+    /// The question or permission card that waits on the person now, by its
+    /// id; `nil` when none does.
+    public var standingCard: Int? {
+        items.last { item in
+            switch item.content {
+            case .question(let card): card.isStanding
+            case .permission(let card): card.isStanding
+            default: false
+            }
+        }?.id
+    }
 
     /// Whether there is a turn in flight that `cancel` would stop.
     public var turnInFlight: Bool {
@@ -75,23 +100,27 @@ public struct Transcript: Equatable {
         return turn
     }
 
-    /// The question or permission card `id` was answered.
-    public mutating func answered(_ id: Int, with answers: [String]) {
-        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+    /// The question or permission card `id` was answered; whether it took
+    /// the answer. One answered already, or closed -- its turn ended before
+    /// it was answered -- takes none, so no answer line is sent for it.
+    @discardableResult
+    public mutating func answered(_ id: Int, with answers: [String]) -> Bool {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return false }
         switch items[index].content {
-        case .question(var card) where card.answers == nil:
+        case .question(var card) where card.isStanding:
             card.answers = answers
             items[index].content = .question(card)
-        case .permission(var card) where card.answer == nil:
+        case .permission(var card) where card.isStanding:
             card.answer = answers.first
             items[index].content = .permission(card)
         default:
-            return
+            return false
         }
         if case .waiting(let turn) = status {
             status = .working(turn: turn)
         }
         revision += 1
+        return true
     }
 
     /// A `cancel` was sent for the turn in flight.
@@ -105,15 +134,20 @@ public struct Transcript: Equatable {
         }
     }
 
-    /// The child was ended to free it: the conversation stays, quiet.
+    /// The child was ended to free it: the conversation stays, quiet -- a
+    /// card it left standing closed, since its child can take no answer now.
     public mutating func paused() {
         closeActivity()
+        closeStandingCards()
         status = .paused
         revision += 1
     }
 
-    /// A new child resumes the conversation: it waits for its `session` event.
+    /// A new child resumes the conversation: it waits for its `session` event,
+    /// and its events fold into a range of their own.
     public mutating func reopening() {
+        closeStandingCards()
+        range += 1
         status = .connecting
         revision += 1
     }
@@ -141,34 +175,48 @@ public struct Transcript: Equatable {
     /// before the session's first event. One that has rows -- a conversation
     /// the app paused and carried on itself -- keeps its own, and takes none.
     /// A chat with no entries draws nothing, and the notice stands as before.
-    public mutating func earlier(_ chat: SavedChat) {
-        guard items.isEmpty, !chat.turns.isEmpty else { return }
+    ///
+    /// What the read could not carry over heads them, in the CLI's words:
+    /// the document's `warnings` (the CLI's 55b), or -- from a binary whose
+    /// document has none -- what the read said on stderr, `stderr`.
+    ///
+    /// They are a range of their own, `earlierRange`: no live event is ever
+    /// matched to them, whatever its number.
+    public mutating func earlier(_ chat: SavedChat, stderr: [String] = []) {
+        let warnings = chat.warnings.map { $0.map(\.message) } ?? stderr
+        guard items.isEmpty, !chat.turns.isEmpty || !warnings.isEmpty else { return }
+        let range = Self.earlierRange
+        for warning in warnings {
+            append(.warning(warning), turn: nil, range: range)
+        }
         if !chat.attachments.isEmpty {
-            append(.notice("attached to the chat: " + Self.named(chat.attachments)), turn: nil)
+            append(.notice("attached to the chat: " + Self.named(chat.attachments)), turn: nil, range: range)
         }
         for entry in chat.turns {
             if let summary = entry.compaction {
-                append(.notice(Self.compacted(summary)), turn: entry.turn)
+                append(.notice(Self.compacted(summary)), turn: entry.turn, range: range)
             } else {
-                if !entry.text.isEmpty { append(.user(entry.text), turn: entry.turn) }
+                if !entry.text.isEmpty { append(.user(entry.text), turn: entry.turn, range: range) }
                 if !entry.attachments.isEmpty {
-                    append(.notice("attached: " + Self.named(entry.attachments)), turn: entry.turn)
+                    append(.notice("attached: " + Self.named(entry.attachments)), turn: entry.turn, range: range)
                 }
             }
             if !entry.tools.isEmpty {
                 var activity = Activity()
                 activity.lines = entry.tools.map(Self.line)
                 activity.typed = entry.isCompaction ? nil : entry.text
-                append(.activity(activity), turn: entry.turn)
+                append(.activity(activity), turn: entry.turn, range: range)
             }
             if !entry.answer.isEmpty {
-                append(.answer(Answer(text: entry.answer, finished: true, usage: nil)), turn: entry.turn)
+                append(.answer(Answer(text: entry.answer, finished: true, usage: nil)), turn: entry.turn, range: range)
             }
             if !entry.answered && !entry.isCompaction {
-                append(.unanswered, turn: entry.turn)
+                append(.unanswered, turn: entry.turn, range: range)
             }
         }
-        append(.divider(Self.earlierDivider), turn: nil)
+        if !chat.turns.isEmpty {
+            append(.divider(Self.earlierDivider), turn: nil, range: range)
+        }
     }
 
     /// The divider's words, where the live session takes over from the turns
@@ -212,6 +260,7 @@ public struct Transcript: Equatable {
             apply(event)
         case .ended(let end):
             closeActivity()
+            closeStandingCards()
             append(.ended(Ending(reason: end.reason, message: end.message, details: end.stderrText)), turn: nil)
             status = .ended
         }
@@ -289,8 +338,11 @@ public struct Transcript: Equatable {
             setStatus(.working(turn: turn ?? 0))
         case .result(let result):
             closeActivity()
+            // A card the turn left standing -- a stop while it asked -- can
+            // take no answer now: the CLI drops one sent after the turn.
+            closeStandingCards()
             let answered = items.contains { item in
-                if case .answer = item.content, item.turn == turn { true } else { false }
+                if case .answer = item.content, isLive(item, turn) { true } else { false }
             }
             if !answered && !result.text.isEmpty {
                 // A driver that dropped every delta still has the answer.
@@ -312,6 +364,7 @@ public struct Transcript: Equatable {
             if case .stopping = status {} else { status = .waiting(turn: turn ?? 0) }
         case .error(let message):
             closeActivity()
+            closeStandingCards()
             finishAnswers(turn, usage: nil)
             append(.error(message), turn: turn)
             status = .ready
@@ -325,10 +378,35 @@ public struct Transcript: Equatable {
 
     // MARK: - Folding
 
-    private mutating func append(_ content: TranscriptItem.Content, turn: Int?) {
-        items.append(TranscriptItem(id: nextID, turn: turn, content: content))
+    private mutating func append(_ content: TranscriptItem.Content, turn: Int?, range: Int? = nil) {
+        items.append(TranscriptItem(id: nextID, turn: turn, range: range ?? self.range, content: content))
         nextID += 1
         revision += 1
+    }
+
+    /// Whether `item` is the live child's, of `turn`: what every live event
+    /// is matched by -- its range and its turn, never the turn alone.
+    private func isLive(_ item: TranscriptItem, _ turn: Int?) -> Bool {
+        item.range == range && item.turn == turn
+    }
+
+    /// Every card still standing is closed: its turn ended, or its child did,
+    /// before it was answered.
+    private mutating func closeStandingCards() {
+        for index in items.indices {
+            switch items[index].content {
+            case .question(var card) where card.isStanding:
+                card.closed = true
+                items[index].content = .question(card)
+                revision += 1
+            case .permission(var card) where card.isStanding:
+                card.closed = true
+                items[index].content = .permission(card)
+                revision += 1
+            default:
+                break
+            }
+        }
     }
 
     /// The status, unless a `cancel` is on its way: then the turn is stopping
@@ -342,7 +420,7 @@ public struct Transcript: Equatable {
     /// The turn's activity section: the last item, when it is this turn's;
     /// a new one otherwise, so the transcript stays in the order things happened.
     private mutating func updateActivity(_ turn: Int?, _ change: (inout Activity) -> Void) {
-        if let last = items.indices.last, case .activity(var activity) = items[last].content, items[last].turn == turn {
+        if let last = items.indices.last, case .activity(var activity) = items[last].content, isLive(items[last], turn) {
             change(&activity)
             items[last].content = .activity(activity)
             revision += 1
@@ -358,7 +436,7 @@ public struct Transcript: Equatable {
     /// What the person sent as `turn`.
     private func typed(_ turn: Int?) -> String? {
         guard let turn else { return nil }
-        for item in items.reversed() where item.turn == turn {
+        for item in items.reversed() where isLive(item, turn) {
             if case .user(let text) = item.content { return text }
         }
         return nil
@@ -377,12 +455,12 @@ public struct Transcript: Equatable {
 
     private func openAnswer(_ turn: Int?) -> Int? {
         items.lastIndex { item in
-            if case .answer(let answer) = item.content, item.turn == turn, !answer.finished { true } else { false }
+            if case .answer(let answer) = item.content, isLive(item, turn), !answer.finished { true } else { false }
         }
     }
 
     private mutating func finishAnswers(_ turn: Int?, usage: Usage?) {
-        for index in items.indices where items[index].turn == turn {
+        for index in items.indices where isLive(items[index], turn) {
             if case .answer(var answer) = items[index].content {
                 answer.finished = true
                 if let usage { answer.usage = usage }
@@ -409,6 +487,10 @@ public struct TranscriptItem: Equatable, Identifiable {
     public let id: Int
     /// The turn it belongs to; `nil` for what is said between turns.
     public let turn: Int?
+    /// The stretch of the conversation it belongs to: `Transcript.earlierRange`
+    /// for the turns read back, else the child that said it, numbered from 1.
+    /// With `turn`, what a live event is matched by.
+    public let range: Int
     public var content: Content
 
     public enum Content: Equatable {
@@ -419,6 +501,9 @@ public struct TranscriptItem: Equatable, Identifiable {
         case answer(Answer)
         /// A line the session said for the user, quiet, kept.
         case notice(String)
+        /// What reading the saved conversation could not carry over, in the
+        /// CLI's words: a gap in the turns that follow.
+        case warning(String)
         /// The past chats a turn recalled, named (52a), each one openable.
         case recalled(Recall)
         /// The excerpts a turn's retrieval sent, numbered for citing (52a).
@@ -490,12 +575,24 @@ public struct QuestionCard: Equatable {
     public let question: Question
     /// One per item, once answered; `nil` while the question stands.
     public var answers: [String]?
+    /// Its turn ended -- stopped or failed -- or its child did, before it was
+    /// answered: it takes no answer now (the CLI drops one sent after).
+    public var closed = false
+
+    /// Whether it waits on the person: not answered, not closed.
+    public var isStanding: Bool { answers == nil && !closed }
 }
 
 public struct PermissionCard: Equatable {
     public let question: Question
     /// `yes`, `session`, `always` or `no`, once answered.
     public var answer: String?
+    /// Its turn ended, or its child did, before it was answered: it takes no
+    /// answer now.
+    public var closed = false
+
+    /// Whether it waits on the person: not answered, not closed.
+    public var isStanding: Bool { answer == nil && !closed }
 }
 
 public struct Ending: Equatable {

@@ -26,6 +26,16 @@ func recorded(_ path: String) -> String {
     return (try? String(contentsOf: tests.appendingPathComponent(path), encoding: .utf8)) ?? ""
 }
 
+/// A recorded stream's lines, by its name under the protocol fixtures.
+func fixtureStream(_ name: String) -> [String] {
+    recorded("data/protocol/Fixtures/\(name).jsonl").split(separator: "\n").map(String.init)
+}
+
+/// A recorded read's document, by its file name under the reads' fixtures.
+func fixtureDocument(_ name: String) -> ReadDocument {
+    ReadDocument(text: recorded("business/reads/Fixtures/\(name)"))!
+}
+
 /// A saved conversation resumed by the binary that ships the CLI's M27: its
 /// `session` event (`next_turn` 6), then one live turn, sent as
 /// `resumedTurn` (tests/data/protocol/Fixtures/resumed-chat.jsonl).
@@ -52,6 +62,7 @@ func shape(_ transcript: Transcript) -> [String] {
         case .activity(let a): "activity\(a.live ? " live" : ""): \(a.reasoning)|\(a.lines.joined(separator: ","))"
         case .answer(let a): "answer\(a.finished ? "" : " streaming"): \(a.text)"
         case .notice(let text): "notice: \(text)"
+        case .warning(let text): "warning: \(text)"
         case .recalled(let recall): "recalled: \(recall.chats.map(\.name).joined(separator: ","))"
         case .sources(let sources): "sources: \(sources.map(\.file).joined(separator: ","))"
         case .question(let card): "question: \(card.answers?.joined(separator: ",") ?? "waiting")"

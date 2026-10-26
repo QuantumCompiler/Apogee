@@ -4,7 +4,8 @@ import SwiftUI
 
 /// The model asks: each question with its options, and room for the user's
 /// own answer every time -- the options are a convenience, not a constraint.
-/// Answered, it collapses to what was asked and what was said.
+/// Answered, it collapses to what was asked and what was said; closed by its
+/// turn's end before an answer, to what was asked and that it went unanswered.
 struct QuestionCardView: View {
     let card: QuestionCard
     let answer: ([String]) -> Void
@@ -18,6 +19,10 @@ struct QuestionCardView: View {
                 symbol: "questionmark.bubble",
                 text: zip(card.question.items, answers)
                     .map { "asked: \($0.question) → \($1)" }.joined(separator: "\n"))
+        } else if card.closed {
+            QuietLine(
+                symbol: "questionmark.bubble",
+                text: card.question.items.map { "asked: \($0.question) → \(Self.unanswered)" }.joined(separator: "\n"))
         } else {
             Card(accent: Palette.accent) {
                 CardLabel(text: "Apogee is asking")
@@ -90,6 +95,9 @@ struct QuestionCardView: View {
         picked[index] = set
     }
 
+    /// A card whose turn ended before it was answered: it takes none now.
+    static let unanswered = "not answered: the turn ended first"
+
     private func symbol(_ index: Int, _ label: String, multiple: Bool) -> String {
         let on = picked[index]?.contains(label) == true
         return multiple ? (on ? "checkmark.square.fill" : "square") : (on ? "largecircle.fill.circle" : "circle")
@@ -105,6 +113,12 @@ struct QuestionCardView: View {
 
 #Preview("Answered") {
     QuestionCardView(card: SessionPreview.question(SessionPreview.noteAnswers)) { _ in }
+        .frame(width: 640)
+        .padding(Spacing.xl)
+}
+
+#Preview("Closed unanswered: the turn was stopped") {
+    QuestionCardView(card: SessionPreview.closedQuestion) { _ in }
         .frame(width: 640)
         .padding(Spacing.xl)
 }
