@@ -1460,6 +1460,68 @@ The app had no draft field on a backend. Its clip and say sheets built their com
 - No live pass of the app.
 - **A CLI gap:** `config set-default <embedding entry>` exits 0 and makes it the chat role, while a voice entry is refused ("cannot take a role").
 
+### 2026-10-26 — `backends-say-kind-and-drafter` (maintenance item M5): the Backends table says each entry's kind and drafter
+
+**Why.** 3a said an MLX set's kind in Stored weights. 3b paired a drafter from the drafter's side and showed a backend's drafter in its details, with Unpair. Its record left three gaps on the Backends side, each reproduced as a failing test first:
+- **No kind or drafter in the table.** A person scanning their backends couldn't see which ones embed or draft.
+- **No pairing from the base.** Someone looking at the model they wanted to speed up had to find its drafter in Stored weights.
+- **No "cannot draft" state.** It was never recorded, so a drafter deleted, or a base converted again as mlx-lm's `chat` build, showed only as the CLI's refusal.
+
+Probed on the branch's binary over sandbox homes with tiny fake MLX directories (a vision base, the drafters that pair with it, and a 12B base with its own):
+- **`models list` doesn't say a pairing:** it is byte-identical before and after. The base's `models info` states it in its `draft:` and `drafter:` lines.
+- **`__complete config set-backend <base> --draft ""`** answers exactly the drafters that pair: the E4B's assistant for the E4B, the 12B's own for the 12B, nothing for mlx-lm's Qwen3, and nothing once the drafter is deleted.
+- **With the drafter deleted:**
+  - the draft line reads `<path> -- cannot draft beside it: there is no drafter at <path> -- 'apogee models convert <a draft head> --mlx' makes one`;
+  - the list row's state becomes `draft`;
+  - `check` warns with the remedy `apogee config set-backend <base> --draft ""`;
+  - a chat refuses in the same words.
+- **A base converted again as mlx-lm's build** refuses with "…is mlx-lm's build (kind chat, recorded)…".
+
+- [x] **The table says an `mlx` entry's kind,** `MLX · vision` over its precision, as Stored weights says it. Every other row is unchanged.
+- [x] **A paired base is marked.** A small drafter glyph after its name carries the tooltip "Drafter: <its handle, or its path once the store no longer lists it> -- <the CLI's words>". The glyph turns the warning colour when the drafter can't draft. Each `mlx` entry's `models info` is read with the list, as 3b's `BackendDraft` reads it, and only when the list states kinds.
+- [x] **Pair a drafter… from the base's details** (`PairDrafterSheet`), on a `vision` entry with none paired. It offers exactly what the binary's completion offers, then runs `config set-backend <base> --draft <drafter path>` and reads back. 3b's `BackendDraft` and Unpair are reused.
+- [x] **A pairing that can no longer draft is drawn in the CLI's words,** from its "cannot draft beside it:" phrase (`BackendDraft.refusal`), as a warning section in the details.
+
+**Decisions made while building** (2026-10-26, each recorded for veto):
+- **The default, taken:** a small drafter glyph with the drafter's name in its tooltip, rather than a column of its own.
+- **The kind cell is two lines** in the existing 110-pt column, the precision truncated with its full text in the tooltip.
+- **An older binary's table costs no extra reads.** Drafters are read only when the list states kinds, and a failed read leaves that backend unmarked.
+- **Pair a drafter… is offered only with none paired.** Replacing a pairing means Unpair first, since no verdict exists for replacing one.
+- **The sheet's "none offered" line is the app's own,** since the completion prints nothing when no drafter pairs.
+
+**Verified.**
+- **Recorded** from the branch's binary over sandbox homes, the home written `/Users/someone`, a second run byte-identical: 18 documents in `tests/business/reads/Fixtures/`.
+  - **The pairing:** `base-pair-*`, the list, each base's completion and `models info` paired and not.
+  - **The drafter deleted:** `draft-gone-*`, its list, info, `check` and chat refusal.
+  - **The base converted again:** `draft-rebuilt-*`, its list, info, `check` and chat refusal.
+
+  The rebuilt homes needed a placeholder Python environment with an `mlx_lm` marker, so the CLI's checks reach the draft rung. `drafter-pairing-verdicts.txt` gains two lines:
+  - the 12B pairing, taken;
+  - the E4B paired with the 12B's drafter, refused: "…drafts for a 3840-wide gemma4 model… is a 2560-wide gemma4 model -- a drafter runs only beside a base of its family and width".
+- **9 new cases** in `BackendsKindAndDrafterTests`:
+  - `tableSaysEachKind` and `pairedBaseMarked`;
+  - `pairFromTheBase`, `pairFromTheBaseHeldToVerdicts`, `pairsAndReadsBack` and `noDrafterOffered`;
+  - `drafterGone` and `baseRebuiltAsChat`;
+  - `olderBinaryKeepsTodaysTable`, which held before and after.
+- **Repeat runs:** `PresentationModels` passed 930 of 930 over 10 iterations. The layering check passed 25 of 25, and `check-previews` finds nothing in models.
+- **9 new previews:**
+  - the table with kinds and a paired mark;
+  - the base's details with Pair a drafter…;
+  - the sheet's offered drafters, and none offered;
+  - the deleted drafter, in the table and the details;
+  - the rebuilt base;
+  - the glyph;
+  - an older binary's table.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,992 tests and the macOS app's 810 cases passed, with no Swift warning.
+
+**Not done:**
+- No live pass of the app.
+- Use in a new session is still offered on a base whose drafter can't draft, as before.
+- **CLI gaps:**
+  - `models list` names no pairing, costing a `models info` per `mlx` entry on each refresh;
+  - the completion gives no reason when nothing pairs;
+  - `chat -m <backend>` refuses with every backend's problem, not only the named one's.
+
 ---
 
 ## Milestone E — The audit's GUI findings

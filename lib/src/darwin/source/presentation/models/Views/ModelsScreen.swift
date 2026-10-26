@@ -99,6 +99,9 @@ public struct ModelsScreen<Downloads: View>: View {
         .sheet(item: $model.editingAdapters) { _ in
             AdaptersSheet(model: model)
         }
+        .sheet(item: $model.pairingDrafter) { _ in
+            PairDrafterSheet(model: model)
+        }
         .sheet(item: $model.renaming) { renaming in
             RenameModelSheet(renaming: renaming) { name in Task { await model.rename(renaming, to: name) } }
         }
@@ -160,15 +163,15 @@ struct ModelTable: View {
                 HStack(spacing: Spacing.s) {
                     KindMark(kind: row.kind)
                     Text(row.name).foregroundStyle(Palette.textPrimary).lineLimit(1).truncationMode(.middle)
+                    if let mark = model.drafterMark(row) {
+                        DrafterGlyph(mark: mark)
+                    }
                     if !row.roles.isEmpty {
                         Text(row.roles).font(.apogeeMeta.monospaced()).foregroundStyle(Palette.accent).lineLimit(1)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Text([row.format, row.quant].compactMap { $0 }.joined(separator: " · "))
-                    .font(.apogeeMeta.monospaced())
-                    .foregroundStyle(Palette.textSecondary)
-                    .frame(width: 110, alignment: .leading)
+                format(row)
                 Text(row.bytes.map(ModelsViewModel.size) ?? "")
                     .font(.apogeeMeta.monospacedDigit())
                     .foregroundStyle(Palette.textSecondary)
@@ -187,6 +190,46 @@ struct ModelTable: View {
         }
         .buttonStyle(.plain)
         .help(row.note ?? row.model)
+    }
+
+    /// The format cell: as it always read, on one line -- or, where the row
+    /// states an `mlx` entry's kind, the kind as Stored weights says it
+    /// (`MLX · vision`) over its precision.
+    @ViewBuilder
+    private func format(_ row: ModelRow) -> some View {
+        let lines = ModelsViewModel.formatLines(row)
+        if lines.count == 1 {
+            Text(lines[0])
+                .font(.apogeeMeta.monospaced())
+                .foregroundStyle(Palette.textSecondary)
+                .frame(width: 110, alignment: .leading)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(lines[0]).foregroundStyle(Palette.textPrimary)
+                ForEach(Array(lines.dropFirst().enumerated()), id: \.offset) { _, line in
+                    Text(line).foregroundStyle(Palette.textSecondary)
+                }
+            }
+            .font(.apogeeMeta.monospaced())
+            .lineLimit(1)
+            .frame(width: 110, alignment: .leading)
+            .help(lines.joined(separator: " · "))
+        }
+    }
+}
+
+/// The table's mark on a base with a drafter paired (GUI M5): a small
+/// glyph, the drafter's name and the CLI's words in its tooltip -- drawn in
+/// the warning's colour where the CLI says it can no longer draft.
+struct DrafterGlyph: View {
+    let mark: DrafterMark
+
+    var body: some View {
+        Image(systemName: "hare")
+            .font(.system(size: 10))
+            .foregroundStyle(mark.drafts ? Palette.textTertiary : Palette.warning)
+            .help(mark.help)
+            .accessibilityLabel(mark.drafts ? "drafts with \(mark.drafter)" : "its drafter cannot draft: \(mark.said)")
     }
 }
 
@@ -229,6 +272,8 @@ struct ModelDetails: View {
                     }
                     if let draft = model.draft {
                         drafter(draft, row)
+                    } else if model.info != nil && model.offersDrafterPairing(row) {
+                        noDrafter(row)
                     }
                     if ModelsViewModel.takesAdapters(row) {
                         AdaptersSection(model: model, row: row)
@@ -306,7 +351,17 @@ struct ModelDetails: View {
                 .foregroundStyle(Palette.textPrimary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
-            if !draft.said.isEmpty {
+            if !draft.drafts {
+                // A pairing that can no longer draft (GUI M5): the CLI's own
+                // words, its way out among them; Unpair is the doctor's.
+                Label {
+                    Text(draft.said).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle")
+                }
+                .font(.apogeeSmall)
+                .foregroundStyle(Palette.warning)
+            } else if !draft.said.isEmpty {
                 Text(draft.said).font(.apogeeSmall).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true)
             }
             if let drafter = draft.drafter {
@@ -314,7 +369,24 @@ struct ModelDetails: View {
             }
             Button("Unpair") { Task { await model.unpair(row) } }
                 .disabled(model.working != nil)
-                .help("apogee config set-backend \(row.backend) --draft \"\" -- the backend answers alone again; the drafter stays under Stored weights")
+                .help(draft.drafts
+                    ? "apogee config set-backend \(row.backend) --draft \"\" -- the backend answers alone again; the drafter stays under Stored weights"
+                    : "apogee config set-backend \(row.backend) --draft \"\" -- the way out the doctor names: the backend answers alone again")
+        }
+    }
+
+    /// A vision base with no drafter (GUI M5): what one would do, and **Pair a
+    /// drafter…**, offering what the binary's completion offers it.
+    private func noDrafter(_ row: ModelRow) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            label("Drafter")
+            Text("None. A drafter proposes the next tokens and \(row.backend) checks them, so every answer is still its own; it runs beside it through mlx-vlm's speculative path.")
+                .font(.apogeeSmall)
+                .foregroundStyle(Palette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Pair a drafter…") { Task { await model.askToPairDrafter(row) } }
+                .disabled(model.working != nil)
+                .help("apogee config set-backend \(row.backend) --draft <a drafter the binary offers it>")
         }
     }
 
@@ -475,6 +547,52 @@ struct KindMark: View {
             .foregroundStyle(kind == .api ? Palette.api : kind == .subscription ? Palette.subscription : kind == .local ? Palette.local : Palette.textTertiary)
             .frame(width: 14)
             .accessibilityLabel(kind == .api ? "cloud API, billed" : kind == .subscription ? "subscription" : kind == .local ? "on this machine" : "model")
+    }
+}
+
+/// `config set-backend <base> --draft <drafter>` from the base's side (GUI
+/// M5): one of the drafters the binary's completion offers this base, each
+/// with the CLI's line for it -- or, none offered, why.
+struct PairDrafterSheet: View {
+    @Bindable var model: ModelsViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        if let form = model.pairingDrafter {
+            VStack(alignment: .leading, spacing: Spacing.m) {
+                Text("Pair a drafter with \(form.backend)").font(.apogeeHeading)
+                Text("A drafter proposes the next tokens and its base checks them, so every answer is still the base's own. It runs beside this backend through mlx-vlm's speculative path.")
+                    .font(.apogeeSmall).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true)
+                if form.offers.isEmpty {
+                    Text("No stored drafter pairs with \(form.backend). A drafter is a draft head converted to MLX for a base of its family and width -- Stored weights converts one with Convert to MLX…, then it is offered here.")
+                        .font(.apogeeSmall).foregroundStyle(Palette.warning).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Picker("Drafter", selection: Binding(get: { model.pairingDrafter?.chosen }, set: { model.pairingDrafter?.chosen = $0 })) {
+                        ForEach(form.offers) { offer in
+                            Text(offer.handle).tag(String?.some(offer.handle))
+                        }
+                    }
+                    .pickerStyle(.radioGroup)
+                    if let said = form.offer?.said {
+                        Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                if let arguments = form.arguments {
+                    Text((["apogee"] + arguments).joined(separator: " "))
+                        .font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack {
+                    Spacer()
+                    Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                    Button("Pair") { Task { await model.pairDrafter() } }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(form.arguments == nil)
+                }
+            }
+            .padding(Spacing.xl)
+            .frame(width: 560)
+        }
     }
 }
 
@@ -640,6 +758,79 @@ struct RenameModelSheet: View {
             await models.connect(binary: previewBinary)
             if let row = models.rows.first(where: { $0.backend == "Gemma4-E4B-4bit" }) { await models.select(row) }
         }
+}
+
+#Preview("Backends: each MLX entry's kind beside its format, the E4B marked with its drafter") {
+    let models = ModelsPreview.models(over: ModelsPreview.basePairRunner(paired: true))
+    ModelTable(model: models)
+        .frame(width: 760, height: 360)
+        .task { await models.connect(binary: previewBinary) }
+}
+
+#Preview("Backends: an older binary's table -- no kind, no drafter read, as before") {
+    let models = ModelsPreview.models()
+    ModelTable(model: models)
+        .frame(width: 760, height: 440)
+        .task { await models.connect(binary: previewBinary) }
+}
+
+#Preview("Details: a vision base with no drafter, Pair a drafter…") {
+    let models = ModelsPreview.models(over: ModelsPreview.basePairRunner(paired: false))
+    ModelDetails(model: models)
+        .frame(width: 380, height: 760)
+        .task { await ModelsPreview.showing(models, "Gemma4-E4B-4bit") }
+}
+
+#Preview("Pair a drafter: the one drafter the binary offers the E4B, not the 12B's") {
+    let models = ModelsPreview.models(over: ModelsPreview.basePairRunner(paired: false))
+    PairDrafterSheet(model: models)
+        .task { await ModelsPreview.pairingDrafter(models, "Gemma4-E4B-4bit") }
+}
+
+#Preview("Pair a drafter: no stored drafter pairs with the 12B") {
+    let models = ModelsPreview.models(over: ModelsPreview.draftsRunner(paired: false))
+    PairDrafterSheet(model: models)
+        .task { await ModelsPreview.pairingDrafter(models, "Gemma4-12B-4bit") }
+}
+
+#Preview("Backends: a pairing whose drafter was deleted, its mark a warning in the CLI's words") {
+    let models = ModelsPreview.models(over: ModelsPreview.draftGoneRunner)
+    ModelTable(model: models)
+        .frame(width: 760, height: 320)
+        .task { await models.connect(binary: previewBinary) }
+}
+
+#Preview("Details: a pairing whose drafter was deleted, the CLI's refusal and Unpair") {
+    let models = ModelsPreview.models(over: ModelsPreview.draftGoneRunner)
+    ModelDetails(model: models)
+        .frame(width: 380, height: 760)
+        .task { await ModelsPreview.showing(models, "Gemma4-E4B-4bit") }
+}
+
+#Preview("Details: a base converted again as mlx-lm's build, its drafter refused") {
+    let models = ModelsPreview.models(over: ModelsPreview.draftRebuiltRunner)
+    ModelDetails(model: models)
+        .frame(width: 380, height: 760)
+        .task { await ModelsPreview.showing(models, "Gemma4-E4B-4bit") }
+}
+
+#Preview("Drafter marks: one drafting, one that cannot") {
+    let paired = ModelsPreview.models(over: ModelsPreview.basePairRunner(paired: true))
+    let gone = ModelsPreview.models(over: ModelsPreview.draftGoneRunner)
+    VStack(alignment: .leading, spacing: Spacing.s) {
+        ForEach([paired, gone].flatMap { model in model.rows.compactMap { model.drafterMark($0) } }, id: \.help) { mark in
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
+                DrafterGlyph(mark: mark)
+                Text(mark.help).font(.apogeeSmall).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+    .padding(Spacing.xl)
+    .frame(width: 560)
+    .task {
+        await paired.connect(binary: previewBinary)
+        await gone.connect(binary: previewBinary)
+    }
 }
 
 #Preview("Each backend's kind, as marked") {

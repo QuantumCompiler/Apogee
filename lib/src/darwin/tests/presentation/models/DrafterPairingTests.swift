@@ -85,7 +85,7 @@ struct DrafterPairingTests {
     @Test("the pairing's commands are pinned to the binary's verdicts: the base and the clearing taken, the other bases refused in its words")
     func commandsPinned() async throws {
         let verdicts = pairingVerdicts()
-        #expect(verdicts.count == 5, "recorded: \(verdicts.keys.sorted())")
+        #expect(verdicts.count == 7, "3b's five and the base side's two (GUI M5): \(verdicts.keys.sorted())")
         let (store, set) = try await store(runner())
         await store.askToPair(set)
         let pair = try #require(store.pairing?.arguments).joined(separator: " ")

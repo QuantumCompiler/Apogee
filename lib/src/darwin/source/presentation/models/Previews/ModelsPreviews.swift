@@ -275,6 +275,64 @@ enum ModelsPreview {
             ])
     }
 
+    // MARK: - A drafter paired from its base (GUI M5)
+
+    static let drafter12B = "Gemma4-12B-Assistant/mlx/8192a3b4c5d6"
+
+    /// The base-side home recorded from the branch's binary: mlx-vlm's builds
+    /// of Gemma 4 E4B and 12B and mlx-lm's Qwen3, registered by `config scan
+    /// --register`, and two drafters stored -- the E4B's assistant and the
+    /// 12B's -- each base's completion of `--draft` offering its own alone.
+    /// When `paired`, the E4B's `models info` read back after `config
+    /// set-backend Gemma4-E4B-4bit --draft <its drafter>`; the list is the
+    /// same bytes either way.
+    static func basePairRunner(paired: Bool) -> PreviewRunner {
+        PreviewRunner(
+            reads: [
+                (["models", "list"], ModelsDocuments.basePairList),
+                (["models", "status"], ModelsDocuments.kindsRegisteredStatus),
+                (["models", "info", "Gemma4-E4B-4bit"], paired ? ModelsDocuments.basePairBackendBasePaired : ModelsDocuments.basePairBackendBase),
+                (["models", "info", "Gemma4-12B-4bit"], ModelsDocuments.basePairBackendWider),
+                (["models", "info", "Qwen3-8B-4bit"], ModelsDocuments.basePairBackendChat),
+                (["models", "info", drafter], ModelsDocuments.basePairDrafter),
+                (["models", "info", drafter12B], ModelsDocuments.basePairDrafterWider),
+            ],
+            commands: [
+                (["__complete", "config", "set-backend", "Gemma4-E4B-4bit", "--draft"], ModelsDocuments.basePairCompleteBase),
+                (["__complete", "config", "set-backend", "Gemma4-12B-4bit", "--draft"], ModelsDocuments.basePairCompleteWider),
+            ])
+    }
+
+    /// The same home with the E4B paired and its drafter's directory then
+    /// deleted, its environment holding what the mlx ladder asks before the
+    /// draft rung, so the CLI's refusal is the draft's.
+    static let draftGoneRunner = PreviewRunner(reads: [
+        (["models", "list"], ModelsDocuments.draftGoneList),
+        (["models", "status"], ModelsDocuments.kindsRegisteredStatus),
+        (["models", "info", "Gemma4-E4B-4bit"], ModelsDocuments.draftGoneBackend),
+    ])
+
+    /// The E4B paired, then its directory's record rewritten as mlx-lm's build
+    /// (`chat`, `mlx_lm.convert 4bit`) -- a fake directory standing for a base
+    /// converted again as mlx-lm's build, its files unchanged.
+    static let draftRebuiltRunner = PreviewRunner(reads: [
+        (["models", "list"], ModelsDocuments.draftRebuiltList),
+        (["models", "status"], ModelsDocuments.kindsRegisteredStatus),
+        (["models", "info", "Gemma4-E4B-4bit"], ModelsDocuments.draftRebuiltBackend),
+    ])
+
+    /// Reads the backends, then opens `backend`'s details, as a person does.
+    static func showing(_ models: ModelsViewModel, _ backend: String) async {
+        await models.connect(binary: previewBinary)
+        if let row = models.rows.first(where: { $0.backend == backend && !$0.isStored }) { await models.select(row) }
+    }
+
+    /// Then asks to pair a drafter with it, from its details.
+    static func pairingDrafter(_ models: ModelsViewModel, _ backend: String) async {
+        await showing(models, backend)
+        if let row = models.selectedRow { await models.askToPairDrafter(row) }
+    }
+
     // MARK: - What an MLX conversion runs (the CLI's 53f-53m)
 
     static let routeLM = "Llama3.2-1B-Instruct/safetensors/edaba290ce7f"

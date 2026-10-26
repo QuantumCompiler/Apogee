@@ -103,6 +103,13 @@ public final class ModelsViewModel {
     public private(set) var adaptersFailure: String?
     /// The adapters being edited: the sheet's.
     public var editingAdapters: AdaptersForm?
+    /// Each `mlx` backend's drafter, by its name, as its `models info`'s
+    /// `draft:` line says it (the CLI's 53i) -- read with the list, since the
+    /// list says nothing of a pairing. Empty against a binary that states no
+    /// kind (before 53e), which is never asked.
+    public private(set) var drafts: [String: BackendDraft] = [:]
+    /// The pair sheet on a base, open (GUI M5).
+    public var pairingDrafter: DrafterPairing?
     /// Says one line in the window's toast.
     public var say: (@MainActor (String) -> Void)?
     /// Checks a model's files as a job on the Jobs tab (2i): the
@@ -136,7 +143,9 @@ public final class ModelsViewModel {
         await refresh()
     }
 
-    /// Reads `models list`, `models status`, and the selected model's details.
+    /// Reads `models list` -- and each `mlx` entry's drafter from its `models
+    /// info`, where the list states kinds (GUI M5) -- `models status`, and
+    /// the selected model's details.
     public func refresh() async {
         guard let binary else { return }
         if listing != .read { listing = .reading }
@@ -147,6 +156,7 @@ public final class ModelsViewModel {
         } else {
             listing = .failed(outcome.failure ?? "the list could not be read")
         }
+        await readDrafts()
         await readRoles()
         await readModelNames()
         if let selected {
@@ -199,6 +209,22 @@ public final class ModelsViewModel {
             backend: row.backend, rows: list.map { AdaptersView.Row(adapter: $0, check: checks[$0.path]) }, checkFailure: failure)
     }
 
+    /// Each `mlx` entry's drafter, from its `models info` (GUI M5): `models
+    /// list` names no pairing, so the `draft:` line is where the CLI says it.
+    /// A read that fails leaves that backend unmarked: nothing is guessed.
+    private func readDrafts() async {
+        guard let binary else { return }
+        var found: [String: BackendDraft] = [:]
+        for row in rows where Self.readsDraft(row) {
+            if let info = await runner.read(binary: binary, ["models", "info", row.backend]).document.map(ModelInfo.init),
+                let draft = BackendDraft(info)
+            {
+                found[row.backend] = draft
+            }
+        }
+        drafts = found
+    }
+
     private func readRoles() async {
         guard let binary else { return }
         let outcome = await runner.read(binary: binary, ["models", "status"])
@@ -225,8 +251,13 @@ public final class ModelsViewModel {
         let outcome = await runner.read(binary: binary, ["models", "info", name])
         guard selected == name else { return }
         if let document = outcome.document {
-            info = ModelInfo(document: document)
+            let read = ModelInfo(document: document)
+            info = read
             infoFailure = nil
+            // The details and the table's mark say the same drafter.
+            if let row = rows.first(where: { $0.name == name }), Self.readsDraft(row) {
+                drafts[row.backend] = BackendDraft(read)
+            }
         } else {
             info = nil
             infoFailure = outcome.failure
@@ -240,6 +271,77 @@ public final class ModelsViewModel {
     /// Stored weights are the store's, under Stored weights (2h).
     public var groups: [ModelGroup] {
         ModelGroup.grouping(rows.filter { !$0.isStored })
+    }
+
+    /// The Backends table's format cell, line by line. An `mlx` entry whose
+    /// row states its kind (the CLI's 53e) says it as Stored weights does,
+    /// `MLX · vision`, its precision on the line under it. Every other row --
+    /// and every row of a binary before 53e, which states no kind -- reads as
+    /// it always has: its format and precision on one line.
+    public static func formatLines(_ row: ModelRow) -> [String] {
+        let today = [row.format, row.quant].compactMap { $0 }.joined(separator: " · ")
+        guard !row.isStored, row.backendType == "mlx", let kind = row.mlxKind else { return [today] }
+        return ["MLX · " + kind.word] + (row.quant.map { [$0] } ?? [])
+    }
+
+    /// Whether `row`'s drafter is read with the list: an `mlx` entry whose row
+    /// states its kind. Only an `mlx` entry takes a `draft:` (the CLI's 53i),
+    /// and a binary that states no kind (before 53e) has no drafters, so
+    /// nothing is read from it that it did not read before.
+    static func readsDraft(_ row: ModelRow) -> Bool {
+        !row.isStored && row.backendType == "mlx" && row.mlxKind != nil
+    }
+
+    /// The mark beside a base with a drafter paired, as its `models info`'s
+    /// `draft:` line says it: the drafter named -- its store handle where the
+    /// list still names a stored drafter at that path, else the path as the
+    /// CLI wrote it -- and whether it drafts there or the CLI's words for why
+    /// it cannot. `nil` for a backend with none, and for every backend of a
+    /// binary before 53i.
+    public func drafterMark(_ row: ModelRow) -> DrafterMark? {
+        guard !row.isStored, let draft = drafts[row.backend] else { return nil }
+        let stored = rows.first { $0.isStored && $0.mlxKind == .drafter && draft.path.hasSuffix("/" + $0.model) }
+        return DrafterMark(drafter: stored?.model ?? draft.path, drafts: draft.drafts, said: draft.said)
+    }
+
+    /// Whether **Pair a drafter…** is offered on `row`: an `mlx` entry over a
+    /// `vision` model -- mlx-vlm's build, the only base a drafter runs beside
+    /// (the CLI's 53i) -- with no drafter paired. Never on mlx-lm's build
+    /// (`chat`) or any other kind, and never on a binary that states no kind.
+    public func offersDrafterPairing(_ row: ModelRow) -> Bool {
+        Self.readsDraft(row) && row.mlxKind == .vision && drafts[row.backend] == nil
+    }
+
+    /// Opens the pair sheet on a base: the drafters the binary's own
+    /// completion offers it (`__complete config set-backend <base> --draft
+    /// ""`, the CLI's 53i) -- its family and width, the base its record
+    /// names -- each with its directory and its line, from its `models info`.
+    /// The app works no pairing out itself; none offered, the sheet says so.
+    public func askToPairDrafter(_ row: ModelRow) async {
+        guard let binary, offersDrafterPairing(row), working == nil else { return }
+        working = "Asking which drafters pair"
+        let completed = await runner.command(binary: binary, ["__complete", "config", "set-backend", row.backend, "--draft", ""])
+        guard case .done(let stdout) = completed else {
+            working = nil
+            failure = completed.failure
+            return
+        }
+        var offers: [DrafterPairing.Offer] = []
+        for handle in stdout.split(whereSeparator: \.isNewline).map({ $0.trimmingCharacters(in: .whitespaces) }) where !handle.isEmpty {
+            let info = await runner.read(binary: binary, ["models", "info", handle]).document.map(ModelInfo.init)
+            offers.append(DrafterPairing.Offer(handle: handle, path: info?.field("model_path"), said: info?.field("drafter")))
+        }
+        working = nil
+        pairingDrafter = DrafterPairing(backend: row.backend, offers: offers)
+    }
+
+    /// The person's yes: `config set-backend <base> --draft <drafter path>`,
+    /// read back -- the details' Drafter and the table's mark then say it as
+    /// the CLI does.
+    public func pairDrafter() async {
+        guard let form = pairingDrafter, let arguments = form.arguments, let offer = form.offer else { return }
+        pairingDrafter = nil
+        await run(arguments, doing: "Pairing", done: "\(form.backend) drafts with \(offer.handle)")
     }
 
     /// The Backends tab's count; the store counts its own.
@@ -563,6 +665,93 @@ public struct BackendDraft: Equatable, Sendable {
             said = ""
         }
         drafter = info.field("drafter")
+    }
+
+    /// The CLI's words before why a pairing cannot run (`models info`'s
+    /// `draft:` line, 53i).
+    static let cannot = "cannot draft beside it: "
+
+    /// Why the drafter cannot run beside the backend, in the CLI's words --
+    /// its drafter gone, mlx-lm's build of the base, a base of another width,
+    /// with the way out it names -- or `nil` where it says nothing of the
+    /// kind (it drafts).
+    public var refusal: String? {
+        said.hasPrefix(Self.cannot) ? String(said.dropFirst(Self.cannot.count)) : nil
+    }
+
+    /// Whether the CLI says it drafts there: every line but a refusal.
+    public var drafts: Bool { refusal == nil }
+}
+
+/// The Backends table's mark on a base with a drafter paired (GUI M5): a
+/// small glyph, the drafter's name and the CLI's words in its tooltip --
+/// drawn as a warning where the CLI says it can no longer draft.
+public struct DrafterMark: Equatable, Sendable {
+    /// The drafter: its store handle, or its path where the store no longer
+    /// lists it.
+    public let drafter: String
+    /// Whether it drafts beside the base, as the CLI says.
+    public let drafts: Bool
+    /// The CLI's words on it (`drafts beside it …` or `cannot draft beside
+    /// it: …`).
+    public let said: String
+
+    public init(drafter: String, drafts: Bool, said: String) {
+        self.drafter = drafter
+        self.drafts = drafts
+        self.said = said
+    }
+
+    /// The tooltip: the drafter, then the CLI's words.
+    public var help: String { "Drafter: " + drafter + (said.isEmpty ? "" : " -- " + said) }
+}
+
+/// `config set-backend <base> --draft <drafter path>`, as the pair sheet on a
+/// base builds it (GUI M5; the CLI's 53i): a drafter chosen among those the
+/// binary's completion offers that base, never worked out here.
+public struct DrafterPairing: Equatable, Identifiable, Sendable {
+    /// A drafter the completion offers, as its `models info` says it.
+    public struct Offer: Equatable, Identifiable, Sendable {
+        /// Its store handle, as the completion offers it.
+        public let handle: String
+        /// Its directory (`model_path`), where its `models info` was read.
+        public let path: String?
+        /// The CLI's line for it (`a drafter (…) for a 2560-wide gemma4
+        /// model, its record naming Gemma4-E4B`).
+        public let said: String?
+        public var id: String { handle }
+
+        public init(handle: String, path: String?, said: String?) {
+            self.handle = handle
+            self.path = path
+            self.said = said
+        }
+
+        /// What `--draft` is given: its directory, as 3b passes it -- else
+        /// its handle, which the CLI takes too (both recorded taken).
+        public var draft: String { path ?? handle }
+    }
+
+    /// The base's backend.
+    public let backend: String
+    /// What the binary offers, in its order.
+    public let offers: [Offer]
+    /// The drafter picked: the first offered, until the person picks.
+    public var chosen: String?
+    public var id: String { backend }
+
+    public init(backend: String, offers: [Offer]) {
+        self.backend = backend
+        self.offers = offers
+        chosen = offers.first?.handle
+    }
+
+    /// The drafter picked, as offered.
+    public var offer: Offer? { offers.first { $0.handle == chosen } }
+
+    /// The command, as typed; `nil` while none is offered.
+    public var arguments: [String]? {
+        offer.map { ["config", "set-backend", backend, "--draft", $0.draft] }
     }
 }
 
