@@ -11,7 +11,7 @@ It is a reference for building the apps under `lib/src/darwin/`, `linux/` and `w
 | `CLAUDE.md` | How to work on the design: keeping it in step with the canvas, what each kind of change touches, the format's rules, and how to check a change. Repo-only. |
 | `html/main.html` | **The entry point**: the interactive prototype, with every screen, overlay and flow in one file. |
 | `html/support.js` | The standalone runtime that lets the design files open in a browser (below). Repo-only: the canvas serves its own. |
-| `html/Screen*.dc.html` | One board per screen and state (50), each mounting the prototype at a starting point, so they cannot drift from it. |
+| `html/Screen*.dc.html` | One board per screen and state (53), each mounting the prototype at a starting point, so they cannot drift from it. |
 | `html/BuildContract.dc.html` | How the app talks to Apogee: startup, each part of the design mapped to the event or command behind it, the CLI gaps (G1–G24, sixteen of them closed as of apogee 0.2.0) with their fallbacks, and the decisions the design makes. |
 | `html/BuildLayout.dc.html` | Regions and sizes, navigation and keys, the states every screen draws, and each piece as SwiftUI, Qt Quick and WinUI. |
 | `html/BuildProcesses.dc.html` | The process diagram: the app, its `apogee` children, and the files it reads and writes. |

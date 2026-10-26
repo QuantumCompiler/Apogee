@@ -2423,3 +2423,71 @@ Probed on the branch's binary over sandboxes:
 - **The app's Halt during a pass** still says the halt is lost (4j); since the CLI's M30 it is kept.
 - **The app's Pipelines tab** still names specs from completion, not `train pipeline list`.
 - **The contract board** renders taller than its canvas frame (about 8,900 px against 5,600), as it already did before this change.
+
+### 2026-10-26 — `design-draws-track-4-additions` (maintenance item M12): the design draws track 4's other additions
+
+**Why.** Track 4 and M5 grew the app's existing screens with states and controls the design never drew. Each item recorded it under "Not done", and 4l listed them together. Training's tabs were M11; this item is everything else, so the design is again the reference a Linux or Windows build can take whole.
+
+- [x] **Sessions** (`lib/design/spec/html/main.html`):
+  - the private conversation's keep-or-end question (before, the prototype wiped it);
+  - the strip of lines held for the turn's end;
+  - a card closed by its turn, Stop now showing while a card waits;
+  - the read's warning row above a resumed chat's earlier turns;
+  - the suite chooser (`/suite`, the header's suite name, "Choose a suite");
+  - a row's ⋯ menu with Details…, Rename…, Compact… and Delete…, and the inspector's SESSION and RECALL sections with Forget.
+- [x] **Models:**
+  - both tabs' delete confirms showing the CLI's plan (the second button only when it names a backend), and the narration card after;
+  - a backend's ADAPTERS section and sheet;
+  - `MLX · vision` over the precision;
+  - a paired 12B's drafter glyph, DRAFTER section and Unpair;
+  - an E4B whose drafter was deleted, in the CLI's "cannot draft beside it:" words;
+  - Pair a drafter…, offering what pairs or "No stored drafter pairs with …".
+- [x] **Media:**
+  - the install card running, failed (the recording's offline-pip words), stopped and done, behind the app's consent sheet;
+  - compose's voice-model picker, its captions line with the remedy, "Planned …", the edit preview's "at most 5 minutes" with Stop, and two skipped projects;
+  - the install card on `ComponentsMedia`.
+- [x] **Settings:**
+  - General's passed-over override, now the default world;
+  - Backends & keys' vendor-run tools on the cloud rows, PROVIDERS ON THIS MACHINE with a registrable Gemini CLI, and HEALTH with its remedies and fixes.
+- [x] **Training and Suites:**
+  - Promote… with adapter mode, its refusals and "Change the promotion…" reopening it, and the PROMOTED VERSIONS list;
+  - datasets Pull…, its replayed bar and Prepare it;
+  - the Suites screen redrawn as the CLI's verdict, with Open a chat under it and Switch the session to it ("… anyway" on a suite that doesn't fit).
+- [x] **Library, Tasks, Knowledge, Review and Graph:**
+  - the editor read-only while saving, then its verdict;
+  - MCP Remove…;
+  - an interrupted task's Resume in its folder;
+  - a record's RAW CONVERSATION;
+  - the target sheet's lenses;
+  - Graph's More menu (export three ways, the report, dedupe with Merge, delete to the empty state).
+- [x] **The machine's own states** (failed reads, no binary) are reached by a new prototype prop, `apogee`: `installed` (the default), `missing` or `config-typo`.
+- [x] **Three new boards:** `ScreenSessionSuite.dc.html` (`chat:suite`), `ScreenModelsDelete.dc.html` (`models:delete`) and `ScreenVideoInstall.dc.html` (`video:install`), each beside its siblings in `json/canvas.json`, the row headings widened. The README counts 53 boards.
+- [x] **The contract board** gains a Sessions row for the suite (the app's own restart, since machine mode carries no suite in the app's binary) and a Code graph row for export, report, dedupe and delete. Rows for `chats info`, `datasets pull`, `config delete-mcp-server` and `knowledge info --raw` are extended. Stats went from 76 / 11 / 8 / 0 to 77 / 12 / 8 / 0, the chips matching, with no gap added.
+- [x] **The canvas,** read first: its `App.dc.html`, `BuildContract.dc.html`, `ComponentsMedia.dc.html` and `canvas.json` were byte-identical to the repo's. All seven changed files were published (canvas version 49) and read back identical.
+
+**Decisions made while building** (2026-10-26, each recorded for veto):
+- **The defaults, taken:**
+  - exactly the three boards named, everything else in `main.html`;
+  - the item finished in one session, so nothing shipped place by place.
+- **The `apogee` prop** models what the machine decides (a missing binary, a config typo) rather than a fake flow, keeping the starts one-to-one with boards.
+- **Existing boards changed to match the app:**
+  - every session board gains the inspector's SESSION section;
+  - Training shows two runs and the promoted versions;
+  - Settings › General shows the passed-over override;
+  - the Suites screen is redrawn, the design's old estimator, window picker and keep-loaded toggles removed;
+  - the private empty state takes the app's current words.
+- **The CLI's words over the app's** where they differ, as M11 did: the default-suite toasts, the Suites screen's suite names, `/Users/someone/…` in CLI lines.
+- **States the CLI's M29–M33 changed are drawn as the app draws them today:** the footprint as text, registration through `config add-backend`, recall as its count.
+
+**Verified.**
+- **The design's health check:** 53 start screens, no problems, under each `apogee` value. 36 interactive states opened in Node came back clean.
+- **Markup** balanced in every changed file. All 2,338 holes in `main.html` are plain dotted lookups. No colour is hard-coded but the modal scrim.
+- **Words** checked against the app's sources, the recordings and the CLI source. The values filling sourced templates (sizes, ids, times, counts) are the design's own, as M11's were.
+- **Served locally and opened:** the three new boards, and a run through each place's new states.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 4,059 tests and the macOS app's 834 cases passed; no code changed in this item.
+
+**Not done:**
+- The edit preview's five-minute timeout alert can't be reached, since the prototype's preview ends after four ticks.
+- Register… for Ollama isn't drawn, since Ollama isn't in the design's world.
+- The no-binary words on Training's Pipelines, Cycle and Regimes tabs, and Voice's skipped records, weren't in this item's list.
+- `ComponentsMedia` renders taller than its canvas frame, as it already did.

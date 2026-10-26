@@ -587,6 +587,33 @@
       "y": 2720,
       "title": "Training · the cycle and its passes",
       "page": "build"
+    },
+    "ScreenSessionSuite.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 16720,
+      "y": 1400,
+      "title": "Session · choosing a suite",
+      "page": "build"
+    },
+    "ScreenModelsDelete.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 39520,
+      "y": 2720,
+      "title": "Models · a delete, the CLI’s plan first",
+      "page": "build"
+    },
+    "ScreenVideoInstall.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 12160,
+      "y": 4040,
+      "title": "Video · installing what a run needs",
+      "page": "build"
     }
   },
   "createdOnFiles": {
@@ -609,7 +636,7 @@
     },
     "sessions": {
       "kind": "title1",
-      "maxW": 16640,
+      "maxW": 18160,
       "text": "Screens — sessions, the system monitor and the console",
       "x": 0,
       "y": 1100,
@@ -617,7 +644,7 @@
     },
     "library": {
       "kind": "title1",
-      "maxW": 39440,
+      "maxW": 40960,
       "text": "Screens — models, suites, tasks, the code graph, knowledge, training, the library and review",
       "x": 0,
       "y": 2420,
@@ -625,7 +652,7 @@
     },
     "media": {
       "kind": "title1",
-      "maxW": 12080,
+      "maxW": 13600,
       "text": "Screens — video and voice",
       "x": 0,
       "y": 3740,
@@ -681,6 +708,7 @@
     "ScreenSessionPrivate.dc.html",
     "ScreenSessionPlay.dc.html",
     "ScreenSessionExecute.dc.html",
+    "ScreenSessionSuite.dc.html",
     "ScreenMonitor.dc.html",
     "ScreenConsole.dc.html",
     "ScreenModels.dc.html",
@@ -690,6 +718,7 @@
     "ScreenModelsDownloads.dc.html",
     "ScreenModelsRoles.dc.html",
     "ScreenDownload.dc.html",
+    "ScreenModelsDelete.dc.html",
     "ScreenSuites.dc.html",
     "ScreenTasks.dc.html",
     "ScreenNewTask.dc.html",
@@ -712,6 +741,7 @@
     "ScreenVideoClip.dc.html",
     "ScreenVideoRun.dc.html",
     "ScreenVideoConsent.dc.html",
+    "ScreenVideoInstall.dc.html",
     "ScreenCompose.dc.html",
     "ScreenComposeEdit.dc.html",
     "ScreenComposeNew.dc.html",

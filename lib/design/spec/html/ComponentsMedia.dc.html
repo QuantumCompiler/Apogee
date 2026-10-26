@@ -324,33 +324,54 @@ changed: 50 steps (--final)</div>
 </div>
 
 <section class="sec">
-<h2 style="margin: 0 0 4px; font-size: 18px; font-weight: 600">The install prompt</h2>
-<p style="margin: 0 0 24px; max-width: 780px; font-size: 13.5px; color: var(--text-secondary)">A child process on a pipe never asks, so the app asks: what is missing, the set it belongs to, where it goes and roughly how big. A yes runs <span class="mono">apogee train setup --with &lt;set&gt;</span> and the run that needed it carries on.</p>
+<h2 style="margin: 0 0 4px; font-size: 18px; font-weight: 600">Installing what a run needs</h2>
+<p style="margin: 0 0 24px; max-width: 780px; font-size: 13.5px; color: var(--text-secondary)">A child process on a pipe never asks, so the app asks, with the refusal in the CLI’s words. A yes runs <span class="mono">apogee train setup --with &lt;set&gt;</span> as a supervised job, drawn by one shared card at the top of the place’s list: running with Stop, then installed, stopped or failed with Dismiss. The run that was refused runs again once the set is in.</p>
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 32px 40px; align-items: start">
 <div>
 <p class="lbl">ASKING</p>
-<div role="dialog" aria-label="Install peft" style="border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-card)">
-<div style="padding: 18px 20px 6px"><h3 style="margin: 0; font-size: var(--t-h2); font-weight: 600">LoRAs need peft</h3><p style="margin: 6px 0 0; color: var(--text-secondary)">diffusers loads a LoRA through peft, and Apogee’s Python environment doesn’t have it yet. It’s the one package of the video set that’s missing.</p></div>
-<div style="padding: 12px 20px; display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px 12px; font-size: var(--t-small)"><span class="k">Needs</span><span class="mono" style="font-size: var(--t-ui)">peft&gt;=0.13 · small, pure Python</span><span class="k">The set</span><span class="mono" style="font-size: var(--t-ui)">video: torch diffusers transformers accelerate ftfy sentencepiece peft</span><span class="k">Into</span><span>~/.apogee/training/venv, by its own pip, and nowhere else</span></div>
-<div style="display: flex; align-items: center; gap: 8px; padding: 12px 20px 18px"><span class="mono" style="flex: 1 1 auto; font-size: var(--t-meta); color: var(--text-tertiary)">apogee train setup --with video</span><button type="button" class="btn-g">Not now</button><button type="button" class="btn-p">Install</button></div>
+<div role="dialog" aria-label="Install what video needs?" style="border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-card)">
+<div style="padding: 18px 20px 6px"><h3 style="margin: 0; font-size: var(--t-h2); font-weight: 600">Install what video needs?</h3></div>
+<div style="padding: 10px 20px; display: flex; flex-direction: column; gap: 12px; font-size: var(--t-small)">
+<p class="mono" style="margin: 0; font-size: var(--t-meta); color: var(--text-primary); overflow-wrap: anywhere">apogee video generate: a LoRA loads through peft, which the video runtime does not have yet -- apogee train setup --with video</p>
+<p style="margin: 0; color: var(--text-secondary)">This downloads and installs Python packages into Apogee's own environment, once. Nothing is installed unless you say yes; the install runs here, with Stop, and what was refused runs again once it is in.</p>
+<div class="mono" style="padding: 8px 10px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); color: var(--text-secondary)">apogee train setup --with video</div>
+</div>
+<div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 20px 18px"><button type="button" class="btn-g">Not now</button><button type="button" class="btn-p">Install</button></div>
 </div>
 </div>
 <div>
-<p class="lbl">INSTALLING</p>
-<div role="dialog" aria-label="Installing peft" style="border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-card)">
-<div style="padding: 18px 20px 6px"><h3 style="margin: 0; font-size: var(--t-h2); font-weight: 600">LoRAs need peft</h3></div>
-<div style="padding: 12px 20px; display: flex; flex-direction: column; gap: 10px">
-<div style="height: 5px; border-radius: 3px; background: var(--line-border); overflow: hidden"><div style="width: 70%; height: 100%; background: var(--status-accent)"></div></div>
-<div class="mono" style="padding: 10px 12px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); line-height: 1.7; color: var(--text-secondary); white-space: pre-wrap">installing the ‘video’ set: torch diffusers transformers accelerate ftfy sentencepiece peft …
-  torch 2.8.0 · already installed
-  diffusers 0.35.1 · already installed
-  peft 0.17.1 · downloaded</div>
+<p class="lbl">THE INSTALL CARD</p>
+<div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+<div class="card" role="status" style="width: 264px; box-sizing: border-box; padding: 12px; border-color: var(--line-border)">
+<div style="display: flex; align-items: flex-start; gap: 8px"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="margin-top: 2px; color: var(--status-accent)"><circle cx="8" cy="8" r="5.5"></circle><path d="M8 5v6M5.5 8.5L8 11l2.5-2.5"></path></svg><span style="flex: 1 1 auto; min-width: 0; font-size: var(--t-body); font-weight: 500">Installing the video set</span></div>
+<div aria-hidden="true" style="height: 4px; margin-top: 8px; border-radius: 2px; background: var(--line-border); overflow: hidden"><div class="pulse" style="width: 100%; height: 100%; background: var(--status-accent)"></div></div>
+<div class="mono" style="display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin-top: 8px; font-size: var(--t-meta); line-height: 1.5; color: var(--text-tertiary); white-space: pre-wrap; overflow-wrap: anywhere">installing the 'video' set: torch&gt;=2.6 diffusers&gt;=0.35 transformers&gt;=4.46 accelerate&gt;=1.0 ftfy&gt;=6.1 sentencepiece&gt;=0.2 peft&gt;=0.13 ...</div>
+<div class="mono" style="margin-top: 6px; font-size: var(--t-meta); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">apogee train setup --with video</div>
+<div style="margin-top: 8px"><button type="button" class="btn-g" style="height: 24px; font-size: var(--t-small)">Stop</button></div>
 </div>
-<div style="display: flex; align-items: center; gap: 8px; padding: 12px 20px 18px"><span style="flex: 1 1 auto; font-size: var(--t-small); color: var(--text-tertiary)">The clip starts as soon as it’s installed.</span><button type="button" class="btn-g">Hide</button></div>
+<div class="card" role="status" style="width: 264px; box-sizing: border-box; padding: 12px; border-color: var(--status-error)">
+<div style="display: flex; align-items: flex-start; gap: 8px"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="margin-top: 2px; color: var(--status-error)"><path d="M8 2.5l6 10.5H2z"></path><path d="M8 6.5v3M8 11.2v.1"></path></svg><span style="flex: 1 1 auto; min-width: 0; font-size: var(--t-body); font-weight: 500">The video set did not install</span></div>
+<div class="mono" style="margin-top: 8px; font-size: var(--t-meta); line-height: 1.5; color: var(--status-error); white-space: pre-wrap; overflow-wrap: anywhere">apogee train: pip install for the 'video' set failed (exit code 1):
+ERROR: Could not install packages: this sandbox's pip is a stub with no network</div>
+<div class="mono" style="margin-top: 6px; font-size: var(--t-meta); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">apogee train setup --with video</div>
+<div style="margin-top: 8px"><button type="button" class="btn-g" style="height: 24px; font-size: var(--t-small)">Dismiss</button></div>
+</div>
+<div class="card" role="status" style="width: 264px; box-sizing: border-box; padding: 12px; border-color: var(--line-border)">
+<div style="display: flex; align-items: flex-start; gap: 8px"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="margin-top: 2px; color: var(--status-accent)"><circle cx="8" cy="8" r="5.5"></circle><path d="M5.5 8.2l1.8 1.8 3.2-3.6"></path></svg><span style="flex: 1 1 auto; min-width: 0; font-size: var(--t-body); font-weight: 500">Installed the video set</span></div>
+<div class="mono" style="margin-top: 8px; font-size: var(--t-meta); line-height: 1.5; color: var(--text-tertiary); white-space: pre-wrap; overflow-wrap: anywhere">python env: at /Users/someone/.apogee/training/venv; sets: video</div>
+<div class="mono" style="margin-top: 6px; font-size: var(--t-meta); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">apogee train setup --with video</div>
+<div style="margin-top: 8px"><button type="button" class="btn-g" style="height: 24px; font-size: var(--t-small)">Dismiss</button></div>
+</div>
+<div class="card" role="status" style="width: 264px; box-sizing: border-box; padding: 12px; border-color: var(--line-border)">
+<div style="display: flex; align-items: flex-start; gap: 8px"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="margin-top: 2px; color: var(--text-tertiary)"><circle cx="8" cy="8" r="5.5"></circle><rect x="6" y="6" width="4" height="4" rx=".5"></rect></svg><span style="flex: 1 1 auto; min-width: 0; font-size: var(--t-body); font-weight: 500">The video set's install was stopped before it finished</span></div>
+<div class="mono" style="display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; margin-top: 8px; font-size: var(--t-meta); line-height: 1.5; color: var(--text-tertiary); white-space: pre-wrap; overflow-wrap: anywhere">installing the 'video' set: torch&gt;=2.6 diffusers&gt;=0.35 transformers&gt;=4.46 accelerate&gt;=1.0 ftfy&gt;=6.1 sentencepiece&gt;=0.2 peft&gt;=0.13 ...</div>
+<div class="mono" style="margin-top: 6px; font-size: var(--t-meta); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">apogee train setup --with video</div>
+<div style="margin-top: 8px"><button type="button" class="btn-g" style="height: 24px; font-size: var(--t-small)">Dismiss</button></div>
 </div>
 </div>
 </div>
-<p class="cap">The video set’s full size is “several gigabytes” and the voice set’s “a few gigabytes with torch, far less without”: the CLI’s own words, since nothing measures the download first.</p>
+</div>
+<p class="cap">Running, failed, installed and stopped, as the app’s InstallCard folds the install’s output: its last line while it runs, the CLI’s failure in full when it fails.</p>
 </section>
 
 </div>
