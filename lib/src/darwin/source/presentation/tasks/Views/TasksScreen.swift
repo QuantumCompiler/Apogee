@@ -93,26 +93,32 @@ struct TaskDetail: View {
     var body: some View {
         if let id = model.selected, let view = model.shown {
             let run = model.run(for: id)
-            let status = run?.state.status ?? view.status
+            let live = run?.isRunning == true ? run : nil
+            let status = live?.state.status ?? view.status
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.l) {
                     VStack(alignment: .leading, spacing: Spacing.xs) {
                         Text(view.goal).font(.apogeeHeading).foregroundStyle(Palette.textPrimary)
-                        Text([TaskStatusWords.say(status), "\(run?.state.roundsUsed ?? view.roundsUsed) of \(view.roundsBudget) rounds", model.elapsed(view), view.id]
+                        Text([live == nil ? TaskStatusWords.say(view) : TaskStatusWords.say(status), "\(live?.state.roundsUsed ?? view.roundsUsed) of \(view.roundsBudget) rounds", model.elapsed(view), view.id]
                             .filter { !$0.isEmpty }.joined(separator: " · "))
                             .font(.apogeeMeta.monospaced())
                             .foregroundStyle(Palette.textTertiary)
                     }
                     HStack(spacing: Spacing.s) {
-                        if TasksViewModel.canStop(status) {
+                        if model.stoppable(id) {
                             Button("Stop after this round") { Task { await model.halt(id) } }
                             Button("Stop now") { Task { await model.cancel(id) } }
                         }
-                        if TasksViewModel.canResume(status) && run?.isRunning != true {
+                        if model.resumable(id) {
                             Button("Resume") { model.resume(id) }
+                            Text("in \(view.folder), where it was started").font(.apogeeMeta).foregroundStyle(Palette.textTertiary).lineLimit(1).truncationMode(.middle)
                         }
                     }
-                    if let finished = run?.state.finished {
+                    if live == nil && view.interrupted {
+                        Text("Its process is gone: it was killed mid-round, and Resume runs that round again.")
+                            .font(.apogeeBody)
+                            .foregroundStyle(Palette.warning)
+                    } else if let finished = run?.state.finished {
                         Text(finished.reason).font(.apogeeBody).foregroundStyle(finished.status == "done" ? Palette.accent : Palette.warning)
                     } else if !view.reason.isEmpty && !view.isRunning {
                         Text(view.reason).font(.apogeeBody).foregroundStyle(view.status == "done" ? Palette.accent : Palette.warning)
@@ -320,6 +326,11 @@ struct NewTaskSheet: View {
 
 /// A task's status in plain words.
 enum TaskStatusWords {
+    /// A read's status: one killed mid-round says so, as `task status` does.
+    static func say(_ view: TaskView) -> String {
+        view.interrupted ? "\(say(view.status)), interrupted" : say(view.status)
+    }
+
     static func say(_ status: String) -> String {
         switch status {
         case "planning": "planning"
@@ -398,6 +409,36 @@ enum TaskStatusWords {
         .task {
             await tasks.connect(binary: previewBinary)
             await tasks.select(TasksPreview.task)
+        }
+}
+
+#Preview("A task killed mid-round: Resume, in its folder") {
+    let tasks = TasksPreview.stopped()
+    TasksScreen(model: tasks)
+        .frame(width: 1100, height: 560)
+        .task {
+            await tasks.connect(binary: previewBinary)
+            await tasks.select(TasksPreview.interrupted)
+        }
+}
+
+#Preview("A task killed mid-round, its page") {
+    let tasks = TasksPreview.stopped()
+    TaskDetail(model: tasks)
+        .frame(width: 800, height: 520)
+        .task {
+            await tasks.connect(binary: previewBinary)
+            await tasks.select(TasksPreview.interrupted)
+        }
+}
+
+#Preview("An exhausted task: no Resume") {
+    let tasks = TasksPreview.stopped(listing: TasksPreview.empty)
+    TaskDetail(model: tasks)
+        .frame(width: 800, height: 560)
+        .task {
+            await tasks.connect(binary: previewBinary)
+            await tasks.select(TasksPreview.exhausted)
         }
 }
 

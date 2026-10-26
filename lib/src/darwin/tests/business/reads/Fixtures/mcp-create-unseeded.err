@@ -1,0 +1,1 @@
+apogee mcp: the 'code-exec' preset cannot run here: code_exec_server.py is not seeded under /Users/someone/.apogee/training/scripts -- apogee check --fix

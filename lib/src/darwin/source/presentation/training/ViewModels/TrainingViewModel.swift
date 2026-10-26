@@ -122,6 +122,21 @@ public final class TrainingViewModel {
         case create
     }
 
+    /// Where one of the place's reads stands: not read yet, read, no apogee,
+    /// or a failed read -- said where what it reads is drawn, in the CLI's
+    /// words, as Records and Tasks say theirs (GUI 4h). A failed refresh keeps
+    /// the rows read before.
+    public enum Listing: Equatable, Sendable {
+        case notRead
+        case read
+        case missing
+        case failed(String)
+
+        static func of(_ outcome: ReadOutcome) -> Listing {
+            outcome.document != nil ? .read : .failed(outcome.failure ?? "apogee printed nothing to read")
+        }
+    }
+
     public var tab: Tab = .runs
     public private(set) var status: TrainingStatus?
     public private(set) var ledgers: [VersionLedger] = []
@@ -143,6 +158,15 @@ public final class TrainingViewModel {
     /// `template`, `sessions` or `empty`.
     public var createFrom = "template"
     public var pending: Pending?
+    /// Each read's standing: `train status` (the runs), `train versions`,
+    /// `train regime list`, `datasets kits`, `datasets list`, and `models list
+    /// --all` (the students and the backends the sheets offer).
+    public private(set) var runsListing: Listing = .notRead
+    public private(set) var versionsListing: Listing = .notRead
+    public private(set) var regimesListing: Listing = .notRead
+    public private(set) var kitsListing: Listing = .notRead
+    public private(set) var datasetsListing: Listing = .notRead
+    public private(set) var modelsListing: Listing = .notRead
     /// The act running now: what it is, and its progress.
     public private(set) var running: String?
     public private(set) var run: JobProgress?
@@ -159,8 +183,15 @@ public final class TrainingViewModel {
         self.starter = starter
     }
 
+    /// With no apogee, the place is its empty state -- `missingText`, said
+    /// where its lists are -- never an alert, so no visit raises one (GUI 4h).
     public func connect(binary: URL?) async {
         self.binary = binary
+        guard binary != nil else {
+            (runsListing, versionsListing, regimesListing) = (.missing, .missing, .missing)
+            (kitsListing, datasetsListing, modelsListing) = (.missing, .missing, .missing)
+            return
+        }
         await refresh()
     }
 
@@ -168,23 +199,60 @@ public final class TrainingViewModel {
         await refresh()
     }
 
-    /// Every document the place shows, read again.
+    /// Every document the place shows, read again. Each failed read is said
+    /// where what it reads is drawn, the rows read before kept.
     public func refresh() async {
-        guard let binary else {
-            failure = "Apogee isn't installed, so there is nothing to train."
-            return
-        }
-        if let document = await runner.read(binary: binary, ["train", "status"]).document {
-            status = TrainingStatus(document: document)
-        }
-        ledgers = await runner.read(binary: binary, ["train", "versions"]).document.map(VersionLedger.list) ?? ledgers
-        regimes = await runner.read(binary: binary, ["train", "regime", "list"]).document.map(TrainingRegime.list) ?? regimes
-        kits = await runner.read(binary: binary, ["datasets", "kits"]).document.map(TrainingKit.list) ?? kits
-        datasets = await runner.read(binary: binary, ["datasets", "list"]).document.map(TrainingDataset.list) ?? datasets
-        if let document = await runner.read(binary: binary, ["models", "list", "--all"]).document {
+        guard let binary else { return }
+        let read = await runner.read(binary: binary, ["train", "status"])
+        if let document = read.document { status = TrainingStatus(document: document) }
+        runsListing = .of(read)
+        let versions = await runner.read(binary: binary, ["train", "versions"])
+        if let document = versions.document { ledgers = VersionLedger.list(from: document) }
+        versionsListing = .of(versions)
+        let regimes = await runner.read(binary: binary, ["train", "regime", "list"])
+        if let document = regimes.document { self.regimes = TrainingRegime.list(from: document) }
+        regimesListing = .of(regimes)
+        let kits = await runner.read(binary: binary, ["datasets", "kits"])
+        if let document = kits.document { self.kits = TrainingKit.list(from: document) }
+        kitsListing = .of(kits)
+        let datasets = await runner.read(binary: binary, ["datasets", "list"])
+        if let document = datasets.document { self.datasets = TrainingDataset.list(from: document) }
+        datasetsListing = .of(datasets)
+        let models = await runner.read(binary: binary, ["models", "list", "--all"])
+        if let document = models.document {
             let rows = ModelRow.list(from: document)
             students = rows.filter { $0.isStored && $0.format == "safetensors" }.map(\.name)
             backends = rows.filter { !$0.isStored }.map(\.backend)
+        }
+        modelsListing = .of(models)
+    }
+
+    static let missingWords = "Apogee isn't installed, so there is nothing to train."
+
+    /// What each tab says where its list is when there is no apogee.
+    public var missingText: String? { runsListing == .missing ? Self.missingWords : nil }
+
+    /// What the runs list says: no apogee, or why `train status` failed.
+    public var runsText: String? { Self.text(runsListing, "runs", missing: true) }
+    /// What the promoted versions say when `train versions` failed.
+    public var versionsText: String? { Self.text(versionsListing, "promoted versions") }
+    /// What the regimes list says: no apogee, or why it failed.
+    public var regimesText: String? { Self.text(regimesListing, "regimes", missing: true) }
+    /// What the datasets list says: no apogee, or why it failed.
+    public var datasetsText: String? { Self.text(datasetsListing, "datasets", missing: true) }
+    /// What the kits say when `datasets kits` failed.
+    public var kitsText: String? { Self.text(kitsListing, "kits") }
+    /// What the sheets that pick a student or a teacher say when `models list
+    /// --all` failed.
+    public var modelsText: String? { Self.text(modelsListing, "stored models") }
+
+    /// A list's line: why its read failed, or -- for a tab's own list -- that
+    /// there is no apogee, said once a tab.
+    private static func text(_ listing: Listing, _ what: String, missing: Bool = false) -> String? {
+        switch listing {
+        case .notRead, .read: nil
+        case .missing: missing ? missingWords : nil
+        case .failed(let message): "The \(what) could not be read: \(message)"
         }
     }
 
@@ -271,30 +339,35 @@ public final class TrainingViewModel {
         start(["datasets", "prepare", path], doing: "Preparing")
     }
 
-    /// `datasets create <name> --from <template|sessions|empty>`, read back.
+    /// `datasets create <name> --from <template|sessions|empty>`, read back;
+    /// the new dataset is selected only once the binary made it -- a refusal
+    /// keeps the selection and is said (GUI 4h).
     public func createDataset() async {
         let name = createName.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
         sheet = nil
-        await change(["datasets", "create", name, "--from", createFrom])
-        selectedDataset = name
+        if await change(["datasets", "create", name, "--from", createFrom]) { selectedDataset = name }
     }
 
     public func confirm() async {
         guard let pending else { return }
         self.pending = nil
-        await change(pending.arguments)
+        _ = await change(pending.arguments)
     }
 
-    private func change(_ arguments: [String]) async {
-        guard let binary else { return }
+    /// Runs a change, reads back, and says how it went; whether it was done.
+    private func change(_ arguments: [String]) async -> Bool {
+        guard let binary else { return false }
         let outcome = await runner.command(binary: binary, arguments)
         await refresh()
         if let failure = outcome.failure {
             self.failure = failure
-        } else if case .done(let stdout) = outcome {
+            return false
+        }
+        if case .done(let stdout) = outcome {
             say?(stdout.split(whereSeparator: \.isNewline).last.map(String.init) ?? "Done")
         }
+        return true
     }
 
     public var isRunning: Bool { job != nil }

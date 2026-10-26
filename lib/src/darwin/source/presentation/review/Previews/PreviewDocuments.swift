@@ -40,5 +40,9 @@ enum ReviewDocuments {
 [review] reading github.com/acme/widget#12
 apogee review: gh is not installed, or not on PATH (the GitHub CLI is how Apogee reaches github, under its own login) -- install the GitHub CLI (https://cli.github.com), then: gh auth login
 """#
+    /// tests/business/reads/Fixtures/review-targets-bad-config.err
+    static let targetsBadConfig = #"""
+apogee review: /Users/someone/.apogee/config/config.json: not valid JSON: line 4, column 5: expected ',' or '}' after a member
+"""#
 }
 #endif

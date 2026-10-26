@@ -20,6 +20,18 @@ enum ReviewPreview {
         (["review", "skills", "list"], ReviewDocuments.skills),
     ])
 
+    /// A config hand-edited into invalid JSON (a missing comma): `review
+    /// targets` refuses it in its recorded words, while the skills, which
+    /// read no config, still list.
+    static let badConfig = PreviewRunner(
+        reads: [(["review", "skills", "list"], ReviewDocuments.skills)],
+        refusals: [(["review", "targets"], ReviewDocuments.targetsBadConfig)])
+
+    /// The lenses the recorded skills list names.
+    static var lenses: [String] {
+        ReadDocument(text: ReviewDocuments.skills).map(ReviewSkill.list(from:))?.map(\.name) ?? []
+    }
+
     /// The reviewer's narration, as tests/presentation/review's `finish` has
     /// the CLI say it.
     static let narration: JobUpdate = .busy("[review] hunting with security")

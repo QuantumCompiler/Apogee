@@ -36,6 +36,22 @@ enum TasksPreview {
         TasksDocuments.taskRun.split(separator: "\n").prefix(16).map { .event(JobEvent.decode(line: String($0))) }
     }
 
+    /// The two tasks GUI 4h recorded from the branch's binary: one killed
+    /// (SIGKILL) in its first round, and one that spent its one round.
+    static let interrupted = "task-20261026-060911"
+    static let exhausted = "task-20261026-060918"
+
+    /// Tasks over 4h's recordings: `task list` with the killed task, and
+    /// each task's `task status`.
+    static func stopped(listing list: String = TasksDocuments.listInterrupted) -> TasksViewModel {
+        let runner = PreviewRunner(reads: [
+            (["task", "list"], list),
+            (["task", "status", interrupted], TasksDocuments.statusInterrupted),
+            (["task", "status", exhausted], TasksDocuments.statusExhausted),
+        ])
+        return TasksViewModel(runner: runner, starter: PreviewJobs(), now: { recorded })
+    }
+
     static func tasks(listing list: String = listed, said: [JobUpdate] = []) -> TasksViewModel {
         TasksViewModel(runner: runner(listing: list), starter: PreviewJobs(said: said), now: { recorded })
     }

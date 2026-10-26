@@ -1872,3 +1872,70 @@ Probed on the branch's binary over a sandbox:
 - No live pass of the app.
 - The second word of a two-word refusal isn't held to the binary, since the parity fixture records top-level words only.
 - Completing inside an unclosed quote (`"My M` + Tab) still offers nothing, as before.
+
+### 2026-10-26 — `library-tasks-review-correctness` (backlog item 4h): Library, Tasks, Knowledge and Review do what their buttons say
+
+**Why.** The parity wave's screens (2c–2g) shipped fast, and the audit found nine correctness defects across them:
+- **Tasks' Resume ran in the home folder,** so the CLI refused it for every task started elsewhere (`… resumes only there -- cd there first`).
+- **Resume was offered on an exhausted task,** which the CLI refuses ("spent its round budget … start a new one"). It was never offered on a task killed mid-round: `interrupted` wasn't parsed, so such a task showed Halt and Cancel as if running.
+- **A Library save wrote back the copy taken when Save was pressed,** reverting what was typed meanwhile while the verdict said "Saved."
+- **A fresh install's Records tab showed a failure,** since `knowledge list` exits 1 by design on a store that never captured.
+- **A play's document landed on whichever symphony was selected when it finished.** So did a collections search.
+- **Library and Review refreshes kept the old list on a failed read,** with nothing said.
+- **Review and Training raised a missing binary as an alert on every visit.**
+- **MCP Register and Create dataset selected the new name even when the create was refused.**
+- **The Add-target sheet had no lenses control,** though its form carries `--skills`.
+
+Eight reproduced on today's source as failing tests first. The ninth, a sheet with no control, was confirmed by reading the view.
+
+Probed on the branch's binary over sandbox homes with the mock backend:
+- **A task killed mid-round** reads `"status":"running","interrupted":true,"process":null`. `task list` carries no `interrupted`.
+- **The refusals:** resume outside the task's folder, and resume of an exhausted task.
+- **On a fresh store,** `knowledge list` exits 1 with `no knowledge collection named 'knowledge' -- capture a record first with 'apogee knowledge capture'`, while `embed list` exits 0 with an empty list.
+
+- [x] **Resume runs in the task's folder, for exactly the states the CLI resumes.**
+  - `TaskView.interrupted` and `isResumable`: halted, cancelled, stalled, failed, or killed mid-round.
+  - `isRunning` leaves an interrupted task out, so a killed task shows Resume and no stops, with a line saying Resume reruns the round.
+  - Resume says its folder ("in <folder>, where it was started"), and once the app's own run ends the read takes over.
+- [x] **No save loses typing.** `DefinitionEditor.saving` makes the agents' and symphonies' editor read-only with a progress line, and the save's result lands on the editor as it stands then. Save and "Put it back" wait for it.
+- [x] **A fresh install's Records are empty, not failed.** `RecordsViewModel.neverCaptured` matches exit 1 and the CLI's whole last line, for any collection name. Every other failure, a timeout or a killed read stays a failure.
+- [x] **Async results land where they started.** A play's document and progress carry their symphony's name, and another symphony's page says "<name> is playing -- one play at a time". The collections search re-checks its selection.
+- [x] **Failed reads are said.** Each list has its own listing state: `LibraryListing`, `ReviewViewModel.Listing`, and Training's six reads (runs, promoted versions, regimes, kits, datasets and the stored models its sheets pick from).
+  - **Where it's said:** in the CLI's words, where the list is drawn.
+  - **What's kept:** earlier rows, as Records and Tasks keep them.
+- [x] **A missing binary is an empty state** in Review, Training and the Library, each tab saying it once, its add and new buttons disabled.
+- [x] **Selection follows only a successful create.** `change` returns Bool, and MCP Register and Create dataset select on success alone.
+- [x] **Targets pin their lenses.** One `LensesMenu` serves the review form and Add target, feeding `TargetForm.skills`.
+
+**Decisions made while building** (2026-10-26, each recorded for veto):
+- **The default, taken:** the editor is read-only while a save runs, then re-enabled with the saved text.
+- **A killed task offers no Stop.** The CLI would take `task cancel` on one, but the document offers Resume.
+- **Resume's states are the CLI help's list, written out.** A status a later CLI adds isn't offered until it's added here.
+- **A missing folder isn't checked before a resume,** to keep the tests hermetic. A missing one fails to start, and the run says so.
+- **Closing the editor mid-save leaves it closed.** Text that changed during a save anyway is kept and said unsaved.
+- **Choosing another symphony keeps the last play's result,** so going back shows it. A failed play's alert names its symphony.
+- **Training's failed reads, and the Library's missing binary,** weren't in the document's lists. They are the same discipline at neighbouring seams.
+
+**Verified.**
+- **Recorded** from the branch's binary over sandbox homes, the home written `/Users/someone`; none hand-made:
+  - **Task views:** `task-status-interrupted.json`, `task-status-exhausted.json` and `task-list-interrupted.json`.
+  - **Fresh stores:** `knowledge-list-fresh.err` and `collections-list-fresh.json`.
+  - **Refused creates** (`mcp create`, the command Register runs, since this binary has no `config add-mcp-server`): `mcp-create-taken.err` and `mcp-create-unseeded.err`. Also `datasets-create-taken.err`.
+  - **A config missing a comma:** six refusals, `*-bad-config.err`, for agents, symphonies, MCP, review targets, regimes and the store.
+
+  Timeouts, a killed read and status variants are scripted inline. `train status`, `train versions`, `datasets kits` and `datasets list` exited 0 over everything tried.
+- 24 new cases: `TaskResumeTests` (5), `LibraryCorrectnessTests` (7), `KnowledgeCorrectnessTests` (4), `ReviewCorrectnessTests` (4) and `TrainingCorrectnessTests` (4). `TasksViewModelTests/controls` was updated: it pinned the old resume.
+- The module schemes, each over 10 iterations: Tasks 17, Library 12, Knowledge 14, Review 12 and Training 8. The layering check passed 25 of 25, and `check-previews` finds nothing in tasks, library, knowledge, review or training.
+- **26 new previews:**
+  - an interrupted task with Resume, and an exhausted one without;
+  - the editor during a save;
+  - Records on a fresh install;
+  - each read failure;
+  - each tab with no apogee;
+  - another symphony playing;
+  - the target sheet's lenses.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,992 tests and the macOS app's 649 cases passed, with no Swift warning.
+
+**Not done:**
+- No live pass of the app.
+- A killed task's row in the task list still reads running, since `task list` carries no `interrupted` (a CLI gap); its page knows.

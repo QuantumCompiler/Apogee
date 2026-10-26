@@ -71,11 +71,13 @@ public struct LibraryScreen: View {
     }
 }
 
-/// A list beside a page, the Library's shape.
+/// A list beside a page, the Library's shape; under its rows, what the list
+/// has to say -- no apogee, or a read that failed.
 struct ListPage<Row: Identifiable, Label: View, Page: View>: View {
     let rows: [Row]
     let selected: Row.ID?
     let pick: (Row) -> Void
+    var note: String? = nil
     @ViewBuilder let label: (Row) -> Label
     @ViewBuilder let page: () -> Page
 
@@ -93,6 +95,9 @@ struct ListPage<Row: Identifiable, Label: View, Page: View>: View {
                         }
                         .buttonStyle(.plain)
                     }
+                    if let note {
+                        Text(note).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).padding(Spacing.m).textSelection(.enabled)
+                    }
                 }
                 .padding(Spacing.s)
             }
@@ -108,7 +113,7 @@ struct AgentsView: View {
     @Bindable var model: AgentsViewModel
 
     var body: some View {
-        ListPage(rows: model.agents, selected: model.selected, pick: { model.selected = $0.name }) { agent in
+        ListPage(rows: model.agents, selected: model.selected, pick: { model.selected = $0.name }, note: model.emptyText) { agent in
             VStack(alignment: .leading, spacing: 2) {
                 Text(agent.name).font(.apogeeBody)
                 Text(agent.bundled ? "shipped · \(agent.tools)" : "yours · \(agent.tools)").font(.apogeeMeta).foregroundStyle(Palette.textTertiary)
@@ -161,7 +166,7 @@ struct SymphoniesView: View {
     @Bindable var model: SymphoniesViewModel
 
     var body: some View {
-        ListPage(rows: model.symphonies, selected: model.selected, pick: { model.select($0) }) { symphony in
+        ListPage(rows: model.symphonies, selected: model.selected, pick: { model.select($0) }, note: model.emptyText) { symphony in
             VStack(alignment: .leading, spacing: 2) {
                 Text(symphony.name).font(.apogeeBody)
                 Text("\(symphony.stages.count) stage\(symphony.stages.count == 1 ? "" : "s") · \(symphony.source)" + (symphony.problems.isEmpty ? "" : " · \(symphony.problems.count) problem\(symphony.problems.count == 1 ? "" : "s")"))
@@ -204,13 +209,15 @@ struct SymphoniesView: View {
                         TextField("Its input", text: $model.input, axis: .vertical).lineLimit(3...8).textFieldStyle(.roundedBorder)
                         HStack {
                             Button("Play") { model.playIt() }.disabled(model.isPlaying || model.input.trimmingCharacters(in: .whitespaces).isEmpty)
-                            if let playing = model.playing {
+                            if let playing = model.shownProgress {
                                 ProgressView().controlSize(.small)
                                 Text(playing.busy ?? "starting").font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textSecondary).lineLimit(1)
                                 Button("Stop") { Task { await model.stop() } }
+                            } else if model.isPlaying, let other = model.playingName {
+                                Text("\(other) is playing -- one play at a time").font(.apogeeMeta).foregroundStyle(Palette.textTertiary)
                             }
                         }
-                        if let play = model.play {
+                        if let play = model.shownPlay {
                             ForEach(play.stages) { stage in
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("\(stage.name) · \(stage.role) (\(stage.backend))").font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary)
@@ -243,7 +250,7 @@ struct MCPView: View {
     @State private var names: [String: String] = [:]
 
     var body: some View {
-        ListPage(rows: model.servers, selected: model.selected, pick: { model.selected = $0.name }) { server in
+        ListPage(rows: model.servers, selected: model.selected, pick: { model.selected = $0.name }, note: model.serversText) { server in
             VStack(alignment: .leading, spacing: 2) {
                 Text(server.name).font(.apogeeBody)
                 Text((server.enabled ? server.state : "disabled") + " · \(server.tools.count) tool\(server.tools.count == 1 ? "" : "s")")
@@ -276,6 +283,9 @@ struct MCPView: View {
                         Divider()
                     }
                     Text("PRESETS APOGEE SHIPS").font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary)
+                    if let presetsText = model.presetsText {
+                        Text(presetsText).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+                    }
                     ForEach(model.presets) { preset in
                         VStack(alignment: .leading, spacing: Spacing.xs) {
                             Text(preset.name).font(.apogeeBody.weight(.medium))
@@ -288,7 +298,9 @@ struct MCPView: View {
                                     TextField("Its name here", text: Binding(get: { names[preset.name] ?? "" }, set: { names[preset.name] = $0 }))
                                         .textFieldStyle(.roundedBorder)
                                         .frame(width: 180)
-                                    Button("Register") { Task { await model.register(preset, as: names[preset.name] ?? "") } }
+                                    Button("Register") {
+                                        Task { if await model.register(preset, as: names[preset.name] ?? "") { names[preset.name] = nil } }
+                                    }
                                         .disabled((names[preset.name] ?? "").trimmingCharacters(in: .whitespaces).isEmpty)
                                 }
                             }
@@ -349,14 +361,25 @@ struct EditorSheet: View {
                 .font(.apogeeCode)
                 .frame(minHeight: 320)
                 .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.border))
-            if let verdict = editor.verdict {
+                .disabled(editor.saving)
+                .opacity(editor.saving ? 0.6 : 1)
+            if editor.saving {
+                HStack(spacing: Spacing.s) {
+                    ProgressView().controlSize(.small)
+                    Text("Saving: the editor waits for apogee's word on the file, then takes your typing again.")
+                        .font(.apogeeSmall)
+                        .foregroundStyle(Palette.textSecondary)
+                }
+            } else if let verdict = editor.verdict {
                 Text(verdict).font(.apogeeSmall).foregroundStyle(editor.refused ? Palette.error : Palette.textSecondary).textSelection(.enabled)
             }
             HStack {
-                if let restore, editor.refused { Button("Put it back as it was") { Task { await restore() } } }
+                if let restore, editor.refused { Button("Put it back as it was") { Task { await restore() } }.disabled(editor.saving) }
                 Spacer()
                 Button("Close", action: close).keyboardShortcut(.cancelAction)
-                Button("Save") { Task { await save() } }.keyboardShortcut(.defaultAction).disabled(!editor.changed && editor.verdict == nil)
+                Button("Save") { Task { await save() } }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(editor.saving || (!editor.changed && editor.verdict == nil))
             }
         }
         .padding(Spacing.xl)
@@ -422,6 +445,54 @@ struct EditorSheet: View {
         }
 }
 
+#Preview("Agents: the list could not be read") {
+    let agents = LibraryPreview.agents(runner: LibraryPreview.badConfig)
+    AgentsView(model: agents)
+        .frame(width: 1000, height: 360)
+        .task { await agents.connect(binary: previewBinary) }
+}
+
+#Preview("Agents: Apogee not installed") {
+    let agents = LibraryPreview.agents()
+    AgentsView(model: agents)
+        .frame(width: 1000, height: 300)
+        .task { await agents.connect(binary: nil) }
+}
+
+#Preview("Symphonies: the list could not be read") {
+    let symphonies = LibraryPreview.symphonies(runner: LibraryPreview.badConfig)
+    SymphoniesView(model: symphonies)
+        .frame(width: 1000, height: 360)
+        .task { await symphonies.connect(binary: previewBinary) }
+}
+
+#Preview("Symphonies: another one playing") {
+    let symphonies = LibraryPreview.symphonies(playing: true)
+    SymphoniesView(model: symphonies)
+        .frame(width: 1000, height: 600)
+        .task {
+            await symphonies.connect(binary: previewBinary)
+            if let critique = symphonies.symphonies.first(where: { $0.name == "critique-revise" }),
+                let other = symphonies.symphonies.first(where: { $0.name != "critique-revise" })
+            {
+                symphonies.select(critique)
+                symphonies.input = "A draft README for the tool."
+                symphonies.playIt()
+                symphonies.select(other)
+            }
+        }
+}
+
+#Preview("MCP: the servers could not be read") {
+    let mcp = LibraryPreview.mcp(runner: LibraryPreview.badConfig)
+    MCPView(model: mcp)
+        .frame(width: 1000, height: 560)
+        .task {
+            mcp.use(binary: previewBinary)
+            await mcp.refresh()
+        }
+}
+
 #Preview("MCP servers and presets") {
     let mcp = LibraryPreview.mcp()
     MCPView(model: mcp)
@@ -448,6 +519,15 @@ struct EditorSheet: View {
             DefinitionEditor(
                 title: "triage", path: "/Users/someone/.apogee/prompts/triage.txt",
                 original: LibraryPreview.triagePrompt, text: LibraryPreview.triagePrompt + "\nFile each issue under one area.\n")),
+        save: {}, restore: nil, close: {})
+}
+
+#Preview("Saving: the editor read-only until apogee answers") {
+    EditorSheet(
+        editor: .constant(
+            DefinitionEditor(
+                title: "triage", path: "/Users/someone/.apogee/prompts/triage.txt",
+                original: LibraryPreview.triagePrompt, text: LibraryPreview.triagePrompt + "\nFile each issue under one area.\n", saving: true)),
         save: {}, restore: nil, close: {})
 }
 #endif

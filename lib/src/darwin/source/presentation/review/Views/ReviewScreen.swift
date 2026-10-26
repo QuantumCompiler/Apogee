@@ -23,8 +23,8 @@ public struct ReviewScreen: View {
                 .labelsHidden()
                 .fixedSize()
                 if model.tab == .targets {
-                    Button("Add target…") { model.newTarget() }
-                    Button("Sweep…") { model.newSweep() }.disabled(model.targets.isEmpty || model.isRunning)
+                    Button("Add target…") { model.newTarget() }.disabled(model.missingText != nil)
+                    Button("Sweep…") { model.newSweep() }.disabled(model.targets.isEmpty || model.isRunning || model.missingText != nil)
                 }
             }
             Divider()
@@ -120,6 +120,8 @@ struct RunsView: View {
                 form
                 if let run = model.run {
                     RunPage(run: run, post: model.askToPost, canPost: run.dryRun && !run.findings.isEmpty && !model.isRunning)
+                } else if let missing = model.missingText {
+                    Text(missing).font(.apogeeSmall).foregroundStyle(Palette.textTertiary)
                 } else {
                     Text("A review runs the lenses over a merge request's change. It posts nothing until you have seen what it found and chosen to post it.")
                         .font(.apogeeSmall)
@@ -143,14 +145,7 @@ struct RunsView: View {
                     .disabled(model.form.arguments(posting: false) == nil || model.isRunning)
             }
             HStack(spacing: Spacing.m) {
-                Menu(model.form.skills.isEmpty ? "Lenses: as the change's files say" : "Lenses: \(model.form.skills.sorted().joined(separator: ", "))") {
-                    ForEach(model.skills) { skill in
-                        Toggle(skill.name, isOn: Binding(
-                            get: { model.form.skills.contains(skill.name) },
-                            set: { if $0 { model.form.skills.insert(skill.name) } else { model.form.skills.remove(skill.name) } }))
-                    }
-                }
-                .fixedSize()
+                LensesMenu(choices: model.lensChoices, chosen: $model.form.skills, none: "the change's files")
                 TextField("Model", text: $model.form.model, prompt: Text("the chat role"))
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 180)
@@ -265,7 +260,9 @@ struct TargetsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.l) {
-                if model.targets.isEmpty {
+                if let said = model.targetsText {
+                    Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+                } else if model.targets.isEmpty {
                     Text("No sweep targets yet. A target is a repository or an owner; a sweep reviews what is new on each since its watermark.")
                         .font(.apogeeSmall)
                         .foregroundStyle(Palette.textSecondary)
@@ -378,6 +375,9 @@ struct SkillsView: View {
                     ForEach(model.skillProblems, id: \.self) { problem in
                         Text(problem).font(.apogeeSmall).foregroundStyle(Palette.warning).padding(Spacing.m)
                     }
+                    if let said = model.skillsText {
+                        Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).padding(Spacing.m).textSelection(.enabled)
+                    }
                 }
                 .padding(Spacing.s)
             }
@@ -434,6 +434,14 @@ struct TargetSheet: View {
                     Text("GitLab").tag("gitlab")
                 }
                 TextField("Host", text: $model.targetForm.host, prompt: Text("the forge's own"))
+                LabeledContent("Lenses") {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        LensesMenu(choices: model.lensChoices, chosen: $model.targetForm.skills, none: "each change's files")
+                        if let said = model.skillsText {
+                            Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary)
+                        }
+                    }
+                }
                 Toggle("Post when swept -- with nobody at the terminal", isOn: $model.targetForm.post)
                 Toggle("Review drafts too", isOn: $model.targetForm.drafts)
                 TextField("Model", text: $model.targetForm.model, prompt: Text("the chat role"))
@@ -451,6 +459,26 @@ struct TargetSheet: View {
         }
         .padding(Spacing.xl)
         .frame(width: 520)
+    }
+}
+
+/// The lenses a review or a target pins (`--skills`): each lens the skills
+/// read names, ticked or not. None ticked leaves the plan to choose by the
+/// files a change touches.
+struct LensesMenu: View {
+    let choices: [String]
+    @Binding var chosen: Set<String>
+    let none: String
+
+    var body: some View {
+        Menu(ReviewViewModel.lensesLabel(chosen, none: none)) {
+            ForEach(choices, id: \.self) { name in
+                Toggle(name, isOn: Binding(
+                    get: { chosen.contains(name) },
+                    set: { if $0 { chosen.insert(name) } else { chosen.remove(name) } }))
+            }
+        }
+        .fixedSize()
     }
 }
 
@@ -622,6 +650,34 @@ struct SweepSheet: View {
         .task { await model.connect(binary: previewBinary) }
 }
 
+#Preview("Targets: the list could not be read") {
+    let model = ReviewPreview.review(runner: ReviewPreview.badConfig)
+    TargetsView(model: model)
+        .frame(width: 900, height: 240)
+        .task { await model.connect(binary: previewBinary) }
+}
+
+#Preview("Targets: Apogee not installed") {
+    let model = ReviewPreview.review()
+    TargetsView(model: model)
+        .frame(width: 900, height: 200)
+        .task { await model.connect(binary: nil) }
+}
+
+#Preview("Skills: Apogee not installed") {
+    let model = ReviewPreview.review()
+    SkillsView(model: model)
+        .frame(width: 1000, height: 300)
+        .task { await model.connect(binary: nil) }
+}
+
+#Preview("Reviews: Apogee not installed") {
+    let model = ReviewPreview.review()
+    RunsView(model: model)
+        .frame(width: 900, height: 300)
+        .task { await model.connect(binary: nil) }
+}
+
 #Preview("No sweep targets yet") {
     let model = ReviewPreview.review(runner: ReviewPreview.noTargets)
     TargetsView(model: model)
@@ -658,6 +714,7 @@ struct SweepSheet: View {
     let model = ReviewPreview.review()
     TargetSheet(model: model)
         .task {
+            await model.connect(binary: previewBinary)
             model.newTarget()
             model.targetForm.name = "gadget"
             model.targetForm.place = "acme/gadget"
@@ -678,6 +735,27 @@ struct SweepSheet: View {
             model.targetForm.post = true
             model.targetForm.drafts = true
         }
+}
+
+#Preview("Add a target: its lenses left to each change") {
+    let model = ReviewPreview.review()
+    TargetSheet(model: model)
+        .task {
+            await model.connect(binary: previewBinary)
+            model.newTarget()
+            model.targetForm.name = "widget"
+            model.targetForm.place = "acme/widget"
+        }
+}
+
+#Preview("Lenses: none pinned") {
+    LensesMenu(choices: ReviewPreview.lenses, chosen: .constant([]), none: "each change's files")
+        .padding(Spacing.xl)
+}
+
+#Preview("Lenses: two pinned") {
+    LensesMenu(choices: ReviewPreview.lenses, chosen: .constant(["concurrency", "security"]), none: "each change's files")
+        .padding(Spacing.xl)
 }
 
 #Preview("Sweep one target, from a date") {

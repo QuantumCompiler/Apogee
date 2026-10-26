@@ -96,9 +96,19 @@ public struct TaskView: Sendable, Equatable {
     public let updatedAt: String
     /// The process running it, when one is.
     public let process: Int?
+    /// Planning or running by its ledger with no process running it: killed
+    /// mid-round, and resumable (`view.cpp`'s `interrupted`). `false` from a
+    /// binary that never says.
+    public let interrupted: Bool
 
-    /// The statuses a task is still under way in.
+    /// The statuses a task is still under way in, by its ledger.
     public static let running: Set<String> = ["planning", "running"]
+    /// The stopped statuses `task resume` continues: halted, cancelled,
+    /// stalled, failed. Never `done` or `exhausted`, which the CLI refuses
+    /// by construction (`runner.cpp`'s `resume_refusal`); a planning or
+    /// running one only once it is `interrupted`, since a live one's process
+    /// holds the task lock.
+    public static let resumable: Set<String> = ["halted", "cancelled", "stalled", "failed"]
 
     public init?(_ value: JSONValue) {
         guard let id = value["id"]?.stringValue else { return nil }
@@ -119,6 +129,7 @@ public struct TaskView: Sendable, Equatable {
         createdAt = text("created_at")
         updatedAt = text("updated_at")
         process = value["process"]?.intValue
+        interrupted = value["interrupted"]?.boolValue ?? false
     }
 
     public init?(document: ReadDocument) {
@@ -138,5 +149,14 @@ public struct TaskView: Sendable, Equatable {
 
     public static func round(_ value: JSONValue) -> Round { Round(value) }
 
-    public var isRunning: Bool { Self.running.contains(status) }
+    /// Whether a process runs it now: under way by its ledger, and not
+    /// killed mid-round.
+    public var isRunning: Bool { Self.running.contains(status) && !interrupted }
+
+    /// Whether `task resume` continues it, by its state: the CLI's set --
+    /// "halted, cancelled, stalled, failed, or killed mid-round" -- and no
+    /// other. Where it resumes is `folder`, and nowhere else.
+    public var isResumable: Bool {
+        Self.resumable.contains(status) || (Self.running.contains(status) && interrupted)
+    }
 }

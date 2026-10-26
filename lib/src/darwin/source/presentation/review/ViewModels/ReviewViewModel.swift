@@ -127,6 +127,16 @@ public final class ReviewViewModel {
         case sweep
     }
 
+    /// Where the targets or the skills stand: not read yet, read, no apogee,
+    /// or a failed read -- each said where it is drawn, as Records and Tasks
+    /// say theirs (GUI 4h). A failed refresh keeps what was read before.
+    public enum Listing: Equatable, Sendable {
+        case notRead
+        case read
+        case missing
+        case failed(String)
+    }
+
     public var tab: Tab = .runs
     public var form = RunForm()
     public var targetForm = TargetForm()
@@ -134,6 +144,8 @@ public final class ReviewViewModel {
     public private(set) var targets: [ReviewTarget] = []
     public private(set) var skills: [ReviewSkill] = []
     public private(set) var skillProblems: [String] = []
+    public private(set) var targetsListing: Listing = .notRead
+    public private(set) var skillsListing: Listing = .notRead
     /// The skill open in full, `review skills show`.
     public private(set) var shownSkill: ReviewSkill?
     public var selectedSkill: String?
@@ -162,8 +174,15 @@ public final class ReviewViewModel {
         self.starter = starter
     }
 
+    /// With no apogee, the place is its empty state -- said in each tab --
+    /// never an alert, so no visit raises one (GUI 4h).
     public func connect(binary: URL?) async {
         self.binary = binary
+        guard binary != nil else {
+            targetsListing = .missing
+            skillsListing = .missing
+            return
+        }
         await refresh()
     }
 
@@ -171,17 +190,56 @@ public final class ReviewViewModel {
         await refresh()
     }
 
-    /// The targets and the skills, read again.
+    /// The targets and the skills, read again; a failure is said where each
+    /// is drawn.
     public func refresh() async {
-        guard let binary else {
-            failure = "Apogee isn't installed, so there is nothing to review with."
-            return
+        guard let binary else { return }
+        let targetsRead = await runner.read(binary: binary, ["review", "targets"])
+        if let document = targetsRead.document {
+            targets = ReviewTarget.list(from: document)
+            targetsListing = .read
+        } else {
+            targetsListing = .failed(targetsRead.failure ?? "apogee printed nothing to read")
         }
-        targets = await runner.read(binary: binary, ["review", "targets"]).document.map(ReviewTarget.list) ?? targets
-        if let document = await runner.read(binary: binary, ["review", "skills", "list"]).document {
+        let skillsRead = await runner.read(binary: binary, ["review", "skills", "list"])
+        if let document = skillsRead.document {
             skills = ReviewSkill.list(from: document)
             skillProblems = (document.value["problems"]?.arrayValue ?? []).compactMap { $0.stringValue ?? $0["message"]?.stringValue }
+            skillsListing = .read
+        } else {
+            skillsListing = .failed(skillsRead.failure ?? "apogee printed nothing to read")
         }
+    }
+
+    /// The words for no apogee, said in every tab.
+    static let missingWords = "Apogee isn't installed, so there is nothing to review with."
+
+    /// What the Reviews tab says in place of its form's help: no apogee.
+    public var missingText: String? { targetsListing == .missing ? Self.missingWords : nil }
+
+    /// What the targets say where they are drawn: no apogee, or why they
+    /// could not be read.
+    public var targetsText: String? { Self.text(targetsListing, "targets") }
+
+    /// What the skills say where they are drawn.
+    public var skillsText: String? { Self.text(skillsListing, "review skills") }
+
+    private static func text(_ listing: Listing, _ what: String) -> String? {
+        switch listing {
+        case .notRead, .read: nil
+        case .missing: missingWords
+        case .failed(let message): "The \(what) could not be read: \(message)"
+        }
+    }
+
+    /// The lenses a review or a target can pin (`--skills`): the skills
+    /// `review skills list` read.
+    public var lensChoices: [String] { skills.map(\.name) }
+
+    /// A lenses menu's title: the lenses pinned, or -- none pinned -- the
+    /// plan's choice by `none`'s files.
+    public static func lensesLabel(_ chosen: Set<String>, none: String) -> String {
+        chosen.isEmpty ? "Lenses: as \(none) say" : "Lenses: \(chosen.sorted().joined(separator: ", "))"
     }
 
     /// `review skills show <name>`: the lens whole, its prompt read-only.

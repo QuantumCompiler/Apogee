@@ -3,6 +3,7 @@ import BusinessJobs
 import BusinessReads
 import DataProtocol
 import Foundation
+import InfrastructureProcess
 
 /// Preview support (ADR 0004). Each module keeps its own copy, as each test
 /// bundle keeps its own scripted support.
@@ -13,13 +14,22 @@ struct PreviewRunner: CommandRunning {
     /// Argument prefixes and what they answer; the longest prefix wins.
     let reads: [([String], String)]
     let commands: [([String], String)]
+    /// Reads the binary refused, each its recorded stderr; every one recorded
+    /// exited 1.
+    let refusals: [([String], String)]
 
-    init(reads: [([String], String)], commands: [([String], String)] = []) {
+    init(reads: [([String], String)], commands: [([String], String)] = [], refusals: [([String], String)] = []) {
         self.reads = reads
         self.commands = commands
+        self.refusals = refusals
     }
 
     func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
+        if let stderr = Self.answer(arguments, refusals) {
+            var tail = BoundedTail()
+            tail.append(Data(stderr.utf8))
+            return .failed(exit: ChildExit(reason: .exited, status: 1), stderrTail: tail)
+        }
         guard let text = Self.answer(arguments, reads), let document = ReadDocument(text: text) else {
             return .couldNotStart("no preview document for apogee \(arguments.joined(separator: " "))")
         }

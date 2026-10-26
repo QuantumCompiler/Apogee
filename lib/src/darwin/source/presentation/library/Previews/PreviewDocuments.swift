@@ -526,5 +526,17 @@ enum LibraryDocuments {
  "symphony": "critique-revise"
 }
 """#
+    /// tests/business/reads/Fixtures/agents-list-bad-config.err
+    static let agentsListBadConfig = #"""
+apogee agents: /Users/someone/.apogee/config/config.json: not valid JSON: line 4, column 5: expected ',' or '}' after a member
+"""#
+    /// tests/business/reads/Fixtures/symphonies-list-bad-config.err
+    static let symphoniesListBadConfig = #"""
+apogee symphonies: /Users/someone/.apogee/config/config.json: not valid JSON: line 4, column 5: expected ',' or '}' after a member
+"""#
+    /// tests/business/reads/Fixtures/mcp-list-bad-config.err
+    static let mcpListBadConfig = #"""
+apogee mcp: /Users/someone/.apogee/config/config.json: not valid JSON: line 4, column 5: expected ',' or '}' after a member
+"""#
 }
 #endif

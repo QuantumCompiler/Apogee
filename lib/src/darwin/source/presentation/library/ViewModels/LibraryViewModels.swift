@@ -16,8 +16,47 @@ public struct DefinitionEditor: Equatable, Sendable {
     /// it stands -- nil before a save.
     public var verdict: String?
     public var refused = false
+    /// A save running now: the editor is read-only until it ends, so nothing
+    /// typed meanwhile is lost (GUI 4h).
+    public var saving = false
 
     public var changed: Bool { text != original }
+
+    /// A save of `saved` ended: written onto the editor as it stands now --
+    /// never onto the copy taken when Save was pressed, which would put back
+    /// whatever was typed since. Re-enabled with the binary's word; text that
+    /// moved on during the save is kept and said unsaved.
+    mutating func endSave(of saved: String, verdict: String, refused: Bool) {
+        saving = false
+        self.refused = refused
+        self.verdict = text == saved ? verdict : verdict + "\nWhat you typed since pressing Save isn't saved yet."
+    }
+}
+
+/// Where one of the Library's lists stands: not read yet, read, no apogee,
+/// or a failed read -- said where the list is drawn, in the CLI's words, as
+/// Records and Tasks say theirs (GUI 4h). A failed refresh keeps the rows
+/// read before, as theirs do; it is never silently kept.
+public enum LibraryListing: Equatable, Sendable {
+    case notRead
+    case read
+    case missing
+    case failed(String)
+
+    /// The line drawn with the list of `what`; nil when there is nothing to
+    /// say.
+    func text(_ what: String) -> String? {
+        switch self {
+        case .notRead, .read: nil
+        case .missing: "Apogee isn't installed, so there are no \(what) to list."
+        case .failed(let message): "The \(what) could not be read: \(message)"
+        }
+    }
+
+    /// A list read: its document's rows, or why there are none.
+    static func of(_ outcome: ReadOutcome) -> LibraryListing {
+        outcome.document != nil ? .read : .failed(outcome.failure ?? "apogee printed nothing to read")
+    }
 }
 
 /// The data directory the definitions' relative paths name: `apogee config
@@ -65,6 +104,7 @@ public final class AgentsViewModel {
     }
 
     public private(set) var agents: [AgentEntry] = []
+    public private(set) var listing: LibraryListing = .notRead
     public var selected: String?
     public var createForm = CreateForm()
     public var creating = false
@@ -84,14 +124,26 @@ public final class AgentsViewModel {
 
     public func connect(binary: URL?) async {
         self.binary = binary
-        if let binary { data = await dataDirectory(runner, binary) }
+        guard let binary else {
+            listing = .missing
+            return
+        }
+        data = await dataDirectory(runner, binary)
         await refresh()
     }
 
+    /// `agents list`; a failure is said where the list is, the rows read
+    /// before kept.
     public func refresh() async {
         guard let binary else { return }
-        agents = await runner.read(binary: binary, ["agents", "list"]).document.map(AgentEntry.list) ?? agents
+        let outcome = await runner.read(binary: binary, ["agents", "list"])
+        if let document = outcome.document { agents = AgentEntry.list(from: document) }
+        listing = .of(outcome)
     }
+
+    /// What the list says under its rows: no apogee, or why it could not be
+    /// read.
+    public var emptyText: String? { listing.text("agents") }
 
     public var current: AgentEntry? { selected.flatMap { n in agents.first { $0.name == n } } }
 
@@ -123,20 +175,27 @@ public final class AgentsViewModel {
 
     /// Writes the file the CLI reads, and reads the agents back. Nothing in
     /// this build checks an agent's files short of running it; that is said.
+    /// The editor is read-only until the read-back ends (`saving`), and the
+    /// end lands on the editor as it stands then: one closed meanwhile stays
+    /// closed.
     public func save() async {
-        guard var editor else { return }
+        guard var editor, !editor.saving else { return }
+        let saved = editor.text
         do {
-            try editor.text.write(toFile: editor.path, atomically: true, encoding: .utf8)
+            try saved.write(toFile: editor.path, atomically: true, encoding: .utf8)
         } catch {
             editor.verdict = "Not saved: \(error.localizedDescription)"
             editor.refused = true
             self.editor = editor
             return
         }
-        await refresh()
-        editor.verdict = "Saved. Apogee checks an agent's prompt and schema when it runs -- its first run says what is wrong, if anything."
-        editor.refused = false
+        editor.saving = true
         self.editor = editor
+        await refresh()
+        guard self.editor?.path == editor.path else { return }
+        self.editor?.endSave(
+            of: saved, verdict: "Saved. Apogee checks an agent's prompt and schema when it runs -- its first run says what is wrong, if anything.",
+            refused: false)
     }
 
     public func closeEditor() {
@@ -169,11 +228,16 @@ public final class AgentsViewModel {
 @Observable
 public final class SymphoniesViewModel {
     public private(set) var symphonies: [Symphony] = []
+    public private(set) var listing: LibraryListing = .notRead
     public var selected: String?
     public var input = ""
     /// A play running now, and the last play's document.
     public private(set) var playing: JobProgress?
     public private(set) var play: SymphonyPlay?
+    /// The symphony the running play plays, and the one the last play's
+    /// document is of: each lands on its own page and no other (GUI 4h).
+    public private(set) var playingName: String?
+    public private(set) var playedName: String?
     public var editor: DefinitionEditor?
     public var copyName = ""
     public var pendingDelete: Symphony?
@@ -192,20 +256,44 @@ public final class SymphoniesViewModel {
 
     public func connect(binary: URL?) async {
         self.binary = binary
+        guard binary != nil else {
+            listing = .missing
+            return
+        }
         await refresh()
     }
 
+    /// `symphonies list`; a failure is said where the list is, the rows read
+    /// before kept.
     public func refresh() async {
         guard let binary else { return }
-        symphonies = await runner.read(binary: binary, ["symphonies", "list"]).document.map(Symphony.list) ?? symphonies
+        let outcome = await runner.read(binary: binary, ["symphonies", "list"])
+        if let document = outcome.document { symphonies = Symphony.list(from: document) }
+        listing = .of(outcome)
+    }
+
+    /// What the list says under its rows: no apogee, or why it could not be
+    /// read.
+    public var emptyText: String? { listing.text("symphonies") }
+
+    /// The last play's document, on the page of the symphony it played --
+    /// never another's.
+    public var shownPlay: SymphonyPlay? {
+        guard let playedName, playedName == selected else { return nil }
+        return play
+    }
+
+    /// The running play's progress, with its Stop, on its own symphony's
+    /// page alone.
+    public var shownProgress: JobProgress? {
+        guard let playingName, playingName == selected else { return nil }
+        return playing
     }
 
     public var current: Symphony? { selected.flatMap { n in symphonies.first { $0.name == n } } }
 
     public func select(_ symphony: Symphony) {
-        guard symphony.name != selected else { return }
         selected = symphony.name
-        play = nil
     }
 
     /// `symphonies play <name> --input <text> --output-format json`,
@@ -215,7 +303,9 @@ public final class SymphoniesViewModel {
         let input = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty else { return }
         play = nil
+        playedName = nil
         playing = JobProgress()
+        playingName = symphony.name
         let job = starter.startJob(binary: binary, arguments: ["symphonies", "play", symphony.name, "--input", input, "--output-format", "json"], streaming: false, folder: nil)
         self.job = job
         Task {
@@ -227,10 +317,12 @@ public final class SymphoniesViewModel {
             self.job = nil
             let progress = playing
             playing = nil
+            playingName = nil
             if let document = ReadDocument(text: stdout.joined(separator: "\n")), let play = SymphonyPlay(document: document) {
                 self.play = play
+                playedName = symphony.name
             } else if case .failed(let message)? = progress?.status {
-                failure = message
+                failure = "\(symphony.name): \(message)"
             }
         }
     }
@@ -250,32 +342,38 @@ public final class SymphoniesViewModel {
 
     /// Writes the spec file, then asks the binary: `symphonies show` refuses
     /// a file it cannot read, in its words, and lists the problems of one it
-    /// can.
+    /// can. The editor is read-only until the binary has answered
+    /// (`saving`), and its word lands on the editor as it stands then: one
+    /// closed meanwhile stays closed.
     public func save() async {
-        guard var editor, let binary, let name = selected else { return }
+        guard var editor, !editor.saving, let binary, let name = selected else { return }
+        let saved = editor.text
         do {
-            try editor.text.write(toFile: editor.path, atomically: true, encoding: .utf8)
+            try saved.write(toFile: editor.path, atomically: true, encoding: .utf8)
         } catch {
             editor.verdict = "Not saved: \(error.localizedDescription)"
             editor.refused = true
             self.editor = editor
             return
         }
-        let outcome = await runner.read(binary: binary, ["symphonies", "show", name])
-        if let document = outcome.document, let symphony = Symphony(document.value) {
-            editor.refused = !symphony.problems.isEmpty
-            editor.verdict = symphony.problems.isEmpty ? "Saved, and apogee reads it." : symphony.problems.joined(separator: "\n")
-        } else {
-            editor.refused = true
-            editor.verdict = outcome.failure ?? "apogee could not read it"
-        }
+        editor.saving = true
         self.editor = editor
+        let outcome = await runner.read(binary: binary, ["symphonies", "show", name])
+        if self.editor?.path == editor.path {
+            if let document = outcome.document, let symphony = Symphony(document.value) {
+                self.editor?.endSave(
+                    of: saved, verdict: symphony.problems.isEmpty ? "Saved, and apogee reads it." : symphony.problems.joined(separator: "\n"),
+                    refused: !symphony.problems.isEmpty)
+            } else {
+                self.editor?.endSave(of: saved, verdict: outcome.failure ?? "apogee could not read it", refused: true)
+            }
+        }
         await refresh()
     }
 
     /// Puts the file back as it was before the edit.
     public func restore() async {
-        guard var editor else { return }
+        guard var editor, !editor.saving else { return }
         editor.text = editor.original
         self.editor = editor
         await save()
@@ -317,6 +415,9 @@ public final class SymphoniesViewModel {
 public final class MCPViewModel {
     public private(set) var servers: [MCPServer] = []
     public private(set) var presets: [MCPPreset] = []
+    /// Where `mcp list` and `mcp presets` stand, each said apart (GUI 4h).
+    public private(set) var serversListing: LibraryListing = .notRead
+    public private(set) var presetsListing: LibraryListing = .notRead
     public private(set) var reading = false
     public var selected: String?
     public var tool = ""
@@ -334,7 +435,7 @@ public final class MCPViewModel {
     }
 
     public func connect(binary: URL?) async {
-        self.binary = binary
+        use(binary: binary)
         await refresh()
     }
 
@@ -342,31 +443,51 @@ public final class MCPViewModel {
     /// it waits until the place comes into view.
     public func use(binary: URL?) {
         self.binary = binary
+        if binary == nil {
+            serversListing = .missing
+            presetsListing = .missing
+        } else if serversListing == .missing {
+            serversListing = .notRead
+            presetsListing = .notRead
+        }
     }
 
-    /// `mcp list` -- it connects to each server, so it takes a moment -- and
-    /// `mcp presets`.
+    /// `mcp list` -- it connects to each server, so it takes a moment, and a
+    /// wedged server makes it time out -- and `mcp presets`. Each failure is
+    /// said where its list is, the rows read before kept.
     public func refresh() async {
         guard let binary else { return }
         reading = true
-        servers = await runner.read(binary: binary, ["mcp", "list"]).document.map(MCPServer.list) ?? servers
-        presets = await runner.read(binary: binary, ["mcp", "presets"]).document.map(MCPPreset.list) ?? presets
+        let list = await runner.read(binary: binary, ["mcp", "list"])
+        if let document = list.document { servers = MCPServer.list(from: document) }
+        serversListing = .of(list)
+        let shipped = await runner.read(binary: binary, ["mcp", "presets"])
+        if let document = shipped.document { presets = MCPPreset.list(from: document) }
+        presetsListing = .of(shipped)
         reading = false
     }
 
+    /// What the servers' list says under its rows.
+    public var serversText: String? { serversListing.text("MCP servers") }
+    /// What the presets say in their place.
+    public var presetsText: String? { presetsListing.text("presets") }
+
     public var current: MCPServer? { selected.flatMap { n in servers.first { $0.name == n } } }
 
-    /// `mcp create <name> --from <preset>`, byte for byte the hand-typed one.
-    public func register(_ preset: MCPPreset, as name: String) async {
+    /// `mcp create <name> --from <preset>`, byte for byte the hand-typed one;
+    /// the new server is selected only once the binary made it -- a refusal
+    /// keeps the selection and is said (GUI 4h). Whether it was made.
+    @discardableResult
+    public func register(_ preset: MCPPreset, as name: String) async -> Bool {
         let name = name.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { return }
-        await change(["mcp", "create", name, "--from", preset.name])
+        guard !name.isEmpty, await change(["mcp", "create", name, "--from", preset.name]) else { return false }
         selected = name
+        return true
     }
 
     /// `mcp enable | disable <name>`, read back.
     public func setEnabled(_ server: MCPServer, _ enabled: Bool) async {
-        await change(["mcp", enabled ? "enable" : "disable", server.name])
+        _ = await change(["mcp", enabled ? "enable" : "disable", server.name])
     }
 
     /// `mcp test <server> <tool> <arguments>`: its answer as printed.
@@ -382,15 +503,19 @@ public final class MCPViewModel {
         }
     }
 
-    private func change(_ arguments: [String]) async {
-        guard let binary else { return }
+    /// Runs a change, reads back, and says how it went; whether it was done.
+    private func change(_ arguments: [String]) async -> Bool {
+        guard let binary else { return false }
         let outcome = await runner.command(binary: binary, arguments)
         await refresh()
         if let failure = outcome.failure {
             self.failure = failure
-        } else if case .done(let stdout) = outcome {
+            return false
+        }
+        if case .done(let stdout) = outcome {
             say?(stdout.split(whereSeparator: \.isNewline).first.map(String.init) ?? "Done")
         }
+        return true
     }
 
     public func dismissFailure() {

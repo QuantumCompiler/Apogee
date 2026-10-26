@@ -468,6 +468,13 @@ struct IngestSheet: View {
         }
 }
 
+#Preview("A fresh install: no records yet") {
+    let records = KnowledgePreview.records(runner: KnowledgePreview.fresh)
+    KnowledgeScreen(records: records, collections: KnowledgePreview.collections(runner: KnowledgePreview.fresh))
+        .frame(width: 1100, height: 480)
+        .task { await records.connect(binary: previewBinary) }
+}
+
 #Preview("Apogee not installed") {
     let records = KnowledgePreview.records()
     KnowledgeScreen(records: records, collections: KnowledgePreview.collections())
@@ -492,6 +499,13 @@ struct IngestSheet: View {
             await records.search()
             if let first = records.query?.matches.first { records.select(first.record) }
         }
+}
+
+#Preview("Records: nothing captured yet") {
+    let records = KnowledgePreview.records(runner: KnowledgePreview.fresh)
+    RecordsView(model: records)
+        .frame(width: 900, height: 420)
+        .task { await records.connect(binary: previewBinary) }
 }
 
 #Preview("Records: a branch with none") {

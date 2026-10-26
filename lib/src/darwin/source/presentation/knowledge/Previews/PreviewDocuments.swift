@@ -163,5 +163,13 @@ enum KnowledgeDocuments {
 0.000  [lexical]  solar.md#0
     # Solar roofs  Panels make the most power at noon. A battery carries the surplus into the evening.  …
 """#
+    /// tests/business/reads/Fixtures/knowledge-list-fresh.err
+    static let knowledgeListFresh = #"""
+apogee knowledge: no knowledge collection named 'knowledge' -- capture a record first with 'apogee knowledge capture'
+"""#
+    /// tests/business/reads/Fixtures/collections-list-fresh.json
+    static let collectionsListFresh = #"""
+{"data":[],"object":"list"}
+"""#
 }
 #endif

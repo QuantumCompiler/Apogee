@@ -122,10 +122,17 @@ struct TasksViewModelTests {
         await model.cancel("task-1")
         #expect(runner.calls.contains("run task cancel task-1"))
         #expect(said == ["It stops when this round ends", "Stopping now"])
+        // Halted, as the ledger now reads it: resumed, in its folder (4h).
+        let halted = taskFixture("task-status-interrupted.json")
+            .replacingOccurrences(of: "task-20261026-060911", with: "task-1")
+            .replacingOccurrences(of: #""status":"running""#, with: #""status":"halted""#)
+            .replacingOccurrences(of: #""interrupted":true"#, with: #""interrupted":false"#)
+        runner.reading(["task", "status"], halted)
+        await model.refresh()
+        #expect(model.resumable("task-1") && !model.stoppable("task-1"))
         model.resume("task-1")
         #expect(jobs.starts.first?.arguments == ["task", "resume", "task-1", "--output-format", "stream-json"])
-        #expect(TasksViewModel.canStop("running") && !TasksViewModel.canStop("done"))
-        #expect(TasksViewModel.canResume("halted") && !TasksViewModel.canResume("done"))
+        #expect(jobs.starts.first?.folder?.path == "/Users/someone/work")
     }
 
     @Test("tasks from elsewhere are reads, on coming into view; the status document is the read's")

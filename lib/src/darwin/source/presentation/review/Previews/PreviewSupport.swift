@@ -13,8 +13,16 @@ import InfrastructureProcess
 struct PreviewRunner: CommandRunning {
     /// Argument prefixes and what they answer; the longest prefix wins.
     let reads: [([String], String)]
+    /// Reads the binary refused, each its recorded stderr; every one recorded
+    /// exited 1.
+    var refusals: [([String], String)] = []
 
     func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
+        if let stderr = Self.answer(arguments, refusals) {
+            var tail = BoundedTail()
+            tail.append(Data(stderr.utf8))
+            return .failed(exit: ChildExit(reason: .exited, status: 1), stderrTail: tail)
+        }
         guard let text = Self.answer(arguments, reads), let document = ReadDocument(text: text) else {
             return .couldNotStart("no preview document for apogee \(arguments.joined(separator: " "))")
         }

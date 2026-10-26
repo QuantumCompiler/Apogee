@@ -122,11 +122,40 @@ public final class TasksViewModel {
         runs.first { $0.state.taskID == id }
     }
 
+    /// The app's run of `id` while its child still runs.
+    private func live(_ id: String) -> Run? {
+        run(for: id).flatMap { $0.isRunning ? $0 : nil }
+    }
+
     /// What the detail pane shows for the selection: the live run's view
-    /// while one follows it, else the read.
+    /// while its child runs, else the read -- which takes over once the run
+    /// ends, so a run killed mid-round reads as the ledger says it.
     public var shown: TaskView? {
-        if let selected, let run = run(for: selected), let view = run.state.view { return view }
-        return status
+        guard let selected else { return nil }
+        if let view = live(selected)?.state.view { return view }
+        return lastView(of: selected)
+    }
+
+    /// The last word on `id` when no run of the app's is in flight: its
+    /// `task status`, else what the app's own run last said of it.
+    private func lastView(of id: String) -> TaskView? {
+        if let status, status.id == id { return status }
+        return run(for: id)?.state.view
+    }
+
+    /// Whether the detail offers the stops: the app's own run in flight, or a
+    /// task the ledger says a process runs now -- never one killed mid-round.
+    public func stoppable(_ id: String) -> Bool {
+        if let live = live(id) { return TaskView.running.contains(live.state.status) }
+        return lastView(of: id).map(Self.canStop) ?? false
+    }
+
+    /// Whether the detail offers Resume: exactly the states `task resume`
+    /// continues, with the folder it resumes in known, and no run of the
+    /// app's in flight.
+    public func resumable(_ id: String) -> Bool {
+        guard live(id) == nil else { return false }
+        return lastView(of: id).map(Self.canResume) ?? false
     }
 
     /// The tasks to list: the ledger's, and any run the app started that the
@@ -195,9 +224,13 @@ public final class TasksViewModel {
         form = NewTaskForm()
     }
 
-    /// `task resume <id>`, followed live.
+    /// `task resume <id>`, followed live, in the folder the task was started
+    /// in -- its read's: the CLI resumes a task nowhere else
+    /// (`task_resume_refusal`), so a resume from the home folder failed for
+    /// every task started elsewhere. Only a task `resumable` names.
     public func resume(_ id: String) {
-        follow(["task", "resume", id, "--output-format", "stream-json"], folder: nil)
+        guard resumable(id), let view = lastView(of: id) else { return }
+        follow(["task", "resume", id, "--output-format", "stream-json"], folder: URL(fileURLWithPath: view.folder, isDirectory: true))
     }
 
     private func follow(_ arguments: [String], folder: URL?) {
@@ -261,11 +294,14 @@ public final class TasksViewModel {
         try? Date(text, strategy: .iso8601)
     }
 
-    /// Whether a task can be stopped, resumed.
-    public static func canStop(_ status: String) -> Bool { TaskView.running.contains(status) }
-    public static func canResume(_ status: String) -> Bool {
-        ["halted", "cancelled", "stalled", "failed", "exhausted"].contains(status)
-    }
+    /// Whether a task runs now, by its view: Stop after this round and Stop
+    /// now are for a process running it.
+    public static func canStop(_ view: TaskView) -> Bool { view.isRunning }
+
+    /// Whether `task resume` continues a task, by its view: halted,
+    /// cancelled, stalled, failed, or killed mid-round -- never done or
+    /// exhausted -- with the folder it resumes in named.
+    public static func canResume(_ view: TaskView) -> Bool { view.isResumable && !view.folder.isEmpty }
 }
 
 /// The new-task sheet: a goal, the checks that say it is done, the round

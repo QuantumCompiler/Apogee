@@ -25,12 +25,12 @@ public struct TrainingScreen: View {
                 .labelsHidden()
                 .fixedSize()
                 switch model.tab {
-                case .runs: Button("New run…") { model.newRun() }.disabled(model.isRunning)
+                case .runs: Button("New run…") { model.newRun() }.disabled(model.isRunning || model.missingText != nil)
                 case .regimes: EmptyView()
                 case .datasets:
-                    Button("New dataset…") { model.newDataset() }
-                    Button("Synthesize…") { model.newSynthesis() }.disabled(model.isRunning)
-                    Button("Prepare a file…") { preparing = true }.disabled(model.isRunning)
+                    Button("New dataset…") { model.newDataset() }.disabled(model.missingText != nil)
+                    Button("Synthesize…") { model.newSynthesis() }.disabled(model.isRunning || model.missingText != nil)
+                    Button("Prepare a file…") { preparing = true }.disabled(model.isRunning || model.missingText != nil)
                 }
             }
             Divider()
@@ -130,14 +130,19 @@ struct RunsView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    if model.runs.isEmpty {
+                    if let said = model.runsText {
+                        Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).padding(Spacing.m).textSelection(.enabled)
+                    } else if model.runs.isEmpty {
                         Text("No runs yet. A run fine-tunes a stored SafeTensors set on a dataset -- hours on a local trainer -- and only starts when you launch it.")
                             .font(.apogeeSmall)
                             .foregroundStyle(Palette.textTertiary)
                             .padding(Spacing.m)
                     }
-                    if !model.ledgers.isEmpty {
+                    if !model.ledgers.isEmpty || model.versionsText != nil {
                         Text("PROMOTED VERSIONS").font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary).padding(.horizontal, Spacing.m).padding(.top, Spacing.l)
+                        if let said = model.versionsText {
+                            Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).padding(.horizontal, Spacing.m).textSelection(.enabled)
+                        }
                         ForEach(model.ledgers) { ledger in
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack {
@@ -237,6 +242,9 @@ struct RegimesView: View {
                         }
                         .buttonStyle(.plain)
                     }
+                    if let said = model.regimesText {
+                        Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).padding(Spacing.m).textSelection(.enabled)
+                    }
                 }
                 .padding(Spacing.s)
             }
@@ -297,10 +305,15 @@ struct DatasetsView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    if model.datasets.isEmpty {
+                    if let said = model.datasetsText {
+                        Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).padding(Spacing.m).textSelection(.enabled)
+                    } else if model.datasets.isEmpty {
                         Text("No datasets yet.").font(.apogeeSmall).foregroundStyle(Palette.textTertiary).padding(Spacing.m)
                     }
                     Text("KITS").font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary).padding(.horizontal, Spacing.m).padding(.top, Spacing.l)
+                    if let said = model.kitsText {
+                        Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).padding(.horizontal, Spacing.m).textSelection(.enabled)
+                    }
                     ForEach(model.kits) { kit in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(kit.name).font(.apogeeSmall)
@@ -364,7 +377,9 @@ struct RunSheet: View {
             .textFieldStyle(.roundedBorder)
             Toggle("Gradient checkpointing: slower, less memory", isOn: $model.runForm.gradCheckpoint)
             Toggle("Completion-only loss: the prompt is not trained on", isOn: $model.runForm.maskPrompt)
-            if model.students.isEmpty {
+            if let said = model.modelsText {
+                Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+            } else if model.students.isEmpty {
                 Text("No stored SafeTensors set to train: pull one with its full weights first.").font(.apogeeSmall).foregroundStyle(Palette.textTertiary)
             }
         }
@@ -406,6 +421,9 @@ struct SynthSheet: View {
             TextField("Dataset name", text: $model.synthForm.name).textFieldStyle(.roundedBorder)
             Picker("Teacher", selection: $model.synthForm.teacher) {
                 ForEach(model.backends, id: \.self) { Text($0).tag($0) }
+            }
+            if let said = model.modelsText {
+                Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
             }
             Picker("Kit", selection: $model.synthForm.kit) {
                 ForEach(model.kits) { Text($0.name).tag($0.name) }
@@ -500,6 +518,66 @@ struct SheetFrame<Fields: View>: View {
     TrainingScreen(model: training)
         .frame(width: 1100, height: 480)
         .task { await training.connect(binary: nil) }
+}
+
+#Preview("Runs: Apogee not installed") {
+    let training = TrainingPreview.training()
+    RunsView(model: training)
+        .frame(width: 900, height: 300)
+        .task { await training.connect(binary: nil) }
+}
+
+#Preview("Regimes: Apogee not installed") {
+    let training = TrainingPreview.training()
+    RegimesView(model: training)
+        .frame(width: 900, height: 300)
+        .task { await training.connect(binary: nil) }
+}
+
+#Preview("Datasets: Apogee not installed") {
+    let training = TrainingPreview.training()
+    DatasetsView(model: training)
+        .frame(width: 900, height: 300)
+        .task { await training.connect(binary: nil) }
+}
+
+#Preview("Runs: the runs not read in time") {
+    let training = TrainingPreview.training(runner: TrainingPreview.unfinished)
+    RunsView(model: training)
+        .frame(width: 900, height: 300)
+        .task { await training.connect(binary: previewBinary) }
+}
+
+#Preview("Regimes: the list could not be read") {
+    let training = TrainingPreview.training(runner: TrainingPreview.badConfig)
+    RegimesView(model: training)
+        .frame(width: 900, height: 300)
+        .task { await training.connect(binary: previewBinary) }
+}
+
+#Preview("Datasets: the list not read in time") {
+    let training = TrainingPreview.training(runner: TrainingPreview.unfinished)
+    DatasetsView(model: training)
+        .frame(width: 900, height: 420)
+        .task { await training.connect(binary: previewBinary) }
+}
+
+#Preview("New run: the stored models could not be read") {
+    let training = TrainingPreview.training(runner: TrainingPreview.badConfig)
+    RunSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newRun()
+        }
+}
+
+#Preview("Synthesize: the models could not be read") {
+    let training = TrainingPreview.training(runner: TrainingPreview.badConfig)
+    SynthSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newSynthesis()
+        }
 }
 
 #Preview("Runs: read, one open") {

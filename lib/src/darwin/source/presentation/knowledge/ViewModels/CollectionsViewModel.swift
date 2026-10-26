@@ -135,10 +135,14 @@ public final class CollectionsViewModel {
     /// `embed query <collection> -- <question>`: its lines, as printed. The
     /// question after `--`, so the binary never reads it as a flag (`Argv`,
     /// GUI 4g).
+    /// Its lines land on the collection they were asked of, as `readInfo`'s
+    /// do: one chosen since drops them (GUI 4h).
     public func search() async {
         let question = question.trimmingCharacters(in: .whitespaces)
         guard let binary, let selected, !question.isEmpty else { return }
-        switch await runner.command(binary: binary, ["embed", "query", selected] + Argv.text(question)) {
+        let outcome = await runner.command(binary: binary, ["embed", "query", selected] + Argv.text(question))
+        guard self.selected == selected else { return }
+        switch outcome {
         case .done(let stdout):
             results = stdout.trimmingCharacters(in: .newlines)
             failure = nil

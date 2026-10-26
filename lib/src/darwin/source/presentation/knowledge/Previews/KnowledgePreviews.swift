@@ -49,11 +49,17 @@ enum KnowledgePreview {
         updates.reduce(into: JobProgress()) { $0.apply($1) }
     }
 
-    static func records(said: [JobUpdate] = []) -> RecordsViewModel {
+    /// A fresh install: no record ever captured, so `knowledge list` refuses
+    /// the collection in its recorded words, while `embed list` reads empty.
+    static let fresh = PreviewRunner(
+        reads: [(["embed", "list"], KnowledgeDocuments.collectionsListFresh)],
+        refusals: [(["knowledge", "list"], KnowledgeDocuments.knowledgeListFresh)])
+
+    static func records(said: [JobUpdate] = [], runner: PreviewRunner = KnowledgePreview.runner) -> RecordsViewModel {
         RecordsViewModel(runner: runner, starter: PreviewJobs(said: said))
     }
 
-    static func collections(said: [JobUpdate] = []) -> CollectionsViewModel {
+    static func collections(said: [JobUpdate] = [], runner: PreviewRunner = KnowledgePreview.runner) -> CollectionsViewModel {
         CollectionsViewModel(runner: runner, starter: PreviewJobs(said: said))
     }
 

@@ -297,5 +297,13 @@ enum TrainingDocuments {
  "object": "list"
 }
 """#
+    /// tests/business/reads/Fixtures/train-regime-list-bad-config.err
+    static let regimesBadConfig = #"""
+apogee train: /Users/someone/.apogee/config/config.json: not valid JSON: line 4, column 5: expected ',' or '}' after a member
+"""#
+    /// tests/business/reads/Fixtures/models-list-bad-config.err
+    static let modelsBadConfig = #"""
+apogee models: /Users/someone/.apogee/config/config.json: not valid JSON: line 4, column 5: expected ',' or '}' after a member
+"""#
 }
 #endif

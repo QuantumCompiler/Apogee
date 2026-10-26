@@ -12,8 +12,14 @@ final class ScriptedRunner: CommandRunning, @unchecked Sendable {
     private let answers = Mutex<[([String], CommandOutcome)]>([])
     private let reads = Mutex<[([String], String)]>([])
     private let log = Mutex<[String]>([])
+    private let readFailures = Mutex<[([String], ReadOutcome)]>([])
 
     var calls: [String] { log.withLock { $0 } }
+
+    /// Answers every later read starting with `prefix` with `outcome`.
+    func failing(_ prefix: [String], _ outcome: ReadOutcome) {
+        readFailures.withLock { $0.insert((prefix, outcome), at: 0) }
+    }
 
     func answering(_ prefix: [String], _ outcome: CommandOutcome) {
         answers.withLock { $0.insert((prefix, outcome), at: 0) }
@@ -25,6 +31,7 @@ final class ScriptedRunner: CommandRunning, @unchecked Sendable {
 
     func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
         log.withLock { $0.append("read " + arguments.joined(separator: "|")) }
+        if let failure = readFailures.withLock({ rules in rules.first { arguments.starts(with: $0.0) }?.1 }) { return failure }
         return reads.withLock { rules in rules.first { arguments.starts(with: $0.0) } }.map { .document(ReadDocument(text: $0.1)!) }
             ?? .couldNotStart("no scripted read for \(arguments)")
     }
@@ -83,4 +90,10 @@ func eventually(_ condition: @MainActor () -> Bool) async -> Bool {
         try? await Task.sleep(for: .milliseconds(10))
     }
     return condition()
+}
+
+func tail(_ text: String) -> BoundedTail {
+    var tail = BoundedTail()
+    tail.append(Data((text + "\n").utf8))
+    return tail
 }

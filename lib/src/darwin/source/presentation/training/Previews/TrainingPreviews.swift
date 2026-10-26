@@ -22,6 +22,20 @@ enum TrainingPreview {
         (["models", "list"], TrainingDocuments.modelsListAll),
     ])
 
+    /// The same reads over a config hand-edited into invalid JSON (a missing
+    /// comma): `train regime list` and `models list --all` refuse it in their
+    /// recorded words; the rest read no config.
+    static let badConfig = PreviewRunner(
+        reads: runner.reads,
+        refusals: [
+            (["train", "regime", "list"], TrainingDocuments.regimesBadConfig),
+            (["models", "list"], TrainingDocuments.modelsBadConfig),
+        ])
+
+    /// `train status` and `datasets list` past the reader's limit -- nothing
+    /// the probes did made them refuse, so this is the reader's own outcome.
+    static let unfinished = PreviewRunner(reads: runner.reads, unfinished: [["train", "status"], ["datasets", "list"]])
+
     /// The recorded run, which failed its gate.
     static let runID = "20261021-051826"
 
@@ -44,7 +58,7 @@ enum TrainingPreview {
         return [.ended(JobEnd(exit: ChildExit(reason: .exited, status: 1), stderrTail: tail, interrupted: false))]
     }
 
-    static func training(said: [JobUpdate] = [], finishes: Bool = false) -> TrainingViewModel {
+    static func training(said: [JobUpdate] = [], finishes: Bool = false, runner: PreviewRunner = TrainingPreview.runner) -> TrainingViewModel {
         TrainingViewModel(runner: runner, starter: PreviewJobs(said: said, finishes: finishes))
     }
 

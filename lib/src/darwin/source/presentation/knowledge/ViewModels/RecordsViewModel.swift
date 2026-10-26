@@ -88,17 +88,37 @@ public final class RecordsViewModel {
         await refresh()
     }
 
-    /// `knowledge list`, read again.
+    /// `knowledge list`, read again. A store that never captured is no
+    /// failure: the CLI refuses to list it by design, so a typo never makes an
+    /// empty database, and that refusal reads as no records yet. Any other
+    /// failure is said.
     public func refresh() async {
         guard let binary else { return }
         let outcome = await runner.read(binary: binary, ["knowledge", "list"])
         if let document = outcome.document {
             records = KnowledgeRecord.list(from: document)
             listing = .read
+        } else if Self.neverCaptured(outcome) {
+            records = []
+            listing = .read
         } else {
             listing = .failed(outcome.failure ?? "the records could not be read")
         }
         if let selected, !records.contains(where: { $0.id == selected }) { self.selected = nil }
+    }
+
+    /// Whether a failed `knowledge list` is the CLI's refusal of a collection
+    /// that does not exist yet -- `knowledge.cpp`'s `open_collection`: exit 1,
+    /// its last stderr line `apogee knowledge: no knowledge collection named
+    /// '<name>' -- capture a record first with 'apogee knowledge capture'` --
+    /// matched on those words whole, never on every failure. A fresh install
+    /// is that store.
+    static func neverCaptured(_ outcome: ReadOutcome) -> Bool {
+        guard case .failed(let exit, let tail) = outcome, exit.reason == .exited, exit.status == 1,
+            let line = tail.lastLine?.trimmingCharacters(in: .whitespaces)
+        else { return false }
+        return line.hasPrefix("apogee knowledge: no knowledge collection named '")
+            && line.hasSuffix("' -- capture a record first with 'apogee knowledge capture'")
     }
 
     /// The records the list shows: the chosen branch, or all.

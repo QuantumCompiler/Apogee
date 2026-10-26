@@ -48,5 +48,17 @@ enum TasksDocuments {
     static let recipeShow = #"""
 {"agent":"","allow":["write_file"],"description":"Read a folder and write a digest of it to DIGEST.md.","goal":"Read the folder {{input}}: list it, then read every file in it. Then write DIGEST.md in the current folder, in Markdown: a short paragraph saying what the folder holds and what it is for, then one line per file -- its path and, in a few words, what it contains. Change nothing else, and say the task is done once DIGEST.md is written.\n","input":"The folder to digest, relative to where the task runs.","name":"digest-folder","object":"task.recipe","path":"/Users/someone/.apogee/recipes/digest-folder.yaml","require":[],"require_files":["DIGEST.md"],"rounds":8,"source":"seeded","tools":true}
 """#
+    /// tests/presentation/tasks/Fixtures/task-list-interrupted.json
+    static let listInterrupted = #"""
+{"data":[{"goal":"say hello","id":"task-20261026-060911","rounds_budget":2,"rounds_used":0,"status":"running"}],"object":"list","total":1}
+"""#
+    /// tests/presentation/tasks/Fixtures/task-status-interrupted.json
+    static let statusInterrupted = #"""
+{"checks":[{"description":"the answer contains \"hello\"","detail":"","kind":"require","passed":false,"ran":false,"value":"hello"}],"conversation":"20261026-060911-0bb7","created_at":"2026-10-26T06:09:11Z","folder":"/Users/someone/work","goal":"say hello","id":"task-20261026-060911","interrupted":true,"plan":"Plan: say hello, then check it.","policy":null,"process":null,"reason":"","rounds_budget":2,"rounds_used":0,"self_report":"unreported","status":"running","tools":false,"turns":[{"adopted":false,"allowed":[],"answered":[],"checks_passed":0,"denied":[],"ended_at":"2026-10-26T06:09:11Z","kind":"plan","outcome":"completed","round":0,"self_report":"","started_at":"2026-10-26T06:09:11Z","tokens":0,"tokens_estimated":true,"tools":0},{"adopted":false,"allowed":[],"answered":[],"checks_passed":0,"denied":[],"ended_at":"","kind":"execute","outcome":"in_flight","round":1,"self_report":"","started_at":"2026-10-26T06:09:11Z","tokens":0,"tokens_estimated":false,"tools":0}],"updated_at":"2026-10-26T06:09:11Z"}
+"""#
+    /// tests/presentation/tasks/Fixtures/task-status-exhausted.json
+    static let statusExhausted = #"""
+{"checks":[{"description":"the answer contains \"hello\"","detail":"not in the answer","kind":"require","passed":false,"ran":true,"value":"hello"}],"conversation":"20261026-060918-41d2","created_at":"2026-10-26T06:09:18Z","folder":"/Users/someone/work","goal":"say hello","id":"task-20261026-060918","interrupted":false,"plan":"Plan: answer.","policy":null,"process":null,"reason":"the round budget (1) is spent and the task is not done -- not passed: the answer contains \"hello\" (not in the answer); not reported done by the model","rounds_budget":1,"rounds_used":1,"self_report":"unreported","status":"exhausted","tools":false,"turns":[{"adopted":false,"allowed":[],"answered":[],"checks_passed":0,"denied":[],"ended_at":"2026-10-26T06:09:18Z","kind":"plan","outcome":"completed","round":0,"self_report":"","started_at":"2026-10-26T06:09:18Z","tokens":0,"tokens_estimated":true,"tools":0},{"adopted":false,"allowed":[],"answered":[],"checks_passed":0,"denied":[],"ended_at":"2026-10-26T06:09:18Z","kind":"execute","outcome":"completed","round":1,"self_report":"unreported","started_at":"2026-10-26T06:09:18Z","tokens":0,"tokens_estimated":true,"tools":0}],"updated_at":"2026-10-26T06:09:18Z"}
+"""#
 }
 #endif

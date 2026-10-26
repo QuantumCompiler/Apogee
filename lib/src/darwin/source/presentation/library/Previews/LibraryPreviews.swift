@@ -40,12 +40,24 @@ enum LibraryPreview {
     /// The agents `agents list` names, as rows.
     static var agentRows: [AgentEntry] { AgentEntry.list(from: ReadDocument(text: LibraryDocuments.agentsList)!) }
 
-    static func agents() -> AgentsViewModel { AgentsViewModel(runner: runner) }
+    /// The same reads over a config hand-edited into invalid JSON (a missing
+    /// comma): `agents list`, `symphonies list` and `mcp list` refuse it, each
+    /// in its recorded words, while `mcp presets` reads no config.
+    static let badConfig = PreviewRunner(
+        reads: [(["mcp", "presets"], LibraryDocuments.mcpPresets)],
+        commands: [(["config", "path"], "/Users/someone/.apogee/config/config.json\n")],
+        refusals: [
+            (["agents", "list"], LibraryDocuments.agentsListBadConfig),
+            (["symphonies", "list"], LibraryDocuments.symphoniesListBadConfig),
+            (["mcp", "list"], LibraryDocuments.mcpListBadConfig),
+        ])
 
-    static func symphonies(playing: Bool = false) -> SymphoniesViewModel {
+    static func agents(runner: PreviewRunner = LibraryPreview.runner) -> AgentsViewModel { AgentsViewModel(runner: runner) }
+
+    static func symphonies(playing: Bool = false, runner: PreviewRunner = LibraryPreview.runner) -> SymphoniesViewModel {
         SymphoniesViewModel(runner: runner, starter: PreviewJobs(said: play, finishes: !playing))
     }
 
-    static func mcp() -> MCPViewModel { MCPViewModel(runner: runner) }
+    static func mcp(runner: PreviewRunner = LibraryPreview.runner) -> MCPViewModel { MCPViewModel(runner: runner) }
 }
 #endif
