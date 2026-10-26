@@ -11,10 +11,15 @@ import PresentationSession
 /// inspector beside it.
 ///
 /// Two laws from the design, kept here (SwiftUI-free, ADR 0002):
-/// - **One live chat child.** Exactly one session has a child at a time.
-///   Opening another ends the current one's first; leaving the place pauses
-///   an idle session -- its child ends and its model is freed -- or, mid-turn,
-///   once its turn ends; coming back resumes it with `--resume`.
+/// - **One live chat child.** Exactly one session has a child at a time, in
+///   every window: opening another ends the current one's first -- a launch
+///   still locating its binary called off, its child gone -- before the next
+///   is made. Leaving the place pauses an idle session -- its child ends and
+///   its model is freed -- or, mid-turn, once its turn ends; coming back
+///   resumes it with `--resume`. A conversation nothing of which is written
+///   can't be resumed, so it is never paused: it stays the one live child,
+///   and a switch away asks first. The window closing and the app quitting
+///   end it too, and nothing starts again until the place is opened anew.
 /// - **Read back; don't mirror.** The list is `chats list` as last read --
 ///   read again on focus, after every turn and after every change the app
 ///   makes -- and nothing else.
@@ -35,6 +40,10 @@ public final class SessionLibraryViewModel {
     public enum Pending: Equatable {
         /// A turn is running in the open session: stop it to open `target`?
         case stopTurn(for: Target)
+        /// The open session is a private conversation that can't be reopened
+        /// (`SessionViewModel.isLostIfEnded`): end it to open `target`, or
+        /// keep it running?
+        case endPrivate(for: Target)
         /// Delete this saved conversation? It cannot be undone.
         case delete(ChatSummary)
     }
@@ -134,31 +143,49 @@ public final class SessionLibraryViewModel {
     private var listedBeforeNew: Set<String>?
     /// The symphonies an execute session's `/play` offers.
     private var plays: [PlayChoice] = []
+    /// What the quit's wait is measured on.
+    private let clock: any Clock<Duration>
+    /// The window closed or the app is quitting: no child starts again until
+    /// `start(inView:)` opens the place once more.
+    private var shut = false
+    /// The open session's close has run to its end -- its child gone, any
+    /// delete it promised done -- so a quit has nothing left to wait for.
+    private var closed = false
+    /// Every promised delete begun, by the chat it deletes: a later ask --
+    /// a second close of the session, the quit's -- joins the first, so
+    /// `chats delete` runs once per chat. Each answers its failure, if any.
+    private var deletions: [String: Task<String?, Never>] = [:]
 
+    /// The library; `clock` is what a quit's wait on a child is measured on.
     public init(
         starter: any ChatStarting, runner: any CommandRunning, preferences: Preferences,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init, clock: any Clock<Duration> = ContinuousClock()
     ) {
         self.starter = starter
         self.runner = runner
         self.preferences = preferences
         self.now = now
+        self.clock = clock
         inspectorOpen = preferences.inspectorOpen
         current = SessionViewModel(starter: starter, launch: ChatLaunch(), reader: runner)
     }
 
     // MARK: - The place
 
-    /// The app started: find the binary, read the list, and -- when Sessions
-    /// is in view -- open the session left open last time, else a new one.
+    /// The app started, or its window opened again: find the binary, read
+    /// the list, and -- when Sessions is in view -- open the session left open
+    /// last time, else a new one. Ordered after the shutdown in flight: a
+    /// window closed and opened again within the grace starts nothing until
+    /// the child before it has gone.
     public func start(inView: Bool) async {
+        await closeCurrent()
+        shut = false
         self.inView = inView
         listing = .reading
         switch await starter.locateBinary() {
         case .notFound:
             listing = .missing
-            make(.new, starter: starter)
-            if inView { current.start() }
+            await replace(with: .new, starter: starter)
             return
         case .found(let found, _):
             self.found = found
@@ -166,26 +193,32 @@ public final class SessionLibraryViewModel {
         await refresh()
         await readModels()
         let last = preferences.openChat.flatMap { id in chats.contains { $0.id == id } ? id : nil }
-        make(last.map(Target.chat) ?? .new, starter: located)
-        if inView { current.start() }
+        await replace(with: last.map(Target.chat) ?? .new, starter: located)
     }
 
-    /// Sessions came into view: resume the open session, read the list again.
+    /// Sessions came into view: resume the open session, read the list again
+    /// -- with the window closed, nothing starts until it opens again.
     public func cameIntoView() async {
         inView = true
         pauseWhenIdle = false
-        if current.isPaused {
-            current.resume()
-        } else if current.connection == .idle {
-            current.start()
+        if !shut {
+            if current.isPaused {
+                current.resume()
+            } else if current.connection == .idle {
+                current.start()
+            }
         }
         await refresh()
     }
 
     /// Another place took the window: pause the open session now if it is
-    /// idle, else once its turn ends.
+    /// idle, else once its turn ends. A conversation nothing of which is
+    /// written is never paused -- no `--resume` could carry it on, and the
+    /// CLI refuses `--private` with one -- so it stays the one live child
+    /// until it is closed.
     public func leftView() async {
         inView = false
+        guard !current.isLostIfEnded else { return }
         if busy {
             pauseWhenIdle = true
         } else {
@@ -200,9 +233,51 @@ public final class SessionLibraryViewModel {
     }
 
     /// The window closed: the open session ends (and a private one on the
-    /// fallback is deleted).
+    /// fallback is deleted), and nothing starts again until the window opens.
     public func shutDown() async {
-        await close(current)
+        shut = true
+        await closeCurrent()
+    }
+
+    /// Whether quitting must wait: the open session holds a child or is
+    /// launching one, or a delete its private fallback promised has not run.
+    public var needsShutdown: Bool {
+        !closed && (current.isLive || current.privateMode == .deletedOnClose)
+    }
+
+    /// ⌘Q: nothing starts again; the open session is ended -- a launch still
+    /// locating called off, its child asked to go and terminated if it will
+    /// not -- then the delete its private fallback promised runs. The child is
+    /// waited for at most the session's grace, on the library's clock: one
+    /// that will not end by then is given up, so the app still quits, and its
+    /// stop's escalation carries on. A close already in flight -- a switch's,
+    /// the window's -- is joined, never repeated.
+    public func quit() async -> ShutdownReport {
+        shut = true
+        let session = current
+        let ended = await finishes(within: SessionViewModel.grace) { await session.shutDown() }
+        let failure = await deletePromised(of: session)
+        if session === current { closed = true }
+        return ShutdownReport(ended: ended, deleteFailure: failure)
+    }
+
+    /// Waits for `work` at most `limit` on the library's clock: whether it
+    /// finished in time. Given up, the work carries on.
+    private func finishes(within limit: Duration, _ work: @escaping @MainActor @Sendable () async -> Void) async -> Bool {
+        let first = FirstAnswer()
+        let clock = self.clock
+        return await withCheckedContinuation { continuation in
+            first.continuation = continuation
+            let timer = Task { @MainActor in
+                try? await clock.sleep(for: limit)
+                first.give(false)
+            }
+            Task { @MainActor in
+                await work()
+                timer.cancel()
+                first.give(true)
+            }
+        }
     }
 
     // MARK: - Reading
@@ -284,10 +359,15 @@ public final class SessionLibraryViewModel {
 
     // MARK: - Opening
 
-    /// Opens a saved conversation, or a new one. A turn running in the open
-    /// session asks first.
+    /// Opens a saved conversation, or a new one. A private conversation that
+    /// can't be reopened asks first, and so does a turn running in the open
+    /// session.
     public func open(_ target: Target) async {
         if case .chat(let id) = target, current.chatID == id { return }
+        if current.isLostIfEnded {
+            pending = .endPrivate(for: target)
+            return
+        }
         if current.transcript.turnInFlight {
             pending = .stopTurn(for: target)
             return
@@ -376,11 +456,13 @@ public final class SessionLibraryViewModel {
         guard let pending else { return }
         self.pending = nil
         switch pending {
-        case .stopTurn(let target): await switchTo(target)
+        case .stopTurn(let target), .endPrivate(let target): await switchTo(target)
         case .delete(let chat): await delete(chat)
         }
     }
 
+    /// Keeps things as they are: no switch, no delete -- a private
+    /// conversation asked about keeps running.
     public func dismissPending() {
         pending = nil
     }
@@ -388,13 +470,26 @@ public final class SessionLibraryViewModel {
     /// Ends the open session's child -- a turn in it is cancelled the
     /// protocol's way -- then opens `target`: never two children at once.
     private func switchTo(_ target: Target) async {
-        await close(current)
-        make(target, starter: located)
-        if inView { current.start() }
+        await replace(with: target, starter: located)
         await refresh()
     }
 
+    /// Opens `target` in place of the open session. Whatever is open when the
+    /// new one is made has been closed first -- its launch called off, its
+    /// child gone -- even one another opening made meanwhile, so two openings
+    /// at once leave the last one's child alone.
+    private func replace(with target: Target, starter: any ChatStarting) async {
+        var leaving: SessionViewModel
+        repeat {
+            leaving = current
+            await closeCurrent()
+        } while leaving !== current
+        make(target, starter: starter)
+        if inView && !shut { current.start() }
+    }
+
     private func make(_ target: Target, starter: any ChatStarting) {
+        closed = false
         switch target {
         case .new:
             let model = nextModel
@@ -426,18 +521,38 @@ public final class SessionLibraryViewModel {
         current.modelChoices = backends
     }
 
-    /// Ends `session`'s child; a private session on the fallback is then
-    /// deleted, as it promised -- once the list has named it.
-    private func close(_ session: SessionViewModel) async {
+    /// Ends the open session's child -- its launch called off, a turn in it
+    /// cancelled the protocol's way -- then deletes it, once, if its private
+    /// fallback promised so. A second close of the same session joins the
+    /// first: its child is stopped once and its delete runs once.
+    private func closeCurrent() async {
+        let session = current
         await session.shutDown()
-        guard session.privateMode == .deletedOnClose, let found else { return }
+        await deletePromised(of: session)
+        if session === current { closed = true }
+    }
+
+    /// The private fallback's promise, kept once `session`'s child has gone:
+    /// its chat deleted -- once the list has named it. Run once per chat; a
+    /// second ask joins the first. Returns the failure, in the CLI's words.
+    @discardableResult
+    private func deletePromised(of session: SessionViewModel) async -> String? {
+        guard session.privateMode == .deletedOnClose, let found else { return nil }
         if session.chatID == nil { await refresh() }
-        guard let id = session.chatID else { return }
-        let outcome = await runner.command(binary: found.url, ["chats", "delete", id])
+        guard let id = session.chatID else { return nil }
+        if let begun = deletions[id] { return await begun.value }
+        let deletion = Task { await delete(privately: id, binary: found.url) }
+        deletions[id] = deletion
+        return await deletion.value
+    }
+
+    private func delete(privately id: String, binary: URL) async -> String? {
+        let outcome = await runner.command(binary: binary, ["chats", "delete", id])
         if let failure = outcome.failure {
             self.failure = "The private session was not deleted: \(failure)"
         }
         await refresh()
+        return outcome.failure
     }
 
     /// An act the open session's window hands up.
@@ -507,9 +622,7 @@ public final class SessionLibraryViewModel {
     private func delete(_ chat: ChatSummary) async {
         guard let found else { return }
         if current.chatID == chat.id {
-            await current.shutDown()
-            make(.new, starter: located)
-            if inView { current.start() }
+            await replace(with: .new, starter: located)
         }
         let outcome = await runner.command(binary: found.url, ["chats", "delete", chat.id])
         await refresh()
@@ -598,6 +711,32 @@ public final class SessionLibraryViewModel {
             if case .answer(let answer) = item.content, answer.finished { return answer.usage }
         }
         return nil
+    }
+}
+
+/// What a quit did, for the app's log.
+public struct ShutdownReport: Equatable, Sendable {
+    /// Whether the open session's child ended within the grace. One that
+    /// would not is given up, so the app can quit; its stop's escalation
+    /// carries on.
+    public let ended: Bool
+    /// The private fallback's promised delete, when it failed: the CLI's words.
+    public let deleteFailure: String?
+
+    public init(ended: Bool, deleteFailure: String?) {
+        self.ended = ended
+        self.deleteFailure = deleteFailure
+    }
+}
+
+/// The first of two answers, given once: a wait's, or its limit's.
+@MainActor
+private final class FirstAnswer {
+    var continuation: CheckedContinuation<Bool, Never>?
+
+    func give(_ answer: Bool) {
+        continuation?.resume(returning: answer)
+        continuation = nil
     }
 }
 

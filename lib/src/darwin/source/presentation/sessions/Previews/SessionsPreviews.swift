@@ -48,6 +48,12 @@ enum SessionsPreview {
     /// (SessionLibraryPrivateTests).
     static let newerBuild = #"{"type":"session","protocol_version":1,"model":"local","next_turn":1,"capabilities":{"events":[],"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"tools":true,"ask":true,"schema":"2026-10-20"}}"#
 
+    /// A conversation on that build: its `session` line, then the recorded
+    /// mock-actor turn after the recording's own `session` line -- a private
+    /// session there is `--private`, so the turn is a conversation nothing
+    /// of which is written.
+    static let privateConversation = [newerBuild] + Array(mockActor.dropFirst())
+
     /// The configured suites, as `config get suites` prints them, and the
     /// folder a door's session opens in (ExecuteDoorTests).
     static let suites = "duo\nfast\n"

@@ -121,27 +121,74 @@ final class ScriptedReader: CommandRunning, @unchecked Sendable {
     }
 }
 
+/// One ordered record a test's sessions share: which act came first, across
+/// them.
+final class Ledger: @unchecked Sendable {
+    private let entries = Mutex<[String]>([])
+
+    var all: [String] { entries.withLock { $0 } }
+
+    func note(_ entry: String) { entries.withLock { $0.append(entry) } }
+}
+
 /// A chat session a test drives by hand: it says what the test emits, and
 /// records every line it was asked to write, in order.
 final class ScriptedSession: ChatSession, @unchecked Sendable {
+    /// How its child takes a stop.
+    enum Stopping {
+        /// It ends at once, as a real session's child does.
+        case ends
+        /// It ends only once `releaseStop()` lets it: a child slow to go, or
+        /// -- never released -- one that won't die.
+        case whenReleased
+    }
+
     let events: AsyncStream<SessionEvent>
     private let continuation: AsyncStream<SessionEvent>.Continuation
     private let log = Mutex<[String]>([])
     private let turns = Mutex(0)
+    private let name: String
+    private let stopping: Stopping
+    private let ledger: Ledger?
 
-    init() {
+    private struct Life {
+        var ended = false
+        var released = false
+        var waiting: [CheckedContinuation<Void, Never>] = []
+    }
+
+    private let life = Mutex(Life())
+
+    init(_ name: String = "session", stopping: Stopping = .ends, ledger: Ledger? = nil) {
         (events, continuation) = AsyncStream.makeStream(of: SessionEvent.self)
+        self.name = name
+        self.stopping = stopping
+        self.ledger = ledger
     }
 
     var calls: [String] { log.withLock { $0 } }
+
+    /// Its child has not ended: what the one-live-child law counts.
+    var isLive: Bool { life.withLock { !$0.ended } }
 
     func emit(_ event: SessionEvent) { continuation.yield(event) }
 
     func emit(_ line: String) { emit(decoded(line)) }
 
     func end(_ reason: SessionEnd.Reason = .finished) {
+        life.withLock { $0.ended = true }
         continuation.yield(.ended(SessionEnd(reason: reason, exit: ChildExit(reason: .exited, status: 0), stderrTail: BoundedTail())))
         continuation.finish()
+    }
+
+    /// Lets a held stop end the child, and every later one at once.
+    func releaseStop() {
+        let waiting = life.withLock { life in
+            life.released = true
+            defer { life.waiting = [] }
+            return life.waiting
+        }
+        waiting.forEach { $0.resume() }
     }
 
     func send(user text: String) async throws -> Int {
@@ -156,23 +203,50 @@ final class ScriptedSession: ChatSession, @unchecked Sendable {
     func compact() async throws { log.withLock { $0.append("compact") } }
     func cancel() async throws { log.withLock { $0.append("cancel") } }
     func close() async { log.withLock { $0.append("close") } }
-    /// Stopped, it ends -- as a real session's child does.
+    /// Stopped, it ends -- as a real session's child does -- at once, or
+    /// once released.
     func stop(grace: Duration) async {
         log.withLock { $0.append("stop") }
-        end(.finished)
+        ledger?.note("\(name): stop")
+        if stopping == .whenReleased {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let now = life.withLock { life in
+                    if life.released { return true }
+                    life.waiting.append(continuation)
+                    return false
+                }
+                if now { continuation.resume() }
+            }
+        }
+        if isLive { end(.finished) }
+        ledger?.note("\(name): ended")
     }
 }
 
 /// Where a test's sessions come from: a fixed discovery outcome, and the
-/// sessions handed out in turn.
+/// sessions handed out in turn. Held, every locate waits until
+/// `releaseLocate()` lets it answer -- a binary still being located.
 final class ScriptedStarter: ChatStarting, @unchecked Sendable {
     let outcome: DiscoveryOutcome
     private let sessions: Mutex<[any ChatSession]>
     private let opened = Mutex(0)
+    private let handedOut = Mutex<[any ChatSession]>([])
 
-    init(outcome: DiscoveryOutcome = .found(ScriptedStarter.binary, skipped: []), sessions: [any ChatSession]) {
+    private struct Locating {
+        var held: Bool
+        var calls = 0
+        var waiting: [CheckedContinuation<Void, Never>] = []
+    }
+
+    private let locating: Mutex<Locating>
+
+    init(
+        outcome: DiscoveryOutcome = .found(ScriptedStarter.binary, skipped: []), sessions: [any ChatSession],
+        holdsLocate: Bool = false
+    ) {
         self.outcome = outcome
         self.sessions = Mutex(sessions)
+        locating = Mutex(Locating(held: holdsLocate))
     }
 
     static let binary = FoundBinary(
@@ -184,12 +258,47 @@ final class ScriptedStarter: ChatStarting, @unchecked Sendable {
     /// How each session was started, in order.
     var launches: [ChatLaunch] { launched.withLock { $0 } }
 
-    func locateBinary() async -> DiscoveryOutcome { outcome }
+    /// The sessions handed out whose child has not ended: the one-live-child
+    /// law holds while this is at most one.
+    var live: Int {
+        handedOut.withLock { $0.filter { ($0 as? ScriptedSession)?.isLive ?? true }.count }
+    }
+
+    /// The scripted sessions handed out, in order.
+    var handed: [ScriptedSession] { handedOut.withLock { $0.compactMap { $0 as? ScriptedSession } } }
+
+    /// How many times the binary was asked for.
+    var locateCalls: Int { locating.withLock { $0.calls } }
+
+    /// Lets every held locate answer, and every later one at once.
+    func releaseLocate() {
+        let waiting = locating.withLock { locating in
+            locating.held = false
+            defer { locating.waiting = [] }
+            return locating.waiting
+        }
+        waiting.forEach { $0.resume() }
+    }
+
+    func locateBinary() async -> DiscoveryOutcome {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let now = locating.withLock { locating in
+                locating.calls += 1
+                if !locating.held { return true }
+                locating.waiting.append(continuation)
+                return false
+            }
+            if now { continuation.resume() }
+        }
+        return outcome
+    }
 
     func openChat(binary: URL, launch: ChatLaunch) -> any ChatSession {
         opened.withLock { $0 += 1 }
         launched.withLock { $0.append(launch) }
-        return sessions.withLock { $0.removeFirst() }
+        let session = sessions.withLock { $0.removeFirst() }
+        handedOut.withLock { $0.append(session) }
+        return session
     }
 }
 

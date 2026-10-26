@@ -1412,3 +1412,63 @@ The app had no draft field on a backend. Its clip and say sheets built their com
 - `video compose`, and the engine on Run again, are untouched. The CLI replays a record's engine itself.
 - The Backends table does not mark a paired backend, and a drafter cannot yet be paired from the backend's side.
 - There is no preview of a pairing that can no longer draft, since no recording of that state exists.
+
+---
+
+## Milestone E — The audit's GUI findings
+
+**Goal.** The app does what it says. The CLI/GUI audit of 2026-10-22 (the user's call: a very thorough bug and feature-disparity audit over both applications, every issue a v0.2.0 item in its queue) ran 14 dimensions with probes against the branch binary and a three-lens adversarial panel per finding. 68 of the 111 surviving findings were the GUI's: 37 bugs, 27 disparities and 4 doc drift, 11 of them high. Track 4 groups them into twelve items:
+- the session's lifecycle and honesty (4a, 4b);
+- the children's supervision (4c);
+- rendering (4d);
+- the store's jobs (4e) and the media studio (4f);
+- the console and every argv (4g);
+- the parity screens' correctness (4h);
+- the verbs still unreached (4i, 4j, 4k);
+- the docs and the contract board (4l).
+
+The CLI's 43 are its track 55 ([CLI Milestone AR](../../cli/assistant/MILESTONES.md#milestone-ar--the-audits-cli-findings)). Every fix stays a machine-mode client of the binary, tested hermetically.
+
+### 2026-10-25 — `private-sessions-survive` (backlog item 4a): private sessions survive navigation, stop and quit
+
+**Why.** The audit found three high-severity breaks in the session lifecycle; three hunters found the first independently. Each still reproduced on today's source, as a failing test first:
+- **Leaving Sessions wiped a private conversation.** `leftView` paused the live session unconditionally. A `--private` session has no chat id to resume by, so the return started an empty one; the CLI refuses `--private --resume`.
+- **⌘Q never finished the shutdown.** The app had no delegate, only the window's `onDisappear` task, which nothing waited on. The stop escalation and the private fallback's `chats delete` never ran. A window reopened inside the 5-second grace started a second child beside the first.
+- **A stop during a launch did nothing.** `session` was set only after `locateBinary` returned, so a stop, pause or switch in that window missed it, and the child spawned moments later ran unsupervised.
+
+- [x] **A private conversation stays live when its place is left.** `isLostIfEnded` names a session that can't come back: `--private`, no chat id, a turn sent, its child not ended. `leftView` never pauses one, so it stays the one live child. Switching away from it, or opening a new session, asks first, in the dialog "Stop the turn and switch?" uses: "This private conversation can't be reopened", with **End it and switch** or **Keep it running**. Ordinary sessions still pause on leave.
+- [x] **Quit waits for the sessions.** `AppDelegate` (`app/Views/AppDelegate.swift`, through `@NSApplicationDelegateAdaptor`, now the owner of `AppViewModel`) asks `Termination` (`app/ViewModels/Termination.swift`, AppKit-free). It answers `.terminateLater` while a child is live or launching, or a private session's delete is still to run.
+  - `SessionLibraryViewModel.quit()` stops new starts, ends the open session (joining a close already in flight), runs the delete, and only then replies.
+  - The child is waited for at most `SessionViewModel.grace` (5 s) on an injectable clock, then given up. A run-loop backstop at 15 s replies even when the main actor can't run.
+  - Each step is written to the system log (subsystem `com.quantumcompiler.apogee`, category `quit`).
+- [x] **A reopened window waits for the close in flight.** `start(inView:)` joins it first, so no second child starts during the grace.
+- [x] **A launch can be called off.**
+  - Each launch has a number. A stop or pause calls it off, and a newer launch supersedes it.
+  - After `locateBinary` returns, a launch opens its child only if it is still current. That open is synchronous on the main actor, so no stop lands between the check and the spawn: the late child is never made.
+  - A pause during a launch now pauses. `shutDown()` is final and joinable, so a settings restart can't relaunch after a stop.
+  - `switchTo`, delete and start go through one `replace()`, which closes what is open before making the next.
+
+**Decisions made while building** (2026-10-25, each recorded for veto):
+- **The defaults, taken:** a private session stays live when its place is left, and a switch away asks; quit waits at most the 5-second grace per session.
+- **A child still alive at 5 s** gets its escalation's SIGTERM, but the SIGKILL step at 7 s doesn't run once the app has exited. A bound of grace + 2 s would guarantee the kill.
+- **An empty private session** (no turn sent) has nothing to lose: it pauses on leave, and a switch asks nothing.
+- **A private conversation with a turn running** asks the private question, whose message says the turn stops too.
+- **Closing the window and ⌘Q end a private conversation without asking.** The criterion's "never without the person's say" is navigation's.
+- **The `--no-recall` fallback's private session** is resumable by its chat id, so it keeps pause-on-leave.
+- **Nothing starts while the window is closed or the app is quitting.** That also stops ⌘N with the window closed from starting a child no window shows.
+- **The backstop** isn't in the document. A scratch AppKit probe showed `.terminateLater` services the main actor only when the quit comes from the event loop (⌘Q, the Dock, a logout). Asked from inside a main-queue job, the shutdown could never run and quit would hang. Nothing in the app quits that way today.
+
+**Verified.**
+- 28 new cases: `SessionLaunchTests` (4), `SessionLifecycleTests` (17) and `TerminationTests` (7). Among them:
+  - `leaveAndReturn`, `leaveMidTurn` and `switchAsks`: the private conversation kept;
+  - `stopWhileLocating`, `pauseWhileLocating`, `switchWhileLocating`, `returnAndOpenAtOnce`, `twoSwitchesAtOnce`, `restartWhileLocating` and `stopDuringRestart`: no child left;
+  - `reopenWaitsForTheShutdown`;
+  - quit's order, recorded by a shared ledger (the private session's stop, then `chats delete`), and a child that won't die given up when a scripted clock reaches 5 s;
+  - a lifecycle matrix checking at most one live child after every step.
+- The module schemes: `PresentationSession` 48 of 48, `PresentationSessions` 42 of 42 and `PresentationApp` 11 of 11, each also over 10–15 repeated runs. The layering check passed 25 of 25, and `check-previews` finds nothing in session, sessions or app. One new preview: a private conversation's end waiting on the person's word.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,992 tests and the macOS app's 477 cases passed, with no Swift warning.
+
+**Not done:**
+- No live pass of the app: running it would write the person's preferences and reach real discovery. Scratch AppKit probes covered the delegate's mechanism.
+- `newSession(on:)` leaves its chosen model pending when the question is dismissed, so the next ⌘N uses it. That predates this item, but the private question makes it easier to hit.
+- Supervised jobs at quit are 4c's.

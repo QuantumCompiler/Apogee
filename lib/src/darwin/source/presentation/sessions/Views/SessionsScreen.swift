@@ -45,12 +45,14 @@ public struct SessionsScreen: View {
             switch library.pending {
             case .stopTurn:
                 Button("Stop the turn and switch", role: .destructive) { Task { await library.confirm() } }
+            case .endPrivate:
+                Button("End it and switch", role: .destructive) { Task { await library.confirm() } }
             case .delete:
                 Button("Delete", role: .destructive) { Task { await library.confirm() } }
             case nil:
                 EmptyView()
             }
-            Button("Cancel", role: .cancel) { library.dismissPending() }
+            Button(keepTitle, role: .cancel) { library.dismissPending() }
         } message: {
             Text(pendingMessage)
         }
@@ -76,6 +78,7 @@ public struct SessionsScreen: View {
     private var pendingTitle: String {
         switch library.pending {
         case .stopTurn: "A turn is running in this session"
+        case .endPrivate: "This private conversation can't be reopened"
         case .delete(let chat): "Delete “\(chat.name)”?"
         case nil: ""
         }
@@ -84,9 +87,18 @@ public struct SessionsScreen: View {
     private var pendingMessage: String {
         switch library.pending {
         case .stopTurn: "Switching stops it, as Stop does, and ends this session's apogee. Its conversation is saved."
+        case .endPrivate:
+            library.current.transcript.turnInFlight
+                ? "Nothing of it is written: switching stops the turn running in it and ends this session's apogee, and the conversation goes with it. Keep it running, or end it?"
+                : "Nothing of it is written: switching ends this session's apogee, and the conversation goes with it. Keep it running, or end it?"
         case .delete(let chat): "apogee chats delete \(chat.id) -- the conversation and its turns are removed, and this can't be undone."
         case nil: ""
         }
+    }
+
+    /// The answer that changes nothing: a private conversation is kept running.
+    private var keepTitle: String {
+        if case .endPrivate = library.pending { "Keep it running" } else { "Cancel" }
     }
 }
 
@@ -247,6 +259,20 @@ public struct SessionCommands: Commands {
         .task {
             await library.start(inView: true)
             if let chat = library.chats.first { library.askToDelete(chat) }
+        }
+}
+
+#Preview("A private conversation's end waiting on the person's word") {
+    let library = SessionsPreview.library(lines: SessionsPreview.privateConversation)
+    SessionsScreen(library: library, shell: SessionsPreview.shell())
+        .frame(width: 1100, height: 760)
+        .task {
+            await library.start(inView: true)
+            await SessionsPreview.until { library.privateIsNothingWritten }
+            await library.newPrivateSession()
+            await SessionsPreview.converse(library.current, typed: SessionsPreview.noteTurn, answers: SessionsPreview.noteAnswers)
+            await SessionsPreview.until { library.current.transcript.status == .ready }
+            await library.newSession()
         }
 }
 

@@ -54,6 +54,9 @@ final class AppViewModel {
     let compose: ComposeViewModel
     let voice: VoiceViewModel
     let settings: SettingsViewModel
+    /// ⌘Q, held until the session library has ended its child and kept its
+    /// private fallback's promise: what the app delegate asks.
+    let termination: Termination
 
     init(
         info: [String: Any]?, preferences: Preferences, starter: (any ChatStarting)? = nil,
@@ -213,6 +216,9 @@ final class AppViewModel {
         self.compose = compose
         self.voice = voice
         self.settings = settings
+        termination = Termination(
+            pending: { [weak sessions] in sessions?.needsShutdown ?? false },
+            shutDown: { [weak sessions] in await sessions?.quit() ?? ShutdownReport(ended: true, deleteFailure: nil) })
     }
 
     /// The application's own composition. The person's login shell is asked

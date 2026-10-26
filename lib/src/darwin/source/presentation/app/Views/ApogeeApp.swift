@@ -40,7 +40,11 @@ extension View {
 /// Settings scene. Started by the `Apogee` target's entry point (source/main),
 /// which holds nothing else.
 public struct ApogeeApp: App {
-    @State private var model = AppViewModel(bundle: .main)
+    /// Holds the app's state, and ⌘Q until the sessions have ended
+    /// (`applicationShouldTerminate`).
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+
+    private var model: AppViewModel { delegate.model }
 
     public init() {}
 
@@ -79,9 +83,11 @@ public struct ApogeeApp: App {
             .frame(minWidth: Layout.windowMinWidth, minHeight: Layout.windowMinHeight)
             .appearance(model.settings.theme)
             .navigationSubtitle(model.versionLine)
+            // Opened again, it starts once the shutdown before it is done.
             .task { await model.start() }
             // The window closing ends its session: the turn cancelled, the
-            // child asked to go, terminated only if it will not.
+            // child asked to go, terminated only if it will not. ⌘Q waits on
+            // the same shutdown (`AppDelegate`).
             .onDisappear { Task { await model.sessions.shutDown() } }
         }
         .windowResizability(.contentMinSize)

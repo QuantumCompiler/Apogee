@@ -74,6 +74,21 @@ public final class SessionViewModel {
     private var readsEarlier = false
     /// The session's run: located, opened, its events read to the end.
     private var running: Task<Void, Never>?
+    /// The launch in flight -- its binary being located, no child yet -- by
+    /// its number; `nil` once it has opened its child, or when none is. A
+    /// stop or a pause calls it off and a newer launch supersedes it: either
+    /// way it opens no child, so the one-live-child law holds in that window
+    /// too.
+    private var launching: Int?
+    private var launches = 0
+    /// The shutdown, once asked: every later ask joins it, and nothing starts
+    /// the session again.
+    private var ending: Task<Void, Never>?
+
+    /// The grace a child is given to go when asked -- its input closed, a turn
+    /// in it cancelled -- before it is terminated (`ChatSession.stop`); the
+    /// library's quit waits on a child no longer than this.
+    public static let grace: Duration = .seconds(5)
 
     /// A line to write, queued so lines leave in the order the user made them.
     private enum Outbound {
@@ -137,6 +152,17 @@ public final class SessionViewModel {
         return launch.noRecall ? .deletedOnClose : nil
     }
 
+    /// Whether ending its child would lose the conversation for good: one
+    /// that writes nothing (`--private`, so no chat id), a turn sent in it,
+    /// its child not ended. No `--resume` can carry it on -- the CLI refuses
+    /// `--private` with `--resume` -- so the library never pauses it, and a
+    /// switch away asks first. An ordinary session, or a private one with no
+    /// turn yet, loses nothing by a pause.
+    public var isLostIfEnded: Bool {
+        guard privateMode == .nothingWritten, chatID == nil, transcript.status != .ended else { return false }
+        return transcript.items.contains { if case .user = $0.content { true } else { false } }
+    }
+
     /// What a private session's state says of what is kept.
     public static func privateWords(_ mode: PrivateMode) -> String {
         switch mode {
@@ -155,8 +181,9 @@ public final class SessionViewModel {
     // MARK: - The session
 
     /// Finds the binary and starts a session on it; again after one has ended
-    /// or none was found.
+    /// or none was found -- never once it has been shut down.
     public func start() {
+        guard !isShutDown else { return }
         switch connection {
         case .locating: return
         case .connected where transcript.status != .ended: return
@@ -165,13 +192,38 @@ public final class SessionViewModel {
         connection = .locating
         transcript = Transcript()
         readsEarlier = true
-        running = Task { await connect() }
+        beginLaunch()
     }
 
-    private func connect() async {
+    /// Begins a launch -- the binary located, then its child opened -- by its
+    /// own number, superseding any launch still locating.
+    private func beginLaunch() {
+        launches += 1
+        let number = launches
+        launching = number
+        running = Task { await connect(number) }
+    }
+
+    /// Calls the launch in flight off, if one is still locating: it opens no
+    /// child. Its task is cancelled too, so a locate that heeds cancellation
+    /// stops early.
+    private func callOffLaunch() {
+        guard launching != nil else { return }
+        launching = nil
+        running?.cancel()
+    }
+
+    private func connect(_ number: Int) async {
+        let located = await starter.locateBinary()
+        // Called off while the binary was located -- stopped, paused, or
+        // superseded by a newer launch: no child is opened. The open below is
+        // synchronous on the main actor, so no stop can land between this
+        // check and the child: one asked from here on finds `session` set.
+        guard launching == number else { return }
+        launching = nil
         let readsEarlier = self.readsEarlier
         self.readsEarlier = false
-        switch await starter.locateBinary() {
+        switch located {
         case .notFound(let skipped):
             connection = .missing(
                 hint: DiscoveryOutcome.installHint,
@@ -238,11 +290,24 @@ public final class SessionViewModel {
         }
     }
 
-    /// Ends the session: a turn in flight is cancelled and the child asked
-    /// to go, terminated only if it will not.
+    /// Ends the session for good: a launch still locating its binary is
+    /// called off, so it opens no child; a turn in flight is cancelled and the
+    /// child asked to go, terminated only if it will not. Every later call
+    /// joins the first, and nothing starts the session again.
     public func shutDown() async {
-        await session?.stop(grace: .seconds(5))
+        if ending == nil {
+            callOffLaunch()
+            ending = Task { await session?.stop(grace: Self.grace) }
+        }
+        await ending?.value
     }
+
+    /// Whether it has been shut down: ended for good, never started again.
+    public var isShutDown: Bool { ending != nil }
+
+    /// Whether it holds a child, or is launching one: what the one-live-child
+    /// law counts.
+    public var isLive: Bool { session != nil || launching != nil }
 
     /// Its child's process id, while it has one.
     public var processIdentifier: Int32? { session?.processIdentifier }
@@ -253,26 +318,32 @@ public final class SessionViewModel {
 
     /// Ends the child to free it -- its model unloads -- keeping the
     /// conversation shown; `resume()` carries it on with `--resume`. Returns
-    /// once the child has gone.
+    /// once the child has gone. A session still locating its binary has its
+    /// launch called off, and is paused before it has a child.
     public func pause() async {
-        guard let session, transcript.status != .ended, !isPaused else { return }
-        pausing = true
-        await session.stop(grace: .seconds(5))
-        // Returns once its events are read to the end: paused, not pausing.
-        await running?.value
+        guard !isShutDown, transcript.status != .ended, !isPaused else { return }
+        if let session {
+            pausing = true
+            await session.stop(grace: Self.grace)
+            // Returns once its events are read to the end: paused, not pausing.
+            await running?.value
+        } else if launching != nil {
+            callOffLaunch()
+            transcript.paused()
+        }
     }
 
     /// Carries a paused session on: a new child resuming the saved
     /// conversation. One that was never saved -- no turn sent, or its id never
     /// found -- starts afresh instead, since nothing of it could be resumed.
     public func resume() {
-        guard isPaused else { return }
+        guard isPaused, !isShutDown else { return }
         if chatID == nil {
             transcript = Transcript()
         } else {
             transcript.reopening()
         }
-        running = Task { await connect() }
+        beginLaunch()
     }
 
     // MARK: - The user's acts
@@ -341,7 +412,7 @@ public final class SessionViewModel {
     /// next turn and says each; an older one is restarted with the new flags,
     /// carrying the conversation on with `--resume`, and the app says so.
     public func apply(_ change: RunSettings) async {
-        guard !change.isEmpty else { return }
+        guard !change.isEmpty, !isShutDown else { return }
         settings = settings.merging(change)
         if canSet, let outbox {
             outbox.yield(.set(change))
@@ -357,13 +428,17 @@ public final class SessionViewModel {
     }
 
     /// Ends the child and starts it again on `launch`, resuming the saved
-    /// conversation when there is one.
+    /// conversation when there is one. A launch still locating is superseded;
+    /// a session shut down while the old child went starts nothing.
     private func restart() async {
         if let session, transcript.status != .ended {
             pausing = true
-            await session.stop(grace: .seconds(5))
+            await session.stop(grace: Self.grace)
             await running?.value
+        } else {
+            callOffLaunch()
         }
+        guard !isShutDown else { return }
         if chatID == nil {
             let notes = transcript.items.filter { if case .notice = $0.content { true } else { false } }
             transcript = Transcript()
@@ -371,7 +446,7 @@ public final class SessionViewModel {
         } else {
             transcript.reopening()
         }
-        running = Task { await connect() }
+        beginLaunch()
     }
 
     static func words(_ settings: RunSettings) -> String {
