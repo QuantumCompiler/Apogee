@@ -1528,3 +1528,68 @@ The CLI's 43 are its track 55 ([CLI Milestone AR](../../cli/assistant/MILESTONES
 **Not done:**
 - No live pass of the app.
 - On a binary without `set`, a settings change made mid-turn still restarts at once: that is a restart, not a line.
+
+### 2026-10-25 — `children-end-cleanly` (backlog item 4c): children end cleanly and are seen
+
+**Why.** The app supervises every `apogee` child through `infrastructure/process` and `business/jobs`. The audit found five defects in that machinery; all five still reproduced on today's source, 7 cases failing first:
+- **A grandchild holding stdout wedged a stopped job.** The reader waited for stdout to close, and only stderr had the 2-second failsafe. Once the child had exited, a grandchild ignoring SIGINT was never terminated, and SIGKILL went to the child's pid alone. The job's card ran on, Stop apparently ignored.
+- **`FoundationChild` leaked.** Both pipe handlers and the failsafe captured it strongly, and the timeout path never cleared a handler.
+- **A failing binary override fell back silently.** Discovery returned the override's failure reason, and the session library and the session both dropped it, so the app ran another binary than the one pointed at.
+- **A profile that printed its environment poisoned `PATH`.** `ShellPath` took the text between the marker's first two occurrences, and `env`, `export -p` or `set` printed the marker's variable first.
+- **The monitor missed the heaviest children.** It listed the session, downloads and tasks only: no video, compose, voice, training, graph, knowledge, symphony, review or console run.
+
+- [x] **A stopped job always ends.**
+  - Foundation's `Process` already starts each child at the head of its own process group, and what it starts joins that group. A scratch program showed it, and `ProcessGroupTests/ownGroup` pins it, so no `posix_spawn` rewrite was needed.
+  - `interrupt()`, `terminate()` and a new `kill()` now all signal the group, whether or not the child itself still runs, falling back to the pid only if no group exists. `groupRunning` says whether anything of the group is left.
+  - Stdout has a failsafe 2 s after the child's exit, as stderr has.
+  - `SupervisedJob.stop` escalates (interrupt, terminate after the grace, kill 2 s later) until the job has ended and nothing of its group is left. Its card still ends within the failsafe after the run exits.
+  - `MachineSession` keeps its steps, now reaching its group, and ends within 2 s of the child's exit. It doesn't wait for leftovers in its group, which would stretch 4a's 5-second quit.
+- [x] **No child outlives its process.** Every handler captures weakly, and both are cleared at end of stream, at the failsafe, on a failed start and on release.
+- [x] **The binary in use is the one said.** `DiscoveryOutcome.skippedOverride` picks out a passed-over override.
+  - The library says it once per launch, as a toast: "Not using <path>: <reason> -- running <binary> instead". A session that locates for itself reports it through `onLocated`.
+  - Settings › General shows "Not using <path>: <reason>. This launch runs the one above." in the warning colour. "From the next launch: …" now appears only for an override chosen since launch.
+- [x] **The marker stands alone.** `ShellPath` counts the marker only as a whole line, with the `PATH` on the line between two of them. The command asked now starts with `/bin/echo;`, so the marker begins a line even after a profile's output with no trailing newline. Checked against the real `/bin/zsh` with a profile running `env`, `export -p` and `set` in a temporary home.
+- [x] **Every child is seen: `ChildRegistry`** (`business/jobs`). It is thread-safe, one for the app (`.app`), each entry carrying an id, kind (session or job), label, pid and that child's own Stop.
+  - **Supervisors register, never screens.** A `SupervisedJob` registers when it spawns and leaves just before its end is announced. `MachineSession` registers as "Session: starting" and is renamed "Session: <model>" once the session says its model.
+  - **Every job registers,** because every job-running place goes through the composition's one `JobStarter`: Downloads and the store jobs, Tasks, the console, Graph, Records, Collections, Training, Symphonies, Review, Settings' fix, Video, Compose and Voice. Jobs a screen keeps only in a local, such as installs and previews, are seen too.
+  - **What reads it.** `AppViewModel.liveChildren` reads the registry. `DownloadsViewModel.children`, `TasksViewModel.children` and `SessionViewModel.processIdentifier` are gone. A row's label is the command words before the first option.
+  - **At quit,** `Termination` stops the running jobs beside the session: a 3-second grace, SIGTERM, then SIGKILL at 5 s, inside 4a's bound, each said in the quit log.
+
+**Decisions made while building** (2026-10-25, each recorded for veto):
+- **The default, taken in substance:** children run in their own process group and Stop reaches it. Foundation already makes the group, so the spawner stayed as it was, and the signals were what changed.
+- **Stop keeps escalating until the group is empty,** while the card ends within the failsafe.
+- **The session doesn't wait for its group's leftovers,** to keep 4a's quit bound.
+- **The monitor's labels became command words** (`apogee models pull org/model`) rather than "Download: …" and "Task: <goal>".
+- **Quit also ends the running jobs.** The document left this optional.
+- **New project edges:**
+  - `BusinessSession` and `BusinessSessionTests` now depend on `BusinessJobs`, so the session can register.
+  - `PresentationAppTests` gained `BusinessJobs`, `BusinessReads`, `DataProtocol` and `InfrastructureProcess`.
+
+**Verified.**
+- 24 new test functions:
+
+  | Suite | Tests |
+  |---|---|
+  | `ProcessGroupTests` | 5 |
+  | `ShellPathTests` | +1, over `env`, `export -p` and `set` |
+  | `JobGroupTests` | 1 |
+  | `ChildRegistryTests` | 4 |
+  | `MachineSessionRegistryTests` | 2 |
+  | `OverrideSkippedTests` | 3 |
+  | `SettingsViewModelTests` | +2 |
+  | `ChildrenSeenTests` | 4 |
+  | `TerminationTests` | +2 |
+
+  `ChildrenSeenTests` runs every job-running place and the session over a fake `apogee` script in a temporary home.
+- **Repeat runs:**
+  - the process-related bundles: 12, then 15 iterations, all green;
+  - the whole plan: four runs of 10 iterations each. The one failure was `GraphViewModelTests/rebuild()`, which fails the same way on an untouched copy of HEAD, 4 of 10 iterations: the test reads the toast before the view-model has said it.
+- The module schemes: `PresentationApp` 17, `PresentationSettings` 12, `PresentationMonitor` 2, `PresentationSessions` 50, `PresentationSession` 64, `PresentationModels` 57 and `PresentationTasks` 10, all passing. The layering check passes, and `check-previews` finds nothing in settings, monitor, app, sessions, session, models or tasks.
+- Two new previews:
+  - General with your apogee passed over, the installed one running;
+  - the monitor with media and training runs beside the session.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,992 tests and the macOS app's 526 cases passed, with no Swift warning.
+
+**Not done:**
+- No live pass of the app.
+- `GraphViewModelTests/rebuild()`'s flake predates this item and is left for an item that touches the graph (4k).

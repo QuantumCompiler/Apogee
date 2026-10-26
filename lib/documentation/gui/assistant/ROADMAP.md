@@ -64,7 +64,7 @@ Opened 2026-10-22 (the user's call): a thorough bug and feature-disparity audit 
 
 - [x] **Private sessions survive** *(4a, shipped 2026-10-25 — [Milestone E](MILESTONES.md#milestone-e--the-audits-gui-findings))* — leaving Sessions never wipes a private conversation; ⌘Q completes the shutdown; a stop during launch reaps its child.
 - [x] **Honest session lines** *(4b, shipped 2026-10-25 — [Milestone E](MILESTONES.md#milestone-e--the-audits-gui-findings))* — lines queued between turns, relaunch on current settings, dead cards closed, earlier and live rows kept apart, resumed chips and warnings, renames that stick.
-- [ ] **Children end cleanly** *([4c](../backlog/v0.2.0/children-end-cleanly.md))* — Stop always ends a job; no leaks; a failing override said; PATH read safely; every child on the monitor.
+- [x] **Children end cleanly** *(4c, shipped 2026-10-25 — [Milestone E](MILESTONES.md#milestone-e--the-audits-gui-findings))* — Stop always ends a job; no leaks; a failing override said; PATH read safely; every child on the monitor.
 - [ ] **Markdown and code keep every line** *([4d](../backlog/v0.2.0/markdown-code-edges.md))* — link definitions, short math answers, pipe paragraphs, bare fences, heredoc shifts.
 - [ ] **Store jobs keep their identity** *([4e](../backlog/v0.2.0/downloads-and-store-jobs.md))* — a quantize registers its own GGUF; resumes only on stops; delete's warnings shown.
 - [ ] **The media studio, finished** *([4f](../backlog/v0.2.0/media-studio-finished.md))* — supervised installs, compose's voice model and consent, honest toasts, captions said up front.

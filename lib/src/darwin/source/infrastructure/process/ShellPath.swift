@@ -21,9 +21,13 @@ import Synchronization
 ///   it runs past the deadline its whole process group is killed
 ///   (`LoginShell`).
 /// - **Only `PATH`:** the shell runs `/usr/bin/printenv PATH` between two
-///   printings of a marker made fresh for the ask, and only what lies between
+///   printings of a marker made fresh for the ask, and only the line between
 ///   them is read -- so a profile that prints is harmless, and no other
 ///   variable of the shell's crosses.
+/// - **A marker stands alone:** it counts only as a whole line of its own,
+///   two of them a line apart (GUI 4c). A profile that prints its
+///   environment -- `env`, `export -p`, `set` -- prints the marker's variable
+///   too, but never the marker alone on its line.
 /// - **The fallback**, for a shell that fails, hangs or is not there: the
 ///   app's own `PATH` (launchd's, from the Dock) widened by
 ///   `wellKnownDirectories`.
@@ -79,8 +83,10 @@ public final class ShellPath: Sendable {
     /// marker, each by its absolute program, so nothing depends on the
     /// shell's own lookups or syntax beyond `;`. The marker's value is never in
     /// the command, so a shell that echoes its commands cannot print it early.
+    /// An empty line goes first, so the marker starts a line of its own after
+    /// a profile that printed without ending its last.
     static let command =
-        "/usr/bin/printenv \(markerVariable); /usr/bin/printenv PATH; /usr/bin/printenv \(markerVariable)"
+        "/bin/echo; /usr/bin/printenv \(markerVariable); /usr/bin/printenv PATH; /usr/bin/printenv \(markerVariable)"
 
     /// The app's own, which `ProcessSpawner()` lays under its children; the
     /// application begins it at launch.
@@ -215,13 +221,28 @@ public final class ShellPath: Sendable {
         return Resolution(path: path, source: .shell, shell: shell)
     }
 
-    /// What lies between the first two printings of `marker`, or `nil` when
-    /// there are not two.
+    /// The line between the first two lines that are `marker` alone and one
+    /// line apart -- empty when the only two are adjacent, as an unset `PATH`
+    /// prints them -- or `nil` when there are no such two. Only whole lines
+    /// count: a last line not yet ended is not read, and the marker inside a
+    /// longer line -- `APOGEE_PATH_MARKER=…` in a printed environment -- is
+    /// not the marker.
     static func between(_ marker: Data, in output: Data) -> Data? {
-        guard let first = output.range(of: marker),
-            let second = output.range(of: marker, in: first.upperBound..<output.endIndex)
-        else { return nil }
-        return output.subdata(in: first.upperBound..<second.lowerBound)
+        var lines = output.split(separator: 0x0A, omittingEmptySubsequences: false)
+        // What follows the last newline is unended, or nothing.
+        lines.removeLast()
+        var adjacent = false
+        for index in lines.indices where lines[index] == marker {
+            if index + 2 < lines.endIndex && lines[index + 2] == marker && !lines[index + 1].isEmpty
+                && lines[index + 1] != marker
+            {
+                return Data(lines[index + 1])
+            }
+            if index + 1 < lines.endIndex && lines[index + 1] == marker {
+                adjacent = true
+            }
+        }
+        return adjacent ? Data() : nil
     }
 
     /// A deadline in words: "5 seconds", "1 second", "0.5 seconds".

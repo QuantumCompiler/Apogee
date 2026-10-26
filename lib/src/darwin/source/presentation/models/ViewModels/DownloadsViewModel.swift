@@ -312,13 +312,6 @@ public final class DownloadsViewModel {
         revision += 1
     }
 
-    /// The running pulls' children, for the monitor.
-    public var children: [(label: String, pid: Int32)] {
-        downloads.compactMap { download in
-            download.job?.processIdentifier.map { ("Download: \(download.reference)", $0) }
-        }
-    }
-
     /// Whether any pull is running: the Models place's dot.
     public var running: Int { downloads.filter(\.isRunning).count }
 

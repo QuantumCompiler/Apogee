@@ -42,13 +42,21 @@ enum SettingsPreview {
             .fallback.path,
         source: .fallback, shell: "/bin/zsh", reason: "didn't answer within 5 seconds")
 
-    /// The view-model, not yet read; `track52` when the build has 52e, and
-    /// `childPath` what the app's resolver answers.
+    /// The person's override as discovery passed it over: a build of their
+    /// own whose `version` fails, in the words discovery says it in
+    /// (tests/data/discovery/BinaryDiscoveryTests.swift).
+    static let skippedOverride = (path: "/Users/someone/tools/apogee", reason: "`version` exited with status 1: error: broken install")
+
+    /// The view-model, not yet read; `track52` when the build has 52e,
+    /// `childPath` what the app's resolver answers, and `override` the
+    /// binary the person pointed the app at.
     static func settings(
         _ pane: SettingsViewModel.Pane = .general, track52: Bool = false,
-        childPath: ShellPath.Resolution = shellPath
+        childPath: ShellPath.Resolution = shellPath, override: String? = nil
     ) -> SettingsViewModel {
-        let model = SettingsViewModel(runner: runner, starter: PreviewJobs(), preferences: Preferences(store: MemoryStore()))
+        let preferences = Preferences(store: MemoryStore())
+        preferences.binaryOverride = override.map { URL(fileURLWithPath: $0) }
+        let model = SettingsViewModel(runner: runner, starter: PreviewJobs(), preferences: preferences)
         model.pane = pane
         model.hasTrack52 = { track52 }
         model.childPathSource = { childPath }
@@ -57,8 +65,8 @@ enum SettingsPreview {
 
     /// Reads every pane, as the window does on opening -- the version the
     /// module's tests give -- and the children's `PATH`.
-    static func read(_ model: SettingsViewModel) async {
-        await model.connect(binary: previewBinary, version: "0.1.9")
+    static func read(_ model: SettingsViewModel, skippedOverride: (path: String, reason: String)? = nil) async {
+        await model.connect(binary: previewBinary, version: "0.1.9", skippedOverride: skippedOverride)
         await model.readChildPath()
     }
 }

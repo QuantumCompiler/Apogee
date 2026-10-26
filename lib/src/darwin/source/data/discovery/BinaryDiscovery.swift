@@ -151,4 +151,14 @@ public enum DiscoveryOutcome: Sendable, Equatable {
         case .found(_, let skipped), .notFound(let skipped): skipped
         }
     }
+
+    /// The person's override, passed over with its reason while another
+    /// binary answered: the app runs a binary other than the one it was
+    /// pointed at, which is to be said (GUI 4c). `nil` when there is none,
+    /// when it is the one found, or when none was found -- where every place
+    /// passed over is said already.
+    public var skippedOverride: SkippedCandidate? {
+        guard case .found(_, let skipped) = self else { return nil }
+        return skipped.first { $0.candidate.source == .override }
+    }
 }

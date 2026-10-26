@@ -1,6 +1,8 @@
+import BusinessJobs
 import DataProtocol
 import Foundation
 import InfrastructureProcess
+import Synchronization
 
 /// One driven `apogee` session: the child, its event stream, and the lines
 /// written back to it.
@@ -9,8 +11,10 @@ import InfrastructureProcess
 /// every stdout line into a `ProtocolEvent` delivered on `events`, in order,
 /// with `.ended` last -- why it ended, and the child's stderr tail when that
 /// was a failure. Stopping a turn is the protocol's `cancel` line; stopping
-/// the session closes the child's input first and terminates it only when it
-/// will not go (`stop(grace:)`).
+/// the session closes the child's input first and terminates it -- its whole
+/// process group -- only when it will not go (`stop(grace:)`). Started with
+/// a children registry, it is listed there from its spawn to its end, as
+/// `Session: <model>` once the session has said its model (GUI 4c).
 public actor MachineSession {
     /// Everything the session says, in order, `.ended` last.
     public nonisolated let events: AsyncStream<SessionEvent>
@@ -29,10 +33,23 @@ public actor MachineSession {
     private var stopping = false
     private var refusedVersion: Int?
     private var ended = false
+    /// Its place in the children registry, from its spawn until its end.
+    private nonisolated let registration = Mutex<ChildRegistry.Registration?>(nil)
+
+    /// What the registry shows a session as before it has said its model.
+    static let startingLabel = "Session: starting"
 
     /// Spawns `command` and begins reading it. A child that will not start is
     /// a session that ends at once, `couldNotStart`, with the reason.
     public static func start(spawner: any ChildSpawner, command: ChildCommand, hello: DriverLine?) -> MachineSession {
+        start(spawner: spawner, command: command, hello: hello, registry: nil)
+    }
+
+    /// Spawns `command` and begins reading it, listed in `registry` until it
+    /// ends.
+    public static func start(
+        spawner: any ChildSpawner, command: ChildCommand, hello: DriverLine?, registry: ChildRegistry?
+    ) -> MachineSession {
         let session: MachineSession
         do {
             let child = try spawner.spawn(command)
@@ -40,6 +57,12 @@ public actor MachineSession {
                 try? child.write(Data((hello.encoded + "\n").utf8))
             }
             session = MachineSession(child: child)
+            if let registry {
+                let registered = registry.register(
+                    kind: .session, label: startingLabel, processIdentifier: child.processIdentifier
+                ) { [weak session] grace in await session?.stop(grace: grace) }
+                session.registration.withLock { $0 = registered }
+            }
         } catch {
             session = MachineSession(child: nil)
             session.continuation.yield(
@@ -81,6 +104,7 @@ public actor MachineSession {
                 return
             }
             info = session
+            registration.withLock { $0?.relabel("Session: \(session.model)") }
         }
         tracker.apply(event)
         continuation.yield(.event(event))
@@ -89,6 +113,10 @@ public actor MachineSession {
     private func finish(exit: ChildExit, tail: BoundedTail) {
         guard !ended else { return }
         ended = true
+        registration.withLock { registration in
+            registration?.leave()
+            registration = nil
+        }
         tracker.end()
         let reason: SessionEnd.Reason =
             if let refusedVersion { .unsupportedProtocol(refusedVersion) }

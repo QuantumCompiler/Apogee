@@ -2,11 +2,13 @@ import Foundation
 import PresentationSession
 import PresentationSessions
 
-/// ⌘Q, held until the sessions have ended. With a session's child live or
-/// launching, or a private session's promised delete still to run, the app
+/// ⌘Q, held until the sessions have ended and the running jobs have
+/// stopped. With a session's child live or launching, a private session's
+/// promised delete still to run, or a supervised job running, the app
 /// answers "later", ends them -- the child stopped by its escalation, waited
-/// for at most the session's grace, then the delete -- and only then replies,
-/// so the process never exits with a child or a promise left behind.
+/// for at most the session's grace, then the delete; beside it each job
+/// stopped as its Stop does, within the same bound (4c) -- and only then
+/// replies, so the process never exits with a child or a promise left behind.
 ///
 /// AppKit-free (ADR 0002): the app delegate asks it, maps its answer to
 /// AppKit's, and writes `log`'s lines to the system log. The reply is given
@@ -29,42 +31,71 @@ final class Termination {
     /// up at this backstop instead of letting the quit hang.
     static let backstop: Duration = SessionViewModel.grace + .seconds(10)
 
+    /// The grace each running job's Stop is given at quit: interrupted at
+    /// once, terminated after this, killed two seconds later -- all within
+    /// the session's grace, the bound the quit waits.
+    static let jobGrace: Duration = SessionViewModel.grace - .seconds(2)
+
     /// Writes one line of what the quit did: the delegate's log.
     var log: @MainActor (String) -> Void = { _ in }
 
     private let pending: @MainActor () -> Bool
     private let shutDown: @MainActor () async -> ShutdownReport
+    private let jobsRunning: @MainActor () -> Int
+    private let stopJobs: @MainActor () async -> Bool
     /// The quit in flight: asked again meanwhile, the app waits on this one.
     private var quitting: Task<Void, Never>?
     /// AppKit's reply, until it has been given.
     private var reply: (@MainActor (Bool) -> Void)?
 
     /// Over `pending` -- whether a session must end first -- and `shutDown`,
-    /// which ends them.
-    init(pending: @escaping @MainActor () -> Bool, shutDown: @escaping @MainActor () async -> ShutdownReport) {
+    /// which ends them; `jobsRunning` -- how many supervised jobs run -- and
+    /// `stopJobs`, which stops them all and says whether all have ended.
+    init(
+        pending: @escaping @MainActor () -> Bool, shutDown: @escaping @MainActor () async -> ShutdownReport,
+        jobsRunning: @escaping @MainActor () -> Int = { 0 }, stopJobs: @escaping @MainActor () async -> Bool = { true }
+    ) {
         self.pending = pending
         self.shutDown = shutDown
+        self.jobsRunning = jobsRunning
+        self.stopJobs = stopJobs
     }
 
-    /// The app asked to quit. `.later` ends the sessions first and then
-    /// calls `reply(true)` -- always, a child given up included, so the quit
-    /// is never refused.
+    /// The app asked to quit. `.later` ends the sessions and stops the jobs
+    /// first, side by side, and then calls `reply(true)` -- always, a child
+    /// given up included, so the quit is never refused.
     func ask(reply: @escaping @MainActor (Bool) -> Void) -> Answer {
         if quitting != nil { return .later }
-        guard pending() else { return .now }
+        let session = pending()
+        let jobs = jobsRunning()
+        guard session || jobs > 0 else { return .now }
         self.reply = reply
         let grace = Self.words(SessionViewModel.grace)
-        log("quit: ending the open session first -- its child asked to go, and a private session's promised delete -- waiting at most \(grace) on the child")
+        if session {
+            log("quit: ending the open session first -- its child asked to go, and a private session's promised delete -- waiting at most \(grace) on the child")
+        }
+        if jobs > 0 {
+            log("quit: stopping \(jobs == 1 ? "the running job" : "the \(jobs) running jobs") first -- interrupted as Ctrl-C does, terminated after \(Self.words(Self.jobGrace)) and killed 2 s later")
+        }
         quitting = Task {
-            let report = await shutDown()
-            if !report.ended {
-                log("quit: the session's child did not end within \(grace); given up so the app can quit -- its stop still escalates")
+            let stopping = Task {
+                guard jobs > 0 else { return true }
+                return await stopJobs()
             }
-            if let failure = report.deleteFailure {
-                log("quit: the private session was not deleted: \(failure)")
+            if session {
+                let report = await shutDown()
+                if !report.ended {
+                    log("quit: the session's child did not end within \(grace); given up so the app can quit -- its stop still escalates")
+                }
+                if let failure = report.deleteFailure {
+                    log("quit: the private session was not deleted: \(failure)")
+                }
+            }
+            if !(await stopping.value) {
+                log("quit: a job did not end after its stop; quitting anyway")
             }
             guard self.reply != nil else { return }
-            log("quit: the sessions have ended; quitting")
+            log(session ? "quit: the sessions have ended; quitting" : "quit: the jobs have stopped; quitting")
             answer()
         }
         return .later

@@ -117,13 +117,6 @@ public final class TasksViewModel {
         await readStatus(id)
     }
 
-    /// The running tasks' children, for the monitor.
-    public var children: [(label: String, pid: Int32)] {
-        runs.compactMap { run in
-            run.job?.processIdentifier.map { ("Task: \(run.state.view?.goal ?? run.state.taskID ?? "starting")", $0) }
-        }
-    }
-
     /// The live run following `id`, when the app started it.
     public func run(for id: String) -> Run? {
         runs.first { $0.state.taskID == id }

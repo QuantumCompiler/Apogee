@@ -115,6 +115,12 @@ public final class SessionLibraryViewModel {
     public private(set) var suites: [String] = []
     /// `models.default_suite`: empty when none is set, `nil` unread.
     public private(set) var defaultSuite: String?
+    /// The person's override, passed over by discovery while another binary
+    /// answered -- its path and why -- so the app says it runs another binary
+    /// than the one it was pointed at: once at launch, and in Settings ›
+    /// General beside the binary in use (4c). `nil` when the override was
+    /// used, is unset, or nothing answered.
+    public private(set) var skippedOverride: (path: String, reason: String)?
 
     private let starter: any ChatStarting
     private let runner: any CommandRunning
@@ -148,6 +154,8 @@ public final class SessionLibraryViewModel {
     private var plays: [PlayChoice] = []
     /// What the quit's wait is measured on.
     private let clock: any Clock<Duration>
+    /// The passed-over override has been said: it is said once a launch.
+    private var saidSkippedOverride = false
     /// The window closed or the app is quitting: no child starts again until
     /// `start(inView:)` opens the place once more.
     private var shut = false
@@ -185,13 +193,16 @@ public final class SessionLibraryViewModel {
         shut = false
         self.inView = inView
         listing = .reading
-        switch await starter.locateBinary() {
+        let outcome = await starter.locateBinary()
+        switch outcome {
         case .notFound:
             listing = .missing
             await replace(with: .new, starter: starter)
             return
         case .found(let found, _):
             self.found = found
+            skippedOverride = outcome.skippedOverride.map { ($0.candidate.url.path, $0.reason) }
+            sayOnce(outcome)
         }
         await refresh()
         await readModels()
@@ -529,6 +540,13 @@ public final class SessionLibraryViewModel {
             preferences.openChat = nil
         }
         current.observer = { [weak self] event in self?.observe(event) }
+        // A session that locates for itself -- none was found at launch --
+        // may find a binary while passing the override over: said too.
+        current.onLocated = { [weak self] outcome in
+            guard let self, let skip = outcome.skippedOverride else { return }
+            skippedOverride = (skip.candidate.url.path, skip.reason)
+            sayOnce(outcome)
+        }
         current.onAction = { [weak self] action in self?.act(action) }
         current.modelChoices = backends
     }
@@ -579,8 +597,19 @@ public final class SessionLibraryViewModel {
         }
     }
 
+    /// Discovery as run once, for the sessions after it: what it passed over
+    /// is the library's to say (`skippedOverride`), so the sessions' own
+    /// outcome lists nothing passed over.
     private var located: any ChatStarting {
         found.map { LocatedStarter(base: starter, found: $0) } ?? starter
+    }
+
+    /// Says, the first time this launch's discovery passes the override
+    /// over, which binary runs instead and why the override was not used.
+    private func sayOnce(_ outcome: DiscoveryOutcome) {
+        guard !saidSkippedOverride, case .found(let found, _) = outcome, let skip = outcome.skippedOverride else { return }
+        saidSkippedOverride = true
+        say?("Not using \(skip.candidate.url.path): \(skip.reason) -- running \(found.url.path) instead")
     }
 
     private func observe(_ event: SessionEvent) {

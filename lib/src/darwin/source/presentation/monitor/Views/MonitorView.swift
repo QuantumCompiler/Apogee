@@ -45,7 +45,11 @@ public struct MonitorView: View {
                     }
                     ForEach(model.children) { child in
                         HStack {
-                            Text(child.label).font(.apogeeSmall)
+                            Text(child.label)
+                                .font(.apogeeSmall)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .help(child.label)
                             Spacer()
                             Text(MonitorViewModel.size(child.bytes)).font(.apogeeMeta.monospacedDigit())
                             Text("pid " + String(child.pid)).font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary)
@@ -87,6 +91,10 @@ public struct MonitorView: View {
 #if DEBUG
 #Preview("The machine, a session's child running") {
     MonitorView(model: MonitorPreview.monitor(children: MonitorPreview.session)) {}
+}
+
+#Preview("The machine, media and training runs beside the session") {
+    MonitorView(model: MonitorPreview.monitor(children: MonitorPreview.studio)) {}
 }
 
 #Preview("The machine, no children running") {

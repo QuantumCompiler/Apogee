@@ -107,22 +107,47 @@ public final class SettingsViewModel {
         self.starter = starter
         self.preferences = preferences
         theme = ThemeSettings(preferences: preferences)
+        binaryOverride = preferences.binaryOverride?.path
     }
 
-    public func connect(binary: URL?, version: String?) async {
+    /// The binary this launch found, and -- when discovery passed the
+    /// person's override over for it -- that override's path and why (4c).
+    public func connect(binary: URL?, version: String?, skippedOverride: (path: String, reason: String)? = nil) async {
         binaryURL = binary
         self.binary = binary?.path
         self.version = version
+        self.skippedOverride = skippedOverride
         await refresh()
     }
 
     // MARK: - General
 
     /// The binary the person points the app at; the next launch looks there first.
-    public var binaryOverride: String? { preferences.binaryOverride?.path }
+    public private(set) var binaryOverride: String?
+
+    /// The override this launch's discovery passed over while another binary
+    /// answered, and why: the app runs another binary than the one it was
+    /// pointed at (4c). `nil` when the override was used or is unset.
+    public private(set) var skippedOverride: (path: String, reason: String)?
+
+    /// What General says of a passed-over override, beside the binary in use.
+    public var skippedOverrideLine: String? {
+        skippedOverride.map { skipped in
+            let reason = skipped.reason.hasSuffix(".") ? String(skipped.reason.dropLast()) : skipped.reason
+            return "Not using \(skipped.path): \(reason). This launch runs the one above."
+        }
+    }
+
+    /// The override chosen since this launch looked -- neither the binary in
+    /// use nor the one it passed over -- which the next launch tries first.
+    public var pendingOverride: String? {
+        guard let binaryOverride, binaryOverride != binary, binaryOverride != skippedOverride?.path else { return nil }
+        return binaryOverride
+    }
 
     public func setBinaryOverride(_ url: URL?) {
         preferences.binaryOverride = url
+        binaryOverride = url?.path
         say?(url == nil ? "The app looks for apogee where it is installed, from its next launch" : "The app uses \(url!.path) from its next launch")
     }
 

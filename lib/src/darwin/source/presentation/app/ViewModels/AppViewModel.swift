@@ -55,24 +55,36 @@ final class AppViewModel {
     let voice: VoiceViewModel
     let settings: SettingsViewModel
     /// ⌘Q, held until the session library has ended its child and kept its
-    /// private fallback's promise: what the app delegate asks.
+    /// private fallback's promise, and the running jobs have been stopped:
+    /// what the app delegate asks.
     let termination: Termination
+    /// Every child the app runs -- each supervised job's and the session's --
+    /// as their supervisors list them: what the monitor shows, and what quit
+    /// stops (4c).
+    let children: ChildRegistry
 
+    /// The composition. `children` is where every job and session the app
+    /// starts is listed; `home` holds the media places' folders. A test hands
+    /// in its own of each.
     init(
         info: [String: Any]?, preferences: Preferences, starter: (any ChatStarting)? = nil,
-        runner: (any CommandRunning)? = nil, jobs: (any JobStarting)? = nil
+        runner: (any CommandRunning)? = nil, jobs: (any JobStarting)? = nil, children: ChildRegistry = .app,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
     ) {
         let version = (info?["CFBundleShortVersionString"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         // Only the release build (scripts/build.sh) stamps the version; a
         // build from Xcode leaves it empty.
         versionLine = version.map { "Version \($0)" } ?? "Development build"
+        // One starter for every place, so every run any of them starts is
+        // listed with the session's child, in one registry.
+        let jobs = jobs ?? JobStarter(registry: children)
         let shell = ShellViewModel(preferences: preferences)
         let sessions = SessionLibraryViewModel(
-            starter: starter ?? ApogeeClient(identity: ClientIdentity(version: version ?? "development")),
+            starter: starter ?? ApogeeClient(identity: ClientIdentity(version: version ?? "development"), children: children),
             runner: runner ?? ReadRunner(), preferences: preferences)
         let models = ModelsViewModel(runner: runner ?? ReadRunner())
         let store = StoreViewModel(runner: runner ?? ReadRunner())
-        let downloads = DownloadsViewModel(starter: jobs ?? JobStarter())
+        let downloads = DownloadsViewModel(starter: jobs)
         downloads.streams = { [weak sessions] in sessions?.streamsJobs ?? false }
         downloads.reader = runner ?? ReadRunner()
         // Show the weights: the set a store job made, open under Stored weights.
@@ -107,52 +119,45 @@ final class AppViewModel {
                 await store?.refresh()
             }
         }
-        let tasks = TasksViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
+        let tasks = TasksViewModel(runner: runner ?? ReadRunner(), starter: jobs)
         tasks.say = { [weak shell] text in shell?.say(text) }
-        let console = ConsoleViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
+        let console = ConsoleViewModel(runner: runner ?? ReadRunner(), starter: jobs)
         let monitor = MonitorViewModel(runner: runner ?? ReadRunner())
-        monitor.liveChildren = { [weak sessions, weak downloads, weak tasks] in
-            var children: [(label: String, pid: Int32)] = []
-            if let session = sessions?.current, let pid = session.processIdentifier {
-                children.append(("Session: \(session.transcript.model ?? "starting")", pid))
-            }
-            return children + (downloads?.children ?? []) + (tasks?.children ?? [])
-        }
+        // The registry, never a screen's own list: whatever any place runs
+        // is seen, the session's child first when it started first.
+        monitor.liveChildren = { children.children.map { ($0.label, $0.processIdentifier) } }
         let suites = SuitesViewModel(runner: runner ?? ReadRunner())
         suites.say = { [weak shell] text in shell?.say(text) }
-        let graph = GraphViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
+        let graph = GraphViewModel(runner: runner ?? ReadRunner(), starter: jobs)
         graph.say = { [weak shell] text in shell?.say(text) }
-        let records = RecordsViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
+        let records = RecordsViewModel(runner: runner ?? ReadRunner(), starter: jobs)
         records.say = { [weak shell] text in shell?.say(text) }
-        let collections = CollectionsViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
+        let collections = CollectionsViewModel(runner: runner ?? ReadRunner(), starter: jobs)
         collections.say = { [weak shell] text in shell?.say(text) }
-        let training = TrainingViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
+        let training = TrainingViewModel(runner: runner ?? ReadRunner(), starter: jobs)
         training.say = { [weak shell] text in shell?.say(text) }
         let agents = AgentsViewModel(runner: runner ?? ReadRunner())
         agents.say = { [weak shell] text in shell?.say(text) }
-        let symphonies = SymphoniesViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
+        let symphonies = SymphoniesViewModel(runner: runner ?? ReadRunner(), starter: jobs)
         symphonies.say = { [weak shell] text in shell?.say(text) }
         let mcp = MCPViewModel(runner: runner ?? ReadRunner())
         mcp.say = { [weak shell] text in shell?.say(text) }
-        let review = ReviewViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter())
+        let review = ReviewViewModel(runner: runner ?? ReadRunner(), starter: jobs)
         review.say = { [weak shell] text in shell?.say(text) }
-        let video = VideoViewModel(
-            starter: jobs ?? JobStarter(), preferences: preferences, home: FileManager.default.homeDirectoryForCurrentUser)
+        let video = VideoViewModel(starter: jobs, preferences: preferences, home: home)
         video.say = { [weak shell] text in shell?.say(text) }
         video.streams = { [weak sessions] in sessions?.streamsJobs ?? false }
         // The store's video models and the default, for the sheet's engine (3b).
         video.reader = runner ?? ReadRunner()
-        let compose = ComposeViewModel(starter: jobs ?? JobStarter())
+        let compose = ComposeViewModel(starter: jobs)
         compose.say = { [weak shell] text in shell?.say(text) }
         compose.streams = { [weak sessions] in sessions?.streamsJobs ?? false }
         compose.plansAlone = { [weak sessions] in sessions?.hasTrack52 ?? false }
         compose.folders = { [weak video] in video?.folders ?? [] }
-        let voice = VoiceViewModel(
-            runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter(), preferences: preferences,
-            home: FileManager.default.homeDirectoryForCurrentUser)
+        let voice = VoiceViewModel(runner: runner ?? ReadRunner(), starter: jobs, preferences: preferences, home: home)
         voice.say = { [weak shell] text in shell?.say(text) }
         voice.streams = { [weak sessions] in sessions?.streamsJobs ?? false }
-        let settings = SettingsViewModel(runner: runner ?? ReadRunner(), starter: jobs ?? JobStarter(), preferences: preferences)
+        let settings = SettingsViewModel(runner: runner ?? ReadRunner(), starter: jobs, preferences: preferences)
         settings.say = { [weak shell] text in shell?.say(text) }
         settings.hasTrack52 = { [weak sessions] in sessions?.hasTrack52 ?? false }
         // General says which PATH the app's children run with (M6): the app's
@@ -216,9 +221,12 @@ final class AppViewModel {
         self.compose = compose
         self.voice = voice
         self.settings = settings
+        self.children = children
         termination = Termination(
             pending: { [weak sessions] in sessions?.needsShutdown ?? false },
-            shutDown: { [weak sessions] in await sessions?.quit() ?? ShutdownReport(ended: true, deleteFailure: nil) })
+            shutDown: { [weak sessions] in await sessions?.quit() ?? ShutdownReport(ended: true, deleteFailure: nil) },
+            jobsRunning: { children.children(.job).count },
+            stopJobs: { await children.stop(.job, grace: Termination.jobGrace) })
     }
 
     /// The application's own composition. The person's login shell is asked
@@ -252,6 +260,7 @@ final class AppViewModel {
         video.connect(binary: sessions.binaryURL)
         compose.connect(binary: sessions.binaryURL)
         await voice.connect(binary: sessions.binaryURL)
-        await settings.connect(binary: sessions.binaryURL, version: sessions.binaryVersion)
+        await settings.connect(
+            binary: sessions.binaryURL, version: sessions.binaryVersion, skippedOverride: sessions.skippedOverride)
     }
 }

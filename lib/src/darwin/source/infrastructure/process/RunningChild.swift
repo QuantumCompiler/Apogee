@@ -46,9 +46,13 @@ public enum ChildError: Error, Equatable, CustomStringConvertible {
 ///
 /// Its stdout arrives as lines; its stderr is captured into a bounded tail,
 /// never shown; its exit is awaited. Stopping it is the caller's escalation:
-/// close its input first, then `terminate`, then `kill`.
+/// close its input first, then `terminate`, then `kill` -- each signal to
+/// its whole process group, as a terminal's reach its foreground job's
+/// (GUI 4c), so what the child started ends with it.
 public protocol RunningChild: AnyObject, Sendable {
-    /// stdout, one line at a time, in order; finished when the child closes it.
+    /// stdout, one line at a time, in order; finished when the child closes
+    /// it -- or, when something it started still holds stdout open, shortly
+    /// after the child's exit.
     var lines: AsyncStream<String> { get }
 
     /// The last of what it wrote to stderr.
@@ -64,17 +68,28 @@ public protocol RunningChild: AnyObject, Sendable {
     /// Closes its stdin: the child reads end of input.
     func closeInput()
 
-    /// Interrupts it, as Ctrl-C at a terminal does: SIGINT.
+    /// Interrupts it, as Ctrl-C at a terminal does: SIGINT, to its group.
     func interrupt()
 
-    /// Asks it to stop: SIGTERM.
+    /// Asks it to stop: SIGTERM, to its group.
     func terminate()
 
-    /// Ends it: SIGKILL.
+    /// Ends it: SIGKILL, to its group.
     func kill()
 
-    /// How it ended, once it has exited and its stderr has closed.
+    /// Whether anything of its process group still runs -- the child, or
+    /// what it started, which may outlive it.
+    var groupRunning: Bool { get }
+
+    /// How it ended, once it has exited and its stderr has closed -- or,
+    /// when something it started holds stderr open, shortly after its exit.
     func waitForExit() async -> ChildExit
+}
+
+extension RunningChild {
+    /// A child with no group of its own to watch: nothing of it runs beyond
+    /// what `waitForExit` says.
+    public var groupRunning: Bool { false }
 }
 
 /// Starts children. The app's is `ProcessSpawner`; a test may hand in its own.

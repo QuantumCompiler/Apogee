@@ -85,6 +85,28 @@ struct ShellPathTests {
         #expect(resolver.current == answer)
     }
 
+    /// 4c, the fourth defect: a profile that prints its environment prints
+    /// the marker's variable, value and all, before the real output.
+    @Test("a profile that prints its environment -- the marker's variable among it -- still yields exactly the PATH", arguments: ["export -p", "env", "set"])
+    func profilePrintsItsEnvironment(_ dump: String) async throws {
+        let shell = try ScriptedShell(
+            """
+            [ "$1" = "-ilc" ] || { echo "asked as $1" >&2; exit 64; }
+            echo "Last login: Thu Oct 22 09:12:01 on ttys001"
+            \(dump)
+            PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin"
+            export PATH
+            eval "$2"
+            \(dump)
+            """)
+        defer { shell.remove() }
+        let resolver = ShellPath(environment: shell.environment)
+        resolver.begin()
+        let answer = await resolver.answer()
+        #expect(answer.source == .shell)
+        #expect(answer.path == "\(shell.home.path)/.local/bin:/opt/homebrew/bin:/usr/bin:/bin")
+    }
+
     @Test("a child spawned through the real spawner carries the shell's PATH under its own variables")
     func childCarriesTheAnswer() async throws {
         let shell = try ScriptedShell(Self.usersCase)

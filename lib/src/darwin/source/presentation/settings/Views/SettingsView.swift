@@ -85,6 +85,13 @@ struct GeneralPane: View {
             if let version = model.version {
                 Text("apogee \(version)").font(.apogeeMeta).foregroundStyle(Palette.textSecondary)
             }
+            if let skipped = model.skippedOverrideLine {
+                Text(skipped)
+                    .font(.apogeeMeta)
+                    .foregroundStyle(Palette.warning)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Text("The app and the command line share models, sessions, keys and settings.")
                 .font(.apogeeMeta)
                 .foregroundStyle(Palette.textTertiary)
@@ -94,7 +101,7 @@ struct GeneralPane: View {
                     Button("Use the installed one") { model.setBinaryOverride(nil) }
                 }
             }
-            if let override = model.binaryOverride {
+            if let override = model.pendingOverride {
                 Text("From the next launch: \(override)").font(.apogeeMeta).foregroundStyle(Palette.textSecondary)
             }
         }
@@ -386,6 +393,14 @@ struct PermissionsPane: View {
         .padding(Spacing.xl)
         .frame(width: 680)
         .task { await SettingsPreview.read(model) }
+}
+
+#Preview("General: your apogee passed over, the installed one running") {
+    let model = SettingsPreview.settings(override: SettingsPreview.skippedOverride.path)
+    VStack(alignment: .leading, spacing: Spacing.xl) { GeneralPane(model: model) }
+        .padding(Spacing.xl)
+        .frame(width: 680)
+        .task { await SettingsPreview.read(model, skippedOverride: SettingsPreview.skippedOverride) }
 }
 
 #Preview("General: not read yet") {

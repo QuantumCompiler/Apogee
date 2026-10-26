@@ -37,6 +37,10 @@ public final class SessionViewModel {
     public var observer: (@MainActor (SessionEvent) -> Void)?
     /// Where the acts the library owns go: a new session, rename, delete ...
     public var onAction: (@MainActor (SessionAction) -> Void)?
+    /// Told what each of its launches' discovery found -- and passed over --
+    /// before its child opens: the library says an override passed over
+    /// (4c).
+    public var onLocated: (@MainActor (DiscoveryOutcome) -> Void)?
     /// What the session holds attached, by the path given: the input's chips
     /// -- each `attach` sent, and a saved conversation's own as `chats show`
     /// names them (the path each `attach` gave), so `detach` reaches them.
@@ -254,6 +258,7 @@ public final class SessionViewModel {
         // check and the child: one asked from here on finds `session` set.
         guard launching == number else { return }
         launching = nil
+        onLocated?(located)
         let readsEarlier = self.readsEarlier
         self.readsEarlier = false
         switch located {
@@ -359,9 +364,6 @@ public final class SessionViewModel {
     /// Whether it holds a child, or is launching one: what the one-live-child
     /// law counts.
     public var isLive: Bool { session != nil || launching != nil }
-
-    /// Its child's process id, while it has one.
-    public var processIdentifier: Int32? { session?.processIdentifier }
 
     /// Whether its child was ended to free it, to be resumed when it is back
     /// in view.

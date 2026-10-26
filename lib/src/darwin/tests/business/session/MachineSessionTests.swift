@@ -1,4 +1,6 @@
+import BusinessJobs
 import BusinessSession
+import DataPreferences
 import DataProtocol
 import Foundation
 import InfrastructureProcess
@@ -215,5 +217,46 @@ struct MachineSessionTests {
         #expect(end.exit == nil)
         #expect(end.message.hasPrefix("apogee could not be started: /nonexistent/apogee could not be started"))
         #expect(reader.seen.count == 1)
+    }
+}
+
+/// 4c: the session's child is listed with every job's, as `Session: <model>`
+/// once it has said its model, and leaves at its end.
+@Suite("MachineSession in the children registry", .timeLimit(.minutes(1)))
+struct MachineSessionRegistryTests {
+    @Test("a session's child is listed from its spawn, renamed by its model, and gone at its end")
+    func listed() async throws {
+        let fake = try FakeApogee()
+        let registry = ChildRegistry()
+        let session = MachineSession.start(
+            spawner: ProcessSpawner(), command: fake.command(.conversation), hello: hello, registry: registry)
+        #expect(registry.children.map(\.kind) == [.session])
+        #expect(registry.children.first?.processIdentifier == session.processIdentifier)
+        var reader = EventReader(session)
+        let opened = await reader.untilKind { if case .session = $0 { true } else { false } }
+        guard case .event(let event) = opened.last, case .session(let info) = event.kind else {
+            Issue.record("no session event")
+            return
+        }
+        #expect(registry.children.map(\.label) == ["Session: \(info.model)"])
+        await session.close()
+        _ = await reader.untilEnded()
+        #expect(registry.children.isEmpty)
+    }
+
+    @Test("the client lists each session it starts in its registry, and a client without one lists none")
+    func clientLists() async throws {
+        let fake = try FakeApogee()
+        let registry = ChildRegistry()
+        let preferences = Preferences(store: MemoryStore())
+        let listing = ApogeeClient(
+            identity: ClientIdentity(version: "test"), spawner: ProcessSpawner(), preferences: preferences,
+            home: fake.directory, children: registry)
+        let session = listing.startChat(binary: fake.executable, environment: ["FAKE_SCENARIO": "conversation"])
+        #expect(registry.children.count == 1)
+        await session.stop(grace: .seconds(2))
+        var reader = EventReader(session)
+        _ = await reader.untilEnded()
+        #expect(registry.children.isEmpty)
     }
 }

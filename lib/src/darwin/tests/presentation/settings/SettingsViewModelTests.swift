@@ -192,6 +192,37 @@ struct SettingsViewModelTests {
         #expect(runner.calls.isEmpty, "learning the PATH runs nothing of the binary's")
     }
 
+    /// 4c, the third defect: Settings said only "From the next launch:
+    /// <override>" for an override discovery had tried and passed over.
+    @Test("General says the override passed over and why, beside the binary in use; the next launch's line is only for a choice made since")
+    func overridePassedOver() async {
+        let preferences = Preferences(store: MemoryStore())
+        preferences.binaryOverride = URL(fileURLWithPath: "/Users/someone/tools/apogee")
+        let model = SettingsViewModel(runner: runner(), starter: NoJobs(), preferences: preferences)
+        await model.connect(
+            binary: URL(fileURLWithPath: "/Users/someone/.local/bin/apogee"), version: "0.2.0",
+            skippedOverride: (path: "/Users/someone/tools/apogee", reason: "`version` exited with status 1: error: broken install"))
+        #expect(model.binary == "/Users/someone/.local/bin/apogee")
+        #expect(model.skippedOverrideLine
+            == "Not using /Users/someone/tools/apogee: `version` exited with status 1: error: broken install. This launch runs the one above.")
+        #expect(model.pendingOverride == nil, "tried and passed over, not waiting for a launch")
+        model.setBinaryOverride(URL(fileURLWithPath: "/Users/someone/tools/apogee-fixed"))
+        #expect(model.pendingOverride == "/Users/someone/tools/apogee-fixed")
+        #expect(model.skippedOverrideLine != nil, "what this launch passed over still stands")
+    }
+
+    @Test("an override in use says nothing more, and none set says nothing")
+    func overrideInUse() async {
+        let preferences = Preferences(store: MemoryStore())
+        preferences.binaryOverride = URL(fileURLWithPath: "/Users/someone/tools/apogee")
+        let model = SettingsViewModel(runner: runner(), starter: NoJobs(), preferences: preferences)
+        await model.connect(binary: URL(fileURLWithPath: "/Users/someone/tools/apogee"), version: "0.2.0")
+        #expect(model.skippedOverrideLine == nil)
+        #expect(model.pendingOverride == nil, "in use, not waiting for a launch")
+        model.setBinaryOverride(nil)
+        #expect(model.binaryOverride == nil && model.pendingOverride == nil)
+    }
+
     @Test("General says when the PATH is the fallback, and why")
     func childPathFallback() async {
         let model = SettingsViewModel(runner: runner(), starter: NoJobs(), preferences: Preferences(store: MemoryStore()))

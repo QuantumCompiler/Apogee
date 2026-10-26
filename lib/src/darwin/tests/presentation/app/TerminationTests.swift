@@ -25,6 +25,25 @@ final class HeldShutdown {
     }
 }
 
+/// The running jobs' stop a test holds: asked, it records so, and answers
+/// only once the test lets it -- the children registry's, as quit asks it.
+@MainActor
+final class HeldStop {
+    private(set) var asked = 0
+    private var waiting: CheckedContinuation<Bool, Never>?
+
+    func stop() async -> Bool {
+        asked += 1
+        return await withCheckedContinuation { waiting = $0 }
+    }
+
+    /// Lets the stop answer whether every job ended.
+    func finish(_ ended: Bool) {
+        waiting?.resume(returning: ended)
+        waiting = nil
+    }
+}
+
 /// 4a, the second defect: ⌘Q is answered "later" while a session must end,
 /// and replied to only once it has.
 @Suite("Termination", .timeLimit(.minutes(1)))
@@ -124,6 +143,52 @@ struct TerminationTests {
         let model = AppViewModel(info: nil, preferences: Preferences(store: MemoryStore()))
         #expect(!model.sessions.needsShutdown)
         #expect(model.termination.ask { _ in } == .now)
+    }
+
+    /// 4c: supervised jobs at quit, which 4a left running.
+    @Test("running jobs alone hold the quit: answered later, and replied to once their stop has ended them")
+    func jobsHoldTheQuit() async {
+        let held = HeldShutdown()
+        let stop = HeldStop()
+        let heard = Heard()
+        let termination = Termination(
+            pending: { false }, shutDown: { await held.shutDown() }, jobsRunning: { 2 }, stopJobs: { await stop.stop() })
+        termination.log = { heard.lines.append($0) }
+        #expect(termination.ask { heard.replies.append($0) } == .later)
+        #expect(await eventually { stop.asked == 1 })
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(heard.replies.isEmpty, "no reply while the jobs stop")
+        #expect(held.asked == 0, "no session to end")
+        stop.finish(true)
+        #expect(await eventually { heard.replies == [true] })
+        #expect(heard.lines == [
+            "quit: stopping the 2 running jobs first -- interrupted as Ctrl-C does, terminated after 3 s and killed 2 s later",
+            "quit: the jobs have stopped; quitting",
+        ])
+        #expect(Termination.jobGrace + .seconds(2) == SessionViewModel.grace, "every step within the session's bound")
+    }
+
+    @Test("a session and a job: both ended side by side, the reply after both, a job left behind said")
+    func sessionAndJobsSideBySide() async {
+        let held = HeldShutdown()
+        let stop = HeldStop()
+        let heard = Heard()
+        let termination = Termination(
+            pending: { true }, shutDown: { await held.shutDown() }, jobsRunning: { 1 }, stopJobs: { await stop.stop() })
+        termination.log = { heard.lines.append($0) }
+        #expect(termination.ask { heard.replies.append($0) } == .later)
+        #expect(await eventually { held.asked == 1 && stop.asked == 1 }, "both begun before either has ended")
+        held.finish(ShutdownReport(ended: true, deleteFailure: nil))
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(heard.replies.isEmpty, "the job is still stopping")
+        stop.finish(false)
+        #expect(await eventually { heard.replies == [true] })
+        #expect(heard.lines == [
+            "quit: ending the open session first -- its child asked to go, and a private session's promised delete -- waiting at most 5 s on the child",
+            "quit: stopping the running job first -- interrupted as Ctrl-C does, terminated after 3 s and killed 2 s later",
+            "quit: a job did not end after its stop; quitting anyway",
+            "quit: the sessions have ended; quitting",
+        ])
     }
 
     @Test("the grace is said as the log says it")
