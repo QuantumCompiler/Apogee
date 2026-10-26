@@ -2009,3 +2009,73 @@ Probed on the branch's binary over sandbox homes, with a mock trainer and stand-
   - the footprint is text inside a field, not typed JSON;
   - launch refusals and admission lines reach stderr only;
   - `datasets pull` has no stream output.
+
+### 2026-10-26 — `pipeline-and-cycle-screens` (backlog item 4j): the Training place sees pipelines and the cycle
+
+**Why.** The Training place was blind to two of `train`'s four run families. Nothing ran `train pipeline run|resume|status`, and nothing ran `train cycle run|status|halt|resume`. `TrainingStatus` decoded only the pipelines' count and `cycleActive`, shown nowhere. A pipeline ran only inside a regime, with no stage view and no resume. The item waited on the CLI's 55h, since neither family took `--output-format`; 55h shipped 2026-10-25 with their documents and streams.
+
+Probed on the branch's binary over a sandbox with the mock trainer: two named pipelines (one stage; two, the second regressing the first's suite) and the cycle over a queue directory, its breaker at 1.
+- **No verb lists the named specs.** Only `__complete train pipeline run --pipeline ""` names them.
+- **`train pipeline status`** is `{"data":[…],"object":"list"}`, with rows `{id, kind, spec_name, status, stages, passed, started_at[, completed_at]}`, status `running`, `complete` or `aborted`.
+- **`train pipeline status <id>`** is the manifest. Its stages count from 0, the stream's from 1, and a stage still training records `cumulative_score` 0.0.
+- **The streams:** `job` (schema `2026-10-25`), `notice`s, `stage {count, index, label, pipeline_run_id, run_id?, cumulative_score?, state}`, `iteration {iteration, iterations, loss, lr, stage, throughput}`, `pass {state, text}`, the `document`, and `error`.
+- **Exit codes:**
+  - a pipeline: aborted 2, complete 0, refused 1, Ctrl-C 130;
+  - a cycle pass: passed or skipped 0, failed 2, refused 1.
+- **`train cycle status` with no history** exits 1 (`no cycle history yet`). `train status` carries `cycle: null` until there is one.
+- **Halt and resume** answer in prose, all exit 0.
+
+- [x] **The Pipelines tab** lists the named specs, each with Run…, and every pipeline run newest first.
+  - **A run's page** shows each stage's word, its run id, its cumulative score once gated, and the iteration while it trains. It is live from the stream while the run is here, then read back from `train pipeline status <id>`.
+  - **Resume…** appears on an aborted or failed run and names the stage it starts from.
+- [x] **The Cycle tab** shows the backend, the anchor, the state, the failures in a row and the passes newest first, with gate reasons and notes.
+  - **Run one pass…** asks in the TUI's words; Halt… and Resume… ask too.
+  - **Scheduling stays the person's own** (`launchd` or cron), and the tab says nothing in the app schedules it.
+  - **With `cycle: null`** it draws the empty state, never asking the read that exits 1.
+  - **A pass running here** is drawn live: its narration and its pipeline's stages.
+- [x] **Every run is supervised** through the jobs core: on the monitor (`apogee train pipeline run`, `apogee train cycle run`), with Stop. `JobEvent.stage` gains `pipelineRunID`, `runID` and `cumulativeScore`, and `iteration` and `pass` are typed. `JobProgress.lastSaid` is the header's line.
+- [x] **The reads** decode the pipeline list and manifest, the cycle history and `train status`'s `cycle`, `active_pipeline`, `latest_pipeline`, `cycle_active` and `pipelines`, tolerant of unknown fields (`business/reads/Training.swift`).
+- [x] **The parity row** for `train` names Runs, Pipelines, Cycle and Regimes, the pipeline and cycle verbs, and "its schedule the person's own, launchd or cron".
+
+**Decisions made while building** (2026-10-26, each recorded for veto):
+- **The default, taken:** the Cycle tab offers run-once, halt and resume only, and says scheduling is the person's.
+- **Two new tabs** (Runs · Pipelines · Cycle · Regimes · Datasets) rather than sections inside Runs.
+- **The spec names come from completion,** since no read lists them, as Graph's do.
+- **All five acts ask first:** a pipeline's run and resume, and the cycle's run, halt and resume.
+- **Run and resume pass the CLI's defaults only.** `--continue-on-fail`, `--judge` and `--trainer` stay the console's.
+- **Resume only for `aborted` or `failed`,** so a manifest a crash left `running` isn't resumed from the app.
+- **A score is shown only once its stage is gated** (fusing, passed, failed), hiding the stale score a resumed stage repeats. A cycle score of 0 goes unsaid, as the CLI's table prints `-`.
+- **Halt isn't offered while a pass holds the cycle,** and Run one pass is held back while the cycle is halted or held, the reason said. Halt stays available with no history, which the CLI accepts.
+- **Pipeline and cycle runs share the place's one job slot.**
+- **The confirm's words live in the view-model,** with `isDestructive` choosing the button's role.
+
+**Verified.**
+- **Recorded** from the branch's binary over the sandbox, the home written `/Users/someone`; none hand-made:
+  - 26 reads in `tests/business/reads/Fixtures/` (`train-pipeline-*`, `train-cycle-*`, `train-status-*`);
+  - 14 streams in `tests/business/jobs/Fixtures/`.
+
+  The mid-run documents (a running manifest, `active: true`, the locked refusal) were caught by not reading a run's stream while the reads ran, the pipe's backpressure holding it mid-stage.
+- 36 new cases:
+  - `PipelineCycleReadsTests` (6);
+  - `TrainingStreamTests` (12), every line of every stream typed;
+  - `PipelineCycleTests` (16), among them `watchedStageByStage`, `resumed`, `cycleNoHistory`, `scheduleStaysYours`, `runOnceConfirmed` and `haltAndResume`;
+  - `ParityTests/pipelinesAndCycleRow` and `ChildrenSeenTests/pipelineAndCycleSeen`.
+- **Repeat runs:** Training 33 of 33 over two 30-iteration runs, after three tests were made to wait for the read-back rather than the job's end. App and Shell passed over 10 iterations; the reads, jobs and layering bundles 114 of 114 over 10.
+- **Mutation:** five mutants planted in the view-model were each caught.
+- The layering check passed 25 of 25, and `check-previews` finds nothing in training or shell.
+- **Previews:**
+  - no pipelines, and pipelines listed;
+  - one running stage by stage, and one failed at a stage with Resume;
+  - the cycle with no history, active and halted;
+  - the run-once confirm.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,992 tests and the macOS app's 731 cases passed, with no Swift warning.
+
+**Not done:**
+- No live pass of the app.
+- No design board draws the two tabs.
+- `TrainingStatus.running` decodes run objects where the CLI sends ids, so it stays empty. That's harmless, since `recent_runs` carries the running run.
+- **CLI gaps the probes found:**
+  - **No read lists the named pipeline specs** or their stage plan before a run.
+  - **A halt during a pass is lost.** `train cycle halt` taken while a pass holds the lock answers "cycle halted", then the pass's save overwrites it: loaded at `cycle.cpp:403`, written at the end.
+  - **A failed pass under `stream-json` writes nothing to stderr,** though `machine-mode.md` says failures are said there too.
+  - **A resume's stream and manifest carry the previous attempt's score** on the stage that trains again.

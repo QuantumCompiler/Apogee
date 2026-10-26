@@ -66,19 +66,22 @@ final class ScriptedJob: JobRunning, @unchecked Sendable {
     }
 }
 
-/// Hands out scripted jobs, recording each start.
+/// Hands out scripted jobs, recording each start and whether it asked for
+/// the stream.
 final class ScriptedJobs: JobStarting, @unchecked Sendable {
     private let jobs: Mutex<[ScriptedJob]>
-    private let started = Mutex<[[String]]>([])
+    private let started = Mutex<[([String], Bool)]>([])
 
     init(_ jobs: [ScriptedJob]) {
         self.jobs = Mutex(jobs)
     }
 
-    var starts: [[String]] { started.withLock { $0 } }
+    var starts: [[String]] { started.withLock { $0.map { $0.0 } } }
+    /// Each start's streaming flag, in order.
+    var streamed: [Bool] { started.withLock { $0.map { $0.1 } } }
 
     func startJob(binary: URL, arguments: [String], streaming: Bool, folder: URL?) -> any JobRunning {
-        started.withLock { $0.append(arguments) }
+        started.withLock { $0.append((arguments, streaming)) }
         return jobs.withLock { $0.removeFirst() }
     }
 }

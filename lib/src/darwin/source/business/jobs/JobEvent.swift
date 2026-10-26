@@ -3,14 +3,30 @@ import Foundation
 
 /// One line a long job's stream says (the CLI's 52b: `models pull`,
 /// `video generate`, `video compose`, `voice say` under
-/// `--output-format stream-json`), read tolerantly: an event this client does
-/// not know is kept, never dropped.
+/// `--output-format stream-json`; since its 55h `train pipeline run|resume`
+/// and `train cycle run` too), read tolerantly: an event this client does not
+/// know is kept, never dropped.
 public enum JobEvent: Sendable, Equatable {
     /// First: the verb, and the versions.
     case job(verb: String)
     /// A step of a pull's chain: `index` of `count`, its label in the chain's
-    /// words, `started`, `done` or `failed`.
-    case stage(index: Int, count: Int, label: String, state: String)
+    /// words, `started`, `done` or `failed`. Or, since the CLI's 55h, a
+    /// pipeline's stage as its manifest records it -- `pending`, `training`,
+    /// `evaluating`, `fusing`, `passed` or `failed` -- with the pipeline run
+    /// it belongs to, the stage's own run once it has one, and its cumulative
+    /// score, 0 to 1, once its gate has scored it.
+    case stage(
+        index: Int, count: Int, label: String, state: String, pipelineRunID: String? = nil, runID: String? = nil,
+        cumulativeScore: Double? = nil)
+    /// A training iteration, as the trainer reported it (55h): `iteration` of
+    /// `iterations` (when the trainer said), the loss, the learning rate,
+    /// iterations a second, and the pipeline stage it belongs to, from 1.
+    case iteration(iteration: Int, iterations: Int?, loss: Double?, lr: Double?, throughput: Double?, stage: Int?)
+    /// A line of a cycle pass's narration (55h): where the pass is --
+    /// `collecting`, `merging`, `training`, `gating`, `promoting`, or how it
+    /// ended: `skipped`, `failed`, `halted`, `passed`; more may be added --
+    /// and the line as the terminal says it.
+    case pass(state: String, text: String)
     /// Bytes moved; `total` only when known, never guessed.
     case bytes(done: Int, total: Int?, file: String?, index: Int?, count: Int?)
     /// A runtime loaded.
@@ -51,7 +67,17 @@ public enum JobEvent: Sendable, Equatable {
             return .job(verb: string("verb") ?? "")
         case "stage":
             guard let index = int("index"), let count = int("count") else { break }
-            return .stage(index: index, count: count, label: string("label") ?? "", state: string("state") ?? "")
+            return .stage(
+                index: index, count: count, label: string("label") ?? "", state: string("state") ?? "",
+                pipelineRunID: string("pipeline_run_id"), runID: string("run_id"), cumulativeScore: number("cumulative_score"))
+        case "iteration":
+            guard let iteration = int("iteration") else { break }
+            return .iteration(
+                iteration: iteration, iterations: int("iterations"), loss: number("loss"), lr: number("lr"),
+                throughput: number("throughput"), stage: int("stage"))
+        case "pass":
+            guard let state = string("state") else { break }
+            return .pass(state: state, text: string("text") ?? "")
         case "bytes":
             guard let done = int("done") else { break }
             return .bytes(done: done, total: int("total"), file: string("file"), index: int("index"), count: int("count"))

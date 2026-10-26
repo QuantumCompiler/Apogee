@@ -1,0 +1,2 @@
+{"protocol_version":1,"schema":"2026-10-25","type":"job","verb":"train cycle run"}
+{"message":"the cycle is halted: circuit breaker: 1 consecutive failed cycle(s) reached circuit_breaker_k 1. Review the data and the suite, then 'apogee train cycle resume'","type":"error"}

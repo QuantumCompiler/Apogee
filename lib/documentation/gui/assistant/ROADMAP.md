@@ -71,7 +71,7 @@ Opened 2026-10-22 (the user's call): a thorough bug and feature-disparity audit 
 - [x] **Console and argv safety** *(4g, shipped 2026-10-25 — [Milestone E](MILESTONES.md#milestone-e--the-audits-gui-findings))* — carve-outs refused after root options, the exec line's refusals, user text after `--`.
 - [x] **Buttons that do what they say** *(4h, shipped 2026-10-26 — [Milestone E](MILESTONES.md#milestone-e--the-audits-gui-findings))* — Tasks' resume in its folder and state, no stale saves, results on their own selection, empty states and failures said.
 - [x] **Training and suites parity** *(4i, shipped 2026-10-26 — [Milestone E](MILESTONES.md#milestone-e--the-audits-gui-findings))* — adapter promote and editing, datasets pull, the shared-base fit, a chat under any suite.
-- [ ] **Pipeline and cycle screens** *([4j](../backlog/v0.2.0/pipeline-and-cycle-screens.md))* — its gate, the CLI's 55h JSON, shipped 2026-10-25.
+- [x] **Pipeline and cycle screens** *(4j, shipped 2026-10-26 — [Milestone E](MILESTONES.md#milestone-e--the-audits-gui-findings))* — named pipelines run, resumed and watched stage by stage; the cycle's state, a pass run, halted and resumed; on the CLI's 55h JSON.
 - [ ] **The remaining verbs** *([4k](../backlog/v0.2.0/settings-sessions-graph-parity.md))* — saved-chat compact/info/recall, one provider registered, `server_tools` shown, graph export/dedupe/delete, MCP remove, raw records, capabilities from launch.
 - [ ] **Docs and the board catch up** *([4l](../backlog/v0.2.0/docs-and-board-catch-up.md))* — shipped gaps flipped by probe; ROADMAP, SPEC and CLAUDE stating what shipped.
 

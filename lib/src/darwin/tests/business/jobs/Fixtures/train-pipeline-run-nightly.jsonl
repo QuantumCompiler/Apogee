@@ -1,0 +1,16 @@
+{"protocol_version":1,"schema":"2026-10-25","type":"job","verb":"train pipeline run"}
+{"text":"[pipeline] nightly as pipe-20261026-074115: 1 stage(s), mock on aaaaaaaaaaaa; no judge: unmatched items skip","type":"notice"}
+{"count":1,"index":1,"label":"base","pipeline_run_id":"pipe-20261026-074115","state":"pending","type":"stage"}
+{"count":1,"index":1,"label":"base","pipeline_run_id":"pipe-20261026-074115","run_id":"pipe-20261026-074115-s0","state":"training","type":"stage"}
+{"text":"[train] stage 1/1 'base': mock lora on aaaaaaaaaaaa, dataset starter.jsonl","type":"notice"}
+{"text":"[train] mock trainer: 4 iteration(s), method lora","type":"notice"}
+{"iteration":1,"iterations":4,"loss":0.72,"lr":0.0001,"stage":1,"throughput":10.0,"type":"iteration"}
+{"iteration":2,"iterations":4,"loss":0.62,"lr":0.0001,"stage":1,"throughput":10.0,"type":"iteration"}
+{"iteration":3,"iterations":4,"loss":0.52,"lr":0.0001,"stage":1,"throughput":10.0,"type":"iteration"}
+{"iteration":4,"iterations":4,"loss":0.42,"lr":0.0001,"stage":1,"throughput":10.0,"type":"iteration"}
+{"text":"[train] adapter saved to /Users/someone/.apogee/training/runs/pipe-20261026-074115-s0/adapters","type":"notice"}
+{"count":1,"index":1,"label":"base","pipeline_run_id":"pipe-20261026-074115","run_id":"pipe-20261026-074115-s0","state":"evaluating","type":"stage"}
+{"text":"[eval] cumulative suite: 1 suite(s), 1 item(s); no judge: unmatched items skip","type":"notice"}
+{"text":"[gate] stage 'base' PASSED the cumulative eval -- 100% (1/1)","type":"notice"}
+{"count":1,"cumulative_score":1.0,"index":1,"label":"base","pipeline_run_id":"pipe-20261026-074115","run_id":"pipe-20261026-074115-s0","state":"passed","type":"stage"}
+{"document":{"kind":"pipeline","pipeline":{"base_model":"/Users/someone/.apogee/models/tiny/safetensors/aaaaaaaaaaaa","completed_at":"2026-10-26T07:41:15Z","pipeline_run_id":"pipe-20261026-074115","spec_name":"nightly","stages":[{"adapter_dir":"/Users/someone/.apogee/training/runs/pipe-20261026-074115-s0/adapters","base_model":"/Users/someone/.apogee/models/tiny/safetensors/aaaaaaaaaaaa","cumulative_passed":true,"cumulative_score":1.0,"dataset":"/Users/someone/.apogee/training/datasets/starter.jsonl","eval_results":{"items":[{"check_type":"contains","expected":"hello","got":"say hello","passed":true,"prompt":"say hello"}],"num_passed":1,"num_skipped":0,"passed":true,"run_at":"2026-10-26T07:41:15Z","score":1.0,"suite":"/Users/someone/.apogee/training/suites/hello.jsonl","total":1},"fused_dir":"","index":0,"name":"base","run_id":"pipe-20261026-074115-s0","status":"passed"}],"started_at":"2026-10-26T07:41:15Z","status":"complete","student":"tiny"}},"type":"document"}

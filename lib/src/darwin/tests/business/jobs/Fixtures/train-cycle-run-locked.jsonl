@@ -1,0 +1,2 @@
+{"protocol_version":1,"schema":"2026-10-25","type":"job","verb":"train cycle run"}
+{"message":"another cycle is already running (lock: /Users/someone/.apogee/training/cycle/cycle.lock). If none is, remove the file and run again","type":"error"}

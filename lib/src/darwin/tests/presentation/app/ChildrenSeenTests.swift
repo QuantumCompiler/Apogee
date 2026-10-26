@@ -172,6 +172,28 @@ struct ChildrenSeenTests {
         #expect(app.monitor.liveChildren().isEmpty)
     }
 
+    /// 4j: a pipeline run and a cycle pass are long acts like any other --
+    /// supervised on the jobs core, so the registry lists them.
+    @Test("a pipeline run and a cycle pass are the monitor's children, under their commands, each ended by its Stop")
+    func pipelineAndCycleSeen() async throws {
+        let home = try FakeApogeeHome()
+        defer { home.remove() }
+        let registry = ChildRegistry()
+        let app = try composed(home, registry, route: "training")
+        await app.training.connect(binary: home.apogee)
+        app.training.pending = .runPipeline("skills")
+        await app.training.confirm()
+        #expect(await eventually { registry.children(.job).map(\.label) == ["apogee train pipeline run"] })
+        #expect(app.monitor.liveChildren().map(\.label) == ["apogee train pipeline run"])
+        await app.training.stop()
+        #expect(await eventually { registry.children.isEmpty && !app.training.isRunning })
+        app.training.pending = .runCycle
+        await app.training.confirm()
+        #expect(await eventually { registry.children(.job).map(\.label) == ["apogee train cycle run"] })
+        await app.training.stop()
+        #expect(await eventually { registry.children.isEmpty && !app.training.isRunning })
+    }
+
     @Test("composed with only a registry, the app's own starters list in it")
     func defaultStartersList() async throws {
         let home = try FakeApogeeHome()

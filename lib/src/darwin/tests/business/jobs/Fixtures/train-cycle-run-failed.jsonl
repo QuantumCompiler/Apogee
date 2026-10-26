@@ -1,0 +1,21 @@
+{"protocol_version":1,"schema":"2026-10-25","type":"job","verb":"train cycle run"}
+{"state":"collecting","text":"[cycle] directory: 1 file(s) in /Users/someone/work/queue","type":"pass"}
+{"state":"merging","text":"[cycle] 1 example(s) from directory","type":"pass"}
+{"state":"training","text":"[cycle] pipeline cycle-20261026-074120 (nightly): 1 stage(s)","type":"pass"}
+{"count":1,"index":1,"label":"base","pipeline_run_id":"cycle-20261026-074120","state":"pending","type":"stage"}
+{"count":1,"index":1,"label":"base","pipeline_run_id":"cycle-20261026-074120","run_id":"cycle-20261026-074120-s0","state":"training","type":"stage"}
+{"text":"[train] stage 1/1 'base': mock lora on aaaaaaaaaaaa, dataset merged.jsonl","type":"notice"}
+{"text":"[train] mock trainer: 4 iteration(s), method lora","type":"notice"}
+{"iteration":1,"iterations":4,"loss":0.72,"lr":0.0001,"stage":1,"throughput":10.0,"type":"iteration"}
+{"iteration":2,"iterations":4,"loss":0.62,"lr":0.0001,"stage":1,"throughput":10.0,"type":"iteration"}
+{"iteration":3,"iterations":4,"loss":0.52,"lr":0.0001,"stage":1,"throughput":10.0,"type":"iteration"}
+{"iteration":4,"iterations":4,"loss":0.42,"lr":0.0001,"stage":1,"throughput":10.0,"type":"iteration"}
+{"text":"[train] adapter saved to /Users/someone/.apogee/training/runs/cycle-20261026-074120-s0/adapters","type":"notice"}
+{"count":1,"index":1,"label":"base","pipeline_run_id":"cycle-20261026-074120","run_id":"cycle-20261026-074120-s0","state":"evaluating","type":"stage"}
+{"text":"[eval] cumulative suite: 1 suite(s), 1 item(s); no judge: unmatched items skip","type":"notice"}
+{"text":"[gate] stage 'base' FAILED the cumulative eval -- 0% (0/1)","type":"notice"}
+{"count":1,"cumulative_score":0.0,"index":1,"label":"base","pipeline_run_id":"cycle-20261026-074120","run_id":"cycle-20261026-074120-s0","state":"failed","type":"stage"}
+{"state":"failed","text":"[cycle] FAILED -- pipeline aborted: pipeline aborted -- stage 'base' failed the cumulative eval gate (0% (0/1)). Fix the data or the suite and 'apogee train pipeline resume cycle-20261026-074120', or pass --continue-on-fail to go on regardless","type":"pass"}
+{"state":"halted","text":"[cycle] circuit breaker: 1 consecutive failed cycle(s) reached circuit_breaker_k 1 -- the loop is halted; 'apogee train cycle resume' after fixing the data or the suite","type":"pass"}
+{"document":{"active":false,"anchor_score":1.0,"anchor_version":1,"backend":"nightly-model","consecutive_fails":1,"halt_reason":"circuit breaker: 1 consecutive failed cycle(s) reached circuit_breaker_k 1","halted":true,"runs":[{"anchor_score":0.0,"cycle_score":0.0,"dataset_rows":0,"gate":"skipped","gate_reason":"no new training data in any source","pipeline_id":"","prev_score":0.0,"promoted_version":0,"run_at":"2026-10-26T07:41:18Z","source":""},{"anchor_score":0.0,"cycle_score":1.0,"dataset_rows":2,"gate":"pass","gate_reason":"","pipeline_id":"cycle-20261026-074119","prev_score":0.0,"promoted_version":1,"run_at":"2026-10-26T07:41:19Z","source":"directory"},{"anchor_score":0.0,"cycle_score":0.0,"dataset_rows":1,"gate":"fail","gate_reason":"pipeline aborted: pipeline aborted -- stage 'base' failed the cumulative eval gate (0% (0/1)). Fix the data or the suite and 'apogee train pipeline resume cycle-20261026-074120', or pass --continue-on-fail to go on regardless","note":"circuit breaker: 1 consecutive failed cycle(s) reached circuit_breaker_k 1","pipeline_id":"cycle-20261026-074120","prev_score":0.0,"promoted_version":0,"run_at":"2026-10-26T07:41:20Z","source":"directory"}],"sessions_until":"","total_runs":3},"type":"document"}
+{"message":"cycle FAILED -- pipeline aborted: pipeline aborted -- stage 'base' failed the cumulative eval gate (0% (0/1)). Fix the data or the suite and 'apogee train pipeline resume cycle-20261026-074120', or pass --continue-on-fail to go on regardless","type":"error"}

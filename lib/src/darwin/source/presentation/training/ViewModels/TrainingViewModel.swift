@@ -7,20 +7,27 @@ import Observation
 
 /// The Training place: runs and their gates and promotions -- merged, or the
 /// adapter alone (the CLI's 53b, gated on a quantized base where it will
-/// serve, 53c) -- the regimes, and the datasets with their kits, pulled from
-/// Hugging Face or made here -- each view a document re-read after, each act
-/// the person's command.
+/// serve, 53c) -- the named pipelines, run, resumed and watched stage by
+/// stage, and the unattended cycle, its state, one pass, a halt and a resume
+/// (the CLI's 55h) -- the regimes, and the datasets with their kits, pulled
+/// from Hugging Face or made here -- each view a document re-read after, each
+/// act the person's command.
 ///
 /// SwiftUI-free (ADR 0002). A long act -- a run, a gate, a promotion, a
-/// regime, a pull, a synthesis, a prepare -- is supervised on the jobs core,
-/// its busy line the CLI's own words: `train run` takes no machine stream, so
-/// nothing is decided from them. No training starts without the person's
-/// launch, and a refused promotion's sheet opens again with the CLI's words.
+/// pipeline, a cycle pass, a regime, a pull, a synthesis, a prepare -- is
+/// supervised on the jobs core, one at a time. `train run` takes no machine
+/// stream, so its busy line is the CLI's own words and nothing is decided
+/// from them; a pipeline and a cycle pass stream their stages, iterations and
+/// narration (55h), drawn as they come and read back from their documents
+/// after. No training starts without the person's word, and nothing here
+/// schedules the cycle: that stays the person's own scheduler's.
 @MainActor
 @Observable
 public final class TrainingViewModel {
     public enum Tab: String, CaseIterable, Identifiable, Sendable {
         case runs
+        case pipelines
+        case cycle
         case regimes
         case datasets
         public var id: String { rawValue }
@@ -176,17 +183,46 @@ public final class TrainingViewModel {
         }
     }
 
-    /// A destructive act waiting on the person's word.
+    /// An act waiting on the person's word: a destructive one, or one that
+    /// trains -- as the TUI asks before its `p` and `c` -- or changes what
+    /// the person's scheduler does.
     public enum Pending: Equatable, Sendable {
         case rollback(backend: String)
         case deleteDataset(String)
+        /// `train pipeline run --pipeline <name>`: each stage a training run,
+        /// held to the cumulative gate.
+        case runPipeline(String)
+        /// `train pipeline resume <id>`: from the first stage that has not
+        /// passed.
+        case resumePipeline(String)
+        /// `train cycle run`: one pass, now.
+        case runCycle
+        /// `train cycle halt`: every pass refuses until a resume.
+        case haltCycle
+        /// `train cycle resume`: the halt and the failure count cleared.
+        case resumeCycle
 
-        /// `train rollback <b>`, or `datasets delete <d> --yes` -- the person
-        /// said yes here.
+        /// The command as a person types it -- `train rollback <b>`,
+        /// `datasets delete <d> --yes` (the person said yes here), a
+        /// pipeline's or the cycle's verb. A run is started with its stream
+        /// asked for besides.
         public var arguments: [String] {
             switch self {
             case .rollback(let backend): ["train", "rollback", backend]
             case .deleteDataset(let name): ["datasets", "delete", name, "--yes"]
+            case .runPipeline(let name): ["train", "pipeline", "run", "--pipeline", name]
+            case .resumePipeline(let id): ["train", "pipeline", "resume", id]
+            case .runCycle: ["train", "cycle", "run"]
+            case .haltCycle: ["train", "cycle", "halt"]
+            case .resumeCycle: ["train", "cycle", "resume"]
+            }
+        }
+
+        /// Whether yes takes something away: a version pointer, a dataset.
+        public var isDestructive: Bool {
+            switch self {
+            case .rollback, .deleteDataset: true
+            case .runPipeline, .resumePipeline, .runCycle, .haltCycle, .resumeCycle: false
             }
         }
     }
@@ -197,6 +233,32 @@ public final class TrainingViewModel {
         case synth
         case create
         case pull
+    }
+
+    /// What the act running now shows live, besides its line: a pipeline's
+    /// stages, or a cycle pass -- its narration and its pipeline's stages.
+    public enum Live: Equatable, Sendable {
+        case pipeline
+        case cycle
+    }
+
+    /// A pipeline stage as the page draws it -- from the run going now, live,
+    /// or from its manifest as last read.
+    public struct StageRow: Equatable, Sendable, Identifiable {
+        /// From 1.
+        public let index: Int
+        public let name: String
+        /// The manifest's word: `pending`, `training`, `evaluating`,
+        /// `fusing`, `passed` or `failed`.
+        public let state: String
+        /// The stage's own run, once it has one.
+        public let runID: String?
+        /// The cumulative gate's score -- only once this attempt is past its
+        /// gate (`PipelineRun.isGated`).
+        public let score: Double?
+        /// The trainer's latest iteration, while this stage trains.
+        public let iteration: JobProgress.Iteration?
+        public var id: Int { index }
     }
 
     /// Where one of the place's reads stands: not read yet, read, no apogee,
@@ -249,6 +311,22 @@ public final class TrainingViewModel {
     /// its fields.
     public private(set) var promoteRefusal: String?
     public var pending: Pending?
+    /// The named pipelines -- `training.pipelines` entries -- as the binary
+    /// completes `train pipeline run --pipeline` (no read lists them).
+    public private(set) var pipelineSpecs: [String] = []
+    /// Every pipeline run, newest first, as `train pipeline status` lists
+    /// them -- a cycle pass's among them.
+    public private(set) var pipelineRuns: [PipelineRunRow] = []
+    /// The pipeline run whose page is open; `nil` shows the one running here.
+    public private(set) var selectedPipelineRun: String?
+    /// The open run's manifest, as `train pipeline status <id>` last read it.
+    public private(set) var pipelineRun: PipelineRun?
+    /// Why the open run's manifest could not be read, in the CLI's words.
+    public private(set) var pipelineRunFailure: String?
+    /// The cycle's history, as `train cycle status` last read it: `nil` while
+    /// `train status` says there is none yet -- then the read, which exits 1,
+    /// is never asked.
+    public private(set) var cycle: CycleHistory?
     /// Each read's standing: `train status` (the runs), `train versions`,
     /// `train regime list`, `datasets kits`, `datasets list`, and `models list
     /// --all` (the students and the backends the sheets offer).
@@ -258,9 +336,16 @@ public final class TrainingViewModel {
     public private(set) var kitsListing: Listing = .notRead
     public private(set) var datasetsListing: Listing = .notRead
     public private(set) var modelsListing: Listing = .notRead
+    /// `train pipeline status`'s standing.
+    public private(set) var pipelinesListing: Listing = .notRead
+    /// The cycle's: `train status`'s when that failed, else `train cycle
+    /// status`'s -- read, with no history yet, without asking it.
+    public private(set) var cycleListing: Listing = .notRead
     /// The act running now: what it is, and its progress.
     public private(set) var running: String?
     public private(set) var run: JobProgress?
+    /// What the act running now shows live, besides its line.
+    public private(set) var live: Live?
     public private(set) var failure: String?
     public var say: (@MainActor (String) -> Void)?
 
@@ -281,6 +366,7 @@ public final class TrainingViewModel {
         guard binary != nil else {
             (runsListing, versionsListing, regimesListing) = (.missing, .missing, .missing)
             (kitsListing, datasetsListing, modelsListing) = (.missing, .missing, .missing)
+            (pipelinesListing, cycleListing) = (.missing, .missing)
             return
         }
         await refresh()
@@ -297,6 +383,8 @@ public final class TrainingViewModel {
         let read = await runner.read(binary: binary, ["train", "status"])
         if let document = read.document { status = TrainingStatus(document: document) }
         runsListing = .of(read)
+        await readCycle(after: read)
+        await readPipelines()
         let versions = await runner.read(binary: binary, ["train", "versions"])
         if let document = versions.document { ledgers = VersionLedger.list(from: document) }
         versionsListing = .of(versions)
@@ -319,6 +407,66 @@ public final class TrainingViewModel {
         modelsListing = .of(models)
     }
 
+    /// The named pipelines, the runs, and the open run's manifest again.
+    private func readPipelines() async {
+        guard let binary else { return }
+        if case .done(let said) = await runner.command(binary: binary, ["__complete", "train", "pipeline", "run", "--pipeline", ""]) {
+            pipelineSpecs = Self.candidates(said)
+        }
+        let read = await runner.read(binary: binary, ["train", "pipeline", "status"])
+        if let document = read.document { pipelineRuns = PipelineRunRow.list(from: document) }
+        pipelinesListing = .of(read)
+        if let open = selectedPipelineRun { await readPipelineRun(open) }
+    }
+
+    /// The completion's candidates: one a line, a description after a tab
+    /// where one follows, never an option.
+    static func candidates(_ said: String) -> [String] {
+        said.split(whereSeparator: \.isNewline)
+            .map { String($0.split(separator: "\t").first ?? "").trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("-") }
+    }
+
+    /// A pipeline run's page opened, its manifest read; `nil` opens the one
+    /// running here.
+    public func openPipelineRun(_ id: String?) async {
+        selectedPipelineRun = id
+        pipelineRunFailure = nil
+        guard let id else { return }
+        await readPipelineRun(id)
+    }
+
+    private func readPipelineRun(_ id: String) async {
+        guard let binary else { return }
+        let read = await runner.read(binary: binary, ["train", "pipeline", "status", id])
+        guard selectedPipelineRun == id else { return }
+        if let document = read.document, let manifest = PipelineRun(document: document) {
+            pipelineRun = manifest
+            pipelineRunFailure = nil
+        } else {
+            pipelineRunFailure = read.failure ?? "apogee printed no pipeline run \(id)"
+        }
+    }
+
+    /// The cycle, read only once `train status` says it has a history:
+    /// before the first pass (or a halt) writes one, `train cycle status`
+    /// exits 1 (the CLI's 55h), and the place's empty state says so instead.
+    private func readCycle(after statusRead: ReadOutcome) async {
+        guard let binary else { return }
+        guard statusRead.document != nil else {
+            cycleListing = .of(statusRead)
+            return
+        }
+        guard status?.cycle != nil else {
+            cycle = nil
+            cycleListing = .read
+            return
+        }
+        let read = await runner.read(binary: binary, ["train", "cycle", "status"])
+        if let document = read.document { cycle = CycleHistory(document: document) }
+        cycleListing = .of(read)
+    }
+
     static let missingWords = "Apogee isn't installed, so there is nothing to train."
 
     /// What each tab says where its list is when there is no apogee.
@@ -337,6 +485,11 @@ public final class TrainingViewModel {
     /// What the sheets that pick a student or a teacher say when `models list
     /// --all` failed.
     public var modelsText: String? { Self.text(modelsListing, "stored models") }
+    /// What the pipeline runs say: no apogee, or why `train pipeline status`
+    /// failed.
+    public var pipelinesText: String? { Self.text(pipelinesListing, "pipeline runs", missing: true) }
+    /// What the cycle says: no apogee, or why its read failed.
+    public var cycleText: String? { Self.text(cycleListing, "cycle", missing: true) }
 
     /// A list's line: why its read failed, or -- for a tab's own list -- that
     /// there is no apogee, said once a tab.
@@ -381,6 +534,227 @@ public final class TrainingViewModel {
         case .some(true): "passed the gate" + (run.evalScore.map { String(format: " (%.0f%%)", $0 * 100) } ?? "")
         case .some(false): "failed the gate" + (run.evalScore.map { String(format: " (%.0f%%)", $0 * 100) } ?? "") + " -- promote refuses it unless forced"
         case .none: "not gated yet"
+        }
+    }
+
+    // MARK: - Pipelines
+
+    /// The open run's manifest, when it is the open run's.
+    public var openPipeline: PipelineRun? {
+        pipelineRun.flatMap { $0.id == selectedPipelineRun ? $0 : nil }
+    }
+
+    /// The pipeline run going here now, once its stream has named it.
+    public var livePipelineID: String? { live == .pipeline ? run?.pipelineRunID : nil }
+
+    /// Whether the open page is the pipeline run going here: none is chosen,
+    /// or the chosen one is it.
+    public var showsLivePipeline: Bool {
+        guard live == .pipeline, let run else { return false }
+        guard let open = selectedPipelineRun else { return true }
+        return run.pipelineRunID == nil || run.pipelineRunID == open
+    }
+
+    /// The stages of the run going here, as its stream moved them: each its
+    /// manifest's word, its run, its gate's score once gated, and the
+    /// trainer's latest iteration on the stage that trains.
+    public var liveStages: [StageRow] {
+        run.map(Self.stages(of:)) ?? []
+    }
+
+    /// The open page's stages: live while it is the run going here, else
+    /// its manifest's as last read.
+    public var pipelineStages: [StageRow] {
+        if showsLivePipeline { return liveStages }
+        return openPipeline.map(Self.stages(of:)) ?? []
+    }
+
+    /// A run's stages as its stream moved them; a score only once its stage
+    /// is past its gate, and the iteration on the stage that trains.
+    public static func stages(of progress: JobProgress) -> [StageRow] {
+        progress.orderedStages.map { entry in
+            StageRow(
+                index: entry.index, name: entry.stage.label, state: entry.stage.state, runID: entry.stage.runID,
+                score: PipelineRun.isGated(entry.stage.state) ? entry.stage.cumulativeScore : nil,
+                iteration: entry.stage.state == "training" && progress.iteration?.stage == entry.index ? progress.iteration : nil)
+        }
+    }
+
+    /// A run's stages as its manifest records them.
+    public static func stages(of run: PipelineRun) -> [StageRow] {
+        run.stages.map {
+            StageRow(
+                index: $0.index, name: $0.name, state: $0.status, runID: $0.runID.isEmpty ? nil : $0.runID, score: $0.score,
+                iteration: nil)
+        }
+    }
+
+    /// Whether `run` can be resumed from here: it stopped short, and nothing
+    /// runs in this place now.
+    public func canResume(_ run: PipelineRun) -> Bool {
+        run.isResumable && !isRunning && binary != nil
+    }
+
+    /// Where a resume starts, in a line: `Resume from stage 2, refusals`.
+    public static func resumeWords(_ run: PipelineRun) -> String? {
+        guard run.isResumable, let stage = run.resumesAt else { return nil }
+        return "Resume from stage \(stage.index), \(stage.name)"
+    }
+
+    /// A stage in a line: its word, the gate's score once gated, and the
+    /// trainer's facts while it trains.
+    public static func words(_ stage: StageRow) -> String {
+        var parts = [stage.state]
+        if let score = stage.score { parts.append("cumulative " + percent(score)) }
+        if let iteration = stage.iteration {
+            parts.append("iter \(iteration.iteration)" + (iteration.iterations.map { "/\($0)" } ?? ""))
+            if let loss = iteration.loss { parts.append(String(format: "loss %.4f", loss)) }
+            if let throughput = iteration.throughput { parts.append(String(format: "%.1f it/s", throughput)) }
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// A pipeline run in a line: its spec, its status, its stages passed.
+    public static func words(_ row: PipelineRunRow) -> String {
+        [row.specName, row.status, "\(row.passed) of \(row.stages) stage\(row.stages == 1 ? "" : "s") passed"]
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+    }
+
+    /// A score, 0 to 1, as a whole percent.
+    public static func percent(_ score: Double) -> String {
+        String(format: "%.0f%%", score * 100)
+    }
+
+    static let noSpecsWords =
+        "No named pipelines. A pipeline is a training.pipelines entry in your config -- its stages, each a dataset and an eval suite, gated cumulatively; a spec file runs from the console (apogee train pipeline run --pipeline <file>)."
+
+    /// What the named pipelines say when there is none.
+    public var specsText: String? {
+        guard binary != nil, pipelinesListing != .notRead, pipelineSpecs.isEmpty else { return nil }
+        return Self.noSpecsWords
+    }
+
+    // MARK: - The cycle
+
+    /// Whether a pass holds the cycle now: this place's own, or -- as last
+    /// read -- another's, the person's scheduler's.
+    public var cycleHeld: Bool {
+        live == .cycle || cycle?.active == true || status?.cycleActive == true
+    }
+
+    /// Whether the loop is halted, as last read.
+    public var cycleHalted: Bool {
+        cycle?.halted ?? status?.cycle?.halted ?? false
+    }
+
+    /// One pass can start: nothing runs here, no pass holds the cycle, and
+    /// it isn't halted -- each refused by the CLI otherwise, and said here
+    /// first.
+    public var canRunCycle: Bool { binary != nil && !isRunning && !cycleHeld && !cycleHalted }
+
+    /// A halt can be taken: not halted already, and no pass holds the cycle
+    /// -- one taken during a pass is lost when the pass records itself (the
+    /// CLI's history is written whole at a pass's end).
+    public var canHaltCycle: Bool { binary != nil && !cycleHeld && !cycleHalted }
+
+    /// A resume is offered: the loop is halted.
+    public var canResumeCycle: Bool { binary != nil && cycleHalted }
+
+    /// Why Halt isn't offered while a pass holds the cycle.
+    static let heldWords =
+        "A pass holds the cycle now. A halt taken during a pass is lost when the pass records itself -- Stop it, if it is this place's, or halt once it has ended."
+
+    /// What the cycle's controls say about its state, when something holds
+    /// them back.
+    public var cycleHoldText: String? {
+        if cycleHeld { return Self.heldWords }
+        if cycleHalted {
+            let reason = cycle?.haltReason ?? status?.cycle?.haltReason ?? ""
+            return "Halted: \(reason.isEmpty ? "'apogee train cycle halt' was run" : reason). Every pass refuses -- your scheduler's too -- until Resume clears it."
+        }
+        return nil
+    }
+
+    /// The cycle is unattended by design: its schedule is the person's own.
+    public static let scheduleWords =
+        "The cycle is unattended by design: your own scheduler -- launchd or cron -- runs apogee train cycle run. Nothing here schedules it; Run one pass is a single pass, now."
+
+    static let noHistoryWords =
+        "No pass has run yet, so the cycle has no history: its first pass writes one -- Run one pass here, or your scheduler's first run. A pass needs training.cycle in your config; the run says so when it's missing."
+
+    /// What the cycle says with no history yet -- `train status`'s `cycle`
+    /// null -- rather than the read that exits 1.
+    public var noHistoryText: String? {
+        cycleListing == .read && cycle == nil ? Self.noHistoryWords : nil
+    }
+
+    /// The anchor, in a line, as the CLI's `train cycle status` says it:
+    /// `v1 (100%)`, or not set yet.
+    public static func anchorWords(_ cycle: CycleHistory) -> String {
+        cycle.anchorVersion > 0
+            ? "v\(cycle.anchorVersion)" + (cycle.anchorScore.map { " (\(percent($0)))" } ?? "")
+            : "not set -- the first passing pass sets it"
+    }
+
+    /// A pass in a line: its gate, its score against the last pass and the
+    /// anchor, what it promoted, where its data came from. A score of 0 is
+    /// one the pass never reached -- a pipeline that aborted before the dual
+    /// gate -- and goes unsaid, as the CLI's own table prints it `-`.
+    public static func words(_ pass: CycleHistory.Pass) -> String {
+        var parts = [pass.gate]
+        func reached(_ score: Double?) -> Double? { score.flatMap { $0 == 0 ? nil : $0 } }
+        if let score = reached(pass.cycleScore) {
+            let against = [("previous", pass.previousScore), ("anchor", pass.anchorScore)]
+                .compactMap { name, value in reached(value).map { "\(name) \(percent($0))" } }
+            parts.append("scored \(percent(score))" + (against.isEmpty ? "" : " (\(against.joined(separator: ", ")))"))
+        }
+        if pass.promotedVersion > 0 { parts.append("promoted v\(pass.promotedVersion)") }
+        if !pass.source.isEmpty { parts.append("\(pass.datasetRows) example\(pass.datasetRows == 1 ? "" : "s") from \(pass.source)") }
+        return parts.joined(separator: " · ")
+    }
+
+    // MARK: - The person's word
+
+    /// The question the confirm asks.
+    public var pendingTitle: String {
+        switch pending {
+        case .rollback(let backend): "Point \(backend) back at its previous version?"
+        case .deleteDataset(let name): "Delete the dataset \(name)?"
+        case .runPipeline(let name): "Run the pipeline \(name)?"
+        case .resumePipeline(let id):
+            openPipeline.flatMap { $0.id == id ? $0.resumesAt : nil }.map { "Resume \(id) from stage \($0.index), \($0.name)?" }
+                ?? "Resume \(id)?"
+        case .runCycle: "Run the training cycle once?"
+        case .haltCycle: "Halt the training cycle?"
+        case .resumeCycle: "Resume the training cycle?"
+        case nil: ""
+        }
+    }
+
+    /// What saying yes does, under the command: the TUI's words before its
+    /// `p` and `c`, and the CLI's for the cycle's halt and resume.
+    public var pendingConsequence: String? {
+        switch pending {
+        case .runPipeline: "Each stage is a training run, held to the cumulative gate -- this machine is held until it ends."
+        case .resumePipeline:
+            "What passed stays; each stage from there is a training run, held to the cumulative gate -- this machine is held until it ends."
+        case .runCycle: "It trains, gates and may promote -- this machine is held until it ends."
+        case .haltCycle: "Every 'cycle run' refuses until 'cycle resume' -- your scheduler's passes too."
+        case .resumeCycle: "It clears the halt and the failure count: your scheduler's next pass runs."
+        case .rollback, .deleteDataset, nil: nil
+        }
+    }
+
+    /// The confirm's button.
+    public var pendingAction: String {
+        switch pending {
+        case .runPipeline: "Start"
+        case .resumePipeline: "Resume"
+        case .runCycle: "Run one pass"
+        case .haltCycle: "Halt"
+        case .resumeCycle: "Resume"
+        case .rollback, .deleteDataset, nil: "Go ahead"
         }
     }
 
@@ -499,11 +873,29 @@ public final class TrainingViewModel {
         if await change(["datasets", "create", name, "--from", createFrom]) { selectedDataset = name }
     }
 
+    /// The person said yes: a run started supervised, its stream asked for;
+    /// any other act run and read back.
     public func confirm() async {
         guard let pending else { return }
         self.pending = nil
-        _ = await change(pending.arguments)
+        switch pending {
+        case .runPipeline(let name):
+            selectedPipelineRun = nil
+            start(pending.arguments + Self.stream, doing: "Running \(name)", act: .pipeline(name))
+        case .resumePipeline(let id):
+            selectedPipelineRun = id
+            start(pending.arguments + Self.stream, doing: "Resuming \(id)", act: .pipeline(id))
+        case .runCycle:
+            start(pending.arguments + Self.stream, doing: "Running one pass of the cycle", act: .cycle)
+        case .rollback, .deleteDataset, .haltCycle, .resumeCycle:
+            _ = await change(pending.arguments)
+        }
     }
+
+    /// The stream a pipeline or a cycle pass is run with (the CLI's 55h):
+    /// its stages, iterations and narration as events, its read's document
+    /// last.
+    static let stream = ["--output-format", "stream-json"]
 
     /// Runs a change, reads back, and says how it went; whether it was done.
     private func change(_ arguments: [String]) async -> Bool {
@@ -526,40 +918,66 @@ public final class TrainingViewModel {
         await job?.stop(grace: .seconds(10))
     }
 
-    /// What a supervised act is, for what its end leaves behind.
+    /// What a supervised act is, for what it shows live and what its end
+    /// leaves behind.
     private enum Act {
         case other
         /// A promotion, as its form sent it: a refusal keeps it to change.
         case promote(PromoteForm)
         /// A pull: its end names the directory to prepare.
         case pull
+        /// A pipeline run or resume -- its spec's name or its run's id --
+        /// streamed: its stages live, its manifest read back after.
+        case pipeline(String)
+        /// A cycle pass, streamed: its narration and its pipeline's stages
+        /// live, the history read back after.
+        case cycle
     }
 
     private func start(_ arguments: [String], doing: String, act: Act = .other) {
         guard let binary, job == nil else { return }
         running = doing
         run = JobProgress()
-        let job = starter.startJob(binary: binary, arguments: arguments, streaming: false, folder: nil)
+        switch act {
+        case .pipeline: live = .pipeline
+        case .cycle: live = .cycle
+        case .other, .promote, .pull: live = nil
+        }
+        let job = starter.startJob(binary: binary, arguments: arguments, streaming: live != nil, folder: nil)
         self.job = job
         Task {
             for await update in job.updates { run?.apply(update) }
             self.job = nil
             let progress = run
+            // The run's page stays open on it, read back from its manifest.
+            if case .pipeline = act, let id = progress?.pipelineRunID, selectedPipelineRun == nil || selectedPipelineRun == id {
+                selectedPipelineRun = id
+            }
             run = nil
             running = nil
+            live = nil
             await refresh()
             switch progress?.status {
             case .done:
                 if case .pull = act, let pulled = PulledDataset(said: progress?.notices ?? []) {
                     self.pulled = pulled
                     say?("Pulled: \(pulled.summary.isEmpty ? pulled.path : pulled.summary)")
+                } else if case .pipeline(let name) = act {
+                    say?("Pipeline \(name): \(openPipeline?.status ?? "done")")
+                } else if case .cycle = act {
+                    say?(progress?.pass?.text ?? "The pass ended")
                 } else {
                     say?(progress?.notices.first ?? "\(doing): done")
                 }
             case .failed(let message):
                 if case .promote(let form) = act { refusedPromotion = RefusedPromotion(form: form, refusal: message) }
                 failure = message
-            case .stopped: say?("Stopped: what was finished stays")
+            case .stopped:
+                if case .pipeline = act {
+                    say?("Stopped: what passed stays -- Resume continues it")
+                } else {
+                    say?("Stopped: what was finished stays")
+                }
             default: break
             }
         }

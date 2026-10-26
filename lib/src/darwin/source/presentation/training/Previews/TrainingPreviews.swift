@@ -121,5 +121,102 @@ enum TrainingPreview {
         training.newPromotion(of: run)
         training.promoteForm.backend = "helper"
     }
+
+    // MARK: - Pipelines and the cycle (GUI 4j)
+
+    /// The completion that names the named pipelines.
+    static let complete = ["__complete", "train", "pipeline", "run", "--pipeline"]
+
+    /// The pipelines sandbox's reads (the CLI's 55h, the mock trainer):
+    /// `nightly` and `skills` named, four runs -- the last stopped at its
+    /// second stage -- and the first's manifest, resumed to complete.
+    static let pipelines = PreviewRunner(
+        reads: runner.reads + [
+            (["train", "pipeline", "status"], TrainingDocuments.pipelineStatusList),
+            (["train", "pipeline", "status", completeID], TrainingDocuments.pipelineStatusComplete),
+        ],
+        commands: [(complete, TrainingDocuments.pipelineComplete)])
+
+    /// A store with no pipeline named and none run: the completion says
+    /// nothing, the list is empty.
+    static let noPipelines = PreviewRunner(
+        reads: runner.reads + [(["train", "pipeline", "status"], TrainingDocuments.pipelineStatusNone)],
+        commands: [(complete, TrainingDocuments.pipelineCompleteNone)])
+
+    /// The same sandbox before anything ran: the two pipelines named, no
+    /// run, no pipeline run, and the cycle with no history -- `train
+    /// status`'s `cycle` null.
+    static let noRuns = PreviewRunner(
+        reads: reads(status: TrainingDocuments.trainStatusNone) + [
+            (["train", "pipeline", "status"], TrainingDocuments.pipelineStatusNone)
+        ],
+        commands: [(complete, TrainingDocuments.pipelineComplete)])
+
+    /// `skills` aborted at its second stage by the cumulative gate: the list
+    /// and its manifest.
+    static let aborted = PreviewRunner(
+        reads: runner.reads + [
+            (["train", "pipeline", "status"], TrainingDocuments.pipelineStatusAbortedList),
+            (["train", "pipeline", "status", abortedID], TrainingDocuments.pipelineStatusAborted),
+        ],
+        commands: [(complete, TrainingDocuments.pipelineComplete)])
+
+    /// The cycle after its passes: idle, its anchor set.
+    static let cycleIdle = cycle(TrainingDocuments.trainStatusCycle, TrainingDocuments.cycleStatusPassed)
+    /// Halted by its breaker after a failed pass.
+    static let cycleHalted = cycle(TrainingDocuments.trainStatusCycleHalted, TrainingDocuments.cycleStatusHalted)
+    /// A pass holding the lock -- read while one ran.
+    static let cycleActive = cycle(TrainingDocuments.trainStatusCycleActive, TrainingDocuments.cycleStatusActive)
+
+    static func cycle(_ status: String, _ history: String) -> PreviewRunner {
+        PreviewRunner(
+            reads: reads(status: status) + pipelines.reads.filter { $0.0.starts(with: ["train", "pipeline"]) } + [
+                (["train", "cycle", "status"], history)
+            ],
+            commands: pipelines.commands)
+    }
+
+    /// The place's reads with `status` as `train status`'s answer.
+    static func reads(status: String) -> [([String], String)] {
+        runner.reads.filter { $0.0 != ["train", "status"] } + [(["train", "status"], status)]
+    }
+
+    /// The manifest the aborted run's page reads.
+    static var abortedRun: PipelineRun {
+        PipelineRun(document: ReadDocument(text: TrainingDocuments.pipelineStatusAborted)!)!
+    }
+
+    static var abortedID: String { abortedRun.id }
+
+    static var completeID: String {
+        PipelineRun(document: ReadDocument(text: TrainingDocuments.pipelineStatusComplete)!)!.id
+    }
+
+    /// The recorded `skills` run, through its second stage's second
+    /// iteration: the first stage passed and fused, the second training.
+    static var pipelineRunning: [JobUpdate] {
+        streamed(TrainingDocuments.pipelineRun) { $0.contains(#""iteration":2,"#) && $0.contains(#""stage":2,"#) }
+    }
+
+    /// The recorded passing cycle pass, through its stage's second
+    /// iteration.
+    static var cycleRunning: [JobUpdate] {
+        streamed(TrainingDocuments.cycleRunPassed) { $0.contains(#""iteration":2,"#) }
+    }
+
+    /// A recorded stream's lines as the jobs core reads them, through the
+    /// first line `through` picks.
+    static func streamed(_ stream: String, through: (String) -> Bool) -> [JobUpdate] {
+        let lines = stream.split(separator: "\n").map(String.init)
+        let end = lines.firstIndex(where: through) ?? lines.count - 1
+        return lines[...end].map { .event(JobEvent.decode(line: $0)) }
+    }
+
+    /// Updates folded as the place folds them.
+    static func folded(_ updates: [JobUpdate]) -> JobProgress {
+        var progress = JobProgress()
+        updates.forEach { progress.apply($0) }
+        return progress
+    }
 }
 #endif

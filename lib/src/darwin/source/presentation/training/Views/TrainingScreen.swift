@@ -5,7 +5,8 @@ import PresentationStyles
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Training place (⌘9): runs with their gates and promotions, the
+/// The Training place (⌘9): runs with their gates and promotions, the named
+/// pipelines and their runs stage by stage, the unattended cycle, the
 /// regimes, the datasets and their kits.
 public struct TrainingScreen: View {
     @Bindable private var model: TrainingViewModel
@@ -26,6 +27,19 @@ public struct TrainingScreen: View {
                 .fixedSize()
                 switch model.tab {
                 case .runs: Button("New run…") { model.newRun() }.disabled(model.isRunning || model.missingText != nil)
+                case .pipelines: EmptyView()
+                case .cycle:
+                    Button("Run one pass…") { model.pending = .runCycle }
+                        .disabled(!model.canRunCycle)
+                        .help("apogee train cycle run: one gated pass -- collect, merge, train, gate against the last pass and the anchor, promote or discard")
+                    if model.canResumeCycle {
+                        Button("Resume…") { model.pending = .resumeCycle }
+                            .help("apogee train cycle resume: the halt and the failure count cleared")
+                    } else {
+                        Button("Halt…") { model.pending = .haltCycle }
+                            .disabled(!model.canHaltCycle)
+                            .help("apogee train cycle halt: every pass refuses until a resume -- your scheduler's too")
+                    }
                 case .regimes: EmptyView()
                 case .datasets:
                     Button("New dataset…") { model.newDataset() }.disabled(model.missingText != nil)
@@ -41,7 +55,7 @@ public struct TrainingScreen: View {
                 HStack(spacing: Spacing.s) {
                     ProgressView().controlSize(.small)
                     Text(model.running ?? "Working").font(.apogeeSmall)
-                    Text(progress.busy ?? progress.notices.last ?? "")
+                    Text(progress.busy ?? progress.lastSaid ?? "")
                         .font(.apogeeMeta.monospaced())
                         .foregroundStyle(Palette.textSecondary)
                         .lineLimit(1)
@@ -55,6 +69,8 @@ public struct TrainingScreen: View {
             }
             switch model.tab {
             case .runs: RunsView(model: model)
+            case .pipelines: PipelinesView(model: model)
+            case .cycle: CycleView(model: model)
             case .regimes: RegimesView(model: model)
             case .datasets: DatasetsView(model: model)
             }
@@ -69,14 +85,16 @@ public struct TrainingScreen: View {
             }
         }
         .confirmationDialog(
-            pendingTitle,
+            model.pendingTitle,
             isPresented: Binding(get: { model.pending != nil }, set: { if !$0 { model.pending = nil } }),
             titleVisibility: .visible
         ) {
-            Button("Go ahead", role: .destructive) { Task { await model.confirm() } }
+            Button(model.pendingAction, role: model.pending?.isDestructive == true ? .destructive : nil) { Task { await model.confirm() } }
             Button("Cancel", role: .cancel) { model.pending = nil }
         } message: {
-            Text("apogee " + (model.pending?.arguments.joined(separator: " ") ?? ""))
+            Text(
+                (["apogee " + (model.pending?.arguments.joined(separator: " ") ?? "")] + [model.pendingConsequence].compactMap { $0 })
+                    .joined(separator: "\n\n"))
         }
         .fileImporter(isPresented: $preparing, allowedContentTypes: [.item]) { result in
             if case .success(let url) = result { model.prepare(url.path) }
@@ -90,14 +108,6 @@ public struct TrainingScreen: View {
             Button("OK") { model.dismissFailure() }
         } message: {
             Text(model.failure ?? "")
-        }
-    }
-
-    private var pendingTitle: String {
-        switch model.pending {
-        case .rollback(let backend): "Point \(backend) back at its previous version?"
-        case .deleteDataset(let name): "Delete the dataset \(name)?"
-        case nil: ""
         }
     }
 

@@ -69,7 +69,7 @@ public enum ParityTable {
         CommandPlace("bootstrap", .screen(module: "PresentationSettings"), "Settings › Backends & keys: install runtimes and register providers"),
         CommandPlace("knowledge", .screen(module: "PresentationKnowledge"), "Knowledge › Records: list, ask, capture, link, move, delete, export"),
         CommandPlace("embed", .screen(module: "PresentationKnowledge"), "Knowledge › Collections: list, health, search, ingest, delete"),
-        CommandPlace("train", .screen(module: "PresentationTraining"), "Training › Runs and Regimes: runs launched, gated, promoted -- merged, or the adapter alone (--adapter, gated on a quantized base by --suite and --judge) -- and rolled back"),
+        CommandPlace("train", .screen(module: "PresentationTraining"), "Training › Runs, Pipelines, Cycle and Regimes: runs launched, gated, promoted -- merged, or the adapter alone (--adapter, gated on a quantized base by --suite and --judge) -- and rolled back; the named pipelines run, resumed and watched stage by stage (train pipeline run|resume|status); the cycle's state, one pass run, halted and resumed (train cycle run|status|halt|resume) -- its schedule the person's own, launchd or cron"),
         CommandPlace("datasets", .screen(module: "PresentationTraining"), "Training › Datasets: create, pull from Hugging Face, synthesize, prepare, delete; the kits"),
         CommandPlace("agents", .screen(module: "PresentationLibrary"), "Library › Agents: list, create, delete, the person's own files edited in place"),
         CommandPlace("mcp", .screen(module: "PresentationLibrary"), "Library › MCP servers: connect state, presets registered, enable, disable, a tool tried"),

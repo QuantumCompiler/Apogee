@@ -1,0 +1,4 @@
+{"protocol_version":1,"schema":"2026-10-25","type":"job","verb":"train cycle run"}
+{"state":"collecting","text":"[cycle] directory: no new files in /Users/someone/work/queue","type":"pass"}
+{"state":"skipped","text":"[cycle] no new data -- skipped","type":"pass"}
+{"document":{"active":false,"anchor_score":0.0,"anchor_version":0,"backend":"nightly-model","consecutive_fails":0,"halt_reason":"","halted":false,"runs":[{"anchor_score":0.0,"cycle_score":0.0,"dataset_rows":0,"gate":"skipped","gate_reason":"no new training data in any source","pipeline_id":"","prev_score":0.0,"promoted_version":0,"run_at":"2026-10-26T07:41:18Z","source":""}],"sessions_until":"","total_runs":1},"type":"document"}

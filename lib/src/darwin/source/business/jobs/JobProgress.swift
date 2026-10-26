@@ -2,8 +2,11 @@ import DataProtocol
 import Foundation
 
 /// A job's progress, folded from its updates and nothing else: the steps,
-/// the bytes, what it said, its documents, how it ended. A pure reducer, so a
-/// screen's whole view of a run is a function of what the run said.
+/// the bytes, what it said, its documents, how it ended -- and, for a
+/// training run (the CLI's 55h), a pipeline's stages as its manifest moved
+/// them, the trainer's latest iteration and a cycle pass's narration. A pure
+/// reducer, so a screen's whole view of a run is a function of what the run
+/// said.
 public struct JobProgress: Sendable, Equatable {
     public enum Status: Sendable, Equatable {
         case running
@@ -16,8 +19,36 @@ public struct JobProgress: Sendable, Equatable {
 
     public struct Stage: Sendable, Equatable {
         public let label: String
-        /// `started`, `done`, `failed`.
+        /// `started`, `done`, `failed` -- or a pipeline stage's manifest word:
+        /// `pending`, `training`, `evaluating`, `fusing`, `passed`, `failed`.
         public var state: String
+        /// A pipeline stage's own run, once it has one: what `train eval`
+        /// and `train promote` take.
+        public var runID: String? = nil
+        /// A pipeline stage's cumulative score, 0 to 1, as its latest event
+        /// carried it -- a resume's first write repeats a stage's last
+        /// attempt's, so a screen reads it as the gate's only once the stage
+        /// is past its gate.
+        public var cumulativeScore: Double? = nil
+    }
+
+    /// The trainer's latest iteration, as it reported it.
+    public struct Iteration: Sendable, Equatable {
+        public let iteration: Int
+        /// Absent when the trainer did not say.
+        public let iterations: Int?
+        public let loss: Double?
+        public let lr: Double?
+        /// Iterations a second.
+        public let throughput: Double?
+        /// The pipeline stage it belongs to, from 1.
+        public let stage: Int?
+    }
+
+    /// A line of a cycle pass's narration: where the pass is, in its words.
+    public struct PassLine: Sendable, Equatable {
+        public let state: String
+        public let text: String
     }
 
     public struct Bytes: Sendable, Equatable {
@@ -51,6 +82,16 @@ public struct JobProgress: Sendable, Equatable {
     public private(set) var scene: SceneState?
     public private(set) var segment: Count?
     public private(set) var device: String?
+    /// The pipeline run its stages belong to (55h): a pipeline's own, or
+    /// the one a cycle pass trains.
+    public private(set) var pipelineRunID: String?
+    /// The trainer's latest iteration (55h).
+    public private(set) var iteration: Iteration?
+    /// A cycle pass's narration so far, in order (55h).
+    public private(set) var passes: [PassLine] = []
+    /// What the run said last for people -- a line, a notice or a pass's
+    /// narration -- whichever came last.
+    public private(set) var lastSaid: String?
     /// Whether the run speaks the 52b stream.
     public private(set) var streamed = false
     /// The stderr tail at the end, for the details.
@@ -74,7 +115,10 @@ public struct JobProgress: Sendable, Equatable {
     public mutating func apply(_ update: JobUpdate) {
         switch update {
         case .said(let line):
-            if !line.trimmingCharacters(in: .whitespaces).isEmpty { notices.append(line) }
+            if !line.trimmingCharacters(in: .whitespaces).isEmpty {
+                notices.append(line)
+                lastSaid = line
+            }
         case .busy(let line):
             busy = line
         case .event(let event):
@@ -102,10 +146,17 @@ public struct JobProgress: Sendable, Equatable {
     private mutating func apply(_ event: JobEvent) {
         switch event {
         case .job: break
-        case .stage(let index, let count, let label, let state):
+        case .stage(let index, let count, let label, let state, let pipelineRunID, let runID, let score):
             stageCount = count
-            stages[index] = Stage(label: label, state: state)
+            stages[index] = Stage(label: label, state: state, runID: runID ?? stages[index]?.runID, cumulativeScore: score)
+            if let pipelineRunID { self.pipelineRunID = pipelineRunID }
             if state == "started" { bytes = nil }
+        case .iteration(let iteration, let iterations, let loss, let lr, let throughput, let stage):
+            self.iteration = Iteration(
+                iteration: iteration, iterations: iterations, loss: loss, lr: lr, throughput: throughput, stage: stage)
+        case .pass(let state, let text):
+            passes.append(PassLine(state: state, text: text))
+            if !text.isEmpty { lastSaid = text }
         case .bytes(let done, let total, let file, let index, let count):
             bytes = Bytes(done: done, total: total, file: file, index: index, count: count)
         case .ready(let device, _, _, _):
@@ -121,6 +172,7 @@ public struct JobProgress: Sendable, Equatable {
             step = nil
         case .notice(let text):
             notices.append(text)
+            lastSaid = text
         case .document(let document):
             documents.append(document)
         case .error(let message):
@@ -132,6 +184,9 @@ public struct JobProgress: Sendable, Equatable {
     public var orderedStages: [(index: Int, stage: Stage)] {
         stages.keys.sorted().map { ($0, stages[$0]!) }
     }
+
+    /// The latest pass line of a cycle pass: where it is now.
+    public var pass: PassLine? { passes.last }
 
     /// The first stage that did not finish -- the one a resume runs again.
     public var unfinishedStage: Int? {

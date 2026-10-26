@@ -9,10 +9,14 @@ import InfrastructureProcess
 /// bundle keeps its own scripted support.
 
 /// Answers a preview's reads from the binary's own recorded documents and its
-/// commands as done: nothing starts the binary or touches the person's files.
+/// commands as done -- with what the binary printed, where one is recorded:
+/// nothing starts the binary or touches the person's files.
 struct PreviewRunner: CommandRunning {
     /// Argument prefixes and what they answer; the longest prefix wins.
     let reads: [([String], String)]
+    /// Commands and what each printed -- a completion's candidates; the
+    /// longest prefix wins, and any other is done with nothing said.
+    var commands: [([String], String)] = []
     /// Reads the binary refused, each its recorded stderr; every one recorded
     /// exited 1.
     var refusals: [([String], String)] = []
@@ -36,7 +40,7 @@ struct PreviewRunner: CommandRunning {
     }
 
     func command(binary: URL, _ arguments: [String]) async -> CommandOutcome {
-        .done(stdout: "")
+        .done(stdout: Self.answer(arguments, commands) ?? "")
     }
 
     static func answer(_ arguments: [String], _ rules: [([String], String)]) -> String? {

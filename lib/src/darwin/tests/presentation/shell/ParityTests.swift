@@ -56,6 +56,16 @@ struct ParityTests {
         #expect(models.note.contains("models status --suite"))
     }
 
+    @Test("4j: the train row names the pipelines and the cycle -- their verbs, and the schedule left the person's")
+    func pipelinesAndCycleRow() throws {
+        let train = try #require(ParityTable.place(of: "train"))
+        #expect(train.kind == .screen(module: "PresentationTraining"))
+        #expect(train.note.contains("Pipelines") && train.note.contains("Cycle"))
+        #expect(train.note.contains("train pipeline run|resume|status"))
+        #expect(train.note.contains("train cycle run|status|halt|resume"))
+        #expect(train.note.contains("launchd or cron"), "nothing schedules the cycle from the app")
+    }
+
     @Test("a verb an item placed is named on its family's row: chats show, a resumed chat's turns in the session window (M7)")
     func chatsShowPlaced() throws {
         let chats = try #require(ParityTable.place(of: "chats"))
