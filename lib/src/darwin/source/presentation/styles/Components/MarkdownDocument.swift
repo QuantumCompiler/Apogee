@@ -13,6 +13,13 @@ import Foundation
 /// A single newline inside a paragraph stays a line break, as the CLI's
 /// terminal renderer keeps it (it renders line by line): an answer with no
 /// markdown in it reads as it was written.
+///
+/// Every character the model wrote reaches the screen: the blocks may style
+/// it, never drop it. A reference-style link definition (`[1]: https://…`),
+/// which Foundation would take as link metadata and show nowhere, is kept as
+/// the line of text it is, as the CLI's terminal renderer prints it -- its
+/// address linked as any bare address is, and a reference to it (`[text][1]`)
+/// left as written, never resolved.
 public struct MarkdownDocument: Equatable, Sendable {
     /// The blocks, in order.
     public let blocks: [MarkdownBlock]
@@ -20,28 +27,49 @@ public struct MarkdownDocument: Equatable, Sendable {
     /// `source` parsed. `streaming` says it is an answer still arriving, and
     /// reads its edge tolerantly -- what is unfinished there is either drawn
     /// as what it already is or held back a moment, never shown as markers
-    /// and then reshaped:
+    /// and then reshaped. Only an unfinished construct's own marker line is
+    /// ever held, never a line of content, and never past its next line:
     /// - an open fence is a code block in progress (CommonMark runs an
     ///   unclosed fence to the end of the text);
     /// - an unclosed emphasis or code marker shows literally until it closes;
-    /// - a last line that is nothing but markers yet (a fence, a closing
-    ///   fence being typed, a rule, a heading's or a list item's marker, a
-    ///   table's delimiter row) waits for the rest of its line;
-    /// - a last paragraph that opens with a pipe is a table whose delimiter
-    ///   row has not arrived, and waits for it.
+    /// - a last line that is nothing yet but a construct's own markers
+    ///   (`isMarkerLine`: a fence or a closing fence being typed, a rule or a
+    ///   setext underline, a heading's, a quote's or a list item's marker
+    ///   with no words yet, a table's delimiter row) waits for the rest of
+    ///   its line;
+    /// - a last line that may be a table's first row -- led by a pipe, after
+    ///   no other pipe-led line, no blank line after it -- waits for its next
+    ///   line, which says whether it is a table (`endsAtTableHeader`).
+    ///
+    /// Finished, the answer is read as written: a fence opened with nothing
+    /// under it shows as its line, and text the parse makes nothing of shows
+    /// as written.
     public init(parsing source: String, streaming: Bool = false) {
         let text = streaming ? Self.heldBack(source) : source
-        let options = AttributedString.MarkdownParsingOptions(
-            allowsExtendedAttributes: false, interpretedSyntax: .full,
-            failurePolicy: .returnPartiallyParsedIfPossible, languageCode: nil)
-        guard let parsed = try? AttributedString(markdown: text, options: options) else {
-            // Never lose an answer: what cannot be read is shown as written.
-            blocks = text.isEmpty ? [] : [.paragraph([MarkdownSpan(text)])]
+        let definitions = Self.keepingDefinitions(text)
+        let marked = definitions ?? text
+        // A finished answer ending at a fence's line is parsed with a probe
+        // line after it, so a fence it opens with nothing under it is known.
+        if !streaming, let fence = Self.fenceAtEnd(text), !marked.unicodeScalars.contains(Self.probe),
+            let probed = Self.parse(marked + (marked.hasSuffix("\n") ? "" : "\n") + String(Self.probe), unmarking: definitions != nil),
+            let blocks = Self.withoutProbe(probed, fence: fence)
+        {
+            self.blocks = blocks.isEmpty ? Self.asWritten(text) : blocks
             return
         }
-        var blocks = Self.blocks(of: Self.tree(parsed))
-        if streaming, case .paragraph(let spans)? = blocks.last, spans.first?.text.hasPrefix("|") == true {
-            blocks.removeLast()
+        guard var blocks = Self.parse(marked, unmarking: definitions != nil) else {
+            // Never lose an answer: what cannot be read is shown as written.
+            self.blocks = Self.asWritten(text)
+            return
+        }
+        if streaming {
+            if case .paragraph(let spans)? = blocks.last, Self.endsAtTableHeader(text) {
+                blocks.removeLast()
+                let above = Self.droppingLastLine(spans)
+                if !above.isEmpty { blocks.append(.paragraph(above)) }
+            }
+        } else if blocks.isEmpty {
+            blocks = Self.asWritten(text)
         }
         self.blocks = blocks
     }
@@ -51,22 +79,252 @@ public struct MarkdownDocument: Equatable, Sendable {
         self.blocks = blocks
     }
 
+    /// `text` read by Foundation's markdown into blocks -- `unmarking` the
+    /// definitions' marks out of them again -- or `nil` when it cannot be read.
+    private static func parse(_ text: String, unmarking: Bool) -> [MarkdownBlock]? {
+        let options = AttributedString.MarkdownParsingOptions(
+            allowsExtendedAttributes: false, interpretedSyntax: .full,
+            failurePolicy: .returnPartiallyParsedIfPossible, languageCode: nil)
+        guard let parsed = try? AttributedString(markdown: text, options: options) else { return nil }
+        return blocks(of: tree(parsed, unmarking: unmarking))
+    }
+
+    /// `text` as written, one paragraph: what the parse made nothing of.
+    /// Only whitespace is nothing to show.
+    private static func asWritten(_ text: String) -> [MarkdownBlock] {
+        let written = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return written.isEmpty ? [] : [.paragraph([MarkdownSpan(written)])]
+    }
+
+    // MARK: - Link definitions, kept as text
+
+    /// What marks a line that could be a link definition, between its `]`
+    /// and `:`: a noncharacter, so no answer means it, and Foundation reads
+    /// the line as the text it is. Taken out of every span again.
+    static let definitionMark = Unicode.Scalar(UInt32(0xFDD0))!
+
+    /// `text` with every line that could be a link reference definition
+    /// marked -- past indentation and any quote or list markers, a
+    /// `[label]` with a colon straight after it, the label closed on its
+    /// line -- so Foundation reads it as text rather than metadata it shows
+    /// nowhere. A footnote's (`[^1]: note`) too. A mark that lands in code
+    /// or anything else that is not a definition is taken out all the same,
+    /// so it changes nothing there. `nil` when there is nothing to mark, or
+    /// the text already holds the mark.
+    static func keepingDefinitions(_ text: String) -> String? {
+        let bytes = Array(text.utf8)
+        var marks: [Int] = []
+        var line = 0
+        while line < bytes.count {
+            var at = afterContainerMarkers(bytes, from: line)
+            if at < bytes.count, bytes[at] == Edge.open {
+                at += 1
+                while at < bytes.count, bytes[at] != Edge.close, bytes[at] != Edge.newline {
+                    at += bytes[at] == Edge.backslash ? 2 : 1
+                }
+                if at + 1 < bytes.count, bytes[at] == Edge.close, bytes[at + 1] == Edge.colon {
+                    marks.append(at + 1)
+                }
+            }
+            while at < bytes.count, bytes[at] != Edge.newline { at += 1 }
+            line = at + 1
+        }
+        guard !marks.isEmpty, !text.unicodeScalars.contains(definitionMark) else { return nil }
+        let mark = Array(String(definitionMark).utf8)
+        var marked: [UInt8] = []
+        marked.reserveCapacity(bytes.count + marks.count * mark.count)
+        var from = 0
+        for place in marks {
+            marked += bytes[from..<place]
+            marked += mark
+            from = place
+        }
+        marked += bytes[from...]
+        return String(decoding: marked, as: UTF8.self)
+    }
+
+    /// Where a line's content starts, past its indentation and the markers
+    /// of the quotes and list items it opens (`> `, `- `, `1. `).
+    private static func afterContainerMarkers(_ bytes: [UInt8], from start: Int) -> Int {
+        var at = start
+        func blanks() {
+            while at < bytes.count, Edge.isBlank(bytes[at]) { at += 1 }
+        }
+        blanks()
+        while at < bytes.count {
+            if bytes[at] == Edge.quote {
+                at += 1
+            } else if Edge.bullets.contains(bytes[at]), at + 1 < bytes.count, Edge.isBlank(bytes[at + 1]) {
+                at += 1
+            } else if let end = orderedMarkerEnd(bytes, from: at), end < bytes.count, Edge.isBlank(bytes[end]) {
+                at = end
+            } else {
+                break
+            }
+            blanks()
+        }
+        return at
+    }
+
+    /// Past an ordered list item's number and its `.` or `)` at `start`;
+    /// `nil` when there is none (CommonMark's one to nine digits).
+    private static func orderedMarkerEnd(_ bytes: some RandomAccessCollection<UInt8>, from start: Int) -> Int? {
+        var at = start
+        while at < bytes.count, at - start < 10, Edge.isDigit(bytes[bytes.index(bytes.startIndex, offsetBy: at)]) { at += 1 }
+        guard (1...9).contains(at - start), at < bytes.count else { return nil }
+        let after = bytes[bytes.index(bytes.startIndex, offsetBy: at)]
+        return after == Edge.dot || after == Edge.paren ? at + 1 : nil
+    }
+
+    // MARK: - A finished answer's last fence
+
+    /// The probe line a finished answer ending at a fence's line is parsed
+    /// with: a noncharacter, in the block the fence leaves open, or after it.
+    static let probe = Unicode.Scalar(UInt32(0xFDD1))!
+
+    /// A finished `text`'s last line with anything on it, when it is a
+    /// fence's line -- at most three spaces in, three or more backticks or
+    /// tildes -- and so may open a fence with nothing under it.
+    static func fenceAtEnd(_ text: String) -> String? {
+        let bytes = text.utf8
+        var end = bytes.endIndex
+        while end > bytes.startIndex, Edge.isSpace(bytes[bytes.index(before: end)]) { end = bytes.index(before: end) }
+        guard end > bytes.startIndex else { return nil }
+        var start = end
+        while start > bytes.startIndex, bytes[bytes.index(before: start)] != Edge.newline { start = bytes.index(before: start) }
+        let line = bytes[start..<end]
+        let indent = line.prefix { $0 == Edge.space }.count
+        let rest = line.dropFirst(indent)
+        guard indent <= 3, let marker = rest.first, marker == Edge.backtick || marker == Edge.tilde,
+            rest.prefix(while: { $0 == marker }).count >= 3
+        else { return nil }
+        return String(text[start..<end]).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// `blocks`, parsed with the probe line after the answer, as they are
+    /// without it: the probe taken out of where it landed -- a paragraph of
+    /// its own after a closed fence, the end of an open block's code, or the
+    /// end of an HTML block's text -- and a fence it alone was the code of,
+    /// one opened with nothing under it, shown as its `fence` line as
+    /// written. `nil` where it landed anywhere else.
+    private static func withoutProbe(_ blocks: [MarkdownBlock], fence: String) -> [MarkdownBlock]? {
+        let alone = String(probe)
+        let after = "\n" + alone
+        var blocks = blocks
+        switch blocks.popLast() {
+        case .paragraph(let spans)? where spans == [MarkdownSpan(alone)]:
+            break
+        case .paragraph(var spans)? where spans.last?.text.hasSuffix(after) == true:
+            spans[spans.count - 1].text.removeLast(after.count)
+            if spans[spans.count - 1].text.isEmpty { spans.removeLast() }
+            blocks.append(.paragraph(spans))
+        case .code(let code)? where code.text == alone:
+            blocks.append(.paragraph([MarkdownSpan(fence)]))
+        case .code(let code)? where code.text.hasSuffix(after):
+            blocks.append(.code(MarkdownCode(language: code.language, text: String(code.text.dropLast(after.count)))))
+        default:
+            return nil
+        }
+        return blocks
+    }
+
     // MARK: - The stream's edge
 
-    /// What a line holds while it is still only a block's markers: fences,
-    /// rules, setext underlines, heading, quote and list markers, a table's
-    /// delimiter row.
-    static let markers = Set(" \t`~-=*_#|>+:.)0123456789")
-
-    /// `source` with its last line held back while that line is non-empty and
-    /// nothing but markers: "Text\n-" is a heading until the next character
-    /// says it is a list, and "```python\nx\n``" is a closing fence being
-    /// typed, not code.
+    /// `source` with its last line held back while it is non-empty and
+    /// nothing yet but a construct's own markers (`isMarkerLine`): "Text\n-"
+    /// is a heading until the next character says it is a list, and
+    /// "```python\nx\n``" is a closing fence being typed, not code. A line
+    /// with content -- "42", "128 * 8 = 1024", a table's row -- is never held.
     static func heldBack(_ source: String) -> String {
-        let start = source.lastIndex(of: "\n").map(source.index(after:)) ?? source.startIndex
-        let line = source[start...]
-        guard !line.isEmpty, line.allSatisfy(markers.contains) else { return source }
+        let bytes = source.utf8
+        var start = bytes.endIndex
+        while start > bytes.startIndex, bytes[bytes.index(before: start)] != Edge.newline { start = bytes.index(before: start) }
+        let line = Array(bytes[start...])
+        guard !line.isEmpty, isMarkerLine(line) else { return source }
         return String(source[..<start])
+    }
+
+    /// Whether `line` is nothing yet but the markers of a construct still
+    /// being typed, past its indentation and any quote's or list item's
+    /// marker: nothing more (indentation, `> `, `- `, `1. `); a run of
+    /// backticks or of tildes (a fence or a closing fence); hashes (a
+    /// heading's); `-`, `*`, `_`, `=`, `+` and spaces (a rule, a setext
+    /// underline, a bullet with no space yet); a number and its `.` or `)`
+    /// (an ordered item's); or pipes, colons, dashes and spaces with a pipe
+    /// among them (a table's delimiter row, or a row's opening pipe).
+    static func isMarkerLine(_ line: [UInt8]) -> Bool {
+        var rest = line[afterContainerMarkers(line, from: 0)...]
+        while let last = rest.last, Edge.isBlank(last) { rest.removeLast() }
+        guard let first = rest.first else { return true }
+        if first == Edge.backtick || first == Edge.tilde || first == Edge.hash {
+            return rest.allSatisfy { $0 == first }
+        }
+        if rest.allSatisfy({ Edge.rules.contains($0) || Edge.isBlank($0) }) { return true }
+        if orderedMarkerEnd(rest, from: 0) == rest.count { return true }
+        return rest.contains(Edge.pipe) && rest.allSatisfy { Edge.delimiters.contains($0) || Edge.isBlank($0) }
+    }
+
+    /// Whether `text` ends at a line that may be a table's first row: led by
+    /// a pipe, the line before it led by none, and no blank line after it.
+    /// That line waits for the next, which says whether it is a table; pipe-
+    /// led prose past it, or ended by a blank line, is shown as it is.
+    static func endsAtTableHeader(_ text: String) -> Bool {
+        var bytes = text.utf8[...]
+        if bytes.last == Edge.newline { bytes.removeLast() }
+        var start = bytes.endIndex
+        while start > bytes.startIndex, bytes[bytes.index(before: start)] != Edge.newline { start = bytes.index(before: start) }
+        guard pipeLed(bytes[start...]) else { return false }
+        guard start > bytes.startIndex else { return true }
+        let end = bytes.index(before: start)
+        var previous = end
+        while previous > bytes.startIndex, bytes[bytes.index(before: previous)] != Edge.newline { previous = bytes.index(before: previous) }
+        return !pipeLed(bytes[previous..<end])
+    }
+
+    private static func pipeLed(_ line: Substring.UTF8View.SubSequence) -> Bool {
+        line.first { !Edge.isBlank($0) } == Edge.pipe
+    }
+
+    /// A paragraph's spans without its last line: all of it before the last
+    /// line break.
+    static func droppingLastLine(_ spans: [MarkdownSpan]) -> [MarkdownSpan] {
+        var spans = spans
+        while var last = spans.popLast() {
+            if let newline = last.text.lastIndex(of: "\n") {
+                last.text = String(last.text[..<newline])
+                if !last.text.isEmpty { spans.append(last) }
+                return spans
+            }
+        }
+        return []
+    }
+
+    /// The bytes the edge's rules look for.
+    private enum Edge {
+        static let newline = UInt8(ascii: "\n")
+        static let space = UInt8(ascii: " ")
+        static let tab = UInt8(ascii: "\t")
+        static let backslash = UInt8(ascii: "\\")
+        static let open = UInt8(ascii: "[")
+        static let close = UInt8(ascii: "]")
+        static let colon = UInt8(ascii: ":")
+        static let quote = UInt8(ascii: ">")
+        static let dot = UInt8(ascii: ".")
+        static let paren = UInt8(ascii: ")")
+        static let backtick = UInt8(ascii: "`")
+        static let tilde = UInt8(ascii: "~")
+        static let hash = UInt8(ascii: "#")
+        static let pipe = UInt8(ascii: "|")
+        /// A list item's bullets.
+        static let bullets = Set("-*+".utf8)
+        /// What a rule, a setext underline or a bullet with no space yet is made of.
+        static let rules = Set("-*_=+".utf8)
+        /// What a table's delimiter row is made of.
+        static let delimiters = Set("|:-".utf8)
+
+        static func isBlank(_ byte: UInt8) -> Bool { byte == space || byte == tab }
+        static func isSpace(_ byte: UInt8) -> Bool { isBlank(byte) || byte == newline || byte == UInt8(ascii: "\r") }
+        static func isDigit(_ byte: UInt8) -> Bool { byte >= UInt8(ascii: "0") && byte <= UInt8(ascii: "9") }
     }
 
     // MARK: - Runs into blocks
@@ -102,11 +360,19 @@ public struct MarkdownDocument: Equatable, Sendable {
     }
 
     /// Every run placed in its blocks: consecutive runs share a block for as
-    /// long as their intents' identities agree, outermost first.
-    private static func tree(_ parsed: AttributedString) -> Node {
+    /// long as their intents' identities agree, outermost first. `unmarking`
+    /// takes the definitions' marks out of each run's text.
+    private static func tree(_ parsed: AttributedString, unmarking: Bool) -> Node {
         let root = Node(.root, identity: 0)
         for run in parsed.runs {
-            let span = MarkdownSpan(String(parsed[run.range].characters), run.inlinePresentationIntent ?? [], link: run.link, image: run.imageURL)
+            var text = String(parsed[run.range].characters)
+            // The mark's first UTF-8 byte, 0xEF, is rare in an answer: only a
+            // run holding one is searched.
+            if unmarking, text.utf8.contains(0xEF) {
+                text.unicodeScalars.removeAll { $0 == definitionMark }
+                if text.isEmpty { continue }
+            }
+            let span = MarkdownSpan(text, run.inlinePresentationIntent ?? [], link: run.link, image: run.imageURL)
             guard let intent = run.presentationIntent else {
                 if let last = root.children.last, case .raw = last.kind {
                     last.append(span)

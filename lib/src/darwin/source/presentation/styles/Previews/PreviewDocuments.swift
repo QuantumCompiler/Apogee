@@ -561,5 +561,115 @@ enum StylesDocuments {
 {"turn":1,"type":"answer_end"}
 {"finish_reason":"stop","model":"chatty","text":"## Retrying a slow host\n\nRetry the timeout where it happens, and keep `asyncio.timeout(10)` around one attempt. In the scraper:\n\n```python\nasync def fetch(self, url: str, retries: int = 3) -> bytes | None:\n    \"\"\"Fetch url, retrying a timeout.\"\"\"\n    for attempt in range(retries + 1):\n        try:\n            async with asyncio.timeout(10.5):\n                return await self.client.get(url)\n        except TimeoutError:\n            log.warning(\"attempt %d timed out: %s\", attempt, url)  # try again\n    return None\n```\n\nThe app's own helper, in Swift:\n\n```swift\n/// Asks again after a pause, up to `attempts` times.\nfunc retry<T>(_ attempts: Int = 3, _ body: () async throws -> T) async throws -> T {\n    for attempt in 1..<attempts {\n        do {\n            return try await body()\n        } catch {\n            print(\"attempt \\(attempt) failed: \\(error)\")\n            try await Task.sleep(for: .milliseconds(250 * attempt))\n        }\n    }\n    return try await body()\n}\n```\n\nThe browser client:\n\n```ts\n// Back off between attempts.\nexport async function fetchWithRetry(url: string, retries = 3): Promise<Response> {\n  for (let attempt = 0; attempt <= retries; attempt++) {\n    const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });\n    if (response.ok) return response;\n    console.warn(`attempt ${attempt} failed: ${response.status}`);\n  }\n  throw new Error('gave up after ' + retries + ' retries');\n}\n```\n\nThe worker's backoff, in Rust:\n\n```rust\nuse std::time::Duration;\n\n/* Doubles the pause after each failed attempt. */\nfn backoff(attempt: u32) -> Duration {\n    let base = 0x10u64; // 16 ms\n    Duration::from_millis(base * 2u64.pow(attempt))\n}\n\nfn main() {\n    for attempt in 0..3 {\n        println!(\"attempt {attempt}: wait {:?}\", backoff(attempt));\n    }\n}\n```\n\nTo check it by hand from the shell:\n\n```bash\n# Three tries, two seconds apart.\nretry() {\n  for i in 1 2 3; do\n    \"$@\" && return 0\n    echo \"attempt $i failed\" >&2\n    sleep 2\n  done\n  return 1\n}\n\nretry curl --max-time 10 'https://example.com/slow'\n```\n\nThe settings it reads, in `config.json`:\n\n```json\n{\n  \"retries\": 3,\n  \"timeout\": 10.5,\n  \"backoff_ms\": [250, 500, 1000],\n  \"hosts\": [\"example.com\"],\n  \"proxy\": null,\n  \"verbose\": false\n}\n```\n\nThe change to `runner.py`, as a patch:\n\n```diff\n--- a/src/ingest/runner.py\n+++ b/src/ingest/runner.py\n@@ -41,3 +41,6 @@ class Runner:\n     async def _fetch(self, url: str) -> bytes | None:\n-        async with asyncio.timeout(10):\n-            return await self.client.get(url)\n+        for attempt in range(self.retries + 1):\n+            with contextlib.suppress(TimeoutError):\n+                async with asyncio.timeout(10.5):\n+                    return await self.client.get(url)\n+        return None\n```\n\nWhat a slow host logs:\n\n```\nattempt 0 timed out: https://example.com/slow\nattempt 1 timed out: https://example.com/slow\n```\n\nAnd the same loop in Elixir:\n\n```elixir\nEnum.each(1..3, fn i -> IO.puts(\"attempt #{i}\") end)\n```","turn":1,"type":"result"}
 """#
+    /// tests/data/protocol/Fixtures/edges-answer.jsonl
+    static let edgesAnswer = #"""
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-10-25","tools":true},"chat_id":"20261026-023650-11d5","model":"chatty","next_turn":1,"protocol_version":1,"type":"session"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"answer_start"}
+{"text":"## Sizin","turn":1,"type":"answer_delta"}
+{"text":"g the ba","turn":1,"type":"answer_delta"}
+{"text":"tch\n\nSta","turn":1,"type":"answer_delta"}
+{"text":"rt from ","turn":1,"type":"answer_delta"}
+{"text":"the arit","turn":1,"type":"answer_delta"}
+{"text":"hmetic:\n","turn":1,"type":"answer_delta"}
+{"text":"\n128 * 8","turn":1,"type":"answer_delta"}
+{"text":" = 1024\n","turn":1,"type":"answer_delta"}
+{"text":"\nSo one ","turn":1,"type":"answer_delta"}
+{"text":"host tak","turn":1,"type":"answer_delta"}
+{"text":"es 1024 ","turn":1,"type":"answer_delta"}
+{"text":"rows, an","turn":1,"type":"answer_delta"}
+{"text":"d 2 + 2 ","turn":1,"type":"answer_delta"}
+{"text":"= 4 work","turn":1,"type":"answer_delta"}
+{"text":"ers shar","turn":1,"type":"answer_delta"}
+{"text":"e them. ","turn":1,"type":"answer_delta"}
+{"text":"Per work","turn":1,"type":"answer_delta"}
+{"text":"er:\n| Wo","turn":1,"type":"answer_delta"}
+{"text":"rkers | ","turn":1,"type":"answer_delta"}
+{"text":"Rows eac","turn":1,"type":"answer_delta"}
+{"text":"h | Tota","turn":1,"type":"answer_delta"}
+{"text":"l |\n|---","turn":1,"type":"answer_delta"}
+{"text":"|--:|--:","turn":1,"type":"answer_delta"}
+{"text":"|\n| 2 | ","turn":1,"type":"answer_delta"}
+{"text":"512 | 10","turn":1,"type":"answer_delta"}
+{"text":"24 |\n| 4","turn":1,"type":"answer_delta"}
+{"text":" | 256 |","turn":1,"type":"answer_delta"}
+{"text":" 1024 |\n","turn":1,"type":"answer_delta"}
+{"text":"\nThe loa","turn":1,"type":"answer_delta"}
+{"text":"der writ","turn":1,"type":"answer_delta"}
+{"text":"es its s","turn":1,"type":"answer_delta"}
+{"text":"ettings ","turn":1,"type":"answer_delta"}
+{"text":"with a h","turn":1,"type":"answer_delta"}
+{"text":"ere-docu","turn":1,"type":"answer_delta"}
+{"text":"ment, an","turn":1,"type":"answer_delta"}
+{"text":"d sizes ","turn":1,"type":"answer_delta"}
+{"text":"its mask","turn":1,"type":"answer_delta"}
+{"text":" with sh","turn":1,"type":"answer_delta"}
+{"text":"ifts:\n\n`","turn":1,"type":"answer_delta"}
+{"text":"``bash\nc","turn":1,"type":"answer_delta"}
+{"text":"at <<EOF","turn":1,"type":"answer_delta"}
+{"text":" > batch","turn":1,"type":"answer_delta"}
+{"text":".conf\nro","turn":1,"type":"answer_delta"}
+{"text":"ws=1024\n","turn":1,"type":"answer_delta"}
+{"text":"EOF\necho","turn":1,"type":"answer_delta"}
+{"text":" $((a<<b","turn":1,"type":"answer_delta"}
+{"text":"))\n(( ma","turn":1,"type":"answer_delta"}
+{"text":"sk = 1 <","turn":1,"type":"answer_delta"}
+{"text":"<bits ))","turn":1,"type":"answer_delta"}
+{"text":"\necho \"d","turn":1,"type":"answer_delta"}
+{"text":"one\"\n```","turn":1,"type":"answer_delta"}
+{"text":"\n\nIn Rub","turn":1,"type":"answer_delta"}
+{"text":"y, `<<` ","turn":1,"type":"answer_delta"}
+{"text":"appends;","turn":1,"type":"answer_delta"}
+{"text":" a here-","turn":1,"type":"answer_delta"}
+{"text":"document","turn":1,"type":"answer_delta"}
+{"text":"'s marke","turn":1,"type":"answer_delta"}
+{"text":"r follow","turn":1,"type":"answer_delta"}
+{"text":"s a spac","turn":1,"type":"answer_delta"}
+{"text":"e:\n\n```r","turn":1,"type":"answer_delta"}
+{"text":"uby\nlist","turn":1,"type":"answer_delta"}
+{"text":"<<Const\n","turn":1,"type":"answer_delta"}
+{"text":"total = ","turn":1,"type":"answer_delta"}
+{"text":"1 << 2\ns","turn":1,"type":"answer_delta"}
+{"text":"ql = <<~","turn":1,"type":"answer_delta"}
+{"text":"SQL\n  SE","turn":1,"type":"answer_delta"}
+{"text":"LECT cou","turn":1,"type":"answer_delta"}
+{"text":"nt(*) FR","turn":1,"type":"answer_delta"}
+{"text":"OM rows\n","turn":1,"type":"answer_delta"}
+{"text":"SQL\nputs","turn":1,"type":"answer_delta"}
+{"text":" sql\n```","turn":1,"type":"answer_delta"}
+{"text":"\n\nSee [t","turn":1,"type":"answer_delta"}
+{"text":"he sizin","turn":1,"type":"answer_delta"}
+{"text":"g guide]","turn":1,"type":"answer_delta"}
+{"text":"[1] and ","turn":1,"type":"answer_delta"}
+{"text":"[the loa","turn":1,"type":"answer_delta"}
+{"text":"der's no","turn":1,"type":"answer_delta"}
+{"text":"tes][2].","turn":1,"type":"answer_delta"}
+{"text":"\n\n[1]: h","turn":1,"type":"answer_delta"}
+{"text":"ttps://a","turn":1,"type":"answer_delta"}
+{"text":".example","turn":1,"type":"answer_delta"}
+{"text":"/docs\n[2","turn":1,"type":"answer_delta"}
+{"text":"]: https","turn":1,"type":"answer_delta"}
+{"text":"://b.exa","turn":1,"type":"answer_delta"}
+{"text":"mple/gui","turn":1,"type":"answer_delta"}
+{"text":"de \"Load","turn":1,"type":"answer_delta"}
+{"text":"er notes","turn":1,"type":"answer_delta"}
+{"text":"\"\n\n|x| i","turn":1,"type":"answer_delta"}
+{"text":"s the ab","turn":1,"type":"answer_delta"}
+{"text":"solute v","turn":1,"type":"answer_delta"}
+{"text":"alue of ","turn":1,"type":"answer_delta"}
+{"text":"x, so |-","turn":1,"type":"answer_delta"}
+{"text":"3| = 3.\n","turn":1,"type":"answer_delta"}
+{"text":"|rows - ","turn":1,"type":"answer_delta"}
+{"text":"1024| is","turn":1,"type":"answer_delta"}
+{"text":" how far","turn":1,"type":"answer_delta"}
+{"text":" a host ","turn":1,"type":"answer_delta"}
+{"text":"is from ","turn":1,"type":"answer_delta"}
+{"text":"full.\n\nT","turn":1,"type":"answer_delta"}
+{"text":"he answe","turn":1,"type":"answer_delta"}
+{"text":"r, then:","turn":1,"type":"answer_delta"}
+{"text":"\n\n42","turn":1,"type":"answer_delta"}
+{"turn":1,"type":"answer_end"}
+{"finish_reason":"stop","model":"chatty","text":"## Sizing the batch\n\nStart from the arithmetic:\n\n128 * 8 = 1024\n\nSo one host takes 1024 rows, and 2 + 2 = 4 workers share them. Per worker:\n| Workers | Rows each | Total |\n|---|--:|--:|\n| 2 | 512 | 1024 |\n| 4 | 256 | 1024 |\n\nThe loader writes its settings with a here-document, and sizes its mask with shifts:\n\n```bash\ncat <<EOF > batch.conf\nrows=1024\nEOF\necho $((a<<b))\n(( mask = 1 <<bits ))\necho \"done\"\n```\n\nIn Ruby, `<<` appends; a here-document's marker follows a space:\n\n```ruby\nlist<<Const\ntotal = 1 << 2\nsql = <<~SQL\n  SELECT count(*) FROM rows\nSQL\nputs sql\n```\n\nSee [the sizing guide][1] and [the loader's notes][2].\n\n[1]: https://a.example/docs\n[2]: https://b.example/guide \"Loader notes\"\n\n|x| is the absolute value of x, so |-3| = 3.\n|rows - 1024| is how far a host is from full.\n\nThe answer, then:\n\n42","turn":1,"type":"result"}
+"""#
 }
 #endif

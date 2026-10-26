@@ -156,6 +156,54 @@ private let samples: [(language: String, code: String, tokens: [Token])] = [
     ]),
 ]
 
+/// The scripted mock's edge-case answer (4d), recorded from the branch's
+/// binary driven as the app drives a chat (tests/data/protocol/Fixtures/
+/// edges-answer.jsonl): a shell fence with a here-document and shifts, and a
+/// Ruby one with an append, a shift and a here-document.
+private let edgesStream = "data/protocol/Fixtures/edges-answer.jsonl"
+
+/// The edge-case answer's fences, each pinned: every here-document a
+/// string to its word's line, and no shift one.
+private let edgesTokens: [(language: String, tokens: [Token])] = [
+    ("bash", [s("<<EOF"), s("rows=1024\nEOF"), n("1"), s(#""done""#)]),
+    ("ruby", [n("1"), n("2"), s("<<~SQL"), s("  SELECT count(*) FROM rows\nSQL")]),
+]
+
+/// `<<` that is a shift, an append or a here-string, never a here-document:
+/// in arithmetic, straight after an operand, or before a space, a digit or
+/// another `<`. Each sample's lines after it colour as code, not as a string.
+private let shifts: [(language: String, code: String, tokens: [Token])] = [
+    ("bash", "echo $((a<<b))\necho after\nmore code", []),
+    ("bash", "echo $(( a <<b ))\nif true; then echo \"after\"; fi", [k("if"), k("then"), s(#""after""#), k("fi")]),
+    ("bash", "(( x << 2 ))\necho \"after\"", [n("2"), s(#""after""#)]),
+    ("bash", "(( mask = 1 <<bits ))\necho \"after\"", [n("1"), s(#""after""#)]),
+    ("bash", "echo $((1<<10)) $((x <<y)) done", [n("1"), n("10"), k("done")]),
+    ("bash", "cat <<<word\necho after\nword", []),
+    ("bash", "cat<<EOF\nfor x in a; do\nEOF", [k("for"), k("in"), k("do")]),
+    ("ruby", "x<<Const\nputs \"after\"\nConst", [s(#""after""#)]),
+    ("ruby", "list<<Item if ok\nputs 'after'", [k("if"), s("'after'")]),
+    ("ruby", "rows[0]<<Item\nfoo(1)", [n("0"), f("foo"), n("1")]),
+    ("ruby", "seen()<<Item\nnil", [f("seen"), k("nil")]),
+    ("ruby", "\"a\"<<\"B\"\nfoo\nB", [s(#""a""#), s(#""B""#)]),
+    ("ruby", "total = 1 << 2\nx = 1<<2\nlist << item", [n("1"), n("2"), n("1"), n("2")]),
+]
+
+/// Real here-documents, each still a string from its marker's line to the
+/// line that is its word.
+private let heredocs: [(language: String, code: String, tokens: [Token])] = [
+    ("bash", "cat <<EOF > out\nif $x\nEOF\necho done", [s("<<EOF"), s("if $x\nEOF"), k("done")]),
+    ("bash", "cat <<-EOF\n\tif $x\n\tEOF\ndone", [s("<<-EOF"), s("\tif $x\n\tEOF"), k("done")]),
+    ("bash", "cat <<~EOF\n  if $x\n  EOF\ndone", [s("<<~EOF"), s("  if $x\n  EOF"), k("done")]),
+    ("bash", "cat <<'EOF'\n$x\nEOF\ndone", [s("<<'EOF'"), s("$x\nEOF"), k("done")]),
+    ("bash", "cat <<\"EOF\"\n$x\nEOF\ndone", [s(#"<<"EOF""#), s("$x\nEOF"), k("done")]),
+    ("bash", "x=$(cat <<EOF\nbody\nEOF\n)", [s("<<EOF"), s("body\nEOF")]),
+    ("bash", "(( n > 1 )) && cat <<EOF\nbody\nEOF", [n("1"), s("<<EOF"), s("body\nEOF")]),
+    ("ruby", "sql = <<~SQL\n  SELECT 1\nSQL\nputs sql", [s("<<~SQL"), s("  SELECT 1\nSQL")]),
+    ("ruby", "sql = <<-SQL\n  SELECT 1\n  SQL\nnil", [s("<<-SQL"), s("  SELECT 1\n  SQL"), k("nil")]),
+    ("ruby", "query(<<SQL)\nSELECT 1\nSQL\nnil", [f("query"), s("<<SQL"), s("SELECT 1\nSQL"), k("nil")]),
+    ("ruby", "text = <<'end'\n#{not} here\nend\nnil", [s("<<'end'"), s("#{not} here\nend"), k("nil")]),
+]
+
 /// The spans' parts before `end`.
 private func clipped(_ spans: [CodeSpan], to end: Int) -> [CodeSpan] {
     spans.compactMap { span in
@@ -473,6 +521,62 @@ struct CodeLexerTests {
             }
             #expect(pasteboard.string(forType: .string) == code.text, "\(code.caption)")
         }
+    }
+
+    // MARK: - Here-documents, never a shift (4d)
+
+    @Test("a shift is never a here-document: <<<, <<, arithmetic and an operand right before it leave the lines after it coloured as code")
+    func shiftsAreNotHeredocs() {
+        for sample in shifts {
+            #expect(tokens(sample.code, sample.language) == sample.tokens, "\(sample.language): \(sample.code.debugDescription)")
+        }
+    }
+
+    @Test("a real here-document still colours as a string: <<EOF, <<-EOF, <<~EOF, a quoted word, Ruby's <<~SQL, after ( and a space")
+    func realHeredocs() {
+        for sample in heredocs {
+            #expect(tokens(sample.code, sample.language) == sample.tokens, "\(sample.language): \(sample.code.debugDescription)")
+        }
+    }
+
+    @Test("the recorded edge-case answer's fences: the here-documents strings, the shifts and the append code")
+    func edgesAnswer() {
+        let fences = codeBlocks(MarkdownDocument(parsing: deltas(edgesStream).joined()).blocks)
+        #expect(fences.map(\.language) == edgesTokens.map(\.language))
+        for (code, expected) in zip(fences, edgesTokens) {
+            #expect(tokens(code.text, code.language) == expected.tokens, "\(expected.language)")
+        }
+    }
+
+    @Test("every cut of the shifts, the here-documents and the edge-case answer's fences: no finished line changes colour")
+    func everyCutOfTheEdges() {
+        var open = 0
+        for sample in shifts + heredocs {
+            open += checkEveryCut(sample.code, sample.language)
+        }
+        for code in codeBlocks(MarkdownDocument(parsing: deltas(edgesStream).joined()).blocks) {
+            open += checkEveryCut(code.text, code.language ?? "")
+        }
+        #expect(open > 50, "the edge fell inside an open here-document or string \(open) times")
+    }
+
+    @Test("the edge-case answer streamed in its 102 recorded pieces: every prefix's fences colour their settled lines as the finished answer does")
+    func edgesStreamedInPieces() {
+        let finished = codeBlocks(MarkdownDocument(parsing: deltas(edgesStream).joined()).blocks)
+        var text = ""
+        for (index, piece) in deltas(edgesStream).enumerated() {
+            text += piece
+            for (place, code) in codeBlocks(MarkdownDocument(parsing: text, streaming: true).blocks).enumerated() {
+                let whole = finished[place]
+                #expect(code.language == whole.language, "delta \(index)")
+                #expect(whole.text.hasPrefix(code.text), "delta \(index)")
+                let end = settled(code.text.utf8)
+                #expect(clipped(CodeLexer.spans(code.text, language: code.language), to: end)
+                        == clipped(CodeLexer.spans(whole.text, language: whole.language), to: end),
+                        "delta \(index), \(code.caption): a settled line changed")
+            }
+        }
+        #expect(codeBlocks(MarkdownDocument(parsing: text).blocks) == finished)
     }
 
     @Test("each kind's token: the design's five code colours; a diff's added line the accent, removed the error colour, headers and context tertiary")

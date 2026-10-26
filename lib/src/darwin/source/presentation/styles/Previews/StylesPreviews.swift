@@ -67,6 +67,29 @@ enum StylesPreview {
     /// The code answer as it stood mid-stream: its TypeScript fence open, the
     /// stream's edge inside a template literal.
     static let openString = prefix(StylesDocuments.codeAnswer, through: "`attempt ${attempt} failed: $")
+
+    /// The scripted mock's edge-case answer: a short arithmetic line, a table
+    /// straight under prose, a here-document and shifts in shell and Ruby, a
+    /// reference use and its link definitions, pipe-led prose, and a last
+    /// line of one number (tests/data/protocol/Fixtures/edges-answer.jsonl).
+    static let edgesAnswer = deltas(StylesDocuments.edgesAnswer).joined()
+
+    /// That answer as it stood with its short arithmetic line half arrived.
+    static let arithmeticArriving = prefix(StylesDocuments.edgesAnswer, through: "128 * 8")
+
+    /// That answer as it stood with its table's first row arriving under
+    /// the prose it follows.
+    static let tableRowArriving = prefix(StylesDocuments.edgesAnswer, through: "| 2 | 512 | 10")
+
+    /// That answer as it stood with its second link definition arriving.
+    static let definitionsArriving = prefix(StylesDocuments.edgesAnswer, through: "[2]: https://b.exa")
+
+    /// That answer as it stood with its pipe-led prose into its second line.
+    static let pipeProseArriving = prefix(StylesDocuments.edgesAnswer, through: "|rows - 1024| is how far")
+
+    /// That answer as it stood just after its Ruby fence opened: what a turn
+    /// stopped there leaves, finished.
+    static let endedAtAFence = prefix(StylesDocuments.edgesAnswer, through: "```r")
 }
 
 extension View {

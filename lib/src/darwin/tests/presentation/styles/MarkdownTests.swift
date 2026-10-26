@@ -119,6 +119,110 @@ private func rawMarkers(in blocks: [MarkdownBlock]) -> [String] {
     }
 }
 
+/// The scripted mock's edge-case answer (4d), recorded from the branch's
+/// binary driven as the app drives a chat (tests/data/protocol/Fixtures/
+/// edges-answer.jsonl): 102 deltas of eight bytes -- a short arithmetic line,
+/// a table straight under prose, a here-document and shifts in shell and
+/// Ruby, a reference use and its link definitions, pipe-led prose, and a
+/// last line of one number -- and that chat's `chats show`
+/// (tests/business/reads/Fixtures/chats-show-edges.json).
+private let edgesStream = "data/protocol/Fixtures/edges-answer.jsonl"
+private let edgesChat = "business/reads/Fixtures/chats-show-edges.json"
+
+/// Every block of the recorded edge-case answer, finished: every line the
+/// model wrote, the link definitions among them.
+private let edgesBlocks: [MarkdownBlock] = [
+    .heading(level: 2, [plain("Sizing the batch")]),
+    .paragraph([plain("Start from the arithmetic:")]),
+    .paragraph([plain("128 * 8 = 1024")]),
+    .paragraph([plain("So one host takes 1024 rows, and 2 + 2 = 4 workers share them. Per worker:")]),
+    .table(MarkdownTable(
+        alignments: [.leading, .trailing, .trailing],
+        header: [[plain("Workers")], [plain("Rows each")], [plain("Total")]],
+        rows: [
+            [[plain("2")], [plain("512")], [plain("1024")]],
+            [[plain("4")], [plain("256")], [plain("1024")]],
+        ])),
+    .paragraph([plain("The loader writes its settings with a here-document, and sizes its mask with shifts:")]),
+    .code(MarkdownCode(language: "bash", text: """
+        cat <<EOF > batch.conf
+        rows=1024
+        EOF
+        echo $((a<<b))
+        (( mask = 1 <<bits ))
+        echo "done"
+        """)),
+    .paragraph([plain("In Ruby, "), code("<<"), plain(" appends; a here-document's marker follows a space:")]),
+    .code(MarkdownCode(language: "ruby", text: """
+        list<<Const
+        total = 1 << 2
+        sql = <<~SQL
+          SELECT count(*) FROM rows
+        SQL
+        puts sql
+        """)),
+    .paragraph([plain("See [the sizing guide][1] and [the loader's notes][2].")]),
+    .paragraph([
+        plain("[1]: "), link("https://a.example/docs", "https://a.example/docs"),
+        plain("\n[2]: "), link("https://b.example/guide", "https://b.example/guide"), plain(" \"Loader notes\""),
+    ]),
+    .paragraph([plain("|x| is the absolute value of x, so |-3| = 3.\n|rows - 1024| is how far a host is from full.")]),
+    .paragraph([plain("The answer, then:")]),
+    .paragraph([plain("42")]),
+]
+
+/// What the CLI's terminal renderer prints for the recorded answer's
+/// reference use and link definitions (lib/src/cli/source/presentation/
+/// markdown/), the oracle for a line Foundation would swallow: each is an
+/// ordinary line (`process` falls through to `ordinary`,
+/// stream_renderer.cpp:517, which renders it inline as written, :599);
+/// `link()` takes only the inline form, a closing bracket followed by a
+/// parenthesis (inline.cpp:187), so `[text][1]` and `[1]:` stay as written;
+/// and the address after `[1]: ` is a bare URL, underlined as a link
+/// (`bare_url`, inline.cpp:284). Each row: its text, and the runs it
+/// underlines. The branch's binary, rendering the recorded answer on a
+/// terminal, prints exactly these rows.
+private let cliRows: [(text: String, links: [String])] = [
+    ("See [the sizing guide][1] and [the loader's notes][2].", []),
+    ("[1]: https://a.example/docs", ["https://a.example/docs"]),
+    ("[2]: https://b.example/guide \"Loader notes\"", ["https://b.example/guide"]),
+]
+
+/// A block's lines as they read, one per row: its spans' text, split where
+/// the answer broke the line; a table's rows its cells.
+private func lines(_ block: MarkdownBlock) -> [String] {
+    switch block {
+    case .paragraph(let spans), .heading(_, let spans):
+        return spans.map(\.text).joined().components(separatedBy: "\n")
+    case .list(let list):
+        return list.items.flatMap { $0.blocks.flatMap(lines) }
+    case .quote(let blocks):
+        return blocks.flatMap(lines)
+    case .code(let code):
+        return code.text.components(separatedBy: "\n")
+    case .table(let table):
+        return ([table.header] + table.rows).map { $0.map { $0.map(\.text).joined() }.joined(separator: " | ") }
+    case .rule:
+        return []
+    }
+}
+
+/// Every line `blocks` show, in order.
+private func shownLines(_ blocks: [MarkdownBlock]) -> [String] {
+    blocks.flatMap(lines)
+}
+
+/// `text` streamed as a parse sees it at every cut on a character's boundary.
+private func everyPrefix(_ text: String) -> [String] {
+    var prefixes: [String] = []
+    var prefix = ""
+    for character in text {
+        prefix.append(character)
+        prefixes.append(prefix)
+    }
+    return prefixes
+}
+
 /// Every network request made while it is registered, refused rather than
 /// sent: a test's proof that nothing was fetched.
 private final class RecordingProtocol: URLProtocol, @unchecked Sendable {
@@ -351,5 +455,273 @@ struct MarkdownTests {
         code.copy(to: pasteboard)
         #expect(pasteboard.string(forType: .string) == code.text)
         #expect(code.text.hasPrefix("async def") && code.text.hasSuffix("return None"))
+    }
+
+    // MARK: - Every line the model wrote (4d)
+
+    @Test("the audit's probes, streaming and finished: link definitions, short arithmetic answers, pipe-led prose and a bare fence opener all reach the screen")
+    func probeMatrix() {
+        let sources = MarkdownBlock.paragraph([plain("Sources:")])
+        let definitions = MarkdownBlock.paragraph([
+            plain("[1]: "), link("https://a.example/docs", "https://a.example/docs"),
+            plain("\n[2]: "), link("https://b.example/guide", "https://b.example/guide"),
+        ])
+        let table = MarkdownBlock.table(MarkdownTable(
+            alignments: [.leading, .leading], header: [[plain("a")], [plain("b")]], rows: [[[plain("1")], [plain("2")]]]))
+        let probes: [(source: String, streaming: [MarkdownBlock], finished: [MarkdownBlock])] = [
+            // 1. Reference-style link definitions, kept as the text lines they are, at every step of the stream.
+            ("Sources:\n\n[1]: https://a.example/docs\n[2]: https://b.example/guide", [sources, definitions], [sources, definitions]),
+            ("Sources:\n\n[2", [sources, .paragraph([plain("[2")])], [sources, .paragraph([plain("[2")])]),
+            ("Sources:\n\n[2]:", [sources, .paragraph([plain("[2]:")])], [sources, .paragraph([plain("[2]:")])]),
+            ("Sources:\n\n[2]: https://b.ex", [sources, .paragraph([plain("[2]: "), link("https://b.ex", "https://b.ex")])],
+             [sources, .paragraph([plain("[2]: "), link("https://b.ex", "https://b.ex")])]),
+            // 2. Short answers made of digits, spaces and operators: content, never held.
+            ("128 * 8 = 1024", [.paragraph([plain("128 * 8 = 1024")])], [.paragraph([plain("128 * 8 = 1024")])]),
+            ("42", [.paragraph([plain("42")])], [.paragraph([plain("42")])]),
+            ("2 + 2 = 4", [.paragraph([plain("2 + 2 = 4")])], [.paragraph([plain("2 + 2 = 4")])]),
+            // 3. Pipe-led prose: only a table's first row waits, for its next line.
+            ("|x| means the absolute value", [], [.paragraph([plain("|x| means the absolute value")])]),
+            ("|x| means the absolute value\nof x.", [.paragraph([plain("|x| means the absolute value\nof x.")])],
+             [.paragraph([plain("|x| means the absolute value\nof x.")])]),
+            ("+---+---+\n| a | b |\n+---+---+\n", [.paragraph([plain("+---+---+\n| a | b |\n+---+---+")])],
+             [.paragraph([plain("+---+---+\n| a | b |\n+---+---+")])]),
+            ("|-- src\n|   |-- main.swift\n|-- tests", [.paragraph([plain("|-- src\n|   |-- main.swift\n|-- tests")])],
+             [.paragraph([plain("|-- src\n|   |-- main.swift\n|-- tests")])]),
+            ("| a | b |\n|---|---|\n| 1 | 2 |", [table], [table]),
+            // 4. A bare fence opener: nothing yet while it streams, the line as written once the answer ends.
+            ("```python", [], [.paragraph([plain("```python")])]),
+        ]
+        for probe in probes {
+            #expect(MarkdownDocument(parsing: probe.source, streaming: true).blocks == probe.streaming, "streaming \(probe.source.debugDescription)")
+            #expect(MarkdownDocument(parsing: probe.source).blocks == probe.finished, "finished \(probe.source.debugDescription)")
+        }
+    }
+
+    @Test("link definitions read as the CLI prints them: each a line of text, its address a link, a reference use as written")
+    func linkDefinitionsAsTheCLIPrintsThem() {
+        let answer = deltas(edgesStream).joined()
+        for blocks in [MarkdownDocument(parsing: answer).blocks, MarkdownDocument(parsing: answer, streaming: true).blocks] {
+            let shown = shownLines(blocks)
+            for row in cliRows {
+                #expect(shown.contains(row.text), "the CLI's row \(row.text.debugDescription) is shown")
+            }
+            let paragraphs = blocks.compactMap { if case .paragraph(let spans) = $0 { spans } else { nil } }
+            let links = paragraphs.filter { $0.contains { $0.link != nil } }
+            #expect(links.count == 1, "the definitions are the one paragraph with links")
+            #expect(links.first?.compactMap { $0.link == nil ? nil : $0.text } == cliRows.flatMap(\.links), "the CLI's underlined runs are the links")
+            #expect(links.first?.compactMap(\.link?.absoluteString) == cliRows.flatMap(\.links), "each goes where it says")
+            #expect(paragraphs.contains { $0 == [plain(cliRows[0].text)] }, "a reference use is resolved into no link")
+        }
+
+        // The CLI's other forms: a footnote, an address in angle brackets, a
+        // title, a definition with no space; inside a quote and a list item.
+        let cases: [(String, [MarkdownBlock])] = [
+            ("See [the docs][1].\n\n[1]: https://a.example/docs", [
+                .paragraph([plain("See [the docs][1].")]),
+                .paragraph([plain("[1]: "), link("https://a.example/docs", "https://a.example/docs")]),
+            ]),
+            ("A note[^1].\n\n[^1]: The batch is sized for one host.", [
+                .paragraph([plain("A note[^1].")]), .paragraph([plain("[^1]: The batch is sized for one host.")]),
+            ]),
+            ("[1]: <https://a.example>", [.paragraph([plain("[1]: "), link("https://a.example", "https://a.example")])]),
+            // Written with no space, the address is linked by Foundation's own
+            // autolinking, which links after a colon where the CLI's does not
+            // (inline.cpp:287): the text is kept either way.
+            ("[1]:https://a.example", [.paragraph([plain("[1]:"), link("https://a.example", "https://a.example")])]),
+            ("  [1]: ./notes.md \"Notes\"", [.paragraph([plain("[1]: ./notes.md \"Notes\"")])]),
+            ("> [1]: ./notes.md", [.quote([.paragraph([plain("[1]: ./notes.md")])])]),
+            ("- [1]: ./notes.md", [.list(MarkdownList(ordered: false, items: [item(1, .paragraph([plain("[1]: ./notes.md")]))]))]),
+        ]
+        for (source, blocks) in cases {
+            #expect(MarkdownDocument(parsing: source).blocks == blocks, "\(source.debugDescription)")
+            #expect(MarkdownDocument(parsing: source, streaming: true).blocks == blocks, "streaming \(source.debugDescription)")
+        }
+        // In code they are code, exactly: nothing added, nothing taken.
+        for fenced in ["```md\n[1]: https://a.example/docs\nsee [x][1]\n```", "`[1]: x`", "    [1]: x", "> [1]: x\n> [2]: y"] {
+            for streaming in [false, true] {
+                let shown = shownLines(MarkdownDocument(parsing: fenced, streaming: streaming).blocks).joined()
+                #expect(Set(shown).isSubset(of: Set(fenced)), "\(fenced.debugDescription): nothing shown the answer did not write")
+            }
+        }
+        #expect(MarkdownDocument(parsing: "```md\n[1]: https://a.example/docs\n```").blocks == [.code(MarkdownCode(language: "md", text: "[1]: https://a.example/docs"))])
+        #expect(MarkdownDocument(parsing: "`[1]: x`").blocks == [.paragraph([code("[1]: x")])])
+    }
+
+    @Test("a link definition never flickers away while it streams: every cut shows every character of it that has arrived")
+    func definitionsStream() {
+        let answer = "Sources:\n\n[1]: https://a.example/docs\n[2]: https://b.example/guide \"Guide\"\n"
+        let start = answer.range(of: "[1]")!.lowerBound
+        for prefix in everyPrefix(answer) where prefix.endIndex > start {
+            let arrived = prefix[start...].components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            let shown = shownLines(MarkdownDocument(parsing: prefix, streaming: true).blocks)
+            for line in arrived {
+                #expect(shown.contains(line), "\(prefix.debugDescription): \(line.debugDescription) is shown")
+            }
+        }
+    }
+
+    @Test("a finished content line is never held: only a construct's own marker line waits at the stream's edge")
+    func onlyMarkersWait() {
+        let text: [MarkdownBlock] = [.paragraph([plain("Text")])]
+        let markers = [
+            "`", "``", "```", "~~~", "*", "**", "#", "## ", "-", "- ", "--", "---", "* * *", "_", "=", "==", "+",
+            "1.", "12) ", ">", "> ", "> - ", "|", "|---|--", ":-:|", "   ",
+        ]
+        for marker in markers {
+            #expect(MarkdownDocument(parsing: "Text\n\n" + marker, streaming: true).blocks == text, "\(marker.debugDescription) waits")
+        }
+        let content = [
+            "42", "128 * 8 = 1024", "2 + 2 = 4", "1", "2026", "3.14", "-1", "+1", "- 5", "...", ":)", "= 4", "#hashtag",
+            "1.5x", "> 42", "x",
+        ]
+        for line in content {
+            for source in [line, "Text\n\n" + line] {
+                let streaming = MarkdownDocument(parsing: source, streaming: true).blocks
+                #expect(streaming == MarkdownDocument(parsing: source).blocks, "\(source.debugDescription) is shown as it will finish")
+                #expect(!streaming.isEmpty)
+            }
+        }
+        // A table's completed row is shown at once, a lone pipe starting the next waits.
+        let row = MarkdownTable(alignments: [.leading, .leading], header: [[plain("a")], [plain("b")]], rows: [[[plain("1")], [plain("2")]]])
+        #expect(MarkdownDocument(parsing: "| a | b |\n|---|---|\n| 1 | 2 |", streaming: true).blocks == [.table(row)])
+        #expect(MarkdownDocument(parsing: "| a | b |\n|---|---|\n| 1 | 2 |\n|", streaming: true).blocks == [.table(row)])
+    }
+
+    @Test("the pipe rule is bounded to a table's first two lines: a header waits for its delimiter row, and pipe-led prose shows once it has gone further")
+    func pipeRuleBounded() {
+        func streaming(_ text: String) -> [MarkdownBlock] { MarkdownDocument(parsing: text, streaming: true).blocks }
+        let header = MarkdownTable(alignments: [.leading, .leading], header: [[plain("a")], [plain("b")]], rows: [])
+        // A table's first row, and its delimiter row while it is typed.
+        for edge in ["| a | b |", "| a | b |\n", "| a | b |\n|", "| a | b |\n|---", "| a | b |\n|---|---|"] {
+            #expect(streaming(edge) == [], "\(edge.debugDescription) waits")
+        }
+        #expect(streaming("| a | b |\n|---|---|\n") == [.table(header)])
+        // Straight under prose, the header waits and the prose stays as it will be.
+        let prose = MarkdownBlock.paragraph([plain("Per worker:")])
+        #expect(streaming("Per worker:\n| a | b |") == [prose])
+        #expect(streaming("Per worker:\n| a | b |\n|---") == [prose])
+        #expect(streaming("Per worker:\n| a | b |\n|---|---|\n") == [prose, .table(header)])
+        #expect(MarkdownDocument(parsing: "Per worker:\n| a | b |").blocks == [.paragraph([plain("Per worker:\n| a | b |")])])
+        // Past its first two lines, or ended by a blank line, it is prose.
+        for shown in ["| a | b |\n| c | d |", "| a | b |\n\n", "|x| is abs\nof x", "| a | b |\n|-- c", "Per worker:\n| a | b |\nmore"] {
+            #expect(streaming(shown) == MarkdownDocument(parsing: shown).blocks, "\(shown.debugDescription) is shown")
+            #expect(!streaming(shown).isEmpty)
+        }
+        // A real table never shows its header or delimiter as prose, and the prose above it never changes.
+        for answer in ["Text\n\n| Workers | Rows each |\n|---|--:|\n| 2 | 512 |\n", "Per worker:\n| Workers | Rows each |\n|---|--:|\n| 2 | 512 |\n"] {
+            let finished = MarkdownDocument(parsing: answer).blocks
+            #expect(finished.count == 2)
+            for prefix in everyPrefix(answer) where prefix.contains("\n") {
+                let blocks = streaming(prefix)
+                #expect(blocks.first == finished.first, "\(prefix.debugDescription): the prose stays as it will be")
+                #expect(blocks.count <= 2, "\(prefix.debugDescription)")
+                if blocks.count == 2 {
+                    guard case .table = blocks[1] else {
+                        Issue.record("\(prefix.debugDescription): the header shown as \(blocks[1])")
+                        continue
+                    }
+                }
+                for problem in rawMarkers(in: blocks) {
+                    Issue.record("\(prefix.debugDescription): \(problem)")
+                }
+            }
+        }
+    }
+
+    @Test("a finished answer never renders a written line as nothing: a bare fence opener at its end shows as written")
+    func finishedAtAFenceOpener() {
+        let intro = MarkdownBlock.paragraph([plain("Intro")])
+        let cases: [(String, [MarkdownBlock])] = [
+            ("```python", [.paragraph([plain("```python")])]),
+            ("```python\n", [.paragraph([plain("```python")])]),
+            ("Intro\n\n```python", [intro, .paragraph([plain("```python")])]),
+            ("Intro\n```python\n", [intro, .paragraph([plain("```python")])]),
+            ("Intro\n\n~~~", [intro, .paragraph([plain("~~~")])]),
+            ("Intro\n\n  ```sh", [intro, .paragraph([plain("```sh")])]),
+            // An empty block, opened and closed, or a heading's marker alone: what was written.
+            ("```python\n```", [.paragraph([plain("```python\n```")])]),
+            ("#", [.paragraph([plain("#")])]),
+            ("## \n", [.paragraph([plain("##")])]),
+            // Fences that close, or hold code, are what they were.
+            ("Intro\n\n```py\nx\n```", [intro, .code(MarkdownCode(language: "py", text: "x"))]),
+            ("```py\nx\n```\n", [.code(MarkdownCode(language: "py", text: "x"))]),
+            ("````\nx\n```", [.code(MarkdownCode(language: nil, text: "x\n```"))]),
+            ("```py\nx", [.code(MarkdownCode(language: "py", text: "x"))]),
+            ("```py\n\n", [.code(MarkdownCode(language: "py", text: ""))]),
+            ("<div>\n```", [.paragraph([plain("<div>\n```")])]),
+        ]
+        for (source, blocks) in cases {
+            #expect(MarkdownDocument(parsing: source).blocks == blocks, "\(source.debugDescription)")
+        }
+        // Still streaming, a fence with no code yet draws nothing, as before.
+        #expect(MarkdownDocument(parsing: "Intro\n\n```python", streaming: true).blocks == [intro])
+        #expect(MarkdownDocument(parsing: "```python", streaming: true).blocks == [])
+        #expect(MarkdownDocument(parsing: " \n ").blocks.isEmpty, "only whitespace is nothing to show")
+
+        // A turn ended right after a recorded fence opened: its prefix, finished, ends at that line.
+        var text = ""
+        for piece in deltas(edgesStream) {
+            text += piece
+            if text.hasSuffix("```r") { break }
+        }
+        let blocks = MarkdownDocument(parsing: text).blocks
+        #expect(blocks.last == .paragraph([plain("```r")]))
+        #expect(Array(blocks.dropLast()) == Array(edgesBlocks.prefix(blocks.count - 1)))
+    }
+
+    @Test("the recorded edge-case answer: every block pinned, every line the model wrote shown, read back the same")
+    func edgesAnswer() throws {
+        let answer = deltas(edgesStream).joined()
+        #expect(deltas(edgesStream).count == 102)
+        #expect(MarkdownDocument(parsing: answer).blocks == edgesBlocks)
+        let result = try #require(events(edgesStream).first { $0["type"] as? String == "result" }?["text"] as? String)
+        #expect(result == answer)
+        // Every line written outside a fence, a table and the heading reaches the screen as written.
+        let shown = Set(shownLines(edgesBlocks))
+        var fenced = false
+        for line in answer.components(separatedBy: "\n") {
+            if line.hasPrefix("```") { fenced.toggle(); continue }
+            if fenced || line.isEmpty || line.hasPrefix("| ") || line.hasPrefix("|---") || line.hasPrefix("#") || line.contains("`") { continue }
+            #expect(shown.contains(line), "\(line.debugDescription) is shown as written")
+        }
+        let document = try #require(try JSONSerialization.jsonObject(with: Data(recorded(edgesChat).utf8)) as? [String: Any])
+        let turns = try #require(document["turns"] as? [[String: Any]])
+        let answers = turns.compactMap { ($0["answer"] as? [String: Any])?["text"] as? String }
+        #expect(answers == [answer], "read back by chats show, it is the live answer")
+        #expect(MarkdownDocument(parsing: answers[0]).blocks == edgesBlocks)
+    }
+
+    @Test("the edge-case answer streamed in its 102 recorded pieces: settled blocks never change, no marker shows raw, and every line arrived is shown but a table's waiting first rows")
+    func edgesStreamedInPieces() {
+        let pieces = deltas(edgesStream)
+        var text = ""
+        for (index, piece) in pieces.enumerated() {
+            text += piece
+            let blocks = MarkdownDocument(parsing: text, streaming: true).blocks
+            #expect(blocks.count <= edgesBlocks.count, "delta \(index)")
+            #expect(Array(blocks.dropLast()) == Array(edgesBlocks.prefix(max(0, blocks.count - 1))), "delta \(index): a settled block changed")
+            // Pipe-led prose past its first two lines is a paragraph opening with a pipe, as written.
+            for problem in rawMarkers(in: blocks) where !problem.hasPrefix("a block's marker read as words: |x| is") {
+                Issue.record("delta \(index): \(problem)")
+            }
+            // The lines outside fences and the table, each as far as it has arrived.
+            let shown = shownLines(blocks)
+            let arrived = text.components(separatedBy: "\n")
+            var fenced = false
+            for (place, line) in arrived.enumerated() {
+                if line.hasPrefix("```") { fenced.toggle(); continue }
+                let words = line.trimmingCharacters(in: .whitespaces)
+                if fenced || words.isEmpty || line.hasPrefix("#") || line.contains("`") || line.hasPrefix("| ") || line.hasPrefix("|---") { continue }
+                // The pipe-led paragraph's first line waits only until its second begins.
+                if line.hasPrefix("|x|"), place == arrived.count - 1 || (place == arrived.count - 2 && arrived[place + 1].isEmpty) { continue }
+                #expect(shown.contains { $0.hasPrefix(words) || $0 == words }, "delta \(index): \(words.debugDescription) is shown")
+            }
+            // Each table row is shown as soon as it holds a cell's first character.
+            if case .table(let table)? = blocks.last {
+                let rows = arrived.filter { $0.hasPrefix("| ") && $0.count > 2 && $0 != "| Workers | Rows each | Total |" }
+                #expect(table.rows.count == rows.count, "delta \(index): \(rows.count) rows arrived, \(table.rows.count) shown")
+            }
+        }
+        #expect(MarkdownDocument(parsing: text, streaming: true).blocks == edgesBlocks, "the last delta in, every block is shown")
     }
 }

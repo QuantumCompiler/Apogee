@@ -1593,3 +1593,78 @@ The CLI's 43 are its track 55 ([CLI Milestone AR](../../cli/assistant/MILESTONES
 **Not done:**
 - No live pass of the app.
 - `GraphViewModelTests/rebuild()`'s flake predates this item and is left for an item that touches the graph (4k).
+
+### 2026-10-25 — `markdown-code-edges` (backlog item 4d): Markdown and code keep every line the model wrote
+
+**Why.** M8 and M9 render chat answers as Markdown and colour code. The audit found five places where the rendered answer lost text the model wrote. Each reproduced on today's source, 10 of the 48 styles tests failing first:
+- **Reference-style definitions vanished.** Foundation reads `[1]: https://…` as link metadata, so `Sources:` followed by two definitions drew only `Sources:`, and while streaming the line flickered `[2`, `[2]:`, then nothing. It also resolved `[text][1]` into a link and `[^1]` into one pointing at "note". The CLI prints them all as text: its `link()` accepts only `](` (`markdown/inline.cpp:171`, `:187`).
+- **Short answers were held back whole.** Digits, space and pipe were construct markers, so `128 * 8 = 1024`, `42` and `2 + 2 = 4` streamed as nothing.
+- **A pipe-led paragraph hid for the whole stream,** and a completed numeric table row lagged a delta.
+- **A finished answer ending at a bare fence opener drew that line as nothing.** The fallback ran only when parsing threw, and `` ```python `` parses to zero runs.
+- **`CodeLexer` read a shift as a here-document,** so `echo $((a<<b))` and Ruby's `x<<Const` coloured the rest of the block as a string.
+
+- [x] **Definitions kept, as the CLI prints them.** Before parsing, a noncharacter (U+FDD0) goes between `]` and `:` on any line that could be a definition, inside quotes and list items too. Foundation then reads the line as text, linking its address as a bare URL as the CLI does (`bare_url`, `inline.cpp:284`). The mark is removed from every run afterwards. Footnote definitions and reference uses (`[text][1]`) stay as written.
+- [x] **Hold-back is bounded**, streaming only:
+  1. **A marker line is held.** The last line is held when, after its indentation and any `>` or list marker followed by a space, what remains is one of:
+     - nothing;
+     - only backticks or only tildes;
+     - only `#`s;
+     - only `-*_=+` and blanks;
+     - a 1–9 digit number and `.` or `)`;
+     - only `|`, `:`, `-` and blanks with at least one `|`.
+  2. **A possible table header is held.** When the last block is a top-level paragraph ending in a `|`-led line whose line before is not `|`-led, that line alone waits. Any next line, or a blank one, ends the hold.
+
+  Nothing else is ever held. A real table still never flickers: its header waits under the second rule and its delimiter under the first, and when the delimiter's newline arrives the table draws whole. A lone `|` starting a new row waits too.
+- [x] **A finished answer never draws a non-empty line as nothing.** An answer ending at a fence-shaped line is parsed with a probe line (U+FDD1) appended, which shows whether the fence opened with nothing under it. If it did, that line is drawn as written. Any other parse yielding nothing for non-blank text draws the text as written.
+- [x] **A shift is a shift.** `isShift` decides from what precedes `<<` on its line alone, so a streamed line never changes colour. `<<` is a shift:
+  - directly after a letter, digit, `_`, non-ASCII byte, `)`, `]`, `}` or quote, with no space;
+  - after another `<`;
+  - inside a `((` its line opened and hasn't closed.
+
+  Real here-documents (`cat <<EOF`, `<<-EOF`, `<<~EOF`, `<<'EOF'`, Ruby's `<<~SQL`) still colour as strings, and `<<<word` here-strings no longer do.
+
+**Decisions made while building** (2026-10-25, each recorded for veto):
+- **The default, taken:** definitions render as plain text lines, never resolved, and a reference use stays as written, as the CLI does it.
+- **Footnote definitions are kept the same way,** since Foundation dropped them too.
+- **The fence fallback is wider than the finding:** prose then a bare opener (`Intro` then `` ```python ``) is drawn too, and a finished lone `#` draws as written.
+- **A `|`-led line straight under prose waits,** where M8 drew it as prose and reshaped it when the table formed. An answer that is only one `|`-led line appears when it finishes.
+- **`1.` is still held, as M8's test requires, and a bare `1` is not,** so a delta ending between the digit and the dot can show `1` for one redraw.
+- **`cat<<EOF` with no space is no longer coloured as a here-document,** a deliberate miss under "prefer false negatives".
+- **`[1]:https://…` with no space:** Foundation links the address and the CLI doesn't. The text is kept either way; the autolink difference predates this item.
+
+**Verified.**
+- **Recorded** from the branch's binary over a sandbox home, driven with the app's `chat` arguments and hello against the scripted mock in 8-byte chunks, the home written `/Users/someone`:
+  - `edges-answer.jsonl`, 812 bytes in 102 deltas: a short arithmetic line, a table straight under prose, a here-document and shifts in bash and Ruby, a reference use with two definitions, two lines of pipe-led prose, and a final `42`;
+  - its `chats show`, `chats-show-edges.json`.
+
+  The deltas, the result and the read-back all equal the scripted answer. The CLI's own rendering of the same answer, replayed from a terminal session, is pinned as the oracle's literals.
+- 13 new cases:
+  - `MarkdownTests` +8: `probeMatrix`, `linkDefinitionsAsTheCLIPrintsThem`, `definitionsStream`, `onlyMarkersWait`, `pipeRuleBounded` (two tables cut at every character), `finishedAtAFenceOpener`, `edgesAnswer` and `edgesStreamedInPieces`;
+  - `CodeLexerTests` +5: `shiftsAreNotHeredocs`, `realHeredocs`, `edgesAnswer`, `everyCutOfTheEdges` and `edgesStreamedInPieces`.
+
+  M8's and M9's tests stay green, `everyCut` and `streamedInPieces` among them.
+- **Mutation:** all 12 mutants were caught. One survived at first, and a lone-`#` case was added for it.
+- **Measured** (Release, median ms, the old and new code compiled alike and run interleaved):
+
+  | Input | Before | After |
+  |---|---|---|
+  | M8's answer, 1.2 KB | 0.40 | 0.40 |
+  | M8's answer ×40, 48 KB | 19.1–19.2 | 19.1–19.2 |
+  | 1,500 streaming re-parses, 12 KB (mean) | 2.38 | 2.38 |
+  | M9's code answer | 0.356 | 0.372 |
+  | the edge answer ×56, 48 KB (112 definitions) | 17.2 | 19.0 |
+  | the edge answer in 8-byte pieces, mean / worst | 0.126 / 0.24 | 0.132 / 0.28 |
+
+  - **M9's code answer** pays 0.016 ms for the probe line, since it ends at a fence.
+  - **The edge answer's 10%** is Foundation now parsing the definitions as visible text; the marking costs 0.15 ms.
+  - **Shell and Ruby with shifts** lex in 0.38 ms at 48 KB. They were faster before only because the false here-document made the rest of the block one string.
+- The module schemes: `PresentationStyles` 48 of 48 (was 35) and `PresentationSession` 64 of 64. The layering check passed 25 of 25, and `check-previews` finds nothing in styles or session. Six new previews draw the edge answer streaming and finished.
+- **A flake the gate hit, fixed.** The first full gate failed on `GraphViewModelTests/rebuild()`, which fails about 4 runs in 10 on an untouched HEAD (found by 4c's repeat runs). The view-model clears `isBuilding` before the read-back that follows a build, and says its toast after it, so the test's wait for `!isBuilding` could end before the toast. The test now waits for both; `GraphViewModelTests` then passed 30 of 30 iterations. The view-model is unchanged.
+- `lib/scripts/cicd.sh --test`, run again with nothing else: green. The CLI's 3,992 tests and the macOS app's 539 cases passed, with no Swift warning.
+
+**Not done:**
+- No live pass of the app.
+- Three edges past this item still draw nothing:
+  - an empty fenced block in the middle of an answer;
+  - `Text` then a lone `#`, finished;
+  - a fence left open inside a list item or quote at an answer's end.

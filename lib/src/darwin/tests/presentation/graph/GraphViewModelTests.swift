@@ -116,7 +116,9 @@ struct GraphViewModelTests {
         #expect(model.isBuilding)
         first.say(.said("Code graph:       16 node(s), 21 edge(s)"))
         first.end()
-        #expect(await eventually { !model.isBuilding })
+        // The toast comes after the read-back that follows the build's end,
+        // so wait for it, not only for the build to stop.
+        #expect(await eventually { !model.isBuilding && !said.isEmpty })
         #expect(said == ["Code graph:       16 node(s), 21 edge(s)"])
         model.build(name: "app", folder: URL(fileURLWithPath: "/Users/someone/app"))
         #expect(jobs.starts.last?.arguments == ["graph", "build", "app", "--source", "/Users/someone/app"])

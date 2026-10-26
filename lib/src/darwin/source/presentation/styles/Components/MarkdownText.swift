@@ -647,4 +647,52 @@ private struct LinkTarget: View {
     }
     .frame(height: 900)
 }
+
+#Preview("Every line the model wrote: definitions, shifts, pipe-led prose") {
+    ScrollView {
+        MarkdownText(StylesPreview.edgesAnswer)
+            .frame(width: 720)
+            .padding(Spacing.xl)
+    }
+    .frame(height: 900)
+}
+
+#Preview("Mid-stream: a short arithmetic line, shown as it arrives") {
+    MarkdownText(StylesPreview.arithmeticArriving, streaming: true)
+        .frame(width: 720)
+        .padding(Spacing.xl)
+}
+
+#Preview("Mid-stream: a table's row under prose, shown as it arrives") {
+    MarkdownText(StylesPreview.tableRowArriving, streaming: true)
+        .frame(width: 720)
+        .padding(Spacing.xl)
+}
+
+#Preview("Mid-stream: link definitions, kept as they arrive") {
+    ScrollView {
+        MarkdownText(StylesPreview.definitionsArriving, streaming: true)
+            .frame(width: 720)
+            .padding(Spacing.xl)
+    }
+    .frame(height: 900)
+}
+
+#Preview("Mid-stream: pipe-led prose, shown past its first line") {
+    ScrollView {
+        MarkdownText(StylesPreview.pipeProseArriving, streaming: true)
+            .frame(width: 720)
+            .padding(Spacing.xl)
+    }
+    .frame(height: 900)
+}
+
+#Preview("Ended at a fence opener: the line as written") {
+    ScrollView {
+        MarkdownText(StylesPreview.endedAtAFence)
+            .frame(width: 720)
+            .padding(Spacing.xl)
+    }
+    .frame(height: 900)
+}
 #endif

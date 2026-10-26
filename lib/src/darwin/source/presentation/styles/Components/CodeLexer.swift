@@ -66,7 +66,10 @@ public struct CodeRun: Equatable, Sendable {
 ///
 /// Honest by default: a fence colours only for a language it names that the
 /// table knows. An unnamed fence, or a language not in the table, has no
-/// spans and draws in one colour; nothing is guessed from the code.
+/// spans and draws in one colour; nothing is guessed from the code. Where a
+/// token is ambiguous it prefers a false negative: a `<<` that may be a
+/// shift is a shift, since a here-document missed colours a few lines as
+/// code, and one taken wrongly would colour the rest of the block a string.
 ///
 /// Streaming: the pass decides each token from what comes before it and from
 /// what follows on its own line only, so a line the stream has finished
@@ -246,7 +249,8 @@ struct StringRule: Sendable {
         /// A here-document: `<<EOF` (`<<-`, `<<~`, the word quoted or not),
         /// its body the lines after it through a line that is the word.
         /// `capital`: the word starts with a capital, or the marker is
-        /// `<<-`/`<<~` (Ruby, where `<<` is also append).
+        /// `<<-`/`<<~` (Ruby, where `<<` is also append). Never a `<<` that
+        /// may be a shift or an append (`CodePass.isShift`).
         case heredoc(capital: Bool)
     }
 
@@ -680,6 +684,9 @@ struct CodePass {
     /// What a `#` must follow to open a shell's or YAML's comment.
     private static let commentBreaks = ByteSet("\t\n\r ;|&()".utf8)
     private static let heredocOpen = Array("<<".utf8)
+    /// What ends an operand besides a word's characters: a call's or an
+    /// index's bracket, a string's quote. A `<<` straight after one shifts it.
+    private static let operandEnds = ByteSet(")]}\"'`".utf8)
 
     init(_ bytes: UnsafeBufferPointer<UInt8>, _ language: CompiledRules) {
         self.bytes = bytes
@@ -959,9 +966,9 @@ struct CodePass {
 
     /// A here-document's marker, `<<EOF`: its end, its word noted for the
     /// body that starts on the next line; `nil` when it is not one (`<<<`,
-    /// `1 << 2`, Ruby's `list << item`).
+    /// `1 << 2`, Ruby's `list << item`, any `isShift`).
     private mutating func heredocMarker(from start: Int, capital: Bool) -> Int? {
-        guard matches(Self.heredocOpen, at: start) else { return nil }
+        guard matches(Self.heredocOpen, at: start), !isShift(at: start) else { return nil }
         var index = start + 2
         guard index < count, bytes[index] != Byte.less else { return nil }
         var dashed = false
@@ -985,6 +992,37 @@ struct CodePass {
         }
         heredocs.append(name)
         return index
+    }
+
+    /// Whether the `<<` at `start` may be a shift or an append rather than a
+    /// here-document, and so is taken as one -- the lexer would rather miss
+    /// a here-document than colour the rest of a block as one: straight
+    /// after an operand, with no space (`a<<b`, Ruby's `x<<Const`,
+    /// `rows[0]<<x`, `"a"<<"b"`); after another `<` (a here-string's
+    /// `<<<word`); or inside arithmetic its line opened and has not closed
+    /// (`$(( a <<b ))`, `(( mask = 1 <<bits ))`). Decided from what precedes
+    /// it on its line alone, so a streaming line never changes its mind.
+    private func isShift(at start: Int) -> Bool {
+        guard start > 0 else { return false }
+        let before = bytes[start - 1]
+        if Byte.isAlphanumeric(before) || before >= 0x80 || before == Byte.less || Self.operandEnds.contains(before) {
+            return true
+        }
+        var index = start
+        while index > 0, bytes[index - 1] != Byte.newline { index -= 1 }
+        var depth = 0
+        while index + 1 < start {
+            if bytes[index] == Byte.open, bytes[index + 1] == Byte.open {
+                depth += 1
+                index += 2
+            } else if bytes[index] == Byte.close, bytes[index + 1] == Byte.close {
+                depth = max(0, depth - 1)
+                index += 2
+            } else {
+                index += 1
+            }
+        }
+        return depth > 0
     }
 
     /// The bodies of the here-documents the line just ended opened, `at` the
