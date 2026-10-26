@@ -404,6 +404,97 @@ TEST_CASE("a chat whose count is short of its answers numbers on from them when 
     CHECK(apogee::logger::load("nocount", {}).session.turns == 3);
 }
 
+TEST_CASE("chats info --output-format json carries the facts its text says, typed",
+          "[chats][info][history][reads][json]") {
+    // M31: `chats info <id> --output-format json` exited 109 -- no JSON face
+    // -- so a host drew the details by cutting the `label: value` lines.
+    const CliHome home{kConfig};
+    save_fixture();
+    const apogee::logger::Session saved = apogee::logger::load(kChatId, {}).session;
+    const Run text = run(home, {"chats", "info", kChatId});
+    INFO(text.err);
+    REQUIRE(text.code == 0);
+    const nlohmann::json info =
+        document(run(home, {"chats", "info", kChatId, "--output-format", "json"}));
+    CHECK(info == nlohmann::json{{"object", "chat.info"},
+                                 {"id", kChatId},
+                                 {"name", "Project setup"},
+                                 {"custom_name", ""},
+                                 {"title", "Project setup"},
+                                 {"backend", "local"},
+                                 {"model", ""},
+                                 {"started", saved.started_at},
+                                 {"updated", saved.updated_at},
+                                 {"turns", 5},
+                                 {"messages", saved.messages.size()},
+                                 {"compactions", 1},
+                                 {"temperature", nullptr},
+                                 {"max_tokens", nullptr},
+                                 {"schema_version", saved.schema_version}});
+    // Every fact the text says, the document says the same.
+    CHECK(text.out ==
+          "id:        20261022-120000-abcd\n"
+          "title:     Project setup\n"
+          "backend:   local\n"
+          "started:   " +
+              saved.started_at +
+              "\n"
+              "updated:   " +
+              saved.updated_at +
+              "\n"
+              "turns:     5\n"
+              "messages:  " +
+              std::to_string(saved.messages.size()) +
+              "\n"
+              "compacted: 1 time(s)\n");
+    // The row's facts as `chats list` says them.
+    const nlohmann::json row =
+        document(run(home, {"chats", "list", "--output-format", "json"})).at("data").at(0);
+    for (const auto& [key, value] : row.items()) {
+        CHECK(info.at(key) == value);
+    }
+
+    // A renamed chat on the default backend, its settings pinned, written
+    // before the schema existed: each said as the text says it.
+    apogee::logger::Session pinned;
+    pinned.chat_id = "20261022-130000-ef01";
+    pinned.custom_name = "standup";
+    pinned.title = "Daily standup";
+    pinned.params.temperature = 0.25;
+    pinned.params.max_tokens = 512;
+    apogee::logger::save(pinned);
+    const nlohmann::json renamed =
+        document(run(home, {"chats", "info", "standup", "--output-format", "json"}));
+    CHECK(renamed.at("name") == "standup");
+    CHECK(renamed.at("custom_name") == "standup");
+    CHECK(renamed.at("title") == "Daily standup");
+    CHECK(renamed.at("backend") == "");
+    CHECK(renamed.at("temperature") == 0.25);
+    CHECK(renamed.at("max_tokens") == 512);
+    const Run renamed_text = run(home, {"chats", "info", "standup"});
+    CHECK(renamed_text.out.find("name:      standup\n") != std::string::npos);
+    CHECK(renamed_text.out.find("backend:   (default)\n") != std::string::npos);
+    CHECK(renamed_text.out.find("temp:      0.25\n") != std::string::npos);
+    CHECK(renamed_text.out.find("max_tok:   512\n") != std::string::npos);
+}
+
+TEST_CASE("chats info refuses a name no chat answers the same in JSON as in text",
+          "[chats][info][history][reads][json]") {
+    const CliHome home{kConfig};
+    save_fixture();
+    const Run text = run(home, {"chats", "info", "no-such-chat"});
+    const Run json = run(home, {"chats", "info", "no-such-chat", "--output-format", "json"});
+    CHECK(text.code == 1);
+    CHECK(json.code == text.code);
+    CHECK(json.out.empty());
+    CHECK(json.err == text.err);
+    CHECK(json.err == "apogee chats: no chat named 'no-such-chat'\n");
+    // A turn's format is refused by name, as every read refuses it.
+    const Run stream = run(home, {"chats", "info", kChatId, "--output-format", "stream-json"});
+    CHECK(stream.code != 0);
+    CHECK(stream.err.find("expected 'text' or 'json'") != std::string::npos);
+}
+
 TEST_CASE("chats show refuses a name no chat answers as chats info refuses it",
           "[chats][show][history]") {
     const CliHome home{kConfig};

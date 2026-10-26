@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -662,6 +663,54 @@ TEST_CASE(
     CHECK_FALSE(std::filesystem::exists(raw));
     CHECK_FALSE(store.get(second).has_value());
     CHECK(fixture.run({"knowledge", "delete", second}, &out, &err) == 1);
+}
+
+TEST_CASE("knowledge info --raw in JSON carries the raw conversation, and the text is unchanged",
+          "[commands][knowledge][raw][reads][json]") {
+    // M31: with --output-format json (or --json) the record came back alone,
+    // exit 0, --raw silently dropped -- the conversation reached only the
+    // text, after its `-- Raw conversation --` marker.
+    const Fixture fixture;
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"knowledge", "capture", "--json", "Ada: drop it? Bob: yes"}, &out) == 0);
+    const std::string id = nlohmann::json::parse(out)["record"]["id"].get<std::string>();
+    REQUIRE(fixture.run({"knowledge", "info", id, "--json"}, &out) == 0);
+    const nlohmann::json record = nlohmann::json::parse(out);
+    CHECK_FALSE(record.contains("raw"));
+
+    // Both JSON faces: the record as before, and `raw` beside it.
+    REQUIRE(fixture.run({"knowledge", "info", "--raw", id, "--output-format", "json"}, &out,
+                        &err) == 0);
+    CHECK(err.empty());
+    CHECK(std::ranges::count(out, '\n') == 1);
+    nlohmann::json document = nlohmann::json::parse(out);
+    CHECK(document.at("raw") == "Ada: drop it? Bob: yes");
+    document.erase("raw");
+    CHECK(document == record);
+    REQUIRE(fixture.run({"knowledge", "info", "--raw", id, "--json"}, &out) == 0);
+    nlohmann::json pretty = nlohmann::json::parse(out);
+    CHECK(pretty.at("raw") == "Ada: drop it? Bob: yes");
+    pretty.erase("raw");
+    CHECK(pretty == record);
+    // Without --raw, neither carries it.
+    REQUIRE(fixture.run({"knowledge", "info", id, "--output-format", "json"}, &out) == 0);
+    CHECK_FALSE(nlohmann::json::parse(out).contains("raw"));
+
+    // The text, word for word, its marker where the app cuts.
+    REQUIRE(fixture.run({"knowledge", "info", id}, &out) == 0);
+    const std::string plain = out;
+    REQUIRE(fixture.run({"knowledge", "info", "--raw", id}, &out) == 0);
+    CHECK(out == plain + "\n-- Raw conversation --\nAda: drop it? Bob: yes\n");
+
+    // An archive gone is null in JSON, as the text says it is unavailable.
+    std::filesystem::remove(record.at("raw_ref").get<std::string>());
+    REQUIRE(fixture.run({"knowledge", "info", "--raw", id, "--output-format", "json"}, &out) == 0);
+    CHECK(nlohmann::json::parse(out).at("raw").is_null());
+    REQUIRE(fixture.run({"knowledge", "info", "--raw", id, "--json"}, &out) == 0);
+    CHECK(nlohmann::json::parse(out).at("raw").is_null());
+    REQUIRE(fixture.run({"knowledge", "info", "--raw", id}, &out) == 0);
+    CHECK(out == plain + "\nRaw conversation: (unavailable)\n");
 }
 
 TEST_CASE(

@@ -67,6 +67,8 @@ apogee_add_module(operations
     operations/collections.cpp
     operations/dataset_core.h
     operations/dataset_core.cpp
+    operations/graph_dedupe_pass.h
+    operations/graph_dedupe_pass.cpp
     operations/graph_members.h
     operations/graph_members.cpp
     operations/graph_sources.h

@@ -265,6 +265,14 @@ struct ModelGroup {
                                              const BusyProgress& progress = {},
                                              const MachineBudgetSource& machine = {});
 
+/// `models status --output-format json`: the record as `fields`, each label
+/// as `render_role_status` prints it (28h) -- and, with a suite active, its
+/// footprint typed beside them (M31, `footprint_document`), from the same
+/// reading as the `footprint` field's text, which stays word for word.
+[[nodiscard]] nlohmann::json role_status_document(const harness::Config& config,
+                                                  const BusyProgress& progress = {},
+                                                  const MachineBudgetSource& machine = {});
+
 class ModelsCommand final : public Command {
 public:
     [[nodiscard]] std::string_view name() const noexcept override;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <nlohmann/json_fwd.hpp>
+
 #include <functional>
 #include <optional>
 #include <string>
@@ -63,6 +65,26 @@ using ResidencyProbe = std::function<std::optional<bool>(std::string_view backen
 /// (`/suite`); `models status`, which loads nothing, passes none.
 [[nodiscard]] std::vector<std::string> footprint_lines(const models::SuiteFootprint& footprint,
                                                        const ResidencyProbe& resident = {});
+
+/// The verdict a footprint's admission is, in the CLI's words (M31): `fits`,
+/// `fits as far as known`, `does not fit`, `budget not known here`, `no
+/// member holds memory` -- what the admission line ends with, as one word
+/// set a host can switch on.
+[[nodiscard]] std::string_view footprint_verdict(models::Admission admission);
+
+/// The footprint as data (M31), beside `footprint_lines`: `{suite, members:
+/// [{backend, roles, local, bytes, known, shares, note}], total_bytes,
+/// margin_bytes, budget_bytes, verdict}`. A member's `bytes` is what the sum
+/// counts of it -- its whole figure (weights unless it `shares` another's
+/// base, cache, adapters, drafter) when `known`, else only what is known of
+/// it, its drafter's weights (M25), or 0 -- and 0 for one holding nothing
+/// here; `note` is the reason the text gives in place of a figure -- why its
+/// size is unknown, or a backend configured nowhere -- empty when it gives
+/// none. `total_bytes` is the members' bytes and the margin, as the
+/// admission line's sum; `budget_bytes` is the machine's, null when not
+/// known or not asked; `verdict` is `footprint_verdict`'s. Exact bytes, where
+/// the text rounds each part to MiB.
+[[nodiscard]] nlohmann::json footprint_document(const models::SuiteFootprint& footprint);
 
 /// `/suite`'s argument, read (27e): the suite or `off`, then `--force` and
 /// `--warm` in any order.

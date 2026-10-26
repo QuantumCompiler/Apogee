@@ -22,6 +22,15 @@ namespace apogee::commands {
 /// for the backend's own), as its session file records them.
 [[nodiscard]] nlohmann::json session_row_view(const logger::Session& session);
 
+/// One saved conversation as `chats info --output-format json` carries it
+/// (M31): `session_row_view`'s facts, then what the text says beside them --
+/// `{object: "chat.info", id, name, updated, turns, backend, model,
+/// custom_name, title, started, messages, compactions, temperature,
+/// max_tokens, schema_version}`, `backend` empty for the default,
+/// `temperature` and `max_tokens` null when unset, `schema_version` 0 for a
+/// file written before the schema existed.
+[[nodiscard]] nlohmann::json session_info_view(const logger::Session& session);
+
 /// One row of `apogee chats list`.
 [[nodiscard]] std::string format_session_row(const logger::Session& session);
 

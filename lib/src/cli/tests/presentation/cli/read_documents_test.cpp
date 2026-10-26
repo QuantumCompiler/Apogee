@@ -8,7 +8,11 @@
 #include <string>
 #include <vector>
 
+#include "cli/complete_protocol.h"
 #include "cli/models.h"
+#include "cli/registry.h"
+#include "cli/root.h"
+#include "contracts/config.h"
 #include "httpserver/admin_agents.h"
 #include "httpserver/admin_config.h"
 #include "logger/session.h"
@@ -245,9 +249,25 @@ TEST_CASE("a JSON face asked of a command with none is refused, naming the reade
     CHECK(refused.code != 0);
     CHECK(refused.out.empty());
     for (const std::string_view reader : {"models list", "models info", "models status",
-                                          "chats list", "agents list", "mcp list", "check"}) {
+                                          "chats list", "agents list", "mcp list", "check",
+                                          // M31: three reads that answered only in prose.
+                                          "chats info", "chats recall", "graph dedupe"}) {
         INFO(refused.err);
         CHECK(refused.err.find(reader) != std::string::npos);
+    }
+    // ...and each of those three takes the flag rather than refusing it
+    // (M31: each exited 109, "The following arguments were not expected").
+    save_chat("20261007-100000-aaaa", "first", 1);
+    for (const std::vector<std::string>& args :
+         {std::vector<std::string>{"chats", "info", "20261007-100000-aaaa"},
+          std::vector<std::string>{"chats", "recall"}}) {
+        std::vector<std::string> json = args;
+        json.insert(json.end(), {"--output-format", "json"});
+        const Read taken = read(home, json);
+        INFO(taken.err);
+        CHECK(taken.code == 0);
+        CHECK(taken.err.find("not expected") == std::string::npos);
+        CHECK(document(taken).is_object());
     }
     // A read refuses a turn's format by name.
     const Read stream = read(home, {"chats", "list", "--output-format", "stream-json"});
@@ -307,4 +327,45 @@ TEST_CASE("models info on a stored set carries a typed data beside its prose fie
     // A backend's document carries no data: its typed facts are its config's.
     CHECK_FALSE(document(read(home, {"models", "info", "local", "--output-format", "json"}))
                     .contains("data"));
+}
+
+TEST_CASE("the reads that gained a JSON face offer --output-format at completion, and take it",
+          "[reads][json][completion]") {
+    // M31, ADR 0007: the flag is offered where it is new -- `chats info`,
+    // `chats recall`, `graph dedupe` -- its words with it, and each word
+    // offered is one the verb takes.
+    const CliHome home{kConfig};
+    save_chat("20261007-100000-aaaa", "first", 1);
+    const apogee::commands::RootCommand root{apogee::commands::default_registry()};
+    const apogee::commands::CommandSpec tree = apogee::commands::specs_from_app(root.app());
+    const apogee::harness::Config config = apogee::harness::parse_config(kConfig, "test");
+    const auto offered = [&](std::vector<std::string> words, std::string current) {
+        return apogee::commands::complete_words(
+                   {.words = std::move(words), .current = std::move(current)}, config, tree)
+            .candidates;
+    };
+    for (const std::vector<std::string>& verb :
+         {std::vector<std::string>{"chats", "info", "20261007-100000-aaaa"},
+          std::vector<std::string>{"chats", "recall"},
+          std::vector<std::string>{"graph", "dedupe", "notes"}}) {
+        std::string line;
+        for (const std::string& word : verb) {
+            line += word + " ";
+        }
+        INFO("apogee " << line);
+        const std::vector<std::string> flags = offered(verb, "--");
+        CHECK(std::ranges::find(flags, "--output-format") != flags.end());
+        std::vector<std::string> valued = verb;
+        valued.emplace_back("--output-format");
+        const std::vector<std::string> words = offered(valued, "");
+        CHECK(words == std::vector<std::string>{"text", "json"});
+    }
+    // What it offers, it takes.
+    for (const std::string format : {"text", "json"}) {
+        INFO(format);
+        CHECK(
+            read(home, {"chats", "info", "20261007-100000-aaaa", "--output-format", format}).code ==
+            0);
+        CHECK(read(home, {"chats", "recall", "--output-format", format}).code == 0);
+    }
 }

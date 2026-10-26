@@ -35,6 +35,7 @@
 #include "harness/harness.h"
 #include "harness/roles.h"
 #include "machine/json_reporter.h"
+#include "operations/graph_dedupe_pass.h"
 #include "operations/graph_sources.h"
 #include "operations/knowledge_core.h"
 #include "views/status_line.h"
@@ -1712,7 +1713,10 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
     dedupe->add_option("--threshold", d->threshold,
                        "Cosine similarity at or above which two entities merge (default 0.92)");
     dedupe->add_flag("--dry-run", d->dry_run, "Print the merge groups; change nothing");
-    dedupe->callback([&context, d]() {
+    // M31: the admin twin's body, from the one pass both run.
+    auto d_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    add_read_format(dedupe, d_format);
+    dedupe->callback([&context, d, d_format]() {
         if (d->threshold <= 0.0 || d->threshold > 1.0) {
             fail_user("--threshold must be in (0, 1]");
         }
@@ -1720,12 +1724,23 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
         const harness::Config config = load_config_strict(context, config_path);
         const Target target = resolve_target(config, d->name);
         embedstore::Store store = open_target(target);
-        // What each layer's dedupe is (27k), read once beside the admin
-        // twin: a code entity's identity is its exact qualified name, so its
-        // merges are the ones the build made; a prose entity merges by vector
-        // agreement, and with no vector to compare the pass is skipped --
-        // said, never silently.
-        const embedstore::DedupeScope scope = store.dedupe_scope();
+        // What each layer's dedupe is (27k), read once by the pass the admin
+        // twin runs: a code entity's identity is its exact qualified name, so
+        // its merges are the ones the build made; a prose entity merges by
+        // vector agreement, and with no vector to compare the pass is skipped
+        // -- said, never silently.
+        operations::GraphDedupePass pass =
+            operations::plan_graph_dedupe(store, d->threshold, d->dry_run);
+        if (*d_format == ReadFormat::Json) {
+            try {
+                operations::run_graph_dedupe(store, pass);
+            } catch (const std::exception& e) {
+                fail_backend(std::string{"dedupe failed: "} + e.what());
+            }
+            write_document(std::cout, operations::graph_dedupe_document(pass));
+            return;
+        }
+        const embedstore::DedupeScope& scope = pass.scope;
         if (scope.code_entities > 0) {
             std::cout << "Code entities: " << scope.code_entities
                       << " -- merged by exact qualified name as they were built ("
@@ -1733,17 +1748,17 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
                       << " stated at more than one place, one node each); never by "
                          "resemblance.\n";
         }
-        if (const std::string skip = scope.prose_skip_reason(); !skip.empty()) {
-            std::cout << "Prose entities: vector dedupe skipped -- " << skip
+        if (!pass.prose_skipped.empty()) {
+            std::cout << "Prose entities: vector dedupe skipped -- " << pass.prose_skipped
                       << "; nothing to merge.\n";
             return;
         }
-        std::vector<embedstore::MergeGroup> groups;
         try {
-            groups = store.dedupe_nodes(d->threshold, d->dry_run);
+            operations::run_graph_dedupe(store, pass);
         } catch (const std::exception& e) {
             fail_backend(std::string{"dedupe failed: "} + e.what());
         }
+        const std::vector<embedstore::MergeGroup>& groups = pass.groups;
         if (groups.empty()) {
             std::cout << "No entities in \"" << target.name << "\" exceed similarity "
                       << d->threshold << " -- nothing to merge.\n";

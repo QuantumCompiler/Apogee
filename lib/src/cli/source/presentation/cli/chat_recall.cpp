@@ -79,6 +79,35 @@ RecallHoldings recall_holdings() {
     return out;
 }
 
+std::vector<agentloop::RecallEntry> recall_summaries() {
+    return agentloop::RecallIndex{harness::recall_index_path(), std::nullopt}.entries();
+}
+
+nlohmann::json recall_view(const RecallHoldings& held,
+                           const std::vector<agentloop::RecallEntry>& summaries) {
+    nlohmann::json data = nlohmann::json::array();
+    for (const agentloop::RecallEntry& summary : summaries) {
+        data.push_back(nlohmann::json{{"chat", summary.chat_id},
+                                      {"name", summary.title},
+                                      {"updated", summary.updated_at},
+                                      {"summary", summary.summary}});
+    }
+    return nlohmann::json{{"object", "list"},
+                          {"data", std::move(data)},
+                          {"index", held.index.string()},
+                          {"pending", held.pending}};
+}
+
+std::string recall_row(const agentloop::RecallEntry& summary) {
+    std::string row = "  " + summary.chat_id;
+    for (const std::string* part : {&summary.updated_at, &summary.title}) {
+        if (!part->empty()) {
+            row += "  " + *part;
+        }
+    }
+    return row;
+}
+
 RecallHoldings forget_all_recall() {
     const RecallHoldings held = recall_holdings();
     std::error_code code;

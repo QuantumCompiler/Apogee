@@ -1,5 +1,7 @@
 #include "cli/suite_residency.h"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <cstdint>
 #include <string>
@@ -196,6 +198,45 @@ std::vector<std::string> footprint_lines(const models::SuiteFootprint& footprint
     }
     lines.push_back("  total: " + admission_line(footprint));
     return lines;
+}
+
+std::string_view footprint_verdict(models::Admission admission) {
+    switch (admission) {
+        case models::Admission::Fits:
+            return "fits";
+        case models::Admission::FitsAsFarAsKnown:
+            return "fits as far as known";
+        case models::Admission::OverBudget:
+            return "does not fit";
+        case models::Admission::BudgetUnknown:
+            return "budget not known here";
+        case models::Admission::NothingHeld:
+            break;
+    }
+    return "no member holds memory";
+}
+
+nlohmann::json footprint_document(const models::SuiteFootprint& footprint) {
+    nlohmann::json members = nlohmann::json::array();
+    for (const models::MemberFootprint& member : footprint.members) {
+        // What the sum counts of it, and whether that is all of it.
+        members.push_back(nlohmann::json{{"backend", member.backend},
+                                         {"roles", member.roles},
+                                         {"local", member.local},
+                                         {"bytes", member.counted_bytes()},
+                                         {"known", member.bytes().has_value()},
+                                         {"shares", member.shares},
+                                         {"note", member.unknown}});
+    }
+    return nlohmann::json{
+        {"suite", footprint.suite},
+        {"members", std::move(members)},
+        {"total_bytes", footprint.needed()},
+        {"margin_bytes", footprint.holds_local() ? models::kFitMargin : std::int64_t{0}},
+        {"budget_bytes", footprint.machine.bytes.has_value()
+                             ? nlohmann::json(*footprint.machine.bytes)
+                             : nlohmann::json(nullptr)},
+        {"verdict", std::string{footprint_verdict(footprint.admission())}}};
 }
 
 SuiteArgument parse_suite_argument(std::string_view argument) {

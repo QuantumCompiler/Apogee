@@ -24,6 +24,7 @@
 #include "httpserver/handler.h"
 #include "httpserver/jobs.h"
 #include "httpserver/mux.h"
+#include "operations/graph_dedupe_pass.h"
 #include "support/env_guard.h"
 
 /// The graph slice of the control plane: the build as an async job on the
@@ -646,6 +647,45 @@ TEST_CASE("POST /graph/{name}/dedupe merges synchronously, previews with dry_run
     CHECK(report["merged_nodes"] == 1);
     CHECK(fixture.store().find_nodes("Atlas Prime").empty());
     CHECK(parsed(fixture.dedupe("notes"))["merged_nodes"] == 0);
+}
+
+TEST_CASE("the dedupe route's body is the one pass's document, which the command line prints",
+          "[httpserver][admin][graph][dedupe][parity]") {
+    // M31: the body was built here alone; it is `operations/graph_dedupe_pass`'s
+    // now, the very document `graph dedupe --output-format json` prints.
+    Fixture fixture;
+    fixture.ingest();
+    HttpResponse response = fixture.build("notes");
+    REQUIRE(response.status == 202);
+    REQUIRE(fixture.wait(parsed(response)["job_id"].get<std::string>()).status ==
+            JobStatus::Succeeded);
+    const auto preview = [&fixture](double threshold) {
+        Store store = fixture.store();
+        apogee::operations::GraphDedupePass pass =
+            apogee::operations::plan_graph_dedupe(store, threshold, /*dry_run=*/true);
+        apogee::operations::run_graph_dedupe(store, pass);
+        return apogee::operations::graph_dedupe_document(pass);
+    };
+    // Nothing to compare: skipped, and said.
+    CHECK(fixture.dedupe("notes", nlohmann::json{{"dry_run", true}}).body ==
+          preview(apogee::embedstore::kDefaultDedupeThreshold).dump());
+    CHECK(preview(apogee::embedstore::kDefaultDedupeThreshold).contains("prose_skipped"));
+    {
+        Store store = fixture.store();
+        const std::int64_t atlas = store.find_nodes("Atlas").front().id;
+        store.update_node_embedding(atlas, {1.0F, 0.0F, 0.0F});
+        const std::int64_t twin = store.upsert_node("Atlas Prime", "system", "the twin").id;
+        store.update_node_embedding(twin, {0.99F, 0.1F, 0.0F});
+    }
+    const nlohmann::json expected = preview(0.9);
+    CHECK(expected.at("merged_nodes") == 1);
+    CHECK(fixture.dedupe("notes", nlohmann::json{{"dry_run", true}, {"threshold", 0.9}}).body ==
+          expected.dump());
+    // A dry run wrote nothing: the merge makes exactly the groups previewed.
+    nlohmann::json merged = parsed(fixture.dedupe("notes", nlohmann::json{{"threshold", 0.9}}));
+    CHECK(merged.at("dry_run") == false);
+    merged["dry_run"] = true;
+    CHECK(merged == expected);
 }
 
 TEST_CASE("the new graph routes sit behind the gate and dispatch through the mux",

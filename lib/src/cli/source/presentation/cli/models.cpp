@@ -2241,8 +2241,18 @@ nlohmann::json model_info_document(const harness::Config& config, std::string_vi
     return document;
 }
 
-std::string render_role_status(const harness::Config& config, const BusyProgress& progress,
-                               const MachineBudgetSource& machine) {
+namespace {
+
+/// `models status`'s record, and the suite's footprint when one is active --
+/// priced once, so the text and the typed document (M31) say one reading.
+struct RoleStatus {
+    std::string body{};
+    std::optional<models::SuiteFootprint> footprint{};
+};
+
+[[nodiscard]] RoleStatus role_status(const harness::Config& config, const BusyProgress& progress,
+                                     const MachineBudgetSource& machine) {
+    RoleStatus status;
     std::ostringstream out;
     // The suite every role below resolves under, when one is active (27d).
     // With none, nothing here changes from before suites.
@@ -2373,11 +2383,33 @@ std::string render_role_status(const harness::Config& config, const BusyProgress
         if (progress) {
             progress("pricing suite " + suite_name, 0, 0);
         }
-        for (const std::string& line : footprint_lines(price_suite(config, suite_name, machine))) {
+        status.footprint = price_suite(config, suite_name, machine);
+        for (const std::string& line : footprint_lines(*status.footprint)) {
             out << line << "\n";
         }
     }
-    return out.str();
+    status.body = out.str();
+    return status;
+}
+
+}  // namespace
+
+std::string render_role_status(const harness::Config& config, const BusyProgress& progress,
+                               const MachineBudgetSource& machine) {
+    return role_status(config, progress, machine).body;
+}
+
+nlohmann::json role_status_document(const harness::Config& config, const BusyProgress& progress,
+                                    const MachineBudgetSource& machine) {
+    // The record's fields as the text makes them -- the footprint's among
+    // them, word for word, which the macOS app reads -- and the footprint
+    // typed beside them (M31).
+    const RoleStatus status = role_status(config, progress, machine);
+    nlohmann::json document = render_record_document(status.body);
+    if (status.footprint.has_value()) {
+        document["footprint"] = footprint_document(*status.footprint);
+    }
+    return document;
 }
 
 std::string_view ModelsCommand::name() const noexcept {
@@ -2536,13 +2568,18 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
             }
         }
         std::string body;
+        nlohmann::json document;
         {
             BusyLine busy{std::cerr, "resolving the roles",
                           busy_options(*status_quiet || *status_format == ReadFormat::Json)};
-            body = render_role_status(config, busy.sink(), machine_budget);
+            if (*status_format == ReadFormat::Json) {
+                document = role_status_document(config, busy.sink(), machine_budget);
+            } else {
+                body = render_role_status(config, busy.sink(), machine_budget);
+            }
         }
         if (*status_format == ReadFormat::Json) {
-            write_document(std::cout, render_record_document(body));
+            write_document(std::cout, document);
             return;
         }
         std::cout << body;

@@ -266,6 +266,52 @@ suites:
     }
 }
 
+TEST_CASE("what a set needs is each member's counted bytes and the margin, nothing else",
+          "[models][footprint]") {
+    // M31: the typed footprint states each member's bytes and the total as
+    // separate numbers; the total must be exactly theirs and the margin, so
+    // a host adding them up reads what the admission line says.
+    SuiteFootprint footprint;
+    footprint.suite = "mixed";
+    MemberFootprint known;
+    known.backend = "root";
+    known.local = true;
+    known.weights = 1926 * kMiB;
+    apogee::models::LocalWindow window;
+    window.cache_bytes = 1904 * kMiB;
+    known.window = window;
+    MemberFootprint sharer = known;
+    sharer.backend = "helper";
+    sharer.shares = "root";
+    sharer.adapters = 1;
+    sharer.adapter_bytes = 3 * kMiB;
+    MemberFootprint drafting;
+    drafting.backend = "e4b";
+    drafting.local = true;
+    drafting.unknown = "an MLX model's footprint is not stated yet";
+    drafting.drafter = "/models/drafter";
+    drafting.drafter_bytes = 300 * kMiB;
+    MemberFootprint cloud;
+    cloud.backend = "claude";
+    footprint.members = {known, sharer, drafting, cloud};
+
+    CHECK(known.counted_bytes() == (1926 + 1904) * kMiB);
+    CHECK(sharer.counted_bytes() == (1904 + 3) * kMiB);
+    CHECK_FALSE(drafting.bytes().has_value());
+    CHECK(drafting.counted_bytes() == 300 * kMiB);
+    CHECK(cloud.counted_bytes() == 0);
+    std::int64_t sum = 0;
+    for (const MemberFootprint& member : footprint.members) {
+        sum += member.counted_bytes();
+    }
+    CHECK(footprint.known_bytes() == sum);
+    CHECK(footprint.needed() == sum + apogee::models::kFitMargin);
+    // Nothing held here: nothing needed, not even the margin.
+    SuiteFootprint remote;
+    remote.members = {cloud};
+    CHECK(remote.needed() == 0);
+}
+
 TEST_CASE("a suite is priced at its own pins, active or not", "[models][footprint]") {
     const Store store;
     const std::string model = store.model("shared", llama_3b(), 1926 * kMiB);

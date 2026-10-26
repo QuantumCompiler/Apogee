@@ -930,7 +930,8 @@ code entities stated at more than one place (a declaration and its
 definition), `prose_skipped` the reason the vector pass did not run when no
 prose entity has a vector to compare; with `"dry_run": true` the groups are
 computed and nothing is written. `400` for a threshold outside `(0, 1]`; `404` for an unbuilt graph
-or a collection with no data.
+or a collection with no data. Since M31 `apogee graph dedupe {id} --output-format json` prints this
+body byte for byte (one pass and one builder, `operations/graph_dedupe_pass`).
 
 ### `DELETE /v1/admin/graph/{id}`
 

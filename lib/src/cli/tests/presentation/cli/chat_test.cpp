@@ -2468,6 +2468,116 @@ TEST_CASE("chats recall shows what recall holds, and forgets it with consent, tr
     CHECK(chat.out == "recall holds nothing -- nothing to forget\n");
 }
 
+TEST_CASE("chats recall lists the summaries themselves: their names in text, each whole in JSON",
+          "[chat][cli][recall][helpers][reads][json]") {
+    // M31: the read gave a count and a path -- `recall holds 1 chat summary
+    // in ...` -- and with --output-format json it exited 109. The summaries
+    // existed only in the index.
+    HelperChat chat{texts({"Noted.", "Fine."}), {"Title", "The project uses Postgres 16."}};
+    const std::string first = first_chat(chat);
+    INFO(chat.err);
+    const std::string updated = apogee::logger::load(first, {}).session.updated_at;
+    const std::string index = apogee::harness::recall_index_path().string();
+
+    // The count line as it was, then each summary's chat, date and name.
+    REQUIRE(chat.run({"chats", "recall"}) == 0);
+    CHECK(chat.out == "recall holds 1 chat summary in " + index + "\n  " + first + "  " + updated +
+                          "  Title\n");
+
+    REQUIRE(chat.run({"chats", "recall", "--output-format", "json"}) == 0);
+    CHECK(std::ranges::count(chat.out, '\n') == 1);
+    CHECK(nlohmann::json::parse(chat.out) ==
+          nlohmann::json{
+              {"object", "list"},
+              {"data", nlohmann::json::array({{{"chat", first},
+                                               {"name", "Title"},
+                                               {"updated", updated},
+                                               {"summary", "The project uses Postgres 16."}}})},
+              {"index", index},
+              {"pending", 0}});
+
+    // A chat marked due one is counted, as the count line counts it.
+    std::filesystem::create_directories(apogee::harness::memory_dir() / "pending");
+    std::ofstream{apogee::harness::memory_dir() / "pending" / "20261020-000000-due1"} << "1\n";
+    REQUIRE(chat.run({"chats", "recall"}) == 0);
+    CHECK(chat.out.starts_with("recall holds 1 chat summary in " + index + ", 1 more due one\n"));
+    REQUIRE(chat.run({"chats", "recall", "--output-format", "json"}) == 0);
+    CHECK(nlohmann::json::parse(chat.out).at("pending") == 1);
+
+    // --forget answers in text: refused with the JSON face, nothing forgotten.
+    CHECK(chat.run({"chats", "recall", "--forget", "--yes", "--output-format", "json"}) == 1);
+    CHECK(chat.out.empty());
+    CHECK(chat.err.find("--forget") != std::string::npos);
+    CHECK(recalled_chats(chat) == 1);
+
+    // Nothing held: an empty list, never null; the count line alone.
+    REQUIRE(chat.run({"chats", "recall", "--forget", "--yes"}) == 0);
+    REQUIRE(chat.run({"chats", "recall", "--output-format", "json"}) == 0);
+    CHECK(nlohmann::json::parse(chat.out) == nlohmann::json{{"object", "list"},
+                                                            {"data", nlohmann::json::array()},
+                                                            {"index", index},
+                                                            {"pending", 0}});
+    REQUIRE(chat.run({"chats", "recall"}) == 0);
+    CHECK(chat.out == "recall holds 0 chat summaries in " + index + "\n");
+}
+
+TEST_CASE("chats recall reads an index written before a summary had a field of its own",
+          "[chat][cli][recall][reads][json][compat]") {
+    // M31: a summary was stored only inside its indexed text, under its
+    // date-and-title prefix (26l). An index written then still reads, each
+    // summary taken from its prefix -- and nothing is migrated in place.
+    HelperChat chat{texts({"Noted."}), {"Title"}};
+    INFO(chat.err);
+    const std::filesystem::path index = apogee::harness::recall_index_path();
+    std::filesystem::create_directories(index.parent_path());
+    const std::string old_text =
+        "An earlier conversation (2026-10-01), \"Deploys: the plan\": We ship on Fridays: never "
+        "on Mondays.";
+    const std::string old_record =
+        R"({"chat_id":"20261001-090000-old1","title":"Deploys: the plan",)"
+        R"("updated_at":"2026-10-01T09:30:00Z"})";
+    {
+        // As 26l's `put` wrote them: the text, and the record beside it.
+        apogee::embedstore::Store store{index};
+        store.replace_source("20261001-090000-old1", {old_text}, {}, {old_record});
+        store.replace_source("20261002-090000-old2",
+                             {"An earlier conversation: Untitled, undated."}, {},
+                             {R"({"chat_id":"20261002-090000-old2","title":"","updated_at":""})"});
+    }
+    // And one written now, beside them.
+    std::string note;
+    REQUIRE(apogee::agentloop::RecallIndex{index, std::nullopt}.put(
+        {.chat_id = "20261003-100000-new1",
+         .title = "Fresh",
+         .updated_at = "2026-10-03T10:00:00Z",
+         .summary = "Uses Postgres 17."},
+        {}, note));
+
+    REQUIRE(chat.run({"chats", "recall", "--output-format", "json"}) == 0);
+    CHECK(nlohmann::json::parse(chat.out).at("data") == nlohmann::json::parse(R"([
+        {"chat": "20261003-100000-new1", "name": "Fresh", "updated": "2026-10-03T10:00:00Z",
+         "summary": "Uses Postgres 17."},
+        {"chat": "20261001-090000-old1", "name": "Deploys: the plan",
+         "updated": "2026-10-01T09:30:00Z", "summary": "We ship on Fridays: never on Mondays."},
+        {"chat": "20261002-090000-old2", "name": "", "updated": "",
+         "summary": "Untitled, undated."}
+    ])"));
+    REQUIRE(chat.run({"chats", "recall"}) == 0);
+    CHECK(chat.out == "recall holds 3 chat summaries in " + index.string() +
+                          "\n"
+                          "  20261003-100000-new1  2026-10-03T10:00:00Z  Fresh\n"
+                          "  20261001-090000-old1  2026-10-01T09:30:00Z  Deploys: the plan\n"
+                          "  20261002-090000-old2\n");
+
+    // Read, never rewritten: the older records are as they were written.
+    const apogee::embedstore::Store store{index};
+    const std::vector<apogee::embedstore::Chunk> old =
+        store.chunks_by_source("20261001-090000-old1");
+    REQUIRE(old.size() == 1);
+    CHECK(old.front().text == old_text);
+    CHECK(old.front().metadata == old_record);
+}
+
 // ---------------------------------------------------------------------------
 // Private stays private, and a title waits its turn (55a)
 // ---------------------------------------------------------------------------

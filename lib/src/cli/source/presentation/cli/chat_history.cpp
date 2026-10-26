@@ -108,6 +108,28 @@ nlohmann::json session_row_view(const logger::Session& session) {
                           {"backend", session.backend}, {"model", session.model}};
 }
 
+nlohmann::json session_info_view(const logger::Session& session) {
+    // `chats list`'s row (28h, 52a), then every fact `chats info`'s text says
+    // beside it (M31), typed: the backend empty where the text says
+    // `(default)`, a setting null where the text leaves its line out, and
+    // the schema's number where it says `legacy`.
+    nlohmann::json view = session_row_view(session);
+    view["object"] = "chat.info";
+    view["custom_name"] = session.custom_name;
+    view["title"] = session.title;
+    view["started"] = session.started_at;
+    view["messages"] = session.messages.size();
+    view["compactions"] = session.compactions;
+    view["temperature"] = session.params.temperature.has_value()
+                              ? nlohmann::json(*session.params.temperature)
+                              : nlohmann::json(nullptr);
+    view["max_tokens"] = session.params.max_tokens.has_value()
+                             ? nlohmann::json(*session.params.max_tokens)
+                             : nlohmann::json(nullptr);
+    view["schema_version"] = session.schema_version;
+    return view;
+}
+
 std::string format_session_row(const logger::Session& session) {
     std::ostringstream out;
     out << session.chat_id << "  " << session.updated_at << "  " << session.turns << " turns  "
@@ -352,14 +374,23 @@ void ChatsCommand::bind(CLI::App& root, const RootContext& context) {
     });
 
     auto info_name = std::make_shared<std::string>();
+    auto info_format = std::make_shared<ReadFormat>(ReadFormat::Text);
     CLI::App* info = cmd->add_subcommand("info", "Show one conversation's details");
     info->add_option("name", *info_name, "Chat id or name")->type_name(kChatValue)->required();
-    info->callback([info_name]() {
+    // M31: the details as one document, beside `list` and `show`.
+    add_read_format(info, info_format);
+    info->callback([info_name, info_format]() {
+        logger::Session session;
         try {
-            std::cout << format_session_info(logger::load(*info_name, {}).session);
+            session = logger::load(*info_name, {}).session;
         } catch (const std::exception& e) {
             fail(e.what());
         }
+        if (*info_format == ReadFormat::Json) {
+            write_document(std::cout, session_info_view(session));
+            return;
+        }
+        std::cout << format_session_info(session);
     });
 
     // `chats show` (M27): a saved chat's turns, read through the loader a
@@ -449,15 +480,23 @@ void ChatsCommand::bind(CLI::App& root, const RootContext& context) {
 
     // `chats recall` (52e): what recall holds, and with --forget every
     // chat's summary gone -- never a transcript -- shown first, asked at a
-    // terminal, --yes for scripts. CLI-only, as recall is (26l).
+    // terminal, --yes for scripts. CLI-only, as recall is (26l). Since M31
+    // the read lists the summaries themselves, and takes a JSON face.
     auto recall_forget = std::make_shared<bool>(false);
     auto recall_yes = std::make_shared<bool>(false);
+    auto recall_format = std::make_shared<ReadFormat>(ReadFormat::Text);
     CLI::App* recall = cmd->add_subcommand(
         "recall", "Show what recall holds of earlier chats, or forget it all with --forget");
     recall->add_flag("--forget", *recall_forget,
                      "Forget every chat's summary -- the transcripts stay");
     recall->add_flag("-y,--yes", *recall_yes, "With --forget: do not ask first (for scripts)");
-    recall->callback([recall_forget, recall_yes, &context]() {
+    add_read_format(recall, recall_format);
+    recall->callback([recall_forget, recall_yes, recall_format, &context]() {
+        if (*recall_forget && *recall_format == ReadFormat::Json) {
+            fail(
+                "--forget answers in text -- --output-format json reads what recall holds, "
+                "without --forget");
+        }
         const RecallHoldings held = recall_holdings();
         const std::string holds =
             std::to_string(held.summaries) + " chat summar" + (held.summaries == 1 ? "y" : "ies") +
@@ -468,7 +507,16 @@ void ChatsCommand::bind(CLI::App& root, const RootContext& context) {
             if (*recall_yes) {
                 fail("--yes answers --forget's question -- give --forget too");
             }
+            // The count line as it was, then the summaries it counts (M31).
+            const std::vector<agentloop::RecallEntry> summaries = recall_summaries();
+            if (*recall_format == ReadFormat::Json) {
+                write_document(std::cout, recall_view(held, summaries));
+                return;
+            }
             std::cout << "recall holds " << holds << "\n";
+            for (const agentloop::RecallEntry& summary : summaries) {
+                std::cout << recall_row(summary) << "\n";
+            }
             return;
         }
         if (held.summaries == 0 && held.pending == 0) {

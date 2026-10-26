@@ -9541,6 +9541,52 @@ The probe, run on two scripted mocks over a sandbox, showed both: `session` keys
 - No HTTP route for the new reads; they are `read_only` in the parity table, as the regimes are.
 - The macOS app adopts the reads and the pull's stream in a later GUI item.
 
+### 2026-10-26 — `prose-reads-gain-json` (maintenance item M31): prose reads gain JSON
+
+**Why.** The macOS app's 4i and 4k reached five reads that answered only in prose. The app ran them as commands and drew or cut their text, the fallback ADR 0006 tolerates. Each was reproduced on `apogee 0.2.0 (4b828e91)` before this item was written:
+- **`chats info <id>`** refused `--output-format json` (exit 109).
+- **`chats recall`** printed a count and a path, never the summaries, though 52e's record says the read shows them. JSON was refused.
+- **`graph dedupe [--dry-run]`** was text only, though its admin twin built the JSON.
+- **`knowledge info --raw` in JSON** silently dropped the raw conversation.
+- **`models status --suite`'s footprint** was text inside a field (M25's "not done", the design board's G10).
+
+- [x] **`chats info --output-format json`** through `add_read_format`: `chats list`'s row and every fact the text prints, typed (`object: "chat.info"`, its messages, turns, compactions, temperature and limits).
+- [x] **Recall's summaries listed.** `RecallIndex::entries()` enumerates the index, and `put` stores `summary` in the record.
+  - **The JSON:** `chats recall --output-format json` is `{data:[{chat, name, updated, summary}], object:"list", index, pending}`, newest first.
+  - **The text** keeps its count line, then one line per summary: id, date, name.
+  - **An older index** is only read, never migrated. An entry with no `summary` field has its date-and-title prefix rebuilt from its own record and removed. Where the record doesn't match the text, the whole text is the summary, never cut where the boundary can't be known.
+  - **Recall stays off `serve`:** the listing lives in `cli/chat_recall`.
+- [x] **`graph dedupe --output-format json`** prints the admin route's body byte for byte. The route's pass moved, unchanged, into `operations/graph_dedupe_pass` (`plan_graph_dedupe`, `run_graph_dedupe`, `graph_dedupe_document`), which both call. The text path still prints its "Code entities" line first.
+- [x] **`knowledge info --raw` in JSON** (`--output-format json` and `--json`) carries `raw`, or `null` when the archive can't be read, held to valid UTF-8. Text is byte-identical, the marker included.
+- [x] **The footprint, typed.** `models status --suite`'s JSON gains `footprint: {suite, members:[{backend, roles, bytes, known, local, shares, note}], margin_bytes, total_bytes, budget_bytes, verdict}` beside `fields`, whose text is unchanged. The members' bytes and the margin sum to `total_bytes` exactly. `verdict` is one of the CLI's five words.
+
+**Decisions made while building** (2026-10-26, each recorded for veto):
+- **The defaults, taken:**
+  - recall's listing as written, with `index` and `pending`, the rest of what the count line states;
+  - the footprint as written, with `role` made `roles` (a member can answer several) and `suite`, `local`, `shares`, `note` and `margin_bytes` added.
+- **`chats recall --forget` with JSON is refused,** since forgetting answers in text.
+- **A recalled name is the title the index recorded,** which an older entry may leave empty, as the `memory` event names it.
+- **Byte values are exact,** where the text rounds each part to MiB.
+
+**Verified.**
+- **14 new Catch2 cases,** and `read_documents_test`'s refusal case inverted:
+  - `chats info` (2) and the completion offering `--output-format` on each new reader;
+  - recall over a new index and one written before the field (2 in `chat_test`, 2 in `recall_test`);
+  - dedupe's CLI body equal to the admin route's at two thresholds and an idempotent re-run, and the route's own case;
+  - `knowledge info --raw`;
+  - the typed footprint (3);
+  - `footprint_test`'s arithmetic.
+
+  Eleven failed first. The rest need the new functions to compile, or pin arithmetic that already held.
+- **The sandbox probe** read an older entry written by the installed binary (07e26c6d), and its record stayed unmigrated.
+- **The full `apogee_tests`:** 3,975 cases, 3,974 passed, 1 skipped (`pdftotext`). `ctest -R '^(cli|harness)\.'`: 60 of 60, conformance and layering among them.
+- **Zero warnings,** the MinGW scan clean over 19 changed `.cpp` files, clang-format clean over 25.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 4,035 tests and the macOS app's 834 cases passed, with no warning.
+
+**Not done:**
+- No HTTP routes for `chats info`, the recall listing or the typed footprint: recall stays off `serve` by rule, and the others are read-only in the parity table.
+- The macOS app adopts these reads in a later GUI item.
+
 ---
 
 ## Milestone AP — Runtime adapters

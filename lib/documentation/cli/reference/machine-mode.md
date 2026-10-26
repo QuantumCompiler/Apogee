@@ -1191,6 +1191,23 @@ entities `shared` by several), `decisions` and `orphans` (each a `total` and the
 `shown` ten), and `human_summary` — one paragraph of the same facts. `--out <file>`
 writes the document there instead.
 
+Since M31 `graph dedupe` answers with its control-plane twin's document --
+a pass, not a read, so it merges unless `--dry-run` is given -- with the same
+selection:
+
+```bash
+apogee graph dedupe <name> [--dry-run] [--threshold T] --output-format json   # {"groups":[…],"merged_nodes",…}
+```
+
+It is byte for byte the body `POST /v1/admin/graph/{id}/dedupe` serves, from
+the one pass both run: `groups` (each `kept`, `kept_type` and the `merged`
+names), `merged_nodes`, `threshold`, `dry_run`, `code_entities` and
+`code_identity_merges`, and `prose_skipped` when the vector pass had nothing
+to compare; the shape is in
+[http-api.md](http-api.md#post-v1admingraphiddedupe). A threshold outside
+`(0, 1]`, or a graph not built, exits `1` with the message on stderr and
+nothing on stdout. The text says the same groups as before.
+
 Since 27q the symphonies — named, staged prompt processes over a suite's
 members — read the same way, and a play prints one document too:
 
@@ -1224,6 +1241,8 @@ apogee models list --output-format json     # {"object":"list","data":[…],"fol
 apogee models info <backend> --output-format json    # {"name":…,"fields":[{"field":"backend","value":…},…]}
 apogee models status --output-format json            # {"fields":[{"field":"chat","value":…},…]}
 apogee chats list --output-format json      # {"object":"list","data":[{"id","updated","turns","name","backend","model"},…]}
+apogee chats info <id|name> --output-format json     # {"object":"chat.info","id",…,"messages","compactions",…}
+apogee chats recall --output-format json    # {"object":"list","data":[{"chat","name","updated","summary"},…],"index","pending"}
 apogee agents list --output-format json     # byte for byte GET /v1/admin/agents
 apogee mcp list --output-format json        # GET /v1/admin/mcp-servers's entries, with what connecting found
 apogee mcp presets --output-format json     # {"object":"list","data":[{"name","description","provides","registers_into_apogee","command","args","runnable",…}]}
@@ -1392,10 +1411,53 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
   said made, by handle, where an MLX video model converted from the set (its
   record's `ref` naming the set, its `transform` mlx-video's converter) stands
   in the store (M24). A backend's document has no `data`.
+  Since M31, with a suite active, `models status` adds a typed
+  **`footprint`** beside the unchanged `fields` -- whose `footprint` field
+  keeps its text, word for word -- from the same reading: `suite`;
+  `members`, one per backend the suite puts to use, in role order, each
+  `backend`, `roles`, `local` (whether its memory is on this machine),
+  `bytes` (what the total counts of it: its whole figure -- weights, unless
+  it `shares` another member's base, then cache, adapters and its drafter --
+  when `known`, else only what is known of it, its drafter's weights, or `0`;
+  `0` for a member holding nothing here), `known`, `shares` (the member
+  whose loaded base it runs on, `""` for its own) and `note` (the reason the
+  text gives in place of a figure -- why its size is unknown, or a backend
+  configured nowhere -- `""` when it gives none); `total_bytes`, the members' `bytes`
+  and the `margin_bytes` held back once for the set (`0` both when nothing is
+  held here); `budget_bytes`, the machine's memory for models, `null` when it
+  is not known or not asked; and `verdict`, one of `fits`, `fits as far as
+  known`, `does not fit`, `budget not known here` and `no member holds
+  memory`. The bytes are exact, where the text rounds each part to MiB. With
+  no suite active there is no `footprint`.
 - **`chats list`**: newest first, each conversation's `id`, `updated`, `turns`
   and `name`, and since 52a the `backend` it runs on and the roster `model` it
   pinned there with `-m` or `/model` — empty when it runs on the backend's own
   model — as its session file records them.
+- **`chats info`** (since M31): one conversation's details, `object`
+  `chat.info` -- `chats list`'s row (`id`, `updated`, `turns`, `name`,
+  `backend`, `model`), then what the text says beside it: `custom_name` (the
+  name `chats title` or `/title` gave it, `""` for none), `title` (its
+  generated title), `started`, `messages` (how many its history holds),
+  `compactions`, `temperature` and `max_tokens` (`null` where unset, the lines
+  the text leaves out) and `schema_version` (`0` for a file written before
+  the schema existed, the text's `legacy`). `backend` is `""` where the text
+  says `(default)`. A name no chat answers is refused as the text refuses it:
+  `apogee chats: no chat named '<name>'` on stderr, exit `1`, nothing on
+  stdout.
+- **`chats recall`** (since M31): the summaries recall holds of earlier
+  chats, newest first by `updated` (undated last) -- each `chat` (the id
+  `chats show` and `--resume` take), the `name` and `updated` time the index
+  recorded when it summarised the chat (what the `memory` event names it by,
+  so a later rename shows once the chat is summarised again), and `summary`,
+  whole: the text the model is handed under its date-and-title line. `index`
+  and `pending` are the count line's other facts -- the index's path, and how
+  many chats are marked due a summary. `data` is `[]`, never null, when recall
+  holds none. An index an older Apogee wrote reads as it is: each summary is
+  taken from its indexed text, nothing migrated. The text keeps its count
+  line (`recall holds 2 chat summaries in …`), then a line per summary: its
+  chat, date and name. `--forget` answers in text, and is refused with
+  `--output-format json`. Recall is the command line's alone (26l): no route
+  serves it.
 - **`agents list`** is exactly the body `GET /v1/admin/agents` serves; **`mcp
   list`** each server as `GET /v1/admin/mcp-servers` serves it — `name`,
   `command`, `args`, `enabled`, `env_set` (never the environment itself) — plus
@@ -1440,7 +1502,12 @@ apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: 
 - **`knowledge list`** and **`knowledge info`** (since 37c): the records the
   human list counts, newest first and kept to `--status`/`--discipline` as it
   is, each record the object `--json` prints (which stays, a bare array for
-  `list`); `db` names the collection read.
+  `list`); `db` names the collection read. Since M31 `knowledge info --raw`
+  carries `raw` beside the record, under `--output-format json` and `--json`
+  alike: the archived conversation, or `null` where the archive cannot be
+  read (the text's `Raw conversation: (unavailable)`); without `--raw` there
+  is none. The text is unchanged -- the conversation after its `-- Raw
+  conversation --` line.
 - **`embed list`** and **`embed info`** (since 37c): each collection's `name`,
   `chunks` and `sources` count, or the `error` that kept it from being read;
   one collection's `path`, `schema`, `chunks`, `vectors` (`chunks`,

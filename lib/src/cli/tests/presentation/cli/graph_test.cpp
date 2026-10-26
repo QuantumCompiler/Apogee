@@ -19,6 +19,9 @@
 #include "contracts/config.h"
 #include "embedstore/store.h"
 #include "harness/harness.h"
+#include "httpserver/admin_config.h"
+#include "httpserver/admin_graph.h"
+#include "httpserver/http_types.h"
 #include "support/env_guard.h"
 
 /// `apogee graph` on the scripted mock as the extractor: a build over an
@@ -559,6 +562,81 @@ TEST_CASE("graph dedupe previews with --dry-run, merges on request, and is idemp
     CHECK(fixture.store().find_nodes("Atlas").front().mention_count == 3);
     REQUIRE(fixture.run({"graph", "dedupe", "notes"}, &out, &err) == 0);
     CHECK(out.find("nothing to merge") != std::string::npos);
+}
+
+TEST_CASE("graph dedupe --output-format json prints the admin route's body, byte for byte",
+          "[commands][graph][dedupe][reads][json][parity]") {
+    // M31: the verb answered in prose alone, and with --output-format json
+    // exited 109, while its admin twin built the very facts as JSON.
+    const Fixture fixture;
+    fixture.ingest();
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"graph", "build", "notes"}, &out, &err) == 0);
+    const apogee::httpserver::AdminConfigContext context{.config_path = fixture.config_path};
+    const auto admin = [&context](const nlohmann::json& body) {
+        apogee::httpserver::HttpRequest request;
+        request.method = "POST";
+        request.body = body.dump();
+        request.remote_address = "127.0.0.1";
+        const apogee::httpserver::HttpResponse response =
+            apogee::httpserver::admin_dedupe_graph(context, "notes", request);
+        REQUIRE(response.status == 200);
+        return response.body + "\n";
+    };
+    const auto cli = [&fixture](std::vector<std::string> args) {
+        std::string printed;
+        std::string said;
+        args.insert(args.begin(), {"graph", "dedupe", "notes"});
+        args.insert(args.end(), {"--output-format", "json"});
+        const int code = fixture.run(args, &printed, &said);
+        INFO(said);
+        REQUIRE(code == 0);
+        CHECK(said.empty());
+        return printed;
+    };
+
+    // No vectors: the vector pass skipped, and said, on both.
+    const std::string skipped = cli({"--dry-run"});
+    CHECK(skipped == admin({{"dry_run", true}}));
+    CHECK(nlohmann::json::parse(skipped).contains("prose_skipped"));
+
+    {
+        Store store = fixture.store();
+        const std::int64_t atlas = store.find_nodes("Atlas").front().id;
+        const std::int64_t vault = store.find_nodes("Vault").front().id;
+        store.update_node_embedding(atlas, {1.0F, 0.0F, 0.0F});
+        store.update_node_embedding(vault, {0.0F, 1.0F, 0.0F});
+        const std::int64_t twin = store.upsert_node("Atlas Prime", "system", "").id;
+        store.update_node_embedding(twin, {0.99F, 0.1F, 0.0F});
+    }
+    // The dry run, at the default threshold and at one given.
+    const std::string preview = cli({"--dry-run"});
+    CHECK(preview == admin({{"dry_run", true}}));
+    CHECK(cli({"--dry-run", "--threshold", "0.9"}) ==
+          admin({{"dry_run", true}, {"threshold", 0.9}}));
+    CHECK(nlohmann::json::parse(preview) == nlohmann::json::parse(R"({
+        "groups": [{"kept": "Atlas", "kept_type": "system", "merged": ["Atlas Prime"]}],
+        "merged_nodes": 1, "threshold": 0.92, "dry_run": true,
+        "code_entities": 0, "code_identity_merges": 0})"));
+    CHECK(fixture.store().find_nodes("Atlas Prime").size() == 1);
+
+    // The merge: what the preview said, done -- and then nothing left, on both.
+    nlohmann::json merged = nlohmann::json::parse(cli({}));
+    CHECK(merged.at("dry_run") == false);
+    merged["dry_run"] = true;
+    CHECK(merged == nlohmann::json::parse(preview));
+    CHECK(fixture.store().find_nodes("Atlas Prime").empty());
+    const std::string again = cli({});
+    CHECK(again == admin(nlohmann::json::object()));
+    CHECK(nlohmann::json::parse(again).at("merged_nodes") == 0);
+
+    // A refusal prints no document: the threshold, and an unbuilt graph.
+    CHECK(fixture.run({"graph", "dedupe", "notes", "--threshold", "0", "--output-format", "json"},
+                      &out, &err) == 1);
+    CHECK(out.empty());
+    CHECK(fixture.run({"graph", "dedupe", "nowhere", "--output-format", "json"}, &out, &err) != 0);
+    CHECK(out.empty());
 }
 
 TEST_CASE(

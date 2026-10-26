@@ -2,7 +2,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <exception>
+#include <optional>
 #include <system_error>
 #include <utility>
 
@@ -53,6 +55,40 @@ constexpr std::int64_t kSummaryTokens = 320;
 void make_private(const fs::path& path, fs::perms mode) {
     std::error_code code;
     fs::permissions(path, mode, fs::perm_options::replace, code);
+}
+
+/// A chat's indexed chunk as the entry it was put as. Its record names the
+/// title and date; the summary is the record's own field since M31, and
+/// before it -- an older index, read as it is -- the text after the prefix
+/// the record rebuilds. A record that does not rebuild the text's prefix, or
+/// no record at all, leaves the text whole: never cut where it cannot be
+/// told.
+[[nodiscard]] RecallEntry indexed_entry(const embedstore::Chunk& chunk) {
+    RecallEntry entry{
+        .chat_id = chunk.source, .title = {}, .updated_at = {}, .summary = chunk.text};
+    const nlohmann::json record = nlohmann::json::parse(chunk.metadata, nullptr, false);
+    if (!record.is_object()) {
+        return entry;
+    }
+    const auto text = [&record](std::string_view key) -> std::optional<std::string> {
+        const auto found = record.find(key);
+        if (found == record.end() || !found->is_string()) {
+            return std::nullopt;
+        }
+        return found->get<std::string>();
+    };
+    entry.title = text("title").value_or("");
+    entry.updated_at = text("updated_at").value_or("");
+    if (std::optional<std::string> summary = text("summary")) {
+        entry.summary = std::move(*summary);
+        return entry;
+    }
+    const std::string prefix = recall_chunk(RecallEntry{
+        .chat_id = entry.chat_id, .title = entry.title, .updated_at = entry.updated_at});
+    if (chunk.text.starts_with(prefix)) {
+        entry.summary = chunk.text.substr(prefix.size());
+    }
+    return entry;
 }
 
 }  // namespace
@@ -180,8 +216,12 @@ bool RecallIndex::put(const RecallEntry& entry, const harness::CancellationToken
             store.set_embedding_model(embedder_.value().model,
                                       static_cast<std::int64_t>(vectors.front().size()));
         }
-        const nlohmann::json metadata{
-            {"chat_id", entry.chat_id}, {"title", entry.title}, {"updated_at", entry.updated_at}};
+        // The summary rides the record whole (M31), so a listing reads it
+        // without cutting the indexed text.
+        const nlohmann::json metadata{{"chat_id", entry.chat_id},
+                                      {"title", entry.title},
+                                      {"updated_at", entry.updated_at},
+                                      {"summary", entry.summary}};
         store.replace_source(entry.chat_id, {text}, vectors, {metadata.dump()});
         for (const std::string_view suffix : {"", "-wal", "-shm"}) {
             const fs::path file = store_path_.string() + std::string{suffix};
@@ -240,6 +280,39 @@ std::size_t RecallIndex::chats() const {
     } catch (const std::exception&) {
         return 0;
     }
+}
+
+std::vector<RecallEntry> RecallIndex::entries() const {
+    std::vector<RecallEntry> out;
+    std::error_code code;
+    if (!fs::exists(store_path_, code)) {
+        return out;
+    }
+    try {
+        // A source per chat, as `chats` counts them, so the listing and the
+        // count agree.
+        const embedstore::Store store{store_path_};
+        for (const std::string& source : store.sources()) {
+            const std::vector<embedstore::Chunk> chunks = store.chunks_by_source(source);
+            if (!chunks.empty()) {
+                out.push_back(indexed_entry(chunks.front()));
+            }
+        }
+    } catch (const std::exception&) {
+        // An index that cannot be read holds nothing to list.
+        return {};
+    }
+    // ISO 8601 dates order as text.
+    std::ranges::sort(out, [](const RecallEntry& a, const RecallEntry& b) {
+        if (a.updated_at != b.updated_at) {
+            if (a.updated_at.empty() || b.updated_at.empty()) {
+                return b.updated_at.empty();
+            }
+            return a.updated_at > b.updated_at;
+        }
+        return a.chat_id < b.chat_id;
+    });
+    return out;
 }
 
 }  // namespace apogee::agentloop

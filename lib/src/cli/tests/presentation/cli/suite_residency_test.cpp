@@ -300,6 +300,90 @@ TEST_CASE("a member's drafter is said on its line and added to the sum, its base
           "  root (chat): 3830 MiB -- 1926 MiB of weights, 1904 MiB of q8_0 cache at 32768 tokens");
 }
 
+TEST_CASE("the footprint as data: each member's bytes and whether known, the sum, the verdict",
+          "[commands][suites][residency][json]") {
+    // M31: the typed twin of `footprint_lines`, read off the same footprint
+    // -- exact bytes where the text rounds to MiB.
+    using apogee::commands::footprint_document;
+    const nlohmann::json fits = footprint_document(research(96 * kGiB));
+    CHECK(fits == nlohmann::json{
+                      {"suite", "research"},
+                      {"members", nlohmann::json::array(
+                                      {{{"backend", "root"},
+                                        {"roles", nlohmann::json::array({"chat"})},
+                                        {"local", true},
+                                        {"bytes", (1926 + 1904) * kMiB},
+                                        {"known", true},
+                                        {"shares", ""},
+                                        {"note", ""}},
+                                       {{"backend", "helper"},
+                                        {"roles", nlohmann::json::array({"embedding", "utility"})},
+                                        {"local", true},
+                                        {"bytes", (770 + 68) * kMiB},
+                                        {"known", true},
+                                        {"shares", ""},
+                                        {"note", ""}},
+                                       {{"backend", "claude"},
+                                        {"roles", nlohmann::json::array({"vision"})},
+                                        {"local", false},
+                                        {"bytes", 0},
+                                        {"known", true},
+                                        {"shares", ""},
+                                        {"note", ""}}})},
+                      {"total_bytes", (1926 + 1904 + 770 + 68) * kMiB + kGiB},
+                      {"margin_bytes", kGiB},
+                      {"budget_bytes", 96 * kGiB},
+                      {"verdict", "fits"}});
+    // The members' bytes and the margin are the total, always.
+    std::int64_t sum = fits.at("margin_bytes").get<std::int64_t>();
+    for (const nlohmann::json& member : fits.at("members")) {
+        sum += member.at("bytes").get<std::int64_t>();
+    }
+    CHECK(sum == fits.at("total_bytes").get<std::int64_t>());
+
+    // Each verdict, in the words the admission line ends with.
+    CHECK(footprint_document(research(4 * kGiB)).at("verdict") == "does not fit");
+    const nlohmann::json budgetless = footprint_document(research(std::nullopt));
+    CHECK(budgetless.at("verdict") == "budget not known here");
+    CHECK(budgetless.at("budget_bytes").is_null());
+    SuiteFootprint unknown = research(96 * kGiB);
+    MemberFootprint e4b;
+    e4b.backend = "e4b";
+    e4b.roles = {"vision"};
+    e4b.local = true;
+    e4b.unknown = "an MLX model's footprint is not stated yet";
+    e4b.drafter = "/models/drafter";
+    e4b.drafter_bytes = 300 * kMiB;
+    unknown.members.push_back(e4b);
+    const nlohmann::json partial = footprint_document(unknown);
+    CHECK(partial.at("verdict") == "fits as far as known");
+    // An unknown member counts what is known of it -- its drafter (M25) --
+    // and says why the rest is not.
+    const nlohmann::json& counted = partial.at("members").back();
+    CHECK(counted.at("known") == false);
+    CHECK(counted.at("bytes") == 300 * kMiB);
+    CHECK(counted.at("note") == "an MLX model's footprint is not stated yet");
+    CHECK(partial.at("total_bytes") == (1926 + 1904 + 770 + 68 + 300) * kMiB + kGiB);
+    // A member on another's base counts its own cache and adapters alone.
+    SuiteFootprint shared = research(96 * kGiB);
+    shared.members[1].shares = "root";
+    shared.members[1].weights = 1926 * kMiB;
+    CHECK(footprint_document(shared).at("members")[1].at("bytes") == 68 * kMiB);
+    CHECK(footprint_document(shared).at("members")[1].at("shares") == "root");
+    // Nothing held here: no margin, no machine asked.
+    SuiteFootprint cloud;
+    cloud.suite = "fast";
+    MemberFootprint remote;
+    remote.backend = "claude";
+    remote.roles = {"chat"};
+    cloud.members.push_back(remote);
+    const nlohmann::json nothing = footprint_document(cloud);
+    CHECK(nothing.at("verdict") == "no member holds memory");
+    CHECK(nothing.at("total_bytes") == 0);
+    CHECK(nothing.at("margin_bytes") == 0);
+    CHECK(nothing.at("budget_bytes").is_null());
+}
+
 TEST_CASE("/suite's argument: a suite, then --force and --warm", "[commands][suites][residency]") {
     using apogee::commands::parse_suite_argument;
     const apogee::commands::SuiteArgument plain = parse_suite_argument("research");
@@ -730,4 +814,77 @@ TEST_CASE("models status prices the active suite against the machine",
                       "cache at 32768 tokens\n"
                       "  total: suite roomy needs 2338 MiB of this machine's 65536 MiB: small "
                       "1314 + 1024 margin -- fits\n") != std::string::npos);
+}
+
+TEST_CASE("models status --suite in JSON carries the footprint typed, beside its field unchanged",
+          "[commands][suites][residency][reads][json]") {
+    // M31: the footprint reached a host only as text inside a field --
+    // `{"field":"footprint","value":"suite roomy\nsmall (extraction): ..."}`
+    // -- its indentation stripped. The field stays, word for word: the app
+    // reads it.
+    AdmissionChat chat;
+    const auto run = [&chat](const std::vector<std::string>& args) {
+        std::ostringstream captured_out;
+        std::ostringstream captured_err;
+        std::streambuf* old_out = std::cout.rdbuf(captured_out.rdbuf());
+        std::streambuf* old_err = std::cerr.rdbuf(captured_err.rdbuf());
+        apogee::commands::RootCommand root{apogee::commands::default_registry()};
+        const std::string path = chat.config_path.string();
+        std::vector<const char*> argv{"apogee", "--config", path.c_str()};
+        for (const std::string& arg : args) {
+            argv.push_back(arg.c_str());
+        }
+        const int code = root.run(static_cast<int>(argv.size()), argv.data());
+        std::cout.rdbuf(old_out);
+        std::cerr.rdbuf(old_err);
+        chat.out = captured_out.str();
+        chat.err = captured_err.str();
+        return code;
+    };
+    REQUIRE(run({"models", "status", "--suite", "roomy", "--output-format", "json"}) == 0);
+    INFO(chat.out << chat.err);
+    const nlohmann::json status = nlohmann::json::parse(chat.out);
+    REQUIRE(status.contains("footprint"));
+    const nlohmann::json& footprint = status.at("footprint");
+
+    // The field, as the record the text makes reads it.
+    REQUIRE(run({"models", "status", "--suite", "roomy"}) == 0);
+    CHECK(status.at("fields") == apogee::commands::render_record_document(chat.out).at("fields"));
+
+    // Typed: each member's bytes and whether they are known, the sum with
+    // the margin, the machine's budget and the verdict in the CLI's words.
+    apogee::harness::Config config = apogee::harness::load_config(chat.config_path);
+    const SuiteFootprint priced = apogee::models::suite_footprint(config, "roomy", {});
+    REQUIRE(priced.members.size() == 2);
+    CHECK(footprint.at("suite") == "roomy");
+    CHECK(footprint.at("members") ==
+          nlohmann::json::array({{{"backend", "root"},
+                                  {"roles", nlohmann::json::array({"chat"})},
+                                  {"local", false},
+                                  {"bytes", 0},
+                                  {"known", true},
+                                  {"shares", ""},
+                                  {"note", ""}},
+                                 {{"backend", "small"},
+                                  {"roles", nlohmann::json::array({"extraction"})},
+                                  {"local", true},
+                                  {"bytes", *priced.members[1].bytes()},
+                                  {"known", true},
+                                  {"shares", ""},
+                                  {"note", ""}}}));
+    CHECK(footprint.at("margin_bytes") == apogee::models::kFitMargin);
+    CHECK(footprint.at("total_bytes") == *priced.members[1].bytes() + apogee::models::kFitMargin);
+    // This machine's budget is whatever it reports; the verdict follows it.
+    if (footprint.at("budget_bytes").is_null()) {
+        CHECK(footprint.at("verdict") == "budget not known here");
+    } else {
+        CHECK(footprint.at("verdict") == (footprint.at("total_bytes").get<std::int64_t>() <=
+                                                  footprint.at("budget_bytes").get<std::int64_t>()
+                                              ? "fits"
+                                              : "does not fit"));
+    }
+
+    // With no suite, no footprint: absent, the record as before.
+    REQUIRE(run({"models", "status", "--suite", "off", "--output-format", "json"}) == 0);
+    CHECK_FALSE(nlohmann::json::parse(chat.out).contains("footprint"));
 }

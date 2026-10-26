@@ -1,6 +1,7 @@
 #include "cli/models.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -1294,6 +1295,52 @@ TEST_CASE("status with a suite active names the suite rung where it answered",
     // Matched as names are, and spelled as the file spells it afterwards.
     CHECK(apogee::commands::select_suite(config, "RESEARCH").empty());
     CHECK(config.models.default_suite == "research");
+}
+
+TEST_CASE("status's document under a suite carries its footprint typed, its fields unchanged",
+          "[commands][models][roles][suites][json]") {
+    // M31: the footprint reached a host as prose inside a field; the field
+    // stays word for word -- the macOS app reads it -- and the same reading
+    // rides beside it as data.
+    Config config = status_config();
+    const auto budget = [] {
+        return apogee::models::MachineBudget{.bytes = std::int64_t{1} << 36};
+    };
+    // No suite: the record as it was, nothing beside it.
+    const nlohmann::json plain = apogee::commands::role_status_document(config, {}, budget);
+    CHECK(plain ==
+          apogee::commands::render_record_document(render_role_status(config, {}, budget)));
+    CHECK_FALSE(plain.contains("footprint"));
+
+    config.models.default_suite = "research";
+    const nlohmann::json document = apogee::commands::role_status_document(config, {}, budget);
+    CHECK(document.at("fields") ==
+          apogee::commands::render_record_document(render_role_status(config, {}, budget))
+              .at("fields"));
+    // The field, as 4i reads it: the footprint's lines, indentation off.
+    const nlohmann::json& fields = document.at("fields");
+    const auto footprint_field = std::ranges::find_if(
+        fields, [](const nlohmann::json& field) { return field.at("field") == "footprint"; });
+    REQUIRE(footprint_field != fields.end());
+    CHECK(footprint_field->at("value") ==
+          "suite research\n"
+          "root (chat): nothing held here\n"
+          "embedder (embedding): nothing held here\n"
+          "helper (utility): nothing held here\n"
+          "total: suite research: no member holds memory on this machine");
+    // Typed: the mocks hold nothing here, so nothing is needed or asked.
+    CHECK(document.at("footprint") == nlohmann::json::parse(R"({
+        "suite": "research",
+        "members": [
+            {"backend": "root", "roles": ["chat"], "local": false, "bytes": 0, "known": true,
+             "shares": "", "note": ""},
+            {"backend": "embedder", "roles": ["embedding"], "local": false, "bytes": 0,
+             "known": true, "shares": "", "note": ""},
+            {"backend": "helper", "roles": ["utility"], "local": false, "bytes": 0,
+             "known": true, "shares": "", "note": ""}
+        ],
+        "total_bytes": 0, "margin_bytes": 0, "budget_bytes": null,
+        "verdict": "no member holds memory"})"));
 }
 
 // --- 28c: provider rows' STATE and VERIFIED -----------------------------------
