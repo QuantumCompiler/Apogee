@@ -1,0 +1,10 @@
+{"protocol_version":1,"schema":"2026-10-25","type":"job","verb":"video compose"}
+{"text":"planning the scenes with planner","type":"notice"}
+{"text":"plan: \"Tides\" -- 2 scenes, about 5.5 s of video","type":"notice"}
+{"text":"  1. (3.0 s) \"The sea breathes.\"","type":"notice"}
+{"text":"     shows: a shore at dawn","type":"notice"}
+{"text":"  2. (3.0 s) \"Twice a day.\"","type":"notice"}
+{"text":"     shows: the moon over water","type":"notice"}
+{"text":"spend: 2 narration runs (faster than real time), then 2 clip runs at 1280x704, 50 steps -- each takes minutes on Apple silicon, less on a CUDA GPU","type":"notice"}
+{"text":"captions: burned into the frames","type":"notice"}
+{"document":{"assembly":null,"brief":"the tides, twice a day","captions":null,"created":"2026-10-26T04:34:12Z","edits":[],"error":null,"object":"video.project","output":"/Users/someone/Movies/Apogee/tides.mp4","parent":null,"plan":{"attempts":1,"backend":"planner"},"platform":"macos-arm64","scenes":[{"asset":null,"clip":null,"index":1,"narration":"The sea breathes.","seconds":3.0,"seed":2003882887,"visual":"a shore at dawn","voice":null},{"asset":null,"clip":null,"index":2,"narration":"Twice a day.","seconds":3.0,"seed":685754606,"visual":"the moon over water","voice":null}],"scenes_dir":"/Users/someone/Movies/Apogee/tides.scenes","settings":{"assets":null,"captions":true,"crossfade":0.5,"model":"org--clip/pipeline/aaaaaaaaaaaa","music":null,"voice":"af_heart","voice_model":"hexgrad--Kokoro-82M/voice/cccccccccccc"},"status":"planned","title":"Tides","version":1},"type":"document"}

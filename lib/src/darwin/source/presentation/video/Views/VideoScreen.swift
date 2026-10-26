@@ -36,14 +36,37 @@ public struct VideoScreen<Compositions: View>: View {
         }
         .sheet(isPresented: $model.sheetOpen) { ClipSheet(model: model) }
         .sheet(item: Binding(get: { model.consent.map(ConsentItem.init) }, set: { if $0 == nil && model.consent != nil { model.decline() } })) { item in
-            ConsentSheet(consent: item.consent, install: model.install, decline: model.decline)
+            InstallConsentSheet(
+                set: item.consent.set, said: item.consent.said, command: item.consent.command, install: model.install,
+                decline: model.decline)
         }
     }
 }
 
 struct ConsentItem: Identifiable {
-    let consent: VideoViewModel.Consent
-    var id: String { consent.arguments.joined(separator: " ") }
+    let consent: InstallConsent
+    var id: String { consent.command }
+}
+
+/// The install the person said yes to, as styles' card draws one: its line
+/// and Stop while it runs, how it ended and Dismiss after (GUI 4f).
+@MainActor
+func installCard(_ install: RuntimeInstall, of model: VideoViewModel) -> some View {
+    InstallCard(
+        headline: install.headline, command: install.command, state: InstallCardState.of(install.phase), detail: install.detail,
+        stop: { Task { await model.stop() } }, dismiss: model.dismissInstall)
+}
+
+/// An install's phase as the card draws it.
+enum InstallCardState {
+    static func of(_ phase: RuntimeInstall.Phase) -> InstallCard.State {
+        switch phase {
+        case .running: .running
+        case .installed: .installed
+        case .stopped: .stopped
+        case .failed: .failed
+        }
+    }
 }
 
 /// The clips list, and the selected clip's page.
@@ -56,6 +79,9 @@ struct ClipsView: View {
             VStack(spacing: 0) {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 1) {
+                        if let install = model.installing {
+                            installCard(install, of: model)
+                        }
                         if let run = model.run {
                             RunRow(model: model, run: run)
                         }
@@ -80,7 +106,7 @@ struct ClipsView: View {
                             }
                             .buttonStyle(.plain)
                         }
-                        if model.clips.isEmpty && model.run == nil {
+                        if model.clips.isEmpty && model.run == nil && model.installing == nil {
                             Text("No clips yet. A clip is made from a prompt or a seed image, with its record beside it in ~/Movies/Apogee.")
                                 .font(.apogeeSmall)
                                 .foregroundStyle(Palette.textTertiary)
@@ -312,7 +338,7 @@ struct ClipSheet: View {
                 Button("Cancel", role: .cancel) { model.sheetOpen = false }.keyboardShortcut(.cancelAction)
                 Button("Generate") { model.generate() }
                     .keyboardShortcut(.return, modifiers: .command)
-                    .disabled(model.plannedArguments == nil)
+                    .disabled(model.plannedArguments == nil || model.isInstalling)
             }
         }
         .padding(Spacing.xl)
@@ -341,31 +367,6 @@ struct ClipSheet: View {
     }
 }
 
-/// The one-time install: what it is, in the CLI's words, and the command.
-struct ConsentSheet: View {
-    let consent: VideoViewModel.Consent
-    let install: () -> Void
-    let decline: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.m) {
-            Text("Install what video needs?").font(.apogeeHeading)
-            Text(consent.said).font(.apogeeBody).foregroundStyle(Palette.textSecondary).textSelection(.enabled)
-            Text("This downloads and installs Python packages into Apogee's own environment, once. Nothing is installed unless you say yes.")
-                .font(.apogeeSmall)
-                .foregroundStyle(Palette.textSecondary)
-            Text((["apogee"] + consent.arguments).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary)
-            HStack {
-                Spacer()
-                Button("Not now", role: .cancel, action: decline).keyboardShortcut(.cancelAction)
-                Button("Install", action: install).keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(Spacing.xl)
-        .frame(width: 580)
-    }
-}
-
 #if DEBUG
 #Preview("Clips: a final, made from its draft") {
     VideoScreen(model: VideoPreview.library("screen-read", selecting: "lighthouse.mp4")) {
@@ -389,10 +390,12 @@ struct ConsentSheet: View {
 }
 
 #Preview("Refused for its runtime: asking to install") {
-    VideoScreen(model: VideoPreview.generating("screen-refused", starter: VideoPreview.refused)) {
+    let model = VideoPreview.library("screen-refused", starter: VideoPreview.runs([VideoPreview.refusedRun]))
+    VideoScreen(model: model) {
         Text("The compositions").font(.apogeeSmall).padding(Spacing.m)
     }
     .frame(width: 1100, height: 600)
+    .task { await VideoPreview.refuse(model) }
 }
 
 #Preview("Clips beside a clip's page, a record whose clip is gone") {
@@ -419,10 +422,7 @@ struct ConsentSheet: View {
 }
 
 #Preview("A run failed, in the CLI's words") {
-    RunRow(
-        model: VideoPreview.library("run-failed"),
-        run: VideoPreview.progress([.event(.error(VideoPreview.refusal)), VideoPreview.ended(1)])
-    )
+    RunRow(model: VideoPreview.library("run-failed"), run: VideoPreview.progress(VideoPreview.refusedRun.updates))
     .frame(width: 264)
     .padding(Spacing.s)
 }
@@ -528,9 +528,24 @@ struct ConsentSheet: View {
     }
 }
 
-#Preview("Install what video needs") {
-    ConsentSheet(
-        consent: VideoViewModel.Consent(arguments: VideoViewModel.installCommand(in: VideoPreview.refusal) ?? [], said: VideoPreview.refusal),
-        install: {}, decline: {})
+#Preview("Installing the video set, Stop beside it") {
+    let model = VideoPreview.library("install-running", starter: VideoPreview.runs([VideoPreview.refusedRun, VideoPreview.installRunning]))
+    ClipsView(model: model)
+        .frame(width: 1000, height: 480)
+        .task { await VideoPreview.install(model) }
+}
+
+#Preview("The install failed, in the CLI's words") {
+    let model = VideoPreview.library("install-failed", starter: VideoPreview.runs([VideoPreview.refusedRun, VideoPreview.installFailed]))
+    ClipsView(model: model)
+        .frame(width: 1000, height: 480)
+        .task { await VideoPreview.install(model) }
+}
+
+#Preview("Installed, the refused clip made again") {
+    let model = VideoPreview.library("install-done", starter: VideoPreview.runs([VideoPreview.refusedRun, VideoPreview.installDone]))
+    ClipsView(model: model)
+        .frame(width: 1000, height: 480)
+        .task { await VideoPreview.install(model) }
 }
 #endif

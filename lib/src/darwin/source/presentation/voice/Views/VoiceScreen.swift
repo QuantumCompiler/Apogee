@@ -25,6 +25,9 @@ public struct VoiceScreen: View {
                 VStack(spacing: 0) {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 1) {
+                            if let install = model.installing {
+                                installCard(install, of: model)
+                            }
                             if let run = model.run {
                                 HStack {
                                     Text(run.status == .running ? (run.segment.map { "Segment \($0.done) of \($0.of)" } ?? "Speaking") : Self.status(run))
@@ -57,11 +60,17 @@ public struct VoiceScreen: View {
                                 }
                                 .buttonStyle(.plain)
                             }
-                            if model.speeches.isEmpty && model.run == nil {
+                            if model.speeches.isEmpty && model.run == nil && model.installing == nil {
                                 Text("No speeches yet. Text is spoken into a WAV, its record beside it in ~/Music/Apogee.")
                                     .font(.apogeeSmall)
                                     .foregroundStyle(Palette.textTertiary)
                                     .padding(Spacing.m)
+                            }
+                            ForEach(model.skipped, id: \.file) { skip in
+                                Text("\((skip.file as NSString).lastPathComponent): \(skip.reason)")
+                                    .font(.apogeeMeta)
+                                    .foregroundStyle(Palette.textTertiary)
+                                    .padding(.horizontal, Spacing.m)
                             }
                         }
                         .padding(Spacing.s)
@@ -86,21 +95,10 @@ public struct VoiceScreen: View {
         }
         .sheet(isPresented: $model.sheetOpen) { SaySheet(model: model) }
         .sheet(isPresented: Binding(get: { model.consent != nil }, set: { if !$0 && model.consent != nil { model.decline() } })) {
-            VStack(alignment: .leading, spacing: Spacing.m) {
-                Text("Install what voice needs?").font(.apogeeHeading)
-                Text(model.consentSaid).font(.apogeeBody).foregroundStyle(Palette.textSecondary)
-                Text("This installs Python packages into Apogee's own environment, once. Nothing is installed unless you say yes.")
-                    .font(.apogeeSmall)
-                    .foregroundStyle(Palette.textSecondary)
-                Text((["apogee"] + (model.consent ?? [])).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary)
-                HStack {
-                    Spacer()
-                    Button("Not now", role: .cancel) { model.decline() }.keyboardShortcut(.cancelAction)
-                    Button("Install") { model.install() }.keyboardShortcut(.defaultAction)
-                }
+            if let consent = model.consent {
+                InstallConsentSheet(
+                    set: consent.set, said: consent.said, command: consent.command, install: model.install, decline: model.decline)
             }
-            .padding(Spacing.xl)
-            .frame(width: 580)
         }
         .fileImporter(isPresented: $addingFolder, allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { model.add(folder: url) }
@@ -113,6 +111,27 @@ public struct VoiceScreen: View {
         case .stopped: "Stopped: nothing was written"
         case .failed(let message): message
         case .running: "Speaking"
+        }
+    }
+}
+
+/// The install the person said yes to, as styles' card draws one: its line
+/// and Stop while it runs, how it ended and Dismiss after (GUI 4f).
+@MainActor
+func installCard(_ install: RuntimeInstall, of model: VoiceViewModel) -> some View {
+    InstallCard(
+        headline: install.headline, command: install.command, state: InstallCardState.of(install.phase), detail: install.detail,
+        stop: { Task { await model.stop() } }, dismiss: model.dismissInstall)
+}
+
+/// An install's phase as the card draws it.
+enum InstallCardState {
+    static func of(_ phase: RuntimeInstall.Phase) -> InstallCard.State {
+        switch phase {
+        case .running: .running
+        case .installed: .installed
+        case .stopped: .stopped
+        case .failed: .failed
         }
     }
 }
@@ -267,7 +286,7 @@ struct SaySheet: View {
                 Button("Cancel", role: .cancel) { model.sheetOpen = false }.keyboardShortcut(.cancelAction)
                 Button("Speak") { model.speak() }
                     .keyboardShortcut(.return, modifiers: .command)
-                    .disabled(model.plannedArguments == nil)
+                    .disabled(model.plannedArguments == nil || model.isInstalling)
             }
         }
         .padding(Spacing.xl)
@@ -290,6 +309,13 @@ struct SaySheet: View {
         .task { await model.connect(binary: previewBinary) }
 }
 
+#Preview("A record whose speech is gone, passed over and said") {
+    let model = VoicePreview.speechGone("screen-gone")
+    VoiceScreen(model: model)
+        .frame(width: 1100, height: 600)
+        .task { await model.connect(binary: previewBinary) }
+}
+
 #Preview("Speaking: segment 1 of 2") {
     let model = VoicePreview.speeches("screen-running", starter: PreviewJobs(said: VoicePreview.segment))
     VoiceScreen(model: model)
@@ -298,14 +324,14 @@ struct SaySheet: View {
 }
 
 #Preview("Refused for its runtime: asking to install") {
-    let model = VoicePreview.speeches("screen-refused", starter: VoicePreview.refused)
+    let model = VoicePreview.speeches("screen-refused", starter: VoicePreview.runs([VoicePreview.refusedRun]))
     VoiceScreen(model: model)
         .frame(width: 1100, height: 600)
         .task { await VoicePreview.say(model) }
 }
 
 #Preview("Not installed: the refusal stands") {
-    let model = VoicePreview.speeches("screen-declined", starter: VoicePreview.refused)
+    let model = VoicePreview.speeches("screen-declined", starter: VoicePreview.runs([VoicePreview.refusedRun]))
     VoiceScreen(model: model)
         .frame(width: 1100, height: 600)
         .task {
@@ -313,6 +339,27 @@ struct SaySheet: View {
             await VoicePreview.until { model.consent != nil }
             model.decline()
         }
+}
+
+#Preview("Installing the voice set, Stop beside it") {
+    let model = VoicePreview.speeches("install-running", starter: VoicePreview.runs([VoicePreview.refusedRun, VoicePreview.installRunning]))
+    VoiceScreen(model: model)
+        .frame(width: 1100, height: 600)
+        .task { await VoicePreview.install(model) }
+}
+
+#Preview("The install failed, in the CLI's words") {
+    let model = VoicePreview.speeches("install-failed", starter: VoicePreview.runs([VoicePreview.refusedRun, VoicePreview.installFailed]))
+    VoiceScreen(model: model)
+        .frame(width: 1100, height: 600)
+        .task { await VoicePreview.install(model) }
+}
+
+#Preview("Installed, the refused speech spoken again") {
+    let model = VoicePreview.speeches("install-done", starter: VoicePreview.runs([VoicePreview.refusedRun, VoicePreview.installDone]))
+    VoiceScreen(model: model)
+        .frame(width: 1100, height: 600)
+        .task { await VoicePreview.install(model) }
 }
 
 #Preview("Hello there: its first sentence lit") {

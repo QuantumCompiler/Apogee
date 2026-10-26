@@ -174,5 +174,31 @@ enum VoiceDocuments {
     static let speechMLX = #"""
 {"created_at":"2026-10-22T09:05:50Z","device":{"device":"gpu","platform":"macos-arm64"},"engine":"mlx","language":"American English","model":{"checkpoint":"model.safetensors","name":"Kokoro-82M/mlx/6f708192a3b4","path":"/Users/someone/.apogee/models/Kokoro-82M/mlx/6f708192a3b4","ref":"Kokoro-82M/voice/5f3a2c91d0e4","revision":""},"object":"voice.speech","output":"/Users/someone/Music/Apogee/hello-mlx.wav","run_seconds":0.108,"sample_rate":24000,"seconds":0.1,"segments":[{"offset":0.0,"seconds":0.1,"sentences":[{"offset":0.0,"seconds":0.05,"text":"Hello there."},{"offset":0.05,"seconds":0.05,"text":"How are you?"}],"text":"Hello there. How are you?"}],"sidecar":"/Users/someone/Music/Apogee/hello-mlx.wav.json","speed":1.0,"status":"done","text":"Hello there. How are you?","versions":{"apogee":"0.1.9","kokoro":"","mlx":"0.31.2","mlx_audio":"0.0-audio-stub","torch":""},"voice":"af_heart"}
 """#
+    /// tests/business/media/Fixtures/voice-refused-runtime.jsonl
+    static let voiceRefused = #"""
+{"protocol_version":1,"schema":"2026-10-25","type":"job","verb":"voice say"}
+"""#
+    /// tests/business/media/Fixtures/voice-refused-runtime.err
+    static let voiceRefusedErr = #"""
+apogee voice say: torch and kokoro are not installed in Apogee's Python environment -- apogee train setup --with voice
+"""#
+    /// tests/business/media/Fixtures/install-voice-done.txt
+    static let installVoiceDone = #"""
+environment already exists at /Users/someone/.apogee/training/venv
+installing the 'voice' set: torch>=2.6 kokoro>=0.9.4 misaki[en]>=0.9.4 ...
+installed
+
+python env: at /Users/someone/.apogee/training/venv; sets: video, voice
+"""#
+    /// tests/business/media/Fixtures/install-voice-failed.txt
+    static let installVoiceFailed = #"""
+environment already exists at /Users/someone/.apogee/training/venv
+installing the 'voice' set: torch>=2.6 kokoro>=0.9.4 misaki[en]>=0.9.4 ...
+"""#
+    /// tests/business/media/Fixtures/install-voice-failed.err
+    static let installVoiceFailedErr = #"""
+apogee train: pip install for the 'voice' set failed (exit code 1):
+ERROR: Could not install packages: this sandbox's pip is a stub with no network
+"""#
 }
 #endif

@@ -34,12 +34,34 @@ enum VoicePreview {
     /// sentences on the file's own clock, `OUT` its WAV.
     static let speech = #"{"object":"voice.speech","status":"done","output":"OUT","sidecar":"OUT.json","model":{"name":"kokoro"},"voice":"af_heart","language":"en-us","speed":1,"text":"Hello there. How are you?","segments":[{"text":"Hello there. How are you?","seconds":2.4,"offset":0,"sentences":[{"text":"Hello there.","seconds":1.0,"offset":0},{"text":"How are you?","seconds":1.4,"offset":1.0}]}],"seconds":2.4,"created_at":"2026-10-20T10:00:00Z"}"#
 
-    /// The refusal of a run whose runtime is not installed, in the CLI's words
-    /// (VoiceViewModelTests' consent test).
-    static let refusal = "apogee voice: the voice runtime is not installed -- run 'apogee train setup --with voice'"
+    // MARK: - The runtime's install (GUI 4f)
 
-    /// A 52b run refused for its runtime: the stream's error, then its end.
-    static let refused = PreviewJobs(said: [.event(.error(refusal))], finishes: true, status: 1)
+    /// `voice say` refused for its runtime as the binary refused it over a
+    /// sandbox with no torch (tests/business/media/Fixtures/
+    /// voice-refused-runtime.*): its 52b stream's one `job` line, the refusal
+    /// on stderr alone.
+    static let refusedRun = PreviewRun(
+        stdout: VoiceDocuments.voiceRefused, streaming: true, status: 1, stderr: VoiceDocuments.voiceRefusedErr)
+
+    /// `train setup --with voice` as the binary ran it over that sandbox's
+    /// stub pip (tests/business/media/Fixtures/install-voice-*): still going,
+    /// its first two lines said; failed; and done.
+    static let installRunning = PreviewRun(
+        stdout: VoiceDocuments.installVoiceDone.split(separator: "\n").prefix(2).joined(separator: "\n"), finishes: false)
+    static let installFailed = PreviewRun(
+        stdout: VoiceDocuments.installVoiceFailed, status: 1, stderr: VoiceDocuments.installVoiceFailedErr)
+    static let installDone = PreviewRun(stdout: VoiceDocuments.installVoiceDone)
+
+    /// A starter replaying `runs`, one a start.
+    static func runs(_ runs: [PreviewRun]) -> PreviewRuns { PreviewRuns(runs) }
+
+    /// Said, refused for its runtime, then the person's yes: the install on
+    /// the starter's next run.
+    static func install(_ model: VoiceViewModel) async {
+        await say(model)
+        await until { model.consent != nil }
+        model.install()
+    }
 
     /// A 52b run's first segment spoken, as tests/business/jobs/JobsTests.swift
     /// reads the stream's line.
@@ -63,7 +85,7 @@ enum VoicePreview {
 
     /// The view-model over `home`, not yet connected (`connect` reads the store).
     static func speeches(
-        _ name: String, spoken: Bool = true, runner: PreviewRunner = runner, starter: PreviewJobs = PreviewJobs()
+        _ name: String, spoken: Bool = true, runner: PreviewRunner = runner, starter: any JobStarting = PreviewJobs()
     ) -> VoiceViewModel {
         let model = VoiceViewModel(runner: runner, starter: starter, preferences: Preferences(store: MemoryStore()), home: home(name, spoken: spoken))
         model.streams = { true }
@@ -126,6 +148,16 @@ enum VoicePreview {
     /// The speech with this file name, as the library read it.
     static func speech(_ name: String, of model: VoiceViewModel) -> SpeechRecord? {
         MediaLibrary.speeches(in: model.folders).records.first { $0.name == name }
+    }
+
+    /// The library beside a record whose speech is gone -- the test's speech
+    /// recorded as `gone.wav`, the WAV itself not there -- which the scan
+    /// passes over and says why.
+    static func speechGone(_ name: String) -> VoiceViewModel {
+        let model = speeches(name)
+        let out = model.outputFolder.appendingPathComponent("gone.wav").path
+        try? speech.replacingOccurrences(of: "OUT", with: out).write(toFile: out + ".json", atomically: true, encoding: .utf8)
+        return model
     }
 
     /// Waits, a few seconds at most, for what a run's end sets.

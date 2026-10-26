@@ -32,6 +32,10 @@ final class ScriptedRunner: CommandRunning, @unchecked Sendable {
 final class ScriptedJob: JobRunning, @unchecked Sendable {
     let updates: AsyncStream<JobUpdate>
     private let continuation: AsyncStream<JobUpdate>.Continuation
+    private let stops = Mutex(0)
+
+    /// Whether its Stop was asked.
+    var stopped: Bool { stops.withLock { $0 > 0 } }
 
     init() {
         (updates, continuation) = AsyncStream.makeStream(of: JobUpdate.self)
@@ -49,10 +53,40 @@ final class ScriptedJob: JobRunning, @unchecked Sendable {
         continuation.finish()
     }
 
+    /// Says a recorded run as `SupervisedJob` says one: each line of its
+    /// stdout an event of the 52b stream when `streaming`, else a line said;
+    /// then its end with `status`, the stderr it left as the tail.
+    func replay(stdout: String, stderr: String = "", status: Int32, streaming: Bool) {
+        for line in stdout.split(separator: "\n") {
+            say(streaming ? .event(JobEvent.decode(line: String(line))) : .said(String(line)))
+        }
+        var tail = BoundedTail()
+        tail.append(Data(stderr.utf8))
+        endWith(tail: tail, status: status)
+    }
+
     func stop(grace: Duration) async {
+        stops.withLock { $0 += 1 }
         continuation.yield(.ended(JobEnd(exit: ChildExit(reason: .exited, status: 130), stderrTail: BoundedTail(), interrupted: true)))
         continuation.finish()
     }
+}
+
+/// A fixture recorded from the binary, by its path under `tests/`.
+func recordedFixture(_ path: String) -> String {
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../\(path)")
+    return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+}
+
+/// What a view-model said, in order: its toasts.
+@MainActor
+final class Toasts {
+    private(set) var said: [String] = []
+
+    func say(_ text: String) { said.append(text) }
+
+    /// Whether a toast says `words`.
+    func contain(_ words: String) -> Bool { said.contains { $0.contains(words) } }
 }
 
 /// Hands out scripted jobs, recording each start.
@@ -71,6 +105,11 @@ final class ScriptedJobs: JobStarting, @unchecked Sendable {
     }
 
     var starts: [Start] { started.withLock { $0 } }
+
+    /// The arguments of the `index`th start (from 0), `nil` before it.
+    func arguments(_ index: Int) -> [String]? {
+        started.withLock { $0.indices.contains(index) ? $0[index].arguments : nil }
+    }
 
     func startJob(binary: URL, arguments: [String], streaming: Bool, folder: URL?) -> any JobRunning {
         started.withLock { $0.append(Start(arguments: arguments, streaming: streaming, folder: folder)) }

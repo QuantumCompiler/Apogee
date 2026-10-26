@@ -3,6 +3,7 @@ import BusinessJobs
 import BusinessMedia
 import DataProtocol
 import Foundation
+import Observation
 
 /// Compositions' view-model for its previews (ADR 0004): a folder of its own
 /// under the temporary folder, holding the project documents the module's
@@ -64,13 +65,16 @@ enum ComposePreview {
     }
 
     /// The view-model over `folder`, read, with `selecting` (a video's file
-    /// name) picked.
+    /// name) picked; its store -- voice models and `check` -- answered by
+    /// `runner`.
     static func compositions(
-        _ folder: URL, selecting: String? = nil, starter: PreviewJobs = PreviewJobs(), plansAlone: Bool = false
+        _ folder: URL, selecting: String? = nil, starter: any JobStarting = PreviewJobs(), plansAlone: Bool = false,
+        runner: PreviewRunner = store()
     ) -> ComposeViewModel {
         let model = ComposeViewModel(starter: starter)
         model.folders = { [folder] }
         model.plansAlone = { plansAlone }
+        model.reader = runner
         model.connect(binary: previewBinary)
         if let picked = selecting.flatMap({ name in model.projects.first { $0.name == name } }) { model.select(picked) }
         return model
@@ -129,5 +133,114 @@ enum ComposePreview {
     static func project(_ document: String) -> ProjectRecord? {
         JSONValue.parse(document).flatMap(ProjectRecord.init)
     }
+
+    // MARK: - Recorded over a sandbox (GUI 4f)
+
+    /// The store the branch's binary composed over (tests/business/reads/
+    /// Fixtures/compose-*, check-captions-*): one voice model or two -- Kokoro
+    /// as hexgrad publishes it beside its MLX build -- and `check` with its
+    /// ffmpeg's captions row skipped (no libass) or passing.
+    static func store(twoVoices: Bool = false, burns: Bool = false) -> PreviewRunner {
+        PreviewRunner(
+            reads: [
+                (["models", "list"], twoVoices ? ComposeDocuments.composeVoicesList : ComposeDocuments.composeVoiceList),
+                (["check"], burns ? ComposeDocuments.checkCaptionsOk : ComposeDocuments.checkCaptionsSkipped),
+            ], commands: [])
+    }
+
+    /// The brief every recording composed.
+    static let brief = "the tides, twice a day"
+
+    /// The new sheet over that store, its store read, on the recordings' brief.
+    static func sheet(_ name: String, twoVoices: Bool = false, burns: Bool = false, starter: any JobStarting = PreviewJobs())
+        async -> ComposeViewModel
+    {
+        let model = compositions(folder(name), starter: starter, plansAlone: true, runner: store(twoVoices: twoVoices, burns: burns))
+        await model.readStore()
+        model.newComposition()
+        model.form.brief = brief
+        return model
+    }
+
+    /// `video compose` refused for its runtime as the binary refused it over
+    /// a sandbox with no torch (tests/business/media/Fixtures/
+    /// compose-refused-runtime.*): its 52b stream's one `job` line, the
+    /// refusal on stderr alone.
+    static let refusedRun = PreviewRun(
+        stdout: ComposeDocuments.composeRefused, streaming: true, status: 1, stderr: ComposeDocuments.composeRefusedErr)
+
+    /// `train setup --with video` still going, its first two lines said
+    /// (tests/business/media/Fixtures/install-video-done.txt).
+    static let installRunning = PreviewRun(
+        stdout: ComposeDocuments.installVideoDone.split(separator: "\n").prefix(2).joined(separator: "\n"), finishes: false)
+
+    /// The recordings' brief composed and refused for its runtime: the
+    /// consent standing -- and, when `install`, the person's yes.
+    static func refused(_ name: String, install: Bool = false) async -> ComposeViewModel {
+        let model = await sheet(name, starter: PreviewRuns([refusedRun, installRunning]))
+        model.streams = { true }
+        model.compose()
+        await until { model.consent != nil }
+        if install { model.install() }
+        return model
+    }
+
+    /// Planned first, as the binary planned it on its mock planner
+    /// (tests/business/media/Fixtures/compose-planned.*): the dry run's
+    /// stream replayed, its kept project written beside the video -- and what
+    /// the place said of it, into `said`.
+    static func planned(_ name: String, said: @escaping @MainActor (String) -> Void) async -> ComposeViewModel {
+        let model = await sheet(name, starter: PreviewRuns([PreviewRun(stdout: ComposeDocuments.composePlanned, streaming: true)]))
+        model.streams = { true }
+        model.say = said
+        guard let output = model.plannedOutput?.path else { return model }
+        model.compose(planFirst: true)
+        try? ComposeDocuments.composePlannedProject
+            .replacingOccurrences(of: "/Users/someone/Movies/Apogee/tides", with: (output as NSString).deletingPathExtension)
+            .write(toFile: output + ".json", atomically: true, encoding: .utf8)
+        await until { !model.isRunning }
+        return model
+    }
+
+    /// The made tides composition in the edit sheet, its preview's dry run
+    /// going -- the planner not answered yet.
+    static func previewing(_ name: String) -> ComposeViewModel {
+        let folder = folder(name)
+        placeTides(in: folder, status: "done", made: 3)
+        let model = compositions(folder, selecting: "tides.mp4")
+        if let project = model.selectedProject {
+            model.edit(project)
+            model.form.instruction = "make scene 2 brighter"
+        }
+        Task { await model.previewEdit() }
+        return model
+    }
+
+    /// A made composition beside two the scan passes over: a document cut
+    /// short, and a project moved here from another folder, naming its old place.
+    static func skipping(_ name: String) -> ComposeViewModel {
+        let folder = folder(name)
+        place(heatPumps, as: "heat.mp4", in: folder, made: true)
+        try? Data(heatPumps.prefix(40).utf8).write(to: folder.appendingPathComponent("cut-short.mp4.json"))
+        try? tides("/Users/someone/Elsewhere/tides.mp4", status: "done", made: 3)
+            .write(to: folder.appendingPathComponent("tides.mp4.json"), atomically: true, encoding: .utf8)
+        return compositions(folder, selecting: "heat.mp4")
+    }
+
+    /// Waits, a few seconds at most, for what a run's end sets.
+    static func until(_ condition: @MainActor () -> Bool) async {
+        for _ in 0..<250 {
+            if condition() { return }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
+}
+
+/// What a place said, kept for a preview to show beside the view: the shell
+/// draws the toast, which the module's own previews cannot.
+@MainActor
+@Observable
+final class PreviewSaid {
+    var last = ""
 }
 #endif

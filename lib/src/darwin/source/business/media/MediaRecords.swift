@@ -216,17 +216,28 @@ public enum MediaLibrary {
     /// A path in `folder` for `base`.`ext` that names nothing yet: a taken
     /// name gets a number (`lighthouse-2.mp4`) -- nothing is ever written over.
     public static func freePath(in folder: URL, base: String, ext: String) -> URL {
+        freePath(in: folder, base: base, ext: ext, besides: [])
+    }
+
+    /// The same, a name taken too where a file of its stem with one of
+    /// `besides`' extensions is there: a composition's `tides.srt`, the
+    /// captions the composer keeps beside `tides.mp4` and never writes over
+    /// (the CLI's 55c refuses the run instead).
+    public static func freePath(in folder: URL, base: String, ext: String, besides: [String]) -> URL {
         let clean = base.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespaces)
         let stem = clean.isEmpty ? "untitled" : clean
-        var candidate = folder.appendingPathComponent("\(stem).\(ext)")
+        func taken(_ name: String) -> Bool {
+            let candidate = folder.appendingPathComponent("\(name).\(ext)").path
+            return FileManager.default.fileExists(atPath: candidate) || FileManager.default.fileExists(atPath: candidate + ".json")
+                || besides.contains { FileManager.default.fileExists(atPath: folder.appendingPathComponent("\(name).\($0)").path) }
+        }
+        var name = stem
         var n = 2
-        while FileManager.default.fileExists(atPath: candidate.path)
-            || FileManager.default.fileExists(atPath: candidate.path + ".json")
-        {
-            candidate = folder.appendingPathComponent("\(stem)-\(n).\(ext)")
+        while taken(name) {
+            name = "\(stem)-\(n)"
             n += 1
         }
-        return candidate
+        return folder.appendingPathComponent("\(name).\(ext)")
     }
 
     /// A file-name stem from a prompt's first words: `a lighthouse at dusk` is

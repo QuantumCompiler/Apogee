@@ -1726,3 +1726,78 @@ Probed on the branch's binary over a sandbox:
 - No preview of a failed store read, since none is recorded.
 - The design canvas doesn't draw the delete's plan in the confirm or the narration card.
 - `MachineSessionTests/conversation()` failed once under a 10-iteration load, a timing race this item didn't touch.
+
+### 2026-10-25 — `media-studio-finished` (backlog item 4f): the media studio, finished
+
+**Why.** Video, Compose and Voice share the media machinery. The audit found seven gaps:
+- **The consented runtime install ran with no UI.** It was a local job that nothing drew, `isRunning` ignored it, a failure was never said, and a second generate re-raised the sheet.
+- **Compose could not name a voice model.** Once the store holds two, the CLI refuses every composition, Plan included: `the store holds 2 voice models -- name one with --model:`.
+- **Compose had no install consent,** only an OK alert.
+- **Plan first toasted "Composed <name>.mp4".**
+- **The edit preview's dry run was unsupervised.** Stop couldn't reach it, nothing bounded it, and it could run beside a render.
+- **Compose dropped the scan's skipped projects.**
+- **Captions' burn ability was learned only after a render,** though `check` states it (52e), and Health showed no `skipped` row or its remedy.
+
+Six reproduced on today's source as failing tests first. The seventh mostly did: the retry after a successful install already worked.
+
+Probed on the branch's binary over a sandbox with a stub Python whose pip never runs:
+- **Compose without its runtime** says on stderr `torch and diffusers are not installed in Apogee's Python environment -- apogee train setup --with video`. Under `stream-json` the stream holds only the `job` line. Once video is in, it refuses the same way for `--with voice`.
+- **`--voice-model` takes a store handle, id, model or path.** With it, two voice models plan.
+- **`check` on this Mac:** both ffmpeg rows `ok`. Behind a wrapper hiding libass's filters, `ffmpeg captions` is `skipped` with the remedy `brew install ffmpeg-full && brew unlink ffmpeg; brew link --force ffmpeg-full`.
+
+- [x] **Installs are supervised jobs,** drawn by one shared card.
+  - **The card:** `styles/Components/InstallCard.swift` draws running with Stop, then installed, stopped or failed with Dismiss. `InstallConsentSheet.swift` is Video's consent sheet and Voice's inline one, promoted to `styles` (ADR 0002).
+  - **Its words** come from `RuntimeInstall` (`business/jobs`), the fold of the install's progress.
+  - **The job is kept and counts as a run,** so a second generate is refused and said. `stop()` reaches it, a failure is a toast in the CLI's words, the refused run is retried only on success, and `dismissInstall()` is the card's Dismiss.
+  - **On the monitor and at quit** with no wiring, through 4c's registry.
+- [x] **Compose names its voice model.** `ComposeForm.voiceModel` adds `--voice-model`. The store's voice models come from one read, `MediaModel.voiceModels(in:)` in `business/media/StoreMedia.swift`, shared by Voice and Compose. The picker appears only with two or more, PyTorch first.
+- [x] **Compose asks to install,** as its siblings do. `InstallConsent` (`business/media`) reads the failure and stderr together, and a run retried after video's install that is refused for voice asks again. Other refusals stay an alert.
+- [x] **A plan says "planned":** "Planned <name>: nothing is rendered yet -- Render it, on its page, renders the plan".
+- [x] **The edit preview is a job.** Stop reaches it, a 5-minute limit is shown in the sheet and said when reached, and it never runs beside a render, nor a render beside it.
+- [x] **Skipped projects are listed** under the compositions with their reasons, and the Voice place now draws its skipped records too.
+- [x] **Captions are said up front.** `CaptionsAbility` (`business/media`) reads `check`'s `ffmpeg captions` row when the compose sheet opens. The sheet says whether captions burn in or are kept as `.srt`, with the remedy. Settings' `healthRows` (fail, warn, then `skipped` rows carrying a remedy) are what Health draws.
+
+**Decisions made while building** (2026-10-25, each recorded for veto):
+- **The default, taken:** the voice-model picker appears only with two or more voice models.
+- **One install at a time.** While a `train setup` or `bootstrap` runs anywhere in the app, a refusal isn't offered another; each place asks the children registry.
+- **A free output name skips a taken `<name>.srt` while captions are on,** since the CLI's 55c refuses to write over one.
+- **Compose reads the store and `check` only when its sheet opens,** so nothing extra runs at launch.
+- **A finished install card stays until dismissed.**
+- **The skipped-captions `check` was recorded through a wrapper** that hides libass from the real ffmpeg, rather than hand-edited, so its row and remedy are the binary's own words.
+- **A refusal with no Python environment at all** (`Run 'apogee train setup' first`) names no set, so it stays an alert with no consent.
+
+**Verified.**
+- **Recorded** from the branch's binary over sandbox homes, the home written `/Users/someone`: 23 documents under `tests/business/media/Fixtures/` and `tests/business/reads/Fixtures/`.
+  - The refusals with their `.err`, the planned dry run and its project, and the store lists.
+  - Both `check` documents.
+  - The installs failed and done, against a stub interpreter, so nothing was downloaded or installed.
+
+  **Hand-made:**
+  - a `check` with a skipped row and no remedy, shaped as `check.cpp`'s "could not ask ffmpeg" branch;
+  - the older `check` with no captions row;
+  - the cut-short and moved project documents.
+- 43 new cases:
+
+  | Suite | Cases |
+  |---|---|
+  | `VideoInstallTests` | 8 |
+  | `VoiceInstallTests` | 7 |
+  | `ComposeStudioTests` (voice model, consent, plan, preview, library, captions) | 17 |
+  | `SettingsHealthTests` | 2 |
+  | `RuntimeInstallTests` | 4 |
+  | `MediaStudioTests` | 5 |
+- **Repeat runs:** the Video, Voice, Compose, Settings and Styles schemes at 10 iterations, and Video, Voice and Compose at 30. The whole plan passed two 10-iteration runs, after a race in `drawnAndElsewhere` was fixed by deciding Dismiss and the retry from the install's own fold.
+- **New project edges:** `BusinessMedia` → `BusinessReads` and `PresentationCompose` → `BusinessReads`, with their layer cards. The layering check passed 25 of 25, and `check-previews` finds nothing in video, compose, voice, settings or styles.
+- **20 new previews:**
+  - the install card's four states;
+  - each place's install running, failed and done;
+  - compose's picker, captions both ways, consent, installing, the planned run, the preview with Stop, and skipped projects;
+  - Health with skipped rows.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,992 tests and the macOS app's 600 cases passed, with no Swift warning.
+
+**Not done:**
+- No live pass of the app.
+- The planned toast is the shell's, so the compose preview shows its words under the page.
+- **Two CLI gaps found by the probes, for the CLI's queue:**
+  - a runtime refusal under `stream-json` emits no `error` event;
+  - compose's two-voice-models refusal names `--model`, where compose's flag is `--voice-model`.

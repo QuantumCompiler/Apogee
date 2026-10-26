@@ -73,6 +73,15 @@ public final class SettingsViewModel {
     public private(set) var providers: [Provider] = []
     public private(set) var checks: [CheckRow] = []
     public private(set) var checkSummary: String?
+    /// What Health draws of `check`, in order: what fails, what to look at,
+    /// then each row skipped with what brings it -- an optional ability not
+    /// set up, its remedy the command (GUI 4f; the captions' `ffmpeg-full`
+    /// among them, the CLI's 52e). A passing row, and a skipped one naming
+    /// nothing to do, is not drawn.
+    public var healthRows: [CheckRow] {
+        checks.filter { $0.status == "fail" } + checks.filter { $0.status == "warn" }
+            + checks.filter { $0.status == "skipped" && $0.remedy != nil }
+    }
     /// Each tool's gate level, as `config get permissions` says it.
     public private(set) var permissions: [(tool: String, level: String)] = []
     public private(set) var pipelines: [String] = []

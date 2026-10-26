@@ -11,7 +11,9 @@ import Observation
 ///
 /// SwiftUI-free (ADR 0002). The library is records, not a database: re-read
 /// on coming into view and after every run. Every run is the command a person
-/// would type; the runtime is installed only on an explicit yes.
+/// would type; the runtime is installed only on an explicit yes, and the
+/// install is a supervised run of the place's like any other (GUI 4f): its
+/// card, Stop, its failure said, the refused clip run again once it is in.
 @MainActor
 @Observable
 public final class VideoViewModel {
@@ -32,14 +34,6 @@ public final class VideoViewModel {
         case another
     }
 
-    /// The install the CLI said a run needs, waiting on the person's yes.
-    public struct Consent: Equatable, Sendable {
-        /// What it runs: `train setup --with video`.
-        public let arguments: [String]
-        /// The CLI's own words for why.
-        public let said: String
-    }
-
     public var tab: Tab = .clips
     public private(set) var clips: [ClipRecord] = []
     public private(set) var skipped: [MediaLibrary.Skipped] = []
@@ -49,8 +43,15 @@ public final class VideoViewModel {
     /// The run going now, and the one before it until dismissed.
     public private(set) var run: JobProgress?
     public private(set) var runArguments: [String]?
-    public private(set) var consent: Consent?
-    public private(set) var installing: JobProgress?
+    /// The install a refused run named, waiting on the person's yes.
+    public private(set) var consent: InstallConsent?
+    /// The install the person said yes to, as it runs and, ended, until
+    /// dismissed: what the clips list draws as its card.
+    public private(set) var installing: RuntimeInstall?
+    /// Whether an install another place started runs now (the composition
+    /// reads the children registry): a second `train setup` into the one
+    /// environment is never offered beside it.
+    public var installElsewhere: @MainActor () -> Bool = { false }
     public var say: (@MainActor (String) -> Void)?
     /// Whether the build streams a run's steps (the CLI's 52b).
     public var streams: @MainActor () -> Bool = { false }
@@ -71,6 +72,8 @@ public final class VideoViewModel {
     private let home: URL
     private var binary: URL?
     private var job: (any JobRunning)?
+    private var installJob: (any JobRunning)?
+    /// The refused run, run again once its install is in -- and only then.
     private var retryAfterInstall: [String]?
 
     public init(starter: any JobStarting, preferences: Preferences, home: URL) {
@@ -104,10 +107,7 @@ public final class VideoViewModel {
     public func readModels() async {
         guard let reader, let binary else { return }
         if let list = await reader.read(binary: binary, ["models", "list"]).document {
-            models = MediaModel.offered(
-                ModelRow.list(from: list).filter(\.isStored).compactMap { row in
-                    MediaEngine.video(format: row.format, kind: row.mlxKind?.word).map { MediaModel(handle: row.model, engine: $0) }
-                })
+            models = MediaModel.videoModels(in: list)
         }
         if case .done(let text) = await reader.command(binary: binary, ["config", "get", "models.default_video"]) {
             let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -244,18 +244,28 @@ public final class VideoViewModel {
     /// The sheet's command, as typed.
     public var plannedArguments: [String]? { form.arguments(output: plannedOutput.path) }
 
-    public var isRunning: Bool { job != nil }
+    /// Whether the place runs something now: a clip, or the install one
+    /// needs.
+    public var isRunning: Bool { job != nil || installJob != nil }
 
-    /// Generates: the sheet's command, supervised.
+    /// Whether the install the person said yes to runs now.
+    public var isInstalling: Bool { installJob != nil }
+
+    /// Generates: the sheet's command, supervised -- never beside an install,
+    /// whose runtime the clip may need.
     public func generate() {
         guard let arguments = plannedArguments else { return }
+        if let installing, isInstalling {
+            say?("Installing first: the clip can be made once \(installing.command) has finished")
+            return
+        }
         try? FileManager.default.createDirectory(at: outputFolder, withIntermediateDirectories: true)
         sheetOpen = false
         start(arguments)
     }
 
     private func start(_ arguments: [String]) {
-        guard let binary, job == nil else { return }
+        guard let binary, job == nil, installJob == nil else { return }
         let streaming = streams()
         let full = arguments + (streaming ? ["--output-format", "stream-json"] : [])
         runArguments = full
@@ -282,9 +292,13 @@ public final class VideoViewModel {
             say?("Stopped: nothing was written")
         case .failed(let message):
             // A run refused because the runtime is not installed names the
-            // command that installs it: the app asks, never assumes.
-            if let install = Self.installCommand(in: message + "\n" + run.stderr) {
-                consent = Consent(arguments: install, said: message)
+            // command that installs it -- on stderr alone, its stream silent:
+            // the app asks, never assumes.
+            guard let asked = InstallConsent(failure: message, stderr: run.stderr) else { break }
+            if installElsewhere() {
+                say?("\(asked.command) is already running: generate the clip again once it has finished")
+            } else {
+                consent = asked
                 retryAfterInstall = arguments
             }
         case .running:
@@ -297,9 +311,14 @@ public final class VideoViewModel {
         MediaLibrary.installCommand(in: text)
     }
 
-    /// Stops the run as Ctrl-C does: nothing is written, the output untouched.
+    /// Stops what runs as Ctrl-C does: the clip -- nothing is written, the
+    /// output untouched -- or the install, which then runs nothing again.
     public func stop() async {
-        await job?.stop(grace: .seconds(10))
+        if let job {
+            await job.stop(grace: .seconds(10))
+        } else {
+            await installJob?.stop(grace: .seconds(10))
+        }
     }
 
     public func dismissRun() {
@@ -308,21 +327,38 @@ public final class VideoViewModel {
         runArguments = nil
     }
 
-    // MARK: - Consent
+    // MARK: - Consent and the install
 
-    /// The person said yes: install, then run what was refused again.
+    /// The person said yes: the install, supervised -- its card, Stop -- and
+    /// once it is in, what was refused run again. A failed or stopped install
+    /// is said, and runs nothing again.
     public func install() {
-        guard let consent, let binary else { return }
+        guard let consent, let binary, job == nil, installJob == nil else { return }
         self.consent = nil
-        installing = JobProgress()
+        let retry = retryAfterInstall
+        retryAfterInstall = nil
+        installing = RuntimeInstall(arguments: consent.arguments)
         let job = starter.startJob(binary: binary, arguments: consent.arguments, streaming: false)
+        installJob = job
         Task {
-            for await update in job.updates { installing?.apply(update) }
-            let done = installing?.status == .done
-            installing = done ? nil : installing
-            if done, let retry = retryAfterInstall {
-                retryAfterInstall = nil
-                start(retry)
+            // Its own fold, drawn as it moves: what it ends as is acted on
+            // even when its card was put away the moment its end was said.
+            var installing = RuntimeInstall(arguments: consent.arguments)
+            for await update in job.updates {
+                installing.apply(update)
+                self.installing = installing
+            }
+            installJob = nil
+            switch installing.phase {
+            case .installed:
+                say?("Installed: \(installing.command)" + (retry == nil ? "" : " -- making the clip again"))
+                if let retry { start(retry) }
+            case .failed:
+                say?("Not installed: \(installing.failure ?? installing.command)")
+            case .stopped:
+                say?("The install was stopped before it finished: \(installing.command) runs it again")
+            case .running:
+                break
             }
         }
     }
@@ -333,10 +369,13 @@ public final class VideoViewModel {
             consent = nil
             retryAfterInstall = nil
         }
-        say?("Not installed. apogee \(consent?.arguments.joined(separator: " ") ?? "train setup") installs it whenever you want it")
+        say?("Not installed. \(consent?.command ?? "apogee train setup") installs it whenever you want it")
     }
 
+    /// The ended install's card, put away -- once its own end is said; a
+    /// running one stays.
     public func dismissInstall() {
+        guard installing?.phase != .running else { return }
         installing = nil
     }
 }

@@ -107,7 +107,7 @@ struct VoiceViewModelTests {
         var tail = BoundedTail()
         tail.append(Data("apogee voice: the voice runtime is not installed -- run 'apogee train setup --with voice'\n".utf8))
         refused.endWith(tail: tail)
-        #expect(await eventually { model.consent == ["train", "setup", "--with", "voice"] })
+        #expect(await eventually { model.consent?.arguments == ["train", "setup", "--with", "voice"] })
         model.install()
         install.end()
         #expect(await eventually { jobs.starts.count == 3 })

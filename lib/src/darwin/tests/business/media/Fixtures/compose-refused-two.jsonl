@@ -1,0 +1,2 @@
+{"protocol_version":1,"schema":"2026-10-25","type":"job","verb":"video compose"}
+{"message":"the store holds 2 voice models -- name one with --model:\n  hexgrad--Kokoro-82M/mlx/ffffffffffff\n  hexgrad--Kokoro-82M/voice/cccccccccccc","type":"error"}

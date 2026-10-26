@@ -22,6 +22,9 @@ public struct ComposeView: View {
                 .padding(Spacing.s)
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 1) {
+                        if let install = model.installing {
+                            installCard(install, of: model)
+                        }
                         ForEach(model.projects) { project in
                             let current = model.selected == project.output
                             Button {
@@ -51,6 +54,13 @@ public struct ComposeView: View {
                                 .foregroundStyle(Palette.textTertiary)
                                 .padding(Spacing.m)
                         }
+                        // What the scan passed over, and why -- as Clips and Voice list theirs.
+                        ForEach(model.skipped, id: \.file) { skip in
+                            Text("\((skip.file as NSString).lastPathComponent): \(skip.reason)")
+                                .font(.apogeeMeta)
+                                .foregroundStyle(Palette.textTertiary)
+                                .padding(.horizontal, Spacing.m)
+                        }
                     }
                     .padding(Spacing.s)
                 }
@@ -68,10 +78,41 @@ public struct ComposeView: View {
         .sheet(item: Binding(get: { model.sheet.map(SheetItem.init) }, set: { if $0 == nil { model.sheet = nil } })) { _ in
             ComposeSheet(model: model)
         }
+        .sheet(item: Binding(get: { model.consent.map(ConsentItem.init) }, set: { if $0 == nil && model.consent != nil { model.decline() } })) { item in
+            InstallConsentSheet(
+                set: item.consent.set, said: item.consent.said, command: item.consent.command, install: model.install,
+                decline: model.decline)
+        }
         .alert("That didn't work", isPresented: Binding(get: { model.failure != nil }, set: { if !$0 { model.dismissFailure() } })) {
             Button("OK") { model.dismissFailure() }
         } message: {
             Text(model.failure ?? "")
+        }
+    }
+}
+
+struct ConsentItem: Identifiable {
+    let consent: InstallConsent
+    var id: String { consent.command }
+}
+
+/// The install the person said yes to, as styles' card draws one: its line
+/// and Stop while it runs, how it ended and Dismiss after (GUI 4f).
+@MainActor
+func installCard(_ install: RuntimeInstall, of model: ComposeViewModel) -> some View {
+    InstallCard(
+        headline: install.headline, command: install.command, state: InstallCardState.of(install.phase), detail: install.detail,
+        stop: { Task { await model.stop() } }, dismiss: model.dismissInstall)
+}
+
+/// An install's phase as the card draws it.
+enum InstallCardState {
+    static func of(_ phase: RuntimeInstall.Phase) -> InstallCard.State {
+        switch phase {
+        case .running: .running
+        case .installed: .installed
+        case .stopped: .stopped
+        case .failed: .failed
         }
     }
 }
@@ -281,8 +322,29 @@ struct ComposeSheet: View {
                         }
                     }
                     Toggle("Captions, timed from the voice", isOn: $model.form.captions)
+                    if model.namesVoiceModel {
+                        // Two or more voice models: the CLI asks which rather
+                        // than guess, so the sheet names the one picked.
+                        Picker("Voice model", selection: Binding(get: { model.voiceModel ?? "" }, set: { model.choose(voiceModel: $0) })) {
+                            ForEach(model.voiceModels) { voiceModel in
+                                Text(model.label(voiceModel)).tag(voiceModel.handle)
+                            }
+                        }
+                    }
                     TextField("Voice", text: $model.form.voice, prompt: Text("af_heart"))
                     TextField("Pipeline", text: $model.form.model, prompt: Text("the default video pipeline"))
+                }
+                if let line = model.captionsLine {
+                    // The CLI's fact, said before the run: check's ffmpeg captions row.
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        Label(line, systemImage: "captions.bubble")
+                            .font(.apogeeSmall)
+                            .foregroundStyle(Palette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let remedy = model.captionsRemedy {
+                            Text("To burn them in: \(remedy)").font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+                        }
+                    }
                 }
                 Text(model.plansAlone()
                     ? "Plan first to see the scenes and the spend before anything renders."
@@ -298,18 +360,29 @@ struct ComposeSheet: View {
                 Button("Cancel", role: .cancel) { model.sheet = nil }.keyboardShortcut(.cancelAction)
                 switch model.sheet {
                 case .edit:
-                    Button(model.previewing ? "Planning…" : "Preview the changes") { Task { await model.previewEdit() } }
-                        .disabled(model.plannedArguments == nil || model.previewing)
+                    if model.previewing {
+                        // The preview is a run of the place's: Stop reaches
+                        // it, and its planner is given a bounded time.
+                        ProgressView().controlSize(.small)
+                        Text("Planning on paper -- at most \(ComposeViewModel.said(model.previewLimit))")
+                            .font(.apogeeSmall)
+                            .foregroundStyle(Palette.textSecondary)
+                        Button("Stop") { Task { await model.stop() } }
+                    } else {
+                        Button("Preview the changes") { Task { await model.previewEdit() } }
+                            .disabled(model.plannedArguments == nil || model.isRunning)
+                            .help("Its dry run: the plan on paper, at most \(ComposeViewModel.said(model.previewLimit))")
+                    }
                     Button("Render") { model.renderEdit() }
                         .keyboardShortcut(.return, modifiers: .command)
-                        .disabled(model.plannedArguments == nil)
+                        .disabled(model.plannedArguments == nil || model.isRunning)
                 default:
                     if model.plansAlone() {
-                        Button("Plan first") { model.compose(planFirst: true) }.disabled(model.plannedArguments == nil)
+                        Button("Plan first") { model.compose(planFirst: true) }.disabled(model.plannedArguments == nil || model.isRunning)
                     }
                     Button("Compose") { model.compose() }
                         .keyboardShortcut(.return, modifiers: .command)
-                        .disabled(model.plannedArguments == nil)
+                        .disabled(model.plannedArguments == nil || model.isRunning)
                 }
             }
         }
@@ -449,5 +522,68 @@ struct ComposeSheet: View {
     let model = ComposePreview.editing("sheet-edit")
     ComposeSheet(model: model)
         .task { await model.previewEdit() }
+}
+
+#Preview("An edit's preview planning, Stop beside it") {
+    ComposeSheet(model: ComposePreview.previewing("sheet-previewing"))
+}
+
+#Preview("New composition: two voice models, the one picked named") {
+    @Previewable @State var model: ComposeViewModel?
+    Group {
+        if let model { ComposeSheet(model: model) } else { ProgressView() }
+    }
+    .task { model = await ComposePreview.sheet("sheet-voices", twoVoices: true) }
+}
+
+#Preview("New composition: this ffmpeg can't burn captions, kept as an .srt") {
+    @Previewable @State var model: ComposeViewModel?
+    Group {
+        if let model { ComposeSheet(model: model) } else { ProgressView() }
+    }
+    .task { model = await ComposePreview.sheet("sheet-captions-kept") }
+}
+
+#Preview("New composition: this ffmpeg burns captions in") {
+    @Previewable @State var model: ComposeViewModel?
+    Group {
+        if let model { ComposeSheet(model: model) } else { ProgressView() }
+    }
+    .task { model = await ComposePreview.sheet("sheet-captions-burned", burns: true) }
+}
+
+#Preview("Refused for its runtime: asking to install") {
+    @Previewable @State var model: ComposeViewModel?
+    Group {
+        if let model { ComposeView(model: model) } else { ProgressView() }
+    }
+    .frame(width: 1100, height: 600)
+    .task { model = await ComposePreview.refused("view-refused") }
+}
+
+#Preview("Installing the video set, Stop beside it") {
+    @Previewable @State var model: ComposeViewModel?
+    Group {
+        if let model { ComposeView(model: model) } else { ProgressView() }
+    }
+    .frame(width: 1100, height: 600)
+    .task { model = await ComposePreview.refused("view-installing", install: true) }
+}
+
+#Preview("Planned first: what it said, and its page offering Render it") {
+    @Previewable @State var model: ComposeViewModel?
+    @Previewable @State var said = PreviewSaid()
+    VStack(alignment: .leading, spacing: 0) {
+        if let model { ComposeView(model: model) } else { ProgressView() }
+        Divider()
+        Text("Said: \(said.last)").font(.apogeeMeta).foregroundStyle(Palette.textSecondary).padding(Spacing.s)
+    }
+    .frame(width: 1100, height: 680)
+    .task { model = await ComposePreview.planned("view-planned") { said.last = $0 } }
+}
+
+#Preview("Projects passed over, and why") {
+    ComposeView(model: ComposePreview.skipping("view-skipped"))
+        .frame(width: 1100, height: 760)
 }
 #endif

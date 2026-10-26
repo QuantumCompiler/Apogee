@@ -39,9 +39,15 @@ public final class VoiceViewModel {
     public var voice = ""
     public var speed = 1.0
     public private(set) var run: JobProgress?
-    public private(set) var consent: [String]?
-    public private(set) var consentSaid = ""
-    public private(set) var installing: JobProgress?
+    /// The install a refused speech named, waiting on the person's yes.
+    public private(set) var consent: InstallConsent?
+    /// The install the person said yes to, as it runs and, ended, until
+    /// dismissed: what the list draws as its card (GUI 4f).
+    public private(set) var installing: RuntimeInstall?
+    /// Whether an install another place started runs now (the composition
+    /// reads the children registry): a second `train setup` into the one
+    /// environment is never offered beside it.
+    public var installElsewhere: @MainActor () -> Bool = { false }
     /// Where playback is, in seconds: the player's clock, set by the view.
     public var position: Double = 0
     public var say: (@MainActor (String) -> Void)?
@@ -53,6 +59,8 @@ public final class VoiceViewModel {
     private let home: URL
     private var binary: URL?
     private var job: (any JobRunning)?
+    private var installJob: (any JobRunning)?
+    /// The refused speech, spoken again once its install is in -- and only then.
     private var retry: [String]?
 
     public init(runner: any CommandRunning, starter: any JobStarting, preferences: Preferences, home: URL) {
@@ -87,13 +95,11 @@ public final class VoiceViewModel {
     }
 
     /// The store's voice models (`models list`'s voice rows, and since the
-    /// CLI's 53m its MLX voice models) and the picked one's voices.
+    /// CLI's 53m its MLX voice models) and the picked one's voices -- read as
+    /// the compose sheet reads them (`MediaModel.readVoiceModels`).
     private func readVoices() async {
-        guard let binary, let list = await runner.read(binary: binary, ["models", "list"]).document else { return }
-        models = MediaModel.offered(
-            ModelRow.list(from: list).filter(\.isStored).compactMap { row in
-                MediaEngine.voice(format: row.format, kind: row.mlxKind?.word).map { MediaModel(handle: row.model, engine: $0) }
-            })
+        guard let binary, let read = await MediaModel.readVoiceModels(runner, binary: binary) else { return }
+        models = read
         if voiceModel == nil || !models.contains(where: { $0.handle == voiceModel }) { voiceModel = models.first?.handle }
         await readVoices(of: voiceModel)
     }
@@ -210,17 +216,28 @@ public final class VoiceViewModel {
         return arguments
     }
 
-    public var isRunning: Bool { job != nil }
+    /// Whether the place runs something now: a speech, or the install one
+    /// needs.
+    public var isRunning: Bool { job != nil || installJob != nil }
 
+    /// Whether the install the person said yes to runs now.
+    public var isInstalling: Bool { installJob != nil }
+
+    /// Says the sheet's text, supervised -- never beside an install, whose
+    /// runtime the speech may need.
     public func speak() {
         guard let arguments = plannedArguments else { return }
+        if let installing, isInstalling {
+            say?("Installing first: the speech can be spoken once \(installing.command) has finished")
+            return
+        }
         try? FileManager.default.createDirectory(at: outputFolder, withIntermediateDirectories: true)
         sheetOpen = false
         start(arguments)
     }
 
     private func start(_ arguments: [String]) {
-        guard let binary, job == nil else { return }
+        guard let binary, job == nil, installJob == nil else { return }
         let streaming = streams()
         run = JobProgress()
         let job = starter.startJob(
@@ -237,9 +254,13 @@ public final class VoiceViewModel {
                     say?("Spoke \((output as NSString).lastPathComponent)")
                 }
             case .failed(let message):
-                if let install = MediaLibrary.installCommand(in: message + "\n" + (run?.stderr ?? "")) {
-                    consent = install
-                    consentSaid = message
+                // Refused for its runtime -- named on stderr alone, the
+                // stream silent -- the app asks, never assumes.
+                guard let asked = InstallConsent(failure: message, stderr: run?.stderr ?? "") else { break }
+                if installElsewhere() {
+                    say?("\(asked.command) is already running: say it again once it has finished")
+                } else {
+                    consent = asked
                     retry = arguments
                 }
             default:
@@ -248,36 +269,66 @@ public final class VoiceViewModel {
         }
     }
 
+    /// Stops what runs as Ctrl-C does: the speech -- nothing is written -- or
+    /// the install, which then runs nothing again.
     public func stop() async {
-        await job?.stop(grace: .seconds(10))
+        if let job {
+            await job.stop(grace: .seconds(10))
+        } else {
+            await installJob?.stop(grace: .seconds(10))
+        }
     }
 
     public func dismissRun() {
         if job == nil { run = nil }
     }
 
-    /// Yes: the voice runtime installed, then the refused run again.
+    /// Yes: the voice runtime's install, supervised -- its card, Stop -- and
+    /// once it is in, the refused speech again. A failed or stopped install
+    /// is said, and runs nothing again.
     public func install() {
-        guard let consent, let binary else { return }
+        guard let consent, let binary, job == nil, installJob == nil else { return }
         self.consent = nil
-        installing = JobProgress()
-        let job = starter.startJob(binary: binary, arguments: consent, streaming: false)
+        let retry = retry
+        self.retry = nil
+        installing = RuntimeInstall(arguments: consent.arguments)
+        let job = starter.startJob(binary: binary, arguments: consent.arguments, streaming: false)
+        installJob = job
         Task {
-            for await update in job.updates { installing?.apply(update) }
-            let done = installing?.status == .done
-            installing = done ? nil : installing
-            if done, let retry {
-                self.retry = nil
-                start(retry)
+            // Its own fold, drawn as it moves: what it ends as is acted on
+            // even when its card was put away the moment its end was said.
+            var installing = RuntimeInstall(arguments: consent.arguments)
+            for await update in job.updates {
+                installing.apply(update)
+                self.installing = installing
+            }
+            installJob = nil
+            switch installing.phase {
+            case .installed:
+                say?("Installed: \(installing.command)" + (retry == nil ? "" : " -- speaking it again"))
+                if let retry { start(retry) }
+            case .failed:
+                say?("Not installed: \(installing.failure ?? installing.command)")
+            case .stopped:
+                say?("The install was stopped before it finished: \(installing.command) runs it again")
+            case .running:
+                break
             }
         }
     }
 
     /// No: nothing installed.
     public func decline() {
-        let command = consent.map { (["apogee"] + $0).joined(separator: " ") } ?? "apogee train setup --with voice"
+        let command = consent?.command ?? "apogee train setup --with voice"
         consent = nil
         retry = nil
         say?("Not installed. \(command) installs it whenever you want it")
+    }
+
+    /// The ended install's card, put away -- once its own end is said; a
+    /// running one stays.
+    public func dismissInstall() {
+        guard installing?.phase != .running else { return }
+        installing = nil
     }
 }

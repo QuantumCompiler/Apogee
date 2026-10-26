@@ -1,0 +1,5 @@
+environment already exists at /Users/someone/.apogee/training/venv
+installing the 'video' set: torch>=2.6 diffusers>=0.35 transformers>=4.46 accelerate>=1.0 ftfy>=6.1 sentencepiece>=0.2 peft>=0.13 ...
+installed
+
+python env: at /Users/someone/.apogee/training/venv; sets: video

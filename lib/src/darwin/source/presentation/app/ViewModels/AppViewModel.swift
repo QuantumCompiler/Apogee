@@ -154,9 +154,17 @@ final class AppViewModel {
         compose.streams = { [weak sessions] in sessions?.streamsJobs ?? false }
         compose.plansAlone = { [weak sessions] in sessions?.hasTrack52 ?? false }
         compose.folders = { [weak video] in video?.folders ?? [] }
+        // The store's voice models and check's captions row, for the sheet (4f).
+        compose.reader = runner ?? ReadRunner()
         let voice = VoiceViewModel(runner: runner ?? ReadRunner(), starter: jobs, preferences: preferences, home: home)
         voice.say = { [weak shell] text in shell?.say(text) }
         voice.streams = { [weak sessions] in sessions?.streamsJobs ?? false }
+        // One install into the one environment at a time: the registry says
+        // whether any place -- or Settings' bootstrap -- runs one now (4f).
+        let installElsewhere: @MainActor () -> Bool = { AppViewModel.installing(in: children) }
+        video.installElsewhere = installElsewhere
+        compose.installElsewhere = installElsewhere
+        voice.installElsewhere = installElsewhere
         let settings = SettingsViewModel(runner: runner ?? ReadRunner(), starter: jobs, preferences: preferences)
         settings.say = { [weak shell] text in shell?.say(text) }
         settings.hasTrack52 = { [weak sessions] in sessions?.hasTrack52 ?? false }
@@ -227,6 +235,13 @@ final class AppViewModel {
             shutDown: { [weak sessions] in await sessions?.quit() ?? ShutdownReport(ended: true, deleteFailure: nil) },
             jobsRunning: { children.children(.job).count },
             stopJobs: { await children.stop(.job, grace: Termination.jobGrace) })
+    }
+
+    /// Whether `registry` holds a run that installs into Apogee's Python
+    /// environment: a `train setup` -- a media place's consented install,
+    /// one typed in the console -- or the bootstrap, which runs them.
+    static func installing(in registry: ChildRegistry) -> Bool {
+        registry.children(.job).contains { $0.label.hasPrefix("apogee train setup") || $0.label.hasPrefix("apogee bootstrap") }
     }
 
     /// The application's own composition. The person's login shell is asked

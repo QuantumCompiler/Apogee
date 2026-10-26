@@ -168,6 +168,10 @@ public struct ComposeForm: Sendable, Equatable {
     public var captions = true
     public var voice = ""
     public var model = ""
+    /// The voice model, by its store handle (`--voice-model`): empty where
+    /// the store holds one, which the CLI takes as it is -- with more, the CLI
+    /// asks which rather than guess (GUI 4f).
+    public var voiceModel = ""
     /// Editing: the composed video (or its project), the instruction, the
     /// scenes to render again on fresh seeds.
     public var from: String?
@@ -196,6 +200,8 @@ public struct ComposeForm: Sendable, Equatable {
             if let assets { arguments += ["--assets", assets] }
             if let music { arguments += ["--music", music] }
             if !captions { arguments.append("--no-captions") }
+            let voiceModel = voiceModel.trimmingCharacters(in: .whitespaces)
+            if !voiceModel.isEmpty { arguments += ["--voice-model", voiceModel] }
             let voice = voice.trimmingCharacters(in: .whitespaces)
             if !voice.isEmpty { arguments += ["--voice", voice] }
             let model = model.trimmingCharacters(in: .whitespaces)

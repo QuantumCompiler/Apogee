@@ -16,7 +16,7 @@ This item reconciles them. The board flips each shipped gap to landed after conf
 **Reference.** The design CLAUDE's update law; GUI MILESTONES:718 (gaps flip in ship docs passes); CLI Milestone AO (track 52's ships); [CLI 55i](../../../cli/assistant/MILESTONES.md#milestone-ar--the-audits-cli-findings) (the CLI docs' twin, shipped 2026-10-25); the CLI/GUI audit (2026-10-22).
 
 **Decisions made** (dated):
-- 2026-10-22: Specced from the CLI/GUI audit (the user's call). G14's flip lands here, and the app's use of it is [`media-studio-finished.md`](media-studio-finished.md) (4f).
+- 2026-10-22: Specced from the CLI/GUI audit (the user's call). G14's flip lands here, and the app's use of it is 4f ([Milestone E](../../assistant/MILESTONES.md#milestone-e--the-audits-gui-findings), shipped 2026-10-25: the compose sheet reads the captions row, and Health draws skipped rows with their remedy).
 
 **Open calls:**
 - [default: SPEC's success criteria are written from three to five behaviors the shipped app demonstrably has (each traceable to a milestone), stated as observable outcomes.]

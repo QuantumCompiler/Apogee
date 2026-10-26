@@ -211,10 +211,14 @@ struct BackendsPane: View {
             if let summary = model.checkSummary {
                 Text(summary).font(.apogeeBody).foregroundStyle(model.checks.contains { $0.status == "fail" } ? Palette.error : Palette.textPrimary)
             }
-            ForEach(model.checks.filter { $0.status == "fail" || $0.status == "warn" }) { row in
+            // What fails and warns, then each optional row skipped with what
+            // brings it (GUI 4f): the captions' ffmpeg-full among them.
+            ForEach(model.healthRows) { row in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(row.section) · \(row.name): \(row.detail)").font(.apogeeSmall)
-                        .foregroundStyle(row.status == "fail" ? Palette.error : Palette.warning)
+                    Text((row.status == "skipped" ? "Not set up · " : "") + "\(row.section) · \(row.name): \(row.detail)")
+                        .font(.apogeeSmall)
+                        .foregroundStyle(Self.tint(row.status))
+                        .fixedSize(horizontal: false, vertical: true)
                     if let remedy = row.remedy {
                         Text(remedy).font(.apogeeCode).foregroundStyle(Palette.textSecondary).textSelection(.enabled)
                     }
@@ -228,6 +232,18 @@ struct BackendsPane: View {
             if let fixing = model.fixing {
                 Text(fixing.busy ?? fixing.notices.last ?? "working").font(.apogeeMeta).foregroundStyle(Palette.textSecondary)
             }
+        }
+    }
+}
+
+extension BackendsPane {
+    /// A Health row's colour: a failure's, a warning's, or -- an optional
+    /// row skipped -- the secondary text's.
+    static func tint(_ status: String) -> Color {
+        switch status {
+        case "fail": Palette.error
+        case "warn": Palette.warning
+        default: Palette.textSecondary
         }
     }
 }
@@ -448,6 +464,16 @@ struct PermissionsPane: View {
         .padding(Spacing.xl)
         .frame(width: 680)
         .task { await SettingsPreview.read(model) }
+}
+
+#Preview("Backends: Health with skipped rows and their remedies, captions among them") {
+    let model = SettingsPreview.settings(.backends, check: SettingsDocuments.checkCaptionsSkipped)
+    ScrollView {
+        VStack(alignment: .leading, spacing: Spacing.xl) { BackendsPane(model: model) }
+            .padding(Spacing.xl)
+    }
+    .frame(width: 680, height: 900)
+    .task { await SettingsPreview.read(model) }
 }
 
 #Preview("Backends: check --fix running") {

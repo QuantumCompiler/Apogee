@@ -9,15 +9,20 @@ import InfrastructureProcess
 /// starts the binary.
 @MainActor
 enum SettingsPreview {
-    static let runner = PreviewRunner(
-        reads: [
-            (["models", "list"], SettingsDocuments.modelsList),
-            (["auth", "list"], authList),
-            (["providers", "scan"], providersScan),
-            (["check"], check),
-        ],
-        commands: [(["config", "get", "permissions"], permissions)],
-        refused: [["config", "get"]])
+    static let runner = runner(check: check)
+
+    /// The panes' reads, `check` answering with `check`'s document.
+    static func runner(check: String) -> PreviewRunner {
+        PreviewRunner(
+            reads: [
+                (["models", "list"], SettingsDocuments.modelsList),
+                (["auth", "list"], authList),
+                (["providers", "scan"], providersScan),
+                (["check"], check),
+            ],
+            commands: [(["config", "get", "permissions"], permissions)],
+            refused: [["config", "get"]])
+    }
 
     /// The documents tests/presentation/settings/SettingsViewModelTests.swift
     /// reads its panes from: a key stored for one provider (names only), a
@@ -48,15 +53,16 @@ enum SettingsPreview {
     static let skippedOverride = (path: "/Users/someone/tools/apogee", reason: "`version` exited with status 1: error: broken install")
 
     /// The view-model, not yet read; `track52` when the build has 52e,
-    /// `childPath` what the app's resolver answers, and `override` the
-    /// binary the person pointed the app at.
+    /// `childPath` what the app's resolver answers, `override` the binary
+    /// the person pointed the app at, and `check` the document `check`
+    /// answers with.
     static func settings(
         _ pane: SettingsViewModel.Pane = .general, track52: Bool = false,
-        childPath: ShellPath.Resolution = shellPath, override: String? = nil
+        childPath: ShellPath.Resolution = shellPath, override: String? = nil, check: String = check
     ) -> SettingsViewModel {
         let preferences = Preferences(store: MemoryStore())
         preferences.binaryOverride = override.map { URL(fileURLWithPath: $0) }
-        let model = SettingsViewModel(runner: runner, starter: PreviewJobs(), preferences: preferences)
+        let model = SettingsViewModel(runner: runner(check: check), starter: PreviewJobs(), preferences: preferences)
         model.pane = pane
         model.hasTrack52 = { track52 }
         model.childPathSource = { childPath }

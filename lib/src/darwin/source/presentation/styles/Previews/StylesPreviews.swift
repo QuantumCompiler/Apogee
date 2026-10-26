@@ -90,6 +90,19 @@ enum StylesPreview {
     /// That answer as it stood just after its Ruby fence opened: what a turn
     /// stopped there leaves, finished.
     static let endedAtAFence = prefix(StylesDocuments.edgesAnswer, through: "```r")
+
+    /// The install `video generate`'s refusal names, as it names it
+    /// (tests/business/media/Fixtures/generate-refused-runtime.err).
+    static var installCommand: String {
+        StylesDocuments.generateRefusedErr.components(separatedBy: " -- ").last?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    /// The first line of what `train setup` printed that starts with `prefix`
+    /// (tests/business/media/Fixtures/install-video-*).
+    static func installLine(_ document: String, startingWith prefix: String) -> String? {
+        document.split(separator: "\n").first { $0.hasPrefix(prefix) }.map(String.init)
+    }
 }
 
 extension View {

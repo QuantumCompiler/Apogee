@@ -671,5 +671,22 @@ enum StylesDocuments {
 {"turn":1,"type":"answer_end"}
 {"finish_reason":"stop","model":"chatty","text":"## Sizing the batch\n\nStart from the arithmetic:\n\n128 * 8 = 1024\n\nSo one host takes 1024 rows, and 2 + 2 = 4 workers share them. Per worker:\n| Workers | Rows each | Total |\n|---|--:|--:|\n| 2 | 512 | 1024 |\n| 4 | 256 | 1024 |\n\nThe loader writes its settings with a here-document, and sizes its mask with shifts:\n\n```bash\ncat <<EOF > batch.conf\nrows=1024\nEOF\necho $((a<<b))\n(( mask = 1 <<bits ))\necho \"done\"\n```\n\nIn Ruby, `<<` appends; a here-document's marker follows a space:\n\n```ruby\nlist<<Const\ntotal = 1 << 2\nsql = <<~SQL\n  SELECT count(*) FROM rows\nSQL\nputs sql\n```\n\nSee [the sizing guide][1] and [the loader's notes][2].\n\n[1]: https://a.example/docs\n[2]: https://b.example/guide \"Loader notes\"\n\n|x| is the absolute value of x, so |-3| = 3.\n|rows - 1024| is how far a host is from full.\n\nThe answer, then:\n\n42","turn":1,"type":"result"}
 """#
+    /// tests/business/media/Fixtures/install-video-done.txt
+    static let installVideoDone = #"""
+environment already exists at /Users/someone/.apogee/training/venv
+installing the 'video' set: torch>=2.6 diffusers>=0.35 transformers>=4.46 accelerate>=1.0 ftfy>=6.1 sentencepiece>=0.2 peft>=0.13 ...
+installed
+
+python env: at /Users/someone/.apogee/training/venv; sets: video
+"""#
+    /// tests/business/media/Fixtures/install-video-failed.err
+    static let installVideoFailedErr = #"""
+apogee train: pip install for the 'video' set failed (exit code 1):
+ERROR: Could not install packages: this sandbox's pip is a stub with no network
+"""#
+    /// tests/business/media/Fixtures/generate-refused-runtime.err
+    static let generateRefusedErr = #"""
+apogee video generate: torch and diffusers are not installed in Apogee's Python environment -- apogee train setup --with video
+"""#
 }
 #endif

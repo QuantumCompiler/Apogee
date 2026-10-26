@@ -23,5 +23,31 @@ Wan2.2-TI2V-5B/mlx/5e6f708192a3
     static let clipMLX = #"""
 {"codec":"h264","created_at":"2026-10-22T09:05:50Z","device":{"device":"gpu","dtype":"4-bit","platform":"macos-arm64"},"engine":"mlx","image":null,"loras":[],"mode":"t2v","model":{"class":"Wan ti2v","name":"Wan2.2-TI2V-5B/mlx/5e6f708192a3","path":"/Users/someone/.apogee/models/Wan2.2-TI2V-5B/mlx/5e6f708192a3","ref":"Wan-AI--Wan2.2-TI2V-5B/safetensors/6ef9b00b8b83","revision":"","variant":null},"object":"video.generation","output":"/Users/someone/Movies/Apogee/lighthouse-mlx.mp4","parent":null,"preset":null,"prompt":"A lighthouse at dusk","seconds":0.093,"seed":88280263,"seed_source":"generated","settings":{"duration":1.0,"fps":8,"frames":9,"guidance":null,"height":144,"steps":4,"width":256},"sidecar":"/Users/someone/Movies/Apogee/lighthouse-mlx.mp4.json","status":"done","versions":{"apogee":"0.1.9","diffusers":"","mlx":"0.31.2","mlx_video":"0.0-video-stub","torch":""}}
 """#
+    /// tests/business/media/Fixtures/generate-refused-runtime.jsonl
+    static let generateRefused = #"""
+{"protocol_version":1,"schema":"2026-10-25","type":"job","verb":"video generate"}
+"""#
+    /// tests/business/media/Fixtures/generate-refused-runtime.err
+    static let generateRefusedErr = #"""
+apogee video generate: torch and diffusers are not installed in Apogee's Python environment -- apogee train setup --with video
+"""#
+    /// tests/business/media/Fixtures/install-video-done.txt
+    static let installVideoDone = #"""
+environment already exists at /Users/someone/.apogee/training/venv
+installing the 'video' set: torch>=2.6 diffusers>=0.35 transformers>=4.46 accelerate>=1.0 ftfy>=6.1 sentencepiece>=0.2 peft>=0.13 ...
+installed
+
+python env: at /Users/someone/.apogee/training/venv; sets: video
+"""#
+    /// tests/business/media/Fixtures/install-video-failed.txt
+    static let installVideoFailed = #"""
+environment already exists at /Users/someone/.apogee/training/venv
+installing the 'video' set: torch>=2.6 diffusers>=0.35 transformers>=4.46 accelerate>=1.0 ftfy>=6.1 sentencepiece>=0.2 peft>=0.13 ...
+"""#
+    /// tests/business/media/Fixtures/install-video-failed.err
+    static let installVideoFailedErr = #"""
+apogee train: pip install for the 'video' set failed (exit code 1):
+ERROR: Could not install packages: this sandbox's pip is a stub with no network
+"""#
 }
 #endif

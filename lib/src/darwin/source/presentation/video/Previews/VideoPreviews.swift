@@ -41,7 +41,7 @@ enum VideoPreview {
     /// from it -- and, when `gone`, a record whose clip is no longer there --
     /// with `selecting` picked.
     static func library(
-        _ name: String, gone: Bool = false, selecting: String? = nil, starter: PreviewJobs = PreviewJobs()
+        _ name: String, gone: Bool = false, selecting: String? = nil, starter: any JobStarting = PreviewJobs()
     ) -> VideoViewModel {
         let home = home(name)
         let folder = home.appendingPathComponent("Movies/Apogee")
@@ -69,7 +69,7 @@ enum VideoPreview {
         connected(home(name), starter: starter)
     }
 
-    private static func connected(_ home: URL, starter: PreviewJobs) -> VideoViewModel {
+    private static func connected(_ home: URL, starter: any JobStarting) -> VideoViewModel {
         let model = VideoViewModel(starter: starter, preferences: Preferences(store: MemoryStore()), home: home)
         model.connect(binary: previewBinary)
         return model
@@ -83,12 +83,50 @@ enum VideoPreview {
     /// A 52b run's step, as tests/presentation/video's streaming test says it.
     static let step: [JobUpdate] = [.event(.step(step: 3, steps: 50, scene: nil))]
 
-    /// The refusal of a run whose runtime is not installed, in the CLI's words
-    /// (tests/presentation/video/VideoViewModelTests.swift's consent test).
-    static let refusal = "apogee video: the video runtime is not installed -- run: apogee train setup --with video"
+    // MARK: - The runtime's install (GUI 4f)
 
-    /// A 52b run refused for its runtime: the stream's error, then its end.
-    static let refused = PreviewJobs(said: [.event(.error(refusal))], finishes: true, status: 1)
+    /// `video generate` refused for its runtime as the binary refused it over
+    /// a sandbox with no torch (tests/business/media/Fixtures/
+    /// generate-refused-runtime.*): its 52b stream's one `job` line, the
+    /// refusal on stderr alone.
+    static let refusedRun = PreviewRun(
+        stdout: VideoDocuments.generateRefused, streaming: true, status: 1, stderr: VideoDocuments.generateRefusedErr)
+
+    /// `train setup --with video` as the binary ran it over that sandbox's
+    /// stub pip (tests/business/media/Fixtures/install-video-*): still going,
+    /// its first two lines said; failed; and done.
+    static let installRunning = PreviewRun(
+        stdout: VideoDocuments.installVideoDone.split(separator: "\n").prefix(2).joined(separator: "\n"), finishes: false)
+    static let installFailed = PreviewRun(
+        stdout: VideoDocuments.installVideoFailed, status: 1, stderr: VideoDocuments.installVideoFailedErr)
+    static let installDone = PreviewRun(stdout: VideoDocuments.installVideoDone)
+
+    /// A starter replaying `runs`, one a start.
+    static func runs(_ runs: [PreviewRun]) -> PreviewRuns { PreviewRuns(runs) }
+
+    /// The clip the recording asked for, on a 52b build, refused for its
+    /// runtime: the consent standing.
+    static func refuse(_ model: VideoViewModel) async {
+        model.streams = { true }
+        model.newClip()
+        model.form.prompt = "a heron lands on a pier at dusk"
+        model.generate()
+        await until { model.consent != nil }
+    }
+
+    /// Refused, then the person's yes: the install on the starter's next run.
+    static func install(_ model: VideoViewModel) async {
+        await refuse(model)
+        model.install()
+    }
+
+    /// Waits, a few seconds at most, for what a run's end sets.
+    static func until(_ condition: @MainActor () -> Bool) async {
+        for _ in 0..<250 {
+            if condition() { return }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
 
     /// How a run ended: `status` 0 is done, any other a failure.
     static func ended(_ status: Int32) -> JobUpdate {
