@@ -2319,6 +2319,34 @@ TEST_CASE("a driven chat names the chat it writes, a resumed one the chat it res
     CHECK(listed_ids(chat) == std::vector<std::string>{id});
 }
 
+TEST_CASE("a driven chat names the suite it runs under, fresh and resumed, and none without one",
+          "[chat][cli][machine][suites]") {
+    // M29: the saved chat held `suite: fast`, and a driver read it from
+    // stderr's admission line alone -- the design's contract board's G23.
+    HelperChat chat{texts({"chatty answer"}),
+                    {"helper answer"},
+                    {},
+                    "suites:\n  fast:\n    members:\n      chat: helper\n"};
+    INFO(chat.err);
+    const std::string hi = std::string{R"({"type":"user","text":"hi"})"} + "\n";
+    REQUIRE(chat.run(driven_args({"--suite", "fast"}), hi) == 0);
+    const nlohmann::json opened = driven_events(chat.out).front();
+    CHECK(opened.at("suite") == "fast");
+    // Execute's alone: a chat orchestrates nothing.
+    CHECK_FALSE(opened.contains("orchestrating"));
+    const std::string id = opened.at("chat_id").get<std::string>();
+
+    // Resumed, it runs under the suite it saved, and says so.
+    REQUIRE(chat.run(driven_args({"--resume", id}), hi) == 0);
+    CHECK(driven_events(chat.out).front().at("suite") == "fast");
+
+    // Turned off, and with none named or configured: no suite to name.
+    REQUIRE(chat.run(driven_args({"--resume", id, "--suite", "off"}), hi) == 0);
+    CHECK_FALSE(driven_events(chat.out).front().contains("suite"));
+    REQUIRE(chat.run(driven_args(), hi) == 0);
+    CHECK_FALSE(driven_events(chat.out).front().contains("suite"));
+}
+
 TEST_CASE("a chat closed before its first turn writes nothing, whatever it set, and keeps no index",
           "[chat][cli][unwritten]") {
     // M28: no empty row in `chats list` -- the open call's default, nothing

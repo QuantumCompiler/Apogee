@@ -713,6 +713,19 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
         build_options.config_path = config_path;
         const backends::BuildResult built = backends::build_providers(harness, build_options);
 
+        // An explicit model answers under its own name or not at all. A typo
+        // is refused by name, and a backend that IS configured but failed to
+        // construct is the same hazard one step later: without this, `-m
+        // local` on an unbuildable local backend falls through to the default
+        // and the user gets a real answer from a model they did not choose.
+        // Asked before the whole list (M29), so a run naming one backend
+        // hears that backend's problem even when nothing started.
+        if (!flags->all_backends) {
+            if (const std::string refused = named_backend_refusal(config, built, flags->model);
+                !refused.empty()) {
+                fail_user(refused);
+            }
+        }
         if (built.constructed_count() == 0) {
             std::string message = "no usable backend is configured";
             if (!built.skipped_summary().empty()) {
@@ -738,27 +751,6 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
         check_images(*flags);
 
         if (!flags->all_backends) {
-            if (!flags->model.empty() && !names_a_configured_backend(config, flags->model)) {
-                std::string known;
-                for (const std::string& name : config.backend_names()) {
-                    known += known.empty() ? "" : ", ";
-                    known += name;
-                }
-                fail_user("no backend named '" + flags->model + "'" +
-                          (known.empty() ? "" : " (configured: " + known + ")"));
-            }
-            // A backend that IS configured but failed to construct is the same
-            // hazard as a typo, one step later: without this, `-m local` on an
-            // unbuildable local backend falls through to the default and the
-            // user gets a real answer from a model they did not choose. Name
-            // the backend's own reason instead.
-            for (const backends::BackendStatus& status : built.statuses) {
-                if (!status.constructed && status.name == flags->model) {
-                    fail_user("backend '" + flags->model + "' is configured but unavailable -- " +
-                              status.reason);
-                }
-            }
-
             const std::string model = harness::resolve_chat_backend(config, flags->model);
             (void)run_one(harness, config, config_path, *flags, model, prompt, decorate);
             return;

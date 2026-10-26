@@ -114,10 +114,15 @@ public:
     /// will carry, past those a resumed conversation already holds. A session
     /// that writes a chat names it, `chat_id` (M28): the id `chats list` lists
     /// it by and `--resume` takes -- a resumed one's, the chat it resumed. A
-    /// private one (52d) writes none, so names none.
+    /// private one (52d) writes none, so names none. A session under a suite
+    /// names it, `suite` (M29), fresh or resumed -- none names none -- and an
+    /// execute session says whether it orchestrates, `orchestrating`: nullopt
+    /// leaves it out, as a chat's.
     void begin_session(std::string_view model, const MachineCapabilities& capabilities,
                        std::optional<std::int64_t> next_turn = std::nullopt,
-                       bool private_chat = false, std::string_view chat_id = {});
+                       bool private_chat = false, std::string_view chat_id = {},
+                       std::string_view suite = {},
+                       std::optional<bool> orchestrating = std::nullopt);
 
     /// A `user` line was accepted as turn `turn` (28f): every event until
     /// `end_turn` carries `"turn": turn`, so a driver can attribute any event

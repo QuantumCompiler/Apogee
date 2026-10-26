@@ -232,11 +232,15 @@ known = {"session", "thinking", "thinking_delta", "memory", "tool_status", "noti
 assert set(types) <= known, f"a type the protocol does not have: {set(types) - known}"
 # The chat it writes, named as chat's is (M28): the conversation just saved.
 assert events[0]["chat_id"] == json.load(open(sys.argv[2]))["chat_id"], (events[0], sys.argv[2])
-assert types[:7] == ["session", "tool_status", "tool_status", "answer_start", "answer_delta",
-                     "answer_end", "result"], types
-assert events[1]["text"].startswith("stage 1/2 first — asking utility (helper): One: hello"), events[1]
-assert events[2]["text"].startswith("stage 2/2 second — asking chat (root): Two: HELPER<"), events[2]
-assert events[6]["text"] == "ROOT<Two: HELPER<One: hello>>", events[6]
+# The suite it runs under, and that it does not orchestrate, said on the
+# session event; what the suite takes of the machine a notice after it (M29).
+assert events[0]["suite"] == "duo" and events[0]["orchestrating"] is False, events[0]
+assert types[:8] == ["session", "notice", "tool_status", "tool_status", "answer_start",
+                     "answer_delta", "answer_end", "result"], types
+assert events[1]["text"] == "suite duo: no member holds memory on this machine", events[1]
+assert events[2]["text"].startswith("stage 1/2 first — asking utility (helper): One: hello"), events[2]
+assert events[3]["text"].startswith("stage 2/2 second — asking chat (root): Two: HELPER<"), events[3]
+assert events[7]["text"] == "ROOT<Two: HELPER<One: hello>>", events[7]
 assert types[-1] == "error" and "no symphony named 'nope'" in events[-1]["message"], events[-1]
 assert types.count("result") == 2, types
 PY

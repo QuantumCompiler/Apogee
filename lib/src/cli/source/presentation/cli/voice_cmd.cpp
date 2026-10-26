@@ -50,59 +50,64 @@ void voice_say(const RootContext& context, SayFlags flags, const CLI::App& verb)
     if (flags.format == JobFormat::StreamJson) {
         job.emplace("voice say");
     }
-    BusyLine busy{std::cerr, "loading the voice model", busy_options(job.has_value())};
-    const auto say = [&busy, &job](const std::string& line) {
-        if (job.has_value()) {
-            job->events().on_notice(line);
-            return;
-        }
-        busy.above([&line] { std::cerr << "[voice] " << line << "\n"; });
-    };
-    VoiceSaySeams seams;
-    seams.ready = [&config](const ResolvedVoiceModel& model) {
-        return ready_voice_engine(config, model.dir, model.handle, model.engine, "voice say");
-    };
-    seams.say = say;
-    seams.on_event = [&](const video::VoiceEvent& event) {
-        if (job.has_value()) {
-            relay_voice_event(job->events(), event, 0);
-            return;
-        }
-        if (const std::optional<std::string> line = narrate_voice_event(event)) {
-            say(*line);
-            busy.set("speaking");
-        }
-    };
-    seams.work_root = harness::video_work_dir();
-    seams.platform = platform::host_target();
+    // A refusal raised below the verb that told no stream -- a runtime not
+    // installed, asked by the ladder -- still ends it on `error` (M29:
+    // training's backstop, shared).
+    run_job_body([&] {
+        BusyLine busy{std::cerr, "loading the voice model", busy_options(job.has_value())};
+        const auto say = [&busy, &job](const std::string& line) {
+            if (job.has_value()) {
+                job->events().on_notice(line);
+                return;
+            }
+            busy.above([&line] { std::cerr << "[voice] " << line << "\n"; });
+        };
+        VoiceSaySeams seams;
+        seams.ready = [&config](const ResolvedVoiceModel& model) {
+            return ready_voice_engine(config, model.dir, model.handle, model.engine, "voice say");
+        };
+        seams.say = say;
+        seams.on_event = [&](const video::VoiceEvent& event) {
+            if (job.has_value()) {
+                relay_voice_event(job->events(), event, 0);
+                return;
+            }
+            if (const std::optional<std::string> line = narrate_voice_event(event)) {
+                say(*line);
+                busy.set("speaking");
+            }
+        };
+        seams.work_root = harness::video_work_dir();
+        seams.platform = platform::host_target();
 
-    VoiceSayResult result;
-    {
-        const InterruptScope interrupt;
-        result = say_text(store_roots_of(config), options, seams, InterruptScope::token());
-    }
-    busy.finish();
-    if (result.document.is_null()) {
+        VoiceSayResult result;
+        {
+            const InterruptScope interrupt;
+            result = say_text(store_roots_of(config), options, seams, InterruptScope::token());
+        }
+        busy.finish();
+        if (result.document.is_null()) {
+            if (job.has_value()) {
+                job->failed(result.error);
+            }
+            fail(result.error, result.exit_code);
+        }
         if (job.has_value()) {
-            job->failed(result.error);
+            job->events().emit_document(result.document);
+        } else if (flags.format == JobFormat::Json) {
+            write_document(std::cout, result.document);
+        } else {
+            for (const std::string& line : result.lines) {
+                std::cout << line << "\n";
+            }
         }
-        fail(result.error, result.exit_code);
-    }
-    if (job.has_value()) {
-        job->events().emit_document(result.document);
-    } else if (flags.format == JobFormat::Json) {
-        write_document(std::cout, result.document);
-    } else {
-        for (const std::string& line : result.lines) {
-            std::cout << line << "\n";
+        if (result.exit_code != 0) {
+            if (job.has_value()) {
+                job->failed(result.error);
+            }
+            fail(result.error, result.exit_code);
         }
-    }
-    if (result.exit_code != 0) {
-        if (job.has_value()) {
-            job->failed(result.error);
-        }
-        fail(result.error, result.exit_code);
-    }
+    });
 }
 
 }  // namespace

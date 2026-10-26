@@ -88,16 +88,9 @@ void run_as_job(JobFormat format, std::string_view verb, const std::function<voi
         body();
         return;
     }
+    // Open while the body runs: what it tells, it tells this stream.
     JobStream job{verb};
-    try {
-        body();
-    } catch (const CLI::RuntimeError&) {
-        job.failed("the run failed; stderr says why");
-        throw;
-    } catch (const std::exception& e) {
-        job.failed(e.what());
-        throw;
-    }
+    run_job_body(body);
 }
 
 [[nodiscard]] harness::Config load_config_or_default(const RootContext& context) {
@@ -1935,10 +1928,13 @@ training::PythonEnv require_python_env(const harness::Config& config, std::strin
     const bool interactive =
         platform::is_terminal(platform::StandardStream::In) && !stdin_is_piped();
     if (!interactive) {
-        std::cerr << "apogee " << purpose
-                  << ": the Python environment has not been created yet. Run 'apogee train "
-                     "setup' first (it creates "
-                  << env.dir().string() << ", never touching the system Python)\n";
+        // Said on stderr and, when the run streams, as its `error` (M29).
+        const std::string refused =
+            "the Python environment has not been created yet. Run 'apogee train setup' first (it "
+            "creates " +
+            env.dir().string() + ", never touching the system Python)";
+        std::cerr << "apogee " << purpose << ": " << refused << "\n";
+        tell_job_failure(refused);
         throw CLI::RuntimeError(kUserError);
     }
     std::cerr << purpose << " needs a Python environment, which Apogee keeps under\n  "

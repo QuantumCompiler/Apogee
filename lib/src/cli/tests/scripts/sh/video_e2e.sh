@@ -615,8 +615,21 @@ generate missing -o "$WORK_DIR/out/missing.mp4"
 [ "$STATUS" -ne 0 ] || fail "a run without diffusers succeeded"
 grep -q "torch and diffusers are not installed in Apogee's Python environment -- apogee train setup --with video" \
     "$WORK_DIR/missing.err" || fail "the refusal: $(cat "$WORK_DIR/missing.err")"
+# Streamed (M29), the stream ends on its error -- the words stderr gets --
+# where it ended on its `job` line alone.
+generate missing_stream -o "$WORK_DIR/out/missing.mp4" --output-format stream-json
+[ "$STATUS" -eq 1 ] || fail "a streamed run without diffusers: exit $STATUS"
+python3 - "$WORK_DIR/missing_stream.out" <<'EOF2' || fail "the stream: $(cat "$WORK_DIR/missing_stream.out")"
+import json, sys
+events = [json.loads(line) for line in open(sys.argv[1])]
+assert [e["type"] for e in events] == ["job", "error"], events
+assert events[1]["message"] == ("torch and diffusers are not installed in Apogee's Python "
+                                "environment -- apogee train setup --with video"), events[1]
+EOF2
+grep -q "^apogee video generate: torch and diffusers are not installed" "$WORK_DIR/missing_stream.err" \
+    || fail "the streamed refusal left stderr: $(cat "$WORK_DIR/missing_stream.err")"
 
-echo "video generate: a missing runtime refused on a pipe - OK"
+echo "video generate: a missing runtime refused on a pipe, and as a stream's error - OK"
 
 # --- on MLX (53l): mlx-video's build of a Wan set, the MLX driver ------------
 if [ -z "$MLX_STUBS" ] || [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then

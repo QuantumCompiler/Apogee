@@ -1,15 +1,19 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <nlohmann/json.hpp>
 
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #include "modelstore/store.h"
 #include "support/cli_home.h"
 #include "support/mlx_model.h"
 #include "support/pipeline_model.h"
 #include "support/wan_original.h"
+#include "training/python_env.h"
 
 /// `apogee video` and its pointer through the real command tree (49c):
 /// `config set-default-video` resolved against the store and written by the
@@ -22,6 +26,25 @@ namespace {
 using Catch::Matchers::ContainsSubstring;
 
 constexpr std::string_view kConfig = "backends:\n  mock:\n    type: mock\n";
+
+/// The JSONL events of a streamed run's stdout.
+[[nodiscard]] std::vector<nlohmann::json> events_of(const std::string& out) {
+    std::vector<nlohmann::json> events;
+    std::istringstream lines{out};
+    for (std::string line; std::getline(lines, line);) {
+        events.push_back(nlohmann::json::parse(line));
+    }
+    return events;
+}
+
+/// The Python environment Apogee owns at `home`, made with nothing installed:
+/// its interpreter alone.
+void write_bare_environment(const std::filesystem::path& home) {
+    const std::filesystem::path interpreter =
+        apogee::training::PythonEnv{home / "training" / "venv"}.interpreter();
+    std::filesystem::create_directories(interpreter.parent_path());
+    std::ofstream{interpreter} << "#!fake";
+}
 
 struct Home {
     apogee::testing::CliHome home{std::string{kConfig}};
@@ -164,5 +187,45 @@ TEST_CASE("video generate refuses an engine its model does not run on, before an
                     "cuda"},
                    &out, &err) == 1);
     CHECK_THAT(err, ContainsSubstring("--engine takes auto, torch or mlx (got 'cuda')"));
+    CHECK_FALSE(std::filesystem::exists(clip));
+}
+
+TEST_CASE("a runtime not installed ends a streamed generate on its error, its words on stderr too",
+          "[cli][video][generate][stream]") {
+    // M29: the stream carried its `job` line alone, the words on stderr --
+    // other refusals said `job`, then `error`.
+    const Home fixture;
+    const apogee::testing::CliHome& home = fixture.home;
+    const std::string clip = (home.home() / "clip.mp4").string();
+    const std::vector<std::string> args{"video",      "generate", "a heron",   "-o",
+                                        clip,         "--model",  "org--clip", "--output-format",
+                                        "stream-json"};
+    std::string out;
+    std::string err;
+    // No environment at all: the environment's own refusal.
+    CHECK(home.run(args, &out, &err) == 1);
+    std::vector<nlohmann::json> events = events_of(out);
+    REQUIRE(events.size() == 2);
+    CHECK(events.front().at("type") == "job");
+    CHECK(events.back().at("type") == "error");
+    const std::string no_environment = events.back().at("message").get<std::string>();
+    CHECK(
+        no_environment.starts_with("the Python environment has not been created yet. Run "
+                                   "'apogee train setup' first"));
+    CHECK(err == "apogee video generate: " + no_environment + "\n");
+
+    // An environment without the set: its refusal, naming its installer.
+    write_bare_environment(home.home());
+    CHECK(home.run(args, &out, &err) == 1);
+    events = events_of(out);
+    REQUIRE(events.size() == 2);
+    CHECK(events.front().at("type") == "job");
+    CHECK(events.back().at("type") == "error");
+    CHECK(events.back().at("message") ==
+          "torch and diffusers are not installed in Apogee's Python environment -- apogee train "
+          "setup --with video");
+    CHECK(err ==
+          "apogee video generate: torch and diffusers are not installed in Apogee's Python "
+          "environment -- apogee train setup --with video\n");
     CHECK_FALSE(std::filesystem::exists(clip));
 }

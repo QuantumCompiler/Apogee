@@ -818,6 +818,12 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     }
     if (!launched.pinned.empty()) {
         std::cerr << "model '" << launched.pinned << "' -- " << roster_pin_note(launched) << "\n";
+    }
+    // The router is asked by the entry's key whenever the name is none it
+    // knows -- a roster's model, or `<backend>:<model>` naming the entry's
+    // own (34), which pins nothing: handed on as typed, it found no such key
+    // and answered from the default (M29).
+    if (!launched.backend.empty() && configured_backend_key(config, flags->model).empty()) {
         roster_adjusted = *flags;
         roster_adjusted.model = launched.backend;
         flags = &roster_adjusted;
@@ -831,6 +837,15 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     build_options.config_path = config_path;
     const backends::BuildResult built = backends::build_providers(harness, build_options);
 
+    // A backend named by `-m` answers under its own name or not at all
+    // (M29): one that did not start, or a name the config defines nowhere, is
+    // refused at launch with its own problem, as `complete -m` refuses it --
+    // before the router could answer for it from the default. A later
+    // request keeps the router's fallback.
+    if (const std::string refused = named_backend_refusal(config, built, flags->model);
+        !refused.empty()) {
+        fail_user(mode, refused);
+    }
     if (built.constructed_count() == 0) {
         std::string message = "no usable backend is configured";
         if (!built.skipped_summary().empty()) {
@@ -868,14 +883,23 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     logger::Session session;
     // What a resume could not carry over (55b): the terminal's `[resume]`
     // warning lines, and a driver's `notice`s once its `session` event is out
-    // -- never stderr alone, which a driver does not draw.
+    // -- never stderr alone, which a driver does not draw. The suite's own
+    // lines at launch -- its warnings and its admission (27e) -- are said the
+    // same way, after them (M29).
     const bool machine_stream = flags->output_format == OutputFormat::StreamJson;
-    std::vector<std::string> resume_notes;
+    std::vector<std::string> opening_notes;
     const auto resume_note = [&](const std::string& message) {
         if (machine_stream) {
-            resume_notes.push_back("resume: " + message);
+            opening_notes.push_back("resume: " + message);
         } else {
             out.print_line(style.tag(ansi::Role::Warning) + " [resume] " + message);
+        }
+    };
+    const auto suite_note = [&](ansi::Role role, const std::string& line) {
+        if (machine_stream) {
+            opening_notes.push_back(line);
+        } else {
+            out.print_line(style.tag(role) + " " + line);
         }
     };
     logger::KnownDependencies known;
@@ -948,7 +972,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     if (chosen_suite.has_value() && *chosen_suite != config.models.default_suite) {
         for (const std::string& line :
              activate_suite(harness, config, *chosen_suite, build_options)) {
-            out.print_line(style.tag(ansi::Role::Warning) + " " + line);
+            suite_note(ansi::Role::Warning, line);
         }
     }
     // A resumed session that had no suite, under a config with no default,
@@ -1387,10 +1411,11 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     };
     refresh_header();
     // What the suite takes of this machine, stated where the session
-    // starts -- on a pipe too, on stderr -- and, asked for, its members
-    // loaded now on the busy line rather than at their first use (27e).
+    // starts -- on a pipe too, on stderr; to a driver, a `notice` after its
+    // `session` event (M29) -- and, asked for, its members loaded now on the
+    // busy line rather than at their first use (27e).
     if (footprint.has_value()) {
-        out.print_line(style.tag(ansi::Role::Apogee) + " " + admission_line(*footprint, forced));
+        suite_note(ansi::Role::Apogee, admission_line(*footprint, forced));
     }
     if (flags->warm) {
         std::vector<std::string> unwarmed;
@@ -1401,7 +1426,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             unwarmed = warm_suite(harness, config, busy);
         }
         for (const std::string& line : unwarmed) {
-            out.print_line(style.tag(ansi::Role::Warning) + " " + line);
+            suite_note(ansi::Role::Warning, line);
         }
     }
     // A private chat says so at its start (52d), on a terminal, a pipe and
@@ -1478,7 +1503,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         // the turns a resumed conversation already holds -- the one count
         // `chats show` numbers them by (55b), which the load reconciled with
         // the answers the file holds. The chat it writes is named (M28) --
-        // none for a private one.
+        // none for a private one -- and the suite it runs under, fresh or
+        // resumed, with whether an execute session orchestrates (M29).
         std::int64_t next_turn = static_cast<std::int64_t>(logger::counted_turns(session)) + 1;
         machine_reporter.begin_session(
             session.backend,
@@ -1486,7 +1512,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 .accepts = {machine_inbound_types().begin(), machine_inbound_types().end()},
                 .tools = tools_on(),
                 .ask = flags->tools},
-            next_turn, flags->private_chat, session.chat_id);
+            next_turn, flags->private_chat, session.chat_id, config.models.default_suite,
+            mode == SessionMode::Execute ? std::optional<bool>{orchestrates()} : std::nullopt);
         // A chat deleted outside while this session runs stays deleted
         // (55b): the save that finds it gone writes nothing more, and the
         // driver is told once.
@@ -1505,9 +1532,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         if (!session.todo.empty()) {
             machine_reporter.on_todo(session.todo);
         }
-        // What the resume could not carry over, said where the driver draws
-        // it (55b): one `notice` each, before anything the session reads.
-        for (const std::string& note : resume_notes) {
+        // What the resume could not carry over (55b), then the suite's lines
+        // (M29), said where the driver draws them: one `notice` each, before
+        // anything the session reads.
+        for (const std::string& note : opening_notes) {
             machine_reporter.on_notice(note);
         }
         // The driver's lines, read while a turn runs, so a `cancel` reaches

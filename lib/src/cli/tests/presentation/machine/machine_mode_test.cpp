@@ -16,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "agentloop/loop.h"
@@ -1112,6 +1113,49 @@ TEST_CASE("a session names the chat it writes, and a private one names none",
     CHECK_FALSE(field->required);
 }
 
+TEST_CASE("a session names the suite it runs under, and an execute session whether it orchestrates",
+          "[commands][machine][suite]") {
+    // M29: added to the event and nothing else moved; a session under none,
+    // and a chat, say nothing new.
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.begin_session("m", {}, 1, false, "20261026-120000-a1b2", "research", false);
+    nlohmann::json session = events(out.str()).front();
+    session.erase("capabilities");
+    CHECK(session.dump() ==
+          R"({"chat_id":"20261026-120000-a1b2","model":"m","next_turn":1,"orchestrating":false,)"
+          R"("protocol_version":1,"suite":"research","type":"session"})");
+
+    std::ostringstream playing;
+    JsonReporter playing_reporter{playing};
+    playing_reporter.begin_session("m", {}, 1, false, "20261026-120000-a1b2", "research", true);
+    CHECK(events(playing.str()).front().at("orchestrating") == true);
+
+    std::ostringstream bare;
+    JsonReporter bare_reporter{bare};
+    bare_reporter.begin_session("m", {}, 1, false, "20261026-120000-a1b2");
+    CHECK_FALSE(events(bare.str()).front().contains("suite"));
+    CHECK_FALSE(events(bare.str()).front().contains("orchestrating"));
+
+    // Declared: optional, so an older driver ignores them.
+    const auto declared = apogee::commands::machine_events();
+    const auto line = std::ranges::find_if(
+        declared, [](const apogee::commands::LineSpec& spec) { return spec.type == "session"; });
+    REQUIRE(line != declared.end());
+    for (const auto& [name, type] :
+         {std::pair<std::string_view, std::string_view>{"suite", "string"},
+          std::pair<std::string_view, std::string_view>{"orchestrating", "boolean"}}) {
+        INFO(name);
+        const auto field = std::ranges::find_if(
+            line->fields, [&wanted = name](const apogee::commands::FieldSpec& spec) {
+                return spec.name == wanted;
+            });
+        REQUIRE(field != line->fields.end());
+        CHECK(field->type == type);
+        CHECK_FALSE(field->required);
+    }
+}
+
 // --- 28f: turn ids and cancel ---------------------------------------------------
 
 TEST_CASE("every event of an open turn carries its number; the session never does",
@@ -1330,8 +1374,9 @@ TEST_CASE("every event every emitter writes is the declaration's, field for fiel
     capabilities.tools = true;
     capabilities.ask = true;
     reporter.begin_session("m", capabilities, 1, true);
-    // And a session that names its chat (M28).
+    // And a session that names its chat (M28), and one its suite (M29).
     reporter.begin_session("m", capabilities, 1, false, "20261024-120000-a1b2");
+    reporter.begin_session("m", capabilities, 1, false, "20261024-120000-a1b2", "research", true);
     reporter.begin_turn(1);
     reporter.on_recall({{.id = "c1", .name = "one", .updated = "2026-10-19T10:00:00Z"}}, 1);
     reporter.on_sources({{.file = "a.md",

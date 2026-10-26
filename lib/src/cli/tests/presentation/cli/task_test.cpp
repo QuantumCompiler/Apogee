@@ -276,6 +276,91 @@ TEST_CASE("a task resumes only in the folder it was started in, and never once f
     CHECK(has(out, "no task 'task-nope'"));
 }
 
+namespace {
+
+/// The config of `home` rewritten: `backends` under `backends:`, the default
+/// `default_backend`, recall off and the filesystem tools in `work()`.
+void write_config(const Home& home, const std::string& backends,
+                  const std::string& default_backend) {
+    std::ofstream{home.home.config_path(), std::ios::binary | std::ios::trunc}
+        << "backends:\n"
+        << backends << "models:\n  default: " << default_backend
+        << "\nmemory:\n  recall: false\ntools:\n  fs_root: " << home.work().string() << "\n";
+}
+
+/// A vendor CLI whose binary is nowhere, as YAML under `backends:`:
+/// configured, never started (M26's fixture).
+[[nodiscard]] std::string unstartable(const Home& home, const std::string& name) {
+    return "  " + name + ":\n    type: claude-cli\n    binary: \"" +
+           (home.home.home() / "nowhere" / "claude").generic_string() + "\"\n";
+}
+
+}  // namespace
+
+TEST_CASE("task run naming a backend that cannot start is refused with its reason, nothing made",
+          "[commands][task][named-backend]") {
+    // M29: `task run -m <a backend that did not start>` ran the task on the
+    // default, every round under the named backend's label.
+    const Home home{R"({"text": "1. Answer."}, {"text": "It is 42.\nTASK STATUS: DONE"})"};
+    write_config(home,
+                 "  m:\n    type: mock\n    model_path: " + home.script.string() + "\n" +
+                     unstartable(home, "gone"),
+                 "m");
+    std::string out;
+    std::string err;
+    CHECK(home.run({"task", "run", "goal", "-m", "gone"}, &out, &err) == 1);
+    CHECK(err.starts_with("apogee task: backend 'gone' is configured but could not be started: "));
+    CHECK(err.ends_with(" (started backends: m)\n"));
+    CHECK(t::list_tasks(home.tasks()).empty());
+
+    // Streamed, refused at launch: nothing on stdout, no session event.
+    CHECK(home.run({"task", "run", "goal", "-m", "gone", "--output-format", "stream-json"}, &out,
+                   &err) == 1);
+    CHECK(out.empty());
+    CHECK(err.starts_with("apogee task: backend 'gone' is configured but could not be started: "));
+
+    // A name the config defines nowhere is refused too, never run on the
+    // default.
+    CHECK(home.run({"task", "run", "goal", "-m", "nope"}, &out, &err) == 1);
+    CHECK(err == "apogee task: no backend named 'nope' (configured: gone, m)\n");
+    CHECK(t::list_tasks(home.tasks()).empty());
+
+    // The backend named that did start runs it.
+    REQUIRE(home.run({"task", "run", "goal", "-m", "m", "--require", "42"}, &out, &err) == 0);
+    CHECK(home.task().status == t::kDone);
+}
+
+TEST_CASE("a task whose backend can no longer start is refused at resume, not run on the default",
+          "[commands][task][resume][named-backend]") {
+    const Home home{R"({"text": "1. Plan."}, {"text": "not yet"})"};
+    std::string out;
+    REQUIRE(home.run({"task", "run", "goal", "--require", "42", "--rounds", "1"}, &out) == 1);
+    t::Task task = home.task();
+    REQUIRE(task.status == t::kExhausted);
+    // Halted with rounds to spare, as `task halt` leaves one mid-run.
+    task.status = std::string{t::kHalted};
+    task.rounds_budget = 3;
+    REQUIRE(t::save_task(home.tasks(), task).empty());
+    const std::size_t transitions = task.transitions.size();
+
+    // Its backend, `m`, can no longer start; another, the default, can.
+    const fs::path spare = home.home.home() / "spare.json";
+    std::ofstream{spare} << R"({"turns": [{"text": "SPARE-SAYS 42"}]})";
+    write_config(home,
+                 unstartable(home, "m") +
+                     "  spare:\n    type: mock\n    model_path: " + spare.string() + "\n",
+                 "spare");
+    std::string err;
+    CHECK(home.run({"task", "resume", task.id}, &out, &err) == 1);
+    CHECK(err.starts_with("apogee task: task " + task.id +
+                          " cannot resume: backend 'm' is configured but could not be started: "));
+    CHECK(err.ends_with(" (started backends: spare)\n"));
+    CHECK(out.find("SPARE-SAYS") == std::string::npos);
+    // Nothing ran: the ledger is as it was.
+    CHECK(home.task().status == t::kHalted);
+    CHECK(home.task().transitions.size() == transitions);
+}
+
 TEST_CASE("task verbs with no task say how to start one", "[commands][task]") {
     const Home home{R"({"text": "x"})"};
     std::string out;

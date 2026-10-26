@@ -2,6 +2,7 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <functional>
 #include <memory>
 #include <ostream>
 #include <string>
@@ -75,6 +76,20 @@ private:
     bool failed_ = false;
     std::string failure_{};
 };
+
+/// A failure said on the open stream too, when one is open (52b): its
+/// `error` carries `message`, the words stderr gets. For a refusal raised
+/// where no stream is in hand -- a runtime not installed, asked below the
+/// verb (M29). Nothing without one.
+void tell_job_failure(std::string_view message);
+
+/// A job's body with its failure said (55h's backstop, shared since M29): a
+/// `CLI::RuntimeError` -- a refusal said on stderr by code that told no
+/// stream -- ends the open stream on `error` `the run failed; stderr says
+/// why`, any other exception on its own words, and is thrown on. A failure
+/// already told stands: the first said is the one that ended the run.
+/// Without a stream open, the body alone.
+void run_job_body(const std::function<void()>& body);
 
 /// `stdout_download_options()`, relayed as `bytes` events while a stream is
 /// open (52b): what every download and hash of a pull is shown through.

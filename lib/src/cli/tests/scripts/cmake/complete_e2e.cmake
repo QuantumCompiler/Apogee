@@ -211,6 +211,47 @@ endif()
 expect_contains("${skip_err}" "no backend named 'nope'" "a typo is refused as before")
 expect_not_contains("${skip_err}" "could not be started" "a typo is not a skipped backend")
 
+# --- nothing started, a backend named (M29) ---------------------------------
+# The same skipped backend with nothing beside it: `-m` named it, and the
+# refusal was every backend's ("no usable backend is configured -- ..."),
+# checked before the one asked for. Its own problem now comes first; a name
+# configured nowhere is a typo still.
+set(ALONE_ROOT "${APOGEE_WORK_DIR}/skipped-alone")
+file(MAKE_DIRECTORY "${ALONE_ROOT}/config")
+file(WRITE "${ALONE_ROOT}/config/config.json"
+    "{\"models\":{\"default\":\"claude\"},\"backends\":{\"claude\":{\"type\":\"claude-cli\","
+    "\"binary\":\"${SKIP_BINARY}\"}}}\n")
+set(ALONE_ENV --unset=APOGEE_HOME "HOME=${ALONE_ROOT}")
+if(NOT CMAKE_HOST_WIN32)
+    list(APPEND ALONE_ENV "PATH=/usr/bin:/bin:/usr/sbin:/sbin")
+endif()
+function(apogee_alone asked)
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E env ${ALONE_ENV}
+            "${APOGEE_BIN}" --custom "${ALONE_ROOT}/config/config.json" complete -m ${asked} "hi"
+        RESULT_VARIABLE alone_code
+        OUTPUT_VARIABLE alone_out
+        ERROR_VARIABLE alone_err
+        INPUT_FILE "${APOGEE_WORK_DIR}/.empty-stdin"
+    )
+    if(NOT alone_code EQUAL 1)
+        message(FATAL_ERROR "-m ${asked} with nothing started: expected exit 1, got ${alone_code}\n"
+            "  stdout: ${alone_out}\n  stderr: ${alone_err}")
+    endif()
+    expect_not_contains("${alone_err}" "no usable backend"
+        "-m ${asked} is refused for itself, not with every backend's problem")
+    set(alone_err "${alone_err}" PARENT_SCOPE)
+endfunction()
+apogee_alone(claude)
+expect_contains("${alone_err}"
+    "apogee complete: backend 'claude' is configured but could not be started: "
+    "the backend asked for is refused with its own problem")
+expect_contains("${alone_err}" "(no backend started; 'apogee check' says why)"
+    "and says nothing started")
+apogee_alone(nope)
+expect_contains("${alone_err}" "no backend named 'nope' (configured: claude)"
+    "a name configured nowhere is a typo, nothing started or not")
+
 # --- --all-backends ---------------------------------------------------------
 apogee_run(0 config add-backend second --type mock --model mock-2)
 apogee_run(0 complete --all-backends "x")

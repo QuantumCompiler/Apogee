@@ -67,7 +67,7 @@ struct StoredSpeaker {
 }  // namespace
 
 std::string resolve_voice_model(const models::StoreRoots& roots, std::string_view given,
-                                ResolvedVoiceModel& out) {
+                                ResolvedVoiceModel& out, std::string_view flag) {
     // Every field this resolution's own, the engine above all (53m).
     out = ResolvedVoiceModel{};
     if (given.empty()) {
@@ -78,7 +78,7 @@ std::string resolve_voice_model(const models::StoreRoots& roots, std::string_vie
         }
         if (voices.size() > 1) {
             return "the store holds " + std::to_string(voices.size()) +
-                   " voice models -- name one with --model:" + handles_of(voices);
+                   " voice models -- name one with " + std::string{flag} + ":" + handles_of(voices);
         }
         out.handle = voices.front().handle;
         out.dir = voices.front().dir;

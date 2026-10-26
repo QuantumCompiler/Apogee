@@ -1,13 +1,16 @@
 #include "cli/job_stream.h"
 
+#include <CLI/CLI.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <random>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -135,6 +138,57 @@ TEST_CASE("a stream's error is its last event, whatever the run says after it fa
     CHECK(events[3].at("text") == "  apogee models pull org/m");
     CHECK(events[4] ==
           nlohmann::json{{"type", "error"}, {"message", "cancelled -- nothing was written"}});
+}
+
+TEST_CASE("a failure no stream was told still ends it on error, a told one standing",
+          "[commands][machine][job]") {
+    // M29: training's backstop (55h), shared with the media verbs -- a
+    // refusal raised below the verb said on stderr alone, the stream ending
+    // on its `job` line.
+    const auto streamed = [](const std::function<void()>& body) {
+        std::ostringstream captured;
+        std::streambuf* const before = std::cout.rdbuf(captured.rdbuf());
+        bool rethrown = false;
+        {
+            apogee::commands::JobStream job{"video generate"};
+            try {
+                apogee::commands::run_job_body(body);
+            } catch (const std::exception&) {
+                rethrown = true;
+            }
+        }
+        std::cout.rdbuf(before);
+        CHECK(rethrown);
+        return events_of(captured.str());
+    };
+    std::vector<nlohmann::json> events = streamed([] { throw CLI::RuntimeError(1); });
+    REQUIRE(events.size() == 2);
+    CHECK(events[1] ==
+          nlohmann::json{{"type", "error"}, {"message", "the run failed; stderr says why"}});
+
+    // Told before it threw, its own words stand.
+    events = streamed([] {
+        apogee::commands::tell_job_failure("torch and diffusers are not installed");
+        throw CLI::RuntimeError(1);
+    });
+    REQUIRE(events.size() == 2);
+    CHECK(events[1].at("message") == "torch and diffusers are not installed");
+
+    // Anything else, in its own words.
+    events = streamed([] { throw std::runtime_error("the disk is full"); });
+    REQUIRE(events.size() == 2);
+    CHECK(events[1].at("message") == "the disk is full");
+
+    // With no stream open, the body alone: telling nothing, thrown on.
+    std::ostringstream captured;
+    std::streambuf* const before = std::cout.rdbuf(captured.rdbuf());
+    CHECK_THROWS_AS(apogee::commands::run_job_body([] {
+                        apogee::commands::tell_job_failure("nobody hears this");
+                        throw CLI::RuntimeError(1);
+                    }),
+                    CLI::RuntimeError);
+    std::cout.rdbuf(before);
+    CHECK(captured.str().empty());
 }
 
 TEST_CASE("models pull as a stream: the bytes, the same words, the stored set's document",

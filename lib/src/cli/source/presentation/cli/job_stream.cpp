@@ -3,6 +3,7 @@
 #include <CLI/CLI.hpp>
 #include <nlohmann/json.hpp>
 
+#include <exception>
 #include <iostream>
 #include <streambuf>
 #include <utility>
@@ -98,6 +99,24 @@ void JobStream::failed(std::string_view message) {
     }
     failed_ = true;
     failure_ = std::string{message};
+}
+
+void tell_job_failure(std::string_view message) {
+    if (JobStream* job = JobStream::current(); job != nullptr) {
+        job->failed(message);
+    }
+}
+
+void run_job_body(const std::function<void()>& body) {
+    try {
+        body();
+    } catch (const CLI::RuntimeError&) {
+        tell_job_failure("the run failed; stderr says why");
+        throw;
+    } catch (const std::exception& e) {
+        tell_job_failure(e.what());
+        throw;
+    }
 }
 
 DownloadProgress::Options job_download_options() {

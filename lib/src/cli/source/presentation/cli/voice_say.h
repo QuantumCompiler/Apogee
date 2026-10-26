@@ -63,10 +63,13 @@ struct ResolvedVoiceModel {
 /// `given`, else the store's one voice model: a handle, a bare id, a model
 /// holding exactly one, or a path -- a voice model as Kokoro publishes it,
 /// or since 53m an MLX directory whose kind is `voice`, counted among the
-/// store's voice models as one. The refusal names what to do instead; empty
-/// means `out` is set.
+/// store's voice models as one. The refusal names what to do instead -- with
+/// several in the store, the verb's own flag for one, `flag` (`--model` for
+/// `voice say`, `--voice-model` for `video compose`, M29); empty means `out`
+/// is set.
 [[nodiscard]] std::string resolve_voice_model(const models::StoreRoots& roots,
-                                              std::string_view given, ResolvedVoiceModel& out);
+                                              std::string_view given, ResolvedVoiceModel& out,
+                                              std::string_view flag = "--model");
 
 /// The voice to speak with: `given` when the model has it -- refused,
 /// naming its voices, when not -- else `kDefaultVoice`, else the first.

@@ -48,7 +48,7 @@ document last (see [A long job's run](#a-long-jobs-run)) -- and since 55h
 One JSON object per line on stdout. Every object has a `type`.
 
 ```jsonl
-{"type":"session","protocol_version":1,"model":"claude-sonnet-5","chat_id":"20261024-120000-a1b2","next_turn":1,"capabilities":{"events":["session","thinking","…"],"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"tools":true,"ask":true,"schema":"2026-10-25"}}
+{"type":"session","protocol_version":1,"model":"claude-sonnet-5","chat_id":"20261024-120000-a1b2","next_turn":1,"capabilities":{"events":["session","thinking","…"],"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"tools":true,"ask":true,"schema":"2026-10-26"}}
 {"type":"thinking"}
 {"type":"thinking_delta","text":"…"}
 {"type":"memory","chats":1,"decisions":1,"sessions":[{"id":"20261019-142233-a1b2c3","name":"asyncio timeouts in the scraper","updated":"2026-10-19T14:40:02Z"}]}
@@ -65,13 +65,13 @@ One JSON object per line on stdout. Every object has a `type`.
 
 | Event | Meaning |
 |---|---|
-| `session` | Once, first, unprompted. Names the protocol version, the model and the session's `capabilities` (below); `chat_id`, the chat the session writes (M28, [below](#which-chat-chat_id)); `"private": true` for a chat that writes nothing (52d, [below](#a-private-chat-chat---private)). |
+| `session` | Once, first, unprompted. Names the protocol version, the model and the session's `capabilities` (below); `chat_id`, the chat the session writes (M28, [below](#which-chat-chat_id)); `"private": true` for a chat that writes nothing (52d, [below](#a-private-chat-chat---private)); `suite`, the suite it runs under, and for `execute` `orchestrating` (M29, [below](#which-suite-suite-and-orchestrating)). A launch the child refuses sends none ([below](#a-launch-refused)). |
 | `thinking` | The model began reasoning. No text. Sent again with `"budget_reached": true` when the reasoning reached its thinking budget and was ended there (`--think-budget`, an `--effort` level's budget, or the backend's `thinking_budget`). Machine mode carries the reasoning as it streams whatever `ui.thinking_display` says: the terminal's and the shell's one-line summary (43) is theirs alone, and is never asked for here. |
 | `thinking_delta` | A chunk of reasoning. **Droppable** — see below. |
 | `memory` | `chat` only: what a turn was handed from earlier conversations -- `chats`, past chats' summaries, and `decisions`, recorded knowledge records -- injected for this turn and never into the transcript (26l). Sent before the turn, only when it recalled something. Since 52a `sessions` names each past chat recalled, in the order sent: its `id` (what `chats list` and `--resume` take), and the `name` and `updated` time the recall index recorded when it summarised the chat -- what the model was handed, so a later rename shows only once the chat is summarised again (its next run with a turn). Since 55b that `name` is the chat's name as `chats list` gives it -- the one `chats title` or `/title` gave it, else its generated title, else its id -- never a generated title it was renamed from. Absent when `chats` is 0. |
 | `sources` | The excerpts retrieval sent the model this turn (52a), before the answer: `sources`, each `{file, pages?, lines?, times?, score, retriever}` in the order sent -- the chat's attachments' excerpts first, then a collection's. `file` is the file as its index names it (an attachment's file name, a collection's source path); `pages`, `lines` and `times` (seconds, for a recording) are `[first, last]` when the excerpt's chunks record them. **What was sent, never what was found**: an excerpt the context budget trimmed is not here, and with nothing sent there is no event. `score` is on its `retriever`'s scale -- `lexical`, `vector` or `hybrid` scores do not compare. Number them in order to draw citations. Past chats' recall is `memory`'s, not this. |
 | `tool_status` | A tool is running, described in `text` for display -- or another model call the turn makes besides the chat model's own (the embedder, the utility model, the rerank judge, the knowledge clerk, a suite member the model consults), as `<role> — <what it is doing>` (26n). A `consult` (27f) is an ordinary tool call: `[tool] consult`, then `consult — asking utility (<backend>): <the question's first words>` while the member answers, and the answer reaches the model as the tool's result. A suite's verifier checking a tool call or an answer (27g) is said the same way: `validate — asking utility (<backend>): Check …`. A symphony the root model plays on its own (27t, an orchestrating `execute` session) is an ordinary tool call too: `[tool] play_<symphony>`, then `play — the model chose <symphony>: <n> member calls, <roles>`, then a line per stage. A tool the **vendor** ran on its own servers (47a: an entry's `server_tools:`, or the run's `--search`) is said here too, never dispatched: `<tool>, run by <vendor>: <what>` -- `web_search, run by Anthropic: "apogee harness"`, then `web_search, run by Anthropic: 5 results` -- and since it can fall between two parts of an answer, the answer's events end before it and start again after. |
-| `notice` | A line for the user in `text` that is neither progress nor an error — a local model answering without the tools it was given because its chat template cannot take them, or a reply kept as text because it did not match the template's format, or a request trimmed to fit the model's window (`context budget: 2 earlier exchanges not sent`), or what a suite's verifier said (27g): an objection to a tool call returned to the model, a dispute the call runs over, the two positions on an answer under `answers: always` (`validate: …`), a check that could not be made; what a resumed chat could not carry over (55b, `resume: …`, [below](#which-chat-chat_id)); a compaction that folded nothing or failed ([below](#the-sessions-own-doors-detach-set-compact)); a chat deleted while its session ran. Show it and keep it; it never ends the turn. |
+| `notice` | A line for the user in `text` that is neither progress nor an error — a local model answering without the tools it was given because its chat template cannot take them, or a reply kept as text because it did not match the template's format, or a request trimmed to fit the model's window (`context budget: 2 earlier exchanges not sent`), or what a suite's verifier said (27g): an objection to a tool call returned to the model, a dispute the call runs over, the two positions on an answer under `answers: always` (`validate: …`), a check that could not be made; what a resumed chat could not carry over (55b, `resume: …`, [below](#which-chat-chat_id)); what the session's suite takes of this machine and its warnings at launch (M29, [below](#which-suite-suite-and-orchestrating)); a compaction that folded nothing or failed ([below](#the-sessions-own-doors-detach-set-compact)); a chat deleted while its session ran. Show it and keep it; it never ends the turn. |
 | `todo` | The session's todo, whole (41d): `items`, an array of `{text, state}` -- `state` `pending`, `active` (being done now) or `done` -- in the model's order, empty when it cleared it. Sent each time the model rewrites it with `todo_write` (a session with tools), and once as a resumed session opens, right after `session`, when it was left holding one. Draw it in place of the last: it is the plan, not a log. |
 | `answer_start` / `answer_end` | Bracket one answer's deltas. |
 | `answer_delta` | A chunk of answer text. Concatenate in order. |
@@ -134,6 +134,32 @@ summary, no saved model state), answers its turns as before, and says so once in
 a `notice`: `chat <id> was deleted while this session ran -- it stays deleted,
 and nothing more of it is saved`.
 
+### Which suite: `suite` and `orchestrating`
+
+A driven `chat` or `execute` running under a suite names it on its `session`
+event (M29): `suite`, the suite as `--suite`, a resumed chat's own or
+`models.default_suite` chose it -- the one the chat saves, so a resumed session
+(`--resume`, `-c`) names the suite it resumed under. A session under none -- no
+suite configured or named, `--suite off`, a bare `execute` -- carries no
+`suite`. An `execute` session also says `orchestrating`: `true` when its root
+model may play the symphonies on its own (`--orchestrate`, or the suite's
+`orchestrate: true`; [below](#playing-a-symphony-execute)), else `false`; a
+`chat` carries none. A later `/suite` at a terminal moves the suite; a driver
+reads the one the session opened under here.
+
+**The suite says what it takes of the machine as a `notice`** (M29). Each
+session under a suite prices its members against this machine at launch, and
+the line saying so -- `suite research needs 10600 MiB of this machine's 98304
+MiB: root 7468 + helper 2108 + 1024 margin -- fits`, `suite research: no member
+holds memory on this machine`, or a run forced over budget, `... -- over budget,
+run anyway (--force)` -- is a `notice` after the `session` event, as are the
+suite's warnings at launch: a member that could not be rebuilt at the window
+the suite pins (`gone keeps its old window -- it could not be rebuilt: …`), a
+member `--warm` could not load. They are said with a resume's own notices,
+in the order they arose, before anything the session reads, carrying no
+`turn`; stderr carries none of them. The terminal prints them on stderr as
+before.
+
 ### Turns: `turn` and `next_turn`
 
 In a driven `chat` or `execute`, each accepted `user` line is a **turn**,
@@ -170,6 +196,32 @@ is distinctly typed precisely so it can be discarded. It never appears in
 **3. Read stdout as lines, and read stderr separately.** stdout carries only
 JSONL; every diagnostic, warning, and progress note goes to stderr. Merging them
 puts prose in the middle of your parser's input.
+
+### A launch refused
+
+A child that cannot open the session it was asked for refuses it **before the
+`session` event**: nothing is written on stdout -- no `session`, no `error` --
+the child exits `1`, and stderr carries one line saying why, `apogee chat:
+<why>` (or `apogee execute: …`). An `error` there would break the stream's
+shape -- `session` comes first ([the stability promise](#the-stability-promise))
+-- and would say a turn failed when none was read. So a host that sees stdout
+end with no `session` event reads the exit code and stderr for the reason. A
+launch is refused for, among others:
+
+- a backend named by `-m` that did not start, with that backend's own problem
+  -- `backend 'mlx' is configured but could not be started: … (started
+  backends: claude)` -- or a name the config defines nowhere, `no backend named
+  'nope' (configured: …)` (M29). Nothing else answers under the name asked
+  for. The check is the launch's: a `set` line's `model` mid-session routes as
+  it always has (M26);
+- a suite that does not fit this machine: `suite vast needs 247056 MiB of this
+  machine's 110100 MiB: … -- it does not fit; --force runs it anyway`, and a
+  suite that does not exist, `--suite: no suite named 'nope' (configured: …)`;
+- a chat that cannot be resumed (`no chat named '…'`), flags that cannot go
+  together, and no backend that started at all.
+
+Once `session` is out, what the session says for the user is on the stream;
+stderr keeps its diagnostics.
 
 ### `protocol_version`
 
@@ -267,6 +319,16 @@ would read goes to stderr, with the outcome; the exit code is the task's (`0`
 done, `130` cancelled, `2` a provider's failure, `1` anything else short of
 done).
 
+**A task names its backend or is refused** (M29). A task whose backend cannot
+answer is refused at launch, as [a session's is](#a-launch-refused): `-m`
+naming a backend that did not start or one the config defines nowhere, and on
+`task resume` the backend its conversation was left on, if it no longer
+starts -- `task <id> cannot resume: backend 'm' is configured but could not
+be started: … (started backends: …)`. Nothing is made or run, nothing is
+written on stdout, and the exit code is `1`, the reason on stderr. A resumed
+task whose backend is no longer configured at all runs on the default, said
+on stderr as a `[resume]` line, as a chat's resume says it.
+
 ## A long job's run
 
 Since 52b the four verbs that run for minutes — `models pull`, `video
@@ -281,7 +343,7 @@ diagnostics, as ever. Without the flag every verb prints exactly what it did
 before.
 
 ```jsonl
-{"type":"job","verb":"models pull","protocol_version":1,"schema":"2026-10-25"}
+{"type":"job","verb":"models pull","protocol_version":1,"schema":"2026-10-26"}
 {"type":"notice","text":"pulling org/model, then converting it to F16 and registering it"}
 {"type":"stage","index":1,"count":3,"label":"pull org/model's full weights","state":"started"}
 {"type":"bytes","done":67108864,"total":4971201024,"file":"model-00001-of-00002.safetensors","index":1,"count":4}
@@ -292,7 +354,7 @@ before.
 ```
 
 ```jsonl
-{"type":"job","verb":"video compose","protocol_version":1,"schema":"2026-10-25"}
+{"type":"job","verb":"video compose","protocol_version":1,"schema":"2026-10-26"}
 {"type":"notice","text":"plan: \"Tides\" -- 2 scenes, about 5.5 s of video"}
 {"type":"scene","scene":1,"scenes":2,"state":"speaking"}
 {"type":"ready","device":"mps","engine":"torch","scene":1}
@@ -329,7 +391,13 @@ started and failed or was cancelled sends its document first, exactly as
 generate` and `voice say` a record of the run written nowhere -- nothing lands
 beside the output, and its `sidecar` is `null` -- and for `video compose` the
 project as it saved it beside the video, its finished scenes kept for the same
-command to resume. A run refused before it starts sends no document. Ctrl-C
+command to resume. A run refused before it starts sends no document, and ends
+on its `error` all the same -- a runtime not installed among them (M29): `torch
+and diffusers are not installed in Apogee's Python environment -- apogee train
+setup --with video` (`torch and kokoro` and `--with voice` for speech), or no
+Python environment yet, `the Python environment has not been created yet. Run
+'apogee train setup' first (…)`. Asked of a terminal those are questions; on a
+pipe they are refused, the words on stderr and in the `error`. Ctrl-C
 exits `130` with the stream ending cleanly on its `error`, every line whole --
 `models pull` on every path too since 55c: a copy from the Ollama store, a
 GGUF, a SafeTensors snapshot, an MLX model, a pipeline, a voice model and the
@@ -358,7 +426,7 @@ as well as in the stream's `error`. Without the flag every verb prints exactly
 what it did before.
 
 ```jsonl
-{"type":"job","verb":"train pipeline run","protocol_version":1,"schema":"2026-10-25"}
+{"type":"job","verb":"train pipeline run","protocol_version":1,"schema":"2026-10-26"}
 {"type":"notice","text":"[pipeline] skills as pipe-20261025-120000: 2 stage(s), mlx on aaaaaaaaaaaa; no judge: unmatched items skip"}
 {"type":"stage","index":1,"count":2,"label":"a","state":"pending","pipeline_run_id":"pipe-20261025-120000"}
 {"type":"stage","index":2,"count":2,"label":"b","state":"pending","pipeline_run_id":"pipe-20261025-120000"}
@@ -375,7 +443,7 @@ what it did before.
 ```
 
 ```jsonl
-{"type":"job","verb":"train cycle run","protocol_version":1,"schema":"2026-10-25"}
+{"type":"job","verb":"train cycle run","protocol_version":1,"schema":"2026-10-26"}
 {"type":"pass","state":"collecting","text":"[cycle] directory: 1 file(s) in /Users/you/queue"}
 {"type":"pass","state":"merging","text":"[cycle] 12 example(s) from directory"}
 {"type":"pass","state":"training","text":"[cycle] pipeline cycle-20261025-030000 (nightly): 1 stage(s)"}
@@ -673,7 +741,8 @@ in `chat`: a slash word other than `/play` is a prompt like any text. The
 catalog is a read: `apogee symphonies list --output-format json`.
 
 **The model's own plays** (27t). Launched with `--orchestrate` -- or under a
-suite whose `orchestrate: true` says so -- an `execute` session offers its root
+suite whose `orchestrate: true` says so, which the `session` event's
+`orchestrating` reports (M29) -- an `execute` session offers its root
 model each symphony it can play as an ordinary tool, `play_<symphony>`, and the
 model may choose one on any turn. Nothing new crosses the wire: the choice is
 a tool call, said as one -- `[tool] play_summarize-verify` in a `tool_status`,

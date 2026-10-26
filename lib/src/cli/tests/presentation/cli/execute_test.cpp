@@ -324,6 +324,40 @@ TEST_CASE("machine mode carries a bare execute session in the events it already 
     CHECK(session.at("chat_id") == home.sessions().front().chat_id);
 }
 
+TEST_CASE("a driven execute names its suite and whether it orchestrates, fresh and resumed",
+          "[execute][machine][suites]") {
+    // M29: neither was on the session event; the suite reached a driver as
+    // stderr's admission line alone, and orchestration not at all.
+    const Home home;
+    std::string out;
+    std::string err;
+    const std::string hi = "{\"type\":\"user\",\"text\":\"hi\"}\n";
+    const auto opened = [&out]() { return nlohmann::json::parse(out.substr(0, out.find('\n'))); };
+    REQUIRE(home.run({"execute", "--suite", "duo", "--output-format", "stream-json"}, &out, &err,
+                     hi) == 0);
+    CHECK(opened().at("suite") == "duo");
+    CHECK(opened().at("orchestrating") == false);
+    const std::string id = opened().at("chat_id").get<std::string>();
+
+    // Resumed with none named, it runs under the one it saved, and says so.
+    REQUIRE(home.run({"execute", "--resume", id, "--output-format", "stream-json"}, &out, &err,
+                     hi) == 0);
+    CHECK(opened().at("suite") == "duo");
+    CHECK(opened().at("orchestrating") == false);
+
+    // Asked to orchestrate, it says it does.
+    REQUIRE(
+        home.run({"execute", "--suite", "duo", "--orchestrate", "--output-format", "stream-json"},
+                 &out, &err, hi) == 0);
+    CHECK(opened().at("suite") == "duo");
+    CHECK(opened().at("orchestrating") == true);
+
+    // Bare (41a): no suite to name, and nothing to orchestrate.
+    REQUIRE(home.run({"execute", "--output-format", "stream-json"}, &out, &err, hi) == 0);
+    CHECK_FALSE(opened().contains("suite"));
+    CHECK(opened().at("orchestrating") == false);
+}
+
 TEST_CASE("execute with no suite named runs under the config's default", "[execute][suites]") {
     const Home home{"  default_suite: duo\n"};
     std::string out;
@@ -580,25 +614,27 @@ TEST_CASE("a driver sees a played symphony as an ordinary turn, in the events it
     REQUIRE(home.run({"execute", "--suite", "duo", "--output-format", "stream-json"}, &out, &err,
                      "{\"type\":\"user\",\"text\":\"/play echo2 hello\"}\n"
                      "{\"type\":\"user\",\"text\":\"hi\"}\n") == 0);
-    // Each stage a `tool_status`, as a side call is; the output the answer
-    // and the turn's `result` -- nothing a chat turn does not emit.
-    CHECK(event_types(out) == std::vector<std::string>{"session", "tool_status", "tool_status",
-                                                       "answer_start", "answer_delta", "answer_end",
-                                                       "result", "thinking", "answer_start",
-                                                       "answer_delta", "answer_end", "result"});
+    // The suite's admission first, a notice since M29. Then each stage a
+    // `tool_status`, as a side call is; the output the answer and the turn's
+    // `result` -- nothing a chat turn does not emit.
+    CHECK(event_types(out) == std::vector<std::string>{
+                                  "session", "notice", "tool_status", "tool_status", "answer_start",
+                                  "answer_delta", "answer_end", "result", "thinking",
+                                  "answer_start", "answer_delta", "answer_end", "result"});
     std::istringstream lines{out};
     std::vector<nlohmann::json> events;
     for (std::string line; std::getline(lines, line);) {
         events.push_back(nlohmann::json::parse(line));
     }
+    CHECK(events[1].at("text") == "suite duo: no member holds memory on this machine");
     CHECK_THAT(
-        events[1].at("text").get<std::string>(),
+        events[2].at("text").get<std::string>(),
         Catch::Matchers::StartsWith("stage 1/2 first — asking utility (helper): One: hello"));
-    CHECK_THAT(events[2].at("text").get<std::string>(),
+    CHECK_THAT(events[3].at("text").get<std::string>(),
                Catch::Matchers::StartsWith("stage 2/2 second — asking chat (root): Two: HELPER<"));
-    CHECK(events[4].at("text") == kPlayed);
-    CHECK(events[6].at("text") == kPlayed);
-    CHECK(events[6].at("model") == "root");
+    CHECK(events[5].at("text") == kPlayed);
+    CHECK(events[7].at("text") == kPlayed);
+    CHECK(events[7].at("model") == "root");
     CHECK(transcript(home.sessions().front()) ==
           std::vector<std::string>{"user: /play echo2 hello", "assistant: " + std::string{kPlayed},
                                    "user: hi", "assistant: ROOT<hi>"});
@@ -611,7 +647,8 @@ TEST_CASE("a driver's play that cannot run ends in an error event, and nothing i
     std::string err;
     REQUIRE(home.run({"execute", "--suite", "duo", "--output-format", "stream-json"}, &out, &err,
                      "{\"type\":\"user\",\"text\":\"/play nope x\"}\n") == 0);
-    CHECK(event_types(out) == std::vector<std::string>{"session", "error"});
+    // The suite's admission, a notice since M29, then the play's error.
+    CHECK(event_types(out) == std::vector<std::string>{"session", "notice", "error"});
     CHECK_THAT(err, Catch::Matchers::ContainsSubstring("apogee: no symphony named 'nope'"));
     // Not even the session: a chat with no turn is never written (M28).
     CHECK(home.sessions().empty());
@@ -1160,8 +1197,9 @@ TEST_CASE("a driver sees the model's play as ordinary tool-call narration, no ne
     std::string err;
     REQUIRE(home.run({"execute", "--suite", "orch", "--output-format", "stream-json"}, &out, &err,
                      "{\"type\":\"user\",\"text\":\"go\"}\n") == 0);
-    const std::set<std::string> known{"session",      "thinking",   "tool_status", "answer_start",
-                                      "answer_delta", "answer_end", "result"};
+    // `notice` is the suite's admission, said after `session` since M29.
+    const std::set<std::string> known{"session",      "notice",       "thinking",   "tool_status",
+                                      "answer_start", "answer_delta", "answer_end", "result"};
     std::vector<std::string> statuses;
     std::istringstream lines{out};
     for (std::string line; std::getline(lines, line);) {

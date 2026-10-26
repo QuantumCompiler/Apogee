@@ -6,6 +6,7 @@
 #include <iostream>
 
 #include "cli/helpers.h"
+#include "cli/job_stream.h"
 #include "cli/train.h"
 #include "platform/platform.h"
 
@@ -52,7 +53,8 @@ std::string install_video_set(training::PythonEnv& env, bool interactive, std::i
 namespace {
 
 /// The environment, then `set` after a yes at a terminal when `missing` says
-/// a package rung refused, then the ladder again.
+/// a package rung refused, then the ladder again. A refusal is said on
+/// stderr and, when the run streams, as its `error` (M29).
 [[nodiscard]] video::VideoReadiness ready_runtime(
     const harness::Config& config, std::string_view purpose, training::RequirementSet set,
     std::string_view needs, std::string_view size,
@@ -70,6 +72,7 @@ namespace {
             install_runtime_set(env, set, needs, size, interactive, std::cin, std::cerr, purpose);
         !refused.empty()) {
         std::cerr << "apogee " << purpose << ": " << refused << "\n";
+        tell_job_failure(refused);
         throw CLI::RuntimeError(kUserError);
     }
     return probe(host);

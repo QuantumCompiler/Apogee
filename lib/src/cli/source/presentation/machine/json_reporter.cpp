@@ -73,7 +73,8 @@ const std::string& JsonReporter::turn_text() const noexcept {
 
 void JsonReporter::begin_session(std::string_view model, const MachineCapabilities& capabilities,
                                  std::optional<std::int64_t> next_turn, bool private_chat,
-                                 std::string_view chat_id) {
+                                 std::string_view chat_id, std::string_view suite,
+                                 std::optional<bool> orchestrating) {
     nlohmann::json object = event("session");
     object["protocol_version"] = kMachineProtocolVersion;
     object["model"] = std::string{model};
@@ -100,6 +101,16 @@ void JsonReporter::begin_session(std::string_view model, const MachineCapabiliti
         // The chat this session writes (M28), so a driver never guesses it
         // from what `chats list` shows next: a private one writes none.
         object["chat_id"] = std::string{chat_id};
+    }
+    if (!suite.empty()) {
+        // The suite the session runs under (M29), as the chat saves it --
+        // never left for a driver to read off stderr's admission line.
+        object["suite"] = std::string{suite};
+    }
+    if (orchestrating.has_value()) {
+        // An execute session's: whether its root may play the symphonies on
+        // its own (27t).
+        object["orchestrating"] = *orchestrating;
     }
     write(object);
 }

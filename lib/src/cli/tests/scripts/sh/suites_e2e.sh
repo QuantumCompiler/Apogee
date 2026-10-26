@@ -239,7 +239,49 @@ else
     grep -q "$VAST -- over budget, run anyway (--force)" "$WORK_DIR/forced.txt" \
         || fail "the forced run does not say so: $(cat "$WORK_DIR/forced.txt")"
     grep -q "ROOT-SAYS" "$WORK_DIR/forced.txt" || fail "the forced chat did not answer"
+    # Driven, the refusal is the launch contract's (M29): no session event,
+    # nothing on stdout, the reason on stderr, exit 1.
+    if echo '{"type":"user","text":"vast question"}' | "$APOGEE_BIN" chat --suite vast \
+        --output-format stream-json >"$WORK_DIR/vast-driven.out" 2>"$WORK_DIR/vast-driven.err"; then
+        fail "a driven chat ran under a suite that does not fit"
+    fi
+    [ -s "$WORK_DIR/vast-driven.out" ] && fail "a refused launch wrote on stdout: $(cat "$WORK_DIR/vast-driven.out")"
+    grep -q "^apogee chat: suite vast needs .* -- it does not fit; --force runs it anyway$" \
+        "$WORK_DIR/vast-driven.err" || fail "the driven refusal: $(cat "$WORK_DIR/vast-driven.err")"
 fi
+
+# --- driven (M29): the session names its suite, the admission a notice ------
+# A driver read the suite from stderr's admission line alone, and a resumed
+# session not at all; the line is now a notice after `session`, stderr clear
+# of it, and `session` carries `suite` -- and, for execute, `orchestrating`.
+driven() {  # driven <name> <args...>: one user line, stdout and stderr apart
+    name="$1"; shift
+    echo '{"type":"user","text":"driven question"}' | "$APOGEE_BIN" "$@" --output-format stream-json \
+        >"$WORK_DIR/$name.jsonl" 2>"$WORK_DIR/$name.err" || fail "$*: $(cat "$WORK_DIR/$name.err")"
+}
+opened() {  # opened <name> <key>: the session event's value, or (absent)
+    python3 -c 'import json,sys; e=json.loads(open(sys.argv[1]).readline()); assert e["type"]=="session"; print(e.get(sys.argv[2], "(absent)"))' \
+        "$WORK_DIR/$1.jsonl" "$2"
+}
+driven driven-research chat --suite research
+[ "$(opened driven-research suite)" = "research" ] || fail "session does not name its suite: $(head -n 1 "$WORK_DIR/driven-research.jsonl")"
+[ "$(opened driven-research orchestrating)" = "(absent)" ] || fail "a chat says it orchestrates"
+python3 - "$WORK_DIR/driven-research.jsonl" <<'PY' || fail "the admission is not the notice after session: $(cat "$WORK_DIR/driven-research.jsonl")"
+import json, sys
+events = [json.loads(line) for line in open(sys.argv[1])]
+second = events[1]
+assert second["type"] == "notice" and "turn" not in second, second
+assert second["text"] == "suite research: no member holds memory on this machine", second
+PY
+grep -q "suite research" "$WORK_DIR/driven-research.err" && fail "the admission still reached stderr: $(cat "$WORK_DIR/driven-research.err")"
+DRIVEN_ID=$(opened driven-research chat_id)
+driven driven-resumed chat --resume "$DRIVEN_ID"
+[ "$(opened driven-resumed suite)" = "research" ] || fail "a resumed session does not name its suite"
+driven driven-execute execute --suite fast
+[ "$(opened driven-execute suite)" = "fast" ] || fail "execute does not name its suite"
+[ "$(opened driven-execute orchestrating)" = "False" ] || fail "execute does not say it does not orchestrate"
+driven driven-plain chat --suite off
+[ "$(opened driven-plain suite)" = "(absent)" ] || fail "a chat with no suite names one"
 
 # --- consult (27f): the root delegates a brief to a member -------------------
 # The asking root calls consult once, then relays what came back; the oracle

@@ -22,6 +22,7 @@
 #include "support/fake_child.h"
 #include "support/mlx_model.h"
 #include "support/voice_model.h"
+#include "training/python_env.h"
 
 /// `voice say` composed (50a), in process over its seams -- a scripted
 /// driver writing real WAV files -- and through the real command tree: the
@@ -413,4 +414,35 @@ TEST_CASE("an MLX voice model resolves by handle, model or path, and only as a v
           "model: an mlx backend chats with it");
     CHECK(apogee::commands::resolve_voice_model(run.roots, "org--m", resolved) ==
           "'org--m' holds no voice model");
+}
+
+TEST_CASE("a runtime not installed ends a streamed voice say on its error, its words on stderr too",
+          "[cli][voice][say][stream]") {
+    // M29: the stream carried its `job` line alone, the words on stderr.
+    const apogee::testing::CliHome home{"backends:\n  m:\n    type: mock\n"};
+    apogee::testing::write_voice_model(home.models() / "hexgrad--Kokoro-82M" / "voice" /
+                                       "aaaaaaaaaaaa");
+    const std::filesystem::path interpreter =
+        apogee::training::PythonEnv{home.home() / "training" / "venv"}.interpreter();
+    std::filesystem::create_directories(interpreter.parent_path());
+    std::ofstream{interpreter} << "#!fake";
+    const std::filesystem::path wav = home.home() / "hi.wav";
+    std::string out;
+    std::string err;
+    CHECK(home.run({"voice", "say", "Hi.", "-o", wav.string(), "--output-format", "stream-json"},
+                   &out, &err) == 1);
+    std::vector<nlohmann::json> events;
+    std::istringstream lines{out};
+    for (std::string line; std::getline(lines, line);) {
+        events.push_back(nlohmann::json::parse(line));
+    }
+    REQUIRE(events.size() == 2);
+    CHECK(events.front().at("type") == "job");
+    CHECK(events.back().at("type") == "error");
+    const std::string refusal =
+        "torch and kokoro are not installed in Apogee's Python environment -- apogee train setup "
+        "--with voice";
+    CHECK(events.back().at("message") == refusal);
+    CHECK(err == "apogee voice say: " + refusal + "\n");
+    CHECK_FALSE(std::filesystem::exists(wav));
 }

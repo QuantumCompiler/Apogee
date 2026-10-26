@@ -17,6 +17,7 @@
 
 #include "backends/llamacpp.h"
 #include "cli/chat.h"
+#include "cli/execute.h"
 #include "cli/models.h"
 #include "cli/registry.h"
 #include "cli/root.h"
@@ -465,10 +466,12 @@ TEST_CASE("a member that cannot be warmed is said, and the walk goes on",
 
 namespace {
 
-/// `apogee chat` in process over a sandbox: a mock chat model and three local
-/// extraction members -- one recorded far beyond any machine, one small, one
-/// with no record -- priced against a fixed 64 GiB machine. Extraction is
-/// never asked in a chat, so no local model is ever loaded.
+/// `apogee chat` -- and `apogee execute`, the same session opened -- in process
+/// over a sandbox: a mock chat model and three local extraction members -- one
+/// recorded far beyond any machine, one small, one with no record -- priced
+/// against a fixed 64 GiB machine. Extraction is never asked in a chat, so no
+/// local model is ever loaded. `extra` is YAML under `suites:`, after the
+/// three; `backends` under `backends:`, after the four.
 struct AdmissionChat {
     apogee::testing::TempDir home{"suite-admission-" + std::to_string(std::random_device{}())};
     apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
@@ -476,7 +479,7 @@ struct AdmissionChat {
     std::string out;
     std::string err;
 
-    AdmissionChat() {
+    explicit AdmissionChat(const std::string& backends = {}, const std::string& extra = {}) {
         std::filesystem::create_directories(config_path.parent_path());
         const std::filesystem::path script = home.path() / "root.json";
         std::ofstream{script, std::ios::binary}
@@ -490,10 +493,11 @@ struct AdmissionChat {
             << model("small", 770 * kMiB).string() << "\n"
             << "  loose:\n    type: llamacpp\n    model_path: "
             << model("loose", std::nullopt).string() << "\n"
-            << "suites:\n"
+            << backends << "suites:\n"
             << "  roomy:\n    members:\n      chat: root\n      extraction: small\n"
             << "  huge:\n    members:\n      chat: root\n      extraction: big\n"
-            << "  partial:\n    members:\n      chat: root\n      extraction: loose\n";
+            << "  partial:\n    members:\n      chat: root\n      extraction: loose\n"
+            << extra;
     }
 
     /// A Llama 3.2 1B header -- 544 MiB of q8_0 cache at 32K -- and, unless
@@ -532,6 +536,8 @@ struct AdmissionChat {
         {
             apogee::commands::CommandRegistry registry;
             registry.add(std::make_unique<apogee::commands::ChatCommand>(
+                [] { return MachineBudget{.bytes = 64 * kGiB}; }));
+            registry.add(std::make_unique<apogee::commands::ExecuteCommand>(
                 [] { return MachineBudget{.bytes = 64 * kGiB}; }));
             apogee::commands::RootCommand root{std::move(registry)};
             const std::string path = config_path.string();
@@ -606,6 +612,97 @@ TEST_CASE("/suite refuses a suite that cannot fit, and --force switches to it",
     CHECK(chat.err.find("over budget, run anyway (--force)") != std::string::npos);
     CHECK(chat.err.find("footprint: suite huge") != std::string::npos);
     CHECK(chat.err.find("unknown option '--hot'") != std::string::npos);
+}
+
+namespace {
+
+/// The JSONL events of a driven run's stdout.
+[[nodiscard]] std::vector<nlohmann::json> events_of(const std::string& out) {
+    std::vector<nlohmann::json> events;
+    std::istringstream lines{out};
+    for (std::string line; std::getline(lines, line);) {
+        events.push_back(nlohmann::json::parse(line));
+    }
+    return events;
+}
+
+constexpr const char* kDrivenHello = "{\"type\":\"user\",\"text\":\"hello\"}\n";
+
+}  // namespace
+
+TEST_CASE("a driven session's admission is a notice after its session event, not stderr's",
+          "[commands][suites][residency][machine]") {
+    // M29: a driver read `[apogee] suite research: ...` from stderr alone.
+    // As a resume's notes are (55b), it is said where the driver draws it.
+    for (const std::string mode : {"chat", "execute"}) {
+        INFO(mode);
+        AdmissionChat chat;
+        REQUIRE(chat.run({mode, "--suite", "roomy", "--output-format", "stream-json"},
+                         kDrivenHello) == 0);
+        const std::vector<nlohmann::json> events = events_of(chat.out);
+        REQUIRE(events.size() > 2);
+        CHECK(events.at(0).at("type") == "session");
+        CHECK(events.at(0).at("suite") == "roomy");
+        CHECK(events.at(1).at("type") == "notice");
+        CHECK(events.at(1).at("text") ==
+              "suite roomy needs 2338 MiB of this machine's 65536 MiB: small 1314 + 1024 margin "
+              "-- fits");
+        CHECK_FALSE(events.at(1).contains("turn"));
+        CHECK(chat.err.find("suite roomy") == std::string::npos);
+
+        // Forced over budget, the line says so -- as a notice too.
+        REQUIRE(chat.run({mode, "--suite", "huge", "--force", "--output-format", "stream-json"},
+                         kDrivenHello) == 0);
+        const std::vector<nlohmann::json> forced = events_of(chat.out);
+        REQUIRE(forced.size() > 2);
+        CHECK(forced.at(1).at("text") ==
+              "suite huge needs 206368 MiB of this machine's 65536 MiB: big 205344 + 1024 margin "
+              "-- over budget, run anyway (--force)");
+        CHECK(chat.err.find("suite huge") == std::string::npos);
+    }
+}
+
+TEST_CASE("a driven session refused admission at launch says so on stderr, exit 1, stdout empty",
+          "[commands][suites][residency][machine]") {
+    // The launch contract (machine-mode.md): nothing is on stdout before the
+    // session event, and a refusal is no turn's error.
+    for (const std::string mode : {"chat", "execute"}) {
+        INFO(mode);
+        AdmissionChat chat;
+        CHECK(chat.run({mode, "--suite", "huge", "--output-format", "stream-json"}, kDrivenHello) ==
+              1);
+        CHECK(chat.out.empty());
+        CHECK(chat.err == "apogee " + mode +
+                              ": suite huge needs 206368 MiB of this machine's 65536 MiB: big "
+                              "205344 + 1024 margin -- it does not fit; --force runs it anyway\n");
+    }
+}
+
+TEST_CASE("a suite's warnings at launch reach a driver as notices, and the terminal as before",
+          "[commands][suites][residency][machine]") {
+    // A member pinned to a window it cannot be rebuilt at: the suite's own
+    // warning, said where the session is read.
+    AdmissionChat chat{"  gone:\n    type: claude-cli\n    binary: /nowhere/at/all/claude\n",
+                       "  pinned:\n    members:\n      chat: root\n      extraction:\n"
+                       "        backend: gone\n        context_size: 4096\n"};
+    REQUIRE(chat.run({"chat", "--suite", "pinned", "--output-format", "stream-json"},
+                     kDrivenHello) == 0);
+    const std::vector<nlohmann::json> events = events_of(chat.out);
+    REQUIRE(events.size() > 2);
+    CHECK(events.at(0).at("suite") == "pinned");
+    CHECK(events.at(1).at("type") == "notice");
+    CHECK(events.at(1).at("text").get<std::string>().starts_with(
+        "gone keeps its old window -- it could not be rebuilt: "));
+    CHECK(events.at(2).at("type") == "notice");
+    CHECK(events.at(2).at("text") == "suite pinned: no member holds memory on this machine");
+    CHECK(chat.err.find("keeps its old window") == std::string::npos);
+
+    // At the terminal -- a pipe -- both stay on stderr, as they always were.
+    REQUIRE(chat.run({"chat", "--suite", "pinned"}, "hello\n") == 0);
+    CHECK(chat.err.find("gone keeps its old window -- it could not be rebuilt: ") !=
+          std::string::npos);
+    CHECK(chat.err.find("[apogee] suite pinned: no member holds memory on this machine") !=
+          std::string::npos);
 }
 
 TEST_CASE("warming needs a suite, and paints nothing on a pipe", "[commands][suites][residency]") {

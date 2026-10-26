@@ -9,6 +9,7 @@
 #include <functional>
 #include <iterator>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,7 @@
 #include "support/cli_home.h"
 #include "support/pipeline_model.h"
 #include "support/voice_model.h"
+#include "training/python_env.h"
 
 /// `video compose` composed (50c), in process over its seams -- a scripted
 /// plan, narration and clips that write files, an assembly that records
@@ -981,4 +983,47 @@ TEST_CASE("a dry run over a kept plan says it reads the plan, never that it rend
     CHECK(std::ranges::none_of(run.said, [](const std::string& line) {
         return line.find("rendering") != std::string::npos;
     }));
+}
+
+TEST_CASE("two voice models in the store are refused naming compose's own flag",
+          "[cli][video][compose]") {
+    // M29: compose's flag is --voice-model; --model names its pipeline.
+    Run run;
+    apogee::testing::write_voice_model(run.roots.models / "other--V" / "voice" / "cccccccccccc");
+    const VideoComposeResult result = run.go();
+    CHECK(result.exit_code == 1);
+    CHECK(result.document.is_null());
+    CHECK(result.error ==
+          "the store holds 2 voice models -- name one with --voice-model:\n"
+          "  hexgrad--Kokoro-82M/voice/bbbbbbbbbbbb\n  other--V/voice/cccccccccccc");
+    CHECK(run.calls.empty());
+}
+
+TEST_CASE("a runtime not installed ends a streamed compose on its error, its words on stderr too",
+          "[cli][video][compose][stream]") {
+    // M29: the stream carried its `job` line alone, the words on stderr.
+    const Run run;
+    const std::filesystem::path interpreter =
+        apogee::training::PythonEnv{run.home.home() / "training" / "venv"}.interpreter();
+    std::filesystem::create_directories(interpreter.parent_path());
+    std::ofstream{interpreter} << "#!fake";
+    std::string out;
+    std::string err;
+    CHECK(run.home.run({"video", "compose", "a minute on tides", "-o", run.options.output.string(),
+                        "--model", "org--clip", "--output-format", "stream-json"},
+                       &out, &err) == 1);
+    std::vector<nlohmann::json> events;
+    std::istringstream lines{out};
+    for (std::string line; std::getline(lines, line);) {
+        events.push_back(nlohmann::json::parse(line));
+    }
+    REQUIRE(events.size() == 2);
+    CHECK(events.front().at("type") == "job");
+    CHECK(events.back().at("type") == "error");
+    const std::string refusal =
+        "torch and diffusers are not installed in Apogee's Python environment -- apogee train "
+        "setup --with video";
+    CHECK(events.back().at("message") == refusal);
+    CHECK(err == "apogee video compose: " + refusal + "\n");
+    CHECK_FALSE(std::filesystem::exists(run.options.output));
 }

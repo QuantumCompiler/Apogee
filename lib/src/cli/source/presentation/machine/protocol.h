@@ -44,7 +44,7 @@ inline constexpr int kMachineProtocolVersion = 1;
 /// tell two builds' streams apart without diffing them. Unlike
 /// `protocol_version` it says nothing about compatibility: every growth is
 /// additive under the stability promise.
-inline constexpr std::string_view kMachineSchemaVersion = "2026-10-25";
+inline constexpr std::string_view kMachineSchemaVersion = "2026-10-26";
 
 struct FieldSpec;
 

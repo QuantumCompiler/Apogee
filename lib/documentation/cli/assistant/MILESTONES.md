@@ -9438,6 +9438,55 @@ The probe, run on two scripted mocks over a sandbox, showed both: `session` keys
 
 **Not done:** 55b's no-op compaction ("history compacted" on an empty conversation) still says so, though nothing is now written.
 
+### 2026-10-26 — `refusals-and-suites-reach-drivers` (maintenance item M29): refusals and suites reach drivers
+
+**Why.** The macOS app's v0.2.0 run drives the binary as its only client. Its probes found five places where the session opening, or a media run's refusal, told a driver less than the truth, each reproduced on `apogee 0.2.0 (4b828e91)` and traced to its line before this item was written (2026-10-26):
+- **A backend named by `-m` that couldn't start was quietly replaced by the default.** `chat -m mlxgone --output-format stream-json` exited 0 with the result `{"model":"mlxgone","text":"GOOD-SAYS"}`: the default's answer under the named backend's label, the saved chat recording `backend: mlxgone`. `execute -m` did the same, and so did a name configured nowhere. `chat_session.cpp` checked only that something had constructed.
+- **A runtime-not-installed refusal sent only the `job` line.** `video generate`, `video compose` and `voice say` under `stream-json` with torch and diffusers missing exited 1, the words on stderr and no `error` in the stream.
+- **Compose's two-voice-models refusal said "name one with --model",** where its flag is `--voice-model`.
+- **A suite's admission line and warnings reached stderr only,** and no stream line said which suite a session ran under. A resumed chat's `session` carried no `suite` (the design board's G23).
+
+- [x] **A named backend speaks for itself or not at all.** `named_backend_refusal()` (`cli/helpers`) runs after construction, before the "no usable backend" check, and is called by `chat`, `execute`, `complete`, `task run` and `task resume`. A backend that is configured but couldn't start is refused at launch, exit 1, nothing on stdout, nothing made:
+  - **its own problem:** `apogee chat: backend 'mlxgone' is configured but could not be started: there is no Python environment at … -- apogee train setup --with mlx (started backends: good, other)`;
+  - **a name configured nowhere:** `no backend named 'nope' (configured: …)`;
+  - **a task that can't resume:** `task <id> cannot resume: backend 'm' is configured but could not be started: …`.
+
+  The router's fallback for later requests (`/model`, a `set` mid-session) is untouched. `-m <backend>:<its own model>` now answers from that backend, looked up by its config key; before, the default answered it too. `complete`'s refusal takes M26's router words, its doubled name gone.
+- [x] **A runtime refusal ends the stream on `error`,** its words still on stderr. `ready_runtime` and `require_python_env` tell the job stream through `tell_job_failure`. `run_job_body` (`cli/job_stream`) holds `train`'s catch-and-report block as the one backstop that `train`, `video generate`, `video compose` and `voice say` share.
+- [x] **Compose names its own flag:** `resolve_voice_model(…, flag)` defaults to `--model`, and compose passes `--voice-model`.
+- [x] **The suite reaches drivers.** In machine mode, a suite's admission line and warnings (`--warm` load failures among them) are `notice`s after `session`, beside 55b's resume notes. In the terminal they stay on stderr. A launch refusal stays on stderr with exit 1 and an empty stdout: `machine-mode.md`'s launch contract.
+- [x] **`session` names its suite** (absent when none) and, for execute, `orchestrating` (`--orchestrate` or the suite's `orchestrate: true`). Both are declared optional, `protocol_version` stays 1, the vocabulary date moves to `2026-10-26`, and the goldens gain the fields and the notice line.
+
+**Decisions made while building** (2026-10-26, each recorded for veto):
+- **The defaults, taken:** a named backend that can't start is refused at launch; suite lines become notices in machine mode; `session` carries `suite` and `orchestrating`.
+- **Two recorded decisions revised:**
+  - **M26's** "a request naming a skipped backend still falls to a default", for the launch alone;
+  - **27e's** "one line, on stderr in every mode", for machine mode.
+- **The same refusal at `task run` and `task resume`,** found while building: a task named a backend that couldn't start and ran on the default.
+  - **A deleted backend still resumes on the default.** A task whose backend was *deleted* from the config resumes on the default as chats do, said on stderr (`[resume] backend 'm' is no longer configured; using the default instead`). Only a backend still configured but unable to start is refused.
+- **`task run -m` refuses a roster name** (`<backend>:<model>`) as `no backend named '…'`. It used to fall silently to the default, so no real choice is lost.
+- **`orchestrating` reports what was asked for,** not whether a symphony could be offered.
+- **`VoiceReady`'s members gained default initializers,** clearing six MinGW warnings in a file this item touched.
+
+**Verified.**
+- **17 new Catch2 cases** (plus an extended declaration case in `machine_mode_test.cpp`):
+  - the named-backend cases for chat, execute, `complete`, `task run` and `task resume`;
+  - each media runtime refusal ending on `error`;
+  - compose's flag;
+  - the suite's notices, and its launch refusal on stderr;
+  - `session`'s `suite` and `orchestrating`, fresh and resumed.
+
+  Every one failed first, as did `cli.complete_lifecycle`, `cli.suites_lifecycle` and `cli.video_lifecycle` on the old binary. Three old execute cases that pinned the exact event order were updated for the new notice, as was `execute_e2e.sh`.
+- **The full `apogee_tests`:** 3,949 cases, 3,948 passed, 1 skipped (`pdftotext` installed here). `ctest -R '^(cli|harness)\.'`: 60 of 60.
+- **Zero warnings,** the MinGW scan clean over every changed `.cpp`, clang-format clean over the 30 touched files.
+- **The macOS app's decoder** ignores unknown fields, and its recorded fixtures are unchanged.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 4,009 tests and the macOS app's 834 cases passed, with no warning.
+
+**Not done:**
+- The other callers of M26's refusals (analyze, knowledge, review, compose's planner, `chats`, the HTTP handler) keep their own wording.
+- Two machine-mode launch lines stay on stderr alone: orchestrate's "not offering" warning and the consult notes.
+- The macOS app reads the new `suite` field and notices from a later GUI item.
+
 ---
 
 ## Milestone AP — Runtime adapters

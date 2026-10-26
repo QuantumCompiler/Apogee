@@ -77,11 +77,10 @@ Release-agnostic upkeep — polish, performance and ergonomics — claimable at 
 - **M32**, list rows carry what drivers need.
 - **M33**, config verbs finish their job: an embedding entry is accepted as the chat role.
 
-Every call is a recorded default; no **[user]** call blocks any of them. `graph delete` keeping its config entry was found too, and is recorded design, not queued. The GUI's adoption of each is a later GUI item, neither gated on the other; its design catch-up is the GUI's M11 and M12.
+Every call is a recorded default; no **[user]** call blocks any of them. `graph delete` keeping its config entry was found too, and is recorded design, not queued. The GUI's adoption of each is a later GUI item, neither gated on the other; its design catch-up is the GUI's M11 and M12. **M29 shipped 2026-10-26** ([Milestone AO](../assistant/MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths)): a backend named with `-m` that can't start is refused with its own problem at `chat`, `execute`, `complete`, `task run` and `task resume`, never answered by the default; runtime refusals end on `error`; compose names `--voice-model`; a suite's lines are notices, and `session` names the suite.
 
 | # | Item | Version | File | Status |
 |---|---|---|---|---|
-| M29 | Refusals and suites reach drivers — a named backend that can't run refused with its own problem (never answered by the default), runtime refusals ending on `error`, compose naming `--voice-model`, suite lines as notices, `suite` on `session` | maint. | [`refusals-and-suites-reach-drivers.md`](maintenance/refusals-and-suites-reach-drivers.md) | 🟢 |
 | M30 | Pipelines and the cycle tell the truth — a halt during a pass kept, a failed pass said on stderr, a resumed stage's stale score reset, `train pipeline list`/`show`, `datasets pull` streamed and cancellable | maint. | [`pipelines-and-cycle-tell-the-truth.md`](maintenance/pipelines-and-cycle-tell-the-truth.md) | 🟢 |
 | M31 | Prose reads gain JSON — `chats info`, recall's summaries listed, `graph dedupe` (the admin twin's serializer), `knowledge info --raw`, a typed suite footprint | maint. | [`prose-reads-gain-json.md`](maintenance/prose-reads-gain-json.md) | 🟢 |
 | M32 | List rows carry what drivers need — `task list`'s `interrupted`, an `mlx` row's drafter and whether it can draft | maint. | [`list-rows-carry-what-drivers-need.md`](maintenance/list-rows-carry-what-drivers-need.md) | 🟢 |

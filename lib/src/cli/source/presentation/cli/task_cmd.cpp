@@ -618,6 +618,17 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
     backends::BuildOptions build_options;
     build_options.config_path = config_path;
     const backends::BuildResult built = backends::build_providers(harness, build_options);
+    // The backend a task names answers it under its own name or not at all
+    // (M29), as chat's opening holds it: `-m` on a new task, and on a resume
+    // the backend its conversation was left on. One that did not start, or a
+    // name the config defines nowhere, is refused before anything is made or
+    // run -- the router would answer every round from the default. One a
+    // resume no longer finds configured was let go above, said, as a chat's.
+    const std::string named = what.existing.has_value() ? session.backend : flags.model;
+    if (const std::string refused = named_backend_refusal(config, built, named); !refused.empty()) {
+        fail_user(what.existing.has_value() ? "task " + task.id + " cannot resume: " + refused
+                                            : refused);
+    }
     if (built.constructed_count() == 0) {
         std::string message = "no usable backend is configured";
         if (!built.skipped_summary().empty()) {

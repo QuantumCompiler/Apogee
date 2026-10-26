@@ -18,6 +18,10 @@
 namespace apogee::commands {
 namespace {
 
+/// Compose's flag for its narration's voice model: `--model` names its
+/// pipeline, so a refusal asking for a voice model names this one (M29).
+constexpr std::string_view kVoiceModelFlag = "--voice-model";
+
 /// `seconds` for a line: `3.4 s`.
 [[nodiscard]] std::string seconds_words(double seconds) {
     std::array<char, 32> buffer{};
@@ -89,9 +93,9 @@ namespace {
     }
     if (!options.voice_model.empty()) {
         ResolvedVoiceModel named;
-        if (!resolve_voice_model(roots, options.voice_model, named).empty() ||
+        if (!resolve_voice_model(roots, options.voice_model, named, kVoiceModelFlag).empty() ||
             named.handle != kept.voice_model) {
-            out.emplace_back("--voice-model");
+            out.emplace_back(kVoiceModelFlag);
         }
     }
     if (!options.voice.empty() && options.voice != kept.voice) {
@@ -454,7 +458,7 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
             chosen(options.voice_model, resumed.has_value() ? resumed->voice_model
                                         : editing           ? parent->voice_model
                                                             : std::string{}),
-            voice_model);
+            voice_model, kVoiceModelFlag);
         !why.empty()) {
         return refuse(why);
     }

@@ -66,9 +66,9 @@ struct VoiceRequest {
 
 /// What the driver found when it loaded the model.
 struct VoiceReady {
-    std::string device;
-    std::string torch;
-    std::string kokoro;
+    std::string device{};
+    std::string torch{};
+    std::string kokoro{};
     int sample_rate = 0;
     /// The engine the driver says it runs (53m) -- `mlx` from the MLX
     /// driver, empty from the PyTorch one, which predates the word -- and on
