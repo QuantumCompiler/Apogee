@@ -30,10 +30,24 @@ public struct CommandPlace: Sendable, Equatable {
     }
 }
 
+/// A command the console refuses (ADR 0003), by the words it starts with --
+/// a top-level command, or a command and its verb -- and the reason it says.
+public struct Refusal: Sendable, Equatable {
+    /// The command's words: `["reset"]`, `["agents", "edit"]`.
+    public let words: [String]
+    public let reason: String
+
+    public init(_ words: String, _ reason: String) {
+        self.words = words.split(separator: " ").map(String.init)
+        self.reason = reason
+    }
+}
+
 /// THE table: every top-level command of `apogee`, today's truth -- the GUI's
 /// analog of the CLI's `tui_parity.cpp`. A queued gap names its item, which
 /// flips the row to its screen when it ships; a new CLI command fails the
-/// app's suite until it is classified here.
+/// app's suite until it is classified here. It is also the console's one
+/// source of refusals, never a second list.
 public enum ParityTable {
     public static let places: [CommandPlace] = [
         // --- screens: drawn in the app today ------------------------------------
@@ -75,22 +89,52 @@ public enum ParityTable {
         CommandPlace("__machine-schema", .plumbing, "the machine protocol's JSON Schema, for a driver to read"),
     ]
 
+    /// Every command the console refuses, by its words -- the set the CLI's
+    /// exec line refuses (`tui_parity.cpp`'s `kRefusals`, ADR 0010), each in
+    /// the app's own words (GUI 4g):
+    /// - the doors the app already is (`chat`, `execute`, `tui`): a child on
+    ///   the console's closed stdin would read nothing and end, so each names
+    ///   where the app opens it;
+    /// - the `$EDITOR` verbs, which need a terminal the console has none of;
+    /// - the carve-outs, by their rows' reasons.
+    public static let refusals: [Refusal] = [
+        // The doors: the app already is what they open.
+        Refusal("chat", "a conversation is a session in the app -- start one with New session (⌘N), or reopen one from Sessions"),
+        Refusal("execute", "an execute session is a session in the app -- open one with New execute session (⌥⌘N)"),
+        Refusal("tui", "the app is the full-screen shell's counterpart already -- run it at a prompt for the terminal's own"),
+        // The `$EDITOR` wall: the editor needs a terminal.
+        Refusal("agents edit", "opens your $EDITOR, which needs a terminal the console doesn't have -- run it at a prompt"),
+        Refusal("symphonies edit", "opens your $EDITOR, which needs a terminal the console doesn't have -- run it at a prompt"),
+    ] + places.compactMap { place -> Refusal? in
+        // The carve-outs: each refused by its row's reason.
+        if case .carvedOut(let reason) = place.kind { Refusal(place.command, reason) } else { nil }
+    }
+
     /// The place of a command word, if it has one.
     public static func place(of command: String) -> CommandPlace? {
         places.first { $0.command == command }
     }
 
-    /// Why the console refuses a command, when the table carves it out.
-    public static func refusal(of command: String) -> String? {
-        if case .carvedOut(let reason) = place(of: command)?.kind { return reason }
-        return nil
+    /// The refusal for a command path -- the command's own words, past any
+    /// root option, as the binary reads them -- when it starts with refused
+    /// words: `["agents", "edit", "reviewer"]` is refused as `agents edit`,
+    /// `["agents", "list"]` is not.
+    public static func refusal(of path: some Collection<String>) -> Refusal? {
+        refusals.first { path.starts(with: $0.words) }
     }
 
     /// What breaks the law over the binary's own command words: a word with
     /// no place, a classified command the binary no longer has (plumbing
-    /// aside -- completion never lists it), a command classified twice, and
+    /// aside -- completion never lists it), a command classified twice, a
+    /// refusal of a command the binary no longer has or with no reason, and
     /// an empty word list, which would pass vacuously.
     public static func violations(words: [String]) -> [String] {
+        violations(words: words, refusals: refusals)
+    }
+
+    /// The same law over `refusals` in place of the table's: how a planted
+    /// refusal is shown to be named.
+    static func violations(words: [String], refusals: [Refusal]) -> [String] {
         guard !words.isEmpty else { return ["no command words -- the law would pass vacuously"] }
         var found: [String] = []
         for word in words where place(of: word) == nil {
@@ -102,6 +146,15 @@ public enum ParityTable {
         var seen: Set<String> = []
         for place in places where !seen.insert(place.command).inserted {
             found.append("'\(place.command)' is classified twice")
+        }
+        for refusal in refusals {
+            let said = refusal.words.joined(separator: " ")
+            if refusal.words.first.map(words.contains) != true {
+                found.append("the console refuses '\(said)', which the binary no longer has")
+            }
+            if refusal.reason.isEmpty {
+                found.append("the console refuses '\(said)' with no reason")
+            }
         }
         return found
     }

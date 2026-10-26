@@ -32,17 +32,18 @@ public final class RecordsViewModel {
 
         public init() {}
 
-        /// `knowledge capture <text> [--status s] [--discipline d] [--link l]`;
-        /// nil with nothing to capture.
+        /// `knowledge capture [--status s] [--discipline d] [--link l] --
+        /// <text>`; nil with nothing to capture. The text after `--`, so the
+        /// binary never reads it as a flag (`Argv`, GUI 4g).
         public var arguments: [String]? {
             let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return nil }
-            var arguments = ["knowledge", "capture", text]
+            var arguments = ["knowledge", "capture"]
             if let status { arguments += ["--status", status] }
             if let discipline { arguments += ["--discipline", discipline] }
             let link = link.trimmingCharacters(in: .whitespaces)
             if !link.isEmpty { arguments += ["--link", link] }
-            return arguments
+            return arguments + Argv.text(text)
         }
     }
 
@@ -127,13 +128,14 @@ public final class RecordsViewModel {
 
     // MARK: - Asking
 
-    /// `knowledge query <question> --json`, over the chosen branch or every
-    /// branch (`--status ""`) -- run as typed, its stdout the document: the
-    /// query takes `--json`, never `--output-format`.
+    /// `knowledge query --status <branch> --json -- <question>`, over the
+    /// chosen branch or every branch (`--status ""`) -- run as typed, its
+    /// stdout the document: the query takes `--json`, never
+    /// `--output-format`. The question after `--` (`Argv`, GUI 4g).
     public func search() async {
         let question = question.trimmingCharacters(in: .whitespaces)
         guard let binary, !question.isEmpty else { return }
-        let outcome = await runner.command(binary: binary, ["knowledge", "query", question, "--status", branch ?? "", "--json"])
+        let outcome = await runner.command(binary: binary, ["knowledge", "query", "--status", branch ?? "", "--json"] + Argv.text(question))
         if case .done(let stdout) = outcome, let document = ReadDocument(text: stdout), let query = KnowledgeQuery(document: document) {
             self.query = query
             failure = nil

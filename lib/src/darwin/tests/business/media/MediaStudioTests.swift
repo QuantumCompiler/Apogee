@@ -88,7 +88,7 @@ struct ComposeFreeNamesTests {
         form.brief = "the tides"
         form.voiceModel = "hexgrad--Kokoro-82M/mlx/ffffffffffff"
         form.voice = "af_heart"
-        #expect(form.arguments(output: "/m/t.mp4") == ["video", "compose", "the tides", "-o", "/m/t.mp4", "--voice-model", "hexgrad--Kokoro-82M/mlx/ffffffffffff", "--voice", "af_heart"])
+        #expect(form.arguments(output: "/m/t.mp4") == ["video", "compose", "-o", "/m/t.mp4", "--voice-model", "hexgrad--Kokoro-82M/mlx/ffffffffffff", "--voice", "af_heart", "--", "the tides"])
         form.from = "/m/t.mp4"
         form.instruction = "brighter"
         #expect(form.arguments(output: "/m/e.mp4")?.contains("--voice-model") == false, "an edit keeps its parent's voice model")

@@ -1,3 +1,4 @@
+import BusinessReads
 import DataProtocol
 import Foundation
 
@@ -181,9 +182,13 @@ public struct ComposeForm: Sendable, Equatable {
     public init() {}
 
     /// `video compose …` writing `output`; `dryRun` plans (or, editing,
-    /// says the diff) and writes nothing. `nil` while it cannot run.
+    /// says the diff) and writes nothing. `nil` while it cannot run. A new
+    /// composition's brief is the last word, after `--`, so the binary never
+    /// reads it as a flag (`Argv`, GUI 4g); an edit's instruction is
+    /// `--edit`'s value, which the binary takes whole.
     public func arguments(output: String, dryRun: Bool = false) -> [String]? {
         var arguments = ["video", "compose"]
+        let brief = brief.trimmingCharacters(in: .whitespacesAndNewlines)
         if let from {
             let instruction = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !instruction.isEmpty || !redo.isEmpty else { return nil }
@@ -191,9 +196,7 @@ public struct ComposeForm: Sendable, Equatable {
             if !instruction.isEmpty { arguments += ["--edit", instruction] }
             for scene in redo.sorted() { arguments += ["--redo-scene", String(scene)] }
         } else {
-            let brief = brief.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !brief.isEmpty else { return nil }
-            arguments.append(brief)
         }
         arguments += ["-o", output]
         if from == nil {
@@ -208,6 +211,6 @@ public struct ComposeForm: Sendable, Equatable {
             if !model.isEmpty { arguments += ["-m", model] }
         }
         if dryRun { arguments.append("--dry-run") }
-        return arguments
+        return from == nil ? arguments + Argv.text(brief) : arguments
     }
 }

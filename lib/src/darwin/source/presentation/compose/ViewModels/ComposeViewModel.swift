@@ -239,7 +239,7 @@ public final class ComposeViewModel {
         guard !waitsForTheInstall() else { return }
         if let folder = outputFolder { try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
         sheet = nil
-        start(planFirst && plansAlone() ? arguments + ["--dry-run"] : arguments, output: output, resumable: arguments)
+        start(planFirst && plansAlone() ? Argv.adding(["--dry-run"], to: arguments) : arguments, output: output, resumable: arguments)
     }
 
     /// Renders a planned composition, or resumes a stopped one: its last
@@ -251,9 +251,10 @@ public final class ComposeViewModel {
     }
 
     /// For a project whose command the app did not run: its brief and output
-    /// -- the composer reads the rest from the project it keeps.
+    /// -- the composer reads the rest from the project it keeps. The brief
+    /// after `--`, as a new composition's (`Argv`).
     static func resumeArguments(_ project: ProjectRecord) -> [String] {
-        ["video", "compose", project.brief, "-o", project.output]
+        ["video", "compose", "-o", project.output] + Argv.text(project.brief)
     }
 
     /// Whether an install runs, said: nothing composes beside it.
@@ -266,8 +267,9 @@ public final class ComposeViewModel {
     private func start(_ arguments: [String], output: String, resumable: [String]) {
         guard let binary, job == nil, previewJob == nil, installJob == nil else { return }
         let streaming = streams()
-        let planning = arguments.contains("--dry-run")
-        let full = arguments + (streaming ? ["--output-format", "stream-json"] : [])
+        // A brief may read like a flag; only an option plans.
+        let planning = Argv.options(of: arguments).contains("--dry-run")
+        let full = streaming ? Argv.adding(["--output-format", "stream-json"], to: arguments) : arguments
         commands[output] = resumable
         running = output
         selected = output
@@ -407,7 +409,7 @@ public final class ComposeViewModel {
     /// is stopped and said.
     public func previewEdit() async {
         guard let binary, !isRunning, let arguments = form.arguments(output: plannedOutput?.path ?? "", dryRun: true) else { return }
-        let job = starter.startJob(binary: binary, arguments: arguments + ["--output-format", "json"], streaming: false)
+        let job = starter.startJob(binary: binary, arguments: Argv.adding(["--output-format", "json"], to: arguments), streaming: false)
         previewJob = job
         previewTimedOut = false
         failure = nil

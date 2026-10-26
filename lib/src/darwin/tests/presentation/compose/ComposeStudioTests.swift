@@ -84,13 +84,15 @@ struct ComposeVoiceModelTests {
         #expect(refusal.hasPrefix("the store holds 2 voice models"))
         #expect(model.voiceModels.allSatisfy { refusal.contains($0.handle) })
         let out = folder.appendingPathComponent("the-tides-twice-a-day.mp4").path
-        #expect(model.plannedArguments == ["video", "compose", Recorded.brief, "-o", out, "--voice-model", Recorded.torch])
+        #expect(model.plannedArguments == ["video", "compose", "-o", out, "--voice-model", Recorded.torch, "--", Recorded.brief])
         model.choose(voiceModel: Recorded.mlx)
-        #expect(model.plannedArguments?.suffix(2) == ["--voice-model", Recorded.mlx])
+        #expect(model.plannedArguments?.suffix(4) == ["--voice-model", Recorded.mlx, "--", Recorded.brief])
         model.choose(voiceModel: Recorded.torch)
         model.compose(planFirst: true)
-        #expect(jobs.arguments(0) == ["video", "compose", Recorded.brief, "-o", out, "--voice-model", Recorded.torch, "--dry-run", "--output-format", "stream-json"])
-        // The binary took that command and planned (compose-named-planned.jsonl).
+        #expect(jobs.arguments(0) == ["video", "compose", "-o", out, "--voice-model", Recorded.torch, "--dry-run", "--output-format", "stream-json", "--", Recorded.brief])
+        // The binary took that command and planned (compose-named-planned.jsonl,
+        // recorded with the brief first; the brief after `--` plans the same
+        // stream but for its scenes' seeds and times, GUI 4g).
         job.replay(stdout: Recorded.media("compose-named-planned.jsonl"), status: 0, streaming: true)
         #expect(await eventually { toasts.contain("Planned the-tides-twice-a-day.mp4") })
     }

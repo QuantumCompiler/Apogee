@@ -304,12 +304,14 @@ public struct NewTaskForm: Equatable {
     }
 
     /// The run, as a person would type it; `nil` until it has a goal -- or,
-    /// with a recipe, its input when the recipe reads one.
+    /// with a recipe, its input when the recipe reads one. The goal is the
+    /// last word, after `--`, so the binary never reads it as a flag
+    /// (`Argv`, GUI 4g); every flag goes before it.
     public var arguments: [String]? {
         if let recipe { return recipeArguments(recipe) }
         let goal = goal.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !goal.isEmpty else { return nil }
-        var arguments = ["task", "run", goal]
+        var arguments = ["task", "run"]
         for text in Self.lines(requires) { arguments += ["--require", text] }
         for file in Self.lines(requireFiles) { arguments += ["--require-file", file] }
         arguments += ["--rounds", String(min(32, max(1, rounds)))]
@@ -318,7 +320,7 @@ public struct NewTaskForm: Equatable {
             if allowWrites { arguments += ["--allow", "write_file", "--allow", "edit_file"] }
             if allowCommands { arguments += ["--allow", "run_command"] }
         }
-        return arguments + modelArguments + ["--output-format", "stream-json"]
+        return arguments + modelArguments + ["--output-format", "stream-json"] + Argv.text(goal)
     }
 
     /// `task run --recipe <name>`: the recipe's own checks, tools and rounds
@@ -337,19 +339,20 @@ public struct NewTaskForm: Equatable {
 
     /// The same run as a hand-typed line -- the recipe expanded as the CLI
     /// expands it: its goal rendered, its checks before the typed ones,
-    /// `--tools`, its rounds unless changed, its agent. Shown, never run.
+    /// `--tools`, its rounds unless changed, its agent; the goal after `--`,
+    /// as a written goal's. Shown, never run.
     public var expansion: [String]? {
         guard let recipe, recipeArguments(recipe) != nil,
             let goal = recipe.renderedGoal(input: input.trimmingCharacters(in: .whitespacesAndNewlines))
         else { return nil }
-        var arguments = ["task", "run", goal]
+        var arguments = ["task", "run"]
         for text in recipe.require + Self.lines(requires) { arguments += ["--require", text] }
         for file in recipe.requireFiles + Self.lines(requireFiles) { arguments += ["--require-file", file] }
         if recipe.tools { arguments.append("--tools") }
         if let rounds = typedRounds(recipe) ?? recipe.rounds.map(String.init) { arguments += ["--rounds", rounds] }
         if !recipe.agent.isEmpty { arguments += ["--agent", recipe.agent] }
         for grant in givenGrants(recipe) { arguments += ["--allow", grant] }
-        return arguments + modelArguments
+        return arguments + modelArguments + Argv.text(goal)
     }
 
     /// The recipe's suggested grants left ungiven: said, as the CLI says them.

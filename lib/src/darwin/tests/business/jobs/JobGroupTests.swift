@@ -186,4 +186,15 @@ struct ChildRegistryTests {
         let long = ChildRegistry.label(for: ["video", "generate", String(repeating: "a fox at dusk, ", count: 20), "-o", "/tmp/a.mp4"])
         #expect(long.count == ChildRegistry.labelLimit && long.hasSuffix("…") && long.hasPrefix("apogee video generate a fox at dusk, "))
     }
+
+    @Test("a person's text after -- is still named: the command words, then the text, never the options between (GUI 4g)")
+    func labelsWithText() {
+        #expect(ChildRegistry.label(for: ["video", "generate", "-o", "/Users/someone/Movies/Apogee/a.mp4", "--", "A lighthouse at dusk"])
+            == "apogee video generate A lighthouse at dusk")
+        #expect(ChildRegistry.label(for: ["task", "run", "--rounds", "8", "--tools", "--output-format", "stream-json", "--", "-x fix the parser"])
+            == "apogee task run -x fix the parser", "a dash-leading text is the text")
+        #expect(ChildRegistry.label(for: ["voice", "say", "-o", "/tmp/a.wav", "--"]) == "apogee voice say", "nothing after it")
+        let long = ChildRegistry.label(for: ["video", "compose", "-o", "/tmp/a.mp4", "--", String(repeating: "a fox at dusk, ", count: 20)])
+        #expect(long.count == ChildRegistry.labelLimit && long.hasPrefix("apogee video compose a fox at dusk, "))
+    }
 }

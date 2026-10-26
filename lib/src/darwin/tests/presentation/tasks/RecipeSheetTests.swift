@@ -73,12 +73,12 @@ struct RecipeSheetTests {
         await model.choose(recipe: "digest-folder")
         #expect(model.form.expansion == nil, "nothing to expand until it has its input")
         model.form.input = "docs"
-        #expect(model.form.expansion == ["task", "run", Self.goal, "--require-file", "DIGEST.md", "--tools", "--rounds", "8"])
+        #expect(model.form.expansion == ["task", "run", "--require-file", "DIGEST.md", "--tools", "--rounds", "8", "--", Self.goal])
         model.form.grants.insert("write_file")
         model.form.requireFiles = "NOTES.md"
         #expect(model.form.expansion == [
-            "task", "run", Self.goal, "--require-file", "DIGEST.md", "--require-file", "NOTES.md", "--tools", "--rounds", "8",
-            "--allow", "write_file",
+            "task", "run", "--require-file", "DIGEST.md", "--require-file", "NOTES.md", "--tools", "--rounds", "8",
+            "--allow", "write_file", "--", Self.goal,
         ])
         #expect(model.form.hasChecks)
     }

@@ -267,7 +267,7 @@ public final class VideoViewModel {
     private func start(_ arguments: [String]) {
         guard let binary, job == nil, installJob == nil else { return }
         let streaming = streams()
-        let full = arguments + (streaming ? ["--output-format", "stream-json"] : [])
+        let full = streaming ? Argv.adding(["--output-format", "stream-json"], to: arguments) : arguments
         runArguments = full
         run = JobProgress()
         let job = starter.startJob(binary: binary, arguments: full, streaming: streaming)

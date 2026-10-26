@@ -92,7 +92,7 @@ struct VideoEnginesTests {
         model.choose(.model(Self.small))
         #expect(model.form.model == Self.small && model.form.engine == nil)
         #expect(model.engineLine == "Runs on PyTorch, through diffusers: a diffusers pipeline.")
-        #expect(Array((model.plannedArguments ?? []).suffix(2)) == ["-m", Self.small], "the engine is the directory's: no --engine")
+        #expect(Array((model.plannedArguments ?? []).suffix(4)) == ["-m", Self.small, "--", "A lighthouse at dusk"], "the engine is the directory's: no --engine")
         model.choose(.another)
         #expect(model.form.model.isEmpty && model.form.engine == nil)
         #expect(model.engineLine == "Runs on what its directory is: PyTorch for a diffusers pipeline, MLX for an MLX video model.")
@@ -105,10 +105,10 @@ struct VideoEnginesTests {
         let model = await sheet(home, runner: store())
         model.choose(.model(Self.pipeline))
         #expect(model.form.engine == .torch)
-        #expect(Array((model.plannedArguments ?? []).suffix(4)) == ["-m", Self.pipeline, "--engine", "torch"])
+        #expect(Array((model.plannedArguments ?? []).suffix(6)) == ["-m", Self.pipeline, "--engine", "torch", "--", "A lighthouse at dusk"])
         model.choose(.model(Self.mlx))
         #expect(model.form.engine == .mlx)
-        #expect(Array((model.plannedArguments ?? []).suffix(4)) == ["-m", Self.mlx, "--engine", "mlx"])
+        #expect(Array((model.plannedArguments ?? []).suffix(6)) == ["-m", Self.mlx, "--engine", "mlx", "--", "A lighthouse at dusk"])
         #expect(model.engineLine == "Runs on MLX, through mlx-video: an MLX video model. Wan2.2-TI2V-5B holds a pipeline and its MLX conversion, so the engine is yours: --engine mlx.")
         model.newClip()
         #expect(model.choice == .byDefault && model.form.engine == nil, "a new sheet starts from the default again")
@@ -130,10 +130,10 @@ struct VideoEnginesTests {
             #expect(verdicts[command] == "taken", "\(command): \(verdicts[command] ?? "never recorded")")
         }
         #expect(built.count == 4)
-        let folder = "video generate A lighthouse at dusk -o OUT.mp4 -m Wan2.2-TI2V-5B --engine mlx"
+        let folder = "video generate -o OUT.mp4 -m Wan2.2-TI2V-5B --engine mlx -- A lighthouse at dusk"
         #expect(verdicts[folder]?.hasPrefix("refused: apogee video: 'Wan2.2-TI2V-5B' holds 2 video models -- name one") == true,
                 "why the sheet names the set's handle: \(verdicts[folder] ?? "not recorded")")
-        let other = "video generate A lighthouse at dusk -o OUT.mp4 -m \(Self.mlx) --engine torch"
+        let other = "video generate -o OUT.mp4 -m \(Self.mlx) --engine torch -- A lighthouse at dusk"
         #expect(verdicts[other]?.hasPrefix("refused: apogee video: --engine torch: '\(Self.mlx)' is an MLX video model") == true,
                 "--engine only names the model's own: \(verdicts[other] ?? "not recorded")")
         #expect(!built.contains(folder) && !built.contains(other))
@@ -162,7 +162,7 @@ struct VideoEnginesTests {
         unread.form.prompt = "A lighthouse at dusk"
         unread.form.model = "wan-1.3b"
         #expect(unread.models.isEmpty && unread.engineLine == nil, "no store read: the typed field, as before")
-        #expect(Array((unread.plannedArguments ?? []).suffix(2)) == ["-m", "wan-1.3b"])
+        #expect(Array((unread.plannedArguments ?? []).suffix(4)) == ["-m", "wan-1.3b", "--", "A lighthouse at dusk"])
     }
 
     @Test("run again from a clip made on MLX says its engine; a record that states none says nothing")

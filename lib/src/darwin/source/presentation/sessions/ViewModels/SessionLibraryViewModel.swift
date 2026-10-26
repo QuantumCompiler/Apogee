@@ -651,7 +651,8 @@ public final class SessionLibraryViewModel {
 
     // MARK: - Changing
 
-    /// Renames a saved conversation: `chats title <id> <name>`, read back.
+    /// Renames a saved conversation: `chats title <id> -- <name>`, read back --
+    /// the name after `--`, so the binary never reads it as a flag (`Argv`).
     ///
     /// The open session's own conversation, while its child runs, is renamed
     /// so that its next turn keeps the name: in place on a binary that keeps
@@ -670,7 +671,7 @@ public final class SessionLibraryViewModel {
             return
         }
         if pauses { await session.pause() }
-        let outcome = await runner.command(binary: found.url, ["chats", "title", chat.id, name])
+        let outcome = await runner.command(binary: found.url, ["chats", "title", chat.id] + Argv.text(name))
         if pauses && session === current && inView && !shut { session.resume() }
         await refresh()
         if let failure = outcome.failure {

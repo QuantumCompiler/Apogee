@@ -2,6 +2,8 @@
 
 **Status:** Accepted · **Date:** 2026-10-20
 
+*2026-10-25: the console refuses what the TUI's exec line refuses -- the carve-outs, the doors and the two `edit` verbs -- by the command path the binary would run, after its root options (4g).*
+
 ## Context
 
 The user's first hands-on run of the built app, 2026-10-20, found the structural hole. The GUI covered the design's 29 screens, but nothing held it to the CLI's whole surface. An audit against the TUI's own classification (`lib/src/cli/source/presentation/cli/tui_parity.cpp`, the CLI's ADR 0010) measured **8 whole command families with no GUI place**: `knowledge`, `embed`, `symphonies`, `train`, `datasets`, `agents`, `mcp` and `review`. It also found partials (execute sessions, prose graphs, task recipes, `analyze`) and no recorded carve-outs.
@@ -23,6 +25,12 @@ The TUI never drifted this way because ADR 0010 made its coverage mechanical: on
 - `reset`: it deletes the data directory the running app stands on;
 - `uninstall`: it removes Apogee and its data directory, and the app never uninstalls the binary it drives.
 
+**The console's refusals are the TUI exec line's, in the same table** (since 4g, 2026-10-25). Besides the three carve-outs:
+- **the doors**, `chat`, `execute` and `tui`, each pointing at the app's own place: a conversation is New session (⌘N), an execute session New execute session (⌥⌘N), and the full-screen shell is the terminal's;
+- **the two-word `agents edit` and `symphonies edit`**, whose `$EDITOR` needs a terminal the console doesn't have.
+
+The console matches them on the command path the binary would run: past every root option before the command (and the value `--config` or `--custom` takes), so `--release serve` is refused as `serve` is. One list, `ParityTable.refusals`, never a second one in the console.
+
 **The table is held to the binary's own word list**: the top-level words `apogee __complete ""` answers, recorded as a fixture by `scripts/refresh-parity-fixture.sh` and refreshed deliberately, never fetched live by a test (hermetic, like the protocol fixture).
 
 ## Consequences
@@ -30,7 +38,7 @@ The TUI never drifted this way because ADR 0010 made its coverage mechanical: on
 - A command a new CLI adds fails the app's suite the day the fixture is refreshed against that CLI, until it is classified. One the CLI drops fails it too.
 - A gap row names its item, and the test holds that item to the backlog index. When the item ships and its row leaves the index, the test fails until the table names the screen that now draws it. The table cannot claim a gap is queued once it isn't.
 - A screen row names a real module, so the table cannot point at a screen that was never built (the CLI's ADR 0012, doors reachable, adopted).
-- The classification is top-level. A command's verbs inside a covered family, such as `models convert` under Models, are each screen item's own scope (2h and 2i found that gap). The console, which runs any verb as typed, is what guarantees reach in the meantime.
+- The classification is top-level; only a refusal may name two words. A command's verbs inside a covered family, such as `models convert` under Models, are each screen item's own scope (2h and 2i found that gap). The console, which runs any verb as typed, is what guarantees reach in the meantime.
 
 ## Enforcement
 
@@ -40,6 +48,7 @@ The TUI never drifted this way because ADR 0010 made its coverage mechanical: on
 - an empty word list never passes;
 - every screen's module has its folder;
 - every queued item is a row of the GUI backlog's index;
-- the census is pinned.
+- the census is pinned;
+- the refusal set is the TUI exec line's, each refusal of a command the binary has and with a reason (`refusalSet`, `refusalLaw`), and the console refuses each behind every root option (`ConsoleSafetyTests`).
 
 The GUI's CLAUDE.md checklist carries the rule: a change that adds or removes a CLI command classifies it here in the same change.

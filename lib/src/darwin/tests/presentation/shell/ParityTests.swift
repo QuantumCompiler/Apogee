@@ -71,12 +71,44 @@ struct ParityTests {
         }
     }
 
-    @Test("the console refuses a carve-out by its reason, and nothing else")
+    @Test("the console refuses a carve-out by its row's reason, a door and an $EDITOR verb by theirs, and nothing else")
     func refusals() {
-        #expect(ParityTable.refusal(of: "reset")?.contains("data directory the running app stands on") == true)
-        #expect(ParityTable.refusal(of: "serve")?.contains("orphan") == true)
-        #expect(ParityTable.refusal(of: "uninstall")?.contains("never uninstalls the binary it runs") == true)
-        #expect(ParityTable.refusal(of: "models") == nil)
-        #expect(ParityTable.refusal(of: "nothing") == nil)
+        #expect(ParityTable.refusal(of: ["reset", "-y"])?.reason.contains("data directory the running app stands on") == true)
+        #expect(ParityTable.refusal(of: ["serve"])?.reason.contains("orphan") == true)
+        #expect(ParityTable.refusal(of: ["uninstall"])?.reason.contains("never uninstalls the binary it runs") == true)
+        #expect(ParityTable.refusal(of: ["chat", "-m", "local"])?.reason.contains("New session (⌘N)") == true)
+        #expect(ParityTable.refusal(of: ["execute"])?.reason.contains("New execute session (⌥⌘N)") == true)
+        #expect(ParityTable.refusal(of: ["tui"])?.reason.contains("full-screen shell's counterpart") == true)
+        #expect(ParityTable.refusal(of: ["agents", "edit", "code-review"])?.words == ["agents", "edit"])
+        #expect(ParityTable.refusal(of: ["symphonies", "edit", "digest"])?.reason.contains("$EDITOR") == true)
+        for path in [["models"], ["chats", "list"], ["agents"], ["agents", "list"], ["symphonies", "play", "edit"], ["executes"], ["nothing"], []] {
+            #expect(ParityTable.refusal(of: path) == nil, "\(path)")
+        }
+    }
+
+    @Test("the refusals are the CLI exec line's set, word for word: the three doors, the two $EDITOR verbs, the three carve-outs -- each carve-out by its row's reason")
+    func refusalSet() {
+        // tui_parity.cpp's kRefusals, in its order.
+        #expect(ParityTable.refusals.map { $0.words.joined(separator: " ") }
+            == ["chat", "execute", "tui", "agents edit", "symphonies edit", "serve", "reset", "uninstall"])
+        for place in ParityTable.places {
+            guard case .carvedOut(let reason) = place.kind else { continue }
+            #expect(ParityTable.refusal(of: [place.command])?.reason == reason, "\(place.command)")
+        }
+        for refusal in ParityTable.refusals {
+            #expect(refusal.words.count <= 2 && !refusal.reason.isEmpty)
+            #expect(ParityTable.place(of: refusal.words[0]) != nil, "a refusal names a classified command")
+        }
+    }
+
+    @Test("a refusal of a command the binary no longer has fails by name, as does one with no reason")
+    func refusalLaw() throws {
+        let words = try fixtureWords()
+        let planted = ParityTable.refusals + [Refusal("frobnicate edit", "it would"), Refusal("agents purge", "")]
+        #expect(ParityTable.violations(words: words, refusals: planted) == [
+            "the console refuses 'frobnicate edit', which the binary no longer has",
+            "the console refuses 'agents purge' with no reason",
+        ])
+        #expect(ParityTable.violations(words: words.filter { $0 != "symphonies" }).contains("the console refuses 'symphonies edit', which the binary no longer has"))
     }
 }

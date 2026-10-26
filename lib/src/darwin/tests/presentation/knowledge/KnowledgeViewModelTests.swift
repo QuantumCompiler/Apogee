@@ -43,12 +43,12 @@ struct RecordsViewModelTests {
         let (model, runner, _) = await records()
         model.question = "why was the cancel button removed"
         await model.search()
-        #expect(runner.calls.last == "run knowledge|query|why was the cancel button removed|--status||--json")
+        #expect(runner.calls.last == "run knowledge|query|--status||--json|--|why was the cancel button removed")
         #expect(model.query?.retriever == "lexical")
         #expect(model.query.map { RecordsViewModel.score($0.matches[0]) } == "0.596")
         model.branch = "shipped"
         await model.search()
-        #expect(runner.calls.last == "run knowledge|query|why was the cancel button removed|--status|shipped|--json")
+        #expect(runner.calls.last == "run knowledge|query|--status|shipped|--json|--|why was the cancel button removed")
         model.select(model.query!.matches[0].record)
         #expect(model.selectedRecord?.discipline == "ux")
     }
@@ -76,11 +76,11 @@ struct RecordsViewModelTests {
         var form = RecordsViewModel.CaptureForm()
         #expect(form.arguments == nil)
         form.text = "Ada: drop it? Bob: yes"
-        #expect(form.arguments == ["knowledge", "capture", "Ada: drop it? Bob: yes"])
+        #expect(form.arguments == ["knowledge", "capture", "--", "Ada: drop it? Bob: yes"])
         form.status = "rejected"
         form.discipline = "ux"
         form.link = "PROJ-9"
-        #expect(form.arguments == ["knowledge", "capture", "Ada: drop it? Bob: yes", "--status", "rejected", "--discipline", "ux", "--link", "PROJ-9"])
+        #expect(form.arguments == ["knowledge", "capture", "--status", "rejected", "--discipline", "ux", "--link", "PROJ-9", "--", "Ada: drop it? Bob: yes"])
         let job = ScriptedJob()
         let (model, _, starter) = await records([job])
         var said: [String] = []
@@ -88,7 +88,7 @@ struct RecordsViewModelTests {
         model.newCapture()
         model.captureForm.text = "Ada: drop it? Bob: yes"
         model.capture()
-        #expect(starter.starts == [["knowledge", "capture", "Ada: drop it? Bob: yes"]] && model.isRunning && !model.capturing)
+        #expect(starter.starts == [["knowledge", "capture", "--", "Ada: drop it? Bob: yes"]] && model.isRunning && !model.capturing)
         job.say(.said("Captured kr-20261021T045944Z-1e2354"))
         job.end()
         #expect(await eventually { !model.isRunning })
@@ -129,7 +129,7 @@ struct CollectionsViewModelTests {
         await model.select(model.collections[1])
         model.question = "how does a heat pump work"
         await model.search()
-        #expect(runner.calls.contains("run embed|query|notes|how does a heat pump work"))
+        #expect(runner.calls.contains("run embed|query|notes|--|how does a heat pump work"))
         #expect(model.results?.hasPrefix("0.000  [lexical]  heat-pumps.md#0") == true)
     }
 

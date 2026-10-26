@@ -26,7 +26,9 @@ public struct ReadRunner: Sendable {
     }
 
     /// `arguments` is the read after `apogee` -- `["chats", "list"]` --
-    /// without `--output-format`, which is added here.
+    /// without `--output-format`, which is added here: before a `--` when the
+    /// read carries a person's text after one (`Argv`), so the flag stays the
+    /// read's and the text stays text.
     public func run(
         binary: URL, _ arguments: [String], environment: [String: String] = [:], workingDirectory: URL? = nil
     ) async -> ReadOutcome {
@@ -41,7 +43,7 @@ public struct ReadRunner: Sendable {
         binary: URL, _ arguments: [String], environment: [String: String] = [:], workingDirectory: URL? = nil
     ) async -> ReadWithStderr {
         let command = ChildCommand(
-            executable: binary, arguments: arguments + ["--output-format", "json"], environment: environment,
+            executable: binary, arguments: Argv.adding(["--output-format", "json"], to: arguments), environment: environment,
             workingDirectory: workingDirectory)
         let run: CapturedRun
         do {

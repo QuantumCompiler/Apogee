@@ -1801,3 +1801,74 @@ Probed on the branch's binary over a sandbox with a stub Python whose pip never 
 - **Two CLI gaps found by the probes, for the CLI's queue:**
   - a runtime refusal under `stream-json` emits no `error` event;
   - compose's two-voice-models refusal names `--model`, where compose's flag is `--voice-model`.
+
+### 2026-10-25 — `console-and-argv-safety` (backlog item 4g): the console and every argv are safe
+
+**Why.** ADR 0003 makes the console (2b) the app's catch-all, and every screen assembles argv for the binary. The audit found five ways a command ran that shouldn't, or ran the wrong command. All five reproduced on today's source as failing tests first:
+- **A root option let a carve-out through.** The gate checked the first word only, and the binary takes root options before the command. Of 270 typed lines, 264 started a job: only the six bare carve-outs were refused, and `--release serve`, `--dev reset -y` and every carve-out behind any of 14 root prefixes started.
+- **The console had none of the TUI exec line's door and editor refusals.** All 180 door and `$EDITOR` lines started: `chat` ended silently on its closed stdin, and `agents edit` ran `vi` with no terminal.
+- **A person's text was read as an option.** `video compose "-m cats brief"` took the brief as `-m`, and `voice say "--draft"` answered "text is required". A brief of `--dry-run` made Compose report the run as planned.
+- **A bare `apogee` answered "A quote is left open."**
+- **Completion corrupted a quoted or escaped word:** `models info "My Mo"` + Tab became `models info "M"My Model" `, and `My\ Mo` ran with `MMy Model`.
+
+Probed on the branch's binary over a sandbox:
+- **Root options:** `-h/--help`, `-V/--version`, `--release`, `--dev` and `--test` take no value; `--config PATH` and `--custom PATH` take one, which may itself start with a dash. They are accepted only before the command.
+- **`--` stops the binary's verb dispatch.**
+- **Every free-text site takes `--`.** With the text after `--`, each verb took dash-leading text as text; without it, each failed: `voice say`, `video compose`, `video generate`, `task run`, `graph query`, `graph explain`, `chats title`, `knowledge capture`, `knowledge query` and `embed query`.
+- **`--output-format` before the `--` is honoured.**
+
+- [x] **The console refuses by the command path.** `ConsoleViewModel.commandPath` skips every dash-leading word before the command, and the value after `--config` or `--custom`, as the TUI's `first_verb` does. It then matches `ParityTable.refusal(of:)`.
+- [x] **One refusal table, the TUI exec line's eight, in its order.** Two-word entries are grown in `ParityTable.refusals`, with no second list in the console:
+
+  | Words | Reason |
+  |---|---|
+  | `chat` | a conversation is a session in the app -- New session (⌘N), or reopen one from Sessions |
+  | `execute` | an execute session is a session in the app -- New execute session (⌥⌘N) |
+  | `tui` | the app is the full-screen shell's counterpart already -- run it at a prompt for the terminal's own |
+  | `agents edit`, `symphonies edit` | opens your `$EDITOR`, which needs a terminal the console doesn't have -- run it at a prompt |
+  | `serve`, `reset`, `uninstall` | their carve-out reasons |
+
+  The parity law also fails a refusal of a command the binary no longer has, or one with no reason. ADR 0003 records the set.
+- [x] **No user text is ever an option.** `Argv` (`business/reads/Argv.swift`) puts text last after `--` and inserts added flags before it. `ReadRunner`'s `read`, `readKeepingStderr` and `report` put `--output-format json` before the `--`.
+  - **Sites changed:**
+    - the clip prompt, a new composition's brief and its resume, the speech text;
+    - the task goal (run and expansion);
+    - the graph query and explain;
+    - the chat title;
+    - the knowledge capture and query, and the collection search.
+  - **Planning** is read from the options only, never from the text.
+  - **`ChildRegistry`'s label** keeps the text after `--`, so 4c's monitor rows read as before.
+- [x] **Bare `apogee`:** "Nothing to run: type a command after apogee -- Tab offers them, and --help lists them all." Nothing starts, and the line stays in the input.
+- [x] **Completion edits what was typed.** The split records where the word being typed starts, as typed. Tab replaces from there and re-quotes the candidate in double quotes, escaping `"` and `\`.
+
+**Decisions made while building** (2026-10-25, each recorded for veto):
+- **The default, taken:** the console mirrors the TUI exec line's refusal set exactly. The `edit` reasons don't point at the Library's editor, since that redirect waits on 2e's editor being offered as one.
+- **Every dash-leading word before the command is skipped,** as the TUI does, so `-h serve` and `-- serve` are refused conservatively.
+  - `--config serve` still runs: there `serve` is a config path, and the binary runs nothing (`neighboursRun`).
+  - `agents -- edit x` isn't refused, since the binary won't dispatch past `--`.
+- **The text sites beyond the document's list** (knowledge capture and query, collection search, graph explain) take `--` too: a node name can start with a dash, as Objective-C's `-[Foo bar]` does.
+- **Left as they were:**
+  - option values, which the binary takes whole even when dash-leading;
+  - typed names in create, rename and targets, which the CLI validates;
+  - `mcp test`'s JSON, which never starts with a dash;
+  - `config set` values;
+  - `knowledge link`'s identifier.
+- **`Argv` lives in `BusinessReads`,** which every caller already imports, so no project edge was added.
+- **The console's empty state still names only the three carve-outs,** as the design board draws it (`main.html:1926`).
+
+**Verified.**
+- 25 new cases:
+  - `ConsoleSafetyTests` (5): the refusal matrix behind every root option, `bareApogee`, `completionEditsWhatWasTyped` and `candidatesQuoted`;
+  - `ParityTests` +2 (`refusalSet`, `refusalLaw`), `ReadFormatBeforeTextTests` (2), `ArgvTests` (2) and `JobGroupTests` +1;
+  - the argv of each text site: `MediaTextAfterDashesTests` (2), `ComposeTextTests` (3), `VideoTextTests`, `VoiceTextTests`, `TaskTextTests` (2), `GraphTextTests`, `KnowledgeTextTests` (2) and `ChatTitleTextTests`.
+
+  30 existing cases that pinned the old argv order were updated one by one.
+- **`engine-command-verdicts.txt` re-recorded** from the branch's binary, after the 3b store rebuilt in a sandbox first reproduced the old file byte for byte. All 21 verdicts are unchanged in the new order. The compose, generate and say streams recorded both ways are identical but for their seeds and times, so they stand. The parity fixture needs no refresh: the classification didn't change.
+- The module schemes, all passing: Console 11, Shell 21, Compose 23, Video 22, Voice 16, Tasks 12, Graph 9, Sessions 51 and Knowledge 10. The layering check passed 25 of 25, and `check-previews` finds nothing in any module touched.
+- Two new previews: a door refused after a root option, and an editor refused.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,992 tests and the macOS app's 625 cases passed, with no Swift warning. The two layer cards' console and reads lines were then brought up to the new refusals and `Argv`, and the layering check passed alone.
+
+**Not done:**
+- No live pass of the app.
+- The second word of a two-word refusal isn't held to the binary, since the parity fixture records top-level words only.
+- Completing inside an unclosed quote (`"My M` + Tab) still offers nothing, as before.

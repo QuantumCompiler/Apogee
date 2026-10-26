@@ -199,21 +199,23 @@ public final class VoiceViewModel {
         return MediaLibrary.freePath(in: outputFolder, base: stem.isEmpty ? "speech" : stem, ext: "wav")
     }
 
-    /// `voice say <text> -o <wav>`, with the voice and speed when chosen --
-    /// and where the store holds more than one voice model, the one picked
+    /// `voice say -o <wav> -- <text>`, with the voice and speed when chosen
+    /// -- and where the store holds more than one voice model, the one picked
     /// (`-m`, by its handle), which the CLI asks for rather than guess (its
-    /// 53m); with one, nothing is named, as before.
+    /// 53m); with one, nothing is named, as before. The text is the last
+    /// word, after `--`, so the binary never reads it as a flag (`Argv`,
+    /// GUI 4g).
     public var plannedArguments: [String]? {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
-        var arguments = ["voice", "say", text, "-o", plannedOutput.path]
+        var arguments = ["voice", "say", "-o", plannedOutput.path]
         if models.count > 1, let voiceModel {
             arguments += ["-m", voiceModel]
             if let engine = chosenEngine { arguments += ["--engine", engine.word] }
         }
         if !voice.isEmpty { arguments += ["--voice", voice] }
         if speed != 1 { arguments += ["--speed", String(format: "%g", speed)] }
-        return arguments
+        return arguments + Argv.text(text)
     }
 
     /// Whether the place runs something now: a speech, or the install one
@@ -241,7 +243,8 @@ public final class VoiceViewModel {
         let streaming = streams()
         run = JobProgress()
         let job = starter.startJob(
-            binary: binary, arguments: arguments + (streaming ? ["--output-format", "stream-json"] : []), streaming: streaming)
+            binary: binary, arguments: streaming ? Argv.adding(["--output-format", "stream-json"], to: arguments) : arguments,
+            streaming: streaming)
         self.job = job
         Task {
             for await update in job.updates { run?.apply(update) }

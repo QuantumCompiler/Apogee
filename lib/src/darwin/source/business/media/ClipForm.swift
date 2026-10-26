@@ -1,3 +1,4 @@
+import BusinessReads
 import Foundation
 
 /// A clip to make, as the generate sheet holds it -- and as the command a
@@ -47,7 +48,9 @@ public struct ClipForm: Sendable, Equatable {
     public init() {}
 
     /// The arguments after `apogee`, writing to `output`; `nil` while the
-    /// form cannot run -- a new clip needs a prompt or a seed image.
+    /// form cannot run -- a new clip needs a prompt or a seed image. The
+    /// prompt is the last word, after `--`, so the binary never reads it as
+    /// a flag (`Argv`, GUI 4g).
     public func arguments(output: String) -> [String]? {
         let prompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         var arguments = ["video", "generate"]
@@ -59,7 +62,6 @@ public struct ClipForm: Sendable, Equatable {
         case .extend(let clip):
             arguments += ["--extend", clip]
         }
-        if !prompt.isEmpty { arguments.insert(prompt, at: 2) }
         arguments += ["-o", output]
         if let image { arguments += ["--image", image] }
         let model = model.trimmingCharacters(in: .whitespaces)
@@ -80,7 +82,7 @@ public struct ClipForm: Sendable, Equatable {
         } else {
             for lora in loras where !lora.isEmpty { arguments += ["--lora", lora] }
         }
-        return arguments
+        return prompt.isEmpty ? arguments : arguments + Argv.text(prompt)
     }
 
     /// `5` for 5.0, `2.5` for 2.5.

@@ -61,9 +61,9 @@ struct VoiceViewModelTests {
         model.voice = "bf_emma"
         model.speed = 1.2
         let out = home.appendingPathComponent("Music/Apogee/hello-there-how-are.wav").path
-        #expect(model.plannedArguments == ["voice", "say", "Hello there. How are you?", "-o", out, "--voice", "bf_emma", "--speed", "1.2"])
+        #expect(model.plannedArguments == ["voice", "say", "-o", out, "--voice", "bf_emma", "--speed", "1.2", "--", "Hello there. How are you?"])
         model.speak()
-        #expect(jobs.starts.first?.arguments == ["voice", "say", "Hello there. How are you?", "-o", out, "--voice", "bf_emma", "--speed", "1.2"])
+        #expect(jobs.starts.first?.arguments == ["voice", "say", "-o", out, "--voice", "bf_emma", "--speed", "1.2", "--", "Hello there. How are you?"])
         try Data("RIFF".utf8).write(to: URL(fileURLWithPath: out))
         try Self.speech.replacingOccurrences(of: "OUT", with: out).write(toFile: out + ".json", atomically: true, encoding: .utf8)
         job.end()

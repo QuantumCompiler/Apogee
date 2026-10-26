@@ -43,15 +43,15 @@ struct ProjectsTests {
         var form = ComposeForm()
         #expect(form.arguments(output: "/m/a.mp4") == nil)
         form.brief = "how a heat pump works"
-        #expect(form.arguments(output: "/m/a.mp4") == ["video", "compose", "how a heat pump works", "-o", "/m/a.mp4"])
+        #expect(form.arguments(output: "/m/a.mp4") == ["video", "compose", "-o", "/m/a.mp4", "--", "how a heat pump works"])
         form.assets = "/m/stills"
         form.music = "/m/bed.mp3"
         form.captions = false
         form.voice = "bf_emma"
         form.model = "wan-5b"
         #expect(form.arguments(output: "/m/a.mp4", dryRun: true) == [
-            "video", "compose", "how a heat pump works", "-o", "/m/a.mp4", "--assets", "/m/stills", "--music", "/m/bed.mp3",
-            "--no-captions", "--voice", "bf_emma", "-m", "wan-5b", "--dry-run",
+            "video", "compose", "-o", "/m/a.mp4", "--assets", "/m/stills", "--music", "/m/bed.mp3",
+            "--no-captions", "--voice", "bf_emma", "-m", "wan-5b", "--dry-run", "--", "how a heat pump works",
         ])
         var edit = ComposeForm()
         edit.from = "/m/heat.mp4"

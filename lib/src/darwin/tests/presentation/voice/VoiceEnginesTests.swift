@@ -69,7 +69,7 @@ struct VoiceEnginesTests {
         #expect(model.voiceModel == Self.torch, "PyTorch first, as the CLI's auto")
         #expect(model.voices.flatMap(\.voices) == ["af_heart", "am_adam", "bf_emma"])
         model.text = "Hello there. How are you?"
-        #expect(Array((model.plannedArguments ?? []).suffix(4)) == ["-m", Self.torch, "--engine", "torch"])
+        #expect(Array((model.plannedArguments ?? []).suffix(6)) == ["-m", Self.torch, "--engine", "torch", "--", "Hello there. How are you?"])
         #expect(model.engineLine == "Speaks on PyTorch, through Kokoro: the voice model as Kokoro publishes it. Kokoro-82M holds it and its MLX build, so the engine is yours: --engine torch.")
         model.voice = "bf_emma"
         await model.choose(model: Self.mlx)
@@ -79,7 +79,7 @@ struct VoiceEnginesTests {
         model.speed = 1.2
         let out = home.appendingPathComponent("Music/Apogee/hello-there-how-are.wav").path
         #expect(model.plannedArguments == [
-            "voice", "say", "Hello there. How are you?", "-o", out, "-m", Self.mlx, "--engine", "mlx", "--voice", "bf_emma", "--speed", "1.2",
+            "voice", "say", "-o", out, "-m", Self.mlx, "--engine", "mlx", "--voice", "bf_emma", "--speed", "1.2", "--", "Hello there. How are you?",
         ])
     }
 
@@ -104,12 +104,12 @@ struct VoiceEnginesTests {
             }
         }
         #expect(built.count == 4)
-        let bare = "voice say Hello there. How are you? -o OUT.wav"
+        let bare = "voice say -o OUT.wav -- Hello there. How are you?"
         #expect(verdicts[bare] == "refused: apogee voice: the store holds 2 voice models -- name one with --model:", "the user's case, recorded")
         #expect(!built.contains(bare))
-        let folder = "voice say Hello there. How are you? -o OUT.wav -m Kokoro-82M --engine mlx"
+        let folder = "voice say -o OUT.wav -m Kokoro-82M --engine mlx -- Hello there. How are you?"
         #expect(verdicts[folder]?.hasPrefix("refused: apogee voice: 'Kokoro-82M' holds 2 voice models") == true, "why the sheet names the handle")
-        let other = "voice say Hello there. How are you? -o OUT.wav -m \(Self.mlx) --engine torch"
+        let other = "voice say -o OUT.wav -m \(Self.mlx) --engine torch -- Hello there. How are you?"
         #expect(verdicts[other]?.hasPrefix("refused: apogee voice: --engine torch: '\(Self.mlx)' is an MLX voice model") == true)
     }
 
@@ -125,8 +125,8 @@ struct VoiceEnginesTests {
         #expect(model.models == [MediaModel(handle: Self.torch, engine: .torch)] && model.chosenEngine == nil)
         model.text = "Hello there. How are you?"
         let out = home.appendingPathComponent("Music/Apogee/hello-there-how-are.wav").path
-        #expect(model.plannedArguments == ["voice", "say", "Hello there. How are you?", "-o", out], "an older binary's command, unchanged")
-        #expect(verdicts()["voice say Hello there. How are you? -o OUT.wav (one voice model in the store)"] == "taken")
+        #expect(model.plannedArguments == ["voice", "say", "-o", out, "--", "Hello there. How are you?"], "an older binary's command, unchanged but for the text after --")
+        #expect(verdicts()["voice say -o OUT.wav -- Hello there. How are you? (one voice model in the store)"] == "taken")
         #expect(model.engineLine == "Speaks on PyTorch, through Kokoro: the voice model as Kokoro publishes it.")
     }
 

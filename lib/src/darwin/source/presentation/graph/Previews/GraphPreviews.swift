@@ -16,7 +16,7 @@ enum GraphPreview {
         reads: [
             (["graph", "stats"], GraphDocuments.stats),
             (["graph", "query"], GraphDocuments.query),
-            (["graph", "explain", "ingest.runner.Runner"], GraphDocuments.explain),
+            (["graph", "explain", "--graph", "demo", "--", "ingest.runner.Runner"], GraphDocuments.explain),
         ],
         commands: [(["__complete", "graph", "stats"], "demo\n")])
 
@@ -26,7 +26,7 @@ enum GraphPreview {
         reads: [
             (["graph", "stats"], GraphDocuments.proseStats),
             (["graph", "report"], GraphDocuments.proseReport),
-            (["graph", "explain", "Heat pump"], GraphDocuments.proseExplain),
+            (["graph", "explain", "--graph", "notes", "--", "Heat pump"], GraphDocuments.proseExplain),
         ],
         commands: [(["__complete", "graph", "stats"], "notes\n")])
 
@@ -42,7 +42,7 @@ enum GraphPreview {
     /// The question the recorded query answered.
     static let question = "runner fetch"
 
-    /// `graph query runner fetch --graph demo`, read.
+    /// `graph query --graph demo -- runner fetch`, read.
     static var query: GraphQuery { GraphQuery(document: ReadDocument(text: GraphDocuments.query)!) }
 
     /// The collection graph's `graph report`, read.

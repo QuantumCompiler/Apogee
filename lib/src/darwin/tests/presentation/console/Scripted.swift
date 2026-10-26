@@ -63,9 +63,11 @@ final class ScriptedJobs: JobStarting, @unchecked Sendable {
 
     var starts: [[String]] { started.withLock { $0 } }
 
+    /// The next scripted job -- or, when the script has run out, one that
+    /// never ends: a start nobody scripted is recorded, never a crash.
     func startJob(binary: URL, arguments: [String], streaming: Bool, folder: URL?) -> any JobRunning {
         started.withLock { $0.append(arguments) }
-        return jobs.withLock { $0.removeFirst() }
+        return jobs.withLock { $0.isEmpty ? ScriptedJob() : $0.removeFirst() }
     }
 }
 

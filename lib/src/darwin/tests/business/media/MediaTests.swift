@@ -63,7 +63,7 @@ struct MediaTests {
         var form = ClipForm()
         #expect(form.arguments(output: "/m/a.mp4") == nil, "a new clip needs a prompt or a seed image")
         form.prompt = "a lighthouse at dusk"
-        #expect(form.arguments(output: "/m/a.mp4") == ["video", "generate", "a lighthouse at dusk", "-o", "/m/a.mp4"])
+        #expect(form.arguments(output: "/m/a.mp4") == ["video", "generate", "-o", "/m/a.mp4", "--", "a lighthouse at dusk"])
         form.image = "/p/seed.png"
         form.model = "wan-5b"
         form.seed = 7
@@ -73,16 +73,16 @@ struct MediaTests {
         form.fps = 16
         form.loras = ["/loras/film.safetensors:0.8", ""]
         #expect(form.arguments(output: "/m/a.mp4") == [
-            "video", "generate", "a lighthouse at dusk", "-o", "/m/a.mp4", "--image", "/p/seed.png", "-m", "wan-5b",
+            "video", "generate", "-o", "/m/a.mp4", "--image", "/p/seed.png", "-m", "wan-5b",
             "--seed", "7", "--duration", "2.5", "--resolution", "704x1280", "--steps", "30", "--fps", "16",
-            "--lora", "/loras/film.safetensors:0.8",
+            "--lora", "/loras/film.safetensors:0.8", "--", "a lighthouse at dusk",
         ])
         form.preset = .draft
         #expect(form.arguments(output: "/m/a.mp4")?.contains("--steps") == false, "a preset sets the steps")
         #expect(form.arguments(output: "/m/a.mp4")?.contains("--draft") == true)
         form.noLoRAs = true
         #expect(form.arguments(output: "/m/a.mp4")?.contains("--lora") == false)
-        #expect(form.arguments(output: "/m/a.mp4")?.last == "--no-lora")
+        #expect(form.arguments(output: "/m/a.mp4")?.suffix(3) == ["--no-lora", "--", "a lighthouse at dusk"], "the last option, the prompt after it")
 
         var again = ClipForm()
         again.start = .again("/m/draft.mp4.json")
@@ -91,7 +91,7 @@ struct MediaTests {
         var extend = ClipForm()
         extend.start = .extend("/m/a.mp4")
         extend.prompt = "the light comes on"
-        #expect(extend.arguments(output: "/m/b.mp4") == ["video", "generate", "the light comes on", "--extend", "/m/a.mp4", "-o", "/m/b.mp4"])
+        #expect(extend.arguments(output: "/m/b.mp4") == ["video", "generate", "--extend", "/m/a.mp4", "-o", "/m/b.mp4", "--", "the light comes on"])
     }
 
     @Test("a speech's record: its sentences laid on the file's own clock, and the one spoken at a time")

@@ -117,13 +117,15 @@ public final class ChildRegistry: Sendable {
     }
 
     /// A job's label: the command the app ran as a person would type it --
-    /// `apogee` and the words before its first option -- the first three
-    /// arguments when it opens with an option, and no more than
+    /// `apogee` and the words before its first option, then a person's text
+    /// the line carries after `--`, the end of options (GUI 4g) -- the first
+    /// three arguments when it opens with an option, and no more than
     /// `labelLimit` characters (a prompt can be a paragraph); the monitor
     /// fits what it shows to its row.
     public static func label(for arguments: [String]) -> String {
         let words = arguments.prefix { !$0.hasPrefix("-") }
-        let said = (["apogee"] + (words.isEmpty ? Array(arguments.prefix(3)) : Array(words))).joined(separator: " ")
+        let text = arguments.firstIndex(of: "--").map { arguments[($0 + 1)...] } ?? []
+        let said = (["apogee"] + (words.isEmpty ? Array(arguments.prefix(3)) : Array(words) + text)).joined(separator: " ")
         return said.count > labelLimit ? String(said.prefix(labelLimit - 1)) + "…" : said
     }
 

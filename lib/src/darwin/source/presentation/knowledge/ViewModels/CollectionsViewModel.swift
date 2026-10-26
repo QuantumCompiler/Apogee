@@ -132,11 +132,13 @@ public final class CollectionsViewModel {
 
     // MARK: - Searching
 
-    /// `embed query <collection> <question>`: its lines, as printed.
+    /// `embed query <collection> -- <question>`: its lines, as printed. The
+    /// question after `--`, so the binary never reads it as a flag (`Argv`,
+    /// GUI 4g).
     public func search() async {
         let question = question.trimmingCharacters(in: .whitespaces)
         guard let binary, let selected, !question.isEmpty else { return }
-        switch await runner.command(binary: binary, ["embed", "query", selected, question]) {
+        switch await runner.command(binary: binary, ["embed", "query", selected] + Argv.text(question)) {
         case .done(let stdout):
             results = stdout.trimmingCharacters(in: .newlines)
             failure = nil

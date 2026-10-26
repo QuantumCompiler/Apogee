@@ -95,12 +95,13 @@ public final class GraphViewModel {
 
     // MARK: - Reading
 
-    /// `graph query <question> --graph <graph>`: the entities named and the
-    /// neighbourhood around them, laid out.
+    /// `graph query --graph <graph> -- <question>`: the entities named and
+    /// the neighbourhood around them, laid out. The question after `--`, so
+    /// the binary never reads it as a flag (`Argv`, GUI 4g).
     public func search() async {
         let question = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let binary, let graph, !question.isEmpty else { return }
-        let outcome = await runner.read(binary: binary, ["graph", "query", question, "--graph", graph])
+        let outcome = await runner.read(binary: binary, ["graph", "query", "--graph", graph] + Argv.text(question))
         guard let document = outcome.document else {
             failure = outcome.failure
             return
@@ -111,7 +112,9 @@ public final class GraphViewModel {
         layout = GraphLayout(nodes: result.nodes.map(\.name), edges: result.edges.map { ($0.from, $0.to) })
     }
 
-    /// Explains a node: `graph explain <name> --graph <graph>`.
+    /// Explains a node: `graph explain --graph <graph> -- <name>` -- a name
+    /// the graph gave it, which may begin with a dash (an Objective-C
+    /// method's `-[Foo bar]`).
     public func select(_ name: String) async {
         selected = name
         await explain(name)
@@ -119,7 +122,7 @@ public final class GraphViewModel {
 
     private func explain(_ name: String) async {
         guard let binary, let graph else { return }
-        let outcome = await runner.read(binary: binary, ["graph", "explain", name, "--graph", graph])
+        let outcome = await runner.read(binary: binary, ["graph", "explain", "--graph", graph] + Argv.text(name))
         guard selected == name else { return }
         if let document = outcome.document, let explained = GraphExplain(document: document) {
             explain = explained

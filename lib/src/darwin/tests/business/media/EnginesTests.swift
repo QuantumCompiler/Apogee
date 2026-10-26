@@ -103,13 +103,13 @@ struct EnginesTests {
     func engineFlag() throws {
         var form = ClipForm()
         form.prompt = "A lighthouse at dusk"
-        #expect(form.arguments(output: "/o.mp4") == ["video", "generate", "A lighthouse at dusk", "-o", "/o.mp4"])
+        #expect(form.arguments(output: "/o.mp4") == ["video", "generate", "-o", "/o.mp4", "--", "A lighthouse at dusk"])
         form.model = "Wan2.2-TI2V-5B/mlx/5e6f708192a3"
-        #expect(form.arguments(output: "/o.mp4") == ["video", "generate", "A lighthouse at dusk", "-o", "/o.mp4", "-m", "Wan2.2-TI2V-5B/mlx/5e6f708192a3"])
+        #expect(form.arguments(output: "/o.mp4") == ["video", "generate", "-o", "/o.mp4", "-m", "Wan2.2-TI2V-5B/mlx/5e6f708192a3", "--", "A lighthouse at dusk"])
         form.engine = .mlx
         form.seed = 7
         #expect(form.arguments(output: "/o.mp4") == [
-            "video", "generate", "A lighthouse at dusk", "-o", "/o.mp4", "-m", "Wan2.2-TI2V-5B/mlx/5e6f708192a3", "--engine", "mlx", "--seed", "7",
+            "video", "generate", "-o", "/o.mp4", "-m", "Wan2.2-TI2V-5B/mlx/5e6f708192a3", "--engine", "mlx", "--seed", "7", "--", "A lighthouse at dusk",
         ])
         let again = ClipForm.from(try #require(ClipRecord(recorded("clip-mlx"))), extend: false)
         #expect(again.engine == nil && !again.arguments(output: "/o.mp4")!.contains("--engine"), "--from replays the record's engine itself")

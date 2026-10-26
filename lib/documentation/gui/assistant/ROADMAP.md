@@ -68,7 +68,7 @@ Opened 2026-10-22 (the user's call): a thorough bug and feature-disparity audit 
 - [x] **Markdown and code keep every line** *(4d, shipped 2026-10-25 — [Milestone E](MILESTONES.md#milestone-e--the-audits-gui-findings))* — link definitions, short math answers, pipe paragraphs, bare fences, heredoc shifts.
 - [x] **Store jobs keep their identity** *(4e, shipped 2026-10-25 — [Milestone E](MILESTONES.md#milestone-e--the-audits-gui-findings))* — a quantize registers its own GGUF; resumes only on stops; delete's warnings shown.
 - [x] **The media studio, finished** *(4f, shipped 2026-10-25 — [Milestone E](MILESTONES.md#milestone-e--the-audits-gui-findings))* — supervised installs, compose's voice model and consent, honest toasts, captions said up front.
-- [ ] **Console and argv safety** *([4g](../backlog/v0.2.0/console-and-argv-safety.md))* — carve-outs refused after root options, the exec line's refusals, user text after `--`.
+- [x] **Console and argv safety** *(4g, shipped 2026-10-25 — [Milestone E](MILESTONES.md#milestone-e--the-audits-gui-findings))* — carve-outs refused after root options, the exec line's refusals, user text after `--`.
 - [ ] **Buttons that do what they say** *([4h](../backlog/v0.2.0/library-tasks-review-correctness.md))* — Tasks' resume in its folder and state, no stale saves, results on their own selection, empty states and failures said.
 - [ ] **Training and suites parity** *([4i](../backlog/v0.2.0/training-and-suites-parity.md))* — adapter promote and editing, datasets pull, the shared-base fit, a chat under any suite.
 - [ ] **Pipeline and cycle screens** *([4j](../backlog/v0.2.0/pipeline-and-cycle-screens.md))* — its gate, the CLI's 55h JSON, shipped 2026-10-25.

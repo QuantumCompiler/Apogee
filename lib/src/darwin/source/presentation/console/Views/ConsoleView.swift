@@ -157,6 +157,27 @@ public struct ConsoleView: View {
         }
 }
 
+#Preview("A door refused: chat, after a root option") {
+    let console = ConsolePreview.console()
+    ConsoleView(model: console) {}
+        .frame(width: 900, height: 420)
+        .task {
+            console.input = "apogee --dev chat"
+            console.run()
+        }
+}
+
+#Preview("An editor refused: agents edit") {
+    let console = ConsolePreview.console()
+    ConsoleView(model: console) {}
+        .frame(width: 900, height: 420)
+        .task {
+            // An agent the recorded agents list names (tests/business/reads/Fixtures/agents-list.json).
+            console.input = "agents edit code-review"
+            console.run()
+        }
+}
+
 #Preview("Running: a symphony at its first stage") {
     let console = ConsolePreview.console(saying: ConsolePreview.playing)
     ConsoleView(model: console) {}

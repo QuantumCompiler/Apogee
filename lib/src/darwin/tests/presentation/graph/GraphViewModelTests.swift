@@ -48,7 +48,7 @@ struct GraphViewModelTests {
         await model.connect(binary: Self.binary)
         model.question = "runner fetch"
         await model.search()
-        #expect(runner.calls.last == "read graph query runner fetch --graph demo")
+        #expect(runner.calls.last == "read graph query --graph demo -- runner fetch")
         let result = model.result!
         #expect(result.nodes.count == 8)
         #expect(result.nodes.filter { $0.hop == 0 }.map(\.short) == ["HttpClient", "Runner", "_fetch", "fetch.py"])
@@ -65,16 +65,16 @@ struct GraphViewModelTests {
         model.question = "runner fetch"
         await model.search()
         await model.select("ingest.runner.Runner")
-        #expect(runner.calls.last == "read graph explain ingest.runner.Runner --graph demo")
+        #expect(runner.calls.last == "read graph explain --graph demo -- ingest.runner.Runner")
         let explain = model.explain!
         #expect(explain.node.name == "ingest.runner.Runner")
         #expect(explain.degreeIn == 4 && explain.degreeOut == 1)
         #expect(explain.relations.map(\.heading) == ["called by", "defined in", "defines"])
         #expect(explain.statedAt == ["ingest/runner.py:4"])
         await model.walk(to: "ingest.cli.main")
-        #expect(!runner.calls.contains("read graph query ingest.cli.main --graph demo"), "in the picture: no new query")
+        #expect(!runner.calls.contains("read graph query --graph demo -- ingest.cli.main"), "in the picture: no new query")
         await model.walk(to: "ingest.retry.backoff_delay")
-        #expect(runner.calls.contains("read graph query ingest.retry.backoff_delay --graph demo"))
+        #expect(runner.calls.contains("read graph query --graph demo -- ingest.retry.backoff_delay"))
         #expect(model.selected == "ingest.retry.backoff_delay")
     }
 

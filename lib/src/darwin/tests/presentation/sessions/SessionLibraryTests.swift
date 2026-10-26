@@ -212,7 +212,7 @@ struct SessionLibraryTests {
         library.say = { said.append($0) }
         await library.start(inView: false)
         await library.rename(library.chats[1], to: "  Weeknight recipes ")
-        #expect(runner.calls.suffix(2) == ["run chats title c1 Weeknight recipes", "read chats list"])
+        #expect(runner.calls.suffix(2) == ["run chats title c1 -- Weeknight recipes", "read chats list"])
         #expect(said == ["Renamed to Weeknight recipes"])
         await library.rename(library.chats[1], to: "   ")
         #expect(runner.calls.last == "read chats list", "an empty name runs nothing")

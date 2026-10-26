@@ -32,10 +32,10 @@ struct VideoViewModelTests {
         model.newClip()
         model.form.prompt = "A lighthouse at dusk"
         let out = home.appendingPathComponent("Movies/Apogee/a-lighthouse-at-dusk.mp4").path
-        #expect(model.plannedArguments == ["video", "generate", "A lighthouse at dusk", "-o", out])
+        #expect(model.plannedArguments == ["video", "generate", "-o", out, "--", "A lighthouse at dusk"])
         model.generate()
         #expect(!model.sheetOpen)
-        #expect(jobs.starts.first?.arguments == ["video", "generate", "A lighthouse at dusk", "-o", out])
+        #expect(jobs.starts.first?.arguments == ["video", "generate", "-o", out, "--", "A lighthouse at dusk"])
         #expect(model.isRunning)
         job.say(.busy("step 12/50"))
         #expect(await eventually { model.run?.busy == "step 12/50" })
@@ -59,7 +59,7 @@ struct VideoViewModelTests {
         model.connect(binary: Self.binary)
         model.form.prompt = "waves"
         model.generate()
-        #expect(jobs.starts.first?.arguments.suffix(2) == ["--output-format", "stream-json"])
+        #expect(jobs.starts.first?.arguments.suffix(4) == ["--output-format", "stream-json", "--", "waves"], "the stream's flag before the prompt's --")
         #expect(jobs.starts.first?.streaming == true)
         job.say(.event(.step(step: 3, steps: 50, scene: nil)))
         #expect(await eventually { model.run?.step?.done == 3 })

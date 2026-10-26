@@ -137,3 +137,32 @@ struct CommandRunningTests {
         #expect(read.failure == "apogee chats: no chat named 'nope' (exited with status 1)")
     }
 }
+
+/// A person's text is never an option (GUI 4g): a read whose words carry it
+/// after `--` gets its format flag before the `--`, where the binary still
+/// reads it as the read's -- after it, the flag would be taken as text too.
+@Suite("A read's format flag before --", .timeLimit(.minutes(1)))
+struct ReadFormatBeforeTextTests {
+    /// A fake read that answers with the words it was given, one per `|`.
+    static let echoing = #"words=$(printf '%s|' "$@"); printf '{"object":"echo","argv":"%s"}\n' "$words""#
+
+    @Test("a read, a read keeping its stderr and a report each put --output-format json before the --, the text after it untouched")
+    func formatBeforeTheText() async throws {
+        let fake = try FakeRead()
+        let binary = try fake.binary(Self.echoing)
+        let words = ["graph", "query", "--graph", "demo", "--", "--output-format text"]
+        let read = await ReadRunner().read(binary: binary, words)
+        #expect(read.document?.value["argv"]?.stringValue == "graph|query|--graph|demo|--output-format|json|--|--output-format text|")
+        let kept = await ReadRunner().readKeepingStderr(binary: binary, words)
+        #expect(kept.outcome.document?.value["argv"]?.stringValue == "graph|query|--graph|demo|--output-format|json|--|--output-format text|")
+        let report = await ReadRunner().report(binary: binary, ["graph", "explain", "--graph", "demo", "--", "-[Foo bar]"])
+        #expect(report.document?.value["argv"]?.stringValue == "graph|explain|--graph|demo|--output-format|json|--|-[Foo bar]|")
+    }
+
+    @Test("a read with no --: the flag at the end, as before")
+    func formatAtTheEnd() async throws {
+        let fake = try FakeRead()
+        let read = await ReadRunner().read(binary: try fake.binary(Self.echoing), ["chats", "list"])
+        #expect(read.document?.value["argv"]?.stringValue == "chats|list|--output-format|json|")
+    }
+}

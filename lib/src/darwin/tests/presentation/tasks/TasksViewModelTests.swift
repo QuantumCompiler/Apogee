@@ -31,7 +31,7 @@ struct TasksViewModelTests {
         var form = NewTaskForm()
         #expect(form.arguments == nil)
         form.goal = "Make tests/test_parsers.py pass on Python 3.12"
-        #expect(form.arguments == ["task", "run", "Make tests/test_parsers.py pass on Python 3.12", "--rounds", "8", "--tools", "--output-format", "stream-json"])
+        #expect(form.arguments == ["task", "run", "--rounds", "8", "--tools", "--output-format", "stream-json", "--", "Make tests/test_parsers.py pass on Python 3.12"])
         #expect(!form.hasChecks)
         form.requires = "62 passed\n\n  ruff clean "
         form.requireFiles = "report.txt"
@@ -40,10 +40,10 @@ struct TasksViewModelTests {
         form.allowCommands = true
         form.model = "local"
         #expect(form.arguments == [
-            "task", "run", "Make tests/test_parsers.py pass on Python 3.12",
+            "task", "run",
             "--require", "62 passed", "--require", "ruff clean", "--require-file", "report.txt",
             "--rounds", "32", "--tools", "--allow", "write_file", "--allow", "edit_file", "--allow", "run_command",
-            "-m", "local", "--output-format", "stream-json",
+            "-m", "local", "--output-format", "stream-json", "--", "Make tests/test_parsers.py pass on Python 3.12",
         ])
         #expect(form.hasChecks)
         form.tools = false
@@ -89,7 +89,7 @@ struct TasksViewModelTests {
         model.sheetOpen = true
         model.start()
         #expect(!model.sheetOpen)
-        #expect(jobs.starts.first?.arguments == ["task", "run", "say hello", "--require", "mock", "--rounds", "8", "--tools", "--output-format", "stream-json"])
+        #expect(jobs.starts.first?.arguments == ["task", "run", "--require", "mock", "--rounds", "8", "--tools", "--output-format", "stream-json", "--", "say hello"])
         #expect(jobs.starts.first?.folder?.path == "/Users/someone/work")
         #expect(model.form == NewTaskForm())
         for line in recordedRun.prefix(3) { job.say(.event(JobEvent.decode(line: line))) }

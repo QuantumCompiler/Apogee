@@ -5,7 +5,8 @@ import InfrastructureProcess
 /// What a screen runs through: a read, and a command that changes something.
 /// `ReadRunner` is the app's; a test's scripted runner stands in for it.
 public protocol CommandRunning: Sendable {
-    /// `apogee <arguments> --output-format json`, its document decoded.
+    /// `apogee <arguments> --output-format json`, its document decoded -- the
+    /// flag before a `--` the arguments hold (`Argv`).
     func read(binary: URL, _ arguments: [String]) async -> ReadOutcome
     /// `apogee <arguments>`, exactly as a person would type it.
     func command(binary: URL, _ arguments: [String]) async -> CommandOutcome
@@ -52,7 +53,7 @@ extension ReadRunner: CommandRunning {
         let run: CapturedRun
         do {
             run = try await spawner.capture(
-                ChildCommand(executable: binary, arguments: arguments + ["--output-format", "json"]), timeout: timeout)
+                ChildCommand(executable: binary, arguments: Argv.adding(["--output-format", "json"], to: arguments)), timeout: timeout)
         } catch {
             return .couldNotStart("\(error)")
         }

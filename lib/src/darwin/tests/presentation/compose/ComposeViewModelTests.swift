@@ -37,9 +37,9 @@ struct ComposeViewModelTests {
         model.newComposition()
         model.form.brief = "Tides, explained"
         let out = folder.appendingPathComponent("tides-explained.mp4").path
-        #expect(model.plannedArguments == ["video", "compose", "Tides, explained", "-o", out])
+        #expect(model.plannedArguments == ["video", "compose", "-o", out, "--", "Tides, explained"])
         model.compose(planFirst: true)
-        #expect(jobs.starts[0].arguments == ["video", "compose", "Tides, explained", "-o", out], "plan first needs 52c: one run")
+        #expect(jobs.starts[0].arguments == ["video", "compose", "-o", out, "--", "Tides, explained"], "plan first needs 52c: one run")
         try projectJSON(out, status: "rendering", made: 1).write(toFile: out + ".json", atomically: true, encoding: .utf8)
         #expect(await eventually { model.selectedProject?.made == 1 })
         try projectJSON(out, status: "rendering", made: 2).write(toFile: out + ".json", atomically: true, encoding: .utf8)
@@ -66,12 +66,12 @@ struct ComposeViewModelTests {
         model.form.brief = "tides"
         model.compose(planFirst: true)
         let out = folder.appendingPathComponent("tides.mp4").path
-        #expect(jobs.starts[0].arguments == ["video", "compose", "tides", "-o", out, "--dry-run"])
+        #expect(jobs.starts[0].arguments == ["video", "compose", "-o", out, "--dry-run", "--", "tides"])
         try projectJSON(out, status: "planned", made: 0).write(toFile: out + ".json", atomically: true, encoding: .utf8)
         first.end()
         #expect(await eventually { !model.isRunning && model.selectedProject?.status == "planned" })
         model.resume(model.selectedProject!)
-        #expect(jobs.starts[1].arguments == ["video", "compose", "tides", "-o", out], "the same command, without the dry run")
+        #expect(jobs.starts[1].arguments == ["video", "compose", "-o", out, "--", "tides"], "the same command, without the dry run")
         second.end()
     }
 
