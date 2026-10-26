@@ -68,13 +68,14 @@ enum SessionsPreview {
     // MARK: - The library
 
     /// Answers the library's reads and the door's commands; `defaultSuite`
-    /// is `models.default_suite`, empty when none is set.
-    static func runner(chats: String, defaultSuite: String) -> PreviewRunner {
+    /// is `models.default_suite`, empty when none is set, and `models` the
+    /// `models list` read at launch.
+    static func runner(chats: String, defaultSuite: String, models: String = modelsList) -> PreviewRunner {
         PreviewRunner(
             reads: [
                 (["chats", "list"], chats),
                 (["chats", "show"], SessionsDocuments.chatsShow),
-                (["models", "list"], modelsList),
+                (["models", "list"], models),
                 (["models", "status"], modelsStatus),
                 (["symphonies", "list"], SessionsDocuments.symphoniesList),
             ],
@@ -97,15 +98,15 @@ enum SessionsPreview {
 
     /// The library over `chats`, each session it opens saying `lines` --
     /// or, `missing`, no binary found. `openChat` is the conversation left
-    /// open last time. Not started.
+    /// open last time, and `models` what `models list` answers. Not started.
     static func library(
         chats: String = chatsList, lines: [String] = mockActor, missing: Bool = false, openChat: String? = nil,
-        defaultSuite: String = ""
+        defaultSuite: String = "", models: String = modelsList
     ) -> SessionLibraryViewModel {
         let now = Self.now
         return SessionLibraryViewModel(
             starter: PreviewChats(lines: lines, missing: missing ? passedOver : nil),
-            runner: runner(chats: chats, defaultSuite: defaultSuite),
+            runner: runner(chats: chats, defaultSuite: defaultSuite, models: models),
             preferences: Preferences(store: MemoryStore(openChat.map { ["openChat": $0] } ?? [:])),
             now: { now })
     }

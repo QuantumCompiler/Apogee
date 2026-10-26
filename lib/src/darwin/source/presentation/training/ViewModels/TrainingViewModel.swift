@@ -284,10 +284,14 @@ public final class TrainingViewModel {
     public private(set) var datasets: [TrainingDataset] = []
     /// The stored SafeTensors sets a run can train, by handle.
     public private(set) var students: [String] = []
-    /// The configured backends a teacher or a promotion can name.
+    /// The configured backends a teacher or a promotion's judge can name:
+    /// those a chat runs on, as both roles chat -- never an `mlx` entry over
+    /// an embedding model, a drafter, a video or voice model, or a kind this
+    /// app does not know (`ModelRow.chatBackends`, the GUI's M4).
     public private(set) var backends: [String] = []
     /// The configured entries an adapter can go on: llama.cpp and mlx ones
-    /// (the CLI's 53a), the only types that take `adapters`.
+    /// (the CLI's 53a), the only types that take `adapters` -- and of those,
+    /// the ones a chat runs on (M4).
     public private(set) var adapterBackends: [String] = []
     public var selectedRun: String?
     public var selectedRegime: String?
@@ -401,8 +405,8 @@ public final class TrainingViewModel {
         if let document = models.document {
             let rows = ModelRow.list(from: document)
             students = rows.filter { $0.isStored && $0.format == "safetensors" }.map(\.name)
-            backends = rows.filter { !$0.isStored }.map(\.backend)
-            adapterBackends = rows.filter { !$0.isStored && Self.takesAdapters($0.backendType) }.map(\.backend)
+            backends = ModelRow.chatBackends(rows)
+            adapterBackends = rows.filter { !$0.isStored && $0.chats && Self.takesAdapters($0.backendType) }.map(\.backend)
         }
         modelsListing = .of(models)
     }

@@ -71,6 +71,13 @@ enum TrainingPreview {
         (["models", "list"], TrainingDocuments.modelsListAdapters),
     ])
 
+    /// The adapter sandbox's reads over 3a's registered kinds instead of its
+    /// own entries: a chat, a vision and an embedding set, each an `mlx`
+    /// entry, as `models list` printed them (the GUI's M4). It folds
+    /// nothing, so `models list --all` prints the same bytes.
+    static let kinds = PreviewRunner(
+        reads: adapters.reads.filter { $0.0 != ["models", "list"] } + [(["models", "list"], TrainingDocuments.kindsRegistered)])
+
     /// The run that passed its gate, as that `train status` lists it.
     static var passed: TrainingRun {
         TrainingStatus(document: ReadDocument(text: TrainingDocuments.trainStatusPassed)!).recent.first!

@@ -489,5 +489,13 @@ Llama3.2-1B-Instruct
     static let adaptersSet = #"""
 edited backend 'based' in /Users/someone/.apogee/config/config.json: set adapters; adapters pinned to /Users/someone/.apogee/models/tiny/gguf/bbbbbbbbbbbb/tiny-F16.gguf (sha256 ce5065b7f3dc)
 """#
+    /// tests/business/reads/Fixtures/store-list-chat-on-embedding.json
+    static let chatOnEmbeddingList = #"""
+{"data":[{"architecture":"gemma3_text","backend":"EmbeddingGemma-300M-bf16","backend_type":"mlx","format":"mlx","group":"mlx","kind":"embedding","model":"EmbeddingGemma-300M/mlx/3c4d5e6f7081","note":"there is no Python environment at /Users/someone/.apogee/training/venv -- the mlx backend runs mlx-lm there, never the system Python -- apogee train setup --with mlx","profile":"gemma3","quant":"4-bit (affine, group 64)","roles":"chat, embedding, extraction","section":"local","source":"local","state":"no environment","type":"model","verified":"0 file(s) on record","window":"32768-token window (the default; trained for 131072)"},{"architecture":"gemma4","backend":"Gemma4-E4B-4bit","backend_type":"mlx","format":"mlx","group":"mlx","kind":"vision","model":"Gemma4-E4B/mlx/2b3c4d5e6f70","note":"there is no Python environment at /Users/someone/.apogee/training/venv -- the mlx backend runs mlx-lm there, never the system Python -- apogee train setup --with mlx","profile":"gemma3","quant":"4-bit (affine, group 64)","roles":"","section":"local","source":"local","state":"no environment","type":"model","verified":"0 file(s) on record","window":"32768-token window (the default; trained for 131072)"},{"architecture":"qwen3","backend":"Qwen3-8B-4bit","backend_type":"mlx","format":"mlx","group":"mlx","kind":"chat","model":"Qwen3-8B/mlx/1a2b3c4d5e6f","note":"there is no Python environment at /Users/someone/.apogee/training/venv -- the mlx backend runs mlx-lm there, never the system Python -- apogee train setup --with mlx","profile":"qwen3","quant":"4-bit (affine, group 64)","roles":"","section":"local","source":"local","state":"no environment","type":"model","verified":"0 file(s) on record","window":"32768-token window (the default; trained for 131072)"}],"folded":0,"object":"list"}
+"""#
+    /// tests/business/reads/Fixtures/models-status-chat-on-embedding.json
+    static let chatOnEmbeddingStatus = #"""
+{"fields":[{"field":"chat","value":"EmbeddingGemma-300M-bf16"},{"field":"embedding","value":"EmbeddingGemma-300M-bf16   (via models.default)"},{"field":"extraction","value":"EmbeddingGemma-300M-bf16   (via models.default)"},{"field":"vision","value":"(unset -- the chat's own backend)"},{"field":"transcription","value":"(unset -- the chat's own backend)"},{"field":"utility","value":"(unset -- the chat's own backend)"}]}
+"""#
 }
 #endif

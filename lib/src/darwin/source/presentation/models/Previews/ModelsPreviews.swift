@@ -231,6 +231,15 @@ enum ModelsPreview {
         StoreViewModel(runner: kindsRegisteredRunner)
     }
 
+    /// The same three entries, registered by `config add-backend`, with the
+    /// chat role pointed at the embedding entry by `config set-default` --
+    /// which the binary takes -- as `models list` and `models status` read
+    /// them then (the GUI's M4).
+    static let chatOnEmbeddingRunner = PreviewRunner(reads: [
+        (["models", "list"], ModelsDocuments.chatOnEmbeddingList),
+        (["models", "status"], ModelsDocuments.chatOnEmbeddingStatus),
+    ])
+
     // MARK: - A drafter and its base (the CLI's 53i)
 
     static let drafter = "Gemma4-E4B-Assistant/mlx/4d5e6f708192"

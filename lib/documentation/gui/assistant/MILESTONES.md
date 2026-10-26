@@ -1413,6 +1413,53 @@ The app had no draft field on a backend. Its clip and say sheets built their com
 - The Backends table does not mark a paired backend, and a drafter cannot yet be paired from the backend's side.
 - There is no preview of a pairing that can no longer draft, since no recording of that state exists.
 
+### 2026-10-26 — `chat-choices-follow-kind` (maintenance item M4): only backends that chat are offered to chat
+
+**Why.** Since the CLI's 53h, `config scan --register` registers an `embedding`-kind MLX directory as an `mlx` entry, which never chats: its chat, stream and complete refuse before anything starts. An `mlx` entry over a drafter, video or voice directory chats no better. Since 53e each such row in `models list` carries its `kind`, and 3a's Use in a new session already asked it. Every other place that picked a backend to chat with or to train still offered them all. Over 3a's recorded registered kinds, each such place failed first:
+- **the session settings sheet's Configured picker** (also opened by `/model` and ⇧⌘M) and **the execute door's Model**, both offering `["(not configured)", "EmbeddingGemma-300M-bf16", "Gemma4-E4B-4bit", "Qwen3-8B-4bit"]`;
+- **Training's Synthesize Teacher,** which opened on the embedding entry, first in the list;
+- **adapter promote's Judge and Onto,** writing `--judge EmbeddingGemma-300M-bf16`;
+- **Models › Roles' chat row,** the app's only choice of a default chat backend. The CLI takes `config set-default` on an embedding entry, and the chat role then points at a backend whose every chat is refused.
+
+- [x] **One answer to "does this row chat":** `ModelRow.chats` (`business/reads/Models.swift`), from the row's MLX kind. `chat` and `vision` chat. `embedding`, `drafter`, `video`, `voice` and any kind word the app doesn't know don't. A row with no kind chats as before. `ModelRow.chatBackends(_:)` returns the configured backends that chat, in list order.
+- [x] **Every chat and train picker asks it.** The settings sheet, the execute door, Synthesize's Teacher, adapter promote's Judge and Onto, and the Roles chat row (`ModelsViewModel.choices(for:)`) all ask it. A chat role already on an entry that can't chat stays in its own picker, shown as it stands.
+- [x] **The places that show backends keep every entry:** the Backends tab, Stored weights, Roles' other five rows (the embedding role still offering the embedding entry), and Settings › Backends & keys.
+
+**Decisions made while building** (2026-10-26, each recorded for veto):
+- **The default, taken:** a picker doesn't explain an entry it leaves out; its place is the Backends tab.
+- **The Roles chat row narrows, while Roles still shows every entry.** The two criteria read as offering and showing: the chat role's picker is a place that offers a backend to chat with.
+- **Sessions' two pickers drop the stored weights' placeholder `(not configured)`,** which they offered whenever the store held unregistered sets, over lists from before the CLI's 53e too. It is no backend, and every other picker already left it out. That is the one place an older binary's lists don't get exactly what they got before.
+- **A kind word the app doesn't know doesn't chat,** as 3a reads it.
+- **Kept, by what the verb does:**
+  - **Training's other inputs:** the run's Student, a stored set; merge mode's free-text name; the regimes, pipelines and cycle, which offer no backend.
+  - **Suites and the suite chooser,** which offer suites the CLI resolves.
+  - **Pair with its base…,** from the binary's completion.
+  - **The clip, voice and compose model pickers,** which offer their own kinds.
+  - **The free-text model fields.**
+  - **The console's completion.**
+
+  Settings never had a default-chat picker; the document's row for it was the Roles chat row.
+
+**Verified.**
+- **Recorded** from the branch's binary over a sandbox home with tiny fake MLX directories, each recording repeated byte-identical, the home written `/Users/someone`:
+  - `store-list-kinds-by-hand.json`: `mlx` entries over a drafter, a video model, a voice model and an unknown kind, written into the config by hand, since `config add-backend` refuses all four even with `--force`;
+  - `store-list-chat-on-embedding.json` and `models-status-chat-on-embedding.json`: the chat role pointed at the embedding entry.
+- **21 new cases:**
+  - `RowsThatChatTests` (4), `SessionChatChoicesTests` (5), `TrainingChatChoicesTests` (6) and `RolesChatChoicesTests` (4);
+  - `BackendsKeepEveryEntryTests` and `SettingsBackendsKeepEveryEntryTests`, one each;
+  - each picker's older-binary case among them.
+- **Repeat runs:**
+  - over 10 iterations: `PresentationModels` 840 of 840, `PresentationSessions` 710 of 710, the training choices 60 of 60;
+  - `PresentationSession` 76 of 76, `PresentationSettings` 25 of 25 and `BusinessReadsTests` 65 of 65.
+
+  The layering check passed 25 of 25, and `check-previews` finds nothing in session, sessions, training, models or settings.
+- **Six new previews:** the settings sheet, the execute door, Synthesize and adapter promote over the registered kinds; Roles' narrowed chat row; and a chat role already on the embedding entry.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 3,992 tests and the macOS app's 801 cases passed, with no Swift warning.
+
+**Not done:**
+- No live pass of the app.
+- **A CLI gap:** `config set-default <embedding entry>` exits 0 and makes it the chat role, while a voice entry is refused ("cannot take a role").
+
 ---
 
 ## Milestone E — The audit's GUI findings

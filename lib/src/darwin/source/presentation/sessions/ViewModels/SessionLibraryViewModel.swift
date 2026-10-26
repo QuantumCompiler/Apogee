@@ -159,7 +159,7 @@ public final class SessionLibraryViewModel {
     private let now: () -> Date
     private var found: FoundBinary?
     private var kinds: [String: ModelKind] = [:]
-    /// The configured backends, from `models list`.
+    /// The configured backends a chat runs on, from `models list` (M4).
     private var backends: [String] = []
     private var modelsRead = false
     /// The line types the last session announced: whether this build has
@@ -392,17 +392,15 @@ public final class SessionLibraryViewModel {
     }
 
     /// Reads `models list` once: each backend's kind (the glyphs) and the
-    /// configured backends (the settings sheet's choices).
+    /// configured backends a chat runs on (the settings sheet's choices and
+    /// the execute door's) -- never stored weights, nor an `mlx` entry over a
+    /// kind that answers no chat (`ModelRow.chatBackends`, the GUI's M4).
     private func readModels() async {
         guard let found, let models = await runner.read(binary: found.url, ["models", "list"]).document else { return }
         modelsRead = true
         kinds = ModelKind.byBackend(from: models)
-        var names: [String] = []
-        for entry in models.entries ?? [] {
-            if let backend = entry["backend"]?.stringValue, !names.contains(backend) { names.append(backend) }
-        }
-        backends = names
-        current.modelChoices = names
+        backends = ModelRow.chatBackends(ModelRow.list(from: models))
+        current.modelChoices = backends
     }
 
     /// The window of the model a session names, for its meter: `models info
@@ -573,7 +571,10 @@ public final class SessionLibraryViewModel {
         }
     }
 
-    /// The configured backends, as `models list` named them: the door's models.
+    /// The configured backends a chat runs on, as `models list` named them:
+    /// the door's models (M4: never an `mlx` entry over a kind that answers
+    /// no chat -- its place is the Backends tab, whose details say its kind
+    /// in the CLI's words).
     public var modelChoices: [String] { backends }
 
     /// Whether the door's session has a suite to orchestrate: one named, or

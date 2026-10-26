@@ -443,6 +443,15 @@ struct DiffView: View {
         .task { await SessionPreview.holdingASetting(model) }
 }
 
+#Preview("Settings: the configured models that chat, over the registered kinds -- the embedding entry left out") {
+    let model = SessionPreview.session([SessionPreview.newerBuild])
+    SettingsSheet(model: model)
+        .task {
+            model.modelChoices = SessionPreview.chatChoices
+            await SessionPreview.ready(model)
+        }
+}
+
 #Preview("A new file's change, folded") {
     DiffView(diff: SessionPreview.newFileDiff)
         .frame(width: 560)

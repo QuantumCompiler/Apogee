@@ -59,7 +59,8 @@ public final class SessionViewModel {
     /// The context window of the session's model in tokens, when the library
     /// could read it (a stored model's `window` in `models list`).
     public var contextWindow: Int?
-    /// The models the settings sheet offers: the configured backends.
+    /// The models the settings sheet offers: the configured backends a chat
+    /// runs on, as the library hands them (`ModelRow.chatBackends`, M4).
     public var modelChoices: [String] = []
     /// What the window should present for the person: files, settings.
     public var presenting: Presenting?

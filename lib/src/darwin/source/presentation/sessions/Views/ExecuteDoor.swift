@@ -136,6 +136,16 @@ struct ExecuteDoorSheet: View {
         }
 }
 
+#Preview("Bare on a model that chats, over the registered kinds -- the embedding entry left out") {
+    let library = SessionsPreview.library(models: SessionsDocuments.kindsRegistered)
+    ExecuteDoorSheet(library: library)
+        .task {
+            await library.start(inView: false)
+            await library.openExecuteDoor()
+            library.executeForm.model = library.modelChoices.first ?? ""
+        }
+}
+
 #Preview("Left to the config's default suite") {
     let library = SessionsPreview.library(defaultSuite: "duo")
     ExecuteDoorSheet(library: library)

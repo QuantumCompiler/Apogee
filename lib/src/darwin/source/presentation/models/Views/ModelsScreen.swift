@@ -449,7 +449,7 @@ struct RolesView: View {
                                 })
                         ) {
                             Text("Not set").tag("")
-                            ForEach(model.backends, id: \.self) { Text($0).tag($0) }
+                            ForEach(model.choices(for: role), id: \.self) { Text($0).tag($0) }
                         }
                         .labelsHidden()
                         .frame(width: 220)
@@ -603,6 +603,20 @@ struct RenameModelSheet: View {
 
 #Preview("Roles: an MLX embedding entry offered to the embedding role") {
     let models = ModelsPreview.models(over: ModelsPreview.kindsRegisteredRunner)
+    RolesView(model: models)
+        .frame(width: 960, height: 480)
+        .task { await models.connect(binary: previewBinary) }
+}
+
+#Preview("Roles: the chat role offers only entries that chat, over the registered kinds -- the embedding role still offers the embedding entry") {
+    let models = ModelsPreview.models(over: ModelsPreview.kindsRegisteredRunner)
+    RolesView(model: models)
+        .frame(width: 960, height: 480)
+        .task { await models.connect(binary: previewBinary) }
+}
+
+#Preview("Roles: a chat role already on the embedding entry, shown as it stands") {
+    let models = ModelsPreview.models(over: ModelsPreview.chatOnEmbeddingRunner)
     RolesView(model: models)
         .frame(width: 960, height: 480)
         .task { await models.connect(binary: previewBinary) }

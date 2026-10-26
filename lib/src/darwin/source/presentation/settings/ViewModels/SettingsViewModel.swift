@@ -267,6 +267,8 @@ public final class SettingsViewModel {
             let rows = ModelRow.list(from: list)
             // The configured backends: a roster's models (`<backend>:<id>`,
             // "built in" or "roster") are a backend's choices, not entries.
+            // Every entry whatever its MLX kind: the pane shows backends and
+            // offers none to chat with (M4).
             backends = rows.filter {
                 !$0.isStored && $0.format != "pipeline" && $0.format != "voice" && !Self.rosterSources.contains($0.source)
             }

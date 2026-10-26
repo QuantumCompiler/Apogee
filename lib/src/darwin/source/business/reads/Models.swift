@@ -52,6 +52,30 @@ public struct ModelRow: Sendable, Equatable, Identifiable {
     /// of the three (the mock backend) or unknown.
     public var kind: ModelKind? { ModelKind(backendType: backendType) }
 
+    /// Whether a chat runs on it -- the one answer every place that offers a
+    /// backend to chat with or to train asks (the GUI's M4). The binary's
+    /// word decides, never a name: an MLX row of kind `chat` or `vision`
+    /// chats, one of any other kind -- `embedding`, `drafter`, `video`,
+    /// `voice`, or a word this app does not know -- does not, as the CLI
+    /// refuses its chat (its 53e, 53h). A row with no kind -- a non-MLX
+    /// backend, and every row of a binary before 53e -- chats, as every row
+    /// did before kinds existed.
+    public var chats: Bool { mlxKind?.chats ?? true }
+
+    /// The backends a chat, or a role that chats -- a teacher, a judge -- can
+    /// be offered: each configured backend that `chats`, once, in the list's
+    /// order. Stored weights are no backend (the list's placeholder is not
+    /// one). The places that show backends -- the Backends tab, Roles,
+    /// Settings -- keep every entry whatever its kind: nothing the CLI lists
+    /// is hidden, only the choices narrow (Roles' chat role asks `chats` too).
+    public static func chatBackends(_ rows: [ModelRow]) -> [String] {
+        var names: [String] = []
+        for row in rows where !row.isStored && row.chats && !names.contains(row.backend) {
+            names.append(row.backend)
+        }
+        return names
+    }
+
     /// How many stored sets `models list` folded away -- those a conversion
     /// consumed -- which `models list --all` lists.
     public static func folded(in document: ReadDocument) -> Int {

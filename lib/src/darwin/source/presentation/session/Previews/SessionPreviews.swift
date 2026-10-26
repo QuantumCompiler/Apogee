@@ -102,6 +102,14 @@ enum SessionPreview {
     /// The bare `session` line the transcript's tests open with (TranscriptTests).
     static let bareSession = #"{"type":"session","protocol_version":1,"model":"m"}"#
 
+    /// The configured models the library hands the settings sheet over 3a's
+    /// registered kinds, as it reads `models list` at launch: the chat and
+    /// vision entries, never the embedding entry (`ModelRow.chatBackends`,
+    /// the GUI's M4).
+    static var chatChoices: [String] {
+        ModelRow.chatBackends(ModelRow.list(from: ReadDocument(text: SessionDocuments.kindsRegistered)!))
+    }
+
     // MARK: - Sessions
 
     static func lines(_ document: String) -> [String] {

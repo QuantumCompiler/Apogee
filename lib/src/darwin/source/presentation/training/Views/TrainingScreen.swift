@@ -821,6 +821,16 @@ struct SheetFrame<Fields: View>: View {
         }
 }
 
+#Preview("Synthesize: a teacher that chats, over the registered kinds -- the embedding entry left out") {
+    let training = TrainingPreview.training(runner: TrainingPreview.kinds)
+    SynthSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newSynthesis()
+            training.synthForm.name = "clerk-data"
+        }
+}
+
 #Preview("New dataset: nothing named yet") {
     let training = TrainingPreview.training()
     CreateSheet(model: training)
@@ -854,6 +864,18 @@ struct SheetFrame<Fields: View>: View {
             TrainingPreview.promotingAdapter(training)
             training.promoteForm.backend = "q4"
             training.promoteForm.suite = "/Users/someone/suite.jsonl"
+        }
+}
+
+#Preview("Promote: the adapter onto an entry that chats, its judge one too, over the registered kinds -- the embedding entry left out") {
+    let training = TrainingPreview.training(runner: TrainingPreview.kinds)
+    PromoteSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newPromotion(of: TrainingPreview.passed)
+            training.promoteForm.adapter = true
+            training.promoteForm.backend = training.adapterBackends.last ?? ""
+            training.promoteForm.judge = training.backends.first
         }
 }
 

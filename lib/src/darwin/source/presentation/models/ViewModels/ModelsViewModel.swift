@@ -509,15 +509,32 @@ public final class ModelsViewModel {
     /// weights -- every one for every role, as the CLI's `config
     /// set-default…` verbs take any backend, so an `mlx` entry over an
     /// embedding model is offered to the embedding role (the CLI's 53h).
+    /// Roles shows every entry; only the chat role's picker narrows
+    /// (`choices(for:)`, M4).
     public var backends: [String] { rows.filter { !$0.isStored }.map(\.backend) }
+
+    /// What a role's picker offers. Every role but chat: every configured
+    /// backend, as above. The chat role -- `config set-default`, what answers
+    /// in sessions -- only those a chat runs on (`ModelRow.chats`, the GUI's
+    /// M4): never an `mlx` entry over an embedding model, a drafter, a video
+    /// or voice model, or a kind this app does not know, whose chat the CLI
+    /// refuses, though `config set-default` takes it. The entry the role is
+    /// set to now keeps its place whatever it is, so a chat role already
+    /// pointed at one is shown as it stands, never hidden.
+    public func choices(for role: RoleAssignment) -> [String] {
+        guard role.role == "chat" else { return backends }
+        let current = role.isSet ? role.backend : nil
+        return rows.filter { !$0.isStored && ($0.chats || $0.backend == current) }.map(\.backend)
+    }
 
     /// Whether a new session can be opened on a backend: a chat backend, a
     /// cloud one, or a local GGUF or MLX one -- but not an `mlx` entry over a
     /// kind it does not chat with (an embedding model, a drafter, a video or
     /// voice model, a kind this app does not know), which the CLI refuses a
-    /// chat (its 53e).
+    /// chat (its 53e) -- the answer every chat picker asks (`ModelRow.chats`,
+    /// M4).
     public func opensSessions(_ row: ModelRow) -> Bool {
-        guard !row.isStored, row.mlxKind?.chats != false else { return false }
+        guard !row.isStored, row.chats else { return false }
         return row.roles.contains("chat") || row.section == "cloud" || row.group == "gguf" || row.group == "mlx"
     }
 }
