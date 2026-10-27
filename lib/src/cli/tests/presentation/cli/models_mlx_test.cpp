@@ -1545,8 +1545,9 @@ TEST_CASE("an entry over a kind no mlx backend chats with is listed as needing a
     const auto chat = std::ranges::find(rows, "talk", &apogee::commands::ModelRow::backend);
     REQUIRE(chat != rows.end());
     CHECK(chat->kind == "chat");
-    CHECK_FALSE(chat->attention);
     if (apple) {
+        // The chat entry beside it reads as it always did: ready, nothing to fix.
+        CHECK_FALSE(chat->attention);
         // The ladder turns it away by its kind (55d), saying what uses it.
         REQUIRE(video->state == "wrong kind");
         CHECK(video->attention);
@@ -1554,8 +1555,10 @@ TEST_CASE("an entry over a kind no mlx backend chats with is listed as needing a
         REQUIRE(chat->state == "ready");
         CHECK(chat->note.starts_with("llama, 4-bit (affine, group 64), 32768-token window"));
     } else {
-        // Elsewhere the runtime's refusal is what needs fixing first.
+        // Elsewhere the runtime's refusal is what needs fixing first, for both
+        // entries alike: mlx runs on Apple silicon only.
         CHECK(video->note == chat->note);
+        CHECK(chat->attention == video->attention);
     }
     REQUIRE(home.run({"models", "info", "film", "-q"}, &out) == 0);
     CHECK(out.find("kind:         video (recorded) -- a video model: 'apogee video generate' runs "

@@ -2567,11 +2567,11 @@ TEST_CASE(
     std::string out;
     std::string err;
     const auto pass_states = [](const std::vector<nlohmann::json>& events) {
-        std::vector<std::string> out;
+        std::vector<std::string> states;
         for (const nlohmann::json& pass : of_type(events, "pass")) {
-            out.push_back(pass.at("state").get<std::string>());
+            states.push_back(pass.at("state").get<std::string>());
         }
-        return out;
+        return states;
     };
     const auto cycle_document = [&fixture]() {
         std::string read;
