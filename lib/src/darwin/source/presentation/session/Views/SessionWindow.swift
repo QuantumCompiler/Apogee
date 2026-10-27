@@ -197,6 +197,43 @@ struct MissingBinaryView: View {
         }
 }
 
+#Preview("Resumed with no --suite: the header names the suite apogee says it runs under") {
+    let session = SessionPreview.resumedNamingItsSuite()
+    SessionWindow(model: session)
+        .frame(width: 900, height: 520)
+        .task { await SessionPreview.answered(session) }
+}
+
+#Preview("Switched on a binary that says its suite: the admission line once, the app's own dropped") {
+    let session = SessionPreview.savedUnderSuiteSaid()
+    SessionWindow(model: session)
+        .frame(width: 900, height: 620)
+        .task {
+            await SessionPreview.answered(session)
+            await session.switchSuite(to: "fast")
+            await SessionPreview.until { session.transcript.acceptsInput }
+            session.draft = SessionPreview.suiteTurn
+            session.submit()
+        }
+}
+
+#Preview("Execute under a suite that orchestrates, no flag passed: the banner says so, apogee's word") {
+    let model = SessionPreview.executeOrchestrating()
+    SessionWindow(model: model)
+        .frame(width: 900, height: 520)
+        .task { await SessionPreview.converse(model, typed: SessionPreview.suiteTurn) }
+}
+
+#Preview("A model that can't start: refused at launch, in apogee's words, Try again") {
+    let model = SessionPreview.refusedModel()
+    SessionWindow(model: model)
+        .frame(width: 900, height: 520)
+        .task {
+            model.start()
+            await SessionPreview.until { model.transcript.status == .ended }
+        }
+}
+
 #Preview("Switched to a local model, not answered yet: the header keeps claude, the CLI's notice stands") {
     let model = SessionPreview.switching()
     SessionWindow(model: model)

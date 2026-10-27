@@ -102,5 +102,14 @@ installed
 
 python env: at /Users/someone/.apogee/training/venv; sets: video
 """#
+    /// tests/business/media/Fixtures/compose-refused-runtime-m29.jsonl
+    static let composeRefusedM29 = #"""
+{"protocol_version":1,"schema":"2026-10-26","type":"job","verb":"video compose"}
+{"message":"torch and diffusers are not installed in Apogee's Python environment -- apogee train setup --with video","type":"error"}
+"""#
+    /// tests/business/media/Fixtures/compose-refused-runtime-m29.err
+    static let composeRefusedM29Err = #"""
+apogee video compose: torch and diffusers are not installed in Apogee's Python environment -- apogee train setup --with video
+"""#
 }
 #endif

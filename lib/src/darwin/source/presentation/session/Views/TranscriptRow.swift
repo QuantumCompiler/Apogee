@@ -101,7 +101,10 @@ struct TranscriptRow: View {
         case .unknown(let type):
             QuietLine(symbol: "questionmark.circle", text: "apogee said something this app does not know yet: \(type)")
         case .ended(let ending):
-            EndedCard(ending: ending, restart: model.start)
+            EndedCard(
+                ending: ending, restart: model.start,
+                chooseModel: ending.atLaunch && model.launchModel != nil ? { model.presenting = .settings } : nil,
+                isLast: item.id == model.transcript.items.last?.id)
         }
     }
 
@@ -227,19 +230,31 @@ struct ActivityView: View {
     }
 }
 
-/// The session is over: why, the details behind it, and a way on.
+/// The session is over: why, the details behind it, and a way on. A launch
+/// the CLI refused -- no session spoke, its one line on stderr (since its M29
+/// a model named with `-m` that can't start among them) -- is 1g's failed
+/// state: the CLI's words, and Try again, which launches it again as it was
+/// (GUI M13).
 struct EndedCard: View {
     let ending: Ending
+    /// Starts the session again: a saved conversation resumed, one never
+    /// saved afresh -- the same launch, flags and all.
     let restart: () -> Void
+    /// For a refused launch that named its model: the session settings, to
+    /// choose another for the next launch.
+    var chooseModel: (() -> Void)?
+    /// Whether it is the conversation's last row: a refusal's way on is
+    /// offered there only, as a failed turn's Try again is.
+    var isLast = true
 
     var body: some View {
         Card(accent: ending.reason == .finished ? Palette.border : Palette.error) {
-            CardLabel(text: "Session ended")
+            CardLabel(text: ending.atLaunch ? "Refused at launch" : "Session ended")
             Text(ending.message)
                 .font(.apogeeBody)
                 .foregroundStyle(Palette.textPrimary)
                 .textSelection(.enabled)
-            if !ending.details.isEmpty {
+            if !ending.details.isEmpty && ending.details.trimmingCharacters(in: .whitespacesAndNewlines) != ending.message {
                 DisclosureGroup("Details") {
                     Text(ending.details)
                         .font(.apogeeCode)
@@ -249,8 +264,15 @@ struct EndedCard: View {
                 }
                 .font(.apogeeMeta)
             }
-            // A saved conversation is resumed; one never saved starts afresh.
-            Button("Start again", action: restart)
+            if !ending.atLaunch {
+                // A saved conversation is resumed; one never saved starts afresh.
+                Button("Start again", action: restart)
+            } else if isLast {
+                HStack(spacing: Spacing.m) {
+                    Button("Try again", action: restart)
+                    if let chooseModel { Button("Choose a model…", action: chooseModel) }
+                }
+            }
         }
     }
 }
@@ -490,6 +512,12 @@ struct EndedCard: View {
 
 #Preview("Ended: failed, the details behind it") {
     EndedCard(ending: SessionPreview.failedEnding) {}
+        .frame(width: 640)
+        .padding(Spacing.xl)
+}
+
+#Preview("Refused at launch: apogee's words, Try again, and another model") {
+    EndedCard(ending: SessionPreview.refusedEnding, restart: {}, chooseModel: {})
         .frame(width: 640)
         .padding(Spacing.xl)
 }

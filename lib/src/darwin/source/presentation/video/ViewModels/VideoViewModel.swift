@@ -292,9 +292,9 @@ public final class VideoViewModel {
             say?("Stopped: nothing was written")
         case .failed(let message):
             // A run refused because the runtime is not installed names the
-            // command that installs it -- on stderr alone, its stream silent:
-            // the app asks, never assumes.
-            guard let asked = InstallConsent(failure: message, stderr: run.stderr) else { break }
+            // command that installs it -- in its stream's error since the
+            // CLI's M29, on stderr alone before it: the app asks, never assumes.
+            guard let asked = InstallConsent(error: run.error, failure: message, stderr: run.stderr) else { break }
             if installElsewhere() {
                 say?("\(asked.command) is already running: generate the clip again once it has finished")
             } else {

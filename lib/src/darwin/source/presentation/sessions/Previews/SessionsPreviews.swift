@@ -59,6 +59,19 @@ enum SessionsPreview {
         await until { session.transcript.acceptsInput && session.transcript.model == localModel }
     }
 
+    // MARK: - The suite, as the CLI's M29 names it (GUI M13)
+
+    /// The branch binary's chat under `pair` resumed with no `--suite`: its
+    /// `session` event names the suite, and its admission line follows.
+    static let resumedUnderSuite = SessionsDocuments.resumedUnderSuiteM29.split(separator: "\n").map(String.init)
+    static var resumedUnderSuiteID: String {
+        resumedUnderSuite.first.flatMap { JSONValue.parse($0)?["chat_id"]?.stringValue } ?? ""
+    }
+
+    /// An `execute` session under `orch`, whose `orchestrate: true` says it
+    /// orchestrates -- the CLI's word, no flag passed.
+    static let executeOrchestrating = SessionsDocuments.executeOrchestrating.split(separator: "\n").map(String.init)
+
     // MARK: - Documents the library's tests hold
 
     /// Two saved conversations, each naming its backend (SessionLibraryTests'

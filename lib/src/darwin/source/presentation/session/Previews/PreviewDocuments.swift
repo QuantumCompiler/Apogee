@@ -1059,5 +1059,57 @@ apogee chat: suite vast needs 247056 MiB of this machine's 110100 MiB: root 4109
 {"turn":2,"type":"answer_end"}
 {"finish_reason":"stop","model":"Gemma4-26B-Instruct","text":"Gemma here, on this machine: the dev server listens on port 8080.","turn":2,"type":"result"}
 """#
+    /// tests/data/protocol/Fixtures/chat-under-suite-m29.jsonl
+    static let chatUnderSuiteM29 = #"""
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-10-26","tools":true},"chat_id":"20261027-002140-dfa1","model":"plain","next_turn":1,"protocol_version":1,"suite":"pair","type":"session"}
+{"text":"suite pair: no member holds memory on this machine","type":"notice"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"answer_start"}
+{"text":"PLAIN-SA","turn":1,"type":"answer_delta"}
+{"text":"YS hello","turn":1,"type":"answer_delta"}
+{"turn":1,"type":"answer_end"}
+{"finish_reason":"stop","model":"plain","text":"PLAIN-SAYS hello","turn":1,"type":"result"}
+"""#
+    /// tests/data/protocol/Fixtures/resumed-under-suite-m29.jsonl
+    static let resumedUnderSuiteM29 = #"""
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-10-26","tools":true},"chat_id":"20261027-002140-dfa1","model":"plain","next_turn":2,"protocol_version":1,"suite":"pair","type":"session"}
+{"text":"suite pair: no member holds memory on this machine","type":"notice"}
+{"text":"utility — restating the follow-up to rank the tools, with fasthelper","turn":2,"type":"tool_status"}
+{"turn":2,"type":"thinking"}
+{"turn":2,"type":"answer_start"}
+{"text":"PLAIN-SA","turn":2,"type":"answer_delta"}
+{"text":"YS hello","turn":2,"type":"answer_delta"}
+{"turn":2,"type":"answer_end"}
+{"finish_reason":"stop","model":"plain","text":"PLAIN-SAYS hello","turn":2,"type":"result"}
+"""#
+    /// tests/data/protocol/Fixtures/resumed-switched-suite-m29.jsonl
+    static let resumedSwitchedSuiteM29 = #"""
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-10-26","tools":true},"chat_id":"20261027-002140-dfa1","model":"fastroot","next_turn":3,"protocol_version":1,"suite":"fast","type":"session"}
+{"text":"suite fast: no member holds memory on this machine","type":"notice"}
+{"text":"utility — restating the follow-up to rank the tools, with fasthelper","turn":3,"type":"tool_status"}
+{"turn":3,"type":"thinking"}
+{"turn":3,"type":"answer_start"}
+{"text":"FASTROOT","turn":3,"type":"answer_delta"}
+{"text":"-SAYS he","turn":3,"type":"answer_delta"}
+{"text":"llo","turn":3,"type":"answer_delta"}
+{"turn":3,"type":"answer_end"}
+{"finish_reason":"stop","model":"fastroot","text":"FASTROOT-SAYS hello","turn":3,"type":"result"}
+"""#
+    /// tests/data/protocol/Fixtures/execute-orchestrating.jsonl
+    static let executeOrchestrating = #"""
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-10-26","tools":true},"chat_id":"20261027-002140-630d","model":"fastroot","next_turn":1,"orchestrating":true,"protocol_version":1,"suite":"orch","type":"session"}
+{"text":"suite orch: no member holds memory on this machine","type":"notice"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"answer_start"}
+{"text":"FASTROOT","turn":1,"type":"answer_delta"}
+{"text":"-SAYS he","turn":1,"type":"answer_delta"}
+{"text":"llo","turn":1,"type":"answer_delta"}
+{"turn":1,"type":"answer_end"}
+{"finish_reason":"stop","model":"fastroot","text":"FASTROOT-SAYS hello","turn":1,"type":"result"}
+"""#
+    /// tests/data/protocol/Fixtures/launch-refused-model.err
+    static let launchRefusedModel = #"""
+apogee chat: backend 'mlxgone' is configured but could not be started: there is no Python environment at /Users/someone/.apogee/training/venv -- the mlx backend runs mlx-lm there, never the system Python -- apogee train setup --with mlx (started backends: good)
+"""#
 }
 #endif

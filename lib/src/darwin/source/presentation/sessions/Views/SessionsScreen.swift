@@ -397,6 +397,27 @@ public struct SessionCommands: Commands {
         }
 }
 
+#Preview("A chat resumed with no --suite: the suite apogee says it runs under") {
+    @Previewable @State var library = SessionsPreview.library(lines: SessionsPreview.resumedUnderSuite)
+    InspectorPane(inspector: library.inspector) {}
+        .frame(width: 360, height: 520)
+        .task {
+            await library.start(inView: true)
+            await library.open(.chat(SessionsPreview.resumedUnderSuiteID))
+        }
+}
+
+#Preview("An execute session: its suite, and that it orchestrates, apogee's word") {
+    @Previewable @State var library = SessionsPreview.library(lines: SessionsPreview.executeOrchestrating)
+    InspectorPane(inspector: library.inspector) {}
+        .frame(width: 360, height: 520)
+        .task {
+            await library.start(inView: true)
+            library.executeForm.suite = "orch"
+            await library.openExecute()
+        }
+}
+
 #Preview("A saved session: what recall holds, Forget beside it") {
     @Previewable @State var library = SessionsPreview.library(
         chats: SessionsDocuments.chatsListTwo, openChat: SessionsPreview.savedTwo[0].id)

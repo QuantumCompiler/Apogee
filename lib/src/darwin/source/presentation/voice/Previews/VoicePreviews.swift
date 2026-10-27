@@ -43,6 +43,12 @@ enum VoicePreview {
     static let refusedRun = PreviewRun(
         stdout: VoiceDocuments.voiceRefused, streaming: true, status: 1, stderr: VoiceDocuments.voiceRefusedErr)
 
+    /// The same speech refused by the branch binary since the CLI's M29
+    /// (tests/business/media/Fixtures/voice-refused-runtime-m29.*): its
+    /// stream ends on the refusal's `error`, stderr saying it too.
+    static let refusedRunSaid = PreviewRun(
+        stdout: VoiceDocuments.voiceRefusedM29, streaming: true, status: 1, stderr: VoiceDocuments.voiceRefusedM29Err)
+
     /// `train setup --with voice` as the binary ran it over that sandbox's
     /// stub pip (tests/business/media/Fixtures/install-voice-*): still going,
     /// its first two lines said; failed; and done.

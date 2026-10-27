@@ -398,6 +398,15 @@ struct ClipSheet: View {
     .task { await VideoPreview.refuse(model) }
 }
 
+#Preview("Refused for its runtime, said in the stream's error: asking to install") {
+    let model = VideoPreview.library("screen-refused-said", starter: VideoPreview.runs([VideoPreview.refusedRunSaid]))
+    VideoScreen(model: model) {
+        Text("The compositions").font(.apogeeSmall).padding(Spacing.m)
+    }
+    .frame(width: 1100, height: 600)
+    .task { await VideoPreview.refuse(model) }
+}
+
 #Preview("Clips beside a clip's page, a record whose clip is gone") {
     ClipsView(model: VideoPreview.library("clips-gone", gone: true, selecting: "lighthouse.mp4"))
         .frame(width: 1000, height: 640)

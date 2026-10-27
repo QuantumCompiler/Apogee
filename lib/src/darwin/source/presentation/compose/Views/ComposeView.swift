@@ -561,6 +561,15 @@ struct ComposeSheet: View {
     .task { model = await ComposePreview.refused("view-refused") }
 }
 
+#Preview("Refused for its runtime, said in the stream's error: asking to install") {
+    @Previewable @State var model: ComposeViewModel?
+    Group {
+        if let model { ComposeView(model: model) } else { ProgressView() }
+    }
+    .frame(width: 1100, height: 600)
+    .task { model = await ComposePreview.refused("view-refused-said", run: ComposePreview.refusedRunSaid) }
+}
+
 #Preview("Installing the video set, Stop beside it") {
     @Previewable @State var model: ComposeViewModel?
     Group {

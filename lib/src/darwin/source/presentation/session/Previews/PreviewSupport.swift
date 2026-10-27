@@ -10,14 +10,15 @@ import InfrastructureProcess
 /// bundle keeps its own scripted support.
 
 /// A chat that says the binary's own recorded stdout, paced as the binary
-/// paces it: up to its `session` event, then -- once a turn is sent -- up to
-/// each `question`, the rest once it is answered. Given `silentFrom`, it
-/// stops short of the first line of that type, a turn left in flight as a
-/// person sees one mid-turn. Given `ending`, the child ends that way once
-/// every line is said. `byTurn`, each turn is said only up to its `result`,
-/// and what the binary said between turns to a `set` line -- its notices --
-/// only once a `set` is written (GUI M10's switch). Stopped or closed, it
-/// ends as a child that went when asked. What is written to it goes nowhere.
+/// paces it: up to its `session` event and the notices it says at launch,
+/// then -- once a turn is sent -- up to each `question`, the rest once it is
+/// answered. Given `silentFrom`, it stops short of the first line of that
+/// type, a turn left in flight as a person sees one mid-turn. Given
+/// `ending`, the child ends that way once every line is said. `byTurn`, each
+/// turn is said only up to its `result`, and what the binary said between
+/// turns to a `set` line -- its notices -- only once a `set` is written (GUI
+/// M10's switch). Stopped or closed, it ends as a child that went when
+/// asked. What is written to it goes nowhere.
 actor PreviewChat: ChatSession {
     nonisolated let events: AsyncStream<SessionEvent>
     private let continuation: AsyncStream<SessionEvent>.Continuation
@@ -52,7 +53,16 @@ actor PreviewChat: ChatSession {
         while let event = unsaid.popFirst() {
             continuation.yield(.event(event))
             switch event.kind {
-            case .session, .question: return
+            case .session:
+                // What the binary says at launch -- a resume's notes, a
+                // suite's admission line (the CLI's M29) -- follows its
+                // `session` at once, before anything it reads.
+                while let next = unsaid.first, next.turn == nil, case .notice = next.kind {
+                    continuation.yield(.event(next))
+                    unsaid.removeFirst()
+                }
+                return
+            case .question: return
             case .result where byTurn && !unsaid.isEmpty: return
             default: continue
             }

@@ -2491,3 +2491,67 @@ Probed on the branch's binary over sandboxes:
 - Register… for Ollama isn't drawn, since Ollama isn't in the design's world.
 - The no-binary words on Training's Pipelines, Cycle and Regimes tabs, and Voice's skipped records, weren't in this item's list.
 - `ComponentsMedia` renders taller than its canvas frame, as it already did.
+
+### 2026-10-26 — `sessions-read-suite-and-refusals` (maintenance item M13): sessions and media read the suite and the refusals the CLI now sends
+
+**Why.** The CLI's M29 made the session opening and the media verbs tell a driver what they used to keep to stderr. The app still worked from its own fallbacks, each gap failing as a test first over recordings from the branch binary:
+- **A resumed chat's header and inspector said no suite,** and execute's banner never said it orchestrates. `session` now carries `suite` and `orchestrating`.
+- **The suite's admission line could appear twice:** beside the app's own switch line, and again on every pause and resume.
+- **A refused `-m` launch drew as "Session ended" with an exit status.** Since M29 a model that can't start is refused at launch.
+- **The install consent read stderr,** not the stream's `error` that M29 now sends.
+
+- [x] **The suite is the CLI's word.** `session`'s `suite` and `orchestrating` are decoded and held by `Transcript`. `SessionViewModel` takes the suite from that event first, then its own launch flags and the config default.
+  - **The inspector** gains Suite and Orchestrating lines.
+  - **The suite chooser** starts on the suite the CLI names.
+  - **Execute's banner** says it orchestrates.
+  - **Telling binaries apart:** a binary announcing schema `2026-10-26` or later (`MachineProtocol.namesSuite`), or sending `suite`, is read as M29's. There no `suite` means none; on an older binary it means "not said", and today's fallback applies.
+- [x] **Each suite line appears once.** On an M29 binary the app's own switch line is dropped where the CLI's admission line says it. A relaunched child's launch notices that repeat the previous child's aren't drawn again.
+- [x] **A refused launch is drawn as refused.** A child that fails before its `session` event becomes a "Refused at launch" card: its words are the stderr tail's last line, with Try again, and with "Choose a model…" when the launch named `-m`. A failure after the session spoke is still "Session ended".
+- [x] **The consent reads the stream.** `JobProgress.error` keeps the stream's own `error`, and `InstallConsent(error:failure:stderr:)` reads it alone when one arrived, stderr otherwise.
+- [x] **Compose's `--voice-model` refusal** is pinned beside the older binary's `--model` words, both kept.
+
+**Decisions made while building** (2026-10-26, each recorded for veto):
+- **The defaults, taken:** the app's switch line yields to the CLI's admission line, and a launch refusal is drawn as the failed state with Try again.
+  - **Where the app's switch line stays:** for `--suite off`, which gets no admission line, and for an unsaved conversation with turns, where it says more.
+- **A missing `suite` on an M29 binary means none,** as `machine-mode.md` says.
+- **The suite is kept through a pause and forgotten on a switch,** so the header neither flickers on resume nor shows the old suite mid-switch.
+- **A refused suite switch draws no ended card on any binary:** 4i's put-back note carries the CLI's words.
+- **When the stream's `error` names no install, nothing is asked,** even if stderr names one.
+- **The preview chats** say the notices that follow `session` at once, as the binary does.
+
+**Verified.**
+- **Recorded** from the branch binary (schema `2026-10-26`) over sandboxes, the home written `/Users/someone`:
+  - chats under, resumed under, switched to and off a suite;
+  - three execute sessions (orchestrating, by flag, not);
+  - four refused launches (`-m` unstartable, unknown, execute, resume), each `.err` and exit 1;
+  - the three media runtime refusals ending in `error`;
+  - compose's `--voice-model` refusal.
+
+  Every older fixture is unchanged and still pinned.
+- **42 new cases:**
+
+  | Suite | Cases |
+  |---|---|
+  | `SuiteSaidTests` | 11 |
+  | `LaunchRefusedTests` | 6 |
+  | `TranscriptSuiteTests` | 6 |
+  | `SuiteInspectorTests` | 4 |
+  | `SessionSuiteTests` | 4 |
+  | `ComposeRefusalErrorTests` | 3 |
+  | `VideoRefusalErrorTests` | 2 |
+  | `VoiceRefusalErrorTests` | 2 |
+  | `InstallConsentErrorTests` | 2 |
+  | `JobErrorTests` | 2 |
+- **The module schemes** over 10 iterations: Session 1,070, Sessions 870, Video 240, Voice 180, Compose 260, and DataProtocol, BusinessMedia and BusinessJobs 860, all passing. The layering check passes 25 of 25, and `check-previews` finds nothing.
+- **A race the first gate caught:** `SuiteSaidTests/switchSaidOnce` checked the notes as soon as the status read ready, while the admission notice is folded a moment after `session`. Under the full suite's load it lost. It now waits for the notes, and passed 30 of 30 iterations.
+- **New previews:**
+  - the header and inspector naming a resumed suite;
+  - the switch with its line once;
+  - execute orchestrating;
+  - a refused `-m` session and its card;
+  - consent from the stream's error in Video, Voice and Compose.
+- `lib/scripts/cicd.sh --test`, run again with nothing else after the race fix: green. The CLI's 4,059 tests and the macOS app's 876 cases passed, with no Swift warning.
+
+**Not done:**
+- No live pass of the app.
+- A switch made before any child has spoken keeps the app's line, since the library's launch-time schema read isn't consulted for it.

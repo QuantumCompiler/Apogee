@@ -92,6 +92,12 @@ enum VideoPreview {
     static let refusedRun = PreviewRun(
         stdout: VideoDocuments.generateRefused, streaming: true, status: 1, stderr: VideoDocuments.generateRefusedErr)
 
+    /// The same clip refused by the branch binary since the CLI's M29
+    /// (tests/business/media/Fixtures/generate-refused-runtime-m29.*): its
+    /// stream ends on the refusal's `error`, stderr saying it too.
+    static let refusedRunSaid = PreviewRun(
+        stdout: VideoDocuments.generateRefusedM29, streaming: true, status: 1, stderr: VideoDocuments.generateRefusedM29Err)
+
     /// `train setup --with video` as the binary ran it over that sandbox's
     /// stub pip (tests/business/media/Fixtures/install-video-*): still going,
     /// its first two lines said; failed; and done.

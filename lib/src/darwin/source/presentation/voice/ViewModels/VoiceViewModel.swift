@@ -257,9 +257,10 @@ public final class VoiceViewModel {
                     say?("Spoke \((output as NSString).lastPathComponent)")
                 }
             case .failed(let message):
-                // Refused for its runtime -- named on stderr alone, the
-                // stream silent -- the app asks, never assumes.
-                guard let asked = InstallConsent(failure: message, stderr: run?.stderr ?? "") else { break }
+                // Refused for its runtime -- named in the stream's error
+                // since the CLI's M29, on stderr alone before it -- the app
+                // asks, never assumes.
+                guard let asked = InstallConsent(error: run?.error, failure: message, stderr: run?.stderr ?? "") else { break }
                 if installElsewhere() {
                     say?("\(asked.command) is already running: say it again once it has finished")
                 } else {

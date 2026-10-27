@@ -169,15 +169,22 @@ enum ComposePreview {
     static let refusedRun = PreviewRun(
         stdout: ComposeDocuments.composeRefused, streaming: true, status: 1, stderr: ComposeDocuments.composeRefusedErr)
 
+    /// The same composition refused by the branch binary since the CLI's M29
+    /// (tests/business/media/Fixtures/compose-refused-runtime-m29.*): its
+    /// stream ends on the refusal's `error`, stderr saying it too.
+    static let refusedRunSaid = PreviewRun(
+        stdout: ComposeDocuments.composeRefusedM29, streaming: true, status: 1, stderr: ComposeDocuments.composeRefusedM29Err)
+
     /// `train setup --with video` still going, its first two lines said
     /// (tests/business/media/Fixtures/install-video-done.txt).
     static let installRunning = PreviewRun(
         stdout: ComposeDocuments.installVideoDone.split(separator: "\n").prefix(2).joined(separator: "\n"), finishes: false)
 
-    /// The recordings' brief composed and refused for its runtime: the
-    /// consent standing -- and, when `install`, the person's yes.
-    static func refused(_ name: String, install: Bool = false) async -> ComposeViewModel {
-        let model = await sheet(name, starter: PreviewRuns([refusedRun, installRunning]))
+    /// The recordings' brief composed and refused for its runtime -- as
+    /// `run` refused it -- the consent standing, and, when `install`, the
+    /// person's yes.
+    static func refused(_ name: String, install: Bool = false, run: PreviewRun = refusedRun) async -> ComposeViewModel {
+        let model = await sheet(name, starter: PreviewRuns([run, installRunning]))
         model.streams = { true }
         model.compose()
         await until { model.consent != nil }

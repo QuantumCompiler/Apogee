@@ -6,10 +6,11 @@ import Foundation
 ///
 /// It is read from the run's own words, never guessed: the CLI refuses a
 /// clip, a speech or a composition whose runtime is not installed by naming
-/// the command that installs it (`apogee video compose: torch and diffusers
-/// are not installed in Apogee's Python environment -- apogee train setup
-/// --with video`). That line is stderr's alone -- a 52b stream says nothing
-/// of it -- so the failure and the stderr the run left are both read.
+/// the command that installs it (`torch and diffusers are not installed in
+/// Apogee's Python environment -- apogee train setup --with video`). Since the
+/// CLI's M29 that refusal ends the job's stream on an `error` event, which is
+/// read first (GUI M13); a binary before it says it on stderr alone, its
+/// stream silent, so there the failure and the stderr the run left are read.
 public struct InstallConsent: Sendable, Equatable {
     /// What the install runs: `train setup --with video`.
     public let arguments: [String]
@@ -21,15 +22,34 @@ public struct InstallConsent: Sendable, Equatable {
         self.said = said
     }
 
+    /// The consent a failed run asks for, read where the run said why: the
+    /// stream's own `error` when one arrived -- its words alone, stderr only
+    /// repeating them -- else `failure`, the run's last word, with the
+    /// `stderr` it left, as a binary before the CLI's M29 says it. `nil` for
+    /// a failure of any other kind.
+    public init?(error: String?, failure: String, stderr: String) {
+        guard let error else {
+            self.init(failure: failure, stderr: stderr)
+            return
+        }
+        guard let arguments = MediaLibrary.installCommand(in: error) else { return nil }
+        self.init(arguments: arguments, said: Self.naming(in: error) ?? error)
+    }
+
     /// The consent a failed run asks for, when its words -- `failure`, the
     /// run's last word, and the `stderr` it left -- name an install; `nil`
-    /// for a failure of any other kind.
+    /// for a failure of any other kind. The fallback where no `error` event
+    /// arrived.
     public init?(failure: String, stderr: String) {
         let text = failure + "\n" + stderr
         guard let arguments = MediaLibrary.installCommand(in: text) else { return nil }
-        self.arguments = arguments
-        let naming = text.split(whereSeparator: \.isNewline).last { $0.contains("apogee train setup") }
-        said = naming.map { $0.trimmingCharacters(in: .whitespaces) } ?? failure
+        self.init(arguments: arguments, said: Self.naming(in: text) ?? failure)
+    }
+
+    /// The line of `text` that names the install, trimmed.
+    private static func naming(in text: String) -> String? {
+        text.split(whereSeparator: \.isNewline).last { $0.contains("apogee train setup") }
+            .map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
     /// The command as a person would type it: `apogee train setup --with video`.

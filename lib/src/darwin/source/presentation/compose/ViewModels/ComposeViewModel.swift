@@ -311,11 +311,11 @@ public final class ComposeViewModel {
         }
     }
 
-    /// A failed run: a runtime not installed -- named on stderr alone, its
-    /// stream silent -- is asked about, never assumed; anything else is the
-    /// alert, in the CLI's words.
+    /// A failed run: a runtime not installed -- named in the stream's error
+    /// since the CLI's M29, on stderr alone before it -- is asked about, never
+    /// assumed; anything else is the alert, in the CLI's words.
     private func refused(_ message: String, _ retry: Retry) {
-        guard let asked = InstallConsent(failure: message, stderr: run?.stderr ?? "") else {
+        guard let asked = InstallConsent(error: run?.error, failure: message, stderr: run?.stderr ?? "") else {
             failure = message
             return
         }

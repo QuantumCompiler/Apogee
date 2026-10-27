@@ -96,6 +96,11 @@ public struct JobProgress: Sendable, Equatable {
     public private(set) var streamed = false
     /// The stderr tail at the end, for the details.
     public private(set) var stderr = ""
+    /// The stream's own `error` event, when one arrived: the run's failure in
+    /// the words the stream gave it -- since the CLI's M29 a media runtime's
+    /// refusal among them -- read before stderr's. `nil` from a run that said
+    /// none: one before M29, or one that speaks no stream.
+    public private(set) var error: String?
 
     /// `done` of `of`.
     public struct Count: Sendable, Equatable {
@@ -176,6 +181,7 @@ public struct JobProgress: Sendable, Equatable {
         case .document(let document):
             documents.append(document)
         case .error(let message):
+            error = message
             status = .failed(message)
         }
     }

@@ -57,6 +57,15 @@ public struct Transcript: Equatable {
     public private(set) var accepts: [String] = []
     /// The session said it writes nothing (`"private": true`, the CLI's 52d).
     public private(set) var isPrivate = false
+    /// The suite the session runs under, as its `session` event said it (the
+    /// CLI's M29): a suite, or none. `nil` where nothing was said -- a binary
+    /// before M29, whose silence is never read as none, or a child that has
+    /// not spoken since the person moved the session to another suite. Kept
+    /// through a pause: it is the conversation's, until a child says another.
+    public private(set) var suite: SessionSuite?
+    /// An `execute` session's: whether it orchestrates, as its `session`
+    /// event said (M29); `nil` unsaid -- a chat, or a binary before M29.
+    public private(set) var orchestrating: Bool?
     /// Moves with every change: what a view watches to follow the end.
     public private(set) var revision = 0
     private var nextID = 0
@@ -64,6 +73,17 @@ public struct Transcript: Equatable {
     /// The range the live child's events fold into: 1 for the first child,
     /// one more for each that carries the conversation on.
     private var range = 1
+    /// The live child has said its `session` event, and has read nothing
+    /// since: a notice now is one it says at launch -- a resume's, a suite's
+    /// admission line and warnings (55b, M29) -- before anything it reads.
+    private var atLaunch = false
+    /// Whether the live child has spoken at all.
+    private var spoke = false
+    /// What the live child has said at launch so far, and what the child
+    /// before it said at its own: a relaunch that says the same line again --
+    /// a pause and resume, the same suite admitted again -- draws it once.
+    private var launchNotices: [String] = []
+    private var earlierLaunch: [String] = []
 
     /// The range of the turns read back from the saved conversation.
     public static let earlierRange = 0
@@ -98,6 +118,7 @@ public struct Transcript: Equatable {
     /// A turn was sent; returns its number.
     @discardableResult
     public mutating func userSent(_ text: String) -> Int {
+        atLaunch = false
         let turn = nextTurn
         nextTurn += 1
         append(.user(text), turn: turn)
@@ -152,14 +173,44 @@ public struct Transcript: Equatable {
     /// and its events fold into a range of their own.
     public mutating func reopening() {
         closeStandingCards()
+        if spoke { earlierLaunch = launchNotices }
+        launchNotices = []
+        atLaunch = false
+        spoke = false
         range += 1
         status = .connecting
         revision += 1
     }
 
+    /// A fresh transcript for a child that starts the conversation afresh --
+    /// nothing of it written, so nothing carried on -- keeping the notices
+    /// said so far, and what the last child said at its launch: one saying
+    /// the same again draws it once.
+    public func restarted() -> Transcript {
+        var fresh = Transcript()
+        for case .notice(let text) in items.map(\.content) { fresh.note(text) }
+        fresh.earlierLaunch = spoke ? launchNotices : earlierLaunch
+        return fresh
+    }
+
+    /// The person moved the session to another suite: what its last child
+    /// said of its suite holds no longer, until the next child says.
+    public mutating func forgetSuite() {
+        suite = nil
+        orchestrating = nil
+        revision += 1
+    }
+
+    /// The app wrote the live child a line -- an attach, a setting: what the
+    /// child says next answers it, and is no launch notice.
+    public mutating func lineSent() {
+        atLaunch = false
+    }
+
     /// A line the app says of what it did -- an attach, a restart -- quiet,
     /// kept, as the session's own notices are.
     public mutating func note(_ text: String) {
+        atLaunch = false
         append(.notice(text), turn: nil)
     }
 
@@ -266,19 +317,51 @@ public struct Transcript: Equatable {
         case .ended(let end):
             closeActivity()
             closeStandingCards()
-            append(.ended(Ending(reason: end.reason, message: end.message, details: end.stderrText)), turn: nil)
+            append(.ended(Self.ending(end, spoke: spoke)), turn: nil)
             status = .ended
         }
     }
 
+    /// How `end` is drawn. A child that failed before its `session` event
+    /// refused the launch (machine-mode.md -> A launch refused: no `session`,
+    /// exit 1, one line on stderr saying why -- since the CLI's M29 a model
+    /// named with `-m` that can't start among them): drawn in its own words,
+    /// the stderr tail's last line, as 1g's failed state is (GUI M13).
+    static func ending(_ end: SessionEnd, spoke: Bool) -> Ending {
+        if !spoke, end.reason == .failed, let said = end.stderrTail.lastLine {
+            return Ending(reason: end.reason, message: said, details: end.stderrText, atLaunch: true)
+        }
+        return Ending(reason: end.reason, message: end.message, details: end.stderrText)
+    }
+
+    /// The live child's refusal of its launch, when that is how the session
+    /// ended: what the window draws as refused, with Try again.
+    public var launchRefusal: Ending? {
+        guard status == .ended, case .ended(let ending)? = items.last?.content, ending.atLaunch else { return nil }
+        return ending
+    }
+
     private mutating func apply(_ event: ProtocolEvent) {
         let turn = event.turn
+        if turn != nil { atLaunch = false }
         switch event.kind {
         case .session(let info):
             model = info.model
             nextTurn = info.nextTurn
             accepts = info.capabilities?.accepts ?? []
             isPrivate = info.isPrivate
+            // The CLI's word on its suite (M29): a name, or -- from a binary
+            // that names its suite -- none. An older binary's silence leaves
+            // what was known as it was: not said.
+            if let name = info.suite {
+                suite = .named(name)
+            } else if info.namesItsSuite {
+                suite = .noSuite
+            }
+            if info.orchestrating != nil || info.namesItsSuite { orchestrating = info.orchestrating }
+            spoke = true
+            atLaunch = true
+            launchNotices = []
             if status == .connecting {
                 status = .ready
             }
@@ -313,6 +396,12 @@ public struct Transcript: Equatable {
         case .sources(let sources):
             append(.sources(sources), turn: turn)
         case .notice(let text):
+            if turn == nil, atLaunch {
+                // Said at launch: a relaunch saying again what the child
+                // before it said at its own is drawn once.
+                launchNotices.append(text)
+                if earlierLaunch.contains(text) { return }
+            }
             append(.notice(text), turn: turn)
         case .todo(let todo):
             // Drawn in place of the last: it is the plan, not a log.
@@ -608,8 +697,20 @@ public struct PermissionCard: Equatable {
 
 public struct Ending: Equatable {
     public let reason: SessionEnd.Reason
-    /// One line, the child's own last words included.
+    /// One line, the child's own last words included -- for a launch it
+    /// refused, its words alone.
     public let message: String
     /// The child's stderr tail.
     public let details: String
+    /// The child refused the launch: it failed before its `session` event,
+    /// saying why on stderr (machine-mode.md -> A launch refused).
+    public var atLaunch = false
+}
+
+/// What a session's `session` event says of its suite (the CLI's M29).
+public enum SessionSuite: Equatable, Sendable {
+    /// It runs under this suite.
+    case named(String)
+    /// It runs under none: the binary names its suite, and named none.
+    case noSuite
 }

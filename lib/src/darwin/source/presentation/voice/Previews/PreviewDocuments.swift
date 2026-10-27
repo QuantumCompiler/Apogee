@@ -200,5 +200,14 @@ installing the 'voice' set: torch>=2.6 kokoro>=0.9.4 misaki[en]>=0.9.4 ...
 apogee train: pip install for the 'voice' set failed (exit code 1):
 ERROR: Could not install packages: this sandbox's pip is a stub with no network
 """#
+    /// tests/business/media/Fixtures/voice-refused-runtime-m29.jsonl
+    static let voiceRefusedM29 = #"""
+{"protocol_version":1,"schema":"2026-10-26","type":"job","verb":"voice say"}
+{"message":"torch and kokoro are not installed in Apogee's Python environment -- apogee train setup --with voice","type":"error"}
+"""#
+    /// tests/business/media/Fixtures/voice-refused-runtime-m29.err
+    static let voiceRefusedM29Err = #"""
+apogee voice say: torch and kokoro are not installed in Apogee's Python environment -- apogee train setup --with voice
+"""#
 }
 #endif

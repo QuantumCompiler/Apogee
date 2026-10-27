@@ -120,6 +120,9 @@ public final class SessionViewModel {
     /// speaks: one that ends first -- the CLI refused the suite at launch --
     /// is put back on it.
     private var switching: SuiteFlags?
+    /// The vocabulary's date the last child that spoke announced: whether
+    /// this binary says a suite's admission at launch itself (the CLI's M29).
+    private var vocabulary: String?
 
     /// What a launch says of its suite: `--suite` and `--force`.
     private struct SuiteFlags {
@@ -184,23 +187,29 @@ public final class SessionViewModel {
     /// An `execute` session (its door's), rather than a chat.
     public var isExecute: Bool { launch.execute != nil }
 
-    /// What an `execute` session was opened with, as its flags said it:
-    /// `execute · suite duo · orchestrating · in ingest`. The session's
-    /// events name its model, never its suite, so the suite is the launch's
-    /// -- or the config's default, read -- and no count is guessed.
+    /// What an `execute` session runs as: `execute · suite duo ·
+    /// orchestrating · in ingest`. Its suite and whether it orchestrates are
+    /// the CLI's word where its `session` event says them (the CLI's M29);
+    /// from a binary before it, the door's own flags -- or the config's
+    /// default suite, read -- and no count is guessed.
     public var executeBanner: String? {
-        guard let execute = launch.execute else { return nil }
+        guard launch.execute != nil else { return nil }
         var parts = ["execute"]
-        if let suite = execute.suite {
-            parts.append("suite \(suite)")
-        } else if let defaultSuite, !defaultSuite.isEmpty {
-            parts.append("suite \(defaultSuite), the default")
-        } else if defaultSuite != nil {
-            parts.append("no suite")
+        if let suite = knownSuite {
+            parts.append(suite.name.map { "suite \($0)" + (suite.note.map { ", \($0)" } ?? "") } ?? "no suite")
         }
-        if execute.orchestrate { parts.append("orchestrating") }
+        if orchestrates == true { parts.append("orchestrating") }
         if let folder = launch.folder { parts.append("in \(folder.lastPathComponent)") }
         return parts.joined(separator: " · ")
+    }
+
+    /// Whether an `execute` session's root model may play the symphonies on
+    /// its own: the CLI's word (M29) -- `--orchestrate`, or the suite's
+    /// `orchestrate: true` -- else the door's flag where it passed one; `nil`
+    /// for a chat, or where neither says.
+    public var orchestrates: Bool? {
+        guard let execute = launch.execute else { return nil }
+        return transcript.orchestrating ?? (execute.orchestrate ? true : nil)
     }
 
     /// The word for none: `--suite off`.
@@ -210,22 +219,66 @@ public final class SessionViewModel {
     /// name, `off` for none, or `nil` -- left to the CLI.
     public var suite: String? { launch.namedSuite }
 
-    /// What the session runs under, as far as its flags and the config say:
-    /// `suite pair`, `no suite`, `suite fast, the default`. `nil` where only
-    /// the CLI knows -- a saved chat resumed with no `--suite` runs under the
-    /// suite it last had, which neither the `session` event nor `chats show`
-    /// states.
-    public var suiteWords: String? {
-        switch launch.namedSuite {
-        case ChatLaunch.noSuite?:
-            return "no suite"
-        case let name?:
-            return "suite \(name)" + (launch.forceSuite ? ", forced past its memory" : "")
-        case nil:
-            guard launch.resume == nil, let defaultSuite else { return nil }
-            return defaultSuite.isEmpty ? "no suite" : "suite \(defaultSuite), the default"
+    /// The suite the session runs under, by the name the chooser offers --
+    /// `off` for none: the CLI's word where its `session` event says it (the
+    /// CLI's M29), else the launch's flag; `nil` where neither says.
+    public var runningSuite: String? {
+        switch transcript.suite {
+        case .named(let name)?: name
+        case .noSuite?: ChatLaunch.noSuite
+        case nil: launch.namedSuite
         }
     }
+
+    /// What the session runs under: `suite pair`, `no suite`, `suite fast,
+    /// the default`. The CLI's word where its `session` event names it (the
+    /// CLI's M29) -- a resumed chat's own suite among them -- else as far as
+    /// the launch's flags and the config say. `nil` where only the CLI knows
+    /// and has not said: a saved chat resumed with no `--suite` on a binary
+    /// before M29, whose silence is never read as none.
+    public var suiteWords: String? {
+        knownSuite.map { suite in
+            suite.name.map { "suite \($0)" + (suite.note.map { ", \($0)" } ?? "") } ?? "no suite"
+        }
+    }
+
+    /// The suite as the inspector says it: `pair`, `none`, `fast (the
+    /// default)`; `nil` where it is not known.
+    public var suiteFact: String? {
+        knownSuite.map { suite in
+            suite.name.map { $0 + (suite.note.map { " (\($0))" } ?? "") } ?? "none"
+        }
+    }
+
+    /// The suite the session runs under -- `name` `nil` for none -- with what
+    /// is known of how it came to: the default the launch left it to, or one
+    /// forced past the CLI's memory refusal. The `session` event's word
+    /// first; the launch's flags and the config's default where it says none.
+    private var knownSuite: (name: String?, note: String?)? {
+        func note(_ name: String) -> String? {
+            if launch.namedSuite == name { return launch.forceSuite ? "forced past its memory" : nil }
+            if launch.namedSuite == nil, launch.resume == nil, defaultSuite == name { return "the default" }
+            return nil
+        }
+        switch transcript.suite {
+        case .named(let name)?: return (name, note(name))
+        case .noSuite?: return (nil, nil)
+        case nil: break
+        }
+        switch launch.namedSuite {
+        case ChatLaunch.noSuite?:
+            return (nil, nil)
+        case let name?:
+            return (name, note(name))
+        case nil:
+            guard launch.resume == nil, let defaultSuite else { return nil }
+            return defaultSuite.isEmpty ? (nil, nil) : (defaultSuite, "the default")
+        }
+    }
+
+    /// The model the launch names with `-m`, when it names one: what a
+    /// launch the CLI refused may be chosen again for.
+    public var launchModel: String? { launch.settings.model }
 
     /// Whether the session can move to another suite: one shut down or with
     /// no binary cannot, nor a conversation nothing of which is written once
@@ -384,6 +437,10 @@ public final class SessionViewModel {
                     // Freed, not finished: no ending card.
                     pausing = false
                     transcript.paused()
+                } else if case .ended = event, refusal != nil, !isShutDown {
+                    // The switch is put back below, said in the CLI's words:
+                    // no refusal card beside it, no Try again of a launch
+                    // already being made again.
                 } else {
                     transcript.apply(event)
                 }
@@ -391,6 +448,7 @@ public final class SessionViewModel {
                     if case .session(let info) = event.kind {
                         spoke = true
                         switching = nil
+                        vocabulary = info.capabilities?.schema
                         // The chat it writes, in the binary's word (M28) --
                         // a private one writes none, whatever it says.
                         if let id = info.chatID, privateMode != .nothingWritten { named(id) }
@@ -599,10 +657,19 @@ public final class SessionViewModel {
         settings = settings.merging(change)
         launch.settings = settings
         let carried = savedChatID != nil || !transcript.items.contains { if case .user = $0.content { true } else { false } }
-        transcript.note(
-            carried
-                ? "restarting with \(Self.words(change)) -- this apogee changes settings by restarting the session; the conversation carries on, and a local model loads again"
-                : "restarting with \(Self.words(change)) -- the earlier turns can't be carried on: this session isn't in the saved list")
+        if transcript.status == .ended {
+            // No child to restart -- one ended, or refused its launch: the
+            // session starts again on the change.
+            transcript.note(
+                carried
+                    ? "starting again with \(Self.words(change))"
+                    : "starting again with \(Self.words(change)) -- the earlier turns can't be carried on: this session isn't in the saved list")
+        } else {
+            transcript.note(
+                carried
+                    ? "restarting with \(Self.words(change)) -- this apogee changes settings by restarting the session; the conversation carries on, and a local model loads again"
+                    : "restarting with \(Self.words(change)) -- the earlier turns can't be carried on: this session isn't in the saved list")
+        }
         await restart()
     }
 
@@ -620,9 +687,7 @@ public final class SessionViewModel {
         guard !isShutDown else { return }
         if savedChatID == nil {
             forgetUnsaved()
-            let notes = transcript.items.filter { if case .notice = $0.content { true } else { false } }
-            transcript = Transcript()
-            for case .notice(let text) in notes.map(\.content) { transcript.note(text) }
+            transcript = transcript.restarted()
         } else {
             transcript.reopening()
         }
@@ -663,7 +728,7 @@ public final class SessionViewModel {
     public func switchSuite(to suite: String, force: Bool = false) async {
         guard canSwitchSuite, !(isExecute && suite == ChatLaunch.noSuite) else { return }
         held.removeAll { if case .suite = $0 { true } else { false } }
-        guard suite != launch.namedSuite || force != launch.forceSuite else { return }
+        guard suite != runningSuite || force != launch.forceSuite else { return }
         if midTurn {
             held.append(.suite(suite, force: force))
             return
@@ -684,7 +749,17 @@ public final class SessionViewModel {
         launch.name(suite: suite, force: force)
         settings.model = nil
         launch.settings.model = nil
-        transcript.note(Self.moveWords(suite, force: force, turns: hasTurns, carried: savedChatID != nil))
+        transcript.forgetSuite()
+        // On a binary that says a suite's admission itself (the CLI's M29),
+        // its notice says the move once the child under the suite speaks:
+        // the app's own line would say the same again. It stands where the
+        // CLI says nothing -- none, which has no admission -- or where it says
+        // more: earlier turns that can't be carried on (GUI M13's default).
+        let saysItself = (vocabulary ?? "") >= MachineProtocol.namesSuite && suite != ChatLaunch.noSuite
+            && (savedChatID != nil || !hasTurns)
+        if !saysItself {
+            transcript.note(Self.moveWords(suite, force: force, turns: hasTurns, carried: savedChatID != nil))
+        }
         switching = before
         // Not running now -- paused, never started, or still locating its
         // binary -- the launch to come carries the flags; else a new child.
@@ -698,14 +773,13 @@ public final class SessionViewModel {
         switching = nil
         let asked = launch.namedSuite
         launch.name(suite: before.suite, force: before.force)
+        transcript.forgetSuite()
         transcript.note(
             "not moved to \(Self.suiteName(asked)): \(refusal) -- the session carries on under \(Self.suiteName(before.suite))")
         guard !isShutDown else { return }
         if savedChatID == nil {
             forgetUnsaved()
-            let notes = transcript.items.filter { if case .notice = $0.content { true } else { false } }
-            transcript = Transcript()
-            for case .notice(let text) in notes.map(\.content) { transcript.note(text) }
+            transcript = transcript.restarted()
         } else {
             transcript.reopening()
         }
@@ -739,6 +813,7 @@ public final class SessionViewModel {
     /// Writes `line`, and shows what it does from now: the chip, the setting.
     private func sendLine(_ line: HeldLine) {
         guard let outbox else { return }
+        transcript.lineSent()
         switch line {
         case .attach(let path):
             if !attachments.contains(path) { attachments.append(path) }
@@ -940,7 +1015,7 @@ public final class SessionViewModel {
         case .answering: "Answering"
         case .waiting: "Waiting for you"
         case .stopping: "Stopping"
-        case .ended: "Session ended"
+        case .ended: transcript.launchRefusal == nil ? "Session ended" : "Refused at launch"
         }
     }
 
@@ -948,7 +1023,7 @@ public final class SessionViewModel {
     public var inputPrompt: String {
         switch transcript.status {
         case .waiting: "Answer the question above"
-        case .ended: "The session has ended"
+        case .ended: transcript.launchRefusal == nil ? "The session has ended" : "apogee refused to start this session"
         case .connecting, .paused: "Starting apogee"
         default: "Message Apogee"
         }

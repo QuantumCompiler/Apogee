@@ -16,7 +16,7 @@ struct SuiteSheet: View {
     /// `choosing`, `forcing` it, where the caller names one.
     init(model: SessionViewModel, choosing: String? = nil, forcing: Bool = false) {
         self.model = model
-        _chosen = State(initialValue: choosing ?? model.suite ?? "")
+        _chosen = State(initialValue: choosing ?? model.runningSuite ?? "")
         _force = State(initialValue: forcing)
     }
 
@@ -59,7 +59,7 @@ struct SuiteSheet: View {
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(chosen.isEmpty || (chosen == model.suite && !force) || (overBudget && !force))
+                .disabled(chosen.isEmpty || (chosen == model.runningSuite && !force) || (overBudget && !force))
             }
         }
         .padding(Spacing.xl)
@@ -85,7 +85,7 @@ struct SuiteSheet: View {
                 Image(systemName: chosen == value ? "largecircle.fill.circle" : "circle")
                     .foregroundStyle(chosen == value ? Palette.accent : Palette.textTertiary)
                 Text(title).font(.apogeeBody).foregroundStyle(Palette.textPrimary)
-                if value == model.suite {
+                if value == model.runningSuite {
                     Text("now").font(.apogeeMeta).foregroundStyle(Palette.accent)
                 }
                 Spacer()

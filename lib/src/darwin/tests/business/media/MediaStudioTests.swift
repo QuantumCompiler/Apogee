@@ -40,6 +40,46 @@ struct InstallConsentTests {
     }
 }
 
+/// GUI M13: since the CLI's M29 a runtime refusal ends the job's stream on an
+/// `error` event, its words still on stderr -- read there first, stderr the
+/// fallback where no `error` arrived (a binary before M29: 4f's recordings).
+@Suite("InstallConsent from the stream's error (M13)")
+struct InstallConsentErrorTests {
+    /// The first `error` event of a recorded stream: its message.
+    static func error(in name: String) -> String? {
+        recorded("business/media/Fixtures/\(name).jsonl").split(separator: "\n").lazy.compactMap { line -> String? in
+            if case .error(let message) = EventDecoder.decode(line: String(line)).kind { message } else { nil }
+        }.first
+    }
+
+    @Test("each recorded runtime refusal's error names its install: the consent is read there, its words the error's")
+    func fromTheError() throws {
+        for (verb, set) in [
+            ("generate-refused-runtime-m29", "video"), ("compose-refused-runtime-m29", "video"), ("voice-refused-runtime-m29", "voice"),
+        ] {
+            let error = try #require(Self.error(in: verb), "\(verb) ends on its error")
+            let stderr = recorded("business/media/Fixtures/\(verb).err")
+            #expect(stderr.contains(error), "\(verb): stderr says the same words, prefixed")
+            let consent = try #require(InstallConsent(error: error, failure: error, stderr: stderr), "\(verb)")
+            #expect(consent.arguments == ["train", "setup", "--with", set])
+            #expect(consent.said == error, "\(verb): the stream's words, not stderr's")
+        }
+    }
+
+    @Test("the error first: one naming no install asks nothing, whatever stderr held; no error, stderr read as before")
+    func errorFirst() throws {
+        let two = try #require(Self.error(in: "compose-refused-two-m29"))
+        // A recorded refusal's stderr beside another refusal's error: the
+        // stream's word decides, never a line stderr happened to hold.
+        let runtimeErr = recorded("business/media/Fixtures/generate-refused-runtime.err")
+        #expect(InstallConsent(error: two, failure: two, stderr: runtimeErr) == nil)
+        let line = runtimeErr.split(whereSeparator: \.isNewline).last.map(String.init) ?? ""
+        let older = try #require(InstallConsent(error: nil, failure: line, stderr: runtimeErr))
+        #expect(older.arguments == ["train", "setup", "--with", "video"])
+        #expect(older.said == runtimeErr.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+}
+
 @Suite("CaptionsAbility")
 struct CaptionsAbilityTests {
     func check(_ name: String) throws -> JSONValue {

@@ -49,5 +49,14 @@ installing the 'video' set: torch>=2.6 diffusers>=0.35 transformers>=4.46 accele
 apogee train: pip install for the 'video' set failed (exit code 1):
 ERROR: Could not install packages: this sandbox's pip is a stub with no network
 """#
+    /// tests/business/media/Fixtures/generate-refused-runtime-m29.jsonl
+    static let generateRefusedM29 = #"""
+{"protocol_version":1,"schema":"2026-10-26","type":"job","verb":"video generate"}
+{"message":"torch and diffusers are not installed in Apogee's Python environment -- apogee train setup --with video","type":"error"}
+"""#
+    /// tests/business/media/Fixtures/generate-refused-runtime-m29.err
+    static let generateRefusedM29Err = #"""
+apogee video generate: torch and diffusers are not installed in Apogee's Python environment -- apogee train setup --with video
+"""#
 }
 #endif

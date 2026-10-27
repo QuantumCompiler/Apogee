@@ -13,6 +13,12 @@ public enum MachineProtocol {
     /// `--output-format` / `--input-format`: one JSON object per line.
     public static let streamFormat = "stream-json"
 
+    /// The vocabulary's date from which a session names its suite -- and an
+    /// `execute` session whether it orchestrates -- on its `session` event,
+    /// a launch's suite lines are notices after it, and a media runtime's
+    /// refusal ends its job stream on `error` (the CLI's M29, 2026-10-26).
+    public static let namesSuite = "2026-10-26"
+
     /// Whether a stream announcing `protocolVersion` can be read by this client.
     public static func understands(protocolVersion: Int) -> Bool {
         protocolVersion == version

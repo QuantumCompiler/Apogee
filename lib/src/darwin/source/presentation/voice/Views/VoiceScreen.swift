@@ -330,6 +330,13 @@ struct SaySheet: View {
         .task { await VoicePreview.say(model) }
 }
 
+#Preview("Refused for its runtime, said in the stream's error: asking to install") {
+    let model = VoicePreview.speeches("screen-refused-said", starter: VoicePreview.runs([VoicePreview.refusedRunSaid]))
+    VoiceScreen(model: model)
+        .frame(width: 1100, height: 600)
+        .task { await VoicePreview.say(model) }
+}
+
 #Preview("Not installed: the refusal stands") {
     let model = VoicePreview.speeches("screen-declined", starter: VoicePreview.runs([VoicePreview.refusedRun]))
     VoiceScreen(model: model)

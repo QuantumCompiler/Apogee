@@ -1118,7 +1118,7 @@ public final class SessionLibraryViewModel {
             chat: currentChat, chatID: current.savedChatID, model: current.transcript.model,
             kind: currentChat.flatMap(kind(of:)), lastTurn: lastUsage, roles: roles,
             rolesFailure: rolesFailure, recall: hasTrack52 ? recall : nil, recallFailure: hasTrack52 ? recallFailure : nil,
-            canCompact: currentChat.map(canCompact) ?? false)
+            canCompact: currentChat.map(canCompact) ?? false, suite: current.suiteFact, orchestrating: current.orchestrates)
     }
 
     private var lastUsage: Usage? {
@@ -1206,10 +1206,18 @@ public struct Inspector: Equatable {
     public let recallFailure: String?
     /// Whether the session's saved conversation can be compacted from here.
     public let canCompact: Bool
+    /// The suite the session runs under -- `pair`, `none`, `fast (the
+    /// default)` -- the CLI's word since its M29, a resumed chat's own among
+    /// them, else the launch's; `nil` where neither says (GUI M13).
+    public let suite: String?
+    /// An `execute` session's: whether its root model plays the symphonies on
+    /// its own, the CLI's word or the door's flag; `nil` for a chat, or unsaid.
+    public let orchestrating: Bool?
 
     public init(
         chat: ChatSummary?, chatID: String?, model: String?, kind: ModelKind?, lastTurn: Usage?, roles: [Field],
-        rolesFailure: String?, recall: String? = nil, recallFailure: String? = nil, canCompact: Bool = false
+        rolesFailure: String?, recall: String? = nil, recallFailure: String? = nil, canCompact: Bool = false,
+        suite: String? = nil, orchestrating: Bool? = nil
     ) {
         self.chat = chat
         self.chatID = chatID
@@ -1221,6 +1229,8 @@ public struct Inspector: Equatable {
         self.recall = recall
         self.recallFailure = recallFailure
         self.canCompact = canCompact
+        self.suite = suite
+        self.orchestrating = orchestrating
     }
 
     /// The session's own facts, label and value.
@@ -1236,7 +1246,7 @@ public struct Inspector: Equatable {
         return fields
     }
 
-    /// The model it runs on.
+    /// The model it runs on, and the suite whose members answer.
     public var modelFacts: [Field] {
         var fields: [Field] = []
         if let model { fields.append(Field("Model", model)) }
@@ -1245,6 +1255,8 @@ public struct Inspector: Equatable {
         if let kind {
             fields.append(Field("Runs", Self.words(kind)))
         }
+        if let suite { fields.append(Field("Suite", suite)) }
+        if let orchestrating { fields.append(Field("Orchestrating", orchestrating ? "yes" : "no")) }
         return fields
     }
 

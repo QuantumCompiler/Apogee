@@ -142,10 +142,21 @@ public struct SessionInfo: Sendable, Equatable {
     /// and from a binary before M28, which never says -- a host then guesses.
     /// A new chat is written only once a turn of it is answered.
     public let chatID: String?
+    /// The suite the session runs under (`suite`, the CLI's M29): the one
+    /// `--suite` named, a resumed chat's own, or `models.default_suite` --
+    /// the suite the chat saves. `nil` when the event names none: from a
+    /// binary that names its suite (`namesItsSuite`) the session runs under
+    /// none; from one before M29 it is not said, never "none".
+    public let suite: String?
+    /// An `execute` session's: whether its root model may play the
+    /// symphonies on its own (`orchestrating`, M29) -- `--orchestrate`, or the
+    /// suite's `orchestrate: true`. `nil` when not said: a chat, or a binary
+    /// before M29.
+    public let orchestrating: Bool?
 
     public init(
         protocolVersion: Int, model: String, nextTurn: Int, capabilities: Capabilities?, isPrivate: Bool = false,
-        chatID: String? = nil
+        chatID: String? = nil, suite: String? = nil, orchestrating: Bool? = nil
     ) {
         self.protocolVersion = protocolVersion
         self.model = model
@@ -153,6 +164,16 @@ public struct SessionInfo: Sendable, Equatable {
         self.capabilities = capabilities
         self.isPrivate = isPrivate
         self.chatID = chatID
+        self.suite = suite
+        self.orchestrating = orchestrating
+    }
+
+    /// Whether the session's binary names its suite on this event -- one that
+    /// named one, or a vocabulary dated `MachineProtocol.namesSuite` or later
+    /// -- so a `session` with no `suite` says it runs under none. From an
+    /// older binary (2026-10-24, 2026-10-25 and before) nothing is said.
+    public var namesItsSuite: Bool {
+        suite != nil || (capabilities?.schema ?? "") >= MachineProtocol.namesSuite
     }
 }
 

@@ -213,6 +213,66 @@ enum SessionPreview {
         model.suiteChoices = suiteChoices
     }
 
+    // MARK: - The suite and the launch, as the CLI's M29 says them (GUI M13)
+
+    /// The branch binary's streams since M29, by the launch's `--suite`: each
+    /// names its suite on `session` and says its admission line after it.
+    /// `--suite pair` the chat opened under it; `--suite fast` the same chat
+    /// resumed under that one; no `--suite` -- `""` -- resumed under its own.
+    static let suiteChatsSaid = PreviewSuiteChats(
+        streams: [
+            "pair": lines(SessionDocuments.chatUnderSuiteM29), "fast": lines(SessionDocuments.resumedSwitchedSuiteM29),
+            "": lines(SessionDocuments.resumedUnderSuiteM29),
+        ])
+
+    /// That chat's id, as its `session` event names it.
+    static var suiteChatIDSaid: String {
+        lines(SessionDocuments.chatUnderSuiteM29).first.flatMap { JSONValue.parse($0)?["chat_id"]?.stringValue } ?? ""
+    }
+
+    /// The chat reopened with no `--suite`, as the library reopens a saved
+    /// one: the CLI names the suite it runs under. Not started.
+    static func resumedNamingItsSuite() -> SessionViewModel {
+        SessionViewModel(starter: suiteChatsSaid, launch: ChatLaunch(resume: suiteChatIDSaid))
+    }
+
+    /// The chat, known by its id, under `pair`, on that binary; not started.
+    static func savedUnderSuiteSaid() -> SessionViewModel {
+        SessionViewModel(starter: suiteChatsSaid, launch: ChatLaunch(resume: suiteChatIDSaid, suite: "pair"))
+    }
+
+    /// An `execute` session under `orch`, whose `orchestrate: true` the door
+    /// passed no flag for: the CLI says it orchestrates. Not started.
+    static func executeOrchestrating() -> SessionViewModel {
+        SessionViewModel(
+            starter: PreviewChats(lines: lines(SessionDocuments.executeOrchestrating)),
+            launch: ChatLaunch(execute: ChatLaunch.Execute(suite: "orch")))
+    }
+
+    /// `chat -m mlxgone` as the branch binary refused it: nothing on stdout,
+    /// exit 1, its one line on stderr
+    /// (tests/data/protocol/Fixtures/launch-refused-model.*).
+    static var refusedLaunch: SessionEnd {
+        var tail = BoundedTail()
+        tail.append(Data((SessionDocuments.launchRefusedModel + "\n").utf8))
+        return SessionEnd(reason: .failed, exit: ChildExit(reason: .exited, status: 1), stderrTail: tail)
+    }
+
+    /// A new session on `mlxgone` -- Models' Use in a new session -- whose
+    /// launch the CLI refuses; not started.
+    static func refusedModel() -> SessionViewModel {
+        SessionViewModel(
+            starter: PreviewChats(lines: [], ending: refusedLaunch), launch: ChatLaunch(settings: RunSettings(model: "mlxgone")))
+    }
+
+    /// The refusal as the transcript folds it, the card's own.
+    static var refusedEnding: Ending {
+        var transcript = Transcript()
+        transcript.apply(.ended(refusedLaunch))
+        guard case .ended(let ending) = transcript.items.last?.content else { preconditionFailure("the transcript ends with its ending") }
+        return ending
+    }
+
     // MARK: - A model switched from the settings sheet (GUI M10)
 
     /// The branch binary's recording over two scripted mocks: a session on
