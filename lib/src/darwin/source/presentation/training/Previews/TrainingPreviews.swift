@@ -113,8 +113,12 @@ enum TrainingPreview {
         }
     }
 
-    static func training(said: [JobUpdate] = [], finishes: Bool = false, runner: PreviewRunner = TrainingPreview.runner) -> TrainingViewModel {
-        TrainingViewModel(runner: runner, starter: PreviewJobs(said: said, finishes: finishes))
+    static func training(
+        said: [JobUpdate] = [], finishes: Bool = false, runner: PreviewRunner = TrainingPreview.runner, vocabulary: String? = nil
+    ) -> TrainingViewModel {
+        let training = TrainingViewModel(runner: runner, starter: PreviewJobs(said: said, finishes: finishes))
+        training.vocabulary = { vocabulary }
+        return training
     }
 
     /// Every document read, and the recorded run chosen.
@@ -217,6 +221,50 @@ enum TrainingPreview {
         let lines = stream.split(separator: "\n").map(String.init)
         let end = lines.firstIndex(where: through) ?? lines.count - 1
         return lines[...end].map { .event(JobEvent.decode(line: $0)) }
+    }
+
+    // MARK: - What the CLI's M30 states (GUI M14)
+
+    /// The branch binary's vocabulary: a halt taken during a pass is kept,
+    /// and the pull streams.
+    static let m30 = "2026-10-26"
+
+    /// The pipelines sandbox's reads with the named pipelines listed and
+    /// shown, as `train pipeline list | show` state them.
+    static let specsListed = PreviewRunner(
+        reads: pipelines.reads + [
+            (["train", "pipeline", "list"], TrainingDocuments.pipelineList),
+            (["train", "pipeline", "show", "skills"], TrainingDocuments.pipelineShowSkills),
+            (["train", "pipeline", "show", "nightly"], TrainingDocuments.pipelineShowNightly),
+        ],
+        commands: pipelines.commands)
+
+    /// Another's pass holding the cycle -- read while it was held on its lock.
+    static let cycleHeld = cycle(TrainingDocuments.trainStatusCycleHeld, TrainingDocuments.cycleStatusHeld)
+    /// The same pass, halted while it runs: `train cycle halt`'s answer then.
+    static let cycleHeldHalted = PreviewRunner(
+        reads: cycle(TrainingDocuments.trainStatusCycleHeldHalted, TrainingDocuments.cycleStatusHeldHalted).reads,
+        commands: pipelines.commands + [(["train", "cycle", "halt"], TrainingDocuments.cycleHaltDuringPass)])
+    /// The pass recorded, the halt kept.
+    static let cycleHaltKept = cycle(TrainingDocuments.trainStatusCycleHaltKept, TrainingDocuments.cycleStatusHaltKept)
+
+    /// The recorded pass halted while it ran, through the notice that says
+    /// the halt is kept -- or all of it, and its end, exit 0.
+    static func passHalted(whole: Bool = false) -> [JobUpdate] {
+        guard whole else { return streamed(TrainingDocuments.cycleRunHalted) { $0.contains("[cycle] halted while this pass ran") } }
+        return streamed(TrainingDocuments.cycleRunHalted) { _ in false } + [ended(0)]
+    }
+
+    /// The pull's stream (hand-made: a pull that lands needs the network)
+    /// through its first file's 49152 bytes -- or all of it, and its end.
+    static func pullStreamed(whole: Bool = false) -> [JobUpdate] {
+        guard whole else { return streamed(TrainingDocuments.pullStream) { $0.contains(#""done":49152"#) } }
+        return streamed(TrainingDocuments.pullStream) { _ in false } + [ended(0)]
+    }
+
+    /// A run's end as the binary left it: exit `status`.
+    static func ended(_ status: Int32) -> JobUpdate {
+        .ended(JobEnd(exit: ChildExit(reason: .exited, status: status), stderrTail: BoundedTail(), interrupted: false))
     }
 
     /// Updates folded as the place folds them.

@@ -7,7 +7,10 @@ import SwiftUI
 /// the anchor, the breaker, a halt and its reason, whether a pass holds it --
 /// its passes, newest first, and one pass run here, live. Its schedule stays
 /// the person's own, said at the top; with no history yet it says that,
-/// rather than the read that exits 1.
+/// rather than the read that exits 1. A halt taken while a pass ran here is
+/// kept on a binary that keeps it (the CLI's M30), and the pass's notice
+/// saying so is drawn: live as it comes, then on the tab while the halt
+/// stands.
 struct CycleView: View {
     @Bindable var model: TrainingViewModel
 
@@ -25,8 +28,18 @@ struct CycleView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
+                if model.live == nil, let kept = model.keptHalt {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        Text("THE LAST PASS RUN HERE").font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary)
+                        Text(kept)
+                            .font(.apogeeSmall)
+                            .foregroundStyle(Palette.warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                }
                 if model.live == .cycle, let run = model.run {
-                    LivePass(run: run, stages: model.liveStages)
+                    LivePass(run: run, stages: model.liveStages, haltNotice: model.liveHaltNotice)
                 }
                 if let said = model.cycleText {
                     Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
@@ -98,10 +111,12 @@ struct CycleView: View {
 }
 
 /// A pass running here: its narration as it comes, the line it is on
-/// strongest, and its pipeline's stages live.
+/// strongest, its pipeline's stages live, and -- once it has said it -- that
+/// a halt taken while it ran is kept.
 private struct LivePass: View {
     let run: JobProgress
     let stages: [TrainingViewModel.StageRow]
+    let haltNotice: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.s) {
@@ -118,6 +133,13 @@ private struct LivePass: View {
             }
             if run.passes.isEmpty {
                 Text("Starting…").font(.apogeeSmall).foregroundStyle(Palette.textTertiary)
+            }
+            if let haltNotice {
+                Text(haltNotice)
+                    .font(.apogeeSmall)
+                    .foregroundStyle(Palette.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
             }
             if !stages.isEmpty {
                 StageList(stages: stages)
@@ -143,6 +165,64 @@ private struct LivePass: View {
         .task {
             await training.connect(binary: previewBinary)
             training.tab = .cycle
+        }
+}
+
+#Preview("The cycle: another's pass holds it, Halt offered") {
+    let training = TrainingPreview.training(runner: TrainingPreview.cycleHeld, vocabulary: TrainingPreview.m30)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 640)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.tab = .cycle
+        }
+}
+
+#Preview("The cycle: Halt during a pass, asking first") {
+    let training = TrainingPreview.training(runner: TrainingPreview.cycleHeld, vocabulary: TrainingPreview.m30)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 640)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.tab = .cycle
+            training.pending = .haltCycle
+        }
+}
+
+#Preview("The cycle: halted while a pass runs, the pass keeping it") {
+    let training = TrainingPreview.training(runner: TrainingPreview.cycleHeldHalted, vocabulary: TrainingPreview.m30)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 640)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.tab = .cycle
+        }
+}
+
+#Preview("The cycle: a pass running here says its halt is kept") {
+    let training = TrainingPreview.training(
+        said: TrainingPreview.passHalted(), runner: TrainingPreview.cycleHeldHalted, vocabulary: TrainingPreview.m30)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 760)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.tab = .cycle
+            training.pending = .runCycle
+            await training.confirm()
+        }
+}
+
+#Preview("The cycle: the pass ended, its halt notice kept") {
+    let training = TrainingPreview.training(
+        said: TrainingPreview.passHalted(whole: true), finishes: true, runner: TrainingPreview.cycleHaltKept,
+        vocabulary: TrainingPreview.m30)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 640)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.tab = .cycle
+            training.pending = .runCycle
+            await training.confirm()
         }
 }
 

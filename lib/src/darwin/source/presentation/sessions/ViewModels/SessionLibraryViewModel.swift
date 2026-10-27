@@ -569,6 +569,11 @@ public final class SessionLibraryViewModel {
     /// or later): a new brief planned alone (52c's dry run) among it.
     public var hasTrack52: Bool { (lastSchema ?? "") >= "2026-10-20" }
 
+    /// The build's vocabulary date, as `__machine-schema` said it at launch
+    /// and the last session refreshed it; `nil` until the binary has said --
+    /// for a place that decides by a date of its own (Training's, GUI M14).
+    public var vocabulary: String? { lastSchema }
+
     /// Whether a running session keeps a rename made from outside -- `chats
     /// title` beside it -- rather than putting its own title back on its next
     /// save (the CLI's 55b), as the last session's vocabulary says: 2026-10-25

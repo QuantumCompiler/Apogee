@@ -3,10 +3,11 @@ import BusinessReads
 import PresentationStyles
 import SwiftUI
 
-/// The named pipelines, each run on the person's word; every pipeline run,
-/// newest first; and the open run's page -- its stages as the manifest
-/// records them, live while it runs here (the CLI's 55h), with Resume where
-/// it stopped short.
+/// The named pipelines, each run on the person's word -- with its stage
+/// count, its student and its page's stage plan where the binary lists them
+/// (the CLI's M30); every pipeline run, newest first; and the open page -- a
+/// spec's plan, or a run's stages as the manifest records them, live while it
+/// runs here (the CLI's 55h), with Resume where it stopped short.
 struct PipelinesView: View {
     @Bindable var model: TrainingViewModel
 
@@ -17,8 +18,24 @@ struct PipelinesView: View {
                     heading("NAMED PIPELINES")
                     ForEach(model.pipelineSpecs, id: \.self) { name in
                         HStack {
-                            Text(name).font(.apogeeBody)
-                            Spacer()
+                            if let spec = model.specs.first(where: { $0.name == name }) {
+                                // Listed by the binary: its page is its plan.
+                                Button {
+                                    Task { await model.openSpec(name) }
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(name).font(.apogeeBody)
+                                        Text(TrainingViewModel.words(spec)).font(.apogeeMeta).foregroundStyle(Palette.textTertiary)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .help("apogee train pipeline show \(name): its stages, each a dataset and a gate")
+                            } else {
+                                Text(name).font(.apogeeBody)
+                                Spacer()
+                            }
                             Button("Run…") { model.pending = .runPipeline(name) }
                                 .buttonStyle(.borderless)
                                 .disabled(model.isRunning)
@@ -26,13 +43,15 @@ struct PipelinesView: View {
                         }
                         .padding(.horizontal, Spacing.m)
                         .padding(.vertical, Spacing.s)
+                        .background(
+                            model.openedSpec == name ? Palette.selection : .clear, in: RoundedRectangle(cornerRadius: Radius.row))
                     }
                     if let said = model.specsText {
                         note(said)
                     }
                     heading("RUNS").padding(.top, Spacing.l)
                     if model.live == .pipeline {
-                        row(selected: model.selectedPipelineRun == nil, open: nil) {
+                        row(selected: model.selectedPipelineRun == nil && model.openedSpec == nil, open: nil) {
                             Text(model.livePipelineID ?? model.running ?? "Starting").font(.apogeeBody.monospacedDigit())
                             Text("running here").font(.apogeeMeta).foregroundStyle(Palette.accent)
                         }
@@ -89,15 +108,24 @@ struct PipelinesView: View {
     }
 }
 
-/// The open pipeline run: the one running here, live, or a run's manifest as
-/// last read -- its stages, and where a resume would start.
+/// The open page: a named pipeline's plan, the run going here, live, or a
+/// run's manifest as last read -- its stages, and where a resume would start.
 private struct PipelinePage: View {
     let model: TrainingViewModel
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.m) {
-                if model.showsLivePipeline {
+                if let name = model.openedSpec {
+                    if let spec = model.openSpecPlan {
+                        plan(spec)
+                    } else if let failure = model.specFailure {
+                        Text(name).font(.apogeeHeading)
+                        Text(failure).font(.apogeeSmall).foregroundStyle(Palette.error).textSelection(.enabled)
+                    } else {
+                        Text("Reading \(name)…").font(.apogeeSmall).foregroundStyle(Palette.textTertiary)
+                    }
+                } else if model.showsLivePipeline {
                     Text(model.livePipelineID ?? model.running ?? "Starting").font(.apogeeHeading.monospacedDigit())
                     Text("Running here, each stage as its manifest moves -- Stop is above; what passed stays.")
                         .font(.apogeeSmall)
@@ -110,7 +138,9 @@ private struct PipelinePage: View {
                 } else if let id = model.selectedPipelineRun {
                     Text("Reading \(id)…").font(.apogeeSmall).foregroundStyle(Palette.textTertiary)
                 } else {
-                    Text("Choose a pipeline run to see its stages.").font(.apogeeSmall).foregroundStyle(Palette.textTertiary)
+                    Text(model.specs.isEmpty ? "Choose a pipeline run to see its stages." : "Choose a named pipeline to see its plan, or a run to see its stages.")
+                        .font(.apogeeSmall)
+                        .foregroundStyle(Palette.textTertiary)
                 }
             }
             .padding(Spacing.xl)
@@ -118,6 +148,47 @@ private struct PipelinePage: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.inspector)
+    }
+
+    /// A named pipeline's plan, as `train pipeline show` states it: its
+    /// student, and each stage's dataset, gate and tuning -- and Run….
+    @ViewBuilder private func plan(_ spec: PipelineSpec) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(spec.name).font(.apogeeHeading).textSelection(.enabled)
+            Spacer()
+            Button("Run…") { model.pending = .runPipeline(spec.name) }
+                .disabled(model.isRunning)
+                .help("apogee train pipeline run --pipeline \(spec.name): each stage a training run, held to the cumulative gate")
+        }
+        Text(((spec.student.isEmpty ? [] : ["student \(spec.student)"]) + [TrainingViewModel.source(spec)]).joined(separator: " · "))
+            .font(.apogeeSmall)
+            .foregroundStyle(Palette.textSecondary)
+            .textSelection(.enabled)
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            Text("STAGE PLAN").font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary)
+            ForEach(spec.stages) { stage in
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.m) {
+                    Text("\(stage.index)")
+                        .font(.apogeeMeta.monospacedDigit())
+                        .foregroundStyle(Palette.textTertiary)
+                        .frame(width: 18, alignment: .trailing)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(stage.name).font(.apogeeBody)
+                        Text(TrainingViewModel.planWords(stage)).font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textPrimary)
+                        Text(TrainingViewModel.tuningWords(stage)).font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary)
+                    }
+                    .textSelection(.enabled)
+                    Spacer()
+                }
+            }
+            if spec.stages.isEmpty {
+                Text("The spec names no stage.").font(.apogeeSmall).foregroundStyle(Palette.textTertiary)
+            }
+        }
+        Text(TrainingViewModel.gateRule)
+            .font(.apogeeMeta)
+            .foregroundStyle(Palette.textTertiary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder private func manifest(_ run: PipelineRun) -> some View {
@@ -204,6 +275,23 @@ struct StageList: View {
             await training.connect(binary: previewBinary)
             await training.openPipelineRun(TrainingPreview.completeID)
         }
+}
+
+#Preview("Pipelines: the specs listed, skills' plan open") {
+    let training = TrainingPreview.training(runner: TrainingPreview.specsListed)
+    PipelinesView(model: training)
+        .frame(width: 960, height: 560)
+        .task {
+            await training.connect(binary: previewBinary)
+            await training.openSpec("skills")
+        }
+}
+
+#Preview("Pipelines: the specs listed, none open") {
+    let training = TrainingPreview.training(runner: TrainingPreview.specsListed)
+    PipelinesView(model: training)
+        .frame(width: 960, height: 560)
+        .task { await training.connect(binary: previewBinary) }
 }
 
 #Preview("Pipelines: one running, stage by stage") {

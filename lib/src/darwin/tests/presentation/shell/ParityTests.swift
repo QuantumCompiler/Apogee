@@ -66,6 +66,12 @@ struct ParityTests {
         #expect(train.note.contains("launchd or cron"), "nothing schedules the cycle from the app")
     }
 
+    @Test("a verb an item placed is named on its family's row: train pipeline list and show, the named pipelines' plans (M14)")
+    func pipelineSpecsPlaced() throws {
+        let train = try #require(ParityTable.place(of: "train"))
+        #expect(train.note.contains("train pipeline list|show"))
+    }
+
     @Test("a verb an item placed is named on its family's row: chats show, a resumed chat's turns in the session window (M7)")
     func chatsShowPlaced() throws {
         let chats = try #require(ParityTable.place(of: "chats"))

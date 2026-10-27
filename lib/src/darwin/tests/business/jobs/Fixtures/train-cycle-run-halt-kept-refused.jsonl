@@ -1,0 +1,2 @@
+{"protocol_version":1,"schema":"2026-10-26","type":"job","verb":"train cycle run"}
+{"message":"the cycle is halted: halted by 'apogee train cycle halt'. Review the data and the suite, then 'apogee train cycle resume'","type":"error"}

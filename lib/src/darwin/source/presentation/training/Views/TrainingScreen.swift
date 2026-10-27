@@ -38,7 +38,9 @@ public struct TrainingScreen: View {
                     } else {
                         Button("Halt…") { model.pending = .haltCycle }
                             .disabled(!model.canHaltCycle)
-                            .help("apogee train cycle halt: every pass refuses until a resume -- your scheduler's too")
+                            .help(
+                                "apogee train cycle halt: every pass refuses until a resume -- your scheduler's too"
+                                    + (model.cycleHeld && model.keepsHalt ? "; the pass running now finishes, and keeps the halt" : ""))
                     }
                 case .regimes: EmptyView()
                 case .datasets:
@@ -55,11 +57,23 @@ public struct TrainingScreen: View {
                 HStack(spacing: Spacing.s) {
                     ProgressView().controlSize(.small)
                     Text(model.running ?? "Working").font(.apogeeSmall)
-                    Text(progress.busy ?? progress.lastSaid ?? "")
-                        .font(.apogeeMeta.monospaced())
-                        .foregroundStyle(Palette.textSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    if let bytes = model.pullBytes {
+                        // A streamed pull's bytes, file by file (the CLI's M30).
+                        if let fraction = bytes.fraction {
+                            ProgressView(value: fraction).frame(maxWidth: 220)
+                        }
+                        Text(TrainingViewModel.bytesWords(bytes))
+                            .font(.apogeeMeta.monospaced())
+                            .foregroundStyle(Palette.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    } else {
+                        Text(progress.busy ?? progress.lastSaid ?? "")
+                            .font(.apogeeMeta.monospaced())
+                            .foregroundStyle(Palette.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
                     Spacer()
                     Button("Stop") { Task { await model.stop() } }
                 }
@@ -943,6 +957,32 @@ struct SheetFrame<Fields: View>: View {
         .frame(width: 900, height: 520)
         .task {
             await training.connect(binary: previewBinary)
+            training.newPull()
+            training.pullRef = "someone/heat-notes"
+            training.pull()
+        }
+}
+
+#Preview("Datasets: a pull streaming, its bytes") {
+    let training = TrainingPreview.training(said: TrainingPreview.pullStreamed(), vocabulary: TrainingPreview.m30)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 520)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.tab = .datasets
+            training.newPull()
+            training.pullRef = "someone/heat-notes"
+            training.pull()
+        }
+}
+
+#Preview("Datasets: pulled, Prepare it on the folder its document names") {
+    let training = TrainingPreview.training(said: TrainingPreview.pullStreamed(whole: true), finishes: true, vocabulary: TrainingPreview.m30)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 520)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.tab = .datasets
             training.newPull()
             training.pullRef = "someone/heat-notes"
             training.pull()

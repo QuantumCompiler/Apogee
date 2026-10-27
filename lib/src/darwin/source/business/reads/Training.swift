@@ -250,6 +250,81 @@ public struct PipelineRun: Sendable, Equatable, Identifiable {
     }
 }
 
+/// A named pipeline as the binary states it: `train pipeline list
+/// --output-format json` lists them (`{"object":"list","data":[…]}`, `data`
+/// `[]` and never null when none is named) and `train pipeline show <name>
+/// --output-format json` is one (`{"object":"training.pipeline",…}`) -- the
+/// CLI's M30. Each is what a `train pipeline run --pipeline` can name: the
+/// student, and the stages in order, each with its dataset, its own eval
+/// suite and the suites its cumulative gate holds it to. Fields this client
+/// does not know are passed over.
+public struct PipelineSpec: Sendable, Equatable, Identifiable {
+    /// One stage of the plan, as the spec writes it.
+    public struct Stage: Sendable, Equatable, Identifiable {
+        /// From 1, in the spec's order -- as a run's `stage` events count.
+        public let index: Int
+        public let name: String
+        /// A dataset's name, or a `.jsonl` path, as the spec names it.
+        public let dataset: String
+        /// Its own eval suite.
+        public let evalSuite: String
+        /// The suites its cumulative gate holds it to, at 100%: every earlier
+        /// stage's, then its own.
+        public let gate: [String]
+        /// `""` is lora, the CLI's default.
+        public let method: String
+        /// `0` leaves each to the trainer's default.
+        public let iters: Int
+        public let batchSize: Int
+        public let numLayers: Int
+        public let gradCheckpoint: Bool
+        public let maskPrompt: Bool
+        /// The share of each earlier stage's dataset mixed into this one's.
+        public let rehearsalFraction: Double
+        public var id: Int { index }
+    }
+
+    /// What a run takes: the `training.pipelines` entry's name.
+    public let name: String
+    /// The spec file it was read from; `nil` for a `training.pipelines`
+    /// entry.
+    public let path: String?
+    /// The stored snapshot it trains, as the spec names it.
+    public let student: String
+    public let stages: [Stage]
+    public var id: String { name }
+
+    /// One spec, a list's entry or `show`'s document.
+    public init?(_ value: JSONValue) {
+        guard let name = value["name"]?.stringValue, !name.isEmpty else { return nil }
+        self.name = name
+        path = value["path"]?.stringValue
+        student = value["student"]?.stringValue ?? ""
+        stages = (value["stages"]?.arrayValue ?? []).enumerated().map { position, stage in
+            Stage(
+                index: position + 1, name: stage["name"]?.stringValue ?? "", dataset: stage["dataset"]?.stringValue ?? "",
+                evalSuite: stage["eval_suite"]?.stringValue ?? "",
+                gate: (stage["gate"]?.arrayValue ?? []).compactMap(\.stringValue),
+                method: stage["method"]?.stringValue ?? "", iters: stage["iters"]?.intValue ?? 0,
+                batchSize: stage["batch_size"]?.intValue ?? 0, numLayers: stage["num_layers"]?.intValue ?? 0,
+                gradCheckpoint: stage["grad_checkpoint"]?.boolValue ?? false,
+                maskPrompt: stage["mask_prompt"]?.boolValue ?? false,
+                rehearsalFraction: TrainingRun.number(stage["rehearsal_fraction"]) ?? 0)
+        }
+    }
+
+    /// `show`'s document: one pipeline, never a list or another read's.
+    public init?(document: ReadDocument) {
+        guard document.object == "training.pipeline" else { return nil }
+        self.init(document.value)
+    }
+
+    /// `list`'s document, in the binary's order.
+    public static func list(from document: ReadDocument) -> [PipelineSpec] {
+        (document.entries ?? []).compactMap(PipelineSpec.init)
+    }
+}
+
 /// The cycle's headline in `train status` (its `cycle`): where the loop
 /// stands, without its passes.
 public struct CycleHeadline: Sendable, Equatable {

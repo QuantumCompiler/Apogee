@@ -1,0 +1,16 @@
+{"protocol_version":1,"schema":"2026-10-26","type":"job","verb":"datasets pull"}
+{"text":"downloading 2 file(s), 136 KiB, into /Users/someone/.apogee/training/datasets/raw/someone--heat-notes","type":"notice"}
+{"count":2,"done":16384,"file":"data/train.jsonl","index":1,"total":100000,"type":"bytes"}
+{"count":2,"done":32768,"file":"data/train.jsonl","index":1,"total":100000,"type":"bytes"}
+{"count":2,"done":49152,"file":"data/train.jsonl","index":1,"total":100000,"type":"bytes"}
+{"count":2,"done":65536,"file":"data/train.jsonl","index":1,"total":100000,"type":"bytes"}
+{"count":2,"done":81920,"file":"data/train.jsonl","index":1,"total":100000,"type":"bytes"}
+{"count":2,"done":98304,"file":"data/train.jsonl","index":1,"total":100000,"type":"bytes"}
+{"count":2,"done":100000,"file":"data/train.jsonl","index":1,"total":100000,"type":"bytes"}
+{"count":2,"done":16384,"file":"data/test.jsonl","index":2,"total":40000,"type":"bytes"}
+{"count":2,"done":32768,"file":"data/test.jsonl","index":2,"total":40000,"type":"bytes"}
+{"count":2,"done":40000,"file":"data/test.jsonl","index":2,"total":40000,"type":"bytes"}
+{"text":"/Users/someone/.apogee/training/datasets/raw/someone--heat-notes","type":"notice"}
+{"text":"2 file(s), 136 KiB","type":"notice"}
+{"text":"Convert it with:  apogee datasets prepare /Users/someone/.apogee/training/datasets/raw/someone--heat-notes","type":"notice"}
+{"document":{"bytes":140000,"files":2,"object":"dataset.pull","path":"/Users/someone/.apogee/training/datasets/raw/someone--heat-notes","ref":"someone/heat-notes"},"type":"document"}

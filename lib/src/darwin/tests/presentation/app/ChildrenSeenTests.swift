@@ -194,6 +194,24 @@ struct ChildrenSeenTests {
         #expect(await eventually { registry.children.isEmpty && !app.training.isRunning })
     }
 
+    @Test("a streamed datasets pull is seen under its command and its Stop reaches it (GUI M14)")
+    func pullSeen() async throws {
+        let home = try FakeApogeeHome()
+        defer { home.remove() }
+        let registry = ChildRegistry()
+        let app = try composed(home, registry, route: "training")
+        await app.training.connect(binary: home.apogee)
+        // The branch binary's vocabulary: the pull asks for its stream.
+        app.training.vocabulary = { "2026-10-26" }
+        app.training.newPull()
+        app.training.pullRef = "someone/heat-notes"
+        app.training.pull()
+        #expect(await eventually { registry.children(.job).map(\.label) == ["apogee datasets pull someone/heat-notes"] })
+        #expect(app.monitor.liveChildren().map(\.label) == ["apogee datasets pull someone/heat-notes"])
+        await app.training.stop()
+        #expect(await eventually { registry.children.isEmpty && !app.training.isRunning })
+    }
+
     @Test("composed with only a registry, the app's own starters list in it")
     func defaultStartersList() async throws {
         let home = try FakeApogeeHome()

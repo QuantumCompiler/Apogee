@@ -125,11 +125,28 @@ struct CapabilitiesFromLaunchTests {
         #expect(app.settings.configSetHint == "Read here, set in the config file: this apogee has no config set.", "asked, and it said")
     }
 
+    @Test("Training follows the vocabulary read at launch (GUI M14): the branch's 2026-10-26 keeps a halt during a pass and streams the pull; the installed 2026-10-25 doesn't")
+    func trainingFollowsTheVocabulary() async throws {
+        let (app, _, jobs) = await launched(try schema("machine-schema-2026-10-26"), route: "training")
+        #expect(app.training.vocabulary() == "2026-10-26")
+        #expect(app.training.keepsHalt && app.training.streamsPull)
+        app.training.pullRef = "someone/heat-notes"
+        app.training.pull()
+        #expect(jobs.streaming == [true])
+        let (older, _, olderJobs) = await launched(try schema("machine-schema"), route: "training")
+        #expect(older.training.vocabulary() == "2026-10-25")
+        #expect(!older.training.keepsHalt && !older.training.streamsPull)
+        older.training.pullRef = "someone/heat-notes"
+        older.training.pull()
+        #expect(olderJobs.streaming == [false])
+    }
+
     @Test("a binary that doesn't answer: the fallbacks, and Settings never says it has no config set")
     func unknownRestoredElsewhere() async {
         let (app, starter, _) = await launched(nil, route: "training")
         #expect(starter.openedCount == 0)
         #expect(!app.downloads.streams() && !app.settings.hasTrack52())
+        #expect(app.training.vocabulary() == nil && !app.training.keepsHalt && !app.training.streamsPull)
         #expect(app.settings.configSetHint?.contains("has no config set") == false)
         #expect(app.settings.configSetHint?.contains("hasn't said what it can do") == true)
     }

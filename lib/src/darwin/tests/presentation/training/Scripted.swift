@@ -46,6 +46,9 @@ final class ScriptedRunner: CommandRunning, @unchecked Sendable {
 final class ScriptedJob: JobRunning, @unchecked Sendable {
     let updates: AsyncStream<JobUpdate>
     private let continuation: AsyncStream<JobUpdate>.Continuation
+    /// What the run says once its Stop reaches it, before its end -- a
+    /// stream's own last words on a Ctrl-C.
+    var stopping: [JobUpdate] = []
 
     init() {
         (updates, continuation) = AsyncStream.makeStream(of: JobUpdate.self)
@@ -61,6 +64,7 @@ final class ScriptedJob: JobRunning, @unchecked Sendable {
     }
 
     func stop(grace: Duration) async {
+        stopping.forEach { continuation.yield($0) }
         continuation.yield(.ended(JobEnd(exit: ChildExit(reason: .exited, status: 130), stderrTail: BoundedTail(), interrupted: true)))
         continuation.finish()
     }

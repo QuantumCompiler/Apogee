@@ -21,6 +21,16 @@ import Observation
 /// narration (55h), drawn as they come and read back from their documents
 /// after. No training starts without the person's word, and nothing here
 /// schedules the cycle: that stays the person's own scheduler's.
+///
+/// Since the CLI's M30 the binary states what 4j and 4i worked around, and
+/// its word decides: the named pipelines and their stage plans are `train
+/// pipeline list | show`'s; a halt taken while a pass runs is kept, the pass
+/// saying so in a notice; and `datasets pull` streams as a job, its document
+/// naming the folder it landed in. An older binary keeps 4j's and 4i's ways,
+/// told apart as honestly as each allows: a refused `train pipeline list`
+/// (the read itself), and a vocabulary dated before `keepsHaltSince` or
+/// `streamsPullSince` (the halt and the pull, which no read can ask before
+/// they run).
 @MainActor
 @Observable
 public final class TrainingViewModel {
@@ -141,23 +151,43 @@ public final class TrainingViewModel {
     }
 
     /// `datasets pull owner/name[@revision][:file]` finished: where the CLI
-    /// put the files and what it said of them, from its own last lines --
-    /// `<n> file(s), <size>`, and the `datasets prepare` that makes them
-    /// trainer-ready, which the tab offers.
+    /// put the files and what it said of them -- `<n> file(s), <size>` --
+    /// for the `datasets prepare` that makes them trainer-ready, which the
+    /// tab offers.
     public struct PulledDataset: Equatable, Sendable {
         /// The directory `datasets prepare` takes, as the CLI named it.
         public let path: String
         /// `2 file(s), 3 MiB`.
         public let summary: String
 
-        /// From what the pull printed: its `Convert it with:  apogee datasets
-        /// prepare <path>` line, and the count line before it. `nil` when it
-        /// names no prepare.
+        /// From what an older pull printed as text (4i): its `Convert it
+        /// with:  apogee datasets prepare <path>` line, and the count line
+        /// before it. `nil` when it names no prepare.
         public init?(said lines: [String]) {
             let door = "apogee datasets prepare "
             guard let line = lines.last(where: { $0.contains(door) }), let range = line.range(of: door) else { return nil }
             path = String(line[range.upperBound...]).trimmingCharacters(in: .whitespaces)
-            summary = lines.last(where: { $0.contains(" file(s), ") && !$0.hasPrefix("downloading ") }) ?? ""
+            summary = Self.countLine(lines) ?? ""
+        }
+
+        /// From a streamed pull's closing document (the CLI's M30), `{object:
+        /// "dataset.pull", ref, path, files, bytes}`: the folder is the
+        /// document's `path`, whatever its lines said; the summary its own
+        /// count line where it said one, else the document's counts. `nil`
+        /// for any other document.
+        public init?(document: JSONValue, said lines: [String]) {
+            guard document["object"]?.stringValue == "dataset.pull", let path = document["path"]?.stringValue, !path.isEmpty
+            else { return nil }
+            self.path = path
+            let files = document["files"]?.intValue ?? 0
+            let size = ByteCountFormatter.string(fromByteCount: Int64(document["bytes"]?.intValue ?? 0), countStyle: .file)
+            summary = Self.countLine(lines) ?? "\(files) file\(files == 1 ? "" : "s"), \(size)"
+        }
+
+        /// The pull's own count line, `2 file(s), 3 MiB` -- never its opening
+        /// `downloading …` line.
+        private static func countLine(_ lines: [String]) -> String? {
+            lines.last { $0.contains(" file(s), ") && !$0.hasPrefix("downloading ") }
         }
     }
 
@@ -315,9 +345,22 @@ public final class TrainingViewModel {
     /// its fields.
     public private(set) var promoteRefusal: String?
     public var pending: Pending?
-    /// The named pipelines -- `training.pipelines` entries -- as the binary
-    /// completes `train pipeline run --pipeline` (no read lists them).
+    /// The named pipelines' names -- `training.pipelines` entries -- as
+    /// `train pipeline list` lists them (the CLI's M30); on an older binary,
+    /// which refuses that read, as it completes `train pipeline run
+    /// --pipeline` (4j).
     public private(set) var pipelineSpecs: [String] = []
+    /// The named pipelines as `train pipeline list` states them: each one's
+    /// student and stages. Empty on an older binary, whose names are
+    /// completion's alone.
+    public private(set) var specs: [PipelineSpec] = []
+    /// The named pipeline whose page is open -- its stage plan -- in place
+    /// of a run's.
+    public private(set) var openedSpec: String?
+    /// The open spec as `train pipeline show <name>` last stated it.
+    private var shownSpec: PipelineSpec?
+    /// Why the open spec could not be shown, in the CLI's words.
+    public private(set) var specFailure: String?
     /// Every pipeline run, newest first, as `train pipeline status` lists
     /// them -- a cycle pass's among them.
     public private(set) var pipelineRuns: [PipelineRunRow] = []
@@ -352,11 +395,18 @@ public final class TrainingViewModel {
     public private(set) var live: Live?
     public private(set) var failure: String?
     public var say: (@MainActor (String) -> Void)?
+    /// The binary's vocabulary date, as the app read it at launch
+    /// (`__machine-schema`, GUI 4k) and each session refreshed it; `nil`
+    /// until it has said -- an older binary's ways, the fallback.
+    public var vocabulary: @MainActor () -> String? = { nil }
 
     private let runner: any CommandRunning
     private let starter: any JobStarting
     private var binary: URL?
     private var job: (any JobRunning)?
+    /// The notice a pass run here ended with when a halt taken while it ran
+    /// was kept.
+    private var haltNotice: String?
 
     public init(runner: any CommandRunning, starter: any JobStarting) {
         self.runner = runner
@@ -411,16 +461,61 @@ public final class TrainingViewModel {
         modelsListing = .of(models)
     }
 
-    /// The named pipelines, the runs, and the open run's manifest again.
+    /// The named pipelines, the runs, and the open page's document again.
     private func readPipelines() async {
         guard let binary else { return }
-        if case .done(let said) = await runner.command(binary: binary, ["__complete", "train", "pipeline", "run", "--pipeline", ""]) {
-            pipelineSpecs = Self.candidates(said)
-        }
+        await readSpecs(binary)
         let read = await runner.read(binary: binary, ["train", "pipeline", "status"])
         if let document = read.document { pipelineRuns = PipelineRunRow.list(from: document) }
         pipelinesListing = .of(read)
         if let open = selectedPipelineRun { await readPipelineRun(open) }
+        if let spec = openedSpec { await readSpec(spec) }
+    }
+
+    /// The named pipelines as `train pipeline list` states them (the CLI's
+    /// M30). The read itself tells the binaries apart: an older one refuses
+    /// it (`A subcommand is required`), and its names are then completion's,
+    /// as 4j read them -- no plan, nothing said of the refusal.
+    private func readSpecs(_ binary: URL) async {
+        if let document = await runner.read(binary: binary, ["train", "pipeline", "list"]).document {
+            specs = PipelineSpec.list(from: document)
+            pipelineSpecs = specs.map(\.name)
+            return
+        }
+        specs = []
+        if case .done(let said) = await runner.command(binary: binary, ["__complete", "train", "pipeline", "run", "--pipeline", ""]) {
+            pipelineSpecs = Self.candidates(said)
+        }
+    }
+
+    /// A named pipeline's page opened in place of a run's: its stage plan as
+    /// `train pipeline show <name>` states it.
+    public func openSpec(_ name: String) async {
+        openedSpec = name
+        selectedPipelineRun = nil
+        specFailure = nil
+        await readSpec(name)
+    }
+
+    private func readSpec(_ name: String) async {
+        guard let binary else { return }
+        let read = await runner.read(binary: binary, ["train", "pipeline", "show", name])
+        guard openedSpec == name else { return }
+        if let document = read.document, let spec = PipelineSpec(document: document) {
+            shownSpec = spec
+            specFailure = nil
+        } else {
+            shownSpec = nil
+            specFailure = read.failure ?? "apogee showed no pipeline \(name)"
+        }
+    }
+
+    /// The open spec's plan: `show`'s, or -- until it answers -- the list's
+    /// entry by that name.
+    public var openSpecPlan: PipelineSpec? {
+        guard let name = openedSpec else { return nil }
+        if let shownSpec, shownSpec.name == name { return shownSpec }
+        return specFailure == nil ? specs.first { $0.name == name } : nil
     }
 
     /// The completion's candidates: one a line, a description after a tab
@@ -435,6 +530,7 @@ public final class TrainingViewModel {
     /// running here.
     public func openPipelineRun(_ id: String?) async {
         selectedPipelineRun = id
+        openedSpec = nil
         pipelineRunFailure = nil
         guard let id else { return }
         await readPipelineRun(id)
@@ -551,10 +647,10 @@ public final class TrainingViewModel {
     /// The pipeline run going here now, once its stream has named it.
     public var livePipelineID: String? { live == .pipeline ? run?.pipelineRunID : nil }
 
-    /// Whether the open page is the pipeline run going here: none is chosen,
-    /// or the chosen one is it.
+    /// Whether the open page is the pipeline run going here: no run and no
+    /// spec is chosen, or the chosen run is it.
     public var showsLivePipeline: Bool {
-        guard live == .pipeline, let run else { return false }
+        guard live == .pipeline, let run, openedSpec == nil else { return false }
         guard let open = selectedPipelineRun else { return true }
         return run.pipelineRunID == nil || run.pipelineRunID == open
     }
@@ -625,6 +721,44 @@ public final class TrainingViewModel {
             .joined(separator: " · ")
     }
 
+    /// A named pipeline in a line, as its row says it: `2 stages · student
+    /// tiny`.
+    public static func words(_ spec: PipelineSpec) -> String {
+        let stages = "\(spec.stages.count) stage\(spec.stages.count == 1 ? "" : "s")"
+        return spec.student.isEmpty ? stages : "\(stages) · student \(spec.student)"
+    }
+
+    /// Where a spec is written, as `train pipeline show` says it: a
+    /// `training.pipelines` entry, or the file it was read from.
+    public static func source(_ spec: PipelineSpec) -> String {
+        spec.path.map { "the spec file \($0)" } ?? "a training.pipelines entry"
+    }
+
+    /// A planned stage in a line: its dataset, and the suites its cumulative
+    /// gate holds it to -- `dataset regress · gate hello + nope`, as the
+    /// CLI's GATE column joins them.
+    public static func planWords(_ stage: PipelineSpec.Stage) -> String {
+        let gate = stage.gate.isEmpty ? stage.evalSuite : stage.gate.joined(separator: " + ")
+        return ["dataset \(stage.dataset)", gate.isEmpty ? "" : "gate \(gate)"].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    /// A planned stage's tuning as the spec writes it, each default left to
+    /// the trainer unsaid: `lora · 4 iterations`.
+    public static func tuningWords(_ stage: PipelineSpec.Stage) -> String {
+        var parts = [stage.method.isEmpty ? "lora" : stage.method]
+        if stage.iters > 0 { parts.append("\(stage.iters) iteration\(stage.iters == 1 ? "" : "s")") }
+        if stage.batchSize > 0 { parts.append("batch \(stage.batchSize)") }
+        if stage.numLayers > 0 { parts.append("\(stage.numLayers) layer\(stage.numLayers == 1 ? "" : "s")") }
+        if stage.gradCheckpoint { parts.append("gradient checkpointing") }
+        if stage.maskPrompt { parts.append("completion-only loss") }
+        if stage.rehearsalFraction > 0 { parts.append("rehearses \(percent(stage.rehearsalFraction)) of each earlier dataset") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// The rule every planned stage is held to, in the words `train pipeline
+    /// show` closes with.
+    public static let gateRule = "A stage passes when its gate -- its own suite and every earlier stage's -- scores 100%."
+
     /// A score, 0 to 1, as a whole percent.
     public static func percent(_ score: Double) -> String {
         String(format: "%.0f%%", score * 100)
@@ -657,27 +791,60 @@ public final class TrainingViewModel {
     /// first.
     public var canRunCycle: Bool { binary != nil && !isRunning && !cycleHeld && !cycleHalted }
 
-    /// A halt can be taken: not halted already, and no pass holds the cycle
-    /// -- one taken during a pass is lost when the pass records itself (the
-    /// CLI's history is written whole at a pass's end).
-    public var canHaltCycle: Bool { binary != nil && !cycleHeld && !cycleHalted }
+    /// The vocabulary's date from which the binary keeps a halt taken while
+    /// a pass runs -- the pass finishes and says so in a notice (the CLI's
+    /// M30, 2026-10-26). M30 kept the date its M29 had set, so a development
+    /// build between the two announces it too; no release does.
+    public static let keepsHaltSince = "2026-10-26"
+
+    /// Whether the binary keeps a halt taken while a pass holds the cycle
+    /// (M30), as its vocabulary says; an older one, or one that hasn't said,
+    /// loses it when the pass records itself.
+    public var keepsHalt: Bool { (vocabulary() ?? "") >= Self.keepsHaltSince }
+
+    /// A halt can be taken: not halted already -- and, on a binary that loses
+    /// a halt taken during a pass, no pass holds the cycle.
+    public var canHaltCycle: Bool { binary != nil && !cycleHalted && (!cycleHeld || keepsHalt) }
 
     /// A resume is offered: the loop is halted.
     public var canResumeCycle: Bool { binary != nil && cycleHalted }
 
-    /// Why Halt isn't offered while a pass holds the cycle.
+    /// Why Halt isn't offered while a pass holds the cycle, on a binary that
+    /// loses a halt taken then (before the CLI's M30).
     static let heldWords =
         "A pass holds the cycle now. A halt taken during a pass is lost when the pass records itself -- Stop it, if it is this place's, or halt once it has ended."
+
+    /// What a halt does to the pass holding the cycle, on a binary that
+    /// keeps it: the CLI's words, `train cycle halt`'s answer then.
+    static let keptWords = "The pass running now finishes, and keeps the halt"
 
     /// What the cycle's controls say about its state, when something holds
     /// them back.
     public var cycleHoldText: String? {
-        if cycleHeld { return Self.heldWords }
-        if cycleHalted {
-            let reason = cycle?.haltReason ?? status?.cycle?.haltReason ?? ""
-            return "Halted: \(reason.isEmpty ? "'apogee train cycle halt' was run" : reason). Every pass refuses -- your scheduler's too -- until Resume clears it."
-        }
-        return nil
+        if cycleHeld && !keepsHalt { return Self.heldWords }
+        guard cycleHalted else { return nil }
+        let reason = cycle?.haltReason ?? status?.cycle?.haltReason ?? ""
+        let halted = "Halted: \(reason.isEmpty ? "'apogee train cycle halt' was run" : reason)."
+        return cycleHeld
+            ? "\(halted) \(Self.keptWords): every pass after it refuses -- your scheduler's too -- until Resume clears it."
+            : "\(halted) Every pass refuses -- your scheduler's too -- until Resume clears it."
+    }
+
+    /// The notice a pass running here says when a halt taken while it ran
+    /// is kept, once it has said it (the CLI's M30) -- machine-mode.md's
+    /// `[cycle] halted while this pass ran (…) -- the halt is kept: …`.
+    public var liveHaltNotice: String? {
+        live == .cycle ? run.flatMap { Self.haltNotice(in: $0.notices) } : nil
+    }
+
+    /// The notice the last pass run here ended with, its halt kept, while the
+    /// loop stays halted: drawn on the tab, as the CLI said it.
+    public var keptHalt: String? { cycleHalted ? haltNotice : nil }
+
+    /// The pass's own word that a halt taken while it ran is kept: its
+    /// notice, never a `pass` of state `halted` (the breaker's).
+    static func haltNotice(in notices: [String]) -> String? {
+        notices.last { $0.hasPrefix("[cycle] halted while this pass ran") }
     }
 
     /// The cycle is unattended by design: its schedule is the person's own.
@@ -744,7 +911,9 @@ public final class TrainingViewModel {
         case .resumePipeline:
             "What passed stays; each stage from there is a training run, held to the cumulative gate -- this machine is held until it ends."
         case .runCycle: "It trains, gates and may promote -- this machine is held until it ends."
-        case .haltCycle: "Every 'cycle run' refuses until 'cycle resume' -- your scheduler's passes too."
+        case .haltCycle:
+            "Every 'cycle run' refuses until 'cycle resume' -- your scheduler's passes too."
+                + (cycleHeld && keepsHalt ? " \(Self.keptWords)." : "")
         case .resumeCycle: "It clears the halt and the failure count: your scheduler's next pass runs."
         case .rollback, .deleteDataset, nil: nil
         }
@@ -795,10 +964,38 @@ public final class TrainingViewModel {
         sheet = .pull
     }
 
-    /// `datasets pull <ref>`, as typed: nothing without a reference.
+    /// `datasets pull <ref>`, as typed -- what the sheet shows: nothing
+    /// without a reference. A binary that streams the pull is started with
+    /// its stream asked for besides (`pull()`).
     public var pullArguments: [String]? {
         let ref = pullRef.trimmingCharacters(in: .whitespaces)
         return ref.isEmpty ? nil : ["datasets", "pull", ref]
+    }
+
+    /// The vocabulary's date from which `datasets pull` streams as a job
+    /// (the CLI's M30, 2026-10-26) -- the date M29 set, as `keepsHaltSince`
+    /// says.
+    public static let streamsPullSince = "2026-10-26"
+
+    /// Whether the binary streams `datasets pull` as a job (the CLI's M30),
+    /// as its vocabulary says: its bytes as they move, a Ctrl-C ending it
+    /// with nothing written, its document naming where it landed. An older
+    /// binary refuses the flag ("The following arguments were not expected:
+    /// stream-json --output-format"), and its pull runs as text, as 4i ran
+    /// it.
+    public var streamsPull: Bool { (vocabulary() ?? "") >= Self.streamsPullSince }
+
+    /// The bytes the act running now has moved, as its stream counts them --
+    /// a streamed pull's, file by file.
+    public var pullBytes: JobProgress.Bytes? { run?.bytes }
+
+    /// Bytes in a line: `49 KB of 100 KB · data/train.jsonl (1 of 2)`, the
+    /// total only when the stream knew it.
+    public static func bytesWords(_ bytes: JobProgress.Bytes) -> String {
+        let done = ByteCountFormatter.string(fromByteCount: Int64(bytes.done), countStyle: .file)
+        let total = bytes.total.map { " of " + ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) } ?? ""
+        let file = bytes.file.map { " · \($0)" + (bytes.index.map { i in " (\(i) of \(bytes.count ?? i))" } ?? "") } ?? ""
+        return done + total + file
     }
 
     public func newSynthesis() {
@@ -836,13 +1033,16 @@ public final class TrainingViewModel {
     }
 
     /// `datasets pull <ref>`: a Hugging Face dataset's data files downloaded
-    /// for `datasets prepare`, supervised -- its lines the CLI's, Stop as
-    /// Ctrl-C. Once done, Prepare is offered on the directory it names.
+    /// for `datasets prepare`, supervised, Stop as Ctrl-C. On a binary that
+    /// streams it (M30) a job's stream -- its bytes, its document naming the
+    /// folder; on an older one its lines as text. Once done, Prepare is
+    /// offered on the directory it names.
     public func pull() {
         guard let arguments = pullArguments else { return }
         sheet = nil
         pulled = nil
-        start(arguments, doing: "Pulling", act: .pull)
+        let streamed = streamsPull
+        start(arguments + (streamed ? Self.stream : []), doing: "Pulling", act: .pull(streamed: streamed))
     }
 
     /// The pulled dataset's banner, once read.
@@ -885,13 +1085,18 @@ public final class TrainingViewModel {
         switch pending {
         case .runPipeline(let name):
             selectedPipelineRun = nil
+            openedSpec = nil
             start(pending.arguments + Self.stream, doing: "Running \(name)", act: .pipeline(name))
         case .resumePipeline(let id):
             selectedPipelineRun = id
+            openedSpec = nil
             start(pending.arguments + Self.stream, doing: "Resuming \(id)", act: .pipeline(id))
         case .runCycle:
+            haltNotice = nil
             start(pending.arguments + Self.stream, doing: "Running one pass of the cycle", act: .cycle)
-        case .rollback, .deleteDataset, .haltCycle, .resumeCycle:
+        case .resumeCycle:
+            if await change(pending.arguments) { haltNotice = nil }
+        case .rollback, .deleteDataset, .haltCycle:
             _ = await change(pending.arguments)
         }
     }
@@ -901,7 +1106,8 @@ public final class TrainingViewModel {
     /// last.
     static let stream = ["--output-format", "stream-json"]
 
-    /// Runs a change, reads back, and says how it went; whether it was done.
+    /// Runs a change, reads back, and says how it went -- the answer's last
+    /// line, as the CLI wrote it but for its indent; whether it was done.
     private func change(_ arguments: [String]) async -> Bool {
         guard let binary else { return false }
         let outcome = await runner.command(binary: binary, arguments)
@@ -911,7 +1117,7 @@ public final class TrainingViewModel {
             return false
         }
         if case .done(let stdout) = outcome {
-            say?(stdout.split(whereSeparator: \.isNewline).last.map(String.init) ?? "Done")
+            say?(stdout.split(whereSeparator: \.isNewline).last.map { $0.trimmingCharacters(in: .whitespaces) } ?? "Done")
         }
         return true
     }
@@ -928,8 +1134,9 @@ public final class TrainingViewModel {
         case other
         /// A promotion, as its form sent it: a refusal keeps it to change.
         case promote(PromoteForm)
-        /// A pull: its end names the directory to prepare.
-        case pull
+        /// A pull: its end names the directory to prepare -- its document's
+        /// when it was `streamed` (M30), else its last lines.
+        case pull(streamed: Bool)
         /// A pipeline run or resume -- its spec's name or its run's id --
         /// streamed: its stages live, its manifest read back after.
         case pipeline(String)
@@ -942,34 +1149,40 @@ public final class TrainingViewModel {
         guard let binary, job == nil else { return }
         running = doing
         run = JobProgress()
+        let streaming: Bool
         switch act {
-        case .pipeline: live = .pipeline
-        case .cycle: live = .cycle
-        case .other, .promote, .pull: live = nil
+        case .pipeline: (live, streaming) = (.pipeline, true)
+        case .cycle: (live, streaming) = (.cycle, true)
+        case .pull(let streamed): (live, streaming) = (nil, streamed)
+        case .other, .promote: (live, streaming) = (nil, false)
         }
-        let job = starter.startJob(binary: binary, arguments: arguments, streaming: live != nil, folder: nil)
+        let job = starter.startJob(binary: binary, arguments: arguments, streaming: streaming, folder: nil)
         self.job = job
         Task {
             for await update in job.updates { run?.apply(update) }
             self.job = nil
             let progress = run
             // The run's page stays open on it, read back from its manifest.
-            if case .pipeline = act, let id = progress?.pipelineRunID, selectedPipelineRun == nil || selectedPipelineRun == id {
+            if case .pipeline = act, let id = progress?.pipelineRunID, openedSpec == nil,
+                selectedPipelineRun == nil || selectedPipelineRun == id
+            {
                 selectedPipelineRun = id
             }
+            // A halt taken while the pass ran, kept: the pass's own word.
+            if case .cycle = act { haltNotice = Self.haltNotice(in: progress?.notices ?? []) }
             run = nil
             running = nil
             live = nil
             await refresh()
             switch progress?.status {
             case .done:
-                if case .pull = act, let pulled = PulledDataset(said: progress?.notices ?? []) {
+                if case .pull(let streamed) = act, let pulled = Self.pulled(progress, streamed: streamed) {
                     self.pulled = pulled
                     say?("Pulled: \(pulled.summary.isEmpty ? pulled.path : pulled.summary)")
                 } else if case .pipeline(let name) = act {
                     say?("Pipeline \(name): \(openPipeline?.status ?? "done")")
                 } else if case .cycle = act {
-                    say?(progress?.pass?.text ?? "The pass ended")
+                    say?(haltNotice ?? progress?.pass?.text ?? "The pass ended")
                 } else {
                     say?(progress?.notices.first ?? "\(doing): done")
                 }
@@ -979,12 +1192,23 @@ public final class TrainingViewModel {
             case .stopped:
                 if case .pipeline = act {
                     say?("Stopped: what passed stays -- Resume continues it")
+                } else if case .pull(true) = act, let words = progress?.error {
+                    // The stream's own last word on a Ctrl-C: nothing kept.
+                    say?(words)
                 } else {
                     say?("Stopped: what was finished stays")
                 }
             default: break
             }
         }
+    }
+
+    /// What a finished pull leaves to prepare: a streamed one's folder from
+    /// its closing document (M30), an older one's from its last lines.
+    private static func pulled(_ progress: JobProgress?, streamed: Bool) -> PulledDataset? {
+        let said = progress?.notices ?? []
+        guard streamed else { return PulledDataset(said: said) }
+        return progress?.documents.last.flatMap { PulledDataset(document: $0, said: said) }
     }
 
     /// The failure read: a refused promotion is let go with it.

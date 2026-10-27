@@ -1,0 +1,1 @@
+{"name":"nightly","object":"training.pipeline","path":null,"stages":[{"batch_size":0,"dataset":"starter","eval_suite":"hello","gate":["hello"],"grad_checkpoint":false,"iters":4,"mask_prompt":false,"method":"","name":"base","num_layers":0,"rehearsal_fraction":0.0}],"student":"tiny"}

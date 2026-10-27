@@ -31,6 +31,13 @@ struct SuiteSaidTests {
         model.start()
         Self.opening(stream).forEach(children[0].emit)
         _ = await eventually { model.transcript.status == .ready }
+        // What the child says at launch follows its `session` event, folded a
+        // moment after the status reads ready: wait for it too, so a turn sent
+        // next never overtakes it and it is known as the launch's.
+        let said = Self.opening(stream).compactMap { line in
+            JSONValue.parse(line).flatMap { $0["type"]?.stringValue == "notice" ? $0["text"]?.stringValue : nil }
+        }
+        _ = await eventually { said.allSatisfy(notes(model).contains) }
         return (model, starter)
     }
 

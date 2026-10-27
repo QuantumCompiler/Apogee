@@ -136,6 +136,9 @@ final class AppViewModel {
         collections.say = { [weak shell] text in shell?.say(text) }
         let training = TrainingViewModel(runner: runner ?? ReadRunner(), starter: jobs)
         training.say = { [weak shell] text in shell?.say(text) }
+        // Whether a halt taken during a pass is kept and the pull streams
+        // (the CLI's M30): the vocabulary read at launch says (GUI M14).
+        training.vocabulary = { [weak sessions] in sessions?.vocabulary }
         let agents = AgentsViewModel(runner: runner ?? ReadRunner())
         agents.say = { [weak shell] text in shell?.say(text) }
         let symphonies = SymphoniesViewModel(runner: runner ?? ReadRunner(), starter: jobs)

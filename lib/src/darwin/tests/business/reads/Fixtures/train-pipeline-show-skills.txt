@@ -1,0 +1,8 @@
+skills  (training.pipelines entry)
+student: tiny
+
+#  STAGE      DATASET  GATE
+1  greetings  starter  hello
+2  refusals   regress  hello + nope
+
+a stage passes when its GATE -- its own suite and every earlier stage's -- scores 100%

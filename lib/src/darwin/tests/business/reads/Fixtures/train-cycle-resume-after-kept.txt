@@ -1,0 +1,1 @@
+cycle resumed (was halted: halted by 'apogee train cycle halt'); the failure count is reset

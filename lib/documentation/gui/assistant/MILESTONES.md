@@ -2555,3 +2555,50 @@ Probed on the branch's binary over sandboxes:
 **Not done:**
 - No live pass of the app.
 - A switch made before any child has spoken keeps the app's line, since the library's launch-time schema read isn't consulted for it.
+
+### 2026-10-26 — `training-reads-pipelines-and-pulls` (maintenance item M14): training reads named pipelines, the cycle's halt and datasets pull as the CLI states them
+
+**Why.** The CLI's M30 fixed what 4j's Training tabs had worked around, and the app still worked around it:
+- **Named pipelines came from completion,** with no stage plan before a run.
+- **Halt was disabled during a pass,** with "A halt taken during a pass is lost when the pass records itself". Since M30 the CLI keeps it, and M11's design draws that.
+- **4i's Pull… ran `datasets pull` as text,** with no bytes and its folder read from prose.
+
+Ten of 13 new Training cases failed first.
+
+- [x] **Named specs from `train pipeline list`.** `PipelineSpec` (`business/reads/Training.swift`) decodes `list` and `show`. Each row reads "2 stages · student tiny", and a spec's page shows `show`'s stage plan with Run…. When `list` fails (an older binary), the names come from completion, as in 4j.
+- [x] **Halt during a pass, kept.** On a binary whose machine schema is dated `2026-10-26` or later, Halt is enabled while a pass holds the cycle, asked in the CLI's words. The pass's `[cycle] halted while this pass ran …` notice is drawn live, said as a toast, and stays on the Cycle tab while the halt stands. An older or unknown binary keeps today's disabled button and warning.
+- [x] **`datasets pull` as a job.** On the same binaries Pull… runs `--output-format stream-json`: a progress bar with the bytes and file, Stop through the registry, and Prepare it on the `dataset.pull` document's `path`. A stopped pull says the CLI's own "cancelled -- nothing was written". An older binary pulls as text.
+- [x] **The schema date reaches Training at launch** (`SessionLibraryViewModel.vocabulary`, wired by `AppViewModel`). The `train` parity row names `train pipeline list | show`.
+
+**Decisions made while building** (2026-10-26, each recorded for veto):
+- **The defaults, taken:**
+  - the spec list replaces completion, a row showing its stage count and student;
+  - Halt during a pass is enabled on schema `2026-10-26` or later.
+- **Telling binaries apart:** the specs by trying the read; the halt and the pull by the schema date.
+  - **A development build between the CLI's M29 and M30** also announces `2026-10-26` without the fix, so it would offer a halt that is lost. No release is affected, and the constants' comments say so.
+  - **The two dates live in `TrainingViewModel`** (`keepsHaltSince`, `streamsPullSince`), inside the seam. They could move beside M13's in `MachineProtocol`.
+- **A `list` that fails on a new binary** (a bad config, say) falls back to completion silently.
+- **The halt notice is matched by its documented prefix,** and cleared by Resume or the next pass.
+- **A race in an M13 test, found by the whole-plan runs.** `SuiteSaidTests/pausedAndResumedOnce` failed 2 of 7 runs: its `ready()` helper didn't wait for the admission notice, so the first turn could overtake it. `ready()` now waits for it, test-only.
+
+**Verified.**
+- **Recorded** from the branch binary over a sandbox with the mock trainer, the home written `/Users/someone`:
+  - **The specs:** `train pipeline list` and `show`, text and JSON; the empty list; the unknown-name refusal.
+  - **The halt:** a pass held on its lock by a FIFO nobody read, `cycle status` and `train status` before and after `cycle halt`, the halt's answer, the drained pass ending in its notice, the next pass refused, and the reads after `resume`.
+  - **The pull:** refused as a stream, and stopped with Ctrl-C while its listing waited on a loopback proxy that never answers, leaving nothing.
+  - **The older shapes,** from the installed binary (schema `2026-10-25`): `list` refused, the pull's stream flag refused.
+  - **Hand-made:** `datasets-pull-handmade.jsonl`, the successful stream, from `datasets.cpp`'s lines and M30's test, since a pull that lands needs the network.
+- **27 new cases:**
+  - `PipelinesHaltPullTests` (13), three pinning the older binary;
+  - `PipelineSpecReadsTests` (5) and `PassHaltPullStreamTests` (6);
+  - `CapabilitiesFromLaunchTests/trainingFollowsTheVocabulary`, `ChildrenSeenTests/pullSeen` and `ParityTests/pipelineSpecsPlaced`.
+- **Repeat runs:** over 10 iterations, Training 520, App 240, Sessions 870, Session 1,070, Shell 410, and the reads, jobs and layering bundles 1,340, all passing. `build.sh test` was green over 5 of 5 whole-plan runs at 903 cases. The layering check passes 25 of 25, and `check-previews` finds nothing.
+- **Nine new previews:**
+  - the specs with the `skills` plan open, and with none open;
+  - another's pass holding the cycle with Halt offered, Halt asking first, halted mid-pass, the notice live, and the notice kept after the pass;
+  - a pull streaming its bytes, and pulled with Prepare it.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 4,059 tests and the macOS app's 903 cases passed, with no Swift warning.
+
+**Not done:**
+- No live pass of the app.
+- The design draws the spec rows (M11), but no spec's plan page.
