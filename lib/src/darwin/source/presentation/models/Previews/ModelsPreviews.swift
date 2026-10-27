@@ -494,6 +494,121 @@ enum ModelsPreview {
         }
     }
 
+    // MARK: - Drafters from the list, and the roles a change moves (GUI M16)
+
+    /// The branch's binary (schema 2026-10-26, the CLI's M32) over M5's fake
+    /// directories, every base registered by `config scan --register`: the
+    /// E4B paired and drafting, the 12B paired and its drafter's directory
+    /// then deleted, Qwen3 unpaired -- each drafter on its `models list` row,
+    /// so the table reads no `models info`; each backend's answers only when
+    /// its details open.
+    static let rowsDraftsRunner = PreviewRunner(reads: [
+        (["models", "list"], ModelsDocuments.rowsDraftsList),
+        (["models", "status"], ModelsDocuments.rowsDraftsStatus),
+        (["models", "info", "Gemma4-E4B-4bit"], ModelsDocuments.rowsDraftsInfoBase),
+        (["models", "info", "Gemma4-12B-4bit"], ModelsDocuments.rowsDraftsInfoWider),
+        (["models", "info", "Qwen3-8B-4bit"], ModelsDocuments.rowsDraftsInfoChat),
+    ])
+
+    /// The library on a binary dated for the CLI's M32, as the launch's
+    /// vocabulary read says it.
+    static func dated(over runner: some CommandRunning) -> ModelsViewModel {
+        let models = ModelsViewModel(runner: runner)
+        models.vocabulary = { "2026-10-26" }
+        return models
+    }
+
+    /// The same bases with nothing paired, the 12B the default and Qwen3
+    /// the utility role; then `config delete-backend Gemma4-12B-4bit`, which
+    /// clears the default that named it (the CLI's M33), and the list and
+    /// roles as the binary read them after.
+    static func removeStore() -> PreviewStore {
+        PreviewStore(
+            reads: [
+                (["models", "list"], ModelsDocuments.removeList),
+                (["models", "status"], ModelsDocuments.removeStatus),
+            ],
+            commands: [(["config", "delete-backend", "Gemma4-12B-4bit"], ModelsDocuments.deleteBackendClears)])
+    }
+
+    /// Reads the backends, asks to remove the 12B -- the default -- and
+    /// removes it, as a person does.
+    static func removeTheDefault(_ models: ModelsViewModel, _ runner: PreviewStore) async {
+        await models.connect(binary: previewBinary)
+        if let row = models.rows.first(where: { $0.backend == "Gemma4-12B-4bit" }) { models.askToRemove(row) }
+        runner.change([
+            (["models", "list"], ModelsDocuments.removeListAfter),
+            (["models", "status"], ModelsDocuments.removeStatusAfter),
+        ])
+        await models.confirmRemove()
+    }
+
+    /// The same bases, Qwen3 the default and the utility role; its weights
+    /// deleted from the Backends tab with its backend -- the plan read first,
+    /// then `models delete Qwen3-8B-4bit --yes --and-backends`, which clears
+    /// both roles that named it -- and the list and roles read back.
+    static func deleteRolesStore() -> PreviewStore {
+        PreviewStore(
+            reads: [
+                (["models", "list"], ModelsDocuments.deleteRolesList),
+                (["models", "status"], ModelsDocuments.deleteRolesStatus),
+            ],
+            commands: [
+                (["models", "delete", "Qwen3-8B-4bit"], ModelsDocuments.deleteRolesPlan),
+                (["models", "delete", "Qwen3-8B-4bit", "--yes", "--and-backends"], ModelsDocuments.deleteRolesAndBackends),
+            ])
+    }
+
+    /// Reads the backends, asks to delete Qwen3 with its weights, and
+    /// deletes it with its backend, as a person does.
+    static func deleteTheRoleHolder(_ models: ModelsViewModel, _ runner: PreviewStore) async {
+        await askToDeleteBackend(models, "Qwen3-8B-4bit")
+        runner.change([
+            (["models", "list"], ModelsDocuments.deleteRolesListAfter),
+            (["models", "status"], ModelsDocuments.deleteRolesStatusAfter),
+        ])
+        await models.confirmDelete(andBackends: true)
+    }
+
+    static let addChat = "Qwen3-8B/mlx/1a2b3c4d5e6f"
+
+    /// The same fake directories, nothing registered and no default; then
+    /// Qwen3 registered from Stored weights -- `config add-backend`, which
+    /// sets the default none was (the CLI's M33) -- and the store as the
+    /// binary read it after.
+    static func addStore() -> PreviewStore {
+        PreviewStore(
+            reads: [
+                (["models", "list"], ModelsDocuments.addList),
+                (["models", "list", "--all"], ModelsDocuments.addListAll),
+                (["models", "info", addChat], ModelsDocuments.addInfoChat),
+                (["models", "info", "Gemma4-E4B/mlx/2b3c4d5e6f70"], ModelsDocuments.addInfoBase),
+                (["models", "info", "Gemma4-12B/mlx/7a8b9c0d1e2f"], ModelsDocuments.addInfoWider),
+                (["models", "info", drafter], ModelsDocuments.addInfoDrafter),
+                (["models", "info", drafter12B], ModelsDocuments.addInfoDrafterWider),
+            ],
+            commands: [
+                (["config", "scan"], ModelsDocuments.addScan),
+                (["config", "add-backend", "Qwen3-8B-4bit"], ModelsDocuments.addBackendDefault),
+            ])
+    }
+
+    /// Reads the store, asks to register Qwen3, and registers it, as a
+    /// person does.
+    static func registerTheFirst(_ store: StoreViewModel, _ runner: PreviewStore) async {
+        await store.connect(binary: previewBinary)
+        await store.refresh()
+        await until { store.infos[addChat] != nil }
+        if let set = store.sets.first(where: { $0.handle == addChat }) { await store.askToRegister(set) }
+        runner.change([
+            (["models", "list"], ModelsDocuments.addListAfter),
+            (["models", "list", "--all"], ModelsDocuments.addListAllAfter),
+            (["models", "info", "Qwen3-8B-4bit"], ModelsDocuments.addInfoBackendAfter),
+            (["models", "info", kindPath(addChat)], ModelsDocuments.addInfoPathAfter),
+        ])
+        await store.registerIt()
+    }
+
     // MARK: - A delete, as the CLI plans and narrates it (GUI 4e)
 
     static let deleteLlamaQ4 = "Llama3.2-1B-Instruct/gguf/5703795782eb"

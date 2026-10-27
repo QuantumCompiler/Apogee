@@ -56,6 +56,41 @@ struct PreviewRunner: CommandRunning {
     }
 }
 
+/// A runner over a home that changes as a preview's story goes (GUI M16):
+/// it answers as `before` does until the binary is asked `change` -- which
+/// `before` answers -- and as `after` does from then on, as the binary read
+/// the home back.
+final class PreviewChanging: CommandRunning, @unchecked Sendable {
+    private let lock = NSLock()
+    private let before: PreviewRunner
+    private let after: PreviewRunner
+    private let change: [String]
+    private var changed = false
+
+    init(_ before: PreviewRunner, after: PreviewRunner, once change: [String]) {
+        self.before = before
+        self.after = after
+        self.change = change
+    }
+
+    /// The runner answering `arguments`, flipped once the change is asked.
+    private func answering(_ arguments: [String]) -> PreviewRunner {
+        lock.withLock {
+            let runner = changed ? after : before
+            if arguments.starts(with: change) { changed = true }
+            return runner
+        }
+    }
+
+    func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
+        await answering(arguments).read(binary: binary, arguments)
+    }
+
+    func command(binary: URL, _ arguments: [String]) async -> CommandOutcome {
+        await answering(arguments).command(binary: binary, arguments)
+    }
+}
+
 /// A job that keeps running and has said nothing yet: a fix in progress.
 final class PreviewJob: JobRunning {
     let updates: AsyncStream<JobUpdate>

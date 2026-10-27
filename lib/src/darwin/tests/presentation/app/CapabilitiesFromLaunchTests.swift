@@ -153,6 +153,16 @@ struct CapabilitiesFromLaunchTests {
         #expect(unsaid.graph.vocabulary() == nil && !unsaid.sessions.readsDocuments, "a binary that hasn't said is read as text")
     }
 
+    @Test("the list rows and config verbs of the CLI's M32 and M33 follow the vocabulary read at launch (GUI M16): Models and Settings hear the branch's 2026-10-26, the installed 2026-10-25, and nothing from one that hasn't said")
+    func rowsAndVerbsFollowTheVocabulary() async throws {
+        let (app, _, _) = await launched(try schema("machine-schema-2026-10-26"), route: "models")
+        #expect(app.models.vocabulary() == "2026-10-26" && app.settings.vocabulary() == "2026-10-26")
+        let (older, _, _) = await launched(try schema("machine-schema"), route: "models")
+        #expect(older.models.vocabulary() == "2026-10-25")
+        let (unsaid, _, _) = await launched(nil, route: "models")
+        #expect(unsaid.models.vocabulary() == nil)
+    }
+
     @Test("a binary that doesn't answer: the fallbacks, and Settings never says it has no config set")
     func unknownRestoredElsewhere() async {
         let (app, starter, _) = await launched(nil, route: "training")

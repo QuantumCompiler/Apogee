@@ -1,0 +1,1 @@
+removed docs.python.org from tools.allowed_hosts

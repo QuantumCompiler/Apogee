@@ -84,10 +84,10 @@ public final class SettingsViewModel {
         /// Ollama CLI's (the CLI's provider table, `needs_model`).
         public var needsModel: Bool { type == "ollama-cli" }
 
-        /// What registering it runs, as a person types it: the entry the
-        /// TUI's `r` writes -- named for the provider, of its type -- through
-        /// the binary's own `config add-backend`, the model where its type
-        /// needs one.
+        /// What registering it runs on a binary before the CLI's M33, as a
+        /// person types it: the entry the TUI's `r` writes -- named for the
+        /// provider, of its type -- through the binary's own `config
+        /// add-backend`, the model where its type needs one.
         public func registration(model: String = "") -> [String] {
             let model = model.trimmingCharacters(in: .whitespaces)
             return ["config", "add-backend", provider, "--type", type] + (model.isEmpty ? [] : ["--model", model])
@@ -116,6 +116,35 @@ public final class SettingsViewModel {
     public private(set) var serverTools: [String: ServerToolsConsent] = [:]
     /// The provider whose registering waits on the person's word.
     public var registering: Provider?
+    /// What a change said, every line as the CLI said it, under the app's
+    /// line for what was done.
+    public struct Said: Equatable, Sendable {
+        public let title: String
+        public let lines: [String]
+
+        /// `said`, every line as printed, where it says a role the CLI moved
+        /// on the person's behalf (`RoleChange`, the CLI's M33): `config
+        /// add-backend` setting the default when none was. `nil` where it
+        /// says none -- a binary before M33 -- whose toast says it.
+        static func movingRoles(title: String, said: String) -> Said? {
+            guard !RoleChange.said(in: said).isEmpty else { return nil }
+            return Said(title: title, lines: said.split(whereSeparator: \.isNewline).map(String.init))
+        }
+    }
+    /// What the last registration said where it said more than one line --
+    /// the default it set, the roster it fetched, why nothing was written
+    /// (the CLI's M33) -- until dismissed; a one-line registration is its
+    /// toast alone (GUI M16).
+    public private(set) var registered: Said?
+    /// The hosts `fetch_url` reaches without asking, as `config get
+    /// tools.allowed_hosts` reads them on a binary that has the read (the
+    /// CLI's M33, GUI M16); `nil` where it hasn't -- a binary before M33, or
+    /// one that hasn't said -- whose list is written blind, each change's
+    /// own words its confirmation, as before.
+    public private(set) var allowedHosts: [String]?
+    /// Why a binary dated for the read couldn't read them, in the CLI's
+    /// words: the form falls back to today's, saying so.
+    public private(set) var allowedHostsUnread: String?
     public private(set) var checks: [CheckRow] = []
     public private(set) var checkSummary: String?
     /// What Health draws of `check`, in order: what fails, what to look at,
@@ -299,7 +328,29 @@ public final class SettingsViewModel {
         }
         webSearch = await value(binary, "tools.search.url")
         recall = await value(binary, "memory.recall")
+        await readAllowedHosts(binary)
         await readRecallHolds(binary)
+    }
+
+    /// The allowed hosts: `config get tools.allowed_hosts`, one a line, on a
+    /// binary dated for the CLI's M33 -- an empty list none, never unread.
+    /// A binary before it isn't asked: its list has no read, and is written
+    /// blind as before. A dated binary that refuses the key falls back to
+    /// that form, its words kept (GUI M16).
+    private func readAllowedHosts(_ binary: URL) async {
+        guard ConfigVerbs.has(vocabulary: vocabulary()) else {
+            allowedHosts = nil
+            allowedHostsUnread = nil
+            return
+        }
+        switch await runner.command(binary: binary, ["config", "get", AllowedHosts.key]) {
+        case .done(let text):
+            allowedHosts = AllowedHosts.list(text)
+            allowedHostsUnread = nil
+        case let other:
+            allowedHosts = nil
+            allowedHostsUnread = other.failure ?? "it could not be read"
+        }
     }
 
     /// The provenance `models list` gives a roster's rows.
@@ -427,13 +478,14 @@ public final class SettingsViewModel {
         await change(binary, ["config", "set-permission", tool, level], done: "\(tool): \(level)")
     }
 
-    /// The allowed websites have no read in this build: the command's own
-    /// words are the confirmation.
+    /// Allows a host: `config add-allowed-host`, its own words the
+    /// confirmation, and the list read back where the binary reads it.
     public func allowHost(_ host: String) async {
         guard let binary = binaryURL, !host.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         await change(binary, ["config", "add-allowed-host", host.trimmingCharacters(in: .whitespaces)], done: nil)
     }
 
+    /// Removes a host: `config delete-allowed-host`, as `allowHost`.
     public func forbidHost(_ host: String) async {
         guard let binary = binaryURL, !host.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         await change(binary, ["config", "delete-allowed-host", host.trimmingCharacters(in: .whitespaces)], done: nil)
@@ -480,20 +532,76 @@ public final class SettingsViewModel {
         await change(binary, ["chats", "recall", "--forget", "--yes"], done: nil)
     }
 
-    /// Registers one scanned provider once the person said yes -- `config
-    /// add-backend <provider> --type <type>`, the entry the TUI's `r` writes
-    /// (the CLI has no verb registering one provider; `providers scan
-    /// --register` registers every one) -- read back by the scan, the CLI's
-    /// words said.
-    public func register(_ provider: Provider, model: String = "") async {
-        registering = nil
-        guard let binary = binaryURL, provider.registers else { return }
-        guard !provider.needsModel || !model.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-        await change(binary, provider.registration(model: model), done: nil)
+    /// Whether the binary registers one provider itself: `providers
+    /// register` (the CLI's M33), on a binary whose vocabulary is dated
+    /// 2026-10-26 or later -- the default taken (GUI M16). Before it, or on
+    /// one that hasn't said, Register composes `config add-backend` as 4k did.
+    public var registersOne: Bool { ConfigVerbs.has(vocabulary: vocabulary()) }
+
+    /// What Register runs for `provider`, as the sheet shows it typed. On a
+    /// binary that registers one provider, `providers register <id>`: the
+    /// TUI's `r` itself -- its plan, the default set when none is, its
+    /// roster fetched, all said -- and no key, which stays the CLI's own
+    /// flows. A model named for a type that runs only with one (Ollama's)
+    /// is the `config add-backend` the CLI names for it, since `providers
+    /// register` takes none and picks Ollama's one model itself. On an
+    /// older binary, `config add-backend` as before (4k).
+    public func registration(for provider: Provider, model: String = "") -> [String] {
+        let model = model.trimmingCharacters(in: .whitespaces)
+        return registersOne && model.isEmpty ? ["providers", "register", provider.provider] : provider.registration(model: model)
     }
 
-    private func change(_ binary: URL, _ arguments: [String], input: Data? = nil, done: String?) async {
-        guard working == nil else { return }
+    /// Whether Register can run for `provider` with `model` named: a type
+    /// that runs only with a model needs one named on an older binary; on
+    /// one that registers one provider, the CLI picks Ollama's one model, or
+    /// says it has several and which.
+    public func canRegister(_ provider: Provider, model: String = "") -> Bool {
+        !provider.needsModel || registersOne || !model.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// Registers one scanned provider once the person said yes -- what
+    /// `registration(for:model:)` names -- read back by the scan, the CLI's
+    /// words said: `providers register`'s document, its first line the toast
+    /// and every line kept where it said more (`registered`); `config
+    /// add-backend`'s output, its last line the toast and every line kept
+    /// where it says a role the CLI moved (the CLI's M33).
+    public func register(_ provider: Provider, model: String = "") async {
+        registering = nil
+        guard let binary = binaryURL, provider.registers, canRegister(provider, model: model), working == nil else { return }
+        registered = nil
+        let arguments = registration(for: provider, model: model)
+        let title = "Registered \(provider.provider)"
+        guard arguments.first == "providers" else {
+            if let stdout = await change(binary, arguments, done: nil) {
+                registered = Said.movingRoles(title: title, said: stdout)
+            }
+            return
+        }
+        working = arguments.prefix(3).joined(separator: " ")
+        let outcome = await runner.read(binary: binary, arguments)
+        working = nil
+        await refresh()
+        guard let document = outcome.document, let done = ProviderRegistration(document: document) else {
+            let failure = outcome.failure ?? "apogee printed no registration"
+            self.failure = failure
+            say?("That didn't work: \(failure)")
+            return
+        }
+        failure = nil
+        registered = done.lines.count > 1 ? Said(title: title, lines: done.lines) : nil
+        say?(done.lines.first ?? title)
+    }
+
+    /// Takes the last registration's words away, once read.
+    public func dismissRegistered() {
+        registered = nil
+    }
+
+    /// Runs a change and reads every pane back, its result said; what it
+    /// printed, when it succeeded.
+    @discardableResult
+    private func change(_ binary: URL, _ arguments: [String], input: Data? = nil, done: String?) async -> String? {
+        guard working == nil else { return nil }
         working = arguments.prefix(3).joined(separator: " ")
         let outcome = await runner.command(binary: binary, arguments, input: input)
         working = nil
@@ -501,11 +609,14 @@ public final class SettingsViewModel {
         if let failure = outcome.failure {
             self.failure = failure
             say?("That didn't work: \(failure)")
+            return nil
         } else if let done {
             say?(done)
         } else if case .done(let stdout) = outcome {
             say?(stdout.split(separator: "\n").last.map(String.init) ?? "Done")
         }
+        if case .done(let stdout) = outcome { return stdout }
+        return nil
     }
 
     /// `check --fix` or `bootstrap`: what a remedy says to run, supervised.

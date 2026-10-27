@@ -233,6 +233,29 @@ public final class TasksViewModel {
         follow(["task", "resume", id, "--output-format", "stream-json"], folder: URL(fileURLWithPath: view.folder, isDirectory: true))
     }
 
+    /// Whether a row says its task was killed mid-round: its `interrupted`,
+    /// as the CLI's M32 puts it on every row (GUI M16) -- read with the list,
+    /// no task's page asked -- while no run of the app's follows it, nor a
+    /// resume of it the app started whose stream hasn't named it yet. A row
+    /// that can't say, from a binary before M32, reads as its status: there
+    /// the task's page still says it, as 4h made it.
+    public func interrupted(_ task: TaskSummary) -> Bool {
+        task.interrupted == true && live(task.id) == nil
+            && !runs.contains { $0.isRunning && $0.arguments.starts(with: ["task", "resume", task.id]) }
+    }
+
+    /// Whether a row's menu offers Resume: exactly the rows that say their
+    /// task was killed mid-round (the default taken, GUI M16).
+    public func resumableRow(_ task: TaskSummary) -> Bool { interrupted(task) }
+
+    /// Resume from a row's menu: the task opened -- its `task status` read,
+    /// for the folder it resumes in and whether it still resumes -- then
+    /// `task resume` there, as its page's Resume runs it.
+    public func resumeRow(_ id: String) async {
+        await select(id)
+        resume(id)
+    }
+
     private func follow(_ arguments: [String], folder: URL?) {
         guard let binary else { return }
         nextRun += 1

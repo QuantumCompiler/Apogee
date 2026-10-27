@@ -188,6 +188,10 @@ final class AppViewModel {
         settings.childPathSource = { await ShellPath.app.answer() }
         sessions.say = { [weak shell] text in shell?.say(text) }
         models.say = { [weak shell] text in shell?.say(text) }
+        // Whether the list states each mlx entry's drafter, so a row without
+        // one has none paired (the CLI's M32): the vocabulary read at launch
+        // says (GUI M16). Settings' Register and allowed hosts ask the same.
+        models.vocabulary = { [weak sessions] in sessions?.vocabulary }
         store.say = { [weak shell] text in shell?.say(text) }
         models.useInSession = { [weak shell, weak sessions] backend in
             shell?.go(.sessions)

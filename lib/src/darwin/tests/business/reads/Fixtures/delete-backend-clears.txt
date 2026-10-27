@@ -1,0 +1,2 @@
+removed backend 'Gemma4-12B-4bit' from /Users/someone/.apogee/config/config.json
+models.default cleared: it named 'Gemma4-12B-4bit'

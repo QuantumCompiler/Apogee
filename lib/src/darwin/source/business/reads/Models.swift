@@ -31,6 +31,45 @@ public struct ModelRow: Sendable, Equatable, Identifiable {
     /// whose MLX sets read as chat models' (`MLXKind.reading`). Named apart
     /// from `kind`, which is where a backend runs.
     public let mlxKind: MLXKind?
+    /// The drafter an `mlx` entry names, as its row states it (the CLI's
+    /// M32): absent when none is paired -- and on every row of a binary
+    /// before M32, which states none (`statesDrafts` tells the two apart).
+    public let draft: Draft?
+
+    /// An `mlx` entry's drafter, as `models list` states it (the CLI's M32,
+    /// the check `models info`'s `draft:` line makes): its directory as the
+    /// config holds it, written absolute, whether it drafts beside the entry,
+    /// and, when it can't, why, in the CLI's words.
+    public struct Draft: Sendable, Equatable {
+        public let path: String
+        public let canDraft: Bool
+        /// Why it cannot draft there -- its drafter gone, mlx-lm's build of
+        /// the base, a base of another width -- with the way out it names;
+        /// `nil` where it drafts.
+        public let refusal: String?
+
+        public init(path: String, canDraft: Bool, refusal: String?) {
+            self.path = path
+            self.canDraft = canDraft
+            self.refusal = refusal
+        }
+    }
+
+    /// The vocabulary's date from which `models list` states each `mlx`
+    /// row's drafter (the CLI's M32). A development build between the CLI's
+    /// M29 and M32 announces this date too without the field: there a paired
+    /// base reads as unpaired, and no release is affected.
+    public static let draftsStatedSince = "2026-10-26"
+
+    /// Whether `rows` -- one `models list` -- states each `mlx` entry's
+    /// drafter, so a row without `draft` has none paired: a row carries one
+    /// (the field's presence), or the binary announcing `vocabulary` is
+    /// dated M32's or later. Otherwise -- a binary before M32, or one that
+    /// hasn't said -- a row without it says nothing either way, and its
+    /// drafter is read from its `models info` (GUI M5).
+    public static func statesDrafts(_ rows: [ModelRow], vocabulary: String?) -> Bool {
+        rows.contains { $0.draft != nil } || (vocabulary ?? "") >= draftsStatedSince
+    }
 
     /// The backend `models list` writes for stored weights no backend points
     /// at -- its table's placeholder, with `-` as their type.
@@ -96,9 +135,17 @@ public struct ModelRow: Sendable, Equatable, Identifiable {
                 verified: text("verified"), section: optional("section") ?? "local", group: optional("group") ?? "other",
                 note: optional("note"), format: optional("format"), quant: optional("quant"), window: optional("window"),
                 components: entry["components"]?.intValue, bytes: entry["bytes"]?.intValue,
-                mlxKind: optional("kind").map(MLXKind.init(word:)))
+                mlxKind: optional("kind").map(MLXKind.init(word:)), draft: Self.draft(entry["draft"]))
             return row.name.isEmpty ? nil : row
         }
+    }
+
+    /// A row's `draft`, where it states one with its path; any other shape
+    /// says nothing.
+    static func draft(_ value: JSONValue?) -> Draft? {
+        guard let value, let path = value["path"]?.stringValue, !path.isEmpty else { return nil }
+        let refusal = value["refusal"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
+        return Draft(path: path, canDraft: value["can_draft"]?.boolValue ?? (refusal == nil), refusal: refusal)
     }
 
     /// The name `models rename` takes: stored weights' directory -- the

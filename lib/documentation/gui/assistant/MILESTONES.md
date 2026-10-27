@@ -2654,3 +2654,58 @@ Ten of 13 new Training cases failed first.
 **Not done:**
 - No live pass of the app.
 - "Budget not known here" has no recording, since no sandbox can hide this machine's memory; it is pinned through the CLI's five verdict words only.
+
+### 2026-10-26 — `rows-and-config-verbs-follow-the-cli` (maintenance item M16): list rows and config verbs follow the CLI
+
+**Why.** The CLI's M32 and M33 put facts on list rows and finished four config verbs, and the app still worked around each:
+- **A killed task read as running** in the task list (only its page knew).
+- **The Backends table read every `mlx` entry's `models info`** to mark drafters (M5).
+- **Settings' Register composed `config add-backend`,** with no default and no roster.
+- **Permissions wrote allowed hosts without reading them.**
+- **Register, Register all and the delete narrations dropped the CLI's new "default set" and "role cleared" lines.**
+
+Twenty-two of 35 new cases failed first. The rest pin the older binary and the decoders.
+
+- [x] **An interrupted task's row says so.** `TaskSummary.interrupted` is decoded from the row and `isRunning` leaves it out. The row says "interrupted" in the warning colour, and its menu offers Resume, which opens the task for its folder and resumes there. With no field, the row reads as today.
+- [x] **Drafters from the list.** Each mark comes from the row's `draft`. A row without one counts as unpaired when any row carries `draft` or the schema is `2026-10-26`+; otherwise M5's per-row read runs. The details pane still reads the selected base's `models info`.
+- [x] **Register through `providers register`.** On schema `2026-10-26`+ (`ConfigVerbs.has`), Register reads `providers register <id> --output-format json` (`ProviderRegistration`, `business/reads/ConfigVerbs.swift`). Its first line is the toast, and a card keeps every line when there are more. Older or unknown binaries use `config add-backend` exactly as before. Ollama with a model typed runs the `config add-backend … --model` the CLI itself names, since `providers register` takes no model.
+- [x] **Permissions reads its hosts** through `config get tools.allowed_hosts` (`AllowedHosts`), each with Remove, read back after every change. Older binaries are never asked.
+- [x] **The CLI's add and delete lines are shown.** `RoleChange` finds an M33 line, and 4e's `DeleteNarration(title:movingRoles:)` keeps the output when it does. Used by Backends' Remove, Stored weights' Register, Register all, and Remove the backend.
+
+**Decisions made while building** (2026-10-26, each recorded for veto):
+- **The defaults, taken:** an interrupted row in the warning colour with Resume from its menu; Register through `providers register` on schema `2026-10-26`+.
+- **No refusal fallback for Register.** A `2026-10-26` development build from before the CLI's M33 shows `providers register`'s refusal in its words rather than retrying. The same caveat covers a pre-M32 build without `draft`. No release is affected.
+- **The row stays quiet while the app's own resume of that task runs.**
+- **4e's names are kept:** registrations reuse `DeleteNarration` and its card. Register all's card shows only what follows the scan's report, which the confirm already showed.
+- **Stored weights' Remove the backend,** also `config delete-backend`, gets the cleared-role card too.
+
+**Verified.**
+- **Recorded** from the branch binary (and the installed one for every `-older` shape) over sandboxes, the home written `/Users/someone`: 61 documents. Fake `claude`, `codex` and `ollama` scripts stood in, so no key was written and no roster fetch left the machine.
+  - **Tasks:** running, killed mid-round (`interrupted: true` beside an exhausted row), and the older list.
+  - **Drafters:** a paired base, a base whose drafter was deleted (`can_draft: false` with the refusal), and an unpaired one.
+  - **Registrations:** `providers register` as JSON and text for each provider, and its refusals.
+  - **Hosts:** `config get tools.allowed_hosts` empty, after adding and after deleting.
+  - **Add and delete lines:** add-backend and `scan --register` setting the default; delete-backend and `models delete --and-backends` clearing roles.
+- **36 new cases:**
+
+  | Suite | Cases |
+  |---|---|
+  | `ListRowsAndConfigVerbsTests` | 9 |
+  | `InterruptedRowTests` | 4 |
+  | `DraftersFromTheListTests` | 5 |
+  | `RoleLinesNarratedTests` | 8 |
+  | `RegisterAndHostsTests` | 9 |
+  | `CapabilitiesFromLaunchTests` | +1 |
+- **Repeat runs:** each touched scheme over 10 iterations (Tasks 210, Models 1,060, Settings 360, App 260, reads and layering 1,200), all passing. The whole plan passed 977 of 977 on three runs of the final state. The layering check passes 25 of 25, and `check-previews` finds nothing.
+- **16 new previews:**
+  - the killed row;
+  - the table's drafters;
+  - Remove and delete clearing roles, and Register setting the default;
+  - `providers register` for codex and Ollama, and their sheets;
+  - the hosts list, and the empty list.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 4,059 tests and the macOS app's 977 cases passed, with no Swift warning.
+
+**Not done:**
+- No live pass of the app.
+- A quantization's registration on the Jobs tab still keeps only its first line, so the "default set" line is dropped there.
+- The CLI's text task list and the TUI still say "running" for a killed task.

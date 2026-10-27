@@ -52,6 +52,21 @@ enum TasksPreview {
         return TasksViewModel(runner: runner, starter: PreviewJobs(), now: { recorded })
     }
 
+    /// The two tasks GUI M16 recorded from the branch's binary (the CLI's
+    /// M32): one killed (SIGKILL) in its first round -- its `task list` row
+    /// saying `interrupted` -- beside one that spent its rounds.
+    static let killed = "task-20261027-023023-2"
+
+    /// Tasks over M16's recordings: the list with the killed task's row, and
+    /// its `task status`.
+    static func killedRows() -> TasksViewModel {
+        let runner = PreviewRunner(reads: [
+            (["task", "list"], TasksDocuments.listKilled),
+            (["task", "status", killed], TasksDocuments.statusKilled),
+        ])
+        return TasksViewModel(runner: runner, starter: PreviewJobs(), now: { recorded })
+    }
+
     static func tasks(listing list: String = listed, said: [JobUpdate] = []) -> TasksViewModel {
         TasksViewModel(runner: runner(listing: list), starter: PreviewJobs(said: said), now: { recorded })
     }

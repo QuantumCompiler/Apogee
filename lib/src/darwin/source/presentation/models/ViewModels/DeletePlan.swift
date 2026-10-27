@@ -62,10 +62,13 @@ public struct DeletePlan: Equatable, Sendable {
 }
 
 /// What a delete said beyond what it removed -- the plan's warnings, a kept
-/// backend and its two doors, the backends removed with it -- kept, every line
-/// as the CLI printed it, until the person dismisses it (GUI 4e).
+/// backend and its two doors, the backends removed with it, the roles it
+/// cleared -- kept, every line as the CLI printed it, until the person
+/// dismisses it (GUI 4e). Since GUI M16 the same card keeps what any other
+/// change said of a role the CLI moved on the person's behalf (the CLI's
+/// M33): a removed backend's cleared roles, a registration's default.
 public struct DeleteNarration: Equatable, Sendable {
-    /// The app's line for what was done: `Deleted <name>`.
+    /// The app's line for what was done: `Deleted <name>`, `Registered <name>`.
     public let title: String
     /// Every line the delete printed, as printed.
     public let lines: [String]
@@ -86,6 +89,19 @@ public struct DeleteNarration: Equatable, Sendable {
             return !line.trimmingCharacters(in: .whitespaces).isEmpty && line != "removed."
         }
         guard more else { return nil }
+        self.title = title
+        self.lines = lines
+    }
+
+    /// `said`, every line as printed, where it says a role the CLI moved on
+    /// the person's behalf (`RoleChange`, the CLI's M33): `models.default set
+    /// to '<name>' (none was set)`, `models.<field> cleared: it named
+    /// '<name>'`. `nil` where it says none -- a change that moved no role, or
+    /// a binary before M33 -- whose toast says it, as before.
+    public init?(title: String, movingRoles said: String) {
+        guard !RoleChange.said(in: said).isEmpty else { return nil }
+        var lines = said.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        while lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeLast() }
         self.title = title
         self.lines = lines
     }

@@ -146,5 +146,38 @@ recall holds 2 chat summaries in /Users/someone/.apogee/memory/chats.db
     static let chatsRecallListing = #"""
 {"data":[{"chat":"20261027-015933-2264","name":"Launch Emails","summary":"Asked when the launch emails go out (09:00 on 2026-11-12) and who approves the copy (Ada, the day before).","updated":"2026-10-27T01:59:33Z"},{"chat":"20261027-015932-30ca","name":"Dev Server Port","summary":"Asked the dev server's port (8080) and confirmed the launch on 2026-11-12.","updated":"2026-10-27T01:59:32Z"},{"chat":"20261027-015931-79d5","name":"Release Checklist","summary":"Asked what was left on the release checklist (the changelog and the signed build) and who signs the build (Grace, once the changelog is in).","updated":"2026-10-27T01:59:31Z"}],"index":"/Users/someone/.apogee/memory/chats.db","object":"list","pending":0}
 """#
+    /// tests/business/reads/Fixtures/providers-scan-fakes.json
+    static let providersScanFakes = #"""
+{"data":[{"backend":"not registered","evidence":["/Users/someone/.local/bin/claude, 2.1.289 (Claude Code)","~/.claude.json exists"],"label":"Claude CLI","provider":"claude","tier":"credentials found","type":"claude-cli"},{"backend":"not registered","evidence":["/Users/someone/.local/bin/codex, codex-cli 0.153.4","`codex login status` reports a login"],"label":"Codex CLI","provider":"codex","tier":"credentials found","type":"codex-cli"},{"backend":"","evidence":["'gemini' is not on PATH"],"label":"Gemini CLI","provider":"gemini","tier":"not found","type":"gemini-cli"},{"backend":"not registered","evidence":["/Users/someone/.local/bin/ollama, ollama version is 0.40.6","the Ollama CLI leaves no login evidence Apogee can check"],"label":"Ollama CLI","provider":"ollama","tier":"installed","type":"ollama-cli"},{"backend":"","evidence":["no key resolves"],"label":"Anthropic API","provider":"anthropic","tier":"not found","type":"anthropic"},{"backend":"","evidence":["no key resolves"],"label":"OpenAI API","provider":"openai","tier":"not found","type":"openai"},{"backend":"","evidence":["no key resolves"],"label":"Google API","provider":"google","tier":"not found","type":"google"}],"object":"list"}
+"""#
+    /// tests/business/reads/Fixtures/providers-register-codex.json
+    static let providersRegisterCodex = #"""
+{"object":"provider.registration","provider":"codex","registration":["registered codex (codex-cli)","models.default set to 'codex' (none was set)"],"rosters":["fetched codex-cli's models: 2 on the roster"]}
+"""#
+    /// tests/business/reads/Fixtures/providers-register-ollama-none.json
+    static let providersRegisterOllamaNone = #"""
+{"object":"provider.registration","provider":"ollama","registration":["ollama: not registered -- an ollama-cli backend needs a model; add one with: apogee config add-backend ollama --type ollama-cli --model <model>","nothing written"],"rosters":[]}
+"""#
+    /// tests/business/reads/Fixtures/allowed-hosts.txt
+    static let allowedHosts = #"""
+docs.python.org
+developer.apple.com
+"""#
+    /// tests/business/reads/Fixtures/allowed-hosts-empty.txt
+    static let allowedHostsEmpty = #"""
+
+"""#
+    /// tests/business/reads/Fixtures/providers-scan-after-codex.json
+    static let providersScanAfterCodex = #"""
+{"data":[{"backend":"not registered","evidence":["/Users/someone/.local/bin/claude, 2.1.289 (Claude Code)","~/.claude.json exists"],"label":"Claude CLI","provider":"claude","tier":"credentials found","type":"claude-cli"},{"backend":"backend: codex","evidence":["/Users/someone/.local/bin/codex, codex-cli 0.153.4","`codex login status` reports a login"],"label":"Codex CLI","provider":"codex","tier":"credentials found","type":"codex-cli"},{"backend":"","evidence":["'gemini' is not on PATH"],"label":"Gemini CLI","provider":"gemini","tier":"not found","type":"gemini-cli"},{"backend":"not registered","evidence":["/Users/someone/.local/bin/ollama, ollama version is 0.40.6","the Ollama CLI leaves no login evidence Apogee can check"],"label":"Ollama CLI","provider":"ollama","tier":"installed","type":"ollama-cli"},{"backend":"","evidence":["no key resolves"],"label":"Anthropic API","provider":"anthropic","tier":"not found","type":"anthropic"},{"backend":"","evidence":["no key resolves"],"label":"OpenAI API","provider":"openai","tier":"not found","type":"openai"},{"backend":"","evidence":["no key resolves"],"label":"Google API","provider":"google","tier":"not found","type":"google"}],"object":"list"}
+"""#
+    /// tests/business/reads/Fixtures/providers-list-after-codex.json
+    static let providersListAfterCodex = #"""
+{"data":[{"architecture":"-","backend":"codex","backend_type":"codex-cli","group":"codex-cli","model":"","profile":"unprofiled","roles":"chat, embedding, extraction","section":"cloud","source":"-","state":"credentials found","type":"model","verified":"no turn yet"},{"architecture":"-","backend":"codex:gpt-5.5","backend_type":"codex-cli","group":"codex-cli","model":"gpt-5.5","profile":"-","roles":"","section":"cloud","source":"roster","state":"-","type":"model","verified":"fetched 2026-10-27"},{"architecture":"-","backend":"codex:gpt-5.5-mini","backend_type":"codex-cli","group":"codex-cli","model":"gpt-5.5-mini","profile":"-","roles":"","section":"cloud","source":"roster","state":"-","type":"model","verified":"fetched 2026-10-27"}],"folded":0,"object":"list"}
+"""#
+    /// tests/business/reads/Fixtures/providers-auth-list.json
+    static let providersAuthList = #"""
+{"backends":[],"data":[],"object":"list"}
+"""#
 }
 #endif

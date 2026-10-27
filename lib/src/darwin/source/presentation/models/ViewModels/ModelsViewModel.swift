@@ -103,10 +103,11 @@ public final class ModelsViewModel {
     public private(set) var adaptersFailure: String?
     /// The adapters being edited: the sheet's.
     public var editingAdapters: AdaptersForm?
-    /// Each `mlx` backend's drafter, by its name, as its `models info`'s
-    /// `draft:` line says it (the CLI's 53i) -- read with the list, since the
-    /// list says nothing of a pairing. Empty against a binary that states no
-    /// kind (before 53e), which is never asked.
+    /// Each `mlx` backend's drafter, by its name: as its row states it (the
+    /// CLI's M32), else -- a list that states none -- as its `models info`'s
+    /// `draft:` line says it (the CLI's 53i, GUI M5), read with the list.
+    /// Empty against a binary that states no kind (before 53e), which is
+    /// never asked.
     public private(set) var drafts: [String: BackendDraft] = [:]
     /// The pair sheet on a base, open (GUI M5).
     public var pairingDrafter: DrafterPairing?
@@ -117,6 +118,11 @@ public final class ModelsViewModel {
     public var checkFiles: (@MainActor (String) -> Void)?
     /// Starts a new session on a backend: the composition's way to Sessions.
     public var useInSession: (@MainActor (String) -> Void)?
+    /// The binary's vocabulary date, as the app read it at launch
+    /// (`__machine-schema`, the session library's): from the CLI's M32 a
+    /// list states each `mlx` row's drafter, so a row without one has none
+    /// paired (GUI M16).
+    public var vocabulary: @MainActor () -> String? = { nil }
 
     private let runner: any CommandRunning
     private var binary: URL?
@@ -143,9 +149,10 @@ public final class ModelsViewModel {
         await refresh()
     }
 
-    /// Reads `models list` -- and each `mlx` entry's drafter from its `models
-    /// info`, where the list states kinds (GUI M5) -- `models status`, and
-    /// the selected model's details.
+    /// Reads `models list` -- each `mlx` entry's drafter from its row where
+    /// the list states drafters (GUI M16), else from its `models info` where
+    /// the list states kinds (GUI M5) -- `models status`, and the selected
+    /// model's details.
     public func refresh() async {
         guard let binary else { return }
         if listing != .read { listing = .reading }
@@ -209,13 +216,24 @@ public final class ModelsViewModel {
             backend: row.backend, rows: list.map { AdaptersView.Row(adapter: $0, check: checks[$0.path]) }, checkFailure: failure)
     }
 
-    /// Each `mlx` entry's drafter, from its `models info` (GUI M5): `models
-    /// list` names no pairing, so the `draft:` line is where the CLI says it.
-    /// A read that fails leaves that backend unmarked: nothing is guessed.
+    /// Each `mlx` entry's drafter. From its row, where the row states one
+    /// (the CLI's M32): no read. A row without one has none paired where the
+    /// list states drafters (`ModelRow.statesDrafts`: a row carries one, or
+    /// the binary is dated M32's or later) -- again no read. Otherwise, a
+    /// binary before M32 or one that hasn't said, from each entry's `models
+    /// info` as M5 read it, since the list names no pairing there: the
+    /// `draft:` line is where the CLI says it. A read that fails leaves that
+    /// backend unmarked: nothing is guessed.
     private func readDrafts() async {
         guard let binary else { return }
+        let stated = ModelRow.statesDrafts(rows, vocabulary: vocabulary())
         var found: [String: BackendDraft] = [:]
-        for row in rows where Self.readsDraft(row) {
+        for row in rows where !row.isStored {
+            if let draft = row.draft {
+                found[row.backend] = BackendDraft(draft)
+                continue
+            }
+            guard !stated, Self.readsDraft(row) else { continue }
             if let info = await runner.read(binary: binary, ["models", "info", row.backend]).document.map(ModelInfo.init),
                 let draft = BackendDraft(info)
             {
@@ -494,7 +512,8 @@ public final class ModelsViewModel {
     }
 
     /// `config delete-backend <name>`: the entry goes; its weights stay under
-    /// Stored weights, ready to register again. Read back.
+    /// Stored weights, ready to register again. Read back, a role the CLI
+    /// cleared with it said in its words (the CLI's M33).
     public func confirmRemove() async {
         guard let name = removing else { return }
         removing = nil
@@ -560,7 +579,9 @@ public final class ModelsViewModel {
 
     /// Runs a change and reads back, its result said. `narrated`, what the
     /// CLI printed beyond what it removed is kept too, never dropped for the
-    /// `done` line (a delete's, GUI 4e).
+    /// `done` line (a delete's, GUI 4e); any other change's words are kept
+    /// where they say a role the CLI moved on the person's behalf -- a
+    /// removal clearing the roles that named its entry (the CLI's M33).
     private func run(_ arguments: [String], doing: String, done: String?, narrated: Bool = false) async {
         guard let binary, working == nil else { return }
         working = doing
@@ -572,7 +593,10 @@ public final class ModelsViewModel {
             say?("That didn't work: \(failure)")
         } else {
             failure = nil
-            if narrated, case .done(let stdout) = outcome, let said = DeleteNarration(title: done ?? "Done", said: stdout) {
+            if case .done(let stdout) = outcome,
+                let said = narrated
+                    ? DeleteNarration(title: done ?? "Done", said: stdout) : DeleteNarration(title: done ?? "Done", movingRoles: stdout)
+            {
                 narration = said
             }
             if case .done(let stdout) = outcome, done == nil {
@@ -654,6 +678,16 @@ public struct BackendDraft: Equatable, Sendable {
     public let said: String
     /// The CLI's line for the drafter itself, where it reads one.
     public let drafter: String?
+
+    /// The drafter as a `models list` row states it (the CLI's M32): its
+    /// path, and the CLI's refusal where it cannot draft, said after its
+    /// `cannot draft beside it: ` as the `draft:` line says it. A row says
+    /// nothing more of one that drafts, so its words are none.
+    public init(_ draft: ModelRow.Draft) {
+        path = draft.path
+        said = draft.canDraft ? "" : Self.cannot + (draft.refusal ?? "")
+        drafter = nil
+    }
 
     public init?(_ info: ModelInfo) {
         guard let line = info.field("draft"), !line.isEmpty else { return nil }

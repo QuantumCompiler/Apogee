@@ -1023,6 +1023,14 @@ struct StepsList: View {
         .task { await ModelsPreview.askToDelete(store, ModelsPreview.deleteLlamaF16) }
 }
 
+#Preview("After Register on a store with no default: the default it set, as the CLI said it") {
+    let runner = ModelsPreview.addStore()
+    let store = StoreViewModel(runner: runner)
+    StoreTable(store: store)
+        .frame(width: 900, height: 600)
+        .task { await ModelsPreview.registerTheFirst(store, runner) }
+}
+
 #Preview("After a delete: its backend kept, with the CLI's two doors") {
     let runner = ModelsPreview.deletesStore()
     let store = StoreViewModel(runner: runner)

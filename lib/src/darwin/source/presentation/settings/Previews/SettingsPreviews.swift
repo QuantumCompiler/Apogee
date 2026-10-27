@@ -1,4 +1,5 @@
 #if DEBUG
+import BusinessReads
 import DataPreferences
 import Foundation
 import InfrastructureProcess
@@ -62,6 +63,43 @@ enum SettingsPreview {
         commands: [(["config", "get", "permissions"], permissions)],
         refused: [["config", "get"]])
 
+    /// The branch's binary (schema 2026-10-26, the CLI's M33) over GUI M16's
+    /// sandbox: fake `claude`, `codex` and `ollama` CLIs on its own PATH, no
+    /// key and no default, scanned; `providers register` answering for codex
+    /// and Ollama; the allowed hosts as `config get` reads them, `hosts`.
+    static func m33Runner(
+        scan: String = SettingsDocuments.providersScanFakes, list: String? = nil, hosts: String = SettingsDocuments.allowedHosts
+    ) -> PreviewRunner {
+        PreviewRunner(
+            reads: [
+                (["auth", "list"], SettingsDocuments.providersAuthList),
+                (["providers", "scan"], scan),
+                (["providers", "register", "codex"], SettingsDocuments.providersRegisterCodex),
+                (["providers", "register", "ollama"], SettingsDocuments.providersRegisterOllamaNone),
+                (["check"], check),
+            ] + (list.map { [(["models", "list"], $0)] } ?? []),
+            commands: [
+                (["config", "get", "permissions"], permissions),
+                (["config", "get", "tools.allowed_hosts"], hosts),
+            ],
+            refused: [["config", "get"]])
+    }
+
+    /// The same home as codex registers: `providers register codex` -- its
+    /// default and roster said -- then the scan and the list read back.
+    static func registeringCodex() -> PreviewChanging {
+        PreviewChanging(
+            m33Runner(), after: m33Runner(scan: SettingsDocuments.providersScanAfterCodex, list: SettingsDocuments.providersListAfterCodex),
+            once: ["providers", "register", "codex"])
+    }
+
+    /// Reads the panes, then registers `provider` as its row's Register…
+    /// does, once the person said yes.
+    static func register(_ model: SettingsViewModel, _ provider: String) async {
+        await read(model)
+        if let row = model.providers.first(where: { $0.provider == provider }) { await model.register(row) }
+    }
+
     /// The documents tests/presentation/settings/SettingsViewModelTests.swift
     /// reads its panes from: a key stored for one provider (names only), a
     /// vendor CLI found, a check with a failing row and its remedy, and the
@@ -99,11 +137,11 @@ enum SettingsPreview {
     static func settings(
         _ pane: SettingsViewModel.Pane = .general, track52: Bool = false, known: Bool = true,
         childPath: ShellPath.Resolution = shellPath, override: String? = nil, check: String = check,
-        runner: PreviewRunner? = nil, vocabulary: String? = nil
+        runner: (any CommandRunning)? = nil, vocabulary: String? = nil
     ) -> SettingsViewModel {
         let preferences = Preferences(store: MemoryStore())
         preferences.binaryOverride = override.map { URL(fileURLWithPath: $0) }
-        let model = SettingsViewModel(runner: runner ?? Self.runner(check: check), starter: PreviewJobs(), preferences: preferences)
+        let model = SettingsViewModel(runner: runner ?? Self.runner(check: check) as any CommandRunning, starter: PreviewJobs(), preferences: preferences)
         model.pane = pane
         model.hasTrack52 = { track52 }
         model.capabilitiesKnown = { known }

@@ -223,9 +223,26 @@ struct BackendsPane: View {
                     }
                 }
             }
+            // What the last registration said beyond its one line -- the
+            // default it set, the roster it fetched (the CLI's M33) -- every
+            // line as the CLI said it, until dismissed.
+            if let said = model.registered {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(said.title).font(.apogeeSmall.weight(.semibold)).foregroundStyle(Palette.textPrimary)
+                        Spacer()
+                        Button("Dismiss") { model.dismissRegistered() }
+                    }
+                    Text(said.lines.joined(separator: "\n"))
+                        .font(.apogeeCode)
+                        .foregroundStyle(Palette.textSecondary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
         .sheet(item: $model.registering) { provider in
-            RegisterProviderSheet(provider: provider) { chosen in
+            RegisterProviderSheet(model: model, provider: provider) { chosen in
                 Task { await model.register(provider, model: chosen) }
             }
         }
@@ -284,10 +301,13 @@ struct ProviderItem: Identifiable {
     let id: String
 }
 
-/// One scanned provider registered as a backend, asked in the TUI's words:
-/// the entry its `r` writes, through `config add-backend`, the command shown
-/// as typed -- and, for a type that runs only with one, its model.
+/// One scanned provider registered as a backend, asked in the TUI's words,
+/// the command shown as typed: `providers register` -- the TUI's `r` itself --
+/// where the binary has it, else the entry its `r` writes through `config
+/// add-backend` (GUI M16) -- and, for a type that runs only with one, its
+/// model.
 struct RegisterProviderSheet: View {
+    let model: SettingsViewModel
     let provider: SettingsViewModel.Provider
     let register: (String) -> Void
     @State private var modelName = ""
@@ -298,9 +318,13 @@ struct RegisterProviderSheet: View {
             Text("Found \(provider.provider) -- register it as a backend?").font(.apogeeHeading)
             Text("\(provider.label) · \(provider.tier)").font(.apogeeSmall).foregroundStyle(Palette.textSecondary)
             if provider.needsModel {
-                TextField("The model it runs, as the provider names it", text: $modelName).textFieldStyle(.roundedBorder)
+                TextField(
+                    model.registersOne ? "The model it runs, or none for apogee to choose" : "The model it runs, as the provider names it",
+                    text: $modelName
+                )
+                .textFieldStyle(.roundedBorder)
             }
-            Text("apogee " + provider.registration(model: modelName).joined(separator: " "))
+            Text("apogee " + model.registration(for: provider, model: modelName).joined(separator: " "))
                 .font(.apogeeCode)
                 .foregroundStyle(Palette.textTertiary)
                 .textSelection(.enabled)
@@ -312,7 +336,7 @@ struct RegisterProviderSheet: View {
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(provider.needsModel && modelName.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(!model.canRegister(provider, model: modelName))
             }
         }
         .padding(Spacing.xl)
@@ -405,14 +429,42 @@ struct PermissionsPane: View {
             }
         }
         SettingRow(label: "Websites fetch_url reaches without asking") {
-            HStack {
-                TextField("docs.python.org", text: $host).textFieldStyle(.roundedBorder)
-                Button("Allow") { Task { await model.allowHost(host) } }
-                Button("Remove") { Task { await model.forbidHost(host) } }
-            }
-            Text("By exact host name. This apogee has no read of the list, so each change shows its own words.")
+            if let hosts = model.allowedHosts {
+                // The list as the CLI reads it (its M33), read back after
+                // each change.
+                ForEach(hosts, id: \.self) { allowed in
+                    HStack {
+                        Text(allowed).font(.apogeeCode)
+                        Spacer()
+                        Button("Remove") { Task { await model.forbidHost(allowed) } }
+                            .disabled(model.working != nil)
+                    }
+                }
+                if hosts.isEmpty {
+                    Text("None yet.").font(.apogeeSmall).foregroundStyle(Palette.textTertiary)
+                }
+                HStack {
+                    TextField("docs.python.org", text: $host).textFieldStyle(.roundedBorder)
+                    Button("Allow") { Task { await model.allowHost(host) } }
+                        .disabled(model.working != nil)
+                }
+                Text("By exact host name.")
+                    .font(.apogeeMeta)
+                    .foregroundStyle(Palette.textTertiary)
+            } else {
+                HStack {
+                    TextField("docs.python.org", text: $host).textFieldStyle(.roundedBorder)
+                    Button("Allow") { Task { await model.allowHost(host) } }
+                    Button("Remove") { Task { await model.forbidHost(host) } }
+                }
+                Text(
+                    model.allowedHostsUnread.map { "By exact host name. This apogee can't read the list -- \($0) -- so each change shows its own words." }
+                        ?? "By exact host name. This apogee has no read of the list, so each change shows its own words."
+                )
                 .font(.apogeeMeta)
                 .foregroundStyle(Palette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
         }
         SettingRow(label: "Web search address") {
             Text(model.webSearch ?? "not set").font(.apogeeCode)
@@ -614,7 +666,7 @@ struct RecalledList: View {
     @Previewable @State var model = SettingsPreview.settings(.backends, runner: SettingsPreview.vendorRunner())
     Group {
         if let claude = model.providers.first(where: { $0.provider == "claude" }) {
-            RegisterProviderSheet(provider: claude) { _ in }
+            RegisterProviderSheet(model: model, provider: claude) { _ in }
         } else {
             ProgressView().padding(Spacing.xl)
         }
@@ -626,12 +678,56 @@ struct RecalledList: View {
     @Previewable @State var model = SettingsPreview.settings(.backends, runner: SettingsPreview.vendorRunner())
     Group {
         if let ollama = model.providers.first(where: { $0.provider == "ollama" }) {
-            RegisterProviderSheet(provider: ollama) { _ in }
+            RegisterProviderSheet(model: model, provider: ollama) { _ in }
         } else {
             ProgressView().padding(Spacing.xl)
         }
     }
     .task { await SettingsPreview.read(model) }
+}
+
+#Preview("Backends after Register on an apogee that registers one provider: its lines -- the default it set, the roster it fetched") {
+    let model = SettingsPreview.settings(.backends, runner: SettingsPreview.registeringCodex(), vocabulary: "2026-10-26")
+    ScrollView {
+        VStack(alignment: .leading, spacing: Spacing.xl) { BackendsPane(model: model) }
+            .padding(Spacing.xl)
+    }
+    .frame(width: 720, height: 900)
+    .task { await SettingsPreview.register(model, "codex") }
+}
+
+#Preview("Registering a scanned provider on an apogee that registers one: providers register, the TUI's r") {
+    @Previewable @State var model = SettingsPreview.settings(.backends, runner: SettingsPreview.m33Runner(), vocabulary: "2026-10-26")
+    Group {
+        if let codex = model.providers.first(where: { $0.provider == "codex" }) {
+            RegisterProviderSheet(model: model, provider: codex) { _ in }
+        } else {
+            ProgressView().padding(Spacing.xl)
+        }
+    }
+    .task { await SettingsPreview.read(model) }
+}
+
+#Preview("Registering Ollama on an apogee that registers one: no model named, apogee chooses") {
+    @Previewable @State var model = SettingsPreview.settings(.backends, runner: SettingsPreview.m33Runner(), vocabulary: "2026-10-26")
+    Group {
+        if let ollama = model.providers.first(where: { $0.provider == "ollama" }) {
+            RegisterProviderSheet(model: model, provider: ollama) { _ in }
+        } else {
+            ProgressView().padding(Spacing.xl)
+        }
+    }
+    .task { await SettingsPreview.read(model) }
+}
+
+#Preview("Backends after Register for Ollama: the CLI says it needs a model, and how to add one") {
+    let model = SettingsPreview.settings(.backends, runner: SettingsPreview.m33Runner(), vocabulary: "2026-10-26")
+    ScrollView {
+        VStack(alignment: .leading, spacing: Spacing.xl) { BackendsPane(model: model) }
+            .padding(Spacing.xl)
+    }
+    .frame(width: 720, height: 900)
+    .task { await SettingsPreview.register(model, "ollama") }
 }
 
 #Preview("An API key, typed once") {
@@ -681,6 +777,23 @@ struct RecalledList: View {
         }
     }
     .task { await SettingsPreview.read(model) }
+}
+
+#Preview("Permissions: the allowed hosts, read through the CLI") {
+    let model = SettingsPreview.settings(.permissions, track52: true, runner: SettingsPreview.m33Runner(), vocabulary: "2026-10-26")
+    VStack(alignment: .leading, spacing: Spacing.xl) { PermissionsPane(model: model) }
+        .padding(Spacing.xl)
+        .frame(width: 680)
+        .task { await SettingsPreview.read(model) }
+}
+
+#Preview("Permissions: no host allowed yet, as the CLI reads it") {
+    let model = SettingsPreview.settings(
+        .permissions, track52: true, runner: SettingsPreview.m33Runner(hosts: SettingsDocuments.allowedHostsEmpty), vocabulary: "2026-10-26")
+    VStack(alignment: .leading, spacing: Spacing.xl) { PermissionsPane(model: model) }
+        .padding(Spacing.xl)
+        .frame(width: 680)
+        .task { await SettingsPreview.read(model) }
 }
 
 #Preview("Permissions: the binary hasn't said what it can do") {

@@ -767,6 +767,48 @@ struct RenameModelSheet: View {
         .task { await models.connect(binary: previewBinary) }
 }
 
+#Preview("Backends: each drafter from the list -- the E4B drafting, the 12B's gone in the CLI's words -- no models info read") {
+    let models = ModelsPreview.dated(over: ModelsPreview.rowsDraftsRunner)
+    ModelTable(model: models)
+        .frame(width: 760, height: 320)
+        .task { await models.connect(binary: previewBinary) }
+}
+
+#Preview("Drafter marks from the list: one drafting, one that cannot") {
+    let models = ModelsPreview.dated(over: ModelsPreview.rowsDraftsRunner)
+    VStack(alignment: .leading, spacing: Spacing.s) {
+        ForEach(models.rows.compactMap { models.drafterMark($0) }, id: \.help) { mark in
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
+                DrafterGlyph(mark: mark)
+                Text(mark.help).font(.apogeeSmall).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+    .padding(Spacing.xl)
+    .frame(width: 560)
+    .task { await models.connect(binary: previewBinary) }
+}
+
+#Preview("Backends after Remove: the default it named cleared, as the CLI said it") {
+    let runner = ModelsPreview.removeStore()
+    let models = ModelsPreview.dated(over: runner)
+    ModelsScreen(model: models, store: ModelsPreview.store(), shell: ModelsPreview.shell()) {
+        DownloadsView(model: ModelsPreview.jobs())
+    }
+    .frame(width: 1200, height: 560)
+    .task { await ModelsPreview.removeTheDefault(models, runner) }
+}
+
+#Preview("Backends after a delete with its backend: both roles it held cleared, as the CLI said it") {
+    let runner = ModelsPreview.deleteRolesStore()
+    let models = ModelsPreview.dated(over: runner)
+    ModelsScreen(model: models, store: ModelsPreview.store(), shell: ModelsPreview.shell()) {
+        DownloadsView(model: ModelsPreview.jobs())
+    }
+    .frame(width: 1200, height: 600)
+    .task { await ModelsPreview.deleteTheRoleHolder(models, runner) }
+}
+
 #Preview("Backends: an older binary's table -- no kind, no drafter read, as before") {
     let models = ModelsPreview.models()
     ModelTable(model: models)

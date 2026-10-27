@@ -727,7 +727,9 @@ public final class StoreViewModel {
         case .removeBackend(let name):
             await run(["config", "delete-backend", name], doing: "Removing", done: "Removed the backend \(name)")
         case .registerAll:
-            await run(["config", "scan", "--register"], doing: "Registering", done: nil)
+            await run(
+                ["config", "scan", "--register"], doing: "Registering", done: nil, titled: "Registered what the scan found",
+                words: Self.registration(in:))
         }
     }
 
@@ -748,11 +750,25 @@ public final class StoreViewModel {
         await run(["config", "set-default-video", set.handle], doing: "Setting", done: "Video generates with \(set.handle)")
     }
 
+    /// What `config scan --register` printed after its report -- the
+    /// report the question already showed -- the registration itself; all
+    /// of it where no blank line ends a report.
+    static func registration(in said: String) -> String {
+        guard let end = said.range(of: "\n\n") else { return said }
+        return String(said[end.upperBound...])
+    }
+
     /// Runs a change and reads the store back, its result said: the `done`
     /// line, else the CLI's last. `narrated`, what the CLI printed beyond
     /// what it removed is kept too, never dropped for the `done` line (a
-    /// delete's, GUI 4e).
-    private func run(_ arguments: [String], doing: String, done: String?, narrated: Bool = false) async {
+    /// delete's, GUI 4e); any other change's `words` are kept, under
+    /// `titled` or the `done` line, where they say a role the CLI moved on
+    /// the person's behalf -- a registration setting the default, a removal
+    /// clearing the roles that named its entry (the CLI's M33, GUI M16).
+    private func run(
+        _ arguments: [String], doing: String, done: String?, narrated: Bool = false, titled: String? = nil,
+        words: (String) -> String = { $0 }
+    ) async {
         guard let binary, working == nil else { return }
         working = doing
         let outcome = await runner.command(binary: binary, arguments)
@@ -763,7 +779,11 @@ public final class StoreViewModel {
             self.failure = failure
         } else {
             failure = nil
-            if narrated, case .done(let stdout) = outcome, let said = DeleteNarration(title: done ?? "Done", said: stdout) {
+            if case .done(let stdout) = outcome,
+                let said = narrated
+                    ? DeleteNarration(title: done ?? "Done", said: stdout)
+                    : DeleteNarration(title: titled ?? done ?? "Done", movingRoles: words(stdout))
+            {
                 narration = said
             }
             if let done {

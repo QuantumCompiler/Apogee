@@ -58,10 +58,16 @@ struct TaskList: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(task.goal).font(.apogeeBody).foregroundStyle(Palette.textPrimary).lineLimit(2)
                             HStack(spacing: Spacing.xs) {
+                                let interrupted = model.interrupted(task)
                                 if task.isRunning || model.run(for: task.id)?.isRunning == true {
                                     Circle().fill(Palette.accent).frame(width: 6, height: 6)
                                 }
-                                Text(TaskStatusWords.say(task.status))
+                                // A task killed mid-round says so from its row
+                                // (the CLI's M32), as its page does.
+                                Text(TaskStatusWords.say(task.status) + (interrupted ? "," : ""))
+                                if interrupted {
+                                    Text("interrupted").foregroundStyle(Palette.warning)
+                                }
                                 Text("· \(task.roundsUsed) of \(task.roundsBudget) rounds")
                             }
                             .font(.apogeeMeta)
@@ -74,6 +80,11 @@ struct TaskList: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        if model.resumableRow(task) {
+                            Button("Resume") { Task { await model.resumeRow(task.id) } }
+                        }
+                    }
                 }
                 if let empty = model.emptyText {
                     Text(empty).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).padding(Spacing.m)
@@ -419,6 +430,23 @@ enum TaskStatusWords {
         .task {
             await tasks.connect(binary: previewBinary)
             await tasks.select(TasksPreview.interrupted)
+        }
+}
+
+#Preview("The list: a task killed mid-round, its row saying interrupted") {
+    let tasks = TasksPreview.killedRows()
+    TaskList(model: tasks)
+        .frame(width: 300, height: 360)
+        .task { await tasks.connect(binary: previewBinary) }
+}
+
+#Preview("A killed task's row chosen: interrupted in the list and on its page") {
+    let tasks = TasksPreview.killedRows()
+    TasksScreen(model: tasks)
+        .frame(width: 1100, height: 560)
+        .task {
+            await tasks.connect(binary: previewBinary)
+            await tasks.select(TasksPreview.killed)
         }
 }
 

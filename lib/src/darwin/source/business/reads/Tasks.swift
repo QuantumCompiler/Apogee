@@ -3,12 +3,13 @@ import Foundation
 
 /// One row of `task list --output-format json`.
 public struct TaskSummary: Sendable, Equatable, Identifiable {
-    public init(id: String, goal: String, status: String, roundsUsed: Int, roundsBudget: Int) {
+    public init(id: String, goal: String, status: String, roundsUsed: Int, roundsBudget: Int, interrupted: Bool? = nil) {
         self.id = id
         self.goal = goal
         self.status = status
         self.roundsUsed = roundsUsed
         self.roundsBudget = roundsBudget
+        self.interrupted = interrupted
     }
 
     public let id: String
@@ -18,17 +19,27 @@ public struct TaskSummary: Sendable, Equatable, Identifiable {
     public let status: String
     public let roundsUsed: Int
     public let roundsBudget: Int
+    /// Whether the row says its task was killed mid-round -- planning or
+    /// running by its ledger, with no process running it -- as the CLI's M32
+    /// puts it on every row (`false` when not). `nil` from a binary before
+    /// M32, whose rows don't say: there only the task's page, `task status`,
+    /// knows (`TaskView.interrupted`), and the row reads as its status.
+    public let interrupted: Bool?
 
     public static func list(from document: ReadDocument) -> [TaskSummary] {
         (document.entries ?? []).compactMap { entry in
             guard let id = entry["id"]?.stringValue else { return nil }
             return TaskSummary(
                 id: id, goal: entry["goal"]?.stringValue ?? "", status: entry["status"]?.stringValue ?? "",
-                roundsUsed: entry["rounds_used"]?.intValue ?? 0, roundsBudget: entry["rounds_budget"]?.intValue ?? 0)
+                roundsUsed: entry["rounds_used"]?.intValue ?? 0, roundsBudget: entry["rounds_budget"]?.intValue ?? 0,
+                interrupted: entry["interrupted"]?.boolValue)
         }
     }
 
-    public var isRunning: Bool { TaskView.running.contains(status) }
+    /// Whether a process runs it now, as far as its row says: under way by
+    /// its ledger, and not killed mid-round. A row that can't say (before
+    /// M32) reads as its status, as it always did.
+    public var isRunning: Bool { TaskView.running.contains(status) && interrupted != true }
 }
 
 /// A task's whole view: what `task status <id> --output-format json` prints,

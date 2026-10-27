@@ -1,0 +1,1 @@
+{"object":"provider.registration","provider":"ollama","registration":["ollama: not registered -- an ollama-cli backend needs a model; add one with: apogee config add-backend ollama --type ollama-cli --model <model>","nothing written"],"rosters":[]}
