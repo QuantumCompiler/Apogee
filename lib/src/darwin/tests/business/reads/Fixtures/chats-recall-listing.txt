@@ -1,0 +1,4 @@
+recall holds 3 chat summaries in /Users/someone/.apogee/memory/chats.db
+  20261027-015933-2264  2026-10-27T01:59:33Z  Launch Emails
+  20261027-015932-30ca  2026-10-27T01:59:32Z  Dev Server Port
+  20261027-015931-79d5  2026-10-27T01:59:31Z  Release Checklist

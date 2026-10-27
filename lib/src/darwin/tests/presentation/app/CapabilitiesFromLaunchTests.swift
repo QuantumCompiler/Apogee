@@ -141,6 +141,18 @@ struct CapabilitiesFromLaunchTests {
         #expect(olderJobs.streaming == [false])
     }
 
+    @Test("the reads M31 made documents follow the vocabulary read at launch (GUI M15): Graph, Knowledge and Settings ask the branch's 2026-10-26 for documents, the installed 2026-10-25 for text")
+    func readsFollowTheVocabulary() async throws {
+        let (app, _, _) = await launched(try schema("machine-schema-2026-10-26"), route: "graph")
+        #expect(app.sessions.readsDocuments)
+        #expect(app.graph.vocabulary() == "2026-10-26" && app.records.vocabulary() == "2026-10-26" && app.settings.vocabulary() == "2026-10-26")
+        let (older, _, _) = await launched(try schema("machine-schema"), route: "graph")
+        #expect(!older.sessions.readsDocuments)
+        #expect(older.graph.vocabulary() == "2026-10-25" && older.records.vocabulary() == "2026-10-25" && older.settings.vocabulary() == "2026-10-25")
+        let (unsaid, _, _) = await launched(nil, route: "graph")
+        #expect(unsaid.graph.vocabulary() == nil && !unsaid.sessions.readsDocuments, "a binary that hasn't said is read as text")
+    }
+
     @Test("a binary that doesn't answer: the fallbacks, and Settings never says it has no config set")
     func unknownRestoredElsewhere() async {
         let (app, starter, _) = await launched(nil, route: "training")

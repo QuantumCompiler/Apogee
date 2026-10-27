@@ -32,6 +32,29 @@ enum GraphPreview {
         reads: [(["graph", "stats"], GraphDocuments.stats)],
         commands: [(["__complete", "graph", "stats"], "demo\n"), (["graph", "dedupe"], GraphDocuments.dedupeDryRunMerges)])
 
+    /// The code graph on the branch binary (schema 2026-10-26, the CLI's
+    /// M31): Dedupe…'s dry run answered with its document -- M15's prose
+    /// graph's two groups the mock embedder made alike, or, `nothing`, the
+    /// code graph's body naming none.
+    static func documents(nothing: Bool = false) -> PreviewRunner {
+        PreviewRunner(
+            reads: [
+                (["graph", "stats"], GraphDocuments.stats),
+                (["graph", "dedupe"], nothing ? GraphDocuments.dedupeDocument : GraphDocuments.dedupeGroups),
+            ],
+            commands: [(["__complete", "graph", "stats"], "demo\n")])
+    }
+
+    /// The graph's view-model over `runner` on that binary.
+    static func documentGraph(_ runner: PreviewRunner) -> GraphViewModel {
+        let graph = GraphViewModel(runner: runner, starter: PreviewJobs())
+        graph.vocabulary = { "2026-10-26" }
+        return graph
+    }
+
+    /// The groups plan of that dry run, read.
+    static var groupsPlan: DedupePlan { DedupePlan(document: ReadDocument(text: GraphDocuments.dedupeGroups)!)! }
+
     /// A named graph after `graph delete`: its config entry kept, so the
     /// completion still names it, and its stats unbuilt (GUI 4k's recording).
     static let deleted = PreviewRunner(

@@ -2602,3 +2602,55 @@ Ten of 13 new Training cases failed first.
 **Not done:**
 - No live pass of the app.
 - The design draws the spec rows (M11), but no spec's plan page.
+
+### 2026-10-26 — `reads-become-documents` (maintenance item M15): the app reads chat details, recall, dedupe, raw records and the footprint as documents
+
+**Why.** The CLI's M31 gave five prose reads a JSON face, and the app still read each as text: a saved chat's Details…, recall's count line, the dedupe dry run's prose, the raw conversation cut at its marker, and the Suites fit parsed from its text. With recall read as a count, Forget erased summaries no one had seen. Eighteen of 22 new view-model and app cases failed first. The other 4 pin the older binary.
+
+- [x] **One way to ask.** `CommandRunning.documentOrText` (`business/reads/DocumentOrText.swift`) asks for the document on a binary whose schema is dated `2026-10-26` or later (`ProseReads.documentsSince`). It falls back to the text on a refusal (exit 109, "arguments were not expected") whatever the date, reusing the schema date read at launch.
+- [x] **Details…** reads `chat.info` (`ChatDetails`), shown with the text's own labels so the two agree line for line. A failure other than the refusal is shown in the CLI's words.
+- [x] **Recall lists its summaries** (`RecallListing`) in the inspector and Settings, each by name and date, its text on selection or hover. Forget's question says how many and names them, and is disabled when nothing is held; it still runs `--forget --yes` as text. This fixed a latent bug: the text fallback read the *last* line, which on the new binary's text is a summary row.
+- [x] **Dedupe…** draws the groups from the body (`DedupePlan`), Merge offered only when there are any and still run supervised.
+- [x] **The raw conversation** reads `raw`, with `null` meaning unavailable. A document with no `raw` key falls back to the text cut at the marker.
+- [x] **The Suites fit** reads the typed footprint whenever its object is present: the members' exact bytes shown as GB/MB, the verdict word the CLI's. With no object it reads the text field as before.
+
+**Decisions made while building** (2026-10-26, each recorded for veto):
+- **The defaults, taken:**
+  - JSON first on schema `2026-10-26` or later, with the text read on a refusal;
+  - recall listed by name and date, its text on selection, and Forget naming what it erases.
+- **The date lives in `BusinessReads` (`ProseReads`),** beside the reads it gates. M13's is in `MachineProtocol` and M14's in `TrainingViewModel`.
+- **The Suites fit asks no date:** the typed object comes in the same document.
+- **The sessions previews embed the `2026-10-26` machine schema,** putting the preview library on an M31 binary through its real launch read.
+
+**Verified.**
+- **Recorded** from the branch binary (and the installed one, schema `2026-10-25`, for the older shapes) over sandboxes, the home written `/Users/someone`: 34 documents.
+  - **Chats:** `chats info` and its refusals; `chats recall` with three summaries, one written by the older binary with no `summary` field; Forget's JSON refusal.
+  - **Dedupe:** the code graph's empty body, and a prose graph built with a mock embedder whose hash-based vectors make real but arbitrary groups.
+  - **Raw:** `knowledge info --raw` with `raw`, with `null` once the archive is deleted, and the older binary silently dropping it.
+  - **Footprints:** 4i's sandbox recorded again with typed footprints, a shared base and a `partial` suite for "fits as far as known".
+- **38 new cases:**
+
+  | Suite | Cases |
+  |---|---|
+  | `ProseReadsTests` | 16 |
+  | `ReadsAsDocumentsTests` | 8 |
+  | `RecallListedTests` | 2 |
+  | `DedupeDocumentTests` | 4 |
+  | `RawDocumentTests` | 4 |
+  | `TypedFootprintTests` | 3 |
+  | `readsFollowTheVocabulary` | 1 |
+
+  `typedAndTextAgree` and `sameVerdictEitherWay` hold the typed and text footprints to the same verdict across fits, does not fit, fits as far as known, and no member holds memory.
+- **Repeat runs:** each touched scheme over 10 iterations, all passing (Sessions 950, Settings 270, Graph 190, Knowledge 210, Suites 140, App 250, Session 1,070, the reads and layering bundles 1,110). The whole plan ran four times, 941 of 941 each. The layering check passes 25 of 25, and `check-previews` finds nothing.
+- **Previews:**
+  - Details from the document;
+  - recall's summaries, chosen and not, and Forget naming them;
+  - Settings' listing;
+  - dedupe groups with Merge, and none;
+  - raw, and raw null;
+  - a shared base's exact bytes, fits as far as known, and a suite over budget.
+- `lib/scripts/cicd.sh --test`, run with nothing else: green. The CLI's 4,059 tests and the macOS app's 941 cases passed, with no Swift warning.
+
+**Not done:**
+- No live pass of the app.
+- "Budget not known here" has no recording, since no sandbox can hide this machine's memory; it is pinned through the CLI's five verdict words only.

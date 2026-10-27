@@ -66,6 +66,35 @@ enum SuitesPreview {
             (["config", "get", "suites.vast"], SuitesDocuments.configGetVast),
         ])
 
+    // MARK: - The typed footprint (GUI M15)
+
+    /// The same sandbox recorded again from the branch binary (schema
+    /// 2026-10-26, the CLI's M31): every suite's `models status --suite`
+    /// carrying the typed `footprint` beside its text, and `partial`, whose
+    /// second member's weights are gone. Each suite's members, the kinds, the
+    /// budget and the sizes are 4i's, which the sandbox repeats byte for byte.
+    static let typed = PreviewRunner(
+        reads: recorded.reads.filter { !$0.0.starts(with: ["models", "status"]) } + [
+            (["models", "status"], SuitesDocuments.statusTyped),
+            (["models", "status", "--suite", "cloud"], SuitesDocuments.statusCloudTyped),
+            (["models", "status", "--suite", "fast"], SuitesDocuments.statusFastTyped),
+            (["models", "status", "--suite", "pair"], SuitesDocuments.statusPairTyped),
+            (["models", "status", "--suite", "partial"], SuitesDocuments.statusPartialTyped),
+            (["models", "status", "--suite", "shared"], SuitesDocuments.statusSharedTyped),
+            (["models", "status", "--suite", "vast"], SuitesDocuments.statusVastTyped),
+        ],
+        commands: recorded.commands.filter { $0.0 != ["config", "get", "suites"] } + [
+            (["config", "get", "suites"], SuitesDocuments.configGetTyped),
+            (["config", "get", "suites.partial"], SuitesDocuments.configGetPartial),
+        ])
+
+    /// The typed suites, a session open or not.
+    static func typedModel(sessionOpen: Bool = false) -> SuitesViewModel {
+        let suites = SuitesViewModel(runner: typed)
+        suites.sessionSwitchable = { sessionOpen }
+        return suites
+    }
+
     /// The recorded suites, a session open or not.
     static func recordedModel(sessionOpen: Bool = false) -> SuitesViewModel {
         let suites = SuitesViewModel(runner: recorded)
@@ -78,6 +107,7 @@ enum SuitesPreview {
         let texts = [
             "cloud": SuitesDocuments.configGetCloud, "fast": SuitesDocuments.configGetFast, "pair": SuitesDocuments.configGetPair,
             "shared": SuitesDocuments.configGetShared, "vast": SuitesDocuments.configGetVast,
+            "partial": SuitesDocuments.configGetPartial,
         ]
         return Suite(name: name, text: texts[name] ?? "")
     }

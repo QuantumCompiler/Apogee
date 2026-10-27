@@ -150,8 +150,15 @@ public final class SettingsViewModel {
     /// What recall holds, as `chats recall` says it, on a build with 52e;
     /// `nil` unread or on one without.
     public private(set) var recallHolds: String?
+    /// The summaries themselves, where the binary lists them (the CLI's
+    /// M31): what Forget erases, named in its question. `nil` read as text.
+    public private(set) var recallListing: RecallListing?
     /// Forgetting recall waits on the person's word, its holdings shown.
     public var forgetting = false
+    /// The binary's vocabulary date, as the app read it at launch
+    /// (`__machine-schema`, the session library's): from the CLI's M31 what
+    /// recall holds is asked as its document first (GUI M15).
+    public var vocabulary: @MainActor () -> String? = { nil }
 
     public let theme: ThemeSettings
     private let runner: any CommandRunning
@@ -328,16 +335,26 @@ public final class SettingsViewModel {
         }
     }
 
-    /// `chats recall` -- what recall holds, as the CLI says it -- on a build
-    /// with 52e.
+    /// `chats recall` -- what recall holds -- on a build with 52e: its
+    /// listing on a binary dated for the CLI's M31 (the summaries themselves,
+    /// and the count line said from them), else the count line the text
+    /// prints -- the text too where the binary refuses the flag (GUI M15).
     private func readRecallHolds(_ binary: URL) async {
         guard hasTrack52() else {
             recallHolds = nil
+            recallListing = nil
             return
         }
-        if case .done(let text) = await runner.command(binary: binary, ["chats", "recall"]) {
-            recallHolds = text.split(whereSeparator: \.isNewline).last.map { $0.trimmingCharacters(in: .whitespaces) }
-        } else {
+        let asks = ProseReads.asksDocuments(vocabulary: vocabulary())
+        switch await runner.documentOrText(binary: binary, ["chats", "recall"], asksDocument: asks, RecallListing.init(document:)) {
+        case .document(let listing):
+            recallListing = listing
+            recallHolds = listing.countLine
+        case .text(let text):
+            recallListing = nil
+            recallHolds = RecallListing.countLine(in: text)
+        case .failed:
+            recallListing = nil
             recallHolds = nil
         }
     }
@@ -434,11 +451,24 @@ public final class SettingsViewModel {
         await change(binary, ["config", "set", key, value], done: "\(key) is \(value)")
     }
 
-    /// Asks before forgetting: what recall holds is read first, and shown.
+    /// Forget's question: how many summaries go and which, named, where the
+    /// binary lists them (GUI M15); the count line where it doesn't.
+    public var forgetMessage: String {
+        let what = recallListing.map { "These go: \($0.forgetting). " } ?? recallHolds.map { "Now: \($0). " } ?? ""
+        return what + "apogee chats recall --forget --yes -- every chat's summary goes, so no later session recalls them; every transcript stays."
+    }
+
+    /// Whether Forget has anything to erase: where the binary lists the
+    /// summaries, only while it lists some (the CLI says "nothing to forget"
+    /// otherwise).
+    public var canForget: Bool { recallListing?.holdsAny ?? true }
+
+    /// Asks before forgetting: what recall holds is read first, and shown
+    /// -- and, where the listing says it holds nothing, nothing is asked.
     public func askToForget() async {
         guard let binary = binaryURL, hasTrack52() else { return }
         await readRecallHolds(binary)
-        forgetting = true
+        forgetting = canForget
     }
 
     /// Forgets every recalled summary once the person said yes -- 52e's

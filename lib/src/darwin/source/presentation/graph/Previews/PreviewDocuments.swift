@@ -449,5 +449,13 @@ Note: community memberships changed -- re-run `apogee graph communities notes` t
     static let exportRefused = #"""
 apogee graph: graph 'spare' has not been built yet -- run: apogee graph build spare
 """#
+    /// tests/business/reads/Fixtures/graph-dedupe-dry-run-groups.json
+    static let dedupeGroups = #"""
+{"code_entities":0,"code_identity_merges":0,"dry_run":true,"groups":[{"kept":"K8s","kept_type":"system","merged":["Cache","Gateway","Store"]},{"kept":"Scheduler","kept_type":"system","merged":["Load Balancer"]}],"merged_nodes":4,"threshold":0.92}
+"""#
+    /// tests/business/reads/Fixtures/graph-dedupe-dry-run.json
+    static let dedupeDocument = #"""
+{"code_entities":9,"code_identity_merges":0,"dry_run":true,"groups":[],"merged_nodes":0,"prose_skipped":"no prose entities -- nothing to compare by vector","threshold":0.92}
+"""#
 }
 #endif

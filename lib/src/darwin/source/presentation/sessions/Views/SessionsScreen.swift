@@ -37,7 +37,8 @@ public struct SessionsScreen: View {
                     inspector: library.inspector,
                     showInfo: { if let chat = library.currentChat { Task { await library.showInfo(chat) } } },
                     compact: { if let chat = library.currentChat { library.askToCompact(chat) } },
-                    forgetRecall: { Task { await library.askToForgetRecall() } }
+                    forgetRecall: { Task { await library.askToForgetRecall() } },
+                    chooseRecall: { library.selectRecall($0) }
                 ) { shell.go(.models) }
                     .frame(width: 360)
                     .task {
@@ -116,9 +117,7 @@ public struct SessionsScreen: View {
             library.isOpen(chat) && library.current.isLive
                 ? "Its session compacts it, as /compact does: the history so far is folded into a summary the model carries on from. The turns before it aren't kept word for word."
                 : "apogee chats compact \(chat.id) --yes -- its history is folded into a summary the model carries on from. The turns before it aren't kept word for word, and this can't be undone."
-        case .forgetRecall:
-            (library.recall.map { "Now: \($0). " } ?? "")
-                + "apogee chats recall --forget --yes -- every chat's summary goes, so no later session recalls them; every transcript stays."
+        case .forgetRecall: library.forgetRecallMessage
         case nil: ""
         }
     }
@@ -139,6 +138,8 @@ struct InspectorPane: View {
     var compact: (() -> Void)?
     /// Recall's summaries forgotten, asked first.
     var forgetRecall: (() -> Void)?
+    /// A recalled summary chosen -- by its chat -- its text shown; `nil`, none.
+    var chooseRecall: ((String?) -> Void)?
     let openModels: () -> Void
 
     var body: some View {
@@ -174,6 +175,9 @@ struct InspectorPane: View {
                                 .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                        if let summaries = inspector.recallSummaries, !summaries.isEmpty {
+                            RecallSummaries(summaries: summaries, selected: inspector.recallSelected, choose: chooseRecall)
+                        }
                         if let failure = inspector.recallFailure {
                             Text(failure).font(.apogeeMeta).foregroundStyle(Palette.error)
                         }
@@ -182,7 +186,9 @@ struct InspectorPane: View {
                             .foregroundStyle(Palette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
                         if let forgetRecall {
-                            Button("Forget every summary…", action: forgetRecall).font(.apogeeSmall)
+                            Button("Forget every summary…", action: forgetRecall)
+                                .font(.apogeeSmall)
+                                .disabled(!inspector.canForgetRecall)
                         }
                     }
                 }
@@ -219,8 +225,53 @@ struct InspectorPane: View {
     }
 }
 
-/// A saved conversation's details, as `chats info` prints them, with its
-/// compaction beside them.
+/// What recall holds, summary by summary (GUI M15, from the CLI's M31): each
+/// one's name and the date it was summarised, newest first; the one chosen
+/// shows the text a later session is handed.
+struct RecallSummaries: View {
+    let summaries: [RecallListing.Summary]
+    let selected: RecallListing.Summary?
+    var choose: ((String?) -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            ForEach(summaries) { summary in
+                let chosen = summary.chat == selected?.chat
+                Button {
+                    choose?(chosen ? nil : summary.chat)
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
+                        Image(systemName: chosen ? "chevron.down" : "chevron.right")
+                            .font(.system(size: TypeScale.label))
+                            .foregroundStyle(Palette.textTertiary)
+                        Text(summary.title)
+                            .foregroundStyle(Palette.textPrimary)
+                            .lineLimit(1)
+                        Spacer(minLength: Spacing.s)
+                        Text(summary.updated.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "undated")
+                            .font(.apogeeMeta)
+                            .foregroundStyle(Palette.textTertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .font(.apogeeSmall)
+                .help(chosen ? "Hide its summary" : "Show its summary")
+                if chosen {
+                    Text(summary.summary)
+                        .font(.apogeeSmall)
+                        .foregroundStyle(Palette.textSecondary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.leading, Spacing.l)
+                }
+            }
+        }
+    }
+}
+
+/// A saved conversation's details -- `chats info`'s typed facts, or the
+/// text it prints -- with its compaction beside them.
 struct ChatInfoSheet: View {
     let info: SessionLibraryViewModel.ChatInfo
     let canCompact: Bool
@@ -242,7 +293,7 @@ struct ChatInfoSheet: View {
                 }
             }
             .font(.apogeeSmall)
-            Text("apogee chats info \(info.chat.id)")
+            Text("apogee chats info \(info.chat.id)\(info.details == nil ? "" : " --output-format json")")
                 .font(.apogeeCode)
                 .foregroundStyle(Palette.textTertiary)
             HStack {
@@ -457,6 +508,62 @@ public struct SessionCommands: Commands {
 
 #Preview("Forgetting what recall holds, asked first") {
     let library = SessionsPreview.library(chats: SessionsDocuments.chatsListTwo)
+    SessionsScreen(library: library, shell: SessionsPreview.shell())
+        .frame(width: 1100, height: 720)
+        .task {
+            await library.start(inView: true)
+            await library.askToForgetRecall()
+        }
+}
+
+#Preview("A saved chat's details, from chats info's document") {
+    @Previewable @State var library = SessionsPreview.documents()
+    Group {
+        if let info = library.info {
+            ChatInfoSheet(info: info, canCompact: library.canCompact(info.chat)) {}
+        } else {
+            ProgressView().padding(Spacing.xl)
+        }
+    }
+    .task {
+        await library.start(inView: false)
+        await library.showInfo(SessionsPreview.recalledPort)
+    }
+}
+
+#Preview("Recall's summaries by name and date, one chosen: its text") {
+    @Previewable @State var library = SessionsPreview.documents()
+    InspectorPane(
+        inspector: library.inspector, showInfo: {}, compact: {}, forgetRecall: {}, chooseRecall: { library.selectRecall($0) }
+    ) {}
+        .frame(width: 360, height: 760)
+        .task {
+            await library.start(inView: false)
+            await library.refreshRoles()
+            await library.refreshRecall()
+            library.selectRecall(SessionsPreview.recalledPort.id)
+        }
+}
+
+#Preview("Recall's summaries, none chosen") {
+    @Previewable @State var library = SessionsPreview.documents()
+    Group {
+        if let summaries = library.inspector.recallSummaries {
+            RecallSummaries(summaries: summaries, selected: nil) { library.selectRecall($0) }
+                .padding(Spacing.l)
+                .frame(width: 360)
+        } else {
+            ProgressView().padding(Spacing.xl)
+        }
+    }
+    .task {
+        await library.start(inView: false)
+        await library.refreshRecall()
+    }
+}
+
+#Preview("Forgetting what recall holds: the summaries it erases, named") {
+    let library = SessionsPreview.documents()
     SessionsScreen(library: library, shell: SessionsPreview.shell())
         .frame(width: 1100, height: 720)
         .task {

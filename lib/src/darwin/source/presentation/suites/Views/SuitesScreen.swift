@@ -110,7 +110,7 @@ struct SuiteDetail: View {
                 }
                 Text(model.footprint(suite) == nil
                     ? "Estimated here, as no read of apogee's states this suite's fit: from each member's models info, a weights file two members share counted once and adapters by their files, against this machine's system read. apogee chat --suite reaches its own verdict and refuses one that does not fit."
-                    : "apogee's own verdict, from models status --suite \(suite.name): the one chat --suite admits a session by, refusing a suite that does not fit unless forced.")
+                    : "apogee's own verdict, from models status --suite \(suite.name)\(model.footprint(suite)?.isTyped == true ? "'s typed footprint" : ""): the one chat --suite admits a session by, refusing a suite that does not fit unless forced.")
                     .font(.apogeeMeta)
                     .foregroundStyle(Palette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -253,6 +253,30 @@ struct SuiteDetail: View {
     SuiteDetail(model: suites, suite: SuitesPreview.recordedSuite("shared"))
         .frame(width: 820, height: 460)
         .task { await suites.connect(binary: previewBinary) }
+}
+
+#Preview("The fit from the typed footprint: a shared base, its exact bytes") {
+    let suites = SuitesPreview.typedModel(sessionOpen: true)
+    SuiteDetail(model: suites, suite: SuitesPreview.recordedSuite("shared"))
+        .frame(width: 820, height: 460)
+        .task { await suites.connect(binary: previewBinary) }
+}
+
+#Preview("The typed footprint: a member's size unknown, fits as far as known") {
+    let suites = SuitesPreview.typedModel()
+    SuiteDetail(model: suites, suite: SuitesPreview.recordedSuite("partial"))
+        .frame(width: 820, height: 420)
+        .task { await suites.connect(binary: previewBinary) }
+}
+
+#Preview("The typed footprint: every suite, vast over budget") {
+    let suites = SuitesPreview.typedModel(sessionOpen: true)
+    SuitesScreen(model: suites)
+        .frame(width: 1100, height: 560)
+        .task {
+            await suites.connect(binary: previewBinary)
+            suites.select("vast")
+        }
 }
 
 #Preview("A suite apogee says does not fit: open it anyway") {

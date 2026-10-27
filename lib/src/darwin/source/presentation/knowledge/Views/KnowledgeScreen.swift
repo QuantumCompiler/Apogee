@@ -227,7 +227,8 @@ struct RecordPage: View {
 }
 
 /// A record's archived raw conversation, asked of the CLI when the person
-/// wants it -- `knowledge info --raw` -- and shown as it printed it.
+/// wants it -- `knowledge info --raw` -- and shown as it gave it: its
+/// document's `raw`, or the text it printed.
 struct RawSection: View {
     let model: RecordsViewModel
     let record: KnowledgeRecord
@@ -606,6 +607,22 @@ struct IngestSheet: View {
         .padding(Spacing.l)
         .frame(width: 380)
         .task { await KnowledgePreview.openRaw(records) }
+}
+
+#Preview("Raw conversation: from knowledge info's document") {
+    let records = KnowledgePreview.documentRecords()
+    RawSection(model: records, record: KnowledgePreview.capturedM31)
+        .padding(Spacing.l)
+        .frame(width: 380)
+        .task { await KnowledgePreview.openRaw(records, KnowledgePreview.capturedM31) }
+}
+
+#Preview("Raw conversation: the document's raw is null") {
+    let records = KnowledgePreview.documentRecords(unavailable: true)
+    RawSection(model: records, record: KnowledgePreview.capturedM31)
+        .padding(Spacing.l)
+        .frame(width: 380)
+        .task { await KnowledgePreview.openRaw(records, KnowledgePreview.capturedM31) }
 }
 
 #Preview("A rejected record, linked to nothing yet") {

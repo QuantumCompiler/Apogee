@@ -106,3 +106,159 @@ public enum ModelKind: String, Sendable, Equatable {
         return kinds
     }
 }
+
+/// One saved conversation's details, as `chats info <id> --output-format json`
+/// types them since the CLI's M31 (`object: "chat.info"`): `chats list`'s row,
+/// then every fact the text prints beside it -- the text `chats info` printed
+/// alone before, which a binary without the document still gets read as
+/// (`Field.lines`).
+public struct ChatDetails: Sendable, Equatable {
+    /// What `--resume` and every `chats` verb take.
+    public let id: String
+    /// The name it is listed by: the one `chats title` gave it, else its title,
+    /// else its id.
+    public let name: String
+    /// The name `chats title` or `/title` gave it; empty for none.
+    public let customName: String
+    /// Its generated title; empty for none.
+    public let title: String
+    /// The backend it runs on; empty for the default -- the text's `(default)`.
+    public let backend: String
+    /// The roster model it pinned there; empty for the backend's own.
+    public let model: String
+    public let started: String
+    public let updated: String
+    public let turns: Int
+    /// How many messages its history holds.
+    public let messages: Int
+    /// How many times its history was folded into a summary.
+    public let compactions: Int
+    /// Its settings, `nil` where unset -- the lines the text leaves out.
+    public let temperature: Double?
+    public let maxTokens: Int?
+    /// The session file's schema, `0` for one written before the schema
+    /// existed -- the text's `legacy`; `nil` where the document says none.
+    public let schemaVersion: Int?
+
+    /// The `chat.info` document's facts; `nil` for any other document.
+    public init?(document: ReadDocument) {
+        let v = document.value
+        guard document.object == "chat.info", let id = v["id"]?.stringValue, !id.isEmpty else { return nil }
+        self.id = id
+        name = v["name"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 } ?? id
+        customName = v["custom_name"]?.stringValue ?? ""
+        title = v["title"]?.stringValue ?? ""
+        backend = v["backend"]?.stringValue ?? ""
+        model = v["model"]?.stringValue ?? ""
+        started = v["started"]?.stringValue ?? ""
+        updated = v["updated"]?.stringValue ?? ""
+        turns = v["turns"]?.intValue ?? 0
+        messages = v["messages"]?.intValue ?? 0
+        compactions = v["compactions"]?.intValue ?? 0
+        temperature = if case .number(let n)? = v["temperature"] { n } else { nil }
+        maxTokens = v["max_tokens"]?.intValue
+        schemaVersion = v["schema_version"]?.intValue
+    }
+
+    /// The facts as the details sheet lists them, typed: under the text's
+    /// own labels where the text says the same fact -- so the two readings of
+    /// one chat agree line for line -- then what only the document states,
+    /// the pinned model and that it was never compacted.
+    public var fields: [Field] {
+        var fields = [Field("id", id)]
+        if !customName.isEmpty { fields.append(Field("name", customName)) }
+        if !title.isEmpty { fields.append(Field("title", title)) }
+        fields.append(Field("backend", backend.isEmpty ? "(default)" : backend))
+        if !model.isEmpty { fields.append(Field("model", model)) }
+        fields += [
+            Field("started", started), Field("updated", updated), Field("turns", String(turns)),
+            Field("messages", String(messages)),
+            Field("compacted", compactions > 0 ? "\(compactions) time(s)" : "never"),
+        ]
+        if let temperature {
+            fields.append(Field("temp", temperature.rounded() == temperature ? String(Int(temperature)) : String(temperature)))
+        }
+        if let maxTokens { fields.append(Field("max_tok", String(maxTokens))) }
+        if schemaVersion == 0 { fields.append(Field("schema", "legacy (pre-versioning)")) }
+        return fields
+    }
+}
+
+/// What recall holds of earlier chats, as `chats recall --output-format json`
+/// lists it since the CLI's M31: each summary itself -- what Forget erases --
+/// newest first, with the count line's other facts. Before it, the read printed
+/// the count line alone (`countLine(in:)`).
+public struct RecallListing: Sendable, Equatable {
+    /// One chat's summary, as the index recorded it when it summarised the
+    /// chat.
+    public struct Summary: Sendable, Equatable, Identifiable {
+        /// The chat it summarises: what `chats show` and `--resume` take.
+        public let chat: String
+        /// The name it was recorded under -- what the `memory` event names it
+        /// by; an older entry may leave it empty.
+        public let name: String
+        /// When the index summarised it; `nil` undated.
+        public let updated: Date?
+        /// The text the model is handed, whole.
+        public let summary: String
+        public var id: String { chat }
+
+        /// What a person knows it by: its name, else its chat's id.
+        public var title: String { name.isEmpty ? chat : name }
+    }
+
+    public let summaries: [Summary]
+    /// The index's path, as the CLI names it.
+    public let index: String
+    /// How many chats are marked due a summary and not yet summarised.
+    public let pending: Int
+
+    /// The listing's facts; `nil` for any other document.
+    public init?(document: ReadDocument) {
+        let v = document.value
+        guard document.object == "list", let data = document.entries, let index = v["index"]?.stringValue else { return nil }
+        summaries = data.compactMap { entry in
+            guard let chat = entry["chat"]?.stringValue, !chat.isEmpty else { return nil }
+            return Summary(
+                chat: chat, name: entry["name"]?.stringValue ?? "",
+                updated: entry["updated"]?.stringValue.flatMap(ChatSummary.date),
+                summary: entry["summary"]?.stringValue ?? "")
+        }
+        self.index = index
+        pending = v["pending"]?.intValue ?? 0
+    }
+
+    /// The count line, as the text says it: `recall holds 3 chat summaries in
+    /// <index>`, and how many more are due one.
+    public var countLine: String {
+        "recall holds \(summaries.count) chat summar\(summaries.count == 1 ? "y" : "ies") in \(index)"
+            + (pending == 0 ? "" : ", \(pending) more due one")
+    }
+
+    /// Whether Forget has anything to erase: the CLI says "nothing to
+    /// forget" otherwise.
+    public var holdsAny: Bool { !summaries.isEmpty || pending > 0 }
+
+    /// How many Forget erases and which, for its question: `3 chat
+    /// summaries: “Launch Emails”, “Dev Server Port” and “Release
+    /// Checklist”`, and those still due one.
+    public var forgetting: String {
+        let titles = summaries.map { "“\($0.title)”" }
+        let named: String
+        switch titles.count {
+        case 0: named = ""
+        case 1: named = ": " + titles[0]
+        default: named = ": " + titles.dropLast().joined(separator: ", ") + " and " + titles[titles.count - 1]
+        }
+        let count = "\(summaries.count) chat summar\(summaries.count == 1 ? "y" : "ies")"
+        return count + named + (pending == 0 ? "" : ", and \(pending) more due one")
+    }
+
+    /// The count line in what `chats recall` printed: its line that begins
+    /// `recall holds` -- an M31 binary lists a line per summary after it --
+    /// else its last line; `nil` for nothing printed.
+    public static func countLine(in text: String) -> String? {
+        let lines = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        return lines.first { $0.hasPrefix("recall holds") } ?? lines.last
+    }
+}

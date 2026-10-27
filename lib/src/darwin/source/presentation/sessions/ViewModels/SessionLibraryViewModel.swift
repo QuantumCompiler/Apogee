@@ -54,14 +54,18 @@ public final class SessionLibraryViewModel {
         case forgetRecall
     }
 
-    /// A saved conversation's details, as `chats info` prints them -- text
-    /// alone, so run as a command and read a `label: value` a line -- for
-    /// the sheet that shows them (GUI 4k).
+    /// A saved conversation's details, for the sheet that shows them (GUI
+    /// 4k): `chats info`'s document, typed, from the CLI's M31 (GUI M15);
+    /// else its text, run as a command and read a `label: value` a line.
     public struct ChatInfo: Equatable, Identifiable {
         public let chat: ChatSummary
+        /// What the sheet lists: the typed facts, or the text's lines.
         public let fields: [Field]
         /// Why they could not be read, in the CLI's words.
         public let failure: String?
+        /// The typed facts, where the binary answered with its document;
+        /// `nil` read from the text.
+        public let details: ChatDetails?
         public var id: String { chat.id }
     }
 
@@ -135,13 +139,20 @@ public final class SessionLibraryViewModel {
     /// A saved conversation's details, read for its sheet; `nil` when none is
     /// shown.
     public var info: ChatInfo?
-    /// What recall holds of earlier chats, as `chats recall` says it -- how
-    /// many summaries, and where; no verb of the CLI lists the summaries
-    /// themselves -- read for the inspector on a binary with the CLI's 52e;
-    /// `nil` unread.
+    /// What recall holds of earlier chats, in the count line `chats recall`
+    /// says it in -- how many summaries, and where -- read for the inspector
+    /// on a binary with the CLI's 52e; `nil` unread. Since the CLI's M31 the
+    /// summaries themselves are `recallListing`.
     public private(set) var recall: String?
     /// Why recall's holdings could not be read, in the CLI's words.
     public private(set) var recallFailure: String?
+    /// The summaries themselves, where the binary lists them (the CLI's
+    /// M31): each one's name and date in the inspector, its text on
+    /// selection, and every one named in Forget's question. `nil` read as
+    /// text.
+    public private(set) var recallListing: RecallListing?
+    /// The summary chosen in the inspector, by its chat; its text is shown.
+    public private(set) var recallSelection: String?
     /// How a binary's file is told apart -- a rebuild installed where it
     /// stood -- so its vocabulary is asked again (GUI 4k). A test hands in
     /// its own.
@@ -954,17 +965,27 @@ public final class SessionLibraryViewModel {
 
     // MARK: - A saved conversation's details, compaction, recall (GUI 4k)
 
-    /// `chats info <id>` -- the details the CLI prints of a saved
+    /// Whether the binary is asked for the documents the CLI's M31 gave its
+    /// prose reads -- `chats info`, `chats recall` -- first: its vocabulary,
+    /// read at launch and refreshed by each session, dated 2026-10-26 or
+    /// later (GUI M15). A refusal of the flag falls back to the text whatever
+    /// the date.
+    public var readsDocuments: Bool { ProseReads.asksDocuments(vocabulary: lastSchema) }
+
+    /// `chats info <id>` -- the details the CLI states of a saved
     /// conversation: when it started and changed, its turns and messages, how
-    /// often it was compacted -- run as a command (it prints text alone),
-    /// for its sheet.
+    /// often it was compacted -- for its sheet: its `chat.info` document,
+    /// typed, on a binary that has it (the CLI's M31), else the text it
+    /// prints, run as a command and read a `label: value` a line.
     public func showInfo(_ chat: ChatSummary) async {
         guard let found else { return }
-        let outcome = await runner.command(binary: found.url, ["chats", "info", chat.id])
-        if case .done(let text) = outcome {
-            info = ChatInfo(chat: chat, fields: Field.lines(text), failure: nil)
-        } else {
-            info = ChatInfo(chat: chat, fields: [], failure: outcome.failure ?? "its details could not be read")
+        switch await runner.documentOrText(binary: found.url, ["chats", "info", chat.id], asksDocument: readsDocuments, ChatDetails.init(document:)) {
+        case .document(let details):
+            info = ChatInfo(chat: chat, fields: details.fields, failure: nil, details: details)
+        case .text(let text):
+            info = ChatInfo(chat: chat, fields: Field.lines(text), failure: nil, details: nil)
+        case .failed(let why):
+            info = ChatInfo(chat: chat, fields: [], failure: why, details: nil)
         }
     }
 
@@ -1012,29 +1033,65 @@ public final class SessionLibraryViewModel {
         }
     }
 
-    /// `chats recall` -- what recall holds, said as the CLI says it -- on a
-    /// binary with the CLI's 52e; nothing on one without.
+    /// `chats recall` -- what recall holds -- on a binary with the CLI's 52e;
+    /// nothing on one without. On a binary that lists the summaries (the
+    /// CLI's M31) its document: each summary, and the count line said from
+    /// it; else the count line the text prints.
     public func refreshRecall() async {
         guard let found, hasTrack52 else {
             recall = nil
             recallFailure = nil
+            recallListing = nil
+            recallSelection = nil
             return
         }
-        let outcome = await runner.command(binary: found.url, ["chats", "recall"])
-        if case .done(let text) = outcome {
-            recall = Self.lastLine(text)
+        switch await runner.documentOrText(binary: found.url, ["chats", "recall"], asksDocument: readsDocuments, RecallListing.init(document:)) {
+        case .document(let listing):
+            recallListing = listing
+            recall = listing.countLine
             recallFailure = nil
-        } else {
-            recallFailure = outcome.failure ?? "what recall holds could not be read"
+        case .text(let text):
+            recallListing = nil
+            recall = RecallListing.countLine(in: text)
+            recallFailure = nil
+        case .failed(let why):
+            recallFailure = why
+        }
+        if let chosen = recallSelection, recallListing?.summaries.contains(where: { $0.chat == chosen }) != true {
+            recallSelection = nil
         }
     }
 
+    /// Shows one summary's text in the inspector -- `nil`, none -- chosen by
+    /// its chat.
+    public func selectRecall(_ chat: String?) {
+        recallSelection = chat
+    }
+
+    /// Whether Forget has anything to erase: on a binary that lists the
+    /// summaries, only while it lists some (or some are due one) -- the CLI
+    /// says "nothing to forget" otherwise; on an older one, whenever recall
+    /// is there to ask about.
+    public var canForgetRecall: Bool {
+        guard hasTrack52 else { return false }
+        return recallListing?.holdsAny ?? true
+    }
+
     /// Asks before forgetting: what recall holds is read first, so it is
-    /// seen before it goes.
+    /// seen before it goes -- and, where the listing says it holds nothing,
+    /// nothing is asked.
     public func askToForgetRecall() async {
         guard hasTrack52 else { return }
         await refreshRecall()
+        guard canForgetRecall else { return }
         pending = .forgetRecall
+    }
+
+    /// Forget's question: how many summaries go and which, named, where the
+    /// binary lists them (GUI M15); the count line where it doesn't.
+    public var forgetRecallMessage: String {
+        let what = recallListing.map { "These go: \($0.forgetting). " } ?? recall.map { "Now: \($0). " } ?? ""
+        return what + "apogee chats recall --forget --yes -- every chat's summary goes, so no later session recalls them; every transcript stays."
     }
 
     /// `chats recall --forget --yes` once the person said yes -- every
@@ -1123,7 +1180,10 @@ public final class SessionLibraryViewModel {
             chat: currentChat, chatID: current.savedChatID, model: current.transcript.model,
             kind: currentChat.flatMap(kind(of:)), lastTurn: lastUsage, roles: roles,
             rolesFailure: rolesFailure, recall: hasTrack52 ? recall : nil, recallFailure: hasTrack52 ? recallFailure : nil,
-            canCompact: currentChat.map(canCompact) ?? false, suite: current.suiteFact, orchestrating: current.orchestrates)
+            recallSummaries: hasTrack52 ? recallListing?.summaries : nil,
+            recallSelected: hasTrack52 ? recallSelection.flatMap { chat in recallListing?.summaries.first { $0.chat == chat } } : nil,
+            canForgetRecall: canForgetRecall, canCompact: currentChat.map(canCompact) ?? false, suite: current.suiteFact,
+            orchestrating: current.orchestrates)
     }
 
     private var lastUsage: Usage? {
@@ -1205,10 +1265,17 @@ public struct Inspector: Equatable {
     public let lastTurn: Usage?
     public let roles: [Field]
     public let rolesFailure: String?
-    /// What recall holds, as `chats recall` says it, on a binary with the
-    /// CLI's 52e; `nil` on one without, or unread.
+    /// What recall holds, in the count line `chats recall` says it in, on a
+    /// binary with the CLI's 52e; `nil` on one without, or unread.
     public let recall: String?
     public let recallFailure: String?
+    /// The summaries themselves, newest first, where the binary lists them
+    /// (the CLI's M31): each one's name and date; `nil` where it doesn't.
+    public let recallSummaries: [RecallListing.Summary]?
+    /// The summary chosen, its text shown.
+    public let recallSelected: RecallListing.Summary?
+    /// Whether Forget has anything to erase.
+    public let canForgetRecall: Bool
     /// Whether the session's saved conversation can be compacted from here.
     public let canCompact: Bool
     /// The suite the session runs under -- `pair`, `none`, `fast (the
@@ -1221,8 +1288,9 @@ public struct Inspector: Equatable {
 
     public init(
         chat: ChatSummary?, chatID: String?, model: String?, kind: ModelKind?, lastTurn: Usage?, roles: [Field],
-        rolesFailure: String?, recall: String? = nil, recallFailure: String? = nil, canCompact: Bool = false,
-        suite: String? = nil, orchestrating: Bool? = nil
+        rolesFailure: String?, recall: String? = nil, recallFailure: String? = nil,
+        recallSummaries: [RecallListing.Summary]? = nil, recallSelected: RecallListing.Summary? = nil,
+        canForgetRecall: Bool = true, canCompact: Bool = false, suite: String? = nil, orchestrating: Bool? = nil
     ) {
         self.chat = chat
         self.chatID = chatID
@@ -1233,6 +1301,9 @@ public struct Inspector: Equatable {
         self.rolesFailure = rolesFailure
         self.recall = recall
         self.recallFailure = recallFailure
+        self.recallSummaries = recallSummaries
+        self.recallSelected = recallSelected
+        self.canForgetRecall = canForgetRecall
         self.canCompact = canCompact
         self.suite = suite
         self.orchestrating = orchestrating

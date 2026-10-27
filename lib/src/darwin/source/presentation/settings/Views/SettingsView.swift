@@ -439,10 +439,14 @@ struct PermissionsPane: View {
                 if let holds = model.recallHolds {
                     Text(holds).font(.apogeeMeta).foregroundStyle(Palette.textSecondary).textSelection(.enabled)
                 }
+                if let listing = model.recallListing, !listing.summaries.isEmpty {
+                    RecalledList(listing: listing)
+                }
                 HStack {
                     Button("On") { Task { await model.setConfig("memory.recall", "true") } }
                     Button("Off") { Task { await model.setConfig("memory.recall", "false") } }
                     Button("Forget every recalled summary…") { Task { await model.askToForget() } }
+                        .disabled(!model.canForget)
                 }
             }
         }
@@ -450,8 +454,27 @@ struct PermissionsPane: View {
             Button("Forget every summary", role: .destructive) { Task { await model.forgetRecall() } }
             Button("Cancel", role: .cancel) { model.forgetting = false }
         } message: {
-            Text((model.recallHolds.map { "Now: \($0). " } ?? "")
-                + "apogee chats recall --forget --yes -- every chat's summary goes, so no later session recalls them; every transcript stays.")
+            Text(model.forgetMessage)
+        }
+    }
+}
+
+/// What recall holds, by name and date, as the binary lists it (GUI M15):
+/// what Forget would erase, seen before it is asked.
+struct RecalledList: View {
+    let listing: RecallListing
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            ForEach(listing.summaries) { summary in
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
+                    Text(summary.title).font(.apogeeSmall).foregroundStyle(Palette.textPrimary)
+                    Text(summary.updated.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "undated")
+                        .font(.apogeeMeta)
+                        .foregroundStyle(Palette.textTertiary)
+                }
+                .help(summary.summary)
+            }
         }
     }
 }
@@ -632,6 +655,32 @@ struct PermissionsPane: View {
             await SettingsPreview.read(model)
             await model.askToForget()
         }
+}
+
+#Preview("Permissions on the branch binary: recall's summaries listed, Forget naming each") {
+    let model = SettingsPreview.settings(.permissions, track52: true, runner: SettingsPreview.listingRunner, vocabulary: "2026-10-26")
+    VStack(alignment: .leading, spacing: Spacing.xl) { PermissionsPane(model: model) }
+        .padding(Spacing.xl)
+        .frame(width: 680, height: 560)
+        .task {
+            await SettingsPreview.read(model)
+            await model.askToForget()
+        }
+}
+
+#Preview("What recall holds, by name and date") {
+    @Previewable @State var model = SettingsPreview.settings(
+        .permissions, track52: true, runner: SettingsPreview.listingRunner, vocabulary: "2026-10-26")
+    Group {
+        if let listing = model.recallListing {
+            RecalledList(listing: listing)
+                .padding(Spacing.xl)
+                .frame(width: 480)
+        } else {
+            ProgressView().padding(Spacing.xl)
+        }
+    }
+    .task { await SettingsPreview.read(model) }
 }
 
 #Preview("Permissions: the binary hasn't said what it can do") {

@@ -233,3 +233,71 @@ public struct GraphReport: Sendable, Equatable {
         orphans = v["orphans"]?["total"]?.intValue ?? 0
     }
 }
+
+/// A dedupe's plan, as `graph dedupe <graph> --dry-run --output-format json`
+/// states it since the CLI's M31 -- byte for byte the body its admin twin
+/// serves: the groups that would merge, each kept entity and the names that
+/// fold into it, at what threshold, and why the vector pass found nothing to
+/// compare where it didn't run. Before it, the dry run printed text alone.
+public struct DedupePlan: Sendable, Equatable {
+    /// One group: the entity kept, its type, and the entities that merge into
+    /// it.
+    public struct Group: Sendable, Equatable, Identifiable {
+        public let kept: String
+        public let keptType: String
+        public let merged: [String]
+        public var id: String { keptType + ":" + kept }
+    }
+
+    public let groups: [Group]
+    /// How many entities merge, across the groups.
+    public let mergedNodes: Int
+    /// The cosine similarity above which two entities merge; `nil` unsaid.
+    public let threshold: Double?
+    /// Whether nothing was written: always so for the dry run the app asks.
+    public let dryRun: Bool
+    /// A code graph's entities, each one node per qualified name as it was
+    /// built -- never merged by resemblance -- and how many were stated at
+    /// more than one place.
+    public let codeEntities: Int
+    public let codeIdentityMerges: Int
+    /// Why the vector pass compared nothing, where it didn't run; `nil` when
+    /// it ran.
+    public let proseSkipped: String?
+
+    /// The body's facts; `nil` for a document with no `groups`.
+    public init?(document: ReadDocument) {
+        let v = document.value
+        guard let groups = v["groups"]?.arrayValue else { return nil }
+        self.groups = groups.compactMap { group in
+            guard let kept = group["kept"]?.stringValue else { return nil }
+            return Group(
+                kept: kept, keptType: group["kept_type"]?.stringValue ?? "",
+                merged: (group["merged"]?.arrayValue ?? []).compactMap(\.stringValue))
+        }
+        mergedNodes = v["merged_nodes"]?.intValue ?? 0
+        threshold = if case .number(let n)? = v["threshold"] { n } else { nil }
+        dryRun = v["dry_run"]?.boolValue ?? true
+        codeEntities = v["code_entities"]?.intValue ?? 0
+        codeIdentityMerges = v["code_identity_merges"]?.intValue ?? 0
+        proseSkipped = v["prose_skipped"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// Whether it names anything to merge: Merge is offered only then.
+    public var merges: Bool { groups.contains { !$0.merged.isEmpty } }
+
+    /// The plan in a sentence, from its facts: `2 groups, 4 entities would
+    /// merge at threshold 0.92`, or that nothing would.
+    public var summary: String {
+        let at = threshold.map { " at threshold \(Self.number($0))" } ?? ""
+        guard merges else { return "Nothing would merge\(at)." }
+        let groupWords = groups.count == 1 ? "1 group" : "\(groups.count) groups"
+        let entityWords = mergedNodes == 1 ? "1 entity" : "\(mergedNodes) entities"
+        return "\(groupWords), \(entityWords) would merge\(at)."
+    }
+
+    /// `0.92`, `1`.
+    static func number(_ value: Double) -> String {
+        value.rounded() == value ? String(Int(value)) : String(value)
+    }
+}

@@ -116,11 +116,12 @@ public struct CollectionInfo: Sendable, Equatable {
 }
 
 /// A record's archived raw conversation, as `knowledge info <id> --raw`
-/// prints it -- in text mode only (`knowledge.cpp`): the record's fields,
+/// gives it: since the CLI's M31 its document's `raw` (`init(document:)`);
+/// before it, in text mode only (`knowledge.cpp`) -- the record's fields,
 /// then a line `-- Raw conversation --` and the conversation, or the line
-/// `Raw conversation: (unavailable)` when the archive is gone. The app runs
-/// the verb as a command and shows what follows the CLI's own marker, never
-/// reading the archive's path itself (GUI 4k; ADR 0002).
+/// `Raw conversation: (unavailable)` when the archive is gone -- what follows
+/// the CLI's own marker shown (`init(printed:)`). Never read from the
+/// archive's path itself (GUI 4k, M15; ADR 0002).
 public enum RawConversation: Sendable, Equatable {
     /// The conversation, as the CLI printed it.
     case text(String)
@@ -129,6 +130,18 @@ public enum RawConversation: Sendable, Equatable {
 
     static let marker = "-- Raw conversation --"
     static let unavailableLine = "Raw conversation: (unavailable)"
+
+    /// The conversation `knowledge info <id> --raw --output-format json`
+    /// carries since the CLI's M31: its `raw`, or `null` where the archive
+    /// can't be read. `nil` for a document with no `raw` at all -- a binary
+    /// before M31 drops it silently -- which is then read from the text.
+    public init?(document: ReadDocument) {
+        switch document.value["raw"] {
+        case .string(let text)?: self = .text(text)
+        case .null?: self = .unavailable
+        default: return nil
+        }
+    }
 
     /// What `knowledge info --raw` printed; `nil` when neither of the CLI's
     /// lines is there to say.

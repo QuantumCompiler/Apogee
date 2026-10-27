@@ -132,6 +132,11 @@ final class AppViewModel {
         graph.say = { [weak shell] text in shell?.say(text) }
         let records = RecordsViewModel(runner: runner ?? ReadRunner(), starter: jobs)
         records.say = { [weak shell] text in shell?.say(text) }
+        // Whether Dedupe… and a record's raw conversation are asked as the
+        // documents the CLI's M31 gave them: the vocabulary read at launch
+        // says (GUI M15).
+        graph.vocabulary = { [weak sessions] in sessions?.vocabulary }
+        records.vocabulary = { [weak sessions] in sessions?.vocabulary }
         let collections = CollectionsViewModel(runner: runner ?? ReadRunner(), starter: jobs)
         collections.say = { [weak shell] text in shell?.say(text) }
         let training = TrainingViewModel(runner: runner ?? ReadRunner(), starter: jobs)
@@ -171,6 +176,9 @@ final class AppViewModel {
         let settings = SettingsViewModel(runner: runner ?? ReadRunner(), starter: jobs, preferences: preferences)
         settings.say = { [weak shell] text in shell?.say(text) }
         settings.hasTrack52 = { [weak sessions] in sessions?.hasTrack52 ?? false }
+        // Whether what recall holds is asked as its listing (the CLI's M31):
+        // the vocabulary read at launch says (GUI M15).
+        settings.vocabulary = { [weak sessions] in sessions?.vocabulary }
         // What the binary can do is asked at launch, and again when its file
         // changes (GUI 4k): Settings says what it lacks only once it has said.
         settings.capabilitiesKnown = { [weak sessions] in sessions?.capabilitiesKnown ?? false }

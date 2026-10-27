@@ -142,5 +142,9 @@ apogee config: no such config key: 'backends.gpt.server_tools'
     static let chatsRecall = #"""
 recall holds 2 chat summaries in /Users/someone/.apogee/memory/chats.db
 """#
+    /// tests/business/reads/Fixtures/chats-recall.json
+    static let chatsRecallListing = #"""
+{"data":[{"chat":"20261027-015933-2264","name":"Launch Emails","summary":"Asked when the launch emails go out (09:00 on 2026-11-12) and who approves the copy (Ada, the day before).","updated":"2026-10-27T01:59:33Z"},{"chat":"20261027-015932-30ca","name":"Dev Server Port","summary":"Asked the dev server's port (8080) and confirmed the launch on 2026-11-12.","updated":"2026-10-27T01:59:32Z"},{"chat":"20261027-015931-79d5","name":"Release Checklist","summary":"Asked what was left on the release checklist (the changelog and the signed build) and who signs the build (Grace, once the changelog is in).","updated":"2026-10-27T01:59:31Z"}],"index":"/Users/someone/.apogee/memory/chats.db","object":"list","pending":0}
+"""#
 }
 #endif

@@ -17,6 +17,11 @@ final class ScriptedRunner: CommandRunning, @unchecked Sendable {
         reads.withLock { $0.insert((prefix, .document(ReadDocument(text: json)!)), at: 0) }
     }
 
+    /// A read answered with `outcome`: a refusal.
+    func reading(_ prefix: [String], _ outcome: ReadOutcome) {
+        reads.withLock { $0.insert((prefix, outcome), at: 0) }
+    }
+
     func saying(_ prefix: [String], _ stdout: String) {
         commands.withLock { $0.insert((prefix, .done(stdout: stdout)), at: 0) }
     }

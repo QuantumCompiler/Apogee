@@ -49,6 +49,19 @@ enum SettingsPreview {
                 : [])
     }
 
+    /// The panes' reads on the branch binary (schema 2026-10-26, the CLI's
+    /// M31): `chats recall` answered with its listing, M15's three summaries.
+    static let listingRunner = PreviewRunner(
+        reads: [
+            (["models", "list"], SettingsDocuments.modelsList),
+            (["auth", "list"], authList),
+            (["providers", "scan"], providersScan),
+            (["check"], check),
+            (["chats", "recall"], SettingsDocuments.chatsRecallListing),
+        ],
+        commands: [(["config", "get", "permissions"], permissions)],
+        refused: [["config", "get"]])
+
     /// The documents tests/presentation/settings/SettingsViewModelTests.swift
     /// reads its panes from: a key stored for one provider (names only), a
     /// vendor CLI found, a check with a failing row and its remedy, and the
@@ -77,7 +90,8 @@ enum SettingsPreview {
     /// (tests/data/discovery/BinaryDiscoveryTests.swift).
     static let skippedOverride = (path: "/Users/someone/tools/apogee", reason: "`version` exited with status 1: error: broken install")
 
-    /// The view-model, not yet read; `track52` when the build has 52e,
+    /// The view-model, not yet read; `vocabulary` the binary's date (GUI
+    /// M15: 2026-10-26 lists recall's summaries); `track52` when the build has 52e,
     /// `known` when the binary has said what it can do (its vocabulary read
     /// at launch, GUI 4k), `childPath` what the app's resolver answers,
     /// `override` the binary the person pointed the app at, `check` the
@@ -85,7 +99,7 @@ enum SettingsPreview {
     static func settings(
         _ pane: SettingsViewModel.Pane = .general, track52: Bool = false, known: Bool = true,
         childPath: ShellPath.Resolution = shellPath, override: String? = nil, check: String = check,
-        runner: PreviewRunner? = nil
+        runner: PreviewRunner? = nil, vocabulary: String? = nil
     ) -> SettingsViewModel {
         let preferences = Preferences(store: MemoryStore())
         preferences.binaryOverride = override.map { URL(fileURLWithPath: $0) }
@@ -93,6 +107,7 @@ enum SettingsPreview {
         model.pane = pane
         model.hasTrack52 = { track52 }
         model.capabilitiesKnown = { known }
+        model.vocabulary = { vocabulary }
         model.childPathSource = { childPath }
         return model
     }

@@ -35,6 +35,37 @@ enum KnowledgePreview {
         KnowledgeRecord.list(from: ReadDocument(text: KnowledgeDocuments.knowledgeListOne)!)[0]
     }
 
+    /// The branch binary (schema 2026-10-26, the CLI's M31) over M15's
+    /// sandbox: its captured record, and `knowledge info --raw`'s document
+    /// carrying the conversation as `raw` -- or, its archive removed, `null`.
+    static func rawDocumentRunner(unavailable: Bool = false) -> PreviewRunner {
+        PreviewRunner(
+            reads: [
+                (["knowledge", "list"], KnowledgeDocuments.knowledgeListRaw),
+                (["knowledge", "info"], unavailable ? KnowledgeDocuments.knowledgeInfoRawNull : KnowledgeDocuments.knowledgeInfoRawDocument),
+            ])
+    }
+
+    /// The records on that binary: its vocabulary's date says the raw
+    /// conversation is asked as the document.
+    static func documentRecords(unavailable: Bool = false) -> RecordsViewModel {
+        let records = RecordsViewModel(runner: rawDocumentRunner(unavailable: unavailable), starter: PreviewJobs(said: []))
+        records.vocabulary = { "2026-10-26" }
+        return records
+    }
+
+    /// That record, as its `knowledge list` named it.
+    static var capturedM31: KnowledgeRecord {
+        KnowledgeRecord.list(from: ReadDocument(text: KnowledgeDocuments.knowledgeListRaw)!)[0]
+    }
+
+    /// The records read, `record` open, and its conversation asked for.
+    static func openRaw(_ records: RecordsViewModel, _ record: KnowledgeRecord) async {
+        await records.connect(binary: previewBinary)
+        records.select(record)
+        await records.showRaw(record)
+    }
+
     /// The records read, the captured one open, and its conversation asked
     /// for.
     static func openRaw(_ records: RecordsViewModel) async {

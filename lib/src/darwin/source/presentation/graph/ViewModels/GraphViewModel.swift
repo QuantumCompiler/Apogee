@@ -49,8 +49,11 @@ public final class GraphViewModel {
     public enum Dedupe: Equatable, Sendable {
         /// `graph dedupe <graph> --dry-run` running.
         case planning
-        /// What the dry run printed: the merge groups, or why there are none.
+        /// What the dry run printed: the merge groups, or why there are none
+        /// -- an older binary's text.
         case planned(String)
+        /// The dry run's plan, as its document states it (the CLI's M31).
+        case found(DedupePlan)
         /// The merge running, supervised.
         case merging
         /// What the merge printed.
@@ -85,6 +88,10 @@ public final class GraphViewModel {
     /// from the graph's reads, which the place draws.
     public private(set) var problem: String?
     public var say: (@MainActor (String) -> Void)?
+    /// The binary's vocabulary date, as the app read it at launch
+    /// (`__machine-schema`, the session library's): from the CLI's M31 the
+    /// dedupe's dry run is asked as its document first (GUI M15).
+    public var vocabulary: @MainActor () -> String? = { nil }
 
     private let runner: any CommandRunning
     private let starter: any JobStarting
@@ -280,24 +287,32 @@ public final class GraphViewModel {
     public var reportName: String { "\(graph ?? "graph")-report.md" }
 
     /// A dedupe's dry run -- `graph dedupe <graph> --dry-run`, which changes
-    /// nothing -- shown before anything merges.
+    /// nothing -- shown before anything merges: its document's plan on a
+    /// binary that has one (the CLI's M31, the admin route's body byte for
+    /// byte; GUI M15), else the text it prints, and the text too where the
+    /// binary refuses the flag. `--dry-run` is always asked: without it the
+    /// read would merge.
     public func planDedupe() async {
         guard let binary, let graph, job == nil else { return }
         dedupe = .planning
-        let outcome = await runner.command(binary: binary, ["graph", "dedupe", graph, "--dry-run"])
-        if case .done(let text) = outcome {
-            dedupe = .planned(text.trimmingCharacters(in: .newlines))
-        } else {
-            dedupe = .failed(outcome.failure ?? "the dry run could not run")
+        let asks = ProseReads.asksDocuments(vocabulary: vocabulary())
+        switch await runner.documentOrText(binary: binary, ["graph", "dedupe", graph, "--dry-run"], asksDocument: asks, DedupePlan.init(document:)) {
+        case .document(let plan): dedupe = .found(plan)
+        case .text(let text): dedupe = .planned(text.trimmingCharacters(in: .newlines))
+        case .failed(let why): dedupe = .failed(why)
         }
     }
 
-    /// Whether the dry run named entities to merge: a line the CLI starts
-    /// `Would merge into` (`graph.cpp`'s dedupe); nothing is offered to
-    /// merge where it found nothing.
+    /// Whether the dry run named entities to merge: its plan's groups where
+    /// the document states them, else a line the CLI starts `Would merge
+    /// into` (`graph.cpp`'s dedupe); nothing is offered to merge where it
+    /// found nothing.
     public var dedupeMerges: Bool {
-        guard case .planned(let text) = dedupe else { return false }
-        return text.split(whereSeparator: \.isNewline).contains { $0.hasPrefix("Would merge into ") }
+        switch dedupe {
+        case .found(let plan)?: plan.merges
+        case .planned(let text)?: text.split(whereSeparator: \.isNewline).contains { $0.hasPrefix("Would merge into ") }
+        default: false
+        }
     }
 
     /// The merge the dry run showed, on the person's word: `graph dedupe

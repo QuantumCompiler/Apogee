@@ -165,6 +165,15 @@ struct DedupeSheet: View {
                         .foregroundStyle(Palette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+            case .found(let plan)?:
+                Text("The dry run -- nothing changed yet:").font(.apogeeSmall).foregroundStyle(Palette.textSecondary)
+                DedupeGroups(plan: plan)
+                if model.dedupeMerges {
+                    Text("apogee graph dedupe \(model.graph ?? "") -- the entities named merge into the one each is kept as. Re-run Find communities after, as the CLI says.")
+                        .font(.apogeeMeta)
+                        .foregroundStyle(Palette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             case .merging?:
                 HStack {
                     ProgressView().controlSize(.small)
@@ -201,6 +210,53 @@ struct DedupeSheet: View {
             .padding(Spacing.m)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Palette.window, in: RoundedRectangle(cornerRadius: Radius.card))
+    }
+}
+
+/// A dedupe's plan, from its document (the CLI's M31): each group -- the
+/// entity kept and the names that merge into it -- then what the plan says
+/// in a sentence, a code graph's entities merged by name as they were built,
+/// and why the vector pass compared nothing where it didn't run.
+struct DedupeGroups: View {
+    let plan: DedupePlan
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            if !plan.groups.isEmpty {
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Spacing.m, verticalSpacing: Spacing.s) {
+                    GridRow {
+                        ForEach(["KEPT", "MERGED INTO IT"], id: \.self) {
+                            Text($0).font(.system(size: TypeScale.label, weight: .medium, design: .monospaced)).foregroundStyle(Palette.textTertiary)
+                        }
+                    }
+                    ForEach(plan.groups) { group in
+                        GridRow {
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(group.kept).font(.apogeeCode)
+                                Text(group.keptType).font(.apogeeMeta).foregroundStyle(Palette.textTertiary)
+                            }
+                            Text(group.merged.joined(separator: ", "))
+                                .font(.apogeeSmall)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+            Text(plan.summary).font(.apogeeSmall).foregroundStyle(Palette.textSecondary)
+            if plan.codeEntities > 0 {
+                Text("Code entities: \(plan.codeEntities), merged by exact qualified name as they were built (\(plan.codeIdentityMerges) stated at more than one place), never by resemblance.")
+                    .font(.apogeeMeta)
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let skipped = plan.proseSkipped {
+                Text("Prose entities: vector dedupe skipped -- \(skipped).")
+                    .font(.apogeeMeta)
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }
 
@@ -561,6 +617,30 @@ struct NewGraphSheet: View {
             await graph.connect(binary: previewBinary)
             await graph.planDedupe()
         }
+}
+
+#Preview("Dedupe: the dry run's groups, from its document, Merge offered") {
+    let graph = GraphPreview.documentGraph(GraphPreview.documents())
+    DedupeSheet(model: graph)
+        .task {
+            await graph.connect(binary: previewBinary)
+            await graph.planDedupe()
+        }
+}
+
+#Preview("Dedupe: the document names no group") {
+    let graph = GraphPreview.documentGraph(GraphPreview.documents(nothing: true))
+    DedupeSheet(model: graph)
+        .task {
+            await graph.connect(binary: previewBinary)
+            await graph.planDedupe()
+        }
+}
+
+#Preview("Dedupe groups, kept and merged") {
+    DedupeGroups(plan: GraphPreview.groupsPlan)
+        .padding(Spacing.xl)
+        .frame(width: 560)
 }
 
 #Preview("Dedupe: merging") {

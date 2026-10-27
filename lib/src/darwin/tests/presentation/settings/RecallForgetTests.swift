@@ -29,6 +29,7 @@ final class RuleRunner: CommandRunning, @unchecked Sendable {
     private let exact = Mutex<[([String], CommandOutcome)]>([])
     private let prefixed = Mutex<[([String], CommandOutcome)]>([])
     private let reads = Mutex<[([String], String)]>([])
+    private let readFailures = Mutex<[([String], ReadOutcome)]>([])
     private let log = Mutex<[String]>([])
 
     var calls: [String] { log.withLock { $0 } }
@@ -36,9 +37,12 @@ final class RuleRunner: CommandRunning, @unchecked Sendable {
     func when(_ arguments: [String], _ outcome: CommandOutcome) { exact.withLock { $0.insert((arguments, outcome), at: 0) } }
     func whenStarting(_ prefix: [String], _ outcome: CommandOutcome) { prefixed.withLock { $0.insert((prefix, outcome), at: 0) } }
     func reading(_ prefix: [String], _ json: String) { reads.withLock { $0.insert((prefix, json), at: 0) } }
+    /// Answers every later read starting with `prefix` with `outcome`: a refusal.
+    func failingRead(_ prefix: [String], _ outcome: ReadOutcome) { readFailures.withLock { $0.insert((prefix, outcome), at: 0) } }
 
     func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
         log.withLock { $0.append("read " + arguments.joined(separator: " ")) }
+        if let failure = readFailures.withLock({ rules in rules.first { arguments.starts(with: $0.0) }?.1 }) { return failure }
         return reads.withLock { rules in rules.first { arguments.starts(with: $0.0) } }.flatMap { ReadDocument(text: $0.1) }.map(ReadOutcome.document)
             ?? .couldNotStart("no scripted read")
     }

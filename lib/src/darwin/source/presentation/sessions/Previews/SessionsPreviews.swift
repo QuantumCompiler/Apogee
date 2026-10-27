@@ -135,6 +135,36 @@ enum SessionsPreview {
             ])
     }
 
+    // MARK: - The reads as documents (GUI M15)
+
+    /// The branch binary (schema 2026-10-26, the CLI's M31) over M15's
+    /// sandbox: three saved chats -- the oldest written by the installed,
+    /// older binary -- `chats info`'s document for one, and `chats recall`'s
+    /// listing of all three; Forget answering as it did there.
+    static func documents() -> SessionLibraryViewModel {
+        let runner = PreviewRunner(
+            reads: [
+                (["chats", "list"], SessionsDocuments.chatsListRecall),
+                (["chats", "info"], SessionsDocuments.chatsInfoDocument),
+                (["chats", "recall"], SessionsDocuments.chatsRecallListing),
+                (["models", "list"], modelsList),
+                (["models", "status"], modelsStatus),
+            ],
+            commands: [
+                (["__machine-schema"], SessionsDocuments.machineSchemaM31),
+                (["config", "get", "suites"], suites),
+                (["chats", "recall", "--forget"], SessionsDocuments.chatsRecallForgetThree),
+            ])
+        let now = Self.now
+        return SessionLibraryViewModel(
+            starter: PreviewChats(lines: mockActor), runner: runner, preferences: Preferences(store: MemoryStore()), now: { now })
+    }
+
+    /// The chat `chats info`'s document was recorded on: Dev Server Port.
+    static var recalledPort: ChatSummary {
+        ChatSummary.list(from: ReadDocument(text: SessionsDocuments.chatsListRecall)!).first { $0.name == "Dev Server Port" }!
+    }
+
     /// The two saved chats the branch's binary listed over a sandbox (GUI
     /// 4k's recording): the first is the one `chats info` and `chats
     /// compact` were recorded on.

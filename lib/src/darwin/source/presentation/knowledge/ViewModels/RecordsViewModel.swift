@@ -48,7 +48,7 @@ public final class RecordsViewModel {
     }
 
     /// Where a record's raw conversation stands, as `knowledge info --raw`
-    /// printed it (GUI 4k).
+    /// gave it (GUI 4k, M15).
     public enum Raw: Equatable, Sendable {
         case reading
         case shown(RawConversation)
@@ -80,6 +80,10 @@ public final class RecordsViewModel {
     /// The open record's raw conversation, once asked for.
     public private(set) var raw: RawView?
     public var say: (@MainActor (String) -> Void)?
+    /// The binary's vocabulary date, as the app read it at launch
+    /// (`__machine-schema`, the session library's): from the CLI's M31 a
+    /// record's raw conversation is asked as its document first (GUI M15).
+    public var vocabulary: @MainActor () -> String? = { nil }
 
     private let runner: any CommandRunning
     private let starter: any JobStarting
@@ -153,18 +157,25 @@ public final class RecordsViewModel {
         selected = record.id
     }
 
-    /// A record's raw conversation -- `knowledge info <id> --raw`, which
-    /// prints it in text mode alone, run as a command -- shown as the CLI
-    /// printed it, never read from the archive's path (GUI 4k; ADR 0002).
+    /// A record's raw conversation -- `knowledge info <id> --raw` -- never
+    /// read from the archive's path (GUI 4k; ADR 0002): its document's `raw`
+    /// on a binary that carries it (the CLI's M31; GUI M15), `null` an
+    /// archive it can't read; else, or where the document has no `raw`, the
+    /// text it prints, run as a command and shown after the CLI's marker.
     public func showRaw(_ record: KnowledgeRecord) async {
         guard let binary else { return }
         raw = RawView(record: record.id, state: .reading)
-        let outcome = await runner.command(binary: binary, ["knowledge", "info", record.id, "--raw"])
+        let asks = ProseReads.asksDocuments(vocabulary: vocabulary())
+        let answer = await runner.documentOrText(
+            binary: binary, ["knowledge", "info", record.id, "--raw"], asksDocument: asks, RawConversation.init(document:))
         guard raw?.record == record.id else { return }
-        if case .done(let text) = outcome, let conversation = RawConversation(printed: text) {
+        switch answer {
+        case .document(let conversation):
             raw = RawView(record: record.id, state: .shown(conversation))
-        } else {
-            raw = RawView(record: record.id, state: .failed(outcome.failure ?? "apogee printed no raw conversation"))
+        case .text(let text):
+            raw = RawView(record: record.id, state: RawConversation(printed: text).map(Raw.shown) ?? .failed("apogee printed no raw conversation"))
+        case .failed(let why):
+            raw = RawView(record: record.id, state: .failed(why))
         }
     }
 

@@ -94,11 +94,15 @@ public struct Suite: Sendable, Equatable, Identifiable {
 }
 
 /// A suite as the CLI prices it on this machine (its 27e, with 53d's shared
-/// bases and adapters and M25's drafters): the `footprint` field `models
-/// status --suite <name>` states -- the suite, a line per member, then the
-/// total and its verdict. The app shows it as said and decides nothing from
-/// its numbers: the verdict is the CLI's, the same one `chat --suite` admits
-/// or refuses a session by.
+/// bases and adapters and M25's drafters), as `models status --suite <name>`
+/// states it: since the CLI's M31 its typed `footprint` object -- each
+/// member's exact bytes, whether they are all of it, whose base it shares,
+/// and the total, margin, budget and verdict -- and before it the
+/// `footprint` field's text alone: the suite, a line per member, then the
+/// total and its verdict. The app shows it and decides nothing from its
+/// numbers: the verdict is the CLI's, the same one `chat --suite` admits or
+/// refuses a session by, and the typed and the text reading of one suite say
+/// the same verdict.
 public struct SuiteFootprint: Sendable, Equatable {
     /// How the total ends, in the CLI's words (`admission_line`).
     public enum Verdict: Sendable, Equatable {
@@ -117,30 +121,120 @@ public struct SuiteFootprint: Sendable, Equatable {
         case unread
     }
 
-    /// One member's line: the backend, the roles it speaks for, and what it
-    /// holds, as the CLI says it.
+    /// One member: the backend, the roles it speaks for, and what it holds.
     public struct Member: Sendable, Equatable, Identifiable {
         public let backend: String
         public let roles: [String]
-        /// After the colon: `136 MiB -- shares root's 40960 MiB of weights, …`,
-        /// or `nothing held here`.
+        /// What it holds, in words: read from the text, the CLI's own after
+        /// the colon (`136 MiB -- shares root's 40960 MiB of weights, …`, or
+        /// `nothing held here`); from the typed facts, said from them.
         public let said: String
+        /// The typed facts (the CLI's M31); `nil` read from the text. What
+        /// the total counts of it, exactly -- all of it where `known`, else
+        /// what is known of it --, whether its memory is on this machine, the
+        /// member whose loaded base it runs on (empty for its own), and why
+        /// its size is unknown (empty when it is known).
+        public let bytes: Int?
+        public let known: Bool?
+        public let local: Bool?
+        public let shares: String?
+        public let note: String?
         public var id: String { backend }
+
+        init(backend: String, roles: [String], said: String) {
+            self.backend = backend
+            self.roles = roles
+            self.said = said
+            bytes = nil
+            known = nil
+            local = nil
+            shares = nil
+            note = nil
+        }
+
+        init?(typed value: JSONValue) {
+            guard let backend = value["backend"]?.stringValue, let bytes = value["bytes"]?.intValue else { return nil }
+            self.backend = backend
+            roles = (value["roles"]?.arrayValue ?? []).compactMap(\.stringValue)
+            self.bytes = bytes
+            let known = value["known"]?.boolValue ?? true
+            let local = value["local"]?.boolValue ?? true
+            let shares = value["shares"]?.stringValue ?? ""
+            let note = value["note"]?.stringValue ?? ""
+            self.known = known
+            self.local = local
+            self.shares = shares
+            self.note = note
+            let size = SuiteFootprint.size(bytes)
+            if !local {
+                said = note.isEmpty ? "nothing held here" : note
+            } else if !known {
+                let why = note.isEmpty ? "its size is not stated" : note
+                said = bytes > 0 ? "at least \(size) -- unknown: \(why)" : "unknown -- \(why)"
+            } else {
+                said = shares.isEmpty ? size : "\(size) -- on \(shares)'s weights, counted there"
+            }
+        }
     }
 
     public let suite: String
     public let members: [Member]
-    /// The total, after `total: `: the sum, the machine's budget, each
-    /// member's part and the verdict -- the line the session's admission says.
+    /// The total in words: read from the text, its line after `total: ` --
+    /// the sum, the machine's budget, each member's part and the verdict,
+    /// the line the session's admission says; from the typed facts, said from
+    /// them.
     public let total: String
     public let verdict: Verdict
+    /// The typed totals (the CLI's M31); `nil` read from the text: what the
+    /// suite needs here exactly -- the members' bytes and the margin -- the
+    /// margin held back once for the set, and the machine's memory for
+    /// models (`nil` too where the CLI doesn't know it).
+    public let totalBytes: Int?
+    public let marginBytes: Int?
+    public let budgetBytes: Int?
+    /// The verdict as the document words it (`does not fit`); `nil` read from
+    /// the text, whose total ends in its own words.
+    let verdictWord: String?
+
+    /// Whether these are the CLI's typed facts rather than its text read.
+    public var isTyped: Bool { verdictWord != nil }
 
     /// The footprint `models status --suite <name> --output-format json`
-    /// carries; `nil` when it carries none (no suite active, or a binary
-    /// before the CLI's 27e).
+    /// carries: its typed object where the document has one (the CLI's M31;
+    /// GUI M15), else its `footprint` field's text; `nil` when it carries
+    /// neither (no suite active, or a binary before the CLI's 27e).
     public init?(document: ReadDocument) {
+        if let typed = document.value["footprint"].flatMap(SuiteFootprint.init(typed:)) {
+            self = typed
+            return
+        }
         guard let text = Field.list(from: document).first(where: { $0.label == "footprint" })?.value else { return nil }
         self.init(text: text)
+    }
+
+    /// The typed `footprint` object (the CLI's M31): `{suite, members,
+    /// margin_bytes, total_bytes, budget_bytes, verdict}`; `nil` when it is
+    /// not one.
+    public init?(typed value: JSONValue) {
+        guard let suite = value["suite"]?.stringValue, let members = value["members"]?.arrayValue,
+            let total = value["total_bytes"]?.intValue, let word = value["verdict"]?.stringValue
+        else { return nil }
+        self.suite = suite
+        self.members = members.compactMap(Member.init(typed:))
+        totalBytes = total
+        let margin = value["margin_bytes"]?.intValue ?? 0
+        marginBytes = margin
+        budgetBytes = value["budget_bytes"]?.intValue
+        verdictWord = word
+        verdict = Self.verdict(word: word)
+        if verdict == .nothingHeld {
+            self.total = "suite \(suite): \(word)"
+        } else {
+            let floor = self.members.contains { $0.known == false } ? "at least " : ""
+            let of = budgetBytes.map { " of this machine's \(Self.size($0))" } ?? ""
+            let held = margin > 0 ? ", \(Self.size(margin)) of it margin" : ""
+            self.total = "suite \(suite) needs \(floor)\(Self.size(total))\(of)\(held) -- \(word)"
+        }
     }
 
     /// `suite shared` / `root (chat): …` / `total: suite shared needs …`.
@@ -160,6 +254,10 @@ public struct SuiteFootprint: Sendable, Equatable {
         }
         self.total = total
         verdict = Self.verdict(of: total)
+        totalBytes = nil
+        marginBytes = nil
+        budgetBytes = nil
+        verdictWord = nil
     }
 
     /// The verdict a total line ends in.
@@ -175,10 +273,30 @@ public struct SuiteFootprint: Sendable, Equatable {
         }
     }
 
-    /// The verdict in a few words, the CLI's own: what the total ends in.
+    /// The verdict a typed footprint words (`footprint_verdict`): one of the
+    /// CLI's five.
+    static func verdict(word: String) -> Verdict {
+        switch word {
+        case "fits": .fits
+        case "fits as far as known": .fitsAsFarAsKnown
+        case "does not fit": .doesNotFit
+        case "budget not known here": .budgetUnknown
+        case "no member holds memory": .nothingHeld
+        default: .unread
+        }
+    }
+
+    /// The verdict in a few words, the CLI's own: the typed word, or what
+    /// the text's total ends in.
     public var verdictWords: String {
+        if let verdictWord { return verdictWord }
         if verdict == .nothingHeld { return "no member holds memory on this machine" }
         guard let dash = total.range(of: " -- ", options: .backwards) else { return total }
         return String(total[dash.upperBound...])
+    }
+
+    /// Bytes as the app says memory: `40.13 GB`, `136 MB`.
+    static func size(_ bytes: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .memory)
     }
 }

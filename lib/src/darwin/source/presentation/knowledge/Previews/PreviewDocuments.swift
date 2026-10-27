@@ -206,5 +206,17 @@ Captured:    2026-10-26T14:24:11.732993Z
 
 Raw conversation: (unavailable)
 """#
+    /// tests/business/reads/Fixtures/knowledge-list-raw.json
+    static let knowledgeListRaw = #"""
+{"data":[{"decision":"Remove the cancel button from checkout.","discipline":"ux","downstream_link":"","id":"kr-20261027T015935Z-e9ccd8","intent":"We dropped the cancel button because testers kept mistaking it for back.","provenance":{"attribution":"Ada Lovelace","source":"meeting"},"raw_ref":"/Users/someone/.apogee/knowledge/raw/kr-20261027T015935Z-e9ccd8.md","status":"shipped","timestamp":"2026-10-27T01:59:35.223139Z"}],"db":"knowledge","object":"list"}
+"""#
+    /// tests/business/reads/Fixtures/knowledge-info-raw.json
+    static let knowledgeInfoRawDocument = #"""
+{"decision":"Remove the cancel button from checkout.","discipline":"ux","downstream_link":"","id":"kr-20261027T015935Z-e9ccd8","intent":"We dropped the cancel button because testers kept mistaking it for back.","provenance":{"attribution":"Ada Lovelace","source":"meeting"},"raw":"Ada: testers keep hitting cancel when they mean back. Grace: then we drop the cancel button from checkout. Ada: agreed, ship it.","raw_ref":"/Users/someone/.apogee/knowledge/raw/kr-20261027T015935Z-e9ccd8.md","status":"shipped","timestamp":"2026-10-27T01:59:35.223139Z"}
+"""#
+    /// tests/business/reads/Fixtures/knowledge-info-raw-null.json
+    static let knowledgeInfoRawNull = #"""
+{"decision":"Remove the cancel button from checkout.","discipline":"ux","downstream_link":"","id":"kr-20261027T015935Z-e9ccd8","intent":"We dropped the cancel button because testers kept mistaking it for back.","provenance":{"attribution":"Ada Lovelace","source":"meeting"},"raw":null,"raw_ref":"/Users/someone/.apogee/knowledge/raw/kr-20261027T015935Z-e9ccd8.md","status":"shipped","timestamp":"2026-10-27T01:59:35.223139Z"}
+"""#
 }
 #endif
