@@ -73,15 +73,15 @@ private:
 
 struct SweepOptions {
     /// `--target`: only these, by name; empty for every target.
-    std::vector<std::string> only;
+    std::vector<std::string> only{};
     /// `--since`: where a target seen for the first time starts.
-    std::optional<std::string> since;
+    std::optional<std::string> since{};
     /// `--allow-post`: the run grants posting everywhere it sweeps.
     bool allow_post = false;
     bool dry_run = false;
     std::size_t cap = kMaxMergeRequestsPerSweep;
     /// Now, ISO 8601 in UTC: where a first sweep starts without `--since`.
-    std::string now;
+    std::string now{};
 };
 
 /// The client for a target's forge.

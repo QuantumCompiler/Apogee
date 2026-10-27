@@ -38,10 +38,10 @@ namespace apogee::commands {
 /// One step, and how it ended.
 struct BootstrapStep {
     /// What it sets up, in words: `the 'video' set`, `the providers`.
-    std::string name;
+    std::string name{};
     /// The command it runs, `apogee` left off; empty for a step this host is
     /// not for, or one that runs another program's commands.
-    std::vector<std::string> words;
+    std::vector<std::string> words{};
     /// Another program's commands, run in order instead of `words`
     /// (2026-10-21: Homebrew's, for ffmpeg-full). One that must succeed stops
     /// the rest when it fails; one that may fail does not.

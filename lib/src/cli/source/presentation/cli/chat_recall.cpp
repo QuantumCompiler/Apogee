@@ -74,7 +74,7 @@ RecallHoldings recall_holdings() {
     std::error_code code;
     for (fs::directory_iterator it{pending_dir(), code}, end; !code && it != end;
          it.increment(code)) {
-        out.pending += it->is_regular_file(code) ? 1 : 0;
+        out.pending += it->is_regular_file(code) ? 1U : 0U;
     }
     return out;
 }

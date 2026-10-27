@@ -73,13 +73,13 @@ struct VideoRequest {
 
 /// What the driver found when it loaded the pipeline.
 struct VideoReady {
-    std::string device;
-    std::string dtype;
-    std::string pipeline;
+    std::string device{};
+    std::string dtype{};
+    std::string pipeline{};
     /// `t2v` or `i2v`.
-    std::string mode;
-    std::string torch;
-    std::string diffusers;
+    std::string mode{};
+    std::string torch{};
+    std::string diffusers{};
     /// The engine the driver says it runs (53l) -- `mlx` from the MLX
     /// driver, empty from the PyTorch one, which predates the word -- and on
     /// MLX the versions that ran. A generation's own events say the engine

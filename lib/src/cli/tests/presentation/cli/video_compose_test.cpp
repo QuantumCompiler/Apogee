@@ -790,7 +790,7 @@ TEST_CASE("a kept edit given a new --edit runs it over the kept project, dry or 
     // Nothing is left of the directory the files went through.
     std::size_t beside = 0;
     for (const auto& entry : std::filesystem::directory_iterator{run.out_dir}) {
-        beside += entry.path().filename().string().starts_with("edited.scenes.") ? 1 : 0;
+        beside += entry.path().filename().string().starts_with("edited.scenes.") ? 1U : 0U;
     }
     CHECK(beside == 0);
     CHECK(nlohmann::json::parse(slurp(edited_sidecar(run))) == document);

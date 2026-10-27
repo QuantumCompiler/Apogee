@@ -164,8 +164,8 @@ TEST_CASE("past its cap a diff stops at a line and says the whole change", "[con
     std::size_t old_side = 0;
     std::size_t new_side = 0;
     for (std::size_t i = 3; i + 1 < lines.size(); ++i) {
-        old_side += lines[i].starts_with('-') || lines[i].starts_with(' ') ? 1 : 0;
-        new_side += lines[i].starts_with('+') || lines[i].starts_with(' ') ? 1 : 0;
+        old_side += lines[i].starts_with('-') || lines[i].starts_with(' ') ? 1U : 0U;
+        new_side += lines[i].starts_with('+') || lines[i].starts_with(' ') ? 1U : 0U;
     }
     const auto side = [](std::size_t count) {
         return count == 1 ? std::string{"1"} : "1," + std::to_string(count);

@@ -97,7 +97,7 @@ std::string fold_name_list(const std::string& error, std::size_t most) {
     }
     std::size_t names = 0;
     for (const std::string& line : lines) {
-        names += std::regex_match(line, kName) ? 1 : 0;
+        names += std::regex_match(line, kName) ? 1U : 0U;
     }
     if (names <= most) {
         return error;

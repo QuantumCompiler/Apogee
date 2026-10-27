@@ -252,8 +252,8 @@ struct NarrationPiece {
 /// and a music bed -- empty for none -- looped to the video's length, lowered
 /// and ducked further under the narration.
 struct AudioMix {
-    std::vector<NarrationPiece> narration;
-    std::filesystem::path bed;
+    std::vector<NarrationPiece> narration{};
+    std::filesystem::path bed{};
 };
 
 /// The bed's level under the video, before any ducking.

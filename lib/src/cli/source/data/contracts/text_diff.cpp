@@ -198,8 +198,8 @@ std::string unified_diff(std::string_view path, std::string_view before, std::st
     for (std::size_t p = 0; p < ops.size(); ++p) {
         old_before[p + 1] = old_before[p] + (ops[p].kind == Kind::Added ? 0 : 1);
         new_before[p + 1] = new_before[p] + (ops[p].kind == Kind::Removed ? 0 : 1);
-        added += ops[p].kind == Kind::Added ? 1 : 0;
-        removed += ops[p].kind == Kind::Removed ? 1 : 0;
+        added += ops[p].kind == Kind::Added ? 1U : 0U;
+        removed += ops[p].kind == Kind::Removed ? 1U : 0U;
     }
 
     std::string out = "--- " + (before_exists ? "a/" + name : std::string{"/dev/null"}) +

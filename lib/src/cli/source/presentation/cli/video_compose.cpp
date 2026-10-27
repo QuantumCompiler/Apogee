@@ -197,7 +197,7 @@ std::vector<std::string> plan_lines(const harness::VideoProject& project, bool c
             out.push_back("     shows: " + shortened(scene.visual, 120) +
                           (scene.asset.empty() ? std::string{} : " (from " + scene.asset + ")"));
         }
-        spoken += held(scene.voice) ? 0 : 1;
+        spoken += held(scene.voice) ? 0U : 1U;
         if (held(scene.clip)) {
             ++kept;
         } else if (asset_clip) {
@@ -504,8 +504,8 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
         std::size_t spoken = 0;
         std::size_t rendered = 0;
         for (const harness::ProjectScene& scene : project.scenes) {
-            spoken += std::filesystem::is_regular_file(scene.voice, code) ? 1 : 0;
-            rendered += std::filesystem::is_regular_file(scene.clip, code) ? 1 : 0;
+            spoken += std::filesystem::is_regular_file(scene.voice, code) ? 1U : 0U;
+            rendered += std::filesystem::is_regular_file(scene.clip, code) ? 1U : 0U;
         }
         if (project.status == "planned") {
             // A dry run's plan (52c): rendered as planned, never planned
