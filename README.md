@@ -4,7 +4,7 @@
 
 Apogee is an AI harness: it runs LLM workloads against Anthropic, OpenAI, Google and Ollama in the cloud — under either a subscription plan (their official CLIs) or an API billing plan (a direct key) — and against local models through llama.cpp linked in-process — or, opt-in on Apple silicon, through MLX. Which model runs is configuration, not architecture. It ships as a single, self-contained binary that bundles no models, requires no cloud account, and passes its own doctor on a fresh, keyless, modelless machine.
 
-This repository is home to the whole Apogee project. Today that is the **CLI application** ([`lib/src/cli`](lib/src/cli)), which carries the entire harness and is the current focus; **GUI applications** for each desktop platform are a committed direction and live here as siblings (`lib/src/darwin`, `lib/src/linux`, `lib/src/windows`), powering the same binary directly over its structured stdio machine mode — never a localhost port. The macOS one has begun (`lib/src/darwin`, in development).
+This repository is home to the whole Apogee project. Today that is the **CLI application** ([`lib/src/cli`](lib/src/cli)), which carries the entire harness and is the current focus; **GUI applications** for each desktop platform are a committed direction and live here as siblings (`lib/src/darwin`, `lib/src/linux`, `lib/src/windows`), powering the same binary directly over its structured stdio machine mode — never a localhost port. The macOS one is built in v0.2.0 (`lib/src/darwin`): every command the CLI offers a person has its place in it, and CI builds, tests and packages it on every run — a run artifact, not yet part of a release.
 
 ## Install
 
@@ -75,7 +75,7 @@ Run `apogee` with nothing after it at a terminal and it opens a full-screen shel
 | Path | What it is |
 |---|---|
 | [`lib/src/cli/`](lib/src/cli) | The CLI application — the whole harness, one self-contained CMake project. |
-| [`lib/src/darwin/`](lib/src/darwin) | The macOS application — an Xcode project, in development; it drives the CLI over its [machine mode](lib/documentation/cli/reference/machine-mode.md). |
+| [`lib/src/darwin/`](lib/src/darwin) | The macOS application — an Xcode project; it drives the CLI over its [machine mode](lib/documentation/cli/reference/machine-mode.md). CI builds, tests and packages it as the run artifact `apogee-gui-darwin`; it is not yet part of a release. |
 | `lib/src/linux` · `windows` | The Linux and Windows applications (planned). |
 | [`lib/documentation/`](lib/documentation) | One docs directory per application — [CLAUDE.md](lib/documentation/CLAUDE.md) routes an agent to [`cli/`](lib/documentation/cli), [`gui/`](lib/documentation/gui) or [`mod/`](lib/documentation/mod). |
 | [`lib/documentation/cli/reference/`](lib/documentation/cli/reference) | Integrator-facing reference: the [stdio machine mode](lib/documentation/cli/reference/machine-mode.md) for front-ends, the [HTTP API](lib/documentation/cli/reference/http-api.md) for `serve` clients, and [training](lib/documentation/cli/reference/training.md). |
