@@ -167,9 +167,14 @@ path-note:
 #      layout. The models are kept whatever else happens, so a change to how
 #      they are stored ships its move in `models migrate`, which every update
 #      runs -- never as a reason to remove them. Nothing to move is a no-op.
-#   2. `reset --keep models <KEEP...>`: every other row reset, and the
+#   2. `reset --yes --keep models <KEEP...>`: every other row reset, and the
 #      skeleton re-seeded and checked (`check --fix`, inside the reset). KEEP
-#      adds rows to keep; `models` is kept whether or not it names it.
+#      adds rows to keep; `models` is kept whether or not it names it. Not
+#      asked (2026-10-21, the user's call): the models are kept, and what the
+#      reset removes the steps after it remake -- the config's registrations
+#      and the environment, by the bootstrap -- so the update does not stop to
+#      ask; a row worth keeping is named in KEEP. `apogee reset` run by hand
+#      still asks.
 #   3. `bootstrap`: the runtimes and the registrations, last. `reinstall` ran
 #      it inside `install`, before its reset, and the reset removed what it
 #      had made -- the environment and the registered backends (the user's

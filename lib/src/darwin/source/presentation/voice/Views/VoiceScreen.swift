@@ -97,7 +97,8 @@ public struct VoiceScreen: View {
         .sheet(isPresented: Binding(get: { model.consent != nil }, set: { if !$0 && model.consent != nil { model.decline() } })) {
             if let consent = model.consent {
                 InstallConsentSheet(
-                    set: consent.set, said: consent.said, command: consent.command, install: model.install, decline: model.decline)
+                    set: consent.set, said: consent.said, command: consent.command,
+                    rebuild: consent.rebuilds ? MediaLibrary.rebuildNote : nil, install: model.install, decline: model.decline)
             }
         }
         .fileImporter(isPresented: $addingFolder, allowedContentTypes: [.folder]) { result in

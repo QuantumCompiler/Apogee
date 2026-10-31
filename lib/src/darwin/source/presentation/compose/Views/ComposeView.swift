@@ -80,7 +80,8 @@ public struct ComposeView: View {
         }
         .sheet(item: Binding(get: { model.consent.map(ConsentItem.init) }, set: { if $0 == nil && model.consent != nil { model.decline() } })) { item in
             InstallConsentSheet(
-                set: item.consent.set, said: item.consent.said, command: item.consent.command, install: model.install,
+                set: item.consent.set, said: item.consent.said, command: item.consent.command,
+                rebuild: item.consent.rebuilds ? MediaLibrary.rebuildNote : nil, install: model.install,
                 decline: model.decline)
         }
         .alert("That didn't work", isPresented: Binding(get: { model.failure != nil }, set: { if !$0 { model.dismissFailure() } })) {

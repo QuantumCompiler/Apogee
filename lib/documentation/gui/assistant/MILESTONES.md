@@ -2709,3 +2709,27 @@ Twenty-two of 35 new cases failed first. The rest pin the older binary and the d
 - No live pass of the app.
 - A quantization's registration on the Jobs tab still keeps only its first line, so the "default set" line is dropped there.
 - The CLI's text task list and the TUI still say "running" for a killed task.
+
+### 2026-10-31 — the install sheet takes a rebuild (the CLI's M19, finished)
+
+**Why.** The CLI's M19 gave an environment on a Python a set cannot run on (the user's: Homebrew's 3.14.5, where Kokoro never installs) a refusal naming its way out, `apogee train setup --rebuild --with voice`. The app read a refusal's command only as `train setup --with <set>`, so the install it offered failed with that refusal, and the failure was the last word. The work was written on 2026-10-21, before 4f, and sat uncommitted in its worktree; it lands in v0.2.1, ported onto 4f's shared consent.
+
+- [x] **`MediaLibrary.installCommand`** reads `--rebuild`: a refusal naming the rebuild gives `train setup --rebuild --yes --with <set>`. The CLI asks only at a terminal, which the app is not, and the sheet is the person's answer. `MediaLibrary.rebuilds` tells a rebuild from an install, and `MediaLibrary.rebuildNote` holds what a rebuild costs.
+- [x] **`InstallConsent.init?(afterFailed:failure:stderr:)`**, the one rule: a failed install whose own words name another command asks for that one next; one naming itself, or nothing, asks nothing. `InstallConsent.rebuilds` says which it is.
+- [x] **Video, Voice and Compose** follow it: the failed install gives way to the question, and the refused clip, speech or composition is kept to run once the rebuild is in. Compose had no such path in the 2026-10-21 work; it shares 4f's consent, so it takes the rule too.
+- [x] **`styles`' `InstallConsentSheet`** takes `rebuild:` -- "Rebuild Apogee's Python environment?", what it downloads again, that a failure puts the old environment back, and a Rebuild button -- with its own preview.
+
+**Decisions made while porting** (2026-10-31, each recorded for veto):
+- **The 2026-10-21 work's own `Consent` types and sheets were not kept**: 4f had replaced them with `InstallConsent` and `InstallConsentSheet`, so the rule went there instead.
+- **Its store-test fix was already in** (`StoreJobsTests` waits for the documents its sheets read), so the branch's copy was dropped.
+- **`RuntimeInstall`'s card still says "Installing the voice set"** while a rebuild runs: the words are the set's, and a rebuild reinstalls it.
+
+**Verified.**
+- `InstallConsentErrorTests/afterFailedInstall`: the rebuild named next, and nothing asked for a failure naming the same install, pip's own failure, or none.
+- `VideoViewModelTests`: the rebuild parsed, `--yes` and all, and `rebuilds`.
+- `VoiceViewModelTests/rebuildConsent` (new): the user's case -- the refused run's install, the install failing with M19's refusal, the rebuild offered next with nothing run before the yes, then the rebuild and the refused speech again.
+- `lib/scripts/cicd.sh --test` on v0.2.1: green. The CLI's 4,061 tests and the macOS app's 979 cases passed, with no warning.
+
+**Not done:**
+- No live pass of the app.
+- A rebuild's card has no words of its own (above).

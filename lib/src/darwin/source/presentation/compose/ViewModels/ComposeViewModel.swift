@@ -368,7 +368,16 @@ public final class ComposeViewModel {
                 say?("Installed: \(installing.command)" + (retry == nil ? "" : " -- composing again"))
                 if let retry { start(retry.arguments, output: retry.output, resumable: retry.resumable) }
             case .failed:
-                say?("Not installed: \(installing.failure ?? installing.command)")
+                // An install its environment's Python cannot take names the
+                // rebuild that can (the CLI's M19): asked next, the refused
+                // composition kept to follow it.
+                if let next = InstallConsent(afterFailed: consent.arguments, failure: installing.failure, stderr: installing.progress.stderr) {
+                    self.installing = nil
+                    self.consent = next
+                    retryAfterInstall = retry
+                } else {
+                    say?("Not installed: \(installing.failure ?? installing.command)")
+                }
             case .stopped:
                 say?("The install was stopped before it finished: \(installing.command) runs it again")
             case .running:

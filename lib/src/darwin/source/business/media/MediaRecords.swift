@@ -249,14 +249,28 @@ public enum MediaLibrary {
 
     /// The command that installs a media runtime -- `train setup --with
     /// video` or `voice` -- when a refusal's words name it: what the app asks
-    /// the person before running, never runs on its own.
+    /// the person before running, never runs on its own. A refusal naming the
+    /// rebuild (the CLI's M19: an environment on a Python the set does not run
+    /// on) gives `train setup --rebuild --yes --with <set>`: the CLI asks
+    /// only at a terminal, which the app is not, and the app's sheet is the
+    /// person's answer.
     public static func installCommand(in text: String) -> [String]? {
         guard let range = text.range(of: "apogee train setup") else { return nil }
-        let words = text[range.lowerBound...].split(whereSeparator: { $0 == " " || $0.isNewline }).map(String.init)
-        guard words.count >= 5, words[3] == "--with" else { return nil }
-        let with = words[4].trimmingCharacters(in: CharacterSet(charactersIn: "'\"`.,;)"))
-        return ["train", "setup", "--with", with]
+        var words = text[range.lowerBound...].split(whereSeparator: { $0 == " " || $0.isNewline }).map(String.init).dropFirst(3)
+        let rebuild = words.first == "--rebuild"
+        if rebuild { words = words.dropFirst() }
+        guard words.count >= 2, words.first == "--with" else { return nil }
+        let with = words[words.startIndex + 1].trimmingCharacters(in: CharacterSet(charactersIn: "'\"`.,;)"))
+        return rebuild ? ["train", "setup", "--rebuild", "--yes", "--with", with] : ["train", "setup", "--with", with]
     }
+
+    /// Whether `command` replaces the environment rather than adding to it.
+    public static func rebuilds(_ command: [String]) -> Bool {
+        command.contains("--rebuild")
+    }
+
+    /// What a rebuild costs, as an install sheet says it.
+    public static let rebuildNote = "This replaces Apogee's own Python environment with one on a Python every runtime runs on, downloading every set it held again -- several gigabytes, once. If anything fails, the environment that was there is put back. Nothing is replaced unless you say yes."
 
     /// The parent chain of `record`: each clip it came from, back to the first.
     public static func chain(of record: ClipRecord, in records: [ClipRecord]) -> [ClipRecord] {

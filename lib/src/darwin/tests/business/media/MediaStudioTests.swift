@@ -78,6 +78,26 @@ struct InstallConsentErrorTests {
         #expect(older.arguments == ["train", "setup", "--with", "video"])
         #expect(older.said == runtimeErr.trimmingCharacters(in: .whitespacesAndNewlines))
     }
+
+    @Test("a failed install naming its rebuild asks for the rebuild next; one naming itself, or nothing, asks nothing")
+    func afterFailedInstall() throws {
+        // The CLI's M19 refusal, as `train setup` says it on an environment
+        // whose Python the set does not run on (`PythonEnv::unfit_reason`).
+        let install = ["train", "setup", "--with", "voice"]
+        let unfit = "apogee train: the Python environment at /h/venv is on Python 3.14.5, and the 'voice' set runs on >=3.10,<3.13 -- rebuild it on a Python that fits: apogee train setup --rebuild --with voice"
+        let next = try #require(InstallConsent(afterFailed: install, failure: unfit, stderr: unfit + "\n"))
+        #expect(next.arguments == ["train", "setup", "--rebuild", "--yes", "--with", "voice"])
+        #expect(next.rebuilds)
+        #expect(next.set == "voice")
+        #expect(next.said == unfit)
+        #expect(!InstallConsent(arguments: install, said: "").rebuilds)
+        // A failure naming the install that just failed, or none, asks nothing again.
+        let again = "apogee voice: kokoro is not installed -- apogee train setup --with voice"
+        #expect(InstallConsent(afterFailed: install, failure: again, stderr: again) == nil)
+        let pip = "apogee train: pip install for the 'voice' set failed (exit code 1):\nERROR: No matching distribution found for kokoro"
+        #expect(InstallConsent(afterFailed: install, failure: pip, stderr: pip) == nil)
+        #expect(InstallConsent(afterFailed: install, failure: nil, stderr: "") == nil)
+    }
 }
 
 @Suite("CaptionsAbility")

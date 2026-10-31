@@ -46,6 +46,19 @@ public struct InstallConsent: Sendable, Equatable {
         self.init(arguments: arguments, said: Self.naming(in: text) ?? failure)
     }
 
+    /// The consent a failed install asks for next: the command its own
+    /// failure names, when that is another than the install `ran`. An
+    /// environment on a Python the set does not run on refuses the install by
+    /// naming its rebuild (the CLI's M19: `train setup --rebuild --with
+    /// voice`). `nil` when the failure names nothing, or the same install.
+    public init?(afterFailed ran: [String], failure: String?, stderr: String) {
+        guard let next = InstallConsent(failure: failure ?? "", stderr: stderr), next.arguments != ran else { return nil }
+        self = next
+    }
+
+    /// It replaces the environment rather than adding to it (the CLI's M19).
+    public var rebuilds: Bool { MediaLibrary.rebuilds(arguments) }
+
     /// The line of `text` that names the install, trimmed.
     private static func naming(in text: String) -> String? {
         text.split(whereSeparator: \.isNewline).last { $0.contains("apogee train setup") }

@@ -5809,6 +5809,11 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,277
 
 **Not run on real packages:** no interpreter or pip ran in the suite. The user's own `make update` is the live run.
 
+*Completed 2026-10-31, in v0.2.1 (with the app's install sheet; written 2026-10-21 and left uncommitted in its worktree until then):* the refusal a person or the app meets before `train setup` names the rebuild too.
+- `video::probe_voice` and `probe_video` say an environment on a Python the set does not run on, and remedy `apogee train setup --rebuild --with <set>`. `check`'s video and voice rows now read the probe's own remedy, one source where M19 had a copy.
+- `install_runtime_set`, the offer to install at a terminal, refuses such a set before asking (`PythonEnv::unfit_reason`, the one wording `install` uses), so nothing is offered that pip would only refuse.
+- Tests: `runtime_test` (the ladder naming the rebuild on 3.14.5 and the install on 3.12.13), and `video_runtime_test` (a 3.9.6 environment refused before the offer, nothing asked, nothing run).
+
 ## Milestone AA — The four layers
 
 **Goal.** Make the CLI's source say what it is: four layers -- **Presentation → Business → Data → Infrastructure** -- each package in one, each including only its own layer and those below, the law enforced by the build itself. Asked for by the user on 2026-10-03 and specced from a spike that measured the real include graph into the standing **Architecture** queue (A1–A4, A5 joining the same day). In C++ nothing makes this free the way Go's ban on import cycles does, which is why the layering here has always been a guarded convention, and this milestone turns it into structure.

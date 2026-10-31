@@ -609,3 +609,22 @@ TEST_CASE("the MLX speech ladder: every rung refuses with its own reason and its
           "publishes it speaks here on PyTorch: apogee models pull hexgrad/Kokoro-82M");
     CHECK(apogee::video::to_string(VideoRefusal::NoMlxAudio) == "no mlx-audio");
 }
+
+TEST_CASE("on a Python the voice set does not run on, the ladder names the rebuild",
+          "[video][runtime][ladder][voice][m19]") {
+    // The user's environment (2026-10-21): Homebrew's 3.14.5, torch in it,
+    // kokoro never installable there. The refusal names what can succeed --
+    // what `check`'s row and the app's install sheet both read.
+    Install install;
+    write(install.host.venv / "pyvenv.cfg", "home = /x\nversion = 3.14.5\n");
+    const VideoReadiness refused = apogee::video::probe_voice(install.host);
+    CHECK(refused.refusal == VideoRefusal::NoKokoro);
+    CHECK(refused.message() ==
+          "the Python environment is on Python 3.14.5, and the voice set runs "
+          "on >=3.10,<3.13 -- apogee train setup --rebuild --with voice");
+    // On a Python it runs on, the install as before.
+    write(install.host.venv / "pyvenv.cfg", "home = /x\nversion = 3.12.13\n");
+    CHECK(apogee::video::probe_voice(install.host).message() ==
+          "kokoro is not installed in the Python environment at " + install.host.venv.string() +
+              " -- apogee train setup --with voice");
+}
