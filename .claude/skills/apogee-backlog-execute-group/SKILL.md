@@ -47,7 +47,7 @@ The classes that trigger the rethink, concretely:
 
 - **Destructive filesystem operations** outside the build tree and the session scratchpad — any `rm -rf` of source, documents, or anything untracked; deleting is the Documentation flow's scoped per-file act, never a sweep.
 - **Destructive git** beyond this skill's two sanctioned acts (below): no `reset --hard`, no `clean -fd`, no history rewriting, and **never any push** — force or otherwise.
-- **Real user state**: `~/.apogee` (any channel's root), the model store, credentials, keychains — probes run against a temp `APOGEE_HOME` under the scratchpad, always.
+- **Real user state**: `~/.apogee` (any channel's root), the model store, credentials, keychains — probes run against a temp `APOGEE_HOME` under the scratchpad, always. A build installed for the user to try goes on [the dev channel](../../../lib/documentation/cli/assistant/CLAUDE.md#development-runs-on-the-dev-channel) (`make -C lib/src/cli install MODE=dev`), never the release `apogee`, the user's production install.
 - **The machine outside the repo**: installs, system or shell config edits, launch agents, network side effects beyond what a documented test already does.
 - **Repository settings**: `required-checks.py --apply` and anything like it stays the user's move, whatever the pipeline docs say about when it is needed — note it in the report instead.
 

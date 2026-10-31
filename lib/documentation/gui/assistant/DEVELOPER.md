@@ -83,7 +83,7 @@ lib/src/windows/                the Windows application -- not yet started
 
 - **The protocol:** [`machine-mode.md`](../../cli/reference/machine-mode.md) — the JSONL events, the driver's stdin lines (including `cancel`), the reads' `--output-format json` documents, task and play narration.
 - **The schema:** `machine-schema.json` — printed by the binary (`apogee __machine-schema`), shipped in every CLI archive, and pinned to the doc and the implementation by `cli.machine_schema_conformance`.
-- **Getting a CLI to drive:** a release install (`install.sh` / `install.ps1`), a source build (`make -C lib/src/cli install`, channels per the CLI docs), or CI's `apogee-<target>` artifacts.
+- **Getting a CLI to drive:** in development, the dev channel -- `make -C lib/src/cli install MODE=dev`, `apogee-dev` over `~/.apogee-dev` -- never the release `apogee`, the user's production install (2026-10-31; see [CLAUDE.md → Development runs on the dev channel](CLAUDE.md#development-runs-on-the-dev-channel)). A release install (`install.sh` / `install.ps1`) or CI's `apogee-<target>` artifacts are what users run.
 
 ## Build & test
 

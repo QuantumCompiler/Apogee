@@ -35,7 +35,7 @@ Everything below reads from the chosen home, written `<home>`: its backlog READM
 
 Prefer a probe over an argument: run the actual binary, drive it the way the question implies, or parse the actual sources (e.g. build the include/dependency graph) — and measure.
 
-- **Sandbox everything.** A probe that touches state runs against a temp `APOGEE_HOME` under the scratchpad directory. Never touch the real `~/.apogee`.
+- **Sandbox everything.** A probe that touches state runs against a temp `APOGEE_HOME` under the scratchpad directory. Never touch the real `~/.apogee` — the user's production install, changed only by what a release ships — nor `~/.apogee-dev`, the user's testing install. A branch build installed for the user to try goes on [the dev channel](../../../lib/documentation/cli/assistant/CLAUDE.md#development-runs-on-the-dev-channel) (`make -C lib/src/cli install MODE=dev`, `apogee-dev`), never the release `apogee`.
 - **Probe scripts live in the scratchpad**, not the repo. Promote a probe into `lib/src/.../tests/` only when the user asks to keep it.
 - Shell facts for probing on this machine: Bash-tool stdin is a pipe, so smoke-test the binary with `</dev/null`; macOS has no `timeout` command (enforce deadlines inside the probe script); use absolute paths.
 - A probe that needs a live conversation drives the installed `apogee` binary with the scripted mock backend (the fake-actor idiom) — no network, no real models. A CLI spike that truly needs real weights follows the model families rules (`lib/documentation/cli/assistant/DEVELOPER.md` → On real weights) — one family at a time, model loaded once; most spikes don't, so don't load a model to answer a plumbing question.

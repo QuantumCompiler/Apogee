@@ -51,6 +51,8 @@ Nothing is built yet. The planned layout ([ADR 0001](../adrs/layer-enforcement.m
 
 The CLI docs' lifecycle, mirrored — read [Working process](../../cli/assistant/CLAUDE.md#working-process) there. The mod's deltas: mod work lands in **this** tree's boards and queue; an item needing a CLI change (a new document, a served tool) gets a CLI-queue sibling, cross-gated by path.
 
+**Development runs on the dev channel** (the user's call, 2026-10-31; the law is the CLI docs' [Development runs on the dev channel](../../cli/assistant/CLAUDE.md#development-runs-on-the-dev-channel)): the release `apogee` over `~/.apogee` is the user's production install, changed only by what a release ships. A development build of the mod drives `apogee-dev` over `~/.apogee-dev`, and a live pass names `apogee-dev`; the scaffold (1a) gives its binary discovery a way to say so.
+
 ## Implementing a Feature
 
 - [ ] `tsc` clean and `claude plugin validate` passing; tests per the item's guardrails (hermetic: scripted process output, no live binary required).

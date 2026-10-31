@@ -71,6 +71,17 @@ The GUI is built docs-first, the same lifecycle as the CLI's. Where new work is 
 - GUI work lands in **this** tree's ROADMAP/backlog/MILESTONES, never the CLI's; an item that needs a CLI change (a new protocol event, a new read) gets a sibling item in the CLI's backlog, gated both ways.
 - **Versioning is repo-wide** (the release, `lib/release/VERSION`, the merge-is-the-release law — the CLI docs record it). The GUI ships inside those releases once it exists; its pipeline joins CI beside the CLI's.
 
+### Development runs on the dev channel
+
+*(The user's call, 2026-10-31; the law is the CLI docs' [Development runs on the dev channel](../../cli/assistant/CLAUDE.md#development-runs-on-the-dev-channel).)* The installed `Apogee.app`, the release `apogee` and `~/.apogee` are the user's production install, changed only by what a release ships, so its updaters are tested for real. A development build of the app drives **`apogee-dev`** over `~/.apogee-dev` and keeps **its own settings**, never the installed app's.
+
+**Not yet true of the app** (measured 2026-10-31), so it is queued as **M18** ([`app-dev-channel.md`](../backlog/maintenance/app-dev-channel.md)):
+- discovery tries `~/.local/bin/apogee` (release) before `apogee-dev` (`BinaryDiscovery.candidates`), so a development build with both installed drives production;
+- Debug and Release share the bundle identifier `com.quantumcompiler.apogee`, so a development build reads and writes the installed app's `UserDefaults` -- the route, the appearance, and the binary override itself;
+- `scripts/build.sh open`, the way to try a build, builds the Release app under that same identity.
+
+Until M18 lands: don't launch a development build of the app on the user's machine for a live pass (the hermetic suite and previews are unaffected -- they never start the binary or read the real defaults), and never set the binary override, which the installed app would read too. When a live pass is needed first, ask the user.
+
 ## Implementing a Feature
 
 Every change should satisfy this before merge:
