@@ -335,6 +335,7 @@ The standing upkeep queue *(created 2026-10-03, the user's call)* — release-ag
 - [x] **Prose reads gain JSON** — maintenance item M31, shipped 2026-10-26 *([Milestone AO](MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths))* — `chats info`, recall's summaries, `graph dedupe`, `knowledge info --raw` and the suite footprint, readable as documents.
 - [x] **List rows carry what drivers need** — maintenance item M32, shipped 2026-10-26 *([Milestone AO](MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths))* — `task list` says a task was interrupted, and `models list` an `mlx` base's drafter.
 - [x] **Config verbs finish their job** — maintenance item M33, shipped 2026-10-26 *([Milestone AO](MILESTONES.md#milestone-ao--the-desktop-clients-cli-growths))* — an embedding entry was accepted as the chat role; `add-backend` set no default; no verb registered one provider; `tools.allowed_hosts` couldn't be read.
+- [ ] **A failed Claude CLI turn says why** — maintenance item M34 *([backlog](../backlog/maintenance/claude-cli-says-why.md))*: the user's `claude: the Claude CLI reported success` (2026-10-31, in the app and the terminal alike) was Claude Code's expired login, reported with `is_error: true` and `subtype: "success"`; the backend named the subtype and dropped Claude Code's own sentence. It shows that sentence, with the `/login` way out for an expired login.
 
 ## Up next
 
