@@ -30,6 +30,12 @@ namespace {
 
 using Catch::Matchers::ContainsSubstring;
 
+/// `word` as a printed command spells it: double-quoted where it holds a
+/// backslash -- a Windows path -- which a shell would read as an escape.
+[[nodiscard]] std::string printed(const std::string& word) {
+    return word.find('\\') == std::string::npos ? word : "\"" + word + "\"";
+}
+
 [[nodiscard]] std::string slurp(const std::filesystem::path& path) {
     std::ifstream in{path, std::ios::binary};
     return {std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
@@ -323,10 +329,11 @@ TEST_CASE("set-backend moving the base under pinned adapters re-pins them or ref
                                       "): " + files.style.string() + " (sha256 " +
                                       pin.substr(0, 12) + ")"));
     CHECK_THAT(err, ContainsSubstring("nothing was edited"));
-    const std::string repin = "apogee config set-backend local --model-path " + other.string() +
-                              " --adapters " + files.style.string() + ":0.5";
-    const std::string take_off =
-        "apogee config set-backend local --model-path " + other.string() + " --adapters \"\"";
+    const std::string repin = "apogee config set-backend local --model-path " +
+                              printed(other.string()) + " --adapters " +
+                              printed(files.style.string() + ":0.5");
+    const std::string take_off = "apogee config set-backend local --model-path " +
+                                 printed(other.string()) + " --adapters \"\"";
     CHECK_THAT(err, ContainsSubstring("re-pin them in the same edit: " + repin));
     CHECK_THAT(err, ContainsSubstring("take them off: " + take_off));
     CHECK(slurp(home.config_path()) == moved);

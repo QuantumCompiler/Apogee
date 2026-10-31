@@ -55,6 +55,12 @@ using apogee::commands::CheckInputs;
 using apogee::commands::CheckReport;
 using apogee::commands::Status;
 
+/// `word` as a printed command spells it: double-quoted where it holds a
+/// backslash -- a Windows path -- which a shell would read as an escape.
+[[nodiscard]] std::string printed(const std::string& word) {
+    return word.find('\\') == std::string::npos ? word : "\"" + word + "\"";
+}
+
 /// A throwaway install root, removed on scope exit.
 struct Install {
     std::filesystem::path root;
@@ -3199,9 +3205,10 @@ TEST_CASE("the doctor names every adapter's state: applied, missing, the wrong k
     CHECK(rows[1].status == Status::Fail);
     CHECK(rows[1].detail == "not there: " + (fixture.loras / "gone.gguf").string());
     CHECK(rows[1].remedy == "apogee config set-backend local --adapters " +
-                                (fixture.loras / "style.gguf").string() + ":0.5," +
-                                (fixture.loras / "a-directory").string() + "," +
-                                (fixture.loras / "tone.gguf").string() + " to take it off");
+                                printed((fixture.loras / "style.gguf").string() + ":0.5," +
+                                        (fixture.loras / "a-directory").string() + "," +
+                                        (fixture.loras / "tone.gguf").string()) +
+                                " to take it off");
     // A directory where llama.cpp reads a GGUF LoRA file.
     CHECK(rows[2].name == "local: a-directory");
     CHECK(rows[2].status == Status::Fail);
@@ -3210,7 +3217,7 @@ TEST_CASE("the doctor names every adapter's state: applied, missing, the wrong k
     CHECK(rows[3].name == "local: tone.gguf");
     CHECK(rows[3].status == Status::Fail);
     CHECK(rows[3].detail.starts_with("pinned to no base"));
-    CHECK(rows[3].remedy == "apogee config set-backend local --adapters " + all +
+    CHECK(rows[3].remedy == "apogee config set-backend local --adapters " + printed(all) +
                                 " to pin the set to the weights model_path names");
 
     // The doctor writes nothing: not even the hash memo a load keeps.
@@ -3249,10 +3256,11 @@ TEST_CASE(
                                 "on, so a load refuses it");
     // Its doors: back to the weights it was made for, or -- these being them
     // -- the set pinned again.
-    CHECK(rows[0].remedy == "apogee config set-backend local --model-path " + stored.string() +
+    CHECK(rows[0].remedy == "apogee config set-backend local --model-path " +
+                                printed(stored.string()) +
                                 " to run it over the weights it was pinned to, or apogee config "
                                 "set-backend local --adapters " +
-                                (fixture.loras / "style.gguf").string() +
+                                printed((fixture.loras / "style.gguf").string()) +
                                 " to pin the set to these weights, if they are the ones it was "
                                 "made for");
 
@@ -3282,7 +3290,7 @@ TEST_CASE(
     CHECK(skipped[0].detail.starts_with("its pin cannot be checked: the base weights at " +
                                         fixture.base.string() + " could not be read"));
     CHECK(skipped[0].remedy.starts_with("apogee config set-backend local --model-path " +
-                                        stored.string()));
+                                        printed(stored.string())));
     // The scale is the loader's to refuse; asked again of a config read any
     // other way, out of range is a failure with the set at scale 1 its door.
     CheckInputs scaled = fixture.with(fixture.item("style.gguf"));
@@ -3293,7 +3301,7 @@ TEST_CASE(
     CHECK(out_of_range[0].status == Status::Fail);
     CHECK(out_of_range[0].detail == "applied at scale 3 -- a scale is above 0 and at most 2");
     CHECK(out_of_range[0].remedy == "apogee config set-backend local --adapters " +
-                                        (fixture.loras / "style.gguf").string() +
+                                        printed((fixture.loras / "style.gguf").string()) +
                                         " to apply it at scale 1");
 }
 

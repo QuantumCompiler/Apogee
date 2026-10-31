@@ -37,6 +37,12 @@ using apogee::backends::weights_sha256;
 using apogee::harness::AdapterConfig;
 using Catch::Matchers::ContainsSubstring;
 
+/// `word` as a printed command spells it: double-quoted where it holds a
+/// backslash -- a Windows path -- which a shell would read as an escape.
+[[nodiscard]] std::string printed(const std::string& word) {
+    return word.find('\\') == std::string::npos ? word : "\"" + word + "\"";
+}
+
 void write(const fs::path& path, std::string_view bytes) {
     fs::create_directories(path.parent_path());
     std::ofstream{path, std::ios::binary} << bytes;
@@ -168,7 +174,7 @@ TEST_CASE("the adapters' refusal table: file facts first, then the pin, each nam
     CHECK_THAT(unpinned, ContainsSubstring("the adapter " + lora.string() +
                                            " is pinned to no base -- apogee config set-backend "
                                            "local --adapters " +
-                                           lora.string() + ":0.5 records the base"));
+                                           printed(lora.string() + ":0.5") + " records the base"));
     // File facts are asked before any weights are read.
     CHECK(scratch.reads.size() == 1);
 
@@ -182,7 +188,7 @@ TEST_CASE("the adapters' refusal table: file facts first, then the pin, each nam
                    apogee::models::sha256_hex("other base weights").substr(0, 12) + ")"));
     CHECK_THAT(changed, ContainsSubstring("point model_path back at them"));
     CHECK_THAT(changed, ContainsSubstring("apogee config set-backend local --adapters " +
-                                          lora.string() + ":0.5"));
+                                          printed(lora.string() + ":0.5")));
     // A base that cannot be read cannot be checked.
     fs::remove(scratch.base);
     CHECK_THAT(
