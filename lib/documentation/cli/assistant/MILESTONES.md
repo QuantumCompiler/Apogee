@@ -98,6 +98,18 @@ The two GCCs ran with code generation, so their flow-based warnings show.
 - Windows arm64 was not built here. Clang 22.1.3, for macOS and for `x86_64-w64-mingw32`, stood in for its compiler; building and testing it is left to CI.
 - `make format-check` is clean for every file touched. Its one failure, `embed.cpp`, predates this change.
 
+### 2026-10-26 — v0.2.0's pull-request rehearsal: a Mac-only check, and the warnings the branch brought back
+
+**Why.** `make pr-ci` ran before the release's pull request, as CLAUDE.md's checklist has it. Its first run failed the Linux unit tests, and GCC 13 and MinGW GCC 16 printed warnings of ours: below the bar the entry above set. The branch's CI had not yet run on Linux or Windows.
+
+- [x] **A test checked a Mac-only fact on every platform.** `models_mlx_test`'s kind case (53e, 2026-10-21) checked that the chat entry beside a video one needs no attention. Off Apple silicon the mlx runtime's refusal is on both entries, so the check failed in the Linux container (`models_mlx_test.cpp:1548`). It now holds on Apple silicon; elsewhere both entries are checked to need the same attention.
+- [x] **The house rules, kept where the branch's new code broke them** (27 sites in 12 files):
+  - 16 struct members gained `{}` (`BootstrapStep`, `InlineComment`, `SweepOptions`, `AudioMix`, `VideoReady`), for `-Wmissing-field-initializers`;
+  - 10 counting ternaries added to a `std::size_t` count in unsigned (`? 1U : 0U`), for `-Wsign-conversion`;
+  - a lambda's local in `train_test`'s cycle-stream case no longer hides the case's own `out` (`-Wshadow`).
+
+**Verified.** The rerun of `make pr-ci` passed every job it rehearses: the version bump, the llama.cpp clone, the macOS unit tests and build, the Linux container's unit tests and the Windows x64 cross-build, with no warning of ours from either GCC. A `-Wpre-c++20-compat` scan for AppleClang 15 found no structured binding captured in a lambda. `lib/scripts/cicd.sh --test`: the CLI's 4,059 tests and the macOS app's 977 cases, no warning. The Windows test runs, windows-arm64 and linux-x64 are left to CI.
+
 ---
 
 ## Milestone B — The config engine

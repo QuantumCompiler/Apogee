@@ -14,5 +14,5 @@ Priority-ordered: the topmost item whose gate is satisfied is the next one to bu
 |---|---|---|---|---|
 | 1a | The mod scaffold — the plugin skeleton with the four layers and the layering check at birth, binary discovery and the not-installed guard, tsc/validate wiring, `changed.sh mod` | v0.2.1 | [`mod-scaffold.md`](mod-scaffold.md) | 🟢 |
 | 1b | Tools, slash commands, the status line — the MCP server's reads registered, `apogee_complete` (the CLI now, 54b's served tool when present), the `/apogee` set, the async long-run pattern | v0.2.1 | [`mod-tools-and-commands.md`](mod-tools-and-commands.md) | 🔒 1a |
-| 1c | The pane — backends, models, training and the ledger over the documents; promote/rollback confirmed; adapters once the CLI's track 53 ships | v0.2.1 | [`mod-pane.md`](mod-pane.md) | 🔒 1b |
+| 1c | The pane — backends, models, training and the ledger over the documents; promote/rollback confirmed; adapters the follow-on (the CLI's track 53 shipped in v0.2.0) | v0.2.1 | [`mod-pane.md`](mod-pane.md) | 🔒 1b |
 | 1d | The mod pipeline — its own `changed.sh`-gated workflow: `tsc` the runner gate, validate/test the dev-host gates, the plugin folder the artifact | v0.2.1 | [`mod-pipeline.md`](mod-pipeline.md) | 🔒 1a |

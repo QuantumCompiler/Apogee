@@ -22,7 +22,7 @@ Opened 2026-10-21 (the user's call, from that day's mod spike; home, layers and 
 
 - [ ] **The mod scaffold** *([1a](../backlog/mod-scaffold.md))* — the plugin skeleton, the four layers with the layering check at birth, binary discovery and the not-installed guard, tsc/validate wiring, `changed.sh mod`.
 - [ ] **Tools, slash commands, the status line** *([1b](../backlog/mod-tools-and-commands.md))* — the server's reads registered, `apogee_complete` (CLI now, 54b's served tool when present), the `/apogee` set over the JSON documents, the async long-run pattern.
-- [ ] **The pane** *([1c](../backlog/mod-pane.md))* — backends, models, training and the ledger over the documents; promote/rollback with confirmation; the adapters column once the CLI's track 53 ships.
+- [ ] **The pane** *([1c](../backlog/mod-pane.md))* — backends, models, training and the ledger over the documents; promote/rollback with confirmation; the adapters column the follow-on (the CLI's track 53 shipped in v0.2.0).
 - [ ] **The mod pipeline** *([1d](../backlog/mod-pipeline.md))* — its own workflow: `changed.sh`-gated, `tsc` the runner gate (validate where the CLI installs headlessly), validate/test the dev-host gates, the plugin folder the artifact.
 
 ## Fast follow
@@ -31,7 +31,7 @@ Opened 2026-10-21 (the user's call, from that day's mod spike; home, layers and 
 
 ## Unspecced ideas
 
-- Adapters in the pane and an adapter argument on the tools, once the CLI's track 53 (runtime LoRA) ships — recorded with the spike.
+- Adapters in the pane and an adapter argument on the tools — recorded with the spike; the CLI's track 53 (runtime LoRA), which they waited on, shipped in v0.2.0.
 
 ## Explicit non-goals
 
