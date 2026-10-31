@@ -3,6 +3,7 @@
 #include <CLI/CLI.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -1238,9 +1239,11 @@ TEST_CASE(
 
     // Both bases rewritten under their adapters.
     write_file(based, "GGUF other base weights");
+    // Another size than add_q4_entry's header: the memo knows a file by its
+    // size and time, and Windows can stamp two writes a tick apart alike.
     apogee::testing::GgufBuilder header;
     header.magic().u32(3).u64(1).u64(2);
-    header.string_kv("general.architecture", "qwen2");
+    header.string_kv("general.architecture", "qwen2moe");
     header.u32_kv("general.file_type", 15);
     header.tensor("token_embd.weight");
     write_file(q4, header.bytes());
@@ -1282,7 +1285,7 @@ TEST_CASE(
     CHECK(changed["status"] == "fail");
     CHECK(changed["detail"].get<std::string>().find("than the base " + based.string() +
                                                     " holds now") != std::string::npos);
-    const std::string remedy = changed["remedy"];
+    const std::string remedy = changed.value("remedy", std::string{});
     CHECK(remedy == "apogee train promote " + id +
                         " --as based --adapter to promote its run again over these weights");
     REQUIRE(fixture.run(door_of(remedy, {}, {}), &out, &err) == 0);
@@ -1290,7 +1293,10 @@ TEST_CASE(
 
     // A quantized base's gate scores there, and nothing names its suite: the
     // door says to, and runs with the blank filled.
-    const std::string q4_remedy = adapter_row("q4: v1.lora.gguf")["remedy"];
+    const nlohmann::json q4_changed = adapter_row("q4: v1.lora.gguf");
+    REQUIRE(q4_changed.is_object());
+    CHECK(q4_changed["status"] == "fail");
+    const std::string q4_remedy = q4_changed.value("remedy", std::string{});
     CHECK(q4_remedy == "apogee train promote " + unscored +
                            " --as q4 --adapter --suite <path|name> to promote its run again "
                            "over these weights");
@@ -2140,6 +2146,10 @@ std::string replaced_all(std::string text, const std::string& from, const std::s
 std::string normalized(const std::string& text, const std::filesystem::path& home) {
     std::string out = replaced_all(text, home.generic_string(), "<home>");
     out = replaced_all(out, home.string(), "<home>");
+    // A path under it, as the golden spells one: Windows prints `\`.
+    if constexpr (std::filesystem::path::preferred_separator == '\\') {
+        std::ranges::replace(out, '\\', '/');
+    }
     static const std::regex kRunId{"(pipe|cycle)-[0-9]{8}-[0-9]{6}(-[0-9]+)?"};
     out = std::regex_replace(out, kRunId, "$1-<id>");
     static const std::regex kStoreId{"/gguf/(\\.incoming-)?[0-9a-f]{12}/"};

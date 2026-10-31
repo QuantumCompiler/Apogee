@@ -270,7 +270,7 @@ std::string spell_adapters(const std::vector<harness::AdapterConfig>& adapters) 
     if (out.empty()) {
         return "\"\"";
     }
-    return out.find_first_of(" '\"") == std::string::npos ? out : "\"" + out + "\"";
+    return out.find_first_of(" '\"\\") == std::string::npos ? out : "\"" + out + "\"";
 }
 
 std::string weights_sha256(const fs::path& weights, const WeightHashing& hashing) {

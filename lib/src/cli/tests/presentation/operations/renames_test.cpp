@@ -16,6 +16,7 @@
 #include "backends/mlx_local.h"
 #include "backends/model_roster.h"
 #include "contracts/config.h"
+#include "contracts/config_edit.h"
 #include "logger/session.h"
 #include "modelstore/mlx_info.h"
 #include "modelstore/snapshot.h"
@@ -538,7 +539,7 @@ TEST_CASE("models rename of a drafter's folder repoints the draft beside its bas
     const fs::path moved = drafted.home.models() / "Gemma4-E4B-Drafter" / "mlx" / "aaaaaaaaaaaa";
     CHECK_FALSE(fs::exists(drafted.drafter));
     CHECK(slurp(drafted.home.config_path()) ==
-          replaced(config, drafted.drafter.string(), moved.string()));
+          replaced(config, drafted.drafter.string(), apogee::harness::yaml_scalar(moved.string())));
     CHECK(DraftedHome::record(moved) == record);
 
     // Still paired, with no conversion: the ladder and models info as before.
@@ -588,7 +589,7 @@ TEST_CASE("models rename of a base's folder rewrites its drafter's recorded base
     // The model_path line's segment; the record's base, and nothing else in it.
     const fs::path moved = drafted.home.models() / "Gemma4-E4B-Base" / "mlx" / "bbbbbbbbbbbb";
     CHECK(slurp(drafted.home.config_path()) ==
-          replaced(config, drafted.base.string(), moved.string()));
+          replaced(config, drafted.base.string(), apogee::harness::yaml_scalar(moved.string())));
     CHECK(DraftedHome::record(drafted.drafter) ==
           replaced(record, "\"Gemma4-E4B-Instruct\"", "\"Gemma4-E4B-Base\""));
     CHECK(apogee::models::load_snapshot(drafted.drafter)->bases ==
@@ -681,10 +682,14 @@ TEST_CASE("a rename that touches no drafter writes the config and every record a
     INFO(out);
     CHECK_THAT(out, ContainsSubstring("repointed 2 backends: gemma-Q4KM, mine"));
     CHECK(out.find("drafter") == std::string::npos);
-    // The config: each model_path's one segment, as 46a wrote it.
-    CHECK(slurp(store.home.config_path()) == replaced(config,
-                                                      (store.home.models() / "org--gemma").string(),
-                                                      (store.home.models() / "gemma").string()));
+    // The config: each model_path's one segment, as 46a wrote it -- the
+    // value written as the editor writes any (quoted on Windows, for its
+    // drive's colon).
+    CHECK(slurp(store.home.config_path()) ==
+          replaced(config, store.file.string(),
+                   apogee::harness::yaml_scalar((store.home.models() / "gemma" / "gguf" /
+                                                 "111111111111" / "gemma-Q4_K_M.gguf")
+                                                    .string())));
     CHECK(slurp(store.home.models() / "gemma" / "gguf" / "111111111111" /
                 "gemma-Q4_K_M.gguf.record.json") == gguf_record);
     // Every MLX record as it was, never written again.

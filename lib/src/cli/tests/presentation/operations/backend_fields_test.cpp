@@ -3,6 +3,7 @@
 #include <CLI/CLI.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -224,10 +225,11 @@ TEST_CASE("set-backend pins adapters to the base as it is now, in place, and cle
                                       " (sha256 " + pin.substr(0, 12) + ")"));
     std::string expected = files.config();
     const std::string under = "    model_path: " + files.base.string() + "   # the base\n";
-    expected.insert(
-        expected.find(under) + under.size(),
-        "    adapters: [{path: " + files.style.string() + ", scale: 0.5, base_sha256: \"" + pin +
-            "\"}, {path: " + files.tone.string() + ", scale: 1, base_sha256: \"" + pin + "\"}]\n");
+    expected.insert(expected.find(under) + under.size(),
+                    "    adapters: [{path: " + apogee::harness::yaml_scalar(files.style.string()) +
+                        ", scale: 0.5, base_sha256: \"" + pin +
+                        "\"}, {path: " + apogee::harness::yaml_scalar(files.tone.string()) +
+                        ", scale: 1, base_sha256: \"" + pin + "\"}]\n");
     CHECK(slurp(home.config_path()) == expected);
     // The base was read once, and is remembered by its identity.
     CHECK(std::filesystem::exists(home.home() / "cache" / "weight-hashes.json"));
@@ -265,8 +267,8 @@ TEST_CASE("set-backend refuses adapters it cannot pin, the file untouched",
         CHECK_THAT(err, ContainsSubstring(reason));
         CHECK(slurp(home.config_path()) == files.config());
     };
-    refused({"config", "set-backend", "local", "--adapters", files.dir.path().string() + "/gone"},
-            "the adapter " + files.dir.path().string() + "/gone is not there");
+    refused({"config", "set-backend", "local", "--adapters", (files.dir.path() / "gone").string()},
+            "the adapter " + (files.dir.path() / "gone").string() + " is not there");
     refused({"config", "set-backend", "local", "--adapters", files.style.string() + ":3"},
             "its scale 3 is outside (0, 2]");
     refused({"config", "set-backend", "claude", "--adapters", files.style.string()},
@@ -396,8 +398,8 @@ TEST_CASE("set-backend pins adapters in a JSONC config in place, its comments ke
     const std::string config =
         "{\n  // The backends.\n  \"backends\": {\n    \"local\": {\n"
         "      \"type\": \"llamacpp\", // in process\n"
-        "      \"model_path\": \"" +
-        files.base.string() + "\" // the base\n    }\n  }\n}\n";
+        "      \"model_path\": " +
+        nlohmann::json(files.base.string()).dump() + " // the base\n    }\n  }\n}\n";
     const apogee::testing::CliHome home{config, "config.json"};
     std::string out;
     std::string err;

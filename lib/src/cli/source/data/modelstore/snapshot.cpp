@@ -118,9 +118,12 @@ BaseRename rename_snapshot_base(const std::filesystem::path& dir, std::string_vi
         return BaseRename::Unnamed;
     }
     // Only `bases` may change: a record this build would not write back as
-    // it reads is left, never trimmed to what it understands.
-    std::ifstream in{snapshot_record_path(dir), std::ios::binary};
-    const std::string bytes{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    // it reads is left, never trimmed to what it understands. Read and closed
+    // before the write below: Windows refuses to replace a file a stream holds.
+    const std::string bytes = [&dir] {
+        std::ifstream in{snapshot_record_path(dir), std::ios::binary};
+        return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    }();
     if (snapshot_record_text(*record) != bytes) {
         return BaseRename::Failed;
     }

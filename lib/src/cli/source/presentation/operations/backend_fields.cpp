@@ -69,10 +69,11 @@ namespace {
 }
 
 /// `text` as one word of a command a person copies: double-quoted when a
-/// shell would split it, as `spell_adapters` quotes a set.
+/// shell would split it or read a backslash as an escape (a Windows path), as
+/// `spell_adapters` quotes a set.
 [[nodiscard]] std::string shell_word(const std::string& text) {
-    return text.empty() || text.find_first_of(" '\"") != std::string::npos ? "\"" + text + "\""
-                                                                           : text;
+    return text.empty() || text.find_first_of(" '\"\\") != std::string::npos ? "\"" + text + "\""
+                                                                             : text;
 }
 
 /// The adapters an entry keeps checked against the base `edits` move it

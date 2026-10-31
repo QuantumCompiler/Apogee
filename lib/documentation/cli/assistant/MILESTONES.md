@@ -120,6 +120,23 @@ The two GCCs ran with code generation, so their flow-based warnings show.
 
 **Verified.** The local gate already compiles with Apple clang 21, the runner's compiler, without a warning of ours. The macOS jobs themselves run in the pull request's CI.
 
+### 2026-10-31 — v0.2.0's Windows test runs: one bug, one gap, and the tests
+
+**Why.** The pull request's next run passed every unit-test job but the two Windows ones: 16 cases failed on each, the same 16 on x64 and arm64. `make pr-ci` cross-builds Windows but cannot run its tests, so these were fixed from the run's log.
+
+- [x] **A drafter's record was never rewritten on Windows** (M25). `rename_snapshot_base` held the record open in an `std::ifstream` while `write_snapshot` replaced it, which Windows refuses. A base's rename then said "could not be rewritten" and left the drafter naming the old base. The read now closes first: the class `rename_session_backend` met on 2026-10-16 (Milestone B). It accounted for 4 of the 16 cases: `store_test`'s, and three in `renames_test`.
+- [x] **A printed door kept a Windows path's backslashes unquoted** (53c). `check`'s Adapters rows and `config set-backend`'s refusals printed `--adapters D:\a\...\style.gguf` bare. A POSIX shell, and the shell's own exec line (`line_tokens`), read each `\` as an escape, so the door ran with the separators gone (`check_test`'s door case). `spell_adapters` and both `shell_word` helpers now quote a word holding a backslash too. A path on macOS or Linux holds none, so nothing printed there changes.
+- [x] **The other 11 cases were the tests', held now to what the code writes on every platform:**
+  - the expected config built with `harness::yaml_scalar`, as the editor writes a value. A Windows path is quoted for its drive's colon.
+  - expected paths joined with `/` or made absolute the way the code makes them (`lexically_normal`). The pipeline golden's paths read with `/` wherever the platform's separator is `\`.
+  - a JSONC fixture's path written as JSON (`nlohmann::json(...).dump()`): a bare `D:\a\...` held invalid escapes, so the config never loaded.
+  - `~` guarded through `USERPROFILE` as well as `HOME`, as the other tests do.
+  - the memo read through a stream closed at once, so the test's `fs::remove` of it succeeds.
+  - a vendor CLI's refusal on a platform that starts no child process is its own reason, not the missing binary.
+  - a base rewritten under its adapters to another size. The memo knows a file by size and time, and Windows can stamp two writes a tick apart alike. The test's rows are now required before they are read, so a miss names itself.
+
+**Verified.** The 16 cases pass on macOS, and a MinGW `-Wall -Wextra` syntax pass over the eleven changed files is clean. Their Windows runs are CI's.
+
 ---
 
 ## Milestone B — The config engine

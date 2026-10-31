@@ -233,9 +233,10 @@ TEST_CASE("a rename repoints each reference through its own transform, every oth
     // The drafter's folder: its `draft:` alone, its comment kept.
     text = apogee::commands::repoint_references(before, config, store.roots, references,
                                                 "Gemma4-E4B-Assistant", "E4B-Drafter");
-    CHECK(
-        text.find("    draft: " + (store.models / "E4B-Drafter" / "mlx" / "aaaaaaaaaaaa").string() +
-                  "   # beside its base\n") != std::string::npos);
+    CHECK(text.find("    draft: " +
+                    apogee::harness::yaml_scalar(
+                        (store.models / "E4B-Drafter" / "mlx" / "aaaaaaaaaaaa").string()) +
+                    "   # beside its base\n") != std::string::npos);
     CHECK(apogee::harness::parse_config(text, "<test>").find_backend("e4b")->model_path ==
           store.base.string());
 
@@ -255,6 +256,7 @@ TEST_CASE("a rename repoints each reference through its own transform, every oth
                               .index = 0,
                               .weights = true};
     const apogee::testing::EnvGuard guard{"HOME", store.root.path().string()};
+    const apogee::testing::EnvGuard profile{"USERPROFILE", store.root.path().string()};
     CHECK(apogee::commands::repointed_value(store.roots, home, "org--gemma", "Gemma") ==
           std::optional<std::string>{"~/models/Gemma/gguf/111111111111/g.gguf"});
 }

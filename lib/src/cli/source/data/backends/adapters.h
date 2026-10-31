@@ -106,9 +106,9 @@ enum class AdapterFiles : std::uint8_t {
                                            const AdapterCheck& check);
 
 /// `adapters` as `config set-backend --adapters` spells them (53c):
-/// `<path>[:<scale>]`, comma-joined, quoted where a shell would split them,
-/// `""` for none -- the whole set a fix names, so it drops nothing it did not
-/// mean to.
+/// `<path>[:<scale>]`, comma-joined, quoted where a shell would split them
+/// or read a backslash as an escape (a Windows path), `""` for none -- the whole set a fix names,
+/// so it drops nothing it did not mean to.
 [[nodiscard]] std::string spell_adapters(const std::vector<harness::AdapterConfig>& adapters);
 
 /// Why `adapters` cannot apply over `check.base`, or empty when they can:

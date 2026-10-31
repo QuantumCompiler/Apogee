@@ -979,9 +979,10 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
 }
 
 /// `text` as one word of a command a person copies: double-quoted when a
-/// shell would split it, as `--adapters` spells a set (53a).
+/// shell would split it or read a backslash as an escape (a Windows path), as
+/// `--adapters` spells a set (53a).
 [[nodiscard]] std::string shell_word(const std::string& text) {
-    return text.find_first_of(" '\"") == std::string::npos ? text : "\"" + text + "\"";
+    return text.find_first_of(" '\"\\") == std::string::npos ? text : "\"" + text + "\"";
 }
 
 /// The door that promotes `run` onto `name` again (53c), as it would run

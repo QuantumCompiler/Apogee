@@ -225,10 +225,13 @@ TEST_CASE("pinning makes each path absolute and records the base's hash on every
           std::vector<AdapterConfig>{
               {.path = (here / "loras" / "a.gguf").string(), .scale = 0.5, .base_sha256 = base},
               {.path = (here / "loras" / "b.gguf").string(), .base_sha256 = base}});
-    // An adapter not there is refused before the base is read.
+    // An adapter not there is refused before the base is read, by the path
+    // pinning made of it: a drive's on Windows.
     std::vector<AdapterConfig> missing{{.path = "/gone/c.gguf"}};
     CHECK_THAT(pin_adapters(missing, scratch.check()),
-               ContainsSubstring("the adapter /gone/c.gguf is not there"));
+               ContainsSubstring("the adapter " +
+                                 fs::absolute("/gone/c.gguf").lexically_normal().string() +
+                                 " is not there"));
     // No base to read, nothing to pin to.
     fs::remove(scratch.base);
     std::vector<AdapterConfig> orphan{{.path = adapters[0].path}};
@@ -244,8 +247,12 @@ TEST_CASE("a read that does not remember answers from the memo and writes nothin
     const std::string expected = apogee::models::sha256_hex("base weights");
     REQUIRE(weights_sha256(scratch.base, scratch.hashing) == expected);
     REQUIRE(scratch.reads.size() == 1);
-    std::ifstream before_in{scratch.memo, std::ios::binary};
-    const std::string before{std::istreambuf_iterator<char>{before_in}, {}};
+    // Each read closed at once: Windows removes no file a stream holds.
+    const auto read_memo = [&scratch] {
+        std::ifstream in{scratch.memo, std::ios::binary};
+        return std::string{std::istreambuf_iterator<char>{in}, {}};
+    };
+    const std::string before = read_memo();
     WeightHashing reading = scratch.hashing;
     reading.remember = false;
     // Held by the memo: answered with no read.
@@ -256,8 +263,7 @@ TEST_CASE("a read that does not remember answers from the memo and writes nothin
     CHECK(weights_sha256(scratch.base, reading) ==
           apogee::models::sha256_hex("other base weights"));
     CHECK(scratch.reads.size() == 2);
-    std::ifstream after_in{scratch.memo, std::ios::binary};
-    CHECK(std::string{std::istreambuf_iterator<char>{after_in}, {}} == before);
+    CHECK(read_memo() == before);
     // With no memo at all, nothing is created.
     fs::remove(scratch.memo);
     CHECK(weights_sha256(scratch.base, reading) ==

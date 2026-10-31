@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "platform/child_process.h"
 #include "support/cli_home.h"
 
 /// Chat's session core, pinned from outside (27s).
@@ -264,8 +265,11 @@ TEST_CASE("a backend named at launch that cannot start is refused with its own r
             "apogee " + mode + ": backend 'gone' is configured but could not be started: ";
         CHECK(home.run({mode, "-m", "gone"}, out, err) == 1);
         CHECK(err.starts_with(refusal));
-        // Its own reason, once named -- the factory's `gone: ` dropped.
-        CHECK(err.find(home.binary.filename().string()) != std::string::npos);
+        // Its own reason, once named -- the factory's `gone: ` dropped: the
+        // missing binary, or a platform that starts no vendor CLI at all.
+        CHECK(err.find(apogee::platform::supports_child_processes()
+                           ? home.binary.filename().string()
+                           : "cannot spawn child processes") != std::string::npos);
         CHECK(err.find("gone: ") == std::string::npos);
         CHECK(err.ends_with(" (started backends: helper, root)\n"));
         CHECK(out.empty());
