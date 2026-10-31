@@ -404,7 +404,9 @@ jobs:
         include:
           - name: macos-arm64
             target: macos-arm64
-            runner: macos-14
+            # The newest stable image (macOS 26 on 2026-10-31; macos-14 was
+            # retired 2026-11-02). The binary's minimum macOS is its SDK's.
+            runner: macos-latest
           - name: linux-x64
             target: linux-x64
             runner: ubuntu-24.04
@@ -486,7 +488,9 @@ jobs:
         include:
           - name: macos-arm64
             target: macos-arm64
-            runner: macos-14
+            # The newest stable image (macOS 26 on 2026-10-31; macos-14 was
+            # retired 2026-11-02). The binary's minimum macOS is its SDK's.
+            runner: macos-latest
           - name: linux-x64
             target: linux-x64
             runner: ubuntu-24.04

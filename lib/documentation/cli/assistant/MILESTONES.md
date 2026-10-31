@@ -110,6 +110,16 @@ The two GCCs ran with code generation, so their flow-based warnings show.
 
 **Verified.** The rerun of `make pr-ci` passed every job it rehearses: the version bump, the llama.cpp clone, the macOS unit tests and build, the Linux container's unit tests and the Windows x64 cross-build, with no warning of ours from either GCC. A `-Wpre-c++20-compat` scan for AppleClang 15 found no structured binding captured in a lambda. `lib/scripts/cicd.sh --test`: the CLI's 4,059 tests and the macOS app's 977 cases, no warning. The Windows test runs, windows-arm64 and linux-x64 are left to CI.
 
+### 2026-10-31 — CI's macOS jobs move to `macos-latest` (the user's call)
+
+**Why.** The v0.2.0 pull request's first run failed both macOS jobs: GitHub's scheduled brownout of the `macos-14` image, which it retires on 2026-11-02 (actions/runner-images#13518). The user chose `macos-latest` over `macos-15` and `macos-26`: the CLI will build in Apple's Foundation Models later, which needs macOS 27, and the label follows the newest stable image.
+
+- [x] **`unit tests macos-arm64` and `build macos-arm64` run on `macos-latest`**: macOS 26 on arm64 on 2026-10-31, Xcode 26.6 with Apple clang 21. The job names are unchanged, so the required checks are too.
+- [x] **The released macOS binary's minimum macOS rises with it.** The build pins no deployment target, so the binary takes its SDK's version: 14 on `macos-14`, 26.6 now (this Mac's own build reads `minos 26.5` from its SDK). v0.2.0's macOS CLI runs on macOS 26.6 and later.
+- [x] **The docs name the new compiler** (CLAUDE.md -> Code Style, DEVELOPER.md -> Dependencies and the test traps). The init-capture rule for structured bindings stays, though Apple clang 21 takes a captured one.
+
+**Verified.** The local gate already compiles with Apple clang 21, the runner's compiler, without a warning of ours. The macOS jobs themselves run in the pull request's CI.
+
 ---
 
 ## Milestone B — The config engine

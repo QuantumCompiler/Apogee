@@ -32,7 +32,8 @@
 #
 # The runner: the app targets macOS 27 and needs Xcode 27's SDK, which
 # GitHub's `xcode-27` image carries (macOS 27, public preview since
-# 2026-07-16). The CLI's `macos-14` cannot build it.
+# 2026-07-16). The CLI's `macos-latest` (macOS 26 on 2026-10-31) cannot
+# build it.
 
 name: Darwin
 
