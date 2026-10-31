@@ -135,7 +135,9 @@ The two GCCs ran with code generation, so their flow-based warnings show.
   - a vendor CLI's refusal on a platform that starts no child process is its own reason, not the missing binary.
   - a base rewritten under its adapters to another size. The memo knows a file by size and time, and Windows can stamp two writes a tick apart alike. The test's rows are now required before they are read, so a miss names itself.
 
-**Verified.** The 16 cases pass on macOS, and a MinGW `-Wall -Wextra` syntax pass over the eleven changed files is clean. Their Windows runs are CI's.
+- [x] **A warning every earlier scan had missed.** The rehearsal's cross-build printed GCC 16's `-Wfree-nonheap-object` in `tests/support/mlx_model.h`, and a full MinGW scan of all 730 first-party files with code generation on found it in eight test files, all from one cause. `write_mlx_model` passed `safetensors_bytes` a braced one-tensor list, and GCC reads that temporary's destruction, inlined, as freeing a non-heap pointer: a false positive. The function builds each list with `emplace_back` now, and all 27 files that include it compile clean. The earlier scans could not see it: MinGW's ran syntax-only (`-fsyntax-only`, and this warning needs code generation), and the rehearsal's cross-build recompiles only what changed. The scan's other two warnings are llama.cpp's own (`-Wshadow` in its headers), the recorded exception.
+
+**Verified.** The 16 cases pass on macOS, and a MinGW `-Wall -Wextra` syntax pass over the eleven changed files is clean. Their Windows runs are CI's. After the header's fix: 850 macOS cases over every test that writes an MLX model, and the MinGW scan above.
 
 ---
 

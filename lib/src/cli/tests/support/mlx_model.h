@@ -125,11 +125,19 @@ inline void write_mlx_model(const std::filesystem::path& dir, const MlxModelSpec
         write_fixture_file(dir / "tokenizer_config.json",
                            "{\"chat_template\": \"{{ messages }}\"}\n");
     }
+    // One tensor's file, its list built rather than braced: GCC 16 reads a
+    // braced temporary's destruction, inlined here, as freeing a pointer
+    // that is not the heap's (-Wfree-nonheap-object, a false positive).
+    const auto one_tensor = [&spec](std::string name, std::int64_t elements) {
+        std::vector<std::pair<std::string, std::int64_t>> tensors;
+        tensors.emplace_back(std::move(name), elements);
+        return safetensors_bytes(tensors, spec.format);
+    };
     std::string map;
     int layer = 0;
     for (const std::string& name : mlx_shard_names(spec)) {
         const std::string tensor = "model.layers." + std::to_string(layer++) + ".weight";
-        write_fixture_file(dir / name, safetensors_bytes({{tensor, 64}}, spec.format));
+        write_fixture_file(dir / name, one_tensor(tensor, 64));
         map += (map.empty() ? "" : ", ") + std::string{"\""} + tensor + "\": \"" + name + "\"";
     }
     if (spec.index) {
@@ -138,13 +146,11 @@ inline void write_mlx_model(const std::filesystem::path& dir, const MlxModelSpec
     }
     if (spec.kind == "video") {
         write_fixture_file(dir / "t5_encoder.safetensors",
-                           safetensors_bytes({{"encoder.block.0.weight", 32}}, spec.format));
-        write_fixture_file(dir / "vae.safetensors",
-                           safetensors_bytes({{"decoder.conv_in.weight", 32}}, spec.format));
+                           one_tensor("encoder.block.0.weight", 32));
+        write_fixture_file(dir / "vae.safetensors", one_tensor("decoder.conv_in.weight", 32));
     }
     if (spec.kind == "voice") {
-        write_fixture_file(dir / "voices" / "af_heart.safetensors",
-                           safetensors_bytes({{"voice", 16}}, spec.format));
+        write_fixture_file(dir / "voices" / "af_heart.safetensors", one_tensor("voice", 16));
     }
 }
 
