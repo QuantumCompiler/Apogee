@@ -79,6 +79,7 @@ Opened 2026-10-22 (the user's call): a thorough bug and feature-disparity audit 
 
 ## Fast follow
 
+- [x] **The macOS app ships with its release** — maintenance item M17 *(shipped 2026-10-31 — [MILESTONES](MILESTONES.md))*: the v0.2.0 release carried no `Apogee.app`, by the pipeline's design (a run artifact only, the user's 2026-10-20 call). The user's word, 2026-10-31: v0.2.0's app attached by hand from #11's verified Darwin build, and every release the merge publishes carries `apogee-gui-darwin.zip` from now on — the pull request's own build, tree-checked like the CLI's archives, or the latest release's copy.
 - [x] **Stored weights by handle** — maintenance item M1 *(shipped 2026-10-20 — [MILESTONES → Milestone B](MILESTONES.md#milestone-b--the-designs-screens))*: the user's run of the built app showed none of their SafeTensors sets. The CLI names every stored, unconfigured row `(not configured)`, and the GUI keyed rows by that name, so 18 stored rows drew as one, and info, delete and repair, Voice's voices and Settings' pipelines were all asked for `(not configured)`. Fixed by naming a stored row by its handle and showing the fold.
 - [x] **Store commands the CLI takes** — maintenance item M2 *(shipped 2026-10-21 — [MILESTONES → Milestone C](MILESTONES.md#milestone-c--cli-parity))*: the user's run of 2026-10-21 met the binary's refusals from the Models place — an MLX conversion of two precisions (`-t 8bit --register-with 4bit`, where since the CLI's M16 `--register-with` names every precision) and a rename of the MLX backend `GPT-OSS-20B-mixed_4_8` (`models rename`, which takes a GGUF family or a stored folder; a backend is `config rename-backend`, which the app never reached); the same form also sends a GGUF precision other than f16 with Register, refused. The sheets build the forms the CLI takes, the binary's completion says which names `models rename` takes, and every sheet command is held to the binary's recorded verdicts — the 2i tests had pinned the refused commands.
 - [x] **Convert offers what the set takes** — maintenance item M3 *(shipped 2026-10-21 — [MILESTONES → Milestone C](MILESTONES.md#milestone-c--cli-parity))*: Stored weights offers both conversions on every SafeTensors set, so the user could start one on `Wan-AI--Wan2.2-TI2V-5B`, a diffusion model no converter takes, and on their draft heads. Once `models info` states `data.converts_to`, the buttons follow it; an older binary as today.
@@ -98,7 +99,6 @@ Opened 2026-10-22 (the user's call): a thorough bug and feature-disparity audit 
 
 ## Unspecced ideas
 
-- **`Apogee.app` in releases** — the merge's release carrying the ad-hoc-signed app beside the CLI's archives. The user's 2026-10-20 call kept it a CI artifact until the session window shipped, which it now has (1c); how the release scripts take it is its own item, on the user's word.
 - **Setting the binary override from the not-found screen** — since 1p, Settings › General's "Use another apogee…" sets the `binaryOverride` default; a "Locate apogee…" chooser on the not-found screen itself would set it before any session starts (1c's note).
 
 ## Ideas / candidate features

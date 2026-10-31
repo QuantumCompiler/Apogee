@@ -25,7 +25,13 @@
 #                               verified
 #   build/<target>/apogee-gui-darwin.zip
 #                               `package`'s: Apogee-<version>/ holding the app
-#                               and a README -- what CI keeps as its artifact
+#                               and a README -- what CI keeps as its artifact,
+#                               and what a release carries (GUI M17)
+#   build/<target>/apogee-gui-darwin.source
+#                               the commit and the source TREE it was built
+#                               from, as the CLI's archives record theirs --
+#                               how the release after a merge proves the app
+#                               is the merged source (release-from-pr.sh)
 #
 # Signing is ad hoc (CODE_SIGN_IDENTITY "-" in the project): the user's call,
 # 2026-10-20 -- no Developer ID and no notarization for now, so no signing
@@ -144,13 +150,14 @@ build_app() {
 # signature must still verify.
 package_app() {
     [[ -d "$bundle" ]] || die "no ${bundle} -- run '$0 build' first"
-    local said version stage zip check
+    local said version stage zip check record
     said="$(codesign --verify --deep --strict "$bundle" 2>&1)" || die "the signature does not verify: ${said}"
     version="$(plutil -extract CFBundleShortVersionString raw "${bundle}/Contents/Info.plist" 2>/dev/null)" ||
         die "${bundle} carries no version: build it with '$0 build'"
     stage="${build_dir}/package/Apogee-${version}"
     zip="${build_dir}/apogee-gui-darwin.zip"
-    rm -rf "${build_dir}/package" "$zip"
+    record="${build_dir}/apogee-gui-darwin.source"
+    rm -rf "${build_dir}/package" "$zip" "$record"
     mkdir -p "$stage"
     ditto "$bundle" "${stage}/Apogee.app"
     cat >"${stage}/README.txt" <<README
@@ -177,7 +184,14 @@ README
         die "the packaged app's signature does not verify: ${said}"
     }
     rm -rf "$check"
-    log "[${target}] ${zip}: Apogee ${version}, the app and its README, its signature verified once unpacked"
+    # The tree, not the commit, is the identity: CI builds a pull request's
+    # test merge, and the merge GitHub then makes is another commit with the
+    # same tree.
+    {
+        echo "commit $(git -C "$app_dir" rev-parse HEAD)"
+        echo "tree $(git -C "$app_dir" rev-parse 'HEAD^{tree}')"
+    } >"$record" || die "could not record what ${zip} was built from"
+    log "[${target}] ${zip}: Apogee ${version}, the app and its README, its signature verified once unpacked; its source in ${record}"
 }
 
 # Each failed test and its messages, from a result bundle.

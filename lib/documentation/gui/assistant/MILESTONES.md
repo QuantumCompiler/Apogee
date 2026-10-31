@@ -2733,3 +2733,24 @@ Twenty-two of 35 new cases failed first. The rest pin the older binary and the d
 **Not done:**
 - No live pass of the app.
 - A rebuild's card has no words of its own (above).
+
+### 2026-10-31 — `app-ships-with-its-release` (maintenance item M17): the macOS app ships with its release
+
+**Why.** The v0.2.0 release, the app's first, carried the CLI's five archives and no `Apogee.app`. That was the pipeline's design: `darwin.yml` kept the app as a run artifact, its release "its own later step, on the user's word" (1d, 2026-10-20), and `release-from-pr.sh` knew one deliverable. The user's word, 2026-10-31: v0.2.0 gets its app now, and every release carries it from here.
+
+- [x] **v0.2.0 repaired by hand, the same day** (the user's call): #11's final Darwin run (41226403105, head `0e5b0f23`, the test merge of the same two parents as the merge `b54b25e9`) still held `apogee-gui-darwin`. The zip was downloaded and checked — `Apogee-0.2.0/Apogee.app`, version 0.2.0, ad-hoc signature verified, arm64 — attached to the release as `apogee-gui-darwin.zip` (sha256 `73d35d5a…`, matched after upload), and the release notes amended in six places to say the app is among the downloads.
+- [x] **`build.sh package`** writes `build/<target>/apogee-gui-darwin.source` (`commit`, `tree`), the CLI's `package.sh` format, and **`darwin.yml`** keeps it in the artifact beside the zip.
+- [x] **`release-from-pr.sh` step 4d**: `changed.sh gui-darwin` against the latest release. Changed: the newest successful `darwin.yml` run of the head (`event=pull_request`; a re-cut: of the commit, any event) holding an unexpired `apogee-gui-darwin`, its `.source` tree equal to the released tree, the zip's `Apogee.app` saying the version (its `Info.plist` read with `plistlib`) — or nothing is published, saying why and how to re-cut. Unchanged: the latest release's zip, copied; a latest release carrying none gives none, said. The zip joins the assets of the one `gh release create`.
+- [x] **A latent break fixed**: with the app on a release, the CLI's copy path (4b) took `apogee-gui-darwin.zip` for a CLI archive, so the next CLI-unchanged release would have stopped on "holds no apogee binary". 4b now leaves `apogee-gui-*` to 4d.
+- [x] `ci.yml`'s `tag and release` comments and the CLI `DEVELOPER.md` release steps name the app; the GUI ROADMAP's parked idea became this item.
+
+**Decisions made** (2026-10-31): the asset is `apogee-gui-darwin.zip`, the artifact's name; the item sits in the GUI's Maintenance queue, changing the repo-wide release machinery the CLI docs record; and three defaults, taken — a re-cut whose app changed needs a Darwin run at the commit (`gh workflow run darwin.yml --ref stable`, `make release` unchanged); a CLI-style copy from a release with no app publishes without one, said; and verification by a stubbed-`gh` harness, since only builds from now on carry the `.source`.
+
+**Verified.**
+- A scratch harness ran the real script against this checkout's commits with `gh` and `latest-release.sh` stubbed. **Changed and matching**: both deliverables attached, the `--publish` call's `gh release create` carrying the CLI archive and `apogee-gui-darwin.zip`, the Darwin lookup asking `event=pull_request` for the head. **Refused, nothing published, each saying why**: the app's tree differing, no Darwin run, the artifact expired, no `.source`, the app saying 0.1.0. **Copied**: CLI and app from a release carrying both (two assets), and the CLI alone from one carrying no app. **The re-cut** at the branch head: the Darwin run looked up by the commit, both attached. **The latent break**: the script before this change, on the copy scenario, stopped with "apogee-gui-darwin.zip holds no apogee binary".
+- A Python plist read from a pipe failed in the harness's first run (`plistlib.load` needs a seekable file); it reads the bytes first now.
+- `bash -n` on both scripts. `shellcheck` is not installed on this host.
+
+**Not done:**
+- The build path is proven on the stubbed `gh` only: the first real proof is the next release pull request's rehearsal (`gh workflow run CI --ref <branch> -f release_rehearsal_pr=<PR>`), the first whose Darwin artifact carries a `.source`.
+- Notarization and a Developer ID stay out (the 2026-10-20 call).

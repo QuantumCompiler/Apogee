@@ -25,10 +25,14 @@
 # The artifact (track 1's 1d, the user's calls of 2026-10-20): Apogee.app,
 # signed ad hoc -- no Developer ID, no notarization, no signing secret
 # anywhere -- verified, zipped with its README as `apogee-gui-darwin`, and
-# kept as an artifact of the run. It is not attached to any release: that is
-# its own later step, on the user's word. The cost of ad-hoc signing is said
-# in the README inside the zip: on another Mac, the first launch is
-# right-click -> Open.
+# kept as an artifact of the run with the `.source` record of the tree it was
+# built from. The release a merge publishes carries it (GUI M17, the user's
+# word, 2026-10-31): ci.yml's `tag and release` runs release-from-pr.sh, which
+# takes this run's `apogee-gui-darwin` when the app changed since the latest
+# release -- so keep the artifact's name and the job's -- checks its tree
+# against the merge, and attaches apogee-gui-darwin.zip. The cost of ad-hoc
+# signing is said in the README inside the zip: on another Mac, the first
+# launch is right-click -> Open.
 #
 # The runner: the app targets macOS 27 and needs Xcode 27's SDK, which
 # GitHub's `xcode-27` image carries (macOS 27, public preview since
@@ -42,8 +46,9 @@ run-name: >-
   && format('{0} Darwin Manual Checks', github.ref_name)
   || format('{0} Darwin Pull Request Checks', github.head_ref) }}
 
-# A pull request into `stable`, or on request. No `closed`: nothing of the app
-# is released by a merge yet.
+# A pull request into `stable`, or on request. No `closed`: the release after
+# a merge rebuilds nothing, and ci.yml's `tag and release` publishes the app
+# this pipeline built for the pull request.
 on:
   pull_request:
     branches: [stable]
@@ -114,12 +119,16 @@ jobs:
         if: needs.changes.outputs.darwin == 'true'
         run: lib/src/darwin/scripts/build.sh package
 
+      # The zip a release carries, and the record of the tree it was built
+      # from, which the release checks against the merge.
       - name: Keep the app as an artifact of the run
         if: needs.changes.outputs.darwin == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: apogee-gui-darwin
-          path: lib/src/darwin/build/macos-arm64/apogee-gui-darwin.zip
+          path: |
+            lib/src/darwin/build/macos-arm64/apogee-gui-darwin.zip
+            lib/src/darwin/build/macos-arm64/apogee-gui-darwin.source
           if-no-files-found: error
 
       - name: Unchanged

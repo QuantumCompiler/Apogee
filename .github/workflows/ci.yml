@@ -584,9 +584,11 @@ jobs:
     # whether the CLI changed: if so it takes the pull request's last green
     # run, checks every archive against the merged source tree and the
     # executable against it; if not it copies the latest release's CLI
-    # archives. Then it creates the tag `v<VERSION>` at the merge commit
-    # together with the release. A version already released publishes
-    # nothing.
+    # archives. The macOS app follows the same rule (GUI M17): changed, the
+    # zip from the pull request's last green Darwin run (darwin.yml), its
+    # tree checked against the merge; unchanged, the latest release's copy.
+    # Then it creates the tag `v<VERSION>` at the merge commit together with
+    # the release. A version already released publishes nothing.
     #
     # Dispatched with release_rehearsal_pr, the same script runs without
     # --publish: every lookup and check, then what it would have published.
@@ -615,7 +617,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write   # the tag and the release
-      actions: read     # the pull request's CI runs and their artifacts
+      actions: read     # the pull request's CI and Darwin runs, and their artifacts
     steps:
       # The merge commit, which carries the script; a rehearsal runs the
       # script from the branch it was dispatched on. The whole history: the
