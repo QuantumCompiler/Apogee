@@ -9,6 +9,8 @@ import SwiftUI
 public struct SessionsScreen: View {
     @Bindable private var library: SessionLibraryViewModel
     private let shell: ShellViewModel
+    /// The width when a drag on the inspector's edge began; `nil` between drags.
+    @State private var dragStart: Double?
 
     public init(library: SessionLibraryViewModel, shell: ShellViewModel) {
         self.library = library
@@ -33,6 +35,22 @@ public struct SessionsScreen: View {
             .id(ObjectIdentifier(library.current))
             if showsInspector {
                 Divider()
+                    .overlay {
+                        Color.clear
+                            .frame(width: 8)
+                            .contentShape(Rectangle())
+                            .pointerStyle(.frameResize(position: .leading))
+                            .gesture(
+                                DragGesture(coordinateSpace: .global)
+                                    .onChanged { value in
+                                        let start = dragStart ?? library.inspectorWidth
+                                        dragStart = start
+                                        library.setInspectorWidth(start - value.translation.width)
+                                    }
+                                    .onEnded { _ in dragStart = nil }
+                            )
+                    }
+                    .zIndex(1)
                 InspectorPane(
                     inspector: library.inspector,
                     showInfo: { if let chat = library.currentChat { Task { await library.showInfo(chat) } } },
@@ -40,7 +58,7 @@ public struct SessionsScreen: View {
                     forgetRecall: { Task { await library.askToForgetRecall() } },
                     chooseRecall: { library.selectRecall($0) }
                 ) { shell.go(.models) }
-                    .frame(width: 360)
+                    .frame(width: CGFloat(library.inspectorWidth))
                     .task {
                         await library.refreshRoles()
                         await library.refreshRecall()

@@ -15,6 +15,8 @@ public final class ShellViewModel {
     public private(set) var overlay: Overlay?
     /// Hidden by the person (⌃⌘S); remembered across launches.
     public private(set) var sidebarHidden: Bool
+    /// The sidebar's width while it is full; the person sets it by dragging.
+    public private(set) var sidebarWidth: Double
     /// The window's width, as last laid out; `nil` before the first layout.
     public private(set) var width: Double?
     /// The one line at the bottom of the window, if one is showing.
@@ -30,6 +32,7 @@ public final class ShellViewModel {
         self.preferences = preferences
         route = preferences.route.flatMap(Destination.init(rawValue:)) ?? .sessions
         sidebarHidden = preferences.sidebarHidden
+        sidebarWidth = preferences.sidebarWidth
     }
 
     /// How the window lays out at its width.
@@ -67,6 +70,11 @@ public final class ShellViewModel {
     public func setSidebarHidden(_ hidden: Bool) {
         sidebarHidden = hidden
         preferences.sidebarHidden = hidden
+    }
+
+    public func setSidebarWidth(_ width: Double) {
+        sidebarWidth = min(max(width, 200), 420)
+        preferences.sidebarWidth = sidebarWidth
     }
 
     /// The window was laid out `width` points wide.

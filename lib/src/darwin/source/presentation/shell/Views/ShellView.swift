@@ -12,6 +12,8 @@ public struct ShellView<Screen: View, Sessions: View, OverlayContent: View>: Vie
     private let sessions: () -> Sessions
     private let screen: (Destination) -> Screen
     private let overlay: (Overlay) -> OverlayContent
+    /// The width when a drag on the divider began; `nil` between drags.
+    @State private var dragStart: Double?
 
     public init(
         model: ShellViewModel, @ViewBuilder sessions: @escaping () -> Sessions,
@@ -29,8 +31,24 @@ public struct ShellView<Screen: View, Sessions: View, OverlayContent: View>: Vie
         HStack(spacing: 0) {
             if layout.sidebar != .hidden {
                 Sidebar(model: model, compact: layout.sidebar == .icons, sessions: sessions)
-                    .frame(width: layout.sidebar == .full ? Layout.sidebar : Layout.sidebarCollapsed)
+                    .frame(width: layout.sidebar == .full ? CGFloat(model.sidebarWidth) : Layout.sidebarCollapsed)
                 Divider()
+                    .overlay {
+                        Color.clear
+                            .frame(width: 8)
+                            .contentShape(Rectangle())
+                            .pointerStyle(.frameResize(position: .trailing))
+                            .gesture(
+                                DragGesture(coordinateSpace: .global)
+                                    .onChanged { value in
+                                        let start = dragStart ?? model.sidebarWidth
+                                        dragStart = start
+                                        model.setSidebarWidth(start + value.translation.width)
+                                    }
+                                    .onEnded { _ in dragStart = nil }
+                            )
+                    }
+                    .zIndex(1)
             }
             screen(model.route)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -127,6 +127,13 @@ public final class SessionLibraryViewModel {
     public var inspectorOpen: Bool {
         didSet { preferences.inspectorOpen = inspectorOpen }
     }
+    /// The inspector's width in points, as the person last dragged it.
+    public private(set) var inspectorWidth: Double
+
+    public func setInspectorWidth(_ width: Double) {
+        inspectorWidth = min(max(width, 280), 560)
+        preferences.inspectorWidth = inspectorWidth
+    }
     /// Says one line in the window's toast.
     public var say: (@MainActor (String) -> Void)?
     /// The execute door's sheet, open, and what it says.
@@ -230,6 +237,7 @@ public final class SessionLibraryViewModel {
         self.now = now
         self.clock = clock
         inspectorOpen = preferences.inspectorOpen
+        inspectorWidth = preferences.inspectorWidth
         current = SessionViewModel(starter: starter, launch: ChatLaunch(), reader: runner)
     }
 

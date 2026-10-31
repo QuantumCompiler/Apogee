@@ -35,6 +35,8 @@ public enum Layout {
     /// A place's button in the sidebar.
     public static let placeWidth: CGFloat = 40
     public static let placeHeight: CGFloat = 34
+    /// A place's button padding in the sidebar.
+    public static let placePadding: CGFloat = 12
     /// The widest the media screens' content grows.
     public static let mediaContentMax: CGFloat = 820
 }
