@@ -326,16 +326,16 @@ struct ConsentSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.m) {
-            Text("Install what video needs?").font(.apogeeHeading)
+            Text(consent.rebuilds ? "Rebuild Apogee's Python environment?" : "Install what video needs?").font(.apogeeHeading)
             Text(consent.said).font(.apogeeBody).foregroundStyle(Palette.textSecondary).textSelection(.enabled)
-            Text("This downloads and installs Python packages into Apogee's own environment, once. Nothing is installed unless you say yes.")
+            Text(consent.rebuilds ? MediaLibrary.rebuildNote : "This downloads and installs Python packages into Apogee's own environment, once. Nothing is installed unless you say yes.")
                 .font(.apogeeSmall)
                 .foregroundStyle(Palette.textSecondary)
             Text((["apogee"] + consent.arguments).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary)
             HStack {
                 Spacer()
                 Button("Not now", role: .cancel, action: decline).keyboardShortcut(.cancelAction)
-                Button("Install", action: install).keyboardShortcut(.defaultAction)
+                Button(consent.rebuilds ? "Rebuild" : "Install", action: install).keyboardShortcut(.defaultAction)
             }
         }
         .padding(Spacing.xl)

@@ -120,3 +120,20 @@ TEST_CASE("a no, a pipe or a failed pip installs nothing and names the command t
         CHECK_FALSE(env.status().has(apogee::training::RequirementSet::Video));
     }
 }
+
+TEST_CASE("a set the environment's Python cannot run is refused before it is offered",
+          "[cli][video][consent][m19]") {
+    // Nothing is offered that pip would only refuse: the rebuild is named,
+    // nobody is asked, nothing runs.
+    Env fixture;
+    apogee::training::PythonEnv env = fixture.env();
+    std::ofstream{env.dir() / "pyvenv.cfg"} << "home = /usr/bin\nversion = 3.9.6\n";
+    std::istringstream in{"y\n"};
+    std::ostringstream out;
+    CHECK(apogee::commands::install_video_set(env, true, in, out, "video generate") ==
+          "the Python environment at " + env.dir().string() +
+              " is on Python 3.9.6, and the 'video' set runs on >=3.10 -- rebuild it on a Python "
+              "that fits: apogee train setup --rebuild --with video");
+    CHECK(out.str().empty());
+    CHECK(fixture.commands.empty());
+}

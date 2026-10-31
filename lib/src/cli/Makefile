@@ -66,8 +66,8 @@ help:
 	@echo "  install       Build, then install the binary to $(PREFIX)/bin"
 	@echo "  update        Bring the install up to date from source: a fresh build, the binary"
 	@echo "                  installed, the models moved to this build's store layout, then"
-	@echo "                  'apogee reset' -- it shows the plan and waits for 'yes' -- and the"
-	@echo "                  bootstrap. The models are ALWAYS kept. KEEP=\"<row> ...\" keeps more"
+	@echo "                  'apogee reset' (not asked: what it removes the bootstrap remakes) and"
+	@echo "                  the bootstrap. The models are ALWAYS kept. KEEP=\"<row> ...\" keeps more"
 	@echo "                  rows of the data directory -- 'apogee reset --help' lists them,"
 	@echo "                  'apogee reset --keep <TAB>' completes them."
 	@echo "                  make update KEEP=sessions"
@@ -167,9 +167,14 @@ path-note:
 #      layout. The models are kept whatever else happens, so a change to how
 #      they are stored ships its move in `models migrate`, which every update
 #      runs -- never as a reason to remove them. Nothing to move is a no-op.
-#   2. `reset --keep models <KEEP...>`: every other row reset, and the
+#   2. `reset --yes --keep models <KEEP...>`: every other row reset, and the
 #      skeleton re-seeded and checked (`check --fix`, inside the reset). KEEP
-#      adds rows to keep; `models` is kept whether or not it names it.
+#      adds rows to keep; `models` is kept whether or not it names it. Not
+#      asked (2026-10-21, the user's call): the models are kept, and what the
+#      reset removes the steps after it remake -- the config's registrations
+#      and the environment, by the bootstrap -- so the update does not stop to
+#      ask; a row worth keeping is named in KEEP. `apogee reset` run by hand
+#      still asks.
 #   3. `bootstrap`: the runtimes and the registrations, last. `reinstall` ran
 #      it inside `install`, before its reset, and the reset removed what it
 #      had made -- the environment and the registered backends (the user's
@@ -183,11 +188,10 @@ path-note:
 # (source/data/contracts/layout.h): the binary checks every word, refuses one
 # the layout does not declare before anything is removed, and completes them
 # on `apogee reset --keep <TAB>`. The reset is the binary's, not a shell `rm`,
-# for uninstall's reason -- a removal written twice drifts -- and it is never
-# given --yes: the destructive confirmation belongs to the person, even in the
-# middle of a make target. The installed binary is run only as $(APOGEE_BIN),
-# so the binary `install-files` put there is the one that resets its own root
-# -- with MODE=dev, `apogee-dev` updating ~/.apogee-dev. `apogee reset` needs
+# for uninstall's reason -- a removal written twice drifts. The installed
+# binary is run only as $(APOGEE_BIN), so the binary `install-files` put there
+# is the one that resets its own root -- with MODE=dev, `apogee-dev` updating
+# ~/.apogee-dev. `apogee reset` needs
 # nothing from the config, and the reset's own check is what stops the target
 # when the fresh directory does not pass.
 KEEP ?=
@@ -199,7 +203,7 @@ update:
 	@echo ""
 	@"$(APOGEE_BIN)" models migrate --yes
 	@echo ""
-	@"$(APOGEE_BIN)" reset $(addprefix --keep ,$(sort models $(KEEP)))
+	@"$(APOGEE_BIN)" reset --yes $(addprefix --keep ,$(sort models $(KEEP)))
 	@echo ""
 	@"$(APOGEE_BIN)" bootstrap || echo "note: the bootstrap did not finish -- '$(APOGEE_NAME) bootstrap' runs it again"
 	@$(MAKE) --no-print-directory path-note

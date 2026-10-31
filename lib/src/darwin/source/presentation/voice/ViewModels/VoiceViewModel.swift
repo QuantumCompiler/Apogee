@@ -202,8 +202,21 @@ public final class VoiceViewModel {
             if done, let retry {
                 self.retry = nil
                 start(retry)
+            } else if case .failed(let message) = installing?.status,
+                      let next = MediaLibrary.installCommand(in: message + "\n" + (installing?.stderr ?? "")),
+                      next != consent {
+                // An install the environment's Python cannot take names its
+                // rebuild (M19): asked next, the refused run kept for after.
+                installing = nil
+                self.consent = next
+                consentSaid = message
             }
         }
+    }
+
+    /// The consent replaces the environment rather than adding to it (M19).
+    public var consentRebuilds: Bool {
+        consent.map(MediaLibrary.rebuilds) ?? false
     }
 
     /// No: nothing installed.

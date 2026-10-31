@@ -87,16 +87,18 @@ public struct VoiceScreen: View {
         .sheet(isPresented: $model.sheetOpen) { SaySheet(model: model) }
         .sheet(isPresented: Binding(get: { model.consent != nil }, set: { if !$0 && model.consent != nil { model.decline() } })) {
             VStack(alignment: .leading, spacing: Spacing.m) {
-                Text("Install what voice needs?").font(.apogeeHeading)
+                Text(model.consentRebuilds ? "Rebuild Apogee's Python environment?" : "Install what voice needs?").font(.apogeeHeading)
                 Text(model.consentSaid).font(.apogeeBody).foregroundStyle(Palette.textSecondary)
-                Text("This installs Python packages into Apogee's own environment, once. Nothing is installed unless you say yes.")
+                Text(model.consentRebuilds
+                     ? MediaLibrary.rebuildNote
+                     : "This installs Python packages into Apogee's own environment, once. Nothing is installed unless you say yes.")
                     .font(.apogeeSmall)
                     .foregroundStyle(Palette.textSecondary)
                 Text((["apogee"] + (model.consent ?? [])).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary)
                 HStack {
                     Spacer()
                     Button("Not now", role: .cancel) { model.decline() }.keyboardShortcut(.cancelAction)
-                    Button("Install") { model.install() }.keyboardShortcut(.defaultAction)
+                    Button(model.consentRebuilds ? "Rebuild" : "Install") { model.install() }.keyboardShortcut(.defaultAction)
                 }
             }
             .padding(Spacing.xl)

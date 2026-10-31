@@ -2539,7 +2539,7 @@ The specced premise of class 1, that the scripts enumerate what they remove, was
 **Decisions made while building** (2026-10-21, each recorded for veto):
 - **The build stays a clean one**, as `reinstall`'s was. An incremental `make install` remains for an install that needs no reset.
 - **`models migrate` runs before the reset.** The reset's own check must pass for the target to go on, and a store still in an older layout would fail it.
-- **The migration is given `--yes`, the reset never.** A migration moves models and removes nothing, while the reset's confirmation belongs to the person.
+- **The migration is given `--yes`, the reset never.** A migration moves models and removes nothing, while the reset's confirmation belongs to the person. *Amended the same day (the user's call, after their first update): the reset is given `--yes` too. The models are kept whatever `KEEP` says, and what the reset removes the steps after it remake: the registrations and the environment, by the bootstrap. So the update no longer stops to ask. `apogee reset` run by hand still asks.*
 
 **Verified.** In a sandbox (`APOGEE_HOME`, `PREFIX` and the test channel, so no completion was written, and `APOGEE_MINIMAL_INSTALL=1` so no runtime was downloaded), `make update` was driven through a pseudo-terminal answering the reset's prompt. The planted home held a stored model, a chat, an environment marker and a configured backend. With `KEEP=sessions` it exited 0: nothing to migrate, the plan keeping `models/` and `sessions/`, the reset's check passing, then the bootstrap. The model and the chat were kept, and the environment and the backend reset. Without `KEEP` the model was kept and the chat removed. `install_parity`'s Makefile order rule (the first `check --fix` before the first `bootstrap`) holds, lines 138 and 140.
 
@@ -5664,6 +5664,11 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,277
 - `lib/scripts/cicd.sh --test`: green with the bootstrap's growths beside it -- the CLI's 3,610 (the two standing skips) and the macOS app's suite, no warning.
 
 **Not run on real packages:** no interpreter or pip ran in the suite. The user's own `make update` is the live run.
+
+*Completed the same day (the app's install sheet):* the refusal a person or the app meets before `train setup` names the rebuild too.
+- `video::probe_voice` and `probe_video` say an environment on a Python the set does not run on, and remedy `apogee train setup --rebuild --with <set>`. `check`'s video and voice rows now read the probe's own remedy, one source where M19 had a copy.
+- `install_runtime_set`, the offer to install at a terminal, refuses such a set before asking (`PythonEnv::unfit_reason`, the one wording `install` uses), so nothing is offered that pip would only refuse.
+- Tests: `runtime_test` (the ladder naming the rebuild on 3.14.5 and the install on 3.12.13), and `video_runtime_test` (a 3.9.6 environment refused before the offer, nothing asked, nothing run).
 
 ## Milestone AA — The four layers
 

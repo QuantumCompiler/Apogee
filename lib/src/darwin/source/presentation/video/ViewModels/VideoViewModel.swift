@@ -24,10 +24,12 @@ public final class VideoViewModel {
 
     /// The install the CLI said a run needs, waiting on the person's yes.
     public struct Consent: Equatable, Sendable {
-        /// What it runs: `train setup --with video`.
+        /// What it runs: `train setup --with video`, or the rebuild.
         public let arguments: [String]
         /// The CLI's own words for why.
         public let said: String
+        /// It replaces the environment rather than adding to it (M19).
+        public var rebuilds: Bool { MediaLibrary.rebuilds(arguments) }
     }
 
     public var tab: Tab = .clips
@@ -211,6 +213,13 @@ public final class VideoViewModel {
             if done, let retry = retryAfterInstall {
                 retryAfterInstall = nil
                 start(retry)
+            } else if case .failed(let message) = installing?.status,
+                      let next = Self.installCommand(in: message + "\n" + (installing?.stderr ?? "")),
+                      next != consent.arguments {
+                // An install the environment's Python cannot take names its
+                // rebuild (M19): asked next, the refused run kept for after.
+                installing = nil
+                self.consent = Consent(arguments: next, said: message)
             }
         }
     }

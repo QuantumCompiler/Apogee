@@ -317,6 +317,9 @@ PythonEnvStatus PythonEnv::status() const {
     if (!status.exists) {
         return status;
     }
+    // What `python -m venv` wrote is the environment's own fact, record or
+    // not; the record's `base_version` (since M19) says it where it can.
+    status.base_version = pyvenv_version(dir_);
     std::ifstream in{record_path(), std::ios::binary};
     if (!in) {
         status.error = "no record at " + record_path().string();
@@ -329,11 +332,10 @@ PythonEnvStatus PythonEnv::status() const {
     }
     status.base_python = record.value("base_python", std::string{});
     status.created_at = record.value("created_at", std::string{});
-    // The record's own word since M19; an environment made before it is read
-    // from what `python -m venv` wrote.
-    const std::optional<PythonVersion> recorded =
-        PythonVersion::parse(record.value("base_version", std::string{}));
-    status.base_version = recorded.value_or(pyvenv_version(dir_));
+    if (const std::optional<PythonVersion> recorded =
+            PythonVersion::parse(record.value("base_version", std::string{}))) {
+        status.base_version = *recorded;
+    }
     if (const auto it = record.find("sets"); it != record.end() && it->is_array()) {
         for (const nlohmann::json& set : *it) {
             if (set.is_string()) {
@@ -373,14 +375,8 @@ std::string PythonEnv::install(RequirementSet set, const harness::CancellationTo
     }
     // Before pip (M19): a set its Python cannot run fails here with the way
     // out, not in pip's words after the download.
-    if (const PythonVersion on = status().base_version;
-        on.known() && !python_range(set).contains(on)) {
-        return "the Python environment at " + dir_.string() + " is on Python " + on.str() +
-               ", and the '" + std::string{to_string(set)} + "' set runs on " +
-               python_range(set).describe() +
-               " -- rebuild it on a Python that fits: apogee train "
-               "setup --rebuild --with " +
-               std::string{to_string(set)};
+    if (std::string unfit = unfit_reason(set); !unfit.empty()) {
+        return unfit;
     }
     platform::ChildCommand command;
     command.program = interpreter().string();
@@ -399,6 +395,18 @@ std::string PythonEnv::install(RequirementSet set, const harness::CancellationTo
     }
     return write_record(record_path(), current.base_python, current.base_version,
                         current.created_at, current.sets);
+}
+
+std::string PythonEnv::unfit_reason(RequirementSet set) const {
+    const PythonVersion on = status().base_version;
+    if (!on.known() || python_range(set).contains(on)) {
+        return {};
+    }
+    return "the Python environment at " + dir_.string() + " is on Python " + on.str() +
+           ", and the '" + std::string{to_string(set)} + "' set runs on " +
+           python_range(set).describe() +
+           " -- rebuild it on a Python that fits: apogee train setup --rebuild --with " +
+           std::string{to_string(set)};
 }
 
 std::string PythonEnv::rebuild(const std::filesystem::path& base_python,

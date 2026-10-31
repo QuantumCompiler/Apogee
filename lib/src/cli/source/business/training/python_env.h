@@ -160,6 +160,12 @@ public:
     [[nodiscard]] std::string install(RequirementSet set,
                                       const harness::CancellationToken& cancellation = {});
 
+    /// Why `set` cannot go in this environment as it is -- its Python is
+    /// outside the set's range -- naming the rebuild; empty when it can, or
+    /// when the version is not known. `install` and every offer to install
+    /// ask it first, so nothing is offered that would fail.
+    [[nodiscard]] std::string unfit_reason(RequirementSet set) const;
+
     /// Replaces the environment with one made from `base_python`, every set
     /// the record lists reinstalled in its order (M19). The old one is moved
     /// aside first and put back if anything fails, so a failed rebuild

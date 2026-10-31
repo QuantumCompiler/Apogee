@@ -987,3 +987,19 @@ Every screen stays a machine-mode client of the binary, tested hermetically.
   Nothing converts: the standing rule.
 - **Drawn offscreen over the real binary on 2h's scratch store:** the convert sheet for the Llama SafeTensors set, and the quantize sheet for its F16. No job was started on real weights; a real conversion through the app is the user's run.
 - Bare `lib/scripts/cicd.sh --test` passed in 7m28s: the CLI's 3,593 tests, none failing, and the app's 331 cases, none failing and none skipped, with no warning.
+
+### 2026-10-21 — The install sheet takes a rebuild, and the store test waits for what it reads
+
+**Why.** The CLI's M19 gave an environment on a Python a set cannot run (the user's: Homebrew's 3.14.5, where Kokoro never installs) a refusal naming its way out, `apogee train setup --rebuild --with voice`. The app's install sheet read a refusal's command only as `train setup --with <set>`, so a rebuild got no sheet at all, and the failure was the last word. Separately, `StoreJobsTests/storeOpensTheSheets()` failed once under load in the bootstrap's gate and passed alone.
+
+- [x] **`MediaLibrary.installCommand`** reads `--rebuild`: a refusal naming the rebuild gives `train setup --rebuild --yes --with <set>`. The CLI asks only at a terminal, which the app is not, and the sheet is the person's answer.
+  - `MediaLibrary.rebuilds` tells a rebuild from an install, and `MediaLibrary.rebuildNote` holds the sheet's one wording for it.
+- [x] **The video and voice view-models**: an install that fails with a refusal naming a different command (the rebuild) offers that command next. The failed install gives way to the question, and the refused run is kept to follow it.
+- [x] **Both sheets** say what a rebuild is when the command is one: "Rebuild Apogee's Python environment?", what it downloads again, that a failure puts the old environment back, and a Rebuild button.
+- [x] **The store test** waits for the two `models info` documents its sheets read (the snapshot's bytes, the F16 file's facts), not just the listing. `refresh()` draws the sets when they are listed and fills each one's details as its read lands, by design. The test had raced those reads, and lost under load.
+
+**Verified.**
+- `VideoViewModelTests`: the rebuild parsed, `--yes` and all, and `Consent.rebuilds`.
+- `VoiceViewModelTests` (new): the user's case. The refused run's install sheet, the install failing with M19's refusal, the rebuild offered next with nothing run before the yes, then the rebuild run and the refused speech run again.
+- `StoreJobsTests` ten iterations under a concurrent CLI build: ten of ten.
+- `scripts/build.sh test`: no failure. The CLI side, the refusal itself, is in the CLI's MILESTONES (M19's entry).

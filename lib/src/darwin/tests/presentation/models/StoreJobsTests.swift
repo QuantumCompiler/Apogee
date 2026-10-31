@@ -218,7 +218,13 @@ struct StoreJobsTests {
         let store = StoreViewModel(runner: runner)
         await store.connect(binary: URL(fileURLWithPath: "/Users/someone/.local/bin/apogee"))
         store.showingAll = true
-        #expect(await eventually { store.sets.count == 6 })
+        // The sets are drawn the moment they are listed and each one's details
+        // as its read lands (refresh's own order), so the list alone is no
+        // sign the details are there: under load the sheets below read them
+        // before they land. Wait for the two they read.
+        #expect(await eventually {
+            store.sets.count == 6 && store.infos[Self.snapshot] != nil && store.infos[Self.f16] != nil
+        })
         var converted: ConvertForm?
         var quantized: QuantizeForm?
         var checked: String?

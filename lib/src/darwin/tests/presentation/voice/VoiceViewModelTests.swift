@@ -114,4 +114,41 @@ struct VoiceViewModelTests {
         #expect(jobs.starts[2].arguments == jobs.starts[0].arguments)
         again.end(status: 1)
     }
+
+    @Test("an install the environment's Python cannot take offers its rebuild next; yes rebuilds, then speaks again")
+    func rebuildConsent() async throws {
+        // The user's machine (2026-10-21): the environment on Homebrew's
+        // 3.14.5, where kokoro never installs. The install's refusal names the
+        // rebuild; the app asks for that next, and the refused run follows it.
+        let home = try home()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let refused = ScriptedJob()
+        let install = ScriptedJob()
+        let rebuild = ScriptedJob()
+        let again = ScriptedJob()
+        let jobs = ScriptedJobs([refused, install, rebuild, again])
+        let model = VoiceViewModel(runner: runner(), starter: jobs, preferences: Preferences(store: MemoryStore()), home: home)
+        await model.connect(binary: Self.binary)
+        model.text = "hi"
+        model.speak()
+        var tail = BoundedTail()
+        tail.append(Data("apogee voice: the voice runtime is not installed -- run 'apogee train setup --with voice'\n".utf8))
+        refused.endWith(tail: tail)
+        #expect(await eventually { model.consent == ["train", "setup", "--with", "voice"] })
+        #expect(!model.consentRebuilds)
+        model.install()
+        var unfit = BoundedTail()
+        unfit.append(Data("apogee train: the Python environment at /h/venv is on Python 3.14.5, and the 'voice' set runs on >=3.10,<3.13 -- rebuild it on a Python that fits: apogee train setup --rebuild --with voice\n".utf8))
+        install.endWith(tail: unfit)
+        #expect(await eventually { model.consent == ["train", "setup", "--rebuild", "--yes", "--with", "voice"] })
+        #expect(model.consentRebuilds)
+        #expect(model.installing == nil, "the failed install gives way to the question")
+        #expect(jobs.starts.count == 2, "nothing rebuilt before the person's yes")
+        model.install()
+        #expect(jobs.starts[2].arguments == ["train", "setup", "--rebuild", "--yes", "--with", "voice"])
+        rebuild.end()
+        #expect(await eventually { jobs.starts.count == 4 })
+        #expect(jobs.starts[3].arguments == jobs.starts[0].arguments, "the refused run, run again")
+        again.end(status: 1)
+    }
 }

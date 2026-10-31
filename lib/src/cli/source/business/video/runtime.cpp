@@ -35,7 +35,8 @@ struct Package {
 /// there, naming `remedy`. True when all are; their versions recorded.
 [[nodiscard]] bool probe_environment(const VideoHost& host, std::string_view runs,
                                      std::initializer_list<Package> packages,
-                                     std::string_view remedy, VideoReadiness& readiness) {
+                                     training::RequirementSet set, std::string_view remedy,
+                                     VideoReadiness& readiness) {
     const training::PythonEnv env{host.venv};
     if (!env.exists()) {
         readiness = refused(std::move(readiness), VideoRefusal::NoEnvironment,
@@ -48,6 +49,18 @@ struct Package {
     for (const Package& package : packages) {
         const std::filesystem::path found = training::find_site_package(host.venv, package.name);
         if (found.empty()) {
+            // An environment on a Python the set does not run on can never
+            // take it by installing (M19): the reason and the rebuild that can.
+            if (const training::PythonVersion on = env.status().base_version;
+                on.known() && !training::python_range(set).contains(on)) {
+                readiness = refused(
+                    std::move(readiness), package.missing,
+                    "the Python environment is on Python " + on.str() + ", and the " +
+                        std::string{training::to_string(set)} + " set runs on " +
+                        training::python_range(set).describe(),
+                    "apogee train setup --rebuild --with " + std::string{training::to_string(set)});
+                return false;
+            }
             readiness =
                 refused(std::move(readiness), package.missing,
                         std::string{package.name} +
@@ -120,7 +133,7 @@ VideoReadiness probe_video(const VideoHost& host, const std::filesystem::path& p
     if (!probe_environment(
             host, "video generation runs diffusers",
             {{"torch", VideoRefusal::NoTorch}, {"diffusers", VideoRefusal::NoDiffusers}},
-            kVideoSetupRemedy, readiness)) {
+            training::RequirementSet::Video, kVideoSetupRemedy, readiness)) {
         return readiness;
     }
 
@@ -211,7 +224,7 @@ VideoReadiness probe_voice(const VideoHost& host, const std::filesystem::path& m
     VideoReadiness readiness;
     if (!probe_environment(host, "speech runs kokoro",
                            {{"torch", VideoRefusal::NoTorch}, {"kokoro", VideoRefusal::NoKokoro}},
-                           kVoiceSetupRemedy, readiness)) {
+                           training::RequirementSet::Voice, kVoiceSetupRemedy, readiness)) {
         return readiness;
     }
 

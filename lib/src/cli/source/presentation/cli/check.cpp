@@ -1894,7 +1894,7 @@ void check_video(CheckReport& report, const CheckInputs& inputs) {
         case video::VideoRefusal::NoTorch:
         case video::VideoRefusal::NoDiffusers:
             add(report, Status::Skipped, "Video", "runtime", "not set up -- " + ready.reason,
-                std::string{video::kVideoSetupRemedy});
+                ready.remedy);
             break;
         default: {
             const std::string found =
@@ -1914,25 +1914,14 @@ void check_video(CheckReport& report, const CheckInputs& inputs) {
     }
     // The speech runtime (50a): the same reading of files, its own set.
     const video::VideoReadiness voice = video::probe_voice(host);
-    // An environment on a Python the voice set does not run on can never
-    // take it by installing (M19): said, with the remedy that works.
-    const training::PythonVersion on = training::PythonEnv{host.venv}.status().base_version;
-    const training::PythonRange voice_range =
-        training::python_range(training::RequirementSet::Voice);
     switch (voice.refusal) {
         case video::VideoRefusal::NoEnvironment:
         case video::VideoRefusal::NoTorch:
         case video::VideoRefusal::NoKokoro:
-            if (voice.refusal != video::VideoRefusal::NoEnvironment && on.known() &&
-                !voice_range.contains(on)) {
-                add(report, Status::Skipped, "Video", "voice runtime",
-                    "not set up -- the Python environment is on Python " + on.str() +
-                        ", and the voice set runs on " + voice_range.describe(),
-                    "apogee train setup --rebuild --with voice");
-                break;
-            }
+            // The probe's own remedy: on a Python the set does not run on,
+            // the rebuild (M19), else the install.
             add(report, Status::Skipped, "Video", "voice runtime", "not set up -- " + voice.reason,
-                std::string{video::kVoiceSetupRemedy});
+                voice.remedy);
             break;
         default:
             add(report, Status::Ok, "Video", "voice runtime",
