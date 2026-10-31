@@ -46,6 +46,16 @@ struct ProjectScene {
     std::vector<ProjectSentence> sentences{};
     std::filesystem::path clip{};
     double clip_seconds = 0.0;
+    /// An edited project's scene (52c), read off the edit's own record
+    /// comparison: the parent's scene it came from, from 1, or 0 for a new
+    /// one -- nullopt in a project no edit made.
+    std::optional<std::size_t> from{};
+    /// Which of its records differ from that scene's, in the diff's order:
+    /// `narration`, `prompt`, `duration`, `asset`, `seed`. Empty when
+    /// untouched, or new.
+    std::vector<std::string> changes{};
+    /// It left the parent's order.
+    bool moved = false;
 };
 
 /// One edit in a project's chain (50d): the instruction (empty for none),
@@ -58,7 +68,7 @@ struct ProjectEdit {
 
 struct VideoProject {
     /// `rendering`, `done`, `failed` or `cancelled` -- or `planned`, for a
-    /// dry run's edited project, which nothing renders.
+    /// dry run's project, which nothing has rendered yet.
     std::string status;
     std::string brief;
     std::string title{};
@@ -92,6 +102,9 @@ struct VideoProject {
     /// and every edit from the original brief to this one, in order.
     std::filesystem::path parent{};
     std::vector<ProjectEdit> edits{};
+    /// An edited project's: the parent's scenes the edit left out, from 1
+    /// (52c).
+    std::vector<std::size_t> removed{};
 };
 
 /// The `video.project` document.

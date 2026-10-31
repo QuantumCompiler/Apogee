@@ -1,6 +1,10 @@
 # Build output. One directory per preset/target (build/macos-arm64, build/lint, …).
 build/
 
+# Xcode's per-user state inside a project (window layout, breakpoints, user
+# schemes). The shared scheme lives in xcshareddata/ and is committed.
+xcuserdata/
+
 # CMake / tooling byproducts
 compile_commands.json
 CMakeUserPresets.json
@@ -13,6 +17,11 @@ Testing/
 .vscode/
 .idea/
 *.swp
+# SweetPad's build-server config for SourceKit-LSP: written at the root of the
+# folder VS Code has open, naming this machine's paths.
+buildServer.json
+# LLVM coverage profiles, written wherever an instrumented binary runs.
+*.profraw
 
 # Python bytecode from running the shipped drivers, the asset generator, or the tests.
 __pycache__/

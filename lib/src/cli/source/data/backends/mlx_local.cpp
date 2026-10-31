@@ -4,8 +4,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <fstream>
 #include <random>
+#include <regex>
 #include <sstream>
 #include <system_error>
 #include <utility>
@@ -16,9 +18,11 @@
 #include "backends/think_filter.h"
 #include "contracts/assets.h"
 #include "contracts/errors.h"
+#include "contracts/layout.h"
 #include "contracts/paths.h"
 #include "logger/operational.h"
 #include "modelstore/mlx_info.h"
+#include "modelstore/snapshot.h"
 #include "platform/platform.h"
 
 namespace apogee::backends {
@@ -115,6 +119,12 @@ constexpr std::string_view kSetupRemedy = "apogee train setup --with mlx";
     return {};
 }
 
+/// A directory mlx-vlm built, by its record (53f): it loads through mlx-vlm
+/// for every turn. One recorded otherwise, or not at all, keeps its way.
+[[nodiscard]] bool loads_through_vlm(const models::MlxKind& kind) noexcept {
+    return kind.word == models::kMlxVision && kind.source == models::MlxKindSource::Recorded;
+}
+
 /// The platform, the environment and `mlx-lm`: the rungs an entry shares
 /// with every other.
 [[nodiscard]] MlxReadiness probe_environment(const MlxHost& host) {
@@ -147,11 +157,11 @@ constexpr std::string_view kSetupRemedy = "apogee train setup --with mlx";
     return readiness;
 }
 
-void refuse_driver(MlxReadiness& readiness, const MlxHost& host) {
+void refuse_driver(MlxReadiness& readiness, const std::filesystem::path& driver) {
     std::error_code code;
-    if (!std::filesystem::is_regular_file(host.driver, code)) {
+    if (!std::filesystem::is_regular_file(driver, code)) {
         readiness.refusal = MlxRefusal::NoDriver;
-        readiness.reason = "the MLX driver is missing: " + host.driver.string();
+        readiness.reason = "the MLX driver is missing: " + driver.string();
         readiness.remedy = "apogee check --fix";
     }
 }
@@ -219,6 +229,141 @@ constexpr std::string_view kCallIdAlphabet =
     return out;
 }
 
+/// Whether `towers` holds an audio tower: an `audio_config`, or an omni
+/// model's `thinker_config`, which nests the audio encoder (53f's reader).
+[[nodiscard]] bool declares_audio_tower(const std::vector<std::string>& towers) {
+    return std::ranges::any_of(towers, [](const std::string& tower) {
+        return tower == "audio_config" || tower == "thinker_config";
+    });
+}
+
+/// The module `model_type` loads by in mlx-vlm's `MODEL_REMAPPING`
+/// (`"<type>": "<module>"` pairs inside its braces), or empty when the table
+/// does not name it.
+[[nodiscard]] std::string remapped_type(const std::filesystem::path& utils,
+                                        std::string_view model_type) {
+    const std::optional<std::string> text = read_file(utils);
+    if (!text.has_value()) {
+        return {};
+    }
+    const std::size_t named = text->find("MODEL_REMAPPING");
+    const std::size_t open = named == std::string::npos ? named : text->find('{', named);
+    const std::size_t close = open == std::string::npos ? open : text->find('}', open);
+    if (close == std::string::npos) {
+        return {};
+    }
+    const std::string body = text->substr(open + 1, close - open - 1);
+    static const std::regex pair{
+        R"re(["']([A-Za-z0-9_.-]+)["']\s*:\s*["']([A-Za-z0-9_.-]+)["'])re"};
+    for (auto match = std::sregex_iterator(body.begin(), body.end(), pair);
+         match != std::sregex_iterator(); ++match) {
+        if ((*match)[1].str() == model_type) {
+            return (*match)[2].str();
+        }
+    }
+    return {};
+}
+
+/// Whether an audio part's container is a WAV: what Apogee's surfaces decode
+/// every recording to through ffmpeg (26e). No format said is taken for one,
+/// and the bytes are checked either way.
+[[nodiscard]] bool says_wav(std::string_view format) {
+    std::string folded{format};
+    std::ranges::transform(folded, folded.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return folded.empty() || folded == "wav";
+}
+
+/// Whether `bytes` are a WAV file: a RIFF container of WAVE.
+[[nodiscard]] bool is_wav(std::string_view bytes) {
+    return bytes.size() >= 12 && bytes.substr(0, 4) == "RIFF" && bytes.substr(8, 4) == "WAVE";
+}
+
+/// A turn's recordings as the driver hears them (53g): each audio part's WAV
+/// written into a private directory of the turn's own, in prompt order, and
+/// the directory removed with everything in it when the turn is over --
+/// answered, refused, cancelled or failed. The driver reads the files; only
+/// this side writes or removes them.
+class TurnAudio {
+public:
+    TurnAudio() = default;
+    TurnAudio(const TurnAudio&) = delete;
+    TurnAudio& operator=(const TurnAudio&) = delete;
+    TurnAudio(TurnAudio&&) = delete;
+    TurnAudio& operator=(TurnAudio&&) = delete;
+
+    ~TurnAudio() {
+        if (!dir_.empty()) {
+            std::error_code code;
+            std::filesystem::remove_all(dir_, code);
+        }
+    }
+
+    /// Writes every audio part of `request`, decoded from its base64. Throws
+    /// ProviderError, naming `backend`, for a part that is not a WAV or a
+    /// file that cannot be written -- before any driver is asked anything.
+    void write(const harness::ChatRequest& request, const std::string& backend) {
+        for (const harness::ChatMessage& message : request.messages) {
+            for (const harness::ContentPart& part : message.content.parts()) {
+                if (part.kind != harness::ContentPart::Kind::InputAudio) {
+                    continue;
+                }
+                const std::string bytes = decode_base64(part.audio_data);
+                if (!is_wav(bytes)) {
+                    throw harness::ProviderError(
+                        backend,
+                        "a recording reaches the mlx backend as a WAV file, and this one is not "
+                        "one -- Apogee's attachments are decoded to WAV through ffmpeg first");
+                }
+                const std::filesystem::path file =
+                    directory(backend) / ("audio-" + std::to_string(files_.size()) + ".wav");
+                std::ofstream out{file, std::ios::binary};
+                out << bytes;
+                out.close();
+                if (!out) {
+                    throw harness::ProviderError(
+                        backend,
+                        "could not write a recording for the MLX driver: " + file.string());
+                }
+                files_.push_back(file.string());
+            }
+        }
+    }
+
+    [[nodiscard]] const std::vector<std::string>& files() const noexcept {
+        return files_;
+    }
+
+private:
+    /// The turn's directory, made on first use: under the system's
+    /// temporary directory, readable by its owner alone.
+    [[nodiscard]] const std::filesystem::path& directory(const std::string& backend) {
+        if (!dir_.empty()) {
+            return dir_;
+        }
+        std::error_code code;
+        const std::filesystem::path root = std::filesystem::temp_directory_path(code);
+        thread_local std::mt19937_64 generator{std::random_device{}()};
+        for (int attempt = 0; attempt < 8 && !code; ++attempt) {
+            std::ostringstream name;
+            name << "apogee-mlx-audio-" << std::hex << generator();
+            const std::filesystem::path candidate = root / name.str();
+            if (std::filesystem::create_directory(candidate, code) && !code) {
+                std::filesystem::permissions(candidate, std::filesystem::perms::owner_all,
+                                             std::filesystem::perm_options::replace, code);
+                dir_ = candidate;
+                return dir_;
+            }
+        }
+        throw harness::ProviderError(
+            backend, "could not make a directory for the turn's recordings under " + root.string() +
+                         (code ? ": " + code.message() : std::string{}));
+    }
+
+    std::filesystem::path dir_;
+    std::vector<std::string> files_;
+};
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -230,6 +375,8 @@ MlxHost MlxHost::at(const std::filesystem::path& home) {
     host.target = platform::host_target();
     host.venv = home / "training" / "venv";
     host.driver = home / harness::bundled_mlx_driver_relative_path();
+    host.embedder = home / harness::bundled_mlx_embedder_relative_path();
+    host.models = home / "models";
     return host;
 }
 
@@ -253,6 +400,16 @@ std::string_view to_string(MlxRefusal refusal) noexcept {
             return "model missing";
         case MlxRefusal::NotAModelDirectory:
             return "not a model directory";
+        case MlxRefusal::NoMlxVlm:
+            return "no mlx-vlm";
+        case MlxRefusal::NoMlxEmbeddings:
+            return "no mlx-embeddings";
+        case MlxRefusal::Drafter:
+            return "a drafter";
+        case MlxRefusal::Kind:
+            return "wrong kind";
+        case MlxRefusal::Draft:
+            return "draft";
         case MlxRefusal::NoDriver:
             return "no driver";
     }
@@ -266,10 +423,63 @@ std::string MlxReadiness::message() const {
     return remedy.empty() ? reason : reason + " -- " + remedy;
 }
 
+std::string_view to_string(MlxAudioRefusal refusal) noexcept {
+    switch (refusal) {
+        case MlxAudioRefusal::None:
+            return "hears";
+        case MlxAudioRefusal::NotMlxVlmBuild:
+            return "not mlx-vlm's build";
+        case MlxAudioRefusal::NoAudioTower:
+            return "no audio tower";
+        case MlxAudioRefusal::NoMlxVlm:
+            return "no mlx-vlm";
+        case MlxAudioRefusal::NoTypeModule:
+            return "no mlx-vlm module for its type";
+    }
+    return "unknown";
+}
+
+std::string MlxAudio::message() const {
+    if (hears()) {
+        return {};
+    }
+    return std::string{to_string(refusal)} + ": " +
+           (remedy.empty() ? reason : reason + " -- " + remedy);
+}
+
 MlxReadiness probe_mlx_runtime(const MlxHost& host) {
     MlxReadiness readiness = probe_environment(host);
     if (readiness.ready()) {
-        refuse_driver(readiness, host);
+        refuse_driver(readiness, host.driver);
+    }
+    return readiness;
+}
+
+MlxReadiness probe_mlx_kind(std::string_view name, const std::filesystem::path& dir) {
+    MlxReadiness readiness;
+    readiness.model_dir = dir;
+    std::error_code code;
+    if (!std::filesystem::is_regular_file(dir / "config.json", code)) {
+        return readiness;
+    }
+    const models::MlxKind kind = models::read_mlx_kind(dir);
+    // A drafter runs beside its base, never alone (53i): an entry names it as
+    // its base's `draft:`, never as its model.
+    if (kind.word == models::kMlxDrafter) {
+        readiness.refusal = MlxRefusal::Drafter;
+        readiness.reason = dir.string() +
+                           " is a drafter: it runs beside its base model, never alone -- an mlx "
+                           "entry over its base names it as its draft";
+        readiness.remedy =
+            "apogee config set-backend <its base's mlx backend> --draft " + dir.string();
+        return readiness;
+    }
+    if (!kind.registers()) {
+        readiness.refusal = MlxRefusal::Kind;
+        readiness.reason =
+            dir.string() + " is kind " + models::describe(kind) + ", so no mlx entry runs it";
+        readiness.remedy = "apogee config add-backend " + std::string{name} +
+                           " --type mlx --model-path <model directory> --force";
     }
     return readiness;
 }
@@ -313,7 +523,56 @@ MlxReadiness probe_mlx_backend(std::string_view name, const harness::BackendConf
         readiness.remedy = fix;
         return readiness;
     }
-    refuse_driver(readiness, host);
+    const models::MlxKind kind = models::read_mlx_kind(readiness.model_dir);
+    // The kind decides the role (53i, 55d): a drafter, a video or voice
+    // model, or a word this build does not know is no entry's model.
+    if (const MlxReadiness by_kind = probe_mlx_kind(name, readiness.model_dir); !by_kind.ready()) {
+        readiness.refusal = by_kind.refusal;
+        readiness.reason = by_kind.reason;
+        readiness.remedy = by_kind.remedy;
+        return readiness;
+    }
+    // An embedding model mlx-embeddings built is embedded with through it
+    // alone, by its own driver (53h).
+    if (kind.embeds()) {
+        if (!find_mlx_embeddings(host).installed()) {
+            readiness.refusal = MlxRefusal::NoMlxEmbeddings;
+            readiness.reason = readiness.model_dir.string() +
+                               " is an embedding model mlx-embeddings built (its record says "
+                               "embedding), and mlx-embeddings is not installed in the Python "
+                               "environment at " +
+                               host.venv.string();
+            readiness.remedy = std::string{kMlxEmbeddingsRemedy};
+            return readiness;
+        }
+        refuse_driver(readiness, host.embedder);
+        return readiness;
+    }
+    // A directory mlx-vlm built loads through it alone (53f): without it not
+    // even a text turn can be answered.
+    if (loads_through_vlm(kind) && !find_mlx_vlm(host).installed()) {
+        readiness.refusal = MlxRefusal::NoMlxVlm;
+        readiness.reason = readiness.model_dir.string() +
+                           " was built by mlx-vlm (its record says vision), which loads it for "
+                           "every turn, and mlx-vlm is not installed in the Python environment "
+                           "at " +
+                           host.venv.string();
+        readiness.remedy = std::string{kMlxVisionRemedy};
+        return readiness;
+    }
+    // Its drafter, beside it (53i): the pairing and mlx-vlm's word on it.
+    if (!config.draft.empty()) {
+        if (const MlxDraft draft = probe_mlx_draft(readiness.model_dir, config.draft, host);
+            !draft.pairs()) {
+            readiness.refusal = MlxRefusal::Draft;
+            readiness.reason = "its draft cannot run beside it: " + draft.reason;
+            readiness.remedy = draft.remedy.empty() ? "apogee config set-backend " +
+                                                          std::string{name} + " --draft \"\""
+                                                    : draft.remedy;
+            return readiness;
+        }
+    }
+    refuse_driver(readiness, host.driver);
     return readiness;
 }
 
@@ -328,12 +587,19 @@ MlxModelInfo inspect_mlx_model(const std::filesystem::path& dir) {
             info.text_model_type = text->value("model_type", std::string{});
         }
         // A vision tower in the configuration, and the processor that
-        // turns a picture into its input beside it (27c).
-        const auto tower = config.find("vision_config");
-        info.vision = tower != config.end() && tower->is_object() &&
-                      (std::filesystem::is_regular_file(dir / "preprocessor_config.json", code) ||
-                       std::filesystem::is_regular_file(dir / "processor_config.json", code));
+        // turns a picture into its input beside it (27c) -- the store's one
+        // reading of it, which an unrecorded directory's kind follows (53e).
+        info.vision_files = models::mlx_vision_files(dir);
+        // Its towers, as the converter's route reads them (53f): an audio
+        // one is what a recording is heard by (53g).
+        info.towers = models::snapshot_towers(dir);
     }
+    // What it is, by the one reader (53e): its record's word over its files.
+    // A vision model is one whose kind says so (53f), and one mlx-vlm built
+    // runs through it for every turn.
+    info.kind = models::read_mlx_kind(dir);
+    info.vision = info.kind.word == models::kMlxVision;
+    info.through_vlm = loads_through_vlm(info.kind);
     if (std::filesystem::is_regular_file(dir / "chat_template.jinja", code) ||
         std::filesystem::is_regular_file(dir / "chat_template.json", code)) {
         info.chat_template = true;
@@ -378,10 +644,31 @@ MlxVlmPackage find_mlx_vlm(const MlxHost& host) {
     return found;
 }
 
+MlxEmbeddingsPackage find_mlx_embeddings(const MlxHost& host) {
+    MlxEmbeddingsPackage found;
+    found.dir = find_package(host.venv, "mlx_embeddings");
+    if (found.installed()) {
+        found.version = installed_version(found.dir);
+    }
+    return found;
+}
+
 MlxVision probe_mlx_vision(const MlxModelInfo& info, const MlxHost& host) {
     MlxVision vision;
     vision.model = info.vision;
     if (!vision.model) {
+        if (info.kind.source == models::MlxKindSource::Recorded && info.vision_files) {
+            // Its record wins over its files (53f): what was built is what
+            // runs, whatever configuration came along with it.
+            vision.reason =
+                info.kind.word == models::kMlxChat
+                    ? std::string{"its record says it is mlx-lm's build of its language model "
+                                  "alone (kind chat), its vision tower left out -- 'apogee "
+                                  "models convert <its SafeTensors set> --mlx' builds it through "
+                                  "mlx-vlm, the tower kept"}
+                    : "its record says it is kind " + info.kind.word + ", not a vision model";
+            return vision;
+        }
         vision.reason =
             "it is not a vision model: its config.json declares no vision_config, or no image "
             "processor (preprocessor_config.json or processor_config.json) ships with it";
@@ -396,6 +683,145 @@ MlxVision probe_mlx_vision(const MlxModelInfo& info, const MlxHost& host) {
         vision.remedy = std::string{kMlxVisionRemedy};
     }
     return vision;
+}
+
+bool mlx_vlm_has_module(const MlxVlmPackage& vlm, std::string_view model_type) {
+    if (!vlm.installed() || model_type.empty()) {
+        return false;
+    }
+    // As mlx-vlm's loader resolves it: the remap table first, then the
+    // package `models.<type>` it imports.
+    std::string module = remapped_type(vlm.dir / "utils.py", model_type);
+    if (module.empty()) {
+        module = std::string{model_type};
+    }
+    std::error_code code;
+    return std::filesystem::is_regular_file(vlm.dir / "models" / module / "__init__.py", code);
+}
+
+bool mlx_vlm_drafts(const MlxVlmPackage& vlm, std::string_view model_type) {
+    // A type is a module's name: nothing that would walk out of the package.
+    if (!vlm.installed() || model_type.empty() ||
+        model_type.find_first_of("/\\.") != std::string_view::npos) {
+        return false;
+    }
+    // Where `load_drafter` finds a drafter's class, and mlx-vlm's converter
+    // falls back to: `speculative.drafters.<type>`, naming its `Model`.
+    const std::optional<std::string> init =
+        read_file(vlm.dir / "speculative" / "drafters" / std::string{model_type} / "__init__.py");
+    return init.has_value() && init->find("Model") != std::string::npos;
+}
+
+std::int64_t drafter_block_size(const std::filesystem::path& drafter) {
+    const nlohmann::json config = read_json(drafter / "config.json");
+    if (!config.is_object()) {
+        return 0;
+    }
+    const auto block = config.find("block_size");
+    return block != config.end() && block->is_number_integer() && block->get<std::int64_t>() > 0
+               ? block->get<std::int64_t>()
+               : 0;
+}
+
+std::string MlxDraft::message() const {
+    if (pairs()) {
+        return {};
+    }
+    return remedy.empty() ? reason : reason + " -- " + remedy;
+}
+
+MlxDraft probe_mlx_draft(const std::filesystem::path& base, std::string_view draft,
+                         const MlxHost& host) {
+    MlxDraft out;
+    out.dir = std::filesystem::path{harness::expand_env_and_home(std::string{draft})};
+    // The pairing, from the files: the drafter, the base, the one it names.
+    out.reason = models::mlx_drafter_refusal(
+        base, out.dir, host.models.empty() ? harness::models_dir() : host.models);
+    out.drafter = models::read_mlx_drafter(out.dir);
+    if (!out.pairs()) {
+        return out;
+    }
+    // mlx-vlm's speculative path runs it: installed, and drafting its type.
+    out.vlm = find_mlx_vlm(host);
+    const std::string type = out.drafter.has_value() ? out.drafter->head.model_type : std::string{};
+    if (!out.vlm.installed()) {
+        out.reason =
+            "a drafter runs through mlx-vlm's speculative path, and mlx-vlm is not installed in "
+            "the Python environment at " +
+            host.venv.string();
+        out.remedy = std::string{kMlxVisionRemedy};
+        return out;
+    }
+    if (!mlx_vlm_drafts(out.vlm, type)) {
+        const std::string installed =
+            "the installed mlx-vlm" + (out.vlm.version.empty() ? "" : " " + out.vlm.version);
+        out.reason = type.empty() ? out.dir.string() + "'s config.json names no model_type, so " +
+                                        installed + " has no drafter to build it as"
+                                  : installed + " drafts no " + type +
+                                        " model -- its speculative path holds no drafter of that "
+                                        "type (speculative/drafters/" +
+                                        type + ")";
+        out.remedy = std::string{kMlxVisionRemedy};
+    }
+    return out;
+}
+
+MlxAudio probe_mlx_audio(const MlxModelInfo& info, const MlxHost& host) {
+    MlxAudio audio;
+    audio.tower = declares_audio_tower(info.towers);
+    // Only mlx-vlm's build of a set keeps its towers (53f), and only a record
+    // says a directory is that build: one with no record is taken for
+    // mlx-lm's layout, as every turn of it is.
+    if (!info.through_vlm) {
+        audio.refusal = MlxAudioRefusal::NotMlxVlmBuild;
+        const std::string convert =
+            "'apogee models convert <its SafeTensors set> --mlx' builds it through mlx-vlm, the "
+            "towers kept";
+        if (info.kind.source != models::MlxKindSource::Recorded) {
+            audio.reason =
+                "no record says mlx-vlm built it (kind " + info.kind.word +
+                (info.kind.source == models::MlxKindSource::Files ? ", inferred from its files"
+                                                                  : ", none recorded") +
+                "), and only mlx-vlm's build of a set keeps an audio tower -- " + convert;
+        } else if (info.kind.word == models::kMlxChat) {
+            audio.reason =
+                "its record says it is mlx-lm's build of its language model alone (kind chat), "
+                "its towers left out -- " +
+                convert;
+        } else {
+            audio.reason = "its record says it is kind " + info.kind.word +
+                           ", not a model mlx-vlm built to chat with";
+        }
+        return audio;
+    }
+    if (!audio.tower) {
+        audio.refusal = MlxAudioRefusal::NoAudioTower;
+        audio.reason =
+            "its config.json declares none -- no audio_config, nor an omni model's "
+            "thinker_config";
+        return audio;
+    }
+    audio.vlm = find_mlx_vlm(host);
+    if (!audio.vlm.installed()) {
+        audio.refusal = MlxAudioRefusal::NoMlxVlm;
+        audio.reason =
+            "it hears through mlx-vlm, which is not installed in the Python environment at " +
+            host.venv.string();
+        audio.remedy = std::string{kMlxVisionRemedy};
+        return audio;
+    }
+    if (!mlx_vlm_has_module(audio.vlm, info.model_type)) {
+        audio.refusal = MlxAudioRefusal::NoTypeModule;
+        const std::string installed =
+            "the installed mlx-vlm" + (audio.vlm.version.empty() ? "" : " " + audio.vlm.version);
+        audio.reason = info.model_type.empty()
+                           ? "its config.json names no model_type, so " + installed +
+                                 " has no module to build it by"
+                           : installed + " has no module for its type, " + info.model_type +
+                                 ", so it cannot build the model to hear with";
+        audio.remedy = std::string{kMlxVisionRemedy};
+    }
+    return audio;
 }
 
 // ---------------------------------------------------------------------------
@@ -427,6 +853,10 @@ MlxLocalProvider::Options MlxLocalProvider::options_from(const std::string& back
     options.vision = vision.reads_images();
     options.vision_gap =
         vision.remedy.empty() ? vision.reason : vision.reason + " -- " + vision.remedy;
+    // Whether it hears, and the rung that says why not (53g).
+    const MlxAudio audio = probe_mlx_audio(options.info, host);
+    options.audio = audio.hears();
+    options.audio_gap = audio.message();
     if (config.max_tokens.has_value()) {
         options.max_tokens = *config.max_tokens;
     }
@@ -443,6 +873,15 @@ MlxLocalProvider::Options MlxLocalProvider::options_from(const std::string& back
     }
     options.sampling = config_rung(config);
     options.seed = config_seed(config);
+    // The adapter, as the loader read it (53a), and where the model's hash
+    // its pin is checked against is remembered.
+    options.adapters = config.adapters;
+    options.weight_hashing.memo = harness::weight_hash_cache_path();
+    // The drafter beside it (53i), the ladder having paired them.
+    if (!config.draft.empty()) {
+        options.draft = std::filesystem::path{harness::expand_env_and_home(config.draft)};
+        options.draft_block_size = config.draft_block_size.value_or(0);
+    }
     return options;
 }
 
@@ -541,7 +980,9 @@ void MlxLocalProvider::preload(const harness::StatusSink& on_status) {
     const std::scoped_lock lock{mutex_};
     harness::StreamOptions options;
     options.on_status = on_status;
-    ensure_child(options);
+    // A directory mlx-vlm built is loaded through it from the first (53f),
+    // and so is one drafted beside (53i).
+    ensure_child(options, options_.info.through_vlm || drafting());
 }
 
 std::vector<harness::ModelInfo> MlxLocalProvider::list_models(
@@ -676,15 +1117,44 @@ void MlxLocalProvider::ensure_child(const harness::StreamOptions& options, bool 
     if (child_ != nullptr) {
         drop_child();  // it died between turns; a fresh one reloads the model
     }
+    // The adapter's file facts before a driver is started (53a): not there,
+    // not an adapter directory, pinned to no base, or pinned to weights the
+    // model directory no longer holds -- each refused by name.
+    if (const std::string refused =
+            adapter_refusal(options_.adapters, AdapterCheck{.backend = options_.backend_name,
+                                                            .base = options_.model_dir,
+                                                            .directories = true,
+                                                            .hashing = options_.weight_hashing});
+        !refused.empty()) {
+        throw harness::ProviderError(options_.backend_name, refused);
+    }
     stderr_tail_.clear();
     say(options, harness::StatusEvent::Type::ModelLoading, harness::StatusEvent::Phase::Start,
-        vision ? "through mlx-vlm, to read images" : std::string{});
+        !vision      ? std::string{}
+        : drafting() ? "through mlx-vlm, drafting beside " + options_.draft.filename().string()
+        : options_.info.through_vlm ? "through mlx-vlm, which built it"
+                                    : "through mlx-vlm, to read images");
 
     platform::ChildCommand command;
     command.program = options_.interpreter.string();
     command.arguments = {options_.driver.string(), "--model", options_.model_dir.string()};
     if (vision) {
         command.arguments.emplace_back("--vision");
+    }
+    // The drafter, by mlx-vlm's own `load_drafter`, beside the base it loads
+    // (53i); its block size only where the entry sets one.
+    if (drafting()) {
+        command.arguments.emplace_back("--draft");
+        command.arguments.push_back(options_.draft.string());
+        if (options_.draft_block_size > 0) {
+            command.arguments.emplace_back("--draft-block-size");
+            command.arguments.push_back(std::to_string(options_.draft_block_size));
+        }
+    }
+    // mlx-lm's own `adapter_path`, applied at load and never fused (53a).
+    for (const harness::AdapterConfig& adapter : options_.adapters) {
+        command.arguments.emplace_back("--adapter");
+        command.arguments.push_back(adapter.path);
     }
     ++spawns_;
     std::string error;
@@ -700,19 +1170,53 @@ void MlxLocalProvider::ensure_child(const harness::StreamOptions& options, bool 
     const mlx::Event& ready = ready_.value();
     if (vision && !ready.vision) {
         // A driver from before 27c: it ignores --vision and loads text only,
-        // and a picture sent to it would never be seen.
+        // and a picture sent to it would never be seen -- nor a directory
+        // mlx-vlm built ever be loaded the way it was built (53f).
         drop_child();
         throw harness::ProviderError(
             options_.backend_name,
             "the MLX driver at " + options_.driver.string() +
-                " does not read images -- it is an older copy: 'apogee check --fix' brings an "
-                "earlier Apogee's up to this build's, and an edited one is kept, so delete it "
-                "first");
+                (options_.info.through_vlm ? " does not load models through mlx-vlm"
+                                           : " does not read images") +
+                " -- it is an older copy: 'apogee check --fix' brings an earlier Apogee's up to "
+                "this build's, and an edited one is kept, so delete it first");
+    }
+    if (!options_.adapters.empty() && ready.adapter.empty()) {
+        // A driver from before 53a: it ignores --adapter and loads the bare
+        // base, which would answer as if the adapter were applied.
+        drop_child();
+        throw harness::ProviderError(
+            options_.backend_name,
+            "the MLX driver at " + options_.driver.string() +
+                " does not apply adapters -- it is an older copy: 'apogee check --fix' brings "
+                "an earlier Apogee's up to this build's, and an edited one is kept, so delete "
+                "it first");
+    }
+    if (drafting() && ready.draft.empty()) {
+        // A driver from before 53i: it ignores --draft and answers from the
+        // base alone, which would read as drafting that never happened.
+        drop_child();
+        throw harness::ProviderError(
+            options_.backend_name,
+            "the MLX driver at " + options_.driver.string() +
+                " does not draft -- it is an older copy: 'apogee check --fix' brings an earlier "
+                "Apogee's up to this build's, and an edited one is kept, so delete it first");
     }
     say(options, harness::StatusEvent::Type::ModelReady, harness::StatusEvent::Phase::Done,
         "mlx-lm " + ready.mlx_lm_version + ", " +
             (ready.model_type.empty() ? std::string{"unknown"} : ready.model_type) +
-            (ready.vision ? ", mlx-vlm " + ready.mlx_vlm_version : std::string{}));
+            (ready.vision ? ", mlx-vlm " + ready.mlx_vlm_version : std::string{}) +
+            (ready.adapter.empty()
+                 ? std::string{}
+                 : ", adapter " + std::filesystem::path{ready.adapter}.filename().string()) +
+            (ready.draft.empty()
+                 ? std::string{}
+                 : ", drafter " + std::filesystem::path{ready.draft}.filename().string() + " (" +
+                       (ready.draft_kind.empty() ? std::string{"mtp"} : ready.draft_kind) +
+                       (ready.draft_block_size > 0
+                            ? ", block " + std::to_string(ready.draft_block_size)
+                            : std::string{}) +
+                       ")"));
 }
 
 void MlxLocalProvider::await_ready(const harness::CancellationToken& cancellation) {
@@ -975,10 +1479,24 @@ void MlxLocalProvider::check_media(const harness::ChatRequest& request) const {
     for (const harness::ChatMessage& message : request.messages) {
         for (const harness::ContentPart& part : message.content.parts()) {
             if (part.kind == harness::ContentPart::Kind::InputAudio) {
-                throw harness::ProviderError(options_.backend_name,
-                                             options_.model +
-                                                 " cannot hear audio on the mlx "
-                                                 "backend");
+                if (!options_.audio) {
+                    // Never silently dropped, nor transcribed here behind the
+                    // caller's back: every surface asks first, and has the
+                    // transcription role read it instead (26e).
+                    throw harness::ProviderError(
+                        options_.backend_name,
+                        options_.model + " cannot hear audio on the mlx backend" +
+                            (options_.audio_gap.empty() ? std::string{}
+                                                        : " -- " + options_.audio_gap));
+                }
+                if (!says_wav(part.audio_format)) {
+                    throw harness::ProviderError(
+                        options_.backend_name,
+                        "a recording reaches the mlx backend as a WAV file, and this one is " +
+                            part.audio_format +
+                            " -- Apogee's attachments are decoded to WAV through ffmpeg first");
+                }
+                continue;
             }
             if (part.kind != harness::ContentPart::Kind::ImageUrl) {
                 continue;
@@ -1009,14 +1527,33 @@ harness::ChatResponse MlxLocalProvider::run(const harness::ChatRequest& request,
     }
     options.cancellation.throw_if_cancelled();
     check_media(request);
-    const bool images = std::ranges::any_of(
+    // The turn's recordings, written where the driver reads them (53g) --
+    // before any driver starts, so one that is not a WAV starts nothing --
+    // and removed when the turn is over, however it ends.
+    TurnAudio audio;
+    audio.write(request, options_.backend_name);
+    const bool media = std::ranges::any_of(
         request.messages, [](const harness::ChatMessage& m) { return m.content.is_rich(); });
     expire_if_idle();
-    ensure_child(options, images);
+    // A picture or a recording asks for mlx-vlm (27c, 53g); so does every
+    // turn, text included, of a directory mlx-vlm built (53f), and of one
+    // drafted beside, which mlx-vlm's speculative path loads (53i).
+    ensure_child(options, media || options_.info.through_vlm || drafting());
     used_ = true;
     last_use_ = options_.clock();
+    if (!audio.files().empty() && !ready_->audio) {
+        // A driver from before 53g: it would refuse an audio part as a
+        // content part it cannot read. It answers text, so it is kept.
+        throw harness::ProviderError(
+            options_.backend_name,
+            "the MLX driver at " + options_.driver.string() +
+                " does not hand recordings to the model -- it is an older copy: 'apogee check "
+                "--fix' brings an earlier Apogee's up to this build's, and an edited one is "
+                "kept, so delete it first");
+    }
 
-    const mlx::GenerateRequest generate = make_request(request, options);
+    mlx::GenerateRequest generate = make_request(request, options);
+    generate.audio_files = audio.files();
     if (!child_->write_stdin(mlx::generate_line(generate) + "\n")) {
         const std::string message = with_tail("the MLX driver closed its input");
         drop_child();

@@ -5,10 +5,12 @@
 #include <algorithm>
 #include <array>
 #include <fstream>
+#include <optional>
 #include <system_error>
 
 #include "modelstore/mlx_info.h"
 #include "modelstore/snapshot.h"
+#include "modelstore/voice_info.h"
 
 namespace apogee::models {
 namespace {
@@ -118,6 +120,15 @@ std::string conversion_refusal(const std::filesystem::path& snapshot,
     if (std::string damaged = damaged_snapshot_error(snapshot); !damaged.empty()) {
         return damaged;
     }
+    // A draft head runs beside its base and never alone (2026-10-21): a GGUF
+    // of one is no backend.
+    if (const std::optional<DraftHead> head = snapshot_draft_head(snapshot)) {
+        return draft_head_refusal(snapshot.string(), *head, {});
+    }
+    // Nor does llama.cpp's converter take a diffusion model's weights (M20).
+    if (const std::optional<DiffusionModel> diffusion = snapshot_diffusion_model(snapshot)) {
+        return diffusion_model_refusal(snapshot.string(), *diffusion);
+    }
     // --- rung 2: never replace ----------------------------------------------
     std::error_code code;
     if (std::filesystem::exists(output, code)) {
@@ -185,7 +196,22 @@ std::int64_t estimated_mlx_bytes(std::int64_t elements, int bits) {
 }
 
 std::string mlx_conversion_refusal(const std::filesystem::path& snapshot,
-                                   const std::filesystem::path& out) {
+                                   const std::filesystem::path& out, std::string_view kind) {
+    // A voice model as Kokoro publishes it is mlx-audio's route's input, and
+    // its alone (53m): no snapshot, so its rung 1 is the model read whole.
+    if (kind == kMlxVoice) {
+        if (const VoiceInfo voice = read_voice_info(snapshot); !voice.complete) {
+            return snapshot.string() +
+                   " is no whole voice model: mlx-audio's converter takes Kokoro's own layout "
+                   "(config.json, its checkpoint and voices/*.pt) -- " +
+                   voice.problem;
+        }
+        std::error_code code;
+        if (std::filesystem::exists(out, code)) {
+            return "something already exists at " + out.string() + " -- delete it first";
+        }
+        return {};
+    }
     // --- rung 1: a snapshot, an intact one, of full weights ---------------------
     if (!is_snapshot_dir(snapshot)) {
         return snapshot.string() +
@@ -200,6 +226,41 @@ std::string mlx_conversion_refusal(const std::filesystem::path& snapshot,
         facts.mlx_format && facts.quantization.quantized()) {
         return snapshot.string() + " is already an MLX model (" + facts.quantization.describe() +
                ") -- an mlx backend runs it as it is; convert the full-weight release instead";
+    }
+    // mlx-lm has no network for a draft head, whatever `--model-type` says
+    // (2026-10-21) -- unless the route is mlx-vlm's drafter, which its
+    // speculative path runs beside the base (53i).
+    if (const std::optional<DraftHead> head = snapshot_draft_head(snapshot);
+        head.has_value() && kind != kMlxDrafter) {
+        return draft_head_refusal(snapshot.string(), *head, {});
+    }
+    // And a drafter's route takes a draft head alone.
+    if (kind == kMlxDrafter && !snapshot_draft_head(snapshot).has_value()) {
+        return snapshot.string() +
+               " is no draft head: only a draft head converts to a drafter (its config.json "
+               "declaring backbone_hidden_size, or a draft head's architecture)";
+    }
+    // Nor for a diffusion model's: it builds language models (M20) -- unless
+    // the route is mlx-video's (53k), the caller having found it installed,
+    // which takes Wan's original layout once it is whole.
+    if (const std::optional<DiffusionModel> diffusion = snapshot_diffusion_model(snapshot);
+        diffusion.has_value() &&
+        !(kind == kMlxVideo && diffusion->wan.has_value() && diffusion->wan->whole())) {
+        return diffusion_model_refusal(snapshot.string(), *diffusion);
+    }
+    // And mlx-video's route takes Wan's original layout alone.
+    if (kind == kMlxVideo && !snapshot_wan_layout(snapshot).has_value()) {
+        return snapshot.string() +
+               " is no Wan original layout: mlx-video's converter takes Wan's own transformer "
+               "(its config.json naming WanModel) beside its text encoder and VAE checkpoints";
+    }
+    // Nor an embedding model, which the mlx backend could not embed with
+    // anyway: its GGUF is the conversion (M21) -- unless the route is
+    // mlx-embeddings', which builds it whole and which the mlx backend
+    // embeds through (53h).
+    if (const std::optional<EmbeddingModel> embedding = snapshot_embedding_model(snapshot);
+        embedding.has_value() && kind != kMlxEmbedding) {
+        return embedding_model_mlx_refusal(snapshot.string(), *embedding);
     }
     // --- rung 2: never replace ---------------------------------------------------
     std::error_code code;
@@ -272,9 +333,10 @@ std::string stage_model_type_overlay(const std::filesystem::path& snapshot,
 MlxConvertResult convert_snapshot_to_mlx(const std::filesystem::path& snapshot,
                                          const std::filesystem::path& out, int bits,
                                          const MlxConvertFn& convert,
-                                         const harness::CancellationToken& cancellation) {
+                                         const harness::CancellationToken& cancellation,
+                                         std::string_view kind) {
     MlxConvertResult result;
-    result.error = mlx_conversion_refusal(snapshot, out);
+    result.error = mlx_conversion_refusal(snapshot, out, kind);
     if (!result.error.empty()) {
         return result;
     }
@@ -291,7 +353,9 @@ MlxConvertResult convert_snapshot_to_mlx(const std::filesystem::path& snapshot,
     }
 
     // --- rung 4: what landed is a whole MLX model, quantized as asked ---------------
-    result.info = read_mlx_info(out);
+    // Read as the route's kind says, its record not yet written: a video
+    // model by mlx-video's layout (53k).
+    result.info = read_mlx_info(out, kind);
     if (!result.info.complete) {
         remove_tree_quietly(out);
         result.error = "the converter finished but its output is not a loadable MLX model -- " +
@@ -305,6 +369,11 @@ MlxConvertResult convert_snapshot_to_mlx(const std::filesystem::path& snapshot,
         return result;
     }
     result.ok = true;
+    // What the route's converter built, said by its record since its files
+    // need not (53e): mlx-lm a language model, whatever the snapshot also
+    // carried; mlx-vlm the whole model, its towers kept (53f); mlx-video a
+    // video model (53k).
+    result.kind = std::string{kind};
     return result;
 }
 

@@ -1,0 +1,8 @@
+updated backend based -> v1 (adapter)
+  adapter: /Users/someone/.apogee/training/versions/based/v1.lora.gguf (352 B, a GGUF LoRA)
+  base:    /Users/someone/.apogee/models/tiny/gguf/bbbbbbbbbbbb/tiny-F16.gguf (untouched; pinned by sha256 ce5065b7f3dc)
+  config:  /Users/someone/.apogee/config/config.json
+  eval:    100% (2/2)
+
+Chat with it:
+  apogee chat -m based

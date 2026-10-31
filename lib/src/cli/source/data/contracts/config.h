@@ -106,6 +106,32 @@ inline constexpr std::int64_t kMaxSeed = 4'294'967'294;
 /// The largest `thinking_budget` a backend may name (26i).
 inline constexpr std::int64_t kMaxThinkingBudget = 1'000'000;
 
+/// The strongest an adapter may be applied (53a): 49e's LoRA bound, so a
+/// scale is a strength in (0, 2] wherever Apogee applies a LoRA.
+inline constexpr double kMaxAdapterScale = 2.0;
+
+/// One LoRA adapter a local entry applies over its base, never merged into it
+/// (53a): a llamacpp entry's GGUF LoRA file, an mlx entry's adapter directory
+/// (`adapter_config.json` beside its weights, as mlx-lm's training writes it).
+struct AdapterConfig {
+    /// `~` and `${VAR}` expanded on read.
+    std::string path{};
+    /// The strength it is applied at; 1.0 unless the entry says.
+    double scale = 1.0;
+    /// The sha256 of the base weights it was registered against -- the pin
+    /// `config set-backend --adapters` records, checked before every load,
+    /// so an adapter never runs over weights it was not made for. Empty for
+    /// an adapter written by hand, which is refused at load with the
+    /// command that records it.
+    std::string base_sha256{};
+
+    bool operator==(const AdapterConfig&) const = default;
+};
+
+/// Whether an entry of `type` applies adapters (53a): the two local runtimes,
+/// llamacpp and mlx. Any other refuses an `adapters:` list at load.
+[[nodiscard]] bool takes_adapters(BackendType type) noexcept;
+
 /// One entry under `backends:`.
 ///
 /// Which fields matter depends on the type -- api_key for the cloud types,
@@ -216,7 +242,56 @@ struct BackendConfig {
     /// Principles, 2026-10-16). The loader refuses a name the vendor does not
     /// offer, and any list on a backend whose API runs none.
     std::vector<std::string> server_tools{};
+
+    /// The LoRA adapters a local entry applies over `model_path`, in order
+    /// (53a): llama.cpp sets every one on each context at its scale; mlx-lm
+    /// loads one adapter directory, at the scale its training wrote. Empty,
+    /// the default, runs the bare base as before. The loader refuses a list
+    /// on any other type, a path named twice, and a scale outside (0, 2] --
+    /// on an mlx entry, more than one adapter or a scale other than 1.
+    std::vector<AdapterConfig> adapters{};
+
+    /// The drafter an mlx entry runs beside `model_path` (53i): an MLX
+    /// directory mlx-vlm built from a draft head -- Gemma 4's assistants --
+    /// whose proposed tokens the base verifies, through mlx-vlm's speculative
+    /// path, so only how fast the answer comes changes. Read as `model_path`
+    /// is, a variable in it expanded. Empty, the default, drafts with
+    /// nothing. The loader refuses it on any other type; whether the drafter
+    /// runs beside this base -- its family, its width, the base its record
+    /// names -- is asked by the editor and the backend's ladder.
+    std::string draft{};
+    /// The tokens one drafting round proposes, plus one -- mlx-vlm's
+    /// `draft_block_size`, from 2 to 16 (53i). Unset takes the drafter's own,
+    /// as its `config.json` states it, else mlx-vlm's default. An mlx entry's
+    /// alone; it means nothing without `draft`.
+    std::optional<std::int64_t> draft_block_size;
+
+    /// The keys the entry holds that no backend reads (55g), in the file's
+    /// order -- a typo's `adaptors:` or `temprature:`. Loading stays tolerant
+    /// (a newer release's key read by an older binary is one of these), so
+    /// they are kept here for `check` to name, never refused.
+    std::vector<std::string> unknown_keys{};
 };
+
+/// Every key a backend entry may hold (55g), declared once: each field
+/// `config set-backend` writes, and `api_key` (`backend_editable_fields()`
+/// is this list but its key). The loader reads an entry against it -- any
+/// other key is an `unknown_keys` entry -- and `config get` reads and
+/// completes from it, so a new field cannot land without its read and its
+/// completion.
+[[nodiscard]] std::span<const std::string_view> backend_entry_keys() noexcept;
+
+/// The key of `backend_entry_keys()` nearest `key` (55g): the fewest edits
+/// away -- a character added, dropped, changed, or two swapped -- within two
+/// (or a quarter of the key's length, when longer), the earlier declared on
+/// a tie. Empty when none is that near: a suggestion that is a guess is
+/// worse than none.
+[[nodiscard]] std::string_view nearest_backend_key(std::string_view key);
+
+/// The tokens a drafting round may propose, plus one (53i): mlx-vlm drafts
+/// `draft_block_size - 1` a round, so 1 would propose none.
+inline constexpr std::int64_t kMinDraftBlockSize = 2;
+inline constexpr std::int64_t kMaxDraftBlockSize = 16;
 
 /// The `models:` role pointers.
 ///

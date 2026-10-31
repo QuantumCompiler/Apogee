@@ -2,8 +2,10 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -14,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "agentloop/loop.h"
@@ -147,13 +150,152 @@ TEST_CASE("what a turn recalled is a memory event, and nothing when it recalled 
           "[commands][machine][recall]") {
     std::ostringstream out;
     JsonReporter reporter{out};
-    reporter.on_recall(0, 0);
-    reporter.on_recall(2, 1);
+    reporter.on_recall({}, 0);
+    reporter.on_recall({{.id = "20261019-142233-a1b2c3",
+                         .name = "asyncio timeouts in the scraper",
+                         .updated = "2026-10-19T14:40:02Z"},
+                        {.id = "20261018-090000-d4e5f6", .name = "", .updated = "2026-10-18"}},
+                       1);
+    reporter.on_recall({}, 2);
     const std::vector<nlohmann::json> all = events(out.str());
-    REQUIRE(all.size() == 1);
+    REQUIRE(all.size() == 2);
     CHECK(all[0].at("type") == "memory");
     CHECK(all[0].at("chats") == 2);
     CHECK(all[0].at("decisions") == 1);
+    // Which chats (52a), in the order sent, each linkable by its id.
+    CHECK(all[0].at("sessions") ==
+          nlohmann::json::parse(R"([{"id":"20261019-142233-a1b2c3",)"
+                                R"("name":"asyncio timeouts in the scraper",)"
+                                R"("updated":"2026-10-19T14:40:02Z"},)"
+                                R"({"id":"20261018-090000-d4e5f6","name":"",)"
+                                R"("updated":"2026-10-18"}])"));
+    // Decisions alone: the event as it always was, no sessions.
+    CHECK(all[1].dump() == R"({"chats":0,"decisions":2,"type":"memory"})");
+}
+
+TEST_CASE("the excerpts a turn sent are a sources event, and nothing when none were",
+          "[commands][machine][sources]") {
+    // 52a: what was sent, in order, each score beside its retriever -- the
+    // golden a driver numbers its citations from.
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.on_sources({});
+    reporter.on_sources({{.file = "report.pdf",
+                          .pages = std::array<std::int64_t, 2>{41, 42},
+                          .score = 0.81,
+                          .retriever = "vector"},
+                         {.file = "notes.md",
+                          .lines = std::array<std::int64_t, 2>{12, 40},
+                          .score = 0.5,
+                          .retriever = "lexical"},
+                         {.file = "talk.mp4",
+                          .times = std::array<double, 2>{270.0, 300.0},
+                          .score = 0.25,
+                          .retriever = "hybrid"},
+                         {.file = "docs/a.md", .score = 0.75, .retriever = "lexical"}});
+    CHECK(out.str() ==
+          R"({"sources":[{"file":"report.pdf","pages":[41,42],"retriever":"vector","score":0.81},)"
+          R"({"file":"notes.md","lines":[12,40],"retriever":"lexical","score":0.5},)"
+          R"({"file":"talk.mp4","retriever":"hybrid","score":0.25,"times":[270.0,300.0]},)"
+          R"({"file":"docs/a.md","retriever":"lexical","score":0.75}],"type":"sources"})"
+          "\n");
+}
+
+TEST_CASE("a job's events: its versions first, unknowns left out, scenes only in a composition",
+          "[commands][machine][job]") {
+    // 52b: one family across the four verbs, each shape pinned.
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.begin_job("video compose");
+    reporter.emit_stage(2, 3, "quantize to Q4_K_M", "failed");
+    reporter.emit_bytes(64, 0, {}, 0, 0);
+    reporter.emit_bytes(64, 128, "a.safetensors", 1, 4);
+    reporter.emit_ready("cuda", "bfloat16", "i2v", 0);
+    reporter.emit_step(3, 30, 0);
+    reporter.emit_frames(49, 832, 480, 2);
+    reporter.emit_assembling(49, 0);
+    reporter.emit_segment(2, 3, 1.25, 1);
+    reporter.emit_scene(2, 5, "rendering");
+    reporter.emit_document(nlohmann::json{{"object", "video.project"}, {"status", "done"}});
+    const std::vector<std::string> expected{
+        R"({"protocol_version":1,"schema":")" +
+            std::string{apogee::commands::kMachineSchemaVersion} +
+            R"(","type":"job","verb":"video compose"})",
+        R"({"count":3,"index":2,"label":"quantize to Q4_K_M","state":"failed","type":"stage"})",
+        R"({"done":64,"type":"bytes"})",
+        R"({"count":4,"done":64,"file":"a.safetensors","index":1,"total":128,"type":"bytes"})",
+        R"({"device":"cuda","dtype":"bfloat16","mode":"i2v","type":"ready"})",
+        R"({"step":3,"steps":30,"type":"step"})",
+        R"({"frames":49,"height":480,"scene":2,"type":"frames","width":832})",
+        R"({"frames":49,"type":"assembling"})",
+        R"({"index":2,"of":3,"scene":1,"seconds":1.25,"type":"segment"})",
+        R"({"scene":2,"scenes":5,"state":"rendering","type":"scene"})",
+        R"({"document":{"object":"video.project","status":"done"},"type":"document"})"};
+    std::vector<std::string> lines;
+    std::istringstream in{out.str()};
+    for (std::string line; std::getline(in, line);) {
+        lines.push_back(line);
+    }
+    CHECK(lines == expected);
+}
+
+TEST_CASE("a training run's events: a pipeline's stage in its manifest's words, a tick, a pass",
+          "[commands][machine][job][train]") {
+    // 55h: the pipeline's fields ride `stage` only where they say something;
+    // a tick's total only when the trainer said it; a pass is its line and
+    // its state.
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.emit_stage(1, 2, "a", "pending", "pipe-20261025-120000");
+    reporter.emit_stage(1, 2, "a", "evaluating", "pipe-20261025-120000", "pipe-20261025-120000-s0");
+    reporter.emit_stage(1, 2, "a", "passed", "pipe-20261025-120000", "pipe-20261025-120000-s0",
+                        0.5);
+    reporter.emit_stage(1, 2, "a", "passed", "pipe-20261025-120000", "pipe-20261025-120000-s0",
+                        0.0);
+    reporter.emit_iteration(10, 600, 1.5, 0.0001, 2.5, 1);
+    reporter.emit_iteration(3, 0, 1.5, 0.0001, 2.5, 0);
+    reporter.emit_pass("collecting", "[cycle] directory: 1 file(s) in /q");
+    const std::vector<std::string> expected{
+        R"({"count":2,"index":1,"label":"a","pipeline_run_id":"pipe-20261025-120000","state":"pending","type":"stage"})",
+        R"({"count":2,"index":1,"label":"a","pipeline_run_id":"pipe-20261025-120000","run_id":"pipe-20261025-120000-s0","state":"evaluating","type":"stage"})",
+        R"({"count":2,"cumulative_score":0.5,"index":1,"label":"a","pipeline_run_id":"pipe-20261025-120000","run_id":"pipe-20261025-120000-s0","state":"passed","type":"stage"})",
+        R"({"count":2,"cumulative_score":0.0,"index":1,"label":"a","pipeline_run_id":"pipe-20261025-120000","run_id":"pipe-20261025-120000-s0","state":"passed","type":"stage"})",
+        R"({"iteration":10,"iterations":600,"loss":1.5,"lr":0.0001,"stage":1,"throughput":2.5,"type":"iteration"})",
+        R"({"iteration":3,"loss":1.5,"lr":0.0001,"throughput":2.5,"type":"iteration"})",
+        R"({"state":"collecting","text":"[cycle] directory: 1 file(s) in /q","type":"pass"})"};
+    std::vector<std::string> lines;
+    std::istringstream in{out.str()};
+    for (std::string line; std::getline(in, line);) {
+        lines.push_back(line);
+    }
+    CHECK(lines == expected);
+}
+
+TEST_CASE("a job's format words: json only for a verb with a document",
+          "[commands][machine][job]") {
+    using apogee::commands::JobFormat;
+    CHECK(apogee::commands::job_format_from_string("stream-json") == JobFormat::StreamJson);
+    CHECK(apogee::commands::job_format_from_string("json") == JobFormat::Json);
+    CHECK(apogee::commands::job_format_from_string("") == JobFormat::Text);
+    CHECK_FALSE(apogee::commands::job_format_from_string("jsonl").has_value());
+    CHECK(apogee::commands::job_format_names(true) ==
+          std::vector<std::string_view>{"text", "json", "stream-json"});
+    CHECK(apogee::commands::job_format_names(false) ==
+          std::vector<std::string_view>{"text", "stream-json"});
+}
+
+TEST_CASE("a file writer's permission question carries its diff as detail",
+          "[commands][machine][permission][diff]") {
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    const std::string diff = "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n";
+    apogee::agent::GateRequest request{"edit_file", "x", diff};
+    request.edits = true;
+    reporter.emit_permission_question(request);
+    const nlohmann::json event = nlohmann::json::parse(out.str());
+    CHECK(event["tool"] == "edit_file");
+    CHECK(event["detail"] == diff);
+    CHECK_FALSE(event.contains("outbound"));
 }
 
 TEST_CASE("a spent thinking budget is said on a thinking event", "[commands][machine][thinking]") {
@@ -886,7 +1028,132 @@ TEST_CASE("hello is parsed, recorded in words, and malformed fields are just abs
 
     const auto inbound = apogee::commands::machine_inbound_types();
     CHECK(std::vector<std::string_view>(inbound.begin(), inbound.end()) ==
-          std::vector<std::string_view>{"user", "answer", "attach", "hello", "cancel"});
+          std::vector<std::string_view>{"user", "answer", "attach", "hello", "cancel", "detach",
+                                        "set", "compact"});
+}
+
+TEST_CASE("the session's own doors parse: detach, set, compact", "[commands][machine][input]") {
+    // 52d: each line an existing core's door. A set line's settings in the
+    // order they apply; any key that is no setting, or no text, refused by
+    // name.
+    using apogee::commands::DriverMessage;
+    const DriverMessage detach =
+        apogee::commands::parse_driver_line(R"({"type":"detach","path":"notes.md"})");
+    CHECK(detach.kind == DriverMessage::Kind::Detach);
+    CHECK(detach.text == "notes.md");
+    CHECK(apogee::commands::parse_driver_line(R"({"type":"compact"})").kind ==
+          DriverMessage::Kind::Compact);
+
+    const DriverMessage set = apogee::commands::parse_driver_line(
+        R"({"type":"set","temperature":0.2,"think":"off","model":"helper","system":"be brief"})");
+    CHECK(set.kind == DriverMessage::Kind::Set);
+    CHECK(set.refused.empty());
+    CHECK(set.settings == std::vector<std::pair<std::string, std::string>>{{"model", "helper"},
+                                                                           {"system", "be brief"},
+                                                                           {"think", "off"},
+                                                                           {"temperature", "0.2"}});
+    const DriverMessage refused = apogee::commands::parse_driver_line(
+        R"({"type":"set","max_tokens":9,"think":["on"],"effort":"high"})");
+    CHECK(refused.kind == DriverMessage::Kind::Set);
+    CHECK(refused.refused == std::vector<std::string>{"think", "max_tokens"});
+    CHECK(refused.settings == std::vector<std::pair<std::string, std::string>>{{"effort", "high"}});
+    CHECK(apogee::commands::settable_keys() ==
+          std::vector<std::string_view>{"model", "system", "think", "effort", "temperature"});
+}
+
+TEST_CASE("a private session says so on its session event", "[commands][machine][private]") {
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.begin_session("m", {}, 1, true);
+    const nlohmann::json session = events(out.str()).front();
+    CHECK(session.at("private") == true);
+    std::ostringstream plain;
+    JsonReporter plain_reporter{plain};
+    plain_reporter.begin_session("m", {}, 1);
+    CHECK_FALSE(events(plain.str()).front().contains("private"));
+}
+
+TEST_CASE("a session names the chat it writes, and a private one names none",
+          "[commands][machine][chat-id]") {
+    // M28: the id `chats list` lists the chat by and `--resume` takes, added
+    // to the event and nothing else moved.
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.begin_session("m", {}, 1, false, "20261024-120000-a1b2");
+    nlohmann::json session = events(out.str()).front();
+    session.erase("capabilities");
+    CHECK(session.dump() ==
+          R"({"chat_id":"20261024-120000-a1b2","model":"m","next_turn":1,"protocol_version":1,)"
+          R"("type":"session"})");
+
+    // A private chat writes none, so it names none -- whatever it was minted.
+    std::ostringstream hidden;
+    JsonReporter private_reporter{hidden};
+    private_reporter.begin_session("m", {}, 1, true, "20261024-120000-a1b2");
+    const nlohmann::json private_session = events(hidden.str()).front();
+    CHECK(private_session.at("private") == true);
+    CHECK_FALSE(private_session.contains("chat_id"));
+
+    // A session given none -- complete, an agent's run -- says nothing new.
+    std::ostringstream none;
+    JsonReporter none_reporter{none};
+    none_reporter.begin_session("m", {}, 1);
+    CHECK_FALSE(events(none.str()).front().contains("chat_id"));
+
+    // Declared: an optional string, so an older driver ignores it.
+    const auto declared = apogee::commands::machine_events();
+    const auto line = std::ranges::find_if(
+        declared, [](const apogee::commands::LineSpec& spec) { return spec.type == "session"; });
+    REQUIRE(line != declared.end());
+    const auto field = std::ranges::find_if(
+        line->fields,
+        [](const apogee::commands::FieldSpec& spec) { return spec.name == "chat_id"; });
+    REQUIRE(field != line->fields.end());
+    CHECK(field->type == "string");
+    CHECK_FALSE(field->required);
+}
+
+TEST_CASE("a session names the suite it runs under, and an execute session whether it orchestrates",
+          "[commands][machine][suite]") {
+    // M29: added to the event and nothing else moved; a session under none,
+    // and a chat, say nothing new.
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.begin_session("m", {}, 1, false, "20261026-120000-a1b2", "research", false);
+    nlohmann::json session = events(out.str()).front();
+    session.erase("capabilities");
+    CHECK(session.dump() ==
+          R"({"chat_id":"20261026-120000-a1b2","model":"m","next_turn":1,"orchestrating":false,)"
+          R"("protocol_version":1,"suite":"research","type":"session"})");
+
+    std::ostringstream playing;
+    JsonReporter playing_reporter{playing};
+    playing_reporter.begin_session("m", {}, 1, false, "20261026-120000-a1b2", "research", true);
+    CHECK(events(playing.str()).front().at("orchestrating") == true);
+
+    std::ostringstream bare;
+    JsonReporter bare_reporter{bare};
+    bare_reporter.begin_session("m", {}, 1, false, "20261026-120000-a1b2");
+    CHECK_FALSE(events(bare.str()).front().contains("suite"));
+    CHECK_FALSE(events(bare.str()).front().contains("orchestrating"));
+
+    // Declared: optional, so an older driver ignores them.
+    const auto declared = apogee::commands::machine_events();
+    const auto line = std::ranges::find_if(
+        declared, [](const apogee::commands::LineSpec& spec) { return spec.type == "session"; });
+    REQUIRE(line != declared.end());
+    for (const auto& [name, type] :
+         {std::pair<std::string_view, std::string_view>{"suite", "string"},
+          std::pair<std::string_view, std::string_view>{"orchestrating", "boolean"}}) {
+        INFO(name);
+        const auto field = std::ranges::find_if(
+            line->fields, [&wanted = name](const apogee::commands::FieldSpec& spec) {
+                return spec.name == wanted;
+            });
+        REQUIRE(field != line->fields.end());
+        CHECK(field->type == type);
+        CHECK_FALSE(field->required);
+    }
 }
 
 // --- 28f: turn ids and cancel ---------------------------------------------------
@@ -1106,9 +1373,16 @@ TEST_CASE("every event every emitter writes is the declaration's, field for fiel
     capabilities.accepts = {"user"};
     capabilities.tools = true;
     capabilities.ask = true;
-    reporter.begin_session("m", capabilities, 1);
+    reporter.begin_session("m", capabilities, 1, true);
+    // And a session that names its chat (M28), and one its suite (M29).
+    reporter.begin_session("m", capabilities, 1, false, "20261024-120000-a1b2");
+    reporter.begin_session("m", capabilities, 1, false, "20261024-120000-a1b2", "research", true);
     reporter.begin_turn(1);
-    reporter.on_recall(2, 1);
+    reporter.on_recall({{.id = "c1", .name = "one", .updated = "2026-10-19T10:00:00Z"}}, 1);
+    reporter.on_sources({{.file = "a.md",
+                          .lines = std::array<std::int64_t, 2>{1, 9},
+                          .score = 0.5,
+                          .retriever = "lexical"}});
     reporter.on_thinking();
     reporter.on_thinking_budget_reached();
     reporter.on_thinking_token("hmm");
@@ -1139,6 +1413,25 @@ TEST_CASE("every event every emitter writes is the declaration's, field for fiel
         reporter.emit_task_transition(task, index, std::nullopt);
     }
     reporter.emit_task_grant(task, 1, task.rounds.back().allowed.front());
+    // A long job's events (52b), as each verb's relay writes them.
+    reporter.begin_job("models pull");
+    reporter.emit_stage(1, 3, "convert to F16", "started");
+    reporter.emit_bytes(512, 1024, "model-00001.safetensors", 1, 2);
+    reporter.emit_bytes(512, 0, {}, 0, 0);
+    reporter.emit_ready("cpu", "float32", "t2v", 0);
+    reporter.emit_ready("mps", {}, {}, 2);
+    reporter.emit_step(1, 30, 2);
+    reporter.emit_frames(49, 832, 480, 0);
+    reporter.emit_assembling(49, 1);
+    reporter.emit_segment(1, 2, 1.5, 0);
+    reporter.emit_scene(1, 2, "speaking");
+    // A pipeline's and a cycle pass's (55h), as the training relay writes them.
+    reporter.emit_stage(1, 2, "a", "fusing", "pipe-20261025-120000", "pipe-20261025-120000-s0",
+                        1.0);
+    reporter.emit_iteration(10, 600, 1.73, 1e-4, 2.4, 1);
+    reporter.emit_iteration(3, 0, 1.9, 1e-4, 0.0, 0);
+    reporter.emit_pass("gating", "[cycle] gate -- current 96%");
+    reporter.emit_document(nlohmann::json{{"object", "video.generation"}});
 
     std::set<std::string> seen_types;
     for (const nlohmann::json& event : events(out.str())) {

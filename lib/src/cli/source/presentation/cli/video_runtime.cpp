@@ -6,6 +6,7 @@
 #include <iostream>
 
 #include "cli/helpers.h"
+#include "cli/job_stream.h"
 #include "cli/train.h"
 #include "platform/platform.h"
 
@@ -52,7 +53,8 @@ std::string install_video_set(training::PythonEnv& env, bool interactive, std::i
 namespace {
 
 /// The environment, then `set` after a yes at a terminal when `missing` says
-/// a package rung refused, then the ladder again.
+/// a package rung refused, then the ladder again. A refusal is said on
+/// stderr and, when the run streams, as its `error` (M29).
 [[nodiscard]] video::VideoReadiness ready_runtime(
     const harness::Config& config, std::string_view purpose, training::RequirementSet set,
     std::string_view needs, std::string_view size,
@@ -70,6 +72,7 @@ namespace {
             install_runtime_set(env, set, needs, size, interactive, std::cin, std::cerr, purpose);
         !refused.empty()) {
         std::cerr << "apogee " << purpose << ": " << refused << "\n";
+        tell_job_failure(refused);
         throw CLI::RuntimeError(kUserError);
     }
     return probe(host);
@@ -96,6 +99,19 @@ video::VideoReadiness ready_voice_runtime(const harness::Config& config, std::st
             return refusal == video::VideoRefusal::NoTorch ||
                    refusal == video::VideoRefusal::NoKokoro;
         });
+}
+
+video::VideoReadiness ready_voice_engine(const harness::Config& config,
+                                         const std::filesystem::path& model,
+                                         std::string_view handle, video::VideoEngine engine,
+                                         std::string_view purpose) {
+    if (engine == video::VideoEngine::Torch) {
+        const video::VideoReadiness runtime = ready_voice_runtime(config, purpose);
+        if (!runtime.ready() && runtime.refusal != video::VideoRefusal::NoDriver) {
+            return runtime;
+        }
+    }
+    return video::probe_voice_engine(video::VideoHost::current(), engine, model, handle);
 }
 
 }  // namespace apogee::commands

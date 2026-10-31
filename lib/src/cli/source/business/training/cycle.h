@@ -2,6 +2,7 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -22,7 +23,8 @@
 /// gate, promote or discard -- meant for launchd or cron; there is no
 /// daemon and no `--watch`, by rule. The state is two files under
 /// `training/cycle/`: `cycle.lock` (a PID, created exclusively) and
-/// `history.json` (written atomically), and the filesystem is the source of
+/// `history.json` (written atomically, under `history.lock` for the moment
+/// it is read and written again), and the filesystem is the source of
 /// truth.
 ///
 /// **The dual gate and the circuit breaker are the safety.** A candidate
@@ -43,6 +45,9 @@ inline constexpr std::string_view kCycleIdPrefix = "cycle-";
 inline constexpr std::string_view kCycleDirName = "cycle";
 inline constexpr std::string_view kHistoryFileName = "history.json";
 inline constexpr std::string_view kLockFileName = "cycle.lock";
+/// Held only while the history is read and written again (M30), never across
+/// a pass: `update_history`'s.
+inline constexpr std::string_view kHistoryLockFileName = "history.lock";
 inline constexpr std::string_view kQueueDirName = "queue";
 inline constexpr std::string_view kConsumedDirName = "consumed";
 inline constexpr std::string_view kWorkDirName = "work";
@@ -50,6 +55,19 @@ inline constexpr std::string_view kWorkDirName = "work";
 inline constexpr std::string_view kGatePass = "pass";
 inline constexpr std::string_view kGateFail = "fail";
 inline constexpr std::string_view kGateSkipped = "skipped";
+
+/// Where a pass is, as each line of its narration says it (55h): the
+/// sources read, merged, the pipeline run, the dual gate, the promotion --
+/// then how the pass ended, and the breaker tripping on it.
+inline constexpr std::string_view kPassCollecting = "collecting";
+inline constexpr std::string_view kPassMerging = "merging";
+inline constexpr std::string_view kPassTraining = "training";
+inline constexpr std::string_view kPassGating = "gating";
+inline constexpr std::string_view kPassPromoting = "promoting";
+inline constexpr std::string_view kPassSkipped = "skipped";
+inline constexpr std::string_view kPassFailed = "failed";
+inline constexpr std::string_view kPassHalted = "halted";
+inline constexpr std::string_view kPassPassed = "passed";
 
 /// One `cycle run`.
 struct CycleRunRecord {
@@ -99,6 +117,32 @@ struct CycleHistory {
 [[nodiscard]] std::string save_history(const std::filesystem::path& cycle_dir,
                                        const CycleHistory& history);
 
+/// How long `update_history` waits for another writer's lock: its holder
+/// reads and writes one small file.
+inline constexpr std::chrono::milliseconds kHistoryLockWait{5000};
+
+/// What `update_history` made of the history.
+struct HistoryUpdate {
+    /// Why nothing was written: the history unreadable, the lock never
+    /// free, the write failed. Empty when the change landed.
+    std::string error{};
+    /// The history as it now stands on disk.
+    CycleHistory history{};
+};
+
+/// One change to the history, made to the file as it stands now and saved
+/// under `history.lock` (M30) -- the way a pass records its outcome and
+/// `cycle halt` and `cycle resume` write. A pass holds the cycle's lock for
+/// as long as it runs, so neither verb could wait on that one; this lock is
+/// held for a read and a write alone. So a halt or a resume taken while a
+/// pass runs is in the history the pass's outcome is added to, and never
+/// written over by a copy the pass read before it. `change` answers whether
+/// there is anything to write; a lock whose holder died is taken over.
+[[nodiscard]] HistoryUpdate update_history(const std::filesystem::path& cycle_dir,
+                                           std::string_view backend,
+                                           const std::function<bool(CycleHistory&)>& change,
+                                           std::chrono::milliseconds wait = kHistoryLockWait);
+
 /// The PID lock: created exclusively, removed on release -- the platform
 /// seam's `PidLock`, which the task runner shares (27h). A lock left by a
 /// crashed cycle is named in the refusal with the way out, never taken over.
@@ -134,6 +178,10 @@ private:
 void halt_cycle(CycleHistory& history, std::string reason);
 /// Clears the halt and the failure count. Whether it was halted.
 bool resume_cycle(CycleHistory& history);
+
+/// What a pass says when a halt was taken while it ran (M30): a notice,
+/// never a `pass` line of state `halted`, which is the breaker tripping.
+[[nodiscard]] std::string halt_kept_notice(const CycleHistory& history);
 
 struct DirectoryCollection {
     /// `*.jsonl` under the directory, sorted by name.
@@ -226,8 +274,12 @@ struct CycleRequest {
     JudgeFn judge;
     GateMode gate_mode = GateMode::Hard;
     PromoteFn promote;
-    std::function<void(std::string_view)> on_message;
+    /// The pass's narration, a line at a time, each with where the pass is
+    /// (`kPass*`): the words a person reads, and the state a surface keys on.
+    std::function<void(std::string_view state, std::string_view text)> on_message;
     std::function<void(const PipelineProgress&)> on_progress;
+    /// The pass's pipeline's manifest writes, as `PipelineRequest` tells them.
+    std::function<void(const PipelineRunManifest&)> on_manifest;
     harness::CancellationToken cancellation;
 };
 
@@ -242,11 +294,15 @@ struct CycleOutcome {
     CycleHistory history;
     /// The breaker tripped on this pass.
     bool halted_now = false;
+    /// A halt was taken while this pass ran -- `cycle halt` from elsewhere --
+    /// and its save kept it (M30): the pass finished, and the next refuses.
+    bool halt_kept = false;
 };
 
 /// One gated pass: the lock, the breaker, the sources, the merge, the
 /// pipeline, the dual gate, then promote-and-consume or discard, the
-/// history saved at every outcome.
+/// outcome added to the history as it stands at every outcome
+/// (`update_history`).
 [[nodiscard]] CycleOutcome run_cycle(const CycleRequest& request);
 
 }  // namespace apogee::training

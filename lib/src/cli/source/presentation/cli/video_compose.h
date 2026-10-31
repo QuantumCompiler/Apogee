@@ -2,10 +2,12 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "cli/video_generate.h"
@@ -26,7 +28,9 @@
 /// `video.project` document, kept beside the video from the first step.
 ///
 /// The same command again resumes: a project beside the output for the same
-/// brief renders only what it does not hold, with its own settings.
+/// brief renders only what it does not hold, with its own settings. An edit
+/// project given an `--edit` or `--redo-scene` it does not hold last runs
+/// that edit over itself, never drops it (55c).
 namespace apogee::commands {
 
 /// What `video compose` was asked for.
@@ -80,6 +84,8 @@ struct VideoComposeSeams {
     std::function<bool()> can_burn{};
     std::function<std::int64_t()> random_seed{};
     std::function<void(const std::string&)> say{};
+    /// Each scene begun, as the composer says it (52b).
+    std::function<void(std::size_t scene, std::size_t scenes, std::string_view state)> on_scene{};
     std::string platform{};
 };
 
@@ -95,8 +101,10 @@ struct VideoComposeResult {
 /// or overlong brief, an output that is not a new `.mp4` in a directory
 /// that exists, a missing bed or assets directory, no pipeline or voice
 /// model, an unknown voice, a project beside the output for another brief,
-/// a ladder that refuses, or no backend to plan with; else planned (or
-/// resumed), the plan said, and rendered.
+/// a ladder that refuses, or no backend to plan with -- or, on every path
+/// that renders, captions it cannot burn whose `.srt` beside the output is
+/// already there (55c); else planned (or resumed, or edited over the kept
+/// project), the plan said, and rendered.
 [[nodiscard]] VideoComposeResult compose_video(const harness::Config& config,
                                                const models::StoreRoots& roots,
                                                const VideoComposeOptions& options,

@@ -1,0 +1,10 @@
+will remove:
+  /Users/someone/.apogee/models/Qwen3-8B/mlx/1a2b3c4d5e6f
+
+backend 'Qwen3-8B-4bit' points into this and will stop working until it is repointed.
+--and-backends: its entry goes too, through the config editor.
+
+removed.
+removed backend 'Qwen3-8B-4bit' from /Users/someone/.apogee/config/config.json
+models.default cleared: it named 'Qwen3-8B-4bit'
+models.default_utility cleared: it named 'Qwen3-8B-4bit'

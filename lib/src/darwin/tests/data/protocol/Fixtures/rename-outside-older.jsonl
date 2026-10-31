@@ -1,0 +1,20 @@
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","document"],"schema":"2026-10-24","tools":true},"chat_id":"20261026-005345-bbb3","model":"plain","next_turn":1,"protocol_version":1,"type":"session"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"answer_start"}
+{"text":"The dev ","turn":1,"type":"answer_delta"}
+{"text":"server l","turn":1,"type":"answer_delta"}
+{"text":"istens o","turn":1,"type":"answer_delta"}
+{"text":"n port 8","turn":1,"type":"answer_delta"}
+{"text":"080.","turn":1,"type":"answer_delta"}
+{"turn":1,"type":"answer_end"}
+{"finish_reason":"stop","model":"plain","text":"The dev server listens on port 8080.","turn":1,"type":"result"}
+{"turn":2,"type":"thinking"}
+{"turn":2,"type":"answer_start"}
+{"text":"Nothing ","turn":2,"type":"answer_delta"}
+{"text":"else: th","turn":2,"type":"answer_delta"}
+{"text":"e launch","turn":2,"type":"answer_delta"}
+{"text":" is on 2","turn":2,"type":"answer_delta"}
+{"text":"026-11-1","turn":2,"type":"answer_delta"}
+{"text":"2.","turn":2,"type":"answer_delta"}
+{"turn":2,"type":"answer_end"}
+{"finish_reason":"stop","model":"plain","text":"Nothing else: the launch is on 2026-11-12.","turn":2,"type":"result"}

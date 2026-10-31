@@ -1,0 +1,8 @@
+will remove:
+  /Users/someone/.apogee/models/Gemma3-1B-Instruct/gguf/09f55af982ed
+
+backend 'Gemma3-1B-Instruct-Q4KM' points into this and will stop working until it is repointed.
+the backend entry stays unless you say -- --and-backends removes it with the weights.
+
+removed.
+kept backend 'Gemma3-1B-Instruct-Q4KM', which points at nothing now -- repoint it: apogee config set-backend Gemma3-1B-Instruct-Q4KM --model-path <file>; or remove it: apogee config delete-backend Gemma3-1B-Instruct-Q4KM

@@ -9,13 +9,17 @@
 #include <iterator>
 #include <random>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include "modelstore/snapshot.h"
+#include "support/draft_head_configs.h"
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
 #include "support/mlx_model.h"
+#include "support/voice_model.h"
+#include "support/wan_original.h"
 
 using apogee::harness::CancellationToken;
 using apogee::models::convert_snapshot;
@@ -427,6 +431,278 @@ TEST_CASE("every MLX refusal comes before the converter runs", "[models][convert
     CHECK(refusal(work.snapshot).starts_with("something already exists at "));
     CHECK(std::filesystem::exists(work.out / "x"));  // and it stays
     CHECK_FALSE(ran);
+}
+
+TEST_CASE("a draft head is refused by both ladders, whatever type it is converted as",
+          "[models][convert][mlx][draft_head]") {
+    // The user's Gemma4-12B-Assistant (2026-10-21): mlx-lm has no network for
+    // it -- even as `gemma4_unified`, building one stops at 'sliding_attention'
+    // -- and a GGUF of it is no backend, so neither ladder converts one.
+    const MlxWork work;
+    write_file(work.snapshot / "config.json",
+               R"({"architectures": ["Gemma4UnifiedAssistantForCausalLM"],
+                   "model_type": "gemma4_unified_assistant", "backbone_hidden_size": 3840})");
+    const std::string mlx = apogee::models::mlx_conversion_refusal(work.snapshot, work.out);
+    CHECK(mlx == work.snapshot.string() +
+                     " is a draft head (Gemma4UnifiedAssistantForCausalLM): speculative decoding "
+                     "runs it beside its base model (a 3840-wide gemma4 model), reading that "
+                     "model's hidden states, and never alone -- nothing converted from it could "
+                     "answer a chat; convert its base model instead");
+    CHECK(apogee::models::conversion_refusal(work.snapshot, work.root.path() / "out.gguf") == mlx);
+    // M15's override renames the type in a view; the weights stay a draft head.
+    const std::filesystem::path overlay = work.root.path() / "overlay";
+    REQUIRE(
+        apogee::models::stage_model_type_overlay(work.snapshot, overlay, "gemma4_unified").empty());
+    CHECK(apogee::models::mlx_conversion_refusal(overlay, work.out).find("is a draft head") !=
+          std::string::npos);
+}
+
+TEST_CASE(
+    "a draft head converts to MLX on the drafter's route alone; GGUF and every other route "
+    "refuse it as before",
+    "[models][convert][mlx][draft_head][drafter]") {
+    // 53i: the draft-heads change's refusal lifted for mlx-vlm's drafter, the
+    // route the command takes only where the installed mlx-vlm drafts it.
+    for (const apogee::testing::DraftHeadPair& pair : apogee::testing::kUserDraftHeads) {
+        INFO(pair.head_model);
+        const MlxWork work;
+        write_file(work.snapshot / "config.json", pair.head_config);
+        const std::string kept = apogee::models::mlx_conversion_refusal(work.snapshot, work.out);
+        CHECK(kept.find("is a draft head") != std::string::npos);
+        for (const std::string_view other : {"chat", "vision", "embedding"}) {
+            CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out, other) == kept);
+        }
+        CHECK(apogee::models::conversion_refusal(work.snapshot, work.root.path() / "out.gguf") ==
+              kept);
+        CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out, "drafter").empty());
+        // Converted, it is recorded a drafter -- what the route names it.
+        const apogee::models::MlxConvertResult made = apogee::models::convert_snapshot_to_mlx(
+            work.snapshot, work.out, 0, writes({.bits = 0, .model_type = "gemma4_assistant"}), {},
+            "drafter");
+        INFO(made.error);
+        REQUIRE(made.ok);
+        CHECK(made.kind == "drafter");
+    }
+    // The drafter's route takes a draft head alone.
+    const MlxWork plain;
+    CHECK(apogee::models::mlx_conversion_refusal(plain.snapshot, plain.out, "drafter")
+              .find("is no draft head: only a draft head converts to a drafter") !=
+          std::string::npos);
+}
+
+TEST_CASE("a diffusion model is refused by both ladders before any converter runs",
+          "[models][convert][mlx][diffusion]") {
+    // The user's Wan2.2-TI2V-5B (M20, 2026-10-21): its MLX conversion ran
+    // three seconds and failed in mlx-lm's own words -- the weights are a
+    // diffusers transformer, which neither converter takes. Since 53j the
+    // refusal says it is Wan's original layout, what it lacks and what runs
+    // it; with no record, no repository is named. Since 53k it names
+    // mlx-video's conversion -- this core asks no environment, so it says
+    // nothing of whether mlx-video is there.
+    const MlxWork work;
+    write_file(work.snapshot / "config.json", std::string{apogee::testing::kWanTi2vConfig});
+    const std::string mlx = apogee::models::mlx_conversion_refusal(work.snapshot, work.out);
+    CHECK(mlx == work.snapshot.string() +
+                     " is Wan's original layout (WanModel), missing "
+                     "models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth -- pulling its "
+                     "repository again with --safetensors fetches them into this set; once it "
+                     "is complete, mlx-video converts it to an MLX video model (--mlx); "
+                     "llama.cpp's converter takes no diffusion model -- it finds a model by its "
+                     "architectures; what runs this model in 'apogee video generate' is its "
+                     "Diffusers pipeline on PyTorch, pulled whole (a repository with "
+                     "model_index.json at its root), or its MLX conversion on MLX through "
+                     "mlx-video, once made");
+    CHECK(apogee::models::conversion_refusal(work.snapshot, work.root.path() / "out.gguf") == mlx);
+}
+
+TEST_CASE("the MLX ladder takes Wan's original layout on mlx-video's route, once it is whole",
+          "[models][convert][mlx][diffusion][mlx_video]") {
+    // 53k: the route's kind `video` -- named by a caller that has found
+    // mlx-video installed -- lifts M20's refusal for Wan's original layout,
+    // whole, and for nothing else; every other route keeps it.
+    const MlxWork work;
+    write_file(work.snapshot / "config.json", std::string{apogee::testing::kWanTi2vConfig});
+    // Not whole: refused on every route, the two files named.
+    const std::string missing = apogee::models::mlx_conversion_refusal(work.snapshot, work.out);
+    CHECK(missing.find("missing models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth") !=
+          std::string::npos);
+    CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out, "video") == missing);
+    // Whole: mlx-video's route alone takes it.
+    for (const std::string_view file :
+         {apogee::testing::kWanTextEncoder, apogee::testing::kWanVae}) {
+        write_file(work.snapshot / file, "fake checkpoint bytes\n");
+    }
+    CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out, "video").empty());
+    for (const std::string_view other : {"", "chat", "vision", "embedding"}) {
+        INFO(other);
+        CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out, other)
+                  .find("Wan's original layout (WanModel), complete") != std::string::npos);
+    }
+    CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out, "drafter")
+              .find("is no draft head") != std::string::npos);
+    CHECK(apogee::models::conversion_refusal(work.snapshot, work.root.path() / "out.gguf")
+              .find("llama.cpp's converter takes no diffusion model") != std::string::npos);
+    // And its route takes nothing else.
+    const MlxWork plain;
+    CHECK(apogee::models::mlx_conversion_refusal(plain.snapshot, plain.out, "video")
+              .find("is no Wan original layout: mlx-video's converter takes Wan's own "
+                    "transformer") != std::string::npos);
+
+    // Converted: read by mlx-video's layout, recorded `video`.
+    const auto video = [](bool vae) -> apogee::models::MlxConvertFn {
+        return [vae](const std::filesystem::path&, const std::filesystem::path& out,
+                     const CancellationToken&) {
+            write_file(out / "config.json",
+                       R"({"model_type": "ti2v", "dim": 3072,
+                           "quantization": {"group_size": 64, "bits": 4}})");
+            for (const char* name : {"model.safetensors", "t5_encoder.safetensors"}) {
+                write_file(out / name, apogee::testing::safetensors_bytes({{"w", 32}}));
+            }
+            if (vae) {
+                write_file(out / "vae.safetensors",
+                           apogee::testing::safetensors_bytes({{"w", 32}}));
+            }
+            return std::string{};
+        };
+    };
+    apogee::models::MlxConvertResult made = apogee::models::convert_snapshot_to_mlx(
+        work.snapshot, work.out, 4, video(true), CancellationToken{}, "video");
+    INFO(made.error);
+    REQUIRE(made.ok);
+    CHECK(made.kind == "video");
+    CHECK(made.info.video);
+    CHECK(made.info.complete);
+    CHECK(made.info.shards.size() == 3);
+    std::filesystem::remove_all(work.out);
+    // A converter that wrote less than the layout -- no VAE -- is never
+    // committed, and leaves nothing.
+    made = apogee::models::convert_snapshot_to_mlx(work.snapshot, work.out, 4, video(false),
+                                                   CancellationToken{}, "video");
+    CHECK_FALSE(made.ok);
+    CHECK(made.error ==
+          "the converter finished but its output is not a loadable MLX model -- cannot load: no "
+          "VAE (vae.safetensors) in " +
+              work.out.string());
+    CHECK_FALSE(std::filesystem::exists(work.out));
+}
+
+TEST_CASE("the MLX ladder takes a voice model on mlx-audio's route alone, read whole",
+          "[models][convert][mlx][voice][mlx_audio]") {
+    // 53m: a voice model as Kokoro publishes it is no snapshot -- every other
+    // route refuses it as one -- and mlx-audio's route, named by a caller that
+    // has found it installed, takes it whole and takes nothing else.
+    const MlxWork work;
+    const std::filesystem::path voice = work.root.path() / "kokoro";
+    apogee::testing::write_voice_model(voice);
+    CHECK(apogee::models::mlx_conversion_refusal(voice, work.out, "voice").empty());
+    for (const std::string_view other : {"", "chat", "vision", "video"}) {
+        INFO(other);
+        CHECK(apogee::models::mlx_conversion_refusal(voice, work.out, other)
+                  .find("is not a SafeTensors snapshot") != std::string::npos);
+    }
+    // Its route takes no snapshot.
+    CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out, "voice")
+              .find("is no whole voice model: mlx-audio's converter takes Kokoro's own layout") !=
+          std::string::npos);
+    // Never over something there.
+    std::filesystem::create_directories(work.out);
+    CHECK(apogee::models::mlx_conversion_refusal(voice, work.out, "voice") ==
+          "something already exists at " + work.out.string() + " -- delete it first");
+    std::filesystem::remove_all(work.out);
+
+    // Converted: read by mlx-audio's layout, recorded `voice`.
+    const auto audio = [](bool voices) -> apogee::models::MlxConvertFn {
+        return [voices](const std::filesystem::path&, const std::filesystem::path& out,
+                        const CancellationToken&) {
+            write_file(out / "config.json", R"({"model_type": "kokoro", "plbert": {}})");
+            write_file(out / "model.safetensors", apogee::testing::safetensors_bytes({{"w", 32}}));
+            if (voices) {
+                write_file(out / "voices" / "af_heart.safetensors",
+                           apogee::testing::safetensors_bytes({{"voice", 16}}));
+            }
+            return std::string{};
+        };
+    };
+    apogee::models::MlxConvertResult made = apogee::models::convert_snapshot_to_mlx(
+        voice, work.out, 0, audio(true), CancellationToken{}, "voice");
+    INFO(made.error);
+    REQUIRE(made.ok);
+    CHECK(made.kind == "voice");
+    CHECK(made.info.voice);
+    CHECK(made.info.complete);
+    std::filesystem::remove_all(work.out);
+    // A converter that wrote no voices is never committed, and leaves nothing.
+    made = apogee::models::convert_snapshot_to_mlx(voice, work.out, 0, audio(false),
+                                                   CancellationToken{}, "voice");
+    CHECK_FALSE(made.ok);
+    CHECK(made.error ==
+          "the converter finished but its output is not a loadable MLX model -- cannot load: no "
+          "voices (voices/*.safetensors) in " +
+              work.out.string());
+    CHECK_FALSE(std::filesystem::exists(work.out));
+    // A voice model cut short is refused before the converter runs.
+    std::filesystem::remove_all(voice / "voices");
+    bool ran = false;
+    made = apogee::models::convert_snapshot_to_mlx(
+        voice, work.out, 0,
+        [&ran](const std::filesystem::path&, const std::filesystem::path&,
+               const CancellationToken&) {
+            ran = true;
+            return std::string{};
+        },
+        CancellationToken{}, "voice");
+    CHECK_FALSE(made.ok);
+    CHECK(made.error.find("no voices (voices/*.pt)") != std::string::npos);
+    CHECK_FALSE(ran);
+}
+
+TEST_CASE("an embedding model is refused by the MLX ladder alone; its GGUF is the conversion",
+          "[models][convert][mlx][embedding]") {
+    // The user's Gemma-Embedding-300M (M21, 2026-10-21): mlx-lm's strict
+    // load refused it after starting, and no MLX build of it could embed.
+    const MlxWork work;
+    write_file(work.snapshot / "config.json",
+               R"({"architectures": ["Gemma3TextModel"], "model_type": "gemma3_text"})");
+    write_file(work.snapshot / "modules.json",
+               R"([{"idx": 0, "path": "", "type": "sentence_transformers.models.Transformer"},
+                   {"idx": 1, "path": "1_Pooling",
+                    "type": "sentence_transformers.models.Pooling"}])");
+    CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out) ==
+          work.snapshot.string() +
+              " is an embedding model (sentence-transformers: Transformer, Pooling): it converts "
+              "to a GGUF a llamacpp backend embeds with -- mlx-lm's converter builds language "
+              "models, and the mlx backend does not embed -- convert it without --mlx");
+    CHECK(apogee::models::conversion_refusal(work.snapshot, work.root.path() / "out.gguf").empty());
+}
+
+TEST_CASE("the MLX ladder lets an embedding model through for mlx-embeddings' route alone",
+          "[models][convert][mlx][embedding]") {
+    // 53h: the caller has found the installed mlx-embeddings builds the
+    // set's type, and its route's kind is `embedding`; every other route
+    // keeps M21's refusal, worded as it was.
+    const MlxWork work;
+    write_file(work.snapshot / "config.json",
+               R"({"architectures": ["Gemma3TextModel"], "model_type": "gemma3_text"})");
+    write_file(work.snapshot / "modules.json",
+               R"([{"idx": 0, "path": "", "type": "sentence_transformers.models.Transformer"},
+                   {"idx": 1, "path": "1_Pooling",
+                    "type": "sentence_transformers.models.Pooling"}])");
+    CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out, "embedding").empty());
+    for (const char* kind : {"chat", "vision", ""}) {
+        INFO(kind);
+        CHECK(apogee::models::mlx_conversion_refusal(work.snapshot, work.out, kind)
+                  .ends_with("and the mlx backend does not embed -- convert it without --mlx"));
+    }
+    // Converted through the route: committed as an embedding model.
+    const apogee::models::MlxConvertResult result = apogee::models::convert_snapshot_to_mlx(
+        work.snapshot, work.out, 8,
+        writes({.bits = 8, .model_type = "gemma3_text", .kind = "embedding"}), {}, "embedding");
+    INFO(result.error);
+    REQUIRE(result.ok);
+    CHECK(result.kind == "embedding");
+    // A language model is not the embedder's to let through: nothing to lift.
+    const MlxWork plain;
+    CHECK(apogee::models::mlx_conversion_refusal(plain.snapshot, plain.out, "embedding").empty());
 }
 
 TEST_CASE("the MLX size estimate follows the bits", "[models][convert][mlx]") {

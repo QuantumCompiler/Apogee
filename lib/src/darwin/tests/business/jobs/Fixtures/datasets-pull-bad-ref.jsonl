@@ -1,0 +1,2 @@
+{"protocol_version":1,"schema":"2026-10-26","type":"job","verb":"datasets pull"}
+{"message":"'nonsense' is not a Hugging Face dataset ref (expected owner/name)","type":"error"}

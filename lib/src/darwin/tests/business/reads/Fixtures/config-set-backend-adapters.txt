@@ -1,0 +1,1 @@
+edited backend 'based' in /Users/someone/.apogee/config/config.json: set adapters; adapters pinned to /Users/someone/.apogee/models/tiny/gguf/bbbbbbbbbbbb/tiny-F16.gguf (sha256 ce5065b7f3dc)

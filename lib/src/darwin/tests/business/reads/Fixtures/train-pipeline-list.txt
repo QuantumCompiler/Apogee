@@ -1,0 +1,3 @@
+NAME     STAGES  STUDENT
+nightly  1       tiny
+skills   2       tiny

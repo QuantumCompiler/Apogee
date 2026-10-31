@@ -7,6 +7,13 @@ namespace apogee::harness {
 NoAvailableBackendError::NoAvailableBackendError(std::string model, const std::string& message)
     : HarnessError(message), model_{std::move(model)} {}
 
+NoAvailableBackendError::NoAvailableBackendError(std::string model, const std::string& message,
+                                                 std::string skipped_backend, std::string reason)
+    : HarnessError(message),
+      model_{std::move(model)},
+      skipped_backend_{std::move(skipped_backend)},
+      reason_{std::move(reason)} {}
+
 ProviderNotRegisteredError::ProviderNotRegisteredError(std::string name)
     : HarnessError("no provider registered under '" + name + "'"), name_{std::move(name)} {}
 

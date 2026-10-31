@@ -43,7 +43,10 @@ struct GateRequest {
     /// outbound tool, a host.
     std::string_view target;
     /// Shown beside the target, never decided on: `fetch_url`'s whole URL,
-    /// so the person asked can see what would leave the machine in it.
+    /// so the person asked can see what would leave the machine in it;
+    /// `write_file`'s and `edit_file`'s change as a unified diff (52a),
+    /// worked out only for a person about to be asked, so a checker never
+    /// sees one.
     std::string_view detail{};
     /// The tool sends data off the machine (`Tool::outbound`). Its answers
     /// are per host rather than per tool: allowing one website is not
@@ -121,7 +124,9 @@ struct Tool {
     std::function<std::string(std::string_view arguments)> describe_target;
 
     /// More for the prompt to show than the target it is decided on -- the
-    /// URL beside the host. Optional.
+    /// URL beside the host, a file writer's diff (52a). Optional. Run only
+    /// when someone is about to be asked, from the arguments the call runs
+    /// with.
     std::function<std::string(std::string_view arguments)> describe_detail;
 
     /// A structural check of a call's arguments the tool can answer without

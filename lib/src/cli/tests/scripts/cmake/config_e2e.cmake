@@ -8,12 +8,31 @@
 # read values back, delete, and confirm the file returned to its initial bytes.
 # Everything lands under a throwaway APOGEE_HOME, so the suite stays hermetic.
 
+# One editor of the concurrent-edits section below, run as a process of its
+# own: `-DAPOGEE_ONE_EDIT=<name> -DAPOGEE_ONE_VERB=add|delete` adds or deletes
+# one backend and prints nothing on stdout -- execute_process runs a
+# pipeline's commands all at once, and an editor writing to a neighbour that
+# had already exited would be killed by the pipe.
+if(DEFINED APOGEE_ONE_EDIT)
+    if(APOGEE_ONE_VERB STREQUAL "add")
+        set(edit config add-backend "${APOGEE_ONE_EDIT}" --type mock --model m)
+    else()
+        set(edit config delete-backend "${APOGEE_ONE_EDIT}")
+    endif()
+    execute_process(COMMAND "${APOGEE_BIN}" ${edit}
+        RESULT_VARIABLE code OUTPUT_VARIABLE out ERROR_VARIABLE err)
+    if(NOT code EQUAL 0)
+        message(FATAL_ERROR "apogee ${edit}: exit ${code}\n${out}${err}")
+    endif()
+    return()
+endif()
+
 if(NOT DEFINED APOGEE_BIN OR NOT DEFINED APOGEE_WORK_DIR)
     message(FATAL_ERROR "APOGEE_BIN and APOGEE_WORK_DIR must be set")
 endif()
 
-file(REMOVE_RECURSE "${APOGEE_WORK_DIR}")
-file(MAKE_DIRECTORY "${APOGEE_WORK_DIR}")
+include("${CMAKE_CURRENT_LIST_DIR}/sandbox.cmake")
+apogee_sandbox_dir(APOGEE_WORK_DIR "${APOGEE_WORK_DIR}")
 
 set(CONFIG_FILE "${APOGEE_WORK_DIR}/config/config.json")
 
@@ -166,6 +185,13 @@ file(WRITE "${CONFIG_FILE}" "${PRISTINE}")
 # --- add-backend -----------------------------------------------------------
 apogee_run(0 config add-backend claude --type anthropic
            --api-key "\${ANTHROPIC_API_KEY}" --model claude-sonnet-5 --context-size 200000)
+# The template sets no default: the first entry that chats becomes it, said
+# as `providers scan --register` says it (M33, 28b's rule).
+if(NOT APOGEE_OUT MATCHES "\nmodels\\.default set to 'claude' \\(none was set\\)\n")
+    message(FATAL_ERROR "add-backend on a config with no default did not set it:\n${APOGEE_OUT}")
+endif()
+apogee_run(0 config get models.default)
+expect_equal("${APOGEE_OUT}" "claude" "the first entry is the default")
 
 apogee_run(0 config get backends)
 expect_equal("${APOGEE_OUT}" "claude" "the added backend is listed")
@@ -562,6 +588,10 @@ string(REPLACE "\"allowed_hosts\": []" "\"allowed_hosts\": [\"127.0.0.1\"]" EXPE
 if(NOT AFTER_ALWAYS STREQUAL EXPECTED_ALWAYS)
     message(FATAL_ERROR "`always` did not add exactly the host:\n${AFTER_ALWAYS}")
 endif()
+# Read back as the host verbs leave it, one per line (M33) -- before, `no such
+# config key`.
+apogee_run(0 config get tools.allowed_hosts)
+expect_equal("${APOGEE_OUT}" "127.0.0.1" "config get tools.allowed_hosts")
 
 # Listed now, so the same pipe run reaches it (and fails to connect, which is
 # the proof it was attempted rather than refused).
@@ -585,18 +615,191 @@ file(READ "${CONFIG_FILE}" AFTER_FORGET)
 if(NOT AFTER_FORGET STREQUAL BEFORE_ALWAYS)
     message(FATAL_ERROR "delete-allowed-host did not restore the bytes")
 endif()
+apogee_run(0 config get tools.allowed_hosts)
+expect_equal("${APOGEE_OUT}" "" "no allowed hosts once the last is deleted")
 apogee_run(1 config delete-allowed-host 127.0.0.1)
 apogee_run(1 config add-allowed-host https://example.com/)
 
-# --- delete restores the original bytes ------------------------------------
-# Rebuild from pristine so the role edits above do not muddy the comparison.
+# --- concurrent edits all land (55f) ---------------------------------------
+# Sixteen editors at once, each a process of its own, on the shipped template:
+# the lock beside the config makes them take turns, so every entry lands --
+# before it, each read the file before another wrote it and the last rename
+# won (the completeness pass's probe kept 6 of 16). Then all sixteen deleted
+# at once, and the file is its pristine bytes again.
+function(apogee_run_at_once verb)
+    set(editors "")
+    foreach(i RANGE 1 16)
+        list(APPEND editors COMMAND "${CMAKE_COMMAND}" "-DAPOGEE_BIN=${APOGEE_BIN}"
+             "-DAPOGEE_ONE_EDIT=b${i}" "-DAPOGEE_ONE_VERB=${verb}"
+             -P "${CMAKE_CURRENT_FUNCTION_LIST_FILE}")
+    endforeach()
+    execute_process(${editors} RESULTS_VARIABLE codes ERROR_VARIABLE err)
+    foreach(code IN LISTS codes)
+        if(NOT code STREQUAL "0")
+            message(FATAL_ERROR "16 editors at once (${verb}): exits ${codes}\n${err}")
+        endif()
+    endforeach()
+endfunction()
+
+# A default set first: since M33 the first add on a config with none makes
+# itself the default, and which of sixteen at once wins the lock is the race's
+# to say -- the bytes compared are the file with its default.
 file(WRITE "${CONFIG_FILE}" "${PRISTINE}")
+apogee_run(0 config add-backend base --type mock --model m)
+file(READ "${CONFIG_FILE}" BEFORE_CONCURRENT)
+apogee_run_at_once(add)
+apogee_run(0 config get backends)
+foreach(i RANGE 1 16)
+    if(NOT "\n${APOGEE_OUT}" MATCHES "\nb${i}\n")
+        message(FATAL_ERROR "16 concurrent add-backends: b${i} did not land:\n${APOGEE_OUT}")
+    endif()
+endforeach()
+apogee_run(0 config get models.default)
+expect_equal("${APOGEE_OUT}" "base" "sixteen adds left the default as it was")
+apogee_run_at_once(delete)
+file(READ "${CONFIG_FILE}" AFTER_CONCURRENT)
+if(NOT AFTER_CONCURRENT STREQUAL BEFORE_CONCURRENT)
+    message(FATAL_ERROR "16 concurrent adds then deletes did not restore the bytes:\n"
+                        "${AFTER_CONCURRENT}")
+endif()
+file(WRITE "${CONFIG_FILE}" "${PRISTINE}")
+if(NOT EXISTS "${CONFIG_FILE}.lock")
+    message(FATAL_ERROR "no lock file beside the config after the edits")
+endif()
+
+# A name both formats cannot edit is refused at add, naming the rule and the
+# way to an existing one (55f) -- before, add took it and set/delete then
+# could not find it.
+apogee_run(1 config add-backend "qwen@home" --type mock --model m)
+if(NOT APOGEE_ERR MATCHES "is not one both config formats can edit" OR
+   NOT APOGEE_ERR MATCHES "config rename-backend")
+    message(FATAL_ERROR "add-backend qwen@home was not refused by the rule:\n${APOGEE_ERR}")
+endif()
+file(READ "${CONFIG_FILE}" AFTER_REFUSAL)
+if(NOT AFTER_REFUSAL STREQUAL PRISTINE)
+    message(FATAL_ERROR "a refused add-backend changed the config")
+endif()
+
+# --- reads and validation catch up with the writes (55g) --------------------
+# `config get` reads every field `set-backend` writes -- the audit found eight
+# it could not -- and its completion offers what it reads.
+file(WRITE "${CONFIG_FILE}" [=[{
+  "backends": {
+    "api": {"type": "anthropic", "model": "claude-sonnet-5", "server_tools": ["web_search"]},
+    "m": {"type": "mlx", "model_path": "/models/base", "adapters": [{"path": "/adapters/a"}],
+          "draft": "/models/drafter", "draft_block_size": 4},
+    "sub": {"type": "claude-cli", "binary": "/usr/local/bin/claude", "mode": "subscription"},
+    "oll": {"type": "ollama-cli", "model": "m", "host": "127.0.0.1:11434"},
+    "loc": {"type": "llamacpp", "model_path": "/models/x.gguf", "idle_unload_seconds": 900}
+  }
+}
+]=])
+foreach(read IN ITEMS "api.server_tools|web_search" "m.adapters|/adapters/a"
+                      "m.draft|/models/drafter" "m.draft_block_size|4"
+                      "sub.binary|/usr/local/bin/claude" "sub.mode|subscription"
+                      "oll.host|127.0.0.1:11434" "loc.idle_unload_seconds|900")
+    string(REPLACE "|" ";" read "${read}")
+    list(GET read 0 key)
+    list(GET read 1 value)
+    apogee_run(0 config get backends.${key})
+    expect_equal("${APOGEE_OUT}" "${value}" "config get backends.${key}")
+endforeach()
+# (Called directly: a function's ARGN drops the empty word being completed.)
+execute_process(COMMAND "${APOGEE_BIN}" __complete config get ""
+    RESULT_VARIABLE complete_code OUTPUT_VARIABLE offered ERROR_VARIABLE complete_err)
+if(NOT complete_code EQUAL 0)
+    message(FATAL_ERROR "__complete config get: exit ${complete_code}\n${complete_err}")
+endif()
+foreach(key IN ITEMS memory.recall knowledge.auto_capture tools.search.provider tools.search.url
+                     tools.search.results backends.m.draft backends.api.server_tools)
+    string(REPLACE "." "\\." pattern "${key}")
+    if(NOT "\n${offered}" MATCHES "\n${pattern}[\t\n]")
+        message(FATAL_ERROR "config get's completion does not offer ${key}:\n${offered}")
+    endif()
+endforeach()
+
+# A typo'd backend key is a named check row with the key it meant, and the
+# entry still loads; a later set-backend leaves it where it is.
+file(WRITE "${CONFIG_FILE}" [=[{
+  "backends": {
+    "m": {"type": "mock", "model": "m", "adaptors": [{"path": "/a"}], "drafter": "/d"},
+    "api": {"type": "mock", "sever_tools": ["web_search"], "temprature": 0.2}
+  }
+}
+]=])
+apogee_run(0 config get backends.m.model)
+expect_equal("${APOGEE_OUT}" "m" "an entry with an unknown key still loads")
+apogee_run(0 check --output-format json)
+foreach(pair IN ITEMS "adaptors|adapters" "drafter|draft" "sever_tools|server_tools"
+                      "temprature|temperature")
+    string(REPLACE "|" ";" pair "${pair}")
+    list(GET pair 0 typo)
+    list(GET pair 1 meant)
+    if(NOT APOGEE_OUT MATCHES "\"detail\": *\"unknown key '${typo}' -- no backend reads it, so it does nothing; did you mean '${meant}'\\?\"")
+        message(FATAL_ERROR "check does not name the unknown key ${typo}:\n${APOGEE_OUT}")
+    endif()
+endforeach()
+apogee_run(0 config set-backend api --model claude-opus-5)
+file(READ "${CONFIG_FILE}" AFTER_TYPO_EDIT)
+if(NOT AFTER_TYPO_EDIT MATCHES "\"temprature\": 0.2")
+    message(FATAL_ERROR "set-backend dropped a key it does not know:\n${AFTER_TYPO_EDIT}")
+endif()
+
+# `config upgrade` brings a release's commented options to a file seeded
+# before it: the shipped template without 53i's draft block is behind by one
+# option, says so, and upgrades back to the template's bytes.
+set(DRAFT_OPENS "    // draft runs a drafter beside the model")
+set(DRAFT_CLOSES "    //   \"draft_block_size\": 4\n")
+string(FIND "${PRISTINE}" "${DRAFT_OPENS}" draft_begin)
+string(FIND "${PRISTINE}" "${DRAFT_CLOSES}" draft_end)
+if(draft_begin EQUAL -1 OR draft_end EQUAL -1)
+    message(FATAL_ERROR "the shipped template has no draft block to take out")
+endif()
+string(LENGTH "${DRAFT_CLOSES}" closes_length)
+math(EXPR draft_stop "${draft_end} + ${closes_length}")
+string(SUBSTRING "${PRISTINE}" 0 ${draft_begin} BEFORE_DRAFT)
+string(SUBSTRING "${PRISTINE}" ${draft_stop} -1 AFTER_DRAFT)
+file(WRITE "${CONFIG_FILE}" "${BEFORE_DRAFT}${AFTER_DRAFT}")
+apogee_run(0 check --output-format json)
+if(NOT APOGEE_OUT MATCHES "parses cleanly -- 1 option from this release's starter config not in the file")
+    message(FATAL_ERROR "check does not count the missing commented option:\n${APOGEE_OUT}")
+endif()
+apogee_run(0 config upgrade)
+if(NOT APOGEE_OUT MATCHES "added 1 option to" OR
+   NOT APOGEE_OUT MATCHES "\n  backends\\.\\*\\.draft, draft_block_size \\(mlx\\)\n")
+    message(FATAL_ERROR "config upgrade did not add the draft option:\n${APOGEE_OUT}")
+endif()
+file(READ "${CONFIG_FILE}" AFTER_UPGRADE)
+if(NOT AFTER_UPGRADE STREQUAL PRISTINE)
+    message(FATAL_ERROR "the upgraded file is not the shipped template:\n${AFTER_UPGRADE}")
+endif()
+apogee_run(0 config upgrade)
+if(NOT APOGEE_OUT MATCHES "is current")
+    message(FATAL_ERROR "a second upgrade was not a no-op:\n${APOGEE_OUT}")
+endif()
+
+# --- delete restores the original bytes ------------------------------------
+# Rebuild from pristine so the role edits above do not muddy the comparison --
+# with a default already set, since M33's first add on a config with none
+# also points models.default at itself, and the delete that clears it again
+# leaves the pointer written empty, not the line gone.
+file(WRITE "${CONFIG_FILE}" "${PRISTINE}")
+apogee_run(0 config add-backend base --type mock --model m)
+file(READ "${CONFIG_FILE}" BEFORE_ROUND_TRIP)
 apogee_run(0 config add-backend temp --type mock --model m)
 apogee_run(0 config delete-backend temp)
 file(READ "${CONFIG_FILE}" AFTER_ROUND_TRIP)
-if(NOT AFTER_ROUND_TRIP STREQUAL PRISTINE)
+if(NOT AFTER_ROUND_TRIP STREQUAL BEFORE_ROUND_TRIP)
     message(FATAL_ERROR "add-then-delete was not byte-identical")
 endif()
+# The entry the default names, deleted: the pointer is cleared with it and
+# said, so no role names an entry that is gone (M33).
+apogee_run(0 config delete-backend base)
+if(NOT APOGEE_OUT MATCHES "\nmodels\\.default cleared: it named 'base'\n")
+    message(FATAL_ERROR "deleting the default's entry did not clear it:\n${APOGEE_OUT}")
+endif()
+apogee_run(0 config get models.default)
+expect_equal("${APOGEE_OUT}" "" "models.default after its entry was deleted")
 
 file(REMOVE_RECURSE "${APOGEE_WORK_DIR}")
 message(STATUS "apogee config end-to-end: OK")

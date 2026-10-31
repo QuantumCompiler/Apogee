@@ -22,7 +22,9 @@ binary="$1"
 work="$2"
 stubs="$(cd "$(dirname "$0")/../../../completions" && pwd)"
 
-rm -rf "$work"
+. "$(dirname "$0")/sandbox.sh"
+work="$(sandbox_dir "$work")"
+trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/bin" "$work/home"
 ln -s "$binary" "$work/bin/apogee"
 export PATH="$work/bin:$PATH"
@@ -51,6 +53,12 @@ printf 'x' >"$gguf/111111111111/m-F16.gguf"
 printf 'x' >"$gguf/222222222222/m-Q4_K_M.gguf"
 apogee config add-backend m-f16 --type llamacpp --model-path "$gguf/111111111111/m-F16.gguf" \
     </dev/null >/dev/null
+# The last scan (M33): what `providers register` offers is read from the
+# provider cache, never a scan -- written here as a scan leaves it.
+mkdir -p "$APOGEE_HOME/cache"
+printf '%s' '{"schema":1,"scanned_at":"2026-10-26T12:00:00Z","providers":{"claude":{"type":"claude-cli","installed":true,"credentials":"found"},"codex":{"type":"codex-cli","installed":false}}}' \
+    >"$APOGEE_HOME/cache/providers.json"
+apogee config add-allowed-host docs.python.org </dev/null >/dev/null
 
 failures=0
 fail() {
@@ -71,6 +79,8 @@ expect() {
 cases=(
     "models||pull"
     "train|pipeline||resume"
+    # M30: the named specs' reads, offered the day they exist.
+    "train|pipeline||show"
     "config||add-graph"
     "kn||capture"
     "config|set-default||claude"
@@ -84,6 +94,8 @@ cases=(
     "complete|--rag||notes"
     "config|get|backends.cl|backends.claude"
     "datasets|synth|x|--kit||reasoning"
+    # 53b: a flag is offered the day it exists.
+    "train|promote|r1|--ad|--adapter"
     "models|pull|ll|llama3.2:3b"
     # Words a command validates itself, offered from the same list.
     "knowledge|query|q|--status||rejected"
@@ -94,6 +106,11 @@ cases=(
     "models|delete|m-|m-f16"
     "models|delete|org--m/gguf/2|org--m/gguf/222222222222"
     "config|add-backend||m-Q4_K_M"
+    # M33: the one-provider verb and what the last scan found to register,
+    # and the allowed hosts as a key config get reads.
+    "providers||register"
+    "providers|register||claude"
+    "config|get|tools.al|tools.allowed_hosts"
 )
 
 # ---- bash -------------------------------------------------------------------

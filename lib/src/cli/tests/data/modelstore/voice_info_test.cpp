@@ -106,3 +106,53 @@ TEST_CASE("every way a voice model cannot load is said, naming the piece",
               "save (no archive end record)");
     }
 }
+
+TEST_CASE("an MLX voice model reads its weights and voices as a voice model's",
+          "[models][voice][info][mlx_audio]") {
+    // 53m: mlx-audio's build of Kokoro, read for `voice say` as the original
+    // is -- its presets the voices it carries, by language.
+    const Dir dir;
+    apogee::testing::write_mlx_voice_model(dir.model,
+                                           {.voices = {"bm_george", "af_heart", "jf_alpha"}});
+    const VoiceInfo info = apogee::models::read_mlx_voice_info(dir.model);
+    INFO(info.problem);
+    CHECK(info.complete);
+    CHECK(info.config_read);
+    CHECK(info.checkpoint == "model.safetensors");
+    REQUIRE(info.voices.size() == 3);
+    CHECK(info.voices[0].name == "af_heart");
+    CHECK(info.voices[0].language == "American English");
+    CHECK(info.voices[2].language == "Japanese");
+    CHECK(info.has_voice("af_heart"));
+    CHECK_FALSE(info.has_voice("am_adam"));
+    CHECK(info.languages() ==
+          std::vector<std::string>{"American English", "British English", "Japanese"});
+    // Cut short, it is said as the MLX reader says it.
+    write_fixture_file(dir.model / "voices" / "af_heart.safetensors", "short");
+    const VoiceInfo cut = apogee::models::read_mlx_voice_info(dir.model);
+    CHECK_FALSE(cut.complete);
+    CHECK(cut.problem.find("voices/af_heart.safetensors is truncated") != std::string::npos);
+}
+
+TEST_CASE("a voice model converts to mlx exactly where it is whole and mlx-audio builds Kokoro",
+          "[models][voice][mlx_audio][conversions]") {
+    // 53m: M20's decision, one more answer -- never a GGUF.
+    const Dir dir;
+    write_voice_model(dir.model);
+    bool asked = false;
+    const auto installed = [&asked]() {
+        asked = true;
+        return true;
+    };
+    CHECK(apogee::models::voice_conversions(dir.model, installed) ==
+          std::vector<std::string>{"mlx"});
+    CHECK(asked);
+    // Without mlx-audio, or with nothing to ask: none.
+    CHECK(apogee::models::voice_conversions(dir.model, [] { return false; }).empty());
+    CHECK(apogee::models::voice_conversions(dir.model).empty());
+    // A model cut short converts to nothing, and mlx-audio is not asked.
+    std::filesystem::remove_all(dir.model / "voices");
+    asked = false;
+    CHECK(apogee::models::voice_conversions(dir.model, installed).empty());
+    CHECK_FALSE(asked);
+}

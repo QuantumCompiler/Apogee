@@ -1,0 +1,20 @@
+{
+ "data": [
+  {
+   "args": [
+    "/Users/someone/.apogee/training/scripts/code_exec_server.py"
+   ],
+   "command": "/opt/homebrew/bin/python3",
+   "enabled": true,
+   "env_set": false,
+   "name": "code",
+   "protocol_version": "2025-03-26",
+   "state": "connected",
+   "tools": [
+    "run_python",
+    "write_input"
+   ]
+  }
+ ],
+ "object": "list"
+}

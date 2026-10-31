@@ -1,0 +1,1 @@
+cycle resumed (was halted: circuit breaker: 1 consecutive failed cycle(s) reached circuit_breaker_k 1); the failure count is reset

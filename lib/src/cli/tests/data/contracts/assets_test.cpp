@@ -11,6 +11,8 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "contracts/config.h"
 #include "contracts/layout.h"
@@ -82,11 +84,12 @@ TEST_CASE("seeding writes absent files only: an edit survives a re-seed",
     REQUIRE(first.ok());
     // Fourteen agent files (40a), eight kits (42b), three training regimes
     // (42a, 42b), seven symphony starters (27q, 40b), three task recipes
-    // (40c), three training drivers, the two mlx drivers, the code-execution
-    // server (47b), the video and voice drivers (49b, 50a), seven review
-    // skills (48b), the vendored converter.
+    // (40c), three training drivers, the three mlx drivers (27a, 27b, 53h),
+    // the code-execution server (47b), the video, MLX video, voice and MLX
+    // voice drivers (49b, 53l, 50a, 53m), seven review skills (48b), the
+    // vendored converter.
     CHECK(first.created.size() == apogee::harness::bundled_files().size());
-    CHECK(first.created.size() == 14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + 2 + 7 + 1 +
+    CHECK(first.created.size() == 14 + 8 + 3 + 7 + 3 + 3 + 3 + 1 + 4 + 7 + 1 +
                                       apogee::harness::bundled_converter_files().size());
     for (const apogee::harness::BundledSymphony& starter : apogee::harness::bundled_symphonies()) {
         CHECK(read(root.path() / "symphonies" / (std::string{starter.name} + ".yaml")) ==
@@ -337,23 +340,27 @@ TEST_CASE("the compiled-in kits and scripts byte-match the shipped files",
     CHECK(apogee::harness::bundled_script_relative_path(script.name) ==
           "training/scripts/prepare_dataset.py");
     CHECK(apogee::harness::bundled_files().size() ==
-          14 + 8 + 3 + 7 + 3 + 3 + 2 + 1 + 2 + 7 + 1 +
+          14 + 8 + 3 + 7 + 3 + 3 + 3 + 1 + 4 + 7 + 1 +
               apogee::harness::bundled_converter_files().size());
 }
 
 TEST_CASE("the compiled-in mlx drivers byte-match the shipped files and seed beside the trainers",
           "[harness][assets][mlx]") {
-    // The mlx backend's driver (27a) and the converter's (27b), held to the
-    // training drivers' rule: the file is the source of truth, and the
-    // literal never drifts from it.
+    // The mlx backend's driver (27a), the converter's (27b) and the embedding
+    // backend's (53h), held to the training drivers' rule: the file is the
+    // source of truth, and the literal never drifts from it.
     const std::filesystem::path assets{APOGEE_ASSETS_DIR};
-    REQUIRE(apogee::harness::bundled_mlx_scripts().size() == 2);
+    REQUIRE(apogee::harness::bundled_mlx_scripts().size() == 3);
     const apogee::harness::BundledScript& converter = apogee::harness::bundled_mlx_scripts()[0];
     CHECK(converter.name == "mlx_convert.py");
     CHECK(read(assets / "mlx" / "mlx_convert.py") == converter.text);
     CHECK(apogee::harness::bundled_mlx_converter_relative_path() ==
           "training/scripts/mlx_convert.py");
-    const apogee::harness::BundledScript& driver = apogee::harness::bundled_mlx_scripts()[1];
+    const apogee::harness::BundledScript& embedder = apogee::harness::bundled_mlx_scripts()[1];
+    CHECK(embedder.name == "mlx_embed.py");
+    CHECK(read(assets / "mlx" / "mlx_embed.py") == embedder.text);
+    CHECK(apogee::harness::bundled_mlx_embedder_relative_path() == "training/scripts/mlx_embed.py");
+    const apogee::harness::BundledScript& driver = apogee::harness::bundled_mlx_scripts()[2];
     CHECK(driver.name == "mlx_generate.py");
     CHECK(read(assets / "mlx" / "mlx_generate.py") == driver.text);
     CHECK(apogee::harness::bundled_mlx_driver_relative_path() ==
@@ -441,12 +448,24 @@ TEST_CASE("the compiled-in video driver byte-matches the shipped file and seeds 
     // 49b: the drivers' rule -- the file is the source of truth, the literal
     // never drifts from it, and the seeded copy is the user's once edited.
     const std::filesystem::path assets{APOGEE_ASSETS_DIR};
-    REQUIRE(apogee::harness::bundled_video_scripts().size() == 2);
+    REQUIRE(apogee::harness::bundled_video_scripts().size() == 4);
     // The speech driver (50a) beside it, held to its file the same way.
-    const apogee::harness::BundledScript& voice = apogee::harness::bundled_video_scripts()[1];
+    const apogee::harness::BundledScript& voice = apogee::harness::bundled_video_scripts()[2];
     CHECK(voice.name == "voice_say.py");
     CHECK(read(assets / "video" / "voice_say.py") == voice.text);
     CHECK(apogee::harness::bundled_voice_driver_relative_path() == "training/scripts/voice_say.py");
+    // The MLX engine's speech driver (53m), held to its file the same way.
+    const apogee::harness::BundledScript& voice_mlx = apogee::harness::bundled_video_scripts()[3];
+    CHECK(voice_mlx.name == "voice_say_mlx.py");
+    CHECK(read(assets / "video" / "voice_say_mlx.py") == voice_mlx.text);
+    CHECK(apogee::harness::bundled_voice_mlx_driver_relative_path() ==
+          "training/scripts/voice_say_mlx.py");
+    // The MLX engine's driver (53l), held to its file the same way.
+    const apogee::harness::BundledScript& mlx = apogee::harness::bundled_video_scripts()[1];
+    CHECK(mlx.name == "video_generate_mlx.py");
+    CHECK(read(assets / "video" / "video_generate_mlx.py") == mlx.text);
+    CHECK(apogee::harness::bundled_video_mlx_driver_relative_path() ==
+          "training/scripts/video_generate_mlx.py");
     const apogee::harness::BundledScript& driver = apogee::harness::bundled_video_scripts()[0];
     CHECK(driver.name == "video_generate.py");
     CHECK(read(assets / "video" / "video_generate.py") == driver.text);
@@ -460,6 +479,16 @@ TEST_CASE("the compiled-in video driver byte-matches the shipped file and seeds 
     REQUIRE(std::filesystem::exists(seeded));
     CHECK(read(seeded) == driver.text);
     CHECK(apogee::harness::inspect_seeded_script(root.path(), "video_generate.py") ==
+          apogee::harness::SeededScript::Current);
+    const std::filesystem::path seeded_mlx =
+        root.path() / apogee::harness::bundled_video_mlx_driver_relative_path();
+    CHECK(read(seeded_mlx) == mlx.text);
+    CHECK(apogee::harness::inspect_seeded_script(root.path(), "video_generate_mlx.py") ==
+          apogee::harness::SeededScript::Current);
+    const std::filesystem::path seeded_voice_mlx =
+        root.path() / apogee::harness::bundled_voice_mlx_driver_relative_path();
+    CHECK(read(seeded_voice_mlx) == voice_mlx.text);
+    CHECK(apogee::harness::inspect_seeded_script(root.path(), "voice_say_mlx.py") ==
           apogee::harness::SeededScript::Current);
     std::ofstream{seeded, std::ios::binary} << "# my edit\n";
     CHECK(apogee::harness::inspect_seeded_script(root.path(), "video_generate.py") ==
@@ -486,6 +515,7 @@ TEST_CASE("the compiled-in converter byte-matches the vendored llama.cpp tree, f
     }
     CHECK(on_disk == files.size());
     bool entry_seen = false;
+    bool lora_seen = false;
     bool package_seen = false;
     bool gguf_seen = false;
     bool template_seen = false;
@@ -497,6 +527,8 @@ TEST_CASE("the compiled-in converter byte-matches the vendored llama.cpp tree, f
         CHECK(apogee::harness::bundled_script_relative_path(file.name) ==
               "training/scripts/" + std::string{file.name});
         entry_seen = entry_seen || file.name == "convert/convert_hf_to_gguf.py";
+        // Its sibling (53b): `train promote --adapter`'s PEFT -> GGUF LoRA.
+        lora_seen = lora_seen || file.name == "convert/convert_lora_to_gguf.py";
         package_seen = package_seen || file.name == "convert/conversion/__init__.py";
         // Where the script's own `sys.path` tweak looks, so the pinned copy
         // shadows the PyPI one (which lags the pin at the same version).
@@ -505,6 +537,7 @@ TEST_CASE("the compiled-in converter byte-matches the vendored llama.cpp tree, f
             template_seen || file.name == "convert/models/templates/llama-cpp-rwkv-world.jinja";
     }
     CHECK(entry_seen);
+    CHECK(lora_seen);
     CHECK(package_seen);
     CHECK(gguf_seen);
     CHECK(template_seen);
@@ -537,6 +570,42 @@ TEST_CASE(
     CHECK_FALSE(apogee::harness::is_unmodified_bundled_asset(root.path(), kits));
     CHECK_FALSE(apogee::harness::is_unmodified_bundled_asset(root.path(), kits / "reasoning.yaml"));
     CHECK(apogee::harness::is_unmodified_bundled_asset(root.path(), kits / "summarization.yaml"));
+}
+
+TEST_CASE(
+    "the LoRA converter is seeded beside its sibling byte for byte, counted in the tree, and "
+    "brought up to date as the tree is",
+    "[harness][assets][converter][adapter]") {
+    // 53b: the vendored `convert_lora_to_gguf.py` is not a second tree -- it
+    // seeds, inspects and refreshes as one more file of the converter's.
+    const apogee::testing::TempDir root{"assets-lora-" + std::to_string(std::random_device{}())};
+    REQUIRE(apogee::harness::seed_data_directory(root.path()).ok());
+    const std::filesystem::path tree =
+        root.path() / apogee::harness::bundled_converter_relative_dir();
+    const std::filesystem::path seeded = tree / "convert_lora_to_gguf.py";
+    const std::filesystem::path vendored = std::filesystem::path{APOGEE_THIRD_PARTY_DIR} /
+                                           "llama.cpp-convert" / "convert_lora_to_gguf.py";
+    REQUIRE(std::filesystem::is_regular_file(seeded));
+    CHECK(read(seeded) == read(vendored));
+    // It imports what its sibling does, from beside it.
+    CHECK(read(seeded).find("from conversion import") != std::string::npos);
+    CHECK(read(seeded).find("Path(__file__).parent / 'gguf-py'") != std::string::npos);
+    CHECK(apogee::harness::inspect_converter_tree(tree).current());
+
+    // An earlier copy, recorded as retired, is this build's again after the
+    // refresh; the same bytes unrecorded are the user's edit, and kept.
+    std::ofstream{seeded, std::ios::binary} << "# an older pin's lora converter\n";
+    const std::string entry = "convert/convert_lora_to_gguf.py " +
+                              apogee::models::sha256_hex("# an older pin's lora converter\n");
+    const std::vector<std::string_view> list{entry};
+    CHECK(apogee::harness::inspect_converter_tree(tree, list).stale == 1);
+    CHECK(apogee::harness::inspect_converter_tree(tree, {}).edited == 1);
+    apogee::harness::AssetSeedResult result;
+    apogee::harness::refresh_converter_tree(root.path(), tree, result, list);
+    REQUIRE(result.ok());
+    CHECK(result.updated ==
+          std::vector<std::string>{"training/scripts/convert/convert_lora_to_gguf.py"});
+    CHECK(read(seeded) == read(vendored));
 }
 
 TEST_CASE("an earlier Apogee's converter is brought up to this build's; an edit is kept",
@@ -786,10 +855,12 @@ TEST_CASE("the compiled-in driver list names earlier versions, never this build'
     }
     std::ranges::sort(recorded);
     CHECK(std::vector<std::string>{retired.begin(), retired.end()} == recorded);
-    // Every version an earlier Apogee seeded: 27a's driver, and v0.1.0's
-    // trainers and preparer before their 2026-10-04 edits.
+    // Every version an earlier Apogee seeded: 27a's driver, v0.1.0's
+    // trainers and preparer before their 2026-10-04 edits, and the MLX
+    // converter before its mlx-vlm route (53f).
     for (const std::string_view earlier :
          {"mlx_generate.py 4676e348595cdbfdb4a23191f7b008e718c29b097da45b5f563c75091e8c2335",
+          "mlx_convert.py 26e95774b422a532805992082bf019fefd3ba305ba449eaf304a47ad1799ef41",
           "prepare_dataset.py 868db898b9bb043399a4f57b2ee5f1ad4bf6e614022b0d0249f1b118ec0de41f",
           "train_mlx.py 7f5b206c455094c5d63b72dd804f9ba49a0647d84cf87b723be6192db4ddc478",
           "train_peft.py 8663c7508fb6630ed0d63bbbb856c55ca817196e05178ea71a1621d77199f508"}) {

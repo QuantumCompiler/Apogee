@@ -27,7 +27,7 @@ constexpr std::array<FieldSpec, 5> kCapabilities{{
     {"schema", "string", true, "The vocabulary's version, a date.", {}, {}},
 }};
 
-constexpr std::array<FieldSpec, 4> kSession{{
+constexpr std::array<FieldSpec, 8> kSession{{
     {"protocol_version",
      "integer",
      true,
@@ -40,6 +40,31 @@ constexpr std::array<FieldSpec, 4> kSession{{
      "integer",
      false,
      "A session of user lines: the number its next turn will carry.",
+     {},
+     {}},
+    {"private",
+     "boolean",
+     false,
+     "true for chat --private: nothing of the session is ever written.",
+     {},
+     {}},
+    {"chat_id",
+     "string",
+     false,
+     "The chat this session writes, as chats list, chats show and --resume name it; absent when "
+     "it writes none (chat --private).",
+     {},
+     {}},
+    {"suite",
+     "string",
+     false,
+     "The suite the session runs under, fresh or resumed; absent when it runs under none.",
+     {},
+     {}},
+    {"orchestrating",
+     "boolean",
+     false,
+     "An execute session's: whether its root model may play the symphonies on its own.",
      {},
      {}},
 }};
@@ -57,9 +82,39 @@ constexpr std::array<FieldSpec, 1> kText{{
     {"text", "string", true, "The text, to concatenate or display as it arrives.", {}, {}},
 }};
 
-constexpr std::array<FieldSpec, 2> kMemory{{
+constexpr std::array<FieldSpec, 3> kRecalledChat{{
+    {"id", "string", true, "The chat's id, as chats list and --resume take it.", {}, {}},
+    {"name", "string", true, "Its title when it was summarised; empty when it had none.", {}, {}},
+    {"updated", "string", true, "When it was last updated before that, ISO 8601.", {}, {}},
+}};
+
+constexpr std::array<FieldSpec, 3> kMemory{{
     {"chats", "integer", true, "Past chats' summaries recalled for this turn.", {}, {}},
     {"decisions", "integer", true, "Knowledge records recalled for this turn.", {}, {}},
+    {"sessions",
+     "array",
+     false,
+     "Each past chat recalled, in the order sent; absent when chats is 0.",
+     kRecalledChat,
+     {}},
+}};
+
+constexpr std::array<FieldSpec, 6> kSource{{
+    {"file", "string", true, "The file as its index names it.", {}, {}},
+    {"pages", "array", false, "First and last page, when the excerpt records them.", {}, "integer"},
+    {"lines", "array", false, "First and last line, when the excerpt records them.", {}, "integer"},
+    {"times", "array", false, "A recording's span, in seconds.", {}, "number"},
+    {"score", "number", true, "Its score, on its retriever's scale.", {}, {}},
+    {"retriever",
+     "string",
+     true,
+     "lexical, vector or hybrid: the scale the score is on; scales do not compare.",
+     {},
+     {}},
+}};
+
+constexpr std::array<FieldSpec, 1> kSources{{
+    {"sources", "array", true, "Each excerpt sent, in the order sent.", kSource, {}},
 }};
 
 constexpr std::array<FieldSpec, 2> kTodoItem{{
@@ -123,7 +178,13 @@ constexpr std::array<FieldSpec, 6> kQuestion{{
     {"tool", "string", false, "A permission question: the tool asking.", {}, {}},
     {"target", "string", false, "A permission question: its path, command or host.", {}, {}},
     {"outbound", "boolean", false, "A permission question about data leaving the machine.", {}, {}},
-    {"detail", "string", false, "An outbound question: the whole URL.", {}, {}},
+    {"detail",
+     "string",
+     false,
+     "An outbound question: the whole URL. A write_file or edit_file question: the change as "
+     "a unified diff, cut at 32 KB with a last line saying so.",
+     {},
+     {}},
 }};
 
 constexpr std::array<FieldSpec, 1> kError{{
@@ -169,6 +230,136 @@ constexpr std::array<FieldSpec, 5> kTaskFinished{{
     {"transition", "object", true, "The transition, as the ledger wrote it.", {}, {}},
 }};
 
+// A long job's events (52b).
+
+constexpr std::array<FieldSpec, 3> kJob{{
+    {"verb", "string", true, "The verb running: models pull, video generate, ...", {}, {}},
+    {"protocol_version", "integer", true, "As the session event's.", {}, {}},
+    {"schema", "string", true, "The vocabulary's version, a date.", {}, {}},
+}};
+
+constexpr std::array<FieldSpec, 7> kStage{{
+    {"index", "integer", true, "Which step of the chain -- a pipeline's stage -- from 1.", {}, {}},
+    {"count", "integer", true, "How many steps the chain has.", {}, {}},
+    {"label",
+     "string",
+     true,
+     "The step, in the chain's words: a pipeline's, the stage's name.",
+     {},
+     {}},
+    {"state",
+     "string",
+     true,
+     "started, done or failed; a pipeline's stage, its manifest's word -- pending, training, "
+     "evaluating, fusing, passed, failed.",
+     {},
+     {}},
+    {"pipeline_run_id", "string", false, "A pipeline's stage: the pipeline run.", {}, {}},
+    {"run_id",
+     "string",
+     false,
+     "A pipeline's stage: its own run, once it has one -- what train eval and train promote take.",
+     {},
+     {}},
+    {"cumulative_score",
+     "number",
+     false,
+     "A pipeline's stage: its cumulative gate's score, 0 to 1, once the gate has scored it.",
+     {},
+     {}},
+}};
+
+constexpr std::array<FieldSpec, 5> kBytes{{
+    {"done", "integer", true, "Bytes moved so far.", {}, {}},
+    {"total", "integer", false, "Bytes in all; absent when unknown, never guessed.", {}, {}},
+    {"file", "string", false, "In a tree of files: the one moving.", {}, {}},
+    {"index", "integer", false, "Its place in the tree, from 1.", {}, {}},
+    {"count", "integer", false, "Files in the tree.", {}, {}},
+}};
+
+constexpr FieldSpec kScene{
+    "scene", "integer", false, "In a composition: the scene this belongs to, from 1.", {}, {}};
+
+constexpr std::array<FieldSpec, 5> kReady{{
+    {"device", "string", true, "Where the runtime runs: cuda, mps, cpu.", {}, {}},
+    {"dtype", "string", false, "The precision it loaded in, when the driver says.", {}, {}},
+    {"mode", "string", false, "A clip's: t2v or i2v.", {}, {}},
+    {"engine", "string", false, "The engine the run takes: torch or mlx.", {}, {}},
+    kScene,
+}};
+
+constexpr std::array<FieldSpec, 3> kStep{{
+    {"step", "integer", true, "Denoising steps done.", {}, {}},
+    {"steps", "integer", true, "Steps in all.", {}, {}},
+    kScene,
+}};
+
+constexpr std::array<FieldSpec, 4> kFrames{{
+    {"frames", "integer", true, "Frames written.", {}, {}},
+    {"width", "integer", true, "Their width, in pixels.", {}, {}},
+    {"height", "integer", true, "Their height, in pixels.", {}, {}},
+    kScene,
+}};
+
+constexpr std::array<FieldSpec, 2> kAssembling{{
+    {"frames", "integer", true, "Frames going into the clip.", {}, {}},
+    kScene,
+}};
+
+constexpr std::array<FieldSpec, 4> kSegment{{
+    {"index", "integer", true, "Which segment of speech, from 1.", {}, {}},
+    {"of", "integer", true, "Segments in all.", {}, {}},
+    {"seconds", "number", true, "Its length, as the driver counted.", {}, {}},
+    kScene,
+}};
+
+constexpr std::array<FieldSpec, 3> kSceneEvent{{
+    {"scene", "integer", true, "The scene, from 1.", {}, {}},
+    {"scenes", "integer", true, "Scenes in the composition.", {}, {}},
+    {"state",
+     "string",
+     true,
+     "speaking (its narration), rendering (its clip) or asset (its asset taken as it is).",
+     {},
+     {}},
+}};
+
+// A pipeline's and a cycle pass's (55h).
+
+constexpr std::array<FieldSpec, 6> kIteration{{
+    {"iteration", "integer", true, "Training iterations done.", {}, {}},
+    {"iterations",
+     "integer",
+     false,
+     "Iterations in all; absent when the trainer did not say.",
+     {},
+     {}},
+    {"loss", "number", true, "The training loss the trainer reported.", {}, {}},
+    {"lr", "number", true, "The learning rate it reported.", {}, {}},
+    {"throughput", "number", true, "Iterations a second, as it reported.", {}, {}},
+    {"stage", "integer", false, "In a pipeline: the stage this belongs to, from 1.", {}, {}},
+}};
+
+constexpr std::array<FieldSpec, 2> kPass{{
+    {"state",
+     "string",
+     true,
+     "Where the pass is: collecting, merging, training, gating, promoting -- or how it ended: "
+     "skipped, failed, halted (the circuit breaker tripped on it), passed.",
+     {},
+     {}},
+    {"text", "string", true, "The line, as the terminal says it.", {}, {}},
+}};
+
+constexpr std::array<FieldSpec, 1> kDocument{{
+    {"document",
+     "object",
+     true,
+     "The verb's own document, whole: what --output-format json prints.",
+     {},
+     {}},
+}};
+
 // Inbound lines.
 
 constexpr std::array<FieldSpec, 1> kUserLine{{
@@ -199,9 +390,31 @@ constexpr std::array<FieldSpec, 2> kHelloLine{{
      "string"},
 }};
 
+constexpr std::array<FieldSpec, 1> kDetachLine{{
+    {"path", "string", true, "The attachment to detach, by the name it was attached as.", {}, {}},
+}};
+
+constexpr std::array<FieldSpec, 5> kSetLine{{
+    {"model",
+     "string",
+     false,
+     "A backend, a roster model, or backend:model, as /model takes it.",
+     {},
+     {}},
+    {"system", "string", false, "The system prompt, replaced whole, as /system takes it.", {}, {}},
+    {"think", "string", false, "on, off or auto, as /think takes it.", {}, {}},
+    {"effort", "string", false, "An effort level or auto, as /effort takes it.", {}, {}},
+    {"temperature",
+     "number|string",
+     false,
+     "The sampling temperature, as /temperature takes it.",
+     {},
+     {}},
+}};
+
 // --- the lines -----------------------------------------------------------------
 
-constexpr std::array<LineSpec, 18> kOutbound{{
+constexpr std::array<LineSpec, 31> kOutbound{{
     LineSpec{"session",
              "Once, first, unprompted: the protocol version, the model, the session's "
              "capabilities.",
@@ -210,6 +423,7 @@ constexpr std::array<LineSpec, 18> kOutbound{{
              kThinking},
     LineSpec{"thinking_delta", "A chunk of reasoning -- droppable.", kText},
     LineSpec{"memory", "What a turn was handed from earlier conversations.", kMemory},
+    LineSpec{"sources", "The excerpts retrieval sent the model, before the answer.", kSources},
     LineSpec{"tool_status", "A tool running, or another model call the turn makes.", kText},
     LineSpec{"notice", "A line for the user that is neither progress nor an error.", kText},
     LineSpec{"todo", "The session's todo, whole, as the model last wrote it.", kTodo},
@@ -224,14 +438,33 @@ constexpr std::array<LineSpec, 18> kOutbound{{
     LineSpec{"task_round", "A task's round started or ended.", kTaskRound},
     LineSpec{"task_grant", "A call a task's grant let through.", kTaskGrant},
     LineSpec{"task_finished", "A task ended.", kTaskFinished},
+    LineSpec{"job", "A long job's first event: the verb and the versions.", kJob},
+    LineSpec{"stage", "A step of a job's chain -- a pipeline's stage, as its manifest records it.",
+             kStage},
+    LineSpec{"bytes", "Bytes a job has moved, and of how many when known.", kBytes},
+    LineSpec{"ready", "A job's runtime loaded, and on what.", kReady},
+    LineSpec{"step", "A denoising step done.", kStep},
+    LineSpec{"frames", "A clip's frames written.", kFrames},
+    LineSpec{"assembling", "A clip's frames going into it.", kAssembling},
+    LineSpec{"segment", "A segment of speech made.", kSegment},
+    LineSpec{"scene", "A composition's scene begun: speaking, rendering or its asset.",
+             kSceneEvent},
+    LineSpec{"iteration", "A training iteration done, as the trainer reported it.", kIteration},
+    LineSpec{"pass", "A line of a cycle pass's narration, with where the pass is.", kPass},
+    LineSpec{"document", "A job's last event: the verb's own document.", kDocument},
 }};
 
-constexpr std::array<LineSpec, 5> kInbound{{
+constexpr std::array<LineSpec, 8> kInbound{{
     LineSpec{"user", "A user turn.", kUserLine},
     LineSpec{"answer", "An answer to a pending question.", kAnswerLine},
     LineSpec{"attach", "Something to attach to the chat.", kAttachLine},
     LineSpec{"hello", "An optional first line: who is driving.", kHelloLine},
     LineSpec{"cancel", "Stop the turn in flight, as Ctrl-C would.", {}},
+    LineSpec{"detach", "Detach an attachment, as /detach does.", kDetachLine},
+    LineSpec{"set",
+             "Move the session's run settings from the next turn, as their slash commands do.",
+             kSetLine},
+    LineSpec{"compact", "Compact the conversation's history now, as /compact does.", {}},
 }};
 
 template <std::size_t N>

@@ -179,7 +179,7 @@ ROOT<hi>
 {"type":"nonsense"}
 --- exit 0
 --- stdout
-{"capabilities":{"accepts":["user","answer","attach","hello","cancel"],"ask":false,"events":["session","thinking","thinking_delta","memory","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished"],"schema":"2026-10-13","tools":false},"model":"root","next_turn":1,"protocol_version":1,"type":"session"}
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":false,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-10-26","tools":false},"chat_id":"<chat-id>","model":"root","next_turn":1,"protocol_version":1,"type":"session"}
 {"turn":1,"type":"thinking"}
 {"turn":1,"type":"answer_start"}
 {"text":"ROOT<hel","turn":1,"type":"answer_delta"}
@@ -201,14 +201,14 @@ ROOT<hi>
 {"type":"user","text":"hi"}
 --- exit 0
 --- stdout
-{"capabilities":{"accepts":["user","answer","attach","hello","cancel"],"ask":false,"events":["session","thinking","thinking_delta","memory","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished"],"schema":"2026-10-13","tools":false},"model":"root","next_turn":1,"protocol_version":1,"type":"session"}
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":false,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-10-26","tools":false},"chat_id":"<chat-id>","model":"root","next_turn":1,"protocol_version":1,"suite":"duo","type":"session"}
+{"text":"suite duo: no member holds memory on this machine","type":"notice"}
 {"turn":1,"type":"thinking"}
 {"turn":1,"type":"answer_start"}
 {"text":"ROOT<hi>","turn":1,"type":"answer_delta"}
 {"turn":1,"type":"answer_end"}
 {"finish_reason":"stop","model":"root","text":"ROOT<hi>","turn":1,"type":"result"}
 --- stderr
-[apogee] suite duo: no member holds memory on this machine
 === apogee chat --suite nope
 --- stdin
 hi
@@ -303,6 +303,7 @@ Options:
   -n,--max-tokens INT         Maximum tokens per reply
   --think TEXT:{on,off,auto}  Whether a reasoning model thinks first: on, off, or auto (per question)
   --no-recall                 Recall no earlier chats in this run
+  --private                   Write nothing of this chat: no transcript, no recall, its attachments indexed in a place gone with the run
   --allow TOOL                Allow a tool for this chat without asking (repeatable, with --tools)
   --deny TOOL                 Refuse a tool or website for this chat without asking (repeatable)
   --allow-host TEXT           Allow fetching from a website for this chat without asking (repeatable)
@@ -360,6 +361,7 @@ Options:
 --no-recall
 --output-format
 --permission-mode
+--private
 --quiet
 --rag
 --rag-limit

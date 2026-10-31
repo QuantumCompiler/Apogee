@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Apogee session · streaming</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:inherit}
+.t-dark{--surface-window:#131415;--surface-sidebar:#0E0F10;--surface-inspector:#161719;--surface-card:#18191B;--surface-control:#222326;--surface-selection:#25282B;--surface-code:#0F1011;--line-border:#2A2C2F;--line-strong:#3B3E42;--text-primary:#E7E5E0;--text-secondary:#ABA8A0;--text-tertiary:#938F86;--status-accent:#7FD4C1;--status-warning:#E9A23B;--status-error:#F2836F;--model-local:#7FD4C1;--model-api:#E9A23B;--model-subscription:#A7B1F8;--code-keyword:#C3A6F0;--code-string:#A5D68E;--code-comment:#8C887F;--code-number:#E5B567;--code-function:#8EC3F0;color-scheme:dark}
+.t-light{--surface-window:#F7F7F5;--surface-sidebar:#EEEEEA;--surface-inspector:#F1F1EE;--surface-card:#FFFFFF;--surface-control:#ECECE8;--surface-selection:#E1E4E1;--surface-code:#F3F3F0;--line-border:#DDDDD7;--line-strong:#C6C6BF;--text-primary:#1B1C1D;--text-secondary:#4B4C4E;--text-tertiary:#5F6062;--status-accent:#0B7A68;--status-warning:#9F5600;--status-error:#B3261E;--model-local:#0B7A68;--model-api:#9F5600;--model-subscription:#4450C4;--code-keyword:#7A3FC0;--code-string:#2F7A1F;--code-comment:#67686A;--code-number:#8F5A00;--code-function:#1F5FA8;color-scheme:light}
+.t-contrast{--surface-window:#000000;--surface-sidebar:#0A0A0A;--surface-inspector:#0A0A0A;--surface-card:#111111;--surface-control:#1E1E1E;--surface-selection:#2A2A2A;--surface-code:#0A0A0A;--line-border:#5A5A5A;--line-strong:#8A8A8A;--text-primary:#FFFFFF;--text-secondary:#D6D6D6;--text-tertiary:#B5B5B5;--status-accent:#5EF0D2;--status-warning:#FFC04D;--status-error:#FF8A7A;--model-local:#5EF0D2;--model-api:#FFC04D;--model-subscription:#B9C2FF;--code-keyword:#D8B9FF;--code-string:#B8F0A0;--code-comment:#B5B5B5;--code-number:#FFC04D;--code-function:#9ED4FF;color-scheme:dark}
+.ap .i{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
+.ap .mono{font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace}
+.ap code{font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:.86em;padding:1px 5px;border-radius:4px;background:var(--surface-control);color:var(--text-primary)}
+.ap .k{color:var(--code-keyword)}.ap .s{color:var(--code-string)}.ap .c{color:var(--code-comment)}.ap .n{color:var(--code-number)}.ap .f{color:var(--code-function)}
+.ap input::placeholder,.ap textarea::placeholder{color:var(--text-tertiary)}
+.ap button{font-family:inherit;cursor:pointer}
+.ap button:focus-visible,.ap a:focus-visible,.ap input:focus-visible,.ap textarea:focus-visible{outline:2px solid var(--status-accent);outline-offset:1px}
+@keyframes ap-blink{50%{opacity:0}}
+.ap .caret{animation:ap-blink 1.1s steps(1) infinite}
+@media (prefers-reduced-motion:reduce){.ap .caret{animation:none}}
+@media (max-width:760px){
+.ap{flex-direction:column!important;height:auto!important;overflow:visible!important}
+.ap .ap-side{flex:0 0 auto!important;border-right:0!important;border-bottom:1px solid var(--line-border)}
+.ap .ap-list,.ap .ap-mon{display:none!important}
+.ap .ap-tools{flex-wrap:wrap!important;height:auto!important;flex-basis:auto!important;padding:10px 16px!important}
+.ap .ap-body{flex-direction:column!important}
+.ap .ap-scroll{overflow:visible!important;justify-content:flex-start!important;padding:16px!important}
+.ap .ap-row{grid-template-columns:minmax(0,1fr)!important}
+.ap .ap-gutter{text-align:left!important;display:flex;gap:8px}
+.ap .ap-compose{padding:0 16px 16px!important}
+.ap .ap-hints{display:none!important}
+.ap .ap-insp{flex:0 0 auto!important;border-left:0!important;border-top:1px solid var(--line-border)}
+}
+</style>
+</helmet>
+<div class="{{themeClass}}" style="height: 900px; display: flex; overflow: hidden; background: var(--surface-window); color: var(--text-primary); font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; line-height: 1.5; -webkit-font-smoothing: antialiased">
+
+<aside class="ap-side" aria-label="Sessions" style="flex: 0 0 256px; min-height: 0; display: flex; flex-direction: column; background: var(--surface-sidebar); border-right: 1px solid var(--line-border)">
+<div style="flex: 0 0 52px; display: flex; align-items: center; gap: 8px; padding: 0 18px">
+<span style="width: 12px; height: 12px; border-radius: 50%; background: #FF5F57"></span>
+<span style="width: 12px; height: 12px; border-radius: 50%; background: #FEBC2E"></span>
+<span style="width: 12px; height: 12px; border-radius: 50%; background: #28C840"></span>
+</div>
+<div style="display: flex; gap: 6px; padding: 0 12px 8px">
+<button type="button" style="flex: 1 1 auto; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; font-size: 12.5px; font-weight: 500; background: var(--surface-control); border: 1px solid var(--line-border); border-radius: 6px; color: var(--text-primary)"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3H4.5A1.5 1.5 0 0 0 3 4.5v7A1.5 1.5 0 0 0 4.5 13h7a1.5 1.5 0 0 0 1.5-1.5V8"></path><path d="M11.5 2.5l2 2L8 10H6V8z"></path></svg>New session<span class="mono" style="margin-left: auto; font-size: 11px; font-weight: 400; color: var(--text-tertiary)">⌘N</span></button>
+<button type="button" aria-label="New private session, not remembered afterwards (Shift Command N)" style="flex: 0 0 30px; height: 30px; display: grid; place-items: center; padding: 0; background: transparent; border: 1px solid var(--line-border); border-radius: 6px; color: var(--text-secondary)"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8s2.2-4 6-4c1 0 1.9.3 2.7.7M14 8s-2.2 4-6 4c-1 0-1.9-.3-2.7-.7"></path><path d="M6.6 9.4a2 2 0 0 1 2.8-2.8"></path><path d="M3 13L13 3"></path></svg></button>
+</div>
+<label style="margin: 0 12px 14px; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border: 1px solid var(--line-border); border-radius: 6px; color: var(--text-tertiary)"><svg class="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"></circle><path d="M10.2 10.2L13.5 13.5"></path></svg><input type="search" placeholder="Search sessions" aria-label="Search sessions" style="flex: 1 1 auto; min-width: 0; height: 26px; padding: 0; border: 0; background: transparent; font: inherit; font-size: 12.5px; color: var(--text-primary)"><span class="mono" style="font-size: 11px">⇧⌘F</span></label>
+
+<nav class="ap-list" aria-label="Past sessions" style="flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 0 8px; display: flex; flex-direction: column; gap: 1px">
+<div class="mono" style="padding: 2px 8px 6px; font-size: 10.5px; letter-spacing: .08em; color: var(--text-tertiary)">TODAY</div>
+<a href="#" aria-current="page" style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 5px; background: var(--surface-selection); color: var(--text-primary); text-decoration: none; font-size: 12.5px"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-label="local" style="color: var(--model-local)"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg><span style="flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis">TaskGroup timeouts in the ingest runner</span><span class="mono" style="font-size: 10.5px; color: var(--text-tertiary)">14:03</span></a>
+<a href="#" style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 5px; color: var(--text-secondary); text-decoration: none; font-size: 12.5px"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-label="local" style="color: var(--text-tertiary)"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg><span style="flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis">Quantize Gemma 4 12B for the M3 Max</span><span class="mono" style="font-size: 10.5px; color: var(--text-tertiary)">11:20</span></a>
+<a href="#" style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 5px; color: var(--text-secondary); text-decoration: none; font-size: 12.5px"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-label="subscription" style="color: var(--model-subscription)"><path d="M12.5 6A4.75 4.75 0 0 0 3.6 5.2"></path><path d="M3.5 10a4.75 4.75 0 0 0 8.9.8"></path><path d="M3.3 2.6v2.8h2.8"></path><path d="M12.7 13.4v-2.8H9.9"></path></svg><span style="flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis">Review PR 482: retry budget for uploads</span><span class="mono" style="font-size: 10.5px; color: var(--text-tertiary)">09:41</span></a>
+<div class="mono" style="padding: 12px 8px 6px; font-size: 10.5px; letter-spacing: .08em; color: var(--text-tertiary)">YESTERDAY</div>
+<a href="#" style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 5px; color: var(--text-secondary); text-decoration: none; font-size: 12.5px"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-label="cloud API, billed" style="color: var(--model-api)"><ellipse cx="8" cy="4.5" rx="5" ry="2"></ellipse><path d="M3 4.5V8c0 1.1 2.2 2 5 2s5-.9 5-2V4.5"></path><path d="M3 8v3.5c0 1.1 2.2 2 5 2s5-.9 5-2V8"></path></svg><span style="flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis">RFC 9111 freshness rules, summarized</span><span class="mono" style="font-size: 10.5px; color: var(--text-tertiary)">18:02</span></a>
+<a href="#" style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 5px; color: var(--text-secondary); text-decoration: none; font-size: 12.5px"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-label="local" style="color: var(--text-tertiary)"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg><span style="flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis">Where llama.cpp sizes the KV cache</span><span class="mono" style="font-size: 10.5px; color: var(--text-tertiary)">16:47</span></a>
+<a href="#" style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 5px; color: var(--text-secondary); text-decoration: none; font-size: 12.5px"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-label="local" style="color: var(--text-tertiary)"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg><span style="flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis">Transcribe standup-2026-10-02.m4a</span><span class="mono" style="font-size: 10.5px; color: var(--text-tertiary)">10:15</span></a>
+<div class="mono" style="padding: 12px 8px 6px; font-size: 10.5px; letter-spacing: .08em; color: var(--text-tertiary)">PREVIOUS 7 DAYS</div>
+<a href="#" style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 5px; color: var(--text-secondary); text-decoration: none; font-size: 12.5px"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-label="local" style="color: var(--text-tertiary)"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg><span style="flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis">Embedding models for the docs search</span><span class="mono" style="font-size: 10.5px; color: var(--text-tertiary)">Fri</span></a>
+<a href="#" style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 5px; color: var(--text-secondary); text-decoration: none; font-size: 12.5px"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-label="subscription" style="color: var(--model-subscription)"><path d="M12.5 6A4.75 4.75 0 0 0 3.6 5.2"></path><path d="M3.5 10a4.75 4.75 0 0 0 8.9.8"></path><path d="M3.3 2.6v2.8h2.8"></path><path d="M12.7 13.4v-2.8H9.9"></path></svg><span style="flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis">Postgres SKIP LOCKED vs advisory locks</span><span class="mono" style="font-size: 10.5px; color: var(--text-tertiary)">Thu</span></a>
+<a href="#" style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 5px; color: var(--text-secondary); text-decoration: none; font-size: 12.5px"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-label="local" style="color: var(--text-tertiary)"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg><span style="flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis">CMake presets for the MinGW cross-build</span><span class="mono" style="font-size: 10.5px; color: var(--text-tertiary)">Wed</span></a>
+<a href="#" style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 5px; color: var(--text-secondary); text-decoration: none; font-size: 12.5px"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-label="local" style="color: var(--text-tertiary)"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg><span style="flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis">asyncio timeouts in the scraper</span><span class="mono" style="font-size: 10.5px; color: var(--text-tertiary)">Mon</span></a>
+</nav>
+
+<section class="ap-mon mono" aria-label="System" style="flex: 0 0 auto; border-top: 1px solid var(--line-border); padding: 12px 16px 16px; font-size: 11px; line-height: 16px; color: var(--text-secondary); display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 7px 10px; align-items: center">
+<div style="grid-column: 1 / -1; display: flex; justify-content: space-between; font-size: 10.5px; letter-spacing: .08em; color: var(--text-tertiary)"><span>SYSTEM</span><span style="letter-spacing: 0">⌥⌘M</span></div>
+<span style="color: var(--text-tertiary)">cpu</span><span style="height: 4px; border-radius: 2px; background: var(--line-border); overflow: hidden"><span style="display: block; width: 31%; height: 100%; background: var(--text-secondary)"></span></span><span>31%</span>
+<span style="color: var(--text-tertiary)">mem</span><span style="height: 4px; border-radius: 2px; background: var(--line-border); overflow: hidden"><span style="display: block; width: 62%; height: 100%; background: var(--text-secondary)"></span></span><span>22.4/36 GB</span>
+<span style="color: var(--text-tertiary)">gpu</span><span style="height: 4px; border-radius: 2px; background: var(--line-border); overflow: hidden"><span style="display: block; width: 64%; height: 100%; background: var(--text-secondary)"></span></span><span>64%</span>
+<span style="color: var(--text-tertiary)">apogee</span><span style="grid-column: 2 / -1">13.0 GB · 2 models loaded</span>
+<span style="color: var(--text-tertiary)">store</span><span style="grid-column: 2 / -1">182 GB · 11 models</span>
+</section>
+</aside>
+
+<div style="flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column">
+<header class="ap-tools" style="flex: 0 0 52px; display: flex; align-items: center; gap: 16px; padding: 0 14px 0 28px; border-bottom: 1px solid var(--line-border)">
+<h1 style="flex: 1 1 auto; min-width: 0; margin: 0; font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">TaskGroup timeouts in the ingest runner</h1>
+<button type="button" aria-label="Model: gpt-oss-20b, local, runs on this Mac. Switch model" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px 0 10px; background: var(--surface-card); border: 1px solid var(--line-strong); border-radius: 7px; color: var(--text-primary); font-size: 13px"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="color: var(--model-local)"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg><span style="font-weight: 600">gpt-oss-20b</span><span class="mono" style="padding: 1px 6px; border-radius: 4px; background: var(--surface-control); font-size: 10.5px; color: var(--model-local)">local · this Mac</span><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" style="color: var(--text-tertiary)"><path d="M4.5 6.5L8 10l3.5-3.5"></path></svg></button>
+<button type="button" aria-label="Thinking: automatic, 30 second budget" style="display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 8px 0 10px; background: transparent; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--text-primary); font-size: 13px"><span>Thinking</span><span class="mono" style="font-size: 11px; color: var(--text-tertiary)">auto · 30 s</span><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" style="color: var(--text-tertiary)"><path d="M4.5 6.5L8 10l3.5-3.5"></path></svg></button>
+<div role="meter" aria-label="Context window, 84 percent full" aria-valuemin="0" aria-valuemax="100" aria-valuenow="84" style="display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-tertiary)">
+<span>Context</span>
+<span aria-hidden="true" style="position: relative; display: block; width: 160px; height: 6px; border-radius: 3px; background: var(--line-border)"><span style="display: block; width: 84%; height: 100%; border-radius: 3px; background: var(--status-warning)"></span><span style="position: absolute; left: 80%; top: -4px; width: 1px; height: 14px; background: var(--text-tertiary)"></span><span style="position: absolute; left: 90%; top: -4px; width: 1px; height: 14px; background: var(--text-tertiary)"></span></span>
+<span class="mono" style="font-size: 11px; color: var(--text-secondary)">27.6K / 32.8K</span>
+<span class="mono" style="font-size: 11px; font-weight: 600; color: var(--status-warning)">84%</span>
+</div>
+<span aria-hidden="true" style="width: 1px; height: 20px; background: var(--line-border)"></span>
+<button type="button" aria-label="Hide inspector (Option Command I)" aria-pressed="true" style="width: 32px; height: 30px; display: grid; place-items: center; padding: 0; background: var(--surface-control); border: 0; border-radius: 7px; color: var(--text-primary)"><svg class="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="2"></rect><path d="M10 3v10"></path></svg></button>
+</header>
+
+<div class="ap-body" style="flex: 1 1 0; min-height: 0; display: flex">
+<div style="flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column">
+<section class="ap-scroll" aria-label="Conversation" style="flex: 1 1 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; padding: 0 28px 20px">
+<div style="width: 100%; max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px">
+
+<div class="ap-row" title="Sent 14:00" style="display: flex; flex-direction: column; align-items: flex-end">
+<div style="max-width: min(80%, 640px); min-width: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 8px">
+<p style="margin: 0; padding: 10px 14px; border-radius: 16px; background: var(--surface-control); font-size: 14px; line-height: 1.6">Where do fetches start in this repo, and what cancels them?</p>
+<div class="mono" style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 6px 10px; border: 1px solid var(--line-border); border-radius: 6px; background: var(--surface-card); font-size: 11.5px; color: var(--text-secondary)"><svg class="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" style="color: var(--text-tertiary)"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.8l1.5 1.5h4.7A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"></path></svg><span style="color: var(--text-primary); font-weight: 500">~/code/ingest/</span><span>214 files</span><span style="color: var(--text-tertiary)">·</span><span>src/ tests/ scripts/</span><span style="color: var(--text-tertiary)">·</span><span>.py 168 · .md 9 · .toml 4</span></div>
+</div>
+</div>
+
+<div class="ap-row">
+<div style="min-width: 0">
+<button type="button" aria-expanded="false" class="mono" style="display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 6px 0 2px; margin: 0 0 6px -2px; background: transparent; border: 0; border-radius: 4px; font-size: 11.5px; color: var(--text-tertiary)"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 4.5L10 8l-3.5 3.5"></path></svg>thought for 9s<span>· 1 helper · 2 tools</span></button>
+<div style="font-size: 14px; line-height: 1.6">
+<p style="margin: 0 0 10px">Fetches start in <code>Runner.run_batch()</code> at <code>src/ingest/runner.py:52</code>. Every URL in the batch becomes its own task inside a single <code>asyncio.TaskGroup</code>:</p>
+<figure style="margin: 0 0 12px; border: 1px solid var(--line-border); border-radius: 6px; background: var(--surface-code); overflow: hidden">
+<figcaption class="mono" style="display: flex; align-items: center; justify-content: space-between; height: 30px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--line-border); font-size: 11px; color: var(--text-tertiary)"><span>python · src/ingest/runner.py:52–56</span><button type="button" class="mono" style="height: 22px; padding: 0 8px; background: transparent; border: 0; border-radius: 4px; font-size: 11px; color: var(--text-tertiary)">copy</button></figcaption>
+<div class="mono" style="padding: 10px 14px; font-size: 12px; line-height: 1.7; white-space: pre; overflow-x: auto; color: var(--text-primary)">
+<div><span class="k">async def</span> <span class="f">run_batch</span>(self, batch: list[str]) -&gt; <span class="k">None</span>:</div>
+<div style="padding-left: 4ch"><span class="k">async with</span> asyncio.<span class="f">TaskGroup</span>() <span class="k">as</span> tg:</div>
+<div style="padding-left: 8ch"><span class="k">for</span> url <span class="k">in</span> batch:</div>
+<div style="padding-left: 12ch">tg.<span class="f">create_task</span>(self.<span class="f">_fetch</span>(url))</div>
+<div style="padding-left: 4ch">log.<span class="f">info</span>(<span class="s">"batch done: %d urls"</span>, <span class="f">len</span>(batch))</div>
+</div>
+</figure>
+<p style="margin: 0 0 6px">Two things cancel a fetch:</p>
+<ol style="margin: 0; padding-left: 22px">
+<li style="margin-bottom: 4px"><code>asyncio.timeout(10)</code> inside <code>_fetch()</code> raises <code>TimeoutError</code> in that task only.</li>
+<li>The <code>TaskGroup</code> itself: when any child raises, it cancels every sibling and re-raises the failures together as an <code>ExceptionGroup</code>.</li>
+</ol>
+</div>
+<div class="mono" style="margin-top: 10px; display: flex; gap: 16px; font-size: 11px; color: var(--text-tertiary)"><span style="display: inline-flex; align-items: center; gap: 6px"><span style="width: 6px; height: 6px; border-radius: 50%; background: var(--model-local)"></span>gpt-oss-20b · 14:00</span><span>in 3,214</span><span>out 588</span><span>14.1 s</span></div>
+</div>
+</div>
+
+<div class="ap-row" title="Sent 14:03" style="display: flex; flex-direction: column; align-items: flex-end">
+<p style="margin: 0; max-width: min(80%, 640px); padding: 10px 14px; border-radius: 16px; background: var(--surface-control); font-size: 14px; line-height: 1.6">So one slow host takes the whole batch down. I want the other fetches to finish and just log the timeouts. What’s the idiomatic fix on 3.12?</p>
+</div>
+
+<div class="ap-row">
+<div role="note" class="mono" style="display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--text-tertiary)"><span style="flex: 1 1 0; height: 1px; background: var(--line-border)"></span><span>2 earlier exchanges not sent — context budget</span><span style="flex: 1 1 0; height: 1px; background: var(--line-border)"></span></div>
+</div>
+
+<div class="ap-row">
+<div style="min-width: 0; display: flex; flex-direction: column; gap: 8px">
+<div class="mono" style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 11.5px; color: var(--text-secondary)"><svg class="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" style="color: var(--text-tertiary)"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9"></path><path d="M2.5 2.5v2.2h2.2"></path><path d="M8 5.5V8l1.8 1.2"></path></svg><span>recalled 1 past session</span><span style="color: var(--text-tertiary)">·</span><a href="#" style="color: var(--text-secondary); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px">asyncio timeouts in the scraper</a><span style="color: var(--text-tertiary)">Mon, Sep 28</span></div>
+<div style="border: 1px solid var(--line-border); border-radius: 6px; background: var(--surface-card)">
+<button type="button" aria-expanded="true" class="mono" style="width: 100%; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; background: transparent; border: 0; border-bottom: 1px solid var(--line-border); font-size: 11.5px; color: var(--text-secondary); text-align: left"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" style="color: var(--text-tertiary)"><path d="M4.5 6.5L8 10l3.5-3.5"></path></svg><span style="color: var(--text-primary); font-weight: 500">thinking</span><span>6.2s</span><span aria-hidden="true" style="flex: 0 0 96px; height: 3px; border-radius: 2px; background: var(--line-border); overflow: hidden"><span style="display: block; width: 21%; height: 100%; background: var(--status-accent)"></span></span><span style="color: var(--text-tertiary)">budget 30s</span></button>
+<div class="mono" style="padding: 10px 12px 12px; display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; gap: 5px 12px; font-size: 11.5px; line-height: 18px; color: var(--text-tertiary)">
+<span>embedding</span><span style="color: var(--text-secondary)">the question → Embedding-Gemma-300M</span><span>0.4 s</span>
+<span>fetch_url</span><span style="color: var(--text-secondary); overflow-wrap: anywhere">https://docs.python.org/3/library/asyncio-task.html</span><span>1.8 s</span>
+<span>read_file</span><span style="color: var(--text-secondary)">src/ingest/runner.py  lines 40–80</span><span>0.1 s</span>
+<span style="padding-top: 6px">reasoning</span>
+<p style="grid-column: 2 / -1; margin: 0; padding-top: 6px; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; line-height: 1.6; color: var(--text-secondary)">They want partial-failure tolerance. TaskGroup is all-or-nothing by design: the first child that raises cancels the rest. Two options. Catch <code>TimeoutError</code> inside <code>_fetch()</code> so the child never fails, or switch to <code>gather(…, return_exceptions=True)</code>. Catching in the child keeps structured cancellation for real errors, and <code>run_batch()</code> is also cancelled on shutdown (line 71), so that path has to keep working. <code>asyncio.timeout()</code> only turns its own deadline into <code>TimeoutError</code>; an outer cancel still arrives as <code>CancelledError</code>, so catching the timeout won’t swallow shutdown. Should also count the<span class="caret" aria-hidden="true" style="display: inline-block; width: 7px; height: 15px; margin-left: 2px; vertical-align: -2px; background: var(--status-accent)"></span></p>
+</div>
+</div>
+</div>
+</div>
+
+</div>
+</section>
+
+<div class="ap-compose" style="flex: 0 0 auto; padding: 0 28px 18px">
+<div style="max-width: 860px; margin: 0 auto; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-card)">
+<div style="display: flex; gap: 10px; padding: 12px 14px 2px">
+<span class="mono" aria-hidden="true" style="color: var(--status-accent); font-size: 14px; line-height: 22px">›</span>
+<textarea aria-label="Message" rows="2" placeholder="Message gpt-oss-20b" style="flex: 1 1 auto; min-width: 0; resize: none; padding: 0; border: 0; background: transparent; font: inherit; font-size: 14px; line-height: 22px; color: var(--text-primary)"></textarea>
+</div>
+<div style="display: flex; align-items: center; gap: 6px; padding: 4px 8px 8px 8px">
+<button type="button" aria-label="Attach files, folders, images, audio or video" style="width: 28px; height: 28px; display: grid; place-items: center; padding: 0; background: transparent; border: 0; border-radius: 5px; color: var(--text-secondary)"><svg class="i" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 7.5l-5.2 5.2a3 3 0 0 1-4.3-4.3l5.6-5.6a2 2 0 0 1 2.9 2.9l-5.5 5.5a1 1 0 0 1-1.4-1.4l5-5"></path></svg></button>
+<span class="ap-hints mono" style="display: flex; gap: 14px; margin-left: 4px; font-size: 11px; color: var(--text-tertiary)"><span><span style="color: var(--text-secondary)">/</span> commands</span><span><span style="color: var(--text-secondary)">@</span> files</span><span><span style="color: var(--text-secondary)">⏎</span> send</span><span><span style="color: var(--text-secondary)">⇧⏎</span> newline</span></span>
+<span style="flex: 1 1 auto"></span>
+<button type="button" class="mono" style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px; background: var(--text-primary); color: var(--surface-window); border: 0; border-radius: 5px; font-size: 11.5px; font-weight: 600"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 1px; background: currentColor"></span>stop<span style="font-weight: 400; opacity: .7">⌘.</span></button>
+</div>
+</div>
+</div>
+</div>
+
+<aside class="ap-insp" aria-label="Inspector" style="flex: 0 0 304px; min-height: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--surface-inspector); border-left: 1px solid var(--line-border); font-size: 12px; line-height: 1.45">
+
+<section style="padding: 16px 18px; border-bottom: 1px solid var(--line-border)">
+<h2 class="mono" style="margin: 0 0 12px; display: flex; align-items: center; justify-content: space-between; font-size: 10.5px; font-weight: 500; letter-spacing: .08em; color: var(--text-tertiary)">THIS TURN<span style="display: inline-flex; align-items: center; gap: 6px; letter-spacing: 0; color: var(--status-accent)"><span style="width: 6px; height: 6px; border-radius: 50%; background: var(--status-accent)"></span>streaming</span></h2>
+<div style="display: grid; grid-template-columns: 70px minmax(0, 1fr) auto; gap: 8px 10px; align-items: baseline">
+<span style="color: var(--text-tertiary)">Thinking</span><span>auto → on</span><span class="mono" style="color: var(--text-tertiary)">6.2 s</span>
+<span style="color: var(--text-tertiary)">Budget</span><span style="display: flex; align-items: center; gap: 8px"><span aria-hidden="true" style="flex: 1 1 auto; height: 4px; border-radius: 2px; background: var(--line-border); overflow: hidden"><span style="display: block; width: 21%; height: 100%; background: var(--status-accent)"></span></span></span><span class="mono" style="color: var(--text-tertiary)">30 s</span>
+<span style="color: var(--text-tertiary)">Embedding</span><span>Embedding-Gemma-300M<br><span style="color: var(--text-tertiary)">the question</span></span><span class="mono" style="color: var(--text-tertiary)">0.4 s</span>
+<span style="color: var(--text-tertiary)">Memory</span><span>Recalled 1 past session<br><a href="#" style="color: var(--status-accent); text-decoration: none">asyncio timeouts in the scraper</a></span><span class="mono" style="color: var(--text-tertiary)">0.1 s</span>
+<span class="mono" style="color: var(--text-tertiary); font-size: 11px">fetch_url</span><span class="mono" style="font-size: 11px; overflow-wrap: anywhere">https://docs.python.org/3/library/asyncio-task.html</span><span class="mono" style="color: var(--text-tertiary)">1.8 s</span>
+<span class="mono" style="color: var(--text-tertiary); font-size: 11px">read_file</span><span><span class="mono" style="font-size: 11px">src/ingest/runner.py</span><br><span style="color: var(--text-tertiary)">lines 40–80</span></span><span class="mono" style="color: var(--text-tertiary)">0.1 s</span>
+<span style="color: var(--text-tertiary)">Usage</span><span style="grid-column: 2 / -1; color: var(--text-tertiary)">Reported when the turn ends</span>
+</div>
+</section>
+
+<section style="padding: 16px 18px; border-bottom: 1px solid var(--line-border)">
+<h2 class="mono" style="margin: 0 0 12px; display: flex; align-items: center; justify-content: space-between; font-size: 10.5px; font-weight: 500; letter-spacing: .08em; color: var(--text-tertiary)">CONTEXT<span style="letter-spacing: 0">32,768-token window</span></h2>
+<div role="meter" aria-label="Context window, 84 percent full" aria-valuemin="0" aria-valuemax="100" aria-valuenow="84" style="position: relative; height: 8px; border-radius: 4px; background: var(--line-border)"><div style="width: 84%; height: 100%; border-radius: 4px; background: var(--status-warning)"></div><span aria-hidden="true" style="position: absolute; left: 80%; top: -3px; width: 1px; height: 14px; background: var(--text-tertiary)"></span><span aria-hidden="true" style="position: absolute; left: 90%; top: -3px; width: 1px; height: 14px; background: var(--text-tertiary)"></span></div>
+<div class="mono" style="display: flex; justify-content: space-between; margin-top: 8px; font-size: 11.5px"><span>27,612 tokens used</span><span style="color: var(--status-warning); font-weight: 600">84%</span></div>
+<p style="margin: 6px 0 12px; color: var(--text-tertiary)">Warns at 80%. At 90%, older turns are summarized and the session notes it.</p>
+<div style="display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 6px 10px">
+<span style="color: var(--text-tertiary)">Not sent</span><span>2 earlier exchanges</span>
+<span style="color: var(--text-tertiary)">Attached</span><span><span class="mono" style="font-size: 11px">~/code/ingest/</span> · 214 files</span>
+<span style="color: var(--text-tertiary)">Recalled</span><span>1 past session</span>
+</div>
+</section>
+
+<section style="padding: 16px 18px">
+<h2 class="mono" style="margin: 0 0 12px; font-size: 10.5px; font-weight: 500; letter-spacing: .08em; color: var(--text-tertiary)">MODEL</h2>
+<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px"><svg class="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" style="color: var(--model-local)"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg><span style="font-size: 13px; font-weight: 600">gpt-oss-20b</span><span class="mono" style="margin-left: auto; padding: 1px 6px; border-radius: 4px; background: var(--surface-control); color: var(--model-local); font-size: 10.5px">local · this Mac</span></div>
+<div style="display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 6px 10px">
+<span style="color: var(--text-tertiary)">Format</span><span>GGUF · MXFP4</span>
+<span style="color: var(--text-tertiary)">Runs on</span><span>llama.cpp · Metal</span>
+<span style="color: var(--text-tertiary)">Memory</span><span>12.1 GB</span>
+<span style="color: var(--text-tertiary)">Window</span><span>32,768 tokens</span>
+</div>
+<h3 class="mono" style="margin: 16px 0 8px; font-size: 10.5px; font-weight: 500; letter-spacing: .08em; color: var(--text-tertiary)">HELPERS</h3>
+<div style="display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 6px 10px">
+<span style="color: var(--text-tertiary)">Embedding</span><span>Embedding-Gemma-300M</span>
+<span style="color: var(--text-tertiary)">Vision</span><span>Qwen3-VL-8B · Q4_K_M</span>
+<span style="color: var(--text-tertiary)">Utility</span><span style="color: var(--text-tertiary)">Not set — uses gpt-oss-20b</span>
+</div>
+</section>
+
+</aside>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light","contrast"],"default":"dark"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const theme = this.props.theme ?? 'dark';
+    return { themeClass: 'ap t-' + theme };
+  }
+}
+</script>
+</body>
+</html>

@@ -2,15 +2,25 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <map>
 #include <set>
 #include <sstream>
 #include <string>
 #include <vector>
 
+#include "cli/complete_protocol.h"
+#include "cli/models.h"
+#include "cli/registry.h"
+#include "cli/root.h"
+#include "contracts/config.h"
 #include "httpserver/admin_agents.h"
 #include "httpserver/admin_config.h"
 #include "logger/session.h"
 #include "support/cli_home.h"
+#include "support/gguf_builder.h"
+#include "support/mlx_model.h"
+#include "support/pipeline_model.h"
+#include "support/voice_model.h"
 
 /// The reads' machine face (28h): `--output-format json` on `models
 /// list|info|status`, `chats list`, `agents list`, `mcp list` and `check`,
@@ -70,11 +80,14 @@ struct Read {
     return out;
 }
 
-void save_chat(const std::string& id, const std::string& title, int turns) {
+void save_chat(const std::string& id, const std::string& title, int turns,
+               const std::string& backend = "local", const std::string& model = {}) {
     apogee::logger::Session session;
     session.chat_id = id;
     session.title = title;
     session.turns = turns;
+    session.backend = backend;
+    session.model = model;
     session.started_at = "2026-10-07T10:00:00Z";
     session.updated_at = "2026-10-07T10:0" + std::to_string(turns) + ":00Z";
     apogee::logger::save(session);
@@ -93,6 +106,8 @@ TEST_CASE("models list: the table's rows, one document", "[reads][json][models]"
         json_backends.insert(row.at("backend").get<std::string>());
         CHECK(row.contains("state"));
         CHECK(row.contains("verified"));
+        // A drafter is an `mlx` entry's alone (M32): absent everywhere else.
+        CHECK_FALSE(row.contains("draft"));
     }
     CHECK(json_backends == std::set<std::string>{"local", "spare"});
     // The rows the human table lists, the same.
@@ -139,10 +154,19 @@ TEST_CASE("chats list: every saved chat, newest first, the row's facts", "[reads
     CHECK(document(read(home, {"chats", "list", "--output-format", "json"})) ==
           nlohmann::json::parse(R"({"object":"list","data":[]})"));
     save_chat("20261007-100000-aaaa", "first", 1);
-    save_chat("20261007-100500-bbbb", "second", 2);
+    save_chat("20261007-100500-bbbb", "second", 2, "claude", "claude-opus-5-5");
     const nlohmann::json listed =
         document(read(home, {"chats", "list", "--output-format", "json"}));
     REQUIRE(listed.at("data").size() == 2);
+    // Each row's backend, and the roster model it pinned -- empty on the
+    // backend's own -- as its session file records them (52a).
+    nlohmann::json newest = listed.at("data")[0];
+    newest.erase("updated");  // the save's own stamp
+    CHECK(newest == nlohmann::json::parse(R"({"id":"20261007-100500-bbbb","turns":2,)"
+                                          R"("name":"second","backend":"claude",)"
+                                          R"("model":"claude-opus-5-5"})"));
+    CHECK(listed.at("data")[1].at("backend") == "local");
+    CHECK(listed.at("data")[1].at("model") == "");
     const Read text = read(home, {"chats", "list"});
     const std::vector<std::string> rows = lines(text.out);
     REQUIRE(rows.size() == 2);
@@ -227,12 +251,123 @@ TEST_CASE("a JSON face asked of a command with none is refused, naming the reade
     CHECK(refused.code != 0);
     CHECK(refused.out.empty());
     for (const std::string_view reader : {"models list", "models info", "models status",
-                                          "chats list", "agents list", "mcp list", "check"}) {
+                                          "chats list", "agents list", "mcp list", "check",
+                                          // M31: three reads that answered only in prose.
+                                          "chats info", "chats recall", "graph dedupe"}) {
         INFO(refused.err);
         CHECK(refused.err.find(reader) != std::string::npos);
+    }
+    // ...and each of those three takes the flag rather than refusing it
+    // (M31: each exited 109, "The following arguments were not expected").
+    save_chat("20261007-100000-aaaa", "first", 1);
+    for (const std::vector<std::string>& args :
+         {std::vector<std::string>{"chats", "info", "20261007-100000-aaaa"},
+          std::vector<std::string>{"chats", "recall"}}) {
+        std::vector<std::string> json = args;
+        json.insert(json.end(), {"--output-format", "json"});
+        const Read taken = read(home, json);
+        INFO(taken.err);
+        CHECK(taken.code == 0);
+        CHECK(taken.err.find("not expected") == std::string::npos);
+        CHECK(document(taken).is_object());
     }
     // A read refuses a turn's format by name.
     const Read stream = read(home, {"chats", "list", "--output-format", "stream-json"});
     CHECK(stream.code != 0);
     CHECK(stream.err.find("expected 'text' or 'json'") != std::string::npos);
+}
+
+TEST_CASE("models info on a stored set carries a typed data beside its prose fields, unchanged",
+          "[reads][json][models][typed]") {
+    // 52e: the set's facts as data -- format, bytes, window, cache, lineage --
+    // where the format's reader knows them, null where it does not; the
+    // fields[] the text says stay label for label.
+    const CliHome home{kConfig};
+    const std::filesystem::path gguf =
+        home.models() / "org--m" / "gguf" / "aaaaaaaaaaaa" / "m-Q4_K_M.gguf";
+    std::filesystem::create_directories(gguf.parent_path());
+    std::ofstream{gguf, std::ios::binary} << apogee::testing::quantizable_gguf();
+    apogee::testing::write_mlx_model(home.models() / "org--x" / "mlx" / "bbbbbbbbbbbb");
+    apogee::testing::write_pipeline_model(home.models() / "org--clip" / "pipeline" /
+                                          "cccccccccccc");
+    apogee::testing::write_voice_model(home.models() / "hexgrad--K" / "voice" / "dddddddddddd");
+
+    std::map<std::string, nlohmann::json> data;
+    for (const std::string handle :
+         {"org--m/gguf/aaaaaaaaaaaa", "org--x/mlx/bbbbbbbbbbbb", "org--clip/pipeline/cccccccccccc",
+          "hexgrad--K/voice/dddddddddddd"}) {
+        INFO(handle);
+        const Read text = read(home, {"models", "info", handle});
+        REQUIRE(text.code == 0);
+        const nlohmann::json record =
+            document(read(home, {"models", "info", handle, "--output-format", "json"}));
+        // The prose, byte for byte the record the text makes, as before.
+        nlohmann::json prose = apogee::commands::render_record_document(text.out);
+        prose["name"] = handle;
+        nlohmann::json without = record;
+        without.erase("data");
+        CHECK(without == prose);
+        const nlohmann::json& typed = record.at("data");
+        CHECK(typed.at("handle") == handle);
+        CHECK(typed.at("bytes").get<std::uintmax_t>() > 0);
+        CHECK(typed.at("lineage").is_array());
+        data[typed.at("format").get<std::string>()] = typed;
+    }
+    // A GGUF's header states its window and what its cache costs.
+    CHECK(data.at("gguf").at("window").at("tokens").get<std::int64_t>() > 0);
+    CHECK(data.at("gguf").at("window").at("source") == "default");
+    CHECK(data.at("gguf").contains("cache"));
+    // An MLX model's config.json states its trained window.
+    CHECK(data.at("mlx").at("window").at("trained") == 131072);
+    CHECK(data.at("mlx").at("architecture").is_string());
+    // A pipeline and a voice model state neither: unknown stays unknown.
+    for (const std::string format : {"pipeline", "voice"}) {
+        INFO(format);
+        CHECK(data.at(format).at("window").is_null());
+        CHECK(data.at(format).at("cache").is_null());
+    }
+    // A backend's document carries no data: its typed facts are its config's.
+    CHECK_FALSE(document(read(home, {"models", "info", "local", "--output-format", "json"}))
+                    .contains("data"));
+}
+
+TEST_CASE("the reads that gained a JSON face offer --output-format at completion, and take it",
+          "[reads][json][completion]") {
+    // M31, ADR 0007: the flag is offered where it is new -- `chats info`,
+    // `chats recall`, `graph dedupe` -- its words with it, and each word
+    // offered is one the verb takes.
+    const CliHome home{kConfig};
+    save_chat("20261007-100000-aaaa", "first", 1);
+    const apogee::commands::RootCommand root{apogee::commands::default_registry()};
+    const apogee::commands::CommandSpec tree = apogee::commands::specs_from_app(root.app());
+    const apogee::harness::Config config = apogee::harness::parse_config(kConfig, "test");
+    const auto offered = [&](std::vector<std::string> words, std::string current) {
+        return apogee::commands::complete_words(
+                   {.words = std::move(words), .current = std::move(current)}, config, tree)
+            .candidates;
+    };
+    for (const std::vector<std::string>& verb :
+         {std::vector<std::string>{"chats", "info", "20261007-100000-aaaa"},
+          std::vector<std::string>{"chats", "recall"},
+          std::vector<std::string>{"graph", "dedupe", "notes"}}) {
+        std::string line;
+        for (const std::string& word : verb) {
+            line += word + " ";
+        }
+        INFO("apogee " << line);
+        const std::vector<std::string> flags = offered(verb, "--");
+        CHECK(std::ranges::find(flags, "--output-format") != flags.end());
+        std::vector<std::string> valued = verb;
+        valued.emplace_back("--output-format");
+        const std::vector<std::string> words = offered(valued, "");
+        CHECK(words == std::vector<std::string>{"text", "json"});
+    }
+    // What it offers, it takes.
+    for (const std::string format : {"text", "json"}) {
+        INFO(format);
+        CHECK(
+            read(home, {"chats", "info", "20261007-100000-aaaa", "--output-format", format}).code ==
+            0);
+        CHECK(read(home, {"chats", "recall", "--output-format", format}).code == 0);
+    }
 }

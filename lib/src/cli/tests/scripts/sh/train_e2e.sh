@@ -14,7 +14,12 @@
 # kits with the mock backend as the teacher, and the cycle from a queue
 # directory -- skipped, passing and promoting with the anchor set, failing
 # on a regression and tripping the breaker at k=1, refused while halted,
-# resumed.
+# resumed. Between them (53b), `promote --adapter`: the fuse skipped, a
+# small GGUF LoRA registered on an entry's adapters over its untouched base,
+# repointed in place, retained, and an mlx run's adapter refused on a
+# llamacpp entry naming both formats. Then (55h), the pipeline and the cycle
+# as streams and their reads as documents; last (M30), the named specs' reads,
+# a pass halted while held on its lock, and a failed pass's stderr.
 #
 # POSIX only, like the other shell checks.
 set -eu
@@ -22,7 +27,8 @@ set -eu
 APOGEE_BIN="${1:?usage: train_e2e.sh <apogee-binary> <work-dir>}"
 WORK_DIR="${2:?usage: train_e2e.sh <apogee-binary> <work-dir>}"
 
-rm -rf "$WORK_DIR"
+. "$(dirname "$0")/sandbox.sh"
+WORK_DIR="$(sandbox_dir "$WORK_DIR")"
 mkdir -p "$WORK_DIR/home"
 export APOGEE_HOME="$WORK_DIR/home"
 unset ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GOOGLE_API_KEY
@@ -214,6 +220,69 @@ assert "pruned_at" in ledger["versions"][0], ledger' "$WORK_DIR/status.json" "$W
 grep -q "ok   versions: tuned" "$WORK_DIR/check.out" || fail "check ledger row: $(grep 'versions' "$WORK_DIR/check.out")"
 grep -q "ok   converter" "$WORK_DIR/check.out" || fail "check converter row: $(grep converter "$WORK_DIR/check.out")"
 
+# --- adapter promote (53b): the fuse skipped, the adapter itself the version ------
+# An entry over a stand-in base -- v3's GGUF, which parses; a real run's own
+# base in use -- and the two runs promoted onto it as adapters: each a small
+# GGUF LoRA under training/versions/based/, registered on the entry's adapters
+# through the one editor and pinned to the base's sha256, the base untouched.
+BASE="$V3"
+BASE_SHA=$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$BASE")
+cp "$BASE" "$WORK_DIR/base.before"
+"$APOGEE_BIN" config add-backend based --type llamacpp --model-path "$BASE" >/dev/null || fail "add-backend based"
+cp "$CONFIG" "$WORK_DIR/before-adapter.json"
+"$APOGEE_BIN" train promote "$RUN" --as based --adapter </dev/null >"$WORK_DIR/adapter.out" 2>&1 || fail "adapter promote: $(cat "$WORK_DIR/adapter.out")"
+grep -q "updated backend based -> v1 (adapter)" "$WORK_DIR/adapter.out" || fail "adapter promote summary: $(cat "$WORK_DIR/adapter.out")"
+A1="$TRAINING/versions/based/v1.lora.gguf"
+[ -f "$A1" ] || fail "no adapter version at $A1"
+[ "$(wc -c < "$A1")" -lt 4096 ] || fail "the adapter version is not small: $(wc -c < "$A1") bytes"
+[ "$(served based)" = "$BASE" ] || fail "the adapter promote repointed model_path: $(served based)"
+cmp "$WORK_DIR/base.before" "$BASE" || fail "the adapter promote touched the base"
+[ ! -d "$TRAINING/runs/$RUN/fused" ] || fail "an adapter promote fused"
+inserted "$WORK_DIR/before-adapter.json" "$CONFIG" > "$WORK_DIR/adapter-added.txt" || fail "the adapter promote changed more than it added: $(diff "$WORK_DIR/before-adapter.json" "$CONFIG")"
+grep -q "\"adapters\"" "$WORK_DIR/adapter-added.txt" || fail "no adapters member: $(cat "$WORK_DIR/adapter-added.txt")"
+grep -q "$A1" "$WORK_DIR/adapter-added.txt" || fail "the adapter is not registered: $(cat "$WORK_DIR/adapter-added.txt")"
+grep -q "$BASE_SHA" "$WORK_DIR/adapter-added.txt" || fail "the adapter is not pinned to the base: $(cat "$WORK_DIR/adapter-added.txt")"
+python3 -c 'import json,sys
+ledger = json.load(open(sys.argv[1]))
+v = ledger["versions"][0]
+assert ledger["active_version"] == 1 and v["adapter_path"] == sys.argv[2], ledger
+assert v["base_sha256"] == sys.argv[3] and "gguf_path" not in v, ledger' \
+    "$TRAINING/versions/based.json" "$A1" "$BASE_SHA" || fail "the adapter ledger: $(cat "$TRAINING/versions/based.json")"
+# A second version takes the first's place; retain_versions 1 prunes the
+# first's kilobytes, and a rollback to it is refused by name.
+cp "$CONFIG" "$WORK_DIR/at-adapter-v1.json"
+"$APOGEE_BIN" train promote "$RUN2" --as based --adapter </dev/null >"$WORK_DIR/adapter2.out" 2>&1 || fail "second adapter promote: $(cat "$WORK_DIR/adapter2.out")"
+A2="$TRAINING/versions/based/v2.lora.gguf"
+grep -q "updated backend based -> v2 (adapter)" "$WORK_DIR/adapter2.out" || fail "second adapter summary: $(cat "$WORK_DIR/adapter2.out")"
+grep -q "pruned:" "$WORK_DIR/adapter2.out" || fail "retention skipped the adapters: $(cat "$WORK_DIR/adapter2.out")"
+[ ! -f "$A1" ] || fail "v1's adapter survived retain_versions 1"
+[ -f "$A2" ] || fail "no v2 adapter"
+sed "s|$A1|$A2|" "$WORK_DIR/at-adapter-v1.json" > "$WORK_DIR/expected-adapter2.json"
+cmp "$WORK_DIR/expected-adapter2.json" "$CONFIG" || fail "the second adapter changed more than the path: $(diff "$WORK_DIR/expected-adapter2.json" "$CONFIG")"
+cmp "$WORK_DIR/base.before" "$BASE" || fail "the second adapter promote touched the base"
+if "$APOGEE_BIN" train rollback based >/dev/null 2>"$WORK_DIR/adapter-rollback.err"; then
+    fail "rollback reached a pruned adapter"
+fi
+grep -q "its adapter is gone" "$WORK_DIR/adapter-rollback.err" || fail "adapter rollback wording: $(cat "$WORK_DIR/adapter-rollback.err")"
+"$APOGEE_BIN" train versions based | grep -q "v2.lora.gguf  <- active" || fail "train versions: $("$APOGEE_BIN" train versions based)"
+"$APOGEE_BIN" check >"$WORK_DIR/check-adapter.out" 2>&1 || fail "check with an adapter version: $(cat "$WORK_DIR/check-adapter.out")"
+grep -q "ok   versions: based" "$WORK_DIR/check-adapter.out" || fail "check adapter ledger row: $(grep 'versions' "$WORK_DIR/check-adapter.out")"
+# Formats never cross: an mlx run's adapter onto a llamacpp entry is refused
+# naming both, and nothing is written.
+python3 -c 'import json,sys
+path = sys.argv[1]
+manifest = json.load(open(path))
+manifest["trainer"] = "mlx"
+json.dump(manifest, open(path, "w"), indent=2)' "$TRAINING/runs/$RUN/manifest.json"
+cp "$CONFIG" "$WORK_DIR/before-cross.json"
+if "$APOGEE_BIN" train promote "$RUN" --as based --adapter </dev/null >/dev/null 2>"$WORK_DIR/cross.err"; then
+    fail "an mlx run's adapter was registered on a llamacpp entry"
+fi
+grep -q "mlx-lm adapter (trainer mlx)" "$WORK_DIR/cross.err" || fail "cross-format wording: $(cat "$WORK_DIR/cross.err")"
+grep -q "GGUF LoRA" "$WORK_DIR/cross.err" || fail "cross-format wording: $(cat "$WORK_DIR/cross.err")"
+cmp "$WORK_DIR/before-cross.json" "$CONFIG" || fail "a refused adapter promote edited the config"
+[ ! -e "$TRAINING/versions/based/v3.lora.gguf" ] || fail "a refused adapter promote wrote a version"
+
 # --- the pipelines item ---------------------------------------------------------
 # The training block is rewritten once for the rest: the mock trainer, a
 # named pipeline, and the cycle over a queue directory with the breaker at 1.
@@ -376,5 +445,155 @@ grep -q "Cycle: idle; backend nightly-model" "$WORK_DIR/status2.out" || fail "st
 grep -q "Pipeline: none in progress" "$WORK_DIR/status2.out" || fail "status pipeline line: $(cat "$WORK_DIR/status2.out")"
 "$APOGEE_BIN" check >"$WORK_DIR/check4.out" 2>&1 || fail "final check: $(cat "$WORK_DIR/check4.out")"
 grep -q "ok   cycle history" "$WORK_DIR/check4.out" || fail "check cycle history row: $(grep 'cycle' "$WORK_DIR/check4.out")"
+
+# --- 55h: the pipeline and the cycle speak JSON ----------------------------------
+# On the real binary, after the text runs above: a pipeline run and a cycle
+# pass as streams -- every stdout line JSON and valid against the schema this
+# binary prints, stderr quiet, the stages as the manifest moved them, the
+# pass's narration with its states -- each stream's document its read's own.
+# (The reads' byte equality with the admin routes is the unit suite's.)
+"$APOGEE_BIN" __machine-schema </dev/null >"$WORK_DIR/machine-schema.json" || fail "__machine-schema"
+"$APOGEE_BIN" train pipeline status --output-format json </dev/null >"$WORK_DIR/pipelines.json" 2>"$WORK_DIR/pipelines.err" \
+    || fail "pipeline status --output-format json: $(cat "$WORK_DIR/pipelines.err")"
+"$APOGEE_BIN" train pipeline run --pipeline nightly --output-format stream-json </dev/null \
+    >"$WORK_DIR/pipe-stream.jsonl" 2>"$WORK_DIR/pipe-stream.err" \
+    || fail "pipeline run as a stream: $(cat "$WORK_DIR/pipe-stream.err")"
+[ ! -s "$WORK_DIR/pipe-stream.err" ] || fail "a streamed pipeline wrote to stderr: $(cat "$WORK_DIR/pipe-stream.err")"
+STREAMED=$(python3 -c 'import json,sys; print(json.loads(open(sys.argv[1]).read().splitlines()[-1])["document"]["pipeline"]["pipeline_run_id"])' \
+    "$WORK_DIR/pipe-stream.jsonl") || fail "the pipeline stream ended without its document: $(tail -1 "$WORK_DIR/pipe-stream.jsonl")"
+"$APOGEE_BIN" train pipeline status "$STREAMED" --output-format json </dev/null >"$WORK_DIR/pipe-read.json" \
+    || fail "pipeline status $STREAMED --output-format json"
+cp "$TRAINING/datasets/starter.jsonl" "$WORK_DIR/queue/day3.jsonl"
+"$APOGEE_BIN" train cycle run --output-format stream-json </dev/null \
+    >"$WORK_DIR/cycle-stream.jsonl" 2>"$WORK_DIR/cycle-stream.err" \
+    || fail "cycle run as a stream: $(cat "$WORK_DIR/cycle-stream.err")"
+[ ! -s "$WORK_DIR/cycle-stream.err" ] || fail "a streamed pass wrote to stderr: $(cat "$WORK_DIR/cycle-stream.err")"
+"$APOGEE_BIN" train cycle status --output-format json </dev/null >"$WORK_DIR/cycle-read.json" \
+    || fail "cycle status --output-format json"
+python3 - "$WORK_DIR" <<'PY' || fail "the training streams or reads are wrong"
+import json, os, sys
+work = sys.argv[1]
+def read(name):
+    return json.load(open(os.path.join(work, name)))
+def stream(name):
+    return [json.loads(line) for line in open(os.path.join(work, name))]
+pipe, cycle = stream("pipe-stream.jsonl"), stream("cycle-stream.jsonl")
+assert pipe[0]["type"] == "job" and pipe[0]["verb"] == "train pipeline run", pipe[0]
+stages = [e["state"] for e in pipe if e["type"] == "stage"]
+assert stages == ["pending", "training", "evaluating", "passed"], stages
+assert [e["stage"] for e in pipe if e["type"] == "iteration"] == [1, 1], pipe
+assert pipe[-1]["type"] == "document" and pipe[-1]["document"] == read("pipe-read.json"), pipe[-1]
+assert pipe[-1]["document"]["pipeline"]["status"] == "complete", pipe[-1]
+listing = read("pipelines.json")
+assert listing["object"] == "list" and listing["data"], listing
+assert all(row["kind"] == "pipeline" for row in listing["data"]), listing
+assert cycle[0]["type"] == "job" and cycle[0]["verb"] == "train cycle run", cycle[0]
+passes = [e["state"] for e in cycle if e["type"] == "pass"]
+assert passes == ["collecting", "merging", "training", "gating", "promoting", "passed"], passes
+assert cycle[-1]["type"] == "document" and cycle[-1]["document"] == read("cycle-read.json"), cycle[-1]
+assert cycle[-1]["document"]["runs"][-1]["promoted_version"] == 2, cycle[-1]
+assert not [e for e in pipe + cycle if e["type"] == "error"], "a stream that ended well said an error"
+try:
+    from jsonschema import Draft202012Validator
+except ImportError:
+    print("train_e2e: no jsonschema module -- the training streams were NOT validated",
+          file=sys.stderr)
+    sys.exit(0)
+valid = Draft202012Validator(read("machine-schema.json"))
+for event in pipe + cycle:
+    errors = list(valid.iter_errors(event))
+    assert not errors, f"{json.dumps(event)[:200]} -- {errors[0].message}"
+PY
+
+# --- M30: the pipelines and the cycle tell the truth ----------------------------
+# The named specs read as text and as a document. Then a pass held on its
+# lock -- its stream into a FIFO nobody reads yet, so it blocks mid-training
+# -- halted from another process: the pass finishes, says the halt is kept,
+# its document halted, and the next run is refused. Last, a failed pass
+# under stream-json says so on stderr too.
+"$APOGEE_BIN" train pipeline list </dev/null >"$WORK_DIR/specs.out" 2>&1 || fail "pipeline list: $(cat "$WORK_DIR/specs.out")"
+grep -qx "nightly  1       tiny" "$WORK_DIR/specs.out" || fail "pipeline list: $(cat "$WORK_DIR/specs.out")"
+"$APOGEE_BIN" train pipeline show nightly </dev/null >"$WORK_DIR/spec.out" 2>&1 || fail "pipeline show: $(cat "$WORK_DIR/spec.out")"
+grep -qx "1  base   starter  hello" "$WORK_DIR/spec.out" || fail "pipeline show: $(cat "$WORK_DIR/spec.out")"
+"$APOGEE_BIN" train pipeline show nightly --output-format json </dev/null >"$WORK_DIR/spec.json" || fail "pipeline show --output-format json"
+python3 - "$WORK_DIR/spec.json" <<'PY2' || fail "pipeline show's document: $(cat "$WORK_DIR/spec.json")"
+import json, sys
+spec = json.load(open(sys.argv[1]))
+assert spec["object"] == "training.pipeline" and spec["name"] == "nightly", spec
+assert spec["path"] is None and spec["student"] == "tiny", spec
+assert [(s["name"], s["gate"]) for s in spec["stages"]] == [("base", ["hello"])], spec
+PY2
+
+# The held pass: nightly's stage takes the queued data's iteration count, so
+# the stream outgrows the pipe and the pass blocks there, lock held.
+python3 - "$CONFIG" <<'PY2' || fail "could not drop nightly's iters"
+import sys
+path = sys.argv[1]
+text = open(path).read()
+old = '"eval_suite": "hello", "iters": 2}'
+assert text.count(old) == 1, text
+open(path, "w").write(text.replace(old, '"eval_suite": "hello"}'))
+PY2
+printf '{"mock": {"iters": 2000}}\n' > "$WORK_DIR/queue/day4.jsonl"
+mkfifo "$WORK_DIR/pass.fifo"
+# The FIFO's reader that reads nothing; off ctest's pipe, so nothing left
+# behind holds the run open.
+( exec 3<"$WORK_DIR/pass.fifo"; exec sleep 60 ) </dev/null >/dev/null 2>&1 &
+HOLDER=$!
+"$APOGEE_BIN" train cycle run --output-format stream-json </dev/null >"$WORK_DIR/pass.fifo" 2>"$WORK_DIR/held.err" &
+PASS=$!
+trap 'kill "$PASS" "$HOLDER" 2>/dev/null || true; rm -rf "$WORK_DIR"' EXIT
+for _ in $(seq 1 100); do
+    [ -f "$TRAINING/cycle/cycle.lock" ] && break
+    sleep 0.1
+done
+sleep 1
+[ -f "$TRAINING/cycle/cycle.lock" ] || fail "the pass never held its lock"
+kill -0 "$PASS" 2>/dev/null || fail "the pass was not held: $(cat "$WORK_DIR/held.err")"
+"$APOGEE_BIN" train cycle halt </dev/null >"$WORK_DIR/halt.out" 2>&1 || fail "halt during a pass: $(cat "$WORK_DIR/halt.out")"
+grep -q "the pass running now finishes, and keeps the halt" "$WORK_DIR/halt.out" || fail "halt wording: $(cat "$WORK_DIR/halt.out")"
+cat "$WORK_DIR/pass.fifo" >"$WORK_DIR/held.jsonl"
+wait "$PASS" || fail "the held pass failed: $(cat "$WORK_DIR/held.err")"
+kill "$HOLDER" 2>/dev/null || true
+wait "$HOLDER" 2>/dev/null || true
+[ ! -s "$WORK_DIR/held.err" ] || fail "the held pass wrote to stderr: $(cat "$WORK_DIR/held.err")"
+if "$APOGEE_BIN" train cycle run </dev/null >/dev/null 2>"$WORK_DIR/after-halt.err"; then
+    fail "the pass after a halt taken during the last one ran"
+fi
+grep -q "the cycle is halted: halted by 'apogee train cycle halt'" "$WORK_DIR/after-halt.err" || fail "after-halt refusal: $(cat "$WORK_DIR/after-halt.err")"
+"$APOGEE_BIN" train cycle status --output-format json </dev/null >"$WORK_DIR/held-read.json" || fail "cycle status after the held pass"
+
+# A failed pass under stream-json: the error in the stream and on stderr.
+"$APOGEE_BIN" train cycle resume </dev/null >/dev/null || fail "resume after the held pass"
+printf '{"mock": {"answer": "nope"}}\n' > "$WORK_DIR/queue/day5.jsonl"
+if "$APOGEE_BIN" train cycle run --output-format stream-json </dev/null >"$WORK_DIR/failed.jsonl" 2>"$WORK_DIR/failed.err"; then
+    fail "a regressing pass passed"
+fi
+python3 - "$WORK_DIR" <<'PY2' || fail "the held or the failed pass is wrong"
+import json, os, sys
+work = sys.argv[1]
+def stream(name):
+    return [json.loads(line) for line in open(os.path.join(work, name))]
+held, failed = stream("held.jsonl"), stream("failed.jsonl")
+passes = [e["state"] for e in held if e["type"] == "pass"]
+assert passes[-1] == "passed" and "halted" not in passes, passes
+assert held[-2] == {"type": "notice", "text": "[cycle] halted while this pass ran (halted by "
+                    "'apogee train cycle halt') -- the halt is kept: 'apogee train cycle run' "
+                    "refuses until 'apogee train cycle resume'"}, held[-2]
+assert held[-1]["type"] == "document" and held[-1]["document"]["halted"] is True, held[-1]
+assert held[-1]["document"] == json.load(open(os.path.join(work, "held-read.json"))), held[-1]
+error = failed[-1]
+assert error["type"] == "error" and error["message"].startswith("cycle FAILED -- "), error
+said = open(os.path.join(work, "failed.err")).read()
+assert said == "apogee train: " + error["message"] + "\n", said
+try:
+    from jsonschema import Draft202012Validator
+except ImportError:
+    sys.exit(0)
+valid = Draft202012Validator(json.load(open(os.path.join(work, "machine-schema.json"))))
+for event in held + failed:
+    errors = list(valid.iter_errors(event))
+    assert not errors, f"{json.dumps(event)[:200]} -- {errors[0].message}"
+PY2
 
 echo "apogee train end-to-end: OK"

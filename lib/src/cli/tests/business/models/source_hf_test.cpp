@@ -8,6 +8,7 @@
 
 #include "support/env_guard.h"
 #include "support/fake_transport.h"
+#include "support/wan_original.h"
 
 /// The Hugging Face source.
 ///
@@ -467,4 +468,107 @@ TEST_CASE("a voice model repository is the one laid out as Kokoro's, and only it
     }
     CHECK(taken ==
           std::vector<std::string>{"config.json", "kokoro-v1_0.pth", "voices/af_heart.pt"});
+}
+
+TEST_CASE("a SafeTensors pull takes Wan's root checkpoints, and no other repository's",
+          "[models][hf][snapshot][wan]") {
+    // 53j: the user's repository as its tree lists it.
+    using apogee::models::HfFile;
+    std::vector<HfFile> wan;
+    for (const std::string& path : apogee::testing::wan_repository_files()) {
+        wan.push_back({.path = path, .size = 1, .sha256 = {}});
+    }
+    const auto paths = [](const std::vector<HfFile>& files) {
+        std::vector<std::string> out;
+        for (const HfFile& file : files) {
+            out.push_back(file.path);
+        }
+        return out;
+    };
+    std::vector<std::string> ten{apogee::testing::kWanRecorded.begin(),
+                                 apogee::testing::kWanRecorded.end()};
+    // Not the layout: exactly the snapshot rule's ten, as before 53j.
+    CHECK(paths(apogee::models::snapshot_files(wan, false)) == ten);
+    // The layout: the ten and its two checkpoints, in the tree's order; never
+    // the model card, the assets or the example image.
+    std::vector<std::string> twelve = ten;
+    twelve.insert(twelve.begin(), std::string{apogee::testing::kWanVae});
+    twelve.emplace_back(apogee::testing::kWanTextEncoder);
+    CHECK(paths(apogee::models::snapshot_files(wan, true)) == twelve);
+
+    using apogee::models::root_checkpoint;
+    CHECK(root_checkpoint("Wan2.2_VAE.pth"));
+    CHECK_FALSE(root_checkpoint("original/consolidated.00.pth"));
+    CHECK_FALSE(root_checkpoint("model.pt"));
+    CHECK_FALSE(root_checkpoint("model.safetensors"));
+
+    // What a stored set's record lacks of them: the two, in order.
+    const std::vector<HfFile> gaps = apogee::models::snapshot_gaps(
+        apogee::testing::wan_record(), apogee::models::snapshot_files(wan, true));
+    CHECK(paths(gaps) == std::vector<std::string>{std::string{apogee::testing::kWanVae},
+                                                  std::string{apogee::testing::kWanTextEncoder}});
+    CHECK(apogee::models::snapshot_gaps(apogee::testing::wan_record(),
+                                        apogee::models::snapshot_files(wan, false))
+              .empty());
+}
+
+TEST_CASE("Wan's original layout is read from the repository's config, and only when it can be one",
+          "[models][hf][snapshot][wan]") {
+    using apogee::models::HfFile;
+    const HfRef ref = *parse_hf_ref("Wan-AI/Wan2.2-TI2V-5B");
+    const std::vector<HfFile> wan{{.path = "Wan2.2_VAE.pth", .size = 1, .sha256 = {}},
+                                  {.path = "config.json", .size = 1, .sha256 = {}},
+                                  {.path = "model.safetensors", .size = 1, .sha256 = {}}};
+    const auto read = [&ref](const std::vector<HfFile>& tree, std::string config,
+                             std::size_t* asked) {
+        auto fake = std::make_unique<FakeTransport>(std::vector<FakeTransport::Reply>{
+            FakeTransport::Reply{.status = 200, .body = std::move(config)}});
+        const FakeTransport* transport = fake.get();
+        HttpClient client{std::move(fake)};
+        apogee::models::HfWanLayout layout =
+            apogee::models::read_wan_layout(client, ref, tree, "", {});
+        *asked = transport->attempts();
+        if (*asked > 0) {
+            CHECK(transport->requests()[0].url ==
+                  "https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B/resolve/main/config.json");
+        }
+        return layout;
+    };
+
+    std::size_t asked = 0;
+    apogee::models::HfWanLayout layout =
+        read(wan, std::string{apogee::testing::kWanTi2vConfig}, &asked);
+    REQUIRE(layout.ok);
+    CHECK(layout.layout());
+    CHECK(layout.class_name == "WanModel");
+    CHECK(asked == 1);
+
+    // The config's class decides: a language model's, or diffusers' port of
+    // Wan, beside a root checkpoint is not the layout.
+    layout = read(wan, R"({"architectures": ["LlamaForCausalLM"], "model_type": "llama"})", &asked);
+    CHECK(layout.ok);
+    CHECK_FALSE(layout.layout());
+    layout = read(
+        wan, R"({"_class_name": "WanTransformer3DModel", "_diffusers_version": "0.33.0"})", &asked);
+    CHECK_FALSE(layout.layout());
+
+    // No root checkpoint, or no root config: nothing more is asked.
+    layout = read({{.path = "config.json", .size = 1, .sha256 = {}},
+                   {.path = "original/consolidated.00.pth", .size = 1, .sha256 = {}},
+                   {.path = "model.safetensors", .size = 1, .sha256 = {}}},
+                  std::string{apogee::testing::kWanTi2vConfig}, &asked);
+    CHECK(layout.ok);
+    CHECK_FALSE(layout.layout());
+    CHECK(asked == 0);
+    layout = read({{.path = "Wan2.2_VAE.pth", .size = 1, .sha256 = {}},
+                   {.path = "transformer/config.json", .size = 1, .sha256 = {}}},
+                  std::string{apogee::testing::kWanTi2vConfig}, &asked);
+    CHECK_FALSE(layout.layout());
+    CHECK(asked == 0);
+
+    // A config that cannot be read is the pull's failure, said.
+    auto refused = client_for({FakeTransport::Reply{.status = 404, .body = ""}});
+    layout = apogee::models::read_wan_layout(*refused, ref, wan, "", {});
+    CHECK_FALSE(layout.ok);
+    CHECK(layout.error.find("could not read config.json") != std::string::npos);
 }

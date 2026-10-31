@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
@@ -32,6 +34,29 @@ inline constexpr std::string_view kVisionReady =
     R"("tool_parser":"json_tools","thinking":false,"mlx_lm":"0.32.0","vision":true,)"
     R"("mlx_vlm":"0.3.9"})"
     "\n";
+
+/// A driver's `ready` once it has loaded an omni model through mlx-vlm and
+/// hands a turn's recordings to it (53g).
+inline constexpr std::string_view kHearingReady =
+    R"({"type":"ready","protocol":1,"model_type":"gemma4","chat_template":true,)"
+    R"("tool_parser":null,"thinking":false,"mlx_lm":"0.32.0","vision":true,)"
+    R"("mlx_vlm":"0.6.1","audio":true})"
+    "\n";
+
+/// The embedding driver's `ready` (53h): its model loaded through
+/// mlx-embeddings.
+inline constexpr std::string_view kEmbeddingReady =
+    R"({"type":"ready","protocol":1,"embedding":true,"model_type":"gemma3_text",)"
+    R"("mlx_embeddings":"0.1.0","max_length":2048})"
+    "\n";
+
+/// A recording the driver was handed (53g): the path an audio part named,
+/// and what that file held when the request arrived -- the provider removes
+/// it once the turn is over.
+struct HeardFile {
+    std::string path;
+    std::string bytes;
+};
 
 /// What a fake driver does, and what was done to it.
 struct DriverState {
@@ -63,6 +88,15 @@ struct DriverState {
     bool dying = false;
     bool stdin_closed = false;
     bool terminated = false;
+    /// Every recording a `generate` named, read as it arrived (53g).
+    std::vector<HeardFile> heard{};
+    /// Answers each `embed` with this many floats a text (53h) -- a text's
+    /// vector its length, then its position in the batch, then zeros -- so
+    /// a test can tell each vector's text. Zero: an `embed` is answered by
+    /// `replies`, as a `generate` is, or not at all.
+    std::size_t embed_width = 0;
+    /// Every `embed` request's texts, in order.
+    std::vector<std::vector<std::string>> embedded{};
 };
 
 class FakeDriver final : public platform::ChildProcess {
@@ -87,7 +121,18 @@ public:
             const nlohmann::json request = nlohmann::json::parse(line, nullptr, false);
             const std::string id =
                 request.is_object() ? request.value("id", nlohmann::json{}).dump() : "0";
-            if (request.value("type", "") == "generate" && !state_->replies.empty()) {
+            if (request.value("type", "") == "generate") {
+                hear(request);
+            }
+            const bool embed = request.value("type", "") == "embed";
+            if (embed) {
+                state_->embedded.push_back(request.value("texts", std::vector<std::string>{}));
+            }
+            if (embed && state_->embed_width > 0) {
+                state_->out += vectors_for(id, state_->embedded.back());
+                state_->dying = state_->dying || state_->die_after_reply;
+            } else if ((request.value("type", "") == "generate" || embed) &&
+                       !state_->replies.empty()) {
                 std::string reply =
                     state_->replies[std::min(state_->replied, state_->replies.size() - 1)];
                 ++state_->replied;
@@ -153,6 +198,47 @@ public:
     }
 
 private:
+    /// The `vectors` line answering `texts` (53h).
+    [[nodiscard]] std::string vectors_for(const std::string& id,
+                                          const std::vector<std::string>& texts) const {
+        nlohmann::json vectors = nlohmann::json::array();
+        for (std::size_t i = 0; i < texts.size(); ++i) {
+            std::vector<float> vector(state_->embed_width, 0.0F);
+            vector[0] = static_cast<float>(texts[i].size());
+            if (vector.size() > 1) {
+                vector[1] = static_cast<float>(i);
+            }
+            vectors.push_back(vector);
+        }
+        return R"({"type":"vectors","id":)" + id + R"(,"vectors":)" + vectors.dump() + "}\n";
+    }
+
+    /// Reads each audio part's file as the request arrives, as the real
+    /// driver would before the turn is over.
+    void hear(const nlohmann::json& request) {
+        const auto messages = request.find("messages");
+        if (messages == request.end() || !messages->is_array()) {
+            return;
+        }
+        for (const nlohmann::json& message : *messages) {
+            const auto content = message.find("content");
+            if (content == message.end() || !content->is_array()) {
+                continue;
+            }
+            for (const nlohmann::json& part : *content) {
+                if (part.value("type", "") != "audio") {
+                    continue;
+                }
+                const std::string path = part.value("audio", "");
+                std::ifstream in{path, std::ios::binary};
+                state_->heard.push_back(
+                    HeardFile{.path = path,
+                              .bytes = std::string{std::istreambuf_iterator<char>{in},
+                                                   std::istreambuf_iterator<char>{}}});
+            }
+        }
+    }
+
     std::shared_ptr<DriverState> state_;
 };
 

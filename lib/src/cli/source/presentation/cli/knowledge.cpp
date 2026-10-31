@@ -24,6 +24,7 @@
 #include "contracts/errors.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "contracts/utf8.h"
 #include "harness/roles.h"
 #include "knowledge/clerk.h"
 #include "knowledge/export.h"
@@ -713,12 +714,24 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
         if (!record.has_value()) {
             fail_user("no record '" + i->id + "' in '" + db + "'");
         }
+        // The record, and under --raw the archived conversation beside it
+        // (M31): `raw`, null where the archive cannot be read -- the text's
+        // `(unavailable)`. Both JSON faces carry it; --raw was dropped there.
+        const auto document = [&store, &record, &i]() {
+            nlohmann::json out = nlohmann::json(*record);
+            if (i->raw) {
+                const std::optional<std::string> raw = store.read_raw(*record);
+                out["raw"] = raw.has_value() ? nlohmann::json(harness::valid_utf8(*raw))
+                                             : nlohmann::json(nullptr);
+            }
+            return out;
+        };
         if (i->json) {
-            std::cout << nlohmann::json(*record).dump(2) << "\n";
+            std::cout << document().dump(2) << "\n";
             return;
         }
         if (*info_format == ReadFormat::Json) {
-            write_document(std::cout, nlohmann::json(*record));
+            write_document(std::cout, document());
             return;
         }
         std::cout << knowledge_record_text(*record);

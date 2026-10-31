@@ -6,7 +6,9 @@
 #include <system_error>
 #include <utility>
 
+#include "modelstore/mlx_info.h"
 #include "modelstore/store.h"
+#include "modelstore/voice_info.h"
 #include "platform/ffmpeg.h"
 #include "video/work_dir.h"
 
@@ -25,13 +27,60 @@ namespace {
 
 }  // namespace
 
+std::optional<VideoEngine> voice_engine_of_directory(const std::filesystem::path& dir) {
+    if (models::is_voice_dir(dir)) {
+        return VideoEngine::Torch;
+    }
+    std::error_code code;
+    if (std::filesystem::is_directory(dir, code) &&
+        models::read_mlx_kind(dir).word == models::kMlxVoice) {
+        return VideoEngine::Mlx;
+    }
+    return std::nullopt;
+}
+
+std::string choose_voice_engine(std::string_view asked, VideoEngine directory,
+                                std::string_view name, VideoEngine& out) {
+    if (asked.empty() || asked == "auto") {
+        out = directory;
+        return {};
+    }
+    const std::optional<VideoEngine> engine = video_engine_from_string(asked);
+    if (!engine.has_value()) {
+        return "--engine takes auto, torch or mlx (got '" + std::string{asked} + "')";
+    }
+    if (*engine == directory) {
+        out = directory;
+        return {};
+    }
+    // The model says its engine: the other one is refused, saying how a
+    // model for it is had.
+    if (directory == VideoEngine::Mlx) {
+        return "'" + std::string{name} +
+               "' is an MLX voice model, which speaks on MLX (mlx-audio), not PyTorch -- "
+               "PyTorch speaks with a voice model as Kokoro publishes it: 'apogee models pull "
+               "hexgrad/Kokoro-82M' stores one, and 'apogee train setup --with voice' installs "
+               "what runs it";
+    }
+    return "'" + std::string{name} +
+           "' is a voice model as Kokoro publishes it, which speaks on PyTorch (kokoro), not "
+           "MLX -- MLX speaks with its MLX build: 'apogee models convert " +
+           std::string{name} + " --mlx' makes one, after '" + std::string{kMlxAudioSetupRemedy} +
+           "'";
+}
+
 nlohmann::json voice_request_document(const VoiceRequest& request,
                                       const std::filesystem::path& out_dir) {
-    return nlohmann::json{{"model_dir", request.model.string()},
-                          {"voice", request.voice},
-                          {"speed", request.speed},
-                          {"segments", request.segments},
-                          {"out_dir", out_dir.string()}};
+    nlohmann::json document{{"model_dir", request.model.string()},
+                            {"voice", request.voice},
+                            {"speed", request.speed},
+                            {"segments", request.segments},
+                            {"out_dir", out_dir.string()}};
+    // On MLX the engine named (53m), as a video request names it.
+    if (request.engine == VideoEngine::Mlx) {
+        document["engine"] = std::string{to_string(request.engine)};
+    }
+    return document;
 }
 
 std::optional<VoiceEvent> read_voice_event(const training::ScriptEvent& line) {
@@ -50,7 +99,10 @@ std::optional<VoiceEvent> read_voice_event(const training::ScriptEvent& line) {
         out.ready = VoiceReady{.device = string_at(record, "device"),
                                .torch = string_at(record, "torch"),
                                .kokoro = string_at(record, "kokoro"),
-                               .sample_rate = static_cast<int>(number_at(record, "sample_rate"))};
+                               .sample_rate = static_cast<int>(number_at(record, "sample_rate")),
+                               .engine = string_at(record, "engine"),
+                               .mlx = string_at(record, "mlx"),
+                               .mlx_audio = string_at(record, "mlx_audio")};
         return out;
     }
     if (event == "segment") {
@@ -97,6 +149,12 @@ VoiceOutcome speak(const VideoReadiness& readiness, const VoiceRequest& request,
     if (request.segments.empty()) {
         return finish("nothing to speak");
     }
+    // The one speech, either engine (53m): the driver the ladder found for
+    // this engine and no other.
+    if (readiness.engine != request.engine) {
+        return finish("the runtime was made ready for " + std::string{to_string(readiness.engine)} +
+                      ", and the speech asks for " + std::string{to_string(request.engine)});
+    }
     sweep_abandoned(work_root);
     std::string error;
     const std::filesystem::path work = make_work_dir(work_root, error);
@@ -124,11 +182,14 @@ VoiceOutcome speak(const VideoReadiness& readiness, const VoiceRequest& request,
     const training::ScriptOutcome ran = training::run_script(
         script,
         [&](const training::ScriptEvent& line) {
-            const std::optional<VoiceEvent> event = read_voice_event(line);
+            std::optional<VoiceEvent> event = read_voice_event(line);
             if (!event.has_value()) {
                 return;
             }
             if (event->kind == VoiceEvent::Kind::Ready) {
+                // The engine the speech takes, said from the moment it is
+                // ready (M24): the request's, as its record says it.
+                event->ready.engine = std::string{to_string(request.engine)};
                 out.ready = event->ready;
             } else if (event->kind == VoiceEvent::Kind::Segment) {
                 segments.push_back(*event);

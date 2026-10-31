@@ -43,6 +43,10 @@ struct LastDatasets {
 
 /// The file or directory name a version's weights are kept under.
 [[nodiscard]] std::string weights_name(const nlohmann::json& version) {
+    // An adapter version (53b) by its adapter's name, `v<N>.lora[.gguf]`.
+    if (version.contains("adapter_path")) {
+        return std::filesystem::path{field(version, "adapter_path")}.filename().string();
+    }
     if (version.contains("mlx_path")) {
         return "mlx/" + std::filesystem::path{field(version, "mlx_path")}.filename().string();
     }

@@ -1,0 +1,2 @@
+apogee models: llama.cpp could not quantize /Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/dfed3eebdfdb/Llama3.2-1B-Instruct-F16.gguf to Q4_K_M
+llama.cpp said: llama_model_quantize: failed to quantize: ios_base::clear: unspecified iostream_category error

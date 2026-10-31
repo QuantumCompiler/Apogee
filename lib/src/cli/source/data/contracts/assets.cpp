@@ -354,6 +354,10 @@ std::string bundled_mlx_converter_relative_path() {
     return bundled_script_relative_path("mlx_convert.py");
 }
 
+std::string bundled_mlx_embedder_relative_path() {
+    return bundled_script_relative_path("mlx_embed.py");
+}
+
 std::string bundled_code_exec_server_relative_path() {
     return bundled_script_relative_path("code_exec_server.py");
 }
@@ -362,8 +366,16 @@ std::string bundled_video_driver_relative_path() {
     return bundled_script_relative_path("video_generate.py");
 }
 
+std::string bundled_video_mlx_driver_relative_path() {
+    return bundled_script_relative_path("video_generate_mlx.py");
+}
+
 std::string bundled_voice_driver_relative_path() {
     return bundled_script_relative_path("voice_say.py");
+}
+
+std::string bundled_voice_mlx_driver_relative_path() {
+    return bundled_script_relative_path("voice_say_mlx.py");
 }
 
 std::string bundled_converter_relative_dir() {

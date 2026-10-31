@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <limits>
@@ -67,6 +68,63 @@ constexpr std::array<std::pair<std::string_view, AgentOutputFormat>, 3> kAgentOu
     {"json", AgentOutputFormat::Json},
     {"markdown", AgentOutputFormat::Markdown},
 }};
+
+/// The one declaration of what a backend entry holds (55g): its type and its
+/// `api_key`, then the rest of the fields `config set-backend` writes, in the
+/// order `config get` completes them. A field added to the loader is a row
+/// here, or `check` names it as a key no backend reads.
+constexpr std::array<std::string_view, 27> kBackendEntryKeys{
+    "type",
+    "api_key",
+    "model",
+    "model_path",
+    "mmproj_path",
+    "embedding_model",
+    "system_prompt",
+    "context_size",
+    "cache_type",
+    "max_tokens",
+    "temperature",
+    "top_p",
+    "top_k",
+    "min_p",
+    "repeat_penalty",
+    "presence_penalty",
+    "seed",
+    "thinking",
+    "thinking_budget",
+    "binary",
+    "mode",
+    "host",
+    "idle_unload_seconds",
+    "server_tools",
+    "adapters",
+    "draft",
+    "draft_block_size",
+};
+
+/// The edits between `a` and `b` when a character may be added, dropped,
+/// changed, or swapped with its neighbour (the optimal string alignment
+/// distance), each costing one.
+[[nodiscard]] std::size_t edits_between(std::string_view a, std::string_view b) {
+    std::vector<std::vector<std::size_t>> d(a.size() + 1, std::vector<std::size_t>(b.size() + 1));
+    for (std::size_t i = 0; i <= a.size(); ++i) {
+        d[i][0] = i;
+    }
+    for (std::size_t j = 0; j <= b.size(); ++j) {
+        d[0][j] = j;
+    }
+    for (std::size_t i = 1; i <= a.size(); ++i) {
+        for (std::size_t j = 1; j <= b.size(); ++j) {
+            const std::size_t change = a[i - 1] == b[j - 1] ? 0 : 1;
+            d[i][j] = std::min({d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + change});
+            if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) {
+                d[i][j] = std::min(d[i][j], d[i - 2][j - 2] + 1);
+            }
+        }
+    }
+    return d[a.size()][b.size()];
+}
 
 constexpr std::array<std::pair<std::string_view, KvCacheType>, 3> kCacheTypeNames{{
     {"f16", KvCacheType::F16},
@@ -154,6 +212,87 @@ std::optional<std::int64_t> integer_in(const YAML::Node& node, std::string_view 
 std::vector<std::string> string_list(const YAML::Node& node, std::string_view origin,
                                      std::string_view key, bool paths);
 
+/// Whether `text` is a sha256 in hex: 64 hex digits, either case.
+[[nodiscard]] bool sha256_digest(std::string_view text) noexcept {
+    return text.size() == 64 && std::ranges::all_of(text, [](char c) {
+               return std::isxdigit(static_cast<unsigned char>(c)) != 0;
+           });
+}
+
+/// An entry's `adapters:` (53a): a list of `{path, scale, base_sha256}`, a
+/// path named once, a scale in (0, kMaxAdapterScale] -- on an mlx entry one
+/// adapter at the scale its training wrote -- and only on a type that applies
+/// them. Empty when absent.
+std::vector<AdapterConfig> parse_adapters(const YAML::Node& node, std::string_view origin,
+                                          const std::string& where, BackendType type) {
+    std::vector<AdapterConfig> out;
+    if (!node.IsDefined() || node.IsNull()) {
+        return out;
+    }
+    if (!node.IsSequence()) {
+        fail(origin, where + ": expected a list of adapters, each {path, scale}");
+    }
+    std::size_t index = 0;
+    for (const YAML::Node& item : node) {
+        const std::string at = where + "[" + std::to_string(index++) + "]";
+        if (!item.IsMap()) {
+            fail(origin, at + ": expected {path, scale}");
+        }
+        for (const auto& field : item) {
+            const std::string key = field.first.Scalar();
+            if (key != "path" && key != "scale" && key != "base_sha256") {
+                fail(origin, at + ": unknown key '" + key +
+                                 "' (an adapter's are path, scale and base_sha256)");
+            }
+        }
+        AdapterConfig adapter;
+        adapter.path = expand_env_and_home(scalar(item["path"], origin, at + ".path"));
+        if (adapter.path.empty()) {
+            fail(origin, at + ": an adapter needs a path");
+        }
+        if (const std::optional<double> scale = number(item["scale"], origin, at + ".scale");
+            scale.has_value()) {
+            if (!std::isfinite(*scale) || *scale <= 0.0 || *scale > kMaxAdapterScale) {
+                fail(origin, at + ".scale: must be above 0 and at most 2");
+            }
+            adapter.scale = *scale;
+        }
+        adapter.base_sha256 = scalar(item["base_sha256"], origin, at + ".base_sha256");
+        if (!adapter.base_sha256.empty() && !sha256_digest(adapter.base_sha256)) {
+            fail(origin, at + ".base_sha256: '" + adapter.base_sha256 +
+                             "' is not a sha256 (64 hex digits)");
+        }
+        std::ranges::transform(adapter.base_sha256, adapter.base_sha256.begin(), fold);
+        if (std::ranges::any_of(out, [&adapter](const AdapterConfig& listed) {
+                return listed.path == adapter.path;
+            })) {
+            fail(origin, at + ".path: " + adapter.path +
+                             " is already in the list -- an adapter is applied once");
+        }
+        out.push_back(std::move(adapter));
+    }
+    if (out.empty()) {
+        return out;
+    }
+    if (!takes_adapters(type)) {
+        fail(origin, where + ": a backend of type " + std::string{to_string(type)} +
+                         " applies no adapters -- only llamacpp and mlx entries take them");
+    }
+    if (type == BackendType::Mlx) {
+        if (out.size() > 1) {
+            fail(origin, where +
+                             ": an mlx entry applies one adapter -- mlx-lm loads one adapter "
+                             "directory over its base");
+        }
+        if (out.front().scale != 1.0) {
+            fail(origin, where +
+                             "[0].scale: mlx-lm applies an adapter at the scale its training "
+                             "wrote (adapter_config.json) -- leave scale at 1");
+        }
+    }
+    return out;
+}
+
 BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
                             const std::string& name) {
     const std::string where = "backends." + name;
@@ -162,6 +301,14 @@ BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
     }
 
     BackendConfig backend;
+    // A key no backend reads is kept for `check` to name (55g), never
+    // refused: an older binary still loads a newer release's entry.
+    for (const auto& field : node) {
+        if (const std::string key = field.first.Scalar();
+            std::ranges::find(kBackendEntryKeys, key) == kBackendEntryKeys.end()) {
+            backend.unknown_keys.push_back(key);
+        }
+    }
 
     const std::string type_name = scalar(node["type"], origin, where + ".type");
     if (type_name.empty()) {
@@ -232,6 +379,20 @@ BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
     if (const std::string refusal = server_tools_refusal(backend.type, backend.server_tools);
         !refusal.empty()) {
         fail(origin, where + ".server_tools: " + refusal);
+    }
+    backend.adapters = parse_adapters(node["adapters"], origin, where + ".adapters", backend.type);
+    // A drafter beside the model (53i): an mlx entry's alone, mlx-vlm's
+    // speculative path being the one Apogee runs.
+    backend.draft = scalar(node["draft"], origin, where + ".draft");
+    backend.draft_block_size =
+        integer_in(node["draft_block_size"], origin, where + ".draft_block_size",
+                   kMinDraftBlockSize, kMaxDraftBlockSize);
+    if ((!backend.draft.empty() || backend.draft_block_size.has_value()) &&
+        backend.type != BackendType::Mlx) {
+        fail(origin, where + (backend.draft.empty() ? ".draft_block_size" : ".draft") +
+                         ": a backend of type " + std::string{to_string(backend.type)} +
+                         " drafts with nothing -- a drafter runs beside an mlx entry's model, "
+                         "through mlx-vlm's speculative path");
     }
 
     return backend;
@@ -1151,6 +1312,26 @@ bool names_its_model(BackendType type) noexcept {
             return false;
     }
     return false;
+}
+
+bool takes_adapters(BackendType type) noexcept {
+    return type == BackendType::LlamaCpp || type == BackendType::Mlx;
+}
+
+std::span<const std::string_view> backend_entry_keys() noexcept {
+    return kBackendEntryKeys;
+}
+
+std::string_view nearest_backend_key(std::string_view key) {
+    std::string_view nearest;
+    std::size_t fewest = std::max<std::size_t>(2, key.size() / 4) + 1;
+    for (const std::string_view known : kBackendEntryKeys) {
+        if (const std::size_t edits = edits_between(key, known); edits < fewest) {
+            fewest = edits;
+            nearest = known;
+        }
+    }
+    return nearest;
 }
 
 std::string_view to_string(AgentToolPolicy policy) noexcept {

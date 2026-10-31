@@ -32,6 +32,8 @@ apogee_add_module(contracts
     contracts/utf8.cpp
     contracts/todo.h
     contracts/todo.cpp
+    contracts/text_diff.h
+    contracts/text_diff.cpp
     contracts/server_tools.h
     contracts/server_tools.cpp
     contracts/assets.h
@@ -194,6 +196,8 @@ apogee_add_module(backends
     backends/sampling.cpp
     backends/prompt_cache.h
     backends/prompt_cache.cpp
+    backends/adapters.h
+    backends/adapters.cpp
     backends/chat_template.h
     backends/chat_template.cpp
     backends/llamacpp_tokens.h
@@ -208,12 +212,16 @@ apogee_add_module(backends
     backends/llamacpp_embed.cpp
     backends/local_prompt.h
     backends/local_prompt.cpp
+    backends/llama_bases.h
+    backends/llama_bases.cpp
     backends/llamacpp.h
     backends/llamacpp.cpp
     backends/mlx_protocol.h
     backends/mlx_protocol.cpp
     backends/mlx_local.h
     backends/mlx_local.cpp
+    backends/mlx_embed.h
+    backends/mlx_embed.cpp
     backends/factory.h
     backends/factory.cpp
     backends/provider_table.h

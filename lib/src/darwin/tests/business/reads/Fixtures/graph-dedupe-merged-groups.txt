@@ -1,0 +1,4 @@
+Merged into K8s (system): Cache, Gateway, Store
+Merged into Scheduler (system): Load Balancer
+2 group(s), 4 entity(ies) merged at threshold 0.92.
+Note: community memberships changed -- re-run `apogee graph communities notes` to refresh the summaries.

@@ -14,6 +14,8 @@ constexpr std::int64_t kGiB = kMiB * 1024;
 
 /// A pipe's permanent line interval: legible in a log, never a flood.
 constexpr std::int64_t kPipeInterval = 64 * kMiB;
+/// How often an unknown total's count is relayed (52b).
+constexpr std::int64_t kRelayInterval = 16 * kMiB;
 
 constexpr std::string_view kEllipsis = "…";
 
@@ -77,7 +79,9 @@ DownloadProgress::DownloadProgress(std::ostream& out, Options options)
     : options_{options}, writer_{out}, status_{writer_, status_options(options_)} {}
 
 DownloadProgress::~DownloadProgress() {
-    status_.clear();
+    if (!options_.relay) {
+        status_.clear();
+    }
 }
 
 void DownloadProgress::bytes(std::int64_t written, std::int64_t total) {
@@ -86,6 +90,20 @@ void DownloadProgress::bytes(std::int64_t written, std::int64_t total) {
 
 void DownloadProgress::file(std::size_t index, std::size_t count, std::string_view relative,
                             std::int64_t written, std::int64_t size) {
+    if (options_.relay) {
+        if (index != index_) {
+            // The previous file's end, then this one's start.
+            relay(seen_, seen_total_, true);
+            index_ = index;
+            count_ = count;
+            name_ = std::string{relative};
+            seen_ = -1;
+            relayed_ = -1;
+            relayed_percent_ = -1;
+        }
+        report(written, size);
+        return;
+    }
     if (index != index_) {
         if (options_.live && index_ != 0) {
             // The previous file is done: it settles into the scrollback, and
@@ -107,6 +125,16 @@ void DownloadProgress::file(std::size_t index, std::size_t count, std::string_vi
 }
 
 void DownloadProgress::finish() {
+    if (options_.relay) {
+        relay(seen_, seen_total_, true);
+        index_ = 0;
+        count_ = 0;
+        name_.clear();
+        seen_ = -1;
+        relayed_ = -1;
+        relayed_percent_ = -1;
+        return;
+    }
     if (options_.live && index_ != 0) {
         status_.print_line(file_line());
     } else {
@@ -118,6 +146,10 @@ void DownloadProgress::finish() {
 }
 
 void DownloadProgress::report(std::int64_t written, std::int64_t total) {
+    if (options_.relay) {
+        relay(written, total, false);
+        return;
+    }
     if (options_.live) {
         std::string line = live_line(written, total);
         if (line != painted_) {
@@ -131,6 +163,27 @@ void DownloadProgress::report(std::int64_t written, std::int64_t total) {
     }
     last_report_ = written;
     status_.print_line((index_ == 0 ? "  " : "      ") + format_download_progress(written, total));
+}
+
+void DownloadProgress::relay(std::int64_t written, std::int64_t total, bool force) {
+    if (!force) {
+        seen_ = written;
+        seen_total_ = total;
+    }
+    if (seen_ < 0 || seen_ == relayed_) {
+        return;  // nothing seen, or nothing new since it was sent
+    }
+    const std::int64_t percent = seen_total_ > 0 ? seen_ * 100 / seen_total_ : -1;
+    const bool due =
+        force || relayed_ < 0 ||
+        (seen_total_ > 0 ? percent > relayed_percent_ : seen_ - relayed_ >= kRelayInterval);
+    if (!due) {
+        return;
+    }
+    relayed_ = seen_;
+    relayed_percent_ = percent;
+    options_.relay(ByteReport{
+        .done = seen_, .total = seen_total_, .file = name_, .index = index_, .count = count_});
 }
 
 std::string DownloadProgress::file_line() const {

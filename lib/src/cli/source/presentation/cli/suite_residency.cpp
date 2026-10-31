@@ -1,5 +1,7 @@
 #include "cli/suite_residency.h"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <cstdint>
 #include <string>
@@ -21,18 +23,43 @@ constexpr std::string_view kSuiteShape = "/suite <name|off> [--force] [--warm]";
     return (bytes + (kMiB / 2)) / kMiB;
 }
 
-/// A member's MiB as shown: its weights and its cache each rounded, so the
-/// parts on a member's line add up to its figure, and the figures to the sum.
+/// A member's MiB as shown: its weights -- unless another member's base
+/// holds them (53d) -- its cache, its adapters and its drafter (M25) each
+/// rounded, so the parts on a member's line add up to its figure, and the
+/// figures to the sum.
 [[nodiscard]] std::optional<std::int64_t> shown_mib(const models::MemberFootprint& member) {
     if (!member.local) {
         return 0;
     }
     // `bytes()`'s rule, read part by part.
-    if (!member.weights.has_value() || !member.window.has_value() ||
-        !member.window->cache_bytes.has_value()) {
+    const bool own = member.shares.empty();
+    if ((own && !member.weights.has_value()) || !member.window.has_value() ||
+        !member.window->cache_bytes.has_value() || !member.adapter_bytes.has_value() ||
+        !member.drafter_bytes.has_value()) {
         return std::nullopt;
     }
-    return whole_mib(*member.weights) + whole_mib(*member.window->cache_bytes);
+    return (own ? whole_mib(*member.weights) : 0) + whole_mib(*member.window->cache_bytes) +
+           whole_mib(*member.adapter_bytes) + whole_mib(*member.drafter_bytes);
+}
+
+/// The MiB an unknown member's drafter adds to the sum (M25), known whatever
+/// the rest of the member is; nullopt when it drafts with nothing or its
+/// drafter's size is unknown too.
+[[nodiscard]] std::optional<std::int64_t> drafter_mib(const models::MemberFootprint& member) {
+    if (!member.local || member.drafter.empty() || !member.drafter_bytes.has_value()) {
+        return std::nullopt;
+    }
+    return whole_mib(*member.drafter_bytes);
+}
+
+/// What a member on another's base says beside its figure (53d): whose
+/// weights it runs on, and what sharing them saves when that is known.
+[[nodiscard]] std::string shared_note(const models::MemberFootprint& member) {
+    std::string note = " (shares " + member.shares + "'s weights";
+    if (member.weights.has_value()) {
+        note += ", " + std::to_string(whole_mib(*member.weights)) + " MiB saved";
+    }
+    return note + ")";
 }
 
 /// The backend's key as the config spells it -- what its provider is
@@ -71,9 +98,17 @@ std::string admission_line(const models::SuiteFootprint& footprint, bool forced)
         parts += parts.empty() ? "" : " + ";
         if (const std::optional<std::int64_t> mib = shown_mib(member); mib.has_value()) {
             parts += member.backend + " " + std::to_string(*mib);
+            if (!member.shares.empty()) {
+                parts += shared_note(member);
+            }
             sum += *mib;
         } else {
             parts += member.backend + " unknown (" + member.unknown + ")";
+            // Its drafter is a load of its own, counted all the same (M25).
+            if (const std::optional<std::int64_t> drafter = drafter_mib(member)) {
+                parts += " + " + member.backend + "'s drafter " + std::to_string(*drafter);
+                sum += *drafter;
+            }
         }
     }
     const std::int64_t margin = whole_mib(models::kFitMargin);
@@ -125,15 +160,34 @@ std::vector<std::string> footprint_lines(const models::SuiteFootprint& footprint
             continue;
         }
         if (const std::optional<std::int64_t> mib = shown_mib(member); mib.has_value()) {
-            // `shown_mib`'s parts, each said: known, since it is.
+            // `shown_mib`'s parts, each said: known, since it is. Weights on
+            // another member's base are that member's, said and not added.
             const models::LocalWindow window = member.window.value_or(models::LocalWindow{});
-            line += std::to_string(*mib) + " MiB -- " +
-                    std::to_string(whole_mib(member.weights.value_or(0))) + " MiB of weights, " +
-                    std::to_string(whole_mib(window.cache_bytes.value_or(0))) + " MiB of " +
+            line += std::to_string(*mib) + " MiB -- ";
+            if (member.shares.empty()) {
+                line += std::to_string(whole_mib(member.weights.value_or(0))) + " MiB of weights, ";
+            } else if (member.weights.has_value()) {
+                line += "shares " + member.shares + "'s " +
+                        std::to_string(whole_mib(*member.weights)) + " MiB of weights, ";
+            } else {
+                line += "shares " + member.shares + "'s weights, ";
+            }
+            line += std::to_string(whole_mib(window.cache_bytes.value_or(0))) + " MiB of " +
                     std::string{harness::to_string(window.cache_type)} + " cache at " +
                     std::to_string(window.window) + " tokens";
+            if (member.adapters > 0) {
+                line += ", " + std::to_string(whole_mib(member.adapter_bytes.value_or(0))) +
+                        " MiB of adapters";
+            }
+            if (!member.drafter.empty()) {
+                line += ", " + std::to_string(whole_mib(member.drafter_bytes.value_or(0))) +
+                        " MiB of its drafter's weights";
+            }
         } else {
             line += "unknown -- " + member.unknown;
+            if (const std::optional<std::int64_t> drafter = drafter_mib(member)) {
+                line += "; its drafter's " + std::to_string(*drafter) + " MiB of weights counted";
+            }
         }
         if (resident) {
             if (const std::optional<bool> loaded = resident(member.backend); loaded.has_value()) {
@@ -144,6 +198,45 @@ std::vector<std::string> footprint_lines(const models::SuiteFootprint& footprint
     }
     lines.push_back("  total: " + admission_line(footprint));
     return lines;
+}
+
+std::string_view footprint_verdict(models::Admission admission) {
+    switch (admission) {
+        case models::Admission::Fits:
+            return "fits";
+        case models::Admission::FitsAsFarAsKnown:
+            return "fits as far as known";
+        case models::Admission::OverBudget:
+            return "does not fit";
+        case models::Admission::BudgetUnknown:
+            return "budget not known here";
+        case models::Admission::NothingHeld:
+            break;
+    }
+    return "no member holds memory";
+}
+
+nlohmann::json footprint_document(const models::SuiteFootprint& footprint) {
+    nlohmann::json members = nlohmann::json::array();
+    for (const models::MemberFootprint& member : footprint.members) {
+        // What the sum counts of it, and whether that is all of it.
+        members.push_back(nlohmann::json{{"backend", member.backend},
+                                         {"roles", member.roles},
+                                         {"local", member.local},
+                                         {"bytes", member.counted_bytes()},
+                                         {"known", member.bytes().has_value()},
+                                         {"shares", member.shares},
+                                         {"note", member.unknown}});
+    }
+    return nlohmann::json{
+        {"suite", footprint.suite},
+        {"members", std::move(members)},
+        {"total_bytes", footprint.needed()},
+        {"margin_bytes", footprint.holds_local() ? models::kFitMargin : std::int64_t{0}},
+        {"budget_bytes", footprint.machine.bytes.has_value()
+                             ? nlohmann::json(*footprint.machine.bytes)
+                             : nlohmann::json(nullptr)},
+        {"verdict", std::string{footprint_verdict(footprint.admission())}}};
 }
 
 SuiteArgument parse_suite_argument(std::string_view argument) {

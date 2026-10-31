@@ -1,0 +1,12 @@
+Gemma4-12B-4bit            not registered
+                           /Users/someone/.apogee/models/Gemma4-12B/mlx/7a8b9c0d1e2f
+Gemma4-12B-Assistant-bf16  not registered -- a drafter: it runs beside its base model, never alone
+                           /Users/someone/.apogee/models/Gemma4-12B-Assistant/mlx/8192a3b4c5d6
+Gemma4-E4B-4bit            not registered
+                           /Users/someone/.apogee/models/Gemma4-E4B/mlx/2b3c4d5e6f70
+Gemma4-E4B-Assistant-bf16  not registered -- a drafter: it runs beside its base model, never alone
+                           /Users/someone/.apogee/models/Gemma4-E4B-Assistant/mlx/4d5e6f708192
+Qwen3-8B-4bit              not registered
+                           /Users/someone/.apogee/models/Qwen3-8B/mlx/1a2b3c4d5e6f
+
+register the unregistered ones as backends: apogee config scan --register

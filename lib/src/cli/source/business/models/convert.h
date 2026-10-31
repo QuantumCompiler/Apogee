@@ -117,6 +117,14 @@ struct MlxConvertResult {
     /// What the finished directory says: its window, its quantization, its
     /// shards and size.
     MlxInfo info;
+    /// What kind of MLX directory the converter made (53e), for its record:
+    /// `chat` for mlx-lm's language model, `vision` for mlx-vlm's build with
+    /// its towers kept (53f), `embedding` for mlx-embeddings' (53h),
+    /// `drafter` for mlx-vlm's build of a draft head (53i), `video` for
+    /// mlx-video's build of Wan's original layout (53k), `voice` for
+    /// mlx-audio's build of a voice model (53m) -- the route's, as the caller
+    /// names it. Set when `ok`.
+    std::string kind{};
 };
 
 /// Roughly what an MLX model of `elements` weighs at `bits` a weight -- a
@@ -126,20 +134,39 @@ struct MlxConvertResult {
 
 /// Why the MLX ladder's first rungs refuse, or empty -- before anything is
 /// announced: not a snapshot, a damaged one, one already quantized by
-/// `mlx-lm` (an MLX model runs as it is), or something already at `out`.
+/// `mlx-lm` (an MLX model runs as it is), a draft head, a diffusion model, an
+/// embedding model (M21), or something already at `out`. `kind` is what the
+/// route's converter builds (53f): `embedding` -- the caller has found the
+/// installed mlx-embeddings builds the set's type (53h) -- lifts M21's
+/// refusal; `drafter` -- the caller has found the installed mlx-vlm drafts
+/// the head's type (53i) -- lifts the draft-heads change's, and takes a draft
+/// head alone; `video` -- the caller has found mlx-video installed (53k) --
+/// lifts M20's for Wan's original layout once it is whole, and takes that
+/// layout alone; `voice` -- the caller has found mlx-audio installed (53m) --
+/// takes a voice model as Kokoro publishes it, read whole (`read_voice_info`),
+/// and nothing else; any other keeps them all, worded as they were.
 [[nodiscard]] std::string mlx_conversion_refusal(const std::filesystem::path& snapshot,
-                                                 const std::filesystem::path& out);
+                                                 const std::filesystem::path& out,
+                                                 std::string_view kind = {});
 
 /// The ladder, in order:
 ///   1. `snapshot` is one, intact, and not already quantized by `mlx-lm`
 ///   2. nothing exists at `out` -- the converter writes the directory itself
 ///      and a conversion never replaces anything
 ///   3. convert into `out`
-///   4. what landed reads as a whole MLX model (`read_mlx_info`), quantized
+///   4. what landed reads as a whole MLX model (`read_mlx_info`, by the
+///      route's kind -- a video model by mlx-video's layout, 53k), quantized
 ///      to `bits` when `bits` is set -- a directory that cannot load, or one
 ///      the converter did not quantize as asked, is never committed
 /// A failure at any rung, cancellation included, removes `out`. Committing
-/// it under its id is the store's (`commit_mlx`).
+/// it under its id is the store's (`commit_mlx`). `kind` is what the route's
+/// converter builds (53f): `chat` for mlx-lm's, `vision` for mlx-vlm's,
+/// `embedding` for mlx-embeddings' (53h), which rung 1 lets an embedding
+/// model through for, `drafter` for mlx-vlm's build of a draft head (53i),
+/// which it lets a draft head through for, `video` for mlx-video's build
+/// of Wan's original layout (53k), which it lets that layout through for
+/// once it is whole, and `voice` for mlx-audio's build of a voice model
+/// (53m), whose input is that model's directory, not a snapshot.
 /// The `model_type` a snapshot's `config.json` declares, or empty.
 [[nodiscard]] std::string snapshot_model_type(const std::filesystem::path& snapshot);
 
@@ -154,6 +181,7 @@ struct MlxConvertResult {
 
 [[nodiscard]] MlxConvertResult convert_snapshot_to_mlx(
     const std::filesystem::path& snapshot, const std::filesystem::path& out, int bits,
-    const MlxConvertFn& convert, const harness::CancellationToken& cancellation);
+    const MlxConvertFn& convert, const harness::CancellationToken& cancellation,
+    std::string_view kind = kMlxChat);
 
 }  // namespace apogee::models

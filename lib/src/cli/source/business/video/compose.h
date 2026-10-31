@@ -176,6 +176,10 @@ struct ComposeSeams {
     bool can_burn = true;
     /// A line the run says as it goes.
     std::function<void(const std::string&)> say{};
+    /// A scene begun (52b), beside the line `say` gets for it: `scene` of
+    /// `scenes`, from 1, at `speaking` (its narration), `rendering` (its
+    /// clip) or `asset` (its asset taken as it is). Unset says nothing.
+    std::function<void(std::size_t scene, std::size_t scenes, std::string_view state)> on_scene{};
     /// The project as it stands, after every step: the caller writes it.
     std::function<void(const harness::VideoProject&)> save{};
 };
@@ -184,7 +188,7 @@ struct ComposeOutcome {
     /// The video is at the project's output.
     bool ok = false;
     bool cancelled = false;
-    std::string error;
+    std::string error{};
 };
 
 /// Renders `project` from wherever it stands. Every scene's narration first
@@ -268,9 +272,31 @@ struct EditedScenes {
 /// such scene.
 [[nodiscard]] std::string redo_scene(EditedScenes& edited, std::size_t scene, std::int64_t seed);
 
+/// Which of a scene's records differ from the scene it came from, in the
+/// diff's order -- `narration`, `prompt`, `duration`, `asset`, `seed` (52c):
+/// the one reading both the said diff and the document's `changes` take.
+[[nodiscard]] std::vector<std::string> changed_records(const SceneChange& change);
+
 /// The diff, scene by scene, in words -- said before anything renders.
 [[nodiscard]] std::vector<std::string> diff_lines(const EditedScenes& edited,
                                                   std::size_t parent_scenes);
+
+/// The edit's comparison written onto `project`, whose scenes are
+/// `edited`'s (52c): each scene's `from`, `changes` and `moved`, and the
+/// parent's scenes `removed` -- the facts `diff_lines` says, as data.
+void record_provenance(harness::VideoProject& project, const EditedScenes& edited);
+
+/// `step`, an edit made over `kept` -- a project itself edited from
+/// `parent`, each scene's `from` recorded -- read against `parent` instead
+/// (55c): each scene's `from` followed through `kept`'s own to the parent's
+/// scene it began as, its records compared with that one's (a seed that is
+/// not the parent's scene's is re-rolled), and the moves and the parent's
+/// removed scenes found again. What a project edited again before it
+/// finished records and says, so it still compares with its `parent` case
+/// for case.
+[[nodiscard]] EditedScenes through_kept(const harness::VideoProject& parent,
+                                        const harness::VideoProject& kept,
+                                        const EditedScenes& step);
 
 /// Carries what each edited scene keeps from its parent into
 /// `scenes_dir`, copied byte for byte under its new number: its narration

@@ -53,12 +53,12 @@ inline constexpr std::string_view kRecallHeader =
 
 /// One chat as the index holds it.
 struct RecallEntry {
-    std::string chat_id;
+    std::string chat_id{};
     std::string title{};
     /// The chat's `updated_at` when it was summarised: a chat updated since
     /// is summarised again.
     std::string updated_at{};
-    std::string summary;
+    std::string summary{};
 };
 
 /// The text a summary is indexed and recalled as: dated and titled, so the
@@ -89,6 +89,16 @@ public:
 
     /// How many chats the index holds.
     [[nodiscard]] std::size_t chats() const;
+
+    /// Every chat the index holds (M31), newest first by the `updated_at` it
+    /// was summarised at -- undated last, ties by id -- each as it was put:
+    /// the title and date its record names, and the summary whole. Since M31
+    /// the summary rides the record in a field of its own; an entry an older
+    /// Apogee indexed has none, and its summary is read from its text, the
+    /// date-and-title prefix its record rebuilds (`recall_chunk`) taken off --
+    /// or the text whole where the two disagree. Nothing is migrated in
+    /// place. Empty when there is no index, or it cannot be read.
+    [[nodiscard]] std::vector<RecallEntry> entries() const;
 
     [[nodiscard]] const std::filesystem::path& path() const noexcept {
         return store_path_;

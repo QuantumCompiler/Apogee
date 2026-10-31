@@ -44,7 +44,7 @@ inline constexpr int kMachineProtocolVersion = 1;
 /// tell two builds' streams apart without diffing them. Unlike
 /// `protocol_version` it says nothing about compatibility: every growth is
 /// additive under the stability promise.
-inline constexpr std::string_view kMachineSchemaVersion = "2026-10-13";
+inline constexpr std::string_view kMachineSchemaVersion = "2026-10-26";
 
 struct FieldSpec;
 
@@ -82,7 +82,7 @@ private:
 /// One field of a line.
 struct FieldSpec {
     std::string_view name;
-    /// Its JSON type: `string`, `integer`, `boolean`, `object`, `array`, or
+    /// Its JSON type: `string`, `integer`, `number`, `boolean`, `object`, `array`, or
     /// two of them joined by `|` (`object|null`).
     std::string_view type;
     /// Always present. A field that may be absent is optional -- and absent

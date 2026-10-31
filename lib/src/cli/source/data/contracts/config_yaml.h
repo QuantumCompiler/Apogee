@@ -38,4 +38,12 @@ namespace apogee::harness {
 /// always a string.
 [[nodiscard]] nlohmann::ordered_json json_of_yaml_scalar(std::string_view scalar, bool plain);
 
+/// Whether `yaml_of_json` writes `key` plain -- letters, digits, `_`, `-`,
+/// `.` and `/`, first neither `-` nor `.`, and no spelling YAML reads as null
+/// -- which YAML reads back as exactly its text. Any other key is written
+/// double-quoted, and the line editor, which finds an entry by its key's text
+/// as written, finds none (55f): so this is also the set of names an entry can
+/// have that both config formats edit.
+[[nodiscard]] bool yaml_plain_key(std::string_view key);
+
 }  // namespace apogee::harness

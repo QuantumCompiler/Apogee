@@ -1,0 +1,1 @@
+apogee video compose: the Python environment has not been created yet. Run 'apogee train setup' first (it creates /Users/someone/.apogee/training/venv, never touching the system Python)

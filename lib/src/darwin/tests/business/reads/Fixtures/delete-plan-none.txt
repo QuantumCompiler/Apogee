@@ -1,0 +1,4 @@
+will remove:
+  /Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/dfed3eebdfdb
+
+re-run with --yes to remove.

@@ -121,8 +121,10 @@ struct LayoutEntry {
 /// `training/runs` -- one directory per fine-tuning run: the manifest, the
 /// adapter, the fused checkpoint while it exists. Created by the first run.
 [[nodiscard]] std::filesystem::path training_runs_dir();
-/// `training/versions` -- promoted GGUFs (`<backend>/v<N>.gguf`) and one
-/// ledger per backend (`<backend>.json`). Created by the first promote.
+/// `training/versions` -- one ledger per backend (`<backend>.json`) and its
+/// adapter versions (53b: `<backend>/v<N>.lora.gguf`, or the directory
+/// `<backend>/v<N>.lora`); a merged version lives in the model store.
+/// Created by the first promote.
 [[nodiscard]] std::filesystem::path training_versions_dir();
 /// `training/suites` -- hand-written eval suites; `train eval --suite <name>`
 /// looks here. Created by first use, never seeded.
@@ -191,6 +193,14 @@ struct LayoutEntry {
 /// A file like the provider cache: created by a registration or an explicit
 /// refresh, never seeded, disposable, rebuilt on the next fetch.
 [[nodiscard]] std::filesystem::path roster_cache_path();
+
+/// `cache/weight-hashes.json` -- the sha256 of each set of base weights an
+/// adapter is pinned to (53a), remembered by the file's identity (its path,
+/// size and modification time, the prompt cache's own rule), so a base of
+/// gigabytes is read once per change rather than at every load. A file like
+/// the provider cache: written by the first check, never seeded, safe to
+/// delete -- the next load reads the weights again.
+[[nodiscard]] std::filesystem::path weight_hash_cache_path();
 
 /// What `seed_data_directory()` did.
 struct SeedResult {

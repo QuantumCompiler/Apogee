@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Apogee components · asking</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:inherit}
+.t-dark{--surface-window:#131415;--surface-sidebar:#0E0F10;--surface-inspector:#161719;--surface-card:#18191B;--surface-control:#222326;--surface-selection:#25282B;--surface-code:#0F1011;--line-border:#2A2C2F;--line-strong:#3B3E42;--text-primary:#E7E5E0;--text-secondary:#ABA8A0;--text-tertiary:#938F86;--status-accent:#7FD4C1;--status-warning:#E9A23B;--status-error:#F2836F;--model-local:#7FD4C1;--model-api:#E9A23B;--model-subscription:#A7B1F8;color-scheme:dark}
+.t-light{--surface-window:#F7F7F5;--surface-sidebar:#EEEEEA;--surface-inspector:#F1F1EE;--surface-card:#FFFFFF;--surface-control:#ECECE8;--surface-selection:#E1E4E1;--surface-code:#F3F3F0;--line-border:#DDDDD7;--line-strong:#C6C6BF;--text-primary:#1B1C1D;--text-secondary:#4B4C4E;--text-tertiary:#5F6062;--status-accent:#0B7A68;--status-warning:#9F5600;--status-error:#B3261E;--model-local:#0B7A68;--model-api:#9F5600;--model-subscription:#4450C4;color-scheme:light}
+.t-contrast{--surface-window:#000000;--surface-sidebar:#0A0A0A;--surface-inspector:#0A0A0A;--surface-card:#111111;--surface-control:#1E1E1E;--surface-selection:#2A2A2A;--surface-code:#0A0A0A;--line-border:#5A5A5A;--line-strong:#8A8A8A;--text-primary:#FFFFFF;--text-secondary:#D6D6D6;--text-tertiary:#B5B5B5;--status-accent:#5EF0D2;--status-warning:#FFC04D;--status-error:#FF8A7A;--model-local:#5EF0D2;--model-api:#FFC04D;--model-subscription:#B9C2FF;color-scheme:dark}
+.ap .i{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
+.ap .mono{font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace}
+.ap input::placeholder{color:var(--text-tertiary)}
+.ap button{font-family:inherit;cursor:pointer}
+.ap button:focus-visible,.ap a:focus-visible,.ap input:focus-visible{outline:2px solid var(--status-accent);outline-offset:1px}
+.ap .sec{margin-top:48px;padding-top:40px;border-top:1px solid var(--line-border)}
+.ap .lbl{margin:0 0 10px;font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:10.5px;letter-spacing:.08em;color:var(--text-tertiary)}
+.ap .cap{margin:8px 0 0;font-size:12px;color:var(--text-tertiary)}
+.ap .kbd{display:inline-flex;align-items:center;height:16px;padding:0 4px;border-radius:3px;font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:10px;font-weight:400;opacity:.75}
+.ap .tl{display:grid;grid-template-columns:96px minmax(0,1fr) auto;column-gap:12px;align-items:baseline;padding:5px 0;font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:11.5px;line-height:18px;color:var(--text-tertiary)}
+@media (max-width:760px){.ap .ap-page{padding:24px 16px!important}.ap .tl{grid-template-columns:80px minmax(0,1fr)!important}}
+</style>
+</helmet>
+<div class="{{themeClass}}" style="min-height: 2050px; background: var(--surface-window); color: var(--text-primary); font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; line-height: 1.5; -webkit-font-smoothing: antialiased">
+<div class="ap-page" style="max-width: 1440px; box-sizing: border-box; margin: 0 auto; padding: 48px 48px 64px">
+
+<header style="max-width: 820px">
+<div class="mono" style="font-size: 11px; letter-spacing: .08em; color: var(--text-tertiary)">FOUNDATIONS · COMPONENTS 3 OF 3</div>
+<h1 style="margin: 6px 0 10px; font-size: 28px; line-height: 1.2; font-weight: 600; letter-spacing: -.01em">Asking and failing</h1>
+<p style="margin: 0; font-size: 14px; line-height: 1.6; color: var(--text-secondary)">The moments a turn stops for you: permission to act, a question only you can answer, and an error with its fix.</p>
+</header>
+
+<section style="margin-top: 40px">
+<h2 style="margin: 0 0 4px; font-size: 18px; font-weight: 600">Permission card</h2>
+<p style="margin: 0 0 24px; max-width: 760px; font-size: 13.5px; color: var(--text-secondary)">Writing a file, running a command, or visiting a new website pauses the turn on this card. It shows exactly what will happen: the full path, the full command, the full URL. Denying is normal; the model is told and carries on.</p>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(560px, 1fr)); gap: 36px 48px; align-items: start">
+
+<div>
+<p class="lbl">WRITE A FILE</p>
+<div role="group" aria-label="Permission request: write a file" style="border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-card); overflow: hidden">
+<div style="display: flex; align-items: center; gap: 10px; padding: 12px 14px 10px">
+<span aria-hidden="true" style="width: 28px; height: 28px; display: grid; place-items: center; border-radius: 6px; background: var(--surface-control); color: var(--text-primary)"><svg class="i" width="15" height="15" viewBox="0 0 16 16"><path d="M10.5 3l2.5 2.5L6 12.5H3.5V10z"></path></svg></span>
+<div style="flex: 1 1 auto; min-width: 0"><div style="font-size: 13.5px; font-weight: 600">Change a file?</div><div style="font-size: 12px; color: var(--text-secondary)">gpt-oss-20b wants to write to an existing file</div></div>
+<span class="mono" style="font-size: 11px; color: var(--text-tertiary)">write_file</span>
+</div>
+<div style="margin: 0 14px; padding: 10px 12px; border: 1px solid var(--line-border); border-radius: 6px; background: var(--surface-code)">
+<div class="mono" style="font-size: 12px; overflow-wrap: anywhere">/Users/taylor/code/ingest/src/ingest/runner.py</div>
+<div class="mono" style="display: flex; align-items: center; gap: 10px; margin-top: 4px; font-size: 11px; color: var(--text-tertiary)"><span><span style="color: var(--status-accent)">+12</span> <span style="color: var(--status-error)">−3</span> lines</span><span>·</span><button type="button" class="mono" style="height: 20px; padding: 0 4px; background: transparent; border: 0; border-radius: 4px; font-size: 11px; color: var(--status-accent)">Show changes</button></div>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 14px">
+<button type="button" style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; background: var(--text-primary); color: var(--surface-window); border: 0; border-radius: 6px; font-size: 12.5px; font-weight: 600">Allow once<span class="kbd">⏎</span></button>
+<button type="button" style="height: 28px; padding: 0 12px; background: var(--surface-control); border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12.5px; color: var(--text-primary)">Allow for this session</button>
+<button type="button" style="height: 28px; padding: 0 12px; background: var(--surface-control); border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12.5px; color: var(--text-primary)">Always allow</button>
+<span style="flex: 1 1 auto"></span>
+<button type="button" style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; background: transparent; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12.5px; color: var(--text-primary)">Deny<span class="kbd">esc</span></button>
+</div>
+<div style="padding: 9px 14px; border-top: 1px solid var(--line-border); font-size: 11.5px; color: var(--text-tertiary)">Always allow lets <span class="mono">write_file</span> change files without asking, in every session. Undo it in Settings › Permissions.</div>
+</div>
+</div>
+
+<div>
+<p class="lbl">RUN A COMMAND</p>
+<div role="group" aria-label="Permission request: run a command" style="border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-card); overflow: hidden">
+<div style="display: flex; align-items: center; gap: 10px; padding: 12px 14px 10px">
+<span aria-hidden="true" style="width: 28px; height: 28px; display: grid; place-items: center; border-radius: 6px; background: var(--surface-control); color: var(--text-primary)"><svg class="i" width="15" height="15" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="2"></rect><path d="M5 7l2 1.5L5 10M8.5 10.5h2.5"></path></svg></span>
+<div style="flex: 1 1 auto; min-width: 0"><div style="font-size: 13.5px; font-weight: 600">Run a command?</div><div style="font-size: 12px; color: var(--text-secondary)">gpt-oss-20b wants to run this in a shell</div></div>
+<span class="mono" style="font-size: 11px; color: var(--text-tertiary)">run_command</span>
+</div>
+<div style="margin: 0 14px; padding: 10px 12px; border: 1px solid var(--line-border); border-radius: 6px; background: var(--surface-code)">
+<div class="mono" style="font-size: 12px; overflow-wrap: anywhere"><span style="color: var(--text-tertiary)">$ </span>rm -rf build/ &amp;&amp; make test</div>
+<div class="mono" style="margin-top: 4px; font-size: 11px; color: var(--text-tertiary); overflow-wrap: anywhere">in /Users/taylor/code/ingest</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 14px">
+<button type="button" style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; background: var(--text-primary); color: var(--surface-window); border: 0; border-radius: 6px; font-size: 12.5px; font-weight: 600">Allow once<span class="kbd">⏎</span></button>
+<button type="button" style="height: 28px; padding: 0 12px; background: var(--surface-control); border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12.5px; color: var(--text-primary)">Allow for this session</button>
+<button type="button" style="height: 28px; padding: 0 12px; background: var(--surface-control); border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12.5px; color: var(--text-primary)">Always allow</button>
+<span style="flex: 1 1 auto"></span>
+<button type="button" style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; background: transparent; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12.5px; color: var(--text-primary)">Deny<span class="kbd">esc</span></button>
+</div>
+<div style="padding: 9px 14px; border-top: 1px solid var(--line-border); font-size: 11.5px; color: var(--text-tertiary)">Always allow lets the shell run <span style="color: var(--status-warning)">any command</span> without asking, in every session. Undo it in Settings › Permissions.</div>
+</div>
+</div>
+
+<div>
+<p class="lbl">VISIT A NEW WEBSITE</p>
+<div role="group" aria-label="Permission request: visit a website" style="border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-card); overflow: hidden">
+<div style="display: flex; align-items: center; gap: 10px; padding: 12px 14px 10px">
+<span aria-hidden="true" style="width: 28px; height: 28px; display: grid; place-items: center; border-radius: 6px; background: var(--surface-control); color: var(--text-primary)"><svg class="i" width="15" height="15" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"></circle><path d="M2.5 8h11M8 2.5c1.6 1.6 2.4 3.4 2.4 5.5S9.6 11.9 8 13.5M8 2.5C6.4 4.1 5.6 5.9 5.6 8s.8 3.9 2.4 5.5"></path></svg></span>
+<div style="flex: 1 1 auto; min-width: 0"><div style="font-size: 13.5px; font-weight: 600">Visit a new website?</div><div style="font-size: 12px; color: var(--text-secondary)">gpt-oss-20b wants to read a page on a site it hasn’t used before</div></div>
+<span class="mono" style="font-size: 11px; color: var(--text-tertiary)">fetch_url</span>
+</div>
+<div style="margin: 0 14px; padding: 10px 12px; border: 1px solid var(--line-border); border-radius: 6px; background: var(--surface-code)">
+<div class="mono" style="font-size: 12px; overflow-wrap: anywhere"><span style="color: var(--text-tertiary)">https://</span><span style="font-weight: 600">peps.python.org</span><span style="color: var(--text-secondary)">/pep-0654/</span></div>
+<div class="mono" style="margin-top: 4px; font-size: 11px; color: var(--text-tertiary)">first visit to peps.python.org</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 14px">
+<button type="button" style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; background: var(--text-primary); color: var(--surface-window); border: 0; border-radius: 6px; font-size: 12.5px; font-weight: 600">Allow once<span class="kbd">⏎</span></button>
+<button type="button" style="height: 28px; padding: 0 12px; background: var(--surface-control); border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12.5px; color: var(--text-primary)">Allow for this session</button>
+<button type="button" style="height: 28px; padding: 0 12px; background: var(--surface-control); border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12.5px; color: var(--text-primary)">Always allow</button>
+<span style="flex: 1 1 auto"></span>
+<button type="button" style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; background: transparent; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12.5px; color: var(--text-primary)">Deny<span class="kbd">esc</span></button>
+</div>
+<div style="padding: 9px 14px; border-top: 1px solid var(--line-border); font-size: 11.5px; color: var(--text-tertiary)">Always allow adds <span class="mono">peps.python.org</span> to Settings › Web access › Allowed websites.</div>
+</div>
+</div>
+
+<div>
+<p class="lbl">AFTER YOU ANSWER · LINES IN THE THINKING SECTION</p>
+<div style="padding: 6px 16px 10px; border: 1px solid var(--line-border); border-radius: 6px; background: var(--surface-card)">
+<div class="tl"><span>write_file</span><span style="color: var(--text-secondary); overflow-wrap: anywhere">src/ingest/runner.py <span style="color: var(--status-accent)">+12</span> <span style="color: var(--status-error)">−3</span></span><span>allowed once</span></div>
+<div class="tl"><span>run_command</span><span style="color: var(--text-secondary)">rm -rf build/ &amp;&amp; make test</span><span style="color: var(--text-secondary)">denied by you</span></div>
+<div class="tl"><span>fetch_url</span><span style="color: var(--text-secondary); overflow-wrap: anywhere">https://peps.python.org/pep-0654/</span><span>allowed · site saved</span></div>
+</div>
+<div role="note" class="mono" style="display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 11px; color: var(--text-tertiary)"><span style="flex: 1 1 0; height: 1px; background: var(--line-border)"></span><span>you denied run_command — gpt-oss-20b was told and continued without it</span><span style="flex: 1 1 0; height: 1px; background: var(--line-border)"></span></div>
+<p class="cap">The card collapses to its line; the decision stays visible in the turn it belongs to.</p>
+</div>
+
+</div>
+<p class="cap" style="margin-top: 20px">Keys: ⏎ allows once, esc denies, 1 to 4 pick an answer while the card has focus (⌘1 to ⌘7 stay the destinations). Focus lands on the card when it appears, so the conversation never scrolls away from it. The line count and Show changes need the proposed edit in the permission question (gap G1 in Build · the contract).</p>
+</section>
+
+<div class="sec" style="display: flex; flex-wrap: wrap; gap: 48px 64px; align-items: flex-start">
+<section style="flex: 1 1 560px; min-width: 0">
+<h2 style="margin: 0 0 4px; font-size: 18px; font-weight: 600">Question card</h2>
+<p style="margin: 0 0 24px; font-size: 13.5px; color: var(--text-secondary)">The model asks a multiple-choice question: a short header, options each with a description, and room for your own answer every time.</p>
+<p class="lbl">ASKING</p>
+<form aria-label="Question from gpt-oss-20b" style="max-width: 640px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-card); overflow: hidden">
+<div style="display: flex; align-items: center; gap: 8px; padding: 12px 14px 4px"><span class="mono" style="display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border: 1px solid var(--line-strong); border-radius: 4px; font-size: 10px; letter-spacing: .08em; color: var(--text-secondary)">RETRIES</span><span style="margin-left: auto; font-size: 12px; color: var(--text-tertiary)">gpt-oss-20b is asking</span></div>
+<fieldset style="margin: 0; padding: 4px 14px 0; border: 0">
+<legend style="padding: 8px 0 10px; font-size: 14px; font-weight: 600">How should a timed-out fetch be handled?</legend>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label style="display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; column-gap: 10px; padding: 9px 12px; border: 1px solid var(--line-border); border-radius: 6px; cursor: pointer"><input type="radio" name="retries" value="none" style="margin: 3px 0 0; accent-color: var(--status-accent)"><span><span style="display: block; font-size: 13px; font-weight: 500">Don’t retry</span><span style="display: block; font-size: 12px; color: var(--text-secondary)">Log it and move on. The batch finishes on time; that URL is missing.</span></span><span class="mono" style="font-size: 10.5px; color: var(--text-tertiary)">1</span></label>
+<label style="display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; column-gap: 10px; padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-selection); cursor: pointer"><input type="radio" name="retries" value="once" checked style="margin: 3px 0 0; accent-color: var(--status-accent)"><span><span style="display: block; font-size: 13px; font-weight: 500">Retry once</span><span style="display: block; font-size: 12px; color: var(--text-secondary)">One more try after 2 s. A slow host can add up to 12 s to the batch.</span></span><span class="mono" style="font-size: 10.5px; color: var(--text-tertiary)">2</span></label>
+<label style="display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; column-gap: 10px; padding: 9px 12px; border: 1px solid var(--line-border); border-radius: 6px; cursor: pointer"><input type="radio" name="retries" value="backoff" style="margin: 3px 0 0; accent-color: var(--status-accent)"><span><span style="display: block; font-size: 13px; font-weight: 500">Retry with backoff</span><span style="display: block; font-size: 12px; color: var(--text-secondary)">Up to 3 tries at 1, 2 and 4 s. Slowest, most complete.</span></span><span class="mono" style="font-size: 10.5px; color: var(--text-tertiary)">3</span></label>
+<label style="display: grid; grid-template-columns: 18px minmax(0, 1fr); column-gap: 10px; align-items: center; padding: 7px 12px; border: 1px solid var(--line-border); border-radius: 6px"><input type="radio" name="retries" value="other" style="margin: 0; accent-color: var(--status-accent)"><input type="text" aria-label="Your own answer" placeholder="Something else: type your own answer" style="min-width: 0; height: 26px; padding: 0; border: 0; background: transparent; font: inherit; font-size: 13px; color: var(--text-primary)"></label>
+</div>
+</fieldset>
+<div style="display: flex; align-items: center; gap: 8px; padding: 12px 14px">
+<button type="button" style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; background: var(--text-primary); color: var(--surface-window); border: 0; border-radius: 6px; font-size: 12.5px; font-weight: 600">Answer<span class="kbd">⏎</span></button>
+<button type="button" style="height: 28px; padding: 0 12px; background: transparent; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12.5px; color: var(--text-primary)">Skip</button>
+<span class="mono" style="margin-left: auto; font-size: 10.5px; color: var(--text-tertiary)">1–3 pick · ⏎ answer</span>
+</div>
+</form>
+<p class="cap">When a question allows several answers, the options become checkboxes and the header says “pick any”.</p>
+<p class="lbl" style="margin-top: 28px">ANSWERED</p>
+<div class="mono" style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 11.5px; color: var(--text-tertiary)"><svg class="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"></circle><path d="M6.4 6.4a1.7 1.7 0 0 1 3.2.6c0 1.2-1.6 1.4-1.6 2.4M8 11.3v.1"></path></svg><span>asked: how should a timed-out fetch be handled?</span><span>→</span><span style="color: var(--text-primary)">Retry once</span></div>
+</section>
+
+<section style="flex: 1 1 520px; min-width: 0">
+<h2 style="margin: 0 0 4px; font-size: 18px; font-weight: 600">Error card</h2>
+<p style="margin: 0 0 24px; font-size: 13.5px; color: var(--text-secondary)">A failure you can recover from says what went wrong in plain words, with the numbers behind it, and offers the fix as a button.</p>
+<p class="lbl">A LOCAL MODEL DIDN’T LOAD</p>
+<div role="alert" style="max-width: 600px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-card); overflow: hidden">
+<div style="display: flex; align-items: flex-start; gap: 10px; padding: 14px 14px 10px">
+<svg class="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" style="margin-top: 2px; color: var(--status-error)"><path d="M8 2.5l6 10.5H2z"></path><path d="M8 6.5v3M8 11.2v.1"></path></svg>
+<div style="min-width: 0"><div style="font-size: 13.5px; font-weight: 600">Qwen3-VL-8B didn’t load</div><div style="margin-top: 2px; font-size: 12.5px; color: var(--text-secondary)">It needs 7.9 GB of memory and 5.2 GB is free. gpt-oss-20b is holding 12.1 GB.</div></div>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 2px 14px 12px 40px">
+<button type="button" style="height: 28px; padding: 0 12px; background: var(--text-primary); color: var(--surface-window); border: 0; border-radius: 6px; font-size: 12.5px; font-weight: 600">Unload gpt-oss-20b and retry</button>
+<button type="button" style="height: 28px; padding: 0 12px; background: var(--surface-control); border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12.5px; color: var(--text-primary)">Keep using gpt-oss-20b</button>
+<button type="button" aria-expanded="false" class="mono" style="height: 28px; padding: 0 8px; background: transparent; border: 0; border-radius: 6px; font-size: 11px; color: var(--text-tertiary)">details</button>
+</div>
+<div class="mono" style="padding: 9px 14px; border-top: 1px solid var(--line-border); font-size: 11px; color: var(--text-tertiary); overflow-wrap: anywhere">llama.cpp: failed to allocate 7.9 GB for model buffers (Metal) · 14:07:12</div>
+</div>
+<p class="cap">It sits in the conversation where the turn stopped. The message box stays usable, and nothing you wrote is lost.</p>
+</section>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light","contrast"],"default":"dark"},"$preview":{"width":1440,"height":2050}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { themeClass: 'ap t-' + (this.props.theme ?? 'dark') };
+  }
+}
+</script>
+</body>
+</html>

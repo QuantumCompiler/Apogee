@@ -26,44 +26,62 @@
 /// one-declaration scan, and the real command tree under the minimal switch.
 namespace {
 
+using apogee::commands::BootstrapHost;
 using apogee::commands::BootstrapResult;
 using apogee::commands::BootstrapSeams;
 using apogee::commands::BootstrapStep;
 using Catch::Matchers::ContainsSubstring;
 using Words = std::vector<std::string>;
 
-/// A scripted runner: every command line it was handed, and what each says
-/// and how it ends.
+/// A scripted runner: every command line it was handed -- the binary's and
+/// another program's alike -- and what each says and how it ends.
 struct Script {
     std::vector<Words> ran;
+    std::vector<Words> programs;
     std::vector<std::string> said;
     /// A step's exit code and its lines, by its command line.
     std::map<std::string, std::pair<int, std::vector<std::string>>> answers;
 
-    [[nodiscard]] BootstrapSeams seams(bool apple_silicon, bool nvidia_smi) {
+    [[nodiscard]] int answer(const Words& words, const std::function<void(std::string)>& line) {
+        std::string typed;
+        for (const std::string& word : words) {
+            typed += (typed.empty() ? "" : " ") + word;
+        }
+        const auto found = answers.find(typed);
+        if (found == answers.end()) {
+            line("ok");
+            return 0;
+        }
+        for (const std::string& text : found->second.second) {
+            line(text);
+        }
+        return found->second.first;
+    }
+
+    [[nodiscard]] BootstrapSeams seams(const BootstrapHost& host) {
         BootstrapSeams seams;
-        seams.apple_silicon = apple_silicon;
-        seams.nvidia_smi = nvidia_smi;
+        seams.host = host;
         seams.run = [this](const Words& words, const std::function<void(std::string)>& line) {
             ran.push_back(words);
-            std::string typed;
-            for (const std::string& word : words) {
-                typed += (typed.empty() ? "" : " ") + word;
-            }
-            const auto found = answers.find(typed);
-            if (found == answers.end()) {
-                line("ok");
-                return 0;
-            }
-            for (const std::string& text : found->second.second) {
-                line(text);
-            }
-            return found->second.first;
+            return answer(words, line);
+        };
+        seams.run_program = [this](const Words& argv,
+                                   const std::function<void(std::string)>& line) {
+            programs.push_back(argv);
+            return answer(argv, line);
         };
         seams.say = [this](const std::string& line) { said.push_back(line); };
         return seams;
     }
+
+    [[nodiscard]] BootstrapSeams seams(bool apple_silicon, bool nvidia_smi) {
+        return seams(BootstrapHost{.apple_silicon = apple_silicon, .nvidia_smi = nvidia_smi});
+    }
 };
+
+/// A Mac with Homebrew whose ffmpeg cannot burn captions: the user's.
+const BootstrapHost kUsersMac{
+    .apple_silicon = true, .macos = true, .brew = true, .ffmpeg_subtitles = false};
 
 [[nodiscard]] std::string slurp(const std::filesystem::path& path) {
     std::ifstream in{path, std::ios::binary};
@@ -74,15 +92,19 @@ struct Script {
 
 TEST_CASE("the bootstrap's plan is train setup's own table, the host deciding each set",
           "[cli][bootstrap]") {
-    const std::vector<BootstrapStep> apple = apogee::commands::bootstrap_plan(true, false);
-    // Every set of the table, in its order, then the two registrations.
+    const std::vector<BootstrapStep> apple =
+        apogee::commands::bootstrap_plan(BootstrapHost{.apple_silicon = true});
+    // Every set of the table, in its order, then the code-execution server,
+    // the two registrations and ffmpeg with captions.
     const auto names = apogee::training::requirement_set_names();
-    REQUIRE(apple.size() == names.size() + 2);
+    REQUIRE(apple.size() == names.size() + 4);
     for (std::size_t index = 0; index < names.size(); ++index) {
         CHECK(apple[index].name == "the '" + std::string{names[index]} + "' set");
     }
-    CHECK(apple[names.size()].words == Words{"providers", "scan", "--register"});
-    CHECK(apple.back().words == Words{"config", "scan", "--register"});
+    CHECK(apple[names.size()].words == Words{"mcp", "create", "code", "--from", "code-exec"});
+    CHECK(apple[names.size() + 1].words == Words{"providers", "scan", "--register"});
+    CHECK(apple[names.size() + 2].words == Words{"config", "scan", "--register"});
+    CHECK(apple.back().name == "ffmpeg with captions");
     const auto step = [](const std::vector<BootstrapStep>& plan, const std::string& set) {
         return *std::ranges::find(plan, "the '" + set + "' set", &BootstrapStep::name);
     };
@@ -91,14 +113,39 @@ TEST_CASE("the bootstrap's plan is train setup's own table, the host deciding ea
     CHECK(step(apple, "mlx-vlm").words == Words{"train", "setup", "--with", "mlx-vlm"});
     CHECK(step(apple, "video").words == Words{"train", "setup", "--with", "video"});
     CHECK(step(apple, "voice").words == Words{"train", "setup", "--with", "voice"});
+    // 53h: the embedding route's set, Apple silicon's too.
+    CHECK(step(apple, "mlx-embeddings").words ==
+          Words{"train", "setup", "--with", "mlx-embeddings"});
     CHECK(step(apple, "peft").words.empty());
     CHECK(step(apple, "peft").status == "skipped");
     CHECK(step(apple, "peft").reason == "for an NVIDIA GPU, and nvidia-smi is not on PATH here");
+    // 53k: mlx-video is Apple silicon's and opt-in -- never installed at
+    // install unasked: said skipped, naming the command that installs it.
+    CHECK(step(apple, "mlx-video").words.empty());
+    CHECK(step(apple, "mlx-video").status == "skipped");
+    CHECK(step(apple, "mlx-video").reason ==
+          "opt-in, never installed unasked -- 'apogee train setup --with mlx-video' installs it");
+    for (const BootstrapStep& each : apple) {
+        CHECK(std::ranges::find(each.words, "mlx-video") == each.words.end());
+    }
+    // 53m: mlx-audio the same -- installed by `train setup --with mlx-audio`
+    // and never unasked.
+    CHECK(step(apple, "mlx-audio").words.empty());
+    CHECK(step(apple, "mlx-audio").status == "skipped");
+    CHECK(step(apple, "mlx-audio").reason ==
+          "opt-in, never installed unasked -- 'apogee train setup --with mlx-audio' installs it");
+    for (const BootstrapStep& each : apple) {
+        CHECK(std::ranges::find(each.words, "mlx-audio") == each.words.end());
+    }
     // An NVIDIA box: the other way round.
-    const std::vector<BootstrapStep> cuda = apogee::commands::bootstrap_plan(false, true);
+    const std::vector<BootstrapStep> cuda =
+        apogee::commands::bootstrap_plan(BootstrapHost{.nvidia_smi = true});
     CHECK(step(cuda, "peft").words == Words{"train", "setup", "--with", "peft"});
     CHECK(step(cuda, "mlx").reason == "for Apple silicon, which this host is not");
     CHECK(step(cuda, "convert").words == Words{"train", "setup", "--with", "convert"});
+    CHECK(step(cuda, "mlx-embeddings").reason == "for Apple silicon, which this host is not");
+    CHECK(step(cuda, "mlx-video").reason == "for Apple silicon, which this host is not");
+    CHECK(step(cuda, "mlx-audio").reason == "for Apple silicon, which this host is not");
 }
 
 TEST_CASE("each step runs once, in order, said as it goes; one that fails is skipped",
@@ -121,36 +168,54 @@ TEST_CASE("each step runs once, in order, said as it goes; one that fails is ski
                                            {"train", "setup", "--with", "mlx-vlm"},
                                            {"train", "setup", "--with", "video"},
                                            {"train", "setup", "--with", "voice"},
+                                           {"train", "setup", "--with", "mlx-embeddings"},
+                                           // never mlx-video's (53k) nor
+                                           // mlx-audio's (53m)
+                                           {"mcp", "create", "code", "--from", "code-exec"},
                                            {"providers", "scan", "--register"},
                                            {"config", "scan", "--register"}});
+    CHECK(script.programs.empty());  // not macOS: no other program runs
     const auto said = [&script](const std::string& line) {
         return std::ranges::find(script.said, line) != script.said.end();
     };
     CHECK(script.said.front() ==
           "bootstrap: the runtimes this machine can run, then its "
           "providers and its model store, registered");
-    CHECK(said("[1/9] the 'prepare' set -- apogee train setup --with prepare"));
+    CHECK(said("[1/14] the 'prepare' set -- apogee train setup --with prepare"));
     CHECK(
-        said("[3/9] the 'peft' set -- skipped: for an NVIDIA GPU, and nvidia-smi is not on "
+        said("[3/14] the 'peft' set -- skipped: for an NVIDIA GPU, and nvidia-smi is not on "
              "PATH here"));
+    CHECK(
+        said("[9/14] the 'mlx-video' set -- skipped: opt-in, never installed unasked -- 'apogee "
+             "train setup --with mlx-video' installs it"));
+    // 53m: mlx-audio is opt-in too, said skipped with the command that
+    // installs it.
+    CHECK(
+        said("[10/14] the 'mlx-audio' set -- skipped: opt-in, never installed unasked -- 'apogee "
+             "train setup --with mlx-audio' installs it"));
     CHECK(said("  environment already exists at /home/.apogee/training/venv"));
     CHECK(
         said("  skipped -- exit 1: ERROR: Could not find a version that satisfies the "
              "requirement torch>=2.6"));
-    CHECK(said("[8/9] the providers -- apogee providers scan --register"));
+    CHECK(said("[11/14] the code-execution server -- apogee mcp create code --from code-exec"));
+    CHECK(said("[12/14] the providers -- apogee providers scan --register"));
     CHECK(said("  claude  credentials found  backend: claude"));
+    CHECK(
+        said("[14/14] ffmpeg with captions -- skipped: Homebrew's ffmpeg-full is macOS's -- "
+             "'apogee check' names this host's way"));
     // The voice set still ran after video's failed; the last line is the door.
     CHECK(script.said.back() ==
-          "done: 7 of 9 steps, 2 skipped -- 'apogee bootstrap' runs it again any time");
+          "done: 9 of 14 steps, 5 skipped -- 'apogee bootstrap' runs it again any time");
     const auto& video = *std::ranges::find(result.steps, "the 'video' set", &BootstrapStep::name);
     CHECK(video.status == "skipped");
-    CHECK(result.steps.back().status == "done");
+    const auto& store = *std::ranges::find(result.steps, "the model store", &BootstrapStep::name);
+    CHECK(store.status == "done");
 
     // The JSON summary: every step, its command, how it ended.
     const nlohmann::json document = apogee::commands::bootstrap_document(result);
     CHECK(document["object"] == "apogee.bootstrap");
     CHECK(document["minimal"] == false);
-    REQUIRE(document["steps"].size() == 9);
+    REQUIRE(document["steps"].size() == 14);
     CHECK(document["steps"][2] == nlohmann::json{{"name", "the 'peft' set"},
                                                  {"command", nullptr},
                                                  {"status", "skipped"},
@@ -158,10 +223,25 @@ TEST_CASE("each step runs once, in order, said as it goes; one that fails is ski
                                                   "for an NVIDIA GPU, and nvidia-smi is "
                                                   "not on PATH here"}});
     CHECK(document["steps"][5]["command"] == "apogee train setup --with video");
-    CHECK(document["steps"][8] == nlohmann::json{{"name", "the model store"},
-                                                 {"command", "apogee config scan --register"},
-                                                 {"status", "done"},
-                                                 {"reason", nullptr}});
+    CHECK(document["steps"][8] ==
+          nlohmann::json{{"name", "the 'mlx-video' set"},
+                         {"command", nullptr},
+                         {"status", "skipped"},
+                         {"reason",
+                          "opt-in, never installed unasked -- 'apogee train setup --with "
+                          "mlx-video' installs it"}});
+    CHECK(document["steps"][9] ==
+          nlohmann::json{{"name", "the 'mlx-audio' set"},
+                         {"command", nullptr},
+                         {"status", "skipped"},
+                         {"reason",
+                          "opt-in, never installed unasked -- 'apogee train setup --with "
+                          "mlx-audio' installs it"}});
+    CHECK(document["steps"][12] == nlohmann::json{{"name", "the model store"},
+                                                  {"command", "apogee config scan --register"},
+                                                  {"status", "done"},
+                                                  {"reason", nullptr}});
+    CHECK(document["steps"][13]["command"] == nullptr);
 }
 
 TEST_CASE("a step that cannot start is skipped, saying why", "[cli][bootstrap]") {
@@ -169,10 +249,83 @@ TEST_CASE("a step that cannot start is skipped, saying why", "[cli][bootstrap]")
     script.answers["config scan --register"] = {
         -1, {"could not start apogee: no child processes here"}};
     const BootstrapResult result = apogee::commands::run_bootstrap(script.seams(false, false));
-    CHECK(result.steps.back().status == "skipped");
-    CHECK(result.steps.back().reason == "could not start apogee: no child processes here");
-    // Neither Apple silicon nor NVIDIA: the any-host sets and the registrations.
-    CHECK(script.ran.size() == 6);
+    const auto& store = *std::ranges::find(result.steps, "the model store", &BootstrapStep::name);
+    CHECK(store.status == "skipped");
+    CHECK(store.reason == "could not start apogee: no child processes here");
+    // Neither Apple silicon nor NVIDIA: the any-host sets, the code-execution
+    // server and the registrations.
+    CHECK(script.ran.size() == 7);
+}
+
+TEST_CASE("the code-execution server is registered once, never over another server's name",
+          "[cli][bootstrap]") {
+    const auto code_step = [](const BootstrapHost& host) {
+        const std::vector<BootstrapStep> plan = apogee::commands::bootstrap_plan(host);
+        return *std::ranges::find(plan, "the code-execution server", &BootstrapStep::name);
+    };
+    CHECK(code_step({}).words == Words{"mcp", "create", "code", "--from", "code-exec"});
+    // A second bootstrap is quiet about it.
+    const BootstrapStep again = code_step({.code_exec_registered_as = "code"});
+    CHECK(again.words.empty());
+    CHECK(again.status == "skipped");
+    CHECK(again.reason == "registered already, as 'code'");
+    CHECK(code_step({.code_exec_registered_as = "python"}).reason ==
+          "registered already, as 'python'");
+    // The name held by something else: never written over, the way named.
+    const BootstrapStep taken =
+        code_step({.code_exec_registered_as = "code", .code_exec_name_taken = true});
+    CHECK(taken.words.empty());
+    CHECK(taken.reason ==
+          "an MCP server named 'code' runs something else -- 'apogee mcp create <name> --from "
+          "code-exec' registers it under another");
+}
+
+TEST_CASE("ffmpeg with captions: check's remedy run on a Mac with Homebrew, in its order",
+          "[cli][bootstrap][ffmpeg]") {
+    // The one declaration: check types it, the bootstrap runs it.
+    CHECK(apogee::commands::remedy_line(apogee::commands::macos_captions_remedy()) ==
+          "brew install ffmpeg-full && brew unlink ffmpeg; brew link --force ffmpeg-full");
+    const auto ffmpeg_step = [](const BootstrapHost& host) {
+        return apogee::commands::bootstrap_plan(host).back();
+    };
+    // Where it is not the remedy, or not needed: skipped, saying why.
+    CHECK(ffmpeg_step({.apple_silicon = true}).reason ==
+          "Homebrew's ffmpeg-full is macOS's -- 'apogee check' names this host's way");
+    CHECK(ffmpeg_step({.macos = true, .ffmpeg_subtitles = false}).reason ==
+          "Homebrew is not on PATH -- 'apogee check' names the commands");
+    CHECK(ffmpeg_step({.macos = true, .brew = true}).reason ==
+          "no ffmpeg answered on PATH -- 'apogee check' names the one to install");
+    CHECK(ffmpeg_step({.macos = true, .brew = true, .ffmpeg_subtitles = true}).reason ==
+          "this ffmpeg burns captions already (its subtitles filter is there)");
+
+    // The user's Mac: every command, in order, through the program seam.
+    {
+        Script script;
+        script.answers["brew unlink ffmpeg"] = {1, {"Error: No such keg: ffmpeg"}};
+        const BootstrapResult result = apogee::commands::run_bootstrap(script.seams(kUsersMac));
+        CHECK(script.programs == std::vector<Words>{{"brew", "install", "ffmpeg-full"},
+                                                    {"brew", "unlink", "ffmpeg"},
+                                                    {"brew", "link", "--force", "ffmpeg-full"}});
+        // The unlink may fail -- no Homebrew ffmpeg to unlink -- and the
+        // link still runs; the step is done.
+        CHECK(result.steps.back().status == "done");
+        CHECK(std::ranges::find(script.said,
+                                "[14/14] ffmpeg with captions -- brew install "
+                                "ffmpeg-full && brew unlink ffmpeg; brew link "
+                                "--force ffmpeg-full") != script.said.end());
+        CHECK(apogee::commands::bootstrap_document(result)["steps"][13]["command"] ==
+              "brew install ffmpeg-full && brew unlink ffmpeg; brew link --force ffmpeg-full");
+    }
+    // An install that fails ends the step there, never fatal, saying which.
+    {
+        Script script;
+        script.answers["brew install ffmpeg-full"] = {1, {"Error: no network"}};
+        const BootstrapResult result = apogee::commands::run_bootstrap(script.seams(kUsersMac));
+        CHECK(script.programs == std::vector<Words>{{"brew", "install", "ffmpeg-full"}});
+        CHECK(result.steps.back().status == "skipped");
+        CHECK(result.steps.back().reason == "brew install ffmpeg-full: exit 1: Error: no network");
+        CHECK(script.said.back().starts_with("done: "));
+    }
 }
 
 TEST_CASE("a minimal install skips the bootstrap whole, naming the door",

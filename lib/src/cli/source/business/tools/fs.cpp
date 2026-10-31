@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "contracts/config_edit.h"
+#include "contracts/text_diff.h"
 #include "platform/platform.h"
 #include "tools/args.h"
 
@@ -297,6 +298,169 @@ std::string existing_file_problem(const std::filesystem::path& root, std::string
     return {};
 }
 
+/// What an `edit_file` call would leave (52a): its file, the text there now
+/// and after -- or why it cannot run, in `failure`. One computation for the
+/// call and for the diff its permission question shows, so the question shows
+/// exactly what the call writes.
+struct PlannedEdit {
+    std::filesystem::path path;
+    std::string before;
+    std::string after;
+    std::size_t count = 0;
+    /// Where each replacement landed: `12, 40`.
+    std::string lines;
+};
+
+std::optional<PlannedEdit> plan_edit(const std::filesystem::path& root, std::string_view arguments,
+                                     agent::ToolOutcome& failure) {
+    const std::optional<Arguments> args = parse_arguments(
+        arguments, R"({"path": "...", "old_string": "...", "new_string": "..."})", failure);
+    if (!args.has_value()) {
+        return std::nullopt;
+    }
+    std::string problem;
+    const std::optional<std::filesystem::path> path =
+        resolve_in_root(root, args->string("path"), problem);
+    if (!path.has_value()) {
+        failure = error(problem);
+        return std::nullopt;
+    }
+    // Read raw, never trimmed: the whitespace is part of what must match.
+    const auto raw = [&](std::string_view key) -> std::optional<std::string> {
+        const auto it = args->object.find(key);
+        if (it == args->object.end() || !it->is_string()) {
+            return std::nullopt;
+        }
+        return it->get<std::string>();
+    };
+    std::optional<std::string> old_text = raw("old_string");
+    std::optional<std::string> new_text = raw("new_string");
+    if (!old_text.has_value() || old_text->empty()) {
+        failure = error(
+            "old_string is required: the exact text to replace. To create a file, "
+            "use write_file");
+        return std::nullopt;
+    }
+    if (!new_text.has_value()) {
+        failure = error("new_string is required, as a string (empty deletes old_string)");
+        return std::nullopt;
+    }
+    if (*old_text == *new_text) {
+        failure = error("old_string and new_string are the same; nothing to change");
+        return std::nullopt;
+    }
+    const auto flag = args->object.find("replace_all");
+    const bool replace_all =
+        flag != args->object.end() &&
+        (flag->is_boolean() ? flag->get<bool>()
+                            : flag->is_string() && flag->get<std::string>() == "true");
+
+    std::error_code code;
+    if (!std::filesystem::is_regular_file(*path, code)) {
+        failure = error(std::filesystem::exists(*path, code)
+                            ? path->string() + " is not a regular file"
+                            : "No such file: " + path->string() +
+                                  ". edit_file changes an existing file; write_file creates one");
+        return std::nullopt;
+    }
+    std::string content;
+    {
+        // Closed before the edit is renamed over it: Windows refuses to
+        // replace a file that is still open, so an edit there failed
+        // every time (found on the first Windows run, 2026-10-04).
+        std::ifstream in{*path, std::ios::binary};
+        content.assign(std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{});
+        if (!in.good() && !in.eof()) {
+            failure = error("could not read " + path->string());
+            return std::nullopt;
+        }
+    }
+
+    std::vector<std::size_t> found = occurrences(content, *old_text);
+    if (found.empty() && content.find("\r\n") != std::string::npos &&
+        old_text->find('\n') != std::string::npos) {
+        // A file with Windows line endings, and text copied without
+        // them: matched as the file writes its lines, and replaced so.
+        std::string crlf_old = with_crlf(*old_text);
+        found = occurrences(content, crlf_old);
+        if (!found.empty()) {
+            old_text = std::move(crlf_old);
+            new_text = with_crlf(*new_text);
+        }
+    }
+    if (found.empty()) {
+        failure = error("old_string was not found in " + path->string() +
+                        "; nothing was changed. Read the file and copy the text exactly, "
+                        "whitespace and indentation included");
+        return std::nullopt;
+    }
+    if (found.size() > 1 && !replace_all) {
+        failure = error("old_string occurs " + std::to_string(found.size()) + " times in " +
+                        path->string() +
+                        "; nothing was changed. Include more of the surrounding text to make "
+                        "it unique, or set replace_all to replace every occurrence");
+        return std::nullopt;
+    }
+
+    std::string edited;
+    edited.reserve(content.size());
+    std::string lines;
+    std::size_t from = 0;
+    for (const std::size_t at : found) {
+        edited.append(content, from, at - from);
+        lines += (lines.empty() ? "" : ", ") + std::to_string(line_of(content, at));
+        edited += *new_text;
+        from = at + old_text->size();
+    }
+    edited.append(content, from, std::string::npos);
+    return PlannedEdit{.path = *path,
+                       .before = std::move(content),
+                       .after = std::move(edited),
+                       .count = found.size(),
+                       .lines = std::move(lines)};
+}
+
+/// What a `write_file` call would write (52a): its file and its content, or
+/// why not, in `failure` -- read once, for the call and for its question.
+struct PlannedWrite {
+    std::filesystem::path path;
+    std::string content;
+};
+
+std::optional<PlannedWrite> plan_write(const std::filesystem::path& root,
+                                       std::string_view arguments, agent::ToolOutcome& failure) {
+    const std::optional<Arguments> args =
+        parse_arguments(arguments, R"({"path": "...", "content": "..."})", failure);
+    if (!args.has_value()) {
+        return std::nullopt;
+    }
+    std::string problem;
+    const std::optional<std::filesystem::path> path =
+        resolve_in_root(root, args->string("path"), problem);
+    if (!path.has_value()) {
+        failure = error(problem);
+        return std::nullopt;
+    }
+    if (!args->has("content") || !args->object["content"].is_string()) {
+        failure = error("content is required, as a string");
+        return std::nullopt;
+    }
+    return PlannedWrite{.path = *path, .content = args->object["content"].get<std::string>()};
+}
+
+/// The most of an existing file a write's question reads to show its diff
+/// (52a): past it the question names the file without the change.
+constexpr std::uintmax_t kDiffReadLimit = 16 * 1024 * 1024;
+
+/// `path` as a diff names it: relative to the root it lies in.
+std::string diff_label(const std::filesystem::path& root, const std::filesystem::path& path) {
+    std::error_code code;
+    const std::filesystem::path canonical_root = std::filesystem::weakly_canonical(root, code);
+    const std::filesystem::path relative = path.lexically_relative(code ? root : canonical_root);
+    const std::string text = relative.generic_string();
+    return text.empty() || text.starts_with("..") ? path.generic_string() : text;
+}
+
 }  // namespace
 
 void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::path& root,
@@ -386,34 +550,46 @@ void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::pat
     write.writes = true;
     write.edits = true;
     write.describe_target = read.describe_target;
+    // The change as a diff against what is there now (52a): the question
+    // shows what the call would write, from the arguments it judges.
+    write.describe_detail = [root](std::string_view arguments) -> std::string {
+        agent::ToolOutcome unused;
+        const std::optional<PlannedWrite> planned = plan_write(root, arguments, unused);
+        if (!planned.has_value()) {
+            return {};
+        }
+        std::error_code code;
+        const bool exists = std::filesystem::is_regular_file(planned->path, code);
+        if (exists && std::filesystem::file_size(planned->path, code) > kDiffReadLimit) {
+            return {};
+        }
+        std::string before;
+        if (exists) {
+            std::ifstream in{planned->path, std::ios::binary};
+            before.assign(std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{});
+        }
+        return harness::unified_diff(diff_label(root, planned->path), before, planned->content,
+                                     exists);
+    };
     write.run = [root](std::string_view arguments) -> agent::ToolOutcome {
         agent::ToolOutcome failure;
-        const std::optional<Arguments> args =
-            parse_arguments(arguments, R"({"path": "...", "content": "..."})", failure);
-        if (!args.has_value()) {
+        const std::optional<PlannedWrite> planned = plan_write(root, arguments, failure);
+        if (!planned.has_value()) {
             return failure;
         }
-        std::string problem;
-        const std::optional<std::filesystem::path> path =
-            resolve_in_root(root, args->string("path"), problem);
-        if (!path.has_value()) {
-            return error(problem);
-        }
-        if (!args->has("content") || !args->object["content"].is_string()) {
-            return error("content is required, as a string");
-        }
-        const std::string content = args->object["content"].get<std::string>();
+        const std::filesystem::path& path = planned->path;
         std::error_code code;
-        std::filesystem::create_directories(path->parent_path(), code);
-        std::ofstream out{*path, std::ios::binary | std::ios::trunc};
+        std::filesystem::create_directories(path.parent_path(), code);
+        std::ofstream out{path, std::ios::binary | std::ios::trunc};
         if (!out) {
-            return error("could not open " + path->string() + " for writing");
+            return error("could not open " + path.string() + " for writing");
         }
-        out << content;
+        out << planned->content;
         if (!out) {
-            return error("could not write " + path->string());
+            return error("could not write " + path.string());
         }
-        return ok("Wrote " + std::to_string(content.size()) + " bytes to " + path->string());
+        return ok("Wrote " + std::to_string(planned->content.size()) + " bytes to " +
+                  path.string());
     };
     registry.add(write);
 
@@ -436,114 +612,34 @@ void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::pat
     edit.precheck = [root](std::string_view arguments) -> std::string {
         return existing_file_problem(root, arguments, "edit_file changes an existing file");
     };
+    edit.describe_detail = [root](std::string_view arguments) -> std::string {
+        agent::ToolOutcome unused;
+        const std::optional<PlannedEdit> planned = plan_edit(root, arguments, unused);
+        return planned.has_value() ? harness::unified_diff(diff_label(root, planned->path),
+                                                           planned->before, planned->after)
+                                   : std::string{};
+    };
     edit.run = [root](std::string_view arguments) -> agent::ToolOutcome {
         agent::ToolOutcome failure;
-        const std::optional<Arguments> args = parse_arguments(
-            arguments, R"({"path": "...", "old_string": "...", "new_string": "..."})", failure);
-        if (!args.has_value()) {
+        const std::optional<PlannedEdit> planned = plan_edit(root, arguments, failure);
+        if (!planned.has_value()) {
             return failure;
         }
-        std::string problem;
-        const std::optional<std::filesystem::path> path =
-            resolve_in_root(root, args->string("path"), problem);
-        if (!path.has_value()) {
-            return error(problem);
-        }
-        // Read raw, never trimmed: the whitespace is part of what must match.
-        const auto raw = [&](std::string_view key) -> std::optional<std::string> {
-            const auto it = args->object.find(key);
-            if (it == args->object.end() || !it->is_string()) {
-                return std::nullopt;
-            }
-            return it->get<std::string>();
-        };
-        std::optional<std::string> old_text = raw("old_string");
-        std::optional<std::string> new_text = raw("new_string");
-        if (!old_text.has_value() || old_text->empty()) {
-            return error(
-                "old_string is required: the exact text to replace. To create a file, "
-                "use write_file");
-        }
-        if (!new_text.has_value()) {
-            return error("new_string is required, as a string (empty deletes old_string)");
-        }
-        if (*old_text == *new_text) {
-            return error("old_string and new_string are the same; nothing to change");
-        }
-        const auto flag = args->object.find("replace_all");
-        const bool replace_all =
-            flag != args->object.end() &&
-            (flag->is_boolean() ? flag->get<bool>()
-                                : flag->is_string() && flag->get<std::string>() == "true");
-
+        const std::filesystem::path& path = planned->path;
         std::error_code code;
-        if (!std::filesystem::is_regular_file(*path, code)) {
-            return error(std::filesystem::exists(*path, code)
-                             ? path->string() + " is not a regular file"
-                             : "No such file: " + path->string() +
-                                   ". edit_file changes an existing file; write_file creates one");
-        }
-        std::string content;
-        {
-            // Closed before the edit is renamed over it: Windows refuses to
-            // replace a file that is still open, so an edit there failed
-            // every time (found on the first Windows run, 2026-10-04).
-            std::ifstream in{*path, std::ios::binary};
-            content.assign(std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{});
-            if (!in.good() && !in.eof()) {
-                return error("could not read " + path->string());
-            }
-        }
-
-        std::vector<std::size_t> found = occurrences(content, *old_text);
-        if (found.empty() && content.find("\r\n") != std::string::npos &&
-            old_text->find('\n') != std::string::npos) {
-            // A file with Windows line endings, and text copied without
-            // them: matched as the file writes its lines, and replaced so.
-            std::string crlf_old = with_crlf(*old_text);
-            found = occurrences(content, crlf_old);
-            if (!found.empty()) {
-                old_text = std::move(crlf_old);
-                new_text = with_crlf(*new_text);
-            }
-        }
-        if (found.empty()) {
-            return error("old_string was not found in " + path->string() +
-                         "; nothing was changed. Read the file and copy the text exactly, "
-                         "whitespace and indentation included");
-        }
-        if (found.size() > 1 && !replace_all) {
-            return error("old_string occurs " + std::to_string(found.size()) + " times in " +
-                         path->string() +
-                         "; nothing was changed. Include more of the surrounding text to make "
-                         "it unique, or set replace_all to replace every occurrence");
-        }
-
-        std::string edited;
-        edited.reserve(content.size());
-        std::string lines;
-        std::size_t from = 0;
-        for (const std::size_t at : found) {
-            edited.append(content, from, at - from);
-            lines += (lines.empty() ? "" : ", ") + std::to_string(line_of(content, at));
-            edited += *new_text;
-            from = at + old_text->size();
-        }
-        edited.append(content, from, std::string::npos);
-
         // Written beside the file and renamed over it, so a failed write
         // leaves the file as it was; the mode carried over, so an edited
         // script stays executable.
-        const std::filesystem::perms mode = std::filesystem::status(*path, code).permissions();
+        const std::filesystem::perms mode = std::filesystem::status(path, code).permissions();
         try {
-            harness::write_file_atomically(*path, edited);
+            harness::write_file_atomically(path, planned->after);
         } catch (const std::exception& e) {
-            return error("could not write " + path->string() + ": " + e.what());
+            return error("could not write " + path.string() + ": " + e.what());
         }
-        std::filesystem::permissions(*path, mode, code);
-        return ok("Replaced " + std::to_string(found.size()) +
-                  (found.size() == 1 ? " occurrence" : " occurrences") + " in " + path->string() +
-                  (found.size() == 1 ? " at line " : " at lines ") + lines);
+        std::filesystem::permissions(path, mode, code);
+        return ok("Replaced " + std::to_string(planned->count) +
+                  (planned->count == 1 ? " occurrence" : " occurrences") + " in " + path.string() +
+                  (planned->count == 1 ? " at line " : " at lines ") + planned->lines);
     };
     registry.add(edit);
 

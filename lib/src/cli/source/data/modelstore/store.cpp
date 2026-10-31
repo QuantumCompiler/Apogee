@@ -116,6 +116,20 @@ std::string weights_handle(std::string_view model, std::string_view format, std:
     return std::string{model} + "/" + std::string{format} + "/" + std::string{id};
 }
 
+std::string weights_label(const std::filesystem::path& path) {
+    const std::filesystem::path normal = path.lexically_normal();
+    // A directory named with its trailing slash is still that directory.
+    const std::filesystem::path named = normal.has_filename() ? normal : normal.parent_path();
+    const std::string last = named.filename().string();
+    const std::filesystem::path format = named.parent_path().filename();
+    if (is_weight_id(last) && is_store_format(format.string()) &&
+        named.parent_path().has_parent_path()) {
+        return weights_handle(named.parent_path().parent_path().filename().string(),
+                              format.string(), last);
+    }
+    return last;
+}
+
 std::optional<WeightsHandle> parse_weights_handle(std::string_view text) {
     const std::size_t first = text.find('/');
     const std::size_t second =
@@ -1079,6 +1093,69 @@ std::string legacy_refusal(const StoreRoots& roots, std::string_view given) {
         }
     }
     return {};
+}
+
+std::vector<std::string> draft_head_bases(const StoreRoots& roots, const DraftHead& head) {
+    std::set<std::string> found;
+    if (head.backbone_hidden_size <= 0) {
+        return {};
+    }
+    const auto consider = [&](const std::string& model, const std::filesystem::path& dir) {
+        if (snapshot_draft_head(dir).has_value()) {
+            return;
+        }
+        const ConfigWidth width = config_width(dir);
+        if (width.hidden_size == head.backbone_hidden_size && width.family == head.family) {
+            found.insert(model);
+        }
+    };
+    for (const StoredSnapshot& stored : list_store_snapshots(roots)) {
+        consider(stored.model, stored.dir);
+    }
+    for (const StoredMlx& stored : list_store_mlx(roots)) {
+        consider(stored.model, stored.dir);
+    }
+    return {found.begin(), found.end()};
+}
+
+std::vector<std::string> mlx_video_conversions(const StoreRoots& roots,
+                                               const std::filesystem::path& dir) {
+    // The same directory however it is spelled: one file on disk, else one
+    // path lexically.
+    const auto same = [](const std::filesystem::path& a, const std::filesystem::path& b) {
+        std::error_code code;
+        return std::filesystem::equivalent(a, b, code) ||
+               a.lexically_normal() == b.lexically_normal();
+    };
+    const std::string made_by = std::string{kMlxVideoConverterPackage} + ".";
+    std::vector<std::string> out;
+    for (const StoredMlx& stored : list_store_mlx(roots)) {
+        const std::optional<Snapshot> record = load_snapshot(stored.dir);
+        if (!record.has_value() || record->ref.empty() || !record->transform.starts_with(made_by)) {
+            continue;
+        }
+        // The set its record names: a handle in the store, or a path.
+        std::filesystem::path source{record->ref};
+        if (const std::optional<WeightsHandle> handle = parse_weights_handle(record->ref)) {
+            source = find_weights_dir(roots, handle->format, handle->model, handle->id);
+        }
+        if (same(source, dir)) {
+            out.push_back(weights_handle(stored.model, kMlxFormat, stored.id));
+        }
+    }
+    std::ranges::sort(out);
+    return out;
+}
+
+std::optional<DiffusionModel> stored_diffusion_model(const StoreRoots& roots,
+                                                     const std::filesystem::path& dir,
+                                                     const VideoConverts& mlx_video) {
+    std::optional<DiffusionModel> model = snapshot_diffusion_model(dir, mlx_video);
+    // Only Wan's original layout converts (53k): nothing else is looked for.
+    if (model.has_value() && model->wan.has_value()) {
+        model->mlx_conversions = mlx_video_conversions(roots, dir);
+    }
+    return model;
 }
 
 }  // namespace apogee::models

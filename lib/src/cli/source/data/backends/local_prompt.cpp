@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
 namespace apogee::backends {
@@ -60,6 +61,32 @@ std::vector<harness::ChatMessage> prompt_messages(const harness::ChatRequest& re
     messages.erase(messages.begin() + 1, messages.begin() + static_cast<std::ptrdiff_t>(leading));
     messages.front() = harness::ChatMessage::system(joined);
     return messages;
+}
+
+std::string decode_base64(std::string_view encoded) {
+    static constexpr std::string_view alphabet =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve(encoded.size() / 4 * 3);
+
+    std::uint32_t accumulator = 0;
+    int bits = 0;
+    for (const char c : encoded) {
+        if (c == '=') {
+            break;
+        }
+        const std::size_t value = alphabet.find(c);
+        if (value == std::string_view::npos) {
+            continue;  // whitespace and newlines are legal in a data URI
+        }
+        accumulator = (accumulator << 6U) | static_cast<std::uint32_t>(value);
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out.push_back(static_cast<char>((accumulator >> static_cast<unsigned>(bits)) & 0xFFU));
+        }
+    }
+    return out;
 }
 
 }  // namespace apogee::backends

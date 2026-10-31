@@ -1,0 +1,53 @@
+{
+ "data": [
+  {
+   "description": "The extraction role's chores in the product's own requests -- the graph clerk's entities and relations, and the shipped symphonies' fact, action and card stages -- each one JSON object held to its schema.",
+   "eval_items": 24,
+   "name": "extraction-fidelity",
+   "path": "/Users/someone/.apogee/training/kits/extraction-fidelity.yaml"
+  },
+  {
+   "description": "Follow explicit instructions precisely \u2014 format, length, and constraints.",
+   "eval_items": 24,
+   "name": "instruction-following",
+   "path": "/Users/someone/.apogee/training/kits/instruction-following.yaml"
+  },
+  {
+   "description": "The knowledge-capture clerk's chore in the product's own request -- a raw discussion read into one canonical intent record: the why, the decision, its status and discipline, and the link it names.",
+   "eval_items": 24,
+   "name": "knowledge-capture",
+   "path": "/Users/someone/.apogee/training/kits/knowledge-capture.yaml"
+  },
+  {
+   "description": "Solve arithmetic and logic problems with a correct final answer.",
+   "eval_items": 24,
+   "name": "reasoning",
+   "path": "/Users/someone/.apogee/training/kits/reasoning.yaml"
+  },
+  {
+   "description": "Emit well-formed JSON that matches a requested shape.",
+   "eval_items": 24,
+   "name": "structured-output",
+   "path": "/Users/someone/.apogee/training/kits/structured-output.yaml"
+  },
+  {
+   "description": "Condense a passage into a faithful, concise summary.",
+   "eval_items": 24,
+   "name": "summarization",
+   "path": "/Users/someone/.apogee/training/kits/summarization.yaml"
+  },
+  {
+   "description": "Choosing the one tool call a request needs -- the right tool and arguments its schema accepts -- against the product's own file, shell and git tool declarations.",
+   "eval_items": 32,
+   "name": "tool-calling",
+   "path": "/Users/someone/.apogee/training/kits/tool-calling.yaml"
+  },
+  {
+   "description": "The utility role's chores in the product's own formats -- a follow-up rewritten as a standalone search query, and a tool's output summarised for the model that acts on it.",
+   "eval_items": 24,
+   "name": "utility-chores",
+   "path": "/Users/someone/.apogee/training/kits/utility-chores.yaml"
+  }
+ ],
+ "object": "list"
+}

@@ -1,0 +1,1 @@
+forgot 2 chat summaries -- every transcript stays; chats finished from now on are summarised again (apogee config set memory.recall false stops it)

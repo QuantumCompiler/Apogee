@@ -21,7 +21,8 @@ APOGEE_BIN="${1:?usage: provider_surfacing_e2e.sh <apogee-binary> <work-dir> <co
 WORK_DIR="${2:?usage: provider_surfacing_e2e.sh <apogee-binary> <work-dir> <codex-fixture>}"
 FIXTURE="${3:?usage: provider_surfacing_e2e.sh <apogee-binary> <work-dir> <codex-fixture>}"
 
-rm -rf "$WORK_DIR"
+. "$(dirname "$0")/sandbox.sh"
+WORK_DIR="$(sandbox_dir "$WORK_DIR")"
 mkdir -p "$WORK_DIR/bin" "$WORK_DIR/home" "$WORK_DIR/empty"
 export HOME="$WORK_DIR/home"
 export APOGEE_HOME="$WORK_DIR/apogee"

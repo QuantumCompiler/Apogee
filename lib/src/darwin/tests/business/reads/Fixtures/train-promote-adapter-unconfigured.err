@@ -1,0 +1,1 @@
+apogee train: an adapter promote registers the adapter on an entry that runs the base it was trained over, and 'nowhere' is not configured -- add it first ('apogee config add-backend nowhere --type llamacpp --model-path <base.gguf>', or --type mlx with the base's MLX directory), then promote --adapter into it

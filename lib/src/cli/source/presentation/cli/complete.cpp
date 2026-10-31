@@ -304,6 +304,9 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
             machine_options.inline_attachments = std::move(turn.inlined);
             if (turn.retrieved.has_value() && turn.retrieved->error.empty()) {
                 machine_options.transient_prefix = turn.retrieved->prefix;
+                if (!turn.retrieved->prefix.empty()) {
+                    reporter.on_sources(turn.retrieved->sources);
+                }
             }
         }
 
@@ -415,6 +418,8 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     const ansi::Style& style = reporter_options.style;
     std::optional<OneShotAttachments> attached;
     std::int64_t share_used = 0;
+    // What the retrievals send, in the order sent (52a).
+    std::vector<harness::ExcerptSource> sent;
     if (attaching) {
         // The same core as chat's: an attachment that fits rides the prompt
         // whole, and the others' excerpts are retrieved for it (26d).
@@ -447,6 +452,7 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
             if (turn.retrieved->error.empty() && !turn.retrieved->prefix.empty()) {
                 loop_options.transient_prefix = turn.retrieved->prefix;
                 share_used = turn.retrieved->tokens;
+                sent = turn.retrieved->sources;
             }
             reporter.status().print_line(style.tag(ansi::Role::Apogee) + " " +
                                          describe_attachment_retrieval(*turn.retrieved));
@@ -472,9 +478,13 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         if (rag.error.empty() && !rag.prefix.empty()) {
             loop_options.transient_prefix.insert(loop_options.transient_prefix.end(),
                                                  rag.prefix.begin(), rag.prefix.end());
+            sent.insert(sent.end(), rag.sources.begin(), rag.sources.end());
         }
         reporter.status().print_line(reporter_options.style.tag(role) + " " +
                                      describe_retrieval(rag_choice, rag));
+    }
+    if (!sent.empty()) {
+        reporter.on_sources(sent);
     }
 
     agent::ToolRegistry registry;
@@ -703,6 +713,19 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
         build_options.config_path = config_path;
         const backends::BuildResult built = backends::build_providers(harness, build_options);
 
+        // An explicit model answers under its own name or not at all. A typo
+        // is refused by name, and a backend that IS configured but failed to
+        // construct is the same hazard one step later: without this, `-m
+        // local` on an unbuildable local backend falls through to the default
+        // and the user gets a real answer from a model they did not choose.
+        // Asked before the whole list (M29), so a run naming one backend
+        // hears that backend's problem even when nothing started.
+        if (!flags->all_backends) {
+            if (const std::string refused = named_backend_refusal(config, built, flags->model);
+                !refused.empty()) {
+                fail_user(refused);
+            }
+        }
         if (built.constructed_count() == 0) {
             std::string message = "no usable backend is configured";
             if (!built.skipped_summary().empty()) {
@@ -728,27 +751,6 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
         check_images(*flags);
 
         if (!flags->all_backends) {
-            if (!flags->model.empty() && !names_a_configured_backend(config, flags->model)) {
-                std::string known;
-                for (const std::string& name : config.backend_names()) {
-                    known += known.empty() ? "" : ", ";
-                    known += name;
-                }
-                fail_user("no backend named '" + flags->model + "'" +
-                          (known.empty() ? "" : " (configured: " + known + ")"));
-            }
-            // A backend that IS configured but failed to construct is the same
-            // hazard as a typo, one step later: without this, `-m local` on an
-            // unbuildable local backend falls through to the default and the
-            // user gets a real answer from a model they did not choose. Name
-            // the backend's own reason instead.
-            for (const backends::BackendStatus& status : built.statuses) {
-                if (!status.constructed && status.name == flags->model) {
-                    fail_user("backend '" + flags->model + "' is configured but unavailable -- " +
-                              status.reason);
-                }
-            }
-
             const std::string model = harness::resolve_chat_backend(config, flags->model);
             (void)run_one(harness, config, config_path, *flags, model, prompt, decorate);
             return;

@@ -37,9 +37,13 @@ nlohmann::json ledger_to_json(const VersionLedger& ledger) {
     nlohmann::json versions = nlohmann::json::array();
     for (const VersionEntry& entry : ledger.versions) {
         nlohmann::json row{{"version", entry.version}, {"run_id", entry.run_id}};
-        // One of the two: a GGUF version's file, or an MLX version's
+        // One of three: an adapter version's adapter and the base weights it
+        // was pinned to (53b), a GGUF version's file, or an MLX version's
         // directory (27c) -- so a GGUF ledger reads exactly as it always has.
-        if (entry.mlx()) {
+        if (entry.adapter()) {
+            row["adapter_path"] = entry.adapter_path;
+            row["base_sha256"] = entry.base_sha256;
+        } else if (entry.mlx()) {
             row["mlx_path"] = entry.mlx_path;
         } else {
             row["gguf_path"] = entry.gguf_path;
@@ -50,6 +54,9 @@ nlohmann::json ledger_to_json(const VersionLedger& ledger) {
         }
         if (entry.eval_passed.has_value()) {
             row["eval_passed"] = *entry.eval_passed;
+        }
+        if (!entry.eval_scored_on.empty()) {
+            row["eval_scored_on"] = entry.eval_scored_on;
         }
         if (entry.pruned()) {
             row["pruned_at"] = entry.pruned_at;
@@ -84,6 +91,8 @@ VersionLedger ledger_from_json(const nlohmann::json& json) {
             entry.run_id = row.value("run_id", std::string{});
             entry.gguf_path = row.value("gguf_path", std::string{});
             entry.mlx_path = row.value("mlx_path", std::string{});
+            entry.adapter_path = row.value("adapter_path", std::string{});
+            entry.base_sha256 = row.value("base_sha256", std::string{});
             entry.promoted_at = row.value("promoted_at", std::string{});
             if (const auto score = row.find("eval_score");
                 score != row.end() && score->is_number()) {
@@ -93,6 +102,7 @@ VersionLedger ledger_from_json(const nlohmann::json& json) {
                 passed != row.end() && passed->is_boolean()) {
                 entry.eval_passed = passed->get<bool>();
             }
+            entry.eval_scored_on = row.value("eval_scored_on", std::string{});
             entry.pruned_at = row.value("pruned_at", std::string{});
             entry.fused_path = row.value("fused_path", std::string{});
             ledger.versions.push_back(std::move(entry));

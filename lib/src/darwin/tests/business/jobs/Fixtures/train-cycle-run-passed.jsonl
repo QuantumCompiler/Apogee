@@ -1,0 +1,30 @@
+{"protocol_version":1,"schema":"2026-10-25","type":"job","verb":"train cycle run"}
+{"state":"collecting","text":"[cycle] directory: 1 file(s) in /Users/someone/work/queue","type":"pass"}
+{"state":"merging","text":"[cycle] 2 example(s) from directory","type":"pass"}
+{"state":"training","text":"[cycle] pipeline cycle-20261026-074119 (nightly): 1 stage(s)","type":"pass"}
+{"count":1,"index":1,"label":"base","pipeline_run_id":"cycle-20261026-074119","state":"pending","type":"stage"}
+{"count":1,"index":1,"label":"base","pipeline_run_id":"cycle-20261026-074119","run_id":"cycle-20261026-074119-s0","state":"training","type":"stage"}
+{"text":"[train] stage 1/1 'base': mock lora on aaaaaaaaaaaa, dataset merged.jsonl","type":"notice"}
+{"text":"[train] mock trainer: 4 iteration(s), method lora","type":"notice"}
+{"iteration":1,"iterations":4,"loss":0.72,"lr":0.0001,"stage":1,"throughput":10.0,"type":"iteration"}
+{"iteration":2,"iterations":4,"loss":0.62,"lr":0.0001,"stage":1,"throughput":10.0,"type":"iteration"}
+{"iteration":3,"iterations":4,"loss":0.52,"lr":0.0001,"stage":1,"throughput":10.0,"type":"iteration"}
+{"iteration":4,"iterations":4,"loss":0.42,"lr":0.0001,"stage":1,"throughput":10.0,"type":"iteration"}
+{"text":"[train] adapter saved to /Users/someone/.apogee/training/runs/cycle-20261026-074119-s0/adapters","type":"notice"}
+{"count":1,"index":1,"label":"base","pipeline_run_id":"cycle-20261026-074119","run_id":"cycle-20261026-074119-s0","state":"evaluating","type":"stage"}
+{"text":"[eval] cumulative suite: 1 suite(s), 1 item(s); no judge: unmatched items skip","type":"notice"}
+{"text":"[gate] stage 'base' PASSED the cumulative eval -- 100% (1/1)","type":"notice"}
+{"count":1,"cumulative_score":1.0,"index":1,"label":"base","pipeline_run_id":"cycle-20261026-074119","run_id":"cycle-20261026-074119-s0","state":"passed","type":"stage"}
+{"state":"gating","text":"[cycle] gate -- current 100%, previous 0%, anchor 0%, threshold 0%","type":"pass"}
+{"state":"promoting","text":"[cycle] gate PASSED (100%) -- promoting cycle-20261026-074119-s0 into nightly-model","type":"pass"}
+{"text":"[promote] run cycle-20261026-074119-s0 -> nightly-model v1","type":"notice"}
+{"text":"[promote] fusing the adapter into the base model","type":"notice"}
+{"text":"[promote]   base:    /Users/someone/.apogee/models/tiny/safetensors/aaaaaaaaaaaa","type":"notice"}
+{"text":"[promote]   adapter: /Users/someone/.apogee/training/runs/cycle-20261026-074119-s0/adapters","type":"notice"}
+{"text":"[promote]   output:  /Users/someone/.apogee/training/runs/cycle-20261026-074119-s0/fused","type":"notice"}
+{"text":"[promote] mock fuse: /Users/someone/.apogee/training/runs/cycle-20261026-074119-s0/adapters into /Users/someone/.apogee/models/tiny/safetensors/aaaaaaaaaaaa","type":"notice"}
+{"text":"[promote] converting the fused model to GGUF (F16): /Users/someone/.apogee/models/tiny/gguf/.incoming-1c387267417d/nightly-model-v1.gguf","type":"notice"}
+{"text":"[promote] mock converter: writing a minimal GGUF","type":"notice"}
+{"state":"passed","text":"[cycle] anchor set to v1 (100%)","type":"pass"}
+{"state":"passed","text":"[cycle] complete -- nightly-model promoted to v1 (/Users/someone/.apogee/models/tiny/gguf/052b295c3e9b/nightly-model-v1.gguf)","type":"pass"}
+{"document":{"active":false,"anchor_score":1.0,"anchor_version":1,"backend":"nightly-model","consecutive_fails":0,"halt_reason":"","halted":false,"runs":[{"anchor_score":0.0,"cycle_score":0.0,"dataset_rows":0,"gate":"skipped","gate_reason":"no new training data in any source","pipeline_id":"","prev_score":0.0,"promoted_version":0,"run_at":"2026-10-26T07:41:18Z","source":""},{"anchor_score":0.0,"cycle_score":1.0,"dataset_rows":2,"gate":"pass","gate_reason":"","pipeline_id":"cycle-20261026-074119","prev_score":0.0,"promoted_version":1,"run_at":"2026-10-26T07:41:19Z","source":"directory"}],"sessions_until":"","total_runs":2},"type":"document"}

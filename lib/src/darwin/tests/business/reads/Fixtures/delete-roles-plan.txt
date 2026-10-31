@@ -1,0 +1,7 @@
+will remove:
+  /Users/someone/.apogee/models/Qwen3-8B/mlx/1a2b3c4d5e6f
+
+backend 'Qwen3-8B-4bit' points into this and will stop working until it is repointed.
+the backend entry stays unless you say -- --and-backends removes it with the weights.
+
+re-run with --yes to remove.

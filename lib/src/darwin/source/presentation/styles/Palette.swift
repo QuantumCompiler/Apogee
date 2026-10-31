@@ -1,0 +1,159 @@
+import AppKit
+import Synchronization
+import SwiftUI
+
+/// The theme the app draws in, and its text size: the person's Appearance
+/// setting, applied here so every color and every size follows it.
+public enum Appearance {
+    public enum Theme: String, Sendable {
+        /// Light or dark as the system is.
+        case system
+        case light
+        case dark
+        case contrast
+    }
+
+    private static let state = Mutex((theme: Theme.system, scale: 1.0))
+
+    public static var theme: Theme { state.withLock { $0.theme } }
+    /// Every type size is multiplied by it, rounded to the half point.
+    public static var scale: Double { state.withLock { $0.scale } }
+
+    public static func apply(theme: Theme, scale: Double) {
+        state.withLock { $0 = (theme, scale) }
+    }
+
+    /// The color scheme the window takes: none for the system's.
+    public static var colorScheme: ColorScheme? {
+        switch theme {
+        case .system: nil
+        case .light: .light
+        case .dark, .contrast: .dark
+        }
+    }
+}
+
+/// One color token: its value in each of the design's three themes.
+///
+/// The values are the design's Graphite Light, Graphite Dark and High
+/// Contrast themes (lib/design/spec/json/tokens.json), copied rather than
+/// read: the design is a reference, never an input to the build. The theme is
+/// the person's Appearance setting; following the system picks Light or Dark
+/// by the window's appearance.
+public struct ColorToken: Sendable, Equatable {
+    /// The design's name for it, `surface.window`.
+    public let name: String
+    /// 0xRRGGBB in each theme.
+    public let light: UInt32
+    public let dark: UInt32
+    public let contrast: UInt32
+
+    public init(_ name: String, light: UInt32, dark: UInt32, contrast: UInt32) {
+        self.name = name
+        self.light = light
+        self.dark = dark
+        self.contrast = contrast
+    }
+
+    /// The value the current theme and `appearance` draw.
+    public func value(darkAppearance: Bool) -> UInt32 {
+        switch Appearance.theme {
+        case .light: light
+        case .dark: dark
+        case .contrast: contrast
+        case .system: darkAppearance ? dark : light
+        }
+    }
+
+    /// The token as a SwiftUI color that follows the theme and the window's appearance.
+    public var color: Color {
+        Color(nsColor: nsColor)
+    }
+
+    /// The token as an AppKit color that follows the theme and the window's
+    /// appearance: resolved each time it is drawn.
+    var nsColor: NSColor {
+        let token = self
+        return NSColor(name: NSColor.Name(name)) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            return NSColor(rgb: token.value(darkAppearance: isDark))
+        }
+    }
+}
+
+extension NSColor {
+    convenience init(rgb: UInt32) {
+        self.init(
+            srgbRed: CGFloat((rgb >> 16) & 0xFF) / 255,
+            green: CGFloat((rgb >> 8) & 0xFF) / 255,
+            blue: CGFloat(rgb & 0xFF) / 255,
+            alpha: 1)
+    }
+}
+
+/// The app's colors, by what they are for.
+public enum Palette {
+    public static let windowToken = ColorToken("surface.window", light: 0xF7F7F5, dark: 0x131415, contrast: 0x000000)
+    public static let sidebarToken = ColorToken("surface.sidebar", light: 0xEEEEEA, dark: 0x0E0F10, contrast: 0x0A0A0A)
+    public static let inspectorToken = ColorToken("surface.inspector", light: 0xF1F1EE, dark: 0x161719, contrast: 0x0A0A0A)
+    public static let cardToken = ColorToken("surface.card", light: 0xFFFFFF, dark: 0x18191B, contrast: 0x111111)
+    public static let controlToken = ColorToken("surface.control", light: 0xECECE8, dark: 0x222326, contrast: 0x1E1E1E)
+    public static let selectionToken = ColorToken("surface.selection", light: 0xE1E4E1, dark: 0x25282B, contrast: 0x2A2A2A)
+    public static let codeToken = ColorToken("surface.code", light: 0xF3F3F0, dark: 0x0F1011, contrast: 0x0A0A0A)
+    public static let borderToken = ColorToken("line.border", light: 0xDDDDD7, dark: 0x2A2C2F, contrast: 0x5A5A5A)
+    public static let strongToken = ColorToken("line.strong", light: 0xC6C6BF, dark: 0x3B3E42, contrast: 0x8A8A8A)
+    public static let textPrimaryToken = ColorToken("text.primary", light: 0x1B1C1D, dark: 0xE7E5E0, contrast: 0xFFFFFF)
+    public static let textSecondaryToken = ColorToken("text.secondary", light: 0x4B4C4E, dark: 0xABA8A0, contrast: 0xD6D6D6)
+    public static let textTertiaryToken = ColorToken("text.tertiary", light: 0x5F6062, dark: 0x938F86, contrast: 0xB5B5B5)
+    public static let accentToken = ColorToken("status.accent", light: 0x0B7A68, dark: 0x7FD4C1, contrast: 0x5EF0D2)
+    public static let warningToken = ColorToken("status.warning", light: 0x9F5600, dark: 0xE9A23B, contrast: 0xFFC04D)
+    public static let errorToken = ColorToken("status.error", light: 0xB3261E, dark: 0xF2836F, contrast: 0xFF8A7A)
+    public static let localToken = ColorToken("model.local", light: 0x0B7A68, dark: 0x7FD4C1, contrast: 0x5EF0D2)
+    public static let apiToken = ColorToken("model.api", light: 0x9F5600, dark: 0xE9A23B, contrast: 0xFFC04D)
+    public static let subscriptionToken = ColorToken("model.subscription", light: 0x4450C4, dark: 0xA7B1F8, contrast: 0xB9C2FF)
+    public static let codeKeywordToken = ColorToken("code.keyword", light: 0x7A3FC0, dark: 0xC3A6F0, contrast: 0xD8B9FF)
+    public static let codeStringToken = ColorToken("code.string", light: 0x2F7A1F, dark: 0xA5D68E, contrast: 0xB8F0A0)
+    public static let codeCommentToken = ColorToken("code.comment", light: 0x67686A, dark: 0x8C887F, contrast: 0xB5B5B5)
+    public static let codeNumberToken = ColorToken("code.number", light: 0x8F5A00, dark: 0xE5B567, contrast: 0xFFC04D)
+    public static let codeFunctionToken = ColorToken("code.function", light: 0x1F5FA8, dark: 0x8EC3F0, contrast: 0x9ED4FF)
+
+    /// Every token above, for the tests that pin them.
+    public static let tokens: [ColorToken] = [
+        windowToken, sidebarToken, inspectorToken, cardToken, controlToken, selectionToken, codeToken,
+        borderToken, strongToken, textPrimaryToken, textSecondaryToken, textTertiaryToken,
+        accentToken, warningToken, errorToken, localToken, apiToken, subscriptionToken,
+        codeKeywordToken, codeStringToken, codeCommentToken, codeNumberToken, codeFunctionToken,
+    ]
+
+    public static var window: Color { windowToken.color }
+    public static var sidebar: Color { sidebarToken.color }
+    public static var inspector: Color { inspectorToken.color }
+    public static var selection: Color { selectionToken.color }
+    public static var strong: Color { strongToken.color }
+    public static var card: Color { cardToken.color }
+    public static var control: Color { controlToken.color }
+    public static var code: Color { codeToken.color }
+    public static var border: Color { borderToken.color }
+    public static var textPrimary: Color { textPrimaryToken.color }
+    public static var textSecondary: Color { textSecondaryToken.color }
+    public static var textTertiary: Color { textTertiaryToken.color }
+    public static var accent: Color { accentToken.color }
+    public static var warning: Color { warningToken.color }
+    public static var error: Color { errorToken.color }
+    /// A model on this machine.
+    public static var local: Color { localToken.color }
+    /// A cloud API, billed per use -- never the only sign of it.
+    public static var api: Color { apiToken.color }
+    /// A model used through a vendor's subscription.
+    public static var subscription: Color { subscriptionToken.color }
+    /// Code's keywords: `def`, `async`, `return`.
+    public static var codeKeyword: Color { codeKeywordToken.color }
+    /// Code's quoted text.
+    public static var codeString: Color { codeStringToken.color }
+    /// Code's comments: notes after `#` or `//`.
+    public static var codeComment: Color { codeCommentToken.color }
+    /// Code's numbers: `10`, `0.5`, `0x1F`.
+    public static var codeNumber: Color { codeNumberToken.color }
+    /// The names code calls and defines: `run_batch`, `create_task`.
+    public static var codeFunction: Color { codeFunctionToken.color }
+}

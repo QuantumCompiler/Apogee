@@ -17,7 +17,7 @@ BUILD_DIR := build/$(PRESET)
 # system-wide install is `make install PREFIX=/usr/local`.
 PREFIX ?= $(HOME)/.local
 # The channel's installed binary: `install` ends in its `check --fix`,
-# `uninstall` runs its own `uninstall`, and `reinstall` resets with it.
+# `uninstall` runs its own `uninstall`, and `update` migrates and resets with it.
 APOGEE_BIN ?= $(PREFIX)/bin/$(APOGEE_NAME)
 
 # The install channel (M10, DEVELOPER.md -> Install channels): which data
@@ -53,7 +53,7 @@ LINT_CXX     ?= $(dir $(CLANG_TIDY))clang++
 # formatted or linted.
 SOURCES := $(shell find source tests \( -name '*.cpp' -o -name '*.h' \) 2>/dev/null)
 
-.PHONY: help build install reinstall install-completions install-zsh-completion test clean fresh format format-check lint no-llama all release release-check linux-tests cross-windows pr-ci pr-ci-clean
+.PHONY: help build install install-files path-note update install-completions install-zsh-completion test clean fresh format format-check lint no-llama all release release-check linux-tests cross-windows pr-ci pr-ci-clean
 
 help:
 	@echo "Apogee CLI — build wrapper (repo-wide entry point: lib/scripts/cicd.sh)"
@@ -64,13 +64,13 @@ help:
 	@echo "Targets:"
 	@echo "  build         Configure + build (preset: $(PRESET), channel: $(MODE))"
 	@echo "  install       Build, then install the binary to $(PREFIX)/bin"
-	@echo "  reinstall     Start over from source: a fresh build, install, then 'apogee reset'"
-	@echo "                  on the installed binary -- it shows the plan and waits for 'yes'."
-	@echo "                  KEEP=\"<row> ...\" keeps those rows of the data directory and ONLY"
-	@echo "                  those. A row is one of the layout's top-level directories --"
-	@echo "                  'apogee reset --help' lists them, 'apogee reset --keep <TAB>'"
-	@echo "                  completes them. Bare 'make reinstall' keeps nothing."
-	@echo "                  make reinstall KEEP=models"
+	@echo "  update        Bring the install up to date from source: a fresh build, the binary"
+	@echo "                  installed, the models moved to this build's store layout, then"
+	@echo "                  'apogee reset --yes' -- nothing asked -- and the bootstrap. The"
+	@echo "                  models are ALWAYS kept. KEEP=\"<row> ...\" keeps more"
+	@echo "                  rows of the data directory -- 'apogee reset --help' lists them,"
+	@echo "                  'apogee reset --keep <TAB>' completes them."
+	@echo "                  make update KEEP=sessions"
 	@echo "  uninstall     Run the installed binary's own 'uninstall' (it shows the plan and asks)"
 	@echo ""
 	@echo "Install channels (MODE=, default release) -- each its own binary and data directory:"
@@ -78,7 +78,7 @@ help:
 	@echo "  dev           apogee-dev    ~/.apogee-dev"
 	@echo "  test          apogee-test   ~/.apogee-test"
 	@echo "                  make install MODE=dev   /   make uninstall MODE=dev"
-	@echo "                  make reinstall MODE=dev KEEP=models"
+	@echo "                  make update MODE=dev"
 	@echo "  test          Build, then run the full ctest suite"
 	@echo "  lint          clang-tidy over source/ and tests/"
 	@echo "  format        Rewrite source/ and tests/ in the project style"
@@ -133,17 +133,24 @@ build:
 # MODE=dev or MODE=test installs that channel's binary beside the release one
 # and seeds that channel's root; the completion stubs stay release-only, since
 # they call `apogee` by name.
-install: build
+install: install-files
+	@echo ""
+	@"$(APOGEE_BIN)" check --fix
+	@echo ""
+	@"$(APOGEE_BIN)" bootstrap || echo "note: the bootstrap did not finish -- '$(APOGEE_NAME) bootstrap' runs it again"
+	@$(MAKE) --no-print-directory path-note
+
+# The files alone -- the binary and, for release, the completions -- which
+# `install` and `update` each follow with the binary's own steps.
+install-files: build
 	@cmake --install $(BUILD_DIR) --prefix "$(PREFIX)" --component apogee
 ifeq ($(MODE),release)
 	@$(MAKE) --no-print-directory install-completions PREFIX="$(PREFIX)"
 else
 	@echo "no shell completions for the $(MODE) channel: the stubs call 'apogee' by name"
 endif
-	@echo ""
-	@"$(APOGEE_BIN)" check --fix
-	@echo ""
-	@"$(APOGEE_BIN)" bootstrap || echo "note: the bootstrap did not finish -- '$(APOGEE_NAME) bootstrap' runs it again"
+
+path-note:
 	@case ":$$PATH:" in \
 		*":$(PREFIX)/bin:"*) ;; \
 		*) echo ""; \
@@ -151,37 +158,52 @@ endif
 		   echo "      export PATH=\"$(PREFIX)/bin:\$$PATH\"" ;; \
 	esac
 
-# Starting over from source (M9): a fresh build -- every object recompiled,
-# the fetched dependencies kept -- then `install`, then `apogee reset` on the
-# binary just installed. Each word of KEEP is forwarded as `--keep <word>`, and
-# only the rows named are kept: bare, it keeps nothing, which the plan shows
-# and the prompt confirms before anything is removed.
+# Bringing an install up to date from source (2026-10-21, the user's call,
+# replacing M9's `reinstall`): a fresh build -- every object recompiled, the
+# fetched dependencies kept -- the files installed, then, on the binary just
+# installed:
 #
-#     make reinstall                        # a fresh install, nothing kept
-#     make reinstall KEEP=models            # ...the models kept
-#     make reinstall KEEP="models sessions" # ...and the chats
+#   1. `models migrate --yes`: the stored models moved to this build's store
+#      layout. The models are kept whatever else happens, so a change to how
+#      they are stored ships its move in `models migrate`, which every update
+#      runs -- never as a reason to remove them. Nothing to move is a no-op.
+#   2. `reset --keep models <KEEP...>`: every other row reset, and the
+#      skeleton re-seeded and checked (`check --fix`, inside the reset). KEEP
+#      adds rows to keep; `models` is kept whether or not it names it.
+#   3. `bootstrap`: the runtimes and the registrations, last. `reinstall` ran
+#      it inside `install`, before its reset, and the reset removed what it
+#      had made -- the environment and the registered backends (the user's
+#      install of 2026-10-21). Last, nothing of it is reset away.
+#
+#     make update                          # the models kept
+#     make update KEEP=sessions            # ...and the chats
+#     make update KEEP="sessions config"   # ...and the config
 #
 # This file does not know the rows. They are the layout's one declaration
 # (source/data/contracts/layout.h): the binary checks every word, refuses one
 # the layout does not declare before anything is removed, and completes them
 # on `apogee reset --keep <TAB>`. The reset is the binary's, not a shell `rm`,
-# for uninstall's reason -- a removal written twice drifts -- and it is never
-# given --yes: the destructive confirmation belongs to the person, even in the
-# middle of a make target. The installed binary is run only as $(APOGEE_BIN),
-# so the binary `install` put there is the one that resets its own root --
-# with MODE=dev, `apogee-dev` resetting ~/.apogee-dev.
-#
-# It stops where `install` stops: an install whose `check --fix` reports a
-# failure (an unparseable config, an unreadable model) ends the target before
-# the reset. `apogee reset` needs nothing from the config -- run it directly.
+# for uninstall's reason -- a removal written twice drifts -- and it is given
+# --yes (the user's call, 2026-10-21): an update asks nothing, and what it
+# keeps is said by the target itself -- the models always, and KEEP's rows.
+# The installed binary is run only as $(APOGEE_BIN),
+# so the binary `install-files` put there is the one that resets its own root
+# -- with MODE=dev, `apogee-dev` updating ~/.apogee-dev. `apogee reset` needs
+# nothing from the config, and the reset's own check is what stops the target
+# when the fresh directory does not pass.
 KEEP ?=
 
-reinstall:
+update:
 	cmake --preset $(PRESET) -DAPOGEE_CHANNEL=$(MODE)
 	cmake --build $(BUILD_DIR) -j $(JOBS) --clean-first
-	@$(MAKE) --no-print-directory install
+	@$(MAKE) --no-print-directory install-files
 	@echo ""
-	@"$(APOGEE_BIN)" reset $(addprefix --keep ,$(KEEP))
+	@"$(APOGEE_BIN)" models migrate --yes
+	@echo ""
+	@"$(APOGEE_BIN)" reset --yes $(addprefix --keep ,$(sort models $(KEEP)))
+	@echo ""
+	@"$(APOGEE_BIN)" bootstrap || echo "note: the bootstrap did not finish -- '$(APOGEE_NAME) bootstrap' runs it again"
+	@$(MAKE) --no-print-directory path-note
 
 # Removes the MODE channel's install by running that binary's own `uninstall`:
 # its binary, its data directory -- the root it was built for, whatever flag
@@ -239,7 +261,7 @@ install-zsh-completion:
 	fi
 
 test:
-	@$(CICD) --platform $$(uname -s | tr '[:upper:]' '[:lower:]' | sed 's/darwin/macos/')-$$(uname -m | sed 's/aarch64/arm64/;s/x86_64/x64/;s/amd64/x64/') --test --jobs $(JOBS)
+	@$(CICD) --app cli --platform $$(uname -s | tr '[:upper:]' '[:lower:]' | sed 's/darwin/macos/')-$$(uname -m | sed 's/aarch64/arm64/;s/x86_64/x64/;s/amd64/x64/') --test --jobs $(JOBS)
 
 # Rehearse the CI run a pull request into `stable` starts: GitHub's test merge
 # of this branch into stable, then ci.yml's pull-request jobs on it -- version
@@ -280,7 +302,7 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 fresh:
-	@$(CICD) --fresh --test
+	@$(CICD) --app cli --fresh --test
 
 format:
 	@$(CLANG_FORMAT) -i $(SOURCES)

@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -14,6 +15,7 @@
 #include "modelstore/gguf_inspect.h"
 #include "modelstore/kv_cache.h"
 #include "modelstore/sidecar.h"
+#include "support/draft_head_configs.h"
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
 
@@ -264,6 +266,52 @@ suites:
     }
 }
 
+TEST_CASE("what a set needs is each member's counted bytes and the margin, nothing else",
+          "[models][footprint]") {
+    // M31: the typed footprint states each member's bytes and the total as
+    // separate numbers; the total must be exactly theirs and the margin, so
+    // a host adding them up reads what the admission line says.
+    SuiteFootprint footprint;
+    footprint.suite = "mixed";
+    MemberFootprint known;
+    known.backend = "root";
+    known.local = true;
+    known.weights = 1926 * kMiB;
+    apogee::models::LocalWindow window;
+    window.cache_bytes = 1904 * kMiB;
+    known.window = window;
+    MemberFootprint sharer = known;
+    sharer.backend = "helper";
+    sharer.shares = "root";
+    sharer.adapters = 1;
+    sharer.adapter_bytes = 3 * kMiB;
+    MemberFootprint drafting;
+    drafting.backend = "e4b";
+    drafting.local = true;
+    drafting.unknown = "an MLX model's footprint is not stated yet";
+    drafting.drafter = "/models/drafter";
+    drafting.drafter_bytes = 300 * kMiB;
+    MemberFootprint cloud;
+    cloud.backend = "claude";
+    footprint.members = {known, sharer, drafting, cloud};
+
+    CHECK(known.counted_bytes() == (1926 + 1904) * kMiB);
+    CHECK(sharer.counted_bytes() == (1904 + 3) * kMiB);
+    CHECK_FALSE(drafting.bytes().has_value());
+    CHECK(drafting.counted_bytes() == 300 * kMiB);
+    CHECK(cloud.counted_bytes() == 0);
+    std::int64_t sum = 0;
+    for (const MemberFootprint& member : footprint.members) {
+        sum += member.counted_bytes();
+    }
+    CHECK(footprint.known_bytes() == sum);
+    CHECK(footprint.needed() == sum + apogee::models::kFitMargin);
+    // Nothing held here: nothing needed, not even the margin.
+    SuiteFootprint remote;
+    remote.members = {cloud};
+    CHECK(remote.needed() == 0);
+}
+
 TEST_CASE("a suite is priced at its own pins, active or not", "[models][footprint]") {
     const Store store;
     const std::string model = store.model("shared", llama_3b(), 1926 * kMiB);
@@ -300,4 +348,286 @@ suites:
           4096);
     // No such suite: nothing to price.
     CHECK(apogee::models::suite_footprint(config, "nope", {}).members.empty());
+}
+
+namespace {
+
+/// Writes `bytes` bytes at `path`: an adapter file of a known size.
+void sized(const std::filesystem::path& path, std::int64_t bytes) {
+    std::ofstream{path, std::ios::binary} << std::string(static_cast<std::size_t>(bytes), 'w');
+}
+
+}  // namespace
+
+TEST_CASE("a base is the model file, its projector and its cache type, however it is spelled",
+          "[models][footprint][shared-base]") {
+    using apogee::harness::KvCacheType;
+    using apogee::models::base_key;
+    const apogee::models::BaseKey plain = base_key("/m/base.gguf", "", KvCacheType::Q8_0, false);
+    CHECK(base_key("/m/./x/../base.gguf", "", KvCacheType::Q8_0, false) == plain);
+    CHECK(base_key("/m/other.gguf", "", KvCacheType::Q8_0, false) != plain);
+    CHECK(base_key("/m/base.gguf", "/m/mmproj.gguf", KvCacheType::Q8_0, false) != plain);
+    CHECK(base_key("/m/base.gguf", "", KvCacheType::F16, false) != plain);
+    CHECK(base_key("/m/base.gguf", "", KvCacheType::Q8_0, true) != plain);
+    // As the factory reads an entry: the default cache type unless named,
+    // and its window and adapters no part of it.
+    BackendConfig entry;
+    entry.type = apogee::harness::BackendType::LlamaCpp;
+    entry.model_path = "/m/base.gguf";
+    CHECK(base_key(entry) == plain);
+    entry.context_size = 4096;
+    entry.adapters = {{.path = "/m/style.gguf"}};
+    CHECK(base_key(entry) == plain);
+    entry.cache_type = KvCacheType::Q8_0;
+    CHECK(base_key(entry) == base_key("/m/base.gguf", "", KvCacheType::Q8_0, true));
+}
+
+TEST_CASE("one base, many roles: its weights counted once, each member its own cache and adapters",
+          "[models][footprint][shared-base]") {
+    const Store store;
+    const std::string base = store.model("base", llama_3b(), 1926 * kMiB);
+    const std::string other = store.model("other", llama_1b(), 770 * kMiB);
+    const std::string unrecorded = store.model("unrecorded", llama_1b(), std::nullopt);
+    const std::filesystem::path style = store.dir.path() / "style.gguf";
+    const std::filesystem::path tone = store.dir.path() / "tone.gguf";
+    sized(style, 3 * kMiB);
+    sized(tone, kMiB);
+    const std::string respelled = (store.dir.path() / "." / "base.gguf").string();
+    const Config config = parse(R"(models:
+  default: root
+backends:
+  root:
+    type: llamacpp
+    model_path: )" + base + R"(
+  helper:
+    type: llamacpp
+    model_path: )" + base + R"(
+    adapters: [{path: )" + style.string() +
+                                R"(}]
+  scribe:
+    type: llamacpp
+    model_path: )" + respelled + R"(
+    adapters: [{path: )" + tone.string() +
+                                R"(, scale: 0.5}]
+  wide:
+    type: llamacpp
+    model_path: )" + base + R"(
+    cache_type: f16
+  apart:
+    type: llamacpp
+    model_path: )" + other + R"(
+  broken:
+    type: llamacpp
+    model_path: )" + base + R"(
+    adapters: [{path: )" + (store.dir.path() / "gone.gguf").string() +
+                                R"(}]
+  first:
+    type: llamacpp
+    model_path: )" + unrecorded +
+                                R"(
+  second:
+    type: llamacpp
+    model_path: )" + unrecorded +
+                                R"(
+suites:
+  roles:
+    members:
+      chat: root
+      utility:
+        backend: helper
+        context_size: 4096
+      extraction:
+        backend: scribe
+        context_size: 4096
+  loaded-apart:
+    members:
+      chat: root
+      utility: wide
+      extraction: apart
+  tuned-first:
+    members:
+      chat: helper
+      utility: root
+  unread:
+    members:
+      chat: root
+      utility:
+        backend: broken
+        context_size: 4096
+  unrecorded:
+    members:
+      chat: first
+      utility:
+        backend: second
+        context_size: 4096
+)");
+
+    SECTION("the first member on the base counts it; the others their own cache and adapters") {
+        const SuiteFootprint footprint =
+            apogee::models::suite_footprint(config, "roles", MachineBudget{.bytes = 96 * kGiB});
+        CHECK(member(footprint, "root").shares.empty());
+        CHECK(member(footprint, "root").adapters == 0);
+        CHECK(member(footprint, "root").bytes() == (1926 + 1904) * kMiB);
+        // Its weights stated, not counted; its cache at its pin; its adapter.
+        CHECK(member(footprint, "helper").shares == "root");
+        CHECK(member(footprint, "helper").weights == 1926 * kMiB);
+        CHECK(member(footprint, "helper").adapters == 1);
+        CHECK(member(footprint, "helper").adapter_bytes == 3 * kMiB);
+        CHECK(member(footprint, "helper").bytes() == (238 + 3) * kMiB);
+        CHECK(member(footprint, "helper").unknown.empty());
+        // The same file spelled another way is the same base.
+        CHECK(member(footprint, "scribe").shares == "root");
+        CHECK(member(footprint, "scribe").bytes() == (238 + 1) * kMiB);
+
+        const std::int64_t known = (1926 + 1904 + 238 + 3 + 238 + 1) * kMiB;
+        CHECK(footprint.known_bytes() == known);
+        CHECK(footprint.saved_bytes() == 2 * 1926 * kMiB);
+        // Admitted where the base counted once fits, and only there.
+        const std::int64_t needed = known + apogee::models::kFitMargin;
+        CHECK(apogee::models::suite_footprint(config, "roles", MachineBudget{.bytes = needed})
+                  .admission() == Admission::Fits);
+        CHECK(apogee::models::suite_footprint(config, "roles", MachineBudget{.bytes = needed - 1})
+                  .admission() == Admission::OverBudget);
+    }
+    SECTION("a base loaded otherwise, or another file, is counted for itself") {
+        const SuiteFootprint footprint = apogee::models::suite_footprint(
+            config, "loaded-apart", MachineBudget{.bytes = 96 * kGiB});
+        CHECK(member(footprint, "wide").shares.empty());
+        CHECK(member(footprint, "apart").shares.empty());
+        CHECK(footprint.saved_bytes() == 0);
+        CHECK(member(footprint, "wide").bytes() ==
+              1926 * kMiB + *member(footprint, "wide").window->cache_bytes);
+    }
+    SECTION("whichever member comes first in the suite counts the base") {
+        const SuiteFootprint footprint =
+            apogee::models::suite_footprint(config, "tuned-first", MachineBudget{});
+        CHECK(member(footprint, "helper").shares.empty());
+        CHECK(member(footprint, "helper").bytes() == (1926 + 1904 + 3) * kMiB);
+        CHECK(member(footprint, "root").shares == "helper");
+        CHECK(member(footprint, "root").bytes() == 1904 * kMiB);
+    }
+    SECTION("an adapter that cannot be read is unknown, never guessed") {
+        const SuiteFootprint footprint =
+            apogee::models::suite_footprint(config, "unread", MachineBudget{.bytes = 96 * kGiB});
+        CHECK(member(footprint, "broken").shares == "root");
+        CHECK(member(footprint, "broken").adapters == 1);
+        CHECK_FALSE(member(footprint, "broken").adapter_bytes.has_value());
+        CHECK_FALSE(member(footprint, "broken").bytes().has_value());
+        CHECK(member(footprint, "broken").unknown == "an adapter's file could not be read");
+        CHECK(footprint.admission() == Admission::FitsAsFarAsKnown);
+    }
+    SECTION("an unrecorded base is unknown once, where it is counted") {
+        const SuiteFootprint footprint = apogee::models::suite_footprint(
+            config, "unrecorded", MachineBudget{.bytes = 96 * kGiB});
+        CHECK(member(footprint, "first").unknown == "no recorded size");
+        CHECK(member(footprint, "second").shares == "first");
+        CHECK(member(footprint, "second").unknown.empty());
+        CHECK(member(footprint, "second").bytes() == 68 * kMiB);
+        CHECK(footprint.saved_bytes() == 0);
+    }
+}
+
+TEST_CASE("a member that drafts counts its drafter by its weights' bytes on disk, and only it",
+          "[models][footprint][drafter]") {
+    // M25: 53i's drafter loads beside its base, so a suite that fits on
+    // paper may not once its member drafts. The E4B pair's drafter, as
+    // mlx-vlm's conversion lays it out: its config, a tokenizer that is no
+    // weight, and two shards.
+    const Store store;
+    const std::string root = store.model("root", llama_3b(), 1926 * kMiB);
+    const std::filesystem::path base =
+        store.dir.path() / "Gemma4-E4B-Instruct" / "mlx" / "bbbbbbbbbbbb";
+    const std::filesystem::path drafter =
+        store.dir.path() / "Gemma4-E4B-Assistant" / "mlx" / "aaaaaaaaaaaa";
+    std::filesystem::create_directories(base);
+    std::filesystem::create_directories(drafter);
+    std::ofstream{base / "config.json"} << apogee::testing::kGemma4BaseE4BConfig;
+    std::ofstream{drafter / "config.json"} << apogee::testing::kGemma4AssistantE4BConfig;
+    sized(drafter / "tokenizer.json", kMiB);
+    sized(drafter / "model-00001-of-00002.safetensors", 2 * kMiB);
+    sized(drafter / "model-00002-of-00002.safetensors", kMiB);
+    const Config config = parse(R"(models:
+  default: root
+backends:
+  root:
+    type: llamacpp
+    model_path: )" + root + R"(
+  e4b:
+    type: mlx
+    model_path: )" + base.string() +
+                                R"(
+    draft: )" + drafter.string() +
+                                R"(
+  plain:
+    type: mlx
+    model_path: )" + base.string() +
+                                R"(
+  lost:
+    type: mlx
+    model_path: )" + base.string() +
+                                R"(
+    draft: )" + (store.dir.path() / "gone").string() +
+                                R"(
+suites:
+  drafting:
+    members:
+      chat: e4b
+      utility: root
+  plain:
+    members:
+      chat: plain
+      utility: root
+  lost:
+    members:
+      chat: lost
+      utility: root
+)");
+    // root at the default 32K: what each suite knows without a drafter.
+    const std::int64_t rooted = (1926 + 1904) * kMiB;
+
+    SECTION("a member drafting with nothing is as it was") {
+        const SuiteFootprint footprint =
+            apogee::models::suite_footprint(config, "plain", MachineBudget{.bytes = 96 * kGiB});
+        const MemberFootprint plain = member(footprint, "plain");
+        CHECK(plain.drafter.empty());
+        CHECK(plain.drafter_bytes == 0);
+        CHECK_FALSE(plain.bytes().has_value());
+        CHECK(plain.counted_bytes() == 0);
+        CHECK(plain.unknown == "an MLX model's footprint is not stated yet");
+        CHECK(footprint.known_bytes() == rooted);
+        CHECK(member(footprint, "root").drafter_bytes == 0);
+        CHECK(member(footprint, "root").bytes() == rooted);
+    }
+    SECTION("its drafter's shards are counted, its base still unknown") {
+        const SuiteFootprint footprint =
+            apogee::models::suite_footprint(config, "drafting", MachineBudget{.bytes = 96 * kGiB});
+        const MemberFootprint e4b = member(footprint, "e4b");
+        CHECK(e4b.drafter == drafter.string());
+        CHECK(e4b.drafter_bytes == 3 * kMiB);  // the shards, never the tokenizer
+        CHECK_FALSE(e4b.bytes().has_value());
+        CHECK(e4b.counted_bytes() == 3 * kMiB);
+        CHECK(e4b.unknown == "an MLX model's footprint is not stated yet");
+        CHECK(footprint.known_bytes() == rooted + 3 * kMiB);
+        CHECK(footprint.has_unknown());
+        CHECK(footprint.admission() == Admission::FitsAsFarAsKnown);
+    }
+    SECTION("what fits on paper does not once its member drafts") {
+        const std::int64_t budget = rooted + apogee::models::kFitMargin + kMiB;
+        CHECK(apogee::models::suite_footprint(config, "plain", MachineBudget{.bytes = budget})
+                  .admission() == Admission::FitsAsFarAsKnown);
+        CHECK(apogee::models::suite_footprint(config, "drafting", MachineBudget{.bytes = budget})
+                  .admission() == Admission::OverBudget);
+    }
+    SECTION("a drafter whose weights cannot be read is unknown, never guessed") {
+        const SuiteFootprint footprint =
+            apogee::models::suite_footprint(config, "lost", MachineBudget{.bytes = 96 * kGiB});
+        const MemberFootprint lost = member(footprint, "lost");
+        CHECK(lost.drafter == (store.dir.path() / "gone").string());
+        CHECK_FALSE(lost.drafter_bytes.has_value());
+        CHECK(lost.counted_bytes() == 0);
+        CHECK(lost.unknown ==
+              "an MLX model's footprint is not stated yet; its drafter's weights could not be "
+              "read");
+        CHECK(footprint.known_bytes() == rooted);
+    }
 }

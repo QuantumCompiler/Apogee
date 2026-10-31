@@ -34,7 +34,8 @@ APOGEE_BIN="${1:?usage: symphonies_e2e.sh <apogee-binary> <work-dir> <assets-dir
 WORK_DIR="${2:?usage: symphonies_e2e.sh <apogee-binary> <work-dir> <assets-dir>}"
 ASSETS_DIR="${3:?usage: symphonies_e2e.sh <apogee-binary> <work-dir> <assets-dir>}"
 
-rm -rf "$WORK_DIR"
+. "$(dirname "$0")/sandbox.sh"
+WORK_DIR="$(sandbox_dir "$WORK_DIR")"
 mkdir -p "$WORK_DIR/scripts"
 export APOGEE_HOME="$WORK_DIR/home"
 export HOME="$WORK_DIR"
@@ -228,7 +229,7 @@ grep -q '^    description: Edited\.$' "$CONFIG" || fail "edit was not written ba
 # A starter edited becomes an entry standing in for it; delete brings it back.
 EDITOR="$WORK_DIR/editor.sh" "$APOGEE_BIN" symphonies edit summarize-verify </dev/null >"$WORK_DIR/out.txt" 2>&1 ||
     fail "edit starter: $(cat "$WORK_DIR/out.txt")"
-"$APOGEE_BIN" symphonies list </dev/null 2>/dev/null | grep -Eq '^summarize-verify +utility → chat +config \(overrides shipped\) +Edited\.' ||
+"$APOGEE_BIN" symphonies list </dev/null 2>/dev/null | grep -E '^summarize-verify +utility → chat +config \(overrides shipped\) +Edited\.' >/dev/null ||
     fail "the edited starter is not an entry standing in for it"
 "$APOGEE_BIN" symphonies delete summarize-verify </dev/null >/dev/null 2>&1 || fail "delete the override"
 "$APOGEE_BIN" symphonies delete pair </dev/null >/dev/null 2>&1 || fail "delete pair"

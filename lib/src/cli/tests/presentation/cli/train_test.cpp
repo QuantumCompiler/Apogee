@@ -1,7 +1,9 @@
 #include "cli/train.h"
 
+#include <CLI/CLI.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -18,6 +20,8 @@
 #include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
 #include "support/env_guard.h"
+#include "support/gguf_builder.h"
+#include "training/python_env.h"
 
 /// `apogee train setup` refusals -- an interpreter named in the config that
 /// does not exist, an unknown requirement set, a bad trainer name -- each
@@ -93,6 +97,42 @@ TEST_CASE("train setup refuses an unknown requirement set and a bad trainer by n
            err.find("python") != std::string::npos));
 }
 
+TEST_CASE("train setup --with's help names every requirement set, from the one set list",
+          "[commands][train][setup][m23]") {
+    // M23: the help was a hand-written list that went stale as the MLX track
+    // added sets. Built from the table, every set is named in its order, with
+    // what it is for, the opt-in ones said to be.
+    CLI::App app{"apogee"};
+    const apogee::commands::RootContext context;
+    apogee::commands::TrainCommand{}.bind(app, context);
+    const CLI::Option* with =
+        app.get_subcommand("train")->get_subcommand("setup")->get_option("--with");
+    REQUIRE(with != nullptr);
+    const std::string help = with->get_description();
+    CHECK(help == apogee::commands::setup_with_help());
+    std::size_t at = 0;
+    for (const std::string_view name : apogee::training::requirement_set_names()) {
+        const apogee::training::RequirementSet set =
+            *apogee::training::requirement_set_from_string(name);
+        const std::string said = std::string{name} + " (" +
+                                 std::string{apogee::training::set_purpose(set)} +
+                                 (apogee::training::set_opt_in(set) ? "; opt-in)" : ")");
+        INFO(said);
+        const std::size_t found = help.find(said, at);
+        REQUIRE(found != std::string::npos);  // each one, in the table's order
+        at = found + said.size();
+    }
+    // The track's sets, by name, so the walk above cannot pass over an empty list.
+    for (const std::string_view set :
+         {"mlx-vlm (", "mlx-embeddings (", "mlx-video (", "mlx-audio (", "voice (", "video ("}) {
+        CHECK(help.find(set) != std::string::npos);
+    }
+    CHECK(help.find("mlx-video (Wan on MLX, built from GitHub; opt-in)") != std::string::npos);
+    CHECK(help.find("mlx-audio (Kokoro on MLX; opt-in)") != std::string::npos);
+    // Its value list is the table's too.
+    CHECK(with->get_type_name().find("mlx-audio") != std::string::npos);
+}
+
 TEST_CASE("the trainer detection names its reason when nothing fits", "[commands][train][setup]") {
     std::string reason;
     const std::string trainer = apogee::commands::detect_trainer(reason);
@@ -111,8 +151,10 @@ TEST_CASE("the trainer detection names its reason when nothing fits", "[commands
 
 #include <nlohmann/json.hpp>
 
+#include "backends/adapters.h"
 #include "contracts/assets.h"
 #include "contracts/layout.h"
+#include "contracts/sha256.h"
 #include "models/quantize.h"
 #include "training/manifest.h"
 #include "training/store.h"
@@ -768,6 +810,549 @@ TEST_CASE(
     CHECK(out.find("active v3 of 3, and the backend points at it") != std::string::npos);
 }
 
+// ---------------------------------------------------------------------------
+// The adapter promote (53b): `train promote --adapter`, the fuse skipped
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// An entry that runs the run's base -- a stand-in GGUF in the store, read
+/// only for its hash -- appended under `backends:`.
+std::filesystem::path add_base_entry(const RunFixture& fixture, std::string_view name) {
+    const std::filesystem::path base =
+        fixture.home / "models" / "tiny" / "gguf" / "bbbbbbbbbbbb" / "tiny-F16.gguf";
+    write_file(base, "GGUF the base weights");
+    write_file(fixture.base.config_path, read_file(fixture.base.config_path) + "  " +
+                                             std::string{name} +
+                                             ":\n    type: llamacpp\n    model_path: " +
+                                             apogee::harness::yaml_scalar(base.string()) + "\n");
+    return base;
+}
+
+/// The ledger of `backend`, which must exist.
+apogee::training::VersionLedger ledger_of(const RunFixture& fixture, std::string_view backend) {
+    const std::optional<apogee::training::VersionLedger> found =
+        apogee::training::TrainingStore{fixture.training}.list_versions(backend);
+    REQUIRE(found.has_value());
+    return *found;
+}
+
+}  // namespace
+
+TEST_CASE(
+    "train promote --adapter writes a small GGUF LoRA, registers it on the entry's adapters "
+    "through the one editor with the base untouched and pinned, and repoints in place; "
+    "rollback restores the pin, retention prunes kilobytes",
+    "[commands][train][promote][adapter]") {
+    const RunFixture fixture;
+    const std::filesystem::path base = add_base_entry(fixture, "based");
+    const std::string base_bytes = read_file(base);
+    const std::string pin = apogee::models::sha256_hex(base_bytes);
+    const std::string id = fixture.trained();
+    std::string out;
+    std::string err;
+
+    // The gate runs first, whatever the mode: nothing is judged differently.
+    CHECK(fixture.run({"train", "promote", id, "--as", "based", "--adapter"}, &out, &err) == 1);
+    CHECK(err.find("no eval results") != std::string::npos);
+    (void)fixture.evaluated(id);
+
+    // Refused before anything is built: a name no entry has (an adapter goes
+    // on an entry that runs its base), and the flags that act on a fuse.
+    CHECK(fixture.run({"train", "promote", id, "--as", "nowhere", "--adapter"}, &out, &err) == 1);
+    CHECK(err.find("'nowhere' is not configured") != std::string::npos);
+    CHECK(err.find("apogee config add-backend nowhere --type llamacpp") != std::string::npos);
+    CHECK(
+        fixture.run({"train", "promote", id, "--as", "based", "--adapter", "--quantize", "Q4_K_M"},
+                    &out, &err) == 1);
+    CHECK(err.find("--quantize has nothing to act on") != std::string::npos);
+    CHECK(fixture.run({"train", "promote", id, "--as", "based", "--adapter", "--keep-fused"}, &out,
+                      &err) == 1);
+    CHECK(err.find("--keep-fused has nothing to act on") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "versions"));
+
+    const std::string before = read_file(fixture.base.config_path);
+    REQUIRE(fixture.run({"train", "promote", id, "--as", "based", "--adapter"}, &out, &err) == 0);
+    INFO(out << err);
+    const std::filesystem::path v1 = fixture.training / "versions" / "based" / "v1.lora.gguf";
+    CHECK(out.find("updated backend based -> v1 (adapter)") != std::string::npos);
+    CHECK(out.find("adapter: " + v1.string()) != std::string::npos);
+    CHECK(out.find("pinned by sha256 " + pin.substr(0, 12)) != std::string::npos);
+    CHECK(err.find("no fuse: the adapter is the version") != std::string::npos);
+    CHECK(err.find("converting the adapter to a GGUF LoRA") != std::string::npos);
+    // A small file, parsed as a GGUF adapter, and nothing fused anywhere.
+    REQUIRE(std::filesystem::is_regular_file(v1));
+    CHECK(std::filesystem::file_size(v1) < 1024);
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "runs" / id / "fused"));
+    // The base untouched: the same bytes, still what model_path names.
+    CHECK(read_file(base) == base_bytes);
+    // Registered through the one editor, and nothing else changed: the
+    // config is the editor's own output over the config before.
+    const apogee::harness::AdapterConfig a1{.path = v1.string(), .base_sha256 = pin};
+    CHECK(read_file(fixture.base.config_path) ==
+          apogee::harness::set_backend_adapters(before, "based", {a1}));
+    const apogee::harness::Config loaded = apogee::harness::load_config(fixture.base.config_path);
+    REQUIRE(loaded.find_backend("based") != nullptr);
+    CHECK(loaded.find_backend("based")->model_path == base.string());
+    CHECK(loaded.find_backend("based")->adapters == std::vector{a1});
+    // The ledger: the adapter and the base's hash, no GGUF of a model.
+    const apogee::training::VersionLedger first = ledger_of(fixture, "based");
+    CHECK(first.active_version == 1);
+    REQUIRE(first.find(1) != nullptr);
+    CHECK(first.find(1)->adapter_path == v1.string());
+    CHECK(first.find(1)->base_sha256 == pin);
+    CHECK(first.find(1)->gguf_path.empty());
+    CHECK(first.find(1)->run_id == id);
+    CHECK(first.find(1)->eval_passed == true);
+
+    // A second version takes the first's place in the list, at its scale;
+    // an adapter the ledger did not put there stays where it stands.
+    const apogee::harness::AdapterConfig style{
+        .path = (fixture.home / "style.gguf").string(), .scale = 0.5, .base_sha256 = pin};
+    write_file(fixture.base.config_path,
+               apogee::harness::set_backend_adapters(read_file(fixture.base.config_path), "based",
+                                                     {a1, style}));
+    const std::string id2 = fixture.trained(3);
+    (void)fixture.evaluated(id2);
+    const std::string at_v1 = read_file(fixture.base.config_path);
+    REQUIRE(fixture.run({"train", "promote", id2, "--as", "based", "--adapter"}, &out, &err) == 0);
+    const std::filesystem::path v2 = fixture.training / "versions" / "based" / "v2.lora.gguf";
+    CHECK(out.find("updated backend based -> v2 (adapter)") != std::string::npos);
+    CHECK(out.find("apogee train rollback based") != std::string::npos);
+    const apogee::harness::AdapterConfig a2{.path = v2.string(), .base_sha256 = pin};
+    CHECK(read_file(fixture.base.config_path) ==
+          apogee::harness::set_backend_adapters(at_v1, "based", {a2, style}));
+    CHECK(read_file(base) == base_bytes);
+
+    // Rollback repoints the adapter, its recorded pin with it; deletes nothing.
+    REQUIRE(fixture.run({"train", "rollback", "based"}, &out, &err) == 0);
+    CHECK(out.find("rolled back based: v2 -> v1") != std::string::npos);
+    CHECK(out.find("adapter: " + v1.string()) != std::string::npos);
+    CHECK(read_file(fixture.base.config_path) == at_v1);
+    CHECK(std::filesystem::exists(v2));
+    CHECK(ledger_of(fixture, "based").active_version == 1);
+    REQUIRE(fixture.run({"train", "versions", "based"}, &out, &err) == 0);
+    CHECK(out.find("v1.lora.gguf  <- active") != std::string::npos);
+    CHECK(out.find("v2.lora.gguf") != std::string::npos);
+
+    // The doctor's ledger row reads an adapter version on the entry's adapters.
+    (void)fixture.run({"check", "--no-color"}, &out, &err);
+    CHECK(out.find("active v1 of 2, and the backend applies it") != std::string::npos);
+
+    // A backend's versions never mix: a merged promote into it is refused.
+    CHECK(fixture.run({"train", "promote", id2, "--as", "based"}, &out, &err) == 1);
+    CHECK(err.find("'based' holds adapter versions (active v1)") != std::string::npos);
+    // Nor an adapter onto an entry whose versions are merged fine-tunes.
+    REQUIRE(fixture.run({"train", "promote", id, "--as", "tuned"}, &out, &err) == 0);
+    CHECK(fixture.run({"train", "promote", id2, "--as", "tuned", "--adapter"}, &out, &err) == 1);
+    CHECK(err.find("'tuned' holds merged versions (active v1)") != std::string::npos);
+
+    // Retention counts adapter versions as any: retain 1 keeps the active
+    // one alone, the others' files removed and their entries kept.
+    write_file(fixture.base.config_path,
+               read_file(fixture.base.config_path) + "training:\n  retain_versions: 1\n");
+    REQUIRE(fixture.run({"train", "promote", id2, "--as", "based", "--adapter"}, &out, &err) == 0);
+    CHECK(out.find("updated backend based -> v3 (adapter)") != std::string::npos);
+    CHECK(out.find("pruned:") != std::string::npos);
+    const apogee::training::VersionLedger retained = ledger_of(fixture, "based");
+    CHECK(retained.active_version == 3);
+    CHECK(retained.find(1)->pruned());
+    CHECK(retained.find(2)->pruned());
+    CHECK_FALSE(std::filesystem::exists(v1));
+    CHECK_FALSE(std::filesystem::exists(v2));
+    CHECK(std::filesystem::exists(fixture.training / "versions" / "based" / "v3.lora.gguf"));
+    CHECK(read_file(base) == base_bytes);
+    CHECK(fixture.run({"train", "rollback", "based"}, &out, &err) == 1);
+    CHECK(err.find("its adapter is gone") != std::string::npos);
+}
+
+TEST_CASE("train rollback checks an adapter version's pin against the weights the entry runs now",
+          "[commands][train][rollback][adapter]") {
+    // 55e: rollback wrote the ledger's recorded pin without comparing it to
+    // the base the entry runs now, so after a re-pull it printed "rolled
+    // back" and the next load refused by hash. Promote pins as it registers;
+    // rollback now checks before it writes.
+    const RunFixture fixture;
+    const std::filesystem::path base = add_base_entry(fixture, "based");
+    const std::string first_pin = apogee::models::sha256_hex(read_file(base));
+    const std::string id = fixture.trained();
+    (void)fixture.evaluated(id);
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"train", "promote", id, "--as", "based", "--adapter"}, &out, &err) == 0);
+    const std::string id2 = fixture.trained(3);
+    (void)fixture.evaluated(id2);
+    REQUIRE(fixture.run({"train", "promote", id2, "--as", "based", "--adapter"}, &out, &err) == 0);
+    const std::filesystem::path v1 = fixture.training / "versions" / "based" / "v1.lora.gguf";
+    const std::filesystem::path v2 = fixture.training / "versions" / "based" / "v2.lora.gguf";
+
+    // A re-pull: other weights where model_path points, the active version
+    // re-pinned over them by the door the doctor names.
+    write_file(base, "GGUF the base weights, pulled again");
+    const std::string now_pin = apogee::models::sha256_hex(read_file(base));
+    REQUIRE(fixture.run({"config", "set-backend", "based", "--adapters", v2.string()}, &out,
+                        &err) == 0);
+    const std::string before = read_file(fixture.base.config_path);
+    CHECK(fixture.run({"train", "rollback", "based"}, &out, &err) == 1);
+    CHECK(err.find("v1's adapter " + v1.string() + " was pinned to other base weights (sha256 " +
+                   first_pin.substr(0, 12) + ") than " + base.string() + " holds now (" +
+                   now_pin.substr(0, 12) + ")") != std::string::npos);
+    CHECK(err.find("nothing was repointed") != std::string::npos);
+    CHECK(err.find("promote its run again over these weights: apogee train promote " + id +
+                   " --as based --adapter") != std::string::npos);
+    CHECK(out.find("rolled back") == std::string::npos);
+    // Nothing written: the config and the ledger as they were.
+    CHECK(read_file(fixture.base.config_path) == before);
+    CHECK(ledger_of(fixture, "based").active_version == 2);
+
+    // The door, run as printed: v1's run promoted again, pinned to today's.
+    REQUIRE(fixture.run({"train", "promote", id, "--as", "based", "--adapter"}, &out, &err) == 0);
+    CHECK(out.find("updated backend based -> v3 (adapter)") != std::string::npos);
+    CHECK(ledger_of(fixture, "based").find(3)->base_sha256 == now_pin);
+
+    // Back on the weights v2 was registered over, its pin holds, and the
+    // rollback goes through with it.
+    write_file(base, "GGUF the base weights");
+    REQUIRE(fixture.run({"train", "rollback", "based"}, &out, &err) == 0);
+    CHECK(out.find("rolled back based: v3 -> v2") != std::string::npos);
+    const apogee::harness::Config rolled = apogee::harness::load_config(fixture.base.config_path);
+    REQUIRE(rolled.find_backend("based")->adapters.size() == 1);
+    CHECK(rolled.find_backend("based")->adapters.front().path == v2.string());
+    CHECK(rolled.find_backend("based")->adapters.front().base_sha256 == first_pin);
+}
+
+TEST_CASE(
+    "train promote --adapter onto an mlx entry registers the run's adapter directory as it is, "
+    "converting nothing; formats never cross, said by name",
+    "[commands][train][promote][adapter][mlx]") {
+    const RunFixture fixture;
+    // An mlx entry over a stand-in MLX directory: a configuration and a shard.
+    const std::filesystem::path base = fixture.home / "models" / "tiny" / "mlx" / "cccccccccccc";
+    write_file(base / "config.json", R"({"model_type": "llama"})");
+    write_file(base / "model.safetensors", "the base shard");
+    write_file(fixture.base.config_path, read_file(fixture.base.config_path) +
+                                             "  fast:\n    type: mlx\n    model_path: " +
+                                             apogee::harness::yaml_scalar(base.string()) + "\n");
+    (void)add_base_entry(fixture, "based");
+    const std::string id = fixture.trained();
+    (void)fixture.evaluated(id);
+    std::string out;
+    std::string err;
+
+    const std::string before = read_file(fixture.base.config_path);
+    REQUIRE(fixture.run({"train", "promote", id, "--as", "fast", "--adapter"}, &out, &err) == 0);
+    INFO(out << err);
+    const std::filesystem::path v1 = fixture.training / "versions" / "fast" / "v1.lora";
+    CHECK(out.find("updated backend fast -> v1 (adapter)") != std::string::npos);
+    CHECK(out.find("the mlx-lm directory as it is") != std::string::npos);
+    CHECK(err.find("no conversion: the mlx-lm adapter directory is registered as it is") !=
+          std::string::npos);
+    CHECK(err.find("converting") == std::string::npos);
+    CHECK(err.find("mock converter") == std::string::npos);
+    // The run's directory, copied whole -- and the run's own copy kept.
+    const std::filesystem::path run_adapter{fixture.manifest(id).adapter_dir};
+    CHECK(read_file(v1 / "adapter_config.json") == read_file(run_adapter / "adapter_config.json"));
+    CHECK(read_file(v1 / "adapters.safetensors") ==
+          read_file(run_adapter / "adapters.safetensors"));
+    CHECK(std::filesystem::exists(run_adapter / "adapters.safetensors"));
+    // Pinned to the MLX base by the store's id rule, registered through the
+    // one editor, the base's files untouched.
+    const std::string pin = apogee::backends::weights_sha256(base);
+    REQUIRE_FALSE(pin.empty());
+    CHECK(read_file(fixture.base.config_path) ==
+          apogee::harness::set_backend_adapters(
+              before, "fast",
+              {apogee::harness::AdapterConfig{.path = v1.string(), .base_sha256 = pin}}));
+    CHECK(read_file(base / "model.safetensors") == "the base shard");
+    const apogee::training::VersionLedger ledger = ledger_of(fixture, "fast");
+    CHECK(ledger.find(1)->adapter_path == v1.string());
+    CHECK(ledger.find(1)->base_sha256 == pin);
+    CHECK(ledger.find(1)->mlx());
+
+    // mlx-lm loads one adapter: another already on the entry is said.
+    write_file(fixture.base.config_path,
+               apogee::harness::set_backend_adapters(
+                   read_file(fixture.base.config_path), "fast",
+                   {apogee::harness::AdapterConfig{.path = (fixture.home / "other").string(),
+                                                   .base_sha256 = pin}}));
+    const std::string id2 = fixture.trained(3);
+    (void)fixture.evaluated(id2);
+    CHECK(fixture.run({"train", "promote", id2, "--as", "fast", "--adapter"}, &out, &err) == 1);
+    CHECK(err.find("'fast' is an mlx entry, which applies one adapter") != std::string::npos);
+    CHECK(err.find("apogee config set-backend fast --adapters") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "versions" / "fast" / "v2.lora"));
+
+    // Formats never cross: an mlx run's adapter onto a llamacpp entry is
+    // refused naming both formats, and a peft run's onto an mlx entry.
+    apogee::training::RunManifest mlx_run = fixture.manifest(id2);
+    mlx_run.trainer = "mlx";
+    REQUIRE(apogee::training::write_manifest(fixture.training / "runs" / id2, mlx_run).empty());
+    const std::string unchanged = read_file(fixture.base.config_path);
+    CHECK(fixture.run({"train", "promote", id2, "--as", "based", "--adapter"}, &out, &err) == 1);
+    CHECK(err.find("an mlx-lm adapter (trainer mlx)") != std::string::npos);
+    CHECK(err.find("a llamacpp entry applies a GGUF LoRA") != std::string::npos);
+    CHECK(err.find("adapter formats never cross") != std::string::npos);
+    apogee::training::RunManifest peft_run = mlx_run;
+    peft_run.trainer = "peft";
+    REQUIRE(apogee::training::write_manifest(fixture.training / "runs" / id2, peft_run).empty());
+    CHECK(fixture.run({"train", "promote", id2, "--as", "fast", "--adapter"}, &out, &err) == 1);
+    CHECK(err.find("a PEFT adapter (trainer peft)") != std::string::npos);
+    CHECK(read_file(fixture.base.config_path) == unchanged);
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "versions" / "based"));
+}
+
+// ---------------------------------------------------------------------------
+// The gate on the base that serves (53c): an adapter onto a quantized base is
+// scored there, through the real command tree on the mock trainer.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// An entry over a Q4_K_M base -- a header that says so, in the store -- a
+/// stand-in the mock's candidate runs over, appended under `backends:`.
+std::filesystem::path add_q4_entry(const RunFixture& fixture, std::string_view name) {
+    const std::filesystem::path base =
+        fixture.home / "models" / "tiny" / "gguf" / "cccccccccccc" / "tiny-Q4_K_M.gguf";
+    apogee::testing::GgufBuilder header;
+    header.magic().u32(3).u64(1).u64(2);
+    header.string_kv("general.architecture", "llama");
+    header.u32_kv("general.file_type", 15);  // MOSTLY_Q4_K_M
+    header.tensor("token_embd.weight");
+    write_file(base, header.bytes());
+    write_file(fixture.base.config_path, read_file(fixture.base.config_path) + "  " +
+                                             std::string{name} +
+                                             ":\n    type: llamacpp\n    model_path: " +
+                                             apogee::harness::yaml_scalar(base.string()) + "\n");
+    return base;
+}
+
+/// A complete mock run over `dataset`, its id.
+std::string trained_on(const RunFixture& fixture, const std::string& dataset) {
+    std::string err;
+    REQUIRE(fixture.run(
+                {"train", "run", "tiny", "--dataset", dataset, "--trainer", "mock", "--iters", "2"},
+                nullptr, &err) == 0);
+    return apogee::training::TrainingStore{fixture.training}.list_runs().front().id;
+}
+
+}  // namespace
+
+TEST_CASE(
+    "train promote --adapter onto a quantized base scores the candidate there, once, says so, "
+    "and a candidate under the floor never registers",
+    "[commands][train][promote][adapter][serving]") {
+    const RunFixture fixture;
+    (void)add_q4_entry(fixture, "q4");
+    (void)add_base_entry(fixture, "based");
+    const std::string suite = (fixture.home / "suite.jsonl").string();
+    const std::string id = fixture.trained();
+    std::string out;
+    std::string err;
+
+    // No suite anywhere -- the run never evaluated, none configured: refused
+    // before anything is built, naming the flag.
+    CHECK(fixture.run({"train", "promote", id, "--as", "q4", "--adapter"}, &out, &err) == 1);
+    CHECK(err.find("no eval suite to score run " + id +
+                   " on tiny-Q4_K_M.gguf (Q4_K_M), the base 'q4' serves -- pass --suite "
+                   "<path|name>") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "versions"));
+    // --suite has nothing to act on where the run's own eval gates -- past
+    // that gate, here by --force.
+    CHECK(fixture.run(
+              {"train", "promote", id, "--as", "based", "--adapter", "--suite", suite, "--force"},
+              &out, &err) == 1);
+    CHECK(err.find("--suite has nothing to act on: this promote is gated on run " + id +
+                   "'s recorded eval") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "versions"));
+
+    // With a suite: no `train eval` first -- the one eval is the gate's, on
+    // the base the version will serve on, and the report says where.
+    const std::string before = read_file(fixture.base.config_path);
+    REQUIRE(fixture.run({"train", "promote", id, "--as", "q4", "--adapter", "--suite", suite}, &out,
+                        &err) == 0);
+    INFO(out << err);
+    CHECK(err.find("[promote] scoring the candidate where it will serve: tiny-Q4_K_M.gguf "
+                   "(Q4_K_M), the base 'q4' serves -- suite " +
+                   suite + " (2 item(s)); no judge: unmatched items skip") != std::string::npos);
+    CHECK(err.find("[promote] scored on tiny-Q4_K_M.gguf (Q4_K_M): 100% (2/2)") !=
+          std::string::npos);
+    CHECK(out.find("  eval:    100% (2/2), scored on tiny-Q4_K_M.gguf (Q4_K_M)\n") !=
+          std::string::npos);
+    // The full-precision score was never computed: the run has no eval.
+    CHECK_FALSE(fixture.manifest(id).eval.has_value());
+    // The version records the gate that let it through, and where.
+    const apogee::training::VersionLedger ledger = ledger_of(fixture, "q4");
+    REQUIRE(ledger.find(1) != nullptr);
+    CHECK(ledger.find(1)->eval_passed == true);
+    CHECK(ledger.find(1)->eval_score == 1.0);
+    CHECK(ledger.find(1)->eval_scored_on == "tiny-Q4_K_M.gguf (Q4_K_M)");
+    CHECK(read_file(fixture.base.config_path) != before);
+
+    // A candidate that degrades below the floor where it serves: refused,
+    // saying where, the adapter it built removed, nothing registered.
+    write_file(fixture.training / "datasets" / "degraded.jsonl",
+               "{\"mock\": {\"answer\": \"something else entirely\"}}\n");
+    const std::string degraded = trained_on(fixture, "degraded");
+    const std::string at_v1 = read_file(fixture.base.config_path);
+    CHECK(fixture.run({"train", "promote", degraded, "--as", "q4", "--adapter", "--suite", suite},
+                      &out, &err) == 1);
+    CHECK(err.find("the eval gate failed for run " + degraded +
+                   ", scored on tiny-Q4_K_M.gguf (Q4_K_M), the base 'q4' serves (50%: 1/2 "
+                   "passed)") != std::string::npos);
+    CHECK(err.find("the adapter was removed, and the config and the version ledger are "
+                   "unchanged") != std::string::npos);
+    CHECK(read_file(fixture.base.config_path) == at_v1);
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "versions" / "q4" / "v2.lora.gguf"));
+    CHECK(ledger_of(fixture, "q4").active_version == 1);
+    CHECK(ledger_of(fixture, "q4").versions.size() == 1);
+
+    // --force skips the gate, as it says: nothing scored, the version
+    // carrying no eval, and said.
+    REQUIRE(fixture.run({"train", "promote", degraded, "--as", "q4", "--adapter", "--force"}, &out,
+                        &err) == 0);
+    CHECK(err.find("promoting despite the gate (--force): run " + degraded +
+                   " was not scored on tiny-Q4_K_M.gguf (Q4_K_M), the base 'q4' serves") !=
+          std::string::npos);
+    CHECK(err.find("[promote] scoring") == std::string::npos);
+    const apogee::training::VersionLedger forced = ledger_of(fixture, "q4");
+    REQUIRE(forced.find(2) != nullptr);
+    CHECK_FALSE(forced.find(2)->eval_passed.has_value());
+    CHECK(forced.find(2)->eval_scored_on.empty());
+}
+
+TEST_CASE(
+    "the doctor's door for a promoted adapter whose base changed promotes its run again, and "
+    "runs as printed",
+    "[commands][train][check][adapters][doors]") {
+    const RunFixture fixture;
+    const std::filesystem::path based = add_base_entry(fixture, "based");
+    const std::filesystem::path q4 = add_q4_entry(fixture, "q4");
+    const std::string suite = (fixture.home / "suite.jsonl").string();
+    const std::string id = fixture.trained();
+    (void)fixture.evaluated(id);
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"train", "promote", id, "--as", "based", "--adapter"}, &out, &err) == 0);
+    const std::string unscored = fixture.trained(3);
+    REQUIRE(fixture.run({"train", "promote", unscored, "--as", "q4", "--adapter", "--suite", suite},
+                        &out, &err) == 0);
+
+    // Both bases rewritten under their adapters.
+    write_file(based, "GGUF other base weights");
+    // Another size than add_q4_entry's header: the memo knows a file by its
+    // size and time, and Windows can stamp two writes a tick apart alike.
+    apogee::testing::GgufBuilder header;
+    header.magic().u32(3).u64(1).u64(2);
+    header.string_kv("general.architecture", "qwen2moe");
+    header.u32_kv("general.file_type", 15);
+    header.tensor("token_embd.weight");
+    write_file(q4, header.bytes());
+
+    const auto adapter_row = [&fixture](const std::string& name) {
+        std::string json;
+        std::string ignored;
+        (void)fixture.run({"check", "--output-format", "json"}, &json, &ignored);
+        const nlohmann::json document = nlohmann::json::parse(json);
+        for (const nlohmann::json& row : document.at("rows")) {
+            if (row.at("section") == "Adapters" && row.at("name") == name) {
+                return row;
+            }
+        }
+        return nlohmann::json{};
+    };
+    // Each door as a person types it after `apogee`: before ` to `, its
+    // blank filled.
+    const auto door_of = [](std::string remedy, const std::string& blank,
+                            const std::string& filled) {
+        remedy.resize(remedy.find(" to "));
+        if (const std::size_t at = remedy.find(blank); at != std::string::npos) {
+            remedy.replace(at, blank.size(), filled);
+        }
+        std::vector<std::string> words;
+        std::istringstream in{remedy};
+        for (std::string word; in >> word;) {
+            words.push_back(word);
+        }
+        REQUIRE(words.front() == "apogee");
+        words.erase(words.begin());
+        return words;
+    };
+
+    // The run's own eval gates the full-precision base's: the door is the
+    // promote alone.
+    const nlohmann::json changed = adapter_row("based: v1.lora.gguf");
+    REQUIRE(changed.is_object());
+    CHECK(changed["status"] == "fail");
+    CHECK(changed["detail"].get<std::string>().find("than the base " + based.string() +
+                                                    " holds now") != std::string::npos);
+    const std::string remedy = changed.value("remedy", std::string{});
+    CHECK(remedy == "apogee train promote " + id +
+                        " --as based --adapter to promote its run again over these weights");
+    REQUIRE(fixture.run(door_of(remedy, {}, {}), &out, &err) == 0);
+    CHECK(adapter_row("based: v2.lora.gguf")["status"] == "ok");
+
+    // A quantized base's gate scores there, and nothing names its suite: the
+    // door says to, and runs with the blank filled.
+    const nlohmann::json q4_changed = adapter_row("q4: v1.lora.gguf");
+    REQUIRE(q4_changed.is_object());
+    CHECK(q4_changed["status"] == "fail");
+    const std::string q4_remedy = q4_changed.value("remedy", std::string{});
+    CHECK(q4_remedy == "apogee train promote " + unscored +
+                           " --as q4 --adapter --suite <path|name> to promote its run again "
+                           "over these weights");
+    REQUIRE(fixture.run(door_of(q4_remedy, "<path|name>", suite), &out, &err) == 0);
+    CHECK(adapter_row("q4: v2.lora.gguf")["status"] == "ok");
+}
+
+TEST_CASE("train promote completes its --adapter flag",
+          "[commands][train][promote][adapter][completion]") {
+    // ADR 0007: a new flag is offered the moment it exists.
+    const Fixture fixture;
+    const std::ostringstream captured;
+    std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
+    int code = -1;
+    {
+        apogee::commands::RootCommand root{apogee::commands::default_registry()};
+        std::vector<const char*> argv{"apogee", "__complete", "train", "promote", "r1", "--ad"};
+        code = root.run(static_cast<int>(argv.size()), argv.data());
+    }
+    std::cout.rdbuf(old_out);
+    CHECK(code == 0);
+    CHECK(captured.str().find("--adapter\n") != std::string::npos);
+}
+
+TEST_CASE("train promote completes its --suite and --judge flags",
+          "[commands][train][promote][serving][completion]") {
+    // ADR 0007: the gate's two flags (53c), offered the moment they exist --
+    // and their values answered as train eval's are.
+    const Fixture fixture;
+    for (const auto& [typed, offered] :
+         {std::pair<std::string, std::string>{"--su", "--suite\n"}, {"--ju", "--judge\n"}}) {
+        const std::ostringstream captured;
+        std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
+        int code = -1;
+        {
+            apogee::commands::RootCommand root{apogee::commands::default_registry()};
+            std::vector<const char*> argv{"apogee",  "__complete", "train",
+                                          "promote", "r1",         typed.c_str()};
+            code = root.run(static_cast<int>(argv.size()), argv.data());
+        }
+        std::cout.rdbuf(old_out);
+        CHECK(code == 0);
+        CHECK(captured.str().find(offered) != std::string::npos);
+    }
+    const std::ostringstream captured;
+    std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
+    {
+        apogee::commands::RootCommand root{apogee::commands::default_registry()};
+        std::vector<const char*> argv{"apogee", "__complete", "train", "promote",
+                                      "r1",     "--judge",    ""};
+        (void)root.run(static_cast<int>(argv.size()), argv.data());
+    }
+    std::cout.rdbuf(old_out);
+    CHECK(captured.str().find("local") != std::string::npos);
+}
+
 TEST_CASE(
     "a failing driver is a failed run through the command line, and a promote whose build "
     "fails leaves the config and the ledger untouched",
@@ -1242,6 +1827,103 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "train pipeline list and show read the named specs and their stages, as text and as "
+    "documents; a spec file shows too, and a name nothing answers is refused",
+    "[commands][train][pipeline][specs]") {
+    // M30: the named pipelines had no read -- completion alone named them.
+    const PipelineFixture fixture{
+        "training:\n  trainer: mock\n  pipelines:\n    nightly:\n      student: tiny\n"
+        "      stages:\n        - name: base\n          dataset: starter\n"
+        "          eval_suite: hello\n          iters: 2\n    two:\n      student: tiny\n"
+        "      stages:\n        - name: a\n          dataset: starter\n"
+        "          eval_suite: hello\n        - name: b\n          dataset: regress\n"
+        "          eval_suite: nope\n          rehearsal_fraction: 0.1\n"};
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"train", "pipeline", "list"}, &out, &err) == 0);
+    CHECK(out ==
+          "NAME     STAGES  STUDENT\n"
+          "nightly  1       tiny\n"
+          "two      2       tiny\n");
+    CHECK(err.empty());
+    REQUIRE(fixture.run({"train", "pipeline", "show", "two"}, &out, &err) == 0);
+    CHECK(out ==
+          "two  (training.pipelines entry)\n"
+          "student: tiny\n"
+          "\n"
+          "#  STAGE  DATASET  GATE\n"
+          "1  a      starter  hello\n"
+          "2  b      regress  hello + nope\n"
+          "\n"
+          "a stage passes when its GATE -- its own suite and every earlier stage's -- scores "
+          "100%\n");
+
+    // The documents: one spec whole, and the list of them in the same shape.
+    REQUIRE(fixture.run({"train", "pipeline", "show", "two", "--output-format", "json"}, &out,
+                        &err) == 0);
+    const nlohmann::json two = nlohmann::json::parse(out);
+    const nlohmann::json stage_a{{"name", "a"},
+                                 {"dataset", "starter"},
+                                 {"eval_suite", "hello"},
+                                 {"gate", {"hello"}},
+                                 {"method", ""},
+                                 {"iters", 0},
+                                 {"batch_size", 0},
+                                 {"num_layers", 0},
+                                 {"grad_checkpoint", false},
+                                 {"mask_prompt", false},
+                                 {"rehearsal_fraction", 0.0}};
+    nlohmann::json stage_b = stage_a;
+    stage_b["name"] = "b";
+    stage_b["dataset"] = "regress";
+    stage_b["eval_suite"] = "nope";
+    stage_b["gate"] = {"hello", "nope"};
+    stage_b["rehearsal_fraction"] = 0.1;
+    CHECK(two == nlohmann::json{{"object", "training.pipeline"},
+                                {"name", "two"},
+                                {"path", nullptr},
+                                {"student", "tiny"},
+                                {"stages", {stage_a, stage_b}}});
+    REQUIRE(fixture.run({"train", "pipeline", "list", "--output-format", "json"}, &out, &err) == 0);
+    const nlohmann::json list = nlohmann::json::parse(out);
+    CHECK(list.at("object") == "list");
+    REQUIRE(list.at("data").size() == 2);
+    CHECK(list.at("data").at(0).at("name") == "nightly");
+    CHECK(list.at("data").at(0).at("stages").size() == 1);
+    nlohmann::json listed = two;
+    listed.erase("object");
+    CHECK(list.at("data").at(1) == listed);
+
+    // A spec file shows as a run would read it, its path said.
+    const std::string spec = fixture.spec_file("regress");
+    REQUIRE(fixture.run({"train", "pipeline", "show", spec}, &out, &err) == 0);
+    CHECK(out.starts_with("two  " + spec + "\nstudent: tiny\n"));
+    REQUIRE(fixture.run({"train", "pipeline", "show", spec, "--output-format", "json"}, &out,
+                        &err) == 0);
+    CHECK(nlohmann::json::parse(out).at("path") == spec);
+
+    // Refused as a run refuses the name; a read is never a stream.
+    CHECK(fixture.run({"train", "pipeline", "show", "nope"}, &out, &err) == 1);
+    CHECK(out.empty());
+    CHECK(err ==
+          "apogee train: no pipeline 'nope': not a spec file, and not an entry under "
+          "training.pipelines\n");
+    CHECK(fixture.run({"train", "pipeline", "list", "--output-format", "stream-json"}, &out,
+                      &err) != 0);
+    CHECK(err.find("expected 'text' or 'json'") != std::string::npos);
+
+    // None named: said, and an empty list.
+    const RunFixture bare;
+    REQUIRE(bare.run({"train", "pipeline", "list"}, &out, &err) == 0);
+    CHECK(out ==
+          "no named pipelines -- add one under training.pipelines, or run a spec file with "
+          "'apogee train pipeline run --pipeline <file>'\n");
+    REQUIRE(bare.run({"train", "pipeline", "list", "--output-format", "json"}, &out, &err) == 0);
+    CHECK(nlohmann::json::parse(out) ==
+          nlohmann::json{{"object", "list"}, {"data", nlohmann::json::array()}});
+}
+
+TEST_CASE(
     "train regime run foundation runs the four bundled kits as one gated pipeline on the mock "
     "trainer: the echoing student fails the first kit's evals under a hard gate, and a soft "
     "gate runs all four",
@@ -1419,4 +2101,1007 @@ TEST_CASE(
     CHECK(out.find("cycle skipped") != std::string::npos);
     REQUIRE(consented.run({"train", "cycle", "status"}, &out, &err) == 0);
     CHECK(out.find("sessions consumed: through 2026-09-19T10:00:00Z") != std::string::npos);
+}
+
+// --- 55h: `train pipeline` and `train cycle` speak JSON ---------------------------------
+//
+// Their default output, held byte for byte to a golden the verbs wrote before
+// their machine faces existed; their documents, to the admin routes' bodies;
+// their streams, to the manifest's transitions and the pass's narration.
+
+#include <functional>
+#include <iterator>
+#include <optional>
+#include <regex>
+#include <string_view>
+
+#include "training/cycle.h"
+
+namespace {
+
+/// The two-stage spec's suites and datasets from the fixture, `nightly` the
+/// cycle's one-stage pipeline over a queue directory, the breaker at 1.
+constexpr std::string_view kCycleBlock =
+    "training:\n  trainer: mock\n  pipelines:\n    nightly:\n      student: tiny\n"
+    "      stages:\n        - name: base\n          dataset: starter\n"
+    "          eval_suite: hello\n          iters: 2\n  cycle:\n    pipeline: nightly\n"
+    "    backend: nightly-model\n    circuit_breaker_k: 1\n    sources:\n"
+    "      - type: directory\n        dir: {home}/queue\n";
+
+/// `text` with every occurrence of `from` replaced by `to`.
+std::string replaced_all(std::string text, const std::string& from, const std::string& to) {
+    if (from.empty()) {
+        return text;
+    }
+    for (std::size_t at = text.find(from); at != std::string::npos;
+         at = text.find(from, at + to.size())) {
+        text.replace(at, from.size(), to);
+    }
+    return text;
+}
+
+/// What a run printed, with what differs between runs named instead: the
+/// home's path, a pipeline's or a pass's id, a promoted GGUF's store id (and
+/// its staging directory's), a time.
+std::string normalized(const std::string& text, const std::filesystem::path& home) {
+    std::string out = replaced_all(text, home.generic_string(), "<home>");
+    out = replaced_all(out, home.string(), "<home>");
+    // A path under it, as the golden spells one: Windows prints `\`.
+    if constexpr (std::filesystem::path::preferred_separator == '\\') {
+        std::ranges::replace(out, '\\', '/');
+    }
+    static const std::regex kRunId{"(pipe|cycle)-[0-9]{8}-[0-9]{6}(-[0-9]+)?"};
+    out = std::regex_replace(out, kRunId, "$1-<id>");
+    static const std::regex kStoreId{"/gguf/(\\.incoming-)?[0-9a-f]{12}/"};
+    out = std::regex_replace(out, kStoreId, "/gguf/$1<id>/");
+    static const std::regex kTime{"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z?"};
+    return std::regex_replace(out, kTime, "<time>");
+}
+
+/// One run as the golden records it: the command line, the exit code,
+/// stdout, stderr.
+std::string scenario(const PipelineFixture& fixture, const std::vector<std::string>& args) {
+    std::string out;
+    std::string err;
+    const int code = fixture.run(args, &out, &err);
+    std::string said = "=== apogee";
+    for (const std::string& arg : args) {
+        said += " " + arg;
+    }
+    return normalized(said, fixture.home) + "\n--- exit " + std::to_string(code) +
+           "\n--- stdout\n" + normalized(out, fixture.home) + "--- stderr\n" +
+           normalized(err, fixture.home);
+}
+
+/// Every path of the six verbs' default output, in order: a pipeline that
+/// aborts at its gate, listed and shown, refused, resumed to complete and
+/// refused again; a named one; the cycle with no history, skipped, passed,
+/// failed into its breaker, refused while halted, and shown.
+std::string train_text_battery() {
+    std::string out;
+    const PipelineFixture fixture{std::string{kCycleBlock}};
+    const auto say = [&](const std::vector<std::string>& args) { out += scenario(fixture, args); };
+    const std::string spec = fixture.spec_file("regress");
+    say({"train", "pipeline", "status"});
+    say({"train", "pipeline", "run", "--pipeline", spec, "--trainer", "mock"});
+    REQUIRE(fixture.pipelines().size() == 1);
+    const std::string id = fixture.pipelines().front().id;
+    say({"train", "pipeline", "status"});
+    say({"train", "pipeline", "status", id});
+    say({"train", "pipeline", "status", "nope"});
+    say({"train", "pipeline", "status", "../x"});
+    write_file(fixture.training / "datasets" / "regress.jsonl",
+               read_file(fixture.training / "datasets" / "starter.jsonl"));
+    say({"train", "pipeline", "resume", id, "--pipeline", spec, "--trainer", "mock"});
+    say({"train", "pipeline", "status", id});
+    say({"train", "pipeline", "resume", id, "--pipeline", spec});
+    say({"train", "pipeline", "run", "--pipeline", "nightly"});
+
+    const std::filesystem::path queue = fixture.home / "queue";
+    say({"train", "cycle", "status"});
+    say({"train", "cycle", "run"});
+    write_file(queue / "day1.jsonl", read_file(fixture.training / "datasets" / "starter.jsonl"));
+    say({"train", "cycle", "run"});
+    write_file(queue / "day2.jsonl", "{\"mock\": {\"answer\": \"nope\"}}\n");
+    say({"train", "cycle", "run"});
+    say({"train", "cycle", "run"});
+    say({"train", "cycle", "status"});
+    return out;
+}
+
+std::optional<std::string> slurp(const std::filesystem::path& path) {
+    std::ifstream in{path, std::ios::binary};
+    if (!in.good()) {
+        return std::nullopt;
+    }
+    return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+}
+
+}  // namespace
+
+TEST_CASE(
+    "train pipeline and train cycle print byte for byte what they printed before they spoke JSON",
+    "[commands][train][pipeline][cycle][golden]") {
+    const std::string actual = train_text_battery();
+    // Written for review when asked to; never into the tree.
+    if (const char* dir = std::getenv("APOGEE_TRAIN_TEXT_GOLDENS");
+        dir != nullptr && *dir != '\0') {
+        std::ofstream{std::filesystem::path{dir} / "train_pipeline_cycle_text.golden",
+                      std::ios::binary}
+            << actual;
+    }
+    const std::optional<std::string> golden = slurp(std::filesystem::path{APOGEE_TEST_FIXTURES} /
+                                                    "cli" / "train_pipeline_cycle_text.golden");
+    REQUIRE(golden.has_value());
+    CHECK(actual == *golden);
+}
+
+#include "httpserver/admin_training.h"
+#include "machine/protocol.h"
+#include "support/cli_home.h"
+
+namespace {
+
+/// Every line of a stream, each one JSON object with a type -- or the test fails.
+std::vector<nlohmann::json> stream_of(const std::string& out) {
+    std::vector<nlohmann::json> events;
+    std::istringstream in{out};
+    for (std::string line; std::getline(in, line);) {
+        INFO(line);
+        const nlohmann::json event = nlohmann::json::parse(line, nullptr, false);
+        REQUIRE(event.is_object());
+        REQUIRE(event.contains("type"));
+        events.push_back(event);
+    }
+    return events;
+}
+
+/// The events of one type.
+std::vector<nlohmann::json> of_type(const std::vector<nlohmann::json>& events,
+                                    std::string_view type) {
+    std::vector<nlohmann::json> out;
+    for (const nlohmann::json& event : events) {
+        if (event.at("type") == type) {
+            out.push_back(event);
+        }
+    }
+    return out;
+}
+
+/// The lines of `text`, each normalized against `home`, kept when `keep` says.
+template <typename Keep>
+std::vector<std::string> lines_where(const std::string& text, const std::filesystem::path& home,
+                                     Keep keep) {
+    std::vector<std::string> out;
+    std::istringstream in{normalized(text, home)};
+    for (std::string line; std::getline(in, line);) {
+        if (keep(line)) {
+            out.push_back(line);
+        }
+    }
+    return out;
+}
+
+/// A stream's texts of one type, normalized against `home`.
+std::vector<std::string> texts(const std::vector<nlohmann::json>& events, std::string_view type,
+                               const std::filesystem::path& home) {
+    std::vector<std::string> out;
+    for (const nlohmann::json& event : of_type(events, type)) {
+        out.push_back(normalized(event.at("text").get<std::string>(), home));
+    }
+    return out;
+}
+
+/// The control plane's view of a fixture's home.
+struct Plane {
+    apogee::harness::Config config;
+    apogee::httpserver::AdminConfigContext context;
+
+    explicit Plane(const PipelineFixture& fixture)
+        : config{apogee::harness::load_config(fixture.base.base.config_path)},
+          context{.config_path = fixture.base.base.config_path, .startup = &config} {}
+
+    Plane(const Plane&) = delete;
+    Plane& operator=(const Plane&) = delete;
+    Plane(Plane&&) = delete;
+    Plane& operator=(Plane&&) = delete;
+    ~Plane() = default;
+};
+
+}  // namespace
+
+TEST_CASE(
+    "train pipeline status and train cycle status print the admin routes' bodies, byte "
+    "for byte",
+    "[commands][train][pipeline][cycle][json]") {
+    const PipelineFixture fixture{std::string{kCycleBlock}};
+    const Plane plane{fixture};
+    std::string out;
+    std::string err;
+
+    // No runs yet: the list is empty, never null -- the route's own body.
+    REQUIRE(fixture.run({"train", "pipeline", "status", "--output-format", "json"}, &out, &err) ==
+            0);
+    apogee::httpserver::HttpRequest listing;
+    listing.method = "GET";
+    listing.path = "/v1/admin/training/runs";
+    listing.query["kind"] = "pipeline";
+    CHECK(out == apogee::httpserver::admin_list_training_runs(plane.context, listing).body + "\n");
+    CHECK(nlohmann::json::parse(out) ==
+          nlohmann::json{{"object", "list"}, {"data", nlohmann::json::array()}});
+
+    const std::string spec = fixture.spec_file("regress");
+    CHECK(fixture.run({"train", "pipeline", "run", "--pipeline", spec, "--trainer", "mock"}, &out,
+                      &err) == 2);
+    REQUIRE(fixture.run({"train", "pipeline", "run", "--pipeline", "nightly"}, &out, &err) == 0);
+    REQUIRE(fixture.pipelines().size() == 2);
+
+    REQUIRE(fixture.run({"train", "pipeline", "status", "--output-format", "json"}, &out, &err) ==
+            0);
+    INFO(out << err);
+    CHECK(err.empty());
+    CHECK(out == apogee::httpserver::admin_list_training_runs(plane.context, listing).body + "\n");
+    // The same facts as the table: the runs it lists, in its order.
+    std::vector<std::string> listed;
+    const nlohmann::json list = nlohmann::json::parse(out);
+    for (const nlohmann::json& row : list.at("data")) {
+        CHECK(row.at("kind") == "pipeline");
+        listed.push_back(row.at("id").get<std::string>());
+    }
+    std::vector<std::string> tabled;
+    for (const apogee::training::PipelineSummary& summary : fixture.pipelines()) {
+        tabled.push_back(summary.id);
+    }
+    CHECK(listed == tabled);
+
+    for (const apogee::training::PipelineSummary& summary : fixture.pipelines()) {
+        REQUIRE(fixture.run({"train", "pipeline", "status", summary.id, "--output-format", "json"},
+                            &out, &err) == 0);
+        CHECK(out ==
+              apogee::httpserver::admin_get_training_run(plane.context, summary.id).body + "\n");
+        const nlohmann::json document = nlohmann::json::parse(out);
+        CHECK(document.at("kind") == "pipeline");
+        CHECK(document.at("pipeline").at("status") == summary.status);
+    }
+
+    // Refused as the text refuses: nothing on stdout.
+    CHECK(fixture.run({"train", "pipeline", "status", "nope", "--output-format", "json"}, &out,
+                      &err) == 1);
+    CHECK(out.empty());
+    CHECK(err == "apogee train: no pipeline run 'nope'\n");
+    CHECK(fixture.run({"train", "pipeline", "status", "../x", "--output-format", "json"}, &out,
+                      &err) == 1);
+    CHECK(out.empty());
+    CHECK(err == "apogee train: '../x' is not a pipeline run id\n");
+    // A plain run's id is not a pipeline's, though the runs route serves it.
+    const std::string stage_run = fixture.pipelines().back().id + "-s0";
+    CHECK(fixture.run({"train", "pipeline", "status", stage_run, "--output-format", "json"}, &out,
+                      &err) == 1);
+    CHECK(apogee::httpserver::admin_get_training_run(plane.context, stage_run).status == 200);
+    // A read is one document, never a stream.
+    CHECK(fixture.run({"train", "pipeline", "status", "--output-format", "stream-json"}, &out,
+                      &err) != 0);
+    CHECK(err.find("expected 'text' or 'json'") != std::string::npos);
+    CHECK(out.empty());
+
+    // The cycle: no history is no document, as the route's 404.
+    CHECK(fixture.run({"train", "cycle", "status", "--output-format", "json"}, &out, &err) == 1);
+    CHECK(out.empty());
+    CHECK(err == "apogee train: no cycle history yet ('apogee train cycle run' writes it)\n");
+    CHECK(apogee::httpserver::admin_training_cycle(plane.context).status == 404);
+    REQUIRE(fixture.run({"train", "cycle", "run"}, &out, &err) == 0);
+    write_file(fixture.home / "queue" / "day1.jsonl",
+               read_file(fixture.training / "datasets" / "starter.jsonl"));
+    REQUIRE(fixture.run({"train", "cycle", "run"}, &out, &err) == 0);
+    REQUIRE(fixture.run({"train", "cycle", "status", "--output-format", "json"}, &out, &err) == 0);
+    CHECK(err.empty());
+    CHECK(out == apogee::httpserver::admin_training_cycle(plane.context).body + "\n");
+    const nlohmann::json cycle = nlohmann::json::parse(out);
+    CHECK(cycle.at("total_runs") == 2);
+    CHECK(cycle.at("anchor_version") == 1);
+    CHECK(cycle.at("active") == false);
+    CHECK(cycle.at("runs").size() == 2);
+    // An unreadable history is refused in its words, the route's 500.
+    write_file(fixture.training / "cycle" / "history.json", "not json");
+    CHECK(fixture.run({"train", "cycle", "status", "--output-format", "json"}, &out, &err) == 1);
+    CHECK(out.empty());
+    CHECK(err.find("apogee train: the cycle history is unreadable: ") == 0);
+    CHECK(apogee::httpserver::admin_training_cycle(plane.context).status == 500);
+}
+
+TEST_CASE(
+    "train pipeline run and resume stream the manifest's transitions, then the run's "
+    "document; the notices are the text run's words",
+    "[commands][train][pipeline][stream]") {
+    const PipelineFixture fixture;
+    std::string out;
+    std::string err;
+    const std::string spec = fixture.spec_file("regress");
+    CHECK(fixture.run({"train", "pipeline", "run", "--pipeline", spec, "--trainer", "mock",
+                       "--output-format", "stream-json"},
+                      &out, &err) == 2);
+    INFO(out << err);
+    const std::string stream_err = err;
+    const std::vector<nlohmann::json> events = stream_of(out);
+    REQUIRE(fixture.pipelines().size() == 1);
+    const std::string id = fixture.pipelines().front().id;
+    REQUIRE(events.size() > 3);
+    CHECK(events.front() ==
+          nlohmann::json{{"type", "job"},
+                         {"verb", "train pipeline run"},
+                         {"protocol_version", 1},
+                         {"schema", std::string{apogee::commands::kMachineSchemaVersion}}});
+
+    // The stages, as the manifest wrote them: both pending, then each move.
+    std::vector<std::string> moves;
+    for (const nlohmann::json& stage : of_type(events, "stage")) {
+        CHECK(stage.at("pipeline_run_id") == id);
+        CHECK(stage.at("count") == 2);
+        moves.push_back(stage.at("label").get<std::string>() + " " +
+                        stage.at("state").get<std::string>());
+    }
+    CHECK(moves == std::vector<std::string>{"a pending", "b pending", "a training", "a evaluating",
+                                            "a fusing", "a passed", "b training", "b evaluating",
+                                            "b failed"});
+    // The trainer's ticks, each its stage's.
+    const std::vector<nlohmann::json> ticks = of_type(events, "iteration");
+    REQUIRE(ticks.size() == 4);
+    CHECK(ticks[0].at("stage") == 1);
+    CHECK(ticks[0].at("iterations") == 2);
+    CHECK(ticks[3].at("stage") == 2);
+    CHECK(ticks[3].at("iteration") == 2);
+
+    // Last but the error: the run's own read, as its status prints it.
+    REQUIRE(events.size() >= 2);
+    const nlohmann::json& document = events[events.size() - 2];
+    REQUIRE(document.at("type") == "document");
+    std::string read;
+    REQUIRE(fixture.run({"train", "pipeline", "status", id, "--output-format", "json"}, &read,
+                        &err) == 0);
+    CHECK(document.at("document") == nlohmann::json::parse(read));
+    CHECK(document.at("document").at("pipeline").at("status") == "aborted");
+    // Each stage's last word in the stream is the document's.
+    const std::vector<nlohmann::json> stages = of_type(events, "stage");
+    CHECK(stages.back().at("state") ==
+          document.at("document").at("pipeline").at("stages").at(1).at("status"));
+    CHECK(events.back().at("type") == "error");
+    CHECK(events.back().at("message").get<std::string>().starts_with(
+        "pipeline aborted -- stage 'b' failed the cumulative eval gate"));
+    CHECK(of_type(events, "error").size() == 1);
+    // stderr keeps the diagnostic, and nothing else.
+    CHECK(lines_where(stream_err, fixture.home, [](const std::string&) { return true; }) ==
+          std::vector<std::string>{normalized(
+              "apogee train: " + events.back().at("message").get<std::string>(), fixture.home)});
+
+    // Fixed and resumed: the passed stage said first as it stands, the run
+    // complete, nothing failed.
+    write_file(fixture.training / "datasets" / "regress.jsonl",
+               read_file(fixture.training / "datasets" / "starter.jsonl"));
+    REQUIRE(fixture.run({"train", "pipeline", "resume", id, "--pipeline", spec, "--trainer", "mock",
+                         "--output-format", "stream-json"},
+                        &out, &err) == 0);
+    const std::vector<nlohmann::json> resumed = stream_of(out);
+    CHECK(resumed.front().at("verb") == "train pipeline resume");
+    moves.clear();
+    for (const nlohmann::json& stage : of_type(resumed, "stage")) {
+        moves.push_back(stage.at("label").get<std::string>() + " " +
+                        stage.at("state").get<std::string>());
+    }
+    CHECK(moves == std::vector<std::string>{"a passed", "b failed", "b training", "b evaluating",
+                                            "b passed"});
+    // M30: trained again, b holds no score until it is evaluated again --
+    // never the last attempt's 50% -- and its manifest says the same.
+    for (const nlohmann::json& stage : of_type(resumed, "stage")) {
+        INFO(stage.dump());
+        if (stage.at("label") == "b" &&
+            (stage.at("state") == "training" || stage.at("state") == "evaluating")) {
+            CHECK_FALSE(stage.contains("cumulative_score"));
+        }
+    }
+    CHECK(of_type(resumed, "stage").at(1).at("cumulative_score") == 0.5);  // as it stood
+    CHECK(of_type(resumed, "stage").back().at("cumulative_score") == 1.0);
+    CHECK(resumed.back().at("type") == "document");
+    CHECK(resumed.back().at("document").at("pipeline").at("status") == "complete");
+    CHECK(of_type(resumed, "error").empty());
+    CHECK(err.empty());
+
+    // The same run as text, in a home of its own: every line the console
+    // prints but its own stage headers and its ticks is a notice, in the
+    // same words.
+    {
+        const PipelineFixture text;
+        const std::string text_spec = text.spec_file("regress");
+        std::string text_out;
+        std::string text_err;
+        CHECK(text.run({"train", "pipeline", "run", "--pipeline", text_spec, "--trainer", "mock"},
+                       &text_out, &text_err) == 2);
+        CHECK(texts(events, "notice", fixture.home) ==
+              lines_where(text_err, text.home, [](const std::string& line) {
+                  return !line.starts_with("-- stage ") && !line.starts_with("[train] iter ") &&
+                         !line.starts_with("apogee train: ");
+              }));
+    }
+}
+
+TEST_CASE("a training stream refused before it runs is its job and its error, and no document",
+          "[commands][train][pipeline][cycle][stream]") {
+    const PipelineFixture fixture{std::string{kCycleBlock}};
+    std::string out;
+    std::string err;
+    CHECK(fixture.run({"train", "pipeline", "run", "--pipeline", "nowhere", "--output-format",
+                       "stream-json"},
+                      &out, &err) == 1);
+    std::vector<nlohmann::json> events = stream_of(out);
+    REQUIRE(events.size() == 2);
+    CHECK(events[0].at("verb") == "train pipeline run");
+    CHECK(events[1] == nlohmann::json{{"type", "error"},
+                                      {"message",
+                                       "no pipeline 'nowhere': not a spec file, and not an entry "
+                                       "under training.pipelines"}});
+    CHECK(err == "apogee train: " + events[1].at("message").get<std::string>() + "\n");
+    CHECK(fixture.run({"train", "pipeline", "resume", "nope", "--output-format", "stream-json"},
+                      &out, &err) == 1);
+    events = stream_of(out);
+    REQUIRE(events.size() == 2);
+    CHECK(events[0].at("verb") == "train pipeline resume");
+    CHECK(events[1].at("type") == "error");
+    CHECK(fixture.pipelines().empty());
+    // A run has no document of its own to print alone.
+    CHECK(fixture.run(
+              {"train", "pipeline", "run", "--pipeline", "nightly", "--output-format", "json"},
+              &out, &err) != 0);
+    CHECK(err.find("expected 'text' or 'stream-json'") != std::string::npos);
+    CHECK(out.empty());
+    CHECK(fixture.pipelines().empty());
+
+    // A pass refused at the breaker: no document, the refusal its error.
+    apogee::training::CycleHistory halted;
+    halted.backend = "nightly-model";
+    apogee::training::halt_cycle(halted, "halted by 'apogee train cycle halt'");
+    REQUIRE(apogee::training::save_history(fixture.training / "cycle", halted).empty());
+    CHECK(fixture.run({"train", "cycle", "run", "--output-format", "stream-json"}, &out, &err) ==
+          1);
+    events = stream_of(out);
+    REQUIRE(events.size() == 2);
+    CHECK(events[0].at("verb") == "train cycle run");
+    CHECK(events[1].at("type") == "error");
+    CHECK(events[1].at("message").get<std::string>().find("halted") != std::string::npos);
+    CHECK(of_type(events, "document").empty());
+}
+
+TEST_CASE(
+    "train cycle run streams the pass's narration as pass events, its pipeline's stages, "
+    "then the cycle's document",
+    "[commands][train][cycle][stream]") {
+    const PipelineFixture fixture{std::string{kCycleBlock}};
+    std::string out;
+    std::string err;
+    const auto pass_states = [](const std::vector<nlohmann::json>& events) {
+        std::vector<std::string> states;
+        for (const nlohmann::json& pass : of_type(events, "pass")) {
+            states.push_back(pass.at("state").get<std::string>());
+        }
+        return states;
+    };
+    const auto cycle_document = [&fixture]() {
+        std::string read;
+        std::string unused;
+        REQUIRE(fixture.run({"train", "cycle", "status", "--output-format", "json"}, &read,
+                            &unused) == 0);
+        return nlohmann::json::parse(read);
+    };
+    const auto cycle_lines = [](const PipelineFixture& home, const std::string& said) {
+        return lines_where(said, home.home,
+                           [](const std::string& line) { return line.starts_with("[cycle] "); });
+    };
+
+    // Nothing queued: skipped, its document the history with the skip.
+    REQUIRE(fixture.run({"train", "cycle", "run", "--output-format", "stream-json"}, &out, &err) ==
+            0);
+    INFO(out << err);
+    std::vector<nlohmann::json> events = stream_of(out);
+    CHECK(events.front().at("verb") == "train cycle run");
+    CHECK(pass_states(events) == std::vector<std::string>{"collecting", "skipped"});
+    CHECK(events.back().at("type") == "document");
+    CHECK(events.back().at("document") == cycle_document());
+    CHECK(events.back().at("document").at("runs").at(0).at("gate") == "skipped");
+    CHECK(of_type(events, "error").empty());
+    CHECK(err.empty());
+    const std::vector<nlohmann::json> skipped = events;
+
+    // A file queued: the pass passes and promotes, the pipeline's stages and
+    // the promotion's lines inside it.
+    write_file(fixture.home / "queue" / "day1.jsonl",
+               read_file(fixture.training / "datasets" / "starter.jsonl"));
+    REQUIRE(fixture.run({"train", "cycle", "run", "--output-format", "stream-json"}, &out, &err) ==
+            0);
+    events = stream_of(out);
+    CHECK(pass_states(events) == std::vector<std::string>{"collecting", "merging", "training",
+                                                          "gating", "promoting", "passed",
+                                                          "passed"});
+    std::vector<std::string> moves;
+    for (const nlohmann::json& stage : of_type(events, "stage")) {
+        CHECK(stage.at("pipeline_run_id").get<std::string>().starts_with("cycle-"));
+        moves.push_back(stage.at("state").get<std::string>());
+    }
+    CHECK(moves == std::vector<std::string>{"pending", "training", "evaluating", "passed"});
+    CHECK_FALSE(of_type(events, "iteration").empty());
+    bool promoted = false;
+    for (const std::string& notice : texts(events, "notice", fixture.home)) {
+        promoted = promoted || notice.starts_with("[promote] run cycle-");
+    }
+    CHECK(promoted);
+    CHECK(events.back().at("document") == cycle_document());
+    CHECK(events.back().at("document").at("anchor_version") == 1);
+    CHECK(err.empty());
+    const std::vector<nlohmann::json> passed = events;
+
+    // A regression: the pass fails and trips the breaker; the document, then
+    // the failure as the error, exit 2 -- nothing reached inference.
+    write_file(fixture.home / "queue" / "day2.jsonl", "{\"mock\": {\"answer\": \"nope\"}}\n");
+    const std::string at_v1 = read_file(fixture.base.base.config_path);
+    CHECK(fixture.run({"train", "cycle", "run", "--output-format", "stream-json"}, &out, &err) ==
+          2);
+    events = stream_of(out);
+    const std::vector<std::string> failed = pass_states(events);
+    CHECK(failed ==
+          std::vector<std::string>{"collecting", "merging", "training", "failed", "halted"});
+    REQUIRE(events.size() >= 2);
+    CHECK(events[events.size() - 2].at("document") == cycle_document());
+    CHECK(events[events.size() - 2].at("document").at("halted") == true);
+    CHECK(events.back().at("type") == "error");
+    CHECK(events.back().at("message").get<std::string>().starts_with("cycle FAILED -- "));
+    CHECK(read_file(fixture.base.base.config_path) == at_v1);
+    // M30: stderr keeps the diagnostic, as a pipeline's failure does -- and
+    // nothing else.
+    CHECK(lines_where(err, fixture.home, [](const std::string&) { return true; }) ==
+          std::vector<std::string>{normalized(
+              "apogee train: " + events.back().at("message").get<std::string>(), fixture.home)});
+
+    // The same three passes as text, in a home of its own: each pass event
+    // is a `[cycle]` line the terminal prints, in the same words.
+    {
+        const PipelineFixture text{std::string{kCycleBlock}};
+        std::string text_out;
+        std::string text_err;
+        REQUIRE(text.run({"train", "cycle", "run"}, &text_out, &text_err) == 0);
+        CHECK(texts(skipped, "pass", fixture.home) == cycle_lines(text, text_err));
+        write_file(text.home / "queue" / "day1.jsonl",
+                   read_file(text.training / "datasets" / "starter.jsonl"));
+        REQUIRE(text.run({"train", "cycle", "run"}, &text_out, &text_err) == 0);
+        CHECK(texts(passed, "pass", fixture.home) == cycle_lines(text, text_err));
+        write_file(text.home / "queue" / "day2.jsonl", "{\"mock\": {\"answer\": \"nope\"}}\n");
+        CHECK(text.run({"train", "cycle", "run"}, &text_out, &text_err) == 2);
+        CHECK(texts(events, "pass", fixture.home) == cycle_lines(text, text_err));
+    }
+}
+
+// --- M30: a halt taken during a pass is kept ----------------------------------------
+
+namespace {
+
+/// A stream that keeps what it is handed and, the first time a whole line of
+/// it holds `needle`, runs `hook`: a person at another terminal, mid-run.
+class HookedBuffer final : public std::streambuf {
+public:
+    HookedBuffer(std::string needle, std::function<void()> hook)
+        : needle_{std::move(needle)}, hook_{std::move(hook)} {}
+
+    [[nodiscard]] const std::string& text() const noexcept {
+        return text_;
+    }
+
+    [[nodiscard]] bool fired() const noexcept {
+        return fired_;
+    }
+
+protected:
+    int_type overflow(int_type c) override {
+        if (traits_type::eq_int_type(c, traits_type::eof())) {
+            return traits_type::not_eof(c);
+        }
+        const char ch = traits_type::to_char_type(c);
+        text_ += ch;
+        line_ += ch;
+        if (ch == '\n') {
+            if (!fired_ && !needle_.empty() && line_.find(needle_) != std::string::npos) {
+                fired_ = true;
+                hook_();
+            }
+            line_.clear();
+        }
+        return c;
+    }
+
+    std::streamsize xsputn(const char* text, std::streamsize count) override {
+        for (std::streamsize i = 0; i < count; ++i) {
+            (void)overflow(traits_type::to_int_type(text[i]));
+        }
+        return count;
+    }
+
+private:
+    std::string needle_;
+    std::function<void()> hook_;
+    std::string text_;
+    std::string line_;
+    bool fired_ = false;
+};
+
+/// `args` run in `fixture`'s home, `hook` run the first time a line on
+/// stdout (or, with `on_stderr`, stderr) holds `needle`.
+int run_hooked(const PipelineFixture& fixture, const std::vector<std::string>& args, bool on_stderr,
+               const std::string& needle, const std::function<void()>& hook, std::string& out,
+               std::string& err) {
+    HookedBuffer stdout_buffer{on_stderr ? std::string{} : needle, hook};
+    HookedBuffer stderr_buffer{on_stderr ? needle : std::string{}, hook};
+    std::istringstream fed{std::string{}};
+    std::streambuf* const old_out = std::cout.rdbuf(&stdout_buffer);
+    std::streambuf* const old_err = std::cerr.rdbuf(&stderr_buffer);
+    std::streambuf* const old_in = std::cin.rdbuf(fed.rdbuf());
+    int code = -1;
+    try {
+        apogee::commands::RootCommand root{apogee::commands::default_registry()};
+        std::vector<std::string> full{"--config", fixture.base.base.config_path.string()};
+        full.insert(full.end(), args.begin(), args.end());
+        std::vector<const char*> argv{"apogee"};
+        for (const std::string& arg : full) {
+            argv.push_back(arg.c_str());
+        }
+        code = root.run(static_cast<int>(argv.size()), argv.data());
+    } catch (...) {
+        std::cout.rdbuf(old_out);
+        std::cerr.rdbuf(old_err);
+        std::cin.rdbuf(old_in);
+        throw;
+    }
+    std::cout.rdbuf(old_out);
+    std::cerr.rdbuf(old_err);
+    std::cin.rdbuf(old_in);
+    CHECK((on_stderr ? stderr_buffer : stdout_buffer).fired());
+    out = stdout_buffer.text();
+    err = stderr_buffer.text();
+    return code;
+}
+
+constexpr std::string_view kHaltKept =
+    "[cycle] halted while this pass ran (halted by 'apogee train cycle halt') -- the halt is "
+    "kept: 'apogee train cycle run' refuses until 'apogee train cycle resume'";
+
+}  // namespace
+
+TEST_CASE(
+    "a cycle halted while its pass runs stays halted: the pass finishes, says the halt as a "
+    "notice, its document halted, and the next run is refused",
+    "[commands][train][cycle][halt]") {
+    // The pass holds the cycle's lock; `train cycle halt` runs as the pass
+    // starts its pipeline, as a person's would from another terminal.
+    const PipelineFixture fixture{std::string{kCycleBlock}};
+    const std::filesystem::path cycle_dir = fixture.training / "cycle";
+    std::string out;
+    std::string err;
+    std::string halt_out;
+    std::string halt_err;
+    int halt_code = -1;
+    bool locked = false;
+    const auto halt = [&]() {
+        locked = std::filesystem::exists(cycle_dir / "cycle.lock");
+        halt_code = fixture.run({"train", "cycle", "halt"}, &halt_out, &halt_err);
+    };
+
+    // As a stream: the pass's events as ever, then the halt said, then the
+    // document with it.
+    write_file(fixture.home / "queue" / "day1.jsonl",
+               read_file(fixture.training / "datasets" / "starter.jsonl"));
+    REQUIRE(run_hooked(fixture, {"train", "cycle", "run", "--output-format", "stream-json"}, false,
+                       R"("state":"training")", halt, out, err) == 0);
+    INFO(out << err);
+    CHECK(locked);
+    CHECK(halt_code == 0);
+    CHECK(halt_out ==
+          "cycle halted -- 'apogee train cycle run' refuses until 'apogee train cycle resume'\n"
+          "  the pass running now finishes, and keeps the halt\n");
+    std::vector<nlohmann::json> events = stream_of(out);
+    std::vector<std::string> states;
+    for (const nlohmann::json& pass : of_type(events, "pass")) {
+        states.push_back(pass.at("state").get<std::string>());
+    }
+    CHECK(states == std::vector<std::string>{"collecting", "merging", "training", "gating",
+                                             "promoting", "passed", "passed"});
+    REQUIRE(events.size() >= 3);
+    CHECK(events[events.size() - 2] ==
+          nlohmann::json{{"type", "notice"}, {"text", std::string{kHaltKept}}});
+    CHECK(events.back().at("type") == "document");
+    CHECK(events.back().at("document").at("halted") == true);
+    CHECK(events.back().at("document").at("halt_reason") == "halted by 'apogee train cycle halt'");
+    CHECK(events.back().at("document").at("total_runs") == 1);
+    CHECK(err.empty());
+    std::string error;
+    CHECK(apogee::training::load_history(cycle_dir, "nightly-model", error).halted);
+
+    // The next pass is refused, as any halt refuses it.
+    write_file(fixture.home / "queue" / "day2.jsonl",
+               read_file(fixture.training / "datasets" / "starter.jsonl"));
+    CHECK(fixture.run({"train", "cycle", "run"}, &out, &err) == 1);
+    CHECK(err.find("the cycle is halted: halted by 'apogee train cycle halt'") !=
+          std::string::npos);
+    CHECK(std::filesystem::exists(fixture.home / "queue" / "day2.jsonl"));
+
+    // As text, in a home of its own: the same words on stderr, after the
+    // pass's own lines.
+    const PipelineFixture text{std::string{kCycleBlock}};
+    write_file(text.home / "queue" / "day1.jsonl",
+               read_file(text.training / "datasets" / "starter.jsonl"));
+    const auto halt_text = [&]() {
+        halt_code = text.run({"train", "cycle", "halt"}, &halt_out, &halt_err);
+    };
+    REQUIRE(run_hooked(text, {"train", "cycle", "run"}, true, "[cycle] pipeline ", halt_text, out,
+                       err) == 0);
+    CHECK(halt_code == 0);
+    CHECK(out.find("cycle PASSED -- nightly-model promoted to v1") != std::string::npos);
+    const std::vector<std::string> said = lines_where(
+        err, text.home, [](const std::string& line) { return line.starts_with("[cycle] "); });
+    REQUIRE_FALSE(said.empty());
+    CHECK(said.back() == kHaltKept);
+    CHECK(apogee::training::load_history(text.training / "cycle", "nightly-model", error).halted);
+}
+
+TEST_CASE("train cycle halt and resume write while a pass holds the cycle's lock",
+          "[commands][train][cycle][halt]") {
+    // The lock a pass holds is never theirs to wait on: each writes the
+    // history under its own short lock, and a pass's save keeps it.
+    const PipelineFixture fixture{std::string{kCycleBlock}};
+    const std::filesystem::path cycle_dir = fixture.training / "cycle";
+    std::string lock_error;
+    std::optional<apogee::training::CycleLock> pass =
+        apogee::training::CycleLock::acquire(cycle_dir, lock_error);
+    REQUIRE(pass.has_value());
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"train", "cycle", "halt"}, &out, &err) == 0);
+    CHECK(out.find("the pass running now finishes, and keeps the halt") != std::string::npos);
+    std::string error;
+    CHECK(apogee::training::load_history(cycle_dir, "nightly-model", error).halted);
+    REQUIRE(fixture.run({"train", "cycle", "resume"}, &out, &err) == 0);
+    CHECK(out.find("cycle resumed") != std::string::npos);
+    CHECK_FALSE(apogee::training::load_history(cycle_dir, "nightly-model", error).halted);
+    pass->release();
+    // No pass running: the halt says nothing of one.
+    REQUIRE(fixture.run({"train", "cycle", "halt"}, &out, &err) == 0);
+    CHECK(out ==
+          "cycle halted -- 'apogee train cycle run' refuses until 'apogee train cycle resume'\n");
+    // Neither left its own lock behind.
+    CHECK_FALSE(std::filesystem::exists(cycle_dir / "history.lock"));
+}
+
+TEST_CASE("the pipeline and cycle verbs complete their output formats",
+          "[commands][train][pipeline][cycle][completion]") {
+    // ADR 0007: each new flag and its words, offered the moment they exist.
+    const apogee::testing::CliHome home{"backends: {}\n"};
+    std::string out;
+    std::string err;
+    for (const std::vector<std::string>& verb : {std::vector<std::string>{"pipeline", "run"},
+                                                 std::vector<std::string>{"pipeline", "resume"},
+                                                 std::vector<std::string>{"cycle", "run"}}) {
+        std::vector<std::string> args{"__complete", "train"};
+        args.insert(args.end(), verb.begin(), verb.end());
+        args.emplace_back("--output-format");
+        args.emplace_back("");
+        REQUIRE(home.run(args, &out, &err) == 0);
+        CHECK(out == "text\nstream-json\n");
+    }
+    for (const std::vector<std::string>& verb : {std::vector<std::string>{"pipeline", "status"},
+                                                 std::vector<std::string>{"pipeline", "list"},
+                                                 std::vector<std::string>{"pipeline", "show"},
+                                                 std::vector<std::string>{"cycle", "status"}}) {
+        std::vector<std::string> args{"__complete", "train"};
+        args.insert(args.end(), verb.begin(), verb.end());
+        args.emplace_back("--output-format");
+        args.emplace_back("");
+        REQUIRE(home.run(args, &out, &err) == 0);
+        CHECK(out == "text\njson\n");
+        args.pop_back();
+        args.back() = "--out";
+        REQUIRE(home.run(args, &out, &err) == 0);
+        CHECK(out.find("--output-format") != std::string::npos);
+    }
+
+    // M30: the named specs' reads, offered, and `show` offered the names it
+    // takes -- what a run's --pipeline takes.
+    REQUIRE(home.run({"__complete", "train", "pipeline", ""}, &out, &err) == 0);
+    CHECK(out.find("list\n") != std::string::npos);
+    CHECK(out.find("show\n") != std::string::npos);
+    const apogee::testing::CliHome named{
+        "backends: {}\ntraining:\n  pipelines:\n    nightly:\n      student: tiny\n"
+        "      stages:\n        - name: base\n          dataset: starter\n"
+        "          eval_suite: hello\n"};
+    REQUIRE(named.run({"__complete", "train", "pipeline", "show", ""}, &out, &err) == 0);
+    CHECK(out.starts_with("nightly\n"));
+    REQUIRE(named.run({"__complete", "train", "pipeline", "run", "--pipeline", ""}, &out, &err) ==
+            0);
+    CHECK(out.starts_with("nightly\n"));
+}
+
+// --- M19: the environment's Python, chosen and said ------------------------------------
+
+#include <CLI/CLI.hpp>
+
+#include <map>
+
+#include "platform/platform.h"
+#include "training/python_env.h"
+
+namespace {
+
+/// A machine for `train setup`: its own home, a PATH of fake interpreters
+/// that say their versions, and a runner standing in for Python and pip --
+/// every command recorded, a `venv` made as Python makes one.
+struct SetupMachine {
+    apogee::testing::TempDir home{"setup-home-" + std::to_string(std::random_device{}())};
+    apogee::testing::EnvGuard apogee_home{"APOGEE_HOME", home.path().string()};
+    apogee::testing::TempDir bin{"setup-path-" + std::to_string(std::random_device{}())};
+    apogee::testing::EnvGuard path{"PATH", bin.path().string()};
+    std::map<std::string, std::string> versions{
+        {"python3", "3.14.5"}, {"python3.13", "3.13.13"}, {"python3.12", "3.12.13"}};
+    std::vector<apogee::platform::ChildCommand> commands;
+
+    SetupMachine() {
+        for (const auto& [name, version] : versions) {
+            std::ofstream{bin.path() / name} << "#!/bin/sh\n";
+            std::filesystem::permissions(bin.path() / name, std::filesystem::perms::owner_all);
+        }
+    }
+
+    [[nodiscard]] apogee::commands::SetupRequest request(
+        std::vector<apogee::training::RequirementSet> with) {
+        apogee::commands::SetupRequest out;
+        out.with = std::move(with);
+        out.host = apogee::training::HostShape{.apple_silicon = true, .nvidia_smi = false};
+        out.runner = [this](const apogee::platform::ChildCommand& command,
+                            const apogee::harness::CancellationToken&) {
+            commands.push_back(command);
+            apogee::training::CommandResult result;
+            result.exit_code = 0;
+            const std::string name = std::filesystem::path{command.program}.filename().string();
+            if (!command.arguments.empty() && command.arguments[0] == "-c") {
+                result.out = versions.at(name) + "\n";
+            } else if (command.arguments.size() >= 3 && command.arguments[1] == "venv") {
+                const std::filesystem::path venv{command.arguments[2]};
+                std::filesystem::create_directories(venv / "bin");
+                std::ofstream{venv / "bin" / "python"} << "#!fake";
+                std::ofstream{venv / "pyvenv.cfg"} << "version = " << versions.at(name) << "\n";
+            }
+            return result;
+        };
+        return out;
+    }
+
+    /// Runs a setup; the exit code (0 for success) and every line said.
+    int run(const apogee::harness::Config& config, const apogee::commands::SetupRequest& request,
+            std::string* said) const {
+        const std::ostringstream captured;
+        std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
+        std::streambuf* old_err = std::cerr.rdbuf(captured.rdbuf());
+        int code = 0;
+        try {
+            apogee::commands::run_train_setup(config, request);
+        } catch (const CLI::RuntimeError& e) {
+            code = e.get_exit_code();
+        }
+        std::cout.rdbuf(old_out);
+        std::cerr.rdbuf(old_err);
+        *said = captured.str();
+        return code;
+    }
+
+    [[nodiscard]] std::vector<std::string> pips() const {
+        std::vector<std::string> out;
+        for (const apogee::platform::ChildCommand& command : commands) {
+            if (command.arguments.size() >= 5 && command.arguments[1] == "pip") {
+                out.push_back(command.arguments[4]);
+            }
+        }
+        return out;
+    }
+};
+
+}  // namespace
+
+TEST_CASE("train setup makes the environment on the newest Python every set runs on, and says why",
+          "[commands][train][setup][m19]") {
+    if (apogee::platform::host_target().starts_with("windows")) {
+        SKIP("the scripted interpreters are POSIX files on a POSIX PATH");
+    }
+    SetupMachine machine;
+    std::string said;
+    REQUIRE(machine.run({}, machine.request({apogee::training::RequirementSet::Prepare}), &said) ==
+            0);
+    INFO(said);
+    CHECK(said.find("from " + (machine.bin.path() / "python3.12").string() +
+                    " (Python 3.12.13) -- the newest Python every set this host can install runs "
+                    "on (>=3.11,<3.13); passed over python3 (3.14.5), python3.13 (3.13.13): the "
+                    "'voice' set runs on >=3.10,<3.13") != std::string::npos);
+    CHECK(said.find("(Python 3.12.13); sets: prepare") != std::string::npos);
+    CHECK(machine.pips() == std::vector<std::string>{"datasets>=3.0"});
+}
+
+TEST_CASE("an environment on 3.14 refuses voice before pip; --rebuild asks, then reinstalls all",
+          "[commands][train][setup][m19]") {
+    if (apogee::platform::host_target().starts_with("windows")) {
+        SKIP("the scripted interpreters are POSIX files on a POSIX PATH");
+    }
+    using apogee::training::RequirementSet;
+    // The user's environment: made from python3 (3.14.5), five sets in it.
+    SetupMachine machine;
+    std::string said;
+    apogee::commands::SetupRequest made =
+        machine.request({RequirementSet::Prepare, RequirementSet::Mlx, RequirementSet::Convert,
+                         RequirementSet::MlxVlm, RequirementSet::Video});
+    made.python = "python3";
+    REQUIRE(machine.run({}, made, &said) == 0);
+    CHECK(said.find("(Python 3.14.5) -- as named") != std::string::npos);
+
+    // Voice: refused before pip, the last line the rebuild that works.
+    machine.commands.clear();
+    CHECK(machine.run({}, machine.request({RequirementSet::Voice}), &said) != 0);
+    CHECK(said.find("is on Python 3.14.5, and the 'voice' set runs on >=3.10,<3.13 -- rebuild it "
+                    "on a Python that fits: apogee train setup --rebuild --with voice") !=
+          std::string::npos);
+    CHECK(machine.pips().empty());
+
+    // --python names a new environment's Python; with one there, it asks for --rebuild.
+    apogee::commands::SetupRequest named = machine.request({});
+    named.python = "python3.12";
+    CHECK(machine.run({}, named, &said) != 0);
+    CHECK(said.find("add --rebuild to replace it") != std::string::npos);
+
+    // Nobody to ask (the suite's stdin is not a terminal): refused, naming --yes.
+    apogee::commands::SetupRequest rebuild = machine.request({RequirementSet::Voice});
+    rebuild.rebuild = true;
+    CHECK(machine.run({}, rebuild, &said) != 0);
+    CHECK(said.find("rerun with --yes: apogee train setup --rebuild --yes") != std::string::npos);
+    CHECK(machine.pips().empty());
+
+    // With --yes: made again on 3.12, every recorded set reinstalled, then voice.
+    rebuild.yes = true;
+    REQUIRE(machine.run({}, rebuild, &said) == 0);
+    INFO(said);
+    CHECK(said.find("rebuilding") != std::string::npos);
+    CHECK(said.find("(Python 3.12.13)") != std::string::npos);
+    CHECK(said.find("reinstalling prepare, mlx, convert, mlx-vlm, video") != std::string::npos);
+    CHECK(machine.pips() == std::vector<std::string>{"datasets>=3.0", "mlx-lm>=0.21", "torch>=2.11",
+                                                     "mlx-vlm>=0.6.1", "torch>=2.6", "torch>=2.6"});
+    CHECK(said.find("(Python 3.12.13); sets: prepare, mlx, convert, mlx-vlm, video, voice") !=
+          std::string::npos);
+}
+
+TEST_CASE("train setup --with mlx-video says the commit pip builds it from, and installs it",
+          "[commands][train][setup][mlx_video]") {
+    if (apogee::platform::host_target().starts_with("windows")) {
+        SKIP("the scripted interpreters are POSIX files on a POSIX PATH");
+    }
+    using apogee::training::RequirementSet;
+    // 53k: mlx-video comes from one reviewed GitHub commit, never PyPI --
+    // said as it installs, the requirement pip is handed the commit's.
+    SetupMachine machine;
+    std::string said;
+    // No git on this PATH: refused before pip, naming what pip fetches it with.
+    CHECK(machine.run({}, machine.request({RequirementSet::MlxVideo}), &said) != 0);
+    CHECK(said.find("which pip fetches with git, and git is not on PATH") != std::string::npos);
+    CHECK(machine.pips().empty());
+    // With git: installed, and said.
+    std::ofstream{machine.bin.path() / "git"} << "#!/bin/sh\n";
+    std::filesystem::permissions(machine.bin.path() / "git", std::filesystem::perms::owner_all);
+    REQUIRE(machine.run({}, machine.request({RequirementSet::MlxVideo}), &said) == 0);
+    INFO(said);
+    CHECK(said.find("installing the 'mlx-video' set: mlx-video @ "
+                    "git+https://github.com/Blaizzy/mlx-video.git@"
+                    "87db56a51758fefb748a359b90a5283bb8ba4837 torch>=2.6 ...\n  mlx-video is not "
+                    "on PyPI: pip builds it with git from https://github.com/Blaizzy/mlx-video at "
+                    "commit 87db56a51758 (2026-05-13), the one this Apogee reviewed on "
+                    "2026-10-21\ninstalled\n") != std::string::npos);
+    CHECK(machine.pips() ==
+          std::vector<std::string>{"mlx-video @ git+https://github.com/Blaizzy/mlx-video.git@"
+                                   "87db56a51758fefb748a359b90a5283bb8ba4837"});
+    CHECK(said.find("sets: mlx-video") != std::string::npos);
 }

@@ -1,12 +1,15 @@
 #include "agentloop/recall.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <random>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include "agentloop/rag.h"
@@ -218,4 +221,120 @@ TEST_CASE("past chats are found through the one retrieval path, never this chat'
     CHECK(injected.find("Postgres 15") == std::string::npos);
     CHECK(injected.find("user's documents") == std::string::npos);
     CHECK(result.chunks >= 1);
+}
+
+TEST_CASE("the index lists every chat it holds, newest first, each summary whole", "[recall]") {
+    // M31: the index had a count and no enumerator, and a summary was kept
+    // only inside its indexed text.
+    const Scratch scratch;
+    RecallIndex index{scratch.index, std::nullopt};
+    CHECK(index.entries().empty());  // no index at all
+    std::string note;
+    REQUIRE(index.put({.chat_id = "chat-a",
+                       .title = "Database: plans",
+                       .updated_at = "2026-10-01T00:00:00Z",
+                       .summary = "Uses Postgres 16: chosen for its JSON."},
+                      {}, note));
+    REQUIRE(index.put({.chat_id = "chat-b",
+                       .title = "Style",
+                       .updated_at = "2026-10-02T00:00:00Z",
+                       .summary = "Prefers tabs."},
+                      {}, note));
+    REQUIRE(index.put({.chat_id = "chat-c", .summary = "Undated."}, {}, note));
+    const std::vector<RecallEntry> listed = index.entries();
+    REQUIRE(listed.size() == index.chats());
+    REQUIRE(listed.size() == 3);
+    CHECK(listed[0].chat_id == "chat-b");
+    CHECK(listed[0].title == "Style");
+    CHECK(listed[0].updated_at == "2026-10-02T00:00:00Z");
+    CHECK(listed[0].summary == "Prefers tabs.");
+    CHECK(listed[1].chat_id == "chat-a");
+    CHECK(listed[1].summary == "Uses Postgres 16: chosen for its JSON.");
+    // Undated last.
+    CHECK(listed[2].chat_id == "chat-c");
+    CHECK(listed[2].summary == "Undated.");
+
+    // The summary rides the record in a field of its own; the indexed text
+    // -- what retrieval searches and the model is handed -- is unchanged.
+    const apogee::embedstore::Store store{scratch.index};
+    const std::vector<apogee::embedstore::Chunk> chunks = store.chunks_by_source("chat-a");
+    REQUIRE(chunks.size() == 1);
+    CHECK(chunks.front().text ==
+          "An earlier conversation (2026-10-01), \"Database: plans\": Uses Postgres 16: chosen "
+          "for its JSON.");
+    const nlohmann::json record = nlohmann::json::parse(chunks.front().metadata);
+    CHECK(record.at("summary") == "Uses Postgres 16: chosen for its JSON.");
+    CHECK(record.at("title") == "Database: plans");
+    CHECK(record.at("updated_at") == "2026-10-01T00:00:00Z");
+    CHECK(record.at("chat_id") == "chat-a");
+}
+
+TEST_CASE("an older index's summaries are read from their prefix, and nothing is migrated",
+          "[recall][compat]") {
+    // Written as 26l's `put` wrote them: the record names the chat, its
+    // title and date, and holds no summary; the text is the summary under
+    // its date-and-title prefix.
+    const Scratch scratch;
+    const auto old_record = [](const std::string& chat, const std::string& title,
+                               const std::string& updated) {
+        return nlohmann::json{{"chat_id", chat}, {"title", title}, {"updated_at", updated}}.dump();
+    };
+    const std::vector<std::pair<std::string, std::string>> written = {
+        {"An earlier conversation (2026-10-01), \"A \"quoted\": title\": It said: "
+         "\"An earlier conversation\" twice.",
+         old_record("titled", "A \"quoted\": title", "2026-10-01T08:00:00Z")},
+        {"An earlier conversation, \"No date\": Only a title.",
+         old_record("titled-only", "No date", "")},
+        {"An earlier conversation (2026-09-30): Only a date.",
+         old_record("dated-only", "", "2026-09-30T08:00:00Z")},
+        // A record that does not match its text, and none at all: the text
+        // read whole, never cut where it cannot be told.
+        {"Something else entirely.", old_record("mismatched", "T", "2026-09-01T00:00:00Z")},
+        {"An earlier conversation: no record.", ""},
+    };
+    {
+        fs::create_directories(scratch.index.parent_path());
+        apogee::embedstore::Store store{scratch.index};
+        const std::vector<std::string> sources = {"titled", "titled-only", "dated-only",
+                                                  "mismatched", "bare"};
+        for (std::size_t i = 0; i < written.size(); ++i) {
+            store.replace_source(sources[i], {written[i].first}, {}, {written[i].second});
+        }
+    }
+    const RecallIndex index{scratch.index, std::nullopt};
+    const std::vector<RecallEntry> listed = index.entries();
+    REQUIRE(listed.size() == 5);
+    std::map<std::string, RecallEntry> by_chat;
+    for (const RecallEntry& entry : listed) {
+        by_chat[entry.chat_id] = entry;
+    }
+    CHECK(by_chat.at("titled").title == "A \"quoted\": title");
+    CHECK(by_chat.at("titled").summary == "It said: \"An earlier conversation\" twice.");
+    CHECK(by_chat.at("titled-only").summary == "Only a title.");
+    CHECK(by_chat.at("dated-only").summary == "Only a date.");
+    CHECK(by_chat.at("dated-only").updated_at == "2026-09-30T08:00:00Z");
+    CHECK(by_chat.at("mismatched").summary == "Something else entirely.");
+    CHECK(by_chat.at("bare").summary == "An earlier conversation: no record.");
+    CHECK(by_chat.at("bare").title.empty());
+    // Newest first, the undated last.
+    CHECK(listed.front().chat_id == "titled");
+    CHECK(listed.back().updated_at.empty());
+
+    // Read, never rewritten: every record as it was written.
+    const apogee::embedstore::Store store{scratch.index};
+    CHECK(store.chunks_by_source("titled").front().metadata == written[0].second);
+    CHECK(store.chunks_by_source("titled").front().text == written[0].first);
+    // And a chat summarised again now carries its summary in its record,
+    // beside the older ones.
+    RecallIndex writable{scratch.index, std::nullopt};
+    std::string note;
+    REQUIRE(writable.put({.chat_id = "titled",
+                          .title = "Renamed",
+                          .updated_at = "2026-10-05T00:00:00Z",
+                          .summary = "Summarised again."},
+                         {}, note));
+    CHECK(nlohmann::json::parse(store.chunks_by_source("titled").front().metadata).at("summary") ==
+          "Summarised again.");
+    CHECK(writable.entries().front().summary == "Summarised again.");
+    CHECK(store.chunks_by_source("dated-only").front().metadata == written[2].second);
 }

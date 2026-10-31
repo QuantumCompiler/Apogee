@@ -38,6 +38,18 @@ inline constexpr std::size_t kMinPrefixCacheTokens = 512;
 /// shorter one re-reads in a second or two.
 inline constexpr std::size_t kMinChatCacheTokens = 2000;
 
+/// One adapter a cache was made under (53a): its file's identity, as the
+/// model's is kept; the base it was pinned to; the scale it was applied at.
+struct AdapterFingerprint {
+    std::string path{};
+    std::uintmax_t size = 0;
+    std::int64_t modified = 0;
+    std::string base_sha256{};
+    double scale = 1.0;
+
+    friend bool operator==(const AdapterFingerprint&, const AdapterFingerprint&) = default;
+};
+
 /// Which model file a cache was made with: its path, size and modification
 /// time. Not a hash of its contents -- reading gigabytes at every load would
 /// cost more than the cache saves -- but replacing the file changes it.
@@ -45,12 +57,25 @@ struct ModelFingerprint {
     std::string path;
     std::uintmax_t size = 0;
     std::int64_t modified = 0;
+    /// The adapters applied over it, in order (53a): the state a context held
+    /// under one set is another model's, so a cache made under one set is a
+    /// miss under any other -- never restored -- and each set keeps a prefix
+    /// directory of its own. Empty for the bare base, whose fingerprint,
+    /// record and directory are exactly what they were before adapters.
+    std::vector<AdapterFingerprint> adapters{};
 
     friend bool operator==(const ModelFingerprint&, const ModelFingerprint&) = default;
+
+    /// Whether `other` names the same model file, whatever its adapters.
+    [[nodiscard]] bool same_file(const ModelFingerprint& other) const noexcept {
+        return path == other.path && size == other.size && modified == other.modified;
+    }
 };
 
-/// `path`'s fingerprint, or nullopt when it cannot be read.
-[[nodiscard]] std::optional<ModelFingerprint> fingerprint_of(const std::filesystem::path& path);
+/// `path`'s fingerprint with `adapters` applied over it, or nullopt when the
+/// model file or an adapter's cannot be read.
+[[nodiscard]] std::optional<ModelFingerprint> fingerprint_of(
+    const std::filesystem::path& path, const std::vector<harness::AdapterConfig>& adapters = {});
 
 /// What a chat file was made with, kept beside it.
 struct ChatCacheRecord {
@@ -74,9 +99,10 @@ public:
         return root_;
     }
 
-    /// Claims the prefix directory of the model `fingerprint` names. A
-    /// directory made for another file of that path is removed whole, and a
-    /// line returned saying so; a missing one is created.
+    /// Claims the prefix directory of the model `fingerprint` names -- its
+    /// file and, with adapters, the set over it (53a). A directory made for
+    /// another file of that path, or under adapter files since changed, is
+    /// removed whole, and a line returned saying so; a missing one is created.
     [[nodiscard]] std::optional<std::string> claim_model(const ModelFingerprint& fingerprint,
                                                          std::string_view name);
 

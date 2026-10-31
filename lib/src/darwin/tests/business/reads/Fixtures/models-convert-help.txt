@@ -1,0 +1,17 @@
+Make a GGUF -- or with --mlx an MLX model -- from SafeTensors weights
+Usage: apogee models convert [OPTIONS] model
+
+Positionals:
+  model SNAPSHOT REQUIRED     A model (its newest SafeTensors download), <model>/safetensors/<id>, or a snapshot directory
+
+Options:
+  -h,--help                   Print this help message and exit
+  -t,--type PRECISION:{f16,bf16,f32,q8_0,auto,4bit,3bit,6bit,8bit,mxfp4}
+                              Precision to write: a GGUF's (default f16; make it smaller with 'models quantize'), or with --mlx an MLX model's (default 4bit)
+  --mlx                       Make an MLX model with mlx-lm's converter (Apple silicon), quantized to --type, into the model's mlx/
+  --from SNAPSHOT_ID          Which of the model's SafeTensors sets, by id
+  --model-type MLX_MODEL_TYPE With --mlx: convert these weights as a type mlx-lm knows -- your word, for a vendor's variant its converter does not list; the snapshot is untouched and the record says so
+  --register                  Register what is made as a backend: the F16, or with --mlx the --type build
+  --register-with REGISTER_LEVEL ...
+                              --register, and quantize to each of these levels too, each its own backend (comma-separated) -- with --mlx the MLX precisions, one conversion each
+  --base-name TEXT            With --register: what each backend's name begins with, before -F16, -Q4KM ... -- or with --mlx -4bit, -8bit ... (default: the model's name)

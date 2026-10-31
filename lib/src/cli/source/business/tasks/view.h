@@ -136,6 +136,10 @@ struct TaskView {
 struct TaskSummary {
     std::string id;
     std::string status;
+    /// The view's own `interrupted` (M32): planning or running by its
+    /// ledger, with no process running it -- decided where the view decides
+    /// it, never a second way.
+    bool interrupted = false;
     int rounds_used = 0;
     int rounds_budget = 0;
     std::string goal;
@@ -155,10 +159,14 @@ struct TaskListView {
 /// Each check as the newest completed round left it -- `ran` false for
 /// every one before a round has completed.
 [[nodiscard]] std::vector<CheckView> make_check_views(const Task& task);
-[[nodiscard]] TaskSummary make_task_summary(const Task& task);
+/// `holder` as `make_task_view` takes it: whether a process runs the task.
+[[nodiscard]] TaskSummary make_task_summary(const Task& task,
+                                            const std::optional<LockHolder>& holder);
 /// `tasks`, newest first as `list_tasks` gives them: the newest `kListLimit`
-/// unless `all`.
-[[nodiscard]] TaskListView make_task_list(const std::vector<Task>& tasks, bool all);
+/// unless `all`. `holder` is the task lock's holder now, asked once for
+/// every row -- one task runs at a time.
+[[nodiscard]] TaskListView make_task_list(const std::vector<Task>& tasks, bool all,
+                                          const std::optional<LockHolder>& holder);
 
 [[nodiscard]] nlohmann::json to_json(const TaskView& view);
 [[nodiscard]] nlohmann::json to_json(const TurnView& view);
@@ -166,7 +174,8 @@ struct TaskListView {
 [[nodiscard]] nlohmann::json to_json(const TaskSummary& summary);
 /// The listing as one document -- `task list --output-format json` and `GET
 /// /v1/admin/tasks` alike: `{"object": "list", "data": [summary...],
-/// "total": N}`.
+/// "total": N}`, each summary `{id, status, interrupted, rounds_used,
+/// rounds_budget, goal}`.
 [[nodiscard]] nlohmann::json to_json(const TaskListView& list);
 
 }  // namespace apogee::tasks

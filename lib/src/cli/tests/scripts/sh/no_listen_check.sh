@@ -34,7 +34,8 @@ if ! command -v lsof >/dev/null 2>&1; then
     exit 0
 fi
 
-rm -rf "$WORK_DIR"
+. "$(dirname "$0")/sandbox.sh"
+WORK_DIR="$(sandbox_dir "$WORK_DIR")"
 mkdir -p "$WORK_DIR"
 export APOGEE_HOME="$WORK_DIR"
 trap 'rm -rf "$WORK_DIR"' EXIT
@@ -123,7 +124,7 @@ if command -v python3 >/dev/null 2>&1; then
         PIDS="$CHILD"
         for pid in $(code_descendants "$CHILD"); do
             PIDS="$PIDS,$pid"
-            if ps -o command= -p "$pid" 2>/dev/null | grep -q code_exec_server.py; then
+            if ps -o command= -p "$pid" 2>/dev/null | grep code_exec_server.py >/dev/null; then
                 SERVER_SEEN=1
             fi
         done
@@ -193,7 +194,7 @@ while kill -0 "$CHILD" 2>/dev/null; do
     PIDS="$CHILD"
     for pid in $(mlx_descendants "$CHILD"); do
         PIDS="$PIDS,$pid"
-        if ps -o command= -p "$pid" 2>/dev/null | grep -q mlx_generate.py; then
+        if ps -o command= -p "$pid" 2>/dev/null | grep mlx_generate.py >/dev/null; then
             DRIVER_SEEN=1
         fi
     done
@@ -275,7 +276,7 @@ while kill -0 "$CLIENT" 2>/dev/null; do
         SERVE_LISTENS=1
     fi
     for pid in $(mlx_descendants "$SERVER"); do
-        if ps -o command= -p "$pid" 2>/dev/null | grep -q mlx_generate.py; then
+        if ps -o command= -p "$pid" 2>/dev/null | grep mlx_generate.py >/dev/null; then
             DRIVER_SEEN=1
         fi
         HIT="$(lsof -a -p "$pid" -i -sTCP:LISTEN -Fn 2>/dev/null)"

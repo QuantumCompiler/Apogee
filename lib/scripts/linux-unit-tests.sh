@@ -130,5 +130,5 @@ dock run --rm --init \
     -e APOGEE_CMAKE_ARGS=-DAPOGEE_ENABLE_LLAMA=OFF \
     "${mounts[@]}" -w "$top" \
     "$image" \
-    bash -c 'mkdir -p "$HOME" && exec lib/scripts/cicd.sh --platform "$1" --unit-tests --no-defer --jobs "$2"' \
+    bash -c 'mkdir -p "$HOME" && exec lib/scripts/cicd.sh --app cli --platform "$1" --unit-tests --no-defer --jobs "$2"' \
     linux-unit-tests "$target" "$JOBS"

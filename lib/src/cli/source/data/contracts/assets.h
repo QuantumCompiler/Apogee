@@ -152,8 +152,9 @@ struct BundledScript {
 /// The three drivers, in listing order.
 [[nodiscard]] std::span<const BundledScript> bundled_training_scripts();
 
-/// The MLX drivers -- the backend's `mlx_generate.py` (27a) and `models
-/// convert --mlx`'s `mlx_convert.py` (27b) -- compiled in from `assets/mlx/`,
+/// The MLX drivers -- the backend's `mlx_generate.py` (27a), `models
+/// convert --mlx`'s `mlx_convert.py` (27b) and the embedding backend's
+/// `mlx_embed.py` (53h) -- compiled in from `assets/mlx/`,
 /// byte-identical to it by test, and seeded skip-if-present beside the
 /// trainers under `training/scripts/`: they run under the same Python
 /// environment, a user's edit survives an update, and `check` shows the
@@ -165,6 +166,9 @@ struct BundledScript {
 
 /// `training/scripts/mlx_convert.py`, relative to the data directory.
 [[nodiscard]] std::string bundled_mlx_converter_relative_path();
+
+/// `training/scripts/mlx_embed.py` (53h), relative to the data directory.
+[[nodiscard]] std::string bundled_mlx_embedder_relative_path();
 
 /// The code-execution server (47b): `code_exec_server.py`, an MCP server on
 /// stdio that runs Python in a throwaway per-session directory. Compiled in
@@ -189,9 +193,19 @@ struct BundledScript {
 /// `training/scripts/video_generate.py`, relative to the data directory.
 [[nodiscard]] std::string bundled_video_driver_relative_path();
 
+/// `training/scripts/video_generate_mlx.py` (53l), the MLX engine's video
+/// driver over mlx-video's Wan generator -- one of `bundled_video_scripts`,
+/// seeded beside the PyTorch one.
+[[nodiscard]] std::string bundled_video_mlx_driver_relative_path();
+
 /// `training/scripts/voice_say.py` (50a), the speech driver -- one of
 /// `bundled_video_scripts`, seeded beside the video driver.
 [[nodiscard]] std::string bundled_voice_driver_relative_path();
+
+/// `training/scripts/voice_say_mlx.py` (53m), the MLX engine's speech driver
+/// over mlx-audio's Kokoro -- one of `bundled_video_scripts`, seeded beside
+/// the PyTorch one.
+[[nodiscard]] std::string bundled_voice_mlx_driver_relative_path();
 
 /// Every version of a seeded driver -- the trainers' and the MLX ones -- an
 /// earlier Apogee shipped and this one does not, as `<name> <sha256>` with

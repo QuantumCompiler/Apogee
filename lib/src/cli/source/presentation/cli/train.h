@@ -23,7 +23,10 @@
 ///             selected driver, live progress, a manifest
 ///   eval      the gate: substring and pairwise-judge items at 100%
 ///   promote   fuse -> convert -> verify -> register through the one config
-///             editor -> the version ledger, with retention
+///             editor -> the version ledger, with retention; with --adapter
+///             (53b) no fuse: the adapter alone, a GGUF LoRA or an mlx-lm
+///             directory, registered on the entry's adapters over its base --
+///             over a quantized base, gated there (53c)
 ///   rollback  repoint a backend at its previous version; delete nothing
 ///   versions  a backend's ledger
 ///   status    the cycle, the active pipeline, the runs, the active versions
@@ -67,10 +70,27 @@ struct SetupRequest {
     /// `auto`, `mlx`, `peft`, or empty for no trainer stack.
     std::string trainer;
     std::vector<training::RequirementSet> with;
+    /// `--python` (M19): the interpreter a new or rebuilt environment is made
+    /// from, for this run; `training.python` keeps one.
+    std::string python;
+    /// `--rebuild`: the environment replaced on a Python every set runs on,
+    /// each recorded set reinstalled -- asked first.
+    bool rebuild = false;
+    /// `--yes`: the rebuild's answer, where nobody can be asked.
+    bool yes = false;
+    /// What runs Python and pip; a test scripts it.
+    training::CommandRunner runner = training::default_command_runner();
+    /// The host's facts, detected when not given.
+    std::optional<training::HostShape> host;
 };
 
 /// Runs a setup, printing each step. Throws the CLI's user error on failure.
 void run_train_setup(const harness::Config& config, const SetupRequest& request);
+
+/// `train setup --with`'s help (M23): every requirement set, in the table's
+/// order, with what it is for and whether only this installs it -- built
+/// from the one set list, so it cannot go stale beside it.
+[[nodiscard]] std::string setup_with_help();
 
 /// The snapshot `name` resolves to: a directory path as given, else a
 /// snapshot of that name under `paths.hf_dir` or `models/`. A backend
@@ -100,6 +120,13 @@ struct StudentResolution {
 [[nodiscard]] std::filesystem::path resolve_dataset(const std::filesystem::path& datasets_dir,
                                                     std::string_view name_or_path,
                                                     std::string& error);
+
+/// The base the entry `name` serves an adapter on (53c), read with no weights
+/// loaded: a GGUF's precision from its header's `general.file_type`, an MLX
+/// directory's from its `config.json`. What `train promote --adapter` gates
+/// on when it is quantized, and what the doctor's re-promote door asks.
+[[nodiscard]] training::ServingBase serving_base(const std::string& name,
+                                                 const harness::BackendConfig& backend);
 
 /// The eval suite `--suite` (or `training.eval_suite_path`) names: a file
 /// path; else `training/suites/<name>.jsonl`; else `training/datasets/

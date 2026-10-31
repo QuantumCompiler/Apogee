@@ -1,0 +1,24 @@
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel"],"ask":true,"events":["session","thinking","thinking_delta","memory","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished"],"schema":"2026-10-13","tools":true},"model":"actor","next_turn":1,"protocol_version":1,"type":"session"}
+{"turn":1,"type":"thinking"}
+{"text":"They wan","turn":1,"type":"thinking_delta"}
+{"text":"t a note","turn":1,"type":"thinking_delta"}
+{"text":" written","turn":1,"type":"thinking_delta"}
+{"text":". I shou","turn":1,"type":"thinking_delta"}
+{"text":"ld ask w","turn":1,"type":"thinking_delta"}
+{"text":"hat to c","turn":1,"type":"thinking_delta"}
+{"text":"all it.","turn":1,"type":"thinking_delta"}
+{"questions":[{"header":"Name","multi_select":false,"options":[{"description":"A to-do list","label":"todo.md"},{"description":"Loose ideas","label":"ideas.md"}],"question":"What should the note be called?"}],"turn":1,"type":"question"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"thinking"}
+{"kind":"permission","questions":[{"header":"Permission","multi_select":false,"options":[{"description":"Allow this once","label":"yes"},{"description":"Deny","label":"no"},{"description":"Allow, and remember it in the config","label":"always"},{"description":"Allow for the rest of this session","label":"session"}],"question":"Allow write_file on todo.md?"}],"target":"todo.md","tool":"write_file","turn":1,"type":"question"}
+{"text":"[tool] write_file","turn":1,"type":"tool_status"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"answer_start"}
+{"text":"I wrote ","turn":1,"type":"answer_delta"}
+{"text":"todo.md ","turn":1,"type":"answer_delta"}
+{"text":"with one","turn":1,"type":"answer_delta"}
+{"text":" item: b","turn":1,"type":"answer_delta"}
+{"text":"uy milk.","turn":1,"type":"answer_delta"}
+{"turn":1,"type":"answer_end"}
+{"finish_reason":"stop","model":"actor","text":"I wrote todo.md with one item: buy milk.","turn":1,"type":"result"}

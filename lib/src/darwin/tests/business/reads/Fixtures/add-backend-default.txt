@@ -1,0 +1,2 @@
+added backend 'Qwen3-8B-4bit' to /Users/someone/.apogee/config/config.json
+models.default set to 'Qwen3-8B-4bit' (none was set)

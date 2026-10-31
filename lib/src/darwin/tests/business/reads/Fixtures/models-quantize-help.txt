@@ -1,0 +1,12 @@
+Make a smaller copy of a GGUF
+Usage: apogee models quantize [OPTIONS] [model]
+
+Positionals:
+  model GGUF                  A model (its newest unquantized GGUF), <model>/gguf/<id>, or a .gguf file
+
+Options:
+  -h,--help                   Print this help message and exit
+  -t,--type TEXT:{Q2_K,Q3_K_M,Q4_K_M,Q5_K_M,Q6_K,Q8_0,F16}
+                              Quantization type (default Q4_K_M)
+  --from GGUF_ID              Which of the model's GGUFs, by id
+  --types                     List the accepted quantization types and exit

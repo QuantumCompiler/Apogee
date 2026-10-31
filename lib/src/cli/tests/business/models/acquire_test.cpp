@@ -7,6 +7,7 @@
 #include <functional>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <random>
 #include <set>
 #include <string>
@@ -15,7 +16,10 @@
 
 #include "contracts/sha256.h"
 #include "modelstore/sidecar.h"
+#include "modelstore/snapshot.h"
+#include "modelstore/store.h"
 #include "support/gguf_builder.h"
+#include "support/wan_original.h"
 
 /// The acquisition ladder, and the promise that nothing partial ever lands.
 ///
@@ -499,4 +503,105 @@ TEST_CASE("a tree download keeps every file it was given, byte for byte",
         CHECK(bytes == payload);
     }
     CHECK(present == expected);
+}
+
+TEST_CASE(
+    "a set is completed from its record's gaps in place: each file verified, recorded as it "
+    "lands, the set never moved",
+    "[models][acquire][tree][wan]") {
+    // 53j: the user's Wan set, pulled before the pull took its root
+    // checkpoints, completed by pulling it again.
+    Scratch scratch;
+    const apogee::models::StoreRoots roots = apogee::models::StoreRoots::at(scratch.root);
+    const std::filesystem::path dir = apogee::testing::write_user_wan_set(roots);
+    const std::string vae{apogee::testing::kWanVae};
+    const std::string encoder{apogee::testing::kWanTextEncoder};
+    const auto item = [](const std::string& relative, std::string served) {
+        const std::string bytes = apogee::testing::wan_bytes(relative);
+        apogee::models::TreeItem out;
+        out.relative = relative;
+        out.promise.ref = "Wan-AI/Wan2.2-TI2V-5B:" + relative;
+        out.promise.source = "huggingface";
+        out.promise.size = static_cast<std::int64_t>(bytes.size());
+        out.promise.digest = apogee::models::sha256_hex(bytes);
+        out.source = bytes_source(std::move(served));
+        return out;
+    };
+    const auto read = [](const std::filesystem::path& path) {
+        std::ifstream in{path, std::ios::binary};
+        return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    };
+    const auto leftovers = [&dir] {
+        std::size_t count = 0;
+        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            const std::string name = entry.path().filename().string();
+            count += name.ends_with(".pull") || name.ends_with(".partial") ? 1U : 0U;
+        }
+        return count;
+    };
+
+    // Refused before a byte moves: a file already on record, a shard (the
+    // id is the shards' hash), a path out of the set.
+    for (const std::string& refused : {std::string{"config.json"}, std::string{"extra.safetensors"},
+                                       std::string{"../out.pth"}}) {
+        INFO(refused);
+        const apogee::models::AcquireTreeResult result =
+            apogee::models::complete_snapshot(dir, {item(refused, "x")});
+        CHECK_FALSE(result.ok);
+        CHECK(result.files == 0);
+    }
+    CHECK(apogee::models::load_snapshot(dir)->files.size() == 10);
+
+    // A checkpoint that is not what was published never lands; what landed
+    // before it stays, on the record.
+    const apogee::models::AcquireTreeResult failed = apogee::models::complete_snapshot(
+        dir, {item(vae, apogee::testing::wan_bytes(vae)), item(encoder, "tampered")});
+    CHECK_FALSE(failed.ok);
+    CHECK(failed.error.starts_with(encoder + ": size mismatch"));
+    CHECK(failed.files == 1);
+    CHECK(read(dir / vae) == apogee::testing::wan_bytes(vae));
+    CHECK_FALSE(std::filesystem::exists(dir / encoder));
+    CHECK(leftovers() == 0);
+    std::optional<apogee::models::Snapshot> record = apogee::models::load_snapshot(dir);
+    REQUIRE(record.has_value());
+    REQUIRE(record->files.size() == 11);
+    CHECK(record->files.back().path == vae);
+
+    // A file of unknown provenance where one goes is replaced by the verified
+    // copy, and the set is whole -- its record the user's ten and the two, its
+    // id what its shards' hash always named.
+    apogee::testing::write_fixture_file(dir / encoder, "left by hand");
+    const apogee::models::AcquireTreeResult done = apogee::models::complete_snapshot(
+        dir, {item(encoder, apogee::testing::wan_bytes(encoder))});
+    INFO(done.error);
+    REQUIRE(done.ok);
+    CHECK(done.files == 1);
+    CHECK(done.sidecars.front().verification.digest_matched);
+    CHECK(read(dir / encoder) == apogee::testing::wan_bytes(encoder));
+    CHECK(leftovers() == 0);
+    record = apogee::models::load_snapshot(dir);
+    REQUIRE(record.has_value());
+    REQUIRE(record->files.size() == 12);
+    const apogee::models::Snapshot user = apogee::testing::wan_record();
+    for (std::size_t i = 0; i < user.files.size(); ++i) {
+        CHECK(record->files[i].path == user.files[i].path);
+        CHECK(record->files[i].size == user.files[i].size);
+        CHECK(record->files[i].sha256 == user.files[i].sha256);
+    }
+    CHECK(record->files.back().sha256 ==
+          apogee::models::sha256_hex(apogee::testing::wan_bytes(encoder)));
+    CHECK(record->ref == user.ref);
+    CHECK(record->pulled_at == user.pulled_at);
+    CHECK(apogee::models::snapshot_weight_id(record->files) == dir.filename().string());
+    CHECK(apogee::models::find_snapshot_damage(dir).empty());
+    CHECK(apogee::models::snapshot_wan_layout(dir)->whole());
+
+    // A set with no record has nothing to complete.
+    const std::filesystem::path bare = scratch.root / "bare";
+    std::filesystem::create_directories(bare);
+    const apogee::models::AcquireTreeResult unrecorded =
+        apogee::models::complete_snapshot(bare, {item(vae, apogee::testing::wan_bytes(vae))});
+    CHECK_FALSE(unrecorded.ok);
+    CHECK(unrecorded.error.find("no record to complete") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(bare / vae));
 }

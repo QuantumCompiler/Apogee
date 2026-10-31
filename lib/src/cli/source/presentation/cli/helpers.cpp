@@ -90,6 +90,55 @@ std::string known_suites(const harness::Config& config) {
     return out.empty() ? "none is configured -- 'apogee config add-suite'" : "configured: " + out;
 }
 
+std::string named_backend_refusal(const harness::Config& config, const backends::BuildResult& built,
+                                  std::string_view name) {
+    if (name.empty()) {
+        return {};
+    }
+    const std::string key = configured_backend_key(config, name);
+    if (key.empty()) {
+        std::string known;
+        for (const std::string& backend : config.backend_names()) {
+            known += (known.empty() ? "" : ", ") + backend;
+        }
+        return "no backend named '" + std::string{name} + "'" +
+               (known.empty() ? std::string{} : " (configured: " + known + ")");
+    }
+    const auto skipped =
+        std::ranges::find_if(built.statuses, [&key](const backends::BackendStatus& status) {
+            return status.name == key && !status.constructed;
+        });
+    if (skipped == built.statuses.end()) {
+        return {};
+    }
+    // The provider's own words open with `<name>: `; the refusal has named
+    // the backend already, so they follow it once (M26).
+    const std::string prefix = key + ": ";
+    const std::string reason = skipped->reason.starts_with(prefix)
+                                   ? skipped->reason.substr(prefix.size())
+                                   : skipped->reason;
+    std::vector<std::string> started;
+    for (const backends::BackendStatus& status : built.statuses) {
+        if (status.constructed) {
+            started.push_back(status.name);
+        }
+    }
+    std::ranges::sort(started);
+    std::string message = "backend '" + key + "'";
+    if (name != key) {
+        message += " (for '" + std::string{name} + "')";
+    }
+    message += " is configured but could not be started: " + reason;
+    if (started.empty()) {
+        return message + " (no backend started; 'apogee check' says why)";
+    }
+    std::string list;
+    for (const std::string& backend : started) {
+        list += (list.empty() ? "" : ", ") + backend;
+    }
+    return message + " (started backends: " + list + ")";
+}
+
 std::string select_suite(harness::Config& config, std::string_view suite) {
     if (suite == harness::kSuiteOff) {
         config.models.default_suite.clear();
@@ -417,7 +466,8 @@ std::string media_refusal_message(const std::string& model, harness::Medium medi
         case harness::Medium::Audio:
             return "backend '" + model + "' cannot hear audio, " +
                    role("transcription", "set-default-transcription") +
-                   ", a local model whose mmproj has an audio encoder";
+                   ", a local model whose mmproj has an audio encoder, or an mlx backend over an "
+                   "omni model mlx-vlm built, with mlx-vlm installed";
         case harness::Medium::Video:
             return "backend '" + model + "' cannot read a video's frames or hear its sound, " +
                    role("vision", "set-default-vision") + local;

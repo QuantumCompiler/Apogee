@@ -6,6 +6,7 @@
 #include <ostream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "agentloop/reporter.h"
 #include "ansi/ansi.h"
@@ -81,7 +82,9 @@ public:
     void set_resting_label(std::string label);
 
     /// `[memory] 2 past chats, 1 decision`, a line that stays (26l).
-    void on_recall(int chats, int decisions) override;
+    void on_recall(const std::vector<agentloop::RecalledChat>& chats, int decisions) override;
+    /// Under `--verbose` only, as `on_progress` is (52a).
+    void on_sources(const std::vector<harness::ExcerptSource>& sources) override;
     /// The todo (41d): a dim block, kept, each time the list changes.
     void on_todo(const harness::TodoList& todo) override;
     /// `· <role> — <what it is doing>` inside the thinking block, completed

@@ -22,6 +22,7 @@ include(Catch)
 add_library(apogee_tests_infrastructure OBJECT
     infrastructure/platform/platform_test.cpp
     infrastructure/platform/pid_lock_test.cpp
+    infrastructure/platform/file_lock_test.cpp
     infrastructure/platform/child_process_test.cpp
     infrastructure/platform/ffmpeg_test.cpp
     infrastructure/platform/ffmpeg_assembly_test.cpp
@@ -42,6 +43,8 @@ add_library(apogee_tests_infrastructure OBJECT
     support/terminal_model.h
     support/terminal_model.cpp
     support/embedding_fixtures.h
+    support/towered_configs.h
+    support/draft_head_configs.h
     support/text_edits.h
     support/hermetic_stdin.cpp
     support/hermetic_home.cpp
@@ -58,12 +61,14 @@ add_library(apogee_tests_data OBJECT
     data/contracts/symphony_walk_test.cpp
     data/contracts/host_test.cpp
     data/contracts/server_tools_test.cpp
+    data/contracts/config_adapters_test.cpp
     data/contracts/review_skill_test.cpp
     data/contracts/review_targets_test.cpp
     data/contracts/utf8_test.cpp
     data/contracts/captions_test.cpp
     data/contracts/video_project_test.cpp
     data/contracts/todo_test.cpp
+    data/contracts/text_diff_test.cpp
     data/contracts/paths_test.cpp
     data/contracts/types_test.cpp
     support/channel_guard.h
@@ -82,6 +87,9 @@ add_library(apogee_tests_data OBJECT
     data/backends/llamacpp_embed_test.cpp
     data/backends/llamacpp_test.cpp
     data/backends/llamacpp_prompt_cache_test.cpp
+    data/backends/llamacpp_adapters_test.cpp
+    data/backends/llama_bases_test.cpp
+    data/backends/adapters_test.cpp
     data/backends/prompt_cache_test.cpp
     data/backends/sampling_test.cpp
     data/backends/claude_cli_events_test.cpp
@@ -92,6 +100,8 @@ add_library(apogee_tests_data OBJECT
     data/backends/mlx_protocol_test.cpp
     data/backends/mlx_local_test.cpp
     data/backends/mlx_driver_test.cpp
+    data/backends/mlx_embed_test.cpp
+    data/backends/mlx_embed_driver_test.cpp
     data/modelstore/gguf_inspect_test.cpp
     data/modelstore/kv_cache_test.cpp
     data/modelstore/footprint_test.cpp
@@ -132,6 +142,7 @@ add_library(apogee_tests_data OBJECT
     support/fake_llama.h
     support/fake_transport.cpp
     support/media_fakes.h
+    support/wan_original.h
 )
 target_link_libraries(apogee_tests_data PRIVATE apogee_data apogee_infrastructure Catch2::Catch2)
 
@@ -201,8 +212,10 @@ add_library(apogee_tests_business OBJECT
     business/video/runtime_test.cpp
     business/video/generation_test.cpp
     business/video/video_driver_test.cpp
+    business/video/video_mlx_driver_test.cpp
     business/video/voice_test.cpp
     business/video/voice_driver_test.cpp
+    business/video/voice_mlx_driver_test.cpp
     business/video/compose_test.cpp
     business/scaffold/mcp_server_test.cpp
     business/scaffold/agent_test.cpp
@@ -268,6 +281,7 @@ target_link_libraries(apogee_tests_business PRIVATE apogee_business apogee_data
 add_library(apogee_tests_presentation OBJECT
     presentation/cli/registry_test.cpp
     presentation/cli/provider_offer_test.cpp
+    presentation/cli/providers_cmd_test.cpp
     presentation/cli/read_documents_test.cpp
     presentation/cli/mcp_presets_cmd_test.cpp
     presentation/cli/review_cmd_test.cpp
@@ -286,11 +300,13 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/tui_workbench_test.cpp
     presentation/cli/root_test.cpp
     presentation/cli/models_pull_test.cpp
+    presentation/cli/models_pull_cancel_test.cpp
     presentation/cli/models_migrate_test.cpp
     presentation/cli/models_convert_test.cpp
     presentation/cli/models_mlx_test.cpp
     presentation/cli/models_pipeline_test.cpp
     presentation/cli/models_voice_test.cpp
+    presentation/cli/models_wan_test.cpp
     presentation/cli/video_runtime_test.cpp
     presentation/cli/video_generate_test.cpp
     presentation/cli/video_cmd_test.cpp
@@ -298,6 +314,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/video_compose_test.cpp
     presentation/cli/bootstrap_cmd_test.cpp
     presentation/cli/model_chain_test.cpp
+    presentation/cli/job_stream_test.cpp
     presentation/cli/complete_sources_test.cpp
     presentation/cli/models_test.cpp
     presentation/cli/suite_residency_test.cpp
@@ -324,6 +341,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/markdown/stream_renderer_test.cpp
     presentation/markdown/corpus_test.cpp
     presentation/cli/chat_test.cpp
+    presentation/cli/chat_history_test.cpp
     presentation/cli/check_test.cpp
     presentation/cli/lifecycle_test.cpp
     presentation/cli/reset_test.cpp
@@ -333,6 +351,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/attachment_graph_test.cpp
     presentation/operations/graph_sources_test.cpp
     presentation/operations/renames_test.cpp
+    presentation/operations/store_references_test.cpp
     presentation/operations/backend_fields_test.cpp
     presentation/operations/mcp_presets_test.cpp
     presentation/cli/chat_completer_test.cpp
@@ -372,6 +391,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/httpserver/admin_suites_test.cpp
     presentation/cli/datasets_test.cpp
     presentation/cli/train_test.cpp
+    presentation/cli/train_stream_test.cpp
     presentation/cli/task_test.cpp
     presentation/cli/symphonies_test.cpp
     presentation/httpserver/admin_datasets_test.cpp
@@ -491,7 +511,7 @@ add_test(NAME harness.layering
 add_test(NAME harness.layer_context
     COMMAND "${CMAKE_COMMAND}"
         -DAPOGEE_CLI_DIR=${CMAKE_SOURCE_DIR}
-        -DAPOGEE_ADR_DIR=${CMAKE_SOURCE_DIR}/../../documentation/adrs/cli
+        -DAPOGEE_ADR_DIR=${CMAKE_SOURCE_DIR}/../../documentation/cli/adrs
         -DAPOGEE_MODULE_MAP=${CMAKE_SOURCE_DIR}/cmake/modules.cmake
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/layer_context.cmake"
 )
@@ -610,7 +630,7 @@ set_tests_properties(cli.serve_help PROPERTIES PASS_REGULAR_EXPRESSION "allow-re
 add_test(NAME cli.http_api_conformance
     COMMAND "${CMAKE_COMMAND}"
         -DMUX_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/../source/presentation/httpserver/mux.cpp
-        -DAPI_DOC=${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/reference/http-api.md
+        -DAPI_DOC=${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/cli/reference/http-api.md
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/http_api_conformance.cmake"
 )
 
@@ -846,7 +866,9 @@ if(UNIX)
     # MLX model operations (27b) on the real binary: `models convert --mlx`
     # through the seeded driver under the stub mlx packages -- the set landed
     # by its hash, listed and checked, a REAL Ctrl-C mid-conversion leaving the
-    # store as it was, and the set deleted whole. Apple silicon only.
+    # store as it was, and the set deleted whole -- and since 53m a stored
+    # Kokoro converted through the stub mlx-audio, recorded `voice`. Apple
+    # silicon only.
     add_test(NAME cli.mlx_models_lifecycle
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/mlx_models_e2e.sh"
             $<TARGET_FILE:apogee>
@@ -913,15 +935,24 @@ if(UNIX)
     # print on neither stream, the loop (49d: a draft, its final over the
     # same seed, a continuation, a clip with no record refused), `voice
     # say` (50a: one WAV, its sentences timed, no listener while the speech
-    # driver runs, Ctrl-C), and a missing runtime refused on a pipe.
+    # driver runs, Ctrl-C), and a missing runtime refused on a pipe; and
+    # since 53l, on Apple silicon, the same generation on MLX -- the seeded
+    # MLX driver over the stub mlx-video, its record's engine, an engine the
+    # model does not run on refused, --from replaying MLX, no socket in the
+    # MLX driver's tree, Ctrl-C, mlx-video missing refused; and since 53m
+    # `voice say` on MLX -- the seeded MLX speech driver over the stub
+    # mlx-audio, its record's engine, its timings the WAV's, an engine the
+    # model does not speak on refused, no socket in its tree, Ctrl-C, a
+    # composition narrated on MLX, mlx-audio missing refused.
     # Skips (77) without python3.
     add_test(NAME cli.video_lifecycle
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/video_e2e.sh"
             $<TARGET_FILE:apogee>
             ${CMAKE_CURRENT_BINARY_DIR}/video-e2e
             ${CMAKE_CURRENT_SOURCE_DIR}/business/video/scripts
+            ${CMAKE_CURRENT_SOURCE_DIR}/data/backends/scripts
     )
-    set_tests_properties(cli.video_lifecycle PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+    set_tests_properties(cli.video_lifecycle PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77)
 
     # `analyze` on the real binary: the bundled agents on the mock backend
     # against a fixture repository -- a ref reviewed without being checked out,
@@ -1170,7 +1201,7 @@ if(UNIX)
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/schema_conformance.py"
                 "${CMAKE_CURRENT_SOURCE_DIR}/../source/presentation/machine/json_reporter.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/reference/machine-mode.md"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/cli/reference/machine-mode.md"
                 # The schema this build prints (28g), held to both.
                 $<TARGET_FILE:apogee>
         )

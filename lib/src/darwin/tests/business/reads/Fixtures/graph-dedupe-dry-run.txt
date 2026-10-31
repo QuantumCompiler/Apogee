@@ -1,0 +1,2 @@
+Code entities: 9 -- merged by exact qualified name as they were built (0 stated at more than one place, one node each); never by resemblance.
+Prose entities: vector dedupe skipped -- no prose entities -- nothing to compare by vector; nothing to merge.

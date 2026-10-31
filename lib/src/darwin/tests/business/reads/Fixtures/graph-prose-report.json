@@ -1,0 +1,276 @@
+{
+ "communities": {
+  "shown": [
+   {
+    "id": 1,
+    "members": [
+     {
+      "name": "Compressor",
+      "type": "component"
+     },
+     {
+      "name": "Heat pump",
+      "type": "system"
+     },
+     {
+      "name": "Outdoor unit",
+      "type": "component"
+     }
+    ],
+    "size": 3,
+    "summary": "The heat pump, its compressor and its outdoor unit: one machine moving heat indoors."
+   }
+  ],
+  "total": 1,
+  "unsummarised": 0
+ },
+ "decisions": {
+  "shown": [
+   {
+    "decision": "Explain the outdoor unit in the heat pump guide. \u2014 Customers kept asking why the outdoor unit runs in winter.",
+    "node": {
+     "discipline": "product",
+     "name": "kr-20261021T050657Z-c74d1a",
+     "status": "shipped",
+     "type": "decision"
+    },
+    "relations": [
+     {
+      "direction": "out",
+      "neighbors": [
+       {
+        "name": "Compressor",
+        "origin": "inferred",
+        "type": "component",
+        "weight": 1
+       },
+       {
+        "name": "Heat pump",
+        "origin": "inferred",
+        "type": "system",
+        "weight": 1
+       },
+       {
+        "name": "Outdoor unit",
+        "origin": "inferred",
+        "type": "component",
+        "weight": 1
+       }
+      ],
+      "relation": "concerns",
+      "total": 3
+     }
+    ]
+   }
+  ],
+  "total": 1
+ },
+ "graph": "notes",
+ "hubs": {
+  "metric": "degree",
+  "ranked": 4,
+  "shown": [
+   {
+    "degree": {
+     "in": 1,
+     "out": 2,
+     "total": 3
+    },
+    "mentions": 4,
+    "node": {
+     "name": "Heat pump",
+     "type": "system"
+    },
+    "relations": [
+     {
+      "direction": "in",
+      "neighbors": [
+       {
+        "discipline": "product",
+        "name": "kr-20261021T050657Z-c74d1a",
+        "origin": "inferred",
+        "status": "shipped",
+        "type": "decision",
+        "weight": 1
+       }
+      ],
+      "relation": "concerns",
+      "total": 1
+     },
+     {
+      "direction": "out",
+      "neighbors": [
+       {
+        "description": "the compressor drives the cycle",
+        "name": "Compressor",
+        "origin": "inferred",
+        "type": "component",
+        "weight": 4
+       },
+       {
+        "description": "the outdoor unit gathers heat",
+        "name": "Outdoor unit",
+        "origin": "inferred",
+        "type": "component",
+        "weight": 4
+       }
+      ],
+      "relation": "contains",
+      "total": 2
+     }
+    ]
+   },
+   {
+    "degree": {
+     "in": 0,
+     "out": 3,
+     "total": 3
+    },
+    "mentions": 1,
+    "node": {
+     "discipline": "product",
+     "name": "kr-20261021T050657Z-c74d1a",
+     "status": "shipped",
+     "type": "decision"
+    },
+    "relations": [
+     {
+      "direction": "out",
+      "neighbors": [
+       {
+        "name": "Compressor",
+        "origin": "inferred",
+        "type": "component",
+        "weight": 1
+       },
+       {
+        "name": "Heat pump",
+        "origin": "inferred",
+        "type": "system",
+        "weight": 1
+       },
+       {
+        "name": "Outdoor unit",
+        "origin": "inferred",
+        "type": "component",
+        "weight": 1
+       }
+      ],
+      "relation": "concerns",
+      "total": 3
+     }
+    ]
+   },
+   {
+    "degree": {
+     "in": 2,
+     "out": 0,
+     "total": 2
+    },
+    "mentions": 4,
+    "node": {
+     "name": "Compressor",
+     "type": "component"
+    },
+    "relations": [
+     {
+      "direction": "in",
+      "neighbors": [
+       {
+        "discipline": "product",
+        "name": "kr-20261021T050657Z-c74d1a",
+        "origin": "inferred",
+        "status": "shipped",
+        "type": "decision",
+        "weight": 1
+       }
+      ],
+      "relation": "concerns",
+      "total": 1
+     },
+     {
+      "direction": "in",
+      "neighbors": [
+       {
+        "description": "the compressor drives the cycle",
+        "name": "Heat pump",
+        "origin": "inferred",
+        "type": "system",
+        "weight": 4
+       }
+      ],
+      "relation": "contains",
+      "total": 1
+     }
+    ]
+   },
+   {
+    "degree": {
+     "in": 2,
+     "out": 0,
+     "total": 2
+    },
+    "mentions": 4,
+    "node": {
+     "name": "Outdoor unit",
+     "type": "component"
+    },
+    "relations": [
+     {
+      "direction": "in",
+      "neighbors": [
+       {
+        "discipline": "product",
+        "name": "kr-20261021T050657Z-c74d1a",
+        "origin": "inferred",
+        "status": "shipped",
+        "type": "decision",
+        "weight": 1
+       }
+      ],
+      "relation": "concerns",
+      "total": 1
+     },
+     {
+      "direction": "in",
+      "neighbors": [
+       {
+        "description": "the outdoor unit gathers heat",
+        "name": "Heat pump",
+        "origin": "inferred",
+        "type": "system",
+        "weight": 4
+       }
+      ],
+      "relation": "contains",
+      "total": 1
+     }
+    ]
+   }
+  ]
+ },
+ "human_summary": "Graph \"notes\" holds 4 entities and 5 relations. Every relation was asserted by a model. Its busiest entity is Heat pump (system), with 3 relations. 1 community is stored; 1 has a summary. 1 decision record is attached.",
+ "object": "graph.report",
+ "origin": {
+  "extracted": 0,
+  "inferred": 5,
+  "relations": 5
+ },
+ "orphans": {
+  "shown": [],
+  "total": 0
+ },
+ "overview": {
+  "by_type": {
+   "component": 2,
+   "decision": 1,
+   "system": 1
+  },
+  "entities": 4,
+  "members": [
+   ""
+  ],
+  "relations": 5,
+  "unresolved_names": 0
+ }
+}

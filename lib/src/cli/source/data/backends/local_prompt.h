@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include "contracts/types.h"
@@ -38,5 +40,12 @@ namespace apogee::backends {
 /// prompt. The Anthropic and Google wires join theirs the same way.
 [[nodiscard]] std::vector<harness::ChatMessage> prompt_messages(const harness::ChatRequest& request,
                                                                 bool state_schema);
+
+/// A media part's bytes, out of the base64 the IR carries them in: skipping
+/// whitespace, which a data: URI may hold, and stopping at padding. Moved
+/// here from `llamacpp.cpp` when the MLX backend began writing a recording's
+/// WAV for its driver (53g), the second reader of an audio part's bytes --
+/// llama.cpp's hands them to mtmd.
+[[nodiscard]] std::string decode_base64(std::string_view encoded);
 
 }  // namespace apogee::backends

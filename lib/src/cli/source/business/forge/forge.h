@@ -97,13 +97,13 @@ struct MergeRequest {
 
 /// One inline comment on the new side of the diff.
 struct InlineComment {
-    std::string path;
+    std::string path{};
     /// The line on the new side.
     std::uint32_t line = 0;
-    std::string body;
+    std::string body{};
     /// The same line on the old side, for a line the change did not touch:
     /// GitLab anchors an unchanged line by both. Unset for an added line.
-    std::optional<std::uint32_t> old_line;
+    std::optional<std::uint32_t> old_line{};
 
     [[nodiscard]] bool operator==(const InlineComment&) const = default;
 };

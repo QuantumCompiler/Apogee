@@ -1,0 +1,2 @@
+apogee train: pip install for the 'voice' set failed (exit code 1):
+ERROR: Could not install packages: this sandbox's pip is a stub with no network

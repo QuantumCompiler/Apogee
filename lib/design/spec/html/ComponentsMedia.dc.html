@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Apogee components · making media</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:inherit}
+.t-dark{--surface-window:#131415;--surface-sidebar:#0E0F10;--surface-inspector:#161719;--surface-card:#18191B;--surface-control:#222326;--surface-selection:#25282B;--surface-code:#0F1011;--line-border:#2A2C2F;--line-strong:#3B3E42;--text-primary:#E7E5E0;--text-secondary:#ABA8A0;--text-tertiary:#938F86;--status-accent:#7FD4C1;--status-warning:#E9A23B;--status-error:#F2836F;--model-local:#7FD4C1;--model-api:#E9A23B;--model-subscription:#A7B1F8;--code-keyword:#C3A6F0;--code-string:#A5D68E;--code-comment:#8C887F;--code-number:#E5B567;--code-function:#8EC3F0;--media-caption:#FFFFFF;--media-caption-fill:#000000;color-scheme:dark}
+.t-light{--surface-window:#F7F7F5;--surface-sidebar:#EEEEEA;--surface-inspector:#F1F1EE;--surface-card:#FFFFFF;--surface-control:#ECECE8;--surface-selection:#E1E4E1;--surface-code:#F3F3F0;--line-border:#DDDDD7;--line-strong:#C6C6BF;--text-primary:#1B1C1D;--text-secondary:#4B4C4E;--text-tertiary:#5F6062;--status-accent:#0B7A68;--status-warning:#9F5600;--status-error:#B3261E;--model-local:#0B7A68;--model-api:#9F5600;--model-subscription:#4450C4;--code-keyword:#7A3FC0;--code-string:#2F7A1F;--code-comment:#67686A;--code-number:#8F5A00;--code-function:#1F5FA8;--media-caption:#FFFFFF;--media-caption-fill:#000000;color-scheme:light}
+.t-contrast{--surface-window:#000000;--surface-sidebar:#0A0A0A;--surface-inspector:#0A0A0A;--surface-card:#111111;--surface-control:#1E1E1E;--surface-selection:#2A2A2A;--surface-code:#0A0A0A;--line-border:#5A5A5A;--line-strong:#8A8A8A;--text-primary:#FFFFFF;--text-secondary:#D6D6D6;--text-tertiary:#B5B5B5;--status-accent:#5EF0D2;--status-warning:#FFC04D;--status-error:#FF8A7A;--model-local:#5EF0D2;--model-api:#FFC04D;--model-subscription:#B9C2FF;--code-keyword:#D8B9FF;--code-string:#B8F0A0;--code-comment:#B5B5B5;--code-number:#FFC04D;--code-function:#9ED4FF;--media-caption:#FFE14D;--media-caption-fill:#000000;color-scheme:dark}
+.ap{--t-display:24px;--t-h1:19px;--t-h2:16px;--t-h3:14px;--t-title:13.5px;--t-prose:14px;--t-body:13px;--t-dense:12.5px;--t-small:12px;--t-code:12px;--t-ui:11.5px;--t-meta:11px;--t-label:10.5px;--t-tag:9.5px;--font-ui:'IBM Plex Sans',system-ui,sans-serif;--font-mono:'IBM Plex Mono',ui-monospace,Menlo,monospace}
+.ap .i{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
+.ap .mono{font-family:var(--font-mono)}
+.ap button,.ap input{font-family:inherit}
+.ap button{cursor:pointer}
+.ap button:focus-visible,.ap input:focus-visible{outline:2px solid var(--status-accent);outline-offset:1px}
+.ap .sec{margin-top:48px;padding-top:40px;border-top:1px solid var(--line-border)}
+.ap .lbl{margin:0 0 10px;font-family:var(--font-mono);font-size:10.5px;letter-spacing:.08em;color:var(--text-tertiary)}
+.ap .cap{margin:10px 0 0;font-size:12px;color:var(--text-tertiary)}
+.ap .card{border:1px solid var(--line-border);border-radius:8px;background:var(--surface-card)}
+.ap .seg{display:flex;height:30px;padding:2px;box-sizing:border-box;border:1px solid var(--line-strong);border-radius:7px;background:var(--surface-card)}
+.ap .seg>button{padding:0 12px;border:0;border-radius:5px;font-size:var(--t-dense)}
+.ap .ib{width:30px;height:30px;display:grid;place-items:center;padding:0;border:0;border-radius:6px;background:transparent;color:var(--text-secondary)}
+.ap .inp{height:28px;box-sizing:border-box;padding:0 8px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-card);color:var(--text-primary);font-size:var(--t-dense)}
+.ap .btn-p{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border:0;border-radius:6px;background:var(--text-primary);color:var(--surface-window);font-size:var(--t-dense);font-weight:600}
+.ap .btn-g{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border:1px solid var(--line-strong);border-radius:6px;background:transparent;color:var(--text-primary);font-size:var(--t-dense)}
+.ap .k{color:var(--text-tertiary)}
+.ap .lk{padding:0;border:0;background:transparent;color:var(--status-accent);font-size:var(--t-ui);text-align:left;text-decoration:underline;text-decoration-color:var(--line-strong);text-underline-offset:3px}
+.ap .step{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 0}
+.ap .step .ico{display:grid;place-items:center;width:16px;height:16px}
+.ap .step .det{font-size:var(--t-meta);color:var(--text-tertiary);text-align:right}
+.ap .bar{height:4px;margin-top:6px;border-radius:2px;background:var(--line-border);overflow:hidden}.ap .bar>div{height:100%}
+.ap .crow{display:flex;flex-direction:column;gap:3px;padding:9px 12px;margin-bottom:4px;border-radius:7px}
+.ap .crow .ln{display:flex;align-items:center;gap:8px;min-width:0}
+.ap .crow .nm{flex:1 1 auto;min-width:0;font-size:var(--t-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap .crow .tag{flex:0 0 auto;padding:0 5px;border-radius:3px;background:var(--surface-control);font-size:var(--t-tag);letter-spacing:.06em;color:var(--text-secondary)}
+.ap .crow .pr{font-size:var(--t-small);color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap .crow .mt{font-size:var(--t-meta);color:var(--text-tertiary)}
+.ap .lin{display:grid;grid-template-columns:14px minmax(0,1fr);column-gap:10px}
+.ap .lin .rail{display:flex;flex-direction:column;align-items:center}
+.ap .lin .dot{width:9px;height:9px;margin-top:4px;box-sizing:border-box;border-radius:50%;border:1.5px solid var(--text-tertiary)}
+.ap .lin .ln2{flex:1 1 auto;width:1px;min-height:14px;background:var(--line-strong)}
+.ap .lin .body{padding-bottom:12px;min-width:0}
+.ap .lin .how{font-size:var(--t-small);color:var(--text-secondary)}
+.ap .trk{font-size:var(--t-meta);color:var(--text-tertiary)}
+.ap .blk{position:absolute;top:0;bottom:0;box-sizing:border-box;padding:0 6px;border:1px solid var(--line-strong);border-radius:4px;background:var(--surface-control);font-family:var(--font-mono);font-size:var(--t-meta);line-height:32px}
+.ap .nar{position:absolute;top:2px;bottom:2px;border-radius:3px;background:var(--text-tertiary)}
+.ap .cue{position:absolute;top:4px;bottom:4px;box-sizing:border-box;border:1px solid var(--text-tertiary);border-radius:2px}
+.ap .duck{position:absolute;top:5px;height:4px;background:var(--line-border)}
+.ap .scn{display:grid;grid-template-columns:26px minmax(0,1fr) auto;gap:4px 12px;padding:12px 0;border-top:1px solid var(--line-border)}
+.ap .scn .shows{margin-top:3px;font-size:var(--t-small);color:var(--text-secondary)}
+.ap .scn .facts{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:6px;font-size:var(--t-meta);color:var(--text-tertiary)}
+.ap .scn .side{display:flex;flex-direction:column;align-items:flex-end;gap:6px;font-size:var(--t-small);color:var(--text-secondary)}
+.ap .scn label{display:inline-flex;align-items:center;gap:6px}
+.ap .dl{display:grid;grid-template-columns:22px minmax(0,1fr);gap:6px;font-size:var(--t-ui)}
+.ap .vc{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border:1px solid var(--line-border);border-radius:6px;background:transparent;color:var(--text-primary);font-size:var(--t-ui)}
+.ap .srow{display:grid;grid-template-columns:28px minmax(0,1fr) 64px 64px;gap:10px;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--line-border);font-size:var(--t-body)}
+.ap .srow .mono{font-size:var(--t-ui);color:var(--text-secondary)}.ap .srow>span:nth-child(3),.ap .srow>span:nth-child(4){text-align:right}
+@keyframes ap-pulse{50%{opacity:.3}}
+.ap .pulse{animation:ap-pulse 1.4s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){.ap .pulse{animation:none}}
+@media (max-width:760px){.ap .ap-page{padding:24px 16px!important}}
+</style>
+</helmet>
+<div class="{{themeClass}}" style="min-height: 3000px; background: var(--surface-window); color: var(--text-primary); font-family: var(--font-ui); font-size: var(--t-body); line-height: 1.5; -webkit-font-smoothing: antialiased">
+<div class="ap-page" style="max-width: 1440px; box-sizing: border-box; margin: 0 auto; padding: 48px 48px 64px">
+
+<header style="max-width: 860px">
+<div class="mono" style="font-size: 11px; letter-spacing: .08em; color: var(--text-tertiary)">FOUNDATIONS · COMPONENTS 4 OF 4</div>
+<h1 style="margin: 6px 0 10px; font-size: 28px; line-height: 1.2; font-weight: 600; letter-spacing: -.01em">Making media</h1>
+<p style="margin: 0; font-size: 14px; line-height: 1.6; color: var(--text-secondary)">The pieces of Video and Voice: the player, a run’s progress, a clip’s record and history, the generate form’s controls, a composition’s timeline and scenes, the edit preview, voices, and the install prompt. Every value here is one a CLI document or command carries.</p>
+</header>
+
+<section style="margin-top: 40px">
+<h2 style="margin: 0 0 4px; font-size: 18px; font-weight: 600">Player</h2>
+<p style="margin: 0 0 24px; max-width: 760px; font-size: 13.5px; color: var(--text-secondary)">The frame keeps the clip’s own aspect. The corners say what the file is; the line under the frame says where you are. A composition’s scene boundaries are ticks on the line.</p>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 36px 40px; align-items: start">
+
+<div>
+<p class="lbl">PAUSED, AT THE START</p>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="position: relative; width: 100%; aspect-ratio: 1280 / 704; box-sizing: border-box; border: 1px solid var(--line-border); border-radius: 8px; overflow: hidden; background: var(--surface-code)">
+<span class="mono" style="position: absolute; left: 12px; top: 10px; font-size: var(--t-meta); color: var(--text-tertiary)">1280×704 · 24 fps</span>
+<span class="mono" style="position: absolute; right: 12px; top: 10px; font-size: var(--t-meta); color: var(--text-tertiary)">draft · 16 steps</span>
+<button type="button" aria-label="Play" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 56px; height: 56px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--surface-card); color: var(--text-primary)"><svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3.2v9.6L13 8z" fill="currentColor"></path></svg></button>
+<span class="mono" style="position: absolute; left: 16px; right: 16px; top: calc(50% + 40px); text-align: center; font-size: var(--t-meta); color: var(--text-tertiary)">5 s · 121 frames</span>
+</div>
+<div style="display: flex; align-items: center; gap: 10px">
+<button type="button" class="ib" aria-label="Play" style="width: 28px; height: 28px; color: var(--text-primary)"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.2v9.6L13 8z" fill="currentColor"></path></svg></button>
+<span class="mono" style="font-size: var(--t-meta); color: var(--text-secondary)">0:00.0 / 0:05.0</span>
+<span aria-hidden="true" style="position: relative; flex: 1 1 auto; height: 4px; border-radius: 2px; background: var(--line-border)"></span>
+<span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">121 frames</span>
+</div>
+</div>
+</div>
+
+<div>
+<p class="lbl">PLAYING A CLIP</p>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="position: relative; width: 100%; aspect-ratio: 1280 / 704; box-sizing: border-box; border: 1px solid var(--line-border); border-radius: 8px; overflow: hidden; background: var(--surface-code)">
+<span class="mono" style="position: absolute; left: 12px; top: 10px; font-size: var(--t-meta); color: var(--text-tertiary)">1280×704 · 24 fps</span>
+<span class="mono" style="position: absolute; left: 16px; right: 16px; top: calc(50% + 40px); text-align: center; font-size: var(--t-meta); color: var(--text-tertiary)">frame 58 of 121</span>
+</div>
+<div style="display: flex; align-items: center; gap: 10px">
+<button type="button" class="ib" aria-label="Pause" style="width: 28px; height: 28px; color: var(--text-primary)"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 3h2.5v10H4.5zM9 3h2.5v10H9z" fill="currentColor"></path></svg></button>
+<span class="mono" style="font-size: var(--t-meta); color: var(--text-secondary)">0:02.4 / 0:05.0</span>
+<span aria-hidden="true" style="position: relative; flex: 1 1 auto; height: 4px; border-radius: 2px; background: var(--line-border)"><span style="position: absolute; left: 0; top: 0; bottom: 0; width: 48%; border-radius: 2px; background: var(--status-accent)"></span></span>
+<span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">121 frames</span>
+</div>
+</div>
+</div>
+
+<div>
+<p class="lbl">A COMPOSITION, CAPTIONS FROM ITS .SRT</p>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="position: relative; width: 100%; aspect-ratio: 1280 / 704; box-sizing: border-box; border: 1px solid var(--line-border); border-radius: 8px; overflow: hidden; background: var(--surface-code)">
+<span class="mono" style="position: absolute; left: 12px; top: 10px; font-size: var(--t-meta); color: var(--text-tertiary)">1280×704 · 24 fps</span>
+<span class="mono" style="position: absolute; right: 12px; top: 10px; font-size: var(--t-meta); color: var(--text-tertiary)">captions from heat-pump.srt</span>
+<span class="mono" style="position: absolute; left: 16px; right: 16px; top: calc(50% + 40px); text-align: center; font-size: var(--t-meta); color: var(--text-tertiary)">scene 2 of 6</span>
+<span style="position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); width: max-content; max-width: 84%; padding: 4px 10px; border-radius: 4px; background: color-mix(in srgb, var(--media-caption-fill) 75%, transparent); color: var(--media-caption); font-size: var(--t-body); line-height: 1.4; text-align: center">A heat pump gathers it with a refrigerant that runs colder than the air itself.</span>
+</div>
+<div style="display: flex; align-items: center; gap: 10px">
+<button type="button" class="ib" aria-label="Pause" style="width: 28px; height: 28px; color: var(--text-primary)"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 3h2.5v10H4.5zM9 3h2.5v10H9z" fill="currentColor"></path></svg></button>
+<span class="mono" style="font-size: var(--t-meta); color: var(--text-secondary)">0:09.6 / 0:33.5</span>
+<span aria-hidden="true" style="position: relative; flex: 1 1 auto; height: 4px; border-radius: 2px; background: var(--line-border)"><span style="position: absolute; left: 16.4%; top: -3px; width: 1px; height: 10px; background: var(--text-tertiary)"></span><span style="position: absolute; left: 32.8%; top: -3px; width: 1px; height: 10px; background: var(--text-tertiary)"></span><span style="position: absolute; left: 47.8%; top: -3px; width: 1px; height: 10px; background: var(--text-tertiary)"></span><span style="position: absolute; left: 64.2%; top: -3px; width: 1px; height: 10px; background: var(--text-tertiary)"></span><span style="position: absolute; left: 80.6%; top: -3px; width: 1px; height: 10px; background: var(--text-tertiary)"></span><span style="position: absolute; left: 0; top: 0; bottom: 0; width: 28.7%; border-radius: 2px; background: var(--status-accent)"></span></span>
+<span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">6 scenes</span>
+</div>
+</div>
+</div>
+
+</div>
+<p class="cap">The design plays nothing. In the app the frame is the platform’s player (AVPlayerView on macOS) under these controls. Captions use the two media tokens; a burned-in caption is part of the picture and gets no band.</p>
+</section>
+
+<div class="sec" style="display: flex; flex-wrap: wrap; gap: 48px 64px; align-items: flex-start">
+<section style="flex: 1 1 560px; min-width: 0">
+<h2 style="margin: 0 0 4px; font-size: 18px; font-weight: 600">A run’s progress</h2>
+<p style="margin: 0 0 24px; font-size: 13.5px; color: var(--text-secondary)">One line per step, with a bar where there is a count. The same list serves a clip, a composition and a download.</p>
+<p class="lbl">A CLIP, MID-DENOISE</p>
+<div class="card" style="padding: 8px 16px">
+<div class="step"><span class="ico"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-label="done" style="color: var(--status-accent)"><path d="M3.5 8.5l3 3 6-7"></path></svg></span><div style="min-width: 0"><div>Load the pipeline</div></div><span class="mono det">Wan 2.2 TI2V-5B · 5 components</span></div>
+<div class="step"><span class="ico"><span class="pulse" aria-label="running" style="width: 8px; height: 8px; border-radius: 50%; background: var(--status-accent)"></span></span><div style="min-width: 0"><div>Denoise</div><div class="bar"><div style="width: 76%; background: var(--status-accent)"></div></div></div><span class="mono det">step 38 of 50</span></div>
+<div class="step"><span class="ico"><span aria-label="not started" style="width: 8px; height: 8px; box-sizing: border-box; border-radius: 50%; border: 1.5px solid var(--text-tertiary)"></span></span><div style="min-width: 0"><div style="color: var(--text-tertiary)">Assemble the clip</div></div><span class="mono det">121 frames · H.264</span></div>
+</div>
+<p class="lbl" style="margin-top: 22px">A COMPOSITION, STOPPED</p>
+<div class="card" style="padding: 8px 16px">
+<div class="step"><span class="ico"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-label="done" style="color: var(--status-accent)"><path d="M3.5 8.5l3 3 6-7"></path></svg></span><div style="min-width: 0"><div>Speak every narration</div><div class="bar"><div style="width: 100%; background: var(--text-secondary)"></div></div></div><span class="mono det">7 of 7 spoken</span></div>
+<div class="step"><span class="ico"><span aria-label="stopped" style="width: 8px; height: 8px; border-radius: 2px; background: var(--status-warning)"></span></span><div style="min-width: 0"><div>Render every clip</div><div class="bar"><div style="width: 57%; background: var(--status-warning)"></div></div></div><span class="mono det" style="color: var(--status-warning)">4 of 7 made</span></div>
+<div class="step"><span class="ico"><span aria-label="not started" style="width: 8px; height: 8px; box-sizing: border-box; border-radius: 50%; border: 1.5px solid var(--text-tertiary)"></span></span><div style="min-width: 0"><div style="color: var(--text-tertiary)">Assemble</div></div><span class="mono det">0.5 s crossfades · captions beside</span></div>
+</div>
+<p class="cap">Stopped is amber and says what is kept. The note under it names the scene that renders again and why.</p>
+</section>
+
+<section style="flex: 1 1 440px; min-width: 0">
+<h2 style="margin: 0 0 4px; font-size: 18px; font-weight: 600">What the run says</h2>
+<p style="margin: 0 0 24px; font-size: 13.5px; color: var(--text-secondary)">The CLI’s own narration, kept as it was said: the settings and seed first, the device and what to expect, then every tenth step.</p>
+<div class="mono" style="padding: 10px 12px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); line-height: 1.7; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere">pipeline Wan 2.2 TI2V-5B · 1280x704 · 24 fps · 5 s (121 frames) · 50 steps · seed 4242 (held)
+from lighthouse-dusk-draft.mp4.json: Wan 2.2 TI2V-5B, 1280x704, 24 fps, 5 s, seed 4242 (held)
+changed: 50 steps (--final)
+running on mps (bfloat16) — expect minutes per clip on Apple silicon
+step 10/50
+step 20/50
+step 30/50</div>
+<p class="cap">Never a time estimate: nothing on this Mac has been measured. On a CPU the line says hours, and that a GPU is far faster.</p>
+</section>
+</div>
+
+<div class="sec" style="display: flex; flex-wrap: wrap; gap: 48px 64px; align-items: flex-start">
+<section style="flex: 0 1 300px; min-width: 0">
+<h2 style="margin: 0 0 4px; font-size: 18px; font-weight: 600">Clip rows</h2>
+<p style="margin: 0 0 20px; font-size: 13.5px; color: var(--text-secondary)">File name, a tag for the preset, the prompt’s first line, then length, seed and when.</p>
+<div style="width: 264px; padding: 8px 0">
+<div class="crow" style="background: var(--surface-selection)"><span class="ln"><span class="pulse" style="flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: var(--status-accent)"></span><span class="mono nm">lighthouse-dusk-3.mp4</span><span class="mono tag" style="color: var(--status-accent)">RUNNING</span></span><span class="pr">A lighthouse on a basalt cliff at dusk, waves</span><span class="mono mt" style="color: var(--status-accent)">step 38 of 50</span></div>
+<div class="crow"><span class="ln"><span class="mono nm">lighthouse-dusk.mp4</span><span class="mono tag" style="color: var(--status-accent)">FINAL</span></span><span class="pr">A lighthouse on a basalt cliff at dusk, waves</span><span class="mono mt">5 s · seed 4242 · Today 12:58</span></div>
+<div class="crow"><span class="ln"><span class="mono nm">lighthouse-dusk-draft.mp4</span><span class="mono tag">DRAFT</span></span><span class="pr">A lighthouse on a basalt cliff at dusk, waves</span><span class="mono mt">5 s · seed 4242 · Today 12:41</span></div>
+<div class="crow"><span class="ln"><span class="mono nm">rain-window.mp4</span><span class="mono tag">40 STEPS</span></span><span class="pr">Rain running down a window at night</span><span class="mono mt">4 s · seed 1203 · Oct 16</span></div>
+<div class="crow"><span class="ln"><span class="mono nm">paper-boat-draft.mp4</span><span class="mono tag" style="color: var(--status-warning)">STOPPED</span></span><span class="pr">A paper boat drifting down a gutter</span><span class="mono mt" style="color: var(--status-warning)">nothing written</span></div>
+</div>
+</section>
+
+<section style="flex: 1 1 380px; min-width: 0">
+<h2 style="margin: 0 0 4px; font-size: 18px; font-weight: 600">The record</h2>
+<p style="margin: 0 0 20px; font-size: 13.5px; color: var(--text-secondary)">The facts the clip’s <span class="mono">video.generation</span> document holds, in its order. Nothing here is estimated.</p>
+<div style="display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px 10px; font-size: var(--t-small)">
+<span class="k">Pipeline</span><span>Wan 2.2 TI2V-5B · WanPipeline</span>
+<span class="k">Made</span><span>from text</span>
+<span class="k">Seed</span><span class="mono">4242 · held</span>
+<span class="k">Frame</span><span>1280×704 · 24 fps</span>
+<span class="k">Length</span><span>5 s · 121 frames</span>
+<span class="k">Steps</span><span>50 · the final preset</span>
+<span class="k">Guidance</span><span>the pipeline’s own default</span>
+<span class="k">Device</span><span>mps · bfloat16</span>
+<span class="k">Versions</span><span class="mono">torch 2.8.0 · diffusers 0.35.1 · transformers 4.56.1</span>
+<span class="k">LoRAs</span><span class="mono">rain-glass-wan22.safetensors × 0.7 · sha256 c41d8e02…5f7a</span>
+<span class="k">Took</span><span>7 min 48 s</span>
+</div>
+</section>
+
+<section style="flex: 1 1 340px; min-width: 0">
+<h2 style="margin: 0 0 4px; font-size: 18px; font-weight: 600">History</h2>
+<p style="margin: 0 0 20px; font-size: 13.5px; color: var(--text-secondary)">Each record names its parent, so a final traces back to its draft and a continuation to the clip it continued.</p>
+<div style="display: flex; flex-direction: column">
+<div class="lin"><span class="rail"><span class="dot" style="border-color: var(--status-accent); background: var(--status-accent)"></span><span class="ln2"></span></span><div class="body"><span class="mono" style="font-size: var(--t-ui)">lighthouse-dusk-2.mp4</span><div class="how">continues lighthouse-dusk.mp4 from its last frame, seed 918273 drawn</div></div></div>
+<div class="lin"><span class="rail"><span class="dot"></span><span class="ln2"></span></span><div class="body"><button type="button" class="mono lk">lighthouse-dusk.mp4</button><div class="how">run again from lighthouse-dusk-draft.mp4.json, seed held, 50 steps</div></div></div>
+<div class="lin"><span class="rail"><span class="dot"></span></span><div class="body"><button type="button" class="mono lk">lighthouse-dusk-draft.mp4</button><div class="how">from text, seed 4242 drawn, 16 steps</div></div></div>
+</div>
+</section>
+</div>
+
+<section class="sec">
+<h2 style="margin: 0 0 4px; font-size: 18px; font-weight: 600">The generate form</h2>
+<p style="margin: 0 0 24px; max-width: 760px; font-size: 13.5px; color: var(--text-secondary)">One control per flag of <span class="mono">video generate</span>, each limited the way the CLI limits it. Starting from a record, the form says what it took and what you changed, in the CLI’s words, as you change it.</p>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 32px 40px; align-items: start">
+
+<div>
+<p class="lbl">FROM A RECORD</p>
+<div class="mono" style="padding: 8px 10px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); line-height: 1.6; color: var(--text-secondary); white-space: pre-wrap">from lighthouse-dusk-draft.mp4.json: Wan 2.2 TI2V-5B, 1280x704, 24 fps, 5 s, seed 4242 (held)
+changed: 50 steps (--final)</div>
+<p class="lbl" style="margin-top: 20px">QUALITY</p>
+<div class="seg" style="display: inline-flex"><button type="button" style="background: var(--surface-control); color: var(--text-primary); font-weight: 600">Draft · 16</button><button type="button" style="background: transparent; color: var(--text-secondary)">Final · 50</button><button type="button" style="background: transparent; color: var(--text-secondary)">Custom</button></div>
+<p class="cap">A draft is the final’s own frame and seed at 16 steps, so a draft that moves right becomes its final in one click.</p>
+<p class="lbl" style="margin-top: 20px">SEED</p>
+<div style="display: flex; align-items: center; gap: 8px"><div class="seg"><button type="button" class="mono" style="background: var(--surface-control); color: var(--text-primary); font-weight: 600; font-size: var(--t-ui)">Hold 4242</button><button type="button" class="mono" style="background: transparent; color: var(--text-secondary); font-size: var(--t-ui)">Another</button></div></div>
+<p class="lbl" style="margin-top: 20px">FRAMES</p>
+<div class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">121 frames: 5 s at 24 fps, rounded to the pipeline’s 4k+1</div>
+</div>
+
+<div>
+<p class="lbl">LORAS · 2 OF 4</p>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 64px 24px; gap: 8px; align-items: center; margin-bottom: 8px"><div style="min-width: 0"><div class="mono" style="font-size: var(--t-ui)">rain-glass-wan22.safetensors</div><div class="mono" style="font-size: var(--t-label); color: var(--text-tertiary)">sha256 c41d8e02…5f7a · held, checked by its hash</div></div><input type="number" class="inp mono" value="0.7" aria-label="Strength" style="width: 100%"><button type="button" class="ib" aria-label="Remove" style="width: 24px; height: 24px"><svg class="i" width="11" height="11" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path></svg></button></div>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 64px 24px; gap: 8px; align-items: center"><div style="min-width: 0"><div class="mono" style="font-size: var(--t-ui)">film-grain-wan22.safetensors</div><div class="mono" style="font-size: var(--t-label); color: var(--text-tertiary)">sha256 b7d2e940…0c3b · adapter lora2</div></div><input type="number" class="inp mono" value="1" aria-label="Strength" style="width: 100%"><button type="button" class="ib" aria-label="Remove" style="width: 24px; height: 24px"><svg class="i" width="11" height="11" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path></svg></button></div>
+<p class="cap">Your own files: up to 4, each above 0 and up to 2. Apogee never downloads one. A held LoRA whose file changed is refused by name.</p>
+<p class="lbl" style="margin-top: 20px">REFUSED BEFORE ANYTHING RUNS</p>
+<div role="alert" style="display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--status-error); border-radius: 6px; font-size: var(--t-small)"><span style="display: flex; gap: 8px"><span aria-hidden="true" style="flex: 0 0 auto; width: 6px; height: 6px; margin-top: 7px; border-radius: 50%; background: var(--status-error)"></span><span>A clip is 10 s at most. Longer videos are compositions.</span></span><span style="display: flex; gap: 8px"><span aria-hidden="true" style="flex: 0 0 auto; width: 6px; height: 6px; margin-top: 7px; border-radius: 50%; background: var(--status-error)"></span><span>~/Movies/Apogee/lighthouse-dusk.mp4 exists. A generation never writes over a file; name another.</span></span></div>
+</div>
+
+<div>
+<p class="lbl">WHAT IT TAKES</p>
+<div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 6px 10px; font-size: var(--t-small)">
+<span class="k">Runs on</span><span>diffusers in a Python child process, on mps at bfloat16. Nothing leaves this Mac.</span>
+<span class="k">Expect</span><span>Minutes per clip on Apple silicon. Nothing here has been measured, so no time is quoted.</span>
+<span class="k">Memory</span><span style="color: var(--status-warning)">Its weights are 22.8 GB on disk; 5.2 GB is free now, with gpt-oss-20b loaded. <button type="button" class="lk" style="font-size: var(--t-small)">Unload gpt-oss</button></span>
+</div>
+<p class="lbl" style="margin-top: 20px">THE SAME RUN ON THE COMMAND LINE</p>
+<div class="mono" style="padding: 8px 10px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); line-height: 1.6; color: var(--text-secondary); overflow-wrap: anywhere">apogee video generate --from ~/Movies/Apogee/lighthouse-dusk-draft.mp4.json --final -o ~/Movies/Apogee/lighthouse-dusk-3.mp4</div>
+<div style="display: flex; align-items: center; gap: 8px; margin-top: 14px"><button type="button" class="btn-p" style="height: 32px; padding: 0 16px">Generate</button><span style="font-size: var(--t-small); color: var(--text-tertiary)">LoRAs need peft; Generate asks first.</span></div>
+</div>
+
+</div>
+</section>
+
+<section class="sec">
+<h2 style="margin: 0 0 4px; font-size: 18px; font-weight: 600">A composition: timeline and scenes</h2>
+<p style="margin: 0 0 24px; max-width: 780px; font-size: 13.5px; color: var(--text-secondary)">The timeline is read-only: you change a composition by saying what to change. Scenes overlap by the 0.5 s crossfade; each narration starts 0.25 s in; the music bed dips where the narration speaks.</p>
+<div style="max-width: 900px; display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 6px 10px; align-items: center">
+<span class="mono trk">picture</span>
+<div style="position: relative; height: 34px">
+<span class="blk" style="left: 0%; width: 17.9%">1</span><span class="blk" style="left: 16.4%; width: 17.9%; border-color: var(--status-accent)">2</span><span class="blk" style="left: 32.8%; width: 16.4%">3</span><span class="blk" style="left: 47.8%; width: 17.9%">4</span><span class="blk" style="left: 64.2%; width: 17.9%">5</span><span class="blk" style="left: 80.6%; width: 19.4%">6</span>
+<span aria-hidden="true" style="position: absolute; left: 28.7%; top: -4px; bottom: -4px; width: 2px; border-radius: 1px; background: var(--status-accent)"></span>
+</div>
+<span class="mono trk">narration</span>
+<div style="position: relative; height: 14px"><span class="nar" style="left: 0.7%; width: 10.8%"></span><span class="nar" style="left: 17.2%; width: 14.1%"></span><span class="nar" style="left: 33.6%; width: 12.5%"></span><span class="nar" style="left: 48.6%; width: 13.1%"></span><span class="nar" style="left: 65%; width: 12.7%"></span><span class="nar" style="left: 81.3%; width: 14.8%"></span></div>
+<span class="mono trk">captions</span>
+<div style="position: relative; height: 14px"><span class="cue" style="left: 0.7%; width: 10.8%"></span><span class="cue" style="left: 17.2%; width: 14.1%"></span><span class="cue" style="left: 33.6%; width: 12.5%"></span><span class="cue" style="left: 48.6%; width: 13.1%"></span><span class="cue" style="left: 65%; width: 12.7%"></span><span class="cue" style="left: 81.3%; width: 14.8%"></span></div>
+<span class="mono trk">music</span>
+<div style="position: relative; height: 14px"><span style="position: absolute; left: 0; right: 0; top: 5px; height: 4px; border-radius: 2px; background: var(--line-strong)"></span><span class="duck" style="left: 0.7%; width: 10.8%"></span><span class="duck" style="left: 17.2%; width: 14.1%"></span><span class="duck" style="left: 33.6%; width: 12.5%"></span><span class="duck" style="left: 48.6%; width: 13.1%"></span><span class="duck" style="left: 65%; width: 12.7%"></span><span class="duck" style="left: 81.3%; width: 14.8%"></span></div>
+<span></span>
+<div class="mono" style="display: flex; justify-content: space-between; font-size: var(--t-label); color: var(--text-tertiary)"><span>0:00</span><span>soft-piano.m4a, ducked under the narration</span><span>0:33.5</span></div>
+</div>
+<p class="lbl" style="margin-top: 28px">SCENE STATES</p>
+<div style="max-width: 900px">
+<div class="scn"><span class="mono" style="color: var(--text-tertiary)">2.</span><div><div>“A heat pump gathers it with a refrigerant that runs colder than the air itself.”</div><div class="shows">shows: Close-up of frosted copper coils and aluminium fins on the outdoor unit, vapour drifting past.</div><div class="mono facts"><span style="color: var(--text-secondary)">narration 4.71 s, measured</span><span style="color: var(--text-secondary)">clip made</span><span>seed 552109</span></div></div><div class="side"><span class="mono">6 s</span><label><input type="checkbox" style="accent-color: var(--status-accent)">Re-roll</label></div></div>
+<div class="scn"><span class="mono" style="color: var(--text-tertiary)">3.</span><div><div>“Come hungry.”</div><div class="shows">takes stall-0412.mov as it is</div><div class="mono facts"><span style="color: var(--text-secondary)">narration 1.04 s, measured</span><span style="color: var(--text-secondary)">clip taken as it is</span></div></div><div class="side"><span class="mono">4.2 s</span></div></div>
+<div class="scn"><span class="mono" style="color: var(--text-tertiary)">4.</span><div><div>“Sourdough starts with nothing but flour, water and time.”</div><div class="shows">shows: Close-up of hands mixing flour and water in a ceramic bowl on a wooden bench.</div><div class="mono facts"><span style="color: var(--status-accent)">speaking…</span><span>clip not made yet</span><span>seed 1840277</span></div></div><div class="side"><span class="mono">5 s</span></div></div>
+<div class="scn"><span class="mono" style="color: var(--text-tertiary)">5.</span><div><div>“Starfish hold on tight with hundreds of tiny tube feet.”</div><div class="shows">shows: Close-up of an orange starfish on a rock, its tube feet moving slowly.</div><div class="mono facts"><span style="color: var(--text-secondary)">narration 3.4 s, measured</span><span style="color: var(--status-warning)">clip stopped; renders again, seed held</span><span>seed 7721409</span></div></div><div class="side"><span class="mono">5.5 s</span></div></div>
+</div>
+</section>
+
+<div class="sec" style="display: flex; flex-wrap: wrap; gap: 48px 64px; align-items: flex-start">
+<section style="flex: 1 1 480px; min-width: 0">
+<h2 style="margin: 0 0 4px; font-size: 18px; font-weight: 600">The edit preview</h2>
+<p style="margin: 0 0 20px; font-size: 13.5px; color: var(--text-secondary)">A dry run: the CLI’s scene-by-scene diff in its own words, then what will run. Rendering writes a new video; the one it came from is never touched.</p>
+<div class="card" style="max-width: 420px; padding: 12px 14px; font-size: var(--t-small)">
+<div class="mono" style="font-size: var(--t-ui); font-weight: 600">the edit: 5 scenes, were 6</div>
+<div style="display: flex; flex-direction: column; gap: 3px; margin-top: 8px">
+<div class="mono dl" style="color: var(--text-tertiary)"><span>1.</span><span>scene 1, untouched</span></div>
+<div class="mono dl"><span style="color: var(--text-tertiary)">2.</span><span>scene 2; its prompt changed</span></div>
+<div class="mono dl" style="color: var(--text-tertiary)"><span>3.</span><span>scene 3, untouched</span></div>
+<div class="mono dl"><span style="color: var(--text-tertiary)">4.</span><span>scene 4; a new seed</span></div>
+<div class="mono dl" style="color: var(--text-tertiary)"><span>5.</span><span>scene 5, untouched</span></div>
+<div class="mono dl" style="color: var(--status-warning)"><span></span><span>scene 6 removed</span></div>
+</div>
+<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-border)">Spend: 2 clip runs at 1280×704, 50 steps, minutes each on Apple silicon; 3 clips already made.</div>
+<div style="margin-top: 4px; color: var(--text-tertiary)">Everything unchanged is copied byte for byte, with its record, under its new number.</div>
+</div>
+<p class="lbl" style="margin-top: 22px">THE EDITOR’S ANSWER DIDN’T HOLD</p>
+<p role="alert" style="margin: 0; font-size: var(--t-small); color: var(--status-error)">The editor’s answer had 12 scenes, over the 8 a composition holds, so nothing changed.</p>
+</section>
+
+<section style="flex: 1 1 480px; min-width: 0">
+<h2 style="margin: 0 0 4px; font-size: 18px; font-weight: 600">Voices and speech</h2>
+<p style="margin: 0 0 20px; font-size: 13.5px; color: var(--text-secondary)">Voices are the model’s own ids, never renamed. A speech’s sentences are timed from the samples the model wrote; the file’s length from its header.</p>
+<p class="lbl">VOICE CHIPS</p>
+<div style="display: flex; flex-wrap: wrap; gap: 6px"><button type="button" class="mono vc" style="border-color: var(--status-accent); background: var(--surface-selection)">af_heart<span style="color: var(--text-tertiary)">default</span></button><button type="button" class="mono vc">af_bella</button><button type="button" class="mono vc">bm_george</button><button type="button" class="mono vc">bf_emma</button></div>
+<p class="lbl" style="margin-top: 20px">SPEED</p>
+<div style="display: flex; align-items: center; gap: 12px; font-size: var(--t-small); color: var(--text-secondary)"><input type="range" min="0.5" max="2" step="0.05" value="1.15" aria-label="Speed" style="width: 180px; accent-color: var(--status-accent)"><span class="mono" style="font-size: var(--t-ui); color: var(--text-primary)">1.15×</span><button type="button" class="btn-g" style="height: 24px; font-size: var(--t-small)">1.0×</button></div>
+<p class="lbl" style="margin-top: 20px">WAVEFORM, SENTENCE 2 PLAYING</p>
+<div class="card" style="padding: 12px 14px">
+<div aria-hidden="true" style="display: flex; align-items: center; gap: 2px; height: 48px"><span style="flex: 1 1 0; height: 4%; min-height: 2px; border-radius: 1px; background: var(--text-secondary)"></span><span style="flex: 1 1 0; height: 50%; min-height: 2px; border-radius: 1px; background: var(--text-secondary)"></span><span style="flex: 1 1 0; height: 73%; min-height: 2px; border-radius: 1px; background: var(--text-secondary)"></span><span style="flex: 1 1 0; height: 76%; min-height: 2px; border-radius: 1px; background: var(--text-secondary)"></span><span style="flex: 1 1 0; height: 56%; min-height: 2px; border-radius: 1px; background: var(--text-secondary)"></span><span style="flex: 1 1 0; height: 44%; min-height: 2px; border-radius: 1px; background: var(--text-secondary)"></span><span style="flex: 1 1 0; height: 78%; min-height: 2px; border-radius: 1px; background: var(--text-secondary)"></span><span style="flex: 1 1 0; height: 92%; min-height: 2px; border-radius: 1px; background: var(--text-secondary)"></span><span style="flex: 1 1 0; height: 76%; min-height: 2px; border-radius: 1px; background: var(--text-secondary)"></span><span style="flex: 1 1 0; height: 24%; min-height: 2px; border-radius: 1px; background: var(--text-secondary)"></span><span style="flex: 1 1 0; height: 64%; min-height: 2px; border-radius: 1px; background: var(--text-secondary)"></span><span style="flex: 1 1 0; height: 84%; min-height: 2px; border-radius: 1px; background: var(--text-secondary)"></span><span style="flex: 1 1 0; height: 79%; min-height: 2px; border-radius: 1px; background: var(--text-secondary)"></span><span style="flex: 1 1 0; height: 51%; min-height: 2px; border-radius: 1px; background: var(--text-secondary)"></span><span style="flex: 1 1 0; height: 40%; min-height: 2px; border-radius: 1px; background: var(--text-secondary)"></span><span style="flex: 1 1 0; height: 61%; min-height: 2px; border-radius: 1px; background: var(--text-secondary)"></span><span style="flex: 1 1 0; height: 66%; min-height: 2px; border-radius: 1px; background: var(--text-secondary)"></span><span style="flex: 1 1 0; height: 4%; min-height: 2px; border-radius: 1px; background: var(--text-secondary)"></span><span style="flex: 1 1 0; height: 25%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 60%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 84%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 83%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 56%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 49%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 82%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 90%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 71%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 27%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 62%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 76%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 67%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 32%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 40%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 66%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 77%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 65%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 29%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 68%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 90%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 85%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 36%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 52%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 80%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 84%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 63%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 29%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 56%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 64%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 63%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 31%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 48%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 77%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 86%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 68%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 34%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 73%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 91%; min-height: 2px; border-radius: 1px; background: var(--status-accent)"></span><span style="flex: 1 1 0; height: 4%; min-height: 2px; border-radius: 1px; background: var(--line-strong)"></span><span style="flex: 1 1 0; height: 31%; min-height: 2px; border-radius: 1px; background: var(--line-strong)"></span><span style="flex: 1 1 0; height: 52%; min-height: 2px; border-radius: 1px; background: var(--line-strong)"></span><span style="flex: 1 1 0; height: 74%; min-height: 2px; border-radius: 1px; background: var(--line-strong)"></span><span style="flex: 1 1 0; height: 73%; min-height: 2px; border-radius: 1px; background: var(--line-strong)"></span><span style="flex: 1 1 0; height: 42%; min-height: 2px; border-radius: 1px; background: var(--line-strong)"></span><span style="flex: 1 1 0; height: 30%; min-height: 2px; border-radius: 1px; background: var(--line-strong)"></span><span style="flex: 1 1 0; height: 58%; min-height: 2px; border-radius: 1px; background: var(--line-strong)"></span><span style="flex: 1 1 0; height: 76%; min-height: 2px; border-radius: 1px; background: var(--line-strong)"></span><span style="flex: 1 1 0; height: 72%; min-height: 2px; border-radius: 1px; background: var(--line-strong)"></span><span style="flex: 1 1 0; height: 29%; min-height: 2px; border-radius: 1px; background: var(--line-strong)"></span><span style="flex: 1 1 0; height: 55%; min-height: 2px; border-radius: 1px; background: var(--line-strong)"></span><span style="flex: 1 1 0; height: 85%; min-height: 2px; border-radius: 1px; background: var(--line-strong)"></span><span style="flex: 1 1 0; height: 90%; min-height: 2px; border-radius: 1px; background: var(--line-strong)"></span><span style="flex: 1 1 0; height: 4%; min-height: 2px; border-radius: 1px; background: var(--line-strong)"></span></div>
+</div>
+<div style="margin-top: 10px">
+<div class="srow"><span class="mono" style="color: var(--text-tertiary)">1</span><span>Welcome to the Apogee walkthrough.</span><span class="mono">0.00 s</span><span class="mono">2.41 s</span></div>
+<div class="srow" style="background: var(--surface-selection)"><span class="mono" style="color: var(--text-tertiary)">2</span><span>In the next two minutes, you’ll see a model answer on this Mac, with nothing leaving it.</span><span class="mono">2.41 s</span><span class="mono">5.37 s</span></div>
+<div class="srow"><span class="mono" style="color: var(--text-tertiary)">3</span><span>Let’s start with a question.</span><span class="mono">7.78 s</span><span class="mono">1.92 s</span></div>
+</div>
+</section>
+</div>
+
+<section class="sec">
+<h2 style="margin: 0 0 4px; font-size: 18px; font-weight: 600">Installing what a run needs</h2>
+<p style="margin: 0 0 24px; max-width: 780px; font-size: 13.5px; color: var(--text-secondary)">A child process on a pipe never asks, so the app asks, with the refusal in the CLI’s words. A yes runs <span class="mono">apogee train setup --with &lt;set&gt;</span> as a supervised job, drawn by one shared card at the top of the place’s list: running with Stop, then installed, stopped or failed with Dismiss. The run that was refused runs again once the set is in.</p>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 32px 40px; align-items: start">
+<div>
+<p class="lbl">ASKING</p>
+<div role="dialog" aria-label="Install what video needs?" style="border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-card)">
+<div style="padding: 18px 20px 6px"><h3 style="margin: 0; font-size: var(--t-h2); font-weight: 600">Install what video needs?</h3></div>
+<div style="padding: 10px 20px; display: flex; flex-direction: column; gap: 12px; font-size: var(--t-small)">
+<p class="mono" style="margin: 0; font-size: var(--t-meta); color: var(--text-primary); overflow-wrap: anywhere">apogee video generate: a LoRA loads through peft, which the video runtime does not have yet -- apogee train setup --with video</p>
+<p style="margin: 0; color: var(--text-secondary)">This downloads and installs Python packages into Apogee's own environment, once. Nothing is installed unless you say yes; the install runs here, with Stop, and what was refused runs again once it is in.</p>
+<div class="mono" style="padding: 8px 10px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); color: var(--text-secondary)">apogee train setup --with video</div>
+</div>
+<div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 20px 18px"><button type="button" class="btn-g">Not now</button><button type="button" class="btn-p">Install</button></div>
+</div>
+</div>
+<div>
+<p class="lbl">THE INSTALL CARD</p>
+<div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+<div class="card" role="status" style="width: 264px; box-sizing: border-box; padding: 12px; border-color: var(--line-border)">
+<div style="display: flex; align-items: flex-start; gap: 8px"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="margin-top: 2px; color: var(--status-accent)"><circle cx="8" cy="8" r="5.5"></circle><path d="M8 5v6M5.5 8.5L8 11l2.5-2.5"></path></svg><span style="flex: 1 1 auto; min-width: 0; font-size: var(--t-body); font-weight: 500">Installing the video set</span></div>
+<div aria-hidden="true" style="height: 4px; margin-top: 8px; border-radius: 2px; background: var(--line-border); overflow: hidden"><div class="pulse" style="width: 100%; height: 100%; background: var(--status-accent)"></div></div>
+<div class="mono" style="display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin-top: 8px; font-size: var(--t-meta); line-height: 1.5; color: var(--text-tertiary); white-space: pre-wrap; overflow-wrap: anywhere">installing the 'video' set: torch&gt;=2.6 diffusers&gt;=0.35 transformers&gt;=4.46 accelerate&gt;=1.0 ftfy&gt;=6.1 sentencepiece&gt;=0.2 peft&gt;=0.13 ...</div>
+<div class="mono" style="margin-top: 6px; font-size: var(--t-meta); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">apogee train setup --with video</div>
+<div style="margin-top: 8px"><button type="button" class="btn-g" style="height: 24px; font-size: var(--t-small)">Stop</button></div>
+</div>
+<div class="card" role="status" style="width: 264px; box-sizing: border-box; padding: 12px; border-color: var(--status-error)">
+<div style="display: flex; align-items: flex-start; gap: 8px"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="margin-top: 2px; color: var(--status-error)"><path d="M8 2.5l6 10.5H2z"></path><path d="M8 6.5v3M8 11.2v.1"></path></svg><span style="flex: 1 1 auto; min-width: 0; font-size: var(--t-body); font-weight: 500">The video set did not install</span></div>
+<div class="mono" style="margin-top: 8px; font-size: var(--t-meta); line-height: 1.5; color: var(--status-error); white-space: pre-wrap; overflow-wrap: anywhere">apogee train: pip install for the 'video' set failed (exit code 1):
+ERROR: Could not install packages: this sandbox's pip is a stub with no network</div>
+<div class="mono" style="margin-top: 6px; font-size: var(--t-meta); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">apogee train setup --with video</div>
+<div style="margin-top: 8px"><button type="button" class="btn-g" style="height: 24px; font-size: var(--t-small)">Dismiss</button></div>
+</div>
+<div class="card" role="status" style="width: 264px; box-sizing: border-box; padding: 12px; border-color: var(--line-border)">
+<div style="display: flex; align-items: flex-start; gap: 8px"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="margin-top: 2px; color: var(--status-accent)"><circle cx="8" cy="8" r="5.5"></circle><path d="M5.5 8.2l1.8 1.8 3.2-3.6"></path></svg><span style="flex: 1 1 auto; min-width: 0; font-size: var(--t-body); font-weight: 500">Installed the video set</span></div>
+<div class="mono" style="margin-top: 8px; font-size: var(--t-meta); line-height: 1.5; color: var(--text-tertiary); white-space: pre-wrap; overflow-wrap: anywhere">python env: at /Users/someone/.apogee/training/venv; sets: video</div>
+<div class="mono" style="margin-top: 6px; font-size: var(--t-meta); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">apogee train setup --with video</div>
+<div style="margin-top: 8px"><button type="button" class="btn-g" style="height: 24px; font-size: var(--t-small)">Dismiss</button></div>
+</div>
+<div class="card" role="status" style="width: 264px; box-sizing: border-box; padding: 12px; border-color: var(--line-border)">
+<div style="display: flex; align-items: flex-start; gap: 8px"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="margin-top: 2px; color: var(--text-tertiary)"><circle cx="8" cy="8" r="5.5"></circle><rect x="6" y="6" width="4" height="4" rx=".5"></rect></svg><span style="flex: 1 1 auto; min-width: 0; font-size: var(--t-body); font-weight: 500">The video set's install was stopped before it finished</span></div>
+<div class="mono" style="display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; margin-top: 8px; font-size: var(--t-meta); line-height: 1.5; color: var(--text-tertiary); white-space: pre-wrap; overflow-wrap: anywhere">installing the 'video' set: torch&gt;=2.6 diffusers&gt;=0.35 transformers&gt;=4.46 accelerate&gt;=1.0 ftfy&gt;=6.1 sentencepiece&gt;=0.2 peft&gt;=0.13 ...</div>
+<div class="mono" style="margin-top: 6px; font-size: var(--t-meta); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">apogee train setup --with video</div>
+<div style="margin-top: 8px"><button type="button" class="btn-g" style="height: 24px; font-size: var(--t-small)">Dismiss</button></div>
+</div>
+</div>
+</div>
+</div>
+<p class="cap">Running, failed, installed and stopped, as the app’s InstallCard folds the install’s output: its last line while it runs, the CLI’s failure in full when it fails.</p>
+</section>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light","contrast"],"default":"dark"},"$preview":{"width":1440,"height":3300}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { themeClass: 'ap t-' + (this.props.theme ?? 'dark') };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,2 @@
+added backend 'ollama' to /Users/someone/.apogee/config/config.json
+models.default set to 'ollama' (none was set)

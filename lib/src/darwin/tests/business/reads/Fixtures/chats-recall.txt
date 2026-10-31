@@ -1,0 +1,1 @@
+recall holds 2 chat summaries in /Users/someone/.apogee/memory/chats.db

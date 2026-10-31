@@ -67,6 +67,8 @@ apogee_add_module(operations
     operations/collections.cpp
     operations/dataset_core.h
     operations/dataset_core.cpp
+    operations/graph_dedupe_pass.h
+    operations/graph_dedupe_pass.cpp
     operations/graph_members.h
     operations/graph_members.cpp
     operations/graph_sources.h
@@ -85,6 +87,8 @@ apogee_add_module(operations
     operations/retrieval.cpp
     operations/run_settings.h
     operations/run_settings.cpp
+    operations/store_references.h
+    operations/store_references.cpp
     operations/suites.h
     operations/suites.cpp
     operations/system_view.h
@@ -190,6 +194,8 @@ apogee_add_module(cli
     cli/command.h
     cli/model_chain.h
     cli/model_chain.cpp
+    cli/job_stream.h
+    cli/job_stream.cpp
     cli/models_pull.h
     cli/models_pull.cpp
     cli/models_migrate.h
@@ -293,6 +299,8 @@ apogee_add_module(cli
     cli/datasets.cpp
     cli/train.h
     cli/train.cpp
+    cli/train_stream.h
+    cli/train_stream.cpp
     cli/video_runtime.h
     cli/video_runtime.cpp
     cli/video_cmd.h

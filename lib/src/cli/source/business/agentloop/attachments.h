@@ -12,6 +12,7 @@
 #include "agentloop/budget.h"
 #include "agentloop/embed_func.h"
 #include "contracts/cancellation.h"
+#include "contracts/types.h"
 #include "embedstore/store.h"
 #include "harness/harness.h"
 #include "logger/session.h"
@@ -108,7 +109,18 @@ struct AttachmentExcerpt {
     std::string label;
     std::string text;
     double score = 0.0;
+    /// Where it came from, as a turn's `sources` reports it (52a): read off
+    /// the same metadata as `label`.
+    harness::ExcerptSource origin{};
 };
+
+/// Where chunks `first` to `last` -- adjacent chunks of one source, or one
+/// chunk twice -- came from, as a turn's `sources` reports it (52a): the file
+/// their metadata names (the stored source when it names none), the pages,
+/// lines or times they record, and `score` on `retriever`'s scale.
+[[nodiscard]] harness::ExcerptSource excerpt_source(const embedstore::Chunk& first,
+                                                    const embedstore::Chunk& last, double score,
+                                                    std::string retriever);
 
 /// `hits` from a chat's index as excerpts: each labelled from its chunk's
 /// metadata -- a page, a line range, or a recording's times (`talk.mp4

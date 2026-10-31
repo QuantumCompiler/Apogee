@@ -4,6 +4,7 @@
 
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 
@@ -12,6 +13,7 @@
 #include "backends/factory.h"
 #include "cli/helpers.h"
 #include "cli/interrupt.h"
+#include "cli/job_stream.h"
 #include "cli/video_compose.h"
 #include "cli/video_generate.h"
 #include "cli/video_runtime.h"
@@ -34,13 +36,38 @@ namespace {
     throw CLI::RuntimeError(code);
 }
 
+/// This install's ladder host, its store where the config puts it.
+[[nodiscard]] video::VideoHost video_host(const harness::Config& config) {
+    video::VideoHost host = video::VideoHost::current();
+    host.roots = store_roots_of(config);
+    return host;
+}
+
+/// The runtime for `pipeline` on its engine, as a command asks it (53l): on
+/// PyTorch the environment and the `video` set asked for at a terminal,
+/// then the whole ladder over the pipeline; on MLX the ladder alone --
+/// mlx-video is opt-in, never asked about, its rungs naming its setup.
+[[nodiscard]] video::VideoReadiness ready_engine(const harness::Config& config,
+                                                 const ResolvedPipeline& pipeline,
+                                                 std::string_view purpose) {
+    if (pipeline.engine == video::VideoEngine::Torch) {
+        const video::VideoReadiness runtime = ready_video_runtime(config, purpose);
+        if (!runtime.ready() && runtime.refusal != video::VideoRefusal::NoDriver &&
+            runtime.refusal != video::VideoRefusal::NoFfmpeg) {
+            return runtime;
+        }
+    }
+    return video::probe_video_engine(video_host(config), pipeline.engine, pipeline.dir,
+                                     pipeline.handle);
+}
+
 struct GenerateFlags {
     VideoGenerateOptions options;
     std::int64_t seed = 0;
     double duration = 0.0;
     int steps = 0;
     int fps = 0;
-    ReadFormat format = ReadFormat::Text;
+    JobFormat format = JobFormat::Text;
 };
 
 void video_generate(const RootContext& context, GenerateFlags flags, const CLI::App& verb) {
@@ -65,84 +92,104 @@ void video_generate(const RootContext& context, GenerateFlags flags, const CLI::
         options.fps = flags.fps;
     }
 
-    const bool json = flags.format == ReadFormat::Json;
-    BusyLine busy{std::cerr, "loading the pipeline", busy_options(false)};
-    const auto say = [&busy](const std::string& line) {
-        busy.above([&line] { std::cerr << "[video] " << line << "\n"; });
-    };
-    int said_tenth = -1;
-
-    VideoGenerateSeams seams;
-    seams.ready = [&config](const ResolvedPipeline& pipeline) {
-        // The environment and the set, asked for at a terminal; then the
-        // whole ladder over this pipeline.
-        const video::VideoReadiness runtime = ready_video_runtime(config, "video generate");
-        if (!runtime.ready() && runtime.refusal != video::VideoRefusal::NoDriver &&
-            runtime.refusal != video::VideoRefusal::NoFfmpeg) {
-            return runtime;
-        }
-        return video::probe_video(video::VideoHost::current(), pipeline.dir, pipeline.handle);
-    };
-    seams.say = say;
-    seams.on_event = [&](const video::VideoEvent& event) {
-        if (event.kind == video::VideoEvent::Kind::Step) {
-            if (busy.active()) {
-                busy.report("denoising", static_cast<std::size_t>(event.step),
-                            static_cast<std::size_t>(event.steps));
+    const bool json = flags.format == JobFormat::Json;
+    // The run's progress as events instead (52b): the driver's own, relayed.
+    std::optional<JobStream> job;
+    if (flags.format == JobFormat::StreamJson) {
+        job.emplace("video generate");
+    }
+    // A refusal raised below the verb that told no stream -- a runtime not
+    // installed, asked by the ladder -- still ends it on `error` (M29:
+    // training's backstop, shared).
+    run_job_body([&] {
+        BusyLine busy{std::cerr, "loading the pipeline", busy_options(job.has_value())};
+        const auto say = [&busy, &job](const std::string& line) {
+            if (job.has_value()) {
+                job->events().on_notice(line);
                 return;
             }
-            // On a pipe, a line at every tenth of the way, and the last.
-            const int tenth = event.steps > 0 ? (event.step * 10) / event.steps : 0;
-            if (tenth != said_tenth || event.step == event.steps) {
-                said_tenth = tenth;
-                say("step " + std::to_string(event.step) + "/" + std::to_string(event.steps));
-            }
-            return;
-        }
-        if (const std::optional<std::string> line = narrate_video_event(event)) {
-            say(*line);
-            busy.set(event.kind == video::VideoEvent::Kind::Assembling ? "assembling" : "working");
-        }
-    };
-    seams.random_seed = [] {
-        std::random_device device;
-        return static_cast<std::int64_t>(device() & 0x7fffffffU);
-    };
-    seams.work_root = harness::video_work_dir();
-    seams.last_frame = [](const std::filesystem::path& clip, const std::filesystem::path& png) {
-        const harness::CancellationToken token = InterruptScope::token();
-        platform::FfmpegLimits limits;
-        limits.stopped = [token] { return token.stop_requested(); };
-        std::string error;
-        return platform::extract_last_frame(clip, png, limits, error) ? std::string{} : error;
-    };
-    seams.platform = platform::host_target();
+            busy.above([&line] { std::cerr << "[video] " << line << "\n"; });
+        };
+        int said_tenth = -1;
 
-    VideoGenerateResult result;
-    {
-        const InterruptScope interrupt;
-        result =
-            generate_clip(config, store_roots_of(config), options, seams, InterruptScope::token());
-    }
-    busy.finish();
-    if (result.document.is_null()) {
-        fail(result.error, result.exit_code);
-    }
-    if (json) {
-        write_document(std::cout, result.document);
-    } else {
-        for (const std::string& line : result.lines) {
-            std::cout << line << "\n";
+        VideoGenerateSeams seams;
+        seams.ready = [&config](const ResolvedPipeline& pipeline) {
+            return ready_engine(config, pipeline, "video generate");
+        };
+        seams.say = say;
+        seams.on_event = [&](const video::VideoEvent& event) {
+            if (job.has_value()) {
+                relay_video_event(job->events(), event, 0);
+                return;
+            }
+            if (event.kind == video::VideoEvent::Kind::Step) {
+                if (busy.active()) {
+                    busy.report("denoising", static_cast<std::size_t>(event.step),
+                                static_cast<std::size_t>(event.steps));
+                    return;
+                }
+                // On a pipe, a line at every tenth of the way, and the last.
+                const int tenth = event.steps > 0 ? (event.step * 10) / event.steps : 0;
+                if (tenth != said_tenth || event.step == event.steps) {
+                    said_tenth = tenth;
+                    say("step " + std::to_string(event.step) + "/" + std::to_string(event.steps));
+                }
+                return;
+            }
+            if (const std::optional<std::string> line = narrate_video_event(event)) {
+                say(*line);
+                busy.set(event.kind == video::VideoEvent::Kind::Assembling ? "assembling"
+                                                                           : "working");
+            }
+        };
+        seams.random_seed = [] {
+            std::random_device device;
+            return static_cast<std::int64_t>(device() & 0x7fffffffU);
+        };
+        seams.work_root = harness::video_work_dir();
+        seams.last_frame = [](const std::filesystem::path& clip, const std::filesystem::path& png) {
+            const harness::CancellationToken token = InterruptScope::token();
+            platform::FfmpegLimits limits;
+            limits.stopped = [token] { return token.stop_requested(); };
+            std::string error;
+            return platform::extract_last_frame(clip, png, limits, error) ? std::string{} : error;
+        };
+        seams.platform = platform::host_target();
+
+        VideoGenerateResult result;
+        {
+            const InterruptScope interrupt;
+            result = generate_clip(config, store_roots_of(config), options, seams,
+                                   InterruptScope::token());
         }
-    }
-    if (result.exit_code != 0) {
-        fail(result.error, result.exit_code);
-    }
+        busy.finish();
+        if (result.document.is_null()) {
+            if (job.has_value()) {
+                job->failed(result.error);
+            }
+            fail(result.error, result.exit_code);
+        }
+        if (job.has_value()) {
+            job->events().emit_document(result.document);
+        } else if (json) {
+            write_document(std::cout, result.document);
+        } else {
+            for (const std::string& line : result.lines) {
+                std::cout << line << "\n";
+            }
+        }
+        if (result.exit_code != 0) {
+            if (job.has_value()) {
+                job->failed(result.error);
+            }
+            fail(result.error, result.exit_code);
+        }
+    });
 }
 
 struct ComposeFlags {
     VideoComposeOptions options;
-    ReadFormat format = ReadFormat::Text;
+    JobFormat format = JobFormat::Text;
 };
 
 /// The plan on `backend`: the system prompt and the user message as a
@@ -198,116 +245,155 @@ void video_compose(const RootContext& context, const ComposeFlags& flags) {
         fail(e.what());
     }
     const models::StoreRoots roots = store_roots_of(config);
-    BusyLine busy{std::cerr, "planning", busy_options(false)};
-    const auto say = [&busy](const std::string& line) {
-        busy.above([&line] { std::cerr << "[compose] " << line << "\n"; });
-    };
-    std::string scene_label;
-    int said_tenth = -1;
+    // The run's progress as events instead (52b): each scene begun, and its
+    // drivers' own events, relayed with the scene they belong to.
+    std::optional<JobStream> job;
+    if (flags.format == JobFormat::StreamJson) {
+        job.emplace("video compose");
+    }
+    // A refusal raised below the verb that told no stream -- a runtime not
+    // installed, asked by the ladder -- still ends it on `error` (M29:
+    // training's backstop, shared).
+    run_job_body([&] {
+        BusyLine busy{std::cerr, "planning", busy_options(job.has_value())};
+        const auto say = [&busy, &job](const std::string& line) {
+            if (job.has_value()) {
+                job->events().on_notice(line);
+                return;
+            }
+            busy.above([&line] { std::cerr << "[compose] " << line << "\n"; });
+        };
+        std::string scene_label;
+        int said_tenth = -1;
+        std::size_t scene_now = 0;
 
-    VideoComposeSeams seams;
-    seams.ready_video = [&config](const ResolvedPipeline& pipeline) {
-        const video::VideoReadiness runtime = ready_video_runtime(config, "video compose");
-        if (!runtime.ready() && runtime.refusal != video::VideoRefusal::NoDriver &&
-            runtime.refusal != video::VideoRefusal::NoFfmpeg) {
-            return runtime;
-        }
-        return video::probe_video(video::VideoHost::current(), pipeline.dir, pipeline.handle);
-    };
-    seams.ready_voice = [&config](const ResolvedVoiceModel& model) {
-        const video::VideoReadiness runtime = ready_voice_runtime(config, "video compose");
-        if (!runtime.ready() && runtime.refusal != video::VideoRefusal::NoDriver) {
-            return runtime;
-        }
-        return video::probe_voice(video::VideoHost::current(), model.dir, model.handle);
-    };
-    seams.plan = [&config, &config_path, &busy](const std::string& backend,
-                                                const std::string& system, const std::string& user,
-                                                const std::string& schema) {
-        busy.set("planning");
-        return plan_on(config, config_path, backend, system, user, schema);
-    };
-    seams.speak = [&](const ResolvedVoiceModel& model, const std::string& voice,
-                      const std::string& text, const std::filesystem::path& wav) {
-        busy.set("speaking");
-        VoiceSayOptions options;
-        options.text = text;
-        options.model = model.handle;
-        options.voice = voice;
-        options.output = wav;
-        VoiceSaySeams run;
-        run.ready = [](const ResolvedVoiceModel& resolved) {
-            return video::probe_voice(video::VideoHost::current(), resolved.dir, resolved.handle);
+        VideoComposeSeams seams;
+        // Each clip on whichever engine its model's directory says (53l): the
+        // composer has no engine of its own.
+        seams.ready_video = [&config](const ResolvedPipeline& pipeline) {
+            return ready_engine(config, pipeline, "video compose");
         };
-        run.work_root = harness::video_work_dir();
-        run.platform = platform::host_target();
-        return spoken_from(say_text(roots, options, run, InterruptScope::token()));
-    };
-    seams.render = [&](const ResolvedPipeline& pipeline, const video::ClipAsk& ask,
-                       const std::filesystem::path& mp4) {
-        scene_label = "scene " + std::to_string(ask.scene);
-        said_tenth = -1;
-        busy.set(scene_label + ": loading the pipeline");
-        VideoGenerateOptions options;
-        options.prompt = ask.prompt;
-        options.model = pipeline.handle;
-        options.seed = ask.seed;
-        options.duration = ask.seconds;
-        options.image = ask.image;
-        options.output = mp4;
-        VideoGenerateSeams run;
-        run.ready = [](const ResolvedPipeline& resolved) {
-            return video::probe_video(video::VideoHost::current(), resolved.dir, resolved.handle);
+        // The narration on whichever engine its voice model's directory says
+        // (53m), as each clip is.
+        seams.ready_voice = [&config](const ResolvedVoiceModel& model) {
+            return ready_voice_engine(config, model.dir, model.handle, model.engine,
+                                      "video compose");
         };
-        run.on_event = [&](const video::VideoEvent& event) {
-            if (event.kind == video::VideoEvent::Kind::Step) {
-                if (busy.active()) {
-                    busy.report(scene_label + ": denoising", static_cast<std::size_t>(event.step),
-                                static_cast<std::size_t>(event.steps));
+        seams.plan = [&config, &config_path, &busy](
+                         const std::string& backend, const std::string& system,
+                         const std::string& user, const std::string& schema) {
+            busy.set("planning");
+            return plan_on(config, config_path, backend, system, user, schema);
+        };
+        seams.speak = [&](const ResolvedVoiceModel& model, const std::string& voice,
+                          const std::string& text, const std::filesystem::path& wav) {
+            busy.set("speaking");
+            VoiceSayOptions options;
+            options.text = text;
+            options.model = model.handle;
+            options.voice = voice;
+            options.output = wav;
+            VoiceSaySeams run;
+            run.ready = [](const ResolvedVoiceModel& resolved) {
+                return video::probe_voice_engine(video::VideoHost::current(), resolved.engine,
+                                                 resolved.dir, resolved.handle);
+            };
+            if (job.has_value()) {
+                run.on_event = [&](const video::VoiceEvent& event) {
+                    relay_voice_event(job->events(), event, scene_now);
+                };
+            }
+            run.work_root = harness::video_work_dir();
+            run.platform = platform::host_target();
+            return spoken_from(say_text(roots, options, run, InterruptScope::token()));
+        };
+        seams.render = [&](const ResolvedPipeline& pipeline, const video::ClipAsk& ask,
+                           const std::filesystem::path& mp4) {
+            scene_label = "scene " + std::to_string(ask.scene);
+            said_tenth = -1;
+            busy.set(scene_label + ": loading the pipeline");
+            VideoGenerateOptions options;
+            options.prompt = ask.prompt;
+            options.model = pipeline.handle;
+            options.seed = ask.seed;
+            options.duration = ask.seconds;
+            options.image = ask.image;
+            options.output = mp4;
+            VideoGenerateSeams run;
+            run.ready = [&config](const ResolvedPipeline& resolved) {
+                return video::probe_video_engine(video_host(config), resolved.engine, resolved.dir,
+                                                 resolved.handle);
+            };
+            run.on_event = [&](const video::VideoEvent& event) {
+                if (job.has_value()) {
+                    relay_video_event(job->events(), event, ask.scene);
                     return;
                 }
-                const int tenth = event.steps > 0 ? (event.step * 10) / event.steps : 0;
-                if (tenth != said_tenth || event.step == event.steps) {
-                    said_tenth = tenth;
-                    say(scene_label + ": step " + std::to_string(event.step) + "/" +
-                        std::to_string(event.steps));
+                if (event.kind == video::VideoEvent::Kind::Step) {
+                    if (busy.active()) {
+                        busy.report(scene_label + ": denoising",
+                                    static_cast<std::size_t>(event.step),
+                                    static_cast<std::size_t>(event.steps));
+                        return;
+                    }
+                    const int tenth = event.steps > 0 ? (event.step * 10) / event.steps : 0;
+                    if (tenth != said_tenth || event.step == event.steps) {
+                        said_tenth = tenth;
+                        say(scene_label + ": step " + std::to_string(event.step) + "/" +
+                            std::to_string(event.steps));
+                    }
                 }
+            };
+            run.work_root = harness::video_work_dir();
+            run.platform = platform::host_target();
+            return rendered_from(
+                generate_clip(config, roots, options, run, InterruptScope::token()));
+        };
+        seams.can_burn = [] { return platform::ffmpeg_has_filter("subtitles", {}); };
+        seams.random_seed = [] {
+            std::random_device device;
+            return static_cast<std::int64_t>(device() & 0x7fffffffU);
+        };
+        seams.say = [&](const std::string& line) {
+            say(line);
+            busy.set("working");
+        };
+        seams.on_scene = [&](std::size_t scene, std::size_t scenes, std::string_view state) {
+            scene_now = scene;
+            if (job.has_value()) {
+                job->events().emit_scene(scene, scenes, state);
             }
         };
-        run.work_root = harness::video_work_dir();
-        run.platform = platform::host_target();
-        return rendered_from(generate_clip(config, roots, options, run, InterruptScope::token()));
-    };
-    seams.can_burn = [] { return platform::ffmpeg_has_filter("subtitles", {}); };
-    seams.random_seed = [] {
-        std::random_device device;
-        return static_cast<std::int64_t>(device() & 0x7fffffffU);
-    };
-    seams.say = [&](const std::string& line) {
-        say(line);
-        busy.set("working");
-    };
-    seams.platform = platform::host_target();
+        seams.platform = platform::host_target();
 
-    VideoComposeResult result;
-    {
-        const InterruptScope interrupt;
-        result = compose_video(config, roots, flags.options, seams, InterruptScope::token());
-    }
-    busy.finish();
-    if (result.document.is_null()) {
-        fail(result.error, result.exit_code);
-    }
-    if (flags.format == ReadFormat::Json) {
-        write_document(std::cout, result.document);
-    } else {
-        for (const std::string& line : result.lines) {
-            std::cout << line << "\n";
+        VideoComposeResult result;
+        {
+            const InterruptScope interrupt;
+            result = compose_video(config, roots, flags.options, seams, InterruptScope::token());
         }
-    }
-    if (result.exit_code != 0) {
-        fail(result.error, result.exit_code);
-    }
+        busy.finish();
+        if (result.document.is_null()) {
+            if (job.has_value()) {
+                job->failed(result.error);
+            }
+            fail(result.error, result.exit_code);
+        }
+        if (job.has_value()) {
+            job->events().emit_document(result.document);
+        } else if (flags.format == JobFormat::Json) {
+            write_document(std::cout, result.document);
+        } else {
+            for (const std::string& line : result.lines) {
+                std::cout << line << "\n";
+            }
+        }
+        if (result.exit_code != 0) {
+            if (job.has_value()) {
+                job->failed(result.error);
+            }
+            fail(result.error, result.exit_code);
+        }
+    });
 }
 
 }  // namespace
@@ -326,7 +412,7 @@ void VideoCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->require_subcommand(1);
 
     auto flags = std::make_shared<GenerateFlags>();
-    auto format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    auto format = std::make_shared<JobFormat>(JobFormat::Text);
     CLI::App* generate = cmd->add_subcommand(
         "generate",
         "Generate one clip -- narrated step by step, written only when whole, its record beside "
@@ -344,9 +430,15 @@ void VideoCommand::bind(CLI::App& root, const RootContext& context) {
         ->type_name(kPathValue);
     generate
         ->add_option("-m,--model", flags->options.model,
-                     "The pipeline: a store handle, id or model, or a path (default: "
-                     "models.default_video)")
+                     "The pipeline, or an MLX video model: a store handle, id or model, or a "
+                     "path (default: models.default_video)")
         ->type_name(kVideoPipelineValue);
+    generate
+        ->add_option("--engine", flags->options.engine,
+                     "What the clip runs on: torch (a diffusers pipeline) or mlx (an MLX video "
+                     "model, through mlx-video) -- the model's directory decides, so this only "
+                     "names it or is refused (default: auto)")
+        ->type_name(words_value(video::video_engine_names()));
     generate->add_option("--seed", flags->seed,
                          "The seed (default: one drawn, and kept in the record)");
     generate->add_option("--duration", flags->duration,
@@ -392,14 +484,14 @@ void VideoCommand::bind(CLI::App& root, const RootContext& context) {
         ->type_name(kPathValue);
     generate->add_flag("--no-lora", flags->options.no_lora,
                        "No LoRAs -- with --from, the record's cleared");
-    add_read_format(generate, format);
+    add_job_format(generate, format, /*document=*/true);
     generate->callback([&context, flags, format, generate]() {
         flags->format = *format;
         video_generate(context, *flags, *generate);
     });
 
     auto compose_flags = std::make_shared<ComposeFlags>();
-    auto compose_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    auto compose_format = std::make_shared<JobFormat>(JobFormat::Text);
     CLI::App* compose = cmd->add_subcommand(
         "compose",
         "Compose a narrated, captioned video from a brief -- the scenes planned and said first, "
@@ -425,8 +517,8 @@ void VideoCommand::bind(CLI::App& root, const RootContext& context) {
         "No captions (default: the narration's own sentences, timed from the voice)");
     compose
         ->add_option("-m,--model", compose_flags->options.model,
-                     "The pipeline: a store handle, id or model, or a path (default: "
-                     "models.default_video)")
+                     "The pipeline, or an MLX video model -- each clip runs on what it is: a "
+                     "store handle, id or model, or a path (default: models.default_video)")
         ->type_name(kVideoPipelineValue);
     compose
         ->add_option("--voice-model", compose_flags->options.voice_model,
@@ -455,9 +547,10 @@ void VideoCommand::bind(CLI::App& root, const RootContext& context) {
                         "With --from: render a scene (from 1) again on a fresh seed; give it "
                         "again for more");
     compose->add_flag("--dry-run", compose_flags->options.dry_run,
-                      "With --from: say the diff and print the edited project; render and write "
-                      "nothing");
-    add_read_format(compose, compose_format);
+                      "Plan on paper: a brief's one planning call, its plan and spend said and "
+                      "kept beside the video, nothing rendered; with --from, the diff said and "
+                      "the edited project printed, nothing written");
+    add_job_format(compose, compose_format, /*document=*/true);
     compose->callback([&context, compose_flags, compose_format]() {
         compose_flags->format = *compose_format;
         video_compose(context, *compose_flags);

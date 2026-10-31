@@ -123,6 +123,12 @@ struct WeightsHandle {
 [[nodiscard]] std::string weights_handle(std::string_view model, std::string_view format,
                                          std::string_view id);
 
+/// How a sentence names the weights at `path`, asking nothing of the disk
+/// (53c): a directory the store files by id -- an MLX model -- by its handle,
+/// `<model>/<format>/<id>`, since its id alone says nothing to a person; a
+/// file -- a GGUF -- or anything else by its last component.
+[[nodiscard]] std::string weights_label(const std::filesystem::path& path);
+
 /// `text` read as a handle, asking nothing of the disk: a model name with no
 /// separator in it, a format, an id. Nullopt for anything else -- a path, a
 /// bare model, a ref. What a record's `ref` names when a conversion or a
@@ -399,6 +405,32 @@ struct StoredVoice {
 /// are). `model` narrows to one.
 [[nodiscard]] std::vector<StoredSnapshot> list_store_snapshots(const StoreRoots& roots,
                                                                std::string_view model = {});
+
+/// The stored models a draft head belongs beside (2026-10-21): each stored
+/// SafeTensors set or MLX model, itself no draft head, of the head's family
+/// and as wide as the head's `backbone_hidden_size` -- read from their
+/// `config.json`, never guessed from a name. By model name, sorted, each
+/// once; empty when the head does not say its base's width or none is stored.
+[[nodiscard]] std::vector<std::string> draft_head_bases(const StoreRoots& roots,
+                                                        const DraftHead& head);
+
+/// The MLX video models converted from the SafeTensors set at `dir` that
+/// stand in the store under `roots` (M24), by handle (`<model>/mlx/<id>`),
+/// sorted: each stored MLX directory whose own record says so -- its `ref`
+/// naming that set, by the handle `models convert --mlx` records (or, for a
+/// set converted from outside the store, its path), and its `transform`
+/// mlx-video's converter (`kMlxVideoConverterPackage`) -- the way 53l finds
+/// the set's tokenizer from the other end. Never matched by a name.
+[[nodiscard]] std::vector<std::string> mlx_video_conversions(const StoreRoots& roots,
+                                                             const std::filesystem::path& dir);
+
+/// The diffusion model the set at `dir` holds, read with the store under
+/// `roots` (M24): `snapshot_diffusion_model`'s reading and, for Wan's
+/// original layout, the MLX video models converted from it there
+/// (`mlx_video_conversions`) -- what every surface with the store at hand
+/// describes one from.
+[[nodiscard]] std::optional<DiffusionModel> stored_diffusion_model(
+    const StoreRoots& roots, const std::filesystem::path& dir, const VideoConverts& mlx_video = {});
 
 /// The model's most recent SafeTensors set -- what `convert` and `train`
 /// read when no id is named.

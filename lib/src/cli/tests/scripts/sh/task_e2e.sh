@@ -44,7 +44,8 @@ set -uo pipefail
 APOGEE_BIN="${1:?usage: task_e2e.sh <apogee-binary> <work-dir>}"
 WORK_DIR="${2:?usage: task_e2e.sh <apogee-binary> <work-dir>}"
 
-rm -rf "$WORK_DIR"
+. "$(dirname "$0")/sandbox.sh"
+WORK_DIR="$(sandbox_dir "$WORK_DIR")"
 mkdir -p "$WORK_DIR/scripts" "$WORK_DIR/project"
 export APOGEE_HOME="$WORK_DIR/home"
 export HOME="$WORK_DIR"
@@ -218,9 +219,9 @@ grep -qi "\[y\]es" "$WORK_DIR/denied.txt" && fail "the task prompted"
 # The budget: an honest status naming the check -- the model's own "done"
 # claimed nothing.
 [ "$(field "$DENIED" "t['status']")" = exhausted ] || fail "the denied task is not exhausted"
-field "$DENIED" "t['reason']" | grep -q "the round budget (1) is spent and the task is not done -- not passed: the file .*report.txt exists and is not empty (no such file)" \
+field "$DENIED" "t['reason']" | grep "the round budget (1) is spent and the task is not done -- not passed: the file .*report.txt exists and is not empty (no such file)" >/dev/null \
     || fail "exhaustion does not name the check: $(field "$DENIED" "t['reason']")"
-"$APOGEE_BIN" task status "$DENIED" </dev/null 2>&1 | grep -q "round 1: write_file on report.txt" \
+"$APOGEE_BIN" task status "$DENIED" </dev/null 2>&1 | grep "round 1: write_file on report.txt" >/dev/null \
     || fail "task status does not show the denial"
 
 # --- 27i: a granted write runs unprompted, recorded with its target -------------
@@ -346,6 +347,21 @@ $LIST"
 done
 
 # --- the lock, and a task killed mid-round ------------------------------------------
+# A task's `interrupted` as its `task list --output-format json` row says it
+# (M32), and its status document's, side by side: `true true`.
+listed_and_status() {
+    "$APOGEE_BIN" task list --output-format json </dev/null >"$WORK_DIR/row-list.json" 2>/dev/null \
+        || return 1
+    "$APOGEE_BIN" task status "$1" --output-format json </dev/null >"$WORK_DIR/row-status.json" \
+        2>/dev/null || return 1
+    python3 - "$WORK_DIR/row-list.json" "$WORK_DIR/row-status.json" "$1" <<'EOF'
+import json, sys
+rows = [r for r in json.load(open(sys.argv[1]))["data"] if r["id"] == sys.argv[3]]
+status = json.load(open(sys.argv[2]))
+print(" ".join(json.dumps(v) for v in (rows[0]["interrupted"] if rows else None,
+                                        status["interrupted"])))
+EOF
+}
 # Round 2 streams slowly: long enough to try a second run, then kill it.
 script killed '{"text": "1. Answer."}, {"text": "Not yet.\nTASK STATUS: NOT DONE"},
                {"text": "This answer streams slowly and never finishes here.", "delay_ms": 400}'
@@ -358,17 +374,33 @@ wait_for "$KILLED" '"round": 2' || fail "the slow task never reached round 2"
     && fail "a second task ran beside a live one"
 grep -q "task $KILLED is running (process $RUNNER) -- one task runs at a time" "$WORK_DIR/second.txt" \
     || fail "the lock did not name the running task: $(cat "$WORK_DIR/second.txt")"
-"$APOGEE_BIN" task status </dev/null 2>&1 | grep -q "task $KILLED  running (now, process $RUNNER)" \
+"$APOGEE_BIN" task status </dev/null 2>&1 | grep "task $KILLED  running (now, process $RUNNER)" >/dev/null \
     || fail "status does not show the running task"
+[ "$(listed_and_status "$KILLED")" = "false false" ] \
+    || fail "task list's row calls the running task interrupted: $(cat "$WORK_DIR/row-list.json")"
 kill -9 "$RUNNER"
 wait "$RUNNER" 2>/dev/null
-"$APOGEE_BIN" task status "$KILLED" </dev/null 2>&1 | grep -q "running (interrupted -- its process is gone" \
+"$APOGEE_BIN" task status "$KILLED" </dev/null 2>&1 | grep "running (interrupted -- its process is gone" >/dev/null \
     || fail "status does not say the killed task was interrupted"
+# Its list row says so too, as its status document does (M32) -- still
+# `running` by its ledger -- and no other row does.
+[ "$(listed_and_status "$KILLED")" = "true true" ] \
+    || fail "task list's row does not say the killed task was interrupted: $(cat "$WORK_DIR/row-list.json")"
+python3 - "$WORK_DIR/row-list.json" "$KILLED" <<'EOF' || fail "task list's rows: $(cat "$WORK_DIR/row-list.json")"
+import json, sys
+for row in json.load(open(sys.argv[1]))["data"]:
+    if row["id"] == sys.argv[2]:
+        assert row["status"] == "running", row
+    else:
+        assert row["interrupted"] is False, row
+EOF
 # The next round's answer, as the restarted model gives it.
 script killed '{"text": "It is 42.\nTASK STATUS: DONE"}'
 "$APOGEE_BIN" task resume "$KILLED" </dev/null >"$WORK_DIR/resumed.txt" 2>&1 \
     || fail "the killed task did not resume to done: $(cat "$WORK_DIR/resumed.txt")"
 [ "$(field "$KILLED" "t['status']")" = done ] || fail "the resumed task is not done"
+[ "$(listed_and_status "$KILLED")" = "false false" ] \
+    || fail "task list's row still calls the resumed task interrupted: $(cat "$WORK_DIR/row-list.json")"
 python3 - "$(session_of "$KILLED")" <<'EOF' || fail "the resumed conversation said a turn twice"
 import json, sys
 s = json.load(open(sys.argv[1]))

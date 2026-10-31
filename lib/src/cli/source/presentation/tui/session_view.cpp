@@ -966,11 +966,12 @@ public:
         });
     }
 
-    void on_recall(int chats, int decisions) override {
-        if (chats <= 0 && decisions <= 0) {
+    void on_recall(const std::vector<agentloop::RecalledChat>& chats, int decisions) override {
+        if (chats.empty() && decisions <= 0) {
             return;
         }
-        post([line = kStyle.dim("[memory] " + agentloop::describe_recall(chats, decisions))](
+        post([line = kStyle.dim("[memory] " + agentloop::describe_recall(
+                                                  static_cast<int>(chats.size()), decisions))](
                  SessionView::State& state) { state.say(line); });
     }
 

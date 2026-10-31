@@ -19,7 +19,8 @@ if ! command -v git >/dev/null 2>&1; then
     exit 0
 fi
 
-rm -rf "$WORK_DIR"
+. "$(dirname "$0")/sandbox.sh"
+WORK_DIR="$(sandbox_dir "$WORK_DIR")"
 mkdir -p "$WORK_DIR/home" "$WORK_DIR/repo"
 export APOGEE_HOME="$WORK_DIR/home"
 unset ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GOOGLE_API_KEY

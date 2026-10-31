@@ -38,8 +38,8 @@ foreach(line IN LISTS install_lines)
     endif()
 endforeach()
 
-file(REMOVE_RECURSE "${WORK_DIR}")
-file(MAKE_DIRECTORY "${WORK_DIR}")
+include("${CMAKE_CURRENT_LIST_DIR}/sandbox.cmake")
+apogee_sandbox_dir(WORK_DIR "${WORK_DIR}")
 
 execute_process(
     COMMAND "${CMAKE_COMMAND}" --install "${BUILD_DIR}" --prefix "${WORK_DIR}" --component apogee
@@ -70,4 +70,5 @@ if(NOT installed STREQUAL expected)
         "COMPONENT apogee and install with --component apogee.")
 endif()
 
+file(REMOVE_RECURSE "${WORK_DIR}")
 message(STATUS "install check: exactly '${installed}' - OK")

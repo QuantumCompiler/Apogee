@@ -1,0 +1,1 @@
+apogee providers: no provider named 'nope' -- the ones apogee knows: claude, codex, gemini, ollama, anthropic, openai, google

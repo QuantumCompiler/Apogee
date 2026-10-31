@@ -14,7 +14,7 @@
 #                     link here fails, and so does a link nothing includes.
 #
 # The layers are ADR 0001's, lowest first, and the build adds them in this
-# order (lib/documentation/adrs/cli/layer-enforcement.md). A module may link
+# order (lib/documentation/cli/adrs/layer-enforcement.md). A module may link
 # modules in its own layer and the layers below it, never above. A new module
 # gets a row here the day its directory exists -- source/<layer>/<module>/ --
 # and its links are the review conversation, held in this file.

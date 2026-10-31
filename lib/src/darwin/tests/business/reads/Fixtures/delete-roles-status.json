@@ -1,0 +1,1 @@
+{"fields":[{"field":"chat","value":"Qwen3-8B-4bit"},{"field":"embedding","value":"Qwen3-8B-4bit   (via models.default)"},{"field":"extraction","value":"Qwen3-8B-4bit   (via models.default)"},{"field":"vision","value":"(unset -- the chat's own backend)"},{"field":"transcription","value":"(unset -- the chat's own backend)"},{"field":"utility","value":"Qwen3-8B-4bit"}]}

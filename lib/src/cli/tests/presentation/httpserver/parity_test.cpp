@@ -92,6 +92,7 @@ const std::map<std::string, Classification>& table() {
         {"config set-default-utility", twin("POST", "/v1/admin/backends/default-utility")},
         {"config format", twin("POST", "/v1/admin/config/format")},
         {"config set-permission", twin("PUT", "/v1/admin/permissions/{id}")},
+        {"config set", twin("PUT", "/v1/admin/config/{id}")},
         {"config add-allowed-host", twin("PUT", "/v1/admin/allowed-hosts/{id}")},
         {"config delete-allowed-host", twin("DELETE", "/v1/admin/allowed-hosts/{id}")},
         {"config delete-mcp-server", twin("DELETE", "/v1/admin/mcp-servers/{id}")},
@@ -140,6 +141,12 @@ const std::map<std::string, Classification>& table() {
         {"datasets pull", backfill("training: the datasets plane, an async job")},
         {"chats title", backfill("sessions: transcripts on disk")},
         {"chats delete", backfill("sessions: transcripts on disk")},
+        // 52d: a served session's compaction is the recorded out the item
+        // names -- the sessions plane, a model call.
+        {"chats compact", backfill("sessions: transcripts on disk, a model call")},
+        {"chats recall",
+         carve_out("recall is CLI-only (26l): nothing of it is reachable from the server, "
+                   "forgetting it included (52e)")},
         // --- carve-outs: host-local by nature ---------------------------------
         {"config init", carve_out("the server cannot exist without a config to start from")},
         {"config migrate",
@@ -153,6 +160,11 @@ const std::map<std::string, Classification>& table() {
          carve_out("detects the vendor CLIs and keys of the host it runs on; host-local by nature, "
                    "and what --register writes a remote client writes through the add-backend "
                    "twin")},
+        // M33: scan --register for one provider, over the host's last scan.
+        {"providers register",
+         carve_out("registers one provider the last scan of the host it runs on found; "
+                   "host-local by nature, as providers scan is, and what it writes a remote "
+                   "client writes through the add-backend twin")},
         {"uninstall", carve_out("removes the binary and the data directory; host-local")},
         {"reset",
          carve_out("resets the data directory to a fresh install; host-local, like uninstall -- "
@@ -239,6 +251,10 @@ const std::map<std::string, Classification>& table() {
         {"graph explain", served("/v1/admin/graph/{id}/explain")},
         {"graph neighbors", served("/v1/admin/graph/{id}/neighbors")},
         {"graph query", served("/v1/admin/graph/{id}/query")},
+        // `--output-format json` prints the route's body byte for byte (55h);
+        // without an id, `GET /v1/admin/training/runs?kind=pipeline`'s.
+        {"train pipeline status", served("/v1/admin/training/runs/{id}")},
+        {"train cycle status", served("/v1/admin/training/cycle")},
         // --- read-only / interactive ------------------------------------------
         {"chat", read_only()},
         // chat's session opened with a suite (27s); a session surface, as chat
@@ -280,6 +296,9 @@ const std::map<std::string, Classification>& table() {
         {"models status", read_only()},
         {"chats list", read_only()},
         {"chats info", read_only()},
+        // A saved chat's turns (M27), beside `chats info`; a live served
+        // session's messages are `GET /v1/sessions/{id}`'s.
+        {"chats show", read_only()},
         {"knowledge query", read_only()},
         {"knowledge list", read_only()},
         {"knowledge info", read_only()},
@@ -291,12 +310,14 @@ const std::map<std::string, Classification>& table() {
         {"datasets info", read_only()},
         {"train versions", read_only()},
         {"train status", read_only()},
-        {"train pipeline status", read_only()},
-        {"train cycle status", read_only()},
         // The shipped and the user's regime specs (42a): reads of the host's
         // own files, beside `datasets kits`.
         {"train regime list", read_only()},
         {"train regime show", read_only()},
+        // The named pipeline specs (M30): the config's own entries, read as
+        // the regimes are.
+        {"train pipeline list", read_only()},
+        {"train pipeline show", read_only()},
     };
     return rows;
 }

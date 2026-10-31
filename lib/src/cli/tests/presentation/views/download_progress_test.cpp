@@ -229,3 +229,72 @@ TEST_CASE("a piped download keeps a coarse permanent line and no escapes", "[ux]
               "      128 MiB of 130 MiB (98%)\n");
     }
 }
+
+TEST_CASE("relayed, a download paints nothing and hands on the same counts",
+          "[ux][progress][relay]") {
+    // 52b: a job's stream frames the one producer's counts -- each file's
+    // start, each whole percent of a known total, every 16 MiB of an unknown
+    // one, and where it ended -- never a second count.
+    struct Seen {
+        std::int64_t done;
+        std::int64_t total;
+        std::string file;
+        std::size_t index;
+        std::size_t count;
+        bool operator==(const Seen&) const = default;
+    };
+
+    std::vector<Seen> seen;
+    DownloadProgress::Options options = piped();
+    options.relay = [&seen](const apogee::commands::ByteReport& report) {
+        seen.push_back(
+            {report.done, report.total, std::string{report.file}, report.index, report.count});
+    };
+
+    SECTION("a known total: the start, each percent, the end") {
+        std::ostringstream out;
+        {
+            DownloadProgress progress{out, options};
+            for (std::int64_t written = 0; written <= 1000; written += 5) {
+                progress.bytes(written, 1000);
+            }
+            progress.finish();
+        }
+        CHECK(out.str().empty());
+        REQUIRE(seen.size() == 101);
+        CHECK(seen.front() == Seen{0, 1000, "", 0, 0});
+        CHECK(seen[50] == Seen{500, 1000, "", 0, 0});
+        CHECK(seen.back() == Seen{1000, 1000, "", 0, 0});
+    }
+
+    SECTION("an unknown total: every 16 MiB, and the end said once") {
+        std::ostringstream out;
+        DownloadProgress progress{out, options};
+        for (std::int64_t written = kMiB; written <= 40 * kMiB; written += kMiB) {
+            progress.bytes(written, 0);
+        }
+        progress.finish();
+        progress.finish();
+        CHECK(out.str().empty());
+        std::vector<std::int64_t> done;
+        for (const Seen& one : seen) {
+            done.push_back(one.done / kMiB);
+            CHECK(one.total == 0);
+        }
+        CHECK(done == std::vector<std::int64_t>{1, 17, 33, 40});
+    }
+
+    SECTION("a tree: each file named with its place, its end before the next") {
+        std::ostringstream out;
+        DownloadProgress progress{out, options};
+        stream_file(progress, 1, 2, "config.json", 700, 700);
+        stream_file(progress, 2, 2, "model.safetensors", 4 * kMiB, kMiB);
+        progress.finish();
+        CHECK(out.str().empty());
+        CHECK(seen == std::vector<Seen>{{700, 700, "config.json", 1, 2},
+                                        {kMiB, 4 * kMiB, "model.safetensors", 2, 2},
+                                        {2 * kMiB, 4 * kMiB, "model.safetensors", 2, 2},
+                                        {3 * kMiB, 4 * kMiB, "model.safetensors", 2, 2},
+                                        {4 * kMiB, 4 * kMiB, "model.safetensors", 2, 2}});
+    }
+}

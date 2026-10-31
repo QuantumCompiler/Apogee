@@ -5,6 +5,9 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <charconv>
+#include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <functional>
 #include <initializer_list>
@@ -21,6 +24,15 @@
 #include "contracts/layout.h"
 
 namespace apogee::harness {
+namespace {
+
+/// The names an entry can have, as every refusal says them (55f): the keys
+/// the JSONC bridge writes plain (`yaml_plain_key`), which the line editor
+/// finds by their text in either format.
+constexpr std::string_view kEntryNameRule =
+    "a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null";
+
+}  // namespace
 
 /// The line editor: every transform, defined once over the YAML text the
 /// config was first written in. A JSONC config reaches it through the bridge
@@ -181,6 +193,120 @@ SectionRange find_section(const Lines& lines, std::string_view section) {
         return range;
     }
     return range;
+}
+
+/// Where the comment after a value on `line` starts -- the first `#` after
+/// a space outside a quoted scalar, from `from` on -- or npos when there is
+/// none. A path quoted for its `#` is not a comment; a quote mark inside a
+/// plain scalar (`it's`) opens nothing. Every scan for a value's comment asks
+/// this one (55f): a URL's fragment or a quoted path's `#` is the value's own.
+std::size_t comment_start(std::string_view line, std::size_t from) {
+    char quote = 0;
+    for (std::size_t i = from; i < line.size(); ++i) {
+        const char c = line[i];
+        const char before = i > 0 ? line[i - 1] : ' ';
+        if (quote == '"' && c == '\\') {
+            ++i;  // an escaped character, a quote among them
+        } else if (quote != 0) {
+            quote = c == quote ? 0 : quote;
+        } else if ((c == '"' || c == '\'') &&
+                   std::string_view{" \t[{,:"}.find(before) != std::string_view::npos) {
+            quote = c;
+        } else if (c == '#' && (before == ' ' || before == '\t')) {
+            return i;
+        }
+    }
+    return std::string_view::npos;
+}
+
+/// The terminator `line` ends with, or none on a file's unterminated last.
+std::string terminator_of(std::string_view line) {
+    if (line.ends_with("\r\n")) {
+        return "\r\n";
+    }
+    return line.ends_with('\n') ? "\n" : "";
+}
+
+/// The lines a field whose key sits at `indent` on line `key_index` owns, up to
+/// `limit`: the key line, and after it its value's -- every line indented
+/// deeper (a block list's items, a block scalar's text, a flow list carried
+/// on) or, for a block list written at the key's own indent, a `- item` there
+/// -- with a blank or comment line kept only when such a line follows it: one
+/// trailing the value is the next field's.
+std::pair<std::size_t, std::size_t> field_extent(const Lines& lines, std::size_t key_index,
+                                                 std::size_t limit, std::size_t indent) {
+    std::size_t last_content = key_index;
+    for (std::size_t i = key_index + 1; i < limit; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line)) {
+            continue;
+        }
+        const std::size_t at = indent_of(line);
+        if (at > indent || (at == indent && line.substr(at).starts_with("-"))) {
+            last_content = i;
+            continue;
+        }
+        break;
+    }
+    return {key_index, last_content + 1};
+}
+
+/// `original` -- a `key: value` line at `indent` -- with its value token
+/// replaced by `rendered`, the trailing comment and the whitespace before it
+/// kept. The comment is found by `comment_start`, so a `#` inside the value
+/// goes with the value.
+std::string with_value(const std::string& original, std::size_t indent, std::string_view rendered,
+                       const std::string& terminator) {
+    const std::size_t key_colon = original.find(':', indent);
+    const std::size_t hash = comment_start(original, key_colon + 1);
+    const std::size_t limit = (hash == std::string::npos) ? original.size() : hash;
+    std::size_t value_start = key_colon + 1;
+    while (value_start < limit && (original[value_start] == ' ' || original[value_start] == '\t')) {
+        ++value_start;
+    }
+    std::size_t value_end = limit;
+    while (value_end > value_start &&
+           (original[value_end - 1] == ' ' || original[value_end - 1] == '\t' ||
+            original[value_end - 1] == '\r' || original[value_end - 1] == '\n')) {
+        --value_end;
+    }
+    std::string replacement = original.substr(0, value_start);
+    if (value_start == key_colon + 1) {
+        replacement += ' ';  // `key:value` had no space; give it one
+    }
+    replacement += rendered;
+    replacement += original.substr(value_end);
+    if (value_start == value_end && hash != std::string::npos) {
+        // `key:   # comment` -- the value below the key, or none: the new one
+        // goes after the colon, and the spacing before the comment stays.
+        replacement = original.substr(0, key_colon + 1) + " " + std::string{rendered} +
+                      original.substr(key_colon + 1);
+    }
+    if (replacement.empty() || replacement.back() != '\n') {
+        replacement += terminator;
+    }
+    return replacement;
+}
+
+/// Sets the field whose key sits at `indent` on line `key` to `rendered`: the
+/// value token replaced on the key's own line, its comment kept, and every
+/// other line of the old value -- a block list's items, a block scalar's text
+/// (`field_extent`, up to `limit`) -- taken with it (55f), so none is left
+/// behind to fold into the field above. A one-line value is one token's edit.
+void replace_field_value(Lines& lines, std::size_t key, std::size_t limit, std::size_t indent,
+                         std::string_view rendered, const std::string& terminator) {
+    const std::size_t end = field_extent(lines, key, limit, indent).second;
+    lines[key] = with_value(lines[key], indent, rendered, terminator);
+    lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(key) + 1,
+                lines.begin() + static_cast<std::ptrdiff_t>(end));
+}
+
+/// Removes the field whose key sits at `indent` on line `key`, and every line
+/// of its value with it (`field_extent`, up to `limit`).
+void remove_field(Lines& lines, std::size_t key, std::size_t limit, std::size_t indent) {
+    const std::size_t end = field_extent(lines, key, limit, indent).second;
+    lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(key),
+                lines.begin() + static_cast<std::ptrdiff_t>(end));
 }
 
 }  // namespace
@@ -401,9 +527,19 @@ std::string append_entry(std::string_view content, std::string_view section, std
     if (name.empty()) {
         throw ConfigEditError(std::string{noun} + " name cannot be empty");
     }
-    if (name.find_first_of(" \t:#") != std::string_view::npos) {
-        throw ConfigEditError(std::string{noun} + " name '" + std::string{name} +
-                              "' cannot contain spaces, tabs, colons, or '#'");
+    // Only a name both formats can edit (55f): another, added to a JSONC
+    // config, would be written quoted by the bridge, and no later edit or
+    // delete would find it.
+    if (!yaml_plain_key(name)) {
+        std::string refusal = std::string{noun} + " name '" + std::string{name} +
+                              "' is not one both config formats can edit -- " +
+                              std::string{kEntryNameRule};
+        if (section == "backends") {
+            refusal +=
+                "; a backend already named otherwise is reached by 'apogee config "
+                "rename-backend'";
+        }
+        throw ConfigEditError(refusal);
     }
 
     Lines lines = split_lines(content);
@@ -669,32 +805,8 @@ std::string set_mcp_server_enabled(std::string_view content, std::string_view na
         if (!rest.starts_with("enabled:")) {
             continue;
         }
-        // Replace only the value token, keeping any trailing comment.
-        const std::string& original = lines[i];
-        const std::size_t key_colon = original.find(':', kFieldIndent);
-        const std::size_t hash = original.find('#', key_colon);
-        const std::size_t limit = hash == std::string::npos ? original.size() : hash;
-        std::size_t value_start = key_colon + 1;
-        while (value_start < limit &&
-               (original[value_start] == ' ' || original[value_start] == '\t')) {
-            ++value_start;
-        }
-        std::size_t value_end = limit;
-        while (value_end > value_start &&
-               (original[value_end - 1] == ' ' || original[value_end - 1] == '\t' ||
-                original[value_end - 1] == '\r' || original[value_end - 1] == '\n')) {
-            --value_end;
-        }
-        std::string replacement = original.substr(0, value_start);
-        if (value_start == key_colon + 1) {
-            replacement += ' ';
-        }
-        replacement += value;
-        replacement += original.substr(value_end);
-        if (replacement.empty() || replacement.back() != '\n') {
-            replacement += terminator;
-        }
-        lines[i] = replacement;
+        // Replace only the value, keeping any trailing comment.
+        replace_field_value(lines, i, end, kFieldIndent, value, terminator);
         return join_lines(lines);
     }
     lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(*key_line + 1),
@@ -1458,29 +1570,6 @@ std::string set_suite_member(std::string_view content, std::string_view suite,
 
 namespace {
 
-/// The lines a suite field at `key_index` owns: the key line, and after it
-/// every line indented deeper -- or, for a block list, a `- item` at the
-/// key's own indent -- with blank and comment lines kept only when such a
-/// line follows them.
-std::pair<std::size_t, std::size_t> suite_field_extent(const Lines& lines, std::size_t key_index,
-                                                       std::size_t limit) {
-    std::size_t last_content = key_index;
-    for (std::size_t i = key_index + 1; i < limit; ++i) {
-        const std::string_view line = body(lines[i]);
-        if (is_blank(line) || is_comment(line)) {
-            continue;
-        }
-        const std::size_t indent = indent_of(line);
-        if (indent > kFieldIndent ||
-            (indent == kFieldIndent && line.substr(indent).starts_with("-"))) {
-            last_content = i;
-            continue;
-        }
-        break;
-    }
-    return {key_index, last_content + 1};
-}
-
 /// Replaces the suite field `key` of `suite` with `rendered` -- removing it
 /// when `rendered` is empty -- in place, every other line of the entry as it
 /// was. A field not yet written goes above `before` when the entry has that
@@ -1511,7 +1600,7 @@ std::string set_suite_field(std::string_view content, std::string_view suite, st
     }
     const Lines rendered = render(terminator);
     if (field_line.has_value()) {
-        const auto [begin, end] = suite_field_extent(lines, *field_line, entry_end);
+        const auto [begin, end] = field_extent(lines, *field_line, entry_end, kFieldIndent);
         lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(begin),
                     lines.begin() + static_cast<std::ptrdiff_t>(end));
         if (!rendered.empty()) {
@@ -1571,8 +1660,9 @@ std::vector<std::string_view> models_role_fields() {
 
 namespace {
 
-/// Sets one path field of a backend entry in place, keeping any trailing
-/// comment; when the entry has none, it goes right after `after_field` (else
+/// Sets one field of a backend entry in place, keeping any trailing comment
+/// -- the whole old value replaced, a block list's or a block scalar's lines
+/// with it (55f) -- or, when the entry has none, after `after_field` (else
 /// after `type:`, else first) -- where a reader looks for it.
 std::string set_backend_path_field(std::string_view content, std::string_view name,
                                    std::string_view key, std::string_view after_field,
@@ -1609,44 +1699,23 @@ std::string set_backend_path_field(std::string_view content, std::string_view na
         if (!field.starts_with(prefix)) {
             continue;
         }
-        // Replace only the value token, keeping any trailing comment.
-        const std::string& original = lines[i];
-        const std::size_t key_colon = original.find(':', kFieldIndent);
-        const std::size_t hash = original.find(" #", key_colon);
-        const std::size_t limit = hash == std::string::npos ? original.size() : hash;
-        std::size_t value_start = key_colon + 1;
-        while (value_start < limit &&
-               (original[value_start] == ' ' || original[value_start] == '\t')) {
-            ++value_start;
-        }
-        std::size_t value_end = limit;
-        while (value_end > value_start &&
-               (original[value_end - 1] == ' ' || original[value_end - 1] == '\t' ||
-                original[value_end - 1] == '\r' || original[value_end - 1] == '\n')) {
-            --value_end;
-        }
-        std::string replacement = original.substr(0, value_start);
-        if (value_start == key_colon + 1) {
-            replacement += ' ';
-        }
-        replacement += value;
-        replacement += original.substr(value_end);
-        if (replacement.empty() || replacement.back() != '\n') {
-            replacement += terminator;
-        }
-        lines[i] = replacement;
+        replace_field_value(lines, i, end, kFieldIndent, value, terminator);
         return join_lines(lines);
     }
-    const std::size_t at = after_line.has_value()  ? *after_line + 1
-                           : type_line.has_value() ? *type_line + 1
-                                                   : begin + 1;
-    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(at),
-                 std::string(kFieldIndent, ' ') + prefix + " " + value + terminator);
+    // Below the field it follows, and below that field's own value lines.
+    const std::size_t at =
+        after_line.has_value()  ? field_extent(lines, *after_line, end, kFieldIndent).second
+        : type_line.has_value() ? field_extent(lines, *type_line, end, kFieldIndent).second
+                                : begin + 1;
+    insert_lines(lines, at, {std::string(kFieldIndent, ' ') + prefix + " " + value + terminator},
+                 terminator);
     return join_lines(lines);
 }
 
-/// Removes `backends.<name>.<key>` -- its line, a comment after it with it --
-/// leaving the entry otherwise as it was; a field it lacks leaves it as is.
+/// Removes `backends.<name>.<key>` -- its line, a comment after it with it,
+/// and every line of its value: a block list's items, a block scalar's text
+/// (55f) -- leaving the entry otherwise as it was; a field it lacks leaves it
+/// as is.
 std::string remove_backend_field(std::string_view content, std::string_view name,
                                  std::string_view key) {
     Lines lines = split_lines(content);
@@ -1664,39 +1733,125 @@ std::string remove_backend_field(std::string_view content, std::string_view name
         const std::string_view line = body(lines[i]);
         if (!is_blank(line) && !is_comment(line) && indent_of(line) == kFieldIndent &&
             line.substr(kFieldIndent).starts_with(prefix)) {
-            lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(i));
+            remove_field(lines, i, end, kFieldIndent);
             return join_lines(lines);
         }
     }
     return std::string{content};
 }
 
+/// `adapters` as the flow list an `adapters:` line holds (53a), each
+/// `{path: ..., scale: ..., base_sha256: "..."}` -- the pin quoted, so a
+/// digest of digits alone stays text in either format, and left out when an
+/// adapter has none.
+std::string adapters_flow_list(const std::vector<AdapterConfig>& adapters) {
+    std::string list;
+    for (const AdapterConfig& adapter : adapters) {
+        list += list.empty() ? "" : ", ";
+        list += "{path: " + yaml_scalar(adapter.path) + ", scale: " + number_scalar(adapter.scale);
+        if (!adapter.base_sha256.empty()) {
+            list += ", base_sha256: \"" + adapter.base_sha256 + "\"";
+        }
+        list += "}";
+    }
+    return "[" + list + "]";
+}
+
+/// One past the last line of the backend field whose key is at `key`: its
+/// value's lines (`field_extent`), up to the entry's `end`.
+std::size_t field_value_end(const Lines& lines, std::size_t key, std::size_t end) {
+    return field_extent(lines, key, end, kFieldIndent).second;
+}
+
 }  // namespace
 
+std::string set_backend_adapters(std::string_view content, std::string_view name,
+                                 const std::vector<AdapterConfig>& adapters) {
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+    const SectionRange range = find_section(lines, "backends");
+    if (!range.found) {
+        throw ConfigEditError("no 'backends:' section in this config");
+    }
+    const std::optional<std::size_t> key_line = find_entry_line(lines, range, name);
+    if (!key_line.has_value()) {
+        throw ConfigEditError("backend '" + std::string{name} + "' not found in config");
+    }
+    const auto [begin, end] = entry_extent(lines, *key_line, range.end);
+    std::optional<std::size_t> field_line;
+    std::optional<std::size_t> path_line;
+    std::optional<std::size_t> type_line;
+    for (std::size_t i = begin + 1; i < end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line) || indent_of(line) != kFieldIndent) {
+            continue;
+        }
+        const std::string_view field = line.substr(kFieldIndent);
+        if (field.starts_with("adapters:")) {
+            field_line = i;
+        } else if (field.starts_with("model_path:")) {
+            path_line = i;
+        } else if (field.starts_with("type:")) {
+            type_line = i;
+        }
+    }
+    const std::string written =
+        std::string(kFieldIndent, ' ') + "adapters: " + adapters_flow_list(adapters);
+    if (field_line.has_value()) {
+        // The whole value goes, a block list's lines with it; a comment after
+        // the key stays, spacing and all, on the one line written instead.
+        const std::size_t stop = field_value_end(lines, *field_line, end);
+        const std::string& original = lines[*field_line];
+        const std::string_view original_body = body(original);
+        const std::size_t colon = original_body.find(':');
+        std::string tail;
+        if (const std::size_t hash = comment_start(original_body, colon + 1);
+            hash != std::string_view::npos) {
+            std::size_t keep = hash;
+            while (keep > colon + 1 &&
+                   (original_body[keep - 1] == ' ' || original_body[keep - 1] == '\t')) {
+                --keep;
+            }
+            tail = std::string{original_body.substr(keep)};
+        }
+        tail += terminator_of(lines[stop - 1]);
+        lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(*field_line) + 1,
+                    lines.begin() + static_cast<std::ptrdiff_t>(stop));
+        if (adapters.empty()) {
+            lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(*field_line));
+        } else {
+            lines[*field_line] = written + tail;
+        }
+        return join_lines(lines);
+    }
+    if (adapters.empty()) {
+        return std::string{content};
+    }
+    // Where a reader looks for it: under the base it applies over.
+    const std::size_t at = path_line.has_value()   ? field_value_end(lines, *path_line, end)
+                           : type_line.has_value() ? field_value_end(lines, *type_line, end)
+                                                   : begin + 1;
+    // After a file's unterminated last line, the line before it gains the
+    // terminator and the new one ends the file as that one did.
+    std::string ending = terminator;
+    if (std::string& before = lines[at - 1]; terminator_of(before).empty()) {
+        before += terminator;
+        ending.clear();
+    }
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(at), written + ending);
+    return join_lines(lines);
+}
+
 std::vector<std::string_view> backend_editable_fields() {
-    return {"type",
-            "model",
-            "model_path",
-            "mmproj_path",
-            "embedding_model",
-            "system_prompt",
-            "context_size",
-            "cache_type",
-            "max_tokens",
-            "temperature",
-            "top_p",
-            "top_k",
-            "min_p",
-            "repeat_penalty",
-            "presence_penalty",
-            "seed",
-            "thinking",
-            "thinking_budget",
-            "binary",
-            "mode",
-            "host",
-            "idle_unload_seconds",
-            "server_tools"};
+    // The entry's keys as the loader declares them (55g), but its key: a key
+    // is stored with `auth add` alone.
+    std::vector<std::string_view> fields;
+    for (const std::string_view key : backend_entry_keys()) {
+        if (key != "api_key") {
+            fields.push_back(key);
+        }
+    }
+    return fields;
 }
 
 /// `value`, a comma-separated list of names (`web_search,code_execution`),
@@ -1747,11 +1902,27 @@ std::string set_backend_field(std::string_view content, std::string_view name,
         if (field == "type") {
             throw ConfigEditError("a backend's type cannot be cleared -- name the type it is");
         }
+        if (field == "adapters") {
+            return yaml_text::set_backend_adapters(content, name, {});  // its block lines too
+        }
         return remove_backend_field(content, name, field);
     }
     if (field == "server_tools") {
         return set_backend_path_field(content, name, field, "", flow_list_of_names(value),
                                       /*quote=*/false);
+    }
+    if (field == "adapters") {
+        // The list as given, pinned to nothing: `config set-backend` records
+        // each pin through `set_backend_adapters` itself (53a).
+        return yaml_text::set_backend_adapters(content, name, parse_adapter_list(value));
+    }
+    // A drafter beside the model it drafts for (53i), its block size beside
+    // it, where a reader looks for them.
+    if (field == "draft") {
+        return set_backend_path_field(content, name, field, "model_path", value);
+    }
+    if (field == "draft_block_size") {
+        return set_backend_path_field(content, name, field, "draft", value);
     }
     return set_backend_path_field(content, name, field, "", value);
 }
@@ -1808,32 +1979,8 @@ std::string set_embedding_graph_enabled(std::string_view content, std::string_vi
                 !line.substr(kGraphFieldIndent).starts_with("enabled:")) {
                 continue;
             }
-            // Replace only the value token, keeping any trailing comment.
-            const std::string& original = lines[i];
-            const std::size_t key_colon = original.find(':', kGraphFieldIndent);
-            const std::size_t hash = original.find('#', key_colon);
-            const std::size_t limit = hash == std::string::npos ? original.size() : hash;
-            std::size_t value_start = key_colon + 1;
-            while (value_start < limit &&
-                   (original[value_start] == ' ' || original[value_start] == '\t')) {
-                ++value_start;
-            }
-            std::size_t value_end = limit;
-            while (value_end > value_start &&
-                   (original[value_end - 1] == ' ' || original[value_end - 1] == '\t' ||
-                    original[value_end - 1] == '\r' || original[value_end - 1] == '\n')) {
-                --value_end;
-            }
-            std::string replacement = original.substr(0, value_start);
-            if (value_start == key_colon + 1) {
-                replacement += ' ';
-            }
-            replacement += value;
-            replacement += original.substr(value_end);
-            if (replacement.empty() || replacement.back() != '\n') {
-                replacement += terminator;
-            }
-            lines[i] = replacement;
+            // Replace only the value, keeping any trailing comment.
+            replace_field_value(lines, i, graph_end, kGraphFieldIndent, value, terminator);
             return join_lines(lines);
         }
         // A `graph:` block with no `enabled:` line: the field goes first in it.
@@ -1854,16 +2001,17 @@ std::string set_embedding_graph_enabled(std::string_view content, std::string_vi
 
 namespace {
 
-/// Sets `<section>.<field>` to `value` -- the shared body of every "one
-/// scalar under a top-level section" edit: replace the line in place keeping
-/// its trailing comment, else insert it at the end of the section, else
-/// append the section.
-std::string set_section_scalar(std::string_view content, std::string_view section_name,
-                               std::string_view field, std::string_view value) {
+/// Sets `<section>.<field>` to `rendered` -- a value already written as
+/// YAML: a quoted string, or a bare `true` or `42` (52e) -- the shared body
+/// of every "one scalar under a top-level section" edit: replace the line in
+/// place keeping its trailing comment, else insert it at the end of the
+/// section, else append the section.
+std::string set_section_rendered(std::string_view content, std::string_view section_name,
+                                 std::string_view field, std::string_view rendered) {
     Lines lines = split_lines(content);
     const std::string terminator = dominant_terminator(lines);
     const std::string new_line =
-        std::string(kEntryIndent, ' ') + std::string{field} + ": " + yaml_scalar(value);
+        std::string(kEntryIndent, ' ') + std::string{field} + ": " + std::string{rendered};
 
     SectionRange section = find_section(lines, section_name);
 
@@ -1881,47 +2029,23 @@ std::string set_section_scalar(std::string_view content, std::string_view sectio
             const std::string_view rest = line.substr(kEntryIndent);
             const std::size_t colon = rest.find(':');
             if (colon == std::string_view::npos || rest.substr(0, colon) != field) {
-                insert_at = i + 1;
+                // After this key's whole value: a new line never splits a
+                // neighbour's block (55f).
+                insert_at = field_extent(lines, i, section.end, kEntryIndent).second;
                 continue;
             }
-            // Found it. Replace ONLY the value token, splicing it between the
+            // Found it. Replace ONLY the value, splicing it between the
             // original prefix and the original suffix.
             //
             // Done this way rather than by rebuilding the line so that the
             // trailing comment AND the exact whitespace before it survive: a
             // config whose comments are column-aligned stays aligned, and the
             // diff for setting a role is one token wide.
-            const std::string& original = lines[i];
-            const std::size_t key_colon = original.find(':', kEntryIndent);
-            const std::size_t hash = original.find('#', key_colon);
-            const std::size_t limit = (hash == std::string::npos) ? original.size() : hash;
-
-            std::size_t value_start = key_colon + 1;
-            while (value_start < limit &&
-                   (original[value_start] == ' ' || original[value_start] == '\t')) {
-                ++value_start;
-            }
-            std::size_t value_end = limit;
-            while (value_end > value_start &&
-                   (original[value_end - 1] == ' ' || original[value_end - 1] == '\t' ||
-                    original[value_end - 1] == '\r' || original[value_end - 1] == '\n')) {
-                --value_end;
-            }
-
-            std::string replacement = original.substr(0, value_start);
-            if (value_start == key_colon + 1) {
-                replacement += ' ';  // `key:value` had no space; give it one
-            }
-            replacement += yaml_scalar(value);
-            replacement += original.substr(value_end);
-            if (replacement.empty() || replacement.back() != '\n') {
-                replacement += terminator;
-            }
-            lines[i] = replacement;
+            replace_field_value(lines, i, section.end, kEntryIndent, rendered, terminator);
             return join_lines(lines);
         }
 
-        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(insert_at), new_line + terminator);
+        insert_lines(lines, insert_at, {new_line + terminator}, terminator);
         return join_lines(lines);
     }
 
@@ -1936,6 +2060,89 @@ std::string set_section_scalar(std::string_view content, std::string_view sectio
     }
     lines.push_back(std::string{section_name} + ":" + terminator);
     lines.push_back(new_line + terminator);
+    return join_lines(lines);
+}
+
+std::string set_section_scalar(std::string_view content, std::string_view section_name,
+                               std::string_view field, std::string_view value) {
+    return set_section_rendered(content, section_name, field, yaml_scalar(value));
+}
+
+/// Sets `<section>.<sub>.<field>` to `rendered` (52e: `tools.search.url`):
+/// the line replaced in place keeping its comment, else inserted at the end
+/// of `<sub>:`'s block, else the block added at the end of the section, else
+/// the section appended. A `<sub>:` written inline (`search: {url: …}`) is
+/// refused, never misread.
+std::string set_subsection_rendered(std::string_view content, std::string_view section_name,
+                                    std::string_view sub, std::string_view field,
+                                    std::string_view rendered) {
+    constexpr std::size_t kSubIndent = kEntryIndent;
+    Lines lines = split_lines(content);
+    const std::string terminator = dominant_terminator(lines);
+    const std::string field_line =
+        std::string(kFieldIndent, ' ') + std::string{field} + ": " + std::string{rendered};
+    const std::string sub_line = std::string(kSubIndent, ' ') + std::string{sub} + ":";
+
+    const SectionRange section = find_section(lines, section_name);
+    if (!section.found) {
+        if (!lines.empty()) {
+            std::string& last = lines.back();
+            if (!last.empty() && last.back() != '\n') {
+                last += terminator;
+            }
+            if (!is_blank(body(lines.back()))) {
+                lines.push_back(terminator);
+            }
+        }
+        lines.push_back(std::string{section_name} + ":" + terminator);
+        lines.push_back(sub_line + terminator);
+        lines.push_back(field_line + terminator);
+        return join_lines(lines);
+    }
+
+    std::optional<std::size_t> header;
+    std::size_t last_in_section = section.header;
+    for (std::size_t i = section.begin; i < section.end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line)) {
+            continue;
+        }
+        last_in_section = i;
+        if (key_at(line, kSubIndent) == sub) {
+            std::string_view rest = line.substr(kSubIndent + sub.size() + 1);
+            while (!rest.empty() && rest.front() == ' ') {
+                rest.remove_prefix(1);
+            }
+            if (!rest.empty() && rest.front() != '#') {
+                throw ConfigEditError("the " + std::string{section_name} + "." + std::string{sub} +
+                                      " line holds more than its key -- the editor sets the block "
+                                      "form, '" +
+                                      std::string{sub} + ":' alone with its fields under it");
+            }
+            header = i;
+        }
+    }
+    if (!header.has_value()) {
+        insert_lines(lines, last_in_section + 1, {sub_line + terminator, field_line + terminator},
+                     terminator);
+        return join_lines(lines);
+    }
+    std::size_t insert_at = *header + 1;
+    for (std::size_t i = *header + 1; i < section.end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (is_blank(line) || is_comment(line)) {
+            continue;
+        }
+        if (indent_of(line) <= kSubIndent) {
+            break;  // the block ended
+        }
+        if (key_at(line, kFieldIndent) == field) {
+            replace_field_value(lines, i, section.end, kFieldIndent, rendered, terminator);
+            return join_lines(lines);
+        }
+        insert_at = i + 1;
+    }
+    insert_lines(lines, insert_at, {field_line + terminator}, terminator);
     return join_lines(lines);
 }
 
@@ -1980,6 +2187,21 @@ std::string set_attachments_graph(std::string_view content, std::string_view met
         }
     }
     return set_section_scalar(content, "attachments", "graph", method);
+}
+
+std::string set_scalar(std::string_view content, std::string_view key, std::string_view rendered) {
+    // Each key's place: `section.field`, or `section.sub.field`.
+    const std::size_t first = key.find('.');
+    const std::size_t second = key.find('.', first + 1);
+    if (key == "attachments.graph") {
+        return set_attachments_graph(content, rendered);
+    }
+    if (second == std::string_view::npos) {
+        return set_section_rendered(content, key.substr(0, first), key.substr(first + 1), rendered);
+    }
+    return set_subsection_rendered(content, key.substr(0, first),
+                                   key.substr(first + 1, second - first - 1),
+                                   key.substr(second + 1), rendered);
 }
 
 std::string set_permission(std::string_view content, std::string_view tool,
@@ -2064,15 +2286,12 @@ struct HostList {
     std::size_t insert_at = 0;
 };
 
-/// The byte where `line`'s YAML value ends: before a ` #` comment and any
-/// trailing whitespace or terminator.
+/// The byte where `line`'s YAML value ends: before a ` #` comment outside its
+/// quotes (`comment_start`) and any trailing whitespace or terminator.
 std::size_t value_end(std::string_view line, std::size_t from) {
-    std::size_t limit = line.size();
-    for (std::size_t i = from; i < line.size(); ++i) {
-        if (line[i] == '#' && (i == from || line[i - 1] == ' ' || line[i - 1] == '\t')) {
-            limit = i;
-            break;
-        }
+    std::size_t limit = from < line.size() && line[from] == '#' ? from : comment_start(line, from);
+    if (limit == std::string_view::npos) {
+        limit = line.size();
     }
     while (limit > from && (line[limit - 1] == ' ' || line[limit - 1] == '\t' ||
                             line[limit - 1] == '\r' || line[limit - 1] == '\n')) {
@@ -2485,9 +2704,12 @@ std::string rename_backend(std::string_view content, std::string_view old_name,
         throw ConfigEditError("no backend named '" + std::string{old_name} + "'");
     }
     {
+        // Plain, as add-backend writes a key: the new name is one YAML reads
+        // as written (`yaml_plain_key`), and a quoted key is one the editor's
+        // later edits would not find (55f).
         std::string& line = lines[*key_line];
         const std::size_t end = key_token_end(body(line), kEntryIndent);
-        line = line.substr(0, kEntryIndent) + yaml_scalar(new_name) + line.substr(end);
+        line = line.substr(0, kEntryIndent) + std::string{new_name} + line.substr(end);
     }
 
     // Every reference: a walk of the mappings by path, a value naming the old
@@ -2689,9 +2911,11 @@ std::string rename_backend_jsonc(std::string_view content, std::string_view old_
 
 std::string rename_backend(std::string_view content, std::string_view old_name,
                            std::string_view new_name) {
-    if (new_name.empty() || new_name.find_first_of(" \t\r\n:") != std::string_view::npos) {
-        throw ConfigEditError("'" + std::string{new_name} +
-                              "' cannot name a backend -- a name is one word, no colon");
+    // The name add-backend would take (55f): a name both formats edit, so the
+    // renamed entry is one every later edit finds. The old name may be any.
+    if (!yaml_plain_key(new_name)) {
+        throw ConfigEditError("'" + std::string{new_name} + "' cannot name a backend -- " +
+                              std::string{kEntryNameRule});
     }
     if (old_name == new_name) {
         throw ConfigEditError("'" + std::string{old_name} + "' is already its name");
@@ -2786,6 +3010,58 @@ std::string set_backend_field(std::string_view content, std::string_view name,
     return in_format(content, [&](std::string_view text) {
         return yaml_text::set_backend_field(text, name, field, value);
     });
+}
+
+std::string set_backend_adapters(std::string_view content, std::string_view name,
+                                 const std::vector<AdapterConfig>& adapters) {
+    return in_format(content, [&](std::string_view text) {
+        return yaml_text::set_backend_adapters(text, name, adapters);
+    });
+}
+
+std::vector<AdapterConfig> parse_adapter_list(std::string_view text) {
+    std::vector<AdapterConfig> adapters;
+    std::size_t start = 0;
+    while (start <= text.size()) {
+        const std::size_t comma = text.find(',', start);
+        std::string_view item = text.substr(
+            start, comma == std::string_view::npos ? std::string_view::npos : comma - start);
+        while (!item.empty() && item.front() == ' ') {
+            item.remove_prefix(1);
+        }
+        while (!item.empty() && item.back() == ' ') {
+            item.remove_suffix(1);
+        }
+        AdapterConfig adapter;
+        std::string_view file = item;
+        // Only a number after the last colon is a scale -- 49e's rule, so
+        // `C:\lora.gguf` and a name holding a colon stay paths.
+        if (const std::size_t colon = item.rfind(':'); colon != std::string_view::npos) {
+            const std::string tail{item.substr(colon + 1)};
+            char* parsed = nullptr;
+            const double value = tail.empty() ? 0.0 : std::strtod(tail.c_str(), &parsed);
+            if (!tail.empty() && parsed == tail.c_str() + tail.size()) {
+                if (!std::isfinite(value) || value <= 0.0 || value > kMaxAdapterScale) {
+                    throw ConfigEditError("adapters: " + std::string{item} + ": its scale " + tail +
+                                          " is outside (0, 2]");
+                }
+                adapter.scale = value;
+                file = item.substr(0, colon);
+            }
+        }
+        if (file.empty()) {
+            throw ConfigEditError("adapters: '" + std::string{text} +
+                                  "' names an empty adapter -- each is <path>[:<scale>], "
+                                  "comma-separated");
+        }
+        adapter.path = std::string{file};
+        adapters.push_back(std::move(adapter));
+        if (comma == std::string_view::npos) {
+            break;
+        }
+        start = comma + 1;
+    }
+    return adapters;
 }
 
 std::string set_backend_mmproj_path(std::string_view content, std::string_view name,
@@ -2941,6 +3217,170 @@ std::string set_attachments_graph(std::string_view content, std::string_view met
     });
 }
 
+std::vector<SettableScalar> settable_scalars() {
+    return {
+        {.key = "memory.recall",
+         .kind = ScalarKind::Boolean,
+         .about = "summarise finished chats and recall them in new ones"},
+        {.key = "knowledge.auto_capture",
+         .kind = ScalarKind::Boolean,
+         .about = "capture a chat into the knowledge collection at a clean exit"},
+        {.key = "ui.markdown",
+         .kind = ScalarKind::Boolean,
+         .about = "render answers as markdown on a terminal"},
+        {.key = "ui.thinking_display",
+         .kind = ScalarKind::Word,
+         .words = "summary|raw",
+         .about = "how a model's reasoning is shown while it streams"},
+        {.key = "attachments.graph",
+         .kind = ScalarKind::Word,
+         .words = "code|off",
+         .about = "whether an attached folder of code builds its graph"},
+        {.key = "tools.search.provider",
+         .kind = ScalarKind::Word,
+         .words = "searxng",
+         .about = "the web search web_search answers from"},
+        {.key = "tools.search.url",
+         .kind = ScalarKind::Text,
+         .about = "the web search's address, such as http://127.0.0.1:8888"},
+        {.key = "tools.search.results",
+         .kind = ScalarKind::Integer,
+         .min = 1,
+         .max = 20,
+         .about = "how many results a search returns"},
+        {.key = "training.python",
+         .kind = ScalarKind::Text,
+         .about = "the Python a new training environment is made from (M19)"},
+    };
+}
+
+namespace {
+
+[[nodiscard]] std::string scalar_keys_list() {
+    std::string out;
+    for (const SettableScalar& scalar : settable_scalars()) {
+        out += (out.empty() ? "" : ", ") + std::string{scalar.key};
+    }
+    return out;
+}
+
+[[nodiscard]] bool has_segment(std::string_view key, std::string_view part) {
+    std::string lowered{key};
+    std::ranges::transform(lowered, lowered.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return lowered.find(part) != std::string::npos;
+}
+
+}  // namespace
+
+std::string scalar_refusal(std::string_view key) {
+    for (const SettableScalar& scalar : settable_scalars()) {
+        if (scalar.key == key) {
+            return {};
+        }
+    }
+    const std::string named = "'" + std::string{key} + "'";
+    // A secret never goes in the file, whatever key it is under.
+    for (const std::string_view secret :
+         {"api_key", "apikey", "token", "secret", "password", "credential"}) {
+        if (has_segment(key, secret)) {
+            return named +
+                   " holds a secret, and a secret never goes in the config file -- store it with "
+                   "'apogee auth add'";
+        }
+    }
+
+    struct Door {
+        std::string_view prefix;
+        std::string_view door;
+    };
+
+    static constexpr std::array<Door, 9> kDoors{{
+        {"backends",
+         "a backend's fields have their verb: 'apogee config set-backend <name> "
+         "--<field> <value>'"},
+        {"models",
+         "the role pointers have their verbs: 'apogee config set-default <backend>' "
+         "and the set-default-* beside it"},
+        {"suites",
+         "a suite has its verbs: 'apogee config add-suite' and 'apogee config "
+         "set-suite'"},
+        {"permissions",
+         "a tool's level has its verb: 'apogee config set-permission <tool> "
+         "<ask|allow|deny>'"},
+        {"tools.allowed_hosts",
+         "the websites have their verbs: 'apogee config "
+         "add-allowed-host <host>' and delete-allowed-host"},
+        {"mcp_servers",
+         "an MCP server has its verbs: 'apogee mcp create', 'apogee mcp "
+         "enable'/'disable' and 'apogee config delete-mcp-server'"},
+        {"embeddings", "a collection is made by 'apogee embed ingest' and kept by its verbs"},
+        {"graphs", "a named graph has its verbs: 'apogee config add-graph' and delete-graph"},
+        {"agents", "an agent has its verbs: 'apogee agents create', edit and delete"},
+    }};
+    for (const Door& door : kDoors) {
+        if (key == door.prefix ||
+            (key.starts_with(door.prefix) && key.size() > door.prefix.size() &&
+             key[door.prefix.size()] == '.')) {
+            return named + " is not a key 'config set' moves -- " + std::string{door.door};
+        }
+    }
+    return named + " is not a key 'config set' moves -- it moves: " + scalar_keys_list();
+}
+
+std::string set_scalar(std::string_view content, std::string_view key, std::string_view value) {
+    if (const std::string refused = scalar_refusal(key); !refused.empty()) {
+        throw ConfigEditError(refused);
+    }
+    const std::vector<SettableScalar> table = settable_scalars();
+    const SettableScalar& scalar = *std::ranges::find(table, key, &SettableScalar::key);
+    std::string rendered;
+    switch (scalar.kind) {
+        case ScalarKind::Boolean:
+            if (value != "true" && value != "false") {
+                throw ConfigEditError(std::string{key} + " takes true or false, not '" +
+                                      std::string{value} + "'");
+            }
+            rendered = std::string{value};
+            break;
+        case ScalarKind::Word: {
+            bool known = false;
+            std::string_view rest = scalar.words;
+            while (!rest.empty()) {
+                const std::size_t bar = rest.find('|');
+                known = known || rest.substr(0, bar) == value;
+                rest = bar == std::string_view::npos ? std::string_view{} : rest.substr(bar + 1);
+            }
+            if (!known) {
+                std::string words{scalar.words};
+                std::ranges::replace(words, '|', ' ');
+                throw ConfigEditError(std::string{key} + " takes " + words + ", not '" +
+                                      std::string{value} + "'");
+            }
+            rendered = key == "attachments.graph" ? std::string{value} : yaml_scalar(value);
+            break;
+        }
+        case ScalarKind::Text:
+            rendered = yaml_scalar(value);
+            break;
+        case ScalarKind::Integer: {
+            std::int64_t number = 0;
+            const auto [end, error] =
+                std::from_chars(value.data(), value.data() + value.size(), number);
+            if (error != std::errc{} || end != value.data() + value.size() || number < scalar.min ||
+                number > scalar.max) {
+                throw ConfigEditError(
+                    std::string{key} + " takes a whole number from " + std::to_string(scalar.min) +
+                    " to " + std::to_string(scalar.max) + ", not '" + std::string{value} + "'");
+            }
+            rendered = std::to_string(number);
+            break;
+        }
+    }
+    return in_format(
+        content, [&](std::string_view text) { return yaml_text::set_scalar(text, key, rendered); });
+}
+
 std::string set_permission(std::string_view content, std::string_view tool,
                            std::string_view level) {
     return in_format(content, [&](std::string_view text) {
@@ -2975,6 +3415,31 @@ std::string read_config_file(const std::filesystem::path& path) {
         throw ConfigError(path.string() + ": error reading config file");
     }
     return buffer.str();
+}
+
+platform::FileLock lock_config_file(const std::filesystem::path& path,
+                                    std::chrono::milliseconds wait) {
+    // A config that is not there is said as reading it says it, and leaves no
+    // lock file behind.
+    if (std::error_code code; !std::filesystem::exists(path, code)) {
+        (void)read_config_file(path);
+    }
+    // A sibling, never the config itself: the edit renames a new file over
+    // the config, and a lock on the old one would order nothing after it.
+    std::filesystem::path lock_path = path;
+    lock_path += ".lock";
+    platform::FileLock::Refusal refusal;
+    std::optional<platform::FileLock> lock = platform::FileLock::acquire(lock_path, wait, refusal);
+    if (!lock.has_value()) {
+        if (refusal.timed_out) {
+            throw ConfigEditError("another edit of " + path.string() + " is still running -- " +
+                                  refusal.error +
+                                  "; nothing was changed: run this again once it ends");
+        }
+        throw ConfigEditError("cannot lock " + path.string() + " for the edit -- " + refusal.error +
+                              "; nothing was changed");
+    }
+    return std::move(*lock);
 }
 
 void write_file_atomically(const std::filesystem::path& path, std::string_view content,

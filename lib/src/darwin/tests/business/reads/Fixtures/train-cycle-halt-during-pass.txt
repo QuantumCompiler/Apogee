@@ -1,0 +1,2 @@
+cycle halted -- 'apogee train cycle run' refuses until 'apogee train cycle resume'
+  the pass running now finishes, and keeps the halt

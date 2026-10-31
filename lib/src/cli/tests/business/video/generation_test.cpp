@@ -336,3 +336,123 @@ TEST_CASE("a dead run's frames are swept by the next run, a live one's never",
     CHECK_FALSE(std::filesystem::exists(dead));
     CHECK(std::filesystem::exists(live / "frames" / "f00001.png"));
 }
+
+TEST_CASE("on MLX the request names its engine and tokenizer, and PyTorch's is unchanged",
+          "[video][generation][request][mlx]") {
+    // 53l: one request contract, the MLX engine's three fields added; a run
+    // on PyTorch asks exactly what it asked before there were two engines.
+    VideoRequest request{.pipeline = "/store/w/mlx/b",
+                         .prompt = "a heron",
+                         .seed = 42,
+                         .width = 1280,
+                         .height = 704,
+                         .frames = 121,
+                         .steps = 50,
+                         .fps = 24};
+    nlohmann::json document = apogee::video::request_document(request, "/work/frames");
+    CHECK_FALSE(document.contains("engine"));
+    CHECK_FALSE(document.contains("tokenizer"));
+    request.shift = 5.0;
+    CHECK_FALSE(apogee::video::request_document(request, "/work/frames").contains("shift"));
+
+    request.engine = apogee::video::VideoEngine::Mlx;
+    request.tokenizer = "/store/w/safetensors/a/google/umt5-xxl";
+    document = apogee::video::request_document(request, "/work/frames");
+    CHECK(document == nlohmann::json{{"engine", "mlx"},
+                                     {"pipeline", "/store/w/mlx/b"},
+                                     {"tokenizer", "/store/w/safetensors/a/google/umt5-xxl"},
+                                     {"prompt", "a heron"},
+                                     {"seed", 42},
+                                     {"width", 1280},
+                                     {"height", 704},
+                                     {"frames", 121},
+                                     {"steps", 50},
+                                     {"shift", 5.0},
+                                     {"frames_dir", "/work/frames"}});
+}
+
+TEST_CASE("the MLX driver's ready line is read with its engine and versions",
+          "[video][generation][protocol][mlx]") {
+    const auto ready = apogee::video::read_video_event(apogee::training::classify_script_line(
+        R"({"event": "ready", "device": "gpu", "dtype": "4-bit", "pipeline": "Wan ti2v", "mode": "t2v", "engine": "mlx", "mlx": "0.31.2", "mlx_video": "0.1.0"})"));
+    REQUIRE(ready.has_value());
+    CHECK(ready->ready.engine == "mlx");
+    CHECK(ready->ready.mlx == "0.31.2");
+    CHECK(ready->ready.mlx_video == "0.1.0");
+    CHECK(ready->ready.torch.empty());
+}
+
+TEST_CASE("an MLX run its engine refuses is refused before anything is spawned",
+          "[video][generation][mlx]") {
+    Run run;
+    // An MLX video model's config, its mode t2v.
+    const std::filesystem::path model = run.dir.path() / "mlx";
+    std::filesystem::create_directories(model);
+    std::ofstream{model / "config.json"} << R"({"model_type": "t2v"})";
+    run.ready.engine = apogee::video::VideoEngine::Mlx;
+    run.request.engine = apogee::video::VideoEngine::Mlx;
+    run.request.pipeline = model;
+    run.request.tokenizer = run.dir.path() / "google" / "umt5-xxl";
+    SECTION("a frame count that is not 4n+1") {
+        run.request.frames = 12;
+        CHECK(run.go().error ==
+              "mlx-video's Wan generator takes 4n+1 frames (5, 9, ... 81, 121) -- 12 is not one");
+    }
+    SECTION("no tokenizer to point the generator at") {
+        run.request.tokenizer.clear();
+        CHECK(run.go().error ==
+              "no T5 tokenizer to point mlx-video's Wan generator at -- it is never fetched from "
+              "the hub");
+    }
+    SECTION("a seed image for a model that takes none") {
+        run.request.image = run.dir.path() / "seed.png";
+        CHECK(run.go().error ==
+              "this MLX video model is text-to-video (its config.json says model_type t2v): it "
+              "takes no seed image -- generate without --image");
+    }
+    SECTION("no seed image for a model that starts from one") {
+        std::ofstream{model / "config.json"} << R"({"model_type": "i2v"})";
+        CHECK(run.go().error ==
+              "this MLX video model is image-to-video (its config.json says model_type i2v): it "
+              "starts from a seed image -- give it one with --image");
+    }
+    SECTION("a runtime made ready for the other engine") {
+        run.ready.engine = apogee::video::VideoEngine::Torch;
+        CHECK(run.go().error == "the runtime was made ready for torch, and the run asks for mlx");
+    }
+    CHECK(run.driver.argv.empty());
+    CHECK_FALSE(std::filesystem::exists(run.output));
+    CHECK_FALSE(run.work_left());
+}
+
+TEST_CASE("an MLX generation is the one generation: its events, its clip, its frames assembled",
+          "[video][generation][mlx]") {
+    Run run;
+    run.ready.engine = apogee::video::VideoEngine::Mlx;
+    run.ready.driver = "/home/training/scripts/video_generate_mlx.py";
+    run.request.engine = apogee::video::VideoEngine::Mlx;
+    run.request.tokenizer = "/store/set/google/umt5-xxl";
+    run.driver.script =
+        R"({"message": "loading mlx-video"})"
+        "\n"
+        R"({"event": "ready", "device": "gpu", "dtype": "4-bit", "pipeline": "Wan ti2v", "mode": "t2v", "engine": "mlx", "mlx": "0.31.2", "mlx_video": "0.1.0"})"
+        "\n"
+        R"({"event": "step", "step": 1, "steps": 3})"
+        "\n"
+        R"({"event": "step", "step": 2, "steps": 3})"
+        "\n"
+        R"({"event": "step", "step": 3, "steps": 3})"
+        "\n"
+        R"({"event": "done", "frames": 5, "width": 64, "height": 48, "seed": 7})"
+        "\n";
+    const VideoOutcome outcome = run.go();
+    INFO(outcome.error);
+    REQUIRE(outcome.ok);
+    CHECK(run.driver.argv.at(0) == "/home/training/scripts/video_generate_mlx.py");
+    CHECK(run.driver.request["engine"] == "mlx");
+    CHECK(run.driver.request["tokenizer"] == "/store/set/google/umt5-xxl");
+    CHECK(outcome.ready.engine == "mlx");
+    CHECK(outcome.ready.mlx_video == "0.1.0");
+    CHECK(slurp(run.output) == "MP4 5 frames at 24");
+    CHECK_FALSE(run.work_left());
+}

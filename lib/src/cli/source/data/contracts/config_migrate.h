@@ -48,10 +48,35 @@ struct MigrationReport {
 /// already JSONC, or when it does not load. Throws ConfigEditError.
 [[nodiscard]] MigrationReport migrate_config_file(const std::filesystem::path& path);
 
+/// An option the starter config teaches in a comment alone (55g): its
+/// example commented out, as the template writes everything a fresh install
+/// leaves unset, so no key says a file has it. Declared with the release
+/// whose template first carried it, so `config upgrade` can bring its block
+/// of comments to a file seeded before, and `check` count it as missing.
+struct CommentedOption {
+    /// The release whose starter config first carried it.
+    std::string_view release{};
+    /// What it teaches, as `config upgrade` and `check` name it.
+    std::string_view option{};
+    /// Its block's first line and its last, trimmed: the block is found in
+    /// the template by them -- a bare `//` line just above the first with
+    /// it -- and a file holding the first line anywhere has it.
+    std::string_view opens{};
+    std::string_view closes{};
+};
+
+/// The starter config's commented options, by release, oldest first (55g).
+/// A release that adds one to the template declares it here, the test that
+/// takes each block out of the template and upgrades it back holding the
+/// declaration to the text.
+[[nodiscard]] std::vector<CommentedOption> commented_options();
+
 /// The options -- dotted paths -- `template_text` writes as keys and
 /// `content` does not: a missing section counts once, never once per key in
 /// it. Only a JSONC config is compared (the template's own format); a YAML
-/// one gives nothing -- it migrates first.
+/// one gives nothing -- it migrates first. Since 55g also each commented
+/// option `template_text` carries that `content` lacks and upgrade can place
+/// -- one inside a missing section comes with it, so it counts with it.
 [[nodiscard]] std::vector<std::string> missing_template_options(std::string_view content,
                                                                 std::string_view template_text);
 
@@ -61,15 +86,20 @@ struct MigrationReport {
 /// A config caught up with a newer template.
 struct Upgrade {
     std::string text;
-    /// The options inserted, as dotted paths, in the order inserted.
+    /// The options inserted, as dotted paths -- a commented option as it is
+    /// declared -- in the order inserted.
     std::vector<std::string> added;
 };
 
 /// `content` with every option `template_text` has and it lacks inserted
 /// where the template places it -- under the same parent, after the option
 /// the template puts before it -- with the comment block that teaches it,
-/// re-indented to the file's own. Nothing present is reordered, rewritten or
-/// removed; a current config comes back unchanged with nothing added.
+/// re-indented to the file's own. Then (55g) each commented option it lacks:
+/// its block in the object the template holds it in, beside the line the
+/// template has after it (else before it) when the file has that line once,
+/// else last in that object; an object written on one line takes none.
+/// Nothing present is reordered, rewritten or removed; a current config
+/// comes back unchanged with nothing added.
 [[nodiscard]] Upgrade upgrade_config_text(std::string_view content, std::string_view template_text);
 
 }  // namespace apogee::harness

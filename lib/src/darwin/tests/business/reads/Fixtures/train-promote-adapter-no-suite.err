@@ -1,0 +1,1 @@
+apogee train: no eval suite to score run 20261026-065638 on tiny-Q4_K_M.gguf (Q4_K_M), the base 'q4' serves -- pass --suite <path|name>, or set training.eval_suite_path, or pass --force to skip the gate

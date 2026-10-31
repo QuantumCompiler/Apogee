@@ -12,6 +12,8 @@
 #include <string_view>
 #include <vector>
 
+#include "backends/adapters.h"
+#include "backends/llama_bases.h"
 #include "backends/llama_runtime.h"
 #include "backends/model_profile.h"
 #include "backends/prompt_cache.h"
@@ -116,19 +118,43 @@ public:
         /// The most the prompt cache keeps on disk.
         std::uint64_t prompt_cache_cap = kPromptCacheCapBytes;
 
+        /// The LoRA adapters every context applies over the model, in order,
+        /// each with its scale and the pin to the base it was registered
+        /// against (53a). Empty, the default, runs the bare base as before.
+        std::vector<harness::AdapterConfig> adapters{};
+        /// Where the base's hash, which each load checks the pins against,
+        /// comes from: `cache/weight-hashes.json` as `options_from` maps it.
+        WeightHashing weight_hashing{};
+
         Clock clock;
     };
 
     /// `runtime` is injected for the same reason every other backend injects
     /// its transport: the merge-blocking build has no llama.cpp in it, so a
     /// scripted runtime is the only way these behaviours are tested at all.
-    LlamaCppProvider(Options options, std::unique_ptr<LlamaRuntime> runtime);
+    ///
+    /// `bases` is the registry this provider's base is shared through (53d):
+    /// another provider on the same base, given the same registry, serves
+    /// from the one loaded model. Null shares with nothing -- the model is
+    /// this provider's alone, as before.
+    LlamaCppProvider(Options options, std::unique_ptr<LlamaRuntime> runtime,
+                     std::shared_ptr<LlamaBases> bases = nullptr);
 
-    /// Builds one over the real llama.cpp, if this build has it.
+    /// Lets go of its share in the base under the base's lock: another
+    /// provider may be using it.
+    ~LlamaCppProvider() override;
+    LlamaCppProvider(const LlamaCppProvider&) = delete;
+    LlamaCppProvider& operator=(const LlamaCppProvider&) = delete;
+    LlamaCppProvider(LlamaCppProvider&&) = delete;
+    LlamaCppProvider& operator=(LlamaCppProvider&&) = delete;
+
+    /// Builds one over the real llama.cpp, if this build has it, its base
+    /// shared through `bases` (53d).
     /// Throws harness::ProviderError when it does not, or when `model_path` is
     /// unset.
     [[nodiscard]] static std::unique_ptr<LlamaCppProvider> from_config(
-        const std::string& backend_name, const harness::BackendConfig& config);
+        const std::string& backend_name, const harness::BackendConfig& config,
+        std::shared_ptr<LlamaBases> bases = nullptr);
 
     /// What a backend entry configures, as `from_config` builds it: with no
     /// runtime, so the mapping is testable in a build without llama.cpp.
@@ -246,8 +272,11 @@ public:
     /// the session.
     [[nodiscard]] std::size_t embedding_dimensions() const noexcept override;
 
-    /// The configured name, else the GGUF's file name: what a collection
-    /// records as the space its vectors live in.
+    /// The configured name, else the GGUF's file name, with the adapters
+    /// every embedding applies (55e, `embedding_space`): what a collection
+    /// records as the space its vectors live in, so vectors made under one
+    /// adapter set are never queried under another. With no adapters, the
+    /// name alone, as every collection bound before 55e recorded it.
     [[nodiscard]] std::string embedding_model_name() const override;
 
     /// Local weights cost nothing per call.
@@ -283,20 +312,43 @@ public:
 
     /// While held, `idle_unload` never fires: a session using this model
     /// keeps it between turns however far apart. Let go, the clock rules
-    /// again from the last use, at the next request as ever.
+    /// again from the last use, at the next request as ever. A base shared
+    /// with other providers (53d) stays while any of them holds it.
     void hold_resident(bool held) noexcept override;
     [[nodiscard]] bool held_resident() const noexcept override;
 
-    /// Whether the model is resident right now. For tests and diagnostics.
+    /// Whether this provider holds its model right now: its share in the
+    /// base, and its adapters over it. For tests and diagnostics.
     [[nodiscard]] bool model_loaded() const noexcept;
 
-    /// Drops the model and every context. The next request reloads.
+    /// Drops every context and the adapters, and lets go of the base: the
+    /// model is freed when no other provider shares it (53d). The next
+    /// request loads again, or joins a sharer's.
     void unload();
 
 private:
     /// Loads the model if needed. Throws ProviderError naming the file when the
     /// load fails.
     void ensure_model(const harness::StatusSink& on_status);
+
+    /// Takes this entry's base -- the one a sharer holds, or loaded now --
+    /// and loads its adapters over it (53d). False with `error` when either
+    /// fails, nothing then held.
+    [[nodiscard]] bool attach(std::string& error);
+
+    /// The loaded model, shared with every provider on its base. Needs it
+    /// loaded; used under the base's lock.
+    [[nodiscard]] LlamaModel& model() const noexcept {
+        return base_->model();
+    }
+
+    /// A fresh context over the model, applying this entry's adapters.
+    [[nodiscard]] std::unique_ptr<LlamaContext> make_context(std::int64_t context_size);
+
+    /// Sets this entry's adapters on `context`, exactly its set (53d): on a
+    /// fresh context, and on the conversation's before every turn. Throws
+    /// ProviderError when the runtime refuses.
+    void assert_adapters(LlamaContext& context) const;
 
     /// Unloads if the idle window has passed. Called at the top of a request,
     /// so a long gap is noticed even though nothing runs in the background --
@@ -475,7 +527,19 @@ private:
     mutable std::string architecture_;
     mutable const ModelProfile* profile_ = nullptr;
     mutable bool profile_resolved_ = false;
-    std::unique_ptr<LlamaModel> model_;
+
+    /// The registry the base is shared through (53d).
+    std::shared_ptr<LlamaBases> bases_;
+    /// The base, this provider's share in it, and its entry's adapters over
+    /// it (53d). In this order, so a context below goes before the adapters
+    /// it applies, and they before the share -- the last sharer's letting go
+    /// frees the model, and no adapter may outlive it.
+    std::shared_ptr<SharedBase> base_;
+    std::unique_ptr<LlamaAdapters> adapters_;
+    /// What free memory held for this entry's default window when it took
+    /// the base (26a): the load's measure when it loaded it, else its own
+    /// (53d). 0 when the default fits, or the window is configured.
+    std::int64_t fitted_window_ = 0;
 
     /// The conversation's KV cache, and the tokens known to be in it.
     ///

@@ -139,6 +139,10 @@ std::filesystem::path roster_cache_path() {
     return cache_dir() / "model-rosters.json";
 }
 
+std::filesystem::path weight_hash_cache_path() {
+    return cache_dir() / "weight-hashes.json";
+}
+
 std::filesystem::path training_dir() {
     return apogee_home() / "training";
 }

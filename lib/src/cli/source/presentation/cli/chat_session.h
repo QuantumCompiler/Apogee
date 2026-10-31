@@ -98,6 +98,9 @@ struct SessionFlags {
     std::string effort;
     /// Recall no earlier chats in this run (26l).
     bool no_recall = false;
+    /// Write nothing of this chat (52d): no transcript, no recall, its
+    /// attachments indexed in a place gone with the run.
+    bool private_chat = false;
     /// The session's answers, given at launch (26o).
     std::vector<std::string> allow;
     std::vector<std::string> deny;

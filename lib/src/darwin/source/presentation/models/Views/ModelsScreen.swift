@@ -1,0 +1,960 @@
+import AppKit
+import BusinessReads
+import PresentationShell
+import PresentationStyles
+import SwiftUI
+
+/// The Models place: the backends and a backend's details, the stored
+/// weights apart (2h), the jobs, and the roles.
+public struct ModelsScreen<Downloads: View>: View {
+    @Bindable private var model: ModelsViewModel
+    @Bindable private var store: StoreViewModel
+    private let shell: ShellViewModel
+    private let downloads: Downloads
+
+    public init(model: ModelsViewModel, store: StoreViewModel, shell: ShellViewModel, @ViewBuilder downloads: () -> Downloads) {
+        self.model = model
+        self.store = store
+        self.shell = shell
+        self.downloads = downloads()
+    }
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            ScreenHeader(title: "Models") {
+                Picker("Show", selection: $model.tab) {
+                    ForEach(ModelsViewModel.Tab.allCases) { tab in
+                        Text((tab == .store ? store.sets.count : model.count(tab)).map { "\(tab.title) \($0)" } ?? tab.title).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                if let working = model.working ?? store.working {
+                    ProgressView().controlSize(.small)
+                    Text(working).font(.apogeeMeta).foregroundStyle(Palette.textSecondary)
+                }
+            }
+            Divider()
+            switch model.tab {
+            case .roles:
+                RolesView(model: model)
+            case .jobs:
+                downloads
+            case .store:
+                StoreView(store: store, shell: shell) { backend in model.useInSession?(backend) }
+            case .backends:
+                HStack(spacing: 0) {
+                    VStack(spacing: 0) {
+                        if let narration = model.narration {
+                            DeleteNarrationCard(narration: narration) { model.dismissNarration() }
+                                .padding(.horizontal, Spacing.l)
+                                .padding(.top, Spacing.m)
+                        }
+                        ModelTable(model: model)
+                    }
+                    if model.selectedRow != nil && shell.layout.sidePanes {
+                        Divider()
+                        ModelDetails(model: model) { backend in
+                            guard let handle = store.handle(forBackend: backend) else { return }
+                            model.tab = .store
+                            Task { await store.select(handle) }
+                        }
+                        .frame(width: 380)
+                    }
+                }
+                // Read again on coming back from Stored weights, as it reads on
+                // coming into view: what was changed there -- a set registered,
+                // a drafter paired with its base -- is said here as the CLI
+                // now says it.
+                .task { await model.appeared() }
+            }
+        }
+        .confirmationDialog(
+            model.pendingDelete.map { "Delete \($0.row.name)?" } ?? "",
+            isPresented: Binding(get: { model.pendingDelete != nil }, set: { if !$0 { model.pendingDelete = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete its files", role: .destructive) { Task { await model.confirmDelete(andBackends: false) } }
+            // Only where the CLI's plan names a backend pointing in.
+            if model.offersAndBackends {
+                Button("Delete its files and the backends that use them", role: .destructive) {
+                    Task { await model.confirmDelete(andBackends: true) }
+                }
+            }
+            Button("Cancel", role: .cancel) { model.pendingDelete = nil }
+        } message: {
+            Text(model.pendingDelete.map { $0.plan.question(running: "apogee models delete \($0.row.name) --yes") } ?? "")
+        }
+        .confirmationDialog(
+            "Remove the backend \(model.removing ?? "")?",
+            isPresented: Binding(get: { model.removing != nil }, set: { if !$0 { model.removing = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Remove the backend", role: .destructive) { Task { await model.confirmRemove() } }
+            Button("Cancel", role: .cancel) { model.removing = nil }
+        } message: {
+            Text("apogee config delete-backend \(model.removing ?? "") -- its config entry goes; the weights stay under Stored weights, ready to register again.")
+        }
+        .sheet(item: $model.editingAdapters) { _ in
+            AdaptersSheet(model: model)
+        }
+        .sheet(item: $model.pairingDrafter) { _ in
+            PairDrafterSheet(model: model)
+        }
+        .sheet(item: $model.renaming) { renaming in
+            RenameModelSheet(renaming: renaming) { name in Task { await model.rename(renaming, to: name) } }
+        }
+        .alert("That didn't work", isPresented: Binding(get: { model.failure != nil }, set: { if !$0 { model.dismissFailure() } })) {
+            Button("OK") { model.dismissFailure() }
+        } message: {
+            Text(model.failure ?? "")
+        }
+    }
+}
+
+/// The library's table: the CLI's groups, a row per model.
+struct ModelTable: View {
+    @Bindable var model: ModelsViewModel
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: Spacing.m) {
+                    Text("NAME").frame(maxWidth: .infinity, alignment: .leading)
+                    Text("FORMAT").frame(width: 110, alignment: .leading)
+                    Text("ON DISK").frame(width: 80, alignment: .trailing)
+                    Text("STATUS").frame(width: 130, alignment: .leading)
+                }
+                .font(.system(size: TypeScale.label, weight: .medium, design: .monospaced))
+                .foregroundStyle(Palette.textTertiary)
+                .padding(.horizontal, Spacing.l)
+                .padding(.vertical, Spacing.s)
+                ForEach(model.groups) { group in
+                    Text(group.title.uppercased())
+                        .font(.system(size: TypeScale.label, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Palette.textTertiary)
+                        .padding(.horizontal, Spacing.l)
+                        .padding(.top, Spacing.m)
+                        .padding(.bottom, Spacing.xs)
+                    ForEach(group.rows) { row in rowView(row) }
+                }
+                if let empty = model.emptyText {
+                    Text(empty)
+                        .font(.apogeeBody)
+                        .foregroundStyle(Palette.textSecondary)
+                        .padding(Spacing.l)
+                }
+                Text("On disk is what a stored pipeline or voice model holds; a model's own size, window and memory are in its details, from its files.")
+                    .font(.apogeeMeta)
+                    .foregroundStyle(Palette.textTertiary)
+                    .padding(Spacing.l)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func rowView(_ row: ModelRow) -> some View {
+        let current = model.selected == row.name
+        return Button {
+            Task { await model.select(row) }
+        } label: {
+            HStack(spacing: Spacing.m) {
+                HStack(spacing: Spacing.s) {
+                    KindMark(kind: row.kind)
+                    Text(row.name).foregroundStyle(Palette.textPrimary).lineLimit(1).truncationMode(.middle)
+                    if let mark = model.drafterMark(row) {
+                        DrafterGlyph(mark: mark)
+                    }
+                    if !row.roles.isEmpty {
+                        Text(row.roles).font(.apogeeMeta.monospaced()).foregroundStyle(Palette.accent).lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                format(row)
+                Text(row.bytes.map(ModelsViewModel.size) ?? "")
+                    .font(.apogeeMeta.monospacedDigit())
+                    .foregroundStyle(Palette.textSecondary)
+                    .frame(width: 80, alignment: .trailing)
+                Text(ModelsViewModel.status(row))
+                    .font(.apogeeSmall)
+                    .foregroundStyle(row.state == "cannot load" ? Palette.error : Palette.textSecondary)
+                    .lineLimit(1)
+                    .frame(width: 130, alignment: .leading)
+            }
+            .font(.apogeeBody)
+            .padding(.horizontal, Spacing.l)
+            .frame(height: 34)
+            .background(current ? Palette.selection : .clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(row.note ?? row.model)
+    }
+
+    /// The format cell: as it always read, on one line -- or, where the row
+    /// states an `mlx` entry's kind, the kind as Stored weights says it
+    /// (`MLX · vision`) over its precision.
+    @ViewBuilder
+    private func format(_ row: ModelRow) -> some View {
+        let lines = ModelsViewModel.formatLines(row)
+        if lines.count == 1 {
+            Text(lines[0])
+                .font(.apogeeMeta.monospaced())
+                .foregroundStyle(Palette.textSecondary)
+                .frame(width: 110, alignment: .leading)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(lines[0]).foregroundStyle(Palette.textPrimary)
+                ForEach(Array(lines.dropFirst().enumerated()), id: \.offset) { _, line in
+                    Text(line).foregroundStyle(Palette.textSecondary)
+                }
+            }
+            .font(.apogeeMeta.monospaced())
+            .lineLimit(1)
+            .frame(width: 110, alignment: .leading)
+            .help(lines.joined(separator: " · "))
+        }
+    }
+}
+
+/// The table's mark on a base with a drafter paired (GUI M5): a small
+/// glyph, the drafter's name and the CLI's words in its tooltip -- drawn in
+/// the warning's colour where the CLI says it can no longer draft.
+struct DrafterGlyph: View {
+    let mark: DrafterMark
+
+    var body: some View {
+        Image(systemName: "hare")
+            .font(.system(size: 10))
+            .foregroundStyle(mark.drafts ? Palette.textTertiary : Palette.warning)
+            .help(mark.help)
+            .accessibilityLabel(mark.drafts ? "drafts with \(mark.drafter)" : "its drafter cannot draft: \(mark.said)")
+    }
+}
+
+/// A model's details: its record, the typed facts where there are some, its
+/// lineage, and what can be done with it.
+struct ModelDetails: View {
+    @Bindable var model: ModelsViewModel
+    /// Opens the backend's set under Stored weights.
+    var showWeights: (String) -> Void = { _ in }
+
+    var body: some View {
+        ScrollView {
+            if let row = model.selectedRow {
+                VStack(alignment: .leading, spacing: Spacing.l) {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
+                            Text(row.name).font(.apogeeHeading).foregroundStyle(Palette.textPrimary).textSelection(.enabled)
+                            Text((row.isStored ? [ModelsViewModel.status(row), row.format ?? ""] : [row.backendType, row.state]).filter { !$0.isEmpty }.joined(separator: " · "))
+                                .font(.apogeeMeta.monospaced())
+                                .foregroundStyle(Palette.textTertiary)
+                        }
+                        Spacer()
+                        Button {
+                            model.close()
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Close details")
+                    }
+                    actions(row)
+                    if let note = row.note {
+                        Text(note).font(.apogeeSmall).foregroundStyle(Palette.warning)
+                    }
+                    if let failure = model.infoFailure {
+                        Text(failure).font(.apogeeSmall).foregroundStyle(Palette.error)
+                    }
+                    if !model.typed.isEmpty {
+                        section("Facts from its files", model.typed)
+                    }
+                    if let draft = model.draft {
+                        drafter(draft, row)
+                    } else if model.info != nil && model.offersDrafterPairing(row) {
+                        noDrafter(row)
+                    }
+                    if ModelsViewModel.takesAdapters(row) {
+                        AdaptersSection(model: model, row: row)
+                    }
+                    if !model.recordFacts.isEmpty {
+                        section("Record", model.recordFacts)
+                    }
+                    if !model.lineage.isEmpty {
+                        VStack(alignment: .leading, spacing: Spacing.s) {
+                            label("Lineage")
+                            ForEach(Array(model.lineage.enumerated()), id: \.offset) { _, step in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(step.kind + (step.from.map { " from \($0)" } ?? ""))
+                                        .font(.apogeeCode)
+                                        .foregroundStyle(step.missing ? Palette.textTertiary : Palette.textPrimary)
+                                    if let detail = step.detail {
+                                        Text(detail).font(.apogeeMeta).foregroundStyle(Palette.textSecondary)
+                                    }
+                                    if step.inferred || step.missing {
+                                        Text(step.missing ? "no longer in the store" : "inferred, not recorded")
+                                            .font(.apogeeMeta)
+                                            .foregroundStyle(Palette.textTertiary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(Spacing.l)
+            }
+        }
+        .background(Palette.inspector)
+    }
+
+    private func actions(_ row: ModelRow) -> some View {
+        HStack(spacing: Spacing.s) {
+            if model.opensSessions(row) {
+                Button("Use in a new session") { model.useInSession?(row.backend) }
+            }
+            if row.group == "gguf" || row.group == "mlx" {
+                Button("Show its weights") { showWeights(row.backend) }
+            }
+            Menu("More") {
+                Button("Assign a role…") { model.tab = .roles }
+                Button("Rename the backend…") { model.askToRename(row, .backend) }
+                if model.renamesAsModel(row) {
+                    Button("Rename the model…") { model.askToRename(row, .model) }
+                }
+                if row.section == "local" {
+                    Button("Check its files") { model.repair(row) }
+                }
+                if let path = model.path {
+                    Button("Show in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                    }
+                }
+                if row.section == "local" {
+                    Divider()
+                    Button("Remove the backend…") { model.askToRemove(row) }
+                    Button("Delete with its weights…", role: .destructive) { Task { await model.askToDelete(row) } }
+                }
+            }
+            .fixedSize()
+        }
+        .disabled(model.working != nil)
+    }
+
+    /// The drafter beside the backend's model (the CLI's 53i): where it is,
+    /// what the CLI says of it there, and Unpair.
+    private func drafter(_ draft: BackendDraft, _ row: ModelRow) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            label("Drafter")
+            Text(draft.path)
+                .font(.apogeeCode)
+                .foregroundStyle(Palette.textPrimary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            if !draft.drafts {
+                // A pairing that can no longer draft (GUI M5): the CLI's own
+                // words, its way out among them; Unpair is the doctor's.
+                Label {
+                    Text(draft.said).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle")
+                }
+                .font(.apogeeSmall)
+                .foregroundStyle(Palette.warning)
+            } else if !draft.said.isEmpty {
+                Text(draft.said).font(.apogeeSmall).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if let drafter = draft.drafter {
+                Text(drafter).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).fixedSize(horizontal: false, vertical: true)
+            }
+            Button("Unpair") { Task { await model.unpair(row) } }
+                .disabled(model.working != nil)
+                .help(draft.drafts
+                    ? "apogee config set-backend \(row.backend) --draft \"\" -- the backend answers alone again; the drafter stays under Stored weights"
+                    : "apogee config set-backend \(row.backend) --draft \"\" -- the way out the doctor names: the backend answers alone again")
+        }
+    }
+
+    /// A vision base with no drafter (GUI M5): what one would do, and **Pair a
+    /// drafter…**, offering what the binary's completion offers it.
+    private func noDrafter(_ row: ModelRow) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            label("Drafter")
+            Text("None. A drafter proposes the next tokens and \(row.backend) checks them, so every answer is still its own; it runs beside it through mlx-vlm's speculative path.")
+                .font(.apogeeSmall)
+                .foregroundStyle(Palette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Pair a drafter…") { Task { await model.askToPairDrafter(row) } }
+                .disabled(model.working != nil)
+                .help("apogee config set-backend \(row.backend) --draft <a drafter the binary offers it>")
+        }
+    }
+
+    private func section(_ title: String, _ fields: [Field]) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            label(title)
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Spacing.m, verticalSpacing: Spacing.xs) {
+                ForEach(Array(fields.enumerated()), id: \.offset) { _, field in
+                    GridRow {
+                        Text(field.label).foregroundStyle(Palette.textTertiary)
+                        Text(field.value)
+                            .foregroundStyle(Palette.textPrimary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .font(.apogeeSmall)
+        }
+    }
+
+    private func label(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(.system(size: TypeScale.label, weight: .medium, design: .monospaced))
+            .tracking(0.8)
+            .foregroundStyle(Palette.textTertiary)
+    }
+}
+
+/// A backend's adapters (the CLI's 53a): each file and its scale, what the
+/// doctor says of its pin (53c) -- in its words, its way to mend one that
+/// fails -- and Edit adapters….
+struct AdaptersSection: View {
+    let model: ModelsViewModel
+    let row: ModelRow
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            Text("ADAPTERS")
+                .font(.system(size: TypeScale.label, weight: .medium, design: .monospaced))
+                .tracking(0.8)
+                .foregroundStyle(Palette.textTertiary)
+            if let failure = model.adaptersFailure {
+                Text(failure).font(.apogeeSmall).foregroundStyle(Palette.error).textSelection(.enabled)
+            } else if let adapters = model.adapters {
+                if adapters.rows.isEmpty {
+                    Text("None. An adapter applies over \(row.backend)'s weights at load, never merged into them.")
+                        .font(.apogeeSmall)
+                        .foregroundStyle(Palette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                ForEach(adapters.rows) { adapter in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(adapter.adapter.path)
+                            .font(.apogeeCode)
+                            .foregroundStyle(Palette.textPrimary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(adapter.scaleWords).font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textSecondary)
+                        if let check = adapter.check {
+                            Text(check.detail)
+                                .font(.apogeeSmall)
+                                .foregroundStyle(Self.color(check.status))
+                                .fixedSize(horizontal: false, vertical: true)
+                            if let remedy = check.remedy {
+                                Text(remedy)
+                                    .font(.apogeeMeta.monospaced())
+                                    .foregroundStyle(Palette.textTertiary)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+                if let failure = adapters.checkFailure {
+                    Text(failure).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Button("Edit adapters…") { model.editAdapters(row) }
+                .disabled(model.working != nil || model.adapters == nil)
+                .help("apogee config set-backend \(row.backend) --adapters <path>[:<scale>],… -- each pinned to the weights it runs now")
+        }
+    }
+
+    /// A pin's status in the design's colours: a failure the error's, a
+    /// warning the warning's.
+    static func color(_ status: String) -> Color {
+        switch status {
+        case "fail": Palette.error
+        case "warn": Palette.warning
+        case "ok": Palette.textSecondary
+        default: Palette.textTertiary
+        }
+    }
+}
+
+/// The roles: which model does which job, each moved through its verb.
+struct RolesView: View {
+    @Bindable var model: ModelsViewModel
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Spacing.l) {
+                Text("Which model does which job. Helpers run beside the chat model; an unset role falls back as shown.")
+                    .font(.apogeeBody)
+                    .foregroundStyle(Palette.textSecondary)
+                if let failure = model.rolesFailure {
+                    Text(failure).font(.apogeeSmall).foregroundStyle(Palette.error)
+                }
+                ForEach(model.roles) { role in
+                    HStack(alignment: .top, spacing: Spacing.l) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(role.role.prefix(1).uppercased() + role.role.dropFirst())
+                                .font(.apogeeTitle)
+                                .foregroundStyle(Palette.textPrimary)
+                            Text((role.verb + ["<backend>"]).joined(separator: " "))
+                                .font(.apogeeMeta.monospaced())
+                                .foregroundStyle(Palette.textTertiary)
+                        }
+                        .frame(width: 220, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(ModelsViewModel.about(role.role)).font(.apogeeSmall).foregroundStyle(Palette.textSecondary)
+                            Text(role.said).font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        Picker(
+                            "Model for \(role.role)",
+                            selection: Binding(
+                                get: { role.isSet ? (role.backend ?? "") : "" },
+                                set: { backend in
+                                    if !backend.isEmpty { Task { await model.assign(role, to: backend) } }
+                                })
+                        ) {
+                            Text("Not set").tag("")
+                            ForEach(model.choices(for: role), id: \.self) { Text($0).tag($0) }
+                        }
+                        .labelsHidden()
+                        .frame(width: 220)
+                        .disabled(model.working != nil)
+                    }
+                    Divider()
+                }
+            }
+            .padding(Spacing.xl)
+            .frame(maxWidth: Layout.mediaContentMax)
+            .frame(maxWidth: .infinity)
+        }
+    }
+}
+
+/// A model's kind, as the design marks it.
+struct KindMark: View {
+    let kind: ModelKind?
+
+    var body: some View {
+        Image(systemName: kind == .api ? "cloud" : kind == .subscription ? "arrow.triangle.2.circlepath" : "cpu")
+            .font(.system(size: 11))
+            .foregroundStyle(kind == .api ? Palette.api : kind == .subscription ? Palette.subscription : kind == .local ? Palette.local : Palette.textTertiary)
+            .frame(width: 14)
+            .accessibilityLabel(kind == .api ? "cloud API, billed" : kind == .subscription ? "subscription" : kind == .local ? "on this machine" : "model")
+    }
+}
+
+/// `config set-backend <base> --draft <drafter>` from the base's side (GUI
+/// M5): one of the drafters the binary's completion offers this base, each
+/// with the CLI's line for it -- or, none offered, why.
+struct PairDrafterSheet: View {
+    @Bindable var model: ModelsViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        if let form = model.pairingDrafter {
+            VStack(alignment: .leading, spacing: Spacing.m) {
+                Text("Pair a drafter with \(form.backend)").font(.apogeeHeading)
+                Text("A drafter proposes the next tokens and its base checks them, so every answer is still the base's own. It runs beside this backend through mlx-vlm's speculative path.")
+                    .font(.apogeeSmall).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true)
+                if form.offers.isEmpty {
+                    Text("No stored drafter pairs with \(form.backend). A drafter is a draft head converted to MLX for a base of its family and width -- Stored weights converts one with Convert to MLX…, then it is offered here.")
+                        .font(.apogeeSmall).foregroundStyle(Palette.warning).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Picker("Drafter", selection: Binding(get: { model.pairingDrafter?.chosen }, set: { model.pairingDrafter?.chosen = $0 })) {
+                        ForEach(form.offers) { offer in
+                            Text(offer.handle).tag(String?.some(offer.handle))
+                        }
+                    }
+                    .pickerStyle(.radioGroup)
+                    if let said = form.offer?.said {
+                        Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                if let arguments = form.arguments {
+                    Text((["apogee"] + arguments).joined(separator: " "))
+                        .font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack {
+                    Spacer()
+                    Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                    Button("Pair") { Task { await model.pairDrafter() } }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(form.arguments == nil)
+                }
+            }
+            .padding(Spacing.xl)
+            .frame(width: 560)
+        }
+    }
+}
+
+/// A new name for a stored model.
+struct RenameModelSheet: View {
+    let renaming: ModelsViewModel.Renaming
+    let rename: (String) -> Void
+    @State private var name: String
+    @Environment(\.dismiss) private var dismiss
+
+    init(renaming: ModelsViewModel.Renaming, rename: @escaping (String) -> Void) {
+        self.renaming = renaming
+        self.rename = rename
+        _name = State(initialValue: renaming.name)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.m) {
+            Text(renaming.kind == .backend ? "Rename backend" : "Rename model").font(.apogeeHeading)
+            Text(renaming.kind == .backend
+                ? "The backend takes the new name, and so does every reference to it: the roles, the suites, the saved chats. Its weights stay where they are."
+                : "Every quantization's backend, and the stored directory they run from, take the new name.")
+                .font(.apogeeSmall)
+                .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            TextField("Name", text: $name).textFieldStyle(.roundedBorder)
+            Text((["apogee"] + renaming.command + ["…"]).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary)
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Rename") {
+                    rename(name)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(Spacing.xl)
+        .frame(width: 460)
+    }
+}
+
+#if DEBUG
+#Preview("Backends: local first, then cloud and subscriptions, one open") {
+    let models = ModelsPreview.models()
+    ModelTable(model: models)
+        .frame(width: 760, height: 440)
+        .task {
+            await models.connect(binary: previewBinary)
+            if let gguf = models.rows.first(where: { $0.backend == "qwen3-8b-Q4KM" }) { await models.select(gguf) }
+        }
+}
+
+#Preview("Backends: Apogee isn't installed") {
+    let models = ModelsPreview.models()
+    ModelTable(model: models)
+        .frame(width: 760, height: 240)
+        .task { await models.connect(binary: nil) }
+}
+
+#Preview("Details: a GGUF backend's typed facts and lineage") {
+    let models = ModelsPreview.models()
+    ModelDetails(model: models)
+        .frame(width: 380, height: 620)
+        .task {
+            await models.connect(binary: previewBinary)
+            if let gguf = models.rows.first(where: { $0.backend == "qwen3-8b-Q4KM" }) { await models.select(gguf) }
+        }
+}
+
+#Preview("Details: a backend's two adapters, pinned") {
+    let models = ModelsPreview.adapters()
+    ModelDetails(model: models)
+        .frame(width: 380, height: 700)
+        .task { await ModelsPreview.showingAdapters(models, of: "based") }
+}
+
+#Preview("Details: an adapter whose base changed under it") {
+    let models = ModelsPreview.adapters()
+    ModelDetails(model: models)
+        .frame(width: 380, height: 700)
+        .task { await ModelsPreview.showingAdapters(models, of: "q4") }
+}
+
+#Preview("Adapters: none on the backend") {
+    let models = ModelsPreview.adapters()
+    VStack(alignment: .leading) {
+        if let row = models.selectedRow {
+            AdaptersSection(model: models, row: row)
+        }
+    }
+    .padding(Spacing.l)
+    .frame(width: 380)
+    .task { await ModelsPreview.showingAdapters(models, of: "tuned") }
+}
+
+#Preview("Adapters: two pinned, one at half scale") {
+    let models = ModelsPreview.adapters()
+    VStack(alignment: .leading) {
+        if let row = models.selectedRow {
+            AdaptersSection(model: models, row: row)
+        }
+    }
+    .padding(Spacing.l)
+    .frame(width: 380)
+    .task { await ModelsPreview.showingAdapters(models, of: "based") }
+}
+
+#Preview("Details: a registered GGUF's record alone, as recorded") {
+    let models = ModelsPreview.models(over: ModelsPreview.storeRunner)
+    ModelDetails(model: models)
+        .frame(width: 380, height: 760)
+        .task {
+            await models.connect(binary: previewBinary)
+            if let q4 = models.rows.first(where: { $0.backend == "llama3.2-1b-Q4KM" }) { await models.select(q4) }
+        }
+}
+
+#Preview("Roles: chat set, embedding by the default, vision unset") {
+    let models = ModelsPreview.models()
+    RolesView(model: models)
+        .frame(width: 960, height: 420)
+        .task { await models.connect(binary: previewBinary) }
+}
+
+#Preview("Roles: an MLX embedding entry offered to the embedding role") {
+    let models = ModelsPreview.models(over: ModelsPreview.kindsRegisteredRunner)
+    RolesView(model: models)
+        .frame(width: 960, height: 480)
+        .task { await models.connect(binary: previewBinary) }
+}
+
+#Preview("Roles: the chat role offers only entries that chat, over the registered kinds -- the embedding role still offers the embedding entry") {
+    let models = ModelsPreview.models(over: ModelsPreview.kindsRegisteredRunner)
+    RolesView(model: models)
+        .frame(width: 960, height: 480)
+        .task { await models.connect(binary: previewBinary) }
+}
+
+#Preview("Roles: a chat role already on the embedding entry, shown as it stands") {
+    let models = ModelsPreview.models(over: ModelsPreview.chatOnEmbeddingRunner)
+    RolesView(model: models)
+        .frame(width: 960, height: 480)
+        .task { await models.connect(binary: previewBinary) }
+}
+
+#Preview("Details: an MLX embedding entry, which opens no session") {
+    let models = ModelsPreview.models(over: ModelsPreview.kindsRegisteredRunner)
+    ModelDetails(model: models)
+        .frame(width: 380, height: 720)
+        .task {
+            await models.connect(binary: previewBinary)
+            if let row = models.rows.first(where: { $0.backend == "EmbeddingGemma-300M-bf16" }) { await models.select(row) }
+        }
+}
+
+#Preview("Details: an MLX backend with its drafter, Unpair") {
+    let models = ModelsPreview.models(over: ModelsPreview.draftsRunner(paired: true))
+    ModelDetails(model: models)
+        .frame(width: 380, height: 760)
+        .task {
+            await models.connect(binary: previewBinary)
+            if let row = models.rows.first(where: { $0.backend == "Gemma4-E4B-4bit" }) { await models.select(row) }
+        }
+}
+
+#Preview("Backends: each MLX entry's kind beside its format, the E4B marked with its drafter") {
+    let models = ModelsPreview.models(over: ModelsPreview.basePairRunner(paired: true))
+    ModelTable(model: models)
+        .frame(width: 760, height: 360)
+        .task { await models.connect(binary: previewBinary) }
+}
+
+#Preview("Backends: each drafter from the list -- the E4B drafting, the 12B's gone in the CLI's words -- no models info read") {
+    let models = ModelsPreview.dated(over: ModelsPreview.rowsDraftsRunner)
+    ModelTable(model: models)
+        .frame(width: 760, height: 320)
+        .task { await models.connect(binary: previewBinary) }
+}
+
+#Preview("Drafter marks from the list: one drafting, one that cannot") {
+    let models = ModelsPreview.dated(over: ModelsPreview.rowsDraftsRunner)
+    VStack(alignment: .leading, spacing: Spacing.s) {
+        ForEach(models.rows.compactMap { models.drafterMark($0) }, id: \.help) { mark in
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
+                DrafterGlyph(mark: mark)
+                Text(mark.help).font(.apogeeSmall).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+    .padding(Spacing.xl)
+    .frame(width: 560)
+    .task { await models.connect(binary: previewBinary) }
+}
+
+#Preview("Backends after Remove: the default it named cleared, as the CLI said it") {
+    let runner = ModelsPreview.removeStore()
+    let models = ModelsPreview.dated(over: runner)
+    ModelsScreen(model: models, store: ModelsPreview.store(), shell: ModelsPreview.shell()) {
+        DownloadsView(model: ModelsPreview.jobs())
+    }
+    .frame(width: 1200, height: 560)
+    .task { await ModelsPreview.removeTheDefault(models, runner) }
+}
+
+#Preview("Backends after a delete with its backend: both roles it held cleared, as the CLI said it") {
+    let runner = ModelsPreview.deleteRolesStore()
+    let models = ModelsPreview.dated(over: runner)
+    ModelsScreen(model: models, store: ModelsPreview.store(), shell: ModelsPreview.shell()) {
+        DownloadsView(model: ModelsPreview.jobs())
+    }
+    .frame(width: 1200, height: 600)
+    .task { await ModelsPreview.deleteTheRoleHolder(models, runner) }
+}
+
+#Preview("Backends: an older binary's table -- no kind, no drafter read, as before") {
+    let models = ModelsPreview.models()
+    ModelTable(model: models)
+        .frame(width: 760, height: 440)
+        .task { await models.connect(binary: previewBinary) }
+}
+
+#Preview("Details: a vision base with no drafter, Pair a drafter…") {
+    let models = ModelsPreview.models(over: ModelsPreview.basePairRunner(paired: false))
+    ModelDetails(model: models)
+        .frame(width: 380, height: 760)
+        .task { await ModelsPreview.showing(models, "Gemma4-E4B-4bit") }
+}
+
+#Preview("Pair a drafter: the one drafter the binary offers the E4B, not the 12B's") {
+    let models = ModelsPreview.models(over: ModelsPreview.basePairRunner(paired: false))
+    PairDrafterSheet(model: models)
+        .task { await ModelsPreview.pairingDrafter(models, "Gemma4-E4B-4bit") }
+}
+
+#Preview("Pair a drafter: no stored drafter pairs with the 12B") {
+    let models = ModelsPreview.models(over: ModelsPreview.draftsRunner(paired: false))
+    PairDrafterSheet(model: models)
+        .task { await ModelsPreview.pairingDrafter(models, "Gemma4-12B-4bit") }
+}
+
+#Preview("Backends: a pairing whose drafter was deleted, its mark a warning in the CLI's words") {
+    let models = ModelsPreview.models(over: ModelsPreview.draftGoneRunner)
+    ModelTable(model: models)
+        .frame(width: 760, height: 320)
+        .task { await models.connect(binary: previewBinary) }
+}
+
+#Preview("Details: a pairing whose drafter was deleted, the CLI's refusal and Unpair") {
+    let models = ModelsPreview.models(over: ModelsPreview.draftGoneRunner)
+    ModelDetails(model: models)
+        .frame(width: 380, height: 760)
+        .task { await ModelsPreview.showing(models, "Gemma4-E4B-4bit") }
+}
+
+#Preview("Details: a base converted again as mlx-lm's build, its drafter refused") {
+    let models = ModelsPreview.models(over: ModelsPreview.draftRebuiltRunner)
+    ModelDetails(model: models)
+        .frame(width: 380, height: 760)
+        .task { await ModelsPreview.showing(models, "Gemma4-E4B-4bit") }
+}
+
+#Preview("Drafter marks: one drafting, one that cannot") {
+    let paired = ModelsPreview.models(over: ModelsPreview.basePairRunner(paired: true))
+    let gone = ModelsPreview.models(over: ModelsPreview.draftGoneRunner)
+    VStack(alignment: .leading, spacing: Spacing.s) {
+        ForEach([paired, gone].flatMap { model in model.rows.compactMap { model.drafterMark($0) } }, id: \.help) { mark in
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
+                DrafterGlyph(mark: mark)
+                Text(mark.help).font(.apogeeSmall).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+    .padding(Spacing.xl)
+    .frame(width: 560)
+    .task {
+        await paired.connect(binary: previewBinary)
+        await gone.connect(binary: previewBinary)
+    }
+}
+
+#Preview("Each backend's kind, as marked") {
+    VStack(alignment: .leading, spacing: Spacing.s) {
+        ForEach(ModelsPreview.rows) { row in
+            HStack(spacing: Spacing.s) {
+                KindMark(kind: row.kind)
+                Text(row.name).font(.apogeeBody)
+            }
+        }
+    }
+    .padding(Spacing.xl)
+}
+
+#Preview("Rename a GGUF backend's model: every quantization and its folder") {
+    if let row = ModelsPreview.rows.first(where: { $0.backend == "qwen3-8b-Q4KM" }) {
+        RenameModelSheet(renaming: .init(row: row, kind: .model)) { _ in }
+    }
+}
+
+#Preview("Rename an MLX backend: the backend and every reference") {
+    if let row = ModelsPreview.rows.first(where: { $0.backend == "qwen-mlx" }) {
+        RenameModelSheet(renaming: .init(row: row, kind: .backend)) { _ in }
+    }
+}
+
+#Preview("Backends, a GGUF backend's details open") {
+    let models = ModelsPreview.models()
+    let store = ModelsPreview.store()
+    ModelsScreen(model: models, store: store, shell: ModelsPreview.shell()) {
+        DownloadsView(model: ModelsPreview.converting())
+    }
+    .frame(width: 1200, height: 640)
+    .task {
+        await models.connect(binary: previewBinary)
+        await store.connect(binary: previewBinary)
+        if let gguf = models.rows.first(where: { $0.backend == "qwen3-8b-Q4KM" }) { await models.select(gguf) }
+    }
+}
+
+#Preview("Delete a backend with its weights: the CLI's plan names the backend that uses its files") {
+    let models = ModelsViewModel(runner: ModelsPreview.backendsDeleteStore())
+    ModelsScreen(model: models, store: ModelsPreview.store(), shell: ModelsPreview.shell()) {
+        DownloadsView(model: ModelsPreview.jobs())
+    }
+    .frame(width: 1200, height: 640)
+    .task { await ModelsPreview.askToDeleteBackend(models, "Llama3.2-1B-Instruct-Q4KM") }
+}
+
+#Preview("Backends after a delete with its weights: the backend kept, with the CLI's two doors") {
+    let runner = ModelsPreview.backendsDeleteStore()
+    let models = ModelsViewModel(runner: runner)
+    ModelsScreen(model: models, store: ModelsPreview.store(), shell: ModelsPreview.shell()) {
+        DownloadsView(model: ModelsPreview.jobs())
+    }
+    .frame(width: 1200, height: 640)
+    .task { await ModelsPreview.deleteBackendKept(models, runner) }
+}
+
+#Preview("Backends after a delete with the backends: the backend removed, as the CLI said it") {
+    let runner = ModelsPreview.backendsDeleteStore()
+    let models = ModelsViewModel(runner: runner)
+    ModelsScreen(model: models, store: ModelsPreview.store(), shell: ModelsPreview.shell()) {
+        DownloadsView(model: ModelsPreview.jobs())
+    }
+    .frame(width: 1200, height: 640)
+    .task { await ModelsPreview.deleteBackendWithBackends(models, runner) }
+}
+
+#Preview("Stored weights, the registered Q4_K_M open") {
+    let models = ModelsPreview.models(over: ModelsPreview.storeRunner)
+    let store = ModelsPreview.store()
+    ModelsScreen(model: models, store: store, shell: ModelsPreview.shell()) {
+        DownloadsView(model: ModelsPreview.jobs())
+    }
+    .frame(width: 1300, height: 680)
+    .task {
+        await models.connect(binary: previewBinary)
+        await store.connect(binary: previewBinary)
+        models.tab = .store
+        await store.refresh()
+        await store.select(ModelsPreview.q4)
+    }
+}
+#endif

@@ -14,9 +14,11 @@ In order:
      BEFORE anything is replaced: a user's ~/.apogee still holds these
      bytes, and the seeding path can tell "an earlier Apogee's copy" (update
      it) from "the user's edit" (keep it) only by this list.
-  2. The converter is replaced: the entry script, conversion/, the `gguf`
-     package (gguf-py/gguf/*.py, not its scripts/), both licenses, and every
-     template under models/templates/ that conversion/ reads by name.
+  2. The converter is replaced: both entry scripts (convert_hf_to_gguf.py,
+     and convert_lora_to_gguf.py, which `train promote --adapter` runs, 53b),
+     conversion/, the `gguf` package (gguf-py/gguf/*.py, not its scripts/),
+     both licenses, and every template under models/templates/ that
+     conversion/ reads by name.
   3. scripts/generate_training_assets.py compiles the result in.
 
 Nothing is edited on the way in (third_party/README.md). A pin bump is its
@@ -81,6 +83,9 @@ def replace(source: Path) -> None:
             entry.unlink()
 
     shutil.copy2(source / "convert_hf_to_gguf.py", VENDORED / "convert_hf_to_gguf.py")
+    # The adapter converter (53b): a PEFT adapter -> a GGUF LoRA, over the same
+    # conversion/ and gguf-py/ as its sibling.
+    shutil.copy2(source / "convert_lora_to_gguf.py", VENDORED / "convert_lora_to_gguf.py")
     shutil.copy2(source / "LICENSE", VENDORED / "LICENSE")
     (VENDORED / "conversion").mkdir()
     for module in sorted((source / "conversion").glob("*.py")):
@@ -100,7 +105,8 @@ def main() -> int:
                         help="a llama.cpp tree at the new pin")
     args = parser.parse_args()
     source: Path = args.source.resolve()
-    for required in ("convert_hf_to_gguf.py", "conversion", "gguf-py/gguf", "models/templates"):
+    for required in ("convert_hf_to_gguf.py", "convert_lora_to_gguf.py", "conversion",
+                     "gguf-py/gguf", "models/templates"):
         if not (source / required).exists():
             raise SystemExit(f"{source} has no {required} -- is it a llama.cpp tree?")
 

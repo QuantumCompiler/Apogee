@@ -84,8 +84,15 @@ std::string definition_hash(const harness::Tool& definition) {
     return models::sha256_hex(bytes);
 }
 
-bool permitted_target(const Tool& tool, std::string_view target, std::string_view detail,
-                      const DispatchContext& context) {
+namespace {
+
+/// The gate's resolution of one target. `late_detail`, when set, is what the
+/// person asked is shown beside it, worked out only once someone is about to
+/// be asked (52a): a file writer's diff reads the file, and a call the
+/// checker settles -- allowed by the config, accept-edits, an `always` --
+/// never shows it.
+bool resolve(const Tool& tool, std::string_view target, std::string_view detail,
+             const std::function<std::string()>& late_detail, const DispatchContext& context) {
     // An address the gate cannot read is not one it can allow. The tool's own
     // parser is what named the target, so a call it could not name one for is
     // a call it would refuse anyway; denying here keeps that true even for a
@@ -112,7 +119,18 @@ bool permitted_target(const Tool& tool, std::string_view target, std::string_vie
     if (!context.confirm) {
         return false;
     }
-    return context.confirm(request);
+    if (!late_detail) {
+        return context.confirm(request);
+    }
+    const std::string shown = late_detail();
+    return context.confirm(GateRequest{tool.name, target, shown, tool.outbound, tool.edits});
+}
+
+}  // namespace
+
+bool permitted_target(const Tool& tool, std::string_view target, std::string_view detail,
+                      const DispatchContext& context) {
+    return resolve(tool, target, detail, {}, context);
 }
 
 namespace {
@@ -139,9 +157,11 @@ bool permitted(const Tool& tool, std::string_view arguments, const DispatchConte
     }
     const std::string target =
         tool.describe_target ? tool.describe_target(arguments) : std::string{};
-    const std::string detail =
-        tool.describe_detail ? tool.describe_detail(arguments) : std::string{};
-    return permitted_target(tool, target, detail, context);
+    if (!tool.describe_detail) {
+        return resolve(tool, target, {}, {}, context);
+    }
+    return resolve(
+        tool, target, {}, [&tool, arguments] { return tool.describe_detail(arguments); }, context);
 }
 
 ToolOutcome dispatch(const ToolRegistry& registry, const harness::ToolCall& call,

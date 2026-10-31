@@ -184,7 +184,7 @@ tui::ListOptions providers_view_options(const RootContext& context) {
                             },
                         .run =
                             [&context](const tui::ListRow& row) {
-                                return register_provider(config_file(context), row.key);
+                                return register_provider(config_file(context), row.key).said();
                             }}};
     return options;
 }

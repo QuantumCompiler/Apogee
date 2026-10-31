@@ -1,11 +1,14 @@
 #include "cli/chat_recall.h"
 
+#include <nlohmann/json.hpp>
+
 #include <exception>
 #include <fstream>
 #include <optional>
 #include <sstream>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include "agentloop/embed_func.h"
 #include "agentloop/rag.h"
@@ -48,7 +51,9 @@ namespace fs = std::filesystem;
 }  // namespace
 
 bool recall_due(const logger::Session& session) {
-    return !session.private_chat && session.turns >= agentloop::kRecallMinTurns;
+    // Never one deleted while it ran (55b): a deleted chat is recalled no
+    // more, and its summary is not written back.
+    return !session.private_chat && !session.deleted && session.turns >= agentloop::kRecallMinTurns;
 }
 
 fs::path recall_marker(std::string_view chat_id) {
@@ -60,6 +65,68 @@ void forget_recall(std::string_view chat_id) {
     (void)index.remove(chat_id);
     std::error_code code;
     fs::remove(recall_marker(chat_id), code);
+}
+
+RecallHoldings recall_holdings() {
+    RecallHoldings out;
+    out.index = harness::recall_index_path();
+    out.summaries = agentloop::RecallIndex{out.index, std::nullopt}.chats();
+    std::error_code code;
+    for (fs::directory_iterator it{pending_dir(), code}, end; !code && it != end;
+         it.increment(code)) {
+        out.pending += it->is_regular_file(code) ? 1U : 0U;
+    }
+    return out;
+}
+
+std::vector<agentloop::RecallEntry> recall_summaries() {
+    return agentloop::RecallIndex{harness::recall_index_path(), std::nullopt}.entries();
+}
+
+nlohmann::json recall_view(const RecallHoldings& held,
+                           const std::vector<agentloop::RecallEntry>& summaries) {
+    nlohmann::json data = nlohmann::json::array();
+    for (const agentloop::RecallEntry& summary : summaries) {
+        data.push_back(nlohmann::json{{"chat", summary.chat_id},
+                                      {"name", summary.title},
+                                      {"updated", summary.updated_at},
+                                      {"summary", summary.summary}});
+    }
+    return nlohmann::json{{"object", "list"},
+                          {"data", std::move(data)},
+                          {"index", held.index.string()},
+                          {"pending", held.pending}};
+}
+
+std::string recall_row(const agentloop::RecallEntry& summary) {
+    std::string row = "  " + summary.chat_id;
+    for (const std::string* part : {&summary.updated_at, &summary.title}) {
+        if (!part->empty()) {
+            row += "  " + *part;
+        }
+    }
+    return row;
+}
+
+RecallHoldings forget_all_recall() {
+    const RecallHoldings held = recall_holdings();
+    std::error_code code;
+    // The index whole -- its write-ahead files with it -- and every due mark,
+    // so nothing is summarised back into it at the next start.
+    for (const std::string_view suffix : {"", "-wal", "-shm"}) {
+        fs::remove(held.index.string() + std::string{suffix}, code);
+    }
+    std::vector<fs::path> marks;
+    for (fs::directory_iterator it{pending_dir(), code}, end; !code && it != end;
+         it.increment(code)) {
+        if (it->is_regular_file(code)) {
+            marks.push_back(it->path());
+        }
+    }
+    for (const fs::path& mark : marks) {
+        fs::remove(mark, code);
+    }
+    return held;
 }
 
 std::string recall_summariser(const harness::Harness& harness, const harness::Config& config,
@@ -90,11 +157,26 @@ std::string summarise_for_recall(const harness::Harness& harness, const harness:
         return "not summarised for recall: " + note;
     }
     agentloop::RecallIndex index{harness::recall_index_path(), free_embedder(harness, config)};
-    const agentloop::RecallEntry entry{
-        .chat_id = session.chat_id,
-        .title = session.title,
-        .updated_at = session.updated_at.empty() ? session.started_at : session.updated_at,
-        .summary = *summary};
+    std::string updated = session.updated_at.empty() ? session.started_at : session.updated_at;
+    if (updated.empty()) {
+        // A chat summarised at its own exit holds no dates in memory --
+        // `save` stamps the file, not the session -- so its index record went
+        // undated, and a recalled chat's `updated` with it (found at 52a).
+        // The file was saved after its last turn: its dates are the chat's.
+        try {
+            const logger::Session saved =
+                logger::load(session.chat_id, logger::KnownDependencies{}).session;
+            updated = saved.updated_at.empty() ? saved.started_at : saved.updated_at;
+        } catch (const std::exception&) {
+            updated.clear();
+        }
+    }
+    // Named as `chats list` names it (55b): a chat renamed with `chats title`
+    // or `/title` is recalled by that name, not the title it was given.
+    const agentloop::RecallEntry entry{.chat_id = session.chat_id,
+                                       .title = session.display_name(),
+                                       .updated_at = std::move(updated),
+                                       .summary = *summary};
     if (!index.put(entry, cancellation, note)) {
         return "not summarised for recall: " + note;
     }
@@ -136,6 +218,21 @@ Recalled ChatRecall::for_turn(const std::string& query, const agentloop::TurnBud
             out.prefix = result.prefix;
             out.chats = static_cast<int>(result.chunks);
             out.tokens = result.tokens;
+            // Named from the record each summary was indexed with -- the
+            // title and date the model was handed in it (52a).
+            for (std::size_t i = 0; i < result.sources.size(); ++i) {
+                const nlohmann::json record = nlohmann::json::parse(
+                    i < result.metadata.size() ? result.metadata[i] : std::string{}, nullptr,
+                    false);
+                const auto text = [&](std::string_view key) {
+                    return record.is_object() && record.contains(key) && record[key].is_string()
+                               ? record[key].get<std::string>()
+                               : std::string{};
+                };
+                out.sessions.push_back(agentloop::RecalledChat{.id = result.sources[i].file,
+                                                               .name = text("title"),
+                                                               .updated = text("updated_at")});
+            }
         }
     }
     // Decisions recorded deliberately, with what is left -- unless `auto_rag`

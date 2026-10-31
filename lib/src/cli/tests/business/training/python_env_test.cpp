@@ -4,10 +4,13 @@
 
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
 
+#include "platform/platform.h"
 #include "support/env_guard.h"
 
 /// The environment Apogee owns: created from a base interpreter with
@@ -16,11 +19,14 @@
 /// runner, so no test here runs Python or pip.
 namespace {
 
+using apogee::training::choose_base_python;
 using apogee::training::CommandResult;
 using apogee::training::locate_base_python;
 using apogee::training::packages_for;
+using apogee::training::python_range;
 using apogee::training::PythonEnv;
 using apogee::training::PythonEnvStatus;
+using apogee::training::PythonVersion;
 using apogee::training::requirement_set_from_string;
 using apogee::training::requirement_set_names;
 using apogee::training::RequirementSet;
@@ -32,35 +38,90 @@ struct Fixture {
     /// interpreter on a `venv` call, as the real one would.
     int exit_code = 0;
     std::string stderr_text;
+    /// What each interpreter, by file name, says its version is (M19); a
+    /// `venv` made by one writes it into `pyvenv.cfg`, as Python does.
+    std::map<std::string, std::string> versions;
+    /// The pip install, counted from 1, that fails; 0 for none.
+    int failing_pip = 0;
+    int pips = 0;
+
+    [[nodiscard]] apogee::training::CommandRunner runner() {
+        return
+            [this](const apogee::platform::ChildCommand& command,
+                   const apogee::harness::CancellationToken& token) { return run(command, token); };
+    }
 
     [[nodiscard]] PythonEnv env() {
-        return PythonEnv{root.path() / "venv", [this](const apogee::platform::ChildCommand& command,
-                                                      const apogee::harness::CancellationToken&) {
-                             commands.push_back(command);
-                             CommandResult result;
-                             result.exit_code = exit_code;
-                             result.err = stderr_text;
-                             // The venv directory is the third argument; a
-                             // command without one creates nothing (a mutant
-                             // that dropped it once wrote fake interpreters
-                             // into the working directory).
-                             if (exit_code == 0 && command.arguments.size() >= 3 &&
-                                 command.arguments[1] == "venv") {
-                                 const std::filesystem::path venv{command.arguments[2]};
-                                 std::filesystem::create_directories(venv / "bin");
-                                 std::ofstream{venv / "bin" / "python"} << "#!fake";
-                                 std::filesystem::create_directories(venv / "Scripts");
-                                 std::ofstream{venv / "Scripts" / "python.exe"} << "fake";
-                             }
-                             return result;
-                         }};
+        return PythonEnv{root.path() / "venv", runner()};
+    }
+
+    CommandResult run(const apogee::platform::ChildCommand& command,
+                      const apogee::harness::CancellationToken&) {
+        commands.push_back(command);
+        CommandResult result;
+        result.exit_code = exit_code;
+        result.err = stderr_text;
+        const std::string name = std::filesystem::path{command.program}.filename().string();
+        if (!command.arguments.empty() && command.arguments[0] == "-c") {
+            const auto said = versions.find(name);
+            result.exit_code = said == versions.end() ? 1 : 0;
+            result.out = said == versions.end() ? "" : said->second + "\n";
+            return result;
+        }
+        if (command.arguments.size() >= 2 && command.arguments[1] == "pip") {
+            ++pips;
+            if (pips == failing_pip) {
+                result.exit_code = 1;
+                result.err = "ERROR: a scripted failure\n";
+                return result;
+            }
+        }
+        // The venv directory is the third argument; a
+        // command without one creates nothing (a mutant
+        // that dropped it once wrote fake interpreters
+        // into the working directory).
+        if (exit_code == 0 && command.arguments.size() >= 3 && command.arguments[1] == "venv") {
+            const std::filesystem::path venv{command.arguments[2]};
+            std::filesystem::create_directories(venv / "bin");
+            std::ofstream{venv / "bin" / "python"} << "#!fake";
+            std::filesystem::create_directories(venv / "Scripts");
+            std::ofstream{venv / "Scripts" / "python.exe"} << "fake";
+            if (const auto said = versions.find(name); said != versions.end()) {
+                std::ofstream{venv / "pyvenv.cfg"} << "home = /x\nversion = " << said->second
+                                                   << "\n";
+            }
+        }
+        return result;
     }
 };
+
+/// Fake interpreters, by name, in a directory that is the whole PATH -- a
+/// scripted machine: each answers its version through the fixture's runner.
+struct ScriptedPath {
+    apogee::testing::TempDir dir{"python-path-" + std::to_string(std::random_device{}())};
+    apogee::testing::EnvGuard path{"PATH", dir.path().string()};
+
+    explicit ScriptedPath(Fixture& fixture, const std::map<std::string, std::string>& pythons) {
+        for (const auto& [name, version] : pythons) {
+            const std::filesystem::path file = dir.path() / name;
+            std::ofstream{file} << "#!/bin/sh\n";
+            std::filesystem::permissions(file, std::filesystem::perms::owner_all);
+            fixture.versions[name] = version;
+        }
+    }
+};
+
+/// Every set an Apple-silicon host can install, in the table's order --
+/// mlx-video too, opt-in (53k), and mlx-audio, opt-in (53m).
+const std::vector<RequirementSet> kAppleSets{
+    RequirementSet::Prepare,       RequirementSet::Mlx,      RequirementSet::Convert,
+    RequirementSet::MlxVlm,        RequirementSet::Video,    RequirementSet::Voice,
+    RequirementSet::MlxEmbeddings, RequirementSet::MlxVideo, RequirementSet::MlxAudio};
 
 }  // namespace
 
 TEST_CASE("requirement sets are named and carry packages", "[training][python]") {
-    CHECK(requirement_set_names().size() == 7);
+    CHECK(requirement_set_names().size() == 10);
     // The speech driver's stack (50a).
     CHECK(requirement_set_from_string("voice") == RequirementSet::Voice);
     CHECK(packages_for(RequirementSet::Voice)[1] == "kokoro>=0.9.4");
@@ -68,7 +129,21 @@ TEST_CASE("requirement sets are named and carry packages", "[training][python]")
     CHECK(requirement_set_from_string("convert") == RequirementSet::Convert);
     // The mlx backend's vision path, installed on demand (27c).
     CHECK(requirement_set_from_string("mlx-vlm") == RequirementSet::MlxVlm);
-    CHECK(packages_for(RequirementSet::MlxVlm)[0] == "mlx-vlm>=0.3");
+    CHECK(packages_for(RequirementSet::MlxVlm)[0] == "mlx-vlm>=0.6.1");
+    // 53f: the first release whose models/ builds every towered set the
+    // store holds, read on a recorded date.
+    CHECK(apogee::training::mlx_vlm_floor_reviewed() == "2026-10-21");
+    // 53h: the embedding route's, on demand -- its floor the first release
+    // whose gemma3_text pools first and converts its padding mask, read on a
+    // recorded date, and Apple silicon's alone.
+    CHECK(requirement_set_from_string("mlx-embeddings") == RequirementSet::MlxEmbeddings);
+    CHECK(to_string(RequirementSet::MlxEmbeddings) == "mlx-embeddings");
+    CHECK(packages_for(RequirementSet::MlxEmbeddings).size() == 1);
+    CHECK(packages_for(RequirementSet::MlxEmbeddings)[0] == "mlx-embeddings>=0.1.0");
+    CHECK(apogee::training::mlx_embeddings_floor_reviewed() == "2026-10-21");
+    CHECK(apogee::training::set_unfit_reason(RequirementSet::MlxEmbeddings, true, false).empty());
+    CHECK(apogee::training::set_unfit_reason(RequirementSet::MlxEmbeddings, false, true) ==
+          "for Apple silicon, which this host is not");
     // The video driver's stack (49b), never installed with anything else.
     CHECK(requirement_set_from_string("video") == RequirementSet::Video);
     CHECK(to_string(RequirementSet::Video) == "video");
@@ -195,4 +270,470 @@ TEST_CASE("an installed package is found by its files, on either layout, with it
     std::ofstream{windows / "__init__.py"};
     CHECK(apogee::training::find_site_package(venv, "diffusers") == windows);
     CHECK(apogee::training::installed_package_version(windows).empty());
+}
+
+TEST_CASE("each set's Python range is carried in the sets' table, with the date it was read",
+          "[training][python][m19]") {
+    // PyPI's requires_python for each set's packages, read 2026-10-21: only
+    // voice is bounded above (kokoro, misaki <3.13), mlx's floor is mlx-lm's.
+    CHECK(apogee::training::python_ranges_reviewed() == "2026-10-21");
+    CHECK(python_range(RequirementSet::Voice).describe() == ">=3.10,<3.13");
+    CHECK(python_range(RequirementSet::Mlx).describe() == ">=3.11");
+    for (const RequirementSet set :
+         {RequirementSet::Prepare, RequirementSet::Peft, RequirementSet::Convert,
+          RequirementSet::MlxVlm, RequirementSet::Video, RequirementSet::MlxEmbeddings}) {
+        CHECK(python_range(set).describe() == ">=3.10");
+    }
+    // An Apple-silicon host's sets fit 3.11 and 3.12 alone.
+    CHECK(python_range(kAppleSets).describe() == ">=3.11,<3.13");
+    CHECK(python_range(kAppleSets).contains(*PythonVersion::parse("3.12.13")));
+    CHECK_FALSE(python_range(kAppleSets).contains(*PythonVersion::parse("3.14.5")));
+    CHECK_FALSE(python_range(kAppleSets).contains(*PythonVersion::parse("3.10.20")));
+
+    CHECK(PythonVersion::parse("3.11.4.final.0")->str() == "3.11.4");
+    CHECK(PythonVersion::parse("3.12")->str() == "3.12.0");
+    CHECK_FALSE(PythonVersion::parse("").has_value());
+    CHECK_FALSE(PythonVersion::parse("python").has_value());
+}
+
+TEST_CASE("an environment on a Python a set does not run on is refused before pip",
+          "[training][python][m19]") {
+    // The user's environment (2026-10-21): made from Homebrew's 3.14.5, its
+    // version only in pyvenv.cfg -- before M19 the record did not say it.
+    Fixture fixture;
+    fixture.versions["python3"] = "3.14.5";
+    PythonEnv env = fixture.env();
+    REQUIRE(env.create("/opt/homebrew/bin/python3").empty());
+    std::ofstream{env.record_path()}
+        << R"({"base_python": "/opt/homebrew/bin/python3", "created_at": "x", "sets": ["prepare"]})";
+    CHECK(env.status().base_version.str() == "3.14.5");
+
+    const std::size_t before = fixture.commands.size();
+    const std::string refused = env.install(RequirementSet::Voice);
+    CHECK(refused.find("is on Python 3.14.5, and the 'voice' set runs on >=3.10,<3.13") !=
+          std::string::npos);
+    CHECK(refused.ends_with("apogee train setup --rebuild --with voice"));
+    CHECK(fixture.commands.size() == before);           // no pip
+    CHECK(env.install(RequirementSet::Video).empty());  // what fits still installs
+}
+
+TEST_CASE("a rebuild reinstalls every recorded set in order, and a failed one puts the old back",
+          "[training][python][m19]") {
+    Fixture fixture;
+    fixture.versions["python3"] = "3.14.5";
+    PythonEnv env = fixture.env();
+    REQUIRE(env.create("/opt/homebrew/bin/python3", {}, *PythonVersion::parse("3.14.5")).empty());
+    for (const RequirementSet set :
+         {RequirementSet::Prepare, RequirementSet::Mlx, RequirementSet::Convert,
+          RequirementSet::MlxVlm, RequirementSet::Video}) {
+        REQUIRE(env.install(set).empty());
+    }
+    const std::vector<std::string> recorded = env.status().sets;
+
+    // A pip that fails midway: what was there is put back as it was.
+    fixture.versions["python3.12"] = "3.12.13";
+    fixture.pips = 0;
+    fixture.failing_pip = 3;
+    const std::string failed =
+        env.rebuild("/opt/homebrew/bin/python3.12", *PythonVersion::parse("3.12.13"));
+    CHECK(failed.find("put back as it was") != std::string::npos);
+    CHECK(env.status().base_version.str() == "3.14.5");
+    CHECK(env.status().sets == recorded);
+    CHECK_FALSE(std::filesystem::exists(env.dir().string() + ".previous"));
+
+    fixture.commands.clear();
+    fixture.pips = 0;
+    fixture.failing_pip = 0;
+    REQUIRE(env.rebuild("/opt/homebrew/bin/python3.12", *PythonVersion::parse("3.12.13")).empty());
+    REQUIRE(fixture.commands.size() == 6);
+    CHECK(fixture.commands[0].program == "/opt/homebrew/bin/python3.12");
+    CHECK(fixture.commands[0].arguments[1] == "venv");
+    std::vector<std::string> installed;
+    for (std::size_t i = 1; i < fixture.commands.size(); ++i) {
+        installed.push_back(fixture.commands[i].arguments.at(4));
+    }
+    CHECK(installed == std::vector<std::string>{"datasets>=3.0", "mlx-lm>=0.21", "torch>=2.11",
+                                                "mlx-vlm>=0.6.1", "torch>=2.6"});
+    CHECK(env.status().base_version.str() == "3.12.13");
+    CHECK(env.status().sets == recorded);
+    CHECK_FALSE(std::filesystem::exists(env.dir().string() + ".previous"));
+    CHECK(env.install(RequirementSet::Voice).empty());  // now it fits
+}
+
+TEST_CASE("the choice is the newest Python every set the host can install runs on",
+          "[training][python][m19]") {
+    if (apogee::platform::host_target().starts_with("windows")) {
+        SKIP("the scripted interpreters are POSIX files on a POSIX PATH");
+    }
+    // The user's Mac: python3 is Homebrew's 3.14.5, 3.13 and 3.12 beside it.
+    Fixture fixture;
+    const ScriptedPath machine{
+        fixture, {{"python3", "3.14.5"}, {"python3.13", "3.13.13"}, {"python3.12", "3.12.13"}}};
+    const apogee::training::PythonChoice chosen =
+        choose_base_python("", kAppleSets, std::vector{RequirementSet::Prepare}, fixture.runner());
+    CHECK(chosen.error.empty());
+    CHECK(chosen.path.filename() == "python3.12");
+    CHECK(chosen.version.str() == "3.12.13");
+    CHECK(chosen.reason ==
+          "the newest Python every set this host can install runs on (>=3.11,<3.13); passed over "
+          "python3 (3.14.5), python3.13 (3.13.13): the 'voice' set runs on >=3.10,<3.13; the "
+          "'mlx-audio' set runs on >=3.10,<3.13");
+
+    // The person's word stands: never swapped, refused before anything runs.
+    const apogee::training::PythonChoice named = choose_base_python(
+        "python3", kAppleSets, std::vector{RequirementSet::Voice}, fixture.runner(), "--python");
+    CHECK(named.path.empty());
+    CHECK(named.error.find("is Python 3.14.5, and the 'voice' set runs on >=3.10,<3.13") !=
+          std::string::npos);
+    const apogee::training::PythonChoice fits = choose_base_python(
+        "python3.12", kAppleSets, std::vector{RequirementSet::Voice}, fixture.runner());
+    CHECK(fits.path.filename() == "python3.12");
+    CHECK(fits.reason == "as named");
+}
+
+TEST_CASE("with no Python for every set, the requested ones decide; with none for them, a refusal",
+          "[training][python][m19]") {
+    if (apogee::platform::host_target().starts_with("windows")) {
+        SKIP("the scripted interpreters are POSIX files on a POSIX PATH");
+    }
+    Fixture fixture;
+    const ScriptedPath machine{fixture, {{"python3", "3.14.5"}, {"python3.13", "3.13.13"}}};
+    const apogee::training::PythonChoice prepare =
+        choose_base_python("", kAppleSets, std::vector{RequirementSet::Prepare}, fixture.runner());
+    CHECK(prepare.path.filename() == "python3");
+    // The voice set and, since 53m, mlx-audio's -- both bounded by misaki.
+    CHECK(prepare.reason.find("so the 'voice' and 'mlx-audio' sets cannot go in this "
+                              "environment") != std::string::npos);
+
+    const apogee::training::PythonChoice voice =
+        choose_base_python("", kAppleSets, std::vector{RequirementSet::Voice}, fixture.runner());
+    CHECK(voice.path.empty());
+    CHECK(voice.error ==
+          "no Python here runs the 'voice' set (>=3.10,<3.13): found python3 "
+          "(3.14.5), python3.13 (3.13.13) -- install one, such as 'brew install "
+          "python@3.12', and name it with --python or training.python");
+    // Nothing was created or installed: version questions only.
+    for (const apogee::platform::ChildCommand& command : fixture.commands) {
+        CHECK(command.arguments.at(0) == "-c");
+    }
+}
+
+TEST_CASE("mlx-video is a set from one reviewed GitHub commit, with the torch its converter needs",
+          "[training][python][mlx_video]") {
+    // 53k, the user's call (2026-10-21): mlx-video is on no index, so pip
+    // builds it from its repository at one commit, read and dated, with the
+    // torch its Wan converter loads the .pth checkpoints through.
+    REQUIRE(requirement_set_from_string("mlx-video") == RequirementSet::MlxVideo);
+    CHECK(to_string(RequirementSet::MlxVideo) == "mlx-video");
+    const auto packages = packages_for(RequirementSet::MlxVideo);
+    REQUIRE(packages.size() == 2);
+    CHECK(packages[0] ==
+          "mlx-video @ git+https://github.com/Blaizzy/mlx-video.git@"
+          "87db56a51758fefb748a359b90a5283bb8ba4837");
+    CHECK(packages[1] == "torch>=2.6");
+    // The pin is carried with its facts, and the requirement is built from
+    // them: a bump moves both or this fails.
+    const std::optional<apogee::training::PinnedSource> source =
+        apogee::training::pinned_source(RequirementSet::MlxVideo);
+    REQUIRE(source.has_value());
+    CHECK(source->package == "mlx-video");
+    CHECK(source->repository == "https://github.com/Blaizzy/mlx-video");
+    CHECK(source->commit.size() == 40);
+    CHECK(source->committed == "2026-05-13");
+    CHECK(source->reviewed == "2026-10-21");
+    CHECK(source->requirement() == packages[0]);
+    CHECK(source->describe() ==
+          "mlx-video is not on PyPI: pip builds it with git from "
+          "https://github.com/Blaizzy/mlx-video at commit 87db56a51758 (2026-05-13), the one this "
+          "Apogee reviewed on 2026-10-21");
+    // Every other set is PyPI's alone, floors and all.
+    for (const std::string_view name : requirement_set_names()) {
+        const RequirementSet set = *requirement_set_from_string(name);
+        CHECK(apogee::training::pinned_source(set).has_value() ==
+              (set == RequirementSet::MlxVideo));
+        CHECK(apogee::training::set_opt_in(set) ==
+              (set == RequirementSet::MlxVideo || set == RequirementSet::MlxAudio));
+    }
+    // Its Python, per its pyproject and README at the commit; Apple silicon's.
+    CHECK(python_range(RequirementSet::MlxVideo).describe() == ">=3.11");
+    CHECK(apogee::training::set_unfit_reason(RequirementSet::MlxVideo, true, false).empty());
+    CHECK(apogee::training::set_unfit_reason(RequirementSet::MlxVideo, false, true) ==
+          "for Apple silicon, which this host is not");
+}
+
+TEST_CASE("mlx-audio is an opt-in set: its floor, the torch and misaki Kokoro needs, its range",
+          "[training][python][mlx_audio]") {
+    // 53m: on PyPI, so floors -- mlx-audio's the first release whose convert
+    // takes every precision and whose Kokoro loads a voice by its pack's
+    // path, read on a recorded date -- with the torch Kokoro's checkpoint is
+    // read through and the misaki it speaks through.
+    REQUIRE(requirement_set_from_string("mlx-audio") == RequirementSet::MlxAudio);
+    CHECK(to_string(RequirementSet::MlxAudio) == "mlx-audio");
+    const auto packages = packages_for(RequirementSet::MlxAudio);
+    REQUIRE(packages.size() == 3);
+    CHECK(packages[0] == "mlx-audio>=0.4.0");
+    CHECK(packages[1] == "misaki[en]>=0.9.4");
+    CHECK(packages[2] == "torch>=2.6");
+    CHECK(apogee::training::mlx_audio_floor_reviewed() == "2026-10-22");
+    CHECK_FALSE(apogee::training::pinned_source(RequirementSet::MlxAudio).has_value());
+    // Installed on the person's word alone, as mlx-video is.
+    CHECK(apogee::training::set_opt_in(RequirementSet::MlxAudio));
+    // Bounded by misaki as the voice set is; Apple silicon's.
+    CHECK(python_range(RequirementSet::MlxAudio).describe() == ">=3.10,<3.13");
+    CHECK(python_range(RequirementSet::MlxAudio).describe() ==
+          python_range(RequirementSet::Voice).describe());
+    CHECK(apogee::training::set_unfit_reason(RequirementSet::MlxAudio, true, false).empty());
+    CHECK(apogee::training::set_unfit_reason(RequirementSet::MlxAudio, false, true) ==
+          "for Apple silicon, which this host is not");
+}
+
+TEST_CASE("installing mlx-video runs pip with the pinned commit, and needs git to fetch it",
+          "[training][python][mlx_video]") {
+    if (apogee::platform::host_target().starts_with("windows")) {
+        SKIP("the scripted git is a POSIX file on a POSIX PATH");
+    }
+    Fixture fixture;
+    PythonEnv env = fixture.env();
+    REQUIRE(env.create("/usr/bin/python3").empty());
+    SECTION("git there: pip with the commit's requirement and torch, recorded") {
+        // A PATH holding git alone, so no host's PATH decides the case.
+        const apogee::testing::TempDir bin{"python-git-" + std::to_string(std::random_device{}())};
+        std::ofstream{bin.path() / "git"} << "#!/bin/sh\n";
+        std::filesystem::permissions(bin.path() / "git", std::filesystem::perms::owner_all);
+        const apogee::testing::EnvGuard path{"PATH", bin.path().string()};
+        REQUIRE(env.install(RequirementSet::MlxVideo).empty());
+        REQUIRE(fixture.commands.size() == 2);
+        const std::vector<std::string>& arguments = fixture.commands[1].arguments;
+        REQUIRE(arguments.size() == 6);
+        CHECK(arguments[2] == "install");
+        CHECK(arguments[4] ==
+              "mlx-video @ git+https://github.com/Blaizzy/mlx-video.git@"
+              "87db56a51758fefb748a359b90a5283bb8ba4837");
+        CHECK(arguments[5] == "torch>=2.6");
+        CHECK(env.status().has(RequirementSet::MlxVideo));
+    }
+    SECTION("no git: refused before pip, saying what pip fetches it with") {
+        const apogee::testing::TempDir empty{"python-nogit-" +
+                                             std::to_string(std::random_device{}())};
+        const apogee::testing::EnvGuard path{"PATH", empty.path().string()};
+        const std::string error = env.install(RequirementSet::MlxVideo);
+        CHECK(error ==
+              "the 'mlx-video' set installs mlx-video from https://github.com/Blaizzy/mlx-video at "
+              "commit 87db56a51758, which pip fetches with git, and git is not on PATH -- install "
+              "git (on macOS, 'xcode-select --install'), then: apogee train setup --with "
+              "mlx-video");
+        CHECK(fixture.commands.size() == 1);
+        CHECK_FALSE(env.status().has(RequirementSet::MlxVideo));
+        // A PyPI set needs no git.
+        REQUIRE(env.install(RequirementSet::Prepare).empty());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// One reader of a set's installed version (M23): the distribution record
+// pip writes -- `*.dist-info/METADATA`'s `Version`, and for a package built
+// from a commit PEP 610's `direct_url.json` -- set against the floor or the
+// pin the sets' table declares. Files the test writes; nothing is run.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+using apogee::training::compare_versions;
+using apogee::training::InstalledSet;
+using apogee::training::read_installed_set;
+using apogee::training::SetStanding;
+
+/// A record pip would write under `site`: `<dir>/METADATA` with `headers`
+/// and a body that must never be read as one, and `direct_url.json` when
+/// given.
+void write_record(const std::filesystem::path& site, const std::string& dir,
+                  const std::string& headers, const std::string& direct_url = {}) {
+    const std::filesystem::path record = site / dir;
+    std::filesystem::create_directories(record);
+    std::ofstream{record / "METADATA", std::ios::binary} << "Metadata-Version: 2.1\n"
+                                                         << headers
+                                                         << "\nThe description.\nVersion: 99.0\n";
+    if (!direct_url.empty()) {
+        std::ofstream{record / "direct_url.json", std::ios::binary} << direct_url;
+    }
+}
+
+[[nodiscard]] std::string vcs_url(std::string_view commit) {
+    return R"({"url": "https://github.com/Blaizzy/mlx-video.git", "vcs_info": {"vcs": "git", )"
+           R"("commit_id": ")" +
+           std::string{commit} + R"("}})";
+}
+
+}  // namespace
+
+TEST_CASE("each set's own package and floor are read from the table's own requirement",
+          "[training][python][m23]") {
+    // The floors are declared once, in packages_for; the reader parses them.
+    const auto requirement = [](RequirementSet set) {
+        return apogee::training::set_requirement(set);
+    };
+    CHECK(requirement(RequirementSet::Mlx).package == "mlx-lm");
+    CHECK(requirement(RequirementSet::Mlx).floor == "0.21");
+    CHECK(requirement(RequirementSet::MlxVlm).package == "mlx-vlm");
+    CHECK(requirement(RequirementSet::MlxVlm).floor == "0.6.1");
+    CHECK(requirement(RequirementSet::MlxVlm).describe() == ">=0.6.1");
+    CHECK(requirement(RequirementSet::MlxEmbeddings).package == "mlx-embeddings");
+    CHECK(requirement(RequirementSet::MlxEmbeddings).floor == "0.1.0");
+    CHECK(requirement(RequirementSet::MlxAudio).package == "mlx-audio");
+    CHECK(requirement(RequirementSet::MlxAudio).floor == "0.4.0");
+    CHECK_FALSE(requirement(RequirementSet::MlxAudio).pin.has_value());
+    // mlx-video: its pin, no floor.
+    const apogee::training::SetRequirement video = requirement(RequirementSet::MlxVideo);
+    CHECK(video.package == "mlx-video");
+    CHECK(video.floor.empty());
+    REQUIRE(video.pin.has_value());
+    CHECK(video.pin->commit == "87db56a51758fefb748a359b90a5283bb8ba4837");
+    CHECK(video.describe() == "commit 87db56a51758 (2026-05-13)");
+    for (const std::string_view name : requirement_set_names()) {
+        const RequirementSet set = *requirement_set_from_string(name);
+        INFO(name);
+        CHECK_FALSE(requirement(set).package.empty());
+        // A name alone: no extra, specifier or URL.
+        CHECK(requirement(set).package.find_first_of("[>= @") == std::string::npos);
+        // Every set says what it is for, for the help built from the list.
+        CHECK_FALSE(apogee::training::set_purpose(set).empty());
+    }
+}
+
+TEST_CASE("versions order as PEP 440 orders release numbers", "[training][python][m23]") {
+    CHECK(compare_versions("0.6.1", "0.6.1") == 0);
+    CHECK(compare_versions("0.6", "0.6.0") == 0);
+    CHECK(compare_versions("0.3.9", "0.6.1") < 0);
+    CHECK(compare_versions("0.10.0", "0.9.9") > 0);  // numbers, not text
+    CHECK(compare_versions("0.32.0", "0.21") > 0);
+    CHECK(compare_versions("v1.0", "1.0") == 0);
+    // Pre-releases sort below their release, a post release above it, and a
+    // development release below its pre-release.
+    CHECK(compare_versions("0.6.1rc1", "0.6.1") < 0);
+    CHECK(compare_versions("0.6.1a2", "0.6.1b1") < 0);
+    CHECK(compare_versions("0.6.1b1", "0.6.1rc1") < 0);
+    CHECK(compare_versions("0.6.1.post1", "0.6.1") > 0);
+    CHECK(compare_versions("0.6.1-1", "0.6.1") > 0);
+    CHECK(compare_versions("0.6.1.dev3", "0.6.1a1") < 0);
+    CHECK(compare_versions("0.6.1rc1.dev2", "0.6.1rc1") < 0);
+    CHECK(compare_versions("0.6.1", "0.6.0.post9") > 0);
+    // A local part never orders; an epoch always does.
+    CHECK(compare_versions("2.6.0+cu121", "2.6.0") == 0);
+    CHECK(compare_versions("1!0.1", "2.0") > 0);
+    // What is no release number is compared with nothing.
+    CHECK_FALSE(compare_versions("0.0-stub", "0.21").has_value());
+    CHECK_FALSE(compare_versions("", "0.21").has_value());
+    CHECK_FALSE(compare_versions("main", "0.21").has_value());
+    CHECK_FALSE(compare_versions("0.6.1", "x").has_value());
+}
+
+TEST_CASE(
+    "a set's installed version is read from its record: current, below its floor, unstated, or "
+    "no record at all",
+    "[training][python][m23]") {
+    Fixture fixture;
+    const std::filesystem::path venv = fixture.root.path() / "venv";
+    const std::filesystem::path site = venv / "lib" / "python3.12" / "site-packages";
+    std::filesystem::create_directories(site);
+
+    // No record: nothing said, and nothing compared.
+    InstalledSet vlm = read_installed_set(venv, RequirementSet::MlxVlm);
+    CHECK(vlm.standing == SetStanding::NoRecord);
+    CHECK(vlm.record.empty());
+    CHECK(vlm.version.empty());
+    CHECK_FALSE(vlm.behind());
+    // A package's own files are no record: the version is the record's.
+    std::filesystem::create_directories(site / "mlx_vlm");
+    std::ofstream{site / "mlx_vlm" / "__init__.py"};
+    CHECK(read_installed_set(venv, RequirementSet::MlxVlm).standing == SetStanding::NoRecord);
+    // Nor is another distribution whose name starts the same.
+    write_record(site, "mlx_vlm_extras-1.0.dist-info", "Name: mlx-vlm-extras\nVersion: 1.0\n");
+    CHECK(read_installed_set(venv, RequirementSet::MlxVlm).standing == SetStanding::NoRecord);
+
+    // Set up before 53f: 0.3.9, below the 0.6.1 floor.
+    write_record(site, "mlx_vlm-0.3.9.dist-info", "Name: mlx-vlm\nVersion: 0.3.9\n");
+    vlm = read_installed_set(venv, RequirementSet::MlxVlm);
+    CHECK(vlm.record == site / "mlx_vlm-0.3.9.dist-info");
+    CHECK(vlm.version == "0.3.9");  // the header's, never the body's
+    CHECK(vlm.standing == SetStanding::BelowFloor);
+    CHECK(vlm.behind());
+    CHECK(vlm.commit.empty());
+    std::filesystem::remove_all(site / "mlx_vlm-0.3.9.dist-info");
+
+    // At the floor, its header's case and spacing as METADATA allows.
+    write_record(site, "mlx_vlm-0.6.1.dist-info", "Name: mlx-vlm\nversion:   0.6.1  \r\n");
+    vlm = read_installed_set(venv, RequirementSet::MlxVlm);
+    CHECK(vlm.version == "0.6.1");
+    CHECK(vlm.standing == SetStanding::Current);
+    CHECK_FALSE(vlm.behind());
+    std::filesystem::remove_all(site / "mlx_vlm-0.6.1.dist-info");
+
+    // A record whose METADATA states no version, or one that is no number.
+    write_record(site, "mlx_vlm-0.6.1.dist-info", "Name: mlx-vlm\n");
+    CHECK(read_installed_set(venv, RequirementSet::MlxVlm).standing == SetStanding::Unstated);
+    std::filesystem::remove_all(site / "mlx_vlm-0.6.1.dist-info");
+    write_record(site, "mlx_vlm-0.0.dist-info", "Name: mlx-vlm\nVersion: 0.0-vlm-stub\n");
+    vlm = read_installed_set(venv, RequirementSet::MlxVlm);
+    CHECK(vlm.standing == SetStanding::Unstated);
+    CHECK(vlm.version == "0.0-vlm-stub");
+    CHECK_FALSE(vlm.behind());
+
+    // The name is compared as PEP 503 compares names: an older pip's record
+    // keeps the project's own spelling.
+    write_record(site, "MLX_Embeddings-0.1.0.dist-info", "Name: MLX-Embeddings\nVersion: 0.1.0\n");
+    CHECK(read_installed_set(venv, RequirementSet::MlxEmbeddings).standing == SetStanding::Current);
+    // mlx-lm's floor: 0.21.
+    write_record(site, "mlx_lm-0.20.0.dist-info", "Name: mlx-lm\nVersion: 0.20.0\n");
+    CHECK(read_installed_set(venv, RequirementSet::Mlx).standing == SetStanding::BelowFloor);
+    // mlx-audio's: 0.4.0, on Windows' one site-packages too.
+    const std::filesystem::path windows = fixture.root.path() / "win" / "Lib" / "site-packages";
+    write_record(windows, "mlx_audio-0.6.1.dist-info", "Name: mlx-audio\nVersion: 0.6.1\n");
+    const InstalledSet audio =
+        read_installed_set(fixture.root.path() / "win", RequirementSet::MlxAudio);
+    CHECK(audio.standing == SetStanding::Current);
+    CHECK(audio.version == "0.6.1");
+}
+
+TEST_CASE("mlx-video's installed commit is read from PEP 610's direct_url.json and held to its pin",
+          "[training][python][mlx_video][m23]") {
+    Fixture fixture;
+    const std::filesystem::path venv = fixture.root.path() / "venv";
+    const std::filesystem::path site = venv / "lib" / "python3.12" / "site-packages";
+    const std::string record = "mlx_video-0.1.0.dist-info";
+    const std::string headers = "Name: mlx-video\nVersion: 0.1.0\n";
+    CHECK(read_installed_set(venv, RequirementSet::MlxVideo).standing == SetStanding::NoRecord);
+
+    // Built from the pinned commit: current, whatever its version says.
+    write_record(site, record, headers, vcs_url("87db56a51758fefb748a359b90a5283bb8ba4837"));
+    InstalledSet video = read_installed_set(venv, RequirementSet::MlxVideo);
+    CHECK(video.standing == SetStanding::Current);
+    CHECK(video.commit == "87db56a51758fefb748a359b90a5283bb8ba4837");
+    CHECK(video.version == "0.1.0");
+    CHECK_FALSE(video.behind());
+    std::filesystem::remove_all(site / record);
+
+    // Another commit: off its pin.
+    write_record(site, record, headers, vcs_url("0123456789abcdef0123456789abcdef01234567"));
+    video = read_installed_set(venv, RequirementSet::MlxVideo);
+    CHECK(video.standing == SetStanding::OffPin);
+    CHECK(video.commit == "0123456789abcdef0123456789abcdef01234567");
+    CHECK(video.behind());
+    std::filesystem::remove_all(site / record);
+
+    // No direct_url.json (an index's install), one for a directory, or one
+    // that does not parse: no commit named, so not the pin.
+    for (const std::string& url :
+         {std::string{}, std::string{R"({"url": "file:///src/mlx-video", "dir_info": {}})"},
+          std::string{"{not json"}}) {
+        INFO(url);
+        write_record(site, record, headers, url);
+        video = read_installed_set(venv, RequirementSet::MlxVideo);
+        CHECK(video.standing == SetStanding::OffPin);
+        CHECK(video.commit.empty());
+        std::filesystem::remove_all(site / record);
+    }
+    // A floor set never reads a commit.
+    write_record(site, "mlx_vlm-0.6.1.dist-info", "Name: mlx-vlm\nVersion: 0.6.1\n",
+                 vcs_url("0123456789abcdef0123456789abcdef01234567"));
+    CHECK(read_installed_set(venv, RequirementSet::MlxVlm).commit.empty());
 }

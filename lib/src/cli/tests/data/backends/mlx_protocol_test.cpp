@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -206,4 +207,155 @@ TEST_CASE(
                                {{"type", "text"}, {"text", "What is this?"}},
                                {{"type", "image"}, {"image", "data:image/jpeg;base64,/9j/4AAQ"}}}));
     CHECK(messages[2]["content"] == "and this");
+}
+
+TEST_CASE(
+    "a recording crosses as the WAV file the provider wrote for it, where its part sat and in "
+    "prompt order; one with no file is not sent",
+    "[backends][mlx][protocol][audio]") {
+    // 53g: the content-part shape an omni model's template places audio by.
+    // The recording's bytes never cross the pipe: the provider decoded them
+    // to a file of the turn's own, and the path is what the driver hands on.
+    GenerateRequest request;
+    request.messages.push_back(apogee::harness::ChatMessage{
+        .role = apogee::harness::Role::User,
+        .content = apogee::harness::MessageContent::from_parts(
+            {apogee::harness::ContentPart::from_audio("UklGRg==", "wav"),
+             apogee::harness::ContentPart::from_text("What is said?")})});
+    request.messages.push_back(apogee::harness::ChatMessage::assistant("Hello."));
+    request.messages.push_back(apogee::harness::ChatMessage{
+        .role = apogee::harness::Role::User,
+        .content = apogee::harness::MessageContent::from_parts(
+            {apogee::harness::ContentPart::from_text("And here?"),
+             apogee::harness::ContentPart::from_image_url("data:image/png;base64,iVBORw0KGgo="),
+             apogee::harness::ContentPart::from_audio("UklGRg==", "wav")})});
+    request.audio_files = {"/tmp/turn/audio-0.wav", "/tmp/turn/audio-1.wav"};
+    const nlohmann::json line =
+        nlohmann::json::parse(apogee::backends::mlx::generate_line(request));
+    const nlohmann::json& messages = line["messages"];
+    CHECK(messages[0]["content"] ==
+          nlohmann::json::array({{{"type", "audio"}, {"audio", "/tmp/turn/audio-0.wav"}},
+                                 {{"type", "text"}, {"text", "What is said?"}}}));
+    CHECK(messages[1]["content"] == "Hello.");
+    CHECK(
+        messages[2]["content"] ==
+        nlohmann::json::array({{{"type", "text"}, {"text", "And here?"}},
+                               {{"type", "image"}, {"image", "data:image/png;base64,iVBORw0KGgo="}},
+                               {{"type", "audio"}, {"audio", "/tmp/turn/audio-1.wav"}}}));
+    // The base64 the IR carried is nowhere on the line.
+    CHECK(line.dump().find("UklGRg") == std::string::npos);
+
+    // A part the provider wrote no file for is left out, never sent bare.
+    request.audio_files = {"/tmp/turn/audio-0.wav"};
+    const nlohmann::json short_line =
+        nlohmann::json::parse(apogee::backends::mlx::generate_line(request));
+    CHECK(short_line["messages"][2]["content"] ==
+          nlohmann::json::array(
+              {{{"type", "text"}, {"text", "And here?"}},
+               {{"type", "image"}, {"image", "data:image/png;base64,iVBORw0KGgo="}}}));
+}
+
+TEST_CASE("a ready line says whether the driver hands recordings on; one before 53g never does",
+          "[backends][mlx][protocol][audio]") {
+    const auto hearing = apogee::backends::mlx::parse_event(
+        R"({"type":"ready","protocol":1,"model_type":"gemma4","chat_template":true,)"
+        R"("tool_parser":null,"thinking":false,"mlx_lm":"0.32.0","vision":true,)"
+        R"("mlx_vlm":"0.6.1","audio":true})");
+    REQUIRE(hearing.has_value());
+    CHECK(hearing->vision);
+    CHECK(hearing->audio);
+    // 53f's driver: vision, and not a word of audio.
+    const auto older = apogee::backends::mlx::parse_event(
+        R"({"type":"ready","protocol":1,"vision":true,"mlx_vlm":"0.6.1"})");
+    REQUIRE(older.has_value());
+    CHECK(older->vision);
+    CHECK_FALSE(older->audio);
+    const auto text = apogee::backends::mlx::parse_event(
+        R"({"type":"ready","protocol":1,"vision":false,"audio":false})");
+    REQUIRE(text.has_value());
+    CHECK_FALSE(text->audio);
+}
+
+TEST_CASE("a ready line names the drafter it loaded beside the model; one before 53i never does",
+          "[backends][mlx][protocol][drafter]") {
+    const auto drafting = apogee::backends::mlx::parse_event(
+        R"({"type":"ready","protocol":1,"model_type":"gemma4","vision":true,"mlx_vlm":"0.6.1",)"
+        R"("audio":true,"draft":"/m/Gemma4-E4B-Assistant/mlx/aaaaaaaaaaaa","draft_kind":"mtp",)"
+        R"("draft_block_size":6})");
+    REQUIRE(drafting.has_value());
+    CHECK(drafting->draft == "/m/Gemma4-E4B-Assistant/mlx/aaaaaaaaaaaa");
+    CHECK(drafting->draft_kind == "mtp");
+    CHECK(drafting->draft_block_size == 6);
+    // The drafter's own block: null on the wire, 0 here.
+    const auto own = apogee::backends::mlx::parse_event(
+        R"({"type":"ready","protocol":1,"draft":"/d","draft_kind":"mtp","draft_block_size":null})");
+    REQUIRE(own.has_value());
+    CHECK(own->draft == "/d");
+    CHECK(own->draft_block_size == 0);
+    // 53h's driver: not a word of drafting.
+    const auto older = apogee::backends::mlx::parse_event(
+        R"({"type":"ready","protocol":1,"vision":true,"mlx_vlm":"0.6.1","audio":true})");
+    REQUIRE(older.has_value());
+    CHECK(older->draft.empty());
+    CHECK(older->draft_kind.empty());
+    CHECK(older->draft_block_size == 0);
+}
+
+TEST_CASE("an embed request is its texts in one line, any bytes said as text",
+          "[backends][mlx][protocol][embedding]") {
+    // 53h: the embedding driver's request, pinned byte for byte. A file's
+    // bytes need not be UTF-8: a Latin-1 é crosses as U+FFFD rather than
+    // ending the batch at the dump.
+    CHECK(apogee::backends::mlx::embed_line({.id = 3, .texts = {"alpha", "beta"}}) ==
+          R"({"id":3,"texts":["alpha","beta"],"type":"embed"})");
+    CHECK(apogee::backends::mlx::embed_line({.id = 4, .texts = {}}) ==
+          R"({"id":4,"texts":[],"type":"embed"})");
+    CHECK(apogee::backends::mlx::embed_line({.id = 5, .texts = {"caf\xe9"}}) ==
+          "{\"id\":5,\"texts\":[\"caf\xef\xbf\xbd\"],\"type\":\"embed\"}");
+}
+
+TEST_CASE("an embedding driver's lines parse: its ready, its vectors, and a malformed answer said",
+          "[backends][mlx][protocol][embedding]") {
+    const std::optional<Event> ready = apogee::backends::mlx::parse_event(
+        R"({"type":"ready","protocol":1,"embedding":true,"model_type":"gemma3_text",)"
+        R"("mlx_embeddings":"0.1.0","max_length":2048})");
+    REQUIRE(ready.has_value());
+    CHECK(ready->kind == Event::Kind::Ready);
+    CHECK(ready->embedding);
+    CHECK(ready->mlx_embeddings_version == "0.1.0");
+    CHECK(ready->model_type == "gemma3_text");
+    // The generation driver's ready never says it.
+    const std::optional<Event> chat = apogee::backends::mlx::parse_event(
+        R"({"type":"ready","protocol":1,"model_type":"llama","mlx_lm":"0.32.0"})");
+    REQUIRE(chat.has_value());
+    CHECK_FALSE(chat->embedding);
+
+    const std::optional<Event> vectors = apogee::backends::mlx::parse_event(
+        R"({"type":"vectors","id":7,"vectors":[[0.5,-1,2e-3],[0,0,1]]})");
+    REQUIRE(vectors.has_value());
+    CHECK(vectors->kind == Event::Kind::Vectors);
+    CHECK(vectors->id == 7);
+    CHECK(vectors->vectors ==
+          std::vector<std::vector<float>>{{0.5F, -1.0F, 2e-3F}, {0.0F, 0.0F, 1.0F}});
+    CHECK(apogee::backends::mlx::describe(*vectors) == "#7 vectors 2x3");
+    const std::optional<Event> none =
+        apogee::backends::mlx::parse_event(R"({"type":"vectors","id":8,"vectors":[]})");
+    REQUIRE(none.has_value());
+    CHECK(none->kind == Event::Kind::Vectors);
+    CHECK(none->vectors.empty());
+
+    // Anything not a list of number lists is a protocol error for its id,
+    // never fewer vectors and never a dropped line a provider would wait on.
+    for (const char* line :
+         {R"({"type":"vectors","id":9})", R"({"type":"vectors","id":9,"vectors":[[1,"2"]]})",
+          R"({"type":"vectors","id":9,"vectors":[1,2]})",
+          R"({"type":"vectors","id":9,"vectors":{"0":[1]}})"}) {
+        INFO(line);
+        const std::optional<Event> bad = apogee::backends::mlx::parse_event(line);
+        REQUIRE(bad.has_value());
+        CHECK(bad->kind == Event::Kind::Error);
+        CHECK(bad->error_kind == "protocol");
+        CHECK(bad->id == 9);
+        CHECK(bad->vectors.empty());
+    }
 }

@@ -1,0 +1,51 @@
+{
+  "assembly": null,
+  "brief": "the tides, twice a day",
+  "captions": null,
+  "created": "2026-10-26T04:34:12Z",
+  "edits": [],
+  "error": null,
+  "object": "video.project",
+  "output": "/Users/someone/Movies/Apogee/tides.mp4",
+  "parent": null,
+  "plan": {
+    "attempts": 1,
+    "backend": "planner"
+  },
+  "platform": "macos-arm64",
+  "scenes": [
+    {
+      "asset": null,
+      "clip": null,
+      "index": 1,
+      "narration": "The sea breathes.",
+      "seconds": 3.0,
+      "seed": 2003882887,
+      "visual": "a shore at dawn",
+      "voice": null
+    },
+    {
+      "asset": null,
+      "clip": null,
+      "index": 2,
+      "narration": "Twice a day.",
+      "seconds": 3.0,
+      "seed": 685754606,
+      "visual": "the moon over water",
+      "voice": null
+    }
+  ],
+  "scenes_dir": "/Users/someone/Movies/Apogee/tides.scenes",
+  "settings": {
+    "assets": null,
+    "captions": true,
+    "crossfade": 0.5,
+    "model": "org--clip/pipeline/aaaaaaaaaaaa",
+    "music": null,
+    "voice": "af_heart",
+    "voice_model": "hexgrad--Kokoro-82M/voice/cccccccccccc"
+  },
+  "status": "planned",
+  "title": "Tides",
+  "version": 1
+}

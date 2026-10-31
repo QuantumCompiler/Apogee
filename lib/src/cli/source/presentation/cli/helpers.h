@@ -182,6 +182,19 @@ inline constexpr std::size_t kFetchMaxBodyBytes = std::size_t{5} * 1024 * 1024;
 /// `config add-suite` when it has none.
 [[nodiscard]] std::string known_suites(const harness::Config& config);
 
+/// Why the backend a run names with `-m` cannot answer it, or empty when it
+/// can or none was named (M29) -- asked by `complete`, `chat` and `execute`
+/// before anything is routed. `name` is as the router will be asked it: a
+/// backend key or an entry's `model:` (`configured_backend_key`). A name the
+/// config defines nowhere is refused by name, with the ones it does; one it
+/// defines that did not start, with that backend's own reason in the router's
+/// words (M26) and the backends that did start -- never every backend's
+/// problem. Asked first because the router answers an explicit name it cannot
+/// serve from the default: the wrong model, under the name asked for.
+[[nodiscard]] std::string named_backend_refusal(const harness::Config& config,
+                                                const backends::BuildResult& built,
+                                                std::string_view name);
+
 /// `registry` narrowed to the tools of `toolset` -- words of
 /// `harness::suite_toolset_names()` (27d). An empty list keeps none.
 [[nodiscard]] agent::ToolRegistry apply_toolset(const agent::ToolRegistry& registry,

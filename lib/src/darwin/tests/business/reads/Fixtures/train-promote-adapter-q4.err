@@ -1,0 +1,9 @@
+[promote] run 20261026-065638 -> q4 v1 (adapter)
+[promote] no fuse: the adapter is the version, applied over the entry's base when it loads
+[promote]   trained on: /Users/someone/.apogee/models/tiny/safetensors/aaaaaaaaaaaa
+[promote]   adapter:    /Users/someone/.apogee/training/runs/20261026-065638/adapters
+[promote] converting the adapter to a GGUF LoRA (F16): /Users/someone/.apogee/training/versions/q4/v1.lora.gguf
+[promote] mock converter: writing a minimal GGUF LoRA
+[promote] pinning the adapter to the base it applies over: /Users/someone/.apogee/models/tiny/gguf/cccccccccccc/tiny-Q4_K_M.gguf
+[promote] scoring the candidate where it will serve: tiny-Q4_K_M.gguf (Q4_K_M), the base 'q4' serves -- suite /Users/someone/suite.jsonl (2 item(s)); no judge: unmatched items skip
+[promote] scored on tiny-Q4_K_M.gguf (Q4_K_M): 100% (2/2)

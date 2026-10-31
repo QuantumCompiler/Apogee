@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -7,6 +9,7 @@
 #include <vector>
 
 #include "contracts/config.h"
+#include "platform/file_lock.h"
 
 /// The config engine's write path: line-oriented text surgery.
 ///
@@ -36,9 +39,12 @@
 /// at all, and it is what makes the two guarantees below implementable:
 ///
 ///   * every edit is validated by RE-PARSING its own output before it lands;
-///   * a failed edit leaves the file untouched (write-temp-then-rename).
+///   * a failed edit leaves the file untouched (write-temp-then-rename);
+///   * two edits at once take turns under a lock beside the file, so neither
+///     writes over the other's change (55f).
 ///
-/// Both live in edit_config_file(), which is the only thing here that writes.
+/// All three live in edit_config_file(), which is the only thing here that
+/// writes.
 namespace apogee::harness {
 
 /// Raised when an edit cannot be applied: entry missing, name collision,
@@ -173,6 +179,8 @@ public:
 /// A backend entry's fields `config set-backend` edits (46b): every field the
 /// entry's schema reads, but its key and its `api_key` -- a key is stored
 /// with `auth add` alone. One flag each, held to `add-backend`'s by a test.
+/// Since 55g it is `backend_entry_keys()` but `api_key`, the one declaration
+/// the loader, `config get` and its completion read too.
 [[nodiscard]] std::vector<std::string_view> backend_editable_fields();
 
 /// Sets `backends.<name>.<field>` to `value` in place (46b): the value token
@@ -184,6 +192,25 @@ public:
 /// not in the config.
 [[nodiscard]] std::string set_backend_field(std::string_view content, std::string_view name,
                                             std::string_view field, std::string_view value);
+
+/// Sets `backends.<name>.adapters` to `adapters` in place (53a): the whole
+/// value replaced where it stands -- a flow list on its line, or a block
+/// list's lines under it -- as one flow list, `{path, scale, base_sha256}`
+/// each (the pin left out where an adapter has none), a comment after the key
+/// kept; written after `model_path:` (else `type:`) when the entry has none.
+/// An empty list removes the field and every line of its value. What
+/// `set_backend_field`'s `adapters` and `config set-backend --adapters` both
+/// write through. Throws ConfigEditError for a backend not in the config.
+[[nodiscard]] std::string set_backend_adapters(std::string_view content, std::string_view name,
+                                               const std::vector<AdapterConfig>& adapters);
+
+/// `text` -- what `config set-backend --adapters` takes -- as the adapters it
+/// names (53a): comma-separated `<path>[:<scale>]`, a scale only the number
+/// after the last colon (so `C:\lora.gguf` stays a path) and 1 when none is
+/// given. Paths as written and no pins: the caller that can read the base
+/// resolves them and records each pin. Throws ConfigEditError naming an empty
+/// item or a scale outside (0, 2].
+[[nodiscard]] std::vector<AdapterConfig> parse_adapter_list(std::string_view text);
 
 /// Field names accepted by set_models_role.
 [[nodiscard]] std::vector<std::string_view> models_role_fields();
@@ -343,6 +370,40 @@ public:
 /// is the other way the block is set.
 [[nodiscard]] std::string set_attachments_graph(std::string_view content, std::string_view method);
 
+/// What a key `config set` moves takes (52e).
+enum class ScalarKind : std::uint8_t { Boolean, Word, Text, Integer };
+
+/// One key `config set` moves: its dotted name, what it takes -- a word
+/// key's words joined by `|`, an integer key's range -- and what it is.
+struct SettableScalar {
+    std::string_view key;
+    ScalarKind kind;
+    std::string_view words{};
+    std::int64_t min = 0;
+    std::int64_t max = 0;
+    std::string_view about{};
+};
+
+/// Every key `config set` moves, in the order it lists them (52e): the
+/// plain scalars with no typed verb of their own. The declared table every
+/// refusal quotes; a key not in it is never written by `set_scalar`.
+[[nodiscard]] std::vector<SettableScalar> settable_scalars();
+
+/// Why `config set` will not move `key`, naming the right door: `auth add`
+/// for anything secret-shaped, the typed verb where one owns the key, else
+/// the table's keys. Empty for a key the table holds.
+[[nodiscard]] std::string scalar_refusal(std::string_view key);
+
+/// Sets the allow-listed scalar `key` to `value` (52e): the line replaced in
+/// place keeping its comment, else inserted into its section (and block),
+/// else the section appended -- written as its kind reads it, a boolean or a
+/// number bare, a word or text quoted when it must be. The one path `config
+/// set` and its admin twin share. Throws ConfigEditError, the file untouched,
+/// for a key outside the table (`scalar_refusal`) or a value the key does
+/// not take, naming what it takes.
+[[nodiscard]] std::string set_scalar(std::string_view content, std::string_view key,
+                                     std::string_view value);
+
 /// Sets `permissions.<tool>` to `level` (`ask`, `allow`, or `deny`),
 /// replacing the existing line (keeping any trailing comment) or inserting
 /// one, creating `permissions:` if needed. The one path by which the
@@ -398,8 +459,24 @@ public:
 void write_file_atomically(const std::filesystem::path& path, std::string_view content,
                            bool private_mode = false);
 
+/// How long a config edit waits for another to finish before it fails (55f).
+/// An edit holds the lock for milliseconds; this is the bound past which one
+/// is stuck, not busy.
+inline constexpr std::chrono::milliseconds kConfigLockWait{10000};
+
+/// The lock a config edit holds across its whole read, transform and rename
+/// (55f): an advisory lock (`platform/file_lock.h`) on `<config>.lock` beside
+/// `path` -- `config.json.lock` -- created on the first edit and left there.
+/// Two editors -- two processes, or two threads of `serve` -- take turns, so
+/// neither writes over what the other just wrote. Waits up to `wait` for
+/// another edit to finish; throws ConfigEditError when it does not, or when
+/// the lock cannot be made -- said, and nothing written.
+[[nodiscard]] platform::FileLock lock_config_file(const std::filesystem::path& path,
+                                                  std::chrono::milliseconds wait = kConfigLockWait);
+
 /// Reads `path`, applies `transform`, re-parses the result, and writes it
-/// atomically.
+/// atomically, holding the config's lock (`lock_config_file`) from the read
+/// to the rename.
 ///
 /// The re-parse is the safety net that makes text surgery acceptable: if a
 /// transform ever produces something the loader cannot read, the edit is
@@ -408,8 +485,14 @@ void write_file_atomically(const std::filesystem::path& path, std::string_view c
 ///
 /// The file is also parsed BEFORE the transform, so "your config is already
 /// broken" and "this edit would break it" are different messages.
+///
+/// The lock is what makes two edits at once both land (55f): without it, each
+/// read the file before the other wrote, and the second rename dropped the
+/// first's change. `lock_wait` bounds the wait for another edit to finish.
 template <typename Transform>
-void edit_config_file(const std::filesystem::path& path, Transform&& transform) {
+void edit_config_file(const std::filesystem::path& path, Transform&& transform,
+                      std::chrono::milliseconds lock_wait = kConfigLockWait) {
+    const platform::FileLock lock = lock_config_file(path, lock_wait);
     const std::string original = read_config_file(path);
     (void)parse_config(original, path.string());
 

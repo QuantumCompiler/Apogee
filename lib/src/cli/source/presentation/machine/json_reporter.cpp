@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <istream>
 #include <stdexcept>
@@ -71,7 +72,9 @@ const std::string& JsonReporter::turn_text() const noexcept {
 }
 
 void JsonReporter::begin_session(std::string_view model, const MachineCapabilities& capabilities,
-                                 std::optional<std::int64_t> next_turn) {
+                                 std::optional<std::int64_t> next_turn, bool private_chat,
+                                 std::string_view chat_id, std::string_view suite,
+                                 std::optional<bool> orchestrating) {
     nlohmann::json object = event("session");
     object["protocol_version"] = kMachineProtocolVersion;
     object["model"] = std::string{model};
@@ -90,6 +93,24 @@ void JsonReporter::begin_session(std::string_view model, const MachineCapabiliti
     object["capabilities"] = std::move(announced);
     if (next_turn.has_value()) {
         object["next_turn"] = *next_turn;
+    }
+    if (private_chat) {
+        // `chat --private` (52d): nothing of this session is ever written.
+        object["private"] = true;
+    } else if (!chat_id.empty()) {
+        // The chat this session writes (M28), so a driver never guesses it
+        // from what `chats list` shows next: a private one writes none.
+        object["chat_id"] = std::string{chat_id};
+    }
+    if (!suite.empty()) {
+        // The suite the session runs under (M29), as the chat saves it --
+        // never left for a driver to read off stderr's admission line.
+        object["suite"] = std::string{suite};
+    }
+    if (orchestrating.has_value()) {
+        // An execute session's: whether its root may play the symphonies on
+        // its own (27t).
+        object["orchestrating"] = *orchestrating;
     }
     write(object);
 }
@@ -125,13 +146,31 @@ void JsonReporter::on_side_call(const agentloop::SideCall& call) {
     write(object);
 }
 
-void JsonReporter::on_recall(int chats, int decisions) {
-    if (chats <= 0 && decisions <= 0) {
+void JsonReporter::on_recall(const std::vector<agentloop::RecalledChat>& chats, int decisions) {
+    if (chats.empty() && decisions <= 0) {
         return;
     }
     nlohmann::json object = event("memory");
-    object["chats"] = chats;
+    object["chats"] = static_cast<int>(chats.size());
     object["decisions"] = decisions;
+    if (!chats.empty()) {
+        // Which chats (52a): what the model was handed, so a host can link
+        // each to its saved session.
+        nlohmann::json sessions = nlohmann::json::array();
+        for (const agentloop::RecalledChat& chat : chats) {
+            sessions.push_back({{"id", chat.id}, {"name", chat.name}, {"updated", chat.updated}});
+        }
+        object["sessions"] = std::move(sessions);
+    }
+    write(object);
+}
+
+void JsonReporter::on_sources(const std::vector<harness::ExcerptSource>& sources) {
+    if (sources.empty()) {
+        return;
+    }
+    nlohmann::json object = event("sources");
+    object["sources"] = sources;
     write(object);
 }
 
@@ -267,6 +306,146 @@ void JsonReporter::emit_error(std::string_view message) {
     write(object);
 }
 
+void JsonReporter::begin_job(std::string_view verb) {
+    nlohmann::json object = event("job");
+    object["verb"] = std::string{verb};
+    object["protocol_version"] = kMachineProtocolVersion;
+    object["schema"] = std::string{kMachineSchemaVersion};
+    write(object);
+}
+
+void JsonReporter::emit_stage(std::size_t index, std::size_t count, std::string_view label,
+                              std::string_view state, std::string_view pipeline_run_id,
+                              std::string_view run_id, std::optional<double> cumulative_score) {
+    nlohmann::json object = event("stage");
+    object["index"] = index;
+    object["count"] = count;
+    object["label"] = std::string{label};
+    object["state"] = std::string{state};
+    if (!pipeline_run_id.empty()) {
+        object["pipeline_run_id"] = std::string{pipeline_run_id};
+    }
+    if (!run_id.empty()) {
+        object["run_id"] = std::string{run_id};
+    }
+    if (cumulative_score.has_value()) {
+        object["cumulative_score"] = *cumulative_score;
+    }
+    write(object);
+}
+
+void JsonReporter::emit_bytes(std::int64_t done, std::int64_t total, std::string_view file,
+                              std::size_t index, std::size_t count) {
+    nlohmann::json object = event("bytes");
+    object["done"] = done;
+    if (total > 0) {
+        object["total"] = total;
+    }
+    if (!file.empty()) {
+        object["file"] = std::string{file};
+        object["index"] = index;
+        object["count"] = count;
+    }
+    write(object);
+}
+
+namespace {
+
+void with_scene(nlohmann::json& object, std::size_t scene) {
+    if (scene > 0) {
+        object["scene"] = scene;
+    }
+}
+
+}  // namespace
+
+void JsonReporter::emit_ready(std::string_view device, std::string_view dtype,
+                              std::string_view mode, std::size_t scene, std::string_view engine) {
+    nlohmann::json object = event("ready");
+    object["device"] = std::string{device};
+    if (!dtype.empty()) {
+        object["dtype"] = std::string{dtype};
+    }
+    if (!mode.empty()) {
+        object["mode"] = std::string{mode};
+    }
+    if (!engine.empty()) {
+        object["engine"] = std::string{engine};
+    }
+    with_scene(object, scene);
+    write(object);
+}
+
+void JsonReporter::emit_step(int step, int steps, std::size_t scene) {
+    nlohmann::json object = event("step");
+    object["step"] = step;
+    object["steps"] = steps;
+    with_scene(object, scene);
+    write(object);
+}
+
+void JsonReporter::emit_frames(int frames, int width, int height, std::size_t scene) {
+    nlohmann::json object = event("frames");
+    object["frames"] = frames;
+    object["width"] = width;
+    object["height"] = height;
+    with_scene(object, scene);
+    write(object);
+}
+
+void JsonReporter::emit_assembling(int frames, std::size_t scene) {
+    nlohmann::json object = event("assembling");
+    object["frames"] = frames;
+    with_scene(object, scene);
+    write(object);
+}
+
+void JsonReporter::emit_segment(int index, int of, double seconds, std::size_t scene) {
+    nlohmann::json object = event("segment");
+    object["index"] = index;
+    object["of"] = of;
+    object["seconds"] = seconds;
+    with_scene(object, scene);
+    write(object);
+}
+
+void JsonReporter::emit_scene(std::size_t scene, std::size_t scenes, std::string_view state) {
+    nlohmann::json object = event("scene");
+    object["scene"] = scene;
+    object["scenes"] = scenes;
+    object["state"] = std::string{state};
+    write(object);
+}
+
+void JsonReporter::emit_iteration(int iteration, int iterations, double loss, double lr,
+                                  double throughput, std::size_t stage) {
+    nlohmann::json object = event("iteration");
+    object["iteration"] = iteration;
+    if (iterations > 0) {
+        object["iterations"] = iterations;
+    }
+    object["loss"] = loss;
+    object["lr"] = lr;
+    object["throughput"] = throughput;
+    if (stage > 0) {
+        object["stage"] = stage;
+    }
+    write(object);
+}
+
+void JsonReporter::emit_pass(std::string_view state, std::string_view text) {
+    nlohmann::json object = event("pass");
+    object["state"] = std::string{state};
+    object["text"] = std::string{text};
+    write(object);
+}
+
+void JsonReporter::emit_document(const nlohmann::json& document) {
+    nlohmann::json object = event("document");
+    object["document"] = document;
+    write(object);
+}
+
 void JsonReporter::emit_task_transition(const tasks::Task& task, std::size_t index,
                                         const std::optional<tasks::LockHolder>& holder) {
     if (index >= task.transitions.size()) {
@@ -365,6 +544,39 @@ std::vector<std::string_view> format_names() {
     return {to_string(OutputFormat::Text), to_string(OutputFormat::StreamJson)};
 }
 
+std::string_view to_string(JobFormat format) noexcept {
+    switch (format) {
+        case JobFormat::Json:
+            return "json";
+        case JobFormat::StreamJson:
+            return "stream-json";
+        case JobFormat::Text:
+            break;
+    }
+    return "text";
+}
+
+std::optional<JobFormat> job_format_from_string(std::string_view name) noexcept {
+    if (name == "text" || name.empty()) {
+        return JobFormat::Text;
+    }
+    if (name == "json") {
+        return JobFormat::Json;
+    }
+    if (name == "stream-json") {
+        return JobFormat::StreamJson;
+    }
+    return std::nullopt;
+}
+
+std::vector<std::string_view> job_format_names(bool document) {
+    if (!document) {
+        return {to_string(JobFormat::Text), to_string(JobFormat::StreamJson)};
+    }
+    return {to_string(JobFormat::Text), to_string(JobFormat::Json),
+            to_string(JobFormat::StreamJson)};
+}
+
 std::string_view to_string(ReadFormat format) noexcept {
     return format == ReadFormat::Json ? "json" : "text";
 }
@@ -435,6 +647,39 @@ DriverMessage parse_driver_line(std::string_view line) {
             message.wants = wants->dump();
         }
         return message;
+    } else if (type == "detach") {
+        // An attachment's name, as `/detach` takes it (52d).
+        message.kind = DriverMessage::Kind::Detach;
+        message.text = root.value("path", std::string{});
+        return message;
+    } else if (type == "set") {
+        // The run settings, applied in the slash commands' order (52d); a
+        // key that is none, or a value that is no text, is refused by name.
+        message.kind = DriverMessage::Kind::Set;
+        for (const std::string_view key : settable_keys()) {
+            const auto found = root.find(std::string{key});
+            if (found == root.end()) {
+                continue;
+            }
+            if (found->is_string()) {
+                message.settings.emplace_back(key, found->get<std::string>());
+            } else if (found->is_number()) {
+                message.settings.emplace_back(key, found->dump());
+            } else {
+                message.refused.emplace_back(key);
+            }
+        }
+        const std::vector<std::string_view> settable = settable_keys();
+        for (const auto& [key, value] : root.items()) {
+            if (key != "type" &&
+                std::ranges::find(settable, std::string_view{key}) == settable.end()) {
+                message.refused.push_back(key);
+            }
+        }
+        return message;
+    } else if (type == "compact") {
+        message.kind = DriverMessage::Kind::Compact;
+        return message;
     } else if (type == "attach") {
         // A file, folder or glob to attach, as `/attach` takes one (26d),
         // and its method, as `/attach`'s `--graph` (27p).
@@ -450,6 +695,10 @@ DriverMessage parse_driver_line(std::string_view line) {
 
     message.text = root.value("text", std::string{});
     return message;
+}
+
+std::vector<std::string_view> settable_keys() {
+    return {"model", "system", "think", "effort", "temperature"};
 }
 
 std::string describe_hello(const DriverMessage& hello) {

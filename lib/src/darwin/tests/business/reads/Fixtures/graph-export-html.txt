@@ -1,0 +1,2 @@
+Exported graph "demo" to /Users/someone/Documents/demo.html: 9 entities and 12 relations drawn, 41 KB.
+Showing all 9 entities; the 1 unresolved name is left out.

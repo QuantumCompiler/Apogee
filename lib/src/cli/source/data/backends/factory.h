@@ -69,7 +69,9 @@ struct BuildOptions {
 /// Anthropic entry whose key is unset and a working local entry must still let
 /// the local one run — otherwise one unconfigured backend takes down every
 /// other. The reason is recorded per entry so a caller can explain the gap
-/// when the model the user actually asked for is the one that was skipped.
+/// when the model the user actually asked for is the one that was skipped --
+/// and handed to the registry with the entry (`note_skipped`, M26), so the
+/// router's own refusal explains it, on every surface, without the caller.
 [[nodiscard]] BuildResult build_providers(harness::ProviderRegistry& harness,
                                           const BuildOptions& options = {});
 
@@ -77,12 +79,16 @@ struct BuildOptions {
 /// over the one before, then reinstalls the default router -- for a backend a
 /// suite switch re-pinned (27d), which must be rebuilt to run at its new
 /// window. A backend that cannot be built keeps the provider it had, and its
-/// reason is in the result.
+/// reason is in the result and handed to the registry, which keeps it only
+/// for a backend that has no provider.
 [[nodiscard]] BuildResult rebuild_providers(harness::ProviderRegistry& harness,
                                             const std::vector<std::string>& names,
                                             const BuildOptions& options = {});
 
 /// Constructs one provider from a single entry, or nullptr with `reason` set.
+/// Every llamacpp provider built here shares its base through one registry
+/// (`backends/llama_bases.h`, 53d): entries on the same base serve from one
+/// loaded model, each through its own adapters.
 ///
 /// Adding a backend type is a case here plus a row in `kBackendTypeNames`
 /// (`harness/config.cpp`). Nothing else changes.

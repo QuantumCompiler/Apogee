@@ -1,0 +1,1 @@
+removed backend 'Gemma4-12B-4bit' from /Users/someone/.apogee/config/config.json

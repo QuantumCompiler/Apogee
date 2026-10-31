@@ -180,6 +180,179 @@ TEST_CASE("with no backends at all the error names the fix", "[harness][router]"
     }
 }
 
+// ---------------------------------------------------------------------------
+// A backend that could not start says why (M26)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// The user's run, 2026-10-22: a claude-cli default the process could not
+/// start, beside a local backend that did -- with the factory's reason as it
+/// records it, the entry's name first.
+constexpr std::string_view kUsersConfig = R"(
+models:
+  default: claude
+backends:
+  claude:
+    type: claude-cli
+    model: opus
+  Local-Mock:
+    type: mock
+)";
+constexpr std::string_view kNotOnPath =
+    "'claude' was not found on PATH. Install the Claude CLI and log in, or set 'binary' on "
+    "this backend to its full path";
+
+/// A harness over `yaml` with `started` registered and `skipped` noted as the
+/// factory notes them, then its router installed.
+Harness with_skips(std::string_view yaml, const std::vector<std::string>& started,
+                   const std::vector<std::string>& skipped) {
+    Harness harness{config_from(yaml)};
+    for (const std::string& name : started) {
+        harness.register_provider(name, mock(name, name + "-model"));
+    }
+    for (const std::string& name : skipped) {
+        harness.note_skipped(name, name + ": " + std::string{kNotOnPath});
+    }
+    harness.use_default_router();
+    return harness;
+}
+
+/// The refusal `route(model)` raises.
+NoAvailableBackendError refusal(const Harness& harness, std::string_view model) {
+    try {
+        (void)harness.route(model);
+    } catch (const NoAvailableBackendError& e) {
+        return e;
+    }
+    FAIL("expected NoAvailableBackendError for '" << model << "'");
+    return NoAvailableBackendError{"", ""};
+}
+
+}  // namespace
+
+TEST_CASE("the default that could not start is refused as configured, with the factory's reason",
+          "[harness][router][skipped]") {
+    // The user's message was "no backend serves 'claude' (configured
+    // backends: Local-Mock)": a list that claimed to be the config, and no
+    // word of why. Asked for by name or by default, it says both now.
+    const Harness harness = with_skips(kUsersConfig, {"Local-Mock"}, {"claude"});
+    const std::string expected =
+        "the default backend 'claude' is configured but could not be "
+        "started: " +
+        std::string{kNotOnPath} + " (started backends: Local-Mock)";
+    for (const std::string_view asked : {"claude", ""}) {
+        INFO("asked for '" << asked << "'");
+        const NoAvailableBackendError e = refusal(harness, asked);
+        CHECK(std::string{e.what()} == expected);
+        CHECK(e.model() == (asked.empty() ? "<default>" : "claude"));
+        // Apart from the message, for a caller that wants them.
+        CHECK(e.skipped_backend() == "claude");
+        CHECK(e.reason() == kNotOnPath);
+    }
+}
+
+TEST_CASE("a skipped backend asked for is named, even when the default did not start either",
+          "[harness][router][skipped]") {
+    // Only the one asked for (the open call's default): `check` lists them all.
+    const Harness harness = with_skips(R"(
+models:
+  default: gpt
+backends:
+  claude:
+    type: claude-cli
+    model: opus
+  gpt:
+    type: codex-cli
+  Local-Mock:
+    type: mock
+)",
+                                       {"Local-Mock"}, {"claude", "gpt"});
+    const NoAvailableBackendError e = refusal(harness, "claude");
+    CHECK(std::string{e.what()} == "backend 'claude' is configured but could not be started: " +
+                                       std::string{kNotOnPath} + " (started backends: Local-Mock)");
+    CHECK(e.skipped_backend() == "claude");
+
+    // Named the ways the router names a started one: normalized, and by the
+    // entry's `model:`, which the refusal says it was asked for as.
+    CHECK(std::string{refusal(harness, "CLAUDE").what()}.starts_with(
+        "backend 'claude' (for 'CLAUDE') is configured but could not be started: "));
+    const NoAvailableBackendError by_model = refusal(harness, "opus");
+    CHECK(std::string{by_model.what()}.starts_with(
+        "backend 'claude' (for 'opus') is configured but could not be started: "));
+    CHECK(by_model.skipped_backend() == "claude");
+    CHECK(by_model.model() == "opus");
+}
+
+TEST_CASE("a name configured nowhere that fell to a default that did not start names the default",
+          "[harness][router][skipped]") {
+    const Harness harness = with_skips(kUsersConfig, {"Local-Mock"}, {"claude"});
+    const NoAvailableBackendError e = refusal(harness, "nope");
+    CHECK(std::string{e.what()} ==
+          "no backend serves 'nope', and the default backend 'claude' is configured but could "
+          "not be started: " +
+              std::string{kNotOnPath} + " (started backends: Local-Mock)");
+    CHECK(e.model() == "nope");
+    CHECK(e.skipped_backend() == "claude");
+    CHECK(e.reason() == kNotOnPath);
+}
+
+TEST_CASE("a name configured nowhere is refused as before, its list the backends that started",
+          "[harness][router][skipped]") {
+    // No default set, nothing skipped: the sentence of before, the list named
+    // for what it is.
+    const Harness plain = with_skips(R"(
+backends:
+  a:
+    type: mock
+)",
+                                     {"a"}, {});
+    const NoAvailableBackendError e = refusal(plain, "nope");
+    CHECK(std::string{e.what()} ==
+          "no backend serves 'nope' (started backends: a); no "
+          "models.default is set -- 'apogee config set-default <name>'");
+    CHECK(e.skipped_backend().empty());
+    CHECK(e.reason().empty());
+
+    // A skipped entry that is neither asked for nor the default is not this
+    // refusal's business.
+    const Harness skipping = with_skips(R"(
+backends:
+  a:
+    type: mock
+  claude:
+    type: claude-cli
+)",
+                                        {"a"}, {"claude"});
+    const NoAvailableBackendError other = refusal(skipping, "nope");
+    CHECK(std::string{other.what()} ==
+          "no backend serves 'nope' (started backends: a); no models.default is set -- "
+          "'apogee config set-default <name>'");
+    CHECK(other.skipped_backend().empty());
+}
+
+TEST_CASE("with nothing started the refusal says so rather than that nothing is configured",
+          "[harness][router][skipped]") {
+    const Harness harness = with_skips(kUsersConfig, {}, {"claude", "Local-Mock"});
+    CHECK(std::string{refusal(harness, "claude").what()} ==
+          "the default backend 'claude' is configured but could not be started: " +
+              std::string{kNotOnPath} + " (no backend started; 'apogee check' says why)");
+    CHECK(std::string{refusal(harness, "nope").what()}.find("no backends are configured") ==
+          std::string::npos);
+}
+
+TEST_CASE("a backend registered after it was skipped routes, and is no longer said to be skipped",
+          "[harness][router][skipped]") {
+    // A rebuild that starts it (27d) mends the skip; a note about a backend
+    // that runs is ignored -- a failed rebuild keeps the provider it had.
+    Harness harness = with_skips(kUsersConfig, {"Local-Mock"}, {"claude"});
+    harness.register_provider("claude", mock("claude", "opus"));
+    harness.note_skipped("claude", "claude: a rebuild failed");
+    harness.use_default_router();
+    CHECK(harness.route("claude").backend_name() == "claude");
+    CHECK(harness.route("").backend_name() == "claude");
+}
+
 TEST_CASE("a single registered backend is NOT routed to implicitly", "[harness][router]") {
     // An implicit sole-backend rung, deliberately absent: it papers over an unset
     // models.default in a way that stops working the moment a second backend

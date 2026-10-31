@@ -2,13 +2,25 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <optional>
 #include <random>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "contracts/config.h"
+#include "modelstore/snapshot.h"
+#include "modelstore/store.h"
+#include "modelstore/voice_info.h"
+#include "support/draft_head_configs.h"
 #include "support/env_guard.h"
 #include "support/mlx_model.h"
+#include "support/voice_model.h"
+#include "support/wan_original.h"
 
 /// The MLX directory reader (27b), over directories built in the test: what
 /// a whole model says, and -- the dishonesty guards -- every way one cannot
@@ -264,4 +276,843 @@ TEST_CASE("an mlx entry's window is 26a's: configured, else the default under th
     CHECK(window.window == 2048);
     CHECK(window.configured);
     CHECK(apogee::models::describe(window) == "2048-token window (context_size; trained for 4096)");
+}
+
+// ---- what kind of MLX directory (53e) --------------------------------------------------
+
+TEST_CASE("an MLX directory's kind is its record's, else its files', else chat",
+          "[models][mlx][kind]") {
+    // One reader decides: the record a conversion wrote, else what the files
+    // said before there was a record (a vision tower and its processor),
+    // else a language model -- every directory before the record reads so.
+    const Dir dir;
+    using apogee::models::MlxKind;
+    using apogee::models::MlxKindSource;
+    using apogee::models::read_mlx_kind;
+
+    SECTION("no record: a chat model, as every MLX directory was") {
+        write_mlx_model(dir.model);
+        const MlxKind kind = read_mlx_kind(dir.model);
+        CHECK(kind.word == "chat");
+        CHECK(kind.source == MlxKindSource::Default);
+        CHECK(kind.known());
+        CHECK(kind.backend());
+    }
+    SECTION("no record, and a vision tower with its processor: a vision model by its files") {
+        write_mlx_model(dir.model, MlxModelSpec{.vision = true});
+        CHECK(apogee::models::mlx_vision_files(dir.model));
+        const MlxKind kind = read_mlx_kind(dir.model);
+        CHECK(kind.word == "vision");
+        CHECK(kind.source == MlxKindSource::Files);
+        CHECK(kind.backend());
+    }
+    SECTION("a tower without its processor, or a processor without a tower, says nothing") {
+        write_mlx_model(dir.model, MlxModelSpec{.vision = true});
+        std::filesystem::remove(dir.model / "preprocessor_config.json");
+        CHECK_FALSE(apogee::models::mlx_vision_files(dir.model));
+        CHECK(read_mlx_kind(dir.model).word == "chat");
+        // The processor's other spelling is a processor too.
+        write_fixture_file(dir.model / "processor_config.json", "{}");
+        CHECK(read_mlx_kind(dir.model).word == "vision");
+
+        write_mlx_model(dir.root.path() / "plain");
+        write_fixture_file(dir.root.path() / "plain" / "preprocessor_config.json", "{}");
+        CHECK(read_mlx_kind(dir.root.path() / "plain").word == "chat");
+    }
+    SECTION("a pull's record names no kind: the files decide, as before") {
+        write_mlx_model(dir.model, MlxModelSpec{.vision = true});
+        apogee::models::Snapshot record;
+        record.ref = "mlx-community/M-4bit";
+        record.source = "huggingface";
+        REQUIRE(apogee::models::write_snapshot(dir.model, record));
+        const MlxKind kind = read_mlx_kind(dir.model);
+        CHECK(kind.word == "vision");
+        CHECK(kind.source == MlxKindSource::Files);
+    }
+    SECTION("each recorded word is the kind, whatever the files say") {
+        for (const std::string word :
+             {"chat", "vision", "embedding", "drafter", "video", "voice"}) {
+            INFO(word);
+            const std::filesystem::path at = dir.root.path() / word;
+            // A vision tower under a record of `chat`: what mlx-lm made is a
+            // language model, and its record says so.
+            write_mlx_model(at, MlxModelSpec{.vision = true, .kind = word});
+            const MlxKind kind = read_mlx_kind(at);
+            CHECK(kind.word == word);
+            CHECK(kind.source == MlxKindSource::Recorded);
+            CHECK(kind.known());
+            CHECK(kind.backend() == (word == "chat" || word == "vision"));
+        }
+    }
+    SECTION("a word this build does not know is kept as written, and runs as nothing") {
+        write_mlx_model(dir.model, MlxModelSpec{.kind = "Hologram"});
+        const MlxKind kind = read_mlx_kind(dir.model);
+        CHECK(kind.word == "Hologram");
+        CHECK(kind.source == MlxKindSource::Recorded);
+        CHECK_FALSE(kind.known());
+        CHECK_FALSE(kind.backend());
+    }
+    SECTION("a kind that is not a word is no kind recorded, and the record still reads") {
+        write_mlx_model(dir.model, MlxModelSpec{.vision = true});
+        for (const char* kind : {R"("kind": 7)", R"("kind": "")", R"("kind": null)"}) {
+            INFO(kind);
+            write_fixture_file(
+                dir.model / "apogee-snapshot.json",
+                std::string{R"({"ref": "org/m", "source": "convert", "files": [], )"} + kind + "}");
+            const std::optional<apogee::models::Snapshot> record =
+                apogee::models::load_snapshot(dir.model);
+            REQUIRE(record.has_value());
+            CHECK(record->ref == "org/m");
+            CHECK(record->kind.empty());
+            CHECK(read_mlx_kind(dir.model).source == MlxKindSource::Files);
+        }
+    }
+}
+
+TEST_CASE("the kind is written beside the transform, only when there is one, and read as written",
+          "[models][mlx][kind][record]") {
+    const Dir dir;
+    write_mlx_model(dir.model);
+    apogee::models::Snapshot record;
+    record.ref = "org--m/safetensors/aaaaaaaaaaaa";
+    record.source = "convert";
+    record.transform = "mlx_lm.convert 4bit";
+    record.kind = "embedding";
+    REQUIRE(apogee::models::write_snapshot(dir.model, record));
+    const std::optional<apogee::models::Snapshot> read = apogee::models::load_snapshot(dir.model);
+    REQUIRE(read.has_value());
+    CHECK(read->transform == "mlx_lm.convert 4bit");
+    CHECK(read->kind == "embedding");
+
+    // A record with no kind -- a pull's, every one before this -- writes none.
+    record.kind.clear();
+    REQUIRE(apogee::models::write_snapshot(dir.model, record));
+    std::ifstream in{apogee::models::snapshot_record_path(dir.model)};
+    const std::string text{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    CHECK(text.find("\"kind\"") == std::string::npos);
+    CHECK(apogee::models::load_snapshot(dir.model)->kind.empty());
+}
+
+TEST_CASE("each kind is said in one wording, with where it came from",
+          "[models][mlx][kind][wording]") {
+    using apogee::models::describe_mlx_kind;
+    CHECK(describe_mlx_kind("chat") == "a language model: an mlx backend chats with it");
+    CHECK(describe_mlx_kind("vision") ==
+          "a vision model: an mlx backend chats with it, and shows it images through mlx-vlm");
+    CHECK(describe_mlx_kind("embedding") ==
+          "an embedding model: the embedding role uses it, never a chat backend");
+    CHECK(describe_mlx_kind("drafter") == "a drafter: it runs beside its base model, never alone");
+    CHECK(describe_mlx_kind("video") ==
+          "a video model: 'apogee video generate' runs it, never a chat backend");
+    CHECK(describe_mlx_kind("voice") ==
+          "a voice model: 'apogee voice say' speaks with it, never a chat backend");
+    CHECK(describe_mlx_kind("Hologram") ==
+          "kind 'Hologram', not one this apogee knows: nothing here runs it");
+
+    using apogee::models::MlxKind;
+    using apogee::models::MlxKindSource;
+    CHECK(apogee::models::describe(MlxKind{}) ==
+          "chat (no kind recorded) -- a language model: an mlx backend chats with it");
+    CHECK(apogee::models::describe(MlxKind{.word = "vision", .source = MlxKindSource::Files}) ==
+          "vision (inferred from its files: a vision_config and an image processor) -- a vision "
+          "model: an mlx backend chats with it, and shows it images through mlx-vlm");
+    CHECK(apogee::models::describe(MlxKind{.word = "voice", .source = MlxKindSource::Recorded}) ==
+          "voice (recorded) -- a voice model: 'apogee voice say' speaks with it, never a chat "
+          "backend");
+}
+
+TEST_CASE("a recorded kind survives a repair of the directory's files",
+          "[models][mlx][kind][repair]") {
+    // `models repair` re-fetches what its record lists and never writes the
+    // record itself: the kind rides through.
+    const Dir dir;
+    const apogee::models::StoreRoots roots = apogee::models::StoreRoots::at(dir.root.path());
+    const std::filesystem::path staging =
+        apogee::models::incoming_path(roots, apogee::models::kMlxFormat, "org--e");
+    write_mlx_model(staging);
+    apogee::models::Snapshot record;
+    record.ref = "org--e/safetensors/aaaaaaaaaaaa";
+    record.source = "convert";
+    record.transform = "a converter";
+    record.kind = "embedding";
+    const apogee::models::StoredDirectory stored =
+        apogee::models::commit_mlx(roots, "org--e", staging, record);
+    REQUIRE(stored.error.empty());
+    const std::string good = [&] {
+        std::ifstream in{stored.dir / "tokenizer.json", std::ios::binary};
+        return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    }();
+    write_fixture_file(stored.dir / "tokenizer.json", "damaged");
+
+    const apogee::models::SnapshotDamage damage = apogee::models::find_snapshot_damage(stored.dir);
+    REQUIRE(damage.refetch.size() == 1);
+    const apogee::models::SnapshotRepair repair = apogee::models::repair_snapshot(
+        stored.dir, damage,
+        [&good](const apogee::models::SnapshotFile&, const std::filesystem::path& to) {
+            write_fixture_file(to, good);
+            return std::string{};
+        });
+    REQUIRE(repair.error.empty());
+    CHECK(repair.fetched == std::vector<std::string>{"tokenizer.json"});
+    const apogee::models::MlxKind kind = apogee::models::read_mlx_kind(stored.dir);
+    CHECK(kind.word == "embedding");
+    CHECK(kind.source == apogee::models::MlxKindSource::Recorded);
+}
+
+TEST_CASE("an mlx backend runs a chat, a vision and an embedding model, and no other kind",
+          "[models][mlx][kind][embedding]") {
+    // 53h: what `config scan --register` registers as an mlx entry -- one it
+    // chats with, or one it embeds with -- and what it never does.
+    using apogee::models::MlxKind;
+    for (const char* word : {"chat", "vision"}) {
+        INFO(word);
+        const MlxKind kind{.word = word, .source = apogee::models::MlxKindSource::Recorded};
+        CHECK(kind.backend());
+        CHECK_FALSE(kind.embeds());
+        CHECK(kind.registers());
+    }
+    const MlxKind embedding{.word = "embedding", .source = apogee::models::MlxKindSource::Recorded};
+    CHECK_FALSE(embedding.backend());
+    CHECK(embedding.embeds());
+    CHECK(embedding.registers());
+    for (const char* word : {"drafter", "video", "voice", "hologram"}) {
+        INFO(word);
+        const MlxKind kind{.word = word, .source = apogee::models::MlxKindSource::Recorded};
+        CHECK_FALSE(kind.embeds());
+        CHECK_FALSE(kind.registers());
+    }
+}
+
+TEST_CASE("an MLX embedding model's width is its last Dense's out_features, else its hidden size",
+          "[models][mlx][embedding][width]") {
+    const Dir dir;
+    using apogee::models::read_mlx_embedding_width;
+    SECTION("what mlx-embeddings' converter writes: the top level's files, the hidden size") {
+        write_mlx_model(dir.model, MlxModelSpec{.model_type = "gemma3_text", .kind = "embedding"});
+        write_fixture_file(dir.model / "config.json",
+                           R"({"model_type": "gemma3_text", "hidden_size": 768})");
+        // Its modules.json names Dense directories the converter never copied.
+        write_fixture_file(dir.model / "modules.json", R"([
+            {"idx": 0, "path": "", "type": "sentence_transformers.models.Transformer"},
+            {"idx": 1, "path": "1_Pooling", "type": "sentence_transformers.models.Pooling"},
+            {"idx": 2, "path": "2_Dense", "type": "sentence_transformers.models.Dense"},
+            {"idx": 3, "path": "3_Dense", "type": "sentence_transformers.models.Dense"},
+            {"idx": 4, "path": "4_Normalize", "type": "sentence_transformers.models.Normalize"}])");
+        const apogee::models::MlxEmbeddingWidth width = read_mlx_embedding_width(dir.model);
+        CHECK(width.width == 768);
+        CHECK(width.source == "its hidden_size");
+        CHECK(apogee::models::describe(width) == "768 wide (its hidden_size)");
+
+        // With the Dense configurations there, the last one's output decides.
+        write_fixture_file(dir.model / "2_Dense" / "config.json",
+                           R"({"in_features": 768, "out_features": 3072})");
+        write_fixture_file(dir.model / "3_Dense" / "config.json",
+                           R"({"in_features": 3072, "out_features": 512})");
+        const apogee::models::MlxEmbeddingWidth dense = read_mlx_embedding_width(dir.model);
+        CHECK(dense.width == 512);
+        CHECK(apogee::models::describe(dense) ==
+              "512 wide (the last Dense's out_features (3_Dense))");
+    }
+    SECTION("a composite's text model states it") {
+        write_fixture_file(dir.model / "config.json",
+                           R"({"model_type": "qwen3_vl", "text_config": {"hidden_size": 2048}})");
+        const apogee::models::MlxEmbeddingWidth width = read_mlx_embedding_width(dir.model);
+        CHECK(width.width == 2048);
+        CHECK(width.source == "its text_config.hidden_size");
+    }
+    SECTION("nothing states it: unknown, never guessed") {
+        write_fixture_file(dir.model / "config.json", R"({"model_type": "gemma3_text"})");
+        const apogee::models::MlxEmbeddingWidth width = read_mlx_embedding_width(dir.model);
+        CHECK_FALSE(width.known());
+        CHECK(width.source.empty());
+        CHECK(apogee::models::describe(width).starts_with("width unknown"));
+        CHECK_FALSE(read_mlx_embedding_width(dir.root.path() / "nothing-here").known());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A drafter beside its base (53i)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// An MLX directory at `dir` whose `config.json` is `config`, recorded as
+/// `kind` -- with `bases` when given, as a drafter's conversion records them
+/// -- or with no record at all when `kind` is empty: what a pull brings.
+void mlx_dir(const std::filesystem::path& dir, const char* config, const std::string& kind,
+             const std::vector<std::string>& bases = {}) {
+    write_mlx_model(dir, MlxModelSpec{.bits = 0});
+    write_fixture_file(dir / "config.json", config);
+    if (kind.empty()) {
+        return;
+    }
+    apogee::models::Snapshot record;
+    record.ref = dir.filename().string();
+    record.source = "convert";
+    record.transform = "mlx_vlm.convert bf16";
+    record.kind = kind;
+    record.bases = bases;
+    REQUIRE(apogee::models::write_snapshot(dir, record));
+}
+
+/// The store's MLX directory for `model`.
+[[nodiscard]] std::filesystem::path mlx_of(const std::filesystem::path& models,
+                                           const std::string& model) {
+    return models / model / "mlx" / "aaaaaaaaaaaa";
+}
+
+}  // namespace
+
+TEST_CASE("a drafter's kind is its record's, else its config's draft head -- never a chat model",
+          "[models][mlx][kind][drafter]") {
+    // A drafter pulled whole, as the MLX community publishes one, has no
+    // record: its config.json declaring a draft head says what it is, so it
+    // is never registered or run as a chat model.
+    const Dir dir;
+    using apogee::models::MlxKindSource;
+    mlx_dir(dir.model, apogee::testing::kGemma4AssistantE4BConfig, "");
+    const apogee::models::MlxKind pulled = apogee::models::read_mlx_kind(dir.model);
+    CHECK(pulled.word == "drafter");
+    CHECK(pulled.source == MlxKindSource::Files);
+    CHECK_FALSE(pulled.backend());
+    CHECK_FALSE(pulled.registers());
+    CHECK(apogee::models::describe(pulled) ==
+          "drafter (inferred from its files: its config.json declares a draft head) -- a "
+          "drafter: it runs beside its base model, never alone");
+    const std::optional<apogee::models::MlxDrafter> drafter =
+        apogee::models::read_mlx_drafter(dir.model);
+    REQUIRE(drafter.has_value());
+    CHECK(drafter->head.backbone_hidden_size == 2560);
+    CHECK(drafter->head.model_type == "gemma4_assistant");
+    CHECK(drafter->bases.empty());
+    CHECK(apogee::models::describe(*drafter) ==
+          "a drafter (Gemma4AssistantForCausalLM) for a 2560-wide gemma4 model, its record "
+          "naming no base");
+
+    // Recorded, with its bases.
+    const std::filesystem::path recorded = dir.root.path() / "recorded";
+    mlx_dir(recorded, apogee::testing::kGemma4Assistant12BConfig, "drafter",
+            {"Gemma4-12B-Instruct"});
+    CHECK(apogee::models::read_mlx_kind(recorded).source == MlxKindSource::Recorded);
+    CHECK(apogee::models::describe(*apogee::models::read_mlx_drafter(recorded)) ==
+          "a drafter (Gemma4UnifiedAssistantForCausalLM) for a 3840-wide gemma4 model, its "
+          "record naming Gemma4-12B-Instruct");
+
+    // Anything else is no drafter: a record's other word wins, and a model
+    // of its own is none.
+    const std::filesystem::path chat = dir.root.path() / "chat";
+    mlx_dir(chat, apogee::testing::kGemma4BaseE4BConfig, "vision");
+    CHECK_FALSE(apogee::models::read_mlx_drafter(chat).has_value());
+    const std::filesystem::path relabelled = dir.root.path() / "relabelled";
+    mlx_dir(relabelled, apogee::testing::kGemma4AssistantE4BConfig, "chat");
+    CHECK_FALSE(apogee::models::read_mlx_drafter(relabelled).has_value());
+}
+
+TEST_CASE(
+    "a drafter pairs only beside a base mlx-vlm built, of its family and width, the one its "
+    "record names",
+    "[models][mlx][drafter]") {
+    const Dir dir;
+    const std::filesystem::path models = dir.root.path() / "models";
+    // The user's four, each head converted beside its base, each base
+    // mlx-vlm's build (recorded vision).
+    for (const apogee::testing::DraftHeadPair& pair : apogee::testing::kUserDraftHeads) {
+        mlx_dir(mlx_of(models, pair.base_model), pair.base_config, "vision");
+        mlx_dir(mlx_of(models, pair.head_model), pair.head_config, "drafter", {pair.base_model});
+    }
+    using apogee::models::mlx_drafter_refusal;
+    for (const apogee::testing::DraftHeadPair& pair : apogee::testing::kUserDraftHeads) {
+        INFO(pair.head_model);
+        const std::filesystem::path head = mlx_of(models, pair.head_model);
+        // Beside its own base: it pairs.
+        CHECK(mlx_drafter_refusal(mlx_of(models, pair.base_model), head, models).empty());
+        // Beside every other: another width, refused saying both.
+        for (const apogee::testing::DraftHeadPair& other : apogee::testing::kUserDraftHeads) {
+            if (std::string_view{other.base_model} == pair.base_model) {
+                continue;
+            }
+            const std::string refused =
+                mlx_drafter_refusal(mlx_of(models, other.base_model), head, models);
+            CHECK(refused.find(" drafts for a " + std::to_string(pair.width) +
+                               "-wide gemma4 model, reading its hidden states, and ") !=
+                  std::string::npos);
+            CHECK(
+                refused.ends_with(" -- a drafter runs only beside a base of its family and width"));
+        }
+    }
+    const std::filesystem::path e4b_head = mlx_of(models, "Gemma4-E4B-Assistant");
+    const std::filesystem::path e4b_base = mlx_of(models, "Gemma4-E4B-Instruct");
+
+    // Another family, as wide: refused.
+    const std::filesystem::path qwen = mlx_of(models, "Qwen-Wide");
+    mlx_dir(qwen,
+            R"({"model_type": "qwen3_vl", "text_config": {"hidden_size": 2560},
+                "vision_config": {"hidden_size": 1152}})",
+            "vision");
+    CHECK(mlx_drafter_refusal(qwen, e4b_head, models)
+              .find("and " + qwen.string() +
+                    " is a 2560-wide qwen3 model -- a drafter runs only "
+                    "beside a base of its family and width") != std::string::npos);
+
+    // The same family and width, but not the base its record names: refused.
+    const std::filesystem::path custom = mlx_of(models, "Gemma4-E4B-Custom");
+    mlx_dir(custom, apogee::testing::kGemma4BaseE4BConfig, "vision");
+    CHECK(mlx_drafter_refusal(custom, e4b_head, models) ==
+          e4b_head.string() + "'s record names Gemma4-E4B-Instruct as its base, and " +
+              custom.string() +
+              " is a build of Gemma4-E4B-Custom -- a drafter runs only beside the base its "
+              "record names");
+    // Outside the store, no base its record names can be told: refused.
+    const std::filesystem::path outside = dir.root.path() / "elsewhere" / "e4b";
+    mlx_dir(outside, apogee::testing::kGemma4BaseE4BConfig, "vision");
+    CHECK(mlx_drafter_refusal(outside, e4b_head, models).find(" is no stored model -- ") !=
+          std::string::npos);
+    // A drafter whose record names none -- a pull -- pairs by family and
+    // width alone, wherever the base is.
+    const std::filesystem::path pulled = mlx_of(models, "mlx-community--gemma-4-E4B-it-assistant");
+    mlx_dir(pulled, apogee::testing::kGemma4AssistantE4BConfig, "");
+    CHECK(mlx_drafter_refusal(custom, pulled, models).empty());
+    CHECK(mlx_drafter_refusal(outside, pulled, models).empty());
+    CHECK_FALSE(mlx_drafter_refusal(mlx_of(models, "Gemma4-12B-Instruct"), pulled, models).empty());
+
+    // mlx-lm's build of the base: refused, conservatively, saying why.
+    const std::filesystem::path text = models / "Gemma4-E4B-Instruct" / "mlx" / "bbbbbbbbbbbb";
+    mlx_dir(text, apogee::testing::kGemma4BaseE4BConfig, "chat");
+    CHECK(mlx_drafter_refusal(text, e4b_head, models) ==
+          text.string() +
+              " is mlx-lm's build (kind chat, recorded), laid out for mlx-lm, and drafting runs "
+              "through mlx-vlm's speculative path, which loads the base through mlx-vlm -- "
+              "'apogee models convert <its SafeTensors set> --mlx' builds it through mlx-vlm, "
+              "and the drafter runs beside that");
+    // A base with no record and no vision files reads chat too: refused.
+    const std::filesystem::path unrecorded =
+        models / "Gemma4-E4B-Instruct" / "mlx" / "cccccccccccc";
+    mlx_dir(unrecorded, apogee::testing::kGemma4BaseE4BConfig, "");
+    CHECK(mlx_drafter_refusal(unrecorded, e4b_head, models).find("(kind chat, none recorded)") !=
+          std::string::npos);
+    // One with vision files and no record reads vision: it pairs.
+    write_fixture_file(unrecorded / "preprocessor_config.json", "{}");
+    CHECK(mlx_drafter_refusal(unrecorded, e4b_head, models).empty());
+
+    // What is no drafter, or no base: each said.
+    CHECK(mlx_drafter_refusal(e4b_base, models / "gone", models)
+              .starts_with("there is no drafter at "));
+    CHECK(mlx_drafter_refusal(e4b_base, custom, models)
+              .starts_with(custom.string() + " is not a drafter: it is vision (recorded)"));
+    CHECK(mlx_drafter_refusal(e4b_head, e4b_head, models) ==
+          e4b_head.string() + " is itself a drafter: a drafter runs beside a base, never alone");
+    const std::filesystem::path embedder = mlx_of(models, "Embedder");
+    mlx_dir(embedder, R"({"model_type": "gemma3_text", "hidden_size": 2560})", "embedding");
+    CHECK(mlx_drafter_refusal(embedder, pulled, models)
+              .ends_with(" -- a drafter runs beside a model an mlx backend chats with"));
+    // A drafter that does not say how wide a model it reads measures nothing.
+    const std::filesystem::path unsized = mlx_of(models, "Unsized-Assistant");
+    mlx_dir(unsized, R"({"architectures": ["Gemma4AssistantForCausalLM"],
+                         "model_type": "gemma4_assistant"})",
+            "drafter");
+    CHECK(mlx_drafter_refusal(e4b_base, unsized, models)
+              .find("does not say how wide a model it reads") != std::string::npos);
+}
+
+TEST_CASE("an MLX video model is read by mlx-video's layout: no tokenizer, every part whole",
+          "[models][mlx][info][mlx_video]") {
+    // 53k: what mlx-video's Wan converter writes -- config.json, the T5 text
+    // encoder, the VAE and the transformer's weights -- and no tokenizer,
+    // which its generator reads from the encoder's own source.
+    const Dir dir;
+    const auto shard = [&dir](const char* name) {
+        write_fixture_file(dir.model / name,
+                           apogee::testing::safetensors_bytes({{"weight", 32}}, "mlx"));
+    };
+    write_fixture_file(dir.model / "config.json",
+                       R"({"model_type": "ti2v", "dim": 3072, "num_layers": 30,
+                           "quantization": {"group_size": 64, "bits": 4}})");
+    shard("model.safetensors");
+    shard("t5_encoder.safetensors");
+    shard("vae.safetensors");
+
+    // Unrecorded, its files say it is a video model (M22) -- a config.json
+    // beside the encoder and the VAE -- so it is read by its own layout.
+    MlxInfo info = read_mlx_info(dir.model);
+    CHECK(info.video);
+    CHECK(info.complete);
+    // Without the files that say so, it is a language model's directory, and
+    // lacks one's tokenizer.
+    std::filesystem::rename(dir.model / "vae.safetensors", dir.model / "aside");
+    info = read_mlx_info(dir.model);
+    CHECK_FALSE(info.video);
+    CHECK_FALSE(info.complete);
+    CHECK(info.problem.find("no tokenizer") != std::string::npos);
+    std::filesystem::rename(dir.model / "aside", dir.model / "vae.safetensors");
+
+    // Read as video -- by the kind a conversion's staging is, or by its record.
+    info = read_mlx_info(dir.model, apogee::models::kMlxVideo);
+    CHECK(info.video);
+    CHECK(info.complete);
+    CHECK(info.problem.empty());
+    CHECK(info.shards.size() == 3);
+    CHECK(info.quantization.bits == 4);
+    CHECK(info.model_type == "ti2v");
+    apogee::models::Snapshot record;
+    record.source = "convert";
+    record.kind = std::string{apogee::models::kMlxVideo};
+    REQUIRE(apogee::models::write_snapshot(dir.model, record));
+    CHECK(read_mlx_info(dir.model).video);
+    CHECK(read_mlx_info(dir.model).complete);
+    // Another kind named by the caller reads as it always did.
+    CHECK_FALSE(read_mlx_info(dir.model, apogee::models::kMlxChat).video);
+
+    // Each part missing is said by name, and never committed as whole.
+    for (const char* part : {"vae.safetensors", "t5_encoder.safetensors", "model.safetensors"}) {
+        INFO(part);
+        std::filesystem::rename(dir.model / part, dir.model / "aside");
+        info = read_mlx_info(dir.model);
+        CHECK_FALSE(info.complete);
+        CHECK(info.problem.starts_with("cannot load: no "));
+        CHECK(info.problem.find(part) != std::string::npos);
+        std::filesystem::rename(dir.model / "aside", dir.model / part);
+    }
+    // A pair of transformers stands for the one: Wan2.2's two experts.
+    std::filesystem::remove(dir.model / "model.safetensors");
+    shard("low_noise_model.safetensors");
+    CHECK_FALSE(read_mlx_info(dir.model).complete);
+    shard("high_noise_model.safetensors");
+    CHECK(read_mlx_info(dir.model).complete);
+    // A part cut short is a shard cut short.
+    write_fixture_file(dir.model / "vae.safetensors", "short");
+    CHECK(read_mlx_info(dir.model).problem.find("vae.safetensors is truncated") !=
+          std::string::npos);
+}
+
+TEST_CASE("an MLX voice model is read by mlx-audio's layout: no tokenizer, its voices whole",
+          "[models][mlx][info][mlx_audio]") {
+    // 53m: what mlx-audio's converter writes for Kokoro -- config.json, the
+    // weights and a voices/ directory of SafeTensors packs -- and no
+    // tokenizer, since Kokoro reads text through its phonemizer.
+    const Dir dir;
+    write_fixture_file(dir.model / "config.json",
+                       R"({"model_type": "kokoro", "istftnet": {}, "plbert": {}})");
+    write_fixture_file(dir.model / "model.safetensors",
+                       apogee::testing::safetensors_bytes({{"bert.weight", 64}}, "mlx"));
+    for (const char* voice : {"af_heart", "bm_george"}) {
+        write_fixture_file(dir.model / "voices" / (std::string{voice} + ".safetensors"),
+                           apogee::testing::safetensors_bytes({{"voice", 16}}, "mlx"));
+    }
+
+    // Unrecorded, its files say it is a voice model (M22) -- a config.json
+    // naming Kokoro beside its voices -- so it is read by its own layout.
+    MlxInfo info = read_mlx_info(dir.model);
+    CHECK(info.voice);
+    CHECK(info.complete);
+    // Without the config that names Kokoro, it is a language model's
+    // directory, and lacks one's tokenizer.
+    write_fixture_file(dir.model / "config.json", R"({"model_type": "llama"})");
+    info = read_mlx_info(dir.model);
+    CHECK_FALSE(info.voice);
+    CHECK_FALSE(info.complete);
+    CHECK(info.problem.find("no tokenizer") != std::string::npos);
+    write_fixture_file(dir.model / "config.json",
+                       R"({"model_type": "kokoro", "istftnet": {}, "plbert": {}})");
+
+    // Read as voice -- by the kind a conversion's staging is, or by its record.
+    info = read_mlx_info(dir.model, apogee::models::kMlxVoice);
+    CHECK(info.voice);
+    CHECK_FALSE(info.video);
+    CHECK(info.complete);
+    CHECK(info.problem.empty());
+    // The weights are its shards; the voices are not.
+    CHECK(info.shards.size() == 1);
+    CHECK(info.model_type == "kokoro");
+    apogee::models::Snapshot record;
+    record.source = "convert";
+    record.kind = std::string{apogee::models::kMlxVoice};
+    REQUIRE(apogee::models::write_snapshot(dir.model, record));
+    CHECK(read_mlx_info(dir.model).voice);
+    CHECK(read_mlx_info(dir.model).complete);
+    CHECK_FALSE(read_mlx_info(dir.model, apogee::models::kMlxChat).voice);
+
+    // A voice pack cut short is said by name, and never read as whole.
+    write_fixture_file(dir.model / "voices" / "bm_george.safetensors", "short");
+    info = read_mlx_info(dir.model);
+    CHECK_FALSE(info.complete);
+    CHECK(info.problem.find("voices/bm_george.safetensors is truncated") != std::string::npos);
+    // No voices at all: nothing to speak with.
+    std::filesystem::remove_all(dir.model / "voices");
+    info = read_mlx_info(dir.model);
+    CHECK_FALSE(info.complete);
+    CHECK(info.problem == "cannot load: no voices (voices/*.safetensors) in " + dir.model.string());
+    // No weights: a shard missing, as any directory's.
+    write_fixture_file(dir.model / "voices" / "af_heart.safetensors",
+                       apogee::testing::safetensors_bytes({{"voice", 16}}, "mlx"));
+    std::filesystem::remove(dir.model / "model.safetensors");
+    CHECK(read_mlx_info(dir.model).problem.find("no weights") != std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// What a pull brings, said by its own files (M22)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// The record a pull writes beside what it brought: where it came from, and
+/// never a kind.
+void pulled_record(const std::filesystem::path& dir, const std::string& ref) {
+    apogee::models::Snapshot record;
+    record.ref = ref;
+    record.source = "huggingface";
+    REQUIRE(apogee::models::write_snapshot(dir, record));
+}
+
+/// The same directory recorded as `kind`, as a conversion that made it would.
+void recorded_as(const std::filesystem::path& dir, const std::string& kind) {
+    apogee::models::Snapshot record;
+    record.ref = "org--m/safetensors/aaaaaaaaaaaa";
+    record.source = "convert";
+    record.transform = "a converter";
+    record.kind = kind;
+    REQUIRE(apogee::models::write_snapshot(dir, record));
+}
+
+}  // namespace
+
+TEST_CASE("a pulled MLX set's own files say it is an embedding, voice or video model",
+          "[models][mlx][kind][pulled]") {
+    // A set the MLX community publishes ready-made arrives with a pull's
+    // record, which names no kind: each of these three is read by its own
+    // files, as a drafter and a vision model already were, and says so.
+    const Dir dir;
+    using apogee::models::describe;
+    using apogee::models::MlxKind;
+    using apogee::models::MlxKindSource;
+    using apogee::models::read_mlx_kind;
+
+    SECTION("an embedding model: its modules.json names a Pooling module") {
+        apogee::testing::write_published_mlx_embedding(dir.model);
+        pulled_record(dir.model, "mlx-community/embeddinggemma-300m-bf16");
+        const MlxKind kind = read_mlx_kind(dir.model);
+        CHECK(kind.word == "embedding");
+        CHECK(kind.source == MlxKindSource::Files);
+        CHECK(kind.embeds());
+        CHECK(kind.registers());
+        CHECK_FALSE(kind.backend());
+        CHECK(describe(kind) ==
+              "embedding (inferred from its files: its modules.json names a sentence-transformers "
+              "Pooling module) -- an embedding model: the embedding role uses it, never a chat "
+              "backend");
+        // Read as a language model's directory is: its tokenizer and shards.
+        const MlxInfo info = read_mlx_info(dir.model);
+        CHECK(info.complete);
+        CHECK_FALSE(info.video);
+        CHECK_FALSE(info.voice);
+        CHECK(apogee::models::read_mlx_embedding_width(dir.model).width == 768);
+    }
+    SECTION("an embedding model with towers: its Pooling says what it gives back") {
+        // embeddinggemma-2 carries a vision tower and its processors, which
+        // read as a vision model before -- one no backend could chat with.
+        apogee::testing::write_published_mlx_embedding(dir.model, /*towers=*/true);
+        CHECK(apogee::models::mlx_vision_files(dir.model));
+        const MlxKind kind = read_mlx_kind(dir.model);
+        CHECK(kind.word == "embedding");
+        CHECK(kind.source == MlxKindSource::Files);
+        CHECK(read_mlx_info(dir.model).complete);
+    }
+    SECTION("a voice model: a config.json naming Kokoro beside its voices") {
+        // As the community publishes it -- Kokoro's own shape, no model_type --
+        // and as mlx-audio's converter writes it, model_type kokoro.
+        apogee::testing::write_published_mlx_kokoro(dir.model);
+        const std::filesystem::path converted = dir.root.path() / "converted";
+        apogee::testing::write_mlx_voice_model(converted, {.ref = ""});
+        for (const std::filesystem::path& at : {dir.model, converted}) {
+            INFO(at.string());
+            const MlxKind kind = read_mlx_kind(at);
+            CHECK(kind.word == "voice");
+            CHECK(kind.source == MlxKindSource::Files);
+            CHECK_FALSE(kind.registers());
+            CHECK(describe(kind) ==
+                  "voice (inferred from its files: a Kokoro config.json beside "
+                  "voices/*.safetensors) -- a voice model: 'apogee voice say' speaks with it, "
+                  "never a chat backend");
+            // Read by mlx-audio's layout: no tokenizer, its voices whole.
+            const MlxInfo info = read_mlx_info(at);
+            CHECK(info.voice);
+            CHECK_FALSE(info.video);
+            CHECK(info.complete);
+            CHECK(info.problem.empty());
+        }
+        // Its voices are its SafeTensors packs, the .pt copies beside them not.
+        const apogee::models::VoiceInfo voices = apogee::models::read_mlx_voice_info(dir.model);
+        CHECK(voices.complete);
+        CHECK(voices.checkpoint == "kokoro-v1_0.safetensors");
+        CHECK(voices.voices.size() == 3);
+        // A quantized build says its bits, and reads the same.
+        const std::filesystem::path eight = dir.root.path() / "eight";
+        apogee::testing::write_published_mlx_kokoro(eight, {.bits = 8});
+        CHECK(read_mlx_kind(eight).word == "voice");
+        CHECK(read_mlx_info(eight).quantization.bits == 8);
+    }
+    SECTION("a video model: a config.json beside mlx-video's text encoder and VAE") {
+        apogee::testing::write_published_mlx_wan(dir.model);
+        const std::filesystem::path pair = dir.root.path() / "pair";
+        apogee::testing::write_published_mlx_wan(pair, /*pair=*/true);
+        for (const std::filesystem::path& at : {dir.model, pair}) {
+            INFO(at.string());
+            const MlxKind kind = read_mlx_kind(at);
+            CHECK(kind.word == "video");
+            CHECK(kind.source == MlxKindSource::Files);
+            CHECK_FALSE(kind.registers());
+            CHECK(describe(kind) ==
+                  "video (inferred from its files: a config.json beside t5_encoder.safetensors and "
+                  "vae.safetensors) -- a video model: 'apogee video generate' runs it, never a "
+                  "chat backend");
+            // Read by mlx-video's layout: no tokenizer, no window, each part whole.
+            const MlxInfo info = read_mlx_info(at);
+            CHECK(info.video);
+            CHECK_FALSE(info.voice);
+            CHECK(info.complete);
+            CHECK(info.quantization.bits == 8);
+        }
+        CHECK(read_mlx_info(dir.model).model_type == "ti2v");
+        CHECK(read_mlx_info(pair).model_type == "i2v");
+    }
+    SECTION("the files that say the kind do not make it whole: a part missing is named") {
+        // A Kokoro whose weights never arrived is a voice model that cannot
+        // load -- never a chat model that lacks a tokenizer.
+        apogee::testing::write_published_mlx_kokoro(dir.model);
+        std::filesystem::remove(dir.model / "kokoro-v1_0.safetensors");
+        CHECK(read_mlx_kind(dir.model).word == "voice");
+        CHECK(read_mlx_info(dir.model).problem.find("no weights") != std::string::npos);
+        // A voice pack cut short, by its name.
+        const std::filesystem::path cut = dir.root.path() / "cut";
+        apogee::testing::write_published_mlx_kokoro(cut);
+        write_fixture_file(cut / "voices" / "am_adam.safetensors", "short");
+        CHECK(read_mlx_kind(cut).word == "voice");
+        CHECK(read_mlx_info(cut).problem.find("voices/am_adam.safetensors is truncated") !=
+              std::string::npos);
+        // A Wan whose transformer never arrived.
+        const std::filesystem::path wan = dir.root.path() / "wan";
+        apogee::testing::write_published_mlx_wan(wan);
+        std::filesystem::remove(wan / "model.safetensors");
+        CHECK(read_mlx_kind(wan).word == "video");
+        CHECK(read_mlx_info(wan).problem.starts_with("cannot load: no transformer weights"));
+    }
+}
+
+TEST_CASE(
+    "a recorded kind wins over a pulled set's files, and files that say nothing certain read "
+    "as before",
+    "[models][mlx][kind][pulled]") {
+    const Dir dir;
+    using apogee::models::MlxKindSource;
+    using apogee::models::read_mlx_kind;
+
+    SECTION("each recorded word is the kind, over each kind's files") {
+        // The record keeps its meaning (53e): only the conversion that made a
+        // directory writes a kind, and what it wrote is what the directory is.
+        using Writer = void (*)(const std::filesystem::path&);
+        const std::array<Writer, 3> shapes{
+            [](const std::filesystem::path& at) {
+                apogee::testing::write_published_mlx_embedding(at);
+            },
+            [](const std::filesystem::path& at) {
+                apogee::testing::write_published_mlx_kokoro(at);
+            },
+            [](const std::filesystem::path& at) { apogee::testing::write_published_mlx_wan(at); },
+        };
+        int n = 0;
+        for (const std::string word :
+             {"chat", "vision", "embedding", "drafter", "video", "voice", "hologram"}) {
+            for (const Writer write : shapes) {
+                const std::filesystem::path at = dir.root.path() / std::to_string(n++);
+                INFO(word + " over " + at.string());
+                write(at);
+                recorded_as(at, word);
+                const apogee::models::MlxKind kind = read_mlx_kind(at);
+                CHECK(kind.word == word);
+                CHECK(kind.source == MlxKindSource::Recorded);
+                // And the files are read by the recorded kind's layout.
+                const MlxInfo info = read_mlx_info(at);
+                CHECK(info.video == (word == "video"));
+                CHECK(info.voice == (word == "voice"));
+            }
+        }
+    }
+    SECTION("a chat set with a stray file of another kind's, and none of the rest, stays chat") {
+        const auto stays_chat = [](const std::filesystem::path& at) {
+            const apogee::models::MlxKind kind = read_mlx_kind(at);
+            CHECK(kind.word == "chat");
+            CHECK(kind.source == MlxKindSource::Default);
+            const MlxInfo info = read_mlx_info(at);
+            CHECK(info.complete);
+            CHECK_FALSE(info.video);
+            CHECK_FALSE(info.voice);
+        };
+        // A voice pack, with no config naming Kokoro.
+        write_mlx_model(dir.model);
+        write_fixture_file(dir.model / "voices" / "af_heart.safetensors",
+                           apogee::testing::safetensors_bytes({{"voice", 16}}));
+        stays_chat(dir.model);
+        // A modules.json naming no Pooling, one that is not JSON, one that is
+        // not a list.
+        for (const char* modules :
+             {R"([{"idx": 0, "path": "", "type": "sentence_transformers.models.Transformer"}])",
+              "not json", R"({"type": "sentence_transformers.models.Pooling"})"}) {
+            INFO(modules);
+            const std::filesystem::path at = dir.root.path() / "modules";
+            write_mlx_model(at);
+            write_fixture_file(at / "modules.json", modules);
+            stays_chat(at);
+        }
+        // The text encoder alone, or the VAE alone.
+        for (const char* part : {"t5_encoder.safetensors", "vae.safetensors"}) {
+            INFO(part);
+            const std::filesystem::path at = dir.root.path() / ("stray-" + std::string{part});
+            write_mlx_model(at);
+            write_fixture_file(at / part, apogee::testing::safetensors_bytes({{"weight", 32}}));
+            stays_chat(at);
+        }
+        // A config in Kokoro's shape whose voices are the original's .pt
+        // packs alone: no MLX build of a voice model.
+        const std::filesystem::path original = dir.root.path() / "original";
+        apogee::testing::write_published_mlx_kokoro(original);
+        for (const char* voice : {"af_heart", "am_adam", "bf_emma"}) {
+            std::filesystem::remove(original / "voices" / (std::string{voice} + ".safetensors"));
+        }
+        CHECK(read_mlx_kind(original).word == "chat");
+        CHECK(read_mlx_kind(original).source == MlxKindSource::Default);
+        // A vision set with a stray voice pack stays a vision model.
+        const std::filesystem::path eyes = dir.root.path() / "eyes";
+        write_mlx_model(eyes, MlxModelSpec{.vision = true});
+        write_fixture_file(eyes / "voices" / "af_heart.safetensors",
+                           apogee::testing::safetensors_bytes({{"voice", 16}}));
+        CHECK(read_mlx_kind(eyes).word == "vision");
+    }
+    SECTION("files that say two kinds say nothing certain, and read as they did") {
+        // A Wan's encoder and VAE beside a Kokoro's config and voices.
+        apogee::testing::write_published_mlx_kokoro(dir.model);
+        write_fixture_file(dir.model / "t5_encoder.safetensors",
+                           apogee::testing::safetensors_bytes({{"encoder.block.0.weight", 32}}));
+        write_fixture_file(dir.model / "vae.safetensors",
+                           apogee::testing::safetensors_bytes({{"decoder.conv_in.weight", 32}}));
+        CHECK(read_mlx_kind(dir.model).word == "chat");
+        CHECK(read_mlx_kind(dir.model).source == MlxKindSource::Default);
+        CHECK_FALSE(read_mlx_info(dir.model).voice);
+        CHECK_FALSE(read_mlx_info(dir.model).video);
+        // An embedding pipeline with towers beside a video layout: its vision
+        // files read as they did.
+        const std::filesystem::path towers = dir.root.path() / "towers";
+        apogee::testing::write_published_mlx_embedding(towers, /*towers=*/true);
+        write_fixture_file(towers / "t5_encoder.safetensors",
+                           apogee::testing::safetensors_bytes({{"encoder.block.0.weight", 32}}));
+        write_fixture_file(towers / "vae.safetensors",
+                           apogee::testing::safetensors_bytes({{"decoder.conv_in.weight", 32}}));
+        CHECK(read_mlx_kind(towers).word == "vision");
+        CHECK(read_mlx_kind(towers).source == MlxKindSource::Files);
+        // A draft head is read first, as 53i reads it, whatever is beside it.
+        const std::filesystem::path head = dir.root.path() / "head";
+        mlx_dir(head, apogee::testing::kGemma4AssistantE4BConfig, "");
+        write_fixture_file(head / "modules.json",
+                           R"([{"idx": 1, "path": "1_Pooling",
+                                "type": "sentence_transformers.models.Pooling"}])");
+        CHECK(read_mlx_kind(head).word == "drafter");
+    }
 }

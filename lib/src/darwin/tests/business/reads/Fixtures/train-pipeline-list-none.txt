@@ -1,0 +1,1 @@
+no named pipelines -- add one under training.pipelines, or run a spec file with 'apogee train pipeline run --pipeline <file>'

@@ -30,6 +30,25 @@
 /// vision model's template places images by -- and only to a driver whose
 /// `ready` said `vision`. A driver from before 27c never says it, so it is
 /// never sent one.
+///
+/// **So is audio** (53g): a recording crosses as `{"type": "audio", "audio":
+/// <path>}` where its part sits -- the WAV the provider wrote for the turn,
+/// decoded by Apogee's one ffmpeg before it ever reached the provider -- and
+/// only to a driver whose `ready` said `audio`. The driver hands the paths
+/// to mlx-vlm as they are; it decodes nothing.
+///
+/// **So is a drafter** (53i): a driver started with `--draft` loads it beside
+/// the model through mlx-vlm's `load_drafter` and says so in its `ready`
+/// (`draft`, `draft_kind`, `draft_block_size`); every turn then runs through
+/// mlx-vlm's speculative path. Nothing a request carries changes.
+///
+/// **So are vectors** (53h), spoken by a second driver over the same framing:
+/// `mlx_embed.py`, one process per embedding provider holding a model
+/// mlx-embeddings built. In, `{"type": "embed", "id": N, "texts": [...]}`;
+/// out, its `ready` saying `embedding` and then one `{"type": "vectors",
+/// "id": N, "vectors": [[...], ...]}` per request, a vector per text in the
+/// order sent -- the pooled, normalized `text_embeds` -- or the request's
+/// `error`. Neither driver is ever sent the other's request.
 namespace apogee::backends::mlx {
 
 /// The protocol version this build speaks; the driver's `ready` names its.
@@ -52,6 +71,10 @@ struct GenerateRequest {
     /// False for a side request: answered on a cache of its own, so the
     /// conversation's is left exactly as it was.
     bool session = true;
+    /// The turn's recordings (53g): one WAV file per audio part, in the order
+    /// the parts appear in the messages, the n-th part crossing as the n-th
+    /// path. A part with no path left for it is not sent.
+    std::vector<std::string> audio_files{};
 };
 
 /// The request as one line, without its newline.
@@ -59,6 +82,16 @@ struct GenerateRequest {
 
 /// Asks the driver to end request `id`'s generation.
 [[nodiscard]] std::string cancel_line(std::int64_t id);
+
+/// One `embed` request (53h): a batch of texts, each to become one vector.
+struct EmbedRequest {
+    /// Increasing per provider, as a `generate`'s is.
+    std::int64_t id = 0;
+    std::vector<std::string> texts{};
+};
+
+/// The request as one line, without its newline.
+[[nodiscard]] std::string embed_line(const EmbedRequest& request);
 
 /// One line from the driver.
 struct Event {
@@ -75,6 +108,8 @@ struct Event {
         Done,
         /// `error_kind` and `text` are set; `id` when a request caused it.
         Error,
+        /// An `embed` request's answer (53h): `vectors` is set.
+        Vectors,
     };
 
     Kind kind = Kind::Text;
@@ -104,6 +139,31 @@ struct Event {
     /// and that package's version.
     bool vision = false;
     std::string mlx_vlm_version;
+    /// Ready: the driver hands a turn's recordings to the model (53g) --
+    /// mlx-vlm's own audio input, under `--vision`. A driver from before 53g
+    /// never says it, so it is never sent one.
+    bool audio = false;
+    /// Ready: the adapter applied over the model (53a), empty for none. A
+    /// driver from before 53a never names one, so a start that asked for one
+    /// and hears none is refused rather than answered from the bare base.
+    std::string adapter{};
+    /// Ready: the drafter loaded beside the model (53i), the kind mlx-vlm
+    /// resolved it as (`mtp`) and the block size it drafts with -- 0 for the
+    /// drafter's own. A driver from before 53i never names one, so a start
+    /// that asked for one and hears none is refused rather than answered
+    /// from the base alone as if drafting.
+    std::string draft{};
+    std::string draft_kind{};
+    std::int64_t draft_block_size = 0;
+    /// Ready: the embedding driver loaded its model through mlx-embeddings
+    /// (53h), and that package's version. The generation driver never says
+    /// it, so a provider that started the wrong one is told so.
+    bool embedding = false;
+    std::string mlx_embeddings_version{};
+    /// Vectors: one per text of the request, in its order. A line whose
+    /// `vectors` is not a list of number lists parses as a `protocol` error,
+    /// never as fewer vectors.
+    std::vector<std::vector<float>> vectors{};
 };
 
 /// Parses one line, or nullopt for one that is not a protocol object -- a

@@ -99,6 +99,14 @@ public:
                 }
             }
             record.dataset = dataset.string();
+            // A stage trained again -- a resume's first unpassed -- holds no
+            // score until it is evaluated again (M30): the last attempt's
+            // eval, its gate and the weights it left are not this attempt's.
+            record.eval.reset();
+            record.cumulative_score = 0.0;
+            record.cumulative_passed = false;
+            record.adapter_dir.clear();
+            record.fused_dir.clear();
             record.status = std::string{kStageTraining};
             if (const std::string failure = save(); !failure.empty()) {
                 return finish(kPipelineFailed, failure);
@@ -288,7 +296,11 @@ public:
 
 private:
     [[nodiscard]] std::string save() {
-        return write_pipeline_manifest(pipeline_dir_, manifest_);
+        std::string failure = write_pipeline_manifest(pipeline_dir_, manifest_);
+        if (failure.empty() && request_.on_manifest) {
+            request_.on_manifest(manifest_);
+        }
+        return failure;
     }
 
     void say(int index, const std::string& name, std::string_view phase, std::string message) {

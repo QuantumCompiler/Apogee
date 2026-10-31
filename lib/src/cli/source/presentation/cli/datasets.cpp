@@ -15,6 +15,8 @@
 #include "agentloop/reporter.h"
 #include "backends/factory.h"
 #include "cli/helpers.h"
+#include "cli/interrupt.h"
+#include "cli/job_stream.h"
 #include "cli/train.h"
 #include "contracts/assets.h"
 #include "contracts/errors.h"
@@ -36,7 +38,105 @@ namespace {
 
 [[noreturn]] void fail_user(const std::string& message) {
     std::cerr << "apogee datasets: " << message << "\n";
+    // A pull streaming (M30) says it as its error too.
+    tell_job_failure(message);
     throw CLI::RuntimeError(kUserError);
+}
+
+/// A pull Ctrl-C stopped (M30): what it staged removed -- the folder, when
+/// it had landed before the stop was seen -- and said as `models pull`
+/// says it, exit 130.
+[[noreturn]] void pull_cancelled(const std::filesystem::path& landed) {
+    if (!landed.empty()) {
+        std::error_code code;
+        std::filesystem::remove_all(landed, code);
+    }
+    const std::string said = "cancelled -- nothing was written";
+    std::cerr << "apogee datasets: " << said << "\n";
+    tell_job_failure(said);
+    throw CLI::RuntimeError(kCancelled);
+}
+
+/// The pull's work, under one `InterruptScope`: the listing, then the files.
+void pull_dataset(const DatasetPullRequest& request, const TransportMaker& transport) {
+    const std::optional<models::HfRef> parsed = models::parse_hf_ref(request.ref);
+    if (!parsed.has_value()) {
+        fail_user("'" + request.ref + "' is not a Hugging Face dataset ref (expected owner/name)");
+    }
+    backends::HttpClient client{transport()};
+    const std::string token = models::hf_token({});
+    const InterruptScope interrupt;
+    const harness::CancellationToken& cancellation = InterruptScope::token();
+    models::HfTree tree;
+    try {
+        tree = models::list_repo_tree(client, *parsed, models::HfRepoKind::Dataset, token,
+                                      cancellation);
+    } catch (const harness::CancelledError&) {
+        pull_cancelled({});
+    }
+    if (!tree.ok) {
+        fail_user(tree.error);
+    }
+    std::vector<models::HfFile> wanted;
+    std::int64_t total = 0;
+    for (const models::HfFile& file : tree.files) {
+        if (!parsed->file.empty() ? file.path != parsed->file
+                                  : !models::dataset_file_wanted(file.path)) {
+            continue;
+        }
+        total += file.size;
+        wanted.push_back(file);
+    }
+    if (wanted.empty()) {
+        fail_user(parsed->file.empty()
+                      ? "'" + parsed->repo_id() +
+                            "' holds no data files (Parquet, JSONL, JSON, CSV, Arrow, text)"
+                      : "no file named '" + parsed->file + "' in '" + parsed->repo_id() + "'");
+    }
+    const std::filesystem::path destination =
+        harness::training_raw_datasets_dir() / models::repo_directory_name(*parsed);
+    std::cout << "downloading " << wanted.size() << " file(s), " << human_size(total) << ", into "
+              << destination.string() << "\n";
+    std::vector<models::TreeItem> items;
+    std::vector<models::SourcePromise> promises;
+    promises.reserve(wanted.size());
+    for (const models::HfFile& file : wanted) {
+        promises.emplace_back();
+        models::TreeItem item;
+        item.relative = file.path;
+        item.source = models::http_source(client, *parsed, models::HfRepoKind::Dataset, file, token,
+                                          cancellation, promises.back());
+        item.promise = promises.back();
+        items.push_back(std::move(item));
+    }
+    // On a stream, the bytes are events (52b's relay); otherwise the line.
+    DownloadProgress progress{std::cout, job_download_options()};
+    const models::AcquireTreeResult result = models::acquire_tree(
+        destination, items,
+        [&progress](std::size_t index, std::size_t count, std::string_view relative,
+                    std::int64_t written,
+                    std::int64_t size) { progress.file(index, count, relative, written, size); });
+    progress.finish();
+    if (cancellation.stop_requested()) {
+        // The ladder removed its staging tree; a folder that landed as the
+        // stop came goes too, so a Ctrl-C always leaves nothing.
+        pull_cancelled(result.ok ? result.path : std::filesystem::path{});
+    }
+    if (!result.ok) {
+        fail_user(result.error);
+    }
+    std::cout << "\n"
+              << result.path.string() << "\n"
+              << result.files << " file(s), " << human_size(result.bytes) << "\n"
+              << "\nConvert it with:  apogee datasets prepare " << result.path.string() << "\n";
+    if (JobStream* job = JobStream::current(); job != nullptr) {
+        // Last: where the dataset landed, the folder `datasets prepare` takes.
+        job->events().emit_document(nlohmann::json{{"object", "dataset.pull"},
+                                                   {"ref", request.ref},
+                                                   {"path", result.path.string()},
+                                                   {"files", result.files},
+                                                   {"bytes", result.bytes}});
+    }
 }
 
 [[nodiscard]] harness::Config load_config_strict(const RootContext& context,
@@ -514,68 +614,23 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
     CLI::App* pull = cmd->add_subcommand(
         "pull", "Download a Hugging Face dataset's files for 'datasets prepare'");
     pull->add_option("ref", *pull_ref, "owner/name[@revision][:file]")->required();
-    pull->callback([pull_ref]() {
-        const std::optional<models::HfRef> parsed = models::parse_hf_ref(*pull_ref);
-        if (!parsed.has_value()) {
-            fail_user("'" + *pull_ref +
-                      "' is not a Hugging Face dataset ref (expected owner/name)");
-        }
-        backends::HttpClient client{std::make_unique<backends::CurlTransport>()};
-        const std::string token = models::hf_token({});
-        const harness::CancellationToken cancellation;
-        const models::HfTree tree = models::list_repo_tree(
-            client, *parsed, models::HfRepoKind::Dataset, token, cancellation);
-        if (!tree.ok) {
-            fail_user(tree.error);
-        }
-        std::vector<models::HfFile> wanted;
-        std::int64_t total = 0;
-        for (const models::HfFile& file : tree.files) {
-            if (!parsed->file.empty() ? file.path != parsed->file
-                                      : !models::dataset_file_wanted(file.path)) {
-                continue;
-            }
-            total += file.size;
-            wanted.push_back(file);
-        }
-        if (wanted.empty()) {
-            fail_user(parsed->file.empty()
-                          ? "'" + parsed->repo_id() +
-                                "' holds no data files (Parquet, JSONL, JSON, CSV, Arrow, text)"
-                          : "no file named '" + parsed->file + "' in '" + parsed->repo_id() + "'");
-        }
-        const std::filesystem::path destination =
-            harness::training_raw_datasets_dir() / models::repo_directory_name(*parsed);
-        std::cout << "downloading " << wanted.size() << " file(s), " << human_size(total)
-                  << ", into " << destination.string() << "\n";
-        std::vector<models::TreeItem> items;
-        std::vector<models::SourcePromise> promises;
-        promises.reserve(wanted.size());
-        for (const models::HfFile& file : wanted) {
-            promises.emplace_back();
-            models::TreeItem item;
-            item.relative = file.path;
-            item.source = models::http_source(client, *parsed, models::HfRepoKind::Dataset, file,
-                                              token, cancellation, promises.back());
-            item.promise = promises.back();
-            items.push_back(std::move(item));
-        }
-        DownloadProgress progress{std::cout, stdout_download_options()};
-        const models::AcquireTreeResult result = models::acquire_tree(
-            destination, items,
-            [&progress](std::size_t index, std::size_t count, std::string_view relative,
-                        std::int64_t written, std::int64_t size) {
-                progress.file(index, count, relative, written, size);
-            });
-        progress.finish();
-        if (!result.ok) {
-            fail_user(result.error);
-        }
-        std::cout << "\n"
-                  << result.path.string() << "\n"
-                  << result.files << " file(s), " << human_size(result.bytes) << "\n"
-                  << "\nConvert it with:  apogee datasets prepare " << result.path.string() << "\n";
+    // The pull's progress as events, where it landed last (M30).
+    auto pull_format = std::make_shared<JobFormat>(JobFormat::Text);
+    add_job_format(pull, pull_format, false, "a document naming where the dataset landed last");
+    pull->callback([pull_ref, pull_format]() {
+        run_dataset_pull(
+            DatasetPullRequest{.ref = *pull_ref, .stream = *pull_format == JobFormat::StreamJson});
     });
+}
+
+void run_dataset_pull(const DatasetPullRequest& request, const TransportMaker& transport) {
+    if (!request.stream) {
+        pull_dataset(request, transport);
+        return;
+    }
+    // Open while the pull runs: what it tells, it tells this stream.
+    JobStream job{"datasets pull"};
+    run_job_body([&]() { pull_dataset(request, transport); });
 }
 
 }  // namespace apogee::commands

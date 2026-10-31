@@ -1,0 +1,3 @@
+Would merge into Compressor (component): compressor unit
+1 group(s), 1 entity(ies) would merge at threshold 0.92.
+Dry run -- nothing was changed.

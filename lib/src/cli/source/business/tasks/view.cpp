@@ -22,6 +22,27 @@ namespace {
     return out;
 }
 
+/// Whether a process runs a task now, from the task lock's holder -- only
+/// while its ledger says planning or running: that task's live holder's
+/// process, or else interrupted. The one rule the view and a listing's row
+/// both read (M32).
+struct Liveness {
+    std::optional<long> process{};
+    bool interrupted = false;
+};
+
+[[nodiscard]] Liveness liveness(const Task& task, const std::optional<LockHolder>& holder) {
+    Liveness out;
+    if (task.status == kPlanning || task.status == kRunning) {
+        if (holder.has_value() && holder->running && holder->task_id == task.id) {
+            out.process = holder->pid;
+        } else {
+            out.interrupted = true;
+        }
+    }
+    return out;
+}
+
 }  // namespace
 
 TurnView make_turn_view(const Round& round) {
@@ -76,13 +97,9 @@ TaskView make_task_view(const Task& task, const std::optional<LockHolder>& holde
     TaskView view;
     view.id = task.id;
     view.status = task.status;
-    if (task.status == kPlanning || task.status == kRunning) {
-        if (holder.has_value() && holder->running && holder->task_id == task.id) {
-            view.process = holder->pid;
-        } else {
-            view.interrupted = true;
-        }
-    }
+    const Liveness live = liveness(task, holder);
+    view.process = live.process;
+    view.interrupted = live.interrupted;
     view.goal = task.goal;
     view.conversation = task.session_id;
     view.folder = task.working_directory;
@@ -108,9 +125,10 @@ TaskView make_task_view(const Task& task, const std::optional<LockHolder>& holde
     return view;
 }
 
-TaskSummary make_task_summary(const Task& task) {
+TaskSummary make_task_summary(const Task& task, const std::optional<LockHolder>& holder) {
     return TaskSummary{.id = task.id,
                        .status = task.status,
+                       .interrupted = liveness(task, holder).interrupted,
                        .rounds_used = rounds_used(task),
                        .rounds_budget = task.rounds_budget,
                        .goal = task.goal};
@@ -182,18 +200,20 @@ nlohmann::json to_json(const TaskView& view) {
 nlohmann::json to_json(const TaskSummary& summary) {
     return nlohmann::json{{"id", summary.id},
                           {"status", summary.status},
+                          {"interrupted", summary.interrupted},
                           {"rounds_used", summary.rounds_used},
                           {"rounds_budget", summary.rounds_budget},
                           {"goal", summary.goal}};
 }
 
-TaskListView make_task_list(const std::vector<Task>& tasks, bool all) {
+TaskListView make_task_list(const std::vector<Task>& tasks, bool all,
+                            const std::optional<LockHolder>& holder) {
     TaskListView list;
     list.total = tasks.size();
     const std::size_t shown = all ? tasks.size() : std::min(tasks.size(), kListLimit);
     list.shown.reserve(shown);
     for (std::size_t index = 0; index < shown; ++index) {
-        list.shown.push_back(make_task_summary(tasks[index]));
+        list.shown.push_back(make_task_summary(tasks[index], holder));
     }
     return list;
 }

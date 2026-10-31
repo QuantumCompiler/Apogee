@@ -22,7 +22,8 @@ if ! command -v curl >/dev/null 2>&1; then
     exit 0
 fi
 
-rm -rf "$WORK_DIR"
+. "$(dirname "$0")/sandbox.sh"
+WORK_DIR="$(sandbox_dir "$WORK_DIR")"
 mkdir -p "$WORK_DIR"
 export APOGEE_HOME="$WORK_DIR"
 # A developer's own keys stay out of the suite (the resolver reads the environment).
@@ -83,7 +84,7 @@ else
 fi
 
 # --- health ------------------------------------------------------------------
-curl -s "$BASE/health" | grep -q '"status":"ok"' || fail "/health did not answer ok"
+curl -s "$BASE/health" | grep '"status":"ok"' >/dev/null || fail "/health did not answer ok"
 
 # --- a session over HTTP, continued, then resumed from the terminal ----------
 curl -s -D "$WORK_DIR/headers.txt" -o "$WORK_DIR/turn1.json" \
@@ -99,7 +100,7 @@ curl -s -o "$WORK_DIR/turn2.json" -H 'Content-Type: application/json' \
     "$BASE/v1/chat/completions" || fail "turn 2 failed"
 grep -q "\"session_id\":\"$SID\"" "$WORK_DIR/turn2.json" || fail "turn 2 did not echo the session id"
 
-curl -s "$BASE/v1/sessions/$SID" | grep -q '"turn_count":2' || fail "the session did not record two turns"
+curl -s "$BASE/v1/sessions/$SID" | grep '"turn_count":2' >/dev/null || fail "the session did not record two turns"
 
 # The same conversation, continued from the terminal: a served session is a
 # chat session. Three user turns end up on disk.

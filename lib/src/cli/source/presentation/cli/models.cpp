@@ -153,11 +153,17 @@ void pad(std::ostringstream& out, const std::string& value, std::size_t width, b
 /// its size -- all from its files.
 void render_mlx_files(std::ostream& out, const models::MlxInfo& info,
                       const harness::BackendConfig& backend) {
+    // A video model's files are mlx-video's layout's, with no tokenizer and
+    // no token window (53k); a voice model's mlx-audio's, the same (53m).
     out << "files:        "
-        << (info.complete
-                ? "whole -- config.json, a tokenizer and " + std::to_string(info.shards.size()) +
+        << (!info.complete ? info.problem
+            : info.video || info.voice
+                ? "whole -- " +
+                      std::string{info.video ? models::kMlxVideoFiles : models::kMlxVoiceFiles} +
+                      ", " + std::to_string(info.shards.size()) +
                       " shard(s), each holding every byte its header lists"
-                : info.problem)
+                : "whole -- config.json, a tokenizer and " + std::to_string(info.shards.size()) +
+                      " shard(s), each holding every byte its header lists")
         << "\n";
     if (info.config_read) {
         out << "quantization: " << info.quantization.describe()
@@ -165,6 +171,11 @@ void render_mlx_files(std::ostream& out, const models::MlxInfo& info,
                     ? ""
                     : "; not in mlx-lm's own format -- it converts the weights as it loads them")
             << "\n";
+    }
+    if (info.video || info.voice) {
+        out << "size:         " << format_progress_size(static_cast<std::int64_t>(info.bytes))
+            << " on disk\n";
+        return;
     }
     const models::MlxWindow window = models::mlx_window(info, backend);
     out << "window:       ";
@@ -179,6 +190,22 @@ void render_mlx_files(std::ostream& out, const models::MlxInfo& info,
     }
     out << "size:         " << format_progress_size(static_cast<std::int64_t>(info.bytes))
         << " on disk\n";
+}
+
+/// `info`'s `voices:` lines (50a): a voice model's voices, one continuation
+/// line per language -- the original's packs, or since 53m an MLX build's.
+void render_voices(std::ostream& out, const models::VoiceInfo& info) {
+    bool first = true;
+    for (const std::string& language : info.languages()) {
+        std::string names;
+        for (const models::VoicePack& voice : info.voices) {
+            if (voice.language == language) {
+                names += (names.empty() ? "" : ", ") + voice.name;
+            }
+        }
+        out << (first ? "voices:       " : "              ") << language << ": " << names << "\n";
+        first = false;
+    }
 }
 
 /// The store `models_dir` and the config's `paths.hf_dir` make.
@@ -300,6 +327,13 @@ void fill_provider_columns(ModelRow& row, const harness::BackendConfig& backend,
     backends::ProviderStatus present = *status;
     present.verified.reset();  // VERIFIED says that; STATE is what is there
     row.state = std::string{backends::to_string(present.tier())};
+}
+
+/// A pairing's state in the CLI's words (M32): the ladder's answer (53i) as
+/// `models info`'s draft line and a `models list` row both say it.
+[[nodiscard]] ModelDraft model_draft(const backends::MlxDraft& draft) {
+    return ModelDraft{
+        .path = draft.dir.string(), .can_draft = draft.pairs(), .refusal = draft.message()};
 }
 
 }  // namespace
@@ -447,13 +481,39 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
                 if (files.config_read) {
                     row.quant = files.quantization.describe();
                 }
-                row.window = models::describe(models::mlx_window(files, backend));
+                // A video model has no token window (53k), nor a voice
+                // model (53m).
+                row.window = files.video || files.voice
+                                 ? "-"
+                                 : models::describe(models::mlx_window(files, backend));
+                // What the directory is (53e), when there is one: an entry
+                // over a kind no mlx backend chats with is said to be one.
+                std::error_code code;
+                const bool there = std::filesystem::is_directory(dir, code);
+                const models::MlxKind kind = there ? models::read_mlx_kind(dir) : models::MlxKind{};
+                if (there) {
+                    row.kind = kind.word;
+                }
                 if (readiness.ready() && !files.complete) {
                     row.state = "cannot load";
                     row.attention = true;
                     row.note = files.problem;
+                } else if (readiness.ready() && kind.embeds()) {
+                    // An embedding entry (53h): the embedding role's, said
+                    // as such, its vectors' width beside it.
+                    row.note = models::describe_mlx_kind(kind.word) + "; vectors " +
+                               models::describe(models::read_mlx_embedding_width(dir));
+                } else if (readiness.ready() && !kind.backend()) {
+                    row.attention = true;
+                    row.note = models::describe_mlx_kind(kind.word);
                 } else if (readiness.ready()) {
                     row.note = mlx_summary(files, backend);
+                }
+                if (!backend.draft.empty()) {
+                    // The drafter the entry names (M32): whether it drafts
+                    // beside the model, as its `models info` says it.
+                    row.draft = model_draft(backends::probe_mlx_draft(
+                        dir, backend.draft, backends::MlxHost::current()));
                 }
             }
             if (!readiness.ready()) {
@@ -605,7 +665,12 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
                                ? std::to_string(record->files.size()) + " file(s) on record"
                                : "no record";
             // No note for a healthy one: its state column already says what
-            // it is, and a line under every snapshot was noise.
+            // it is, and a line under every snapshot was noise -- unless it is
+            // a draft head, which no conversion makes runnable (2026-10-21).
+            if (const std::optional<models::DraftHead> head =
+                    models::snapshot_draft_head(stored.dir)) {
+                row.note = models::draft_head_note(*head, models::draft_head_bases(roots, *head));
+            }
             if (models::config_is_download_record(stored.dir)) {
                 row.attention = true;
                 row.note = "damaged by an older pull -- 'apogee models repair " + stored.model +
@@ -648,9 +713,18 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
             if (info.config_read) {
                 row.quant = info.quantization.describe();
             }
-            row.window = models::describe(models::mlx_window(info, {}));
+            // A video model has no token window (53k), nor a voice model (53m).
+            row.window =
+                info.video || info.voice ? "-" : models::describe(models::mlx_window(info, {}));
             row.attention = !info.complete;
             row.note = info.complete ? mlx_summary(info) : info.problem;
+            // Listed as its kind (53e): one no mlx backend chats with says
+            // what it is and what uses it in place of a backend's summary.
+            const models::MlxKind kind = models::read_mlx_kind(stored.dir);
+            row.kind = kind.word;
+            if (info.complete && !kind.backend()) {
+                row.note = models::describe_mlx_kind(kind.word);
+            }
             rows.push_back(std::move(row));
         }
 
@@ -982,10 +1056,19 @@ nlohmann::json model_row_json(const ModelRow& row) {
     for (const auto& [key, value] :
          {std::pair<const char*, const std::string&>{"format", row.format},
           std::pair<const char*, const std::string&>{"quant", row.quant},
-          std::pair<const char*, const std::string&>{"window", row.window}}) {
+          std::pair<const char*, const std::string&>{"window", row.window},
+          std::pair<const char*, const std::string&>{"kind", row.kind}}) {
         if (!value.empty()) {
             object[key] = value;
         }
+    }
+    if (row.draft.has_value()) {
+        // An `mlx` entry's drafter (M32): `refusal` only when it cannot draft.
+        nlohmann::json draft{{"path", row.draft->path}, {"can_draft", row.draft->can_draft}};
+        if (!row.draft->can_draft) {
+            draft["refusal"] = row.draft->refusal;
+        }
+        object["draft"] = std::move(draft);
     }
     if (row.components > 0) {
         object["components"] = row.components;
@@ -1236,6 +1319,20 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     return out;
 }
 
+/// The backends whose `draft:` is the drafter at `path` (53i), joined.
+[[nodiscard]] std::string backends_drafting_with(const harness::Config& config,
+                                                 const std::filesystem::path& path) {
+    std::string out;
+    for (const auto& [key, backend] : config.backends) {
+        if (!backend.draft.empty() &&
+            comparable(std::filesystem::path{harness::expand_env_and_home(backend.draft)}) ==
+                comparable(path)) {
+            out += (out.empty() ? "" : ", ") + key;
+        }
+    }
+    return out;
+}
+
 /// `info` on one stored GGUF, by its handle: the file, where it came from,
 /// and its header -- for a model no backend points at yet (M4).
 [[nodiscard]] std::string render_stored_gguf(const harness::Config& config,
@@ -1260,6 +1357,70 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     return out.str();
 }
 
+/// The MLX conversion a SafeTensors set is offered (53f) -- which converter,
+/// its towers kept or its language model alone -- where its files make `mlx`
+/// a format it takes at all (M20, M21; an embedding model's where the
+/// installed mlx-embeddings builds it, 53h); nullopt where they do not.
+[[nodiscard]] std::optional<MlxOffer> set_mlx_offer(const std::filesystem::path& dir) {
+    const std::vector<std::string> formats = models::snapshot_conversions(
+        dir, installed_mlx_embedding_builds(), installed_mlx_drafter_builds(),
+        installed_mlx_video_converts());
+    if (std::ranges::find(formats, std::string{models::kMlxFormat}) == formats.end()) {
+        return std::nullopt;
+    }
+    return installed_mlx_offer(dir);
+}
+
+/// The formats a SafeTensors set converts to: the one decision from its files
+/// (M20, M21), MLX left out where no converter installed builds it -- never
+/// offered where it cannot work (the user's call, 2026-10-21).
+[[nodiscard]] std::vector<std::string> set_conversions(const std::filesystem::path& dir,
+                                                       const std::optional<MlxOffer>& offer) {
+    std::vector<std::string> conversions = models::snapshot_conversions(
+        dir, installed_mlx_embedding_builds(), installed_mlx_drafter_builds(),
+        installed_mlx_video_converts());
+    if (!offer.has_value() || !offer->offered()) {
+        std::erase(conversions, std::string{models::kMlxFormat});
+    }
+    return conversions;
+}
+
+/// `info`'s `towers:` line for a set that has them (53f): which converter an
+/// MLX conversion runs, whether its towers are kept, and what asks for its
+/// language model alone -- or why no MLX conversion is offered.
+[[nodiscard]] std::string towers_line(const MlxOffer& offer) {
+    std::string out = models::describe_towers(offer.towers) + " -- ";
+    if (offer.converter.has_value()) {
+        out += "--mlx builds it through mlx-vlm, its towers kept";
+        if (offer.text_only) {
+            out += "; --mlx --text-only builds its language model alone with mlx-lm";
+        }
+    } else if (offer.text_only) {
+        out += offer.gap + ", so --mlx --text-only builds its language model alone with mlx-lm";
+        if (!offer.remedy.empty()) {
+            out += "; '" + offer.remedy + "' keeps them";
+        }
+    } else {
+        out += "no MLX conversion: " + offer.gap + ", and the mlx-lm there builds no " +
+               (offer.type.empty() ? std::string{"model of its type"} : offer.type + " model");
+    }
+    return out;
+}
+
+/// `data.mlx_conversion` (53f): what an MLX conversion of the set runs,
+/// where one is offered; null where none is.
+[[nodiscard]] nlohmann::json mlx_conversion_of(const std::optional<MlxOffer>& offer) {
+    if (!offer.has_value() || !offer->offered()) {
+        return nullptr;
+    }
+    nlohmann::json out{
+        {"towers", offer->towers}, {"converter", nullptr}, {"text_only", offer->text_only}};
+    if (offer->converter.has_value()) {
+        out["converter"] = std::string{training::to_string(*offer->converter)};
+    }
+    return out;
+}
+
 /// `info` on one stored SafeTensors set: where it came from, what was made
 /// of it, and whether the listing folds it (M4).
 [[nodiscard]] std::string render_snapshot(const harness::Config& config,
@@ -1271,7 +1432,54 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     std::ostringstream out;
     out << "weights:      " << handle << "\n";
     out << "path:         " << stored.dir.string() << "\n";
-    out << "format:       SafeTensors -- full weights, trainable, not runnable\n";
+    const std::optional<models::DraftHead> head = models::snapshot_draft_head(stored.dir);
+    const std::optional<models::DiffusionModel> diffusion =
+        models::stored_diffusion_model(roots, stored.dir, installed_mlx_video_converts());
+    std::optional<MlxOffer> offer;
+    if (head.has_value()) {
+        // An MLX drafter, where the installed mlx-vlm drafts its type (53i);
+        // where it does not, why.
+        offer = installed_mlx_offer(stored.dir);
+        const bool drafts = offer->offered();
+        out << "format:       SafeTensors -- a draft head's weights, not runnable"
+            << (drafts ? "; --mlx converts it to a drafter" : " and not convertible") << "\n";
+        out << "draft head:   "
+            << models::describe_draft_head(*head, models::draft_head_bases(roots, *head)) << "\n";
+        out << "drafter:      "
+            << (drafts ? std::string{"--mlx builds it through mlx-vlm, a drafter an mlx backend "
+                                     "over its base runs beside it (its draft)"}
+                       : "no MLX drafter: " + offer->gap +
+                             (offer->remedy.empty() ? "" : " -- '" + offer->remedy + "'"))
+            << "\n";
+    } else if (diffusion.has_value()) {
+        // Wan's original layout converts to an MLX video model through
+        // mlx-video, whole and with it installed (53k); the line says what
+        // else it needs.
+        offer = set_mlx_offer(stored.dir);
+        out << "format:       SafeTensors -- a diffusion model's weights, not runnable"
+            << (diffusion->mlx_convertible() ? "; --mlx converts it to an MLX video model"
+                                             : " and not convertible")
+            << "\n";
+        out << "diffusion:    " << models::describe_diffusion_model(*diffusion) << "\n";
+    }
+    if (!head.has_value() && !diffusion.has_value()) {
+        offer = set_mlx_offer(stored.dir);
+        out << "format:       SafeTensors -- full weights, trainable, not runnable\n";
+        if (const std::optional<models::EmbeddingModel> embedding =
+                models::snapshot_embedding_model(stored.dir)) {
+            // M21's words, unless the installed mlx-embeddings builds it (53h).
+            const bool mlx = offer.has_value() && offer->offered();
+            out << "embedding:    "
+                << (mlx ? models::describe_embedding_model_both(*embedding)
+                        : models::describe_embedding_model(*embedding))
+                << "\n";
+        }
+        // What sees or hears beside the language model, and which MLX
+        // conversion keeps it (53f).
+        if (offer.has_value() && !offer->towers.empty()) {
+            out << "towers:       " << towers_line(*offer) << "\n";
+        }
+    }
     render_lineage(out, lineage, lineage.origin_of(handle));
     const std::string architecture = models::snapshot_architecture(stored.dir);
     out << "architecture: " << (architecture.empty() ? "-" : architecture) << "\n";
@@ -1289,9 +1497,32 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
             mlx_made.push_back(models::weights_handle(mlx.model, models::kMlxFormat, mlx.id));
         }
     }
-    if (!consumed.has_value() && mlx_made.empty()) {
-        out << "made from it: nothing yet -- 'apogee models convert " << handle
-            << "' makes a GGUF of it (--mlx an MLX model)\n";
+    const std::vector<std::string> conversions = set_conversions(stored.dir, offer);
+    if (!consumed.has_value() && mlx_made.empty() && conversions.empty()) {
+        // What no conversion takes is offered none (M20).
+        out << "made from it: nothing -- no conversion takes these weights\n";
+    } else if (!consumed.has_value() && mlx_made.empty()) {
+        // Only what can work is offered (M21), and only its language model
+        // where that is all an installed converter keeps (53f).
+        const bool mlx =
+            std::ranges::find(conversions, std::string{models::kMlxFormat}) != conversions.end();
+        const bool text_only = mlx && offer.has_value() && !offer->converter.has_value();
+        if (head.has_value()) {
+            // Its one conversion: a drafter, never a GGUF (53i).
+            out << "made from it: nothing yet -- 'apogee models convert " << handle
+                << " --mlx' makes an MLX drafter of it\n";
+        } else if (diffusion.has_value()) {
+            // Its one conversion: an MLX video model, never a GGUF (53k).
+            out << "made from it: nothing yet -- 'apogee models convert " << handle
+                << " --mlx' makes an MLX video model of it\n";
+        } else {
+            out << "made from it: nothing yet -- 'apogee models convert " << handle
+                << "' makes a GGUF of it"
+                << (text_only ? " (--mlx --text-only an MLX model of its language model)"
+                    : mlx     ? " (--mlx an MLX model)"
+                              : "")
+                << "\n";
+        }
     } else {
         bool first = true;
         if (consumed.has_value()) {
@@ -1325,22 +1556,64 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     std::ostringstream out;
     out << "weights:      " << models::weights_handle(stored.model, models::kMlxFormat, stored.id)
         << "\n";
+    // What kind it is decides what runs it (53e): a backend's hint and
+    // template line only for a kind an mlx backend chats with.
+    const models::MlxKind kind = models::read_mlx_kind(stored.dir);
     const std::string backends = backends_on(config, stored.dir);
-    out << "backends:     "
-        << (backends.empty()
-                ? "none -- 'apogee config add-backend " + models::stored_mlx_name(stored) +
-                      " --type mlx --model-path <the path below>'"
-                : backends)
-        << "\n";
+    out << "backends:     ";
+    if (!backends.empty()) {
+        out << backends;
+    } else if (kind.backend()) {
+        out << "none -- 'apogee config add-backend " << models::stored_mlx_name(stored)
+            << " --type mlx --model-path <the path below>'";
+    } else if (kind.embeds()) {
+        // An mlx entry the embedding role names (53h).
+        out << "none -- 'apogee config add-backend " << models::stored_mlx_name(stored)
+            << " --type mlx --model-path <the path below>', then 'apogee config "
+               "set-default-embedding "
+            << models::stored_mlx_name(stored) << "'";
+    } else if (kind.word == models::kMlxDrafter) {
+        // A drafter runs as a backend's draft, never as one (53i).
+        const std::string drafting = backends_drafting_with(config, stored.dir);
+        out << (drafting.empty() ? "none -- it runs as the draft of an mlx backend over its "
+                                   "base: 'apogee config set-backend <that backend> --draft "
+                                   "<the path below>'"
+                                 : "none of its own; the draft of " + drafting);
+    } else {
+        out << "none -- no chat backend runs it; the kind line says what does";
+    }
+    out << "\n";
     out << "model_path:   " << stored.dir.string() << "\n";
-    out << "format:       MLX -- runs on an mlx backend (Apple silicon)\n";
+    out << "format:       "
+        << (kind.backend()  ? "MLX -- runs on an mlx backend (Apple silicon)"
+            : kind.embeds() ? "MLX -- an mlx backend embeds with it (Apple silicon)"
+                            : "MLX (Apple silicon)")
+        << "\n";
+    out << "kind:         " << models::describe(kind) << "\n";
+    if (const std::optional<models::MlxDrafter> drafter = models::read_mlx_drafter(stored.dir)) {
+        // What it drafts for, and the bases its record names (53i).
+        out << "drafter:      " << models::describe(*drafter) << "\n";
+    }
+    if (kind.embeds()) {
+        // How wide its vectors are, from its own config (53h).
+        out << "vectors:      " << models::describe(models::read_mlx_embedding_width(stored.dir))
+            << "\n";
+    }
+    if (kind.word == models::kMlxVoice) {
+        // Its voices, by language, as a voice model's are listed (53m): the
+        // presets mlx-audio's build carries.
+        render_voices(out, models::read_mlx_voice_info(stored.dir));
+    }
     out << "lineage:      " << mlx_origin(models::load_snapshot(stored.dir), roots) << "\n";
     const models::MlxInfo info = models::read_mlx_info(stored.dir);
     out << "model_type:   " << (info.model_type.empty() ? "-" : info.model_type) << "\n";
-    const backends::MlxModelInfo facts = backends::inspect_mlx_model(stored.dir);
-    out << "template:     "
-        << (facts.chat_template ? "ships with the model" : "none -- a base model, offered no tools")
-        << "\n";
+    if (kind.backend()) {
+        const backends::MlxModelInfo facts = backends::inspect_mlx_model(stored.dir);
+        out << "template:     "
+            << (facts.chat_template ? "ships with the model"
+                                    : "none -- a base model, offered no tools")
+            << "\n";
+    }
     render_mlx_files(out, info, harness::BackendConfig{});
     if (!info.complete) {
         out << "repair:       apogee models repair "
@@ -1404,37 +1677,49 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
 
 /// `info` on one stored voice model (50a): where it came from, its
 /// checkpoint, and its voices by language -- the directory read whole, or
-/// said why it cannot load.
+/// said why it cannot load. Since 53m, where mlx-audio is installed or an MLX
+/// build of it is stored, what `--mlx` makes of it and what it made; with
+/// neither, exactly as before.
 [[nodiscard]] std::string render_stored_voice(const models::StoredVoice& stored,
                                               const models::StoreRoots& roots) {
     const std::string handle =
         models::weights_handle(stored.model, models::kVoiceFormat, stored.id);
+    const models::VoiceInfo info = models::read_voice_info(stored.dir);
+    const bool converts =
+        !models::voice_conversions(stored.dir, installed_mlx_audio_converts()).empty();
+    std::vector<std::string> mlx_made;
+    for (const models::StoredMlx& mlx : models::list_store_mlx(roots, stored.model)) {
+        const std::optional<models::Snapshot> made = models::load_snapshot(mlx.dir);
+        if (made.has_value() && made->source == "convert" && made->ref == handle) {
+            mlx_made.push_back(models::weights_handle(mlx.model, models::kMlxFormat, mlx.id));
+        }
+    }
     std::ostringstream out;
     out << "weights:      " << handle << "\n";
     out << "path:         " << stored.dir.string() << "\n";
-    out << "format:       voice -- a text-to-speech model, taken whole\n";
+    out << "format:       voice -- a text-to-speech model, taken whole"
+        << (converts ? "; --mlx converts it to an MLX voice model" : "") << "\n";
     out << "lineage:      " << mlx_origin(models::load_snapshot(stored.dir), roots) << "\n";
-    const models::VoiceInfo info = models::read_voice_info(stored.dir);
     out << "files:        "
         << (info.complete
                 ? "whole -- config.json, " + info.checkpoint + " and " +
                       std::to_string(info.voices.size()) + " voice(s), each a whole archive"
                 : info.problem)
         << "\n";
-    // The voices, one continuation line per language.
-    bool first = true;
-    for (const std::string& language : info.languages()) {
-        std::string names;
-        for (const models::VoicePack& voice : info.voices) {
-            if (voice.language == language) {
-                names += (names.empty() ? "" : ", ") + voice.name;
-            }
-        }
-        out << (first ? "voices:       " : "              ") << language << ": " << names << "\n";
-        first = false;
-    }
+    render_voices(out, info);
     out << "size:         " << format_progress_size(static_cast<std::int64_t>(info.bytes))
         << " on disk\n";
+    // Its MLX builds (53m), recorded; else the one conversion it takes, where
+    // mlx-audio is there to make it.
+    bool first = true;
+    for (const std::string& made : mlx_made) {
+        out << (first ? "made from it: " : "              ") << made << " (recorded)\n";
+        first = false;
+    }
+    if (mlx_made.empty() && converts) {
+        out << "made from it: nothing yet -- 'apogee models convert " << handle
+            << " --mlx' makes an MLX voice model of it\n";
+    }
     if (!info.complete) {
         out << "repair:       apogee models repair " << handle << "\n";
     }
@@ -1604,10 +1889,35 @@ std::string render_model_info(const harness::Config& config, std::string_view na
             }
             const backends::MlxModelInfo info = backends::inspect_mlx_model(dir);
             out << "model_type:   " << (info.model_type.empty() ? "-" : info.model_type) << "\n";
+            // What the directory is (53e), when there is one to say it.
+            bool embeds = false;
+            if (std::error_code code; std::filesystem::is_directory(dir, code)) {
+                const models::MlxKind kind = models::read_mlx_kind(dir);
+                embeds = kind.embeds();
+                out << "kind:         " << models::describe(kind) << "\n";
+            }
             if (progress) {
                 progress("reading " + dir.filename().string(), 0, 0);
             }
             render_mlx_files(out, models::read_mlx_info(dir), value);
+            if (embeds) {
+                // An embedding entry (53h): its vectors' width, what embeds
+                // through it, and no chat's template, sight or sampling.
+                const backends::MlxEmbeddingsPackage package =
+                    backends::find_mlx_embeddings(backends::MlxHost::current());
+                out << "vectors:      " << models::describe(models::read_mlx_embedding_width(dir))
+                    << "\n";
+                out << "embeds:       "
+                    << (package.installed()
+                            ? "through mlx-embeddings " +
+                                  (package.version.empty() ? std::string{"(version unstated)"}
+                                                           : package.version) +
+                                  " -- the embedding role names this backend; it answers no chat"
+                            : "no -- mlx-embeddings is not installed (" +
+                                  std::string{backends::kMlxEmbeddingsRemedy} + ")")
+                    << "\n";
+                return out.str();
+            }
             out << "template:     "
                 << (info.chat_template ? "ships with the model"
                                        : "none -- a base model, offered no tools")
@@ -1624,6 +1934,44 @@ std::string render_model_info(const harness::Config& config, std::string_view na
                         : "no -- " + vision.reason +
                               (vision.remedy.empty() ? std::string{} : " (" + vision.remedy + ")"))
                 << "\n";
+            // And whether a recording is heard as it is (53g), by the rungs
+            // the provider's `accepts_audio` answers from (M23).
+            const backends::MlxAudio audio =
+                backends::probe_mlx_audio(info, backends::MlxHost::current());
+            out << "hearing:      "
+                << (audio.hears()
+                        ? "hears recordings as they are -- mlx-vlm " +
+                              (audio.vlm.version.empty() ? std::string{"(version unstated)"}
+                                                         : audio.vlm.version)
+                        : "no -- " + std::string{backends::to_string(audio.refusal)} + ": " +
+                              audio.reason +
+                              (audio.remedy.empty() ? std::string{} : " (" + audio.remedy + ")"))
+                << "\n";
+            if (!value.draft.empty()) {
+                // The drafter beside it (53i): what it is, the block it drafts
+                // in, and whether it pairs -- the ladder's own question.
+                const backends::MlxDraft draft =
+                    backends::probe_mlx_draft(dir, value.draft, backends::MlxHost::current());
+                // The words a `models list` row carries too (M32).
+                const ModelDraft said = model_draft(draft);
+                const std::int64_t block =
+                    value.draft_block_size.value_or(backends::drafter_block_size(draft.dir));
+                out << "draft:        " << said.path << " -- "
+                    << (said.can_draft
+                            ? "drafts beside it through mlx-vlm's speculative path "
+                              "(mtp, " +
+                                  (block > 0 ? "block " + std::to_string(block)
+                                             : std::string{"mlx-vlm's default block"}) +
+                                  (value.draft_block_size.has_value() ? ", draft_block_size"
+                                   : block > 0                        ? ", the drafter's own"
+                                                                      : "") +
+                                  "); the answer is the base's"
+                            : "cannot draft beside it: " + said.refusal)
+                    << "\n";
+                if (draft.drafter.has_value()) {
+                    out << "drafter:      " << models::describe(*draft.drafter) << "\n";
+                }
+            }
             const backends::ModelProfile* family =
                 backends::resolve_mlx_profile(info, value.model + " " + dir.string());
             out << "profile:      " << (family == nullptr ? "unprofiled" : family->name) << "\n";
@@ -1690,8 +2038,244 @@ std::string read_model_info(const harness::Config& config, std::string_view name
                              ProviderLens{view.get(), &cache, &store});
 }
 
-std::string render_role_status(const harness::Config& config, const BusyProgress& progress,
-                               const MachineBudgetSource& machine) {
+namespace {
+
+/// The bytes of every regular file under `dir`.
+[[nodiscard]] std::uintmax_t bytes_under(const std::filesystem::path& dir) {
+    std::uintmax_t total = 0;
+    std::error_code code;
+    for (std::filesystem::recursive_directory_iterator it{dir, code}, end; !code && it != end;
+         it.increment(code)) {
+        if (it->is_regular_file(code)) {
+            total += it->file_size(code);
+        }
+    }
+    return total;
+}
+
+[[nodiscard]] std::string_view origin_word(models::OriginKind kind) {
+    switch (kind) {
+        case models::OriginKind::Pulled:
+            return "pulled";
+        case models::OriginKind::Converted:
+            return "converted";
+        case models::OriginKind::Quantized:
+            return "quantized";
+        case models::OriginKind::Trained:
+            return "trained";
+        case models::OriginKind::Unknown:
+            break;
+    }
+    return "unknown";
+}
+
+/// Each step of `origin`'s chain as an entry: how it came, from what, its
+/// detail, and whether the record said so or the store's shape did.
+[[nodiscard]] nlohmann::json lineage_entries(const models::Lineage& lineage,
+                                             const models::Origin& origin) {
+    nlohmann::json out = nlohmann::json::array();
+    for (const models::LineageLink& link : lineage.chain(origin)) {
+        out.push_back({{"kind", std::string{origin_word(link.origin.kind)}},
+                       {"from", link.origin.from},
+                       {"detail", link.origin.detail},
+                       {"inferred", link.origin.inferred},
+                       {"missing", link.missing}});
+    }
+    return out;
+}
+
+/// A window as data: its tokens, whether the config set it, the trained
+/// window when the files state one -- null when nothing says.
+[[nodiscard]] nlohmann::json window_of(std::int64_t window, bool configured, std::int64_t trained) {
+    if (window <= 0) {
+        return nullptr;
+    }
+    return {{"tokens", window},
+            {"source", configured ? "context_size" : "default"},
+            {"trained", trained > 0 ? nlohmann::json(trained) : nlohmann::json(nullptr)}};
+}
+
+/// `models info`'s typed `data` for one stored set (52e), beside its prose
+/// `fields[]`: the format, the bytes on disk, the window and the cache it
+/// costs where the format's own reader knows them (the GGUF header, the MLX
+/// files), and the lineage as entries -- read through the same readers the
+/// prose lines are, and null where they say nothing: an unknown is never
+/// guessed. Null for a name that is not one stored set.
+[[nodiscard]] nlohmann::json stored_set_data(const harness::Config& config, std::string_view name,
+                                             const std::filesystem::path& models_dir) {
+    const models::StoreRoots roots = store_roots_for(config, models_dir);
+    const models::StoreTarget target = models::resolve_store_target(roots, name);
+    if (!target.error.empty() || target.outside || target.id.empty()) {
+        return nullptr;
+    }
+    const std::string handle = models::weights_handle(target.model, target.format, target.id);
+    const models::Lineage lineage = models::read_lineage(roots);
+    nlohmann::json data{
+        {"format", target.format},           {"handle", handle},  {"bytes", nullptr},
+        {"architecture", nullptr},           {"window", nullptr}, {"cache", nullptr},
+        {"lineage", nlohmann::json::array()}};
+    // A SafeTensors set's conversions, below; null for what conversions make.
+    data["converts_to"] = nullptr;
+    // Which converter its MLX conversion runs (53f), below; null where none.
+    data["mlx_conversion"] = nullptr;
+    // An MLX directory's kind, below (53e); null for every other format.
+    data["kind"] = nullptr;
+    // An MLX embedding model's vector width, below (53h); null otherwise.
+    data["vector_width"] = nullptr;
+    // Wan's original layout, whole or what it lacks, below (53j); null for
+    // every other set and format.
+    data["wan_layout"] = nullptr;
+    if (target.format == models::kGgufFormat) {
+        for (const models::StoredGguf& stored : models::list_store_ggufs(roots, target.model)) {
+            if (stored.id != target.id) {
+                continue;
+            }
+            data["bytes"] = bytes_under(stored.dir);
+            data["lineage"] =
+                lineage_entries(lineage, lineage.origin_of(stored.file, std::nullopt));
+            const models::GgufInfo info = models::inspect_gguf(stored.file);
+            if (info.parsed && !info.is_projector()) {
+                if (!info.architecture.empty()) {
+                    data["architecture"] = info.architecture;
+                }
+                const models::LocalWindow window = models::local_window(info, {});
+                data["window"] = window_of(window.window, window.configured, window.trained);
+                if (window.cache_bytes.has_value()) {
+                    data["cache"] = {{"bytes", *window.cache_bytes},
+                                     {"type", std::string{harness::to_string(window.cache_type)}},
+                                     {"sliding_positions", window.sliding_positions}};
+                }
+            }
+            return data;
+        }
+        return nullptr;
+    }
+    if (target.format == models::kMlxFormat) {
+        for (const models::StoredMlx& stored : models::list_store_mlx(roots, target.model)) {
+            if (stored.id != target.id) {
+                continue;
+            }
+            const models::MlxInfo info = models::read_mlx_info(stored.dir);
+            data["bytes"] = info.bytes;
+            if (!info.architecture.empty()) {
+                data["architecture"] = info.architecture;
+            }
+            // A video model states no token window (53k), nor a voice
+            // model (53m): null, as a pipeline's is.
+            if (!info.video && !info.voice) {
+                const models::MlxWindow window = models::mlx_window(info, {});
+                data["window"] = window_of(window.window, window.configured, window.trained);
+            }
+            const models::MlxKind kind = models::read_mlx_kind(stored.dir);
+            data["kind"] = kind.word;
+            if (const models::MlxEmbeddingWidth width =
+                    models::read_mlx_embedding_width(stored.dir);
+                kind.embeds() && width.known()) {
+                data["vector_width"] = width.width;
+            }
+            // The record it was made by: a pull's ref, or the set a
+            // conversion read.
+            if (const std::optional<models::Snapshot> record = models::load_snapshot(stored.dir);
+                record.has_value()) {
+                data["lineage"].push_back(
+                    {{"kind", record->source == "convert" ? "converted" : "pulled"},
+                     {"from", record->ref},
+                     {"detail", record->source},
+                     {"inferred", false},
+                     {"missing", false}});
+            }
+            return data;
+        }
+        return nullptr;
+    }
+    std::filesystem::path dir;
+    if (target.format == models::kPipelineFormat) {
+        for (const models::StoredPipeline& stored :
+             models::list_store_pipelines(roots, target.model)) {
+            dir = stored.id == target.id ? stored.dir : dir;
+        }
+    } else if (target.format == models::kVoiceFormat) {
+        for (const models::StoredVoice& stored : models::list_store_voices(roots, target.model)) {
+            dir = stored.id == target.id ? stored.dir : dir;
+        }
+        // Where mlx-audio is installed, the decision its converter makes
+        // (53m): `mlx` for a whole voice model, its converter named. With
+        // none installed, nothing is said, as before.
+        if (!dir.empty() && installed_mlx_audio()) {
+            const std::vector<std::string> conversions =
+                models::voice_conversions(dir, installed_mlx_audio_converts());
+            data["converts_to"] = conversions;
+            if (!conversions.empty()) {
+                data["mlx_conversion"] = {
+                    {"towers", nlohmann::json::array()},
+                    {"converter",
+                     std::string{training::to_string(training::MlxConverterKind::MlxAudio)}},
+                    {"text_only", false}};
+            }
+        }
+    } else {
+        for (const models::StoredSnapshot& stored :
+             models::list_store_snapshots(roots, target.model)) {
+            dir = stored.id == target.id ? stored.dir : dir;
+        }
+        if (!dir.empty()) {
+            if (const std::string architecture = models::snapshot_architecture(dir);
+                !architecture.empty()) {
+                data["architecture"] = architecture;
+            }
+            data["lineage"] = lineage_entries(lineage, lineage.origin_of(handle));
+            // The formats it converts to, as the ladders decide (M20, M21),
+            // and which converter an MLX conversion runs (53f).
+            const std::optional<MlxOffer> offer = set_mlx_offer(dir);
+            data["converts_to"] = set_conversions(dir, offer);
+            data["mlx_conversion"] = mlx_conversion_of(offer);
+            if (const std::optional<models::WanLayout> wan = models::snapshot_wan_layout(dir)) {
+                data["wan_layout"] = {{"class", wan->class_name},
+                                      {"whole", wan->whole()},
+                                      {"missing", wan->missing()}};
+            }
+        }
+    }
+    if (dir.empty()) {
+        return nullptr;
+    }
+    data["bytes"] = bytes_under(dir);
+    return data;
+}
+
+}  // namespace
+
+nlohmann::json model_info_document(const harness::Config& config, std::string_view name,
+                                   const std::filesystem::path& config_path,
+                                   const BusyProgress& progress) {
+    const std::string body = read_model_info(config, name, config_path, progress);
+    if (body.empty()) {
+        return nullptr;
+    }
+    nlohmann::json document = render_record_document(body);
+    document["name"] = std::string{name};
+    // A stored set's facts as data (52e), beside the prose fields unchanged.
+    if (config.backends.find(std::string{name}) == config.backends.end()) {
+        if (nlohmann::json data = stored_set_data(config, name, harness::models_dir());
+            !data.is_null()) {
+            document["data"] = std::move(data);
+        }
+    }
+    return document;
+}
+
+namespace {
+
+/// `models status`'s record, and the suite's footprint when one is active --
+/// priced once, so the text and the typed document (M31) say one reading.
+struct RoleStatus {
+    std::string body{};
+    std::optional<models::SuiteFootprint> footprint{};
+};
+
+[[nodiscard]] RoleStatus role_status(const harness::Config& config, const BusyProgress& progress,
+                                     const MachineBudgetSource& machine) {
+    RoleStatus status;
     std::ostringstream out;
     // The suite every role below resolves under, when one is active (27d).
     // With none, nothing here changes from before suites.
@@ -1758,6 +2342,20 @@ std::string render_role_status(const harness::Config& config, const BusyProgress
                         ? "   [mlx: reads images as they are]"
                         : "   [mlx: cannot read images -- " + vision.reason +
                               (vision.remedy.empty() ? std::string{} : "; " + vision.remedy) + "]");
+        } else if (role == harness::ModelRole::Transcription &&
+                   entry->second.type == harness::BackendType::Mlx) {
+            // Whether this model hears a recording at all (53g, M23), as the
+            // vision role says whether it sees.
+            const backends::MlxAudio audio = backends::probe_mlx_audio(
+                backends::inspect_mlx_model(
+                    std::filesystem::path{harness::expand_env_and_home(entry->second.model_path)}),
+                backends::MlxHost::current());
+            out << (audio.hears()
+                        ? "   [mlx: hears recordings as they are]"
+                        : "   [mlx: cannot hear recordings -- " +
+                              std::string{backends::to_string(audio.refusal)} + ": " +
+                              audio.reason +
+                              (audio.remedy.empty() ? std::string{} : "; " + audio.remedy) + "]");
         } else if (entry->second.type == harness::BackendType::LlamaCpp &&
                    !entry->second.model_path.empty()) {
             // What loading it costs: a helper is a second model resident
@@ -1808,11 +2406,33 @@ std::string render_role_status(const harness::Config& config, const BusyProgress
         if (progress) {
             progress("pricing suite " + suite_name, 0, 0);
         }
-        for (const std::string& line : footprint_lines(price_suite(config, suite_name, machine))) {
+        status.footprint = price_suite(config, suite_name, machine);
+        for (const std::string& line : footprint_lines(*status.footprint)) {
             out << line << "\n";
         }
     }
-    return out.str();
+    status.body = out.str();
+    return status;
+}
+
+}  // namespace
+
+std::string render_role_status(const harness::Config& config, const BusyProgress& progress,
+                               const MachineBudgetSource& machine) {
+    return role_status(config, progress, machine).body;
+}
+
+nlohmann::json role_status_document(const harness::Config& config, const BusyProgress& progress,
+                                    const MachineBudgetSource& machine) {
+    // The record's fields as the text makes them -- the footprint's among
+    // them, word for word, which the macOS app reads -- and the footprint
+    // typed beside them (M31).
+    const RoleStatus status = role_status(config, progress, machine);
+    nlohmann::json document = render_record_document(status.body);
+    if (status.footprint.has_value()) {
+        document["footprint"] = footprint_document(*status.footprint);
+    }
+    return document;
 }
 
 std::string_view ModelsCommand::name() const noexcept {
@@ -1889,13 +2509,19 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
     info->callback([load, info_name, info_quiet, info_format, &context]() {
         const harness::Config config = load();
         std::string body;
+        nlohmann::json document;
         {
             BusyLine busy{std::cerr, "reading the model",
                           busy_options(*info_quiet || *info_format == ReadFormat::Json)};
-            body = read_model_info(config, *info_name,
-                                   harness::resolve_config_path(context.config_path), busy.sink());
+            const std::filesystem::path config_path =
+                harness::resolve_config_path(context.config_path);
+            if (*info_format == ReadFormat::Json) {
+                document = model_info_document(config, *info_name, config_path, busy.sink());
+            } else {
+                body = read_model_info(config, *info_name, config_path, busy.sink());
+            }
         }
-        if (body.empty()) {
+        if (body.empty() && document.is_null()) {
             // A whole model is not one thing to show: name what it holds.
             const models::StoreRoots roots = store_roots_for(config, harness::models_dir());
             const models::StoreTarget target = models::resolve_store_target(roots, *info_name);
@@ -1941,8 +2567,6 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
             fail("no backend or stored weights named '" + *info_name + "'");
         }
         if (*info_format == ReadFormat::Json) {
-            nlohmann::json document = render_record_document(body);
-            document["name"] = *info_name;
             write_document(std::cout, document);
             return;
         }
@@ -1967,13 +2591,18 @@ void ModelsCommand::bind(CLI::App& root, const RootContext& context) {
             }
         }
         std::string body;
+        nlohmann::json document;
         {
             BusyLine busy{std::cerr, "resolving the roles",
                           busy_options(*status_quiet || *status_format == ReadFormat::Json)};
-            body = render_role_status(config, busy.sink(), machine_budget);
+            if (*status_format == ReadFormat::Json) {
+                document = role_status_document(config, busy.sink(), machine_budget);
+            } else {
+                body = render_role_status(config, busy.sink(), machine_budget);
+            }
         }
         if (*status_format == ReadFormat::Json) {
-            write_document(std::cout, render_record_document(body));
+            write_document(std::cout, document);
             return;
         }
         std::cout << body;

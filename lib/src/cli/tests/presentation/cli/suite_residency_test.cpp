@@ -17,6 +17,7 @@
 
 #include "backends/llamacpp.h"
 #include "cli/chat.h"
+#include "cli/execute.h"
 #include "cli/models.h"
 #include "cli/registry.h"
 #include "cli/root.h"
@@ -171,6 +172,216 @@ TEST_CASE("the footprint block: each member, resident or not, and the set's tota
     const std::vector<std::string> status = apogee::commands::footprint_lines(footprint);
     CHECK(status[1] ==
           "  root (chat): 3830 MiB -- 1926 MiB of weights, 1904 MiB of q8_0 cache at 32768 tokens");
+}
+
+TEST_CASE("a base two members share is said once, and what sharing it saves",
+          "[commands][suites][residency][shared-base]") {
+    using apogee::commands::admission_line;
+    using apogee::commands::admission_refusal;
+    // research, its helper on root's base with an adapter of its own, and a
+    // scribe on it with none (53d).
+    SuiteFootprint footprint = research(96 * kGiB);
+    MemberFootprint& helper = footprint.members[1];
+    helper.weights = 1926 * kMiB;
+    helper.shares = "root";
+    helper.adapters = 1;
+    helper.adapter_bytes = 3 * kMiB;
+    MemberFootprint scribe = local("scribe", {"extraction"}, 1926, 238, 4096);
+    scribe.shares = "root";
+    footprint.members.push_back(scribe);
+    REQUIRE(footprint.known_bytes() == (1926 + 1904 + 68 + 3 + 238) * kMiB);
+
+    CHECK(admission_line(footprint) ==
+          "suite research needs 5163 MiB of this machine's 98304 MiB: root 3830 + helper 71 "
+          "(shares root's weights, 1926 MiB saved) + scribe 238 (shares root's weights, 1926 MiB "
+          "saved) + 1024 margin -- fits");
+    footprint.machine.bytes = 4 * kGiB;
+    CHECK(admission_refusal(footprint, "--force") ==
+          "suite research needs 5163 MiB of this machine's 4096 MiB: root 3830 + helper 71 "
+          "(shares root's weights, 1926 MiB saved) + scribe 238 (shares root's weights, 1926 MiB "
+          "saved) + 1024 margin -- it does not fit; --force runs it anyway");
+    footprint.machine.bytes = 96 * kGiB;
+
+    const std::vector<std::string> lines = apogee::commands::footprint_lines(footprint);
+    REQUIRE(lines.size() == 6);
+    CHECK(lines[1] ==
+          "  root (chat): 3830 MiB -- 1926 MiB of weights, 1904 MiB of q8_0 cache at 32768 tokens");
+    CHECK(lines[2] ==
+          "  helper (embedding, utility): 71 MiB -- shares root's 1926 MiB of weights, 68 MiB of "
+          "q8_0 cache at 4096 tokens, 3 MiB of adapters");
+    CHECK(lines[4] ==
+          "  scribe (extraction): 238 MiB -- shares root's 1926 MiB of weights, 238 MiB of q8_0 "
+          "cache at 4096 tokens");
+
+    // A base with no record: the sharer still adds up, says whose weights it
+    // runs on, and claims no saving it cannot state.
+    footprint.members[0].weights.reset();
+    footprint.members[0].unknown = "no recorded size";
+    footprint.members[1].weights.reset();
+    footprint.members.pop_back();
+    CHECK(admission_line(footprint) ==
+          "suite research needs at least 1095 MiB of this machine's 98304 MiB: root unknown (no "
+          "recorded size) + helper 71 (shares root's weights) + 1024 margin -- fits as far as "
+          "known");
+    CHECK(apogee::commands::footprint_lines(footprint)[2] ==
+          "  helper (embedding, utility): 71 MiB -- shares root's weights, 68 MiB of q8_0 cache "
+          "at 4096 tokens, 3 MiB of adapters");
+
+    // An entry on its own base with adapters adds them to its own line.
+    SuiteFootprint tuned = research(96 * kGiB);
+    tuned.members[0].adapters = 2;
+    tuned.members[0].adapter_bytes = 2 * kMiB;
+    CHECK(admission_line(tuned) ==
+          "suite research needs 5694 MiB of this machine's 98304 MiB: root 3832 + helper 838 + "
+          "1024 margin -- fits");
+    CHECK(apogee::commands::footprint_lines(tuned)[1] ==
+          "  root (chat): 3832 MiB -- 1926 MiB of weights, 1904 MiB of q8_0 cache at 32768 "
+          "tokens, 2 MiB of adapters");
+}
+
+TEST_CASE("a member's drafter is said on its line and added to the sum, its base known or not",
+          "[commands][suites][residency][drafter]") {
+    using apogee::commands::admission_line;
+    using apogee::commands::admission_refusal;
+    // M25: research with an MLX member drafting beside its base (53i) -- the
+    // base's own numbers unknown, its drafter's 300 MiB of weights known.
+    SuiteFootprint footprint = research(96 * kGiB);
+    MemberFootprint e4b;
+    e4b.backend = "e4b";
+    e4b.roles = {"vision"};
+    e4b.local = true;
+    e4b.unknown = "an MLX model's footprint is not stated yet";
+    e4b.drafter = "/models/Gemma4-E4B-Assistant/mlx/aaaaaaaaaaaa";
+    e4b.drafter_bytes = 300 * kMiB;
+    footprint.members.push_back(e4b);
+    REQUIRE(footprint.known_bytes() == (3830 + 838 + 300) * kMiB);
+    CHECK(admission_line(footprint) ==
+          "suite research needs at least 5992 MiB of this machine's 98304 MiB: root 3830 + "
+          "helper 838 + e4b unknown (an MLX model's footprint is not stated yet) + e4b's drafter "
+          "300 + 1024 margin -- fits as far as known");
+    const std::vector<std::string> lines = apogee::commands::footprint_lines(footprint);
+    REQUIRE(lines.size() == 6);
+    CHECK(lines[4] ==
+          "  e4b (vision): unknown -- an MLX model's footprint is not stated yet; its drafter's "
+          "300 MiB of weights counted");
+
+    // The drafter alone tips it over: refused, the drafter named in the sum.
+    footprint.machine.bytes = 5800 * kMiB;
+    CHECK(admission_refusal(footprint, "--force") ==
+          "suite research needs at least 5992 MiB of this machine's 5800 MiB: root 3830 + helper "
+          "838 + e4b unknown (an MLX model's footprint is not stated yet) + e4b's drafter 300 + "
+          "1024 margin -- it does not fit; --force runs it anyway");
+    footprint.members.back().drafter.clear();
+    footprint.members.back().drafter_bytes = 0;
+    CHECK(admission_refusal(footprint, "--force").empty());
+
+    // A drafter whose weights cannot be read adds nothing, and is said.
+    footprint.members.back().drafter = "/models/gone";
+    footprint.members.back().drafter_bytes.reset();
+    footprint.members.back().unknown =
+        "an MLX model's footprint is not stated yet; its drafter's weights could not be read";
+    CHECK(admission_line(footprint) ==
+          "suite research needs at least 5692 MiB of this machine's 5800 MiB: root 3830 + helper "
+          "838 + e4b unknown (an MLX model's footprint is not stated yet; its drafter's weights "
+          "could not be read) + 1024 margin -- fits as far as known");
+
+    // A member whose own numbers are known carries its drafter in its figure.
+    SuiteFootprint known = research(96 * kGiB);
+    known.members[0].drafter = "/models/Gemma4-E4B-Assistant/mlx/aaaaaaaaaaaa";
+    known.members[0].drafter_bytes = 300 * kMiB;
+    CHECK(admission_line(known) ==
+          "suite research needs 5992 MiB of this machine's 98304 MiB: root 4130 + helper 838 + "
+          "1024 margin -- fits");
+    CHECK(apogee::commands::footprint_lines(known)[1] ==
+          "  root (chat): 4130 MiB -- 1926 MiB of weights, 1904 MiB of q8_0 cache at 32768 "
+          "tokens, 300 MiB of its drafter's weights");
+    // And a member drafting with nothing reads as it always has.
+    CHECK(apogee::commands::footprint_lines(research(96 * kGiB))[1] ==
+          "  root (chat): 3830 MiB -- 1926 MiB of weights, 1904 MiB of q8_0 cache at 32768 tokens");
+}
+
+TEST_CASE("the footprint as data: each member's bytes and whether known, the sum, the verdict",
+          "[commands][suites][residency][json]") {
+    // M31: the typed twin of `footprint_lines`, read off the same footprint
+    // -- exact bytes where the text rounds to MiB.
+    using apogee::commands::footprint_document;
+    const nlohmann::json fits = footprint_document(research(96 * kGiB));
+    CHECK(fits == nlohmann::json{
+                      {"suite", "research"},
+                      {"members", nlohmann::json::array(
+                                      {{{"backend", "root"},
+                                        {"roles", nlohmann::json::array({"chat"})},
+                                        {"local", true},
+                                        {"bytes", (1926 + 1904) * kMiB},
+                                        {"known", true},
+                                        {"shares", ""},
+                                        {"note", ""}},
+                                       {{"backend", "helper"},
+                                        {"roles", nlohmann::json::array({"embedding", "utility"})},
+                                        {"local", true},
+                                        {"bytes", (770 + 68) * kMiB},
+                                        {"known", true},
+                                        {"shares", ""},
+                                        {"note", ""}},
+                                       {{"backend", "claude"},
+                                        {"roles", nlohmann::json::array({"vision"})},
+                                        {"local", false},
+                                        {"bytes", 0},
+                                        {"known", true},
+                                        {"shares", ""},
+                                        {"note", ""}}})},
+                      {"total_bytes", (1926 + 1904 + 770 + 68) * kMiB + kGiB},
+                      {"margin_bytes", kGiB},
+                      {"budget_bytes", 96 * kGiB},
+                      {"verdict", "fits"}});
+    // The members' bytes and the margin are the total, always.
+    std::int64_t sum = fits.at("margin_bytes").get<std::int64_t>();
+    for (const nlohmann::json& member : fits.at("members")) {
+        sum += member.at("bytes").get<std::int64_t>();
+    }
+    CHECK(sum == fits.at("total_bytes").get<std::int64_t>());
+
+    // Each verdict, in the words the admission line ends with.
+    CHECK(footprint_document(research(4 * kGiB)).at("verdict") == "does not fit");
+    const nlohmann::json budgetless = footprint_document(research(std::nullopt));
+    CHECK(budgetless.at("verdict") == "budget not known here");
+    CHECK(budgetless.at("budget_bytes").is_null());
+    SuiteFootprint unknown = research(96 * kGiB);
+    MemberFootprint e4b;
+    e4b.backend = "e4b";
+    e4b.roles = {"vision"};
+    e4b.local = true;
+    e4b.unknown = "an MLX model's footprint is not stated yet";
+    e4b.drafter = "/models/drafter";
+    e4b.drafter_bytes = 300 * kMiB;
+    unknown.members.push_back(e4b);
+    const nlohmann::json partial = footprint_document(unknown);
+    CHECK(partial.at("verdict") == "fits as far as known");
+    // An unknown member counts what is known of it -- its drafter (M25) --
+    // and says why the rest is not.
+    const nlohmann::json& counted = partial.at("members").back();
+    CHECK(counted.at("known") == false);
+    CHECK(counted.at("bytes") == 300 * kMiB);
+    CHECK(counted.at("note") == "an MLX model's footprint is not stated yet");
+    CHECK(partial.at("total_bytes") == (1926 + 1904 + 770 + 68 + 300) * kMiB + kGiB);
+    // A member on another's base counts its own cache and adapters alone.
+    SuiteFootprint shared = research(96 * kGiB);
+    shared.members[1].shares = "root";
+    shared.members[1].weights = 1926 * kMiB;
+    CHECK(footprint_document(shared).at("members")[1].at("bytes") == 68 * kMiB);
+    CHECK(footprint_document(shared).at("members")[1].at("shares") == "root");
+    // Nothing held here: no margin, no machine asked.
+    SuiteFootprint cloud;
+    cloud.suite = "fast";
+    MemberFootprint remote;
+    remote.backend = "claude";
+    remote.roles = {"chat"};
+    cloud.members.push_back(remote);
+    const nlohmann::json nothing = footprint_document(cloud);
+    CHECK(nothing.at("verdict") == "no member holds memory");
+    CHECK(nothing.at("total_bytes") == 0);
+    CHECK(nothing.at("margin_bytes") == 0);
+    CHECK(nothing.at("budget_bytes").is_null());
 }
 
 TEST_CASE("/suite's argument: a suite, then --force and --warm", "[commands][suites][residency]") {
@@ -339,10 +550,12 @@ TEST_CASE("a member that cannot be warmed is said, and the walk goes on",
 
 namespace {
 
-/// `apogee chat` in process over a sandbox: a mock chat model and three local
-/// extraction members -- one recorded far beyond any machine, one small, one
-/// with no record -- priced against a fixed 64 GiB machine. Extraction is
-/// never asked in a chat, so no local model is ever loaded.
+/// `apogee chat` -- and `apogee execute`, the same session opened -- in process
+/// over a sandbox: a mock chat model and three local extraction members -- one
+/// recorded far beyond any machine, one small, one with no record -- priced
+/// against a fixed 64 GiB machine. Extraction is never asked in a chat, so no
+/// local model is ever loaded. `extra` is YAML under `suites:`, after the
+/// three; `backends` under `backends:`, after the four.
 struct AdmissionChat {
     apogee::testing::TempDir home{"suite-admission-" + std::to_string(std::random_device{}())};
     apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
@@ -350,7 +563,7 @@ struct AdmissionChat {
     std::string out;
     std::string err;
 
-    AdmissionChat() {
+    explicit AdmissionChat(const std::string& backends = {}, const std::string& extra = {}) {
         std::filesystem::create_directories(config_path.parent_path());
         const std::filesystem::path script = home.path() / "root.json";
         std::ofstream{script, std::ios::binary}
@@ -364,10 +577,11 @@ struct AdmissionChat {
             << model("small", 770 * kMiB).string() << "\n"
             << "  loose:\n    type: llamacpp\n    model_path: "
             << model("loose", std::nullopt).string() << "\n"
-            << "suites:\n"
+            << backends << "suites:\n"
             << "  roomy:\n    members:\n      chat: root\n      extraction: small\n"
             << "  huge:\n    members:\n      chat: root\n      extraction: big\n"
-            << "  partial:\n    members:\n      chat: root\n      extraction: loose\n";
+            << "  partial:\n    members:\n      chat: root\n      extraction: loose\n"
+            << extra;
     }
 
     /// A Llama 3.2 1B header -- 544 MiB of q8_0 cache at 32K -- and, unless
@@ -406,6 +620,8 @@ struct AdmissionChat {
         {
             apogee::commands::CommandRegistry registry;
             registry.add(std::make_unique<apogee::commands::ChatCommand>(
+                [] { return MachineBudget{.bytes = 64 * kGiB}; }));
+            registry.add(std::make_unique<apogee::commands::ExecuteCommand>(
                 [] { return MachineBudget{.bytes = 64 * kGiB}; }));
             apogee::commands::RootCommand root{std::move(registry)};
             const std::string path = config_path.string();
@@ -482,6 +698,97 @@ TEST_CASE("/suite refuses a suite that cannot fit, and --force switches to it",
     CHECK(chat.err.find("unknown option '--hot'") != std::string::npos);
 }
 
+namespace {
+
+/// The JSONL events of a driven run's stdout.
+[[nodiscard]] std::vector<nlohmann::json> events_of(const std::string& out) {
+    std::vector<nlohmann::json> events;
+    std::istringstream lines{out};
+    for (std::string line; std::getline(lines, line);) {
+        events.push_back(nlohmann::json::parse(line));
+    }
+    return events;
+}
+
+constexpr const char* kDrivenHello = "{\"type\":\"user\",\"text\":\"hello\"}\n";
+
+}  // namespace
+
+TEST_CASE("a driven session's admission is a notice after its session event, not stderr's",
+          "[commands][suites][residency][machine]") {
+    // M29: a driver read `[apogee] suite research: ...` from stderr alone.
+    // As a resume's notes are (55b), it is said where the driver draws it.
+    for (const std::string mode : {"chat", "execute"}) {
+        INFO(mode);
+        AdmissionChat chat;
+        REQUIRE(chat.run({mode, "--suite", "roomy", "--output-format", "stream-json"},
+                         kDrivenHello) == 0);
+        const std::vector<nlohmann::json> events = events_of(chat.out);
+        REQUIRE(events.size() > 2);
+        CHECK(events.at(0).at("type") == "session");
+        CHECK(events.at(0).at("suite") == "roomy");
+        CHECK(events.at(1).at("type") == "notice");
+        CHECK(events.at(1).at("text") ==
+              "suite roomy needs 2338 MiB of this machine's 65536 MiB: small 1314 + 1024 margin "
+              "-- fits");
+        CHECK_FALSE(events.at(1).contains("turn"));
+        CHECK(chat.err.find("suite roomy") == std::string::npos);
+
+        // Forced over budget, the line says so -- as a notice too.
+        REQUIRE(chat.run({mode, "--suite", "huge", "--force", "--output-format", "stream-json"},
+                         kDrivenHello) == 0);
+        const std::vector<nlohmann::json> forced = events_of(chat.out);
+        REQUIRE(forced.size() > 2);
+        CHECK(forced.at(1).at("text") ==
+              "suite huge needs 206368 MiB of this machine's 65536 MiB: big 205344 + 1024 margin "
+              "-- over budget, run anyway (--force)");
+        CHECK(chat.err.find("suite huge") == std::string::npos);
+    }
+}
+
+TEST_CASE("a driven session refused admission at launch says so on stderr, exit 1, stdout empty",
+          "[commands][suites][residency][machine]") {
+    // The launch contract (machine-mode.md): nothing is on stdout before the
+    // session event, and a refusal is no turn's error.
+    for (const std::string mode : {"chat", "execute"}) {
+        INFO(mode);
+        AdmissionChat chat;
+        CHECK(chat.run({mode, "--suite", "huge", "--output-format", "stream-json"}, kDrivenHello) ==
+              1);
+        CHECK(chat.out.empty());
+        CHECK(chat.err == "apogee " + mode +
+                              ": suite huge needs 206368 MiB of this machine's 65536 MiB: big "
+                              "205344 + 1024 margin -- it does not fit; --force runs it anyway\n");
+    }
+}
+
+TEST_CASE("a suite's warnings at launch reach a driver as notices, and the terminal as before",
+          "[commands][suites][residency][machine]") {
+    // A member pinned to a window it cannot be rebuilt at: the suite's own
+    // warning, said where the session is read.
+    AdmissionChat chat{"  gone:\n    type: claude-cli\n    binary: /nowhere/at/all/claude\n",
+                       "  pinned:\n    members:\n      chat: root\n      extraction:\n"
+                       "        backend: gone\n        context_size: 4096\n"};
+    REQUIRE(chat.run({"chat", "--suite", "pinned", "--output-format", "stream-json"},
+                     kDrivenHello) == 0);
+    const std::vector<nlohmann::json> events = events_of(chat.out);
+    REQUIRE(events.size() > 2);
+    CHECK(events.at(0).at("suite") == "pinned");
+    CHECK(events.at(1).at("type") == "notice");
+    CHECK(events.at(1).at("text").get<std::string>().starts_with(
+        "gone keeps its old window -- it could not be rebuilt: "));
+    CHECK(events.at(2).at("type") == "notice");
+    CHECK(events.at(2).at("text") == "suite pinned: no member holds memory on this machine");
+    CHECK(chat.err.find("keeps its old window") == std::string::npos);
+
+    // At the terminal -- a pipe -- both stay on stderr, as they always were.
+    REQUIRE(chat.run({"chat", "--suite", "pinned"}, "hello\n") == 0);
+    CHECK(chat.err.find("gone keeps its old window -- it could not be rebuilt: ") !=
+          std::string::npos);
+    CHECK(chat.err.find("[apogee] suite pinned: no member holds memory on this machine") !=
+          std::string::npos);
+}
+
 TEST_CASE("warming needs a suite, and paints nothing on a pipe", "[commands][suites][residency]") {
     AdmissionChat chat;
     CHECK(chat.run({"chat", "--warm"}, "hello\n") == 1);
@@ -507,4 +814,77 @@ TEST_CASE("models status prices the active suite against the machine",
                       "cache at 32768 tokens\n"
                       "  total: suite roomy needs 2338 MiB of this machine's 65536 MiB: small "
                       "1314 + 1024 margin -- fits\n") != std::string::npos);
+}
+
+TEST_CASE("models status --suite in JSON carries the footprint typed, beside its field unchanged",
+          "[commands][suites][residency][reads][json]") {
+    // M31: the footprint reached a host only as text inside a field --
+    // `{"field":"footprint","value":"suite roomy\nsmall (extraction): ..."}`
+    // -- its indentation stripped. The field stays, word for word: the app
+    // reads it.
+    AdmissionChat chat;
+    const auto run = [&chat](const std::vector<std::string>& args) {
+        std::ostringstream captured_out;
+        std::ostringstream captured_err;
+        std::streambuf* old_out = std::cout.rdbuf(captured_out.rdbuf());
+        std::streambuf* old_err = std::cerr.rdbuf(captured_err.rdbuf());
+        apogee::commands::RootCommand root{apogee::commands::default_registry()};
+        const std::string path = chat.config_path.string();
+        std::vector<const char*> argv{"apogee", "--config", path.c_str()};
+        for (const std::string& arg : args) {
+            argv.push_back(arg.c_str());
+        }
+        const int code = root.run(static_cast<int>(argv.size()), argv.data());
+        std::cout.rdbuf(old_out);
+        std::cerr.rdbuf(old_err);
+        chat.out = captured_out.str();
+        chat.err = captured_err.str();
+        return code;
+    };
+    REQUIRE(run({"models", "status", "--suite", "roomy", "--output-format", "json"}) == 0);
+    INFO(chat.out << chat.err);
+    const nlohmann::json status = nlohmann::json::parse(chat.out);
+    REQUIRE(status.contains("footprint"));
+    const nlohmann::json& footprint = status.at("footprint");
+
+    // The field, as the record the text makes reads it.
+    REQUIRE(run({"models", "status", "--suite", "roomy"}) == 0);
+    CHECK(status.at("fields") == apogee::commands::render_record_document(chat.out).at("fields"));
+
+    // Typed: each member's bytes and whether they are known, the sum with
+    // the margin, the machine's budget and the verdict in the CLI's words.
+    apogee::harness::Config config = apogee::harness::load_config(chat.config_path);
+    const SuiteFootprint priced = apogee::models::suite_footprint(config, "roomy", {});
+    REQUIRE(priced.members.size() == 2);
+    CHECK(footprint.at("suite") == "roomy");
+    CHECK(footprint.at("members") ==
+          nlohmann::json::array({{{"backend", "root"},
+                                  {"roles", nlohmann::json::array({"chat"})},
+                                  {"local", false},
+                                  {"bytes", 0},
+                                  {"known", true},
+                                  {"shares", ""},
+                                  {"note", ""}},
+                                 {{"backend", "small"},
+                                  {"roles", nlohmann::json::array({"extraction"})},
+                                  {"local", true},
+                                  {"bytes", *priced.members[1].bytes()},
+                                  {"known", true},
+                                  {"shares", ""},
+                                  {"note", ""}}}));
+    CHECK(footprint.at("margin_bytes") == apogee::models::kFitMargin);
+    CHECK(footprint.at("total_bytes") == *priced.members[1].bytes() + apogee::models::kFitMargin);
+    // This machine's budget is whatever it reports; the verdict follows it.
+    if (footprint.at("budget_bytes").is_null()) {
+        CHECK(footprint.at("verdict") == "budget not known here");
+    } else {
+        CHECK(footprint.at("verdict") == (footprint.at("total_bytes").get<std::int64_t>() <=
+                                                  footprint.at("budget_bytes").get<std::int64_t>()
+                                              ? "fits"
+                                              : "does not fit"));
+    }
+
+    // With no suite, no footprint: absent, the record as before.
+    REQUIRE(run({"models", "status", "--suite", "off", "--output-format", "json"}) == 0);
+    CHECK_FALSE(nlohmann::json::parse(chat.out).contains("footprint"));
 }

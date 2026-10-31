@@ -1,5 +1,8 @@
 #pragma once
 
+#include <nlohmann/json_fwd.hpp>
+
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -8,6 +11,8 @@
 #include <vector>
 
 #include "agentloop/budget.h"
+#include "agentloop/recall.h"
+#include "agentloop/reporter.h"
 #include "agentloop/side_call.h"
 #include "contracts/cancellation.h"
 #include "contracts/config.h"
@@ -22,7 +27,8 @@
 /// agents and `serve` never reach it.
 namespace apogee::commands {
 
-/// Whether `session` is due a summary: at least two turns, not private.
+/// Whether `session` is due a summary: at least two turns, not private, and
+/// not deleted while it ran (55b).
 [[nodiscard]] bool recall_due(const logger::Session& session);
 
 /// The marker naming the process that has `chat_id` open, and so is due to
@@ -32,6 +38,41 @@ namespace apogee::commands {
 /// Forgets a chat entirely: its summary and its marker. `chats delete`, and
 /// `/private`.
 void forget_recall(std::string_view chat_id);
+
+/// What recall holds (52e): the chats summarised in its index, and the
+/// chats marked as due a summary -- never a transcript, which recall does
+/// not hold.
+struct RecallHoldings {
+    std::filesystem::path index;
+    std::size_t summaries = 0;
+    std::size_t pending = 0;
+};
+
+[[nodiscard]] RecallHoldings recall_holdings();
+
+/// The summaries themselves (M31): every chat the index holds, newest first,
+/// each its id, the name and date it was summarised under, and the summary
+/// whole -- an older index read as it is (`agentloop::RecallIndex::entries`).
+/// What `chats recall` lists, and nothing `serve` reaches.
+[[nodiscard]] std::vector<agentloop::RecallEntry> recall_summaries();
+
+/// `chats recall --output-format json` (M31): `{object: "list", data:
+/// [{chat, name, updated, summary}], index, pending}` -- each summary as
+/// `recall_summaries` lists it, `name` and `updated` as the index recorded
+/// them when it summarised the chat (what the `memory` event names it by),
+/// then the count line's other facts: the index's path, and how many chats
+/// are marked due one. `data` is `[]`, never null, when it holds nothing.
+[[nodiscard]] nlohmann::json recall_view(const RecallHoldings& held,
+                                         const std::vector<agentloop::RecallEntry>& summaries);
+
+/// One summary under `chats recall`'s count line (M31): `  <id>  <updated>
+/// <name>`, as `chats list` orders its row, an empty date or name left out.
+[[nodiscard]] std::string recall_row(const agentloop::RecallEntry& summary);
+
+/// Forgets every chat's summary (52e: `chats recall --forget`): the index
+/// and the due marks removed, every transcript left as it is. Returns what
+/// was there.
+RecallHoldings forget_all_recall();
 
 /// Who summarises: the utility model when one is named, else the chat's own
 /// backend only when it costs nothing per call -- a summary is Apogee's idea,
@@ -50,6 +91,8 @@ void forget_recall(std::string_view chat_id);
 /// What a turn recalled.
 struct Recalled {
     std::vector<harness::ChatMessage> prefix;
+    /// Each past chat sent, in order (52a): the `memory` event's sessions.
+    std::vector<agentloop::RecalledChat> sessions;
     int chats = 0;
     int decisions = 0;
     std::int64_t tokens = 0;

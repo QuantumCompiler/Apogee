@@ -1,0 +1,47 @@
+# Apogee GUI — Project Spec
+
+The product spec: what the Apogee GUI is, what it is for, and the principles that shape it. The high-level plan and progress board are in [ROADMAP.md](ROADMAP.md); the work queue is [`backlog/`](../backlog/README.md) (one document per pending item); shipped work is recorded in [MILESTONES.md](MILESTONES.md); how to work in the repo is in [CLAUDE.md](CLAUDE.md). The harness itself — the product the GUI fronts — is specced in [`cli/assistant/SPEC.md`](../../cli/assistant/SPEC.md).
+
+---
+
+## One-liner
+
+**The Apogee GUI** is the desktop face of the harness: one native application per platform (macOS, Linux, Windows) that drives the `apogee` CLI over its stdio machine mode — the harness's capabilities rendered graphically, owned by the CLI, reimplemented nowhere.
+
+## Background
+
+Apogee was built CLI-first and docs-first, with the GUI designed in from the start as a *client*: the machine mode exists precisely so a front end can drive the CLI over stdin/stdout — a JSONL protocol with a published schema (`machine-schema.json`, printed by the binary and shipped in every archive), additive growth as law, and the whole capability surface behind it. The GUI effort opened 2026-10-20 (the user's call), after v0.1.9 shipped the CLI's desktop-parity capabilities. The shape this enables: the GUI is thin and honest — every session, model operation, read and long-running job is the CLI's own, so the CLI's test suite vouches for what the GUI shows.
+
+## Core surfaces
+
+1. **The desktop application** — one per platform (`darwin`, `linux`, `windows`), each the same product: Apogee's sessions and operations in a graphical shell, over the machine-mode child.
+
+## Scope (in)
+
+- **Driving sessions:** chat and execute over the machine-mode protocol — turns, streaming, thinking, tool narration, asks answered from the UI, cancellation.
+- **Rendering the reads:** the CLI's `--output-format json` documents (models, chats, suites, check, agents, MCP, tasks, graphs …) as native views.
+- **Long-running work:** the CLI's jobs (pulls, conversions, training, video) narrated with progress and cancel, through the protocol's own events.
+
+**The first release's cut** *(stated 2026-10-26, from what shipped; 4l)*: v0.2.0 carries the macOS application -- the first spike's split as the user settled it (macOS first, Swift and SwiftUI, unsigned ad-hoc) and everything built on it: every screen of the design (Milestones A and B), a classified place for every CLI command (Milestone C), MLX kinds (Milestone D) and the CLI/GUI audit's findings fixed (Milestone E). Linux and Windows wait for their own work.
+
+## Non-goals
+
+- **No capability of its own.** The GUI never calls a provider, stores a model, edits config outside the CLI's one path, or grows a feature the CLI lacks — a wanted capability is built in the CLI first, then rendered. (The repo's parity law.)
+- **No HTTP path for local work.** Local front-ends are pipes; `apogee serve` is for remote deployments. The GUI spawns the binary; it does not connect to a local server. (The never-listens law.)
+
+## Principles
+
+- **Thin client, honest renderer.** The GUI shows what the protocol says — states, errors and refusals in the CLI's own words — and invents nothing on top.
+- **Additive protocol, tolerant client.** Unknown events and fields are tolerated, never fatal; a GUI version never requires a breaking protocol change (the CLI's ADR 0006, consumed).
+- **Native per platform.** Each app feels at home on its OS — the macOS app is Swift and SwiftUI (the user's call, 2026-10-20). Whether linux/windows share anything beyond ADR 0001's shape is decided when their work opens.
+- **Full parity** *(added 2026-10-20 — the user's call, from the first hands-on run of the built app)*: the GUI is meant to do **everything and anything the CLI and TUI do**. Every capability the CLI offers a person has a classified place in the GUI — a screen, the console, or a recorded carve-out with its reason — held mechanically by ADR 0003 and its `ParityTable` since 2a (2026-10-20). "The design doesn't show it" is a reason to grow the design per its own new-screen law, never to drop a capability.
+
+## Success criteria
+
+*(Written 2026-10-26 from behaviors the shipped app has, each traceable to its milestone; 4l.)*
+
+- **A conversation is the app's and the CLI's at once.** A person opens a chat, drives a turn, answers the model's questions and stops it, entirely in the app, with the CLI's own session files as the record; a reopened conversation shows its earlier turns (1c, 1f, 1g and M7; Milestones A and B).
+- **Every command has its place.** Each command the CLI offers a person is a screen, the console or a carve-out with its reason, and the app's suite fails the day the binary grows one unclassified (2a, ADR 0003; Milestone C).
+- **Long work is supervised.** Pulls, conversions, quantizations, training runs, pipelines and media renders run as jobs with progress and Stop, are on the monitor, and end when stopped (1i, 2i, 4c and 4j; Milestones B, C and E).
+- **The app says what the binary says.** Refusals, warnings and capabilities reach the person in the CLI's words, read from the binary -- its capabilities at launch -- never assumed (4b and 4k; Milestone E).
+- **Nothing is lost to the app's own moves.** Leaving a place never ends a private conversation without the person's say, and quitting ends every child the app started (4a and 4c; Milestone E).

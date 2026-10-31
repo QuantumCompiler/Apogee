@@ -2,10 +2,13 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "contracts/config.h"
+#include "modelstore/snapshot.h"
 
 /// What an MLX model directory is, read from its files alone (27b): the
 /// window `config.json` declares, how its weights are stored, every shard
@@ -68,9 +71,23 @@ struct MlxShard {
 struct MlxInfo {
     /// Every file a load needs was found whole: `config.json` (the model's,
     /// not a download record), a tokenizer, every shard the index names, and
-    /// each shard's header within its file. Not a claim that `mlx-lm` builds
-    /// the architecture -- only a load says that.
+    /// each shard's header within its file -- or, for a video model, its
+    /// layout's files in a tokenizer's place (`video`), and for a voice model
+    /// its voices (`voice`). Not a claim that `mlx-lm` builds the
+    /// architecture -- only a load says that.
     bool complete = false;
+    /// Read as an MLX video model (53k): mlx-video's Wan layout, its
+    /// `config.json` beside `t5_encoder.safetensors`, `vae.safetensors` and
+    /// the transformer's weights (`model.safetensors`, or a pair's
+    /// `low_noise_model.safetensors` and `high_noise_model.safetensors`), each
+    /// whole. No tokenizer -- mlx-video reads the text encoder's from its own
+    /// source -- and no token window.
+    bool video = false;
+    /// Read as an MLX voice model (53m): mlx-audio's build of Kokoro, its
+    /// `config.json` beside the weights and a `voices/` directory of voice
+    /// packs (`voices/<name>.safetensors`), each whole. No tokenizer --
+    /// Kokoro reads text through its phonemizer -- and no token window.
+    bool voice = false;
     /// Why not, in a sentence. Set exactly when `complete` is false.
     std::string problem;
     /// `config.json` was read and is the model's: what follows comes from it.
@@ -95,8 +112,27 @@ struct MlxInfo {
 };
 
 /// Reads `dir`. Never throws: an unreadable directory is an incomplete one,
-/// with the reason.
-[[nodiscard]] MlxInfo read_mlx_info(const std::filesystem::path& dir);
+/// with the reason. `kind` is what the directory is (53e), when the caller
+/// knows it before a record says it -- a conversion's staging (53k); empty,
+/// the one reader's word (`read_mlx_kind`: its record's, else, since M22,
+/// what its files unambiguously say -- so a video or voice set a pull brought
+/// is read by its own layout). A `video` directory is read by its own
+/// layout's files (`MlxInfo::video`), and since 53m a `voice` directory by
+/// its own (`MlxInfo::voice`); every other kind as a language model's.
+[[nodiscard]] MlxInfo read_mlx_info(const std::filesystem::path& dir, std::string_view kind = {});
+
+/// The files an MLX video model's directory holds (53k), as mlx-video's Wan
+/// converter writes them -- `config.json`, `t5_encoder.safetensors`,
+/// `vae.safetensors`, then the transformer's weights -- for a sentence.
+inline constexpr std::string_view kMlxVideoFiles =
+    "config.json, the T5 text encoder (t5_encoder.safetensors), the VAE (vae.safetensors) and "
+    "the transformer's weights";
+
+/// The files an MLX voice model's directory holds (53m), as mlx-audio's
+/// converter writes Kokoro -- `config.json`, the weights, then its voice
+/// packs -- for a sentence.
+inline constexpr std::string_view kMlxVoiceFiles =
+    "config.json, the weights and its voices (voices/*.safetensors)";
 
 /// Whether the SafeTensors file `shard`, `size` bytes, is whole: its header
 /// reads and every tensor it lists lies within the file -- what tells a
@@ -115,6 +151,168 @@ struct MlxInfo {
 /// `config.json` and a shard, carrying `mlx-lm`'s marks (`mlx_format`). What
 /// `models migrate` sends to `mlx/` rather than `safetensors/`.
 [[nodiscard]] bool is_mlx_model_dir(const std::filesystem::path& dir);
+
+// --- what kind of MLX directory (53e) --------------------------------------------------
+
+/// **What an MLX directory is, decided once.** Every directory under a
+/// model's `mlx/` was taken for a language model, true while mlx-lm was the
+/// only converter writing there. Each converter now records what it made
+/// (`Snapshot::kind`), and one reader decides: the record's word, else what
+/// the files say, else `chat` -- so a directory made before the record reads
+/// exactly as it did. The listing, `models info` and `config scan` all ask
+/// it; a name is never the evidence (the draft-head and M20 rule).
+///
+/// The words: `chat` (mlx-lm's language model), `vision` (a vision model,
+/// its towers kept), `embedding`, `drafter`, `video`, `voice`. A word this
+/// build does not know is shown as written and registered as nothing.
+inline constexpr std::string_view kMlxChat = "chat";
+inline constexpr std::string_view kMlxVision = "vision";
+inline constexpr std::string_view kMlxEmbedding = "embedding";
+inline constexpr std::string_view kMlxDrafter = "drafter";
+inline constexpr std::string_view kMlxVideo = "video";
+inline constexpr std::string_view kMlxVoice = "voice";
+
+/// mlx-video's package (53k), as the first word of the `transform` its
+/// conversion records begins -- `mlx_video.models.wan_2.convert 4bit`, the
+/// converter's entry (`training::mlx_converter_entry`) then the precision:
+/// what an MLX video model made from a set is known by (M24), whichever
+/// module of the package a pin holds the converter in.
+inline constexpr std::string_view kMlxVideoConverterPackage = "mlx_video";
+
+/// Where a directory's kind came from.
+enum class MlxKindSource {
+    /// Its record names it: the conversion that made it wrote it.
+    Recorded,
+    /// No record names one, and its files make it a vision model -- or, since
+    /// 53i, a drafter: its `config.json` declares a draft head -- or, since
+    /// M22, an embedding, voice or video model, as the MLX community
+    /// publishes each.
+    Files,
+    /// Nothing says otherwise: `chat`, as every MLX directory was before.
+    Default,
+};
+
+struct MlxKind {
+    /// The word, as the record wrote it.
+    std::string word{kMlxChat};
+    MlxKindSource source = MlxKindSource::Default;
+
+    /// One of the six words.
+    [[nodiscard]] bool known() const noexcept;
+
+    /// An mlx backend chats with it: `chat` or `vision`. Every other kind,
+    /// and a word this build does not know, is no chat backend.
+    [[nodiscard]] bool backend() const noexcept;
+
+    /// An mlx backend embeds with it (53h): `embedding`, which mlx-embeddings
+    /// built -- the embedding role's to name, never a chat's.
+    [[nodiscard]] bool embeds() const noexcept;
+
+    /// An mlx backend runs it at all: it chats with it (`backend`) or embeds
+    /// with it (`embeds`). What `config scan --register` registers as an
+    /// `mlx` entry; a drafter, a video or voice model, and a word this build
+    /// does not know, never.
+    [[nodiscard]] bool registers() const noexcept;
+};
+
+/// The kind of the MLX directory `dir`: its record's `kind`, else `drafter`
+/// when its `config.json` declares a draft head (`snapshot_draft_head`, 53i --
+/// a drafter pulled whole, as the MLX community publishes one, is never taken
+/// for a chat model), else -- since M22, what a pull brings ready-made -- the
+/// one kind its files say of these three:
+/// - `video`: a `config.json` beside mlx-video's T5 text encoder and VAE
+///   (`t5_encoder.safetensors`, `vae.safetensors`), 53k's layout;
+/// - `voice`: a `config.json` naming Kokoro (`model_type: kokoro`, or its
+///   `istftnet` and `plbert`) beside `voices/*.safetensors`, 53m's layout;
+/// - `embedding`: a `modules.json` naming a sentence-transformers `Pooling`
+///   module (`snapshot_embedding_model`, M21) -- over a vision tower too.
+///
+/// Files that say two of them say nothing certain. Then `vision` when its
+/// files say so (`mlx_vision_files`), else `chat`. Each inference's wording
+/// is `describe`'s. Never throws: an unreadable record is no record.
+[[nodiscard]] MlxKind read_mlx_kind(const std::filesystem::path& dir);
+
+/// Whether `dir`'s files make a vision model: `config.json` declares a
+/// `vision_config`, and the processor that turns a picture into its input is
+/// beside it (`preprocessor_config.json` or `processor_config.json`). The
+/// fact the mlx backend reads images by (27c), and the one an unrecorded
+/// directory's kind is inferred from.
+[[nodiscard]] bool mlx_vision_files(const std::filesystem::path& dir);
+
+/// What a kind is and what uses it, in the one wording every surface says:
+/// "an embedding model: the embedding role uses it, never a chat backend";
+/// for a word this build does not know, "kind '<word>', not one this apogee
+/// knows: nothing here runs it".
+[[nodiscard]] std::string describe_mlx_kind(std::string_view word);
+
+/// `models info`'s line: the word, where it came from, and what it is --
+/// "chat (no kind recorded) -- a language model: an mlx backend chats with it".
+[[nodiscard]] std::string describe(const MlxKind& kind);
+
+// --- a drafter beside its base (53i) ---------------------------------------------------
+
+/// A **drafter** as its directory says it (53i): a draft head mlx-vlm built --
+/// Gemma 4's assistants, a few layers proposing tokens for their base to
+/// verify -- which an mlx entry runs beside its base through mlx-vlm's
+/// speculative path (`draft:`), never alone and never as a backend of its own.
+struct MlxDrafter {
+    /// The draft head its `config.json` declares: the architecture, the
+    /// family and width of the base it reads, its `model_type`.
+    DraftHead head{};
+    /// The bases its record names (`Snapshot::bases`): the stored models
+    /// `draft_head_bases` measured when it was converted. Empty when it names
+    /// none -- a pull, or a conversion with no base stored -- and then it pairs
+    /// by family and width alone.
+    std::vector<std::string> bases{};
+};
+
+/// The drafter at `dir`, or nullopt when it is none: its kind is not
+/// `drafter` (`read_mlx_kind`), or its `config.json` declares no draft head.
+[[nodiscard]] std::optional<MlxDrafter> read_mlx_drafter(const std::filesystem::path& dir);
+
+/// What a drafter is, in one phrase: "a drafter (Gemma4AssistantForCausalLM)
+/// for a 2560-wide gemma4 model, its record naming Gemma4-E4B-Instruct".
+[[nodiscard]] std::string describe(const MlxDrafter& drafter);
+
+/// Why the drafter at `drafter` cannot run beside the MLX model at `base`, in
+/// one sentence naming the way out -- or empty when it can. File facts alone,
+/// asked in order: a drafter is there (`read_mlx_drafter`) and says how wide
+/// a model it reads; the base is a model mlx-vlm loads to chat with -- kind
+/// `vision`, never mlx-lm's build (`chat`): mlx-vlm's speculative path loads
+/// the base through mlx-vlm, and mlx-lm's build is laid out for mlx-lm with
+/// its towers left out -- of the drafter's family and as wide as it reads
+/// (`config_width`); and, where its record names bases, `base` is a stored
+/// MLX model of one of them -- under `models_root`, the store's MLX root.
+/// Whether the installed mlx-vlm drafts its type is the backend's question
+/// (`backends::probe_mlx_draft`), asked after this.
+[[nodiscard]] std::string mlx_drafter_refusal(const std::filesystem::path& base,
+                                              const std::filesystem::path& drafter,
+                                              const std::filesystem::path& models_root);
+
+/// How wide an MLX embedding model's vectors are (53h), from the directory's
+/// own files: the last sentence-transformers `Dense` module its
+/// `modules.json` names whose `config.json` states `out_features` -- what
+/// the pipeline ends in -- else `config.json`'s `hidden_size` (a composite's
+/// `text_config.hidden_size`), what the pooled vector is when no Dense
+/// reshapes it. mlx-embeddings' converter copies only the top level's files,
+/// so a directory it wrote states the hidden size, which Gemma 3's two dense
+/// layers map back to. Read, never guessed: 0 when nothing states it.
+struct MlxEmbeddingWidth {
+    std::int64_t width = 0;
+    /// Where it was read: `the last Dense's out_features (3_Dense)`, `its
+    /// hidden_size`, `its text_config.hidden_size`. Empty when unknown.
+    std::string source{};
+
+    [[nodiscard]] bool known() const noexcept {
+        return width > 0;
+    }
+};
+
+[[nodiscard]] MlxEmbeddingWidth read_mlx_embedding_width(const std::filesystem::path& dir);
+
+/// One phrase: "768 wide (its hidden_size)", or "width unknown -- its
+/// config.json states no hidden_size" -- what `models info` says.
+[[nodiscard]] std::string describe(const MlxEmbeddingWidth& width);
 
 /// The window an `mlx` backend gets over a model (26a's chain): its
 /// `context_size` when set, else 26a's default -- 32,768, or the trained

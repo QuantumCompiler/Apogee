@@ -78,6 +78,14 @@ struct RagResult {
     MatchStrength strength;
     /// That best hit's raw score, for the line beside the band.
     double best_score = 0.0;
+
+    /// Each excerpt `prefix` holds, in the order sent (52a): read off the
+    /// chunks that survived the budget, never the ones it trimmed -- what a
+    /// turn's `sources` reports.
+    std::vector<harness::ExcerptSource> sources;
+    /// Beside each source, its first chunk's stored metadata, for a caller
+    /// that reads its own records back: recall's chat titles and dates.
+    std::vector<std::string> metadata;
 };
 
 /// Everything one turn's retrieval needs, gathered by the surface.
@@ -158,6 +166,11 @@ struct RagTurn {
     std::string graph_name;
     std::string graph_seed_collection;
 };
+
+/// The excerpts a turn sent, as the terminal's verbose line says them (52a):
+/// `sources: report.pdf pp. 41–42 (vector 0.81), notes.md (lexical 0.40)` --
+/// each score beside its retriever, the scales never mixed.
+[[nodiscard]] std::string describe_sources(const std::vector<harness::ExcerptSource>& sources);
 
 /// The full retrieval matrix for one turn: resolve the retriever ONCE, run it,
 /// optionally rerank, and package the transient prefix. Never throws for an

@@ -1,0 +1,8 @@
+updated backend q4 -> v1 (adapter)
+  adapter: /Users/someone/.apogee/training/versions/q4/v1.lora.gguf (352 B, a GGUF LoRA)
+  base:    /Users/someone/.apogee/models/tiny/gguf/cccccccccccc/tiny-Q4_K_M.gguf (untouched; pinned by sha256 a81cdd0551b6)
+  config:  /Users/someone/.apogee/config/config.json
+  eval:    100% (2/2), scored on tiny-Q4_K_M.gguf (Q4_K_M)
+
+Chat with it:
+  apogee chat -m q4

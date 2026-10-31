@@ -2,23 +2,32 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <random>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
+#include "backends/adapters.h"
 #include "backends/factory.h"
 #include "contracts/errors.h"
+#include "contracts/layout.h"
+#include "modelstore/mlx_info.h"
+#include "support/draft_head_configs.h"
 #include "support/env_guard.h"
 #include "support/fake_mlx_driver.h"
+#include "support/towered_configs.h"
 
 /// The mlx backend (27a) over a scripted driver, and its refusal ladder.
 ///
@@ -67,6 +76,7 @@ struct Fixture {
                     next.stderr_read = false;
                     next.stdin_closed = false;
                     next.terminated = false;
+                    next.heard.clear();
                     drivers.push_back(std::make_shared<DriverState>(std::move(next)));
                 }
                 drivers[commands.size() - 1]->vision_spawn =
@@ -907,6 +917,438 @@ TEST_CASE(
     CHECK(sighted.provider->spawn_count() == 0);
 }
 
+TEST_CASE(
+    "a directory mlx-vlm built answers every turn through mlx-vlm, text included; one recorded "
+    "as mlx-lm's reads no images; one with no record keeps 27c's way",
+    "[backends][mlx][vision][kind]") {
+    // 53f: the backend chooses by the recorded kind (53e's reader), never by
+    // the files alone.
+    Runtime runtime;
+    const std::filesystem::path model = runtime.dir.path() / "model";
+    std::ofstream{model / "config.json"}
+        << R"({"model_type":"qwen3_vl","vision_config":{"depth":27},)"
+           R"("text_config":{"model_type":"qwen3_vl_text"}})";
+    std::ofstream{model / "preprocessor_config.json"} << "{}";
+    const std::filesystem::path site = runtime.host.venv / "lib" / "python3.14" / "site-packages";
+    Runtime::touch(site / "mlx_vlm" / "__init__.py");
+    std::filesystem::create_directories(site / "mlx_vlm-0.6.1.dist-info");
+    const auto record = [&model](std::string_view kind) {
+        std::ofstream{model / "apogee-snapshot.json"}
+            << R"({"source": "convert", "transform": "a converter", "files": [], "kind": ")" << kind
+            << R"("})";
+    };
+    const auto options = [&runtime] {
+        return MlxLocalProvider::options_from("local", runtime.entry, runtime.host);
+    };
+    const auto sighted = [] {
+        DriverState state;
+        state.vision_startup = std::string{apogee::testing::kVisionReady};
+        state.replies = {numbered(text("ok")) + done()};
+        return state;
+    };
+
+    SECTION("no record: text through mlx-lm, its cache kept, mlx-vlm from the first picture") {
+        const MlxLocalProvider::Options unrecorded = options();
+        CHECK(unrecorded.info.kind.source == apogee::models::MlxKindSource::Files);
+        CHECK(unrecorded.vision);
+        CHECK_FALSE(unrecorded.info.through_vlm);
+        Fixture fixture{sighted(), unrecorded};
+        (void)fixture.provider->chat(ask("hello"), {});
+        REQUIRE(fixture.commands.size() == 1);
+        CHECK_FALSE(asked_for_vision(fixture.commands[0]));
+        CHECK(apogee::backends::probe_mlx_backend("local", runtime.entry, runtime.host).ready());
+    }
+    SECTION("recorded vision: mlx-vlm from the first turn, one driver for every turn") {
+        record("vision");
+        const MlxLocalProvider::Options built = options();
+        CHECK(built.info.kind.source == apogee::models::MlxKindSource::Recorded);
+        CHECK(built.info.through_vlm);
+        CHECK(built.vision);
+        Fixture fixture{sighted(), built};
+        CHECK(fixture.provider->accepts_images());
+        Streamed streamed;
+        (void)fixture.provider->stream_chat(ask("hello"), streamed.options);
+        REQUIRE(fixture.commands.size() == 1);
+        CHECK(asked_for_vision(fixture.commands[0]));
+        CHECK(fixture.provider->has_vision_child());
+        const apogee::harness::StatusEvent* loading =
+            streamed.status(apogee::harness::StatusEvent::Type::ModelLoading);
+        REQUIRE(loading != nullptr);
+        CHECK(loading->detail == "through mlx-vlm, which built it");
+        // A picture, then text again: the same driver, never swapped.
+        (void)fixture.provider->chat(look(), {});
+        (void)fixture.provider->chat(ask("and now?"), {});
+        CHECK(fixture.provider->spawn_count() == 1);
+        CHECK(fixture.drivers[0]->writes.size() == 3);
+
+        // Preloaded the same way.
+        Fixture preloaded{sighted(), built};
+        preloaded.provider->preload({});
+        REQUIRE(preloaded.commands.size() == 1);
+        CHECK(asked_for_vision(preloaded.commands[0]));
+
+        // A driver from before 27c ignores --vision: refused, the fix named.
+        DriverState older;
+        older.replies = {numbered(text("never")) + done()};
+        Fixture stale{std::move(older), built};
+        try {
+            (void)stale.provider->chat(ask("hello"), {});
+            FAIL("an older driver must not answer for a directory mlx-vlm built");
+        } catch (const apogee::harness::ProviderError& e) {
+            const std::string message = e.what();
+            CHECK(message.find("does not load models through mlx-vlm") != std::string::npos);
+            CHECK(message.find("apogee check --fix") != std::string::npos);
+        }
+        CHECK(stale.drivers[0]->writes.empty());
+    }
+    SECTION("recorded chat: mlx-lm's build of its language model reads no images") {
+        record("chat");
+        const MlxLocalProvider::Options text_only = options();
+        CHECK(text_only.info.vision_files);
+        CHECK_FALSE(text_only.vision);
+        CHECK_FALSE(text_only.info.through_vlm);
+        const apogee::backends::MlxVision vision = apogee::backends::probe_mlx_vision(
+            apogee::backends::inspect_mlx_model(model), runtime.host);
+        CHECK_FALSE(vision.model);
+        CHECK(vision.reason.find("its record says it is mlx-lm's build of its language model "
+                                 "alone (kind chat), its vision tower left out") !=
+              std::string::npos);
+        Fixture fixture{sighted(), text_only};
+        CHECK_FALSE(fixture.provider->accepts_images());
+        try {
+            (void)fixture.provider->chat(look(), {});
+            FAIL("a picture went to mlx-lm's build of a language model");
+        } catch (const apogee::harness::ProviderError& e) {
+            CHECK(std::string{e.what()}.find("cannot read images: its record says") !=
+                  std::string::npos);
+        }
+        CHECK(fixture.provider->spawn_count() == 0);
+        (void)fixture.provider->chat(ask("hello"), {});
+        REQUIRE(fixture.commands.size() == 1);
+        CHECK_FALSE(asked_for_vision(fixture.commands[0]));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Audio (53g)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A short WAV as Apogee's ffmpeg runner writes one: RIFF, a PCM format
+/// chunk at 16 kHz, mono, 16-bit, then `samples` bytes -- their value the
+/// count, so two recordings of different lengths differ in every byte.
+std::string wav(std::size_t samples = 32) {
+    const auto le = [](std::uint32_t value, int width) {
+        std::string out;
+        for (int at = 0; at < width; ++at) {
+            out.push_back(static_cast<char>((value >> (8U * static_cast<unsigned>(at))) & 0xFFU));
+        }
+        return out;
+    };
+    const auto size = static_cast<std::uint32_t>(samples);
+    return "RIFF" + le(36 + size, 4) + "WAVE" + "fmt " + le(16, 4) + le(1, 2) + le(1, 2) +
+           le(16000, 4) + le(32000, 4) + le(2, 2) + le(16, 2) + "data" + le(size, 4) +
+           std::string(samples, static_cast<char>(samples % 251));
+}
+
+/// Base64, as the IR carries a recording.
+std::string base64(std::string_view bytes) {
+    constexpr std::string_view kAlphabet =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    for (std::size_t at = 0; at < bytes.size(); at += 3) {
+        const auto byte = [&bytes](std::size_t index) -> std::uint32_t {
+            return index < bytes.size() ? static_cast<unsigned char>(bytes[index]) : 0U;
+        };
+        const std::uint32_t chunk = (byte(at) << 16U) | (byte(at + 1) << 8U) | byte(at + 2);
+        out.push_back(kAlphabet[(chunk >> 18U) & 0x3FU]);
+        out.push_back(kAlphabet[(chunk >> 12U) & 0x3FU]);
+        out.push_back(at + 1 < bytes.size() ? kAlphabet[(chunk >> 6U) & 0x3FU] : '=');
+        out.push_back(at + 2 < bytes.size() ? kAlphabet[chunk & 0x3FU] : '=');
+    }
+    return out;
+}
+
+/// A question about a recording, the recording after the words.
+ChatRequest listen(const std::string& recording, std::string format = "wav") {
+    ChatRequest request;
+    request.messages.push_back(ChatMessage{
+        .role = apogee::harness::Role::User,
+        .content = apogee::harness::MessageContent::from_parts(
+            {apogee::harness::ContentPart::from_text("what is said?"),
+             apogee::harness::ContentPart::from_audio(base64(recording), std::move(format))})});
+    return request;
+}
+
+/// An omni directory mlx-vlm built, hearing through it.
+MlxLocalProvider::Options hearing() {
+    MlxLocalProvider::Options options = seeing();
+    options.model = "gemma-4-E4B";
+    options.info.model_type = "gemma4";
+    options.info.kind = {.word = std::string{apogee::models::kMlxVision},
+                         .source = apogee::models::MlxKindSource::Recorded};
+    options.info.through_vlm = true;
+    options.audio = true;
+    return options;
+}
+
+DriverState hearing_driver(std::vector<std::string> replies) {
+    DriverState state;
+    state.vision_startup = std::string{apogee::testing::kHearingReady};
+    state.replies = std::move(replies);
+    return state;
+}
+
+}  // namespace
+
+TEST_CASE(
+    "a directory hears only as mlx-vlm's build of a set with an audio tower, with mlx-vlm and its "
+    "type's module installed: each rung refuses by name, from the files alone",
+    "[backends][mlx][audio]") {
+    using apogee::backends::MlxAudioRefusal;
+    Runtime runtime;
+    const std::filesystem::path model = runtime.dir.path() / "model";
+    const std::filesystem::path site = runtime.host.venv / "lib" / "python3.14" / "site-packages";
+    const std::filesystem::path vlm = site / "mlx_vlm";
+    const auto configure = [&model](const char* config) {
+        std::ofstream{model / "config.json"} << config;
+    };
+    const auto record = [&model](std::string_view kind) {
+        std::ofstream{model / "apogee-snapshot.json"}
+            << R"({"source": "convert", "transform": "mlx_vlm.convert 4bit", "files": [], )"
+            << R"("kind": ")" << kind << R"("})";
+    };
+    const auto audio = [&runtime, &model] {
+        return apogee::backends::probe_mlx_audio(apogee::backends::inspect_mlx_model(model),
+                                                 runtime.host);
+    };
+
+    // Gemma 4's E4B with its processor, but no record: its files make it a
+    // vision model, and nothing says mlx-vlm built it -- taken for mlx-lm's
+    // layout, which keeps no audio tower.
+    configure(apogee::testing::kGemma4Config);
+    std::ofstream{model / "processor_config.json"} << "{}";
+    CHECK(apogee::backends::inspect_mlx_model(model).towers ==
+          std::vector<std::string>{"vision_config", "audio_config"});
+    CHECK(audio().refusal == MlxAudioRefusal::NotMlxVlmBuild);
+    CHECK(audio().message().starts_with(
+        "not mlx-vlm's build: no record says mlx-vlm built it (kind vision, inferred from its "
+        "files), and only mlx-vlm's build of a set keeps an audio tower -- 'apogee models "
+        "convert <its SafeTensors set> --mlx' builds it through mlx-vlm, the towers kept"));
+
+    // mlx-lm's build of it: the towers left out.
+    record("chat");
+    CHECK(audio().refusal == MlxAudioRefusal::NotMlxVlmBuild);
+    CHECK(audio().reason.find("its record says it is mlx-lm's build of its language model alone "
+                              "(kind chat), its towers left out") != std::string::npos);
+    // Another kind altogether.
+    record("embedding");
+    CHECK(audio().refusal == MlxAudioRefusal::NotMlxVlmBuild);
+    CHECK(audio().reason.find("kind embedding") != std::string::npos);
+
+    // mlx-vlm's build of a set that only sees.
+    record("vision");
+    configure(apogee::testing::kQwen3VlConfig);
+    CHECK(audio().refusal == MlxAudioRefusal::NoAudioTower);
+    CHECK(audio().message() ==
+          "no audio tower: its config.json declares none -- no audio_config, nor an omni "
+          "model's thinker_config");
+
+    // mlx-vlm's build of Gemma 4, with no mlx-vlm to hear through.
+    configure(apogee::testing::kGemma4Config);
+    CHECK(audio().refusal == MlxAudioRefusal::NoMlxVlm);
+    CHECK(audio().reason.find(runtime.host.venv.string()) != std::string::npos);
+    CHECK(audio().remedy == "apogee train setup --with mlx-vlm");
+
+    // An mlx-vlm without the type's module -- a module file of the name is not
+    // the package its loader imports.
+    Runtime::touch(vlm / "__init__.py");
+    std::filesystem::create_directories(site / "mlx_vlm-0.6.0.dist-info");
+    Runtime::touch(vlm / "models" / "qwen3_vl" / "__init__.py");
+    Runtime::touch(vlm / "models" / "gemma4.py");
+    CHECK(audio().refusal == MlxAudioRefusal::NoTypeModule);
+    CHECK(audio().message() ==
+          "no mlx-vlm module for its type: the installed mlx-vlm 0.6.0 has no module for its "
+          "type, gemma4, so it cannot build the model to hear with -- apogee train setup --with "
+          "mlx-vlm");
+
+    // With it, it hears: asked of the files, before any turn, no driver started.
+    Runtime::touch(vlm / "models" / "gemma4" / "__init__.py");
+    CHECK(audio().hears());
+    CHECK(audio().message().empty());
+    CHECK(audio().vlm.version == "0.6.0");
+    const MlxLocalProvider::Options options =
+        MlxLocalProvider::options_from("local", runtime.entry, runtime.host);
+    CHECK(options.audio);
+    CHECK(options.audio_gap.empty());
+    Fixture fixture{DriverState{}, options};
+    CHECK(fixture.provider->accepts_audio());
+    // The contract's 16 kHz, which mlx-vlm converts to its own.
+    CHECK(fixture.provider->audio_sample_rate() == 0);
+    CHECK(fixture.provider->spawn_count() == 0);
+
+    // Qwen3-Omni: its audio tower nested in its thinker, no vision_config at
+    // the top -- its record alone makes it mlx-vlm's.
+    configure(apogee::testing::kQwen3OmniConfig);
+    CHECK(apogee::backends::inspect_mlx_model(model).towers ==
+          std::vector<std::string>{"thinker_config"});
+    CHECK(audio().refusal == MlxAudioRefusal::NoTypeModule);
+    CHECK(audio().reason.find("type, qwen3_omni_moe,") != std::string::npos);
+    // Built by another type's package, through mlx-vlm's remap table...
+    std::ofstream{vlm / "utils.py"}
+        << "MODEL_REMAPPING = {\n    \"llava-qwen2\": \"llava_bunny\",\n"
+        << "    'qwen3_omni_moe': 'qwen3_omni',\n}\n";
+    CHECK(audio().refusal == MlxAudioRefusal::NoTypeModule);
+    Runtime::touch(vlm / "models" / "qwen3_omni" / "__init__.py");
+    CHECK(audio().hears());
+    // ...or by its own.
+    std::filesystem::remove(vlm / "utils.py");
+    CHECK_FALSE(audio().hears());
+    Runtime::touch(vlm / "models" / "qwen3_omni_moe" / "__init__.py");
+    CHECK(audio().hears());
+    CHECK(apogee::backends::mlx_vlm_has_module(audio().vlm, "qwen3_omni_moe"));
+    CHECK_FALSE(apogee::backends::mlx_vlm_has_module(audio().vlm, ""));
+    CHECK_FALSE(apogee::backends::mlx_vlm_has_module({}, "qwen3_omni_moe"));
+
+    // An entry that cannot hear carries its rung into its options.
+    configure(apogee::testing::kQwen3VlConfig);
+    const MlxLocalProvider::Options deaf =
+        MlxLocalProvider::options_from("local", runtime.entry, runtime.host);
+    CHECK_FALSE(deaf.audio);
+    CHECK(deaf.audio_gap.starts_with("no audio tower: "));
+    CHECK(deaf.vision);
+}
+
+TEST_CASE(
+    "a recording reaches a driver that hears as a WAV file of the turn's own, where its part sat, "
+    "and is gone once the turn is over, however it ends",
+    "[backends][mlx][audio]") {
+    Fixture fixture{hearing_driver({numbered(text("It says hello.")) + done("stop", 300)}),
+                    hearing()};
+    const std::string recording = wav(64);
+    Streamed streamed;
+    (void)fixture.provider->stream_chat(listen(recording), streamed.options);
+    CHECK(streamed.tokens == "It says hello.");
+    REQUIRE(fixture.commands.size() == 1);
+    CHECK(asked_for_vision(fixture.commands[0]));
+
+    // The part where it sat, as the path of the file written for it...
+    const json sent = fixture.written(0, 0);
+    const json& content = sent["messages"][0]["content"];
+    REQUIRE(content.size() == 2);
+    CHECK(content[0] == json{{"type", "text"}, {"text", "what is said?"}});
+    CHECK(content[1]["type"] == "audio");
+    const std::filesystem::path path{content[1]["audio"].get<std::string>()};
+    CHECK(path.filename() == "audio-0.wav");
+    CHECK(path.parent_path().filename().string().starts_with("apogee-mlx-audio-"));
+    // ...the recording byte for byte while the driver read it, never its
+    // base64 on the line...
+    REQUIRE(fixture.drivers[0]->heard.size() == 1);
+    CHECK(fixture.drivers[0]->heard[0].path == path.string());
+    CHECK(fixture.drivers[0]->heard[0].bytes == recording);
+    CHECK(fixture.drivers[0]->writes[0].find(base64(recording)) == std::string::npos);
+    // ...and nothing of it outlives the turn.
+    CHECK_FALSE(std::filesystem::exists(path.parent_path()));
+
+    // Two recordings in two messages: each where it sat, in prompt order.
+    ChatRequest two = listen(wav(8));
+    two.messages.push_back(ChatMessage::assistant("It says hello."));
+    two.messages.push_back(
+        ChatMessage{.role = apogee::harness::Role::User,
+                    .content = apogee::harness::MessageContent::from_parts(
+                        {apogee::harness::ContentPart::from_audio(base64(wav(16)), "WAV"),
+                         apogee::harness::ContentPart::from_text("and this one?")})});
+    (void)fixture.provider->chat(two, {});
+    const json second = fixture.written(0, 1);
+    const std::filesystem::path first_path{
+        second["messages"][0]["content"][1]["audio"].get<std::string>()};
+    const std::filesystem::path second_path{
+        second["messages"][2]["content"][0]["audio"].get<std::string>()};
+    CHECK(first_path.filename() == "audio-0.wav");
+    CHECK(second_path.filename() == "audio-1.wav");
+    CHECK(first_path.parent_path() == second_path.parent_path());
+    CHECK(first_path.parent_path() != path.parent_path());
+    REQUIRE(fixture.drivers[0]->heard.size() == 3);
+    CHECK(fixture.drivers[0]->heard[1].bytes == wav(8));
+    CHECK(fixture.drivers[0]->heard[2].bytes == wav(16));
+    CHECK_FALSE(std::filesystem::exists(first_path.parent_path()));
+
+    // A text turn after it: the same driver, nothing to hear.
+    (void)fixture.provider->chat(ask("thanks"), {});
+    CHECK(fixture.provider->spawn_count() == 1);
+    CHECK(fixture.drivers[0]->heard.size() == 3);
+
+    // A turn the driver fails still leaves nothing behind.
+    Fixture failing{hearing_driver({numbered(R"({"type":"error","id":"{id}","kind":"request",)"
+                                             R"("message":"ValueError: the audio is too long"})"
+                                             "\n")}),
+                    hearing()};
+    CHECK_THROWS_AS(failing.provider->chat(listen(wav()), {}), apogee::harness::ProviderError);
+    REQUIRE(failing.drivers[0]->heard.size() == 1);
+    CHECK_FALSE(std::filesystem::exists(std::filesystem::path{failing.drivers[0]->heard[0].path}));
+}
+
+TEST_CASE(
+    "what cannot be heard is refused before anything starts, the rung said; a recording that is "
+    "not a WAV starts nothing either; a driver from before 53g is never sent one",
+    "[backends][mlx][audio]") {
+    // A directory that cannot hear: the rung and its reason, nothing spawned.
+    MlxLocalProvider::Options deaf = hearing();
+    deaf.audio = false;
+    deaf.audio_gap =
+        "no audio tower: its config.json declares none -- no audio_config, nor an omni model's "
+        "thinker_config";
+    Fixture blind{hearing_driver({numbered(text("never")) + done()}), deaf};
+    CHECK_FALSE(blind.provider->accepts_audio());
+    try {
+        (void)blind.provider->chat(listen(wav()), {});
+        FAIL("a model that hears nothing was sent a recording");
+    } catch (const apogee::harness::ProviderError& e) {
+        CHECK(std::string{e.what()}.find(
+                  "gemma-4-E4B cannot hear audio on the mlx backend -- no audio tower: its "
+                  "config.json declares none") != std::string::npos);
+    }
+    CHECK(blind.provider->spawn_count() == 0);
+
+    // One that hears, sent what is not a WAV: by its container, or its bytes.
+    Fixture fixture{hearing_driver({numbered(text("never")) + done()}), hearing()};
+    try {
+        (void)fixture.provider->chat(listen(wav(), "mp3"), {});
+        FAIL("an mp3 part was handed on");
+    } catch (const apogee::harness::ProviderError& e) {
+        CHECK(std::string{e.what()}.find("as a WAV file, and this one is mp3") !=
+              std::string::npos);
+    }
+    try {
+        (void)fixture.provider->chat(listen("ID3 an mp3 said to be a WAV"), {});
+        FAIL("bytes that are no WAV were handed on");
+    } catch (const apogee::harness::ProviderError& e) {
+        CHECK(std::string{e.what()}.find("as a WAV file, and this one is not one") !=
+              std::string::npos);
+    }
+    CHECK(fixture.provider->spawn_count() == 0);
+
+    // 53f's driver: it loads through mlx-vlm, and says nothing of audio.
+    DriverState older;
+    older.vision_startup = std::string{apogee::testing::kVisionReady};
+    older.replies = {numbered(text("hello")) + done()};
+    Fixture stale{std::move(older), hearing()};
+    try {
+        (void)stale.provider->chat(listen(wav()), {});
+        FAIL("an older driver must not be sent a recording");
+    } catch (const apogee::harness::ProviderError& e) {
+        const std::string message = e.what();
+        CHECK(message.find("does not hand recordings to the model") != std::string::npos);
+        CHECK(message.find("apogee check --fix") != std::string::npos);
+    }
+    CHECK(stale.drivers[0]->writes.empty());
+    // It answers text as it did: kept, not loaded again.
+    CHECK(stale.provider->has_live_child());
+    (void)stale.provider->chat(ask("hello"), {});
+    CHECK(stale.provider->spawn_count() == 1);
+}
+
 TEST_CASE("preload starts the driver and waits for its model", "[backends][mlx][session]") {
     Fixture fixture{DriverState{}};
     CHECK(fixture.provider->model_status().type ==
@@ -985,13 +1427,27 @@ TEST_CASE("the refusal ladder: every rung refuses with its own reason and its ex
                 "--type mlx");
     }
     {
+        // A directory mlx-vlm built (53f), with no mlx-vlm to load it -- asked
+        // before the driver, which could not load it either.
+        const Runtime runtime;
+        std::ofstream{runtime.dir.path() / "model" / "apogee-snapshot.json"}
+            << R"({"source": "convert", "transform": "mlx_vlm.convert 4bit", "files": [],)"
+               R"( "kind": "vision"})";
+        std::filesystem::remove(runtime.host.driver);
+        refused(runtime.probe(), MlxRefusal::NoMlxVlm,
+                "was built by mlx-vlm (its record says vision), which loads it for every turn, "
+                "and mlx-vlm is not installed",
+                "apogee train setup --with mlx-vlm");
+    }
+    {
         const Runtime runtime;
         std::filesystem::remove(runtime.host.driver);
         refused(runtime.probe(), MlxRefusal::NoDriver, "the MLX driver is missing",
                 "apogee check --fix");
     }
-    // Eight rungs, eight different sentences.
-    CHECK(messages.size() == 8);
+    // Nine rungs, nine different sentences.
+    CHECK(messages.size() == 9);
+    CHECK(apogee::backends::to_string(MlxRefusal::NoMlxVlm) == "no mlx-vlm");
 }
 
 TEST_CASE("the ladder asks the platform first, the runtime before the model",
@@ -1116,4 +1572,407 @@ TEST_CASE("an entry's fields map onto the provider's options", "[backends][mlx][
     CHECK(options.sampling.top_k == 40);
     CHECK(options.seed == 7U);
     CHECK(options.info.model_type == "llama");
+}
+
+// ---------------------------------------------------------------------------
+// Adapters (53a)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A model directory with a shard, an adapter directory beside it, and the
+/// options that run the one over the other, the adapter pinned as it is now.
+struct AdapterBench {
+    apogee::testing::TempDir dir{"mlx-adapters-" + std::to_string(std::random_device{}())};
+    std::filesystem::path model = dir.path() / "model";
+    std::filesystem::path adapter = dir.path() / "style-adapter";
+    std::filesystem::path memo = dir.path() / "cache" / "weight-hashes.json";
+
+    AdapterBench() {
+        std::filesystem::create_directories(model);
+        std::ofstream{model / "config.json"} << R"({"model_type":"llama"})";
+        std::ofstream{model / "model.safetensors"} << "weights";
+        std::filesystem::create_directories(adapter);
+        std::ofstream{adapter / "adapter_config.json"} << "{}";
+        std::ofstream{adapter / "adapters.safetensors"} << "delta";
+    }
+
+    [[nodiscard]] MlxLocalProvider::Options options() const {
+        MlxLocalProvider::Options options = Fixture::defaults();
+        options.model_dir = model;
+        options.weight_hashing.memo = memo;
+        options.adapters = {
+            {.path = adapter.string(), .base_sha256 = apogee::backends::weights_sha256(model)}};
+        return options;
+    }
+
+    /// The ready line of a driver that applied the adapter.
+    [[nodiscard]] std::string ready() const {
+        return json{{"type", "ready"},        {"protocol", 1},
+                    {"model_type", "llama"},  {"chat_template", true},
+                    {"tool_parser", nullptr}, {"thinking", false},
+                    {"mlx_lm", "0.32.0"},     {"adapter", adapter.string()}}
+                   .dump() +
+               "\n";
+    }
+};
+
+}  // namespace
+
+TEST_CASE("an adapter reaches the driver as mlx-lm's adapter_path, the argv pinned",
+          "[backends][mlx][adapters]") {
+    const AdapterBench bench;
+    DriverState state;
+    state.startup = bench.ready();
+    state.replies = {numbered(text("Styled.")) + done()};
+    Fixture fixture{state, bench.options()};
+    Streamed streamed;
+    CHECK(fixture.provider->stream_chat(ask("hi"), streamed.options).message.content.plain_text() ==
+          "Styled.");
+    REQUIRE(fixture.commands.size() == 1);
+    CHECK(fixture.commands[0].arguments ==
+          std::vector<std::string>{"/home/training/scripts/mlx_generate.py", "--model",
+                                   bench.model.string(), "--adapter", bench.adapter.string()});
+    REQUIRE(streamed.status(apogee::harness::StatusEvent::Type::ModelReady) != nullptr);
+    CHECK(streamed.status(apogee::harness::StatusEvent::Type::ModelReady)->detail ==
+          "mlx-lm 0.32.0, llama, adapter style-adapter");
+    // One driver, the adapter applied once as it loaded.
+    CHECK(fixture.provider->spawn_count() == 1);
+}
+
+TEST_CASE("a driver that never names the adapter it was handed is refused, the fix named",
+          "[backends][mlx][adapters]") {
+    // One older than 53a ignores --adapter and loads the bare base: answering
+    // from it would read as the adapter's answer.
+    const AdapterBench bench;
+    DriverState state;
+    state.replies = {numbered(text("Bare.")) + done()};
+    Fixture fixture{state, bench.options()};
+    Streamed streamed;
+    CHECK_THROWS_WITH(fixture.provider->stream_chat(ask("hi"), streamed.options),
+                      Catch::Matchers::ContainsSubstring("does not apply adapters") &&
+                          Catch::Matchers::ContainsSubstring("apogee check --fix"));
+    CHECK_FALSE(fixture.provider->has_live_child());
+}
+
+TEST_CASE("an adapter pinned to other weights is refused before a driver starts",
+          "[backends][mlx][adapters][refusal]") {
+    const AdapterBench bench;
+    MlxLocalProvider::Options options = bench.options();
+    std::ofstream{bench.model / "model.safetensors"} << "retrained weights";
+    DriverState state;
+    state.startup = bench.ready();
+    Fixture fixture{state, std::move(options)};
+    Streamed streamed;
+    CHECK_THROWS_WITH(fixture.provider->stream_chat(ask("hi"), streamed.options),
+                      Catch::Matchers::ContainsSubstring("the adapter " + bench.adapter.string() +
+                                                         " was pinned to other base weights"));
+    CHECK(fixture.provider->spawn_count() == 0);
+    // An adapter directory gone: refused by name, nothing started either.
+    std::filesystem::remove_all(bench.adapter);
+    Fixture gone{state, bench.options()};
+    CHECK_THROWS_WITH(gone.provider->stream_chat(ask("hi"), streamed.options),
+                      Catch::Matchers::ContainsSubstring("is not there"));
+    CHECK(gone.provider->spawn_count() == 0);
+}
+
+TEST_CASE("an mlx entry's adapter maps onto the provider's options",
+          "[backends][mlx][adapters][config]") {
+    Runtime runtime;
+    runtime.entry.adapters = {{.path = "/adapters/style", .base_sha256 = std::string(64, 'c')}};
+    const MlxLocalProvider::Options options =
+        MlxLocalProvider::options_from("local", runtime.entry, runtime.host);
+    CHECK(options.adapters == runtime.entry.adapters);
+    CHECK(options.weight_hashing.memo == apogee::harness::weight_hash_cache_path());
+}
+
+// ---------------------------------------------------------------------------
+// A drafter beside the model (53i)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A drafter's directory: the user's E4B assistant's config.json, as
+/// mlx-vlm's conversion keeps it, recorded a drafter -- naming `bases` when
+/// given -- or with no record at all, as a pull brings one.
+void drafter_dir(const std::filesystem::path& dir, const char* config,
+                 const std::vector<std::string>& bases = {}, bool recorded = true) {
+    std::filesystem::create_directories(dir);
+    std::ofstream{dir / "config.json"} << config;
+    if (recorded) {
+        json record{{"ref", "Gemma4-E4B-Assistant/safetensors/aaaaaaaaaaaa"},
+                    {"source", "convert"},
+                    {"transform", "mlx_vlm.convert bf16"},
+                    {"files", json::array()},
+                    {"kind", "drafter"}};
+        if (!bases.empty()) {
+            record["bases"] = bases;
+        }
+        std::ofstream{dir / "apogee-snapshot.json"} << record.dump();
+    }
+}
+
+/// A ready line from a driver that loaded `draft` beside the model through
+/// mlx-vlm, its block `block` (null for the drafter's own).
+std::string drafting_ready(const std::string& draft, const json& block) {
+    return json{{"type", "ready"},          {"protocol", 1},
+                {"model_type", "gemma4"},   {"chat_template", true},
+                {"tool_parser", nullptr},   {"thinking", false},
+                {"mlx_lm", "0.32.0"},       {"vision", true},
+                {"mlx_vlm", "0.6.1"},       {"audio", true},
+                {"draft", draft},           {"draft_kind", "mtp"},
+                {"draft_block_size", block}}
+               .dump() +
+           "\n";
+}
+
+}  // namespace
+
+TEST_CASE(
+    "a drafted entry answers every turn through mlx-vlm beside its drafter, the argv and the "
+    "ready line pinned",
+    "[backends][mlx][drafter]") {
+    MlxLocalProvider::Options options = Fixture::defaults();
+    options.draft = "/models/Gemma4-E4B-Assistant/mlx/aaaaaaaaaaaa";
+    options.draft_block_size = 4;
+    DriverState state;
+    state.vision_startup = drafting_ready(options.draft.string(), 4);
+    state.replies = {numbered(text("Drafted, the base's words.")) + done(),
+                     numbered(text("Again.")) + done()};
+    Fixture fixture{state, options};
+    CHECK(fixture.provider->drafting());
+    Streamed streamed;
+    // A text turn, no picture: through mlx-vlm all the same, which its
+    // speculative path loads the base through.
+    CHECK(fixture.provider->stream_chat(ask("hi"), streamed.options).message.content.plain_text() ==
+          "Drafted, the base's words.");
+    REQUIRE(fixture.commands.size() == 1);
+    CHECK(fixture.commands[0].arguments ==
+          std::vector<std::string>{"/home/training/scripts/mlx_generate.py", "--model",
+                                   "/models/llama", "--vision", "--draft",
+                                   "/models/Gemma4-E4B-Assistant/mlx/aaaaaaaaaaaa",
+                                   "--draft-block-size", "4"});
+    CHECK(fixture.provider->has_vision_child());
+    REQUIRE(streamed.status(apogee::harness::StatusEvent::Type::ModelLoading) != nullptr);
+    CHECK(streamed.status(apogee::harness::StatusEvent::Type::ModelLoading)->detail ==
+          "through mlx-vlm, drafting beside aaaaaaaaaaaa");
+    REQUIRE(streamed.status(apogee::harness::StatusEvent::Type::ModelReady) != nullptr);
+    CHECK(streamed.status(apogee::harness::StatusEvent::Type::ModelReady)->detail ==
+          "mlx-lm 0.32.0, gemma4, mlx-vlm 0.6.1, drafter aaaaaaaaaaaa (mtp, block 4)");
+    // The request is the same request: nothing a turn carries changes.
+    const json request = fixture.written(0, 0);
+    CHECK(request["type"] == "generate");
+    CHECK_FALSE(request.contains("draft"));
+    // One child for the conversation.
+    CHECK(fixture.provider->stream_chat(ask("again"), streamed.options)
+              .message.content.plain_text() == "Again.");
+    CHECK(fixture.provider->spawn_count() == 1);
+
+    // No block set: the drafter's own, and no flag for it.
+    MlxLocalProvider::Options own = Fixture::defaults();
+    own.draft = "/models/drafter";
+    DriverState own_state;
+    own_state.vision_startup = drafting_ready("/models/drafter", nullptr);
+    own_state.replies = {numbered(text("ok")) + done()};
+    Fixture fixture_own{own_state, own};
+    Streamed own_streamed;
+    (void)fixture_own.provider->stream_chat(ask("hi"), own_streamed.options);
+    CHECK(fixture_own.commands[0].arguments ==
+          std::vector<std::string>{"/home/training/scripts/mlx_generate.py", "--model",
+                                   "/models/llama", "--vision", "--draft", "/models/drafter"});
+    CHECK(own_streamed.status(apogee::harness::StatusEvent::Type::ModelReady)->detail ==
+          "mlx-lm 0.32.0, gemma4, mlx-vlm 0.6.1, drafter drafter (mtp)");
+    // And preload starts it the same way.
+    Fixture preloaded{own_state, own};
+    preloaded.provider->preload({});
+    CHECK(preloaded.commands[0].arguments.at(3) == "--vision");
+}
+
+TEST_CASE("a driver that never names the drafter it was handed is refused, the fix named",
+          "[backends][mlx][drafter]") {
+    // One older than 53i ignores --draft and answers from the base alone,
+    // which would read as drafting that never happened.
+    MlxLocalProvider::Options options = Fixture::defaults();
+    options.draft = "/models/drafter";
+    DriverState state;
+    state.vision_startup = std::string{apogee::testing::kHearingReady};
+    state.replies = {numbered(text("Bare.")) + done()};
+    Fixture fixture{state, options};
+    Streamed streamed;
+    CHECK_THROWS_WITH(fixture.provider->stream_chat(ask("hi"), streamed.options),
+                      Catch::Matchers::ContainsSubstring("does not draft") &&
+                          Catch::Matchers::ContainsSubstring("apogee check --fix"));
+    CHECK_FALSE(fixture.provider->has_live_child());
+}
+
+TEST_CASE(
+    "the ladder refuses a drafter as an entry's model, and a draft that cannot run beside it, "
+    "each by name from the files alone",
+    "[backends][mlx][ladder][drafter]") {
+    Runtime runtime;
+    const apogee::testing::EnvGuard home{"APOGEE_HOME", runtime.dir.path().string()};
+    const std::filesystem::path models = runtime.dir.path() / "models";
+    const std::filesystem::path site = runtime.host.venv / "lib" / "python3.14" / "site-packages";
+    const std::filesystem::path vlm = site / "mlx_vlm";
+
+    // A drafter as the model: it runs beside a base, never alone.
+    {
+        Runtime drafted;
+        drafter_dir(drafted.dir.path() / "model", apogee::testing::kGemma4AssistantE4BConfig);
+        const MlxReadiness readiness = drafted.probe();
+        CHECK(readiness.refusal == MlxRefusal::Drafter);
+        CHECK(readiness.reason ==
+              (drafted.dir.path() / "model").string() +
+                  " is a drafter: it runs beside its base model, never alone -- an mlx entry "
+                  "over its base names it as its draft");
+        CHECK(readiness.remedy == "apogee config set-backend <its base's mlx backend> --draft " +
+                                      (drafted.dir.path() / "model").string());
+        CHECK(apogee::backends::to_string(MlxRefusal::Drafter) == "a drafter");
+        // Pulled, with no record: its config says so all the same.
+        std::filesystem::remove(drafted.dir.path() / "model" / "apogee-snapshot.json");
+        CHECK(drafted.probe().refusal == MlxRefusal::Drafter);
+    }
+
+    // The E4B base, mlx-vlm's build, in the store; its drafter beside it.
+    const std::filesystem::path base = models / "Gemma4-E4B-Instruct" / "mlx" / "bbbbbbbbbbbb";
+    std::filesystem::create_directories(base);
+    std::ofstream{base / "config.json"} << apogee::testing::kGemma4BaseE4BConfig;
+    std::ofstream{base / "apogee-snapshot.json"}
+        << R"({"source": "convert", "transform": "mlx_vlm.convert 4bit", "files": [],)"
+           R"( "kind": "vision"})";
+    const std::filesystem::path draft = models / "Gemma4-E4B-Assistant" / "mlx" / "aaaaaaaaaaaa";
+    drafter_dir(draft, apogee::testing::kGemma4AssistantE4BConfig, {"Gemma4-E4B-Instruct"});
+    runtime.entry.model_path = base.string();
+    runtime.entry.draft = draft.string();
+
+    // No mlx-vlm to draft through: the base's own rung asks first.
+    MlxReadiness readiness = runtime.probe();
+    CHECK(readiness.refusal == MlxRefusal::NoMlxVlm);
+    // An mlx-vlm with no drafter of its type.
+    Runtime::touch(vlm / "__init__.py");
+    std::filesystem::create_directories(site / "mlx_vlm-0.6.1.dist-info");
+    readiness = runtime.probe();
+    CHECK(readiness.refusal == MlxRefusal::Draft);
+    CHECK(readiness.reason ==
+          "its draft cannot run beside it: the installed mlx-vlm 0.6.1 drafts no gemma4_assistant "
+          "model -- its speculative path holds no drafter of that type "
+          "(speculative/drafters/gemma4_assistant)");
+    CHECK(readiness.remedy == "apogee train setup --with mlx-vlm");
+    CHECK(apogee::backends::to_string(MlxRefusal::Draft) == "draft");
+    // A package of the name that names no Model is none.
+    Runtime::touch(vlm / "speculative" / "drafters" / "gemma4_assistant" / "__init__.py");
+    CHECK(runtime.probe().refusal == MlxRefusal::Draft);
+    std::ofstream{vlm / "speculative" / "drafters" / "gemma4_assistant" / "__init__.py"}
+        << "from .gemma4_assistant import Gemma4AssistantDraftModel as Model\n";
+    CHECK(runtime.probe().ready());
+
+    // Beside another width, another family, or a base its record does not
+    // name: refused by the pairing's own words.
+    const std::filesystem::path wide = models / "Gemma4-12B-Instruct" / "mlx" / "cccccccccccc";
+    std::filesystem::create_directories(wide);
+    std::ofstream{wide / "config.json"} << apogee::testing::kGemma4Base12BConfig;
+    std::ofstream{wide / "apogee-snapshot.json"}
+        << R"({"source": "convert", "files": [], "kind": "vision"})";
+    runtime.entry.model_path = wide.string();
+    readiness = runtime.probe();
+    CHECK(readiness.refusal == MlxRefusal::Draft);
+    CHECK(readiness.reason.find("drafts for a 2560-wide gemma4 model, reading its hidden states, "
+                                "and " +
+                                wide.string() + " is a 3840-wide gemma4 model") !=
+          std::string::npos);
+    CHECK(readiness.remedy == "apogee config set-backend local --draft \"\"");
+    const std::filesystem::path custom = models / "Gemma4-E4B-Custom" / "mlx" / "dddddddddddd";
+    std::filesystem::create_directories(custom);
+    std::ofstream{custom / "config.json"} << apogee::testing::kGemma4BaseE4BConfig;
+    std::ofstream{custom / "apogee-snapshot.json"}
+        << R"({"source": "convert", "files": [], "kind": "vision"})";
+    runtime.entry.model_path = custom.string();
+    CHECK(runtime.probe().reason.find("record names Gemma4-E4B-Instruct as its base") !=
+          std::string::npos);
+    // A drafter gone.
+    runtime.entry.model_path = base.string();
+    runtime.entry.draft = (models / "gone").string();
+    CHECK(runtime.probe().reason.find("there is no drafter at ") != std::string::npos);
+
+    // Paired: the entry's options carry it and its block, and the readers
+    // say what mlx-vlm drafts and the drafter's own block.
+    runtime.entry.draft = draft.string();
+    runtime.entry.draft_block_size = 6;
+    REQUIRE(runtime.probe().ready());
+    const MlxLocalProvider::Options options =
+        MlxLocalProvider::options_from("local", runtime.entry, runtime.host);
+    CHECK(options.draft == draft);
+    CHECK(options.draft_block_size == 6);
+    CHECK(MlxLocalProvider::options_from("local", Runtime{}.entry, runtime.host).draft.empty());
+    const apogee::backends::MlxVlmPackage installed = apogee::backends::find_mlx_vlm(runtime.host);
+    CHECK(apogee::backends::mlx_vlm_drafts(installed, "gemma4_assistant"));
+    CHECK_FALSE(apogee::backends::mlx_vlm_drafts(installed, "gemma4_unified_assistant"));
+    CHECK_FALSE(apogee::backends::mlx_vlm_drafts(installed, ""));
+    CHECK_FALSE(apogee::backends::mlx_vlm_drafts({}, "gemma4_assistant"));
+    CHECK(apogee::backends::drafter_block_size(draft) == 0);
+    std::ofstream{draft / "config.json"} << R"({"model_type": "gemma4_assistant",
+        "backbone_hidden_size": 2560, "block_size": 3})";
+    CHECK(apogee::backends::drafter_block_size(draft) == 3);
+}
+
+TEST_CASE("the ladder turns away a set whose kind no mlx entry runs, by the one predicate",
+          "[backends][mlx][ladder][kind]") {
+    // The completeness pass (55d): a stored voice set's record said `voice`,
+    // and the ladder ran it as a chat backend all the same.
+    const auto record = [](const std::filesystem::path& dir, const std::string& kind) {
+        std::ofstream{dir / "apogee-snapshot.json"} << json{
+            {"source", "convert"},
+            {"transform", "x"},
+            {"files", json::array()},
+            {"kind", kind}}.dump();
+    };
+    for (const std::string word : {"voice", "video", "hologram"}) {
+        INFO(word);
+        const Runtime runtime;
+        const std::filesystem::path dir = runtime.dir.path() / "model";
+        record(dir, word);
+        const MlxReadiness readiness = runtime.probe();
+        CHECK(readiness.refusal == MlxRefusal::Kind);
+        CHECK(readiness.reason == dir.string() + " is kind " +
+                                      apogee::models::describe(apogee::models::read_mlx_kind(dir)) +
+                                      ", so no mlx entry runs it");
+        CHECK(readiness.remedy ==
+              "apogee config add-backend local --type mlx --model-path <model directory> --force");
+        // The one rung, asked alone by the doors that make an entry.
+        CHECK(apogee::backends::probe_mlx_kind("local", dir).message() == readiness.message());
+    }
+    CHECK(apogee::backends::to_string(MlxRefusal::Kind) == "wrong kind");
+    // Said by its files, as a pull lands one (M22): the same rung.
+    {
+        const Runtime runtime;
+        const std::filesystem::path dir = runtime.dir.path() / "model";
+        std::ofstream{dir / "config.json"} << R"({"model_type": "kokoro"})";
+        Runtime::touch(dir / "voices" / "af_heart.safetensors");
+        const MlxReadiness readiness = runtime.probe();
+        CHECK(readiness.refusal == MlxRefusal::Kind);
+        CHECK(readiness.reason.find(" is kind voice (inferred from its files: a Kokoro "
+                                    "config.json beside voices/*.safetensors)") !=
+              std::string::npos);
+    }
+    // A kind an entry runs passes the rung, on to its own.
+    {
+        const Runtime runtime;
+        record(runtime.dir.path() / "model", "chat");
+        CHECK(runtime.probe().ready());
+    }
+    {
+        const Runtime runtime;
+        record(runtime.dir.path() / "model", "embedding");
+        CHECK(runtime.probe().refusal == MlxRefusal::NoMlxEmbeddings);
+    }
+    // A drafter keeps its own rung and its door (53i).
+    {
+        const Runtime runtime;
+        record(runtime.dir.path() / "model", "drafter");
+        CHECK(runtime.probe().refusal == MlxRefusal::Drafter);
+        CHECK(apogee::backends::probe_mlx_kind("local", runtime.dir.path() / "model").refusal ==
+              MlxRefusal::Drafter);
+    }
+    // A directory with no config.json is the model rungs' to name, never the kind's.
+    CHECK(apogee::backends::probe_mlx_kind("local", "/nowhere/at/all").ready());
 }

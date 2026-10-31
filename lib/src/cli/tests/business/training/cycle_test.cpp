@@ -3,14 +3,17 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <string>
 #include <vector>
 
 #include "contracts/types.h"
+#include "platform/pid_lock.h"
 #include "support/env_guard.h"
 #include "training/mock_trainer.h"
 
@@ -411,7 +414,9 @@ TEST_CASE(
     Fixture fixture;
     std::vector<std::string> said;
     apogee::training::CycleRequest request = fixture.request(2);
-    request.on_message = [&said](std::string_view text) { said.emplace_back(text); };
+    request.on_message = [&said](std::string_view /*state*/, std::string_view text) {
+        said.emplace_back(text);
+    };
 
     // Nothing queued: skipped, the history started.
     apogee::training::CycleOutcome outcome = apogee::training::run_cycle(request);
@@ -510,6 +515,53 @@ TEST_CASE(
     outcome = apogee::training::run_cycle(request);
     CHECK_FALSE(outcome.ok);
     CHECK(outcome.error.find("another cycle is already running") != std::string::npos);
+}
+
+TEST_CASE(
+    "each line a pass says carries where the pass is, and its pipeline's manifest writes are told",
+    "[training][cycle][run][narration]") {
+    // 55h: a stream keys on the state; a person reads the line, as before.
+    Fixture fixture;
+    std::vector<std::string> states;
+    std::vector<std::string> lines;
+    std::vector<std::string> manifests;
+    apogee::training::CycleRequest request = fixture.request(1);
+    request.on_message = [&](std::string_view state, std::string_view text) {
+        states.emplace_back(state);
+        lines.emplace_back(text);
+    };
+    request.on_manifest = [&](const apogee::training::PipelineRunManifest& manifest) {
+        manifests.push_back(manifest.pipeline_run_id + " " + manifest.status);
+    };
+
+    REQUIRE(apogee::training::run_cycle(request).ok);
+    CHECK(states == std::vector<std::string>{"collecting", "skipped"});
+    CHECK(lines.back() == "[cycle] no new data -- skipped");
+    CHECK(manifests.empty());
+
+    states.clear();
+    lines.clear();
+    write(fixture.queue / "day1.jsonl", kPlain);
+    apogee::training::CycleOutcome outcome = apogee::training::run_cycle(request);
+    REQUIRE(outcome.ok);
+    CHECK(states == std::vector<std::string>{"collecting", "merging", "training", "gating",
+                                             "promoting", "passed", "passed"});
+    for (const std::string& line : lines) {
+        CHECK(line.starts_with("[cycle] "));
+    }
+    CHECK(lines[3].starts_with("[cycle] gate -- current 100%"));
+    CHECK(lines.back().starts_with("[cycle] complete -- nightly-model promoted to v1"));
+    REQUIRE_FALSE(manifests.empty());
+    CHECK(manifests.front() == outcome.record->pipeline_id + " running");
+    CHECK(manifests.back() == outcome.record->pipeline_id + " complete");
+
+    states.clear();
+    write(fixture.queue / "day2.jsonl", "{\"mock\": {\"answer\": \"nope\"}}\n");
+    outcome = apogee::training::run_cycle(request);
+    REQUIRE(outcome.ok);
+    CHECK(outcome.halted_now);
+    CHECK(states ==
+          std::vector<std::string>{"collecting", "merging", "training", "failed", "halted"});
 }
 
 TEST_CASE(
@@ -638,4 +690,192 @@ TEST_CASE(
     CHECK(outcome.record->gate == "pass");
     CHECK(fixture.promoted.size() == 3);
     CHECK(fixture.history().consecutive_fails == 0);
+}
+
+// --- M30: a halt taken during a pass is kept ---------------------------------------
+//
+// `train cycle halt` and `train cycle resume` write the history while a pass
+// holds the cycle's lock -- from another process, which these callbacks stand
+// in for, writing as the verbs did. The pass's save must keep what they wrote.
+
+namespace {
+
+/// What `train cycle halt` writes, from outside the pass.
+void halt_from_outside(const std::filesystem::path& cycle) {
+    std::string error;
+    CycleHistory now = apogee::training::load_history(cycle, "nightly-model", error);
+    REQUIRE(error.empty());
+    apogee::training::halt_cycle(now, "halted by 'apogee train cycle halt'");
+    REQUIRE(apogee::training::save_history(cycle, now).empty());
+}
+
+/// What `train cycle resume` writes, from outside the pass.
+void resume_from_outside(const std::filesystem::path& cycle) {
+    std::string error;
+    CycleHistory now = apogee::training::load_history(cycle, "nightly-model", error);
+    REQUIRE(error.empty());
+    (void)apogee::training::resume_cycle(now);
+    REQUIRE(apogee::training::save_history(cycle, now).empty());
+}
+
+}  // namespace
+
+TEST_CASE("a halt taken while a pass runs survives the pass's save, and the next pass is refused",
+          "[training][cycle][run][halt]") {
+    Fixture fixture;
+    apogee::training::CycleRequest request = fixture.request(3);
+    int halts = 0;
+    request.on_message = [&](std::string_view state, std::string_view) {
+        if (state == apogee::training::kPassTraining && halts++ == 0) {
+            halt_from_outside(fixture.cycle);
+        }
+    };
+    write(fixture.queue / "day1.jsonl", kPlain);
+    apogee::training::CycleOutcome outcome = apogee::training::run_cycle(request);
+    INFO(outcome.error);
+    REQUIRE(outcome.ok);
+    CHECK(halts == 1);
+    // The pass in flight finishes, and its record stands beside the halt.
+    CHECK(outcome.record->gate == "pass");
+    CHECK(fixture.promoted.size() == 1);
+    CycleHistory history = fixture.history();
+    CHECK(history.halted);
+    CHECK(history.halt_reason == "halted by 'apogee train cycle halt'");
+    CHECK(history.total_runs == 1);
+    CHECK(history.anchor_version == 1);
+    CHECK(outcome.history.halted);
+    CHECK(outcome.halt_kept);
+    CHECK_FALSE(outcome.halted_now);  // the breaker did not trip: a person halted it
+    CHECK(apogee::training::halt_kept_notice(outcome.history) ==
+          "[cycle] halted while this pass ran (halted by 'apogee train cycle halt') -- the halt "
+          "is kept: 'apogee train cycle run' refuses until 'apogee train cycle resume'");
+    CHECK_FALSE(std::filesystem::exists(fixture.cycle / "history.lock"));
+
+    // The next pass is refused, nothing recorded.
+    write(fixture.queue / "day2.jsonl", kPlain);
+    outcome = apogee::training::run_cycle(request);
+    CHECK_FALSE(outcome.ok);
+    CHECK(outcome.error.find("the cycle is halted: halted by 'apogee train cycle halt'") !=
+          std::string::npos);
+    CHECK(fixture.history().total_runs == 1);
+}
+
+TEST_CASE(
+    "a halt taken while a failing pass runs stands in its own words, the breaker not rewriting it",
+    "[training][cycle][run][halt]") {
+    Fixture fixture;
+    apogee::training::CycleRequest request = fixture.request(1);
+    request.on_message = [&](std::string_view state, std::string_view) {
+        if (state == apogee::training::kPassTraining) {
+            halt_from_outside(fixture.cycle);
+        }
+    };
+    write(fixture.queue / "bad.jsonl", "{\"mock\": {\"answer\": \"nope\"}}\n");
+    const apogee::training::CycleOutcome outcome = apogee::training::run_cycle(request);
+    REQUIRE(outcome.ok);
+    CHECK(outcome.record->gate == "fail");
+    CHECK(outcome.halt_kept);
+    CHECK_FALSE(outcome.halted_now);
+    CHECK(outcome.record->note.empty());
+    const CycleHistory history = fixture.history();
+    CHECK(history.halted);
+    CHECK(history.halt_reason == "halted by 'apogee train cycle halt'");
+    CHECK(history.consecutive_fails == 1);
+    CHECK(history.total_runs == 1);
+}
+
+TEST_CASE("a resume taken while a pass runs keeps its reset failure count",
+          "[training][cycle][run][halt]") {
+    Fixture fixture;
+    apogee::training::CycleRequest request = fixture.request(2);
+    // One failure on the record: the breaker at 2 is one failure away.
+    write(fixture.queue / "bad.jsonl", "{\"mock\": {\"answer\": \"nope\"}}\n");
+    REQUIRE(apogee::training::run_cycle(request).ok);
+    REQUIRE(fixture.history().consecutive_fails == 1);
+
+    // The person resets the count while the next pass runs; that pass fails
+    // too. It is the first failure since the reset, so the breaker holds.
+    request.on_message = [&](std::string_view state, std::string_view) {
+        if (state == apogee::training::kPassTraining) {
+            resume_from_outside(fixture.cycle);
+        }
+    };
+    const apogee::training::CycleOutcome outcome = apogee::training::run_cycle(request);
+    REQUIRE(outcome.ok);
+    CHECK(outcome.record->gate == "fail");
+    CHECK_FALSE(outcome.halted_now);
+    CHECK_FALSE(outcome.halt_kept);
+    const CycleHistory history = fixture.history();
+    CHECK(history.consecutive_fails == 1);
+    CHECK_FALSE(history.halted);
+    CHECK(history.total_runs == 2);
+}
+
+TEST_CASE(
+    "update_history changes the file as it stands under its own lock: nothing written when "
+    "nothing changed, a dead writer's lock taken over, a live one's waited on and named",
+    "[training][cycle][history][halt]") {
+    const Fixture fixture;
+    const std::filesystem::path lock = fixture.cycle / "history.lock";
+
+    // The change is made to what is on disk now, and saved.
+    CycleHistory seeded;
+    seeded.backend = "nightly-model";
+    seeded.consecutive_fails = 2;
+    REQUIRE(apogee::training::save_history(fixture.cycle, seeded).empty());
+    apogee::training::HistoryUpdate update =
+        apogee::training::update_history(fixture.cycle, "nightly-model", [](CycleHistory& history) {
+            CHECK(history.consecutive_fails == 2);
+            apogee::training::halt_cycle(history, "by hand");
+            return true;
+        });
+    CHECK(update.error.empty());
+    CHECK(update.history.halted);
+    CHECK(fixture.history().halted);
+    CHECK(fixture.history().halt_reason == "by hand");
+    CHECK_FALSE(std::filesystem::exists(lock));
+
+    // Nothing to write: the file untouched.
+    const std::string before = read(apogee::training::history_path(fixture.cycle));
+    update = apogee::training::update_history(fixture.cycle, "nightly-model",
+                                              [](CycleHistory&) { return false; });
+    CHECK(update.error.empty());
+    CHECK(read(apogee::training::history_path(fixture.cycle)) == before);
+
+    // A lock its writer left when it died is taken over.
+    write(lock, "2147483000\n");
+    update =
+        apogee::training::update_history(fixture.cycle, "nightly-model", [](CycleHistory& history) {
+            (void)apogee::training::resume_cycle(history);
+            return true;
+        });
+    CHECK(update.error.empty());
+    CHECK_FALSE(fixture.history().halted);
+    CHECK_FALSE(std::filesystem::exists(lock));
+
+    // A live writer's is waited on, then named; nothing is changed.
+    std::filesystem::remove(lock);
+    apogee::platform::PidLock::Refusal refusal;
+    std::optional<apogee::platform::PidLock> held =
+        apogee::platform::PidLock::acquire(lock, {}, false, refusal);
+    REQUIRE(held.has_value());
+    bool asked = false;
+    update = apogee::training::update_history(
+        fixture.cycle, "nightly-model",
+        [&asked](CycleHistory&) {
+            asked = true;
+            return true;
+        },
+        std::chrono::milliseconds{30});
+    CHECK_FALSE(asked);
+    CHECK(update.error.find("the cycle history is being written by process") != std::string::npos);
+    CHECK(update.error.find(lock.string()) != std::string::npos);
+    held->release();
+
+    // An unreadable history is refused, never written over.
+    write(apogee::training::history_path(fixture.cycle), "{not json");
+    update = apogee::training::update_history(fixture.cycle, "nightly-model",
+                                              [](CycleHistory&) { return true; });
+    CHECK(update.error.starts_with("the cycle history is unreadable: "));
+    CHECK(read(apogee::training::history_path(fixture.cycle)) == "{not json");
 }

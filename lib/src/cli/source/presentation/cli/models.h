@@ -3,6 +3,7 @@
 #include <nlohmann/json_fwd.hpp>
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -30,6 +31,19 @@
 /// unprofiled model says *unprofiled*, an unreadable header says *why*, and a
 /// check that could not run says *skipped* rather than passing.
 namespace apogee::commands {
+
+/// An `mlx` entry's drafter (M32), as `models info`'s `draft:` line says it
+/// (53i): the ladder's own question (`backends::probe_mlx_draft`), asked once
+/// for both.
+struct ModelDraft {
+    /// The drafter's directory, as the entry's `draft:` names it, `~` and
+    /// `${VAR}` expanded.
+    std::string path{};
+    /// Whether it drafts beside the entry's model.
+    bool can_draft = false;
+    /// Why not, with its fix when one command is it; empty when it can.
+    std::string refusal{};
+};
 
 /// One row of `apogee models list`.
 struct ModelRow {
@@ -84,6 +98,15 @@ struct ModelRow {
     std::string format;
     std::string quant;
     std::string window;
+    /// For an MLX model (53e): what kind of directory it is -- `chat`,
+    /// `vision`, `embedding`, `drafter`, `video`, `voice`, or a word this
+    /// build does not know, as written -- from the store's one reader
+    /// (`read_mlx_kind`). Empty for every other row, and then not in the JSON.
+    std::string kind{};
+    /// For an `mlx` backend whose entry names a drafter (M32): where it is
+    /// and whether it drafts beside the entry's model. Absent for every other
+    /// row, and then not in the JSON.
+    std::optional<ModelDraft> draft{};
     /// For a diffusion pipeline (49a): its components counted and its size
     /// on disk, in bytes -- what it costs the disk, said as a number. Zero
     /// for every other row, and then not in the JSON.
@@ -159,6 +182,15 @@ struct ProviderLens {
 [[nodiscard]] std::string read_model_info(const harness::Config& config, std::string_view name,
                                           const std::filesystem::path& config_path,
                                           const BusyProgress& progress = {});
+
+/// `models info <name> --output-format json`'s document -- the body above
+/// as records, named -- or null when there is no one thing to show. What a
+/// pull's stream ends with for each set it stored (52b), so the two can
+/// never disagree.
+[[nodiscard]] nlohmann::json model_info_document(const harness::Config& config,
+                                                 std::string_view name,
+                                                 const std::filesystem::path& config_path,
+                                                 const BusyProgress& progress = {});
 
 /// Renders rows as an aligned table. Empty input yields a single explanatory
 /// line, never a bare header with nothing under it.
@@ -250,6 +282,14 @@ struct ModelGroup {
 [[nodiscard]] std::string render_role_status(const harness::Config& config,
                                              const BusyProgress& progress = {},
                                              const MachineBudgetSource& machine = {});
+
+/// `models status --output-format json`: the record as `fields`, each label
+/// as `render_role_status` prints it (28h) -- and, with a suite active, its
+/// footprint typed beside them (M31, `footprint_document`), from the same
+/// reading as the `footprint` field's text, which stays word for word.
+[[nodiscard]] nlohmann::json role_status_document(const harness::Config& config,
+                                                  const BusyProgress& progress = {},
+                                                  const MachineBudgetSource& machine = {});
 
 class ModelsCommand final : public Command {
 public:

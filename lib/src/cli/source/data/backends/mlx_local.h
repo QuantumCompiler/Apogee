@@ -13,11 +13,13 @@
 #include <string_view>
 #include <vector>
 
+#include "backends/adapters.h"
 #include "backends/mlx_protocol.h"
 #include "backends/model_profile.h"
 #include "backends/sampling.h"
 #include "contracts/config.h"
 #include "contracts/provider.h"
+#include "modelstore/mlx_info.h"
 #include "platform/child_process.h"
 #include "transport/jsonl_framer.h"
 
@@ -56,6 +58,13 @@ struct MlxHost {
     std::filesystem::path venv;
     /// The seeded driver: `<home>/training/scripts/mlx_generate.py`.
     std::filesystem::path driver;
+    /// The seeded embedding driver (53h):
+    /// `<home>/training/scripts/mlx_embed.py`.
+    std::filesystem::path embedder{};
+    /// The model store's root (53i): `<home>/models`, where the bases a
+    /// drafter's record names are stored. Empty: the layout's, from
+    /// `apogee_home()`.
+    std::filesystem::path models{};
 
     /// The running build against `home`.
     [[nodiscard]] static MlxHost at(const std::filesystem::path& home);
@@ -68,6 +77,9 @@ inline constexpr std::string_view kMlxTarget = "macos-arm64";
 
 /// The driver's name under `training/scripts/`.
 inline constexpr std::string_view kMlxDriverName = "mlx_generate.py";
+
+/// The embedding driver's name there (53h).
+inline constexpr std::string_view kMlxEmbedderName = "mlx_embed.py";
 
 /// Which rung of the ladder refused, in the order they are asked.
 enum class MlxRefusal : std::uint8_t {
@@ -84,6 +96,25 @@ enum class MlxRefusal : std::uint8_t {
     ModelMissing,
     /// `model_path` is not a model directory (no `config.json`).
     NotAModelDirectory,
+    /// The directory loads through mlx-vlm alone -- its record says mlx-vlm
+    /// built it (53f) -- and the environment has no `mlx_vlm` package.
+    NoMlxVlm,
+    /// The directory is an embedding model mlx-embeddings built -- its record
+    /// says `embedding` (53h) -- and the environment has no `mlx_embeddings`
+    /// package to embed with it through.
+    NoMlxEmbeddings,
+    /// The directory is a drafter (53i): it runs beside its base model, never
+    /// alone -- an entry's `draft:`, never its `model_path`.
+    Drafter,
+    /// The directory's kind is one no mlx entry runs (55d): a video or voice
+    /// model, or a word this build does not know -- `models::MlxKind::
+    /// registers()` false, by its record or its files.
+    Kind,
+    /// The entry's `draft:` cannot run beside its model (53i): no drafter
+    /// there, a base of another family or width, one its record does not
+    /// name, mlx-lm's build of the base, or an mlx-vlm that drafts no model
+    /// of its type (`probe_mlx_draft`).
+    Draft,
     /// The seeded driver is not there.
     NoDriver,
 };
@@ -117,8 +148,28 @@ struct MlxReadiness {
 /// The runtime's rungs: platform, environment, `mlx-lm`, the driver.
 [[nodiscard]] MlxReadiness probe_mlx_runtime(const MlxHost& host);
 
+/// **The kind decides the role** (55d): whether an mlx entry `name` may run
+/// the MLX directory `dir` at all, by the kind its record states or its files
+/// say, through the one predicate -- `models::MlxKind::registers()`, a model
+/// it chats or embeds with. A drafter is refused with its door (53i: it runs
+/// as a base's `draft:`); any other kind no entry runs -- a video or voice
+/// model, a word this build does not know -- with the kind and what uses it.
+/// Ready for a kind that registers, and for a directory with no `config.json`
+/// (the ladder's model rungs say what is wrong with that). The ladder asks it,
+/// and so does every door that makes or points at an entry (`config
+/// add-backend`, `set-backend`, `set-default*` and their admin twins), so an
+/// entry is turned away by the same words wherever it is.
+[[nodiscard]] MlxReadiness probe_mlx_kind(std::string_view name, const std::filesystem::path& dir);
+
 /// The whole ladder for one entry `name`: the platform, the environment and
-/// `mlx-lm`, then its `model_path`, then the driver. Construction and `check`
+/// `mlx-lm`, then its `model_path` -- a drafter there refused, since it runs
+/// beside a base and never alone (53i), and since 55d any other kind no mlx
+/// entry runs (`probe_mlx_kind`) -- then mlx-vlm for a directory that
+/// loads through it alone (53f), then its `draft:` beside it, when it names
+/// one (53i, `probe_mlx_draft`), then the driver. An embedding directory
+/// (53h) asks for mlx-embeddings in mlx-vlm's place and for the embedding
+/// driver in the generation driver's -- mlx-lm stays a rung, as
+/// mlx-embeddings' own dependency through mlx-vlm. Construction and `check`
 /// both ask this, so they cannot disagree about whether an entry can run.
 [[nodiscard]] MlxReadiness probe_mlx_backend(std::string_view name,
                                              const harness::BackendConfig& config,
@@ -134,11 +185,32 @@ struct MlxModelInfo {
     std::string text_model_type;
     bool chat_template = false;
     SamplingRung sampling;
-    /// A vision model (27c): `config.json` declares a `vision_config`, and an
-    /// image processor's configuration (`preprocessor_config.json` or
-    /// `processor_config.json`) ships beside it -- what mlx-vlm needs to
-    /// read a picture. A fact of the files, never of the name.
+    /// What the directory is (53e's one reader, `read_mlx_kind`): its
+    /// record's word, else `vision` where its files say so, else `chat`.
+    models::MlxKind kind{};
+    /// A vision model: its kind is `vision` (53f) -- recorded by mlx-vlm's
+    /// conversion, or, with no record, read from its files (27c): a
+    /// `vision_config` and an image processor's configuration
+    /// (`preprocessor_config.json` or `processor_config.json`) beside it,
+    /// what mlx-vlm needs to read a picture. A record saying it is something
+    /// else -- mlx-lm's build of its language model alone -- wins over the
+    /// files. Never a fact of the name.
     bool vision = false;
+    /// The files carry a vision tower and its processor, whatever the record
+    /// says (`models::mlx_vision_files`).
+    bool vision_files = false;
+    /// Every turn loads through mlx-vlm (53f): its record says mlx-vlm built
+    /// it (kind `vision`, recorded), so its weights are laid out the way
+    /// mlx-vlm loads them -- whether mlx-lm could load them for a text turn
+    /// is not known without real weights. An unrecorded directory with
+    /// vision files keeps 27c's way: text through mlx-lm, its cache kept, and
+    /// mlx-vlm from the first picture on.
+    bool through_vlm = false;
+    /// What its `config.json` declares beside its language model (53f's one
+    /// reader, `models::snapshot_towers`): `vision_config`, `audio_config`,
+    /// an omni model's `thinker_config`. An audio tower is either of the last
+    /// two -- the thinker nests the audio encoder beside the vision one.
+    std::vector<std::string> towers{};
 };
 
 [[nodiscard]] MlxModelInfo inspect_mlx_model(const std::filesystem::path& dir);
@@ -160,9 +232,25 @@ struct MlxVlmPackage {
 
 [[nodiscard]] MlxVlmPackage find_mlx_vlm(const MlxHost& host);
 
+/// The fix that installs the embedding dependency (53h).
+inline constexpr std::string_view kMlxEmbeddingsRemedy = "apogee train setup --with mlx-embeddings";
+
+/// mlx-embeddings as installed in the environment (53h): its package
+/// directory and version, read from files as mlx-vlm's are, never imported.
+struct MlxEmbeddingsPackage {
+    std::filesystem::path dir{};
+    std::string version{};
+
+    [[nodiscard]] bool installed() const noexcept {
+        return !dir.empty();
+    }
+};
+
+[[nodiscard]] MlxEmbeddingsPackage find_mlx_embeddings(const MlxHost& host);
+
 /// Whether an MLX model reads images natively (27c), from file facts alone:
-/// the directory is a vision model (`MlxModelInfo::vision`) and mlx-vlm is
-/// installed in the environment. The provider's `accepts_images`, `check`
+/// the directory is a vision model (`MlxModelInfo::vision`, by its kind
+/// since 53f) and mlx-vlm is installed in the environment. The provider's `accepts_images`, `check`
 /// and `models info/status` all ask this, so no surface claims a capability
 /// another denies.
 struct MlxVision {
@@ -181,6 +269,104 @@ struct MlxVision {
 
 [[nodiscard]] MlxVision probe_mlx_vision(const MlxModelInfo& info, const MlxHost& host);
 
+/// Whether the installed mlx-vlm has a module for `model_type` (53g): the type
+/// as mlx-vlm's own loader resolves it -- through `utils.py`'s
+/// `MODEL_REMAPPING` when the table names it -- a package under its `models/`.
+/// Read from files, never imported. (The training track's `mlx_model_types`
+/// lists every type a converter builds; this layer cannot reach it, and asks
+/// the one type's question the loader asks.)
+[[nodiscard]] bool mlx_vlm_has_module(const MlxVlmPackage& vlm, std::string_view model_type);
+
+/// Whether the installed mlx-vlm drafts with a model of `model_type` (53i):
+/// its speculative path holds a drafter package of that type,
+/// `speculative/drafters/<type>/`, whose `__init__.py` names the `Model` its
+/// loader builds -- where mlx-vlm's `load_drafter` finds it, and its
+/// converter too. Read from files, never imported.
+[[nodiscard]] bool mlx_vlm_drafts(const MlxVlmPackage& vlm, std::string_view model_type);
+
+/// The block size mlx-vlm drafts with when an entry sets none (53i): the
+/// drafter's own `block_size`, as its `config.json` states it -- mlx-vlm's
+/// drafter configuration reads it there -- or 0 when it states none, and
+/// mlx-vlm's own default for its kind applies.
+[[nodiscard]] std::int64_t drafter_block_size(const std::filesystem::path& drafter);
+
+/// Whether an entry's drafter runs beside its model (53i), and why not: the
+/// pairing's file facts (`models::mlx_drafter_refusal` -- a drafter there, a
+/// base mlx-vlm loads to chat with, of its family and width, the one its
+/// record names), then mlx-vlm installed and drafting the drafter's type.
+/// The default the user's open call took: Gemma 4's unified 12B assistant
+/// (`gemma4_unified_assistant`) pairs only where the installed mlx-vlm drafts
+/// that type, and is refused saying so otherwise -- as every drafter is.
+/// The editor (`config set-backend --draft`), the ladder and `check` ask
+/// this, so none pairs what another refuses.
+struct MlxDraft {
+    /// The drafter's directory, `~` and `${VAR}` expanded.
+    std::filesystem::path dir{};
+    /// Why it cannot run, in a sentence, and the fix when one command is it.
+    /// Both empty when it can.
+    std::string reason{};
+    std::string remedy{};
+    /// What was read: the drafter, when one is there.
+    std::optional<models::MlxDrafter> drafter{};
+    MlxVlmPackage vlm{};
+
+    [[nodiscard]] bool pairs() const noexcept {
+        return reason.empty();
+    }
+
+    /// The reason with its fix, as one line; empty when it pairs.
+    [[nodiscard]] std::string message() const;
+};
+
+[[nodiscard]] MlxDraft probe_mlx_draft(const std::filesystem::path& base, std::string_view draft,
+                                       const MlxHost& host);
+
+/// Which rung of the audio ladder refused (53g), in the order they are asked.
+enum class MlxAudioRefusal : std::uint8_t {
+    None,
+    /// Not a directory mlx-vlm built (its record does not say `vision`):
+    /// mlx-lm's build, and one with no record, keep no audio tower.
+    NotMlxVlmBuild,
+    /// Its `config.json` declares no audio tower.
+    NoAudioTower,
+    /// mlx-vlm is not installed in the environment.
+    NoMlxVlm,
+    /// The installed mlx-vlm has no module for its type.
+    NoTypeModule,
+};
+
+[[nodiscard]] std::string_view to_string(MlxAudioRefusal refusal) noexcept;
+
+/// Whether an MLX model hears a recording natively (53g), from file facts
+/// alone: a directory mlx-vlm built (recorded `vision`, 53f), whose
+/// `config.json` declares an audio tower, with mlx-vlm installed and holding
+/// its type's module. The provider's `accepts_audio` asks this; anything
+/// else has no native audio, and a recording reaches it as the
+/// transcription role's text (26e) -- or, sent to it anyway, is refused
+/// before anything starts, the rung said.
+struct MlxAudio {
+    MlxAudioRefusal refusal = MlxAudioRefusal::None;
+    /// Its `config.json` declares an audio tower, whichever rung refused
+    /// (M23): what `check` says hearing of, as it says sight of a vision
+    /// model alone.
+    bool tower = false;
+    MlxVlmPackage vlm{};
+    /// Why it does not hear, in a sentence; and the fix, when one command is
+    /// it. Both empty when it does.
+    std::string reason{};
+    std::string remedy{};
+
+    [[nodiscard]] bool hears() const noexcept {
+        return refusal == MlxAudioRefusal::None;
+    }
+
+    /// The rung, the reason and its fix, as one line: "no audio tower: its
+    /// config.json declares none ...". Empty when it hears.
+    [[nodiscard]] std::string message() const;
+};
+
+[[nodiscard]] MlxAudio probe_mlx_audio(const MlxModelInfo& info, const MlxHost& host);
+
 /// The family profile for a model directory: its `model_type` (and a
 /// vision-language model's text model's) in each spelling the profiles list
 /// architectures under -- `gpt_oss` is the GGUF's `gpt-oss` -- and then the
@@ -193,6 +379,7 @@ class MlxLocalProvider final : public harness::LLMProvider,
                                public harness::StatusReporting,
                                public harness::ContextWindowReporting,
                                public harness::VisionCapable,
+                               public harness::AudioCapable,
                                public harness::ResidencyHolding {
 public:
     /// Starts the driver. Injected so the provider is tested over a scripted
@@ -216,6 +403,12 @@ public:
         /// mlx-vlm (27c).
         bool vision = false;
         std::string vision_gap;
+        /// Whether it hears a recording natively, and why not
+        /// (`probe_mlx_audio`'s rung and reason): a turn carrying one is
+        /// answered by a driver loaded through mlx-vlm, each recording handed
+        /// to it as a WAV file of the turn's own (53g).
+        bool audio = false;
+        std::string audio_gap{};
         /// Cap on generated tokens when the request sets none.
         std::int64_t max_tokens = 2048;
         /// The window, when the entry sets one; 0 leaves it to the model.
@@ -227,6 +420,23 @@ public:
         /// The config's rung of the sampling ladder, and its seed (26h).
         SamplingRung sampling;
         std::optional<std::uint32_t> seed;
+        /// The drafter the driver runs beside the model (53i): mlx-vlm's
+        /// speculative path, `draft_kind="mtp"`, every turn through mlx-vlm --
+        /// which loads the base -- and its answer the base's own. Empty, the
+        /// default, starts the driver exactly as before.
+        std::filesystem::path draft{};
+        /// The tokens a drafting round proposes, plus one (mlx-vlm's
+        /// `draft_block_size`): the entry's `draft_block_size`; 0 leaves it to
+        /// the drafter's own (`drafter_block_size`), then mlx-vlm's default.
+        std::int64_t draft_block_size = 0;
+        /// The adapter the driver loads over the model (53a): at most one --
+        /// mlx-lm's `adapter_path`, a directory its training wrote -- with
+        /// the pin to the base it was registered against. Empty, the
+        /// default, starts the driver exactly as before.
+        std::vector<harness::AdapterConfig> adapters{};
+        /// Where the model directory's hash, which each start checks the pin
+        /// against, comes from: `cache/weight-hashes.json` from `options_from`.
+        WeightHashing weight_hashing{};
         /// Ends the child after this long with no request; zero never does.
         std::chrono::seconds idle_unload{0};
         /// How long a load may take before the driver is given up on: a
@@ -326,6 +536,18 @@ public:
         return options_.vision;
     }
 
+    // --- AudioCapable (53g) ---------------------------------------------------
+
+    /// True for an omni directory mlx-vlm built, with mlx-vlm and its type's
+    /// module installed (`probe_mlx_audio`), from the files alone -- asked
+    /// before a turn, never at the cost of a load. Otherwise false, so every
+    /// surface has a recording transcribed by the transcription role instead.
+    /// The rate is left at the contract's default: a recording is decoded to
+    /// 16 kHz, and mlx-vlm converts it to its feature extractor's own.
+    [[nodiscard]] bool accepts_audio() const noexcept override {
+        return options_.audio;
+    }
+
     /// How many children this provider has started: "one per session" is a
     /// claim only if it can be counted.
     [[nodiscard]] int spawn_count() const noexcept;
@@ -335,6 +557,11 @@ public:
 
     /// Whether the running driver loaded the model through mlx-vlm (27c).
     [[nodiscard]] bool has_vision_child() const noexcept;
+
+    /// Whether every turn drafts beside the drafter its entry names (53i).
+    [[nodiscard]] bool drafting() const noexcept {
+        return !options_.draft.empty();
+    }
 
     /// What the driver said when it was ready, once it has.
     [[nodiscard]] const std::optional<mlx::Event>& driver_ready() const noexcept {
@@ -349,11 +576,14 @@ private:
     /// ProviderError with the driver's own words when it cannot. `vision`
     /// asks for one loaded through mlx-vlm: a running text driver is ended
     /// and the model loaded again that way (27c); a running vision driver
-    /// answers text turns too, so it is never swapped back.
+    /// answers text turns too, so it is never swapped back. A directory
+    /// mlx-vlm built (`MlxModelInfo::through_vlm`, 53f) is always asked for
+    /// one, its first turn and every turn after.
     void ensure_child(const harness::StreamOptions& options, bool vision = false);
 
     /// Refuses a request carrying what this model cannot read: an image
-    /// when it reads none, one that is not a data: URI, any audio.
+    /// when it reads none, one that is not a data: URI, a recording when it
+    /// hears none -- the rung said -- or one that is not a WAV.
     void check_media(const harness::ChatRequest& request) const;
 
     /// Reads the driver's startup: `ready`, or the error that ends it.

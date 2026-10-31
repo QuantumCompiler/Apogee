@@ -8,24 +8,31 @@
 #include <chrono>
 #include <cmath>
 #include <csignal>
+#include <exception>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 
 #include "agentloop/loop.h"
 #include "agentloop/reporter.h"
+#include "backends/adapters.h"
 #include "backends/factory.h"
 #include "backends/mlx_local.h"
 #include "cli/datasets.h"
 #include "cli/helpers.h"
 #include "cli/interrupt.h"
+#include "cli/job_stream.h"
 #include "cli/models_pull.h"
+#include "cli/train_stream.h"
 #include "contracts/config_edit.h"
 #include "contracts/errors.h"
 #include "contracts/layout.h"
@@ -52,6 +59,7 @@
 #include "training/regime.h"
 #include "training/regime_specs.h"
 #include "training/script_runner.h"
+#include "training/script_trainer.h"
 #include "training/store.h"
 #include "views/status_line.h"
 #include "views/terminal.h"
@@ -61,7 +69,28 @@ namespace {
 
 [[noreturn]] void fail_user(const std::string& message) {
     std::cerr << "apogee train: " << message << "\n";
+    // A run streaming (55h) says it as its error too.
+    if (JobStream* job = JobStream::current(); job != nullptr) {
+        job->failed(message);
+    }
     throw CLI::RuntimeError(kUserError);
+}
+
+/// What a training job's stream ends on, as its help says it (55h).
+constexpr std::string_view kPipelineStreamLast = "its 'train pipeline status' document last";
+constexpr std::string_view kCycleStreamLast = "its 'train cycle status' document last";
+
+/// A training job's body, under `stream-json` with its stream open before
+/// anything can be refused (55h): every refusal is then the stream's
+/// `error`, and a failure nothing has said yet is said for it.
+void run_as_job(JobFormat format, std::string_view verb, const std::function<void()>& body) {
+    if (format != JobFormat::StreamJson) {
+        body();
+        return;
+    }
+    // Open while the body runs: what it tells, it tells this stream.
+    JobStream job{verb};
+    run_job_body(body);
 }
 
 [[nodiscard]] harness::Config load_config_or_default(const RootContext& context) {
@@ -96,6 +125,8 @@ std::string describe_status(const training::PythonEnvStatus& status) {
         sets += sets.empty() ? set : ", " + set;
     }
     return "at " + status.interpreter.parent_path().parent_path().string() +
+           (status.base_version.known() ? " (Python " + status.base_version.str() + ")"
+                                        : std::string{}) +
            (sets.empty() ? std::string{"; no requirement sets installed"} : "; sets: " + sets);
 }
 
@@ -214,6 +245,30 @@ struct Providers {
     return training::script_converter(env.interpreter(), script);
 }
 
+/// The converter an adapter promote runs for a GGUF target (53b): the mock's
+/// for a mock run, else the vendored `convert_lora_to_gguf.py` under the
+/// environment's interpreter with the `convert` set -- the full converter's
+/// questions, asked of its sibling in the same tree.
+[[nodiscard]] training::AdapterConverter make_adapter_converter(const harness::Config& config,
+                                                                std::string_view trainer_name) {
+    if (trainer_name == "mock") {
+        return [](const std::filesystem::path& adapter, const std::filesystem::path& base,
+                  const std::filesystem::path& gguf, const training::MessageSink& on_message,
+                  const harness::CancellationToken&) {
+            if (on_message) {
+                on_message("mock converter: writing a minimal GGUF LoRA");
+            }
+            return training::write_mock_lora_gguf(adapter, base, gguf);
+        };
+    }
+    const training::PythonEnv env = require_python_env(config, "train promote --adapter");
+    const std::filesystem::path script = training::lora_converter_script();
+    if (const std::string why = training::converter_unavailable(env, script); !why.empty()) {
+        fail_user(why);
+    }
+    return training::script_lora_converter(env.interpreter(), script);
+}
+
 [[nodiscard]] training::Verifier header_verifier() {
     return [](const std::filesystem::path& gguf) {
         const models::GgufInfo info = models::inspect_gguf(gguf);
@@ -228,6 +283,21 @@ struct Providers {
     return [](const std::filesystem::path& dir) {
         const models::MlxInfo info = models::read_mlx_info(dir);
         return info.complete ? std::string{} : info.problem;
+    };
+}
+
+/// An MLX adapter version's check (53b): the directory mlx-lm loads an
+/// adapter from -- its `adapter_config.json` and `adapters.safetensors`, the
+/// one list a load's gate asks too (55e).
+[[nodiscard]] training::Verifier mlx_adapter_verifier() {
+    return [](const std::filesystem::path& dir) {
+        std::error_code code;
+        for (const std::string_view file : backends::kMlxAdapterFiles) {
+            if (!std::filesystem::is_regular_file(dir / file, code)) {
+                return "it holds no " + std::string{file};
+            }
+        }
+        return std::string{};
     };
 }
 
@@ -296,6 +366,15 @@ struct PromoteRequest {
     /// What to make runnable (27c): asked for, else what an existing entry
     /// runs, else a GGUF.
     std::optional<training::PromoteTarget> target;
+    /// `--adapter` (53b): the adapter itself as the version, registered on
+    /// the entry's `adapters:` over the base it runs -- the fuse skipped.
+    /// Off, the default: the merged promote, byte for byte as before.
+    bool adapter = false;
+    /// `--suite` and `--judge` (53c): what the gate on a quantized base
+    /// scores the candidate with -- `train eval`'s own two, for the promote
+    /// that runs its eval where the version will serve.
+    std::string suite{};
+    std::string judge{};
 };
 
 struct PromoteChecks {
@@ -305,6 +384,13 @@ struct PromoteChecks {
     std::string existing_key;
     /// The target, resolved.
     training::PromoteTarget target = training::PromoteTarget::Gguf;
+    /// An adapter promote onto an entry whose base is quantized (53c): its
+    /// gate scores the candidate on that base, after the adapter is built --
+    /// the run's recorded eval, scored where its trainer ran, is not it.
+    bool on_serving_base = false;
+    training::ServingGateRequest serving{};
+    /// The judge that gate asks, resolved; empty for none.
+    std::string judge_key{};
 };
 
 /// The backend type a promotion's target registers: llamacpp runs a GGUF,
@@ -314,19 +400,106 @@ struct PromoteChecks {
                                                   : harness::BackendType::LlamaCpp;
 }
 
+/// The suite and the judge the gate on a serving base scores with (53c),
+/// found as `train eval` finds them: the flag, else what the run's recorded
+/// eval was judged by, else the config's. A name that cannot be read is
+/// refused by name, before anything is built; no suite at all is the plan's
+/// to say. Nothing is read for a gate `--force` skips.
+[[nodiscard]] std::string serving_gate_inputs(const harness::Config& config,
+                                              const training::RunManifest& manifest,
+                                              const PromoteRequest& request,
+                                              PromoteChecks& checks) {
+    checks.serving.mode = training::gate_mode_from_string(config.training.effective_gate_mode());
+    checks.serving.force = request.force;
+    if (request.force) {
+        return {};
+    }
+    const std::optional<training::EvalResults>& recorded = manifest.eval;
+    std::string suite = request.suite;
+    std::string from = "--suite";
+    if (suite.empty() && recorded.has_value() && !recorded->suite.empty()) {
+        // A kit is recorded as `kit:<name>`, the name `--suite` takes.
+        suite = recorded->suite.starts_with("kit:") ? recorded->suite.substr(4) : recorded->suite;
+        from = "the suite run " + manifest.run_id + " was evaluated on";
+    }
+    if (suite.empty()) {
+        suite = config.training.eval_suite_path;
+        from = "training.eval_suite_path";
+    }
+    if (!suite.empty()) {
+        const SuiteResolution resolved = resolve_suite(harness::training_dir(), suite);
+        if (!resolved.error.empty()) {
+            return from + ": " + resolved.error;
+        }
+        checks.serving.items = resolved.items;
+        checks.serving.suite = resolved.label;
+    }
+    std::string judge = request.judge;
+    if (judge.empty() && recorded.has_value()) {
+        judge = recorded->judge_backend;
+    }
+    if (judge.empty()) {
+        judge = config.training.judge_backend;
+    }
+    if (!judge.empty()) {
+        const TeacherResolution resolved = resolve_teacher(config, judge);
+        if (resolved.key.empty()) {
+            return "judge: " + resolved.error;
+        }
+        checks.judge_key = resolved.key;
+    }
+    return {};
+}
+
 /// Every refusal before the expensive part.
 [[nodiscard]] PromoteChecks precheck_promotion(const harness::Config& config,
                                                const training::RunManifest& manifest,
                                                const PromoteRequest& request) {
     PromoteChecks checks;
-    const training::GateVerdict gate = training::eval_gate(
-        manifest, training::gate_mode_from_string(config.training.effective_gate_mode()),
-        request.force);
-    if (!gate.ok) {
-        checks.error = gate.error;
-        return checks;
+    // 53c: an adapter onto an entry whose base is quantized is gated where it
+    // will serve, once it is built; every other promote on its run's eval.
+    if (request.adapter) {
+        const std::string key = configured_backend_key(config, request.backend);
+        const harness::BackendConfig* entry = key.empty() ? nullptr : config.find_backend(key);
+        if (entry != nullptr && !entry->model_path.empty() &&
+            harness::takes_adapters(entry->type)) {
+            checks.serving.base = serving_base(key, *entry);
+            checks.on_serving_base = checks.serving.base.quantized;
+        }
     }
-    checks.warning = gate.warning;
+    if (checks.on_serving_base) {
+        if (std::string refused = serving_gate_inputs(config, manifest, request, checks);
+            !refused.empty()) {
+            checks.error = std::move(refused);
+            return checks;
+        }
+        const training::ServingPlan plan = training::plan_serving_gate(manifest, checks.serving);
+        if (!plan.verdict.ok) {
+            checks.error = plan.verdict.error;
+            return checks;
+        }
+        checks.warning = plan.verdict.warning;
+    } else {
+        const training::GateVerdict gate = training::eval_gate(
+            manifest, training::gate_mode_from_string(config.training.effective_gate_mode()),
+            request.force);
+        if (!gate.ok) {
+            checks.error = gate.error;
+            return checks;
+        }
+        checks.warning = gate.warning;
+        if (!request.suite.empty() || !request.judge.empty()) {
+            checks.error =
+                std::string{request.suite.empty() ? "--judge" : "--suite"} +
+                " has nothing to act on: this promote is gated on run " + manifest.run_id +
+                "'s recorded eval -- only an adapter promote onto an entry whose base is "
+                "quantized scores its candidate where it will serve. Drop it, or score the "
+                "run with 'apogee train eval " +
+                manifest.run_id +
+                (request.suite.empty() ? " --judge <backend>'" : " --suite <path|name>'");
+            return checks;
+        }
+    }
     if (request.backend.empty() || request.backend.find_first_of("/\\ \t") != std::string::npos) {
         checks.error = "--as must be a plain backend name (got '" + request.backend + "')";
         return checks;
@@ -361,6 +534,35 @@ struct PromoteChecks {
         }
         checks.target = *runs;
     }
+    if (request.adapter) {
+        // 53b: the adapter goes on an entry that already runs its base.
+        if (existing == nullptr) {
+            checks.error =
+                "an adapter promote registers the adapter on an entry that runs the base it "
+                "was trained over, and '" +
+                request.backend +
+                "' is not configured -- add it first ('apogee config add-backend " +
+                request.backend +
+                " --type llamacpp --model-path <base.gguf>', or --type mlx with the base's MLX "
+                "directory), then promote --adapter into it";
+            return checks;
+        }
+        if (existing->model_path.empty()) {
+            checks.error = "adapters apply over the entry's model_path, and '" +
+                           checks.existing_key + "' names none -- set it with 'apogee config " +
+                           "set-backend " + checks.existing_key + " --model-path <base>'";
+            return checks;
+        }
+        if (!request.quantize.empty() || request.keep_fused) {
+            checks.error = std::string{request.quantize.empty() ? "--keep-fused" : "--quantize"} +
+                           " has nothing to act on: an adapter promote fuses and quantizes "
+                           "nothing, the version is the adapter alone over the entry's base -- "
+                           "drop it, or promote without --adapter";
+            return checks;
+        }
+        checks.error = training::adapter_promotion_conflict(manifest, checks.target);
+        return checks;
+    }
     if (!request.quantize.empty() && checks.target == training::PromoteTarget::Mlx) {
         checks.error =
             "--quantize makes a quantized GGUF, and an MLX promotion registers the "
@@ -390,6 +592,12 @@ struct PromoteChecks {
     return checks;
 }
 
+/// The gate on the serving base (53c), scoring the candidate with
+/// `adapters` -- every adapter the entry will apply once the version is
+/// registered.
+using ServingScorer =
+    std::function<training::ServingGate(const std::vector<harness::AdapterConfig>& adapters)>;
+
 struct PromoteOutcome {
     bool ok = false;
     bool cancelled = false;
@@ -405,6 +613,16 @@ struct PromoteOutcome {
     /// An existing entry repointed rather than a new one appended.
     bool updated = false;
     training::PruneResult pruned;
+    /// An adapter version (53b): the base it applies over, untouched, and
+    /// the sha256 it was pinned to.
+    std::string base_path{};
+    std::string base_sha256{};
+    /// The version's size on disk.
+    std::int64_t bytes = 0;
+    /// The gate on the serving base (53c): its eval, when it scored the
+    /// candidate, and what a soft gate let through.
+    std::optional<training::EvalResults> scored{};
+    std::string warning{};
 };
 
 /// The model store's roots as a promotion sees them: `paths.hf_dir` for
@@ -457,6 +675,14 @@ struct PromoteOutcome {
 /// store -- a version promoted before the store existed -- goes alone. An
 /// MLX version is its stored directory, whole (27c).
 [[nodiscard]] std::string remove_promoted(const training::VersionEntry& entry) {
+    if (entry.adapter()) {
+        // An adapter version's file or directory under training/versions/
+        // (53b): the version alone -- its base is the entry's, never Apogee's
+        // to remove.
+        std::error_code code;
+        std::filesystem::remove_all(entry.adapter_path, code);
+        return code ? code.message() : std::string{};
+    }
     if (entry.mlx()) {
         return models::remove_weights(entry.mlx_path);
     }
@@ -640,6 +866,445 @@ struct PromoteOutcome {
     }
     outcome.ok = true;
     return outcome;
+}
+
+/// Two spellings of one path: an adapter's as the config holds it (`~` and
+/// `${VAR}` expanded on read) and a version's as the ledger records it.
+[[nodiscard]] bool same_path(const std::string& a, const std::string& b) {
+    return std::filesystem::path{a}.lexically_normal() ==
+           std::filesystem::path{b}.lexically_normal();
+}
+
+/// The entry's adapters with `adapter` in place of `replaced` (53b): the
+/// version a promote or a rollback moves from, at its scale and in its place
+/// -- or, when the entry lists no such adapter, `adapter` after the rest.
+/// Every adapter the ledger did not put there stays as it is.
+[[nodiscard]] std::vector<harness::AdapterConfig> with_version_adapter(
+    std::vector<harness::AdapterConfig> adapters, const std::string& replaced,
+    harness::AdapterConfig adapter) {
+    const auto held = std::ranges::find_if(adapters, [&](const harness::AdapterConfig& item) {
+        return !replaced.empty() && same_path(item.path, replaced);
+    });
+    if (held != adapters.end()) {
+        adapter.scale = held->scale;
+        *held = std::move(adapter);
+    } else {
+        adapters.push_back(std::move(adapter));
+    }
+    return adapters;
+}
+
+/// Why rolling `key` back to adapter version `target` would leave its pin
+/// stale (55e), or empty when it would not: the version's adapter asked its
+/// file facts, then the pin its ledger recorded against the weights the entry
+/// runs now -- the check promote makes as it pins (53a), read once per change
+/// of those weights and remembered. A re-pull, a requantize or a model_path
+/// move since the version was registered is refused here, by name, never left
+/// for the next load to find. The door, where the version's run is still
+/// there to promote from, promotes it again over today's weights.
+[[nodiscard]] std::string rollback_pin_refusal(const std::string& key,
+                                               const harness::BackendConfig& entry,
+                                               const training::VersionEntry& target,
+                                               const training::TrainingStore& store) {
+    const std::string version = "v" + std::to_string(target.version);
+    const bool mlx = entry.type == harness::BackendType::Mlx;
+    if (entry.model_path.empty()) {
+        return "backend '" + key + "' names no model_path, the weights " + version +
+               "'s adapter applies over -- nothing was repointed";
+    }
+    const std::filesystem::path base{harness::expand_env_and_home(entry.model_path)};
+    const backends::AdapterCheck check{.backend = key,
+                                       .base = base,
+                                       .directories = mlx,
+                                       .hashing = {.memo = harness::weight_hash_cache_path()}};
+    const harness::AdapterConfig adapter{.path = target.adapter_path,
+                                         .base_sha256 = target.base_sha256};
+    if (backends::adapter_files(adapter, check) == backends::AdapterFiles::WrongKind) {
+        return version + "'s adapter " + target.adapter_path + " is not what '" + key +
+               "' applies (" + backends::adapter_kind_gap(adapter, check) +
+               ") -- nothing was repointed";
+    }
+    std::string again;
+    std::string error;
+    if (training::valid_run_id(target.run_id) &&
+        training::read_manifest(store.run_dir(target.run_id), error).has_value()) {
+        again = "; promote its run again over these weights: apogee train promote " +
+                target.run_id + " --as " + key + " --adapter";
+    }
+    if (target.base_sha256.empty()) {
+        return version + "'s adapter " + target.adapter_path +
+               " was recorded with no pin to the weights it applies over, so it cannot be "
+               "checked against " +
+               base.string() + " -- nothing was repointed" + again;
+    }
+    const std::string now = backends::weights_sha256(base, check.hashing);
+    if (now.empty()) {
+        return "the base weights at " + base.string() + " could not be read to check " + version +
+               "'s pin against -- nothing was repointed";
+    }
+    if (now != target.base_sha256) {
+        return version + "'s adapter " + target.adapter_path +
+               " was pinned to other base weights (sha256 " + target.base_sha256.substr(0, 12) +
+               ") than " + base.string() + " holds now (" + now.substr(0, 12) +
+               ") -- an adapter applies only over the weights it was trained on, so nothing was "
+               "repointed: point model_path back at the weights it was pinned to" +
+               again;
+    }
+    return {};
+}
+
+/// Why an mlx entry cannot take `adapters` (53b): mlx-lm loads one adapter
+/// directory, so another already there is said, with the way to take it off.
+[[nodiscard]] std::string one_mlx_adapter(const std::string& key,
+                                          const harness::BackendConfig& entry,
+                                          const std::vector<harness::AdapterConfig>& adapters,
+                                          const std::string& version_path) {
+    if (entry.type != harness::BackendType::Mlx || adapters.size() <= 1) {
+        return {};
+    }
+    for (const harness::AdapterConfig& adapter : adapters) {
+        if (!same_path(adapter.path, version_path)) {
+            return "'" + key + "' is an mlx entry, which applies one adapter, and it already " +
+                   "applies " + adapter.path + " -- take it off with 'apogee config set-backend " +
+                   key + " --adapters \"\"', then promote again";
+        }
+    }
+    return {};
+}
+
+/// The adapter promote (53b), beside `promote_run`: the same gate, refusals
+/// and ledger, the fuse skipped. The run's adapter becomes a small version
+/// under `training/versions/` -- a GGUF LoRA converted by the vendored
+/// script, or the mlx-lm directory copied as it is -- pinned to the base the
+/// entry runs, and registered on its `adapters:` through the one editor in
+/// place of the active version's. The entry's `model_path`, and the base it
+/// names, are never touched. A failure at any step leaves the config and the
+/// ledger as they were. Onto a quantized base (53c) the gate runs between
+/// the pin and the config, `score` scoring the candidate there with every
+/// adapter the entry will apply: a candidate under the gate's floor is
+/// removed, never registered.
+[[nodiscard]] PromoteOutcome promote_adapter_run(
+    const harness::Config& config, const std::filesystem::path& config_path,
+    const training::TrainingStore& store, const training::RunManifest& manifest,
+    const training::AdapterConverter& convert, const PromoteRequest& request,
+    const ServingScorer& score, const training::MessageSink& on_message,
+    const harness::CancellationToken& cancellation) {
+    PromoteOutcome outcome;
+    const auto refuse = [&outcome](std::string error) {
+        outcome.refused = true;
+        outcome.error = std::move(error);
+        return outcome;
+    };
+    const PromoteChecks checks = precheck_promotion(config, manifest, request);
+    if (!checks.error.empty()) {
+        return refuse(checks.error);
+    }
+    std::string ledger_error;
+    training::VersionLedger ledger =
+        training::load_ledger(store.versions_dir(), request.backend, ledger_error)
+            .value_or(training::VersionLedger{.backend = request.backend});
+    if (!ledger_error.empty()) {
+        return refuse("the version ledger is unreadable: " + ledger_error);
+    }
+    ledger.backend = checks.existing_key;
+    if (const std::string conflict =
+            training::target_conflict(ledger, checks.target, training::PromoteMode::Adapter);
+        !conflict.empty()) {
+        return refuse(conflict);
+    }
+    const harness::BackendConfig& entry = *config.find_backend(checks.existing_key);
+    const training::VersionEntry* active = ledger.active();
+    const std::string replaced = active != nullptr ? active->adapter_path : std::string{};
+    const training::PromotePlan plan = training::plan_adapter_promotion(
+        ledger, store.versions_dir(), ledger.backend, checks.target);
+    if (const std::string refusal = one_mlx_adapter(
+            ledger.backend, entry,
+            with_version_adapter(entry.adapters, replaced,
+                                 harness::AdapterConfig{.path = plan.adapter_path.string()}),
+            plan.adapter_path.string());
+        !refusal.empty()) {
+        return refuse(refusal);
+    }
+    const bool mlx = checks.target == training::PromoteTarget::Mlx;
+    outcome.target = checks.target;
+    outcome.backend_key = ledger.backend;
+    outcome.updated = true;
+    outcome.version = plan.version;
+    outcome.base_path = harness::expand_env_and_home(entry.model_path);
+    if (on_message) {
+        on_message("run " + manifest.run_id + " -> " + ledger.backend + " v" +
+                   std::to_string(plan.version) + " (adapter" + (mlx ? ", mlx)" : ")"));
+    }
+    const training::ArtifactsResult built = training::build_adapter_artifacts(
+        manifest, plan, convert, mlx ? mlx_adapter_verifier() : header_verifier(), on_message,
+        cancellation);
+    if (built.cancelled) {
+        outcome.cancelled = true;
+        outcome.error = "cancelled";
+        return outcome;
+    }
+    if (!built.ok) {
+        outcome.error = built.error + " -- the config and the version ledger are unchanged";
+        return outcome;
+    }
+    outcome.bytes = built.bytes;
+    outcome.weights_path = plan.adapter_path.string();
+    std::error_code code;
+    const auto unstore = [&plan, &code] { std::filesystem::remove_all(plan.adapter_path, code); };
+
+    // Pinned to the weights the entry runs now (53a's unit), the hash read
+    // once per change of them and remembered.
+    if (on_message) {
+        on_message("pinning the adapter to the base it applies over: " + outcome.base_path);
+    }
+    std::vector<harness::AdapterConfig> fresh{harness::AdapterConfig{.path = outcome.weights_path}};
+    if (const std::string refused =
+            backends::pin_adapters(fresh, {.backend = ledger.backend,
+                                           .base = std::filesystem::path{outcome.base_path},
+                                           .directories = mlx,
+                                           .hashing = {.memo = harness::weight_hash_cache_path()}});
+        !refused.empty()) {
+        unstore();
+        outcome.error = refused +
+                        " -- the adapter was removed, and the config and the version "
+                        "ledger are unchanged";
+        return outcome;
+    }
+    outcome.base_sha256 = fresh.front().base_sha256;
+    const std::vector<harness::AdapterConfig> adapters =
+        with_version_adapter(entry.adapters, replaced, fresh.front());
+
+    // 53c: on a quantized base the gate scores the candidate where it will
+    // serve -- built and pinned, the config not yet touched -- and a
+    // candidate under its floor goes no further.
+    std::optional<training::ServingGate> gated;
+    if (checks.on_serving_base && score) {
+        training::ServingGate gate = score(adapters);
+        if (gate.cancelled) {
+            unstore();
+            outcome.cancelled = true;
+            outcome.error = "cancelled";
+            return outcome;
+        }
+        if (!gate.verdict.ok) {
+            unstore();
+            outcome.refused = true;
+            outcome.error = gate.verdict.error +
+                            " -- the adapter was removed, and the config and the version ledger "
+                            "are unchanged";
+            return outcome;
+        }
+        if (gate.results.has_value()) {
+            // A gate that let it through unscored said so at the precheck.
+            outcome.warning = gate.verdict.warning;
+            outcome.scored = gate.results;
+        }
+        gated = std::move(gate);
+    }
+
+    // The adapter exists, reads whole and is pinned: now, and only now, the
+    // config -- the entry's `adapters:` through the one editor.
+    try {
+        harness::edit_config_file(config_path, [&](std::string_view content) {
+            return harness::set_backend_adapters(content, ledger.backend, adapters);
+        });
+    } catch (const harness::ConfigEditError& e) {
+        unstore();
+        outcome.error = std::string{"registering the adapter: "} + e.what() +
+                        " -- the adapter was removed and the ledger is unchanged";
+        return outcome;
+    } catch (const harness::ConfigError& e) {
+        unstore();
+        outcome.error = std::string{"registering the adapter: "} + e.what() +
+                        " -- the adapter was removed and the ledger is unchanged";
+        return outcome;
+    }
+
+    training::VersionEntry version =
+        training::promotion_entry(manifest, plan, training::rfc3339_now());
+    version.base_sha256 = outcome.base_sha256;
+    if (gated.has_value()) {
+        training::record_serving_gate(version, *gated, checks.serving.base);
+    }
+    outcome.pruned =
+        training::record_promotion(ledger, std::move(version), config.training.retain_versions,
+                                   training::rfc3339_now(), remove_promoted);
+    if (const std::string failure = training::save_ledger(store.versions_dir(), ledger);
+        !failure.empty()) {
+        outcome.error = "the adapter is registered, but the ledger could not be saved: " + failure;
+        return outcome;
+    }
+    outcome.ok = true;
+    return outcome;
+}
+
+/// One prompt answered by an entry's own runtime (53c) -- llama.cpp or
+/// mlx-lm, with the adapters it will serve with -- greedy and at the
+/// trainer's own answer budget, as the candidate is asked where its trainer
+/// ran it, and a side request no conversation's cache keeps.
+class ServedCandidate final : public training::CandidateRunner {
+public:
+    explicit ServedCandidate(std::shared_ptr<harness::LLMProvider> provider)
+        : provider_{std::move(provider)} {}
+
+    [[nodiscard]] training::CandidateReply run(
+        std::string_view prompt, const harness::CancellationToken& cancellation) override {
+        training::CandidateReply reply;
+        harness::ChatRequest request;
+        request.messages.push_back(harness::ChatMessage::user(std::string{prompt}));
+        request.temperature = 0.0;
+        request.max_tokens = training::kCandidateMaxTokens;
+        request.transient.side_request = true;
+        try {
+            reply.text = provider_->chat(request, cancellation).message.content.plain_text();
+            reply.ok = true;
+        } catch (const std::exception& e) {
+            reply.error = e.what();
+        }
+        return reply;
+    }
+
+private:
+    std::shared_ptr<harness::LLMProvider> provider_;
+};
+
+/// The gate's inference on the serving base (53c), handed to `training/`
+/// whole: the mock's for a mock run, as its converter is -- its candidate
+/// over the base's path, scripted by the run's adapter, so the chain runs on
+/// the real binary with nothing installed -- else the entry itself, built as
+/// it runs with `adapters` on it (none for the judge's baseline): the
+/// quantized weights, the runtime and the adapters that will answer once the
+/// version is registered.
+[[nodiscard]] training::ServingRunnerFactory serving_runners(
+    const harness::Config& config, const std::filesystem::path& config_path,
+    const training::ServingBase& base, const training::RunManifest& manifest,
+    std::string_view trainer_name, std::vector<harness::AdapterConfig> adapters) {
+    if (trainer_name == "mock") {
+        return [weights = base.weights, adapter = std::filesystem::path{manifest.adapter_dir}](
+                   bool tuned, std::string&) -> std::unique_ptr<training::CandidateRunner> {
+            training::MockTrainer mock;
+            return mock.candidate_runner(weights, tuned ? adapter : std::filesystem::path{});
+        };
+    }
+    return [&config, config_path, key = base.backend, adapters = std::move(adapters)](
+               bool tuned, std::string& error) -> std::unique_ptr<training::CandidateRunner> {
+        harness::BackendConfig served = harness::backend_as_run(config, key);
+        served.adapters = tuned ? adapters : std::vector<harness::AdapterConfig>{};
+        backends::BuildOptions options;
+        options.config_path = config_path;
+        std::shared_ptr<harness::LLMProvider> provider =
+            backends::make_provider(key, served, error, options);
+        if (provider == nullptr) {
+            return nullptr;
+        }
+        return std::make_unique<ServedCandidate>(std::move(provider));
+    };
+}
+
+/// `train promote --adapter` (53b), after the shared refusals: the converter
+/// composed here -- the GGUF target's alone; an MLX one converts nothing, so
+/// none need be installed -- and, onto a quantized base (53c), the gate's
+/// inference there and its judge, then the adapter promote run, and its
+/// report.
+void run_adapter_promote(const harness::Config& config, const std::filesystem::path& config_path,
+                         const training::TrainingStore& store,
+                         const training::RunManifest& manifest, const PromoteRequest& request,
+                         const PromoteChecks& checks, std::string_view trainer_name) {
+    const bool mlx = checks.target == training::PromoteTarget::Mlx;
+    const training::AdapterConverter convert =
+        mlx ? training::AdapterConverter{} : make_adapter_converter(config, trainer_name);
+    const InterruptScope interrupt;
+    const training::ServingBase& base = checks.serving.base;
+    const std::string where = training::describe(base);
+    std::optional<Providers> providers;
+    if (checks.on_serving_base && !checks.judge_key.empty()) {
+        providers.emplace(config, config_path);
+    }
+    const ServingScorer score = [&](const std::vector<harness::AdapterConfig>& adapters) {
+        if (!training::plan_serving_gate(manifest, checks.serving).score) {
+            return training::gate_on_serving_base(manifest, checks.serving, {}, {});
+        }
+        training::EvalOptions options;
+        if (!checks.judge_key.empty()) {
+            options.judge = make_judge(providers->harness, checks.judge_key);
+            options.judge_backend = checks.judge_key;
+        }
+        const bool tty = platform::is_terminal(platform::StandardStream::Err);
+        options.on_progress = [tty](int done, int total) {
+            if (tty) {
+                std::cerr << "\r[promote] scoring: " << done << "/" << total << " item(s)"
+                          << std::flush;
+            }
+        };
+        options.cancellation = InterruptScope::token();
+        std::cerr << "[promote] scoring the candidate where it will serve: " << where
+                  << ", the base '" << base.backend << "' serves -- suite " << checks.serving.suite
+                  << " (" << checks.serving.items.size() << " item(s))"
+                  << (checks.judge_key.empty() ? std::string{"; no judge: unmatched items skip"}
+                                               : ", judge " + checks.judge_key)
+                  << "\n";
+        training::ServingGate gate = training::gate_on_serving_base(
+            manifest, checks.serving,
+            serving_runners(config, config_path, base, manifest, trainer_name, adapters),
+            std::move(options));
+        if (tty) {
+            std::cerr << "\n";
+        }
+        if (gate.results.has_value()) {
+            std::cerr << "[promote] scored on " << where << ": " << percent(gate.results->score)
+                      << " (" << gate.results->num_passed << "/" << gate.results->total << ")"
+                      << (gate.results->num_skipped > 0
+                              ? "; " + std::to_string(gate.results->num_skipped) +
+                                    " item(s) with no `expected` skipped and auto-passed"
+                              : std::string{})
+                      << "\n";
+        }
+        return gate;
+    };
+    const PromoteOutcome result = promote_adapter_run(
+        config, config_path, store, manifest, convert, request, score,
+        [](std::string_view text) { std::cerr << "[promote] " << text << "\n"; },
+        InterruptScope::token());
+    if (result.cancelled) {
+        throw CLI::RuntimeError(kCancelled);
+    }
+    if (result.refused) {
+        fail_user(result.error);
+    }
+    if (!result.ok) {
+        std::cerr << "apogee train: promote failed: " << result.error << "\n";
+        throw CLI::RuntimeError(kBackendError);
+    }
+    if (!result.warning.empty()) {
+        std::cerr << "apogee train: warning: " << result.warning << "\n";
+    }
+    std::cout << "updated backend " << result.backend_key << " -> v" << result.version
+              << " (adapter)\n"
+              << "  adapter: " << result.weights_path << " (" << human_size(result.bytes)
+              << (mlx ? ", the mlx-lm directory as it is" : ", a GGUF LoRA") << ")\n"
+              << "  base:    " << result.base_path << " (untouched; pinned by sha256 "
+              << result.base_sha256.substr(0, 12) << ")\n"
+              << "  config:  " << config_path.string() << "\n";
+    if (result.scored.has_value()) {
+        std::cout << "  eval:    " << percent(result.scored->score) << " ("
+                  << result.scored->num_passed << "/" << result.scored->total << "), scored on "
+                  << where << "\n";
+    } else if (!checks.on_serving_base && manifest.eval.has_value()) {
+        std::cout << "  eval:    " << percent(manifest.eval->score) << " ("
+                  << manifest.eval->num_passed << "/" << manifest.eval->total << ")\n";
+    }
+    for (const std::string& removed : result.pruned.removed) {
+        std::cout << "  pruned:  " << removed << " (retain_versions "
+                  << config.training.retain_versions << ")\n";
+    }
+    for (const std::string& failed : result.pruned.failed) {
+        std::cerr << "apogee train: warning: could not prune " << failed << "\n";
+    }
+    std::cout << "\nChat with it:\n  apogee chat -m " << result.backend_key << "\n";
+    const std::optional<training::VersionLedger> ledger = store.list_versions(result.backend_key);
+    if (ledger.has_value() && ledger->kept() > 1) {
+        std::cout << "Roll back if needed:\n  apogee train rollback " << result.backend_key << "\n";
+    }
 }
 
 // --- the pipeline console ---------------------------------------------------------
@@ -945,6 +1610,19 @@ void print_cycle_history(const training::CycleHistory& history, bool active) {
 
 }  // namespace
 
+std::string setup_with_help() {
+    std::string sets;
+    const std::span<const std::string_view> names = training::requirement_set_names();
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        const training::RequirementSet set = *training::requirement_set_from_string(names[i]);
+        sets += (i == 0 ? "" : (i + 1 == names.size() ? " and " : ", ")) + std::string{names[i]} +
+                " (" + std::string{training::set_purpose(set)} +
+                (training::set_opt_in(set) ? "; opt-in" : "") + ")";
+    }
+    return "Install a requirement set: " + sets +
+           " -- an opt-in set is installed only by this, never by the install's bootstrap";
+}
+
 // --- the resolvers ------------------------------------------------------------------
 
 std::string detect_trainer(std::string& reason) {
@@ -1045,6 +1723,34 @@ std::filesystem::path resolve_dataset(const std::filesystem::path& datasets_dir,
     error = "no dataset named '" + std::string{name_or_path} +
             "' and no such file -- 'apogee datasets list' shows the datasets";
     return {};
+}
+
+training::ServingBase serving_base(const std::string& name, const harness::BackendConfig& backend) {
+    training::ServingBase base;
+    base.backend = name;
+    base.weights = std::filesystem::path{harness::expand_env_and_home(backend.model_path)};
+    base.label = models::weights_label(base.weights);
+    if (backend.model_path.empty()) {
+        return base;
+    }
+    if (backend.type == harness::BackendType::Mlx) {
+        // `config.json` alone: mlx-lm's quantization, a publisher's, or a
+        // floating-point type -- "4-bit (affine, group 64)" said as "4-bit".
+        const models::MlxQuantization quantization =
+            models::read_mlx_config(base.weights).quantization;
+        base.quantized = quantization.quantized() || !quantization.method.empty();
+        if (base.quantized || !quantization.dtype.empty()) {
+            base.precision = quantization.describe();
+            base.precision.resize(std::min(base.precision.size(), base.precision.find(" (")));
+        }
+        return base;
+    }
+    const models::GgufInfo info = models::inspect_gguf(base.weights);
+    if (info.parsed) {
+        base.precision = models::file_type_name(info.file_type);
+        base.quantized = info.is_quantized();
+    }
+    return base;
 }
 
 SuiteResolution resolve_suite(const std::filesystem::path& training_dir,
@@ -1190,6 +1896,30 @@ std::string render_iteration(const training::ProgressEvent& event) {
 
 // --- setup (the datasets item) ------------------------------------------------------
 
+namespace {
+
+/// The sets this host can install -- the bootstrap's own table (51) -- which
+/// one environment serves, so its Python is chosen against them all (M19).
+[[nodiscard]] std::vector<training::RequirementSet> host_sets(const training::HostShape& host) {
+    std::vector<training::RequirementSet> sets;
+    for (const std::string_view name : training::requirement_set_names()) {
+        const std::optional<training::RequirementSet> set =
+            training::requirement_set_from_string(name);
+        if (set.has_value() &&
+            training::set_unfit_reason(*set, host.apple_silicon, host.nvidia_smi).empty()) {
+            sets.push_back(*set);
+        }
+    }
+    return sets;
+}
+
+/// " (Python 3.12.13)", or nothing for a version not said.
+[[nodiscard]] std::string python_note(const training::PythonVersion& version) {
+    return version.known() ? " (Python " + version.str() + ")" : std::string{};
+}
+
+}  // namespace
+
 training::PythonEnv require_python_env(const harness::Config& config, std::string_view purpose) {
     training::PythonEnv env{harness::training_venv_dir()};
     if (env.exists()) {
@@ -1198,10 +1928,13 @@ training::PythonEnv require_python_env(const harness::Config& config, std::strin
     const bool interactive =
         platform::is_terminal(platform::StandardStream::In) && !stdin_is_piped();
     if (!interactive) {
-        std::cerr << "apogee " << purpose
-                  << ": the Python environment has not been created yet. Run 'apogee train "
-                     "setup' first (it creates "
-                  << env.dir().string() << ", never touching the system Python)\n";
+        // Said on stderr and, when the run streams, as its `error` (M29).
+        const std::string refused =
+            "the Python environment has not been created yet. Run 'apogee train setup' first (it "
+            "creates " +
+            env.dir().string() + ", never touching the system Python)";
+        std::cerr << "apogee " << purpose << ": " << refused << "\n";
+        tell_job_failure(refused);
         throw CLI::RuntimeError(kUserError);
     }
     std::cerr << purpose << " needs a Python environment, which Apogee keeps under\n  "
@@ -1212,20 +1945,22 @@ training::PythonEnv require_python_env(const harness::Config& config, std::strin
     if (answer != "y" && answer != "Y" && answer != "yes") {
         fail_user("not created. Run 'apogee train setup' when ready");
     }
-    std::string error;
-    const std::filesystem::path base = training::locate_base_python(config.training.python, error);
-    if (base.empty()) {
-        fail_user(error);
+    const training::PythonChoice choice =
+        training::choose_base_python(config.training.python, host_sets(training::detect_host()), {},
+                                     training::default_command_runner());
+    if (choice.path.empty()) {
+        fail_user(choice.error);
     }
-    std::cerr << "creating the Python environment from " << base.string() << " ...\n";
-    if (const std::string failure = env.create(base); !failure.empty()) {
+    std::cerr << "creating the Python environment from " << choice.path.string()
+              << python_note(choice.version) << " -- " << choice.reason << " ...\n";
+    if (const std::string failure = env.create(choice.path, {}, choice.version); !failure.empty()) {
         fail_user(failure);
     }
     return env;
 }
 
 void run_train_setup(const harness::Config& config, const SetupRequest& request) {
-    training::PythonEnv env{harness::training_venv_dir()};
+    training::PythonEnv env{harness::training_venv_dir(), request.runner};
     std::vector<training::RequirementSet> sets = request.with;
     if (!request.trainer.empty()) {
         std::string trainer = request.trainer;
@@ -1247,20 +1982,76 @@ void run_train_setup(const harness::Config& config, const SetupRequest& request)
         }
     }
 
-    if (!env.exists()) {
-        std::string error;
-        const std::filesystem::path base =
-            training::locate_base_python(config.training.python, error);
-        if (base.empty()) {
-            fail_user(error);
+    // The Python is chosen against every set this host can install (M19):
+    // one environment serves them all, and the bootstrap makes it at its
+    // first set, so a choice that fit only that set would doom a later one.
+    const std::vector<training::RequirementSet> host =
+        host_sets(request.host.value_or(training::detect_host()));
+    const auto choose = [&]() {
+        const bool flag = !request.python.empty();
+        training::PythonChoice choice =
+            training::choose_base_python(flag ? request.python : config.training.python, host, sets,
+                                         request.runner, flag ? "--python" : "training.python");
+        if (choice.path.empty()) {
+            fail_user(choice.error);
         }
-        std::cout << "creating " << env.dir().string() << " from " << base.string() << " ...\n";
-        if (const std::string failure = env.create(base); !failure.empty()) {
+        return choice;
+    };
+    if (!env.exists()) {
+        const training::PythonChoice choice = choose();
+        std::cout << "creating " << env.dir().string() << " from " << choice.path.string()
+                  << python_note(choice.version) << " -- " << choice.reason << " ...\n";
+        if (const std::string failure = env.create(choice.path, {}, choice.version);
+            !failure.empty()) {
             fail_user(failure);
         }
         std::cout << "created\n";
+    } else if (request.rebuild) {
+        const training::PythonEnvStatus before = env.status();
+        const training::PythonChoice choice = choose();
+        std::string recorded;
+        for (const std::string& set : before.sets) {
+            recorded += (recorded.empty() ? "" : ", ") + set;
+        }
+        // Gigabytes of packages are replaced only on the person's word: asked
+        // at a terminal, `--yes` where nobody can be -- a pipe, the bootstrap.
+        if (!request.yes) {
+            const bool interactive =
+                platform::is_terminal(platform::StandardStream::In) && !stdin_is_piped();
+            if (!interactive) {
+                fail_user("the environment at " + env.dir().string() +
+                          " is replaced only on your word -- rerun with --yes: apogee train "
+                          "setup --rebuild --yes");
+            }
+            std::cerr << "Rebuild " << env.dir().string() << python_note(before.base_version)
+                      << " on " << choice.path.string() << python_note(choice.version)
+                      << ", reinstalling " << (recorded.empty() ? "no sets" : recorded)
+                      << "? What pip installed there is downloaded again. [y/N] " << std::flush;
+            std::string answer;
+            std::getline(std::cin, answer);
+            if (answer != "y" && answer != "Y" && answer != "yes") {
+                fail_user("not rebuilt");
+            }
+        }
+        std::cout << "rebuilding " << env.dir().string() << " from " << choice.path.string()
+                  << python_note(choice.version) << " -- " << choice.reason
+                  << (recorded.empty() ? std::string{} : "; reinstalling " + recorded) << " ...\n"
+                  << std::flush;
+        if (const std::string failure = env.rebuild(choice.path, choice.version);
+            !failure.empty()) {
+            fail_user(failure);
+        }
+        std::cout << "rebuilt\n";
     } else {
-        std::cout << "environment already exists at " << env.dir().string() << "\n";
+        if (!request.python.empty()) {
+            fail_user(
+                "--python chooses the Python a new environment is made from, and one "
+                "exists at " +
+                env.dir().string() + python_note(env.status().base_version) +
+                " -- add --rebuild to replace it");
+        }
+        std::cout << "environment already exists at " << env.dir().string()
+                  << python_note(env.status().base_version) << "\n";
     }
 
     for (const training::RequirementSet set : sets) {
@@ -1268,7 +2059,13 @@ void run_train_setup(const harness::Config& config, const SetupRequest& request)
         for (const std::string_view package : training::packages_for(set)) {
             std::cout << " " << package;
         }
-        std::cout << " ...\n" << std::flush;
+        std::cout << " ...\n";
+        // A package built from a reviewed commit rather than PyPI, said as
+        // such (53k).
+        if (const std::optional<training::PinnedSource> source = training::pinned_source(set)) {
+            std::cout << "  " << source->describe() << "\n";
+        }
+        std::cout << std::flush;
         if (const std::string failure = env.install(set); !failure.empty()) {
             fail_user(failure);
         }
@@ -1304,20 +2101,34 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     // ---- setup -------------------------------------------------------------
     auto setup_trainer = std::make_shared<std::string>();
     auto setup_with = std::make_shared<std::vector<std::string>>();
+    auto setup_python = std::make_shared<std::string>();
+    auto setup_rebuild = std::make_shared<bool>(false);
+    auto setup_yes = std::make_shared<bool>(false);
     CLI::App* setup = cmd->add_subcommand(
         "setup", "Create the Python environment under training/venv and install requirement sets");
     setup
         ->add_option("--trainer", *setup_trainer,
                      "Install a trainer's stack: auto (detect this host), mlx, or peft")
         ->type_name(words_value(installable_trainers()));
-    setup
-        ->add_option("--with", *setup_with,
-                     "Install a requirement set: prepare (Parquet), mlx, peft, convert")
+    setup->add_option("--with", *setup_with, setup_with_help())
         ->type_name(words_value(training::requirement_set_names()));
-    setup->callback([&context, setup_trainer, setup_with]() {
+    setup
+        ->add_option("--python", *setup_python,
+                     "The Python a new or rebuilt environment is made from, for this run "
+                     "(training.python keeps one); by default the newest every set here runs on")
+        ->type_name(kPathValue);
+    setup->add_flag("--rebuild", *setup_rebuild,
+                    "Replace the environment on a Python every set runs on, reinstalling each "
+                    "set it holds (asked first)");
+    setup->add_flag("-y,--yes", *setup_yes, "Rebuild without asking (a pipe, a script)");
+    setup->callback([&context, setup_trainer, setup_with, setup_python, setup_rebuild,
+                     setup_yes]() {
         const harness::Config config = load_config_or_default(context);
         SetupRequest request;
         request.trainer = *setup_trainer;
+        request.python = *setup_python;
+        request.rebuild = *setup_rebuild;
+        request.yes = *setup_yes;
         for (const std::string& name : *setup_with) {
             const std::optional<training::RequirementSet> set =
                 training::requirement_set_from_string(name);
@@ -1656,10 +2467,14 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     auto promote_keep = std::make_shared<bool>(false);
     auto promote_trainer = std::make_shared<std::string>();
     auto promote_target = std::make_shared<std::string>();
+    auto promote_adapter = std::make_shared<bool>(false);
+    auto promote_suite = std::make_shared<std::string>();
+    auto promote_judge = std::make_shared<std::string>();
     CLI::App* promote = cmd->add_subcommand(
         "promote",
         "Fuse, verify, and register the run: a GGUF on a llamacpp backend, or with --target mlx "
-        "the fused model itself on an mlx backend");
+        "the fused model itself on an mlx backend; with --adapter, the adapter alone on the "
+        "entry's adapters, over the base it runs");
     promote->add_option("run", *promote_id, "The run id")->type_name(kRunValue)->required();
     promote
         ->add_option("--as", *promote_as,
@@ -1681,8 +2496,26 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
                       "Keep the fused SafeTensors checkpoint under the run directory");
     promote->add_option("--trainer", *promote_trainer, "Override the run's recorded trainer")
         ->type_name(words_value(training::trainer_names()));
+    promote->add_flag(
+        "--adapter", *promote_adapter,
+        "No fuse: register the adapter itself on an existing entry's adapters, over the base it "
+        "runs -- a GGUF LoRA converted from a peft run for a llamacpp entry, an mlx run's "
+        "adapter directory as it is for an mlx entry (default: merge)");
+    promote
+        ->add_option("--suite", *promote_suite,
+                     "With --adapter onto an entry whose base is quantized: the suite the gate "
+                     "scores the candidate on, there -- as train eval takes it (default: the "
+                     "run's recorded eval's, else training.eval_suite_path)")
+        ->type_name(kSuiteValue);
+    promote
+        ->add_option("--judge", *promote_judge,
+                     "With --adapter onto an entry whose base is quantized: the backend that "
+                     "judges items without `expected` (default: the run's recorded eval's, else "
+                     "training.judge_backend; none skips them)")
+        ->type_name(kBackendValue);
     promote->callback([&context, promote_id, promote_as, promote_force, promote_quantize,
-                       promote_keep, promote_trainer, promote_target]() {
+                       promote_keep, promote_trainer, promote_target, promote_adapter,
+                       promote_suite, promote_judge]() {
         std::filesystem::path config_path;
         const harness::Config config = load_config_strict(context, config_path);
         const training::TrainingStore store{harness::training_dir()};
@@ -1692,6 +2525,9 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         request.force = *promote_force;
         request.quantize = *promote_quantize;
         request.keep_fused = *promote_keep;
+        request.adapter = *promote_adapter;
+        request.suite = *promote_suite;
+        request.judge = *promote_judge;
         if (!promote_target->empty()) {
             request.target = training::promote_target_from_string(*promote_target);
             if (!request.target.has_value()) {
@@ -1708,6 +2544,12 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             std::cerr << "apogee train: warning: " << checks.warning << "\n";
         }
         const std::string trainer_name = choose_trainer(config, *promote_trainer, manifest.trainer);
+        if (request.adapter) {
+            // No fuse, so no trainer is built (53b).
+            run_adapter_promote(config, config_path, store, manifest, request, checks,
+                                trainer_name);
+            return;
+        }
         const std::unique_ptr<training::Trainer> trainer =
             make_trainer(config, trainer_name, "train promote");
         const bool mlx = checks.target == training::PromoteTarget::Mlx;
@@ -1816,9 +2658,32 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         const int from = ledger->active_version;
         const int to = target.entry->version;
         const std::string weights = target.entry->weights();
+        // An adapter version (53b) repoints the entry's adapters, in the
+        // active version's place, with the pin it was registered under; the
+        // base is not touched.
+        std::vector<harness::AdapterConfig> adapters;
+        if (target.entry->adapter()) {
+            const training::VersionEntry* active = ledger->active();
+            const harness::BackendConfig& entry = *config.find_backend(key);
+            adapters = with_version_adapter(
+                entry.adapters, active != nullptr ? active->adapter_path : std::string{},
+                harness::AdapterConfig{.path = weights, .base_sha256 = target.entry->base_sha256});
+            if (const std::string refusal = one_mlx_adapter(key, entry, adapters, weights);
+                !refusal.empty()) {
+                fail_user(refusal);
+            }
+            // The pin it was registered under, checked against the weights
+            // the entry runs now before anything is written (55e).
+            if (const std::string refusal = rollback_pin_refusal(key, entry, *target.entry, store);
+                !refusal.empty()) {
+                fail_user(refusal);
+            }
+        }
         try {
             harness::edit_config_file(config_path, [&](std::string_view content) {
-                return harness::set_backend_model_path(content, key, weights);
+                return target.entry->adapter()
+                           ? harness::set_backend_adapters(content, key, adapters)
+                           : harness::set_backend_model_path(content, key, weights);
             });
         } catch (const harness::ConfigEditError& e) {
             fail_user(e.what());
@@ -1831,8 +2696,10 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             fail_user("the config is repointed, but the ledger could not be saved: " + failure);
         }
         std::cout << "rolled back " << key << ": v" << from << " -> v" << to << "\n"
-                  << (target.entry->mlx() ? "  mlx:  " : "  gguf: ") << weights
-                  << "\n  nothing was deleted; v" << from << " stays on disk\n";
+                  << (target.entry->adapter() ? "  adapter: "
+                      : target.entry->mlx()   ? "  mlx:  "
+                                              : "  gguf: ")
+                  << weights << "\n  nothing was deleted; v" << from << " stays on disk\n";
     });
 
     // ---- versions ----------------------------------------------------------
@@ -1892,8 +2759,10 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
                           << pad(promoted, 22) << pad(entry.run_id, 20)
                           << pad(eval_glyph(entry.eval_passed, entry.eval_score), 11)
                           // A GGUF by its file's name; an MLX version by its
-                          // stored directory, the id its weights hash to (27c).
-                          << (entry.mlx() ? "mlx/" : "")
+                          // stored directory, the id its weights hash to (27c);
+                          // an adapter version by its own, `v<N>.lora[.gguf]`
+                          // (53b).
+                          << (entry.mlx() && !entry.adapter() ? "mlx/" : "")
                           << std::filesystem::path{entry.weights()}.filename().string();
                 if (entry.pruned()) {
                     std::cout << "  (pruned)";
@@ -1947,6 +2816,9 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         ->type_name(kBackendValue);
     pipe_run->add_option("--trainer", *pipe_trainer, "auto (default), mlx, peft, or mock")
         ->type_name(words_value(training::trainer_names()));
+    // The run's progress as events, its status's document last (55h).
+    auto pipe_format = std::make_shared<JobFormat>(JobFormat::Text);
+    add_job_format(pipe_run, pipe_format, false, kPipelineStreamLast);
 
     auto resume_id = std::make_shared<std::string>();
     auto resume_spec = std::make_shared<std::string>();
@@ -1968,12 +2840,16 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         ->type_name(kBackendValue);
     pipe_resume->add_option("--trainer", *resume_trainer, "auto (default), mlx, peft, or mock")
         ->type_name(words_value(training::trainer_names()));
+    auto resume_format = std::make_shared<JobFormat>(JobFormat::Text);
+    add_job_format(pipe_resume, resume_format, false, kPipelineStreamLast);
 
     auto pipe_status_id = std::make_shared<std::string>();
     CLI::App* pipe_status =
         pipeline->add_subcommand("status", "A pipeline run's stages, or every pipeline run");
     pipe_status->add_option("id", *pipe_status_id, "The pipeline run id (default: list them)")
         ->type_name(kPipelineRunValue);
+    auto pipe_status_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    add_read_format(pipe_status, pipe_status_format);
 
     // One body for run and resume: resolve, drive, report.
     auto drive_pipeline = [&context](const harness::Config& config,
@@ -2008,81 +2884,140 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
                                       : training::new_run_id(harness::training_pipelines_dir(),
                                                              std::chrono::system_clock::now(),
                                                              training::kPipelineIdPrefix);
-        PipelineConsole console{spec.stages.size()};
-        request.on_progress = [&console](const training::PipelineProgress& progress) {
-            console(progress);
-        };
+        // A stream's progress is the relay's (55h); a person's, the console's.
+        JobStream* const job = JobStream::current();
+        std::optional<PipelineRelay> relay;
+        std::optional<PipelineConsole> console;
+        if (job != nullptr) {
+            relay.emplace(job->events());
+            request.on_progress = [&relay](const training::PipelineProgress& progress) {
+                relay->progress(progress);
+            };
+            request.on_manifest = [&relay](const training::PipelineRunManifest& manifest) {
+                relay->manifest(manifest);
+            };
+        } else {
+            console.emplace(spec.stages.size());
+            request.on_progress = [&console](const training::PipelineProgress& progress) {
+                (*console)(progress);
+            };
+        }
         const InterruptScope interrupt;
         request.cancellation = InterruptScope::token();
-        std::cerr << "[pipeline] " << (existing.has_value() ? "resuming " : "") << spec.name
-                  << " as " << request.pipeline_run_id << ": " << spec.stages.size()
-                  << " stage(s), " << trainer_name << " on "
-                  << request.base_model.filename().string()
-                  << (judge.key.empty() ? std::string{"; no judge: unmatched items skip"}
-                                        : ", judge " + judge.key)
-                  << "\n";
+        const std::string header =
+            "[pipeline] " + std::string{existing.has_value() ? "resuming " : ""} + spec.name +
+            " as " + request.pipeline_run_id + ": " + std::to_string(spec.stages.size()) +
+            " stage(s), " + trainer_name + " on " + request.base_model.filename().string() +
+            (judge.key.empty() ? std::string{"; no judge: unmatched items skip"}
+                               : ", judge " + judge.key);
+        if (job != nullptr) {
+            job->events().on_notice(header);
+        } else {
+            std::cerr << header << "\n";
+        }
         const training::PipelineOutcome outcome =
             existing.has_value() ? training::resume_pipeline(request, std::move(*existing))
                                  : training::run_pipeline(request);
-        console.finish();
-        print_pipeline_summary(outcome.manifest);
+        if (job != nullptr) {
+            // The run's own read, whatever became of it: what `train pipeline
+            // status <id> --output-format json` prints, once the run has
+            // written its manifest.
+            if (const std::optional<nlohmann::json> document =
+                    operations::training_pipeline_document(request.pipeline_run_id);
+                document.has_value()) {
+                job->events().emit_document(*document);
+            }
+        } else {
+            console->finish();
+            print_pipeline_summary(outcome.manifest);
+        }
         if (outcome.cancelled) {
-            std::cerr << "[pipeline] cancelled; recorded as " << outcome.manifest.status
-                      << " -- 'apogee train pipeline resume " << request.pipeline_run_id
-                      << "' continues it\n";
+            const std::string said = "cancelled; recorded as " + outcome.manifest.status +
+                                     " -- 'apogee train pipeline resume " +
+                                     request.pipeline_run_id + "' continues it";
+            std::cerr << "[pipeline] " << said << "\n";
+            if (job != nullptr) {
+                job->failed(said);
+            }
             throw CLI::RuntimeError(kCancelled);
         }
         if (!outcome.ok) {
             std::cerr << "apogee train: " << outcome.error << "\n";
+            if (job != nullptr) {
+                job->failed(outcome.error);
+            }
             throw CLI::RuntimeError(kBackendError);
         }
     };
 
-    pipe_run->callback(
-        [&context, drive_pipeline, pipe_spec, pipe_continue, pipe_judge, pipe_trainer]() {
+    pipe_run->callback([&context, drive_pipeline, pipe_spec, pipe_continue, pipe_judge,
+                        pipe_trainer, pipe_format]() {
+        run_as_job(*pipe_format, "train pipeline run", [&]() {
             std::filesystem::path config_path;
             const harness::Config config = load_config_strict(context, config_path);
             const harness::PipelineSpec spec = resolve_pipeline_spec(config, *pipe_spec);
             drive_pipeline(config, spec, std::nullopt, *pipe_continue, *pipe_judge, *pipe_trainer);
         });
-
-    pipe_resume->callback([&context, drive_pipeline, resume_id, resume_spec, resume_continue,
-                           resume_judge, resume_trainer]() {
-        std::filesystem::path config_path;
-        const harness::Config config = load_config_strict(context, config_path);
-        const training::TrainingStore store{harness::training_dir()};
-        if (!training::valid_run_id(*resume_id)) {
-            fail_user("'" + *resume_id + "' is not a pipeline run id");
-        }
-        std::optional<training::PipelineRunManifest> existing = store.get_pipeline(*resume_id);
-        if (!existing.has_value()) {
-            fail_user("no pipeline run '" + *resume_id +
-                      "' ('apogee train pipeline status' lists them)");
-        }
-        harness::PipelineSpec spec;
-        if (!resume_spec->empty()) {
-            spec = resolve_pipeline_spec(config, *resume_spec);
-        } else if (const auto named = config.training.pipelines.find(existing->spec_name);
-                   named != config.training.pipelines.end()) {
-            spec = named->second;
-        } else {
-            fail_user("pipeline '" + existing->spec_name +
-                      "' is not under training.pipelines any more -- pass --pipeline <spec> to "
-                      "resume " +
-                      *resume_id);
-        }
-        if (const std::string refusal = training::resume_check(*existing, spec); !refusal.empty()) {
-            fail_user(refusal);
-        }
-        std::error_code code;
-        if (!std::filesystem::is_directory(existing->base_model, code)) {
-            fail_user("the run's snapshot is gone: " + existing->base_model);
-        }
-        drive_pipeline(config, spec, std::move(existing), *resume_continue, *resume_judge,
-                       *resume_trainer);
     });
 
-    pipe_status->callback([pipe_status_id]() {
+    pipe_resume->callback([&context, drive_pipeline, resume_id, resume_spec, resume_continue,
+                           resume_judge, resume_trainer, resume_format]() {
+        run_as_job(*resume_format, "train pipeline resume", [&]() {
+            std::filesystem::path config_path;
+            const harness::Config config = load_config_strict(context, config_path);
+            const training::TrainingStore store{harness::training_dir()};
+            if (!training::valid_run_id(*resume_id)) {
+                fail_user("'" + *resume_id + "' is not a pipeline run id");
+            }
+            std::optional<training::PipelineRunManifest> existing = store.get_pipeline(*resume_id);
+            if (!existing.has_value()) {
+                fail_user("no pipeline run '" + *resume_id +
+                          "' ('apogee train pipeline status' lists them)");
+            }
+            harness::PipelineSpec spec;
+            if (!resume_spec->empty()) {
+                spec = resolve_pipeline_spec(config, *resume_spec);
+            } else if (const auto named = config.training.pipelines.find(existing->spec_name);
+                       named != config.training.pipelines.end()) {
+                spec = named->second;
+            } else {
+                fail_user("pipeline '" + existing->spec_name +
+                          "' is not under training.pipelines any more -- pass --pipeline <spec> to "
+                          "resume " +
+                          *resume_id);
+            }
+            if (const std::string refusal = training::resume_check(*existing, spec);
+                !refusal.empty()) {
+                fail_user(refusal);
+            }
+            std::error_code code;
+            if (!std::filesystem::is_directory(existing->base_model, code)) {
+                fail_user("the run's snapshot is gone: " + existing->base_model);
+            }
+            drive_pipeline(config, spec, std::move(existing), *resume_continue, *resume_judge,
+                           *resume_trainer);
+        });
+    });
+
+    pipe_status->callback([pipe_status_id, pipe_status_format]() {
+        if (*pipe_status_format == ReadFormat::Json) {
+            // The bodies `GET /v1/admin/training/runs?kind=pipeline` and
+            // `GET /v1/admin/training/runs/{id}` serve (55h).
+            if (pipe_status_id->empty()) {
+                write_document(std::cout, operations::training_runs_document("pipeline"));
+                return;
+            }
+            if (!training::valid_run_id(*pipe_status_id)) {
+                fail_user("'" + *pipe_status_id + "' is not a pipeline run id");
+            }
+            const std::optional<nlohmann::json> document =
+                operations::training_pipeline_document(*pipe_status_id);
+            if (!document.has_value()) {
+                fail_user("no pipeline run '" + *pipe_status_id + "'");
+            }
+            write_document(std::cout, *document);
+            return;
+        }
         const training::TrainingStore store{harness::training_dir()};
         if (pipe_status_id->empty()) {
             const std::vector<training::PipelineSummary> pipelines = store.list_pipelines();
@@ -2112,6 +3047,83 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             fail_user("no pipeline run '" + *pipe_status_id + "'");
         }
         print_pipeline_table(*manifest);
+    });
+
+    // ---- pipeline list / show (M30) -------------------------------------------
+    // The specs a run can name, read as `train regime list|show` reads the
+    // regimes: completion alone named them before.
+    auto specs_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    CLI::App* pipe_list = pipeline->add_subcommand(
+        "list", "The named pipelines a run can take (training.pipelines), with their stages");
+    add_read_format(pipe_list, specs_format);
+    pipe_list->callback([&context, specs_format]() {
+        std::filesystem::path config_path;
+        const harness::Config config = load_config_strict(context, config_path);
+        if (*specs_format == ReadFormat::Json) {
+            write_document(std::cout, operations::training_pipeline_specs_document(config));
+            return;
+        }
+        if (config.training.pipelines.empty()) {
+            std::cout << "no named pipelines -- add one under training.pipelines, or run a spec "
+                         "file with 'apogee train pipeline run --pipeline <file>'\n";
+            return;
+        }
+        std::size_t width = 4;
+        for (const auto& [name, spec] : config.training.pipelines) {
+            width = std::max(width, name.size());
+        }
+        std::cout << pad("NAME", width) << "  " << pad("STAGES", 6) << "  STUDENT\n";
+        for (const auto& [name, spec] : config.training.pipelines) {
+            std::cout << pad(name, width) << "  " << pad(std::to_string(spec.stages.size()), 6)
+                      << "  " << spec.student << "\n";
+        }
+    });
+    auto spec_shown = std::make_shared<std::string>();
+    auto spec_show_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    CLI::App* pipe_show = pipeline->add_subcommand(
+        "show", "One pipeline whole -- a named one or a spec file: its stages, datasets and gates");
+    pipe_show->add_option("name", *spec_shown, "A name under training.pipelines, or a spec file")
+        ->type_name(kPipelineValue)
+        ->required();
+    add_read_format(pipe_show, spec_show_format);
+    pipe_show->callback([&context, spec_shown, spec_show_format]() {
+        std::filesystem::path config_path;
+        const harness::Config config = load_config_strict(context, config_path);
+        // Read as a run reads it: a spec file first, then an entry.
+        std::error_code code;
+        const std::filesystem::path file = std::filesystem::is_regular_file(*spec_shown, code)
+                                               ? std::filesystem::path{*spec_shown}
+                                               : std::filesystem::path{};
+        harness::PipelineSpec spec = resolve_pipeline_spec(config, *spec_shown);
+        if (file.empty()) {
+            spec.name = *spec_shown;  // the entry's name, which a run takes
+        }
+        if (*spec_show_format == ReadFormat::Json) {
+            write_document(std::cout, operations::training_pipeline_spec_document(spec, file));
+            return;
+        }
+        std::cout << spec.name << "  "
+                  << (file.empty() ? std::string{"(training.pipelines entry)"} : file.string())
+                  << "\nstudent: " << spec.student << "\n\n";
+        std::size_t number = 1;
+        std::size_t stage_width = 5;
+        std::size_t dataset_width = 7;
+        for (const harness::PipelineStageSpec& stage : spec.stages) {
+            stage_width = std::max(stage_width, stage.name.size());
+            dataset_width = std::max(dataset_width, stage.dataset.size());
+        }
+        const std::size_t index_width = std::to_string(spec.stages.size()).size();
+        std::cout << pad("#", index_width) << "  " << pad("STAGE", stage_width) << "  "
+                  << pad("DATASET", dataset_width) << "  GATE\n";
+        std::string gate;
+        for (const harness::PipelineStageSpec& stage : spec.stages) {
+            gate += (gate.empty() ? "" : " + ") + stage.eval_suite;
+            std::cout << pad(std::to_string(number++), index_width) << "  "
+                      << pad(stage.name, stage_width) << "  " << pad(stage.dataset, dataset_width)
+                      << "  " << gate << "\n";
+        }
+        std::cout << "\na stage passes when its GATE -- its own suite and every earlier stage's "
+                     "-- scores 100%\n";
     });
 
     // ---- regime ------------------------------------------------------------
@@ -2443,130 +3455,220 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         ->add_option("--source", *cycle_source,
                      "A queue directory for this run, replacing the first directory source")
         ->type_name(kPathValue);
-    cycle_run->callback([&context, cycle_source]() {
-        std::filesystem::path config_path;
-        const harness::Config config = load_config_strict(context, config_path);
-        const harness::CycleConfig& settings = config.training.cycle;
-        if (!settings.configured()) {
-            fail_user(
-                "training.cycle is not configured: it needs 'pipeline' (a training.pipelines "
-                "entry or a spec file), 'backend' (where a passing cycle promotes) and at least "
-                "one entry under 'sources' -- see the training block in the starter config (apogee "
-                "config init)");
-        }
-        const harness::PipelineSpec spec = resolve_pipeline_spec(config, settings.pipeline);
-        // The datasets are the merged sources; only the suites are resolved.
-        const PipelineInputs inputs = resolve_pipeline_inputs(config, context, spec, false);
-        const TeacherResolution judge = resolve_judge(config, settings.judge_backend);
-        const std::string trainer_name = choose_trainer(config, {}, {});
-        const std::unique_ptr<training::Trainer> trainer =
-            make_trainer(config, trainer_name, "train cycle run");
-        const training::Converter convert = make_converter(config, trainer_name);
-        {
-            PromoteRequest probe;
-            probe.backend = settings.backend;
-            if (probe.backend.find_first_of("/\\ \t") != std::string::npos) {
-                fail_user("training.cycle.backend must be a plain backend name");
+    // The pass's narration as events, the cycle's status document last (55h).
+    auto cycle_format = std::make_shared<JobFormat>(JobFormat::Text);
+    add_job_format(cycle_run, cycle_format, false, kCycleStreamLast);
+    cycle_run->callback([&context, cycle_source, cycle_format]() {
+        run_as_job(*cycle_format, "train cycle run", [&]() {
+            std::filesystem::path config_path;
+            const harness::Config config = load_config_strict(context, config_path);
+            const harness::CycleConfig& settings = config.training.cycle;
+            if (!settings.configured()) {
+                fail_user(
+                    "training.cycle is not configured: it needs 'pipeline' (a training.pipelines "
+                    "entry or a spec file), 'backend' (where a passing cycle promotes) and at "
+                    "least one entry under 'sources' -- see the training block in the starter "
+                    "config (apogee config init)");
             }
-            const std::string key = configured_backend_key(config, settings.backend);
-            const harness::BackendConfig* existing =
-                key.empty() ? nullptr : config.find_backend(key);
-            if (existing != nullptr && existing->type != harness::BackendType::LlamaCpp) {
-                fail_user("training.cycle.backend '" + key + "' is a " +
-                          std::string{harness::to_string(existing->type)} +
-                          " backend, not a llamacpp one");
+            const harness::PipelineSpec spec = resolve_pipeline_spec(config, settings.pipeline);
+            // The datasets are the merged sources; only the suites are resolved.
+            const PipelineInputs inputs = resolve_pipeline_inputs(config, context, spec, false);
+            const TeacherResolution judge = resolve_judge(config, settings.judge_backend);
+            const std::string trainer_name = choose_trainer(config, {}, {});
+            const std::unique_ptr<training::Trainer> trainer =
+                make_trainer(config, trainer_name, "train cycle run");
+            const training::Converter convert = make_converter(config, trainer_name);
+            {
+                PromoteRequest probe;
+                probe.backend = settings.backend;
+                if (probe.backend.find_first_of("/\\ \t") != std::string::npos) {
+                    fail_user("training.cycle.backend must be a plain backend name");
+                }
+                const std::string key = configured_backend_key(config, settings.backend);
+                const harness::BackendConfig* existing =
+                    key.empty() ? nullptr : config.find_backend(key);
+                if (existing != nullptr && existing->type != harness::BackendType::LlamaCpp) {
+                    fail_user("training.cycle.backend '" + key + "' is a " +
+                              std::string{harness::to_string(existing->type)} +
+                              " backend, not a llamacpp one");
+                }
             }
-        }
-        std::optional<Providers> providers;
-        if (!judge.key.empty()) {
-            providers.emplace(config, config_path);
-        }
-        std::optional<LoadedSessions> sessions;
-        for (const harness::CycleSourceConfig& source : settings.sources) {
-            if (source.type == "sessions" && !sessions.has_value()) {
-                sessions = load_session_views();
+            std::optional<Providers> providers;
+            if (!judge.key.empty()) {
+                providers.emplace(config, config_path);
             }
-        }
+            std::optional<LoadedSessions> sessions;
+            for (const harness::CycleSourceConfig& source : settings.sources) {
+                if (source.type == "sessions" && !sessions.has_value()) {
+                    sessions = load_session_views();
+                }
+            }
 
-        training::CycleRequest request;
-        request.config = settings;
-        request.cycle_dir = harness::training_cycle_dir();
-        request.training_dir = harness::training_dir();
-        request.spec = &spec;
-        request.stages = inputs.stages;
-        request.base_model = inputs.base_model;
-        request.source_override = *cycle_source;
-        if (sessions.has_value()) {
-            request.sessions = sessions->views;
-        }
-        request.trainer = trainer.get();
-        if (!judge.key.empty()) {
-            request.judge_backend = judge.key;
-            request.judge = make_judge(providers->harness, judge.key);
-        }
-        request.gate_mode = training::gate_mode_from_string(config.training.effective_gate_mode());
-        const training::TrainingStore store{harness::training_dir()};
-        const InterruptScope interrupt;
-        request.cancellation = InterruptScope::token();
-        request.promote = [&](std::string_view run_id) {
-            training::CyclePromotion promotion;
-            std::string error;
-            const std::optional<training::RunManifest> manifest =
-                training::read_manifest(store.run_dir(run_id), error);
-            if (!manifest.has_value()) {
-                promotion.error = error;
+            training::CycleRequest request;
+            request.config = settings;
+            request.cycle_dir = harness::training_cycle_dir();
+            request.training_dir = harness::training_dir();
+            request.spec = &spec;
+            request.stages = inputs.stages;
+            request.base_model = inputs.base_model;
+            request.source_override = *cycle_source;
+            if (sessions.has_value()) {
+                request.sessions = sessions->views;
+            }
+            request.trainer = trainer.get();
+            if (!judge.key.empty()) {
+                request.judge_backend = judge.key;
+                request.judge = make_judge(providers->harness, judge.key);
+            }
+            request.gate_mode =
+                training::gate_mode_from_string(config.training.effective_gate_mode());
+            const training::TrainingStore store{harness::training_dir()};
+            const InterruptScope interrupt;
+            request.cancellation = InterruptScope::token();
+            JobStream* const job = JobStream::current();
+            request.promote = [&](std::string_view run_id) {
+                training::CyclePromotion promotion;
+                std::string error;
+                const std::optional<training::RunManifest> manifest =
+                    training::read_manifest(store.run_dir(run_id), error);
+                if (!manifest.has_value()) {
+                    promotion.error = error;
+                    return promotion;
+                }
+                PromoteRequest promote_request;
+                promote_request.backend = settings.backend;
+                const PromoteOutcome result = promote_run(
+                    config, config_path, store, *manifest, *trainer, convert, promote_request,
+                    [job](std::string_view text) {
+                        if (job != nullptr) {
+                            job->events().on_notice("[promote] " + std::string{text});
+                            return;
+                        }
+                        std::cerr << "[promote] " << text << "\n";
+                    },
+                    InterruptScope::token());
+                promotion.ok = result.ok;
+                promotion.error = result.error;
+                promotion.version = result.version;
+                promotion.weights_path = result.weights_path;
                 return promotion;
+            };
+            // A stream's narration is `pass` events and the relay's (55h); a
+            // person's, the console's.
+            std::optional<PipelineRelay> relay;
+            std::optional<PipelineConsole> console;
+            if (job != nullptr) {
+                relay.emplace(job->events());
+                request.on_message = [job](std::string_view state, std::string_view text) {
+                    job->events().emit_pass(state, text);
+                };
+                request.on_progress = [&relay](const training::PipelineProgress& progress) {
+                    relay->progress(progress);
+                };
+                request.on_manifest = [&relay](const training::PipelineRunManifest& manifest) {
+                    relay->manifest(manifest);
+                };
+            } else {
+                console.emplace(spec.stages.size());
+                request.on_message = [&console](std::string_view /*state*/, std::string_view text) {
+                    (*console)(training::PipelineProgress{.stage_index = -1,
+                                                          .message = std::string{text}});
+                };
+                request.on_progress = [&console](const training::PipelineProgress& progress) {
+                    (*console)(progress);
+                };
             }
-            PromoteRequest promote_request;
-            promote_request.backend = settings.backend;
-            const PromoteOutcome result = promote_run(
-                config, config_path, store, *manifest, *trainer, convert, promote_request,
-                [](std::string_view text) { std::cerr << "[promote] " << text << "\n"; },
-                InterruptScope::token());
-            promotion.ok = result.ok;
-            promotion.error = result.error;
-            promotion.version = result.version;
-            promotion.weights_path = result.weights_path;
-            return promotion;
-        };
-        PipelineConsole console{spec.stages.size()};
-        request.on_message = [&console](std::string_view text) {
-            console(training::PipelineProgress{.stage_index = -1, .message = std::string{text}});
-        };
-        request.on_progress = [&console](const training::PipelineProgress& progress) {
-            console(progress);
-        };
-        const training::CycleOutcome outcome = training::run_cycle(request);
-        console.finish();
-        if (outcome.cancelled) {
-            std::cerr << "[cycle] cancelled before an outcome was recorded\n";
-            throw CLI::RuntimeError(kCancelled);
-        }
-        if (!outcome.ok) {
-            fail_user(outcome.error);
-        }
-        const training::CycleRunRecord& record = *outcome.record;
-        if (record.gate == training::kGateSkipped) {
-            std::cout << "cycle skipped -- " << record.gate_reason << "\n";
-            return;
-        }
-        if (record.gate == training::kGateFail) {
-            std::cout << "cycle FAILED -- " << record.gate_reason
-                      << "\n  the candidate was discarded; nothing reached inference\n";
-            if (outcome.halted_now) {
-                std::cout << "  " << outcome.history.halt_reason
-                          << "\n  the loop is halted: fix the data or the suite, then 'apogee "
-                             "train cycle resume'\n";
+            const training::CycleOutcome outcome = training::run_cycle(request);
+            if (console.has_value()) {
+                console->finish();
             }
-            throw CLI::RuntimeError(kBackendError);
-        }
-        std::cout << "cycle PASSED -- " << settings.backend << " promoted to v"
-                  << record.promoted_version << " (" << percent(record.cycle_score) << ")\n"
-                  << "  history: " << training::history_path(request.cycle_dir).string() << "\n";
+            if (outcome.halt_kept) {
+                // A halt taken while the pass ran (M30): said where the pass's
+                // narration goes, never as a `pass` of state `halted`, which is
+                // the breaker's.
+                const std::string kept = training::halt_kept_notice(outcome.history);
+                if (job != nullptr) {
+                    job->events().on_notice(kept);
+                } else {
+                    std::cerr << kept << "\n";
+                }
+            }
+            if (job != nullptr && (outcome.ok || outcome.cancelled)) {
+                // The cycle's own read, once the pass got under way: what `train
+                // cycle status --output-format json` prints. A pass refused before
+                // it began sends none.
+                std::string unreadable;
+                if (const std::optional<nlohmann::json> document =
+                        operations::training_cycle_document(unreadable);
+                    document.has_value()) {
+                    job->events().emit_document(*document);
+                }
+            }
+            if (outcome.cancelled) {
+                std::cerr << "[cycle] cancelled before an outcome was recorded\n";
+                if (job != nullptr) {
+                    job->failed("cancelled before an outcome was recorded");
+                }
+                throw CLI::RuntimeError(kCancelled);
+            }
+            if (!outcome.ok) {
+                fail_user(outcome.error);
+            }
+            const training::CycleRunRecord& record = *outcome.record;
+            // A stream's outcome is its `pass` events and its document.
+            if (record.gate == training::kGateSkipped) {
+                if (job == nullptr) {
+                    std::cout << "cycle skipped -- " << record.gate_reason << "\n";
+                }
+                return;
+            }
+            if (record.gate == training::kGateFail) {
+                if (job != nullptr) {
+                    // Said on stderr too, as a pipeline's failure is (M30).
+                    const std::string failed = "cycle FAILED -- " + record.gate_reason;
+                    std::cerr << "apogee train: " << failed << "\n";
+                    job->failed(failed);
+                    throw CLI::RuntimeError(kBackendError);
+                }
+                std::cout << "cycle FAILED -- " << record.gate_reason
+                          << "\n  the candidate was discarded; nothing reached inference\n";
+                if (outcome.halted_now) {
+                    std::cout << "  " << outcome.history.halt_reason
+                              << "\n  the loop is halted: fix the data or the suite, then 'apogee "
+                                 "train cycle resume'\n";
+                }
+                throw CLI::RuntimeError(kBackendError);
+            }
+            if (job != nullptr) {
+                return;
+            }
+            std::cout << "cycle PASSED -- " << settings.backend << " promoted to v"
+                      << record.promoted_version << " (" << percent(record.cycle_score) << ")\n"
+                      << "  history: " << training::history_path(request.cycle_dir).string()
+                      << "\n";
+        });
     });
 
     CLI::App* cycle_status = cycle->add_subcommand("status", "The cycle's history and anchor");
-    cycle_status->callback([&context]() {
+    auto cycle_status_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    add_read_format(cycle_status, cycle_status_format);
+    cycle_status->callback([&context, cycle_status_format]() {
+        if (*cycle_status_format == ReadFormat::Json) {
+            // The body `GET /v1/admin/training/cycle` serves (55h); none until
+            // the first pass writes the history, refused as the route answers
+            // 404.
+            std::string error;
+            const std::optional<nlohmann::json> document =
+                operations::training_cycle_document(error);
+            if (!error.empty()) {
+                fail_user("the cycle history is unreadable: " + error);
+            }
+            if (!document.has_value()) {
+                fail_user("no cycle history yet ('apogee train cycle run' writes it)");
+            }
+            write_document(std::cout, *document);
+            return;
+        }
         const harness::Config config = load_config_or_default(context);
         const std::filesystem::path cycle_dir = harness::training_cycle_dir();
         std::string error;
@@ -2591,24 +3693,32 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     cycle_halt->callback([&context]() {
         const harness::Config config = load_config_or_default(context);
         const std::filesystem::path cycle_dir = harness::training_cycle_dir();
-        std::string error;
-        training::CycleHistory history =
-            training::load_history(cycle_dir, config.training.cycle.backend, error);
-        if (!error.empty()) {
-            fail_user("the cycle history is unreadable: " + error);
+        // Written under the history's own lock, never the one a pass holds
+        // for as long as it runs: a pass running now keeps the halt (M30).
+        bool already = false;
+        std::string reason;
+        const training::HistoryUpdate update = training::update_history(
+            cycle_dir, config.training.cycle.backend, [&](training::CycleHistory& history) {
+                already = history.halted;
+                reason = history.halt_reason;
+                if (!already) {
+                    training::halt_cycle(history, "halted by 'apogee train cycle halt'");
+                }
+                return !already;
+            });
+        if (!update.error.empty()) {
+            fail_user(update.error);
         }
-        if (history.halted) {
-            std::cout << "already halted: " << history.halt_reason
+        if (already) {
+            std::cout << "already halted: " << reason
                       << "\n  'apogee train cycle resume' clears it\n";
             return;
         }
-        training::halt_cycle(history, "halted by 'apogee train cycle halt'");
-        if (const std::string failure = training::save_history(cycle_dir, history);
-            !failure.empty()) {
-            fail_user(failure);
-        }
         std::cout << "cycle halted -- 'apogee train cycle run' refuses until 'apogee train cycle "
                      "resume'\n";
+        if (training::cycle_lock_held(cycle_dir)) {
+            std::cout << "  the pass running now finishes, and keeps the halt\n";
+        }
     });
 
     CLI::App* cycle_resume = cycle->add_subcommand(
@@ -2616,21 +3726,22 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     cycle_resume->callback([&context]() {
         const harness::Config config = load_config_or_default(context);
         const std::filesystem::path cycle_dir = harness::training_cycle_dir();
-        std::string error;
-        training::CycleHistory history =
-            training::load_history(cycle_dir, config.training.cycle.backend, error);
-        if (!error.empty()) {
-            fail_user("the cycle history is unreadable: " + error);
-        }
         if (!training::history_exists(cycle_dir)) {
             std::cout << "no cycle history yet -- nothing to resume\n";
             return;
         }
-        const std::string reason = history.halt_reason;
-        const bool was_halted = training::resume_cycle(history);
-        if (const std::string failure = training::save_history(cycle_dir, history);
-            !failure.empty()) {
-            fail_user(failure);
+        // Under the history's own lock, as `halt` writes (M30): a pass
+        // running now keeps the reset count.
+        std::string reason;
+        bool was_halted = false;
+        const training::HistoryUpdate update = training::update_history(
+            cycle_dir, config.training.cycle.backend, [&](training::CycleHistory& history) {
+                reason = history.halt_reason;
+                was_halted = training::resume_cycle(history);
+                return true;
+            });
+        if (!update.error.empty()) {
+            fail_user(update.error);
         }
         if (was_halted) {
             std::cout << "cycle resumed (was halted: " << reason

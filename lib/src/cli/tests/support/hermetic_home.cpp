@@ -1,6 +1,7 @@
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 
+#include <filesystem>
 #include <memory>
 #include <random>
 #include <string>
@@ -20,6 +21,11 @@
 /// directory of the run's own, removed when the run ends. A test's own guard
 /// still wins for its scope, and one that needs the variable unset says so
 /// with `EnvUnsetGuard`, as the root-resolution tests do.
+///
+/// Ollama's store is guarded the same way (2026-10-21): registration reads
+/// its models (`ollama_models_here`), so `OLLAMA_MODELS` names an empty
+/// directory of the run's own -- a developer's pulled models never decide
+/// what a test registers.
 namespace {
 
 class HermeticHome final : public Catch::EventListenerBase {
@@ -31,9 +37,12 @@ public:
         home_ = std::make_unique<apogee::testing::TempDir>("run-home-" +
                                                            std::to_string(std::random_device{}()));
         guard_ = std::make_unique<apogee::testing::EnvGuard>("APOGEE_HOME", home_->path().string());
+        ollama_ = std::make_unique<apogee::testing::EnvGuard>(
+            "OLLAMA_MODELS", (home_->path() / "ollama-models").string());
     }
 
     void testRunEnded(const Catch::TestRunStats& /*stats*/) override {
+        ollama_.reset();
         guard_.reset();
         home_.reset();
     }
@@ -41,6 +50,7 @@ public:
 private:
     std::unique_ptr<apogee::testing::TempDir> home_;
     std::unique_ptr<apogee::testing::EnvGuard> guard_;
+    std::unique_ptr<apogee::testing::EnvGuard> ollama_;
 };
 
 }  // namespace

@@ -142,6 +142,10 @@ HttpResponse AdminHandler::put_permission(const HttpRequest& request, std::strin
     return admin_put_permission(config_context(), tool, request);
 }
 
+HttpResponse AdminHandler::put_config_value(const HttpRequest& request, std::string_view key) {
+    return admin_put_config_value(config_context(), key, request);
+}
+
 HttpResponse AdminHandler::list_allowed_hosts(const HttpRequest&) {
     return admin_list_allowed_hosts(config_context());
 }

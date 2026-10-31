@@ -1,0 +1,10 @@
+0.000  [lexical]  heat-pumps.md#0
+    # Heat pumps  A heat pump moves heat from a cold place to a warm one. In winter the outdoor unit pul…
+0.000  [lexical]  graph://community/1#0
+    The heat pump, its compressor and its outdoor unit: one machine moving heat indoors.
+0.000  [lexical]  windows.md#0
+    # Windows  Triple glazing halves the heat lost through a window. Frames matter as much as glass. 
+0.000  [lexical]  kr-20261021T050657Z-c74d1a#0
+    Customers kept asking why the outdoor unit runs in winter.  Decision: Explain the outdoor unit in th…
+0.000  [lexical]  solar.md#0
+    # Solar roofs  Panels make the most power at noon. A battery carries the surplus into the evening.  …

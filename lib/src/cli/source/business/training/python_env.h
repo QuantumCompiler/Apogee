@@ -35,7 +35,9 @@ namespace apogee::training {
 /// A named group of packages, installed together. Pinned as version FLOORS
 /// rather than exact versions: an exact pin ages into an uninstallable one
 /// the day it is yanked, and the drivers are written against the libraries'
-/// stable surfaces.
+/// stable surfaces. A package not on PyPI is the one exception (53k): pip
+/// builds it from its repository at one reviewed commit (`pinned_source`),
+/// since there is no release to name a floor by.
 enum class RequirementSet : std::uint8_t {
     /// `datasets`, for Parquet in `prepare_dataset.py`.
     Prepare,
@@ -46,8 +48,10 @@ enum class RequirementSet : std::uint8_t {
     /// The GGUF converter's stack (the run item).
     Convert,
     /// `mlx-vlm`: an `mlx` backend over a vision model reads images through
-    /// it (27c). Installed on demand, never with `mlx`: only a vision model
-    /// needs it, and without it such a model's images go to the vision role.
+    /// it (27c), and `models convert --mlx` builds a model that sees or
+    /// hears through it, its towers kept (53f). Installed on demand, never
+    /// with `mlx`: only those need it, and without it such a model's images
+    /// go to the vision role.
     MlxVlm,
     /// `torch` and `diffusers` with what a diffusion pipeline loads through
     /// (49b): what `video_generate.py` runs a pipeline on. Installed on
@@ -57,6 +61,25 @@ enum class RequirementSet : std::uint8_t {
     /// `kokoro` and what it speaks through (50a): what `voice_say.py` runs a
     /// voice model on. Installed on demand, as the video set is.
     Voice,
+    /// `mlx-embeddings` (53h): `models convert --mlx` builds an embedding
+    /// model through it, and an `mlx` backend over what it built embeds
+    /// through it, its seeded driver `mlx_embed.py`. Installed on demand, or
+    /// by the bootstrap on Apple silicon; brings mlx-vlm and mlx-lm with it.
+    MlxEmbeddings,
+    /// `mlx-video`, with the `torch` its converter loads Wan's `.pth`
+    /// checkpoints through (53k): `models convert --mlx` makes Wan's original
+    /// layout an MLX video model through it. Not on PyPI -- built from its
+    /// GitHub repository at one reviewed commit (`pinned_source`) -- and
+    /// opt-in only: `train setup --with mlx-video`, never the bootstrap
+    /// (`set_opt_in`). Brings mlx-vlm and mlx-lm with it.
+    MlxVideo,
+    /// `mlx-audio`, with the `torch` Kokoro's PyTorch checkpoint is read
+    /// through and the `misaki` its text is phonemized by (53m): `models
+    /// convert --mlx` makes a stored voice model an MLX one through its
+    /// converter, and `voice say` speaks with that through its Kokoro, the
+    /// seeded driver `voice_say_mlx.py`. Opt-in only, as mlx-video is: `train
+    /// setup --with mlx-audio`, never the bootstrap (`set_opt_in`).
+    MlxAudio,
 };
 
 [[nodiscard]] std::string_view to_string(RequirementSet set) noexcept;
@@ -68,10 +91,169 @@ enum class RequirementSet : std::uint8_t {
 [[nodiscard]] std::span<const std::string_view> packages_for(RequirementSet set) noexcept;
 
 /// Why `set` is not for a host with these facts (51) -- the table's own
-/// column, so a set added to it says there where it runs: `mlx` and
-/// `mlx-vlm` are Apple silicon's, `peft` an NVIDIA GPU's, every other set
-/// any host's. Empty when it is for this one.
+/// column, so a set added to it says there where it runs: `mlx`, `mlx-vlm`,
+/// `mlx-embeddings`, `mlx-video` and `mlx-audio` are Apple silicon's, `peft`
+/// an NVIDIA GPU's, every other set any host's. Empty when it is for this one.
 [[nodiscard]] std::string set_unfit_reason(RequirementSet set, bool apple_silicon, bool nvidia_smi);
+
+/// Whether `set` is installed only on the person's word (53k) -- the table's
+/// own column: `train setup --with <set>` installs it, and the install's
+/// bootstrap never does, saying it skipped with that command named:
+/// `mlx-video`, whose package comes from a GitHub commit rather than PyPI
+/// ("never at install unasked", the user's call, 2026-10-21), and since 53m
+/// `mlx-audio` ("installed by `train setup --with mlx-audio` and never
+/// unasked"). Their Python ranges still count toward the environment's
+/// choice, since the person may install them later.
+[[nodiscard]] bool set_opt_in(RequirementSet set) noexcept;
+
+/// A set's package that is not on PyPI (53k): pip builds it from its
+/// repository at one commit, read and dated as the Python ranges are (ADR
+/// 0009's discipline). Apogee's environment trusts that commit alone; a later
+/// one is a deliberate bump. Its requirement in `packages_for` is `<package>
+/// @ git+<repository>.git@<commit>`, which pip fetches with git.
+struct PinnedSource {
+    std::string_view package{};
+    /// `https://github.com/Blaizzy/mlx-video`.
+    std::string_view repository{};
+    /// The full commit sha.
+    std::string_view commit{};
+    /// The commit's own date.
+    std::string_view committed{};
+    /// When it was read and chosen.
+    std::string_view reviewed{};
+
+    /// `<package> @ git+<repository>.git@<commit>`: what pip installs.
+    [[nodiscard]] std::string requirement() const;
+    /// What `train setup` says of it: "mlx-video is not on PyPI: pip builds
+    /// it with git from https://github.com/Blaizzy/mlx-video at commit
+    /// 87db56a51758 (2026-05-13), the one this Apogee reviewed on 2026-10-21".
+    [[nodiscard]] std::string describe() const;
+};
+
+/// `set`'s pinned source, or nullopt for a set whose packages are all PyPI's.
+[[nodiscard]] std::optional<PinnedSource> pinned_source(RequirementSet set) noexcept;
+
+/// What `set` is for, in a few words (M23) -- the table's own column, so
+/// `train setup --with`'s help names every set from the one list and cannot
+/// go stale beside it.
+[[nodiscard]] std::string_view set_purpose(RequirementSet set) noexcept;
+
+/// A set's own package and what it is held to (M23): the first of
+/// `packages_for(set)` -- the set's own, for every MLX set -- read apart as
+/// pip reads it (`mlx-vlm>=0.6.1` is `mlx-vlm` at a floor of `0.6.1`), or,
+/// for a set built from a commit (53k), its pinned source's package and that
+/// commit, with no floor.
+struct SetRequirement {
+    std::string package{};
+    /// The floor's version, `0.6.1`; empty for a pinned set.
+    std::string floor{};
+    std::optional<PinnedSource> pin{};
+
+    /// `>=0.6.1`, or `commit 87db56a51758 (2026-05-13)`.
+    [[nodiscard]] std::string describe() const;
+};
+
+[[nodiscard]] SetRequirement set_requirement(RequirementSet set);
+
+/// How a set's installed package stands against its floor or its pin (M23).
+enum class SetStanding : std::uint8_t {
+    /// No distribution record of it in the environment's site-packages.
+    NoRecord,
+    /// At or above its floor, or at its pinned commit.
+    Current,
+    /// Below its floor.
+    BelowFloor,
+    /// A pinned package at another commit, or installed from none.
+    OffPin,
+    /// A record that states no version, or none that is a release number:
+    /// nothing to compare.
+    Unstated,
+};
+
+[[nodiscard]] std::string_view to_string(SetStanding standing) noexcept;
+
+/// What the environment's files say of one set's own package (M23): the
+/// distribution record pip wrote for it in the environment's site-packages
+/// -- `<name>-<version>.dist-info`, whose `METADATA` states its `Version`
+/// -- and, for a package built from a commit (53k), PEP 610's
+/// `direct_url.json` beside it, whose `vcs_info.commit_id` names the commit.
+/// Set against the set's floor or its pin. Read from files alone, never by
+/// importing anything or starting Python.
+struct InstalledSet {
+    RequirementSet set{};
+    SetRequirement requirement{};
+    /// The record's directory; empty when there is none.
+    std::filesystem::path record{};
+    /// `METADATA`'s `Version`, as written; empty when it states none.
+    std::string version{};
+    /// `direct_url.json`'s `vcs_info.commit_id`; empty when it names none.
+    std::string commit{};
+    SetStanding standing = SetStanding::NoRecord;
+
+    /// Below its floor or off its pin: `train setup --with <set>` brings it
+    /// up.
+    [[nodiscard]] bool behind() const noexcept {
+        return standing == SetStanding::BelowFloor || standing == SetStanding::OffPin;
+    }
+};
+
+[[nodiscard]] InstalledSet read_installed_set(const std::filesystem::path& venv,
+                                              RequirementSet set);
+
+/// `a` against `b` in PEP 440's order of release numbers -- `0.6.1` above
+/// `0.6.1rc1` and below `0.6.1.post1`, a local `+cu121` part ignored --
+/// negative, zero or positive; nullopt when either is not one.
+[[nodiscard]] std::optional<int> compare_versions(std::string_view a, std::string_view b);
+
+/// A Python's version, as `sys.version_info` states it (M19).
+struct PythonVersion {
+    int major = 0;
+    int minor = 0;
+    int patch = 0;
+
+    /// `3.12.13`; empty for the zero value, which means unknown.
+    [[nodiscard]] std::string str() const;
+
+    [[nodiscard]] bool known() const noexcept {
+        return major > 0;
+    }
+
+    /// `3.12.13` or `3.12`; nullopt for anything else.
+    [[nodiscard]] static std::optional<PythonVersion> parse(std::string_view text);
+    auto operator<=>(const PythonVersion&) const = default;
+};
+
+/// The Pythons a set's packages run on (M19): the `requires_python` PyPI
+/// publishes for each package's current release, carried with the date they
+/// were read -- ADR 0009's discipline for facts that go stale -- so a choice
+/// is made before an environment exists, not after pip refuses. Python 3
+/// minors; `below` 0 is no upper bound.
+struct PythonRange {
+    int at_least = 0;
+    int below = 0;
+
+    [[nodiscard]] bool contains(const PythonVersion& version) const noexcept;
+    /// `>=3.11`, `>=3.10,<3.13`.
+    [[nodiscard]] std::string describe() const;
+};
+
+/// One set's range, from the sets' table.
+[[nodiscard]] PythonRange python_range(RequirementSet set) noexcept;
+/// The range every one of `sets` runs on: their intersection.
+[[nodiscard]] PythonRange python_range(std::span<const RequirementSet> sets) noexcept;
+/// When the ranges were last read against PyPI.
+[[nodiscard]] std::string_view python_ranges_reviewed() noexcept;
+/// When mlx-vlm's floor was last read against its releases (53f): the
+/// first whose `models/` builds every towered set the store holds.
+[[nodiscard]] std::string_view mlx_vlm_floor_reviewed() noexcept;
+/// When mlx-embeddings' floor was last read against its releases (53h): the
+/// first whose `models/gemma3_text.py` pools before its dense layers and
+/// converts its padding mask -- the module the embedding route is built on.
+[[nodiscard]] std::string_view mlx_embeddings_floor_reviewed() noexcept;
+/// When mlx-audio's floor was last read against its releases (53m): the
+/// first whose `convert` takes every precision the table maps (`q_mode`) and
+/// whose Kokoro loads a voice by a direct path to its SafeTensors pack.
+[[nodiscard]] std::string_view mlx_audio_floor_reviewed() noexcept;
 
 /// What the environment holds, read from `apogee.json` and the filesystem.
 struct PythonEnvStatus {
@@ -80,6 +262,9 @@ struct PythonEnvStatus {
     std::filesystem::path interpreter;
     /// The interpreter it was seeded from.
     std::string base_python;
+    /// Its version: the record's `base_version`, else `pyvenv.cfg`'s
+    /// `version` (written by `python -m venv`) -- read, never asked of Python.
+    PythonVersion base_version;
     std::string created_at;
     /// Requirement sets installed, by name.
     std::vector<std::string> sets;
@@ -105,14 +290,28 @@ public:
 
     [[nodiscard]] PythonEnvStatus status() const;
 
-    /// Creates the environment from `base_python` (`python -m venv`). The
-    /// error text, or empty. An existing environment is left alone.
+    /// Creates the environment from `base_python` (`python -m venv`),
+    /// recording its version when known. The error text, or empty. An
+    /// existing environment is left alone.
     [[nodiscard]] std::string create(const std::filesystem::path& base_python,
-                                     const harness::CancellationToken& cancellation = {});
+                                     const harness::CancellationToken& cancellation = {},
+                                     const PythonVersion& version = {});
 
     /// Installs `set` into the environment with its own pip and records it.
-    /// The error text, or empty.
+    /// The error text, or empty. An environment whose Python the set does
+    /// not run on is refused before pip, naming the rebuild (M19); so is a
+    /// set with a pinned source (53k) where git -- what pip fetches it with
+    /// -- is not on PATH.
     [[nodiscard]] std::string install(RequirementSet set,
+                                      const harness::CancellationToken& cancellation = {});
+
+    /// Replaces the environment with one made from `base_python`, every set
+    /// the record lists reinstalled in its order (M19). The old one is moved
+    /// aside first and put back if anything fails, so a failed rebuild
+    /// leaves what was there. Asking the person is the caller's. The error
+    /// text, or empty.
+    [[nodiscard]] std::string rebuild(const std::filesystem::path& base_python,
+                                      const PythonVersion& version,
                                       const harness::CancellationToken& cancellation = {});
 
     /// The record's path: `<dir>/apogee.json`.
@@ -138,7 +337,50 @@ private:
 /// and `~` expanded) when non-empty, else `python3` then `python` on PATH.
 /// Empty with `error` set when none is found or the configured one is not
 /// there.
+/// `source` names where `configured` came from in a refusal.
 [[nodiscard]] std::filesystem::path locate_base_python(std::string_view configured,
-                                                       std::string& error);
+                                                       std::string& error,
+                                                       std::string_view source = "training.python");
+
+/// `interpreter`'s version, asked through `runner` (`-c "import sys; ..."`);
+/// the zero value when it does not answer.
+[[nodiscard]] PythonVersion probe_python_version(const std::filesystem::path& interpreter,
+                                                 const CommandRunner& runner);
+
+/// An interpreter on this machine and its version.
+struct PythonCandidate {
+    std::filesystem::path path;
+    PythonVersion version;
+};
+
+/// The interpreters on PATH by name (M19): `python3.<minor>` for 3.10 to
+/// 3.30, newest first, then `python3`, then `python` -- each asked its
+/// version through `runner`, one reached by two names listed once. No
+/// install prefix beyond PATH is searched and nothing is installed.
+[[nodiscard]] std::vector<PythonCandidate> python_candidates(const CommandRunner& runner);
+
+/// The interpreter a new environment is made from, and why (M19).
+struct PythonChoice {
+    std::filesystem::path path;
+    PythonVersion version;
+    /// Why this one, in the words setup says.
+    std::string reason;
+    /// Why none: set exactly when `path` is empty.
+    std::string error;
+};
+
+/// The choice. `configured` (`training.python`, or `--python` for the run)
+/// is the person's word, used as given -- one whose version is outside
+/// `requested`'s range is refused naming both, never swapped. Otherwise the
+/// newest candidate every set in `host` runs on (what this host can install:
+/// one environment serves them all, and the bootstrap makes it at its first
+/// set); else the newest `requested` runs on, naming what it leaves out;
+/// else refused, naming the range, what was found and where an interpreter
+/// comes from.
+[[nodiscard]] PythonChoice choose_base_python(std::string_view configured,
+                                              std::span<const RequirementSet> host,
+                                              std::span<const RequirementSet> requested,
+                                              const CommandRunner& runner,
+                                              std::string_view source = "training.python");
 
 }  // namespace apogee::training

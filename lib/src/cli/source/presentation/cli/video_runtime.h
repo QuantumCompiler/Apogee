@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <istream>
 #include <ostream>
 #include <string>
@@ -51,5 +52,16 @@ namespace apogee::commands {
 /// torch or kokoro is missing, then the voice ladder.
 [[nodiscard]] video::VideoReadiness ready_voice_runtime(const harness::Config& config,
                                                         std::string_view purpose);
+
+/// The speech runtime for the voice model at `model` (`handle` naming it)
+/// on `engine`, as a command asks it (53m): on PyTorch `ready_voice_runtime`
+/// -- the environment and the `voice` set asked for at a terminal -- then the
+/// whole ladder over the model; on MLX the ladder alone (`probe_voice_mlx`):
+/// mlx-audio is opt-in, never asked about, its rungs naming its setup.
+[[nodiscard]] video::VideoReadiness ready_voice_engine(const harness::Config& config,
+                                                       const std::filesystem::path& model,
+                                                       std::string_view handle,
+                                                       video::VideoEngine engine,
+                                                       std::string_view purpose);
 
 }  // namespace apogee::commands

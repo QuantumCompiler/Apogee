@@ -1,0 +1,8 @@
+downloading 2 file(s), 3 MiB, into /Users/someone/.apogee/training/datasets/raw/someone--heat-notes
+  [1/2] data/train.jsonl
+  [2/2] data/test.jsonl
+
+/Users/someone/.apogee/training/datasets/raw/someone--heat-notes
+2 file(s), 3 MiB
+
+Convert it with:  apogee datasets prepare /Users/someone/.apogee/training/datasets/raw/someone--heat-notes

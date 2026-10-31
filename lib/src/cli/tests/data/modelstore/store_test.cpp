@@ -6,20 +6,26 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <random>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "contracts/sha256.h"
 #include "modelstore/sidecar.h"
+#include "modelstore/snapshot.h"
 #include "platform/platform.h"
+#include "support/draft_head_configs.h"
 #include "support/env_guard.h"
 #include "support/file_time.h"
 #include "support/mlx_model.h"
 #include "support/pipeline_model.h"
+#include "support/towered_configs.h"
 #include "support/voice_model.h"
+#include "support/wan_original.h"
 
 using apogee::models::StoreRoots;
 using apogee::models::StoreTarget;
@@ -81,6 +87,19 @@ TEST_CASE("a handle is read without asking the disk, and only a handle is one", 
         INFO(not_one);
         CHECK_FALSE(apogee::models::parse_weights_handle(not_one).has_value());
     }
+}
+
+TEST_CASE("weights are named for a sentence: a stored directory by its handle, a file by its name",
+          "[models][store]") {
+    // 53c: where the gate says it scored, and the doctor's rows.
+    using apogee::models::weights_label;
+    CHECK(weights_label("/h/models/org--m/mlx/0123456789ab") == "org--m/mlx/0123456789ab");
+    CHECK(weights_label("/h/models/org--m/mlx/0123456789ab/") == "org--m/mlx/0123456789ab");
+    CHECK(weights_label("/h/models/org--m/gguf/0123456789ab/m-Q4_K_M.gguf") == "m-Q4_K_M.gguf");
+    CHECK(weights_label("/elsewhere/base.gguf") == "base.gguf");
+    // An id under no format of the store is a name like any.
+    CHECK(weights_label("/h/other/0123456789ab") == "0123456789ab");
+    CHECK(weights_label("/h/models/org--m/mlx/not-an-id") == "not-an-id");
 }
 
 TEST_CASE("a SafeTensors set's id covers its shards and nothing else", "[models][store]") {
@@ -885,4 +904,891 @@ TEST_CASE("a voice model lands under its model's voice/ by the digest over its w
     CHECK(apogee::models::backend_type_for_format(apogee::models::kVoiceFormat).empty());
     REQUIRE(apogee::models::remove_weights(stored.dir).empty());
     CHECK(apogee::models::list_store_voices(store.roots).empty());
+}
+
+namespace {
+
+/// The user's Gemma4-12B-Assistant, as its own config.json says it (2026-10-21):
+/// four layers 1024 wide, reading a 3840-wide base through a projection --
+/// with the other three, the user's four (53i, `draft_head_configs.h`).
+constexpr const char* kAssistantConfig = apogee::testing::kGemma4Assistant12BConfig;
+
+/// A SafeTensors set whose config.json is `config`.
+void place_snapshot_with(const std::filesystem::path& dir, const std::string& config) {
+    write_file(dir / "config.json", config);
+    write_file(dir / "model.safetensors");
+}
+
+}  // namespace
+
+TEST_CASE("a draft head is read from its config: the width it reads, or its architecture's name",
+          "[models][store][draft_head]") {
+    const Store store;
+    const std::filesystem::path head = store.root.path() / "head";
+    place_snapshot_with(head, kAssistantConfig);
+    const std::optional<apogee::models::DraftHead> read = apogee::models::snapshot_draft_head(head);
+    REQUIRE(read.has_value());
+    CHECK(read->architecture == "Gemma4UnifiedAssistantForCausalLM");
+    CHECK(read->backbone_hidden_size == 3840);
+    CHECK(read->family == "gemma4");
+
+    // Named by an architecture llama.cpp converts as one, its width unsaid.
+    const std::filesystem::path named = store.root.path() / "named";
+    place_snapshot_with(named, R"({"architectures": ["Gemma4AssistantForCausalLM"],
+                                   "model_type": "gemma4_assistant"})");
+    const std::optional<apogee::models::DraftHead> by_name =
+        apogee::models::snapshot_draft_head(named);
+    REQUIRE(by_name.has_value());
+    CHECK(by_name->backbone_hidden_size == 0);
+
+    // A model of its own is none -- nor is a vendor's type name alone, M15's case.
+    const std::filesystem::path base = store.root.path() / "base";
+    place_snapshot_with(base, R"({"architectures": ["Gemma4UnifiedForConditionalGeneration"],
+                                  "model_type": "gemma4_unified",
+                                  "text_config": {"hidden_size": 3840}})");
+    CHECK_FALSE(apogee::models::snapshot_draft_head(base).has_value());
+    const std::filesystem::path variant = store.root.path() / "variant";
+    place_snapshot_with(variant, R"({"architectures": ["LlamaForCausalLM"],
+                                     "model_type": "gemma4_unified_assistant"})");
+    CHECK_FALSE(apogee::models::snapshot_draft_head(variant).has_value());
+    CHECK_FALSE(apogee::models::snapshot_draft_head(store.root.path() / "absent").has_value());
+
+    // A width is the config's own, or its text model's.
+    CHECK(apogee::models::config_width(base).hidden_size == 3840);
+    CHECK(apogee::models::config_width(base).family == "gemma4");
+    const std::filesystem::path flat = store.root.path() / "flat";
+    place_snapshot_with(flat, R"({"model_type": "llama", "hidden_size": 4096})");
+    CHECK(apogee::models::config_width(flat).hidden_size == 4096);
+    CHECK(apogee::models::config_width(flat).family == "llama");
+
+    // One wording: the base named when stored, else its width, else unsaid.
+    CHECK(apogee::models::describe_draft_head(*read, {"Gemma4-12B-Instruct"}) ==
+          "a draft head (Gemma4UnifiedAssistantForCausalLM): speculative decoding runs it beside "
+          "its base model (Gemma4-12B-Instruct), reading that model's hidden states, and never "
+          "alone");
+    CHECK(apogee::models::describe_draft_head(*read, {}).find("(a 3840-wide gemma4 model)") !=
+          std::string::npos);
+    CHECK(apogee::models::describe_draft_head(*by_name, {}).find("its base model, reading") !=
+          std::string::npos);
+    CHECK(apogee::models::draft_head_note(*read, {"Gemma4-12B-Instruct"}) ==
+          "draft head -- runs beside Gemma4-12B-Instruct, never alone");
+    CHECK(apogee::models::draft_head_refusal("'Gemma4-12B-Assistant'", *read, {})
+              .ends_with("never alone -- nothing converted from it could answer a chat; convert "
+                         "its base model instead"));
+}
+
+TEST_CASE("a draft head's base is the stored model of its family as wide as the width it reads",
+          "[models][store][draft_head]") {
+    const Store store;
+    const std::filesystem::path models = store.roots.models;
+    place_snapshot_with(models / "Gemma4-12B-Assistant" / "safetensors" / "aaaaaaaaaaaa",
+                        kAssistantConfig);
+    place_snapshot_with(models / "Gemma4-12B-Instruct" / "safetensors" / "bbbbbbbbbbbb",
+                        R"({"architectures": ["Gemma4UnifiedForConditionalGeneration"],
+                            "model_type": "gemma4_unified", "text_config": {"hidden_size": 3840}})");
+    // As wide, but another family: never its base.
+    place_snapshot_with(models / "Wide-Llama" / "safetensors" / "cccccccccccc",
+                        R"({"model_type": "llama", "hidden_size": 3840})");
+    // Another draft head declaring the same width is no base either.
+    place_snapshot_with(models / "Other-Assistant" / "safetensors" / "dddddddddddd",
+                        R"({"model_type": "gemma4_assistant", "backbone_hidden_size": 3840,
+                            "hidden_size": 3840})");
+    // The 26B: its base stored twice, as a snapshot and as an MLX model.
+    place_snapshot_with(models / "Gemma4-26B-Instruct" / "safetensors" / "eeeeeeeeeeee",
+                        R"({"model_type": "gemma4", "text_config": {"hidden_size": 2816}})");
+    apogee::testing::write_mlx_model(models / "Gemma4-26B-Instruct" / "mlx" / "ffffffffffff");
+    write_file(models / "Gemma4-26B-Instruct" / "mlx" / "ffffffffffff" / "config.json",
+               R"({"model_type": "gemma4", "text_config": {"hidden_size": 2816},
+                   "quantization": {"group_size": 64, "bits": 4}})");
+
+    const std::optional<apogee::models::DraftHead> head = apogee::models::snapshot_draft_head(
+        models / "Gemma4-12B-Assistant" / "safetensors" / "aaaaaaaaaaaa");
+    REQUIRE(head.has_value());
+    CHECK(apogee::models::draft_head_bases(store.roots, *head) ==
+          std::vector<std::string>{"Gemma4-12B-Instruct"});
+
+    apogee::models::DraftHead wide = *head;
+    wide.backbone_hidden_size = 2816;
+    CHECK(apogee::models::draft_head_bases(store.roots, wide) ==
+          std::vector<std::string>{"Gemma4-26B-Instruct"});
+    wide.backbone_hidden_size = 5376;
+    CHECK(apogee::models::draft_head_bases(store.roots, wide).empty());
+    wide.backbone_hidden_size = 0;
+    CHECK(apogee::models::draft_head_bases(store.roots, wide).empty());
+}
+
+namespace {
+
+/// Wan2.2-TI2V-5B's own config.json, as the user's store holds it: a
+/// diffusers transformer (M20, 2026-10-21).
+constexpr const char* kWanConfig = R"({
+  "_class_name": "WanModel",
+  "_diffusers_version": "0.33.0",
+  "dim": 3072,
+  "eps": 1e-06,
+  "ffn_dim": 14336,
+  "freq_dim": 256,
+  "in_dim": 48,
+  "model_type": "ti2v",
+  "num_heads": 24,
+  "num_layers": 30,
+  "out_dim": 48,
+  "text_len": 512
+})";
+
+}  // namespace
+
+TEST_CASE("a diffusion model is read from its config: its diffusers class, and no architectures",
+          "[models][store][diffusion]") {
+    const Store store;
+    const std::filesystem::path wan = store.root.path() / "wan";
+    place_snapshot_with(wan, kWanConfig);
+    const std::optional<apogee::models::DiffusionModel> read =
+        apogee::models::snapshot_diffusion_model(wan);
+    REQUIRE(read.has_value());
+    CHECK(read->class_name == "WanModel");
+
+    // A language model is none, and neither is a config that names its
+    // architectures whatever else it says, or one diffusers did not write.
+    const std::filesystem::path llama = store.root.path() / "llama";
+    place_snapshot_with(llama, R"({"architectures": ["LlamaForCausalLM"], "model_type": "llama"})");
+    CHECK_FALSE(apogee::models::snapshot_diffusion_model(llama).has_value());
+    const std::filesystem::path named = store.root.path() / "named";
+    place_snapshot_with(named, R"({"_class_name": "WanModel", "_diffusers_version": "0.33.0",
+                                   "architectures": ["LlamaForCausalLM"]})");
+    CHECK_FALSE(apogee::models::snapshot_diffusion_model(named).has_value());
+    const std::filesystem::path unwritten = store.root.path() / "unwritten";
+    place_snapshot_with(unwritten, R"({"_class_name": "WanModel"})");
+    CHECK_FALSE(apogee::models::snapshot_diffusion_model(unwritten).has_value());
+    CHECK_FALSE(apogee::models::snapshot_diffusion_model(store.root.path() / "absent").has_value());
+
+    // One wording, and the refusal built on it -- M20's for a diffusers
+    // class that is no Wan transformer (Wan's is 53j's, below).
+    const std::filesystem::path ltx = store.root.path() / "ltx";
+    place_snapshot_with(ltx, R"({"_class_name": "LTXVideoTransformer3DModel",
+                                 "_diffusers_version": "0.33.0"})");
+    const std::optional<apogee::models::DiffusionModel> other =
+        apogee::models::snapshot_diffusion_model(ltx);
+    REQUIRE(other.has_value());
+    CHECK_FALSE(other->wan.has_value());
+    CHECK(apogee::models::describe_diffusion_model(*other) ==
+          "a diffusion model's weights (LTXVideoTransformer3DModel, a diffusers class): neither "
+          "converter takes one -- llama.cpp's finds a model by its architectures, and mlx-lm's "
+          "builds a language model");
+    CHECK(apogee::models::diffusion_model_refusal("'Lightricks--LTX-Video'", *other) ==
+          "'Lightricks--LTX-Video' is " + apogee::models::describe_diffusion_model(*other));
+}
+
+TEST_CASE("a Wan transformer is known by its config's class, never diffusers' port of it",
+          "[models][store][diffusion][wan]") {
+    using apogee::models::is_wan_transformer_class;
+    CHECK(is_wan_transformer_class("WanModel"));
+    CHECK(is_wan_transformer_class("VaceWanModel"));
+    CHECK(is_wan_transformer_class("WanModel_S2V"));
+    CHECK_FALSE(is_wan_transformer_class("WanTransformer3DModel"));
+    CHECK_FALSE(is_wan_transformer_class("WanVACETransformer3DModel"));
+    CHECK_FALSE(is_wan_transformer_class("LTXVideoTransformer3DModel"));
+    CHECK_FALSE(is_wan_transformer_class("WanPipeline"));
+    CHECK_FALSE(is_wan_transformer_class(""));
+
+    // A config's text, as the pull reads one before a byte of weights moves:
+    // diffusers wrote it, it names no architectures, and its class is Wan's.
+    using apogee::models::wan_transformer_class;
+    CHECK(wan_transformer_class(apogee::testing::kWanTi2vConfig) == "WanModel");
+    CHECK(wan_transformer_class(R"({"_class_name": "WanModel"})").empty());
+    CHECK(wan_transformer_class(R"({"_class_name": "WanModel", "_diffusers_version": "0.33.0",
+                                    "architectures": ["LlamaForCausalLM"]})")
+              .empty());
+    CHECK(wan_transformer_class(R"({"_class_name": "WanTransformer3DModel",
+                                    "_diffusers_version": "0.33.0"})")
+              .empty());
+    CHECK(wan_transformer_class(R"({"architectures": ["LlamaForCausalLM"]})").empty());
+    CHECK(wan_transformer_class("not json").empty());
+}
+
+TEST_CASE("the user's Wan set reads as Wan's original layout, missing its two checkpoints by name",
+          "[models][store][diffusion][wan]") {
+    // 53j: the user's record of ten files and config, as the pull before
+    // 53j left them.
+    const Store store;
+    // The fixture is the user's: ten files on record, the config and the
+    // configuration at the sizes the record lists.
+    CHECK(apogee::testing::kWanTi2vConfig.size() == 251);
+    CHECK(apogee::testing::kWanConfiguration.size() == 43);
+    CHECK(apogee::testing::wan_record().files.size() == 10);
+    const std::filesystem::path dir = apogee::testing::write_user_wan_set(store.roots);
+    const std::string encoder{apogee::testing::kWanTextEncoder};
+    const std::string vae{apogee::testing::kWanVae};
+
+    std::optional<apogee::models::WanLayout> layout = apogee::models::snapshot_wan_layout(dir);
+    REQUIRE(layout.has_value());
+    CHECK(layout->class_name == "WanModel");
+    REQUIRE(layout->components.size() == 2);
+    CHECK(layout->components[0].role == "text encoder");
+    CHECK(layout->components[1].role == "VAE");
+    CHECK_FALSE(layout->whole());
+    CHECK(layout->missing() == std::vector<std::string>{encoder, vae});
+
+    // The refusal and `info`'s line say what it is, what it lacks with the
+    // pull that fetches it, that neither converter takes it, and what runs
+    // the model today.
+    std::optional<apogee::models::DiffusionModel> model =
+        apogee::models::snapshot_diffusion_model(dir);
+    REQUIRE(model.has_value());
+    CHECK(model->ref == "Wan-AI/Wan2.2-TI2V-5B");
+    CHECK(apogee::models::diffusion_model_refusal(
+              "'Wan-AI--Wan2.2-TI2V-5B/safetensors/6ef9b00b8b83'", *model) ==
+          "'Wan-AI--Wan2.2-TI2V-5B/safetensors/6ef9b00b8b83' is Wan's original layout "
+          "(WanModel), missing models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth -- 'apogee "
+          "models pull Wan-AI/Wan2.2-TI2V-5B --safetensors' fetches them into this set; once it "
+          "is complete, mlx-video converts it to an MLX video model (--mlx); llama.cpp's "
+          "converter takes no diffusion model -- it finds a model by its architectures; what "
+          "runs this model in 'apogee video generate' is its Diffusers pipeline on PyTorch, "
+          "pulled whole with 'apogee models pull Wan-AI/Wan2.2-TI2V-5B-Diffusers', or its MLX "
+          "conversion on MLX through mlx-video, once made");
+
+    // One there, one not: the one named.
+    apogee::testing::write_fixture_file(dir / vae, apogee::testing::wan_bytes(vae));
+    layout = apogee::models::snapshot_wan_layout(dir);
+    REQUIRE(layout.has_value());
+    CHECK(layout->missing() == std::vector<std::string>{encoder});
+    model = apogee::models::snapshot_diffusion_model(dir);
+    REQUIRE(model.has_value());
+    CHECK(apogee::models::describe_diffusion_model(*model).starts_with(
+        "Wan's original layout (WanModel), missing models_t5_umt5-xxl-enc-bf16.pth -- 'apogee "
+        "models pull Wan-AI/Wan2.2-TI2V-5B --safetensors' fetches it into this set; "));
+
+    // Both there: whole, and said complete.
+    apogee::testing::write_fixture_file(dir / encoder, apogee::testing::wan_bytes(encoder));
+    layout = apogee::models::snapshot_wan_layout(dir);
+    REQUIRE(layout.has_value());
+    CHECK(layout->whole());
+    CHECK(layout->missing().empty());
+    model = apogee::models::snapshot_diffusion_model(dir);
+    REQUIRE(model.has_value());
+    CHECK(apogee::models::describe_diffusion_model(*model) ==
+          "Wan's original layout (WanModel), complete -- its transformer beside "
+          "models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth; mlx-video converts it to an MLX "
+          "video model (--mlx); llama.cpp's converter takes no diffusion model -- it finds a "
+          "model by its architectures; what runs this model in 'apogee video generate' is its "
+          "Diffusers pipeline on PyTorch, pulled whole with 'apogee models pull "
+          "Wan-AI/Wan2.2-TI2V-5B-Diffusers', or its MLX conversion on MLX through mlx-video, "
+          "once made");
+    // Still no conversion with no mlx-video to ask: the original layout
+    // converts through mlx-video where it is installed (53k, below).
+    CHECK(apogee::models::snapshot_conversions(dir).empty());
+}
+
+TEST_CASE(
+    "a Wan set's components are named as it holds them, as its record lists them, or as Wan "
+    "names them",
+    "[models][store][diffusion][wan]") {
+    const Store store;
+    // A record that took the checkpoints, one since removed, and an image
+    // encoder beside them: each a component, the lost one by its recorded name.
+    const std::filesystem::path dir = store.root.path() / "i2v";
+    place_snapshot_with(dir, R"({"_class_name": "WanModel", "_diffusers_version": "0.30.0",
+                                 "model_type": "i2v", "in_dim": 36, "out_dim": 16})");
+    apogee::models::Snapshot record;
+    record.ref = "Wan-AI/Wan2.1-I2V-14B-480P";
+    record.revision = "0123abcd";
+    record.source = "huggingface";
+    record.files = {{.path = "model.safetensors", .size = 1, .sha256 = std::string(64, 'a')},
+                    {.path = "models_t5_umt5-xxl-enc-bf16.pth", .size = 1, .sha256 = {}},
+                    {.path = "Wan2.1_VAE.pth", .size = 1, .sha256 = {}},
+                    {.path = "models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
+                     .size = 1,
+                     .sha256 = {}}};
+    REQUIRE(apogee::models::write_snapshot(dir, record));
+    write_file(dir / "models_t5_umt5-xxl-enc-bf16.pth");
+    write_file(dir / "models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth");
+    const std::optional<apogee::models::WanLayout> layout =
+        apogee::models::snapshot_wan_layout(dir);
+    REQUIRE(layout.has_value());
+    REQUIRE(layout->components.size() == 3);
+    CHECK(layout->components[2].role == "checkpoint");
+    CHECK(layout->components[2].present);
+    CHECK(layout->missing() == std::vector<std::string>{"Wan2.1_VAE.pth"});
+    // The way names the revision it was pulled at; the pipeline, the
+    // repository alone.
+    const std::optional<apogee::models::DiffusionModel> model =
+        apogee::models::snapshot_diffusion_model(dir);
+    REQUIRE(model.has_value());
+    const std::string said = apogee::models::describe_diffusion_model(*model);
+    CHECK(said.find("missing Wan2.1_VAE.pth -- 'apogee models pull "
+                    "Wan-AI/Wan2.1-I2V-14B-480P@0123abcd --safetensors' fetches it") !=
+          std::string::npos);
+    CHECK(
+        said.ends_with("'apogee models pull Wan-AI/Wan2.1-I2V-14B-480P-Diffusers', or its MLX "
+                       "conversion on MLX through mlx-video, once made"));
+
+    // No record and no checkpoints: the names Wan's releases give them -- the
+    // VAE by the latent width the transformer declares -- and no repository
+    // to name.
+    const std::filesystem::path bare = store.root.path() / "bare";
+    place_snapshot_with(bare, R"({"_class_name": "WanModel", "_diffusers_version": "0.30.0",
+                                  "out_dim": 16})");
+    const std::optional<apogee::models::DiffusionModel> unrecorded =
+        apogee::models::snapshot_diffusion_model(bare);
+    REQUIRE(unrecorded.has_value());
+    REQUIRE(unrecorded->wan.has_value());
+    CHECK(unrecorded->wan->missing() ==
+          std::vector<std::string>{"models_t5_umt5-xxl-enc-bf16.pth", "Wan2.1_VAE.pth"});
+    CHECK(apogee::models::describe_diffusion_model(*unrecorded) ==
+          "Wan's original layout (WanModel), missing models_t5_umt5-xxl-enc-bf16.pth and "
+          "Wan2.1_VAE.pth -- pulling its repository again with --safetensors fetches them into "
+          "this set; once it is complete, mlx-video converts it to an MLX video model (--mlx); "
+          "llama.cpp's converter takes no diffusion model -- it finds a model by its "
+          "architectures; what runs this model in 'apogee video generate' is its Diffusers "
+          "pipeline on PyTorch, pulled whole (a repository with model_index.json at its root), or "
+          "its MLX conversion on MLX through mlx-video, once made");
+    const std::filesystem::path unsized = store.root.path() / "unsized";
+    place_snapshot_with(unsized, R"({"_class_name": "WanModel", "_diffusers_version": "0.30.0"})");
+    CHECK(apogee::models::snapshot_wan_layout(unsized)->missing().back() == "*_VAE.pth");
+
+    // Anything else is no Wan layout.
+    const std::filesystem::path llama = store.root.path() / "llama";
+    place_snapshot_with(llama, R"({"architectures": ["LlamaForCausalLM"], "model_type": "llama"})");
+    CHECK_FALSE(apogee::models::snapshot_wan_layout(llama).has_value());
+    CHECK_FALSE(apogee::models::snapshot_wan_layout(store.root.path() / "absent").has_value());
+}
+
+TEST_CASE(
+    "which conversions a set takes is one decision: a language model both, a draft head or "
+    "a diffusion model none",
+    "[models][store][diffusion][draft_head]") {
+    const Store store;
+    const std::filesystem::path wan = store.root.path() / "wan";
+    place_snapshot_with(wan, kWanConfig);
+    const std::filesystem::path head = store.root.path() / "head";
+    place_snapshot_with(head, kAssistantConfig);
+    const std::filesystem::path llama = store.root.path() / "llama";
+    place_snapshot_with(llama, R"({"architectures": ["LlamaForCausalLM"], "model_type": "llama"})");
+    CHECK(apogee::models::snapshot_conversions(wan).empty());
+    CHECK(apogee::models::snapshot_conversions(head).empty());
+    CHECK(apogee::models::snapshot_conversions(llama) == std::vector<std::string>{"gguf", "mlx"});
+}
+
+TEST_CASE(
+    "Wan's original layout converts to MLX exactly where it is whole and mlx-video is "
+    "installed",
+    "[models][store][diffusion][wan][mlx_video]") {
+    // 53k: the decision's three answers over the user's own set -- as the
+    // pull before 53j left it, then completed per 53j -- and the wording each
+    // way, naming what is missing: the checkpoints by name, or mlx-video by
+    // its setup.
+    using Formats = std::vector<std::string>;
+    const Store store;
+    const std::filesystem::path dir = apogee::testing::write_user_wan_set(store.roots);
+    int asked = 0;
+    const apogee::models::VideoConverts installed = [&asked] {
+        ++asked;
+        return true;
+    };
+    const apogee::models::VideoConverts absent = [] { return false; };
+    const std::string tail =
+        "; llama.cpp's converter takes no diffusion model -- it finds a model by its "
+        "architectures; what runs this model in 'apogee video generate' is its Diffusers "
+        "pipeline on PyTorch, pulled whole with 'apogee models pull "
+        "Wan-AI/Wan2.2-TI2V-5B-Diffusers', or its MLX conversion on MLX through mlx-video, once "
+        "made";
+
+    // Not whole: none, mlx-video or not -- the refusal names the two files.
+    CHECK(apogee::models::snapshot_conversions(dir, {}, {}, installed).empty());
+    CHECK(apogee::models::snapshot_conversions(dir, {}, {}, absent).empty());
+    std::optional<apogee::models::DiffusionModel> model =
+        apogee::models::snapshot_diffusion_model(dir, installed);
+    REQUIRE(model.has_value());
+    CHECK(model->mlx_video == true);
+    CHECK_FALSE(model->mlx_convertible());
+    const std::string missing =
+        "Wan's original layout (WanModel), missing models_t5_umt5-xxl-enc-bf16.pth and "
+        "Wan2.2_VAE.pth -- 'apogee models pull Wan-AI/Wan2.2-TI2V-5B --safetensors' fetches them "
+        "into this set; once it is complete, mlx-video converts it to an MLX video model (--mlx)";
+    CHECK(apogee::models::describe_diffusion_model(*model) == missing + tail);
+    // Neither there: both said, the files and mlx-video's setup.
+    model = apogee::models::snapshot_diffusion_model(dir, absent);
+    REQUIRE(model.has_value());
+    CHECK(model->mlx_video == false);
+    CHECK(apogee::models::diffusion_model_refusal("'wan'", *model) ==
+          "'wan' is " + missing +
+              ", and is not installed in Apogee's Python environment -- 'apogee train setup "
+              "--with mlx-video'" +
+              tail);
+
+    // Whole, per 53j.
+    apogee::testing::complete_user_wan_set(dir);
+    REQUIRE(apogee::models::snapshot_wan_layout(dir)->whole());
+    const std::string complete =
+        "Wan's original layout (WanModel), complete -- its transformer beside "
+        "models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth";
+    // Whole and installed: MLX alone, never a GGUF -- said ready.
+    CHECK(apogee::models::snapshot_conversions(dir, {}, {}, installed) == Formats{"mlx"});
+    model = apogee::models::snapshot_diffusion_model(dir, installed);
+    REQUIRE(model.has_value());
+    CHECK(model->mlx_convertible());
+    CHECK(apogee::models::describe_diffusion_model(*model) ==
+          complete + "; --mlx converts it to an MLX video model through mlx-video" + tail);
+    // Whole, mlx-video not installed: none, its setup named.
+    CHECK(apogee::models::snapshot_conversions(dir, {}, {}, absent).empty());
+    model = apogee::models::snapshot_diffusion_model(dir, absent);
+    REQUIRE(model.has_value());
+    CHECK_FALSE(model->mlx_convertible());
+    CHECK(apogee::models::describe_diffusion_model(*model) ==
+          complete +
+              "; mlx-video converts it to an MLX video model (--mlx), and is not installed in "
+              "Apogee's Python environment -- 'apogee train setup --with mlx-video'" +
+              tail);
+    // Nobody asked: none, and nothing claimed either way.
+    CHECK(apogee::models::snapshot_conversions(dir).empty());
+    CHECK_FALSE(apogee::models::snapshot_diffusion_model(dir)->mlx_video.has_value());
+
+    // Asked of the layout alone: a language model, and a diffusers class
+    // that is no Wan transformer, never ask, and keep their answers.
+    asked = 0;
+    const std::filesystem::path llama = store.root.path() / "llama";
+    place_snapshot_with(llama, R"({"architectures": ["LlamaForCausalLM"], "model_type": "llama"})");
+    CHECK(apogee::models::snapshot_conversions(llama, {}, {}, installed) == Formats{"gguf", "mlx"});
+    const std::filesystem::path ltx = store.root.path() / "ltx";
+    place_snapshot_with(ltx, R"({"_class_name": "LTXVideoTransformer3DModel",
+                                 "_diffusers_version": "0.33.0"})");
+    CHECK(apogee::models::snapshot_conversions(ltx, {}, {}, installed).empty());
+    CHECK(asked == 0);
+}
+
+TEST_CASE(
+    "the user's Wan set names both engines that run it, true to the store: not whole, "
+    "convertible, converted",
+    "[models][store][diffusion][wan][engines]") {
+    // M24: the description's closing sentence over 53j's fixture and 53k's
+    // converted directory -- the Diffusers pipeline on PyTorch, and the MLX
+    // conversion through mlx-video, once made or made by handle.
+    const Store store;
+    const std::filesystem::path dir = apogee::testing::write_user_wan_set(store.roots);
+    const apogee::models::VideoConverts installed = [] { return true; };
+    const std::string engines =
+        "; llama.cpp's converter takes no diffusion model -- it finds a model by its "
+        "architectures; what runs this model in 'apogee video generate' is its Diffusers "
+        "pipeline on PyTorch, pulled whole with 'apogee models pull "
+        "Wan-AI/Wan2.2-TI2V-5B-Diffusers', or its MLX conversion on MLX through mlx-video";
+
+    // Not whole: what it lacks, and the conversion still to make.
+    std::optional<apogee::models::DiffusionModel> model =
+        apogee::models::stored_diffusion_model(store.roots, dir, installed);
+    REQUIRE(model.has_value());
+    CHECK(model->mlx_conversions.empty());
+    CHECK(apogee::models::describe_diffusion_model(*model) ==
+          "Wan's original layout (WanModel), missing models_t5_umt5-xxl-enc-bf16.pth and "
+          "Wan2.2_VAE.pth -- 'apogee models pull Wan-AI/Wan2.2-TI2V-5B --safetensors' fetches "
+          "them into this set; once it is complete, mlx-video converts it to an MLX video model "
+          "(--mlx)" +
+              engines + ", once made");
+
+    // Convertible: whole, mlx-video there, nothing converted yet.
+    apogee::testing::complete_user_wan_set(dir);
+    const std::string complete =
+        "Wan's original layout (WanModel), complete -- its transformer beside "
+        "models_t5_umt5-xxl-enc-bf16.pth and Wan2.2_VAE.pth; --mlx converts it to an MLX video "
+        "model through mlx-video";
+    model = apogee::models::stored_diffusion_model(store.roots, dir, installed);
+    REQUIRE(model.has_value());
+    CHECK(model->mlx_convertible());
+    CHECK(model->mlx_conversions.empty());
+    CHECK(apogee::models::describe_diffusion_model(*model) == complete + engines + ", once made");
+
+    // Converted: 53k's build of it in the store, said made by its handle --
+    // in the description, and so in the refusal built on it.
+    (void)apogee::testing::write_converted_wan(store.roots, dir);
+    const std::string handle = std::string{apogee::testing::kWanModel} + "/mlx/bbbbbbbbbbbb";
+    model = apogee::models::stored_diffusion_model(store.roots, dir, installed);
+    REQUIRE(model.has_value());
+    CHECK(model->mlx_conversions == std::vector<std::string>{handle});
+    CHECK(apogee::models::describe_diffusion_model(*model) ==
+          complete + engines + ", made as " + handle);
+    CHECK(apogee::models::diffusion_model_refusal("'wan'", *model) ==
+          "'wan' is " + complete + engines + ", made as " + handle);
+    // Two builds of it, both named.
+    (void)apogee::testing::write_converted_wan(store.roots, dir, "ti2v", "cccccccccccc");
+    model = apogee::models::stored_diffusion_model(store.roots, dir, installed);
+    REQUIRE(model.has_value());
+    CHECK(apogee::models::describe_diffusion_model(*model).ends_with(
+        ", made as " + handle + " and " + std::string{apogee::testing::kWanModel} +
+        "/mlx/cccccccccccc"));
+
+    // Read without the store, nothing is claimed made: the conversion is
+    // named as one to make.
+    model = apogee::models::snapshot_diffusion_model(dir, installed);
+    REQUIRE(model.has_value());
+    CHECK(model->mlx_conversions.empty());
+    CHECK(apogee::models::describe_diffusion_model(*model).ends_with(", once made"));
+}
+
+TEST_CASE("an MLX conversion of a Wan set is known by its record, never by a name",
+          "[models][store][diffusion][wan][engines]") {
+    // M24's open call, taken at its default: the converted directory's own
+    // record -- its ref naming the set, its transform mlx-video's -- is the
+    // evidence, the way 53l reads the set's tokenizer from the other end.
+    using apogee::models::mlx_video_conversions;
+    const Store store;
+    const std::filesystem::path dir = apogee::testing::write_user_wan_set(store.roots);
+    apogee::testing::complete_user_wan_set(dir);
+    const std::string set_handle =
+        std::string{apogee::testing::kWanModel} + "/safetensors/" + dir.filename().string();
+    const auto convert = [&](std::string_view model, std::string_view id, std::string ref,
+                             std::string transform) {
+        const std::filesystem::path made =
+            apogee::models::weights_dir(store.roots, apogee::models::kMlxFormat, model, id);
+        apogee::testing::write_published_mlx_wan(made);
+        apogee::models::Snapshot record;
+        record.ref = std::move(ref);
+        record.source = "convert";
+        record.transform = std::move(transform);
+        record.kind = std::string{apogee::models::kMlxVideo};
+        REQUIRE(apogee::models::write_snapshot(made, record));
+    };
+    // Under the set's own name, with no record: a pulled MLX Wan (M22), which
+    // names no set it was made from -- not this set's conversion.
+    apogee::testing::write_published_mlx_wan(apogee::models::weights_dir(
+        store.roots, apogee::models::kMlxFormat, apogee::testing::kWanModel, "aaaaaaaaaaaa"));
+    // Its record naming this set, made by another converter.
+    convert(apogee::testing::kWanModel, "bbbbbbbbbbbb", set_handle, "mlx_lm.convert 4bit");
+    // mlx-video's, from another set.
+    convert(apogee::testing::kWanModel, "cccccccccccc",
+            std::string{apogee::testing::kWanModel} + "/safetensors/000000000000",
+            "mlx_video.models.wan_2.convert 4bit");
+    CHECK(mlx_video_conversions(store.roots, dir).empty());
+
+    // mlx-video's, from this set, stored under any name: found by the record.
+    convert("my-wan", "dddddddddddd", set_handle, "mlx_video.models.wan_2.convert 8bit");
+    CHECK(mlx_video_conversions(store.roots, dir) ==
+          std::vector<std::string>{"my-wan/mlx/dddddddddddd"});
+
+    // A set kept under `paths.hf_dir`, its conversion under the models root:
+    // the handle resolves to it there.
+    const apogee::testing::TempDir hf{"store-hf-" + std::to_string(std::random_device{}())};
+    StoreRoots moved = store.roots;
+    moved.safetensors = hf.path();
+    const std::filesystem::path kept = apogee::testing::write_user_wan_set(moved);
+    CHECK(mlx_video_conversions(moved, kept) ==
+          std::vector<std::string>{"my-wan/mlx/dddddddddddd"});
+
+    // A set converted from outside the store: its record names the path.
+    const std::filesystem::path outside = store.root.path() / "outside-wan";
+    place_snapshot_with(outside, std::string{apogee::testing::kWanTi2vConfig});
+    CHECK(mlx_video_conversions(store.roots, outside).empty());
+    convert("outside-wan", "eeeeeeeeeeee", outside.string(), "mlx_video.models.wan_2.convert 4bit");
+    CHECK(mlx_video_conversions(store.roots, outside) ==
+          std::vector<std::string>{"outside-wan/mlx/eeeeeeeeeeee"});
+    CHECK(mlx_video_conversions(store.roots, dir) ==
+          std::vector<std::string>{"my-wan/mlx/dddddddddddd"});
+}
+
+TEST_CASE(
+    "each of the user's four assistants converts to an MLX drafter alone, exactly where the "
+    "installed mlx-vlm drafts its type -- the unified 12B's only where it drafts that",
+    "[models][store][draft_head][drafter]") {
+    // 53i: M21's rule carried to drafters, as 53f carried it to towers.
+    const Store store;
+    using Formats = std::vector<std::string>;
+    // What mlx-vlm drafts as the test says it: Gemma 4's assistant, and the
+    // unified one only when asked.
+    bool unified = false;
+    const apogee::models::DrafterBuilds drafts = [&unified](std::string_view type) {
+        return type == "gemma4_assistant" || (unified && type == "gemma4_unified_assistant");
+    };
+    for (const apogee::testing::DraftHeadPair& pair : apogee::testing::kUserDraftHeads) {
+        INFO(pair.head_model);
+        const std::filesystem::path head = store.root.path() / pair.head_model;
+        place_snapshot_with(head, pair.head_config);
+        const std::optional<apogee::models::DraftHead> read =
+            apogee::models::snapshot_draft_head(head);
+        REQUIRE(read.has_value());
+        CHECK(read->model_type == pair.drafter_type);
+        CHECK(read->backbone_hidden_size == pair.width);
+        CHECK(read->family == "gemma4");
+        // No mlx-vlm to ask: the draft-heads change's answer stands.
+        CHECK(apogee::models::snapshot_conversions(head).empty());
+        CHECK(apogee::models::snapshot_conversions(head, {}, [](std::string_view) {
+                  return false;
+              }).empty());
+        // Never a GGUF: its one conversion is the drafter.
+        unified = false;
+        const bool twelve = std::string_view{pair.drafter_type} == "gemma4_unified_assistant";
+        CHECK(apogee::models::snapshot_conversions(head, {}, drafts) ==
+              (twelve ? Formats{} : Formats{"mlx"}));
+        unified = true;
+        CHECK(apogee::models::snapshot_conversions(head, {}, drafts) == Formats{"mlx"});
+    }
+    // A drafter's closure decides nothing for anything else.
+    const std::filesystem::path llama = store.root.path() / "llama";
+    place_snapshot_with(llama, apogee::testing::kLlamaConfig);
+    CHECK(apogee::models::snapshot_conversions(llama, {}, drafts) == Formats{"gguf", "mlx"});
+}
+
+TEST_CASE("each assistant's base is the one stored model of its family as wide as it reads",
+          "[models][store][draft_head][drafter]") {
+    // 53i's guardrail on the draft-heads change's finder: the user's four
+    // heads and their four bases in one store, each head finding its own.
+    const Store store;
+    for (const apogee::testing::DraftHeadPair& pair : apogee::testing::kUserDraftHeads) {
+        place_snapshot_with(store.roots.models / pair.head_model / "safetensors" / "aaaaaaaaaaaa",
+                            pair.head_config);
+        place_snapshot_with(store.roots.models / pair.base_model / "safetensors" / "bbbbbbbbbbbb",
+                            pair.base_config);
+    }
+    for (const apogee::testing::DraftHeadPair& pair : apogee::testing::kUserDraftHeads) {
+        INFO(pair.head_model);
+        const std::optional<apogee::models::DraftHead> head = apogee::models::snapshot_draft_head(
+            store.roots.models / pair.head_model / "safetensors" / "aaaaaaaaaaaa");
+        REQUIRE(head.has_value());
+        CHECK(apogee::models::draft_head_bases(store.roots, *head) ==
+              std::vector<std::string>{pair.base_model});
+    }
+}
+
+TEST_CASE("a drafter's record names its bases, written only when there are any, read as text",
+          "[models][store][drafter]") {
+    const Store store;
+    const std::filesystem::path dir = store.root.path() / "drafter";
+    std::filesystem::create_directories(dir);
+    apogee::models::Snapshot record;
+    record.ref = "Gemma4-E4B-Assistant/safetensors/aaaaaaaaaaaa";
+    record.source = "convert";
+    record.transform = "mlx_vlm.convert bf16";
+    record.kind = "drafter";
+    record.bases = {"Gemma4-E4B-Instruct"};
+    REQUIRE(apogee::models::write_snapshot(dir, record));
+    const std::optional<apogee::models::Snapshot> read = apogee::models::load_snapshot(dir);
+    REQUIRE(read.has_value());
+    CHECK(read->kind == "drafter");
+    CHECK(read->bases == std::vector<std::string>{"Gemma4-E4B-Instruct"});
+
+    // None: no key at all, as every record before 53i.
+    record.bases.clear();
+    REQUIRE(apogee::models::write_snapshot(dir, record));
+    std::ifstream in{apogee::models::snapshot_record_path(dir)};
+    const std::string text{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    CHECK(text.find("bases") == std::string::npos);
+    CHECK(apogee::models::load_snapshot(dir)->bases.empty());
+
+    // What is not a name is no base: read as no record of one.
+    write_file(apogee::models::snapshot_record_path(dir),
+               R"({"ref": "x", "source": "convert", "kind": "drafter",
+                   "bases": ["Gemma4-E4B-Instruct", 7, "", "Gemma4-E4B-Instruct", "Other"]})");
+    CHECK(apogee::models::load_snapshot(dir)->bases ==
+          std::vector<std::string>{"Gemma4-E4B-Instruct", "Other"});
+    write_file(apogee::models::snapshot_record_path(dir),
+               R"({"ref": "x", "source": "convert", "kind": "drafter", "bases": "Gemma"})");
+    CHECK(apogee::models::load_snapshot(dir)->bases.empty());
+}
+
+TEST_CASE(
+    "a drafter's record has a renamed base rewritten where it stands, every other byte as it was",
+    "[models][store][drafter][rename]") {
+    // M25: a base's folder renamed leaves its drafter's record naming it as
+    // it is now called -- `bases` alone, through write_snapshot.
+    using apogee::models::BaseRename;
+    using apogee::models::rename_snapshot_base;
+    const Store store;
+    const std::filesystem::path dir =
+        store.root.path() / "Gemma4-E4B-Assistant" / "mlx" / "aaaaaaaaaaaa";
+    std::filesystem::create_directories(dir);
+    apogee::models::Snapshot record;
+    record.ref = "Gemma4-E4B-Assistant/safetensors/aaaaaaaaaaaa";
+    record.source = "convert";
+    record.pulled_at = "2026-10-21T09:00:00Z";
+    record.transform = "mlx_vlm.convert bf16";
+    record.kind = "drafter";
+    record.bases = {"Gemma4-E4B-Instruct", "Gemma4-E4B-Custom"};
+    record.files = {{.path = "config.json", .size = 412, .sha256 = std::string(64, 'c')},
+                    {.path = "model.safetensors", .size = 4096, .sha256 = std::string(64, 'w')}};
+    REQUIRE(apogee::models::write_snapshot(dir, record));
+    const std::filesystem::path path = apogee::models::snapshot_record_path(dir);
+    const auto slurp = [&path] {
+        std::ifstream in{path, std::ios::binary};
+        return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    };
+    const std::string before = slurp();
+
+    // Renamed where it stands: the one name's bytes, nothing else.
+    REQUIRE(rename_snapshot_base(dir, "Gemma4-E4B-Instruct", "Gemma4-E4B-Base") ==
+            BaseRename::Renamed);
+    std::string expected = before;
+    const std::string named = "\"Gemma4-E4B-Instruct\"";
+    REQUIRE(expected.find(named) != std::string::npos);
+    expected.replace(expected.find(named), named.size(), "\"Gemma4-E4B-Base\"");
+    CHECK(slurp() == expected);
+    CHECK(apogee::models::load_snapshot(dir)->bases ==
+          std::vector<std::string>{"Gemma4-E4B-Base", "Gemma4-E4B-Custom"});
+
+    // A base it does not name: nothing written.
+    const std::string settled = slurp();
+    CHECK(rename_snapshot_base(dir, "Gemma4-E4B-Instruct", "Elsewhere") == BaseRename::Unnamed);
+    CHECK(rename_snapshot_base(dir, "Gemma4-E2B-Instruct", "Gemma4-E4B-Base") ==
+          BaseRename::Unnamed);
+    CHECK(slurp() == settled);
+    CHECK(rename_snapshot_base(store.root.path() / "no-record", "a", "b") == BaseRename::Unnamed);
+
+    // Onto a name it already holds: kept once, never twice.
+    REQUIRE(rename_snapshot_base(dir, "Gemma4-E4B-Custom", "Gemma4-E4B-Base") ==
+            BaseRename::Renamed);
+    CHECK(apogee::models::load_snapshot(dir)->bases == std::vector<std::string>{"Gemma4-E4B-Base"});
+
+    // A record this build would not write back as it reads -- a field it
+    // does not know -- is left whole, and said to have failed.
+    const std::string foreign =
+        R"({"ref": "x", "source": "convert", "kind": "drafter", "bases": ["Gemma4-E4B-Base"],)"
+        R"( "made_by": "a later apogee", "files": []})";
+    write_file(path, foreign);
+    CHECK(rename_snapshot_base(dir, "Gemma4-E4B-Base", "Gemma4-E4B-Other") == BaseRename::Failed);
+    CHECK(slurp() == foreign);
+}
+
+TEST_CASE(
+    "a set's towers are what its config declares beside its language model: vision, audio, an "
+    "omni model's thinker, never a name",
+    "[models][store][towers]") {
+    // 53f: the converter is chosen by these, so each of the user's sets is
+    // read from its own configuration.
+    const Store store;
+    const auto towers = [&store](const std::string& name, const std::string& config) {
+        const std::filesystem::path dir = store.root.path() / name;
+        place_snapshot_with(dir, config);
+        return apogee::models::snapshot_towers(dir);
+    };
+    using Towers = std::vector<std::string>;
+    CHECK(towers("qwen3-vl", apogee::testing::kQwen3VlConfig) == Towers{"vision_config"});
+    CHECK(towers("qwen3-omni", apogee::testing::kQwen3OmniConfig) == Towers{"thinker_config"});
+    CHECK(towers("gemma4", apogee::testing::kGemma4Config) ==
+          Towers{"vision_config", "audio_config"});
+    CHECK(towers("gemma4-unified", apogee::testing::kGemma4UnifiedConfig) ==
+          Towers{"vision_config", "audio_config"});
+    CHECK(towers("qwen3.8", apogee::testing::kQwen35Config) == Towers{"vision_config"});
+    CHECK(towers("llama", apogee::testing::kLlamaConfig).empty());
+    // A key set to nothing declares nothing, and neither does a model that
+    // says it is its language model alone -- as the GGUF path reads them.
+    CHECK(towers("null", R"({"model_type": "gemma4", "audio_config": null,
+                             "vision_config": {}})")
+              .empty());
+    CHECK(towers("only", R"({"model_type": "mistral3", "language_model_only": true,
+                             "vision_config": {"hidden_size": 1024}})")
+              .empty());
+    // The name says nothing: a Llama called "VL" is a Llama.
+    CHECK(towers("Qwen3-VL-named", apogee::testing::kLlamaConfig).empty());
+    CHECK(apogee::models::snapshot_towers(store.root.path() / "absent").empty());
+    CHECK(apogee::models::describe_towers({"vision_config", "audio_config"}) ==
+          "vision_config, audio_config");
+    // What a set converts to is unchanged by them: MLX stays a format, its
+    // converter the route's.
+    CHECK(apogee::models::snapshot_conversions(store.root.path() / "qwen3-omni") ==
+          std::vector<std::string>{"gguf", "mlx"});
+    CHECK(apogee::models::snapshot_conversions(store.root.path() / "gemma4") ==
+          std::vector<std::string>{"gguf", "mlx"});
+}
+
+namespace {
+
+/// The user's Gemma-Embedding-300M (M21, 2026-10-21): its `modules.json`
+/// and its two dense layers' configs as stored, its `config.json` sliced to
+/// what says what it is.
+constexpr const char* kEmbeddingConfig =
+    R"({"architectures": ["Gemma3TextModel"], "model_type": "gemma3_text",
+        "hidden_size": 768, "use_bidirectional_attention": true})";
+constexpr const char* kEmbeddingModules = R"([
+  {"idx": 0, "name": "0", "path": "", "type": "sentence_transformers.models.Transformer"},
+  {"idx": 1, "name": "1", "path": "1_Pooling", "type": "sentence_transformers.models.Pooling"},
+  {"idx": 2, "name": "2", "path": "2_Dense", "type": "sentence_transformers.models.Dense"},
+  {"idx": 3, "name": "3", "path": "3_Dense", "type": "sentence_transformers.models.Dense"},
+  {"idx": 4, "name": "4", "path": "4_Normalize", "type": "sentence_transformers.models.Normalize"}
+])";
+
+/// The embedding model `dir` as the user's is stored, its dense layers'
+/// weights there when `dense`.
+void place_embedding_model(const std::filesystem::path& dir, bool dense) {
+    place_snapshot_with(dir, kEmbeddingConfig);
+    write_file(dir / "modules.json", kEmbeddingModules);
+    write_file(dir / "2_Dense" / "config.json",
+               R"({"in_features": 768, "out_features": 3072, "bias": false,
+                   "activation_function": "torch.nn.modules.linear.Identity"})");
+    write_file(dir / "3_Dense" / "config.json",
+               R"({"in_features": 3072, "out_features": 768, "bias": false,
+                   "activation_function": "torch.nn.modules.linear.Identity"})");
+    if (dense) {
+        write_file(dir / "2_Dense" / "model.safetensors");
+        write_file(dir / "3_Dense" / "model.safetensors");
+    }
+}
+
+}  // namespace
+
+TEST_CASE("an embedding model is read from its modules.json: its pipeline, and its dense layers",
+          "[models][store][embedding]") {
+    const Store store;
+    const std::filesystem::path embed = store.root.path() / "embed";
+    place_embedding_model(embed, true);
+    const std::optional<apogee::models::EmbeddingModel> read =
+        apogee::models::snapshot_embedding_model(embed);
+    REQUIRE(read.has_value());
+    CHECK(read->modules ==
+          std::vector<std::string>{"Transformer", "Pooling", "Dense", "Dense", "Normalize"});
+    CHECK(read->dense);
+    // Dense modules named but their weights absent: the converter takes none.
+    const std::filesystem::path bare = store.root.path() / "bare";
+    place_embedding_model(bare, false);
+    CHECK_FALSE(apogee::models::snapshot_embedding_model(bare)->dense);
+    // No Pooling module, no modules.json: none.
+    const std::filesystem::path unpooled = store.root.path() / "unpooled";
+    place_snapshot_with(unpooled, kEmbeddingConfig);
+    write_file(unpooled / "modules.json",
+               R"([{"idx": 0, "path": "", "type": "sentence_transformers.models.Transformer"}])");
+    CHECK_FALSE(apogee::models::snapshot_embedding_model(unpooled).has_value());
+    const std::filesystem::path llama = store.root.path() / "llama";
+    place_snapshot_with(llama, R"({"architectures": ["LlamaForCausalLM"], "model_type": "llama"})");
+    CHECK_FALSE(apogee::models::snapshot_embedding_model(llama).has_value());
+
+    // One wording, and the decision: a GGUF alone.
+    CHECK(apogee::models::describe_embedding_model(*read) ==
+          "an embedding model (sentence-transformers: Transformer, Pooling, Dense, Dense, "
+          "Normalize): it converts to a GGUF a llamacpp backend embeds with -- mlx-lm's converter "
+          "builds language models, and the mlx backend does not embed");
+    CHECK(apogee::models::embedding_model_mlx_refusal("'Gemma-Embedding-300M'", *read)
+              .ends_with("does not embed -- convert it without --mlx"));
+    CHECK(apogee::models::snapshot_conversions(embed) == std::vector<std::string>{"gguf"});
+}
+
+TEST_CASE("an embedding model gains MLX exactly where the installed mlx-embeddings builds its type",
+          "[models][store][embedding][mlx]") {
+    // 53h: the one decision, handed what the environment's mlx-embeddings
+    // builds -- MLX joins the GGUF, offered second, where it builds the set's
+    // own model_type; anywhere else M21's answer stands.
+    const Store store;
+    const std::filesystem::path embed = store.root.path() / "embed";
+    place_embedding_model(embed, true);
+    const auto builds = [](std::vector<std::string> types) -> apogee::models::EmbeddingBuilds {
+        return [types = std::move(types)](std::string_view type) {
+            return std::ranges::find(types, type) != types.end();
+        };
+    };
+    CHECK(apogee::models::snapshot_conversions(embed, builds({"bert", "gemma3_text"})) ==
+          std::vector<std::string>{"gguf", "mlx"});
+    // Its type unbuilt, or nothing installed to ask: as M21 left it.
+    CHECK(apogee::models::snapshot_conversions(embed, builds({"bert", "qwen3"})) ==
+          std::vector<std::string>{"gguf"});
+    CHECK(apogee::models::snapshot_conversions(embed, builds({})) ==
+          std::vector<std::string>{"gguf"});
+    CHECK(apogee::models::snapshot_conversions(embed, {}) == std::vector<std::string>{"gguf"});
+    // A language model's answer is not the embedder's to change.
+    const std::filesystem::path llama = store.root.path() / "llama";
+    place_snapshot_with(llama, R"({"architectures": ["LlamaForCausalLM"], "model_type": "llama"})");
+    CHECK(apogee::models::snapshot_conversions(llama, builds({})) ==
+          std::vector<std::string>{"gguf", "mlx"});
+
+    // Said both ways where it builds.
+    const std::optional<apogee::models::EmbeddingModel> read =
+        apogee::models::snapshot_embedding_model(embed);
+    REQUIRE(read.has_value());
+    CHECK(apogee::models::describe_embedding_model_both(*read) ==
+          "an embedding model (sentence-transformers: Transformer, Pooling, Dense, Dense, "
+          "Normalize): it converts to a GGUF a llamacpp backend embeds with, and through "
+          "mlx-embeddings to an MLX model an mlx backend embeds with");
 }

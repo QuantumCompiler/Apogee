@@ -3,13 +3,18 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <memory>
 #include <random>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "support/env_guard.h"
+#include "training/eval.h"
 #include "training/manifest.h"
 #include "training/mock_trainer.h"
 #include "training/store.h"
@@ -678,4 +683,688 @@ TEST_CASE(
     const apogee::training::RollbackTarget across = apogee::training::rollback_target(mixed);
     CHECK(across.entry == nullptr);
     CHECK(across.error.find("never changes a backend's type") != std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// The adapter promote (53b): the fuse skipped, the adapter the version
+// ---------------------------------------------------------------------------
+
+namespace {
+
+using apogee::training::PromoteMode;
+using apogee::training::PromoteTarget;
+
+/// An adapter version (53b): its file -- or, for MLX, its directory -- under
+/// `dir`, pinned to a base.
+VersionEntry adapter_entry(int version, const std::filesystem::path& dir, bool mlx = false,
+                           bool pruned = false) {
+    VersionEntry e;
+    e.version = version;
+    e.run_id = "r" + std::to_string(version);
+    e.adapter_path = apogee::training::adapter_version_path(
+                         dir, "tuned", version, mlx ? PromoteTarget::Mlx : PromoteTarget::Gguf)
+                         .string();
+    e.base_sha256 = std::string(64, 'b');
+    e.promoted_at = "2026-10-21T12:00:0" + std::to_string(version) + "Z";
+    if (pruned) {
+        e.pruned_at = "2026-10-21T13:00:00Z";
+    } else if (mlx) {
+        write(std::filesystem::path{e.adapter_path} / "adapters.safetensors", "a");
+    } else {
+        write(e.adapter_path, "GGUF lora");
+    }
+    return e;
+}
+
+std::string read_back(const std::filesystem::path& path) {
+    std::ifstream in{path, std::ios::binary};
+    return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+}
+
+/// A converter that counts, records what it was handed, and writes the
+/// mock's GGUF LoRA.
+struct CountingAdapterConverter {
+    int calls = 0;
+    std::filesystem::path adapter;
+    std::filesystem::path base;
+    std::filesystem::path out;
+
+    apogee::training::AdapterConverter closure() {
+        return
+            [this](const std::filesystem::path& adapter_dir, const std::filesystem::path& base_dir,
+                   const std::filesystem::path& gguf, const apogee::training::MessageSink&,
+                   const apogee::harness::CancellationToken&) {
+                ++calls;
+                adapter = adapter_dir;
+                base = base_dir;
+                out = gguf;
+                return apogee::training::write_mock_lora_gguf(adapter_dir, base_dir, gguf);
+            };
+    }
+};
+
+}  // namespace
+
+TEST_CASE(
+    "the adapter plan sits beside the fused plan: max + 1, a small file or directory named for "
+    "the version under training/versions/<backend>/, nothing fused; the default plan is merge",
+    "[training][promote][adapter]") {
+    const apogee::testing::TempDir root{"adapter-plan-" + std::to_string(std::random_device{}())};
+    VersionLedger ledger;
+    ledger.backend = "tuned";
+    ledger.versions = {adapter_entry(1, root.path(), false, true), adapter_entry(2, root.path())};
+    ledger.active_version = 2;
+    const PromotePlan gguf = apogee::training::plan_adapter_promotion(
+        ledger, root.path() / "versions", "tuned", PromoteTarget::Gguf);
+    CHECK(gguf.version == 3);
+    CHECK(gguf.mode == PromoteMode::Adapter);
+    CHECK(gguf.target == PromoteTarget::Gguf);
+    CHECK(gguf.adapter_path == root.path() / "versions" / "tuned" / "v3.lora.gguf");
+    CHECK(gguf.artifact() == gguf.adapter_path);
+    CHECK(gguf.fused_dir.empty());
+    CHECK(gguf.gguf_path.empty());
+    CHECK(gguf.quantize_type.empty());
+    CHECK_FALSE(gguf.keep_fused);
+    const PromotePlan mlx = apogee::training::plan_adapter_promotion(
+        ledger, root.path() / "versions", "tuned", PromoteTarget::Mlx);
+    CHECK(mlx.adapter_path == root.path() / "versions" / "tuned" / "v3.lora");
+    CHECK(mlx.artifact() == mlx.adapter_path);
+
+    // The default is the merge, its plan exactly as it was: no adapter path.
+    const PromotePlan merged = apogee::training::plan_promotion(
+        ledger, root.path() / "runs" / "r9", root.path() / "stage", "tuned", "", false);
+    CHECK(merged.mode == PromoteMode::Merge);
+    CHECK(merged.adapter_path.empty());
+    CHECK(merged.artifact() == merged.gguf_path);
+
+    // What a version is made by, and its kind, read back from the ledger.
+    CHECK(apogee::training::mode_of(adapter_entry(4, root.path())) == PromoteMode::Adapter);
+    CHECK(apogee::training::mode_of(entry(5, root.path())) == PromoteMode::Merge);
+    CHECK(apogee::training::target_of(adapter_entry(6, root.path())) == PromoteTarget::Gguf);
+    CHECK(apogee::training::target_of(adapter_entry(7, root.path(), true)) == PromoteTarget::Mlx);
+    CHECK(adapter_entry(8, root.path()).weights() ==
+          (root.path() / "tuned" / "v8.lora.gguf").string());
+}
+
+TEST_CASE(
+    "a GGUF adapter version skips the fuse, converts once -- the run's adapter against its "
+    "base, into the plan's file -- verifies it, and leaves nothing on a failure",
+    "[training][promote][adapter]") {
+    const apogee::testing::TempDir root{"adapter-gguf-" + std::to_string(std::random_device{}())};
+    const RunManifest manifest = complete_run(root.path());
+    VersionLedger ledger;
+    ledger.backend = "tuned";
+    const PromotePlan plan = apogee::training::plan_adapter_promotion(
+        ledger, root.path() / "versions", "tuned", PromoteTarget::Gguf);
+    CountingAdapterConverter convert;
+    int verified = 0;
+    const apogee::training::Verifier verify = [&verified](const std::filesystem::path&) {
+        ++verified;
+        return std::string{};
+    };
+    std::vector<std::string> messages;
+    const apogee::training::ArtifactsResult built = apogee::training::build_adapter_artifacts(
+        manifest, plan, convert.closure(), verify,
+        [&messages](std::string_view text) { messages.emplace_back(text); }, {});
+    INFO(built.error);
+    REQUIRE(built.ok);
+    CHECK(convert.calls == 1);
+    CHECK(convert.adapter == std::filesystem::path{manifest.adapter_dir});
+    CHECK(convert.base == std::filesystem::path{manifest.base_model});
+    // Written under a staging name beside its place, renamed in once read.
+    CHECK(convert.out == plan.adapter_path.parent_path() / ".incoming-v1.lora.gguf");
+    CHECK_FALSE(std::filesystem::exists(convert.out));
+    CHECK(verified == 1);
+    CHECK(std::filesystem::is_regular_file(plan.adapter_path));
+    CHECK(built.bytes == static_cast<std::int64_t>(std::filesystem::file_size(plan.adapter_path)));
+    // Nothing fused: no checkpoint beside the run, and the fuse never said.
+    CHECK_FALSE(std::filesystem::exists(root.path() / "runs" / "r1" / "fused"));
+    bool fused_message = false;
+    bool no_fuse = false;
+    for (const std::string& message : messages) {
+        fused_message = fused_message || message.find("fusing") != std::string::npos;
+        no_fuse = no_fuse || message.find("no fuse") != std::string::npos;
+    }
+    CHECK_FALSE(fused_message);
+    CHECK(no_fuse);
+    // The run's adapter is as it was.
+    CHECK(
+        std::filesystem::exists(root.path() / "runs" / "r1" / "adapters" / "adapters.safetensors"));
+
+    // The version's path is taken: a second build refuses before converting.
+    const apogee::training::ArtifactsResult again = apogee::training::build_adapter_artifacts(
+        manifest, plan, convert.closure(), verify, {}, {});
+    CHECK_FALSE(again.ok);
+    CHECK(again.error.find("already exists, though the ledger records no v1") != std::string::npos);
+    CHECK(convert.calls == 1);
+    CHECK(std::filesystem::is_regular_file(plan.adapter_path));
+
+    // A conversion that fails, or one that writes something unreadable,
+    // leaves nothing at the version's path.
+    VersionLedger next = ledger;
+    next.versions = {adapter_entry(1, root.path() / "elsewhere")};
+    next.active_version = 1;
+    const PromotePlan second = apogee::training::plan_adapter_promotion(
+        next, root.path() / "versions", "tuned", PromoteTarget::Gguf);
+    const apogee::training::AdapterConverter failing =
+        [](const std::filesystem::path&, const std::filesystem::path&,
+           const std::filesystem::path& gguf, const apogee::training::MessageSink&,
+           const apogee::harness::CancellationToken&) {
+            write(gguf, "half");
+            return std::string{"Model FooForCausalLM is not supported"};
+        };
+    const apogee::training::ArtifactsResult convert_failed =
+        apogee::training::build_adapter_artifacts(manifest, second, failing, verify, {}, {});
+    CHECK_FALSE(convert_failed.ok);
+    CHECK(convert_failed.error.find("convert: Model FooForCausalLM") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(second.adapter_path));
+    CHECK_FALSE(
+        std::filesystem::exists(second.adapter_path.parent_path() / ".incoming-v2.lora.gguf"));
+    const apogee::training::Verifier unreadable = [](const std::filesystem::path&) {
+        return std::string{"bad magic"};
+    };
+    const apogee::training::ArtifactsResult unparsed = apogee::training::build_adapter_artifacts(
+        manifest, second, convert.closure(), unreadable, {}, {});
+    CHECK_FALSE(unparsed.ok);
+    CHECK(unparsed.error.find("the converted LoRA does not parse: bad magic") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(second.adapter_path));
+
+    // Cancelled before it starts: nothing converted, nothing written.
+    const apogee::harness::CancellationToken token = apogee::harness::CancellationToken::create();
+    token.cancel();
+    const int before = convert.calls;
+    const apogee::training::ArtifactsResult cancelled = apogee::training::build_adapter_artifacts(
+        manifest, second, convert.closure(), verify, {}, token);
+    CHECK(cancelled.cancelled);
+    CHECK(convert.calls == before);
+    CHECK_FALSE(std::filesystem::exists(second.adapter_path));
+
+    // What an interrupted attempt left under the staging name was never
+    // registered: the next build replaces it.
+    write(second.adapter_path.parent_path() / ".incoming-v2.lora.gguf", "half of a killed run");
+    const apogee::training::ArtifactsResult resumed = apogee::training::build_adapter_artifacts(
+        manifest, second, convert.closure(), verify, {}, {});
+    INFO(resumed.error);
+    CHECK(resumed.ok);
+    CHECK(std::filesystem::is_regular_file(second.adapter_path));
+    CHECK_FALSE(
+        std::filesystem::exists(second.adapter_path.parent_path() / ".incoming-v2.lora.gguf"));
+    std::filesystem::remove(second.adapter_path);
+
+    // An adapter that is not there is said.
+    RunManifest gone = manifest;
+    gone.adapter_dir = (root.path() / "runs" / "r1" / "nothing").string();
+    const apogee::training::ArtifactsResult missing =
+        apogee::training::build_adapter_artifacts(gone, second, convert.closure(), verify, {}, {});
+    CHECK_FALSE(missing.ok);
+    CHECK(missing.error.find("the run's adapter is not at") != std::string::npos);
+}
+
+TEST_CASE(
+    "an MLX adapter version copies the adapter directory as it is -- the trainer's numbered "
+    "checkpoints left behind -- and converts nothing",
+    "[training][promote][adapter][mlx]") {
+    const apogee::testing::TempDir root{"adapter-mlx-" + std::to_string(std::random_device{}())};
+    const RunManifest manifest = complete_run(root.path());
+    const std::filesystem::path run_adapter{manifest.adapter_dir};
+    write(run_adapter / "adapter_config.json", R"({"lora_parameters": {"rank": 8}})");
+    write(run_adapter / "0000100_adapters.safetensors", "checkpoint");
+    write(run_adapter / "0000200_adapters.safetensors", "checkpoint");
+    VersionLedger ledger;
+    ledger.backend = "tuned";
+    const PromotePlan plan = apogee::training::plan_adapter_promotion(
+        ledger, root.path() / "versions", "tuned", PromoteTarget::Mlx);
+    CountingAdapterConverter convert;
+    const apogee::training::ArtifactsResult built = apogee::training::build_adapter_artifacts(
+        manifest, plan, convert.closure(), accept(), {}, {});
+    INFO(built.error);
+    REQUIRE(built.ok);
+    CHECK(convert.calls == 0);
+    CHECK(std::filesystem::is_directory(plan.adapter_path));
+    CHECK(read_back(plan.adapter_path / "adapter_config.json") ==
+          R"({"lora_parameters": {"rank": 8}})");
+    CHECK(read_back(plan.adapter_path / "adapters.safetensors") == "a");
+    CHECK_FALSE(std::filesystem::exists(plan.adapter_path / "0000100_adapters.safetensors"));
+    CHECK_FALSE(std::filesystem::exists(plan.adapter_path / "0000200_adapters.safetensors"));
+    // What was copied, and nothing else: the configuration and the weights.
+    CHECK(built.bytes ==
+          static_cast<std::int64_t>(std::string_view{R"({"lora_parameters": {"rank": 8}})"}.size() +
+                                    std::string_view{"a"}.size()));
+    // The run keeps its own copy, checkpoints and all.
+    CHECK(std::filesystem::exists(run_adapter / "0000100_adapters.safetensors"));
+    CHECK_FALSE(std::filesystem::exists(root.path() / "runs" / "r1" / "fused"));
+
+    // A copy the check refuses is removed whole.
+    VersionLedger next;
+    next.backend = "tuned";
+    next.versions = {adapter_entry(1, root.path() / "elsewhere", true)};
+    next.active_version = 1;
+    const PromotePlan second = apogee::training::plan_adapter_promotion(
+        next, root.path() / "versions", "tuned", PromoteTarget::Mlx);
+    const apogee::training::Verifier refusing = [](const std::filesystem::path&) {
+        return std::string{"it holds no adapter_config.json"};
+    };
+    const apogee::training::ArtifactsResult refused = apogee::training::build_adapter_artifacts(
+        manifest, second, convert.closure(), refusing, {}, {});
+    CHECK_FALSE(refused.ok);
+    CHECK(refused.error.find("not an mlx-lm adapter directory") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(second.adapter_path));
+    CHECK_FALSE(std::filesystem::exists(second.adapter_path.parent_path() / ".incoming-v2.lora"));
+    CHECK(convert.calls == 0);
+}
+
+TEST_CASE(
+    "adapter formats never cross, said by name: an mlx run's adapter onto a llamacpp target, a "
+    "peft run's onto an mlx one; a later pipeline stage's adapter applies over no entry's base",
+    "[training][promote][adapter][refusal]") {
+    const apogee::testing::TempDir root{"adapter-cross-" + std::to_string(std::random_device{}())};
+    RunManifest run = complete_run(root.path());
+    using apogee::training::adapter_promotion_conflict;
+
+    run.trainer = "mlx";
+    const std::string mlx_to_gguf = adapter_promotion_conflict(run, PromoteTarget::Gguf);
+    CHECK(mlx_to_gguf.find("mlx-lm adapter (trainer mlx)") != std::string::npos);
+    CHECK(mlx_to_gguf.find("GGUF LoRA") != std::string::npos);
+    CHECK(mlx_to_gguf.find("PEFT adapter (trainer peft)") != std::string::npos);
+    CHECK(mlx_to_gguf.find("never cross") != std::string::npos);
+    CHECK(mlx_to_gguf.find("--target mlx") != std::string::npos);
+    CHECK(adapter_promotion_conflict(run, PromoteTarget::Mlx).empty());
+
+    run.trainer = "peft";
+    const std::string peft_to_mlx = adapter_promotion_conflict(run, PromoteTarget::Mlx);
+    CHECK(peft_to_mlx.find("PEFT adapter (trainer peft)") != std::string::npos);
+    CHECK(peft_to_mlx.find("mlx-lm adapter directory (trainer mlx)") != std::string::npos);
+    CHECK(peft_to_mlx.find("--target gguf") != std::string::npos);
+    CHECK(adapter_promotion_conflict(run, PromoteTarget::Gguf).empty());
+
+    run.trainer = "mock";
+    CHECK(adapter_promotion_conflict(run, PromoteTarget::Gguf).empty());
+    CHECK(adapter_promotion_conflict(run, PromoteTarget::Mlx).empty());
+
+    // A format nobody recorded is not guessed.
+    run.trainer.clear();
+    CHECK(adapter_promotion_conflict(run, PromoteTarget::Gguf).find("records no trainer") !=
+          std::string::npos);
+
+    // A stage after the first trained over the stage before's fused weights.
+    run.trainer = "peft";
+    run.parent_run = "pipe-1-s0";
+    const std::string staged = adapter_promotion_conflict(run, PromoteTarget::Gguf);
+    CHECK(staged.find("pipeline stage trained over stage pipe-1-s0") != std::string::npos);
+    CHECK(staged.find("without --adapter") != std::string::npos);
+}
+
+TEST_CASE(
+    "a backend's versions are merged or adapters, never both: each is refused into a ledger of "
+    "the other, before anything is built",
+    "[training][promote][adapter][refusal]") {
+    const apogee::testing::TempDir root{"adapter-kinds-" + std::to_string(std::random_device{}())};
+    VersionLedger empty;
+    empty.backend = "tuned";
+    CHECK(apogee::training::target_conflict(empty, PromoteTarget::Gguf, PromoteMode::Adapter)
+              .empty());
+
+    VersionLedger merged;
+    merged.backend = "tuned";
+    merged.versions = {entry(1, root.path())};
+    merged.active_version = 1;
+    CHECK(apogee::training::target_conflict(merged, PromoteTarget::Gguf).empty());
+    const std::string onto_merged =
+        apogee::training::target_conflict(merged, PromoteTarget::Gguf, PromoteMode::Adapter);
+    CHECK(onto_merged.find("'tuned' holds merged versions (active v1)") != std::string::npos);
+    CHECK(onto_merged.find("not the base an adapter was trained over") != std::string::npos);
+
+    VersionLedger adapters;
+    adapters.backend = "tuned";
+    adapters.versions = {adapter_entry(1, root.path() / "a"), adapter_entry(2, root.path() / "a")};
+    adapters.active_version = 2;
+    CHECK(apogee::training::target_conflict(adapters, PromoteTarget::Gguf, PromoteMode::Adapter)
+              .empty());
+    // The default -- a merge -- is refused into it: it would replace the
+    // base under the adapters.
+    const std::string onto_adapters =
+        apogee::training::target_conflict(adapters, PromoteTarget::Gguf);
+    CHECK(onto_adapters.find("'tuned' holds adapter versions (active v2)") != std::string::npos);
+    CHECK(onto_adapters.find("with --adapter") != std::string::npos);
+    // Within adapters, the target still never changes.
+    CHECK(apogee::training::target_conflict(adapters, PromoteTarget::Mlx, PromoteMode::Adapter)
+              .find("holds GGUF LoRA adapters (active v2)") != std::string::npos);
+
+    // A rollback never crosses from an adapter version to a merged one.
+    VersionLedger mixed;
+    mixed.backend = "tuned";
+    mixed.versions = {entry(1, root.path() / "m"), adapter_entry(2, root.path() / "m")};
+    mixed.active_version = 2;
+    const apogee::training::RollbackTarget across = apogee::training::rollback_target(mixed);
+    CHECK(across.entry == nullptr);
+    CHECK(across.error.find("v1 of 'tuned' is a GGUF") != std::string::npos);
+    CHECK(across.error.find("never changes a backend's type") != std::string::npos);
+}
+
+TEST_CASE(
+    "adapter versions are retained and rolled back as any version is: kilobyte files removed "
+    "beyond retain_versions, never the active one, a rollback to one gone refused",
+    "[training][promote][adapter][retain][rollback]") {
+    const apogee::testing::TempDir root{"adapter-retain-" + std::to_string(std::random_device{}())};
+    VersionLedger ledger;
+    ledger.backend = "tuned";
+    ledger.versions = {adapter_entry(1, root.path()), adapter_entry(2, root.path()),
+                       adapter_entry(3, root.path())};
+    ledger.active_version = 3;
+    const apogee::training::PruneResult pruned = apogee::training::record_promotion(
+        ledger, adapter_entry(4, root.path()), 2, "2026-10-21T15:00:00Z");
+    CHECK(ledger.active_version == 4);
+    CHECK(pruned.removed ==
+          std::vector<std::string>{(root.path() / "tuned" / "v1.lora.gguf").string(),
+                                   (root.path() / "tuned" / "v2.lora.gguf").string()});
+    CHECK_FALSE(std::filesystem::exists(root.path() / "tuned" / "v1.lora.gguf"));
+    CHECK_FALSE(std::filesystem::exists(root.path() / "tuned" / "v2.lora.gguf"));
+    CHECK(std::filesystem::exists(root.path() / "tuned" / "v3.lora.gguf"));
+    CHECK(std::filesystem::exists(root.path() / "tuned" / "v4.lora.gguf"));
+    CHECK(ledger.find(1)->pruned());
+    CHECK(ledger.kept() == 2);
+
+    // Rollback repoints at the adapter below, its pin with it; deletes nothing.
+    const apogee::training::RollbackTarget back = apogee::training::rollback_target(ledger);
+    REQUIRE(back.entry != nullptr);
+    CHECK(back.entry->version == 3);
+    CHECK(back.entry->adapter_path == (root.path() / "tuned" / "v3.lora.gguf").string());
+    CHECK(back.entry->base_sha256 == std::string(64, 'b'));
+    CHECK(std::filesystem::exists(root.path() / "tuned" / "v4.lora.gguf"));
+    ledger.active_version = 3;
+    const apogee::training::RollbackTarget gone = apogee::training::rollback_target(ledger);
+    CHECK(gone.entry == nullptr);
+    CHECK(gone.error.find("its adapter is gone") != std::string::npos);
+    ledger.active_version = 4;
+    std::filesystem::remove(root.path() / "tuned" / "v3.lora.gguf");
+    const apogee::training::RollbackTarget missing = apogee::training::rollback_target(ledger);
+    CHECK(missing.entry == nullptr);
+    CHECK(missing.error.find("the adapter for v3 of 'tuned' is not at") != std::string::npos);
+
+    // An MLX adapter version's directory goes whole.
+    VersionLedger mlx;
+    mlx.backend = "tuned";
+    mlx.versions = {adapter_entry(1, root.path() / "x", true),
+                    adapter_entry(2, root.path() / "x", true)};
+    mlx.active_version = 2;
+    (void)apogee::training::record_promotion(mlx, adapter_entry(3, root.path() / "x", true), 2,
+                                             "t");
+    CHECK_FALSE(std::filesystem::exists(root.path() / "x" / "tuned" / "v1.lora"));
+    CHECK(
+        std::filesystem::exists(root.path() / "x" / "tuned" / "v2.lora" / "adapters.safetensors"));
+
+    // The ledger entry a successful adapter build records.
+    const PromotePlan plan = apogee::training::plan_adapter_promotion(
+        ledger, root.path() / "versions", "tuned", PromoteTarget::Gguf);
+    const VersionEntry recorded =
+        apogee::training::promotion_entry(complete_run(root.path()), plan, "now");
+    CHECK(recorded.version == 5);
+    CHECK(recorded.adapter_path == plan.adapter_path.string());
+    CHECK(recorded.gguf_path.empty());
+    CHECK(recorded.mlx_path.empty());
+    CHECK(recorded.adapter());
+}
+
+// ---------------------------------------------------------------------------
+// The gate on the base that serves (53c): a candidate bound for a quantized
+// base scored there, once, over scripted closures.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+using apogee::training::CandidateReply;
+using apogee::training::CandidateRunner;
+using apogee::training::EvalItem;
+using apogee::training::EvalOptions;
+using apogee::training::gate_on_serving_base;
+using apogee::training::plan_serving_gate;
+using apogee::training::ServingGate;
+using apogee::training::ServingGateRequest;
+using apogee::training::ServingRunnerFactory;
+
+/// A runner answering every prompt with `answer` -- or the prompt itself
+/// when it is empty -- counting what it is asked; failing when told to.
+class Answering final : public CandidateRunner {
+public:
+    Answering(std::string answer, int& asked, bool fail)
+        : answer_{std::move(answer)}, asked_{asked}, fail_{fail} {}
+
+    CandidateReply run(std::string_view prompt,
+                       const apogee::harness::CancellationToken& cancellation) override {
+        ++asked_;
+        CandidateReply reply;
+        if (fail_ || cancellation.stop_requested()) {
+            reply.error = "the runtime stopped";
+            return reply;
+        }
+        reply.ok = true;
+        reply.text = answer_.empty() ? std::string{prompt} : answer_;
+        return reply;
+    }
+
+private:
+    std::string answer_;
+    int& asked_;
+    bool fail_;
+};
+
+/// The serving base's runtime, scripted: what the tuned candidate answers,
+/// what refuses to build, and every build and ask counted -- so a test pins
+/// which closure the gate scored on.
+struct Served {
+    std::string answer{};
+    std::string refuse_tuned{};
+    std::string refuse_bare{};
+    bool fail = false;
+    int tuned = 0;
+    int bare = 0;
+    int asked = 0;
+
+    [[nodiscard]] ServingRunnerFactory factory() {
+        return [this](bool tuned_build, std::string& error) -> std::unique_ptr<CandidateRunner> {
+            const std::string& refused = tuned_build ? refuse_tuned : refuse_bare;
+            if (!refused.empty()) {
+                error = refused;
+                return nullptr;
+            }
+            ++(tuned_build ? tuned : bare);
+            return std::make_unique<Answering>(tuned_build ? answer : "base says no", asked, fail);
+        };
+    }
+};
+
+/// A request scoring two substring items on a Q4_K_M base.
+ServingGateRequest on_q4(GateMode mode = GateMode::Hard, bool force = false) {
+    ServingGateRequest request;
+    request.base = {.backend = "local",
+                    .weights = "/models/m/gguf/0123456789ab/m-Q4_K_M.gguf",
+                    .label = "m-Q4_K_M.gguf",
+                    .precision = "Q4_K_M",
+                    .quantized = true};
+    request.items = {EvalItem{.prompt = "say hello", .expected = "hello"},
+                     EvalItem{.prompt = "say bye", .expected = "bye"}};
+    request.suite = "kit:demo";
+    request.mode = mode;
+    request.force = force;
+    return request;
+}
+
+constexpr std::string_view kWhere = "m-Q4_K_M.gguf (Q4_K_M), the base 'local' serves";
+
+}  // namespace
+
+TEST_CASE(
+    "a candidate bound for a quantized base is scored there, once, whatever its run's own eval "
+    "said",
+    "[training][promote][gate][serving]") {
+    const apogee::testing::TempDir root{"serving-" + std::to_string(std::random_device{}())};
+    CHECK(apogee::training::describe(on_q4().base) == "m-Q4_K_M.gguf (Q4_K_M)");
+
+    // The run's own eval FAILED where its trainer ran; on the base that will
+    // serve, the candidate passes -- and that is the verdict.
+    Served served;
+    const ServingGate passing =
+        gate_on_serving_base(complete_run(root.path(), true, false), on_q4(), served.factory(), {});
+    CHECK(passing.verdict.ok);
+    CHECK(passing.verdict.warning.empty());
+    REQUIRE(passing.results.has_value());
+    CHECK(passing.results->passed);
+    CHECK(passing.results->num_passed == 2);
+    CHECK(passing.results->suite == "kit:demo");
+    // The serving closure, its candidate built once and asked each item; no
+    // baseline without a judge, and nothing else is asked.
+    CHECK(served.tuned == 1);
+    CHECK(served.bare == 0);
+    CHECK(served.asked == 2);
+
+    // The run's own eval PASSED; on the quantized base the candidate
+    // degrades under the floor -- refused, saying where it was scored.
+    Served degraded{.answer = "something else"};
+    const ServingGate refused =
+        gate_on_serving_base(complete_run(root.path()), on_q4(), degraded.factory(), {});
+    CHECK_FALSE(refused.verdict.ok);
+    CHECK(refused.verdict.error == "the eval gate failed for run r1, scored on " +
+                                       std::string{kWhere} +
+                                       " (0%: 0/2 passed). Fix the training or the suite, then "
+                                       "promote again, or pass --force to skip the gate");
+    REQUIRE(refused.results.has_value());
+    CHECK_FALSE(refused.results->passed);
+    CHECK(degraded.asked == 2);
+
+    // Soft: let through, said, and the failing score kept for the record.
+    Served soft_run{.answer = "say hello"};
+    const ServingGate soft = gate_on_serving_base(complete_run(root.path()), on_q4(GateMode::Soft),
+                                                  soft_run.factory(), {});
+    CHECK(soft.verdict.ok);
+    CHECK(
+        soft.verdict.warning.starts_with("gate_mode is soft: the eval gate failed for run r1, "
+                                         "scored on " +
+                                         std::string{kWhere} + " (50%: 1/2 passed)"));
+    REQUIRE(soft.results.has_value());
+
+    // The version records the gate that let it through, never the run's
+    // own eval: where it scored, and how.
+    VersionEntry version = entry(1, root.path());
+    version.eval_score = 1.0;
+    version.eval_passed = true;
+    apogee::training::record_serving_gate(version, soft, on_q4().base);
+    CHECK(version.eval_score == 0.5);
+    CHECK(version.eval_passed == false);
+    CHECK(version.eval_scored_on == "m-Q4_K_M.gguf (Q4_K_M)");
+}
+
+TEST_CASE(
+    "the gate on the serving base: --force scores nothing, no suite refuses a hard gate, and "
+    "an incomplete run never passes",
+    "[training][promote][gate][serving]") {
+    const apogee::testing::TempDir root{"serving-" + std::to_string(std::random_device{}())};
+
+    // --force: no eval at all, no judge paid -- and said.
+    Served forced;
+    const ServingGate skipped = gate_on_serving_base(
+        complete_run(root.path()), on_q4(GateMode::Hard, true), forced.factory(), {});
+    CHECK(skipped.verdict.ok);
+    CHECK(skipped.verdict.warning ==
+          "promoting despite the gate (--force): run r1 was not scored on " + std::string{kWhere});
+    CHECK_FALSE(skipped.results.has_value());
+    CHECK(forced.tuned + forced.bare + forced.asked == 0);
+    CHECK_FALSE(plan_serving_gate(complete_run(root.path()), on_q4(GateMode::Hard, true)).score);
+    // The version then carries no eval, not its run's.
+    VersionEntry version = entry(1, root.path());
+    version.eval_score = 1.0;
+    version.eval_passed = true;
+    apogee::training::record_serving_gate(version, skipped, on_q4().base);
+    CHECK_FALSE(version.eval_score.has_value());
+    CHECK_FALSE(version.eval_passed.has_value());
+    CHECK(version.eval_scored_on.empty());
+
+    // No suite: a hard gate refuses before anything is built, naming the
+    // flag; a soft one lets it through, said.
+    ServingGateRequest bare = on_q4();
+    bare.items.clear();
+    const apogee::training::ServingPlan plan = plan_serving_gate(complete_run(root.path()), bare);
+    CHECK_FALSE(plan.verdict.ok);
+    CHECK_FALSE(plan.score);
+    CHECK(plan.verdict.error ==
+          "no eval suite to score run r1 on " + std::string{kWhere} +
+              " -- pass --suite <path|name>, or set training.eval_suite_path, or pass --force to "
+              "skip the gate");
+    Served unasked;
+    CHECK_FALSE(
+        gate_on_serving_base(complete_run(root.path()), bare, unasked.factory(), {}).verdict.ok);
+    bare.mode = GateMode::Soft;
+    const ServingGate soft =
+        gate_on_serving_base(complete_run(root.path()), bare, unasked.factory(), {});
+    CHECK(soft.verdict.ok);
+    CHECK(soft.verdict.warning.starts_with("gate_mode is soft: no eval suite"));
+    CHECK(unasked.tuned + unasked.bare == 0);
+
+    // A run that did not complete is refused, whatever the mode or --force.
+    RunManifest crashed = complete_run(root.path());
+    crashed.status = std::string{apogee::training::kStatusFailed};
+    const ServingGate dead =
+        gate_on_serving_base(crashed, on_q4(GateMode::Soft, true), unasked.factory(), {});
+    CHECK_FALSE(dead.verdict.ok);
+    CHECK(dead.verdict.error.find("only a complete run can be promoted") != std::string::npos);
+}
+
+TEST_CASE(
+    "a candidate the serving base cannot build or ask is held to the gate unscored; a judge or "
+    "baseline that fails never costs it",
+    "[training][promote][gate][serving]") {
+    const apogee::testing::TempDir root{"serving-" + std::to_string(std::random_device{}())};
+
+    // The runtime cannot build the candidate: nothing to say for it.
+    Served unbuilt{.refuse_tuned = "llama.cpp is not in this build"};
+    const ServingGate no_runtime =
+        gate_on_serving_base(complete_run(root.path()), on_q4(), unbuilt.factory(), {});
+    CHECK_FALSE(no_runtime.verdict.ok);
+    CHECK(no_runtime.verdict.error == "run r1 could not be scored on " + std::string{kWhere} +
+                                          ": llama.cpp is not in this build, or pass --force to "
+                                          "skip the gate");
+    CHECK_FALSE(no_runtime.results.has_value());
+    // Built, but it cannot answer: the eval aborts, held the same way.
+    Served broken{.fail = true};
+    const ServingGate aborted =
+        gate_on_serving_base(complete_run(root.path()), on_q4(), broken.factory(), {});
+    CHECK_FALSE(aborted.verdict.ok);
+    CHECK(aborted.verdict.error.find("could not be scored on " + std::string{kWhere} +
+                                     ": candidate inference") != std::string::npos);
+
+    // A judged suite: the baseline -- the bare serving base -- is built for
+    // the judge alone, and a judge that fails is a tie, which passes.
+    ServingGateRequest judged = on_q4();
+    judged.items = {EvalItem{.prompt = "write a haiku"}};
+    EvalOptions options;
+    options.judge_backend = "judge";
+    options.judge = [](std::string_view, std::string_view, std::string_view,
+                       const apogee::harness::CancellationToken&) {
+        return apogee::training::JudgeReply{.ok = false, .text = {}, .error = "judge down"};
+    };
+    Served judging;
+    const ServingGate tied =
+        gate_on_serving_base(complete_run(root.path()), judged, judging.factory(), options);
+    CHECK(tied.verdict.ok);
+    REQUIRE(tied.results.has_value());
+    CHECK(tied.results->items.front().judge_winner == "tie");
+    CHECK(judging.tuned == 1);
+    CHECK(judging.bare == 1);
+    // A baseline the runtime cannot build leaves the judged items to skip,
+    // counted -- never a refusal.
+    Served baseless{.refuse_bare = "no memory for a second copy"};
+    const ServingGate skipped =
+        gate_on_serving_base(complete_run(root.path()), judged, baseless.factory(), options);
+    CHECK(skipped.verdict.ok);
+    REQUIRE(skipped.results.has_value());
+    CHECK(skipped.results->num_skipped == 1);
+
+    // Cancelled mid-eval: said as cancelled, no verdict either way.
+    EvalOptions cancelling;
+    cancelling.cancellation = apogee::harness::CancellationToken::create();
+    cancelling.cancellation.cancel();
+    Served stopped;
+    const ServingGate cancelled =
+        gate_on_serving_base(complete_run(root.path()), on_q4(), stopped.factory(), cancelling);
+    CHECK(cancelled.cancelled);
+    CHECK_FALSE(cancelled.results.has_value());
 }

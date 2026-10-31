@@ -1,0 +1,27 @@
+Planning A Note -- 20261022-182803-f9f6, on chatty
+attached to the chat: /Users/someone/Documents/report.md (1 file, 71 B)
+
+turn 2 -- history compacted; what came before is this summary:
+  They asked how to write a note; a short list, the date first.
+Then write the date first, as 2026-10-22.
+
+turn 3
+You: Which port does the dev server use?
+The dev server listens on port 8080.
+
+turn 4
+You: What is in notes.md?
+[tool] read_file {"path":"Documents/notes.md"} -- returned 30 B
+notes.md holds two items: **buy milk** and *call the plumber*.
+
+turn 4
+You: Is the launch still on?
+(no answer kept: the turn was cancelled or failed)
+
+turn 5
+You: What does the report I attached say?
+attached: /Users/someone/Documents/report.md (1 file, 71 B)
+The report says the launch moved to **November**:
+
+- the beta ends on 2026-10-31
+- the launch is on 2026-11-12

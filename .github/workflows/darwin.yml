@@ -1,0 +1,127 @@
+# Apogee Darwin -- the macOS application's PIPELINE.
+#
+# WHEN YOU CHANGE THIS FILE -- a job added, removed or renamed -- the same
+# list as the CLI pipeline's applies (DEVELOPER.md -> Changing the pipeline):
+#
+#   - the required checks. Once the pull request's run passes, and BEFORE it
+#     merges: lib/scripts/required-checks.py --pr <N>, then --apply (it
+#     changes the repository's settings, so it is the user's to run). It
+#     reads every workflow's passing jobs, this one's included;
+#   - a required job never gets a job-level `if:`: it would report skipped
+#     under its name and never pass. Skip its steps instead (see `build`).
+#
+# The CLI pipeline is ci.yml; this is the GUI's own, beside it (the recorded
+# 2026-09-25 decision: a GUI application gets a pipeline of its own). It
+# builds, tests and packages ONE deliverable, Apogee.app (lib/src/darwin), and
+# it runs only when what the app is built from has changed --
+# lib/scripts/changed.sh gui-darwin declares that, once. When it has not, the
+# job runs under its required name with nothing in it, on a Linux runner, and
+# passes.
+#
+# One build path: the job calls lib/scripts/cicd.sh --app darwin, the same
+# command a developer runs, which calls the app's own scripts/build.sh; the
+# package is that script's too. Nothing here builds anything itself.
+#
+# The artifact (track 1's 1d, the user's calls of 2026-10-20): Apogee.app,
+# signed ad hoc -- no Developer ID, no notarization, no signing secret
+# anywhere -- verified, zipped with its README as `apogee-gui-darwin`, and
+# kept as an artifact of the run. It is not attached to any release: that is
+# its own later step, on the user's word. The cost of ad-hoc signing is said
+# in the README inside the zip: on another Mac, the first launch is
+# right-click -> Open.
+#
+# The runner: the app targets macOS 27 and needs Xcode 27's SDK, which
+# GitHub's `xcode-27` image carries (macOS 27, public preview since
+# 2026-07-16). The CLI's `macos-latest` (macOS 26 on 2026-10-31) cannot
+# build it.
+
+name: Darwin
+
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+  && format('{0} Darwin Manual Checks', github.ref_name)
+  || format('{0} Darwin Pull Request Checks', github.head_ref) }}
+
+# A pull request into `stable`, or on request. No `closed`: nothing of the app
+# is released by a merge yet.
+on:
+  pull_request:
+    branches: [stable]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: darwin-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    # Has what the app is built from changed since the latest release? The
+    # same comparison as the CLI pipeline's `what changed`: against the
+    # latest RELEASE, judged on the pull request's whole test merge. On
+    # request, everything runs. If this fails, `build darwin` is skipped and
+    # its required check never reports: fail closed.
+    name: what changed (darwin)
+    runs-on: ubuntu-24.04
+    outputs:
+      darwin: ${{ steps.diff.outputs['gui-darwin'] }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Has the app changed since the latest release?
+        id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          found="$(lib/scripts/latest-release.sh)"
+          commit=""
+          [ -z "$found" ] || read -r _ commit <<<"$found"
+          case "$EVENT" in
+            pull_request)
+              lib/scripts/changed.sh gui-darwin "$commit" HEAD
+              ;;
+            *)
+              echo "on request: everything runs"
+              echo "gui-darwin=true" | tee -a "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+  build:
+    # Build, test, package: on the `xcode-27` image when the app changed, and
+    # with every step skipped on a Linux runner when it did not -- the job
+    # still reports, under its required name.
+    name: build darwin
+    needs: changes
+    runs-on: ${{ needs.changes.outputs.darwin == 'true' && 'xcode-27' || 'ubuntu-24.04' }}
+    steps:
+      - uses: actions/checkout@v5
+        if: needs.changes.outputs.darwin == 'true'
+
+      # The release build, then the whole suite: hermetic, no network, no
+      # apogee binary (the real-binary pass is skipped, and says so).
+      - name: Build and test
+        if: needs.changes.outputs.darwin == 'true'
+        run: lib/scripts/cicd.sh --app darwin --platform macos-arm64 --test --no-defer
+
+      # Apogee.app, its signature verified again, zipped with its README.
+      - name: Package
+        if: needs.changes.outputs.darwin == 'true'
+        run: lib/src/darwin/scripts/build.sh package
+
+      - name: Keep the app as an artifact of the run
+        if: needs.changes.outputs.darwin == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: apogee-gui-darwin
+          path: lib/src/darwin/build/macos-arm64/apogee-gui-darwin.zip
+          if-no-files-found: error
+
+      - name: Unchanged
+        if: needs.changes.outputs.darwin != 'true'
+        run: echo "the app is unchanged since the latest release -- nothing to build"

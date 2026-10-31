@@ -4,13 +4,21 @@
 #include <nlohmann/json.hpp>
 
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
+#include <system_error>
 
 #include "cli/helpers.h"
 #include "cli/tui_child.h"
+#include "contracts/config.h"
+#include "contracts/paths.h"
 #include "machine/json_reporter.h"
+#include "operations/code_exec_server.h"
+#include "platform/child_process.h"
+#include "platform/ffmpeg.h"
 #include "platform/platform.h"
 #include "training/python_env.h"
 #include "training/trainer.h"
@@ -27,6 +35,11 @@ namespace {
     return out;
 }
 
+/// What a step runs, as typed: `apogee …`, or another program's commands.
+[[nodiscard]] std::string step_line(const BootstrapStep& step) {
+    return step.external.empty() ? command_line(step.words) : remedy_line(step.external);
+}
+
 /// The last line with anything on it, trimmed.
 [[nodiscard]] std::string last_said(const std::vector<std::string>& lines) {
     for (auto line = lines.rbegin(); line != lines.rend(); ++line) {
@@ -41,26 +54,106 @@ namespace {
 
 constexpr std::string_view kRerun = "'apogee bootstrap' runs it again any time";
 
+/// The plan's facts, read once before the first step: the host's shape;
+/// whether the code-execution server is registered, from the config; and,
+/// where the captions step could run, whether ffmpeg has the subtitles
+/// filter -- by `check`'s own probe (2026-10-21).
+[[nodiscard]] BootstrapHost detect_bootstrap_host(const RootContext& context) {
+    BootstrapHost host;
+    const training::HostShape shape = training::detect_host();
+    host.apple_silicon = shape.apple_silicon;
+    host.nvidia_smi = shape.nvidia_smi;
+    host.macos = platform::host_target().starts_with("macos");
+    host.brew = !platform::find_on_path("brew").empty();
+    if (host.macos && host.brew && !platform::ffmpeg_path().empty()) {
+        std::string error;
+        if (const std::optional<std::string> filters =
+                platform::ffmpeg_listing("-filters", {}, error)) {
+            host.ffmpeg_subtitles = platform::filter_listed(*filters, "subtitles");
+        }
+    }
+    try {
+        const std::filesystem::path path = harness::resolve_config_path(context.config_path);
+        std::error_code code;
+        if (std::filesystem::exists(path, code)) {
+            const harness::Config config = harness::load_config(path);
+            const operations::CodeExecRegistration registration =
+                operations::code_exec_registration(harness::apogee_home());
+            host.code_exec_registered_as =
+                operations::registered_code_exec_server(config, registration.script);
+            if (host.code_exec_registered_as.empty() &&
+                config.mcp_servers.contains(std::string{operations::kCodeExecServerName})) {
+                host.code_exec_registered_as = operations::kCodeExecServerName;
+                host.code_exec_name_taken = true;
+            }
+        }
+    } catch (const harness::ConfigError&) {
+        // A config that does not parse is check's to report; the step runs
+        // and says the create's own refusal.
+    }
+    return host;
+}
+
 }  // namespace
 
-std::vector<BootstrapStep> bootstrap_plan(bool apple_silicon, bool nvidia_smi) {
+std::vector<BootstrapStep> bootstrap_plan(const BootstrapHost& host) {
     std::vector<BootstrapStep> out;
     // The table's own sets, in its order: a set added there joins here.
     for (const std::string_view name : training::requirement_set_names()) {
         const std::optional<training::RequirementSet> set =
             training::requirement_set_from_string(name);
         BootstrapStep step{.name = "the '" + std::string{name} + "' set"};
-        if (std::string unfit = training::set_unfit_reason(*set, apple_silicon, nvidia_smi);
+        if (std::string unfit =
+                training::set_unfit_reason(*set, host.apple_silicon, host.nvidia_smi);
             !unfit.empty()) {
             step.status = "skipped";
             step.reason = std::move(unfit);
+        } else if (training::set_opt_in(*set)) {
+            // Never at install unasked (53k): said, with the command that
+            // installs it on the person's word.
+            step.status = "skipped";
+            step.reason = "opt-in, never installed unasked -- 'apogee train setup --with " +
+                          std::string{name} + "' installs it";
         } else {
             step.words = {"train", "setup", "--with", std::string{name}};
         }
         out.push_back(std::move(step));
     }
+    // The code-execution server (47b), by its preset (47c), after the
+    // runtimes so it runs under the environment they made.
+    BootstrapStep code{.name = "the code-execution server"};
+    if (host.code_exec_name_taken) {
+        code.status = "skipped";
+        code.reason = "an MCP server named '" + host.code_exec_registered_as +
+                      "' runs something else -- 'apogee mcp create <name> --from code-exec' "
+                      "registers it under another";
+    } else if (!host.code_exec_registered_as.empty()) {
+        code.status = "skipped";
+        code.reason = "registered already, as '" + host.code_exec_registered_as + "'";
+    } else {
+        code.words = {"mcp", "create", std::string{operations::kCodeExecServerName}, "--from",
+                      "code-exec"};
+    }
+    out.push_back(std::move(code));
     out.push_back({.name = "the providers", .words = {"providers", "scan", "--register"}});
     out.push_back({.name = "the model store", .words = {"config", "scan", "--register"}});
+    // An ffmpeg that burns captions (52e's ability): check's remedy run,
+    // where it is the remedy -- macOS with Homebrew -- and needed.
+    BootstrapStep ffmpeg{.name = "ffmpeg with captions"};
+    ffmpeg.status = "skipped";
+    if (!host.macos) {
+        ffmpeg.reason = "Homebrew's ffmpeg-full is macOS's -- 'apogee check' names this host's way";
+    } else if (!host.brew) {
+        ffmpeg.reason = "Homebrew is not on PATH -- 'apogee check' names the commands";
+    } else if (!host.ffmpeg_subtitles.has_value()) {
+        ffmpeg.reason = "no ffmpeg answered on PATH -- 'apogee check' names the one to install";
+    } else if (*host.ffmpeg_subtitles) {
+        ffmpeg.reason = "this ffmpeg burns captions already (its subtitles filter is there)";
+    } else {
+        ffmpeg.status.clear();
+        ffmpeg.external = macos_captions_remedy();
+    }
+    out.push_back(std::move(ffmpeg));
     return out;
 }
 
@@ -79,7 +172,7 @@ BootstrapResult run_bootstrap(const BootstrapSeams& seams, const std::string& mi
             "has, any time");
         return result;
     }
-    result.steps = bootstrap_plan(seams.apple_silicon, seams.nvidia_smi);
+    result.steps = bootstrap_plan(seams.host);
     const std::size_t count = result.steps.size();
     say("bootstrap: the runtimes this machine can run, then its providers and its model store, "
         "registered");
@@ -88,18 +181,33 @@ BootstrapResult run_bootstrap(const BootstrapSeams& seams, const std::string& mi
         BootstrapStep& step = result.steps[index];
         const std::string head =
             "[" + std::to_string(index + 1) + "/" + std::to_string(count) + "] " + step.name;
-        if (step.words.empty()) {
+        if (!step.runs()) {
             say(head + " -- skipped: " + step.reason);
             continue;
         }
-        say(head + " -- " + command_line(step.words));
+        say(head + " -- " + step_line(step));
         std::vector<std::string> lines;
-        const int code = seams.run ? seams.run(step.words,
-                                               [&](std::string line) {
-                                                   say("  " + line);
-                                                   lines.push_back(std::move(line));
-                                               })
-                                   : -1;
+        const auto hand_on = [&](std::string line) {
+            say("  " + line);
+            lines.push_back(std::move(line));
+        };
+        int code = 0;
+        std::string failed;
+        if (step.external.empty()) {
+            code = seams.run ? seams.run(step.words, hand_on) : -1;
+        } else {
+            // Another program's commands, in order: one that must succeed
+            // ends the step when it fails; one that may fail does not.
+            for (const RemedyCommand& command : step.external) {
+                lines.clear();
+                const int ended = seams.run_program ? seams.run_program(command.argv, hand_on) : -1;
+                if (ended != 0 && !command.may_fail) {
+                    code = ended;
+                    failed = remedy_line({command}) + ": ";
+                    break;
+                }
+            }
+        }
         if (code == 0) {
             step.status = "done";
             ++done;
@@ -108,9 +216,9 @@ BootstrapResult run_bootstrap(const BootstrapSeams& seams, const std::string& mi
         // Never fatal: said, and the rest still run.
         const std::string last = last_said(lines);
         step.status = "skipped";
-        step.reason = code < 0 ? (last.empty() ? std::string{"it could not start"} : last)
-                               : "exit " + std::to_string(code) +
-                                     (last.empty() ? std::string{} : ": " + last);
+        step.reason = failed + (code < 0 ? (last.empty() ? std::string{"it could not start"} : last)
+                                         : "exit " + std::to_string(code) +
+                                               (last.empty() ? std::string{} : ": " + last));
         say("  skipped -- " + step.reason);
     }
     say("done: " + std::to_string(done) + " of " + std::to_string(count) + " steps, " +
@@ -121,12 +229,12 @@ BootstrapResult run_bootstrap(const BootstrapSeams& seams, const std::string& mi
 nlohmann::json bootstrap_document(const BootstrapResult& result) {
     nlohmann::json steps = nlohmann::json::array();
     for (const BootstrapStep& step : result.steps) {
-        steps.push_back({{"name", step.name},
-                         {"command", step.words.empty() ? nlohmann::json(nullptr)
-                                                        : nlohmann::json(command_line(step.words))},
-                         {"status", step.status},
-                         {"reason", step.reason.empty() ? nlohmann::json(nullptr)
-                                                        : nlohmann::json(step.reason)}});
+        steps.push_back(
+            {{"name", step.name},
+             {"command", step.runs() ? nlohmann::json(step_line(step)) : nlohmann::json(nullptr)},
+             {"status", step.status},
+             {"reason",
+              step.reason.empty() ? nlohmann::json(nullptr) : nlohmann::json(step.reason)}});
     }
     return {{"object", "apogee.bootstrap"},
             {"minimal", result.minimal},
@@ -169,14 +277,21 @@ void BootstrapCommand::bind(CLI::App& root, const RootContext& context) {
         } else if (minimal_install_env()) {
             minimal_by = "APOGEE_MINIMAL_INSTALL";
         }
-        const training::HostShape host = training::detect_host();
         const std::filesystem::path binary = platform::executable_path();
         BootstrapSeams seams;
-        seams.apple_silicon = host.apple_silicon;
-        seams.nvidia_smi = host.nvidia_smi;
+        if (minimal_by.empty()) {
+            seams.host = detect_bootstrap_host(context);
+        }
         seams.run = [&context, &binary](const std::vector<std::string>& words,
                                         const std::function<void(std::string)>& line) {
             return run_child_lines(self_command(context, binary, words), line);
+        };
+        seams.run_program = [](const std::vector<std::string>& argv,
+                               const std::function<void(std::string)>& line) {
+            platform::ChildCommand command;
+            command.program = argv.front();
+            command.arguments.assign(argv.begin() + 1, argv.end());
+            return run_child_lines(command, line);
         };
         // The narration is the output; under JSON, the document is, and the
         // narration goes to stderr.

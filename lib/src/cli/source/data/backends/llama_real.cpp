@@ -9,10 +9,15 @@
 /// Every raw handle llama.cpp hands out is wrapped in a `unique_ptr` with a
 /// custom deleter at this boundary and never escapes it -- the Code Style rule
 /// for C APIs, and the reason a `throw` from a decode cannot leak a context.
+/// An entry's adapter handles (53d) cross the seam inside `LlamaAdapters`,
+/// whose `Native` each half defines: llama.cpp's handles here, nothing there.
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "backends/llama_runtime.h"
 
@@ -164,6 +169,17 @@ struct SamplerDeleter {
         llama_sampler_free(sampler);
     }
 };
+
+/// A LoRA adapter (53a), owned by its entry's set (53d) and freed before the
+/// model it was loaded over: llama.cpp would free one left behind with the
+/// model, but an owner says when.
+struct AdapterDeleter {
+    void operator()(llama_adapter_lora* adapter) const noexcept {
+        llama_adapter_lora_free(adapter);
+    }
+};
+
+using AdapterPtr = std::unique_ptr<llama_adapter_lora, AdapterDeleter>;
 
 /// llama.cpp's multimodal projector. Owned by the model; contexts borrow it.
 struct MtmdDeleter {
@@ -360,6 +376,67 @@ private:
     std::unique_ptr<llama_chat::ReplyParser> parser_;
 };
 
+class RealModel;
+
+}  // namespace
+
+/// llama.cpp's handles for one entry's adapters (53d): each loaded once over
+/// its model, with the scale every context sets it at.
+struct LlamaAdapters::Native {
+    Native() = default;
+    /// Takes them out of the model's embedding context, if they are there,
+    /// before they are freed: a context must never hold an adapter llama.cpp
+    /// has let go of.
+    ~Native();
+    Native(const Native&) = delete;
+    Native& operator=(const Native&) = delete;
+    Native(Native&&) = delete;
+    Native& operator=(Native&&) = delete;
+
+    /// The model they were loaded over, which outlives them: an entry frees
+    /// its set before it lets go of its share in the base. Borrowed.
+    RealModel* owner = nullptr;
+    const llama_model* over = nullptr;
+    std::vector<AdapterPtr> adapters{};
+    std::vector<float> scales{};
+};
+
+namespace {
+
+/// Sets exactly `adapters` on `context` (53d): their handles at their scales,
+/// in order, or none at all for the bare base. llama.cpp changes a context
+/// only when the set differs, so asking on every use costs nothing. False with
+/// `error` when the set was loaded over another model, or llama.cpp refuses.
+[[nodiscard]] bool apply_adapters(llama_context* context, const LlamaAdapters& adapters,
+                                  std::string& error) {
+    const LlamaAdapters::Native* native = adapters.native();
+    if (native == nullptr && !adapters.empty()) {
+        error = "llama.cpp: these adapters were not loaded by llama.cpp";
+        return false;
+    }
+    if (native != nullptr && native->over != llama_get_model(context)) {
+        error = "llama.cpp: these adapters were loaded over another model";
+        return false;
+    }
+    // The C API takes mutable arrays; these are this call's own copies.
+    std::vector<llama_adapter_lora*> handles;
+    std::vector<float> scales;
+    if (native != nullptr) {
+        handles.reserve(native->adapters.size());
+        for (const AdapterPtr& adapter : native->adapters) {
+            handles.push_back(adapter.get());
+        }
+        scales = native->scales;
+    }
+    llama_log().forget();
+    if (llama_set_adapters_lora(context, handles.empty() ? nullptr : handles.data(), handles.size(),
+                                scales.empty() ? nullptr : scales.data()) != 0) {
+        error = with_llama_reason("llama.cpp: could not set the adapters on a context");
+        return false;
+    }
+    return true;
+}
+
 class RealContext final : public LlamaContext {
 public:
     /// `checkpoints` is whether this context's memory needs them: a
@@ -443,6 +520,10 @@ public:
         budget_ = budget;
         budget_spent_ = false;
         return true;
+    }
+
+    [[nodiscard]] bool set_adapters(const LlamaAdapters& adapters, std::string& error) override {
+        return apply_adapters(context_.get(), adapters, error);
     }
 
     [[nodiscard]] std::int64_t trim_to(std::int64_t position) override {
@@ -962,6 +1043,45 @@ public:
                                              checkpoints, cache_type, sliding_window);
     }
 
+    [[nodiscard]] std::unique_ptr<LlamaAdapters> load_adapters(
+        const std::vector<AdapterLoad>& adapters, std::string& error) override {
+        if (adapters.empty()) {
+            return std::make_unique<LlamaAdapters>();
+        }
+        // Each adapter loaded once, over the model it was made for (53a):
+        // llama.cpp refuses another architecture's, and its reason rides on
+        // the error naming the file. One that will not load frees the ones
+        // before it.
+        auto native = std::make_unique<LlamaAdapters::Native>();
+        native->owner = this;
+        native->over = model_.get();
+        for (const AdapterLoad& wanted : adapters) {
+            llama_log().forget();
+            AdapterPtr adapter{llama_adapter_lora_init(model_.get(), wanted.path.c_str())};
+            if (adapter == nullptr) {
+                error = with_llama_reason("could not load the adapter at '" + wanted.path +
+                                          "' -- check that it is a GGUF LoRA made for this "
+                                          "model's architecture");
+                return nullptr;
+            }
+            native->adapters.push_back(std::move(adapter));
+            native->scales.push_back(static_cast<float>(wanted.scale));
+        }
+        return std::make_unique<LlamaAdapters>(adapters, std::move(native));
+    }
+
+    /// Takes `native`'s adapters out of the embedding context when they are
+    /// the set it holds, before they are freed (53d).
+    void forget_adapters(const LlamaAdapters::Native& native) noexcept {
+        if (embedding_set_ != &native) {
+            return;
+        }
+        embedding_set_ = nullptr;
+        if (embedding_context_ != nullptr) {
+            llama_set_adapters_lora(embedding_context_.get(), nullptr, 0, nullptr);
+        }
+    }
+
     [[nodiscard]] bool supports_vision() const noexcept override {
         // Both halves: a projector was loaded AND it does images. A projector
         // can load and be audio-only, and answering yes on the strength of
@@ -996,6 +1116,7 @@ public:
     }
 
     [[nodiscard]] std::vector<std::vector<float>> embed_batch(const std::vector<std::string>& texts,
+                                                              const LlamaAdapters& adapters,
                                                               std::string& error) override {
         if (texts.empty()) {
             return {};
@@ -1004,6 +1125,14 @@ public:
             return {};
         }
         llama_context* ctx = embedding_context_.get();
+        // The caller's entry embeds as it answers: through its adapters (53a),
+        // set on the one embedding context every sharer of this model uses,
+        // so nothing of the last caller's set is left (53d).
+        if (!apply_adapters(ctx, adapters, error)) {
+            embedding_set_ = nullptr;
+            return {};
+        }
+        embedding_set_ = adapters.native();
         const auto n_batch = static_cast<std::size_t>(llama_n_batch(ctx));
         const std::size_t width = embedding_dimensions();
 
@@ -1187,6 +1316,9 @@ private:
     ContextSettings settings_;
     /// Lazily created; see ensure_embedding_context.
     std::unique_ptr<llama_context, ContextDeleter> embedding_context_;
+    /// The set the embedding context holds (53d) -- compared, never read
+    /// through, and cleared before that set is freed.
+    const LlamaAdapters::Native* embedding_set_ = nullptr;
     /// The model's chat templates, parsed on first render; see render_chat.
     mutable std::unique_ptr<llama_chat::Templates> templates_;
     mutable std::string templates_error_;
@@ -1242,9 +1374,17 @@ constexpr std::uint32_t kMinimumFittedWindow = 4096;
 /// machine that holds the default it only ever says so. So a check that costs
 /// nothing goes first: the weights, the default window's cache from the
 /// header, and llama-server's 1 GiB margin, against what the devices have
-/// free. Only a model that fails it, or whose cache the header cannot size,
-/// is handed to the fitter.
-[[nodiscard]] std::int64_t fit_default_window(const ModelLoad& request) {
+/// free (`models::header_window_fit`). Only a model that fails it, or whose
+/// cache the header cannot size, is handed to the fitter.
+///
+/// **A base already resident is priced once** (55e): an entry joining a base
+/// another entry loaded (53d) measures free memory with those weights in it,
+/// so `resident` counts them as taken rather than to load -- its own cache and
+/// the margin are what it needs, the budget the first member's load had --
+/// and a window that does not fit is lowered by the same arithmetic, never by
+/// the fitter, whose projection would count the weights a second time. Only a
+/// joiner whose cache the header cannot size still asks the fitter.
+[[nodiscard]] std::int64_t fit_default_window(const ModelLoad& request, bool resident) {
     constexpr std::int64_t kMargin = std::int64_t{1024} * 1024 * 1024;
     const std::int64_t free = free_device_memory(request.gpu_layers);
     if (free <= 0) {
@@ -1255,17 +1395,19 @@ constexpr std::uint32_t kMinimumFittedWindow = 4096;
     if (const std::optional<models::CacheShape> shape =
             info.parsed ? models::cache_shape(info.architecture, info.attention) : std::nullopt;
         shape.has_value()) {
-        const std::int64_t window = models::default_local_window(info.attention.context_length, 0);
-        std::int64_t needed =
-            info.file_size +
-            models::cache_bytes(models::cache_values(*shape, window), request.cache_type) + kMargin;
+        std::int64_t weights = info.file_size;
         if (!request.mmproj_path.empty()) {
             std::error_code code;
             const std::uintmax_t projector = std::filesystem::file_size(request.mmproj_path, code);
-            needed += code ? 0 : static_cast<std::int64_t>(projector);
+            weights += code ? 0 : static_cast<std::int64_t>(projector);
         }
-        if (needed <= free) {
-            return 0;
+        if (const std::optional<std::int64_t> fitted = models::header_window_fit(
+                *shape, info.attention.context_length, request.cache_type,
+                models::WindowRoom{
+                    .free = free, .weights = weights, .resident = resident, .margin = kMargin},
+                kMinimumFittedWindow);
+            fitted.has_value()) {
+            return *fitted;
         }
     }
     const std::int64_t fitted = llama_chat::fit_window(
@@ -1287,7 +1429,7 @@ public:
         settings.cache_type = request.cache_type;
         settings.cache_type_named = request.cache_type_named;
         if (request.fit_window) {
-            settings.fitted_window = fit_default_window(request);
+            settings.fitted_window = fit_default_window(request, /*resident=*/false);
         }
 
         llama_model_params params = llama_model_default_params();
@@ -1323,9 +1465,31 @@ public:
         }
         return std::make_unique<RealModel>(std::move(model), std::move(vision), settings);
     }
+
+    /// Asked only by an entry joining a base already loaded (53d), whose
+    /// weights are resident (55e).
+    [[nodiscard]] std::int64_t fit_window(const ModelLoad& request) override {
+        ensure_backend_init();
+        return fit_default_window(request, /*resident=*/true);
+    }
 };
 
 }  // namespace
+
+LlamaAdapters::Native::~Native() {
+    if (owner != nullptr) {
+        owner->forget_adapters(*this);
+    }
+}
+
+LlamaAdapters::LlamaAdapters() = default;
+
+LlamaAdapters::LlamaAdapters(std::vector<AdapterLoad> loads) : loads_{std::move(loads)} {}
+
+LlamaAdapters::LlamaAdapters(std::vector<AdapterLoad> loads, std::unique_ptr<Native> native)
+    : loads_{std::move(loads)}, native_{std::move(native)} {}
+
+LlamaAdapters::~LlamaAdapters() = default;
 
 std::unique_ptr<LlamaRuntime> make_llama_runtime(std::string& reason) {
     reason.clear();
@@ -1350,6 +1514,18 @@ std::optional<std::int64_t> offload_memory_total() {
 #else  // APOGEE_ENABLE_LLAMA
 
 namespace apogee::backends {
+
+/// No llama.cpp, no handles: a set here is only ever a scripted runtime's.
+struct LlamaAdapters::Native {};
+
+LlamaAdapters::LlamaAdapters() = default;
+
+LlamaAdapters::LlamaAdapters(std::vector<AdapterLoad> loads) : loads_{std::move(loads)} {}
+
+LlamaAdapters::LlamaAdapters(std::vector<AdapterLoad> loads, std::unique_ptr<Native> native)
+    : loads_{std::move(loads)}, native_{std::move(native)} {}
+
+LlamaAdapters::~LlamaAdapters() = default;
 
 std::unique_ptr<LlamaRuntime> make_llama_runtime(std::string& reason) {
     // Not an error state: the default build deliberately excludes llama.cpp so

@@ -16,6 +16,10 @@ _apogee_cicd() {
             COMPREPLY=( $(compgen -W "linux-x64 linux-arm64 macos-arm64 windows-x64 windows-arm64 all" -- "$cur") )
             return
             ;;
+        -a|--app)
+            COMPREPLY=( $(compgen -W "cli darwin all" -- "$cur") )
+            return
+            ;;
         -b|--branch)
             # Complete local branch names.
             COMPREPLY=( $(compgen -W "$(git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null)" -- "$cur") )
@@ -27,7 +31,7 @@ _apogee_cicd() {
             ;;
     esac
 
-    COMPREPLY=( $(compgen -W "-p --platform -c --clean -t --test -u --unit-tests --clone-llama --host -f --fresh -b --branch -j --jobs --no-defer -h --help" -- "$cur") )
+    COMPREPLY=( $(compgen -W "-p --platform -a --app -c --clean -t --test -u --unit-tests --clone-llama --host -f --fresh -b --branch -j --jobs --no-defer -h --help" -- "$cur") )
 }
 
 complete -F _apogee_cicd cicd.sh ./cicd.sh lib/scripts/cicd.sh ./lib/scripts/cicd.sh

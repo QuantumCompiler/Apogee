@@ -1,0 +1,317 @@
+import BusinessJobs
+import BusinessReads
+import BusinessSession
+import DataPreferences
+import Foundation
+import InfrastructureProcess
+import Observation
+import PresentationCompose
+import PresentationGraph
+import PresentationKnowledge
+import PresentationLibrary
+import PresentationReview
+import PresentationTraining
+import PresentationModels
+import PresentationConsole
+import PresentationMonitor
+import PresentationSessions
+import PresentationSettings
+import PresentationShell
+import PresentationSuites
+import PresentationTasks
+import PresentationVideo
+import PresentationVoice
+
+/// The application's state: its name, the build it is, the window around its
+/// screens, and the session library.
+///
+/// SwiftUI-free (ADR 0002): it reads the bundle's information dictionary as a
+/// plain value, and builds the view-models over the client core and the app's
+/// preferences -- the composition the views bind to, never reach past.
+@MainActor
+@Observable
+final class AppViewModel {
+    let title = "Apogee"
+    let versionLine: String
+    let shell: ShellViewModel
+    let sessions: SessionLibraryViewModel
+    let models: ModelsViewModel
+    let store: StoreViewModel
+    let downloads: DownloadsViewModel
+    let tasks: TasksViewModel
+    let monitor: MonitorViewModel
+    let console: ConsoleViewModel
+    let suites: SuitesViewModel
+    let graph: GraphViewModel
+    let records: RecordsViewModel
+    let collections: CollectionsViewModel
+    let training: TrainingViewModel
+    let agents: AgentsViewModel
+    let symphonies: SymphoniesViewModel
+    let mcp: MCPViewModel
+    let review: ReviewViewModel
+    let video: VideoViewModel
+    let compose: ComposeViewModel
+    let voice: VoiceViewModel
+    let settings: SettingsViewModel
+    /// ⌘Q, held until the session library has ended its child and kept its
+    /// private fallback's promise, and the running jobs have been stopped:
+    /// what the app delegate asks.
+    let termination: Termination
+    /// Every child the app runs -- each supervised job's and the session's --
+    /// as their supervisors list them: what the monitor shows, and what quit
+    /// stops (4c).
+    let children: ChildRegistry
+
+    /// The composition. `children` is where every job and session the app
+    /// starts is listed; `home` holds the media places' folders. A test hands
+    /// in its own of each.
+    init(
+        info: [String: Any]?, preferences: Preferences, starter: (any ChatStarting)? = nil,
+        runner: (any CommandRunning)? = nil, jobs: (any JobStarting)? = nil, children: ChildRegistry = .app,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) {
+        let version = (info?["CFBundleShortVersionString"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        // Only the release build (scripts/build.sh) stamps the version; a
+        // build from Xcode leaves it empty.
+        versionLine = version.map { "Version \($0)" } ?? "Development build"
+        // One starter for every place, so every run any of them starts is
+        // listed with the session's child, in one registry.
+        let jobs = jobs ?? JobStarter(registry: children)
+        let shell = ShellViewModel(preferences: preferences)
+        let sessions = SessionLibraryViewModel(
+            starter: starter ?? ApogeeClient(identity: ClientIdentity(version: version ?? "development"), children: children),
+            runner: runner ?? ReadRunner(), preferences: preferences)
+        let models = ModelsViewModel(runner: runner ?? ReadRunner())
+        let store = StoreViewModel(runner: runner ?? ReadRunner())
+        let downloads = DownloadsViewModel(starter: jobs)
+        downloads.streams = { [weak sessions] in sessions?.streamsJobs ?? false }
+        downloads.reader = runner ?? ReadRunner()
+        // Show the weights: the set a store job made, open under Stored weights.
+        downloads.showWeights = { [weak models, weak store] name in
+            models?.tab = .store
+            Task {
+                await store?.refresh()
+                let handle = name.contains("/") ? name : store?.handle(forBackend: name) ?? name
+                await store?.select(handle)
+            }
+        }
+        // The store's long runs, started from Stored weights, followed on Jobs.
+        store.startConvert = { [weak models, weak downloads] form in
+            downloads?.convert(form)
+            models?.tab = .jobs
+        }
+        store.startQuantize = { [weak models, weak downloads] form in
+            downloads?.quantize(form)
+            models?.tab = .jobs
+        }
+        store.startCheck = { [weak models, weak downloads] name in
+            downloads?.check(name)
+            models?.tab = .jobs
+        }
+        models.checkFiles = { [weak models, weak downloads] name in
+            downloads?.check(name)
+            models?.tab = .jobs
+        }
+        downloads.finished = { [weak models, weak store] in
+            Task {
+                await models?.refresh()
+                await store?.refresh()
+            }
+        }
+        let tasks = TasksViewModel(runner: runner ?? ReadRunner(), starter: jobs)
+        tasks.say = { [weak shell] text in shell?.say(text) }
+        let console = ConsoleViewModel(runner: runner ?? ReadRunner(), starter: jobs)
+        let monitor = MonitorViewModel(runner: runner ?? ReadRunner())
+        // The registry, never a screen's own list: whatever any place runs
+        // is seen, the session's child first when it started first.
+        monitor.liveChildren = { children.children.map { ($0.label, $0.processIdentifier) } }
+        let suites = SuitesViewModel(runner: runner ?? ReadRunner())
+        suites.say = { [weak shell] text in shell?.say(text) }
+        let graph = GraphViewModel(runner: runner ?? ReadRunner(), starter: jobs)
+        graph.say = { [weak shell] text in shell?.say(text) }
+        let records = RecordsViewModel(runner: runner ?? ReadRunner(), starter: jobs)
+        records.say = { [weak shell] text in shell?.say(text) }
+        // Whether Dedupe… and a record's raw conversation are asked as the
+        // documents the CLI's M31 gave them: the vocabulary read at launch
+        // says (GUI M15).
+        graph.vocabulary = { [weak sessions] in sessions?.vocabulary }
+        records.vocabulary = { [weak sessions] in sessions?.vocabulary }
+        let collections = CollectionsViewModel(runner: runner ?? ReadRunner(), starter: jobs)
+        collections.say = { [weak shell] text in shell?.say(text) }
+        let training = TrainingViewModel(runner: runner ?? ReadRunner(), starter: jobs)
+        training.say = { [weak shell] text in shell?.say(text) }
+        // Whether a halt taken during a pass is kept and the pull streams
+        // (the CLI's M30): the vocabulary read at launch says (GUI M14).
+        training.vocabulary = { [weak sessions] in sessions?.vocabulary }
+        let agents = AgentsViewModel(runner: runner ?? ReadRunner())
+        agents.say = { [weak shell] text in shell?.say(text) }
+        let symphonies = SymphoniesViewModel(runner: runner ?? ReadRunner(), starter: jobs)
+        symphonies.say = { [weak shell] text in shell?.say(text) }
+        let mcp = MCPViewModel(runner: runner ?? ReadRunner())
+        mcp.say = { [weak shell] text in shell?.say(text) }
+        let review = ReviewViewModel(runner: runner ?? ReadRunner(), starter: jobs)
+        review.say = { [weak shell] text in shell?.say(text) }
+        let video = VideoViewModel(starter: jobs, preferences: preferences, home: home)
+        video.say = { [weak shell] text in shell?.say(text) }
+        video.streams = { [weak sessions] in sessions?.streamsJobs ?? false }
+        // The store's video models and the default, for the sheet's engine (3b).
+        video.reader = runner ?? ReadRunner()
+        let compose = ComposeViewModel(starter: jobs)
+        compose.say = { [weak shell] text in shell?.say(text) }
+        compose.streams = { [weak sessions] in sessions?.streamsJobs ?? false }
+        compose.plansAlone = { [weak sessions] in sessions?.hasTrack52 ?? false }
+        compose.folders = { [weak video] in video?.folders ?? [] }
+        // The store's voice models and check's captions row, for the sheet (4f).
+        compose.reader = runner ?? ReadRunner()
+        let voice = VoiceViewModel(runner: runner ?? ReadRunner(), starter: jobs, preferences: preferences, home: home)
+        voice.say = { [weak shell] text in shell?.say(text) }
+        voice.streams = { [weak sessions] in sessions?.streamsJobs ?? false }
+        // One install into the one environment at a time: the registry says
+        // whether any place -- or Settings' bootstrap -- runs one now (4f).
+        let installElsewhere: @MainActor () -> Bool = { AppViewModel.installing(in: children) }
+        video.installElsewhere = installElsewhere
+        compose.installElsewhere = installElsewhere
+        voice.installElsewhere = installElsewhere
+        let settings = SettingsViewModel(runner: runner ?? ReadRunner(), starter: jobs, preferences: preferences)
+        settings.say = { [weak shell] text in shell?.say(text) }
+        settings.hasTrack52 = { [weak sessions] in sessions?.hasTrack52 ?? false }
+        // Whether what recall holds is asked as its listing (the CLI's M31):
+        // the vocabulary read at launch says (GUI M15).
+        settings.vocabulary = { [weak sessions] in sessions?.vocabulary }
+        // What the binary can do is asked at launch, and again when its file
+        // changes (GUI 4k): Settings says what it lacks only once it has said.
+        settings.capabilitiesKnown = { [weak sessions] in sessions?.capabilitiesKnown ?? false }
+        settings.checkCapabilities = { [weak sessions] in await sessions?.checkBinary() }
+        // General says which PATH the app's children run with (M6): the app's
+        // resolver's answer, waited for at most until the shell's deadline.
+        settings.childPathSource = { await ShellPath.app.answer() }
+        sessions.say = { [weak shell] text in shell?.say(text) }
+        models.say = { [weak shell] text in shell?.say(text) }
+        // Whether the list states each mlx entry's drafter, so a row without
+        // one has none paired (the CLI's M32): the vocabulary read at launch
+        // says (GUI M16). Settings' Register and allowed hosts ask the same.
+        models.vocabulary = { [weak sessions] in sessions?.vocabulary }
+        store.say = { [weak shell] text in shell?.say(text) }
+        models.useInSession = { [weak shell, weak sessions] backend in
+            shell?.go(.sessions)
+            Task { await sessions?.newSession(on: backend) }
+        }
+        // Suites' doors into Sessions (GUI 4i): a new chat under a suite, and
+        // the open session moved under one, each in Sessions' view.
+        suites.openChat = { [weak shell, weak sessions] suite, force in
+            shell?.go(.sessions)
+            Task { await sessions?.newSession(under: suite, force: force) }
+        }
+        suites.switchSession = { [weak shell, weak sessions] suite, force in
+            shell?.go(.sessions)
+            Task { await sessions?.switchSuite(to: suite, force: force) }
+        }
+        suites.sessionSwitchable = { [weak sessions] in sessions?.canSwitchSuite ?? false }
+        // Sessions in view or not: the library keeps its one child to the
+        // session on screen. A place coming into view reads again.
+        shell.routeChanged = { [weak sessions, weak models, weak store, weak tasks, weak suites, weak graph, weak video, weak compose, weak voice, weak records, weak collections, weak training, weak agents, weak symphonies, weak mcp, weak review] destination in
+            Task {
+                // A binary changed under the app is asked again before the
+                // place it opens reads or runs anything (GUI 4k).
+                await sessions?.checkBinary()
+                if destination == .sessions { await sessions?.cameIntoView() } else { await sessions?.leftView() }
+                if destination == .models {
+                    await models?.appeared()
+                    if models?.tab == .store { await store?.refresh() }
+                }
+                if destination == .tasks { await tasks?.appeared() }
+                if destination == .suites { await suites?.appeared() }
+                if destination == .graph { await graph?.appeared() }
+                if destination == .training { await training?.appeared() }
+                if destination == .review { await review?.appeared() }
+                if destination == .library {
+                    await agents?.refresh()
+                    await symphonies?.refresh()
+                    await mcp?.refresh()
+                }
+                if destination == .knowledge {
+                    await records?.appeared()
+                    await collections?.appeared()
+                }
+                if destination == .voice { await voice?.appeared() }
+                if destination == .video {
+                    video?.appeared()
+                    compose?.appeared()
+                }
+            }
+        }
+        self.shell = shell
+        self.sessions = sessions
+        self.models = models
+        self.store = store
+        self.downloads = downloads
+        self.tasks = tasks
+        self.monitor = monitor
+        self.console = console
+        self.suites = suites
+        self.graph = graph
+        self.records = records
+        self.collections = collections
+        self.training = training
+        self.agents = agents
+        self.symphonies = symphonies
+        self.mcp = mcp
+        self.review = review
+        self.video = video
+        self.compose = compose
+        self.voice = voice
+        self.settings = settings
+        self.children = children
+        termination = Termination(
+            pending: { [weak sessions] in sessions?.needsShutdown ?? false },
+            shutDown: { [weak sessions] in await sessions?.quit() ?? ShutdownReport(ended: true, deleteFailure: nil) },
+            jobsRunning: { children.children(.job).count },
+            stopJobs: { await children.stop(.job, grace: Termination.jobGrace) })
+    }
+
+    /// Whether `registry` holds a run that installs into Apogee's Python
+    /// environment: a `train setup` -- a media place's consented install,
+    /// one typed in the console -- or the bootstrap, which runs them.
+    static func installing(in registry: ChildRegistry) -> Bool {
+        registry.children(.job).contains { $0.label.hasPrefix("apogee train setup") || $0.label.hasPrefix("apogee bootstrap") }
+    }
+
+    /// The application's own composition. The person's login shell is asked
+    /// for its PATH first, before any child: the ask runs off the main actor
+    /// and nothing waits on it, so a child spawned before it answers gets the
+    /// fallback (M6). The tests compose through `init(info:preferences:)`,
+    /// which never asks.
+    convenience init(bundle: Bundle) {
+        ShellPath.app.begin()
+        self.init(info: bundle.infoDictionary, preferences: .standard())
+    }
+
+    /// The app started: the library finds the binary and asks what it can do
+    /// -- `__machine-schema`, before any session starts, whatever place is in
+    /// view (GUI 4k) -- then reads and opens what is in view, and every place
+    /// is handed the binary.
+    func start() async {
+        await sessions.start(inView: shell.route == .sessions)
+        await models.connect(binary: sessions.binaryURL)
+        await store.connect(binary: sessions.binaryURL)
+        downloads.connect(binary: sessions.binaryURL)
+        await tasks.connect(binary: sessions.binaryURL)
+        monitor.connect(binary: sessions.binaryURL)
+        console.connect(binary: sessions.binaryURL)
+        await suites.connect(binary: sessions.binaryURL)
+        await graph.connect(binary: sessions.binaryURL)
+        await records.connect(binary: sessions.binaryURL)
+        await collections.connect(binary: sessions.binaryURL)
+        await training.connect(binary: sessions.binaryURL)
+        await agents.connect(binary: sessions.binaryURL)
+        await symphonies.connect(binary: sessions.binaryURL)
+        mcp.use(binary: sessions.binaryURL)
+        await review.connect(binary: sessions.binaryURL)
+        video.connect(binary: sessions.binaryURL)
+        compose.connect(binary: sessions.binaryURL)
+        await voice.connect(binary: sessions.binaryURL)
+        await settings.connect(
+            binary: sessions.binaryURL, version: sessions.binaryVersion, skippedOverride: sessions.skippedOverride)
+    }
+}

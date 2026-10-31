@@ -497,3 +497,34 @@ TEST_CASE("a header that fails to read carries no sampling", "[models][gguf][sam
     REQUIRE_FALSE(info.parsed);
     CHECK_FALSE(info.sampling.temperature.has_value());
 }
+
+TEST_CASE("a file type is named as llama.cpp names it, or not at all",
+          "[models][gguf][file-type]") {
+    // 53c: the precision an adapter's gate says it scored on.
+    using apogee::models::file_type_name;
+    CHECK(file_type_name(0) == "F32");
+    CHECK(file_type_name(1) == "F16");
+    CHECK(file_type_name(7) == "Q8_0");
+    CHECK(file_type_name(15) == "Q4_K_M");
+    CHECK(file_type_name(18) == "Q6_K");
+    CHECK(file_type_name(30) == "IQ4_XS");
+    CHECK(file_type_name(32) == "BF16");
+    CHECK(file_type_name(38) == "MXFP4_MOE");
+    CHECK(file_type_name(41) == "Q2_0");
+    // The numbers llama.cpp removed, past its last, and none at all.
+    CHECK(file_type_name(4).empty());
+    CHECK(file_type_name(34).empty());
+    CHECK(file_type_name(42).empty());
+    CHECK(file_type_name(apogee::models::kUnknownFileType).empty());
+    // Read from a header, beside whether it is quantized.
+    Builder builder;
+    builder.magic().u32(3).u64(1).u64(2);
+    builder.string_kv("general.architecture", "llama");
+    builder.u32_kv("general.file_type", 15);
+    builder.tensor("token_embd.weight");
+    std::istringstream in{builder.bytes()};
+    const GgufInfo info = inspect_gguf(in, builder.bytes().size());
+    REQUIRE(info.parsed);
+    CHECK(file_type_name(info.file_type) == "Q4_K_M");
+    CHECK(info.is_quantized());
+}

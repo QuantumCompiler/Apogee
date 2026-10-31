@@ -1,0 +1,242 @@
+#if DEBUG
+import BusinessReads
+import DataDiscovery
+import DataPreferences
+import DataProtocol
+import Foundation
+import PresentationSession
+import PresentationShell
+
+/// The Sessions place's view-models for its previews, over the binary's
+/// recorded documents and the library's tests' own (ADR 0004): nothing
+/// starts the binary.
+@MainActor
+enum SessionsPreview {
+    // MARK: - The recorded conversation
+
+    static let mockActor = SessionsDocuments.mockActor.split(separator: "\n").map(String.init)
+
+    /// A saved conversation resumed: its `session` event, then one live turn
+    /// -- and the conversation as `chats list` and `chats show` read it before.
+    static let resumedChat = SessionsDocuments.resumedChat.split(separator: "\n").map(String.init)
+    static var savedChatID: String { ChatSummary.list(from: ReadDocument(text: SessionsDocuments.chatsList)!)[0].id }
+    /// What its live turn was sent as, recorded with it.
+    static let resumedTurn = "Thanks -- anything else?"
+
+    /// What the person sends and answers in it, as the session window's
+    /// end-to-end test does (tests/presentation/session/SessionViewModelTests).
+    static let noteTurn = "Write me a note."
+    static let noteAnswers = ["todo.md", "yes"]
+
+    // MARK: - A model switched from the settings sheet (GUI M10)
+
+    /// The branch binary's recording over two scripted mocks: a new session
+    /// naming its chat, a turn on `claude`, the sheet's `set` to the local
+    /// model, the CLI's notice, a turn the local model answered -- and the
+    /// list read after it, the chat's row on the backend it switched to.
+    static let switchedToLocal = SessionsDocuments.switchedToLocal.split(separator: "\n").map(String.init)
+
+    /// What the recording sent, turn by turn, and the model it switched to.
+    static let switchTurns = ["Which port does the dev server use?", "And on the local model?"]
+    static let localModel = "Gemma4-26B-Instruct"
+
+    /// The library over that recording -- its list read after the switch --
+    /// each session said turn by turn. Not started.
+    static func switching() -> SessionLibraryViewModel {
+        library(chats: SessionsDocuments.chatsListSwitched, lines: switchedToLocal, byTurn: true)
+    }
+
+    /// The open session's first turn answered on claude, the local model
+    /// chosen in its settings sheet -- the `set` line sent, the CLI's notice
+    /// said -- then the next turn sent and answered on it.
+    static func switchToLocal(_ session: SessionViewModel) async {
+        await converse(session, typed: switchTurns[0])
+        await until { session.transcript.acceptsInput && session.transcript.items.count > 1 }
+        await session.apply(RunSettings(model: localModel))
+        await until { if case .notice = session.transcript.items.last?.content { true } else { false } }
+        session.draft = switchTurns[1]
+        session.submit()
+        await until { session.transcript.acceptsInput && session.transcript.model == localModel }
+    }
+
+    // MARK: - The suite, as the CLI's M29 names it (GUI M13)
+
+    /// The branch binary's chat under `pair` resumed with no `--suite`: its
+    /// `session` event names the suite, and its admission line follows.
+    static let resumedUnderSuite = SessionsDocuments.resumedUnderSuiteM29.split(separator: "\n").map(String.init)
+    static var resumedUnderSuiteID: String {
+        resumedUnderSuite.first.flatMap { JSONValue.parse($0)?["chat_id"]?.stringValue } ?? ""
+    }
+
+    /// An `execute` session under `orch`, whose `orchestrate: true` says it
+    /// orchestrates -- the CLI's word, no flag passed.
+    static let executeOrchestrating = SessionsDocuments.executeOrchestrating.split(separator: "\n").map(String.init)
+
+    // MARK: - Documents the library's tests hold
+
+    /// Two saved conversations, each naming its backend (SessionLibraryTests'
+    /// `glyphFallback`).
+    static let chatsList = #"{"object":"list","data":[{"id":"c2","name":"Plans","turns":3,"updated":"2026-10-20T15:00:00Z","backend":"claude","model":""},{"id":"c1","name":"Recipes","turns":1,"updated":"2026-10-12T09:00:00Z","backend":"actor","model":""}]}"#
+
+    /// The backends those name, and their types (the same test).
+    static let modelsList = #"{"object":"list","data":[{"backend":"claude","backend_type":"anthropic"},{"backend":"actor","backend_type":"mock"}]}"#
+
+    /// A conversation in each date group, and one undated (SessionLibraryTests'
+    /// `groupsAndSearch`).
+    static let everyGroup = #"{"object":"list","data":[{"id":"a","name":"Today's plan","turns":1,"updated":"2026-10-20T08:00:00Z"},{"id":"b","name":"Yesterday's","turns":1,"updated":"2026-10-19T12:00:00Z"},{"id":"c","name":"Last week","turns":1,"updated":"2026-10-14T12:00:00Z"},{"id":"d","name":"Long ago PLAN","turns":1,"updated":"2026-09-01T12:00:00Z"},{"id":"e","name":"Undated","turns":1}]}"#
+
+    /// The roles, as `models status` reads them (SessionLibraryTests' `inspector`).
+    static let modelsStatus = #"{"fields":[{"field":"chat","value":"actor"},{"field":"vision","value":"(unset -- the chat's own backend)"}]}"#
+
+    /// A build with `--private`: its `session` line accepts `set`
+    /// (SessionLibraryPrivateTests).
+    static let newerBuild = #"{"type":"session","protocol_version":1,"model":"local","next_turn":1,"capabilities":{"events":[],"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"tools":true,"ask":true,"schema":"2026-10-20"}}"#
+
+    /// A conversation on that build: its `session` line, then the recorded
+    /// mock-actor turn after the recording's own `session` line -- a private
+    /// session there is `--private`, so the turn is a conversation nothing
+    /// of which is written.
+    static let privateConversation = [newerBuild] + Array(mockActor.dropFirst())
+
+    /// The configured suites, as `config get suites` prints them, and the
+    /// folder a door's session opens in (ExecuteDoorTests).
+    static let suites = "duo\nfast\n"
+    static let project = URL(fileURLWithPath: "/Users/someone/code/ingest")
+
+    /// 2026-10-20 18:00 UTC: the tests' now, so the date groups hold.
+    static let now = Date(timeIntervalSince1970: 1_792_519_200)
+
+    /// The saved conversations `chatsList` names, as rows.
+    static var chats: [ChatSummary] { ChatSummary.list(from: ReadDocument(text: chatsList)!) }
+
+    // MARK: - The library
+
+    /// Answers the library's reads and the door's commands; `defaultSuite`
+    /// is `models.default_suite`, empty when none is set, and `models` the
+    /// `models list` read at launch.
+    static func runner(chats: String, defaultSuite: String, models: String = modelsList) -> PreviewRunner {
+        PreviewRunner(
+            reads: [
+                (["chats", "list"], chats),
+                (["chats", "show"], SessionsDocuments.chatsShow),
+                (["models", "list"], models),
+                (["models", "status"], modelsStatus),
+                (["symphonies", "list"], SessionsDocuments.symphoniesList),
+            ],
+            commands: [
+                (["config", "get", "suites"], suites),
+                (["config", "get", "models.default_suite"], defaultSuite + "\n"),
+                // What the binary can do, asked at launch (GUI 4k): the
+                // branch's vocabulary, so every place is on a capable binary.
+                (["__machine-schema"], SessionsDocuments.machineSchema),
+                (["chats", "info"], SessionsDocuments.chatsInfo),
+                (["chats", "recall"], SessionsDocuments.chatsRecall),
+                (["chats", "compact"], SessionsDocuments.chatsCompact),
+            ])
+    }
+
+    // MARK: - The reads as documents (GUI M15)
+
+    /// The branch binary (schema 2026-10-26, the CLI's M31) over M15's
+    /// sandbox: three saved chats -- the oldest written by the installed,
+    /// older binary -- `chats info`'s document for one, and `chats recall`'s
+    /// listing of all three; Forget answering as it did there.
+    static func documents() -> SessionLibraryViewModel {
+        let runner = PreviewRunner(
+            reads: [
+                (["chats", "list"], SessionsDocuments.chatsListRecall),
+                (["chats", "info"], SessionsDocuments.chatsInfoDocument),
+                (["chats", "recall"], SessionsDocuments.chatsRecallListing),
+                (["models", "list"], modelsList),
+                (["models", "status"], modelsStatus),
+            ],
+            commands: [
+                (["__machine-schema"], SessionsDocuments.machineSchemaM31),
+                (["config", "get", "suites"], suites),
+                (["chats", "recall", "--forget"], SessionsDocuments.chatsRecallForgetThree),
+            ])
+        let now = Self.now
+        return SessionLibraryViewModel(
+            starter: PreviewChats(lines: mockActor), runner: runner, preferences: Preferences(store: MemoryStore()), now: { now })
+    }
+
+    /// The chat `chats info`'s document was recorded on: Dev Server Port.
+    static var recalledPort: ChatSummary {
+        ChatSummary.list(from: ReadDocument(text: SessionsDocuments.chatsListRecall)!).first { $0.name == "Dev Server Port" }!
+    }
+
+    /// The two saved chats the branch's binary listed over a sandbox (GUI
+    /// 4k's recording): the first is the one `chats info` and `chats
+    /// compact` were recorded on.
+    static var savedTwo: [ChatSummary] { ChatSummary.list(from: ReadDocument(text: SessionsDocuments.chatsListTwo)!) }
+
+    /// The library over `chats`, each session it opens saying `lines` --
+    /// or, `missing`, no binary found. `openChat` is the conversation left
+    /// open last time, and `models` what `models list` answers. Not started.
+    static func library(
+        chats: String = chatsList, lines: [String] = mockActor, missing: Bool = false, openChat: String? = nil,
+        defaultSuite: String = "", models: String = modelsList, byTurn: Bool = false
+    ) -> SessionLibraryViewModel {
+        let now = Self.now
+        return SessionLibraryViewModel(
+            starter: PreviewChats(lines: lines, missing: missing ? passedOver : nil, byTurn: byTurn),
+            runner: runner(chats: chats, defaultSuite: defaultSuite, models: models),
+            preferences: Preferences(store: MemoryStore(openChat.map { ["openChat": $0] } ?? [:])),
+            now: { now })
+    }
+
+    /// The window around it, its preferences held in memory.
+    static func shell() -> ShellViewModel {
+        ShellViewModel(preferences: Preferences(store: MemoryStore()))
+    }
+
+    /// Every place the app looks, on a Mac with no apogee installed: each
+    /// candidate discovery names for the home, passed over as it says of a
+    /// file that is not there (`BinaryDiscovery.candidates`, `locate`).
+    static let passedOver = [
+        SkippedCandidate(candidate: BinaryCandidate(url: previewBinary, source: .release), reason: "not installed"),
+        SkippedCandidate(
+            candidate: BinaryCandidate(url: URL(fileURLWithPath: "/Users/someone/.local/bin/apogee-dev"), source: .dev),
+            reason: "not installed"),
+        SkippedCandidate(
+            candidate: BinaryCandidate(url: URL(fileURLWithPath: "/Users/someone/.local/bin/apogee-test"), source: .test),
+            reason: "not installed"),
+    ]
+
+    // MARK: - Driving a session as the person does
+
+    /// Waits until `condition` holds -- five seconds at most, as the tests'
+    /// `eventually` does.
+    static func until(_ condition: () -> Bool) async {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !condition() && ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    /// Sends `typed` once `session` has spoken, then answers each card as it
+    /// stands with the next of `answers`.
+    static func converse(_ session: SessionViewModel, typed: String, answers: [String] = []) async {
+        session.start()
+        await until { session.transcript.status == .ready }
+        session.draft = typed
+        session.submit()
+        for answer in answers {
+            await until { waiting(session) != nil }
+            guard let card = waiting(session) else { return }
+            session.answer(card, with: [answer])
+        }
+    }
+
+    /// The card that waits on the person, by its id.
+    static func waiting(_ session: SessionViewModel) -> Int? {
+        session.transcript.items.last { item in
+            switch item.content {
+            case .question(let card): card.answers == nil
+            case .permission(let card): card.answer == nil
+            default: false
+            }
+        }?.id
+    }
+}
+#endif

@@ -276,6 +276,91 @@ TEST_CASE("a task resumes only in the folder it was started in, and never once f
     CHECK(has(out, "no task 'task-nope'"));
 }
 
+namespace {
+
+/// The config of `home` rewritten: `backends` under `backends:`, the default
+/// `default_backend`, recall off and the filesystem tools in `work()`.
+void write_config(const Home& home, const std::string& backends,
+                  const std::string& default_backend) {
+    std::ofstream{home.home.config_path(), std::ios::binary | std::ios::trunc}
+        << "backends:\n"
+        << backends << "models:\n  default: " << default_backend
+        << "\nmemory:\n  recall: false\ntools:\n  fs_root: " << home.work().string() << "\n";
+}
+
+/// A vendor CLI whose binary is nowhere, as YAML under `backends:`:
+/// configured, never started (M26's fixture).
+[[nodiscard]] std::string unstartable(const Home& home, const std::string& name) {
+    return "  " + name + ":\n    type: claude-cli\n    binary: \"" +
+           (home.home.home() / "nowhere" / "claude").generic_string() + "\"\n";
+}
+
+}  // namespace
+
+TEST_CASE("task run naming a backend that cannot start is refused with its reason, nothing made",
+          "[commands][task][named-backend]") {
+    // M29: `task run -m <a backend that did not start>` ran the task on the
+    // default, every round under the named backend's label.
+    const Home home{R"({"text": "1. Answer."}, {"text": "It is 42.\nTASK STATUS: DONE"})"};
+    write_config(home,
+                 "  m:\n    type: mock\n    model_path: " + home.script.string() + "\n" +
+                     unstartable(home, "gone"),
+                 "m");
+    std::string out;
+    std::string err;
+    CHECK(home.run({"task", "run", "goal", "-m", "gone"}, &out, &err) == 1);
+    CHECK(err.starts_with("apogee task: backend 'gone' is configured but could not be started: "));
+    CHECK(err.ends_with(" (started backends: m)\n"));
+    CHECK(t::list_tasks(home.tasks()).empty());
+
+    // Streamed, refused at launch: nothing on stdout, no session event.
+    CHECK(home.run({"task", "run", "goal", "-m", "gone", "--output-format", "stream-json"}, &out,
+                   &err) == 1);
+    CHECK(out.empty());
+    CHECK(err.starts_with("apogee task: backend 'gone' is configured but could not be started: "));
+
+    // A name the config defines nowhere is refused too, never run on the
+    // default.
+    CHECK(home.run({"task", "run", "goal", "-m", "nope"}, &out, &err) == 1);
+    CHECK(err == "apogee task: no backend named 'nope' (configured: gone, m)\n");
+    CHECK(t::list_tasks(home.tasks()).empty());
+
+    // The backend named that did start runs it.
+    REQUIRE(home.run({"task", "run", "goal", "-m", "m", "--require", "42"}, &out, &err) == 0);
+    CHECK(home.task().status == t::kDone);
+}
+
+TEST_CASE("a task whose backend can no longer start is refused at resume, not run on the default",
+          "[commands][task][resume][named-backend]") {
+    const Home home{R"({"text": "1. Plan."}, {"text": "not yet"})"};
+    std::string out;
+    REQUIRE(home.run({"task", "run", "goal", "--require", "42", "--rounds", "1"}, &out) == 1);
+    t::Task task = home.task();
+    REQUIRE(task.status == t::kExhausted);
+    // Halted with rounds to spare, as `task halt` leaves one mid-run.
+    task.status = std::string{t::kHalted};
+    task.rounds_budget = 3;
+    REQUIRE(t::save_task(home.tasks(), task).empty());
+    const std::size_t transitions = task.transitions.size();
+
+    // Its backend, `m`, can no longer start; another, the default, can.
+    const fs::path spare = home.home.home() / "spare.json";
+    std::ofstream{spare} << R"({"turns": [{"text": "SPARE-SAYS 42"}]})";
+    write_config(home,
+                 unstartable(home, "m") +
+                     "  spare:\n    type: mock\n    model_path: " + spare.string() + "\n",
+                 "spare");
+    std::string err;
+    CHECK(home.run({"task", "resume", task.id}, &out, &err) == 1);
+    CHECK(err.starts_with("apogee task: task " + task.id +
+                          " cannot resume: backend 'm' is configured but could not be started: "));
+    CHECK(err.ends_with(" (started backends: spare)\n"));
+    CHECK(out.find("SPARE-SAYS") == std::string::npos);
+    // Nothing ran: the ledger is as it was.
+    CHECK(home.task().status == t::kHalted);
+    CHECK(home.task().transitions.size() == transitions);
+}
+
 TEST_CASE("task verbs with no task say how to start one", "[commands][task]") {
     const Home home{R"({"text": "x"})"};
     std::string out;
@@ -1083,6 +1168,75 @@ TEST_CASE("task status, as a person and as a document, says which process runs a
     CHECK(
         has(out, "running (now, process " + std::to_string(document["process"].get<long>()) + ")"));
     lock->release();
+}
+
+TEST_CASE(
+    "task list's rows say a task was interrupted, as task status does, and so does the admin "
+    "plane's",
+    "[commands][task][surfaces][read][list]") {
+    // M32: a task killed mid-round is `running` by its ledger with no process
+    // left. Its list row says so -- every row says whether, `false` when not
+    // -- by the view's own rule, so a driver draws the list without reading
+    // each task's status.
+    const Home home{R"({"text": "x"})"};
+    t::Task task;
+    task.id = "task-20261004-120000";
+    task.goal = "Keep going";
+    task.session_id = "20261004-120000-abcd";
+    task.working_directory = home.work().string();
+    task.status = std::string{t::kRunning};
+    task.created_at = "2026-10-04T12:00:00Z";
+    REQUIRE(t::save_task(home.tasks(), task).empty());
+    t::Task done = task;
+    done.id = "task-20261004-110000";
+    done.status = std::string{t::kDone};
+    done.created_at = "2026-10-04T11:00:00Z";
+    REQUIRE(t::save_task(home.tasks(), done).empty());
+
+    // The list's rows, the admin plane's the same bytes, and each task's own
+    // status document.
+    const auto listed = [&home]() {
+        std::string out;
+        std::string err;
+        REQUIRE(home.run({"task", "list", "--output-format", "json"}, &out, &err) == 0);
+        {
+            const apogee::testing::EnvGuard guard{"APOGEE_HOME", home.home.home().string()};
+            apogee::httpserver::HttpRequest request;
+            request.method = "GET";
+            request.path = "/v1/admin/tasks";
+            CHECK(out == apogee::httpserver::admin_list_tasks(request).body + "\n");
+        }
+        const nlohmann::json list = nlohmann::json::parse(out);
+        REQUIRE(list["data"].size() == 2);
+        return list["data"];
+    };
+    const auto status_of = [&home](const std::string& id) {
+        std::string out;
+        std::string err;
+        REQUIRE(home.run({"task", "status", id, "--output-format", "json"}, &out, &err) == 0);
+        return nlohmann::json::parse(out);
+    };
+
+    nlohmann::json rows = listed();
+    REQUIRE(rows[0]["id"] == task.id);
+    CHECK(rows[0]["status"] == "running");
+    CHECK(rows[0]["interrupted"] == true);
+    CHECK(rows[0]["interrupted"] == status_of(task.id)["interrupted"]);
+    REQUIRE(rows[1]["id"] == done.id);
+    CHECK(rows[1]["interrupted"] == false);
+    CHECK(rows[1]["interrupted"] == status_of(done.id)["interrupted"]);
+
+    // This process holds its lock: running now, interrupted on neither.
+    std::string error;
+    std::optional<t::TaskLock> lock = t::TaskLock::acquire(home.tasks(), task.id, error);
+    REQUIRE(lock.has_value());
+    rows = listed();
+    CHECK(rows[0]["interrupted"] == false);
+    CHECK(rows[0]["interrupted"] == status_of(task.id)["interrupted"]);
+    CHECK(rows[1]["interrupted"] == false);
+    lock->release();
+    // Released with the ledger still running: interrupted again.
+    CHECK(listed()[0]["interrupted"] == true);
 }
 
 TEST_CASE("task status pairs each answered question with its own answer",

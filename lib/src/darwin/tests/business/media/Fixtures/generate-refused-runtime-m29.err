@@ -1,0 +1,1 @@
+apogee video generate: torch and diffusers are not installed in Apogee's Python environment -- apogee train setup --with video

@@ -2,6 +2,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <cstdint>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -106,11 +108,41 @@ TEST_CASE("what a turn recalled is said on the status line, never in the answer"
           "[ux][reporter][recall]") {
     Harness h;
     CliReporter reporter = h.make();
-    reporter.on_recall(0, 0);
+    reporter.on_recall({}, 0);
     CHECK(h.progress.str().find("[memory]") == std::string::npos);
-    reporter.on_recall(2, 1);
+    reporter.on_recall({{.id = "a", .name = "one", .updated = "2026-10-19T10:00:00Z"},
+                        {.id = "b", .name = "two", .updated = "2026-10-18T10:00:00Z"}},
+                       1);
     CHECK(h.progress.str().find("[memory] 2 past chats, 1 decision") != std::string::npos);
     CHECK(h.answer.str().empty());
+}
+
+TEST_CASE("the excerpts a turn sent are said under --verbose only", "[ux][reporter][sources]") {
+    // 52a: the retrieval line already says how many and how well; the files
+    // and their spans are the verbose line's, each score beside its scale.
+    const std::vector<apogee::harness::ExcerptSource> sources{
+        {.file = "report.pdf",
+         .pages = std::array<std::int64_t, 2>{41, 42},
+         .score = 0.81,
+         .retriever = "vector"},
+        {.file = "notes.md",
+         .lines = std::array<std::int64_t, 2>{12, 12},
+         .score = 0.4,
+         .retriever = "lexical"}};
+    Harness quiet;
+    CliReporter ordinary = quiet.make();
+    ordinary.on_sources(sources);
+    CHECK(quiet.progress.str().empty());
+
+    Harness loud;
+    CliReporter verbose = loud.make(true, Verbosity::Verbose);
+    verbose.on_sources(sources);
+    verbose.on_sources({});
+    CHECK(loud.progress.str().find(
+              "sources: report.pdf pp. 41–42 (vector 0.81), notes.md:12 (lexical 0.40)") !=
+          std::string::npos);
+    CHECK(count_of(loud.progress.str(), "sources:") == 1);
+    CHECK(loud.answer.str().empty());
 }
 
 TEST_CASE("a spent budget reaches the thinking block's summary", "[ux][reporter][thinking]") {
@@ -158,7 +190,7 @@ TEST_CASE("a line said during a turn lands above the open block, never inside it
     CliReporter reporter = h.make();
     reporter.on_side_call({.role = "embedding", .detail = "the question"});
     reporter.keep_line("[warn] 1 chunk(s) from 'notes'");
-    reporter.on_recall(1, 0);
+    reporter.on_recall({{.id = "a", .name = "one", .updated = "2026-10-19T10:00:00Z"}}, 0);
     reporter.on_thinking();
     reporter.on_thinking_token("pondering");
     reporter.on_clear_status();

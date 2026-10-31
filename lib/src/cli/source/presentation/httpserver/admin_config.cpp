@@ -168,6 +168,23 @@ nlohmann::json backend_view(std::string_view name, const harness::BackendConfig&
     if (!backend.server_tools.empty()) {
         out["server_tools"] = backend.server_tools;
     }
+    // The adapters as the entry holds them, each with its pin (53a).
+    if (!backend.adapters.empty()) {
+        nlohmann::json adapters = nlohmann::json::array();
+        for (const harness::AdapterConfig& adapter : backend.adapters) {
+            adapters.push_back({{"path", adapter.path},
+                                {"scale", adapter.scale},
+                                {"base_sha256", adapter.base_sha256}});
+        }
+        out["adapters"] = std::move(adapters);
+    }
+    // The drafter beside the model, and its block (53i).
+    if (!backend.draft.empty()) {
+        out["draft"] = backend.draft;
+    }
+    if (backend.draft_block_size.has_value()) {
+        out["draft_block_size"] = *backend.draft_block_size;
+    }
     return out;
 }
 
@@ -308,9 +325,21 @@ HttpResponse admin_create_backend(const AdminConfigContext& context, const HttpR
                               kForbidden);
     }
 
+    // The kind decides the role (55d): the CLI's own refusal, by the one
+    // predicate, before anything is written.
+    if (const std::string refused = commands::kind_refusal(name, backend); !refused.empty()) {
+        return error_response(400, refused);
+    }
+    // The CLI's own add (M33): the default too, when none is set and the
+    // entry chats -- the same bytes, said in the same words.
+    const bool chats = commands::role_refusal(name, backend, "default").empty();
+    bool default_set = false;
     try {
         harness::edit_config_file(context.config_path, [&](std::string_view content) {
-            return harness::append_backend(content, name, backend, force);
+            commands::AddedBackend added =
+                commands::add_backend_text(content, name, backend, force, chats);
+            default_set = added.default_set;
+            return std::move(added.text);
         });
     } catch (const harness::ConfigEditError& e) {
         const std::string what = e.what();
@@ -327,6 +356,7 @@ HttpResponse admin_create_backend(const AdminConfigContext& context, const HttpR
     }
     nlohmann::json out = backend_view(name, backend);
     out["restart_required"] = drifted(context, *loaded.config);
+    out["said"] = default_set ? commands::default_set_words(name) : std::string{};
     return json_response(201, out);
 }
 
@@ -351,9 +381,14 @@ HttpResponse admin_delete_backend(const AdminConfigContext& context, std::string
     if (loaded.config->find_backend(name) == nullptr) {
         return error_response(404, "no backend named '" + std::string{name} + "'", kNotFoundError);
     }
+    // The CLI's own delete (M33): the roles that named it cleared with it,
+    // its lines as `said`.
+    std::vector<std::string> cleared;
     try {
         harness::edit_config_file(context.config_path, [&](std::string_view content) {
-            return harness::delete_backend(content, name);
+            commands::DeletedBackend deleted = commands::delete_backend_text(content, name);
+            cleared = std::move(deleted.cleared);
+            return std::move(deleted.text);
         });
     } catch (const harness::ConfigEditError& e) {
         return error_response(400, e.what());
@@ -366,6 +401,7 @@ HttpResponse admin_delete_backend(const AdminConfigContext& context, std::string
     }
     return json_response(200,
                          nlohmann::json{{"deleted", std::string{name}},
+                                        {"said", cleared},
                                         {"restart_required", drifted(context, *after.config)}});
 }
 
@@ -690,6 +726,43 @@ HttpResponse admin_put_permission(const AdminConfigContext& context, std::string
                  {"restart_required", restart}});
 }
 
+HttpResponse admin_put_config_value(const AdminConfigContext& context, std::string_view key,
+                                    const HttpRequest& request) {
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, false);
+    if (body.is_discarded() || !body.is_object() || !body.contains("value")) {
+        return error_response(400, "the request body must be a JSON object with a value");
+    }
+    const nlohmann::json& given = body.at("value");
+    std::string value;
+    if (given.is_string()) {
+        value = given.get<std::string>();
+    } else if (given.is_boolean()) {
+        value = given.get<bool>() ? "true" : "false";
+    } else if (given.is_number_integer()) {
+        value = std::to_string(given.get<std::int64_t>());
+    } else {
+        return error_response(400, "value must be a string, a boolean or a whole number");
+    }
+    try {
+        harness::edit_config_file(context.config_path, [&](std::string_view content) {
+            return harness::set_scalar(content, key, value);
+        });
+    } catch (const harness::ConfigEditError& e) {
+        return error_response(400, e.what());
+    } catch (const harness::ConfigError& e) {
+        return error_response(400, e.what(), kConfigError);
+    }
+    const Loaded after = load_now(context);
+    if (!after.config.has_value()) {
+        return after.failure;
+    }
+    // A served run reads its config once at startup: a value set here is the
+    // CLI's now and this server's after a restart.
+    return json_response(200, nlohmann::json{{"key", std::string{key}},
+                                             {"value", value},
+                                             {"restart_required", context.startup != nullptr}});
+}
+
 HttpResponse admin_list_allowed_hosts(const AdminConfigContext& context) {
     const Loaded loaded = load_now(context);
     if (!loaded.config.has_value()) {
@@ -778,6 +851,13 @@ HttpResponse admin_set_role(const AdminConfigContext& context, std::string_view 
                               "no backend named '" + name + "' in this config" +
                                   (known.empty() ? " (it has no backends yet)"
                                                  : " (known backends: " + join_names(known) + ")"));
+    }
+    // And one that runs what it names (55d), of the kind the role uses
+    // (M33), as the CLI refuses it.
+    if (const std::string refused =
+            commands::role_refusal(name, *loaded.config->find_backend(name), field);
+        !refused.empty()) {
+        return error_response(400, "backend '" + name + "' cannot take a role: " + refused);
     }
     try {
         harness::edit_config_file(context.config_path, [&](std::string_view content) {

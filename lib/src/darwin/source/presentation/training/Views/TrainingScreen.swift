@@ -1,0 +1,1032 @@
+import BusinessJobs
+import BusinessReads
+import PresentationShell
+import PresentationStyles
+import SwiftUI
+import UniformTypeIdentifiers
+
+/// The Training place (⌘9): runs with their gates and promotions, the named
+/// pipelines and their runs stage by stage, the unattended cycle, the
+/// regimes, the datasets and their kits.
+public struct TrainingScreen: View {
+    @Bindable private var model: TrainingViewModel
+    @State private var preparing = false
+
+    public init(model: TrainingViewModel) {
+        self.model = model
+    }
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            ScreenHeader(title: "Training") {
+                Picker("Show", selection: $model.tab) {
+                    ForEach(TrainingViewModel.Tab.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                switch model.tab {
+                case .runs: Button("New run…") { model.newRun() }.disabled(model.isRunning || model.missingText != nil)
+                case .pipelines: EmptyView()
+                case .cycle:
+                    Button("Run one pass…") { model.pending = .runCycle }
+                        .disabled(!model.canRunCycle)
+                        .help("apogee train cycle run: one gated pass -- collect, merge, train, gate against the last pass and the anchor, promote or discard")
+                    if model.canResumeCycle {
+                        Button("Resume…") { model.pending = .resumeCycle }
+                            .help("apogee train cycle resume: the halt and the failure count cleared")
+                    } else {
+                        Button("Halt…") { model.pending = .haltCycle }
+                            .disabled(!model.canHaltCycle)
+                            .help(
+                                "apogee train cycle halt: every pass refuses until a resume -- your scheduler's too"
+                                    + (model.cycleHeld && model.keepsHalt ? "; the pass running now finishes, and keeps the halt" : ""))
+                    }
+                case .regimes: EmptyView()
+                case .datasets:
+                    Button("New dataset…") { model.newDataset() }.disabled(model.missingText != nil)
+                    Button("Pull…") { model.newPull() }
+                        .disabled(model.isRunning || model.missingText != nil)
+                        .help("apogee datasets pull owner/name: a Hugging Face dataset's data files, for Prepare")
+                    Button("Synthesize…") { model.newSynthesis() }.disabled(model.isRunning || model.missingText != nil)
+                    Button("Prepare a file…") { preparing = true }.disabled(model.isRunning || model.missingText != nil)
+                }
+            }
+            Divider()
+            if let progress = model.run {
+                HStack(spacing: Spacing.s) {
+                    ProgressView().controlSize(.small)
+                    Text(model.running ?? "Working").font(.apogeeSmall)
+                    if let bytes = model.pullBytes {
+                        // A streamed pull's bytes, file by file (the CLI's M30).
+                        if let fraction = bytes.fraction {
+                            ProgressView(value: fraction).frame(maxWidth: 220)
+                        }
+                        Text(TrainingViewModel.bytesWords(bytes))
+                            .font(.apogeeMeta.monospaced())
+                            .foregroundStyle(Palette.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    } else {
+                        Text(progress.busy ?? progress.lastSaid ?? "")
+                            .font(.apogeeMeta.monospaced())
+                            .foregroundStyle(Palette.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    Spacer()
+                    Button("Stop") { Task { await model.stop() } }
+                }
+                .padding(.horizontal, Spacing.l)
+                .padding(.vertical, Spacing.s)
+                Divider()
+            }
+            switch model.tab {
+            case .runs: RunsView(model: model)
+            case .pipelines: PipelinesView(model: model)
+            case .cycle: CycleView(model: model)
+            case .regimes: RegimesView(model: model)
+            case .datasets: DatasetsView(model: model)
+            }
+        }
+        .sheet(item: Binding(get: { model.sheet.map(SheetID.init) }, set: { if $0 == nil { model.sheet = nil } })) { which in
+            switch which.sheet {
+            case .run: RunSheet(model: model)
+            case .promote: PromoteSheet(model: model)
+            case .synth: SynthSheet(model: model)
+            case .create: CreateSheet(model: model)
+            case .pull: PullSheet(model: model)
+            }
+        }
+        .confirmationDialog(
+            model.pendingTitle,
+            isPresented: Binding(get: { model.pending != nil }, set: { if !$0 { model.pending = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button(model.pendingAction, role: model.pending?.isDestructive == true ? .destructive : nil) { Task { await model.confirm() } }
+            Button("Cancel", role: .cancel) { model.pending = nil }
+        } message: {
+            Text(
+                (["apogee " + (model.pending?.arguments.joined(separator: " ") ?? "")] + [model.pendingConsequence].compactMap { $0 })
+                    .joined(separator: "\n\n"))
+        }
+        .fileImporter(isPresented: $preparing, allowedContentTypes: [.item]) { result in
+            if case .success(let url) = result { model.prepare(url.path) }
+        }
+        .alert("That didn't work", isPresented: Binding(get: { model.failure != nil }, set: { if !$0 { model.dismissFailure() } })) {
+            if model.refusedPromotion != nil {
+                // The CLI's words name the way: the sheet again, in the mode
+                // they name, with them above it.
+                Button("Change the promotion…") { model.changePromotion() }
+            }
+            Button("OK") { model.dismissFailure() }
+        } message: {
+            Text(model.failure ?? "")
+        }
+    }
+
+    struct SheetID: Identifiable {
+        let sheet: TrainingViewModel.Sheet
+        var id: String { "\(sheet)" }
+    }
+}
+
+/// The runs: each with its trainer, its loss and its gate; the promoted
+/// versions under them.
+struct RunsView: View {
+    @Bindable var model: TrainingViewModel
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) {
+                    ForEach(model.runs) { run in
+                        Button {
+                            model.selectedRun = run.id
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack {
+                                    Text(run.id).font(.apogeeBody.monospacedDigit())
+                                    Spacer()
+                                    Text(run.status).font(.apogeeMeta).foregroundStyle(Palette.textSecondary)
+                                }
+                                Text([run.method, run.trainer, run.finalLoss.map { String(format: "loss %.4f", $0) } ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
+                                    + " · " + TrainingViewModel.gate(run))
+                                    .font(.apogeeMeta)
+                                    .foregroundStyle(run.evalPassed == false ? Palette.error : Palette.textTertiary)
+                                    .lineLimit(1)
+                            }
+                            .padding(Spacing.m)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(model.selectedRun == run.id ? Palette.selection : .clear, in: RoundedRectangle(cornerRadius: Radius.row))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if let said = model.runsText {
+                        Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).padding(Spacing.m).textSelection(.enabled)
+                    } else if model.runs.isEmpty {
+                        Text("No runs yet. A run fine-tunes a stored SafeTensors set on a dataset -- hours on a local trainer -- and only starts when you launch it.")
+                            .font(.apogeeSmall)
+                            .foregroundStyle(Palette.textTertiary)
+                            .padding(Spacing.m)
+                    }
+                    if !model.ledgers.isEmpty || model.versionsText != nil {
+                        Text("PROMOTED VERSIONS").font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary).padding(.horizontal, Spacing.m).padding(.top, Spacing.l)
+                        if let said = model.versionsText {
+                            Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).padding(.horizontal, Spacing.m).textSelection(.enabled)
+                        }
+                        ForEach(model.ledgers) { ledger in
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack {
+                                    Text(ledger.backend).font(.apogeeBody)
+                                    Spacer()
+                                    Button("Roll back…") { model.pending = .rollback(backend: ledger.backend) }
+                                        .buttonStyle(.borderless)
+                                        .disabled(ledger.versions.count < 2)
+                                }
+                                ForEach(ledger.versions) { version in
+                                    Text(RunsView.words(version, active: ledger.active))
+                                        .font(.apogeeMeta.monospaced())
+                                        .foregroundStyle(version.version == ledger.active ? Palette.textPrimary : Palette.textTertiary)
+                                        .help(version.path)
+                                }
+                            }
+                            .padding(Spacing.m)
+                        }
+                    }
+                }
+                .padding(Spacing.s)
+            }
+            .frame(minWidth: 380)
+            Divider()
+            Group {
+                if let run = model.currentRun {
+                    RunPage(model: model, run: run)
+                } else {
+                    Text("Choose a run to see what it trained and how it did.")
+                        .font(.apogeeSmall)
+                        .foregroundStyle(Palette.textTertiary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .frame(width: 380)
+            .background(Palette.inspector)
+        }
+    }
+
+    /// A promoted version in a line: its number and run, an adapter one said
+    /// so -- with where its gate scored it, over a quantized base (53c) --
+    /// active or pruned.
+    static func words(_ version: VersionLedger.Version, active: Int?) -> String {
+        var parts = ["v\(version.version)", "run \(version.runID)"]
+        if version.isAdapter { parts.append("adapter") }
+        if let scoredOn = version.evalScoredOn { parts.append("scored on \(scoredOn)") }
+        if version.version == active { parts.append("active") }
+        if version.pruned { parts.append("pruned") }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// One run: its facts, its gate, and Gate and Promote.
+struct RunPage: View {
+    let model: TrainingViewModel
+    let run: TrainingRun
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Spacing.m) {
+                Text(run.id).font(.apogeeHeading.monospacedDigit())
+                Text(TrainingViewModel.gate(run))
+                    .font(.apogeeSmall)
+                    .foregroundStyle(run.evalPassed == false ? Palette.error : Palette.textSecondary)
+                fact("Trained", run.baseModel)
+                fact("On", run.dataset)
+                fact("How", [run.method, run.trainer, run.iterations.map { "\($0) iterations" } ?? ""].filter { !$0.isEmpty }.joined(separator: " · "))
+                fact("Final loss", run.finalLoss.map { String(format: "%.4f", $0) } ?? "—")
+                fact("Ran", [run.startedAt, run.finishedAt].filter { !$0.isEmpty }.joined(separator: " → "))
+                HStack {
+                    Button("Gate it") { model.gate(run) }
+                        .help("apogee train eval \(run.id): the run's answers against its suite")
+                    Button("Promote…") { model.newPromotion(of: run) }
+                        .help("apogee train promote: fuse, verify and register it as a backend -- or, with --adapter, the adapter alone on an entry's adapters")
+                }
+                .disabled(model.isRunning)
+            }
+            .padding(Spacing.l)
+        }
+    }
+
+    private func fact(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label.uppercased()).font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary)
+            Text(value.isEmpty ? "—" : value).font(.apogeeBody).textSelection(.enabled)
+        }
+    }
+}
+
+/// The regimes: each one's kits in order, and Run.
+struct RegimesView: View {
+    @Bindable var model: TrainingViewModel
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) {
+                    ForEach(model.regimes) { regime in
+                        Button {
+                            model.selectedRegime = regime.name
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(regime.name).font(.apogeeBody)
+                                Text("\(regime.kits.count) kit\(regime.kits.count == 1 ? "" : "s") · \(regime.source)").font(.apogeeMeta).foregroundStyle(Palette.textTertiary)
+                            }
+                            .padding(Spacing.m)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(model.selectedRegime == regime.name ? Palette.selection : .clear, in: RoundedRectangle(cornerRadius: Radius.row))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if let said = model.regimesText {
+                        Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).padding(Spacing.m).textSelection(.enabled)
+                    }
+                }
+                .padding(Spacing.s)
+            }
+            .frame(width: 280)
+            .background(Palette.sidebar)
+            Divider()
+            if let regime = model.currentRegime {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Spacing.m) {
+                        HStack {
+                            Text(regime.name).font(.apogeeHeading)
+                            Spacer()
+                            Button("Run this regime") { model.runRegime(regime) }
+                                .disabled(model.isRunning)
+                                .help("apogee train regime run \(regime.name): a dataset per kit from the teacher, one gated pipeline, the last passing stage promoted")
+                        }
+                        Text(regime.description).font(.apogeeBody).textSelection(.enabled)
+                        Text("KITS, IN ORDER").font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary)
+                        ForEach(Array(regime.kits.enumerated()), id: \.offset) { index, kit in
+                            Text("\(index + 1). \(kit)").font(.apogeeBody)
+                        }
+                        if regime.teacher.isEmpty || regime.student.isEmpty {
+                            Text("The spec names no \(regime.teacher.isEmpty ? "teacher" : "student") -- the run says what it needs, in its words.")
+                                .font(.apogeeSmall)
+                                .foregroundStyle(Palette.textTertiary)
+                        }
+                    }
+                    .padding(Spacing.xl)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                Text("Choose a regime to see its kits.").font(.apogeeSmall).foregroundStyle(Palette.textTertiary).frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+}
+
+/// The datasets, and the kits a synthesis draws on.
+struct DatasetsView: View {
+    @Bindable var model: TrainingViewModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let pulled = model.pulled {
+                PulledBanner(model: model, pulled: pulled)
+                Divider()
+            }
+            lists
+        }
+    }
+
+    private var lists: some View {
+        HStack(spacing: 0) {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) {
+                    ForEach(model.datasets) { dataset in
+                        Button {
+                            model.selectedDataset = dataset.name
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(dataset.name).font(.apogeeBody)
+                                Text("\(dataset.lines) example\(dataset.lines == 1 ? "" : "s") · \(dataset.shape)").font(.apogeeMeta).foregroundStyle(Palette.textTertiary)
+                            }
+                            .padding(Spacing.m)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(model.selectedDataset == dataset.name ? Palette.selection : .clear, in: RoundedRectangle(cornerRadius: Radius.row))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if let said = model.datasetsText {
+                        Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).padding(Spacing.m).textSelection(.enabled)
+                    } else if model.datasets.isEmpty {
+                        Text("No datasets yet.").font(.apogeeSmall).foregroundStyle(Palette.textTertiary).padding(Spacing.m)
+                    }
+                    Text("KITS").font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary).padding(.horizontal, Spacing.m).padding(.top, Spacing.l)
+                    if let said = model.kitsText {
+                        Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).padding(.horizontal, Spacing.m).textSelection(.enabled)
+                    }
+                    ForEach(model.kits) { kit in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(kit.name).font(.apogeeSmall)
+                            Text("\(kit.evalItems) eval items").font(.apogeeMeta).foregroundStyle(Palette.textTertiary)
+                        }
+                        .padding(.horizontal, Spacing.m)
+                        .padding(.vertical, Spacing.xs)
+                        .help(kit.description)
+                    }
+                }
+                .padding(Spacing.s)
+            }
+            .frame(width: 300)
+            .background(Palette.sidebar)
+            Divider()
+            if let dataset = model.currentDataset {
+                VStack(alignment: .leading, spacing: Spacing.m) {
+                    HStack {
+                        Text(dataset.name).font(.apogeeHeading)
+                        Spacer()
+                        Button("Delete…", role: .destructive) { model.pending = .deleteDataset(dataset.name) }
+                    }
+                    Text("\(dataset.lines) examples · \(dataset.shape) · \(ByteCountFormatter.string(fromByteCount: Int64(dataset.bytes), countStyle: .file))")
+                        .font(.apogeeBody)
+                    Text(dataset.path).font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+                    Spacer()
+                }
+                .padding(Spacing.xl)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text("Choose a dataset.").font(.apogeeSmall).foregroundStyle(Palette.textTertiary).frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+}
+
+/// A pull that finished: where the CLI put the files, what it said of them,
+/// and its own next step -- `datasets prepare` on that directory.
+struct PulledBanner: View {
+    let model: TrainingViewModel
+    let pulled: TrainingViewModel.PulledDataset
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.m) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Pulled" + (pulled.summary.isEmpty ? "" : ": \(pulled.summary)")).font(.apogeeSmall)
+                Text(pulled.path)
+                    .font(.apogeeMeta.monospaced())
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
+            Spacer()
+            Button("Prepare it") { model.prepare(pulled.path) }
+                .disabled(model.isRunning)
+                .help("apogee datasets prepare \(pulled.path): the files made trainer-ready")
+            Button("Dismiss") { model.dismissPulled() }
+        }
+        .padding(.horizontal, Spacing.l)
+        .padding(.vertical, Spacing.s)
+    }
+}
+
+/// A Hugging Face dataset's files, downloaded for Prepare.
+struct PullSheet: View {
+    @Bindable var model: TrainingViewModel
+
+    var body: some View {
+        SheetFrame(title: "Pull a dataset", arguments: model.pullArguments, action: "Pull", act: model.pull, cancel: { model.sheet = nil }) {
+            Text("Downloads a Hugging Face dataset's data files -- Parquet, JSONL, JSON, CSV, Arrow or text -- for Prepare to make trainer-ready. A gated dataset needs your Hugging Face token.")
+                .font(.apogeeSmall)
+                .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            TextField("owner/name[@revision][:file]", text: $model.pullRef).textFieldStyle(.roundedBorder)
+        }
+    }
+}
+
+/// A new run: the stored set to train, the dataset, how.
+struct RunSheet: View {
+    @Bindable var model: TrainingViewModel
+
+    var body: some View {
+        SheetFrame(title: "Train a model", arguments: model.runForm.arguments, action: "Start the run", act: model.startRun, cancel: { model.sheet = nil }) {
+            Text("A run fine-tunes a stored SafeTensors set -- hours on a local trainer. It starts only now, when you say.")
+                .font(.apogeeSmall)
+                .foregroundStyle(Palette.textSecondary)
+            Picker("Student", selection: $model.runForm.student) {
+                ForEach(model.students, id: \.self) { Text($0).tag($0) }
+            }
+            Picker("Dataset", selection: $model.runForm.dataset) {
+                ForEach(model.datasets) { Text($0.name).tag($0.name) }
+            }
+            Picker("Method", selection: $model.runForm.method) {
+                Text("LoRA (the default)").tag(String?.none)
+                Text("QLoRA").tag(String?.some("qlora"))
+            }
+            HStack {
+                TextField("Iterations", text: $model.runForm.iters)
+                TextField("Batch size", text: $model.runForm.batchSize)
+                TextField("Layers", text: $model.runForm.numLayers)
+            }
+            .textFieldStyle(.roundedBorder)
+            Toggle("Gradient checkpointing: slower, less memory", isOn: $model.runForm.gradCheckpoint)
+            Toggle("Completion-only loss: the prompt is not trained on", isOn: $model.runForm.maskPrompt)
+            if let said = model.modelsText {
+                Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+            } else if model.students.isEmpty {
+                Text("No stored SafeTensors set to train: pull one with its full weights first.").font(.apogeeSmall).foregroundStyle(Palette.textTertiary)
+            }
+        }
+    }
+}
+
+/// A promotion: the run fused and registered as a backend -- or, with
+/// `--adapter`, its adapter alone on an entry's adapters -- the gate honoured,
+/// and the CLI's refusal above the fields when it sent the sheet back.
+struct PromoteSheet: View {
+    @Bindable var model: TrainingViewModel
+
+    var body: some View {
+        SheetFrame(title: "Promote \(model.promoteForm.run)", arguments: model.promoteForm.arguments, action: "Promote", act: model.promote, cancel: { model.sheet = nil }) {
+            if let refusal = model.promoteRefusal {
+                Text(refusal)
+                    .font(.apogeeSmall)
+                    .foregroundStyle(Palette.error)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let run = model.runs.first(where: { $0.id == model.promoteForm.run }) {
+                Text("This run " + TrainingViewModel.gate(run) + ".")
+                    .font(.apogeeSmall)
+                    .foregroundStyle(run.evalPassed == false ? Palette.error : Palette.textSecondary)
+            }
+            Toggle("The adapter alone (--adapter): no fuse -- registered on an existing entry's adapters, over the base it runs", isOn: $model.promoteForm.adapter)
+            if model.promoteForm.adapter {
+                adapterFields
+            } else {
+                mergeFields
+            }
+            Picker("Trainer", selection: $model.promoteForm.trainer) {
+                Text("The run's recorded one").tag(String?.none)
+                ForEach(TrainingViewModel.PromoteForm.trainers, id: \.self) { Text($0).tag(String?.some($0)) }
+            }
+            Toggle("Skip the gate (--force): a failing candidate reaches inference", isOn: $model.promoteForm.force)
+        }
+    }
+
+    /// An adapter version: the entry it goes on, and what its gate scores it
+    /// on where that entry's base is quantized (53c).
+    @ViewBuilder private var adapterFields: some View {
+        Picker("Onto", selection: $model.promoteForm.backend) {
+            Text("Choose an entry").tag("")
+            ForEach(entries, id: \.self) { Text($0).tag($0) }
+        }
+        if model.adapterBackends.isEmpty {
+            Text("No llamacpp or mlx entry is configured: an adapter goes on one that runs the base it was trained over.")
+                .font(.apogeeSmall)
+                .foregroundStyle(Palette.textTertiary)
+        }
+        ledger
+        TextField("Gate suite, where the base is quantized (--suite; else the run's recorded eval's)", text: $model.promoteForm.suite)
+            .textFieldStyle(.roundedBorder)
+        Picker("Judge", selection: $model.promoteForm.judge) {
+            Text("The recorded eval's, or the config's").tag(String?.none)
+            ForEach(model.backends, id: \.self) { Text($0).tag(String?.some($0)) }
+        }
+        Text("Over a quantized base the gate scores the candidate there, on this suite; over any other it is the run's recorded eval.")
+            .font(.apogeeMeta)
+            .foregroundStyle(Palette.textTertiary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// A merged version: fused, converted, registered.
+    @ViewBuilder private var mergeFields: some View {
+        TextField("As backend (new, or an existing llamacpp or mlx entry)", text: $model.promoteForm.backend).textFieldStyle(.roundedBorder)
+        ledger
+        Picker("Target", selection: $model.promoteForm.target) {
+            Text("What the backend runs (else GGUF)").tag(String?.none)
+            Text("GGUF, for llama.cpp").tag(String?.some("gguf"))
+            Text("MLX, as fused").tag(String?.some("mlx"))
+        }
+        Picker("Quantize", selection: $model.promoteForm.quantize) {
+            Text("Keep F16").tag(String?.none)
+            ForEach(TrainingViewModel.PromoteForm.levels, id: \.self) { Text($0).tag(String?.some($0)) }
+        }
+        Toggle("Keep the fused checkpoint (--keep-fused)", isOn: $model.promoteForm.keepFused)
+    }
+
+    /// What the named backend's ledger holds, as `train versions` read it.
+    @ViewBuilder private var ledger: some View {
+        if let words = model.ledgerWords(for: model.promoteForm.backend) {
+            Text(words).font(.apogeeSmall).foregroundStyle(Palette.textSecondary)
+        }
+    }
+
+    /// The entries an adapter can go on, and the one named if it is not one.
+    private var entries: [String] {
+        let named = model.promoteForm.backend.trimmingCharacters(in: .whitespaces)
+        return named.isEmpty || model.adapterBackends.contains(named) ? model.adapterBackends : [named] + model.adapterBackends
+    }
+}
+
+/// A dataset distilled from a teacher for a kit's skill.
+struct SynthSheet: View {
+    @Bindable var model: TrainingViewModel
+
+    var body: some View {
+        SheetFrame(title: "Synthesize a dataset", arguments: model.synthForm.arguments, action: "Synthesize", act: model.synthesize, cancel: { model.sheet = nil }) {
+            TextField("Dataset name", text: $model.synthForm.name).textFieldStyle(.roundedBorder)
+            Picker("Teacher", selection: $model.synthForm.teacher) {
+                ForEach(model.backends, id: \.self) { Text($0).tag($0) }
+            }
+            if let said = model.modelsText {
+                Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+            }
+            Picker("Kit", selection: $model.synthForm.kit) {
+                ForEach(model.kits) { Text($0.name).tag($0.name) }
+            }
+            HStack {
+                TextField("Examples (the kit's own)", text: $model.synthForm.count)
+                TextField("Topic (optional)", text: $model.synthForm.topic)
+            }
+            .textFieldStyle(.roundedBorder)
+            Text("A cloud teacher is billed per call.").font(.apogeeSmall).foregroundStyle(Palette.textTertiary)
+        }
+    }
+}
+
+/// A new dataset scaffolded.
+struct CreateSheet: View {
+    @Bindable var model: TrainingViewModel
+
+    var body: some View {
+        let name = model.createName.trimmingCharacters(in: .whitespaces)
+        SheetFrame(title: "New dataset", arguments: name.isEmpty ? nil : ["datasets", "create", name, "--from", model.createFrom], action: "Create", act: { Task { await model.createDataset() } }, cancel: { model.sheet = nil }) {
+            TextField("Dataset name", text: $model.createName).textFieldStyle(.roundedBorder)
+            Picker("From", selection: $model.createFrom) {
+                Text("A template (two example lines)").tag("template")
+                Text("Your chats").tag("sessions")
+                Text("Empty").tag("empty")
+            }
+        }
+    }
+}
+
+/// A sheet's frame: its title, its fields, the command as typed, and its two
+/// buttons.
+struct SheetFrame<Fields: View>: View {
+    let title: String
+    let arguments: [String]?
+    let action: String
+    let act: () -> Void
+    let cancel: () -> Void
+    @ViewBuilder let fields: () -> Fields
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.m) {
+            Text(title).font(.apogeeHeading)
+            fields()
+            if let arguments {
+                Text((["apogee"] + arguments).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary).lineLimit(3).textSelection(.enabled)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel, action: cancel).keyboardShortcut(.cancelAction)
+                Button(action, action: act).keyboardShortcut(.defaultAction).disabled(arguments == nil)
+            }
+        }
+        .padding(Spacing.xl)
+        .frame(width: 560)
+    }
+}
+
+#if DEBUG
+#Preview("Runs: one, failed its gate") {
+    let training = TrainingPreview.training()
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 640)
+        .task { await TrainingPreview.read(training) }
+}
+
+#Preview("A run training") {
+    let training = TrainingPreview.training(said: TrainingPreview.running)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 640)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newRun()
+            training.startRun()
+        }
+}
+
+#Preview("A promotion the gate refused") {
+    let training = TrainingPreview.training(said: TrainingPreview.refused, finishes: true)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 640)
+        .task {
+            await TrainingPreview.read(training)
+            TrainingPreview.promoting(training)
+            training.promote()
+        }
+}
+
+#Preview("Apogee not installed") {
+    let training = TrainingPreview.training()
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 480)
+        .task { await training.connect(binary: nil) }
+}
+
+#Preview("Runs: Apogee not installed") {
+    let training = TrainingPreview.training()
+    RunsView(model: training)
+        .frame(width: 900, height: 300)
+        .task { await training.connect(binary: nil) }
+}
+
+#Preview("Regimes: Apogee not installed") {
+    let training = TrainingPreview.training()
+    RegimesView(model: training)
+        .frame(width: 900, height: 300)
+        .task { await training.connect(binary: nil) }
+}
+
+#Preview("Datasets: Apogee not installed") {
+    let training = TrainingPreview.training()
+    DatasetsView(model: training)
+        .frame(width: 900, height: 300)
+        .task { await training.connect(binary: nil) }
+}
+
+#Preview("Runs: the runs not read in time") {
+    let training = TrainingPreview.training(runner: TrainingPreview.unfinished)
+    RunsView(model: training)
+        .frame(width: 900, height: 300)
+        .task { await training.connect(binary: previewBinary) }
+}
+
+#Preview("Regimes: the list could not be read") {
+    let training = TrainingPreview.training(runner: TrainingPreview.badConfig)
+    RegimesView(model: training)
+        .frame(width: 900, height: 300)
+        .task { await training.connect(binary: previewBinary) }
+}
+
+#Preview("Datasets: the list not read in time") {
+    let training = TrainingPreview.training(runner: TrainingPreview.unfinished)
+    DatasetsView(model: training)
+        .frame(width: 900, height: 420)
+        .task { await training.connect(binary: previewBinary) }
+}
+
+#Preview("New run: the stored models could not be read") {
+    let training = TrainingPreview.training(runner: TrainingPreview.badConfig)
+    RunSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newRun()
+        }
+}
+
+#Preview("Synthesize: the models could not be read") {
+    let training = TrainingPreview.training(runner: TrainingPreview.badConfig)
+    SynthSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newSynthesis()
+        }
+}
+
+#Preview("Runs: read, one open") {
+    let training = TrainingPreview.training()
+    RunsView(model: training)
+        .frame(width: 900, height: 520)
+        .task { await TrainingPreview.read(training) }
+}
+
+#Preview("Runs: none read") {
+    RunsView(model: TrainingPreview.training())
+        .frame(width: 900, height: 400)
+}
+
+#Preview("A run that failed its gate") {
+    RunPage(model: TrainingPreview.training(), run: TrainingPreview.run)
+        .frame(width: 380, height: 520)
+        .background(Palette.inspector)
+}
+
+#Preview("Regimes: foundation open") {
+    let training = TrainingPreview.training()
+    RegimesView(model: training)
+        .frame(width: 900, height: 520)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.selectedRegime = "foundation"
+        }
+}
+
+#Preview("Datasets: heat-notes open, and the kits") {
+    let training = TrainingPreview.training()
+    DatasetsView(model: training)
+        .frame(width: 900, height: 640)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.selectedDataset = "heat-notes"
+        }
+}
+
+#Preview("New run: the first stored set, on heat-notes") {
+    let training = TrainingPreview.training()
+    RunSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newRun()
+        }
+}
+
+#Preview("New run: QLoRA, tuned") {
+    let training = TrainingPreview.training()
+    RunSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newRun()
+            training.runForm.method = "qlora"
+            training.runForm.iters = "200"
+            training.runForm.batchSize = "2"
+            training.runForm.gradCheckpoint = true
+            training.runForm.maskPrompt = true
+        }
+}
+
+#Preview("Promote: a run that failed its gate") {
+    let training = TrainingPreview.training()
+    PromoteSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            TrainingPreview.promoting(training)
+        }
+}
+
+#Preview("Promote: forced past the gate, quantized") {
+    let training = TrainingPreview.training()
+    PromoteSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            TrainingPreview.promoting(training)
+            training.promoteForm.target = "gguf"
+            training.promoteForm.quantize = "Q4_K_M"
+            training.promoteForm.force = true
+        }
+}
+
+#Preview("Synthesize: a teacher, a kit") {
+    let training = TrainingPreview.training()
+    SynthSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newSynthesis()
+            training.synthForm.name = "clerk-data"
+            training.synthForm.count = "50"
+        }
+}
+
+#Preview("Synthesize: a teacher that chats, over the registered kinds -- the embedding entry left out") {
+    let training = TrainingPreview.training(runner: TrainingPreview.kinds)
+    SynthSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newSynthesis()
+            training.synthForm.name = "clerk-data"
+        }
+}
+
+#Preview("New dataset: nothing named yet") {
+    let training = TrainingPreview.training()
+    CreateSheet(model: training)
+        .task { training.newDataset() }
+}
+
+#Preview("New dataset: from your chats") {
+    let training = TrainingPreview.training()
+    CreateSheet(model: training)
+        .task {
+            training.newDataset()
+            training.createName = "notes"
+            training.createFrom = "sessions"
+        }
+}
+
+#Preview("Promote: the adapter alone, onto an entry") {
+    let training = TrainingPreview.training(runner: TrainingPreview.adapters)
+    PromoteSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            TrainingPreview.promotingAdapter(training)
+        }
+}
+
+#Preview("Promote: the adapter onto a quantized base, its gate's suite named") {
+    let training = TrainingPreview.training(runner: TrainingPreview.adapters)
+    PromoteSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            TrainingPreview.promotingAdapter(training)
+            training.promoteForm.backend = "q4"
+            training.promoteForm.suite = "/Users/someone/suite.jsonl"
+        }
+}
+
+#Preview("Promote: the adapter onto an entry that chats, its judge one too, over the registered kinds -- the embedding entry left out") {
+    let training = TrainingPreview.training(runner: TrainingPreview.kinds)
+    PromoteSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newPromotion(of: TrainingPreview.passed)
+            training.promoteForm.adapter = true
+            training.promoteForm.backend = training.adapterBackends.last ?? ""
+            training.promoteForm.judge = training.backends.first
+        }
+}
+
+#Preview("Promote: sent back with the CLI's refusal, which names --adapter") {
+    let training = TrainingPreview.training(
+        said: TrainingPreview.refusal(TrainingDocuments.promoteNamesAdapter), finishes: true, runner: TrainingPreview.adapters)
+    PromoteSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newPromotion(of: TrainingPreview.passed)
+            training.promoteForm.backend = "based"
+            training.promote()
+            await TrainingPreview.settled { training.refusedPromotion != nil }
+            training.changePromotion()
+        }
+}
+
+#Preview("A promotion the CLI refused, its way offered") {
+    let training = TrainingPreview.training(
+        said: TrainingPreview.refusal(TrainingDocuments.promoteAdapterNoSuite), finishes: true, runner: TrainingPreview.adapters)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 640)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.selectedRun = TrainingPreview.passed.id
+            TrainingPreview.promotingAdapter(training)
+            training.promoteForm.backend = "q4"
+            training.promote()
+        }
+}
+
+#Preview("Runs: adapter versions promoted") {
+    let training = TrainingPreview.training(runner: TrainingPreview.adapters)
+    RunsView(model: training)
+        .frame(width: 900, height: 520)
+        .task { await training.connect(binary: previewBinary) }
+}
+
+#Preview("Pull: a reference typed") {
+    let training = TrainingPreview.training()
+    PullSheet(model: training)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newPull()
+            training.pullRef = "someone/heat-notes"
+        }
+}
+
+#Preview("Datasets: a pull running") {
+    let training = TrainingPreview.training(said: TrainingPreview.pulling(2))
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 520)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.tab = .datasets
+            training.newPull()
+            training.pullRef = "someone/heat-notes"
+            training.pull()
+        }
+}
+
+#Preview("Datasets: pulled, Prepare offered") {
+    let training = TrainingPreview.training(said: TrainingPreview.pulling(), finishes: true)
+    DatasetsView(model: training)
+        .frame(width: 900, height: 520)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.newPull()
+            training.pullRef = "someone/heat-notes"
+            training.pull()
+        }
+}
+
+#Preview("Datasets: a pull streaming, its bytes") {
+    let training = TrainingPreview.training(said: TrainingPreview.pullStreamed(), vocabulary: TrainingPreview.m30)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 520)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.tab = .datasets
+            training.newPull()
+            training.pullRef = "someone/heat-notes"
+            training.pull()
+        }
+}
+
+#Preview("Datasets: pulled, Prepare it on the folder its document names") {
+    let training = TrainingPreview.training(said: TrainingPreview.pullStreamed(whole: true), finishes: true, vocabulary: TrainingPreview.m30)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 520)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.tab = .datasets
+            training.newPull()
+            training.pullRef = "someone/heat-notes"
+            training.pull()
+        }
+}
+
+#Preview("A pull refused: not a dataset reference") {
+    let training = TrainingPreview.training(said: TrainingPreview.refusal(TrainingDocuments.pullBadRef), finishes: true)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 520)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.tab = .datasets
+            training.newPull()
+            training.pullRef = "nonsense"
+            training.pull()
+        }
+}
+
+#Preview("A pulled dataset's banner") {
+    let training = TrainingPreview.training(said: TrainingPreview.pulling(), finishes: true)
+    VStack {
+        if let pulled = training.pulled {
+            PulledBanner(model: training, pulled: pulled)
+        }
+    }
+    .frame(width: 900)
+    .task {
+        await training.connect(binary: previewBinary)
+        training.newPull()
+        training.pullRef = "someone/heat-notes"
+        training.pull()
+    }
+}
+
+#Preview("A sheet's frame: its command as typed") {
+    SheetFrame(title: "New dataset", arguments: ["datasets", "create", "notes", "--from", "sessions"], action: "Create", act: {}, cancel: {}) {
+        TextField("Dataset name", text: .constant("notes")).textFieldStyle(.roundedBorder)
+    }
+}
+
+#Preview("A sheet's frame: nothing to run yet") {
+    SheetFrame(title: "New dataset", arguments: nil, action: "Create", act: {}, cancel: {}) {
+        TextField("Dataset name", text: .constant("")).textFieldStyle(.roundedBorder)
+    }
+}
+#endif

@@ -1,5 +1,6 @@
 #include "training/convert.h"
 
+#include <regex>
 #include <string_view>
 #include <utility>
 
@@ -16,6 +17,10 @@ const std::vector<std::string>& converter_out_types() {
 
 std::filesystem::path converter_script() {
     return harness::training_scripts_dir() / "convert" / "convert_hf_to_gguf.py";
+}
+
+std::filesystem::path lora_converter_script() {
+    return harness::training_scripts_dir() / "convert" / "convert_lora_to_gguf.py";
 }
 
 std::string converter_unavailable(const PythonEnv& env, const std::filesystem::path& script,
@@ -63,13 +68,59 @@ std::string converter_unavailable(const PythonEnv& env, const std::filesystem::p
 std::vector<std::string> converter_arguments(std::string_view out_type,
                                              const std::filesystem::path& input,
                                              const std::filesystem::path& output,
-                                             ConverterOutput writes) {
+                                             ConverterOutput writes, bool dense_modules) {
     std::vector<std::string> arguments{"--outtype", std::string{out_type}, "--outfile",
                                        output.string(), input.string()};
     if (writes == ConverterOutput::Projector) {
         arguments.emplace_back("--mmproj");
     }
+    if (dense_modules && writes == ConverterOutput::Model) {
+        arguments.emplace_back("--sentence-transformers-dense-modules");
+    }
     return arguments;
+}
+
+std::string fold_name_list(const std::string& error, std::size_t most) {
+    // A name a line: a dotted identifier, then its list's comma or full stop,
+    // and on the last one perhaps the run's ` -- stderr: ...` tail.
+    static const std::regex kName{R"(^\s*[A-Za-z_][A-Za-z0-9_.]*[,.]?(\s+--\s.*)?$)"};
+    std::vector<std::string> lines;
+    std::size_t start = 0;
+    while (start <= error.size()) {
+        const std::size_t end = error.find('\n', start);
+        lines.push_back(
+            error.substr(start, end == std::string::npos ? std::string::npos : end - start));
+        if (end == std::string::npos) {
+            break;
+        }
+        start = end + 1;
+    }
+    std::size_t names = 0;
+    for (const std::string& line : lines) {
+        names += std::regex_match(line, kName) ? 1U : 0U;
+    }
+    if (names <= most) {
+        return error;
+    }
+    std::string out;
+    std::string tail;
+    std::size_t seen = 0;
+    for (const std::string& line : lines) {
+        if (!std::regex_match(line, kName)) {
+            out += (out.empty() ? "" : "\n") + line;
+            continue;
+        }
+        ++seen;
+        if (seen <= most) {
+            out += (out.empty() ? "" : "\n") + line;
+            if (seen == most) {
+                out += "\n... and " + std::to_string(names - most) + " more";
+            }
+        } else if (const std::size_t dash = line.find(" -- "); dash != std::string::npos) {
+            tail = line.substr(dash);
+        }
+    }
+    return out + tail;
 }
 
 std::string explain_converter_failure(std::string error) {
@@ -87,15 +138,15 @@ std::string explain_converter_failure(std::string error) {
 }
 
 Converter script_converter(std::filesystem::path interpreter, std::filesystem::path script,
-                           std::string out_type, ConverterOutput writes) {
+                           std::string out_type, ConverterOutput writes, bool dense_modules) {
     return [interpreter = std::move(interpreter), script = std::move(script),
-            out_type = std::move(out_type),
-            writes](const std::filesystem::path& input, const std::filesystem::path& gguf,
-                    const MessageSink& on_message, const harness::CancellationToken& cancellation) {
+            out_type = std::move(out_type), writes, dense_modules](
+               const std::filesystem::path& input, const std::filesystem::path& gguf,
+               const MessageSink& on_message, const harness::CancellationToken& cancellation) {
         ScriptRequest request;
         request.interpreter = interpreter;
         request.script = script;
-        request.arguments = converter_arguments(out_type, input, gguf, writes);
+        request.arguments = converter_arguments(out_type, input, gguf, writes, dense_modules);
         request.environment.emplace_back("PYTHONDONTWRITEBYTECODE", "1");
         const ScriptOutcome outcome = run_script(
             request,
@@ -111,7 +162,47 @@ Converter script_converter(std::filesystem::path interpreter, std::filesystem::p
         if (outcome.cancelled) {
             return std::string{"cancelled"};
         }
-        return explain_converter_failure(outcome.describe());
+        return explain_converter_failure(fold_name_list(outcome.describe()));
+    };
+}
+
+std::vector<std::string> lora_converter_arguments(std::string_view out_type,
+                                                  const std::filesystem::path& adapter,
+                                                  const std::filesystem::path& base,
+                                                  const std::filesystem::path& output) {
+    return {"--outtype", std::string{out_type}, "--base",        base.string(),
+            "--outfile", output.string(),       adapter.string()};
+}
+
+AdapterConverter script_lora_converter(std::filesystem::path interpreter,
+                                       std::filesystem::path script, std::string out_type) {
+    return [interpreter = std::move(interpreter), script = std::move(script),
+            out_type = std::move(out_type)](
+               const std::filesystem::path& adapter, const std::filesystem::path& base,
+               const std::filesystem::path& gguf, const MessageSink& on_message,
+               const harness::CancellationToken& cancellation) {
+        ScriptRequest request;
+        request.interpreter = interpreter;
+        request.script = script;
+        request.arguments = lora_converter_arguments(out_type, adapter, base, gguf);
+        request.environment.emplace_back("PYTHONDONTWRITEBYTECODE", "1");
+        // `--base` names the configuration; nothing is fetched to find it.
+        request.environment.emplace_back("HF_HUB_OFFLINE", "1");
+        const ScriptOutcome outcome = run_script(
+            request,
+            [&on_message](const ScriptEvent& event) {
+                if (on_message && event.kind != ScriptEvent::Kind::Error) {
+                    on_message(event.text);
+                }
+            },
+            cancellation);
+        if (outcome.ok) {
+            return std::string{};
+        }
+        if (outcome.cancelled) {
+            return std::string{"cancelled"};
+        }
+        return explain_converter_failure(fold_name_list(outcome.describe()));
     };
 }
 

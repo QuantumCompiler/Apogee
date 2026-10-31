@@ -1,0 +1,2 @@
+/Users/someone/.apogee/training/versions/based/v1.lora.gguf
+/Users/someone/extra.lora.gguf:0.5

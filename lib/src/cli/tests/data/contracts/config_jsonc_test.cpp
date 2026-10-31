@@ -537,3 +537,135 @@ TEST_CASE("rename_backend in a JSONC config: the key where it stands, every refe
     CHECK(config.find_backend("gemma4-12b") != nullptr);
     CHECK(config.mcp_server_names() == std::vector<std::string>{"gemma"});
 }
+
+// --- 55f: names, lists and hashes, in JSONC as in YAML ------------------------
+
+TEST_CASE("every name add-backend takes lives a whole life in JSONC, and the rest are refused",
+          "[config_edit][jsonc][names]") {
+    using namespace apogee::harness;
+    // The refusal is one rule, said alike in both formats.
+    const auto refusal = [](std::string_view content) {
+        try {
+            (void)append_backend(content, "qwen@home", mock_backend(), false);
+        } catch (const ConfigEditError& e) {
+            return std::string{e.what()};
+        }
+        return std::string{};
+    };
+    CHECK_THAT(refusal(kJsonc), Catch::Matchers::ContainsSubstring(
+                                    "is not one both config formats can edit -- a name is "
+                                    "letters, digits, '_', '-', '.' and '/'"));
+    CHECK_THAT(refusal(kJsonc), Catch::Matchers::ContainsSubstring("config rename-backend"));
+    CHECK(refusal(kJsonc) == refusal(kYaml));
+
+    // Each accepted name: added, edited, cleared and deleted, the file back
+    // to its bytes -- the bridge writes it plain, so the editor finds it.
+    for (const std::string_view name :
+         {"qwen-home", "qwen_home", "Qwen3.5-9B-Q4KM", "org/model", "_x", "9b", "true", "a.b"}) {
+        INFO(name);
+        const std::string added = append_backend(kJsonc, name, mock_backend(), false);
+        const std::string edited = set_backend_field(added, name, "max_tokens", "512");
+        CHECK(parse_config(edited, "<test>").find_backend(name)->max_tokens == 512);
+        CHECK(set_backend_field(edited, name, "max_tokens", "") == added);
+        CHECK(delete_backend(added, name) == kJsonc);
+        const std::string renamed = rename_backend(added, name, "renamed");
+        CHECK(rename_backend(renamed, "renamed", name) == added);
+    }
+}
+
+TEST_CASE("an odd name a JSONC config already holds is reached through rename-backend",
+          "[config_edit][jsonc][names]") {
+    using namespace apogee::harness;
+    // Hand-written, or added before 55f: the bridge quotes the key, so the line
+    // editor cannot find it -- but rename-backend reads the JSONC itself.
+    constexpr std::string_view kOdd = R"({
+  "backends": {
+    "qwen@home": {"type": "mock"} // the odd one
+  }
+}
+)";
+    CHECK_THROWS_WITH(set_backend_field(kOdd, "qwen@home", "max_tokens", "9"),
+                      "backend 'qwen@home' not found in config");
+    const std::string renamed = rename_backend(kOdd, "qwen@home", "qwen-home");
+    CHECK(renamed == R"({
+  "backends": {
+    "qwen-home": {"type": "mock"} // the odd one
+  }
+}
+)");
+    const std::string set = set_backend_field(renamed, "qwen-home", "max_tokens", "9");
+    CHECK(parse_config(set, "<test>").find_backend("qwen-home")->max_tokens == 9);
+    CHECK_THAT(set, Catch::Matchers::ContainsSubstring("// the odd one"));
+    CHECK(parse_config(delete_backend(set, "qwen-home"), "<test>").backends.empty());
+}
+
+TEST_CASE("a list field and a hash-bearing value edit alike in JSONC and in YAML",
+          "[config_edit][jsonc][block-list][hash][parity]") {
+    using namespace apogee::harness;
+    // The JSONC twin of a YAML block list: the bridge writes it as a flow
+    // list, so JSONC never met the fold -- held here to mean what YAML now
+    // means.
+    constexpr std::string_view kListJsonc = R"({
+  "backends": {
+    "claude": {
+      "type": "anthropic", // the vendor's own API
+      "api_key": "sk-test-literal",
+      "server_tools": ["web_search", "code_execution"], // the vendor's tools
+      "max_tokens": 1024 // the cap
+    }
+  },
+  "tools": {
+    "search": {
+      "provider": "searxng",
+      "url": "http://127.0.0.1:8888/#frag" // my instance
+    }
+  }
+}
+)";
+    constexpr std::string_view kListYaml = R"(backends:
+  claude:
+    type: anthropic   # the vendor's own API
+    api_key: sk-test-literal
+    server_tools:   # the vendor's tools
+      - web_search
+      - code_execution
+    max_tokens: 1024   # the cap
+tools:
+  search:
+    provider: searxng
+    url: "http://127.0.0.1:8888/#frag"   # my instance
+)";
+    const auto both = [&](const std::function<std::string(std::string_view)>& verb) {
+        const std::string json = verb(kListJsonc);
+        const std::string yaml = verb(kListYaml);
+        CHECK_THAT(json, Catch::Matchers::ContainsSubstring("// the cap"));
+        CHECK_THAT(yaml, Catch::Matchers::ContainsSubstring("# the cap"));
+        return std::pair{parse_config(yaml, "yaml"), parse_config(json, "jsonc")};
+    };
+    {
+        const auto [yaml, json] = both([](std::string_view content) {
+            return set_backend_field(content, "claude", "server_tools", "");
+        });
+        CHECK(json.find_backend("claude")->server_tools.empty());
+        CHECK(yaml.find_backend("claude")->server_tools.empty());
+        CHECK(json.find_backend("claude")->api_key == "sk-test-literal");
+        CHECK(yaml.find_backend("claude")->api_key == "sk-test-literal");
+        CHECK(json.find_backend("claude")->max_tokens == yaml.find_backend("claude")->max_tokens);
+    }
+    {
+        const auto [yaml, json] = both([](std::string_view content) {
+            return set_backend_field(content, "claude", "server_tools", "web_search");
+        });
+        CHECK(json.find_backend("claude")->server_tools == std::vector<std::string>{"web_search"});
+        CHECK(yaml.find_backend("claude")->server_tools ==
+              json.find_backend("claude")->server_tools);
+        CHECK(yaml.find_backend("claude")->api_key == json.find_backend("claude")->api_key);
+    }
+    {
+        const auto [yaml, json] = both([](std::string_view content) {
+            return set_scalar(content, "tools.search.url", "http://10.0.0.2:8080/#x");
+        });
+        CHECK(json.tools.search.url == "http://10.0.0.2:8080/#x");
+        CHECK(yaml.tools.search.url == json.tools.search.url);
+    }
+}

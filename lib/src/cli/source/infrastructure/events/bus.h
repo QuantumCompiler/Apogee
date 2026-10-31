@@ -32,7 +32,7 @@
 namespace apogee::events {
 
 /// The event-type catalog, as `GET /v1/admin/events` names them. Documented for
-/// client authors in `documentation/reference/http-api.md`; keep the two in step.
+/// client authors in `documentation/cli/reference/http-api.md`; keep the two in step.
 inline constexpr std::string_view kSessionCreated = "session.created";
 inline constexpr std::string_view kSessionEvicted = "session.evicted";
 inline constexpr std::string_view kModelLoadStarted = "model.load.started";

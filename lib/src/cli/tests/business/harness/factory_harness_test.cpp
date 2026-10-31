@@ -1,7 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <random>
@@ -15,9 +17,13 @@
 #include "backends/gemini_cli.h"
 #include "backends/mock.h"
 #include "backends/provider_cache.h"
+#include "backends/provider_status.h"
+#include "backends/provider_table.h"
 #include "contracts/config.h"
 #include "contracts/errors.h"
 #include "harness/harness.h"
+#include "platform/child_process.h"
+#include "platform/platform.h"
 #include "secrets/store.h"
 #include "support/env_guard.h"
 #include "support/fake_child.h"
@@ -139,6 +145,70 @@ TEST_CASE("embedding is a per-entry capability the harness discovers, and Anthro
     CHECK(harness.generation_is_metered("gpt"));
     CHECK(harness.generation_is_metered("gemini"));
     CHECK_FALSE(harness.generation_is_metered("mock"));
+}
+
+TEST_CASE(
+    "an mlx entry over an embedding model embeds, discovered by the harness, and chats with "
+    "nothing",
+    "[backends][factory][embed][capability][mlx]") {
+    // 53h: the factory builds the embedding provider for an entry whose
+    // directory mlx-embeddings built; the Harness discovers EmbeddingCapable
+    // on the object, never a type. A chat entry beside it is no embedder.
+    // Construction asks files only -- nothing is spawned here.
+    if (apogee::platform::host_target() != "macos-arm64") {
+        SKIP("the mlx backend's ladder refuses every host but Apple silicon");
+    }
+    const apogee::testing::TempDir home{"factory-mlx-embed-" +
+                                        std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard root{"APOGEE_HOME", home.path().string()};
+    const std::filesystem::path site =
+        home.path() / "training" / "venv" / "lib" / "python3.99" / "site-packages";
+    const auto touch = [](const std::filesystem::path& path, const std::string& text) {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream{path, std::ios::binary} << text;
+    };
+    touch(home.path() / "training" / "venv" / "bin" / "python", "#!/bin/sh\n");
+    touch(site / "mlx_lm" / "__init__.py", "");
+    touch(site / "mlx_embeddings" / "__init__.py", "");
+    touch(home.path() / "training" / "scripts" / "mlx_generate.py", "#\n");
+    touch(home.path() / "training" / "scripts" / "mlx_embed.py", "#\n");
+    const std::filesystem::path embed = home.path() / "models" / "embed";
+    touch(embed / "config.json", R"({"model_type": "gemma3_text", "hidden_size": 768})");
+    touch(embed / "apogee-snapshot.json",
+          R"({"source": "convert", "transform": "mlx_embeddings.convert 8bit", "files": [],)"
+          R"( "kind": "embedding"})");
+    const std::filesystem::path talk = home.path() / "models" / "talk";
+    touch(talk / "config.json", R"({"model_type": "llama"})");
+
+    apogee::harness::Config config;
+    apogee::harness::BackendConfig entry;
+    entry.type = apogee::harness::BackendType::Mlx;
+    entry.model_path = embed.string();
+    config.backends.emplace("embed", entry);
+    entry.model_path = talk.string();
+    config.backends.emplace("talk", entry);
+    apogee::harness::Harness harness{config};
+    const auto built = apogee::backends::build_providers(harness, {});
+    INFO(built.skipped_summary());
+    REQUIRE(built.constructed_count() == 2);
+
+    CHECK(harness.can_embed("embed"));
+    CHECK_FALSE(harness.can_embed("talk"));
+    apogee::harness::EmbeddingCapable* embedder = harness.embedder_for("embed");
+    REQUIRE(embedder != nullptr);
+    CHECK(embedder->embedding_model_name() == "mlx:" + embed.string());
+    CHECK(embedder->embedding_dimensions() == 768);
+    CHECK_FALSE(embedder->embedding_is_metered());
+    CHECK_FALSE(harness.generation_is_metered("embed"));
+
+    // Without mlx-embeddings the entry is skipped with its rung and its fix.
+    std::filesystem::remove_all(site / "mlx_embeddings");
+    apogee::harness::Harness bare{config};
+    const auto skipped = apogee::backends::build_providers(bare, {});
+    CHECK(skipped.constructed_count() == 1);
+    CHECK(skipped.skipped_summary().find("apogee train setup --with mlx-embeddings") !=
+          std::string::npos);
+    CHECK_FALSE(bare.can_embed("embed"));
 }
 
 TEST_CASE("a suite switch rebuilds exactly the backends it re-pins",
@@ -432,4 +502,63 @@ TEST_CASE("a config outside an install's config directory records nothing anywhe
     for (const auto& [provider, record] : outside.verified) {
         CHECK(record.backend != name);
     }
+}
+
+TEST_CASE("the user's run: a vendor CLI default that could not start is refused with why",
+          "[backends][factory][skipped]") {
+    // M26, the fixture the item names: a claude-cli default not found, beside
+    // a local backend that started. The words were "no backend serves
+    // 'claude' (configured backends: Local-Mock)"; the backend is configured,
+    // and why it did not start was known to the factory all along.
+    const apogee::testing::TempDir root{"skipped-default-" +
+                                        std::to_string(std::random_device{}())};
+    const std::filesystem::path binary = root.path() / "bin" / "claude";
+    Harness harness{
+        config_from("models:\n  default: claude\nbackends:\n  claude:\n"
+                    "    type: claude-cli\n    binary: \"" +
+                    binary.generic_string() + "\"\n  Local-Mock:\n    type: mock\n")};
+    const auto built = build_providers(harness, no_env());
+    REQUIRE(built.constructed_count() == 1);  // still non-fatal
+    const auto skipped = std::ranges::find_if(
+        built.statuses, [](const apogee::backends::BackendStatus& s) { return !s.constructed; });
+    REQUIRE(skipped != built.statuses.end());
+    const std::string reason = skipped->reason.substr(std::string{"claude: "}.size());
+    REQUIRE(skipped->reason == "claude: " + reason);
+
+    // Asked for by name -- what `complete` and the app's sessions route,
+    // having resolved the default themselves -- and by default.
+    for (const std::string_view asked : {"claude", ""}) {
+        INFO("asked for '" << asked << "'");
+        try {
+            (void)harness.route(asked);
+            FAIL("expected NoAvailableBackendError");
+        } catch (const apogee::harness::NoAvailableBackendError& e) {
+            CHECK(std::string{e.what()} ==
+                  "the default backend 'claude' is configured but could not be started: " + reason +
+                      " (started backends: Local-Mock)");
+            CHECK(e.skipped_backend() == "claude");
+            CHECK(e.reason() == reason);
+            if (apogee::platform::supports_child_processes()) {
+                // The doctor's words (28c), never a second wording.
+                CHECK(reason ==
+                      apogee::backends::not_on_path(binary.generic_string()) + ". " +
+                          std::string{
+                              apogee::backends::provider_for_type(BackendType::ClaudeCli)->remedy});
+            }
+        }
+    }
+    CHECK(harness.route("Local-Mock").backend_name() == "Local-Mock");
+
+    if (!apogee::platform::supports_child_processes()) {
+        return;
+    }
+    // Installed since, and rebuilt (27d's path): it starts, routes, and no
+    // refusal names it any more. Construction only checks the path; nothing
+    // is spawned.
+    std::filesystem::create_directories(binary.parent_path());
+    std::ofstream{binary} << "#!/bin/sh\nexit 1\n";
+    REQUIRE(apogee::backends::rebuild_providers(harness, {"claude"}, no_env())
+                .statuses.front()
+                .constructed);
+    CHECK(harness.route("").backend_name() == "claude");
 }

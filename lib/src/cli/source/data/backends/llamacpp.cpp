@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <filesystem>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <random>
 #include <utility>
@@ -111,33 +113,6 @@ constexpr std::int64_t kCheckpointTail = 4;
 /// Where a fresh context's state came from, for the cache line (26j).
 constexpr std::string_view kFromSavedChat = "the saved chat";
 constexpr std::string_view kFromPromptCache = "the prompt cache on disk";
-
-/// Decodes base64, skipping whitespace; stops at padding.
-[[nodiscard]] std::string decode_base64(std::string_view encoded) {
-    static constexpr std::string_view alphabet =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string out;
-    out.reserve(encoded.size() / 4 * 3);
-
-    std::uint32_t accumulator = 0;
-    int bits = 0;
-    for (const char c : encoded) {
-        if (c == '=') {
-            break;
-        }
-        const std::size_t value = alphabet.find(c);
-        if (value == std::string_view::npos) {
-            continue;  // whitespace and newlines are legal in a data URI
-        }
-        accumulator = (accumulator << 6U) | static_cast<std::uint32_t>(value);
-        bits += 6;
-        if (bits >= 8) {
-            bits -= 8;
-            out.push_back(static_cast<char>((accumulator >> static_cast<unsigned>(bits)) & 0xFFU));
-        }
-    }
-    return out;
-}
 
 /// Decodes the base64 payload of a `data:` URI. Empty for anything else.
 ///
@@ -442,15 +417,24 @@ private:
 
 }  // namespace
 
-LlamaCppProvider::LlamaCppProvider(Options options, std::unique_ptr<LlamaRuntime> runtime)
-    : options_{std::move(options)}, runtime_{std::move(runtime)} {
+LlamaCppProvider::LlamaCppProvider(Options options, std::unique_ptr<LlamaRuntime> runtime,
+                                   std::shared_ptr<LlamaBases> bases)
+    : options_{std::move(options)},
+      runtime_{std::move(runtime)},
+      // With no registry, one of its own: a base no other provider can reach.
+      bases_{bases != nullptr ? std::move(bases) : std::make_shared<LlamaBases>()} {
     if (!options_.clock) {
         options_.clock = [] { return std::chrono::steady_clock::now(); };
     }
 }
 
+LlamaCppProvider::~LlamaCppProvider() {
+    unload();
+}
+
 std::unique_ptr<LlamaCppProvider> LlamaCppProvider::from_config(
-    const std::string& backend_name, const harness::BackendConfig& config) {
+    const std::string& backend_name, const harness::BackendConfig& config,
+    std::shared_ptr<LlamaBases> bases) {
     if (config.model_path.empty()) {
         throw harness::ProviderError(
             backend_name,
@@ -464,7 +448,7 @@ std::unique_ptr<LlamaCppProvider> LlamaCppProvider::from_config(
         throw harness::ProviderError(backend_name, reason);
     }
     return std::make_unique<LlamaCppProvider>(options_from(backend_name, config),
-                                              std::move(runtime));
+                                              std::move(runtime), std::move(bases));
 }
 
 LlamaCppProvider::Options LlamaCppProvider::options_from(const std::string& backend_name,
@@ -476,6 +460,10 @@ LlamaCppProvider::Options LlamaCppProvider::options_from(const std::string& back
     // The prompt cache under `cache/prompt/` (26j).
     options.prompt_cache_dir = harness::prompt_cache_dir();
     options.mmproj_path = harness::expand_env(config.mmproj_path);
+    // The adapters, as the loader read them (53a), and where the base's hash
+    // their pins are checked against is remembered.
+    options.adapters = config.adapters;
+    options.weight_hashing.memo = harness::weight_hash_cache_path();
     if (config.context_size.has_value()) {
         options.context_size = *config.context_size;
     }
@@ -538,7 +526,7 @@ std::int64_t LlamaCppProvider::context_window() const {
     if (options_.context_size > 0) {
         return options_.context_size;
     }
-    if (model_ != nullptr) {
+    if (base_ != nullptr) {
         return session_window();
     }
     // Before a load, the header's trained window is all there is; free
@@ -551,7 +539,7 @@ std::int64_t LlamaCppProvider::session_window() const {
     if (options_.context_size > 0) {
         return options_.context_size;
     }
-    return models::default_local_window(model_->context_length(), model_->fitted_window());
+    return models::default_local_window(model().context_length(), fitted_window_);
 }
 
 harness::ModelBehavior LlamaCppProvider::model_behavior() const {
@@ -589,7 +577,7 @@ bool LlamaCppProvider::accepts_audio() const noexcept {
 }
 
 int LlamaCppProvider::audio_sample_rate() const noexcept {
-    return model_ != nullptr ? model_->audio_sample_rate() : 0;
+    return base_ != nullptr ? model().audio_sample_rate() : 0;
 }
 
 bool LlamaCppProvider::accepts_video() const noexcept {
@@ -607,14 +595,23 @@ bool LlamaCppProvider::accepts_video() const noexcept {
 }
 
 bool LlamaCppProvider::model_loaded() const noexcept {
-    return model_ != nullptr;
+    return base_ != nullptr;
 }
 
 void LlamaCppProvider::unload() {
-    // Order matters: a context borrows its model, so it must go first.
-    session_.reset();
+    if (base_ != nullptr) {
+        // Order matters: a context borrows its model and applies the
+        // adapters, so it goes first; the adapters go before the share, since
+        // no adapter may outlive the model it was loaded over. Under the
+        // base's lock: another provider may be using the model (53d).
+        const std::unique_lock<std::mutex> lock = base_->use();
+        session_.reset();
+        adapters_.reset();
+    }
     session_tokens_.clear();
-    model_.reset();
+    // The last sharer's letting go frees the model.
+    base_.reset();
+    fitted_window_ = 0;
     // A file replaced while unloaded is noticed at the next load (26j).
     fingerprint_read_ = false;
     fingerprint_.reset();
@@ -626,7 +623,9 @@ PromptCache* LlamaCppProvider::prompt_cache() {
     }
     if (!fingerprint_read_) {
         fingerprint_read_ = true;
-        fingerprint_ = fingerprint_of(std::filesystem::path{options_.model_path});
+        // The adapter set is part of what a cache was made with (53a).
+        fingerprint_ =
+            fingerprint_of(std::filesystem::path{options_.model_path}, options_.adapters);
     }
     if (!fingerprint_.has_value()) {
         return nullptr;
@@ -721,8 +720,10 @@ bool LlamaCppProvider::restore_chat(PromptCache& cache, LlamaContext& context,
     std::string why;
     if (!record.has_value()) {
         why = "its record is missing";
-    } else if (record->model != fingerprint_.value()) {
+    } else if (!record->model.same_file(fingerprint_.value())) {
         why = "it was made with a different model file";
+    } else if (record->model != fingerprint_.value()) {
+        why = "it was made under a different set of adapters";
     } else if (record->cache_type != context.cache_type() || record->window != context.capacity()) {
         why = "it was made with another cache type or window";
     } else {
@@ -777,7 +778,13 @@ void LlamaCppProvider::save_conversation(std::string_view conversation_id,
             on_status(event);
         }
     };
-    const PromptCache* cache = session_ == nullptr ? nullptr : prompt_cache();
+    if (session_ == nullptr) {
+        return;
+    }
+    // The conversation's context is read under the base's lock (53d).
+    const std::shared_ptr<SharedBase> base = base_;
+    const std::unique_lock<std::mutex> lock = base->use();
+    const PromptCache* cache = prompt_cache();
     const std::filesystem::path file =
         cache == nullptr ? std::filesystem::path{} : cache->chat_path(conversation_id);
     if (file.empty()) {
@@ -840,7 +847,11 @@ std::vector<std::vector<float>> LlamaCppProvider::embed(
     expire_if_idle();
     ensure_model({});
     try {
-        std::vector<std::vector<float>> vectors = embed_with_llama(*model_, inputs, cancellation);
+        // Under the base's lock, through this entry's adapters (53d).
+        const std::shared_ptr<SharedBase> base = base_;
+        const std::unique_lock<std::mutex> lock = base->use();
+        std::vector<std::vector<float>> vectors =
+            embed_with_llama(base->model(), *adapters_, inputs, cancellation);
         // An embedding is a use of the model like any other, so the idle
         // timer restarts from here -- otherwise a long ingest could unload the
         // weights under itself.
@@ -853,14 +864,15 @@ std::vector<std::vector<float>> LlamaCppProvider::embed(
 }
 
 std::string LlamaCppProvider::embedding_model_name() const {
-    if (!options_.model.empty()) {
-        return options_.model;
-    }
-    return std::filesystem::path{options_.model_path}.filename().string();
+    // The adapters `embed` applies (53a) are part of the space (55e).
+    return embedding_space(options_.model.empty()
+                               ? std::filesystem::path{options_.model_path}.filename().string()
+                               : options_.model,
+                           options_.adapters, options_.weight_hashing);
 }
 
 std::size_t LlamaCppProvider::embedding_dimensions() const noexcept {
-    return model_ == nullptr ? 0 : model_->embedding_dimensions();
+    return base_ == nullptr ? 0 : model().embedding_dimensions();
 }
 
 bool LlamaCppProvider::uses_in_text_tool_calls() const noexcept {
@@ -869,8 +881,8 @@ bool LlamaCppProvider::uses_in_text_tool_calls() const noexcept {
 
 harness::StatusEvent LlamaCppProvider::model_status() const {
     harness::StatusEvent event;
-    event.type = model_ == nullptr ? harness::StatusEvent::Type::ModelLoading
-                                   : harness::StatusEvent::Type::ModelReady;
+    event.type = base_ == nullptr ? harness::StatusEvent::Type::ModelLoading
+                                  : harness::StatusEvent::Type::ModelReady;
     event.phase = harness::StatusEvent::Phase::Done;
     event.name = options_.model;
     return event;
@@ -895,7 +907,7 @@ bool LlamaCppProvider::held_resident() const noexcept {
 void LlamaCppProvider::expire_if_idle() {
     // A session using this model holds it (27e): the clock is not consulted
     // until the hold is let go, and then from the last use as ever.
-    if (options_.idle_unload.count() <= 0 || model_ == nullptr || !used_ || held_.load()) {
+    if (options_.idle_unload.count() <= 0 || base_ == nullptr || !used_ || held_.load()) {
         return;
     }
     if (options_.clock() - last_use_ >= options_.idle_unload) {
@@ -904,7 +916,7 @@ void LlamaCppProvider::expire_if_idle() {
 }
 
 void LlamaCppProvider::ensure_model(const harness::StatusSink& on_status) {
-    if (model_ != nullptr) {
+    if (base_ != nullptr) {
         return;
     }
     // The lifecycle bus hears about a load whether or not anyone streams
@@ -931,18 +943,18 @@ void LlamaCppProvider::ensure_model(const harness::StatusSink& on_status) {
         say(event);
     }
 
-    ModelLoad load;
-    load.path = options_.model_path;
-    load.gpu_layers = options_.gpu_layers;
-    load.mmproj_path = options_.mmproj_path;
-    load.cache_type = options_.cache_type;
-    load.cache_type_named = options_.cache_type_named;
-    // Only the default window is fitted to memory: a context_size the user
-    // wrote is used as written.
-    load.fit_window = options_.context_size <= 0;
-    std::string error;
-    model_ = runtime_->load(load, error);
-    if (model_ == nullptr) {
+    // The adapters' file facts before anything is read into memory (53a): an
+    // adapter not there, one pinned to no base, a base whose weights are not
+    // the ones it was pinned to -- each refused by name, as a failed load is,
+    // and the runtime's own word on an adapter relayed after.
+    std::string error =
+        adapter_refusal(options_.adapters, AdapterCheck{.backend = options_.backend_name,
+                                                        .base = options_.model_path,
+                                                        .hashing = options_.weight_hashing});
+    if (error.empty()) {
+        (void)attach(error);
+    }
+    if (base_ == nullptr) {
         {
             harness::StatusEvent failed;
             failed.type = harness::StatusEvent::Type::ModelLoading;
@@ -967,13 +979,81 @@ void LlamaCppProvider::ensure_model(const harness::StatusSink& on_status) {
                  nlohmann::json{{"backend", options_.backend_name}, {"model", options_.model}});
 }
 
+bool LlamaCppProvider::attach(std::string& error) {
+    ModelLoad load;
+    load.path = options_.model_path;
+    load.gpu_layers = options_.gpu_layers;
+    load.mmproj_path = options_.mmproj_path;
+    load.cache_type = options_.cache_type;
+    load.cache_type_named = options_.cache_type_named;
+    // Only the default window is fitted to memory: a context_size the user
+    // wrote is used as written.
+    load.fit_window = options_.context_size <= 0;
+
+    // The base another provider on the same file holds, or loaded now, and
+    // held for the next to share (53d).
+    bool loaded = false;
+    std::shared_ptr<SharedBase> base = bases_->acquire(
+        shared_base_key(load),
+        [this, &load, &loaded](std::string& why) {
+            loaded = true;
+            return runtime_->load(load, why);
+        },
+        error);
+    if (base == nullptr) {
+        return false;
+    }
+
+    // The default window fitted to what is free: the load's own measure when
+    // this entry made it; joining a base already resident, this entry's own
+    // -- its cache is its own (26a) -- with the base's weights counted once,
+    // as resident, never as a second load of them (55e).
+    std::int64_t fitted = 0;
+    if (load.fit_window) {
+        fitted = loaded ? base->model().fitted_window() : runtime_->fit_window(load);
+    }
+
+    // This entry's adapters, loaded once over it (53a): its own, never the
+    // base's, so another entry's contexts never apply them. Last, so nothing
+    // after can throw with them loaded and not yet held.
+    std::vector<AdapterLoad> wanted;
+    wanted.reserve(options_.adapters.size());
+    for (const harness::AdapterConfig& adapter : options_.adapters) {
+        wanted.push_back(AdapterLoad{.path = adapter.path, .scale = adapter.scale});
+    }
+    {
+        const std::unique_lock<std::mutex> lock = base->use();
+        adapters_ = base->model().load_adapters(wanted, error);
+    }
+    if (adapters_ == nullptr) {
+        return false;
+    }
+    base_ = std::move(base);
+    fitted_window_ = fitted;
+    return true;
+}
+
+std::unique_ptr<LlamaContext> LlamaCppProvider::make_context(std::int64_t context_size) {
+    std::unique_ptr<LlamaContext> context = model().make_context(context_size);
+    assert_adapters(*context);
+    return context;
+}
+
+void LlamaCppProvider::assert_adapters(LlamaContext& context) const {
+    std::string error;
+    if (!context.set_adapters(*adapters_, error)) {
+        throw harness::ProviderError(options_.backend_name, error);
+    }
+}
+
 std::int64_t LlamaCppProvider::count_prompt_tokens(const harness::ChatRequest& request) {
-    if (model_ == nullptr) {
+    if (base_ == nullptr) {
         return -1;  // see the header: never load a model to answer a measurement
     }
+    const std::unique_lock<std::mutex> lock = base_->use();
     // The prompt a turn would actually send, tool definitions included -- on
     // a local window they are not a rounding error.
-    return static_cast<std::int64_t>(model_->tokenize(render_request(request).text, true).size());
+    return static_cast<std::int64_t>(model().tokenize(render_request(request).text, true).size());
 }
 
 LlamaCppProvider::RenderedRequest LlamaCppProvider::render_request(
@@ -994,7 +1074,7 @@ LlamaCppProvider::RenderedRequest LlamaCppProvider::render_request(
         ChatRenderOptions held = render;
         held.response_schema = request.transient.response_schema;
         auto chat = std::make_unique<ChatRendering>();
-        if (model_->render_chat(prompt_messages(request, false), request.tools, held, *chat,
+        if (model().render_chat(prompt_messages(request, false), request.tools, held, *chat,
                                 rendered.schema_fallback)) {
             rendered.text = chat->prompt;
             rendered.chat = std::move(chat);
@@ -1004,14 +1084,14 @@ LlamaCppProvider::RenderedRequest LlamaCppProvider::render_request(
 
     const std::vector<harness::ChatMessage> messages = prompt_messages(request, true);
     auto chat = std::make_unique<ChatRendering>();
-    if (model_->render_chat(messages, request.tools, render, *chat, rendered.fallback_reason)) {
+    if (model().render_chat(messages, request.tools, render, *chat, rendered.fallback_reason)) {
         rendered.text = chat->prompt;
         rendered.chat = std::move(chat);
         return rendered;
     }
     // The fallback, as it was before 25b: llama.cpp's fixed template set or
     // the name-matched registry, and the profile's filters on the reply.
-    RenderedPrompt fallback = llama_tokens::render_prompt(*model_, options_.model, messages, true);
+    RenderedPrompt fallback = llama_tokens::render_prompt(model(), options_.model, messages, true);
     rendered.text = std::move(fallback.text);
     rendered.stops = std::move(fallback.stops);
     if (request.thinking.off()) {
@@ -1085,14 +1165,14 @@ std::optional<std::size_t> LlamaCppProvider::rendered_length_before(
         }
         ChatRendering prefix;
         std::string ignored;
-        if (!model_->render_chat(before, request.tools, render, prefix, ignored)) {
+        if (!model().render_chat(before, request.tools, render, prefix, ignored)) {
             return std::nullopt;
         }
         text = std::move(prefix.prompt);
     } else {
-        text = llama_tokens::render_prompt(*model_, options_.model, before, false).text;
+        text = llama_tokens::render_prompt(model(), options_.model, before, false).text;
     }
-    const std::vector<std::int32_t> head = model_->tokenize(text, true);
+    const std::vector<std::int32_t> head = model().tokenize(text, true);
     if (!head.empty() && head.size() < prompt.size() &&
         std::equal(head.begin(), head.end(), prompt.begin())) {
         return head.size();
@@ -1371,7 +1451,7 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
             budget_said = true;
             budget_reached(options, sampling.reasoning_budget->tokens);
         }
-        if (model_->is_eog(token)) {
+        if (model().is_eog(token)) {
             break;
         }
         generated.push_back(token);
@@ -1383,14 +1463,14 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
                 std::find(chat->preserved_tokens.begin(), chat->preserved_tokens.end(), token) !=
                 chat->preserved_tokens.end();
             const std::string piece =
-                preserved ? model_->special_token_text(token) : model_->token_text(token);
+                preserved ? model().special_token_text(token) : model().token_text(token);
             if (reply->write(piece)) {
                 stopped = true;
                 break;  // a stop string: not fed back, the reply is over
             }
         } else {
             const std::string visible = pump(
-                think.write(spill.write(watch.write(model_->token_text(token), stopped), stopped)));
+                think.write(spill.write(watch.write(model().token_text(token), stopped), stopped)));
             answer += visible;
             if (options.on_token && !visible.empty()) {
                 options.on_token(visible);
@@ -1470,8 +1550,8 @@ LlamaCppProvider::Generation LlamaCppProvider::generate(LlamaContext& context,
 
 harness::ChatResponse LlamaCppProvider::run_multimodal(const harness::ChatRequest& request,
                                                        const harness::StreamOptions& options) {
-    const MediaPrompt media = with_markers(request, model_->image_marker());
-    if (media.images && !model_->supports_vision()) {
+    const MediaPrompt media = with_markers(request, model().image_marker());
+    if (media.images && !model().supports_vision()) {
         // Reached when a model loaded but its projector does not do images --
         // an audio-only mmproj, say. The capability probe answered from config,
         // which cannot know that; this is where the truth arrives.
@@ -1480,7 +1560,7 @@ harness::ChatResponse LlamaCppProvider::run_multimodal(const harness::ChatReques
             "this model has no usable image support. Check that mmproj_path points at the "
             "projector matching this model");
     }
-    if (media.audio && !model_->supports_audio()) {
+    if (media.audio && !model().supports_audio()) {
         throw harness::ProviderError(options_.backend_name,
                                      "this model's projector has no audio encoder, so it cannot "
                                      "hear the audio it was sent");
@@ -1500,7 +1580,7 @@ harness::ChatResponse LlamaCppProvider::run_multimodal(const harness::ChatReques
     // A fresh context every time. There is no prefix to reuse -- an image
     // occupies embedding positions that no token comparison can match -- so
     // pretending otherwise would corrupt the cache rather than save work.
-    std::unique_ptr<LlamaContext> scratch = model_->make_context(session_window());
+    std::unique_ptr<LlamaContext> scratch = make_context(session_window());
     LlamaContext& context = *scratch;
 
     std::string error;
@@ -1539,6 +1619,10 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
                                             const harness::StreamOptions& options) {
     expire_if_idle();
     ensure_model(options.on_status);
+    // The whole turn under the base's lock: one thread drives a model at a
+    // time, and the providers sharing it take turns (53d).
+    const std::shared_ptr<SharedBase> base = base_;
+    const std::unique_lock<std::mutex> lock = base->use();
 
     // Images take a different route entirely. mtmd turns text-with-markers plus
     // decoded pictures into interleaved text and embedding chunks, so there is
@@ -1554,7 +1638,7 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
     notice_if_toolless(request, rendered, options);
     notice_schema_fallback(rendered, options);
     // add_special: see llama_tokens::tokenize_prompt.
-    const std::vector<std::int32_t> prompt = model_->tokenize(rendered.text, true);
+    const std::vector<std::int32_t> prompt = model().tokenize(rendered.text, true);
 
     // A side request -- a background title summary, a one-off clerk call -- is
     // not a turn of this conversation. It runs on its own throwaway context so
@@ -1566,16 +1650,19 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
     std::unique_ptr<LlamaContext> scratch;
 
     if (side_request) {
-        scratch = model_->make_context(side_context_size(request, prompt.size()));
+        scratch = make_context(side_context_size(request, prompt.size()));
         context = scratch.get();
         reject_if_too_long(*context, prompt.size(), options_.backend_name);
         decode_in_batches(*context, prompt, 0);
     } else {
         if (session_ == nullptr) {
-            session_ = model_->make_context(session_window());
+            session_ = make_context(session_window());
             session_tokens_.clear();
         }
         context = session_.get();
+        // This entry's set, asserted on every turn: the conversation's
+        // context only ever holds its own entry's (53d).
+        assert_adapters(*context);
         reject_if_too_long(*context, prompt.size(), options_.backend_name);
 
         // A context with nothing in it yet may start from disk (26j): the

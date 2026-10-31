@@ -21,8 +21,10 @@ HttpResponse admin_list_tasks(const HttpRequest& request) {
     }
     // An unreadable ledger is left out, as `task list` leaves it out; the
     // reason names its path, which a served response never does.
-    const std::vector<tasks::Task> listed = tasks::list_tasks(harness::tasks_dir());
-    return json_response(200, tasks::to_json(tasks::make_task_list(listed, all == "true")));
+    const std::filesystem::path root = harness::tasks_dir();
+    const std::vector<tasks::Task> listed = tasks::list_tasks(root);
+    return json_response(200, tasks::to_json(tasks::make_task_list(listed, all == "true",
+                                                                   tasks::lock_holder(root))));
 }
 
 HttpResponse admin_get_task(std::string_view id) {

@@ -618,6 +618,17 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
     backends::BuildOptions build_options;
     build_options.config_path = config_path;
     const backends::BuildResult built = backends::build_providers(harness, build_options);
+    // The backend a task names answers it under its own name or not at all
+    // (M29), as chat's opening holds it: `-m` on a new task, and on a resume
+    // the backend its conversation was left on. One that did not start, or a
+    // name the config defines nowhere, is refused before anything is made or
+    // run -- the router would answer every round from the default. One a
+    // resume no longer finds configured was let go above, said, as a chat's.
+    const std::string named = what.existing.has_value() ? session.backend : flags.model;
+    if (const std::string refused = named_backend_refusal(config, built, named); !refused.empty()) {
+        fail_user(what.existing.has_value() ? "task " + task.id + " cannot resume: " + refused
+                                            : refused);
+    }
     if (built.constructed_count() == 0) {
         std::string message = "no usable backend is configured";
         if (!built.skipped_summary().empty()) {
@@ -908,9 +919,11 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
     if (machine_mode) {
         // Once, first -- the protocol's rule -- then the task's lifecycle.
         // A task reads nothing from its driver, so it accepts no line and
-        // nobody is asked over the protocol (28d).
+        // nobody is asked over the protocol (28d). It names the chat it
+        // drives (M28), written from the task's start.
         machine_reporter->begin_session(
-            session.backend, MachineCapabilities{.accepts = {}, .tools = task.tools, .ask = false});
+            session.backend, MachineCapabilities{.accepts = {}, .tools = task.tools, .ask = false},
+            std::nullopt, false, session.chat_id);
     }
 
     // One task event per transition the ledger holds, and one per grant used:
@@ -1298,7 +1311,8 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
         }
         // One listing, for a person or as the document a host reads -- the
         // body `GET /v1/admin/tasks` serves.
-        const tasks::TaskListView listed = tasks::make_task_list(all, list_flags->all);
+        const tasks::TaskListView listed =
+            tasks::make_task_list(all, list_flags->all, tasks::lock_holder(tasks_root));
         if (list_flags->read_format == ReadFormat::Json) {
             write_document(std::cout, tasks::to_json(listed));
             return;

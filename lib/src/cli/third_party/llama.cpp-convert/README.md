@@ -7,6 +7,7 @@ pinned revision the in-process backend builds against (release `b11151`, see
 | Path | Upstream | Why |
 |---|---|---|
 | `convert_hf_to_gguf.py` | `/convert_hf_to_gguf.py` | the entry point `apogee train promote` runs |
+| `convert_lora_to_gguf.py` | `/convert_lora_to_gguf.py` | the entry point `apogee train promote --adapter` runs (53b): a PEFT adapter → a GGUF LoRA, read against the base model's `config.json` (`--base`, never the Hub), over the same `conversion/` and `gguf-py/` |
 | `conversion/` | `/conversion/` | the converter itself -- one module per model family, refactored upstream out of the old single file |
 | `gguf-py/gguf/*.py`, `gguf-py/LICENSE` | `/gguf-py/gguf/`, `/gguf-py/LICENSE` | the `gguf` package the converter imports: tensor names, metadata keys, the writer. Its `scripts/` (the `gguf-dump`-style tools) are left out; the converter never imports them. |
 | `models/templates/*.jinja` | `/models/templates/` | the templates `conversion/` reads by path (Mistral community, RWKV world, DeepSeek-V4, Kimi-K3, MiniMax-M1 at this pin) -- found by the vendoring script, which copies every template a module names. The rest of that directory is never consulted by the converter. |
@@ -45,6 +46,7 @@ the tree on one `converter` row. It runs under the environment's
 interpreter, never the system Python:
 
     <venv>/bin/python training/scripts/convert/convert_hf_to_gguf.py --outtype f16 --outfile <out.gguf> <fused snapshot>
+    <venv>/bin/python training/scripts/convert/convert_lora_to_gguf.py --outtype f16 --base <base snapshot> --outfile <out.lora.gguf> <PEFT adapter>
 
 **After a pin bump.** Skip-if-present alone would leave every existing install
 converting with the old revision's converter -- which refuses the models the

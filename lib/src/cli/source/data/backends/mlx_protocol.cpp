@@ -2,6 +2,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstddef>
+#include <utility>
+#include <vector>
+
 namespace apogee::backends::mlx {
 namespace {
 
@@ -17,10 +21,18 @@ namespace {
     return parsed;
 }
 
-/// A message's content: its text, or -- once it carries a picture -- its
-/// parts in order, each image where it sits (27c). Audio is never sent: no
-/// MLX provider declares it.
-[[nodiscard]] nlohmann::json template_content(const harness::MessageContent& content) {
+/// The paths a request's recordings cross as, handed out in prompt order:
+/// `next` is the next audio part's.
+struct AudioPaths {
+    const std::vector<std::string>& files;
+    std::size_t next = 0;
+};
+
+/// A message's content: its text, or -- once it carries a picture or a
+/// recording -- its parts in order, each image where it sits (27c) and each
+/// recording as the WAV file written for it (53g).
+[[nodiscard]] nlohmann::json template_content(const harness::MessageContent& content,
+                                              AudioPaths& audio) {
     if (!content.is_rich()) {
         return content.plain_text();
     }
@@ -30,15 +42,19 @@ namespace {
             parts.push_back({{"type", "text"}, {"text", part.text}});
         } else if (part.kind == harness::ContentPart::Kind::ImageUrl) {
             parts.push_back({{"type", "image"}, {"image", part.image_url}});
+        } else if (part.kind == harness::ContentPart::Kind::InputAudio &&
+                   audio.next < audio.files.size()) {
+            parts.push_back({{"type", "audio"}, {"audio", audio.files[audio.next++]}});
         }
     }
     return parts;
 }
 
 /// One IR message in the shape a Hugging Face chat template takes.
-[[nodiscard]] nlohmann::json template_message(const harness::ChatMessage& message) {
+[[nodiscard]] nlohmann::json template_message(const harness::ChatMessage& message,
+                                              AudioPaths& audio) {
     nlohmann::json out{{"role", std::string{harness::to_string(message.role)}},
-                       {"content", template_content(message.content)}};
+                       {"content", template_content(message.content, audio)}};
     if (message.role == harness::Role::Assistant && !message.tool_calls.empty()) {
         nlohmann::json calls = nlohmann::json::array();
         for (const harness::ToolCall& call : message.tool_calls) {
@@ -78,12 +94,40 @@ namespace {
     return it != object.end() && it->is_number_integer() ? it->get<std::int64_t>() : 0;
 }
 
+/// `vectors` as a list of number lists, into `out`; false for anything else
+/// -- a missing key, a row that is not a list, an element that is not a
+/// number -- so nothing half-read is ever handed on.
+[[nodiscard]] bool read_vectors(const nlohmann::json& object,
+                                std::vector<std::vector<float>>& out) {
+    const auto rows = object.find("vectors");
+    if (rows == object.end() || !rows->is_array()) {
+        return false;
+    }
+    out.reserve(rows->size());
+    for (const nlohmann::json& row : *rows) {
+        if (!row.is_array()) {
+            return false;
+        }
+        std::vector<float> vector;
+        vector.reserve(row.size());
+        for (const nlohmann::json& value : row) {
+            if (!value.is_number()) {
+                return false;
+            }
+            vector.push_back(value.get<float>());
+        }
+        out.push_back(std::move(vector));
+    }
+    return true;
+}
+
 }  // namespace
 
 std::string generate_line(const GenerateRequest& request) {
     nlohmann::json messages = nlohmann::json::array();
+    AudioPaths audio{.files = request.audio_files};
     for (const harness::ChatMessage& message : request.messages) {
-        messages.push_back(template_message(message));
+        messages.push_back(template_message(message, audio));
     }
     nlohmann::json tools = nlohmann::json::array();
     for (const harness::Tool& tool : request.tools) {
@@ -114,6 +158,13 @@ std::string generate_line(const GenerateRequest& request) {
 
 std::string cancel_line(std::int64_t id) {
     return nlohmann::json{{"type", "cancel"}, {"id", id}}.dump();
+}
+
+std::string embed_line(const EmbedRequest& request) {
+    // A text is a file's bytes, which need not be UTF-8: said as U+FFFD
+    // rather than ending the batch at the dump.
+    return nlohmann::json{{"type", "embed"}, {"id", request.id}, {"texts", request.texts}}.dump(
+        -1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 
 std::optional<Event> parse_event(std::string_view line) {
@@ -155,6 +206,19 @@ std::optional<Event> parse_event(std::string_view line) {
         event.completion_tokens = count_field(object, "completion_tokens");
         return event;
     }
+    if (type == "vectors") {
+        event.kind = Event::Kind::Vectors;
+        if (read_vectors(object, event.vectors)) {
+            return event;
+        }
+        // Said, never dropped: a provider waiting for this id would otherwise
+        // wait out its stall bound for an answer that came and was unread.
+        event.kind = Event::Kind::Error;
+        event.error_kind = "protocol";
+        event.text = "the MLX embedding driver's vectors are not a list of number lists";
+        event.vectors.clear();
+        return event;
+    }
     if (type == "error") {
         event.kind = Event::Kind::Error;
         event.error_kind = string_field(object, "kind");
@@ -168,6 +232,11 @@ std::optional<Event> parse_event(std::string_view line) {
         event.tool_parser = string_field(object, "tool_parser");
         event.mlx_lm_version = string_field(object, "mlx_lm");
         event.mlx_vlm_version = string_field(object, "mlx_vlm");
+        event.adapter = string_field(object, "adapter");
+        event.draft = string_field(object, "draft");
+        event.draft_kind = string_field(object, "draft_kind");
+        event.draft_block_size = count_field(object, "draft_block_size");
+        event.mlx_embeddings_version = string_field(object, "mlx_embeddings");
         const auto boolean = [&object](const char* key) {
             const auto it = object.find(key);
             return it != object.end() && it->is_boolean() && it->get<bool>();
@@ -175,6 +244,8 @@ std::optional<Event> parse_event(std::string_view line) {
         event.chat_template = boolean("chat_template");
         event.thinking = boolean("thinking");
         event.vision = boolean("vision");
+        event.audio = boolean("audio");
+        event.embedding = boolean("embedding");
         return event;
     }
     // An unknown type is a newer driver's, and carries nothing this side reads.
@@ -198,6 +269,9 @@ std::string describe(const Event& event) {
                    std::to_string(event.completion_tokens);
         case Event::Kind::Error:
             return id + "error " + event.error_kind + ": " + event.text;
+        case Event::Kind::Vectors:
+            return id + "vectors " + std::to_string(event.vectors.size()) + "x" +
+                   std::to_string(event.vectors.empty() ? 0 : event.vectors.front().size());
     }
     return "?";
 }

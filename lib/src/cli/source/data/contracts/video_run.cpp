@@ -62,6 +62,15 @@ nlohmann::json video_run_document(const VideoRun& run) {
     if (!run.peft.empty()) {
         document["versions"]["peft"] = run.peft;
     }
+    // The engine (53l), added beside every field there was: a PyTorch run's
+    // record is what it was, and `engine`.
+    document["engine"] = run.engine.empty() ? std::string{"torch"} : run.engine;
+    if (!run.mlx.empty()) {
+        document["versions"]["mlx"] = run.mlx;
+    }
+    if (!run.mlx_video.empty()) {
+        document["versions"]["mlx_video"] = run.mlx_video;
+    }
     return document;
 }
 
@@ -127,6 +136,13 @@ std::optional<VideoRun> parse_video_run(const nlohmann::json& document, std::str
         run.diffusers = text_at(*versions, "diffusers");
         run.apogee = text_at(*versions, "apogee");
         run.peft = text_at(*versions, "peft");
+        run.mlx = text_at(*versions, "mlx");
+        run.mlx_video = text_at(*versions, "mlx_video");
+    }
+    // A record from before 53l ran on PyTorch, the one engine there was.
+    run.engine = text_at(document, "engine");
+    if (run.engine.empty()) {
+        run.engine = "torch";
     }
     run.codec = text_at(document, "codec");
     if (const auto seconds = document.find("seconds");

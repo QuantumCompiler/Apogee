@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <cstddef>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -14,6 +16,7 @@
 #include <span>
 #include <sstream>
 #include <system_error>
+#include <tuple>
 
 #include "agent/fetch_url.h"
 #include "agent/web_search.h"
@@ -22,6 +25,8 @@
 #include "agentloop/retriever.h"
 #include "agentloop/structured.h"
 #include "ansi/ansi.h"
+#include "backends/adapters.h"
+#include "backends/mlx_embed.h"
 #include "backends/mlx_local.h"
 #include "backends/prompt_cache.h"
 #include "backends/provider_cache.h"
@@ -32,6 +37,7 @@
 #include "cli/helpers.h"
 #include "cli/models_pull.h"
 #include "cli/provider_offer.h"
+#include "cli/train.h"
 #include "contracts/assets.h"
 #include "contracts/config_edit.h"
 #include "contracts/config_migrate.h"
@@ -178,19 +184,21 @@ struct MediumGap {
 [[nodiscard]] MediumGap medium_gap(const harness::BackendConfig& backend, Medium medium,
                                    const backends::MlxHost& host) {
     if (backend.type == harness::BackendType::Mlx) {
-        if (medium == Medium::Audio) {
-            return {.reason =
-                        "an mlx backend hears no audio -- only a llamacpp model's audio "
-                        "projector transcribes here",
-                    .remedy = {}};
-        }
         if (host.target != backends::kMlxTarget) {
             return {.reason = "the mlx backend runs on Apple silicon macOS only", .remedy = {}};
         }
-        const backends::MlxVision vision = backends::probe_mlx_vision(
-            backends::inspect_mlx_model(
-                std::filesystem::path{harness::expand_env_and_home(backend.model_path)}),
-            host);
+        const backends::MlxModelInfo info = backends::inspect_mlx_model(
+            std::filesystem::path{harness::expand_env_and_home(backend.model_path)});
+        if (medium == Medium::Audio) {
+            // Whether it hears (53g), by the rungs its provider answers
+            // `accepts_audio` from (M23): an omni model mlx-vlm built does.
+            const backends::MlxAudio audio = backends::probe_mlx_audio(info, host);
+            return {.reason = audio.hears() ? std::string{}
+                                            : std::string{backends::to_string(audio.refusal)} +
+                                                  ": " + audio.reason,
+                    .remedy = audio.remedy};
+        }
+        const backends::MlxVision vision = backends::probe_mlx_vision(info, host);
         return {.reason = vision.reason, .remedy = vision.remedy};
     }
     return {.reason = medium_gap_text(backend, medium), .remedy = {}};
@@ -220,7 +228,7 @@ void check_role_pointer(CheckReport& report, const harness::Config& config,
             if (remedy.empty()) {
                 remedy = *medium == Medium::Audio
                              ? "point it at a llamacpp backend whose mmproj_path has an audio "
-                               "encoder"
+                               "encoder, or an mlx backend over an omni model mlx-vlm built"
                              : "point it at a backend with an mmproj_path, an mlx backend over a "
                                "vision model, or a cloud one";
             }
@@ -446,6 +454,20 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
         const std::string label = "backend: " + name;
         const std::string_view type = harness::to_string(backend.type);
 
+        // A key no backend reads does nothing, and said nothing until 55g: a
+        // warning naming it, with the key it most likely meant. The entry
+        // still loads -- a newer release's key read here is one of these.
+        for (const std::string& key : backend.unknown_keys) {
+            const std::string_view meant = harness::nearest_backend_key(key);
+            add(report, Status::Warn, "Config", label,
+                "unknown key '" + key + "' -- no backend reads it, so it does nothing" +
+                    (meant.empty() ? std::string{}
+                                   : "; did you mean '" + std::string{meant} + "'?"),
+                meant.empty() ? "remove it from " + file +
+                                    " ('apogee config set-backend --help' lists a backend's fields)"
+                              : "rename it '" + std::string{meant} + "' in " + file);
+        }
+
         if (backend.type == harness::BackendType::LlamaCpp) {
             if (backend.model_path.empty()) {
                 // The entry exists: a door the binary accepts on it (M14).
@@ -529,6 +551,19 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
                                            : std::string{});
                     continue;
                 }
+                if (backends::mlx_entry_embeds(backend)) {
+                    // An embedding entry (53h): what it embeds, and how wide.
+                    add(report, Status::Ok, "Config", label,
+                        std::string{type} + " -- an embedding model directory (" +
+                            (info.model_type.empty() ? std::string{"its type unstated"}
+                                                     : info.model_type) +
+                            "), " + files.quantization.describe() + "; vectors " +
+                            models::describe(
+                                models::read_mlx_embedding_width(readiness.model_dir)) +
+                            "; it embeds through mlx-embeddings and answers no chat; its "
+                            "runtime is present");
+                    continue;
+                }
                 // Whether its pictures are read as they are (27c), never claimed
                 // for a model that cannot.
                 std::string sight;
@@ -538,13 +573,26 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
                                 : "; a vision model, but mlx-vlm is not installed, so it "
                                   "does not read images as they are";
                 }
+                // And whether it hears (53g), said beside its sight for a
+                // directory with an audio tower (M23): the provider's own
+                // rungs, the one that refuses named with its way.
+                std::string hearing;
+                if (const backends::MlxAudio audio =
+                        backends::probe_mlx_audio(info, mlx_host(inputs));
+                    audio.tower) {
+                    hearing = audio.hears()
+                                  ? "; it hears recordings as they are, through mlx-vlm"
+                                  : "; it has an audio tower, but does not hear recordings as "
+                                    "they are -- " +
+                                        audio.message();
+                }
                 add(report, Status::Ok, "Config", label,
                     std::string{type} + " -- " +
                         (info.model_type.empty() ? std::string{"a"} : info.model_type) +
                         " model directory" +
                         (info.chat_template ? "" : " with no chat template (a base model)") + ", " +
                         files.quantization.describe() + "; " +
-                        models::describe(models::mlx_window(files, backend)) + sight +
+                        models::describe(models::mlx_window(files, backend)) + sight + hearing +
                         "; its runtime is present");
                 continue;
             }
@@ -820,6 +868,11 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
             add(report, Status::Warn, "Models", name,
                 "damaged by an older pull: its config.json is a download record",
                 "apogee models repair " + name);
+        } else if (const std::optional<models::DraftHead> head =
+                       models::snapshot_draft_head(stored.dir)) {
+            add(report, Status::Ok, "Models", name,
+                "SafeTensors weights, " +
+                    models::draft_head_note(*head, models::draft_head_bases(roots, *head)));
         } else {
             add(report, Status::Ok, "Models", name, "SafeTensors weights");
         }
@@ -922,6 +975,246 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
         // Apogee bundles none and downloads none without being asked.
         add(report, Status::Ok, "Models", "models/",
             "no models installed -- Apogee bundles none; pull one with 'apogee models pull'");
+    }
+}
+
+/// `text` as one word of a command a person copies: double-quoted when a
+/// shell would split it or read a backslash as an escape (a Windows path), as
+/// `--adapters` spells a set (53a).
+[[nodiscard]] std::string shell_word(const std::string& text) {
+    return text.find_first_of(" '\"\\") == std::string::npos ? text : "\"" + text + "\"";
+}
+
+/// The door that promotes `run` onto `name` again (53c), as it would run
+/// now, so it runs as printed: on a quantized base its gate scores the
+/// candidate there and needs a suite -- named where neither the run's
+/// recorded eval nor the config names one; on any other base the gate reads
+/// the run's recorded eval, which is scored first where none passed and the
+/// gate is hard.
+[[nodiscard]] std::string promote_again_door(const CheckInputs& inputs,
+                                             const training::TrainingStore& store,
+                                             const std::string& run, const std::string& name,
+                                             bool quantized) {
+    const std::string promote = "apogee train promote " + run + " --as " + name + " --adapter";
+    std::string error;
+    const std::optional<training::RunManifest> manifest =
+        training::read_manifest(store.run_dir(run), error);
+    const std::optional<training::EvalResults> recorded =
+        manifest.has_value() ? manifest->eval : std::nullopt;
+    if (quantized) {
+        const bool suite_known = (recorded.has_value() && !recorded->suite.empty()) ||
+                                 !inputs.config.training.eval_suite_path.empty();
+        return promote + (suite_known ? "" : " --suite <path|name>");
+    }
+    const bool hard = training::gate_mode_from_string(
+                          inputs.config.training.effective_gate_mode()) == training::GateMode::Hard;
+    if (hard && !(recorded.has_value() && recorded->passed)) {
+        return "apogee train eval " + run + " --suite <path|name> --force && " + promote;
+    }
+    return promote;
+}
+
+/// The `Adapters` section (53c): a row for every adapter an entry applies,
+/// its facts read through 53a's one implementation (`backends/adapters`) --
+/// a scale the loader allows; its file there and the kind its runtime reads;
+/// pinned; and the base's weights the ones it was pinned to, the base hashed
+/// once per entry and only when a pin asks. That hash comes from the memo a
+/// load keeps, read and never written back: the doctor edits nothing, a
+/// cache included. Each failure names its doors, each a command that runs as
+/// printed -- for a version `train promote --adapter` made, the promote that
+/// makes it again -- and a pin that cannot be checked is skipped, never
+/// passed. Absent when no entry applies an adapter.
+void check_adapters(CheckReport& report, const CheckInputs& inputs) {
+    if (inputs.config_missing || !inputs.config_error.empty()) {
+        return;
+    }
+    const training::TrainingStore store{inputs.home / "training"};
+    const models::StoreRoots roots = check_roots(inputs);
+    for (const auto& [name, backend] : inputs.config.backends) {
+        if (backend.adapters.empty() || !harness::takes_adapters(backend.type)) {
+            continue;
+        }
+        const bool mlx = backend.type == harness::BackendType::Mlx;
+        const std::filesystem::path base{harness::expand_env_and_home(backend.model_path)};
+        const backends::AdapterCheck check{
+            .backend = name,
+            .base = base,
+            .directories = mlx,
+            .hashing = {.memo = inputs.home / "cache" / "weight-hashes.json", .remember = false}};
+        const std::string set_backend = "apogee config set-backend " + name;
+        const std::string pin_all =
+            set_backend + " --adapters " + backends::spell_adapters(backend.adapters);
+
+        // The run a promoted version came from (53b's ledger), while its
+        // manifest is still there to promote it from again.
+        std::string ledger_error;
+        const std::optional<training::VersionLedger> ledger =
+            training::load_ledger(store.versions_dir(), name, ledger_error);
+        const auto promoted_from = [&](const harness::AdapterConfig& adapter) {
+            if (!ledger.has_value()) {
+                return std::string{};
+            }
+            std::error_code code;
+            for (const training::VersionEntry& version : ledger->versions) {
+                if (version.adapter() && training::valid_run_id(version.run_id) &&
+                    std::filesystem::path{version.adapter_path}.lexically_normal() ==
+                        std::filesystem::path{adapter.path}.lexically_normal() &&
+                    std::filesystem::is_regular_file(
+                        training::manifest_path(store.run_dir(version.run_id)), code)) {
+                    return version.run_id;
+                }
+            }
+            return std::string{};
+        };
+        // The weights an adapter was pinned to, when the store holds them
+        // apart from the base -- filed under the hash's first twelve
+        // characters -- so a door can point model_path back at them.
+        const auto stored_base = [&](const std::string& pin) {
+            const std::string id = pin.substr(0, models::kWeightIdLength);
+            const auto elsewhere = [&base](const std::filesystem::path& found) {
+                return found.lexically_normal() != base.lexically_normal();
+            };
+            if (mlx) {
+                for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
+                    if (stored.id == id && elsewhere(stored.dir)) {
+                        return stored.dir;
+                    }
+                }
+            } else {
+                for (const models::StoredGguf& stored : models::list_store_ggufs(roots)) {
+                    if (stored.id == id && elsewhere(stored.file)) {
+                        return stored.file;
+                    }
+                }
+            }
+            return std::filesystem::path{};
+        };
+
+        std::optional<std::string> base_sha256;  // read once, when a pin asks
+        // What the base is, for a promoted version's door (its header alone).
+        std::optional<training::ServingBase> serving;
+        for (std::size_t index = 0; index < backend.adapters.size(); ++index) {
+            const harness::AdapterConfig& adapter = backend.adapters[index];
+            // A directory named with its trailing slash is still that directory.
+            const std::filesystem::path named =
+                std::filesystem::path{adapter.path}.lexically_normal();
+            const std::string label =
+                name + ": " +
+                (named.has_filename() ? named : named.parent_path()).filename().string();
+            std::vector<harness::AdapterConfig> rest = backend.adapters;
+            rest.erase(rest.begin() + static_cast<std::ptrdiff_t>(index));
+            const std::string take_off =
+                set_backend + " --adapters " + backends::spell_adapters(rest) + " to take it off";
+            const std::string run = promoted_from(adapter);
+            if (!run.empty() && !serving.has_value()) {
+                serving = serving_base(name, backend);
+            }
+            const std::string promote_again =
+                run.empty() ? std::string{}
+                            : promote_again_door(inputs, store, run, name, serving->quantized);
+            std::ostringstream scale;
+            scale << adapter.scale;
+
+            // The scale the loader allows (53a), asked again: the doctor
+            // never assumes how its config was read.
+            if (!std::isfinite(adapter.scale) || adapter.scale <= 0.0 ||
+                adapter.scale > harness::kMaxAdapterScale || (mlx && adapter.scale != 1.0)) {
+                std::vector<harness::AdapterConfig> plain = backend.adapters;
+                plain[index].scale = 1.0;
+                add(report, Status::Fail, "Adapters", label,
+                    "applied at scale " + scale.str() +
+                        (mlx ? " -- mlx-lm applies an adapter at the scale its training wrote, "
+                               "so an mlx entry's is 1"
+                             : " -- a scale is above 0 and at most 2"),
+                    set_backend + " --adapters " + backends::spell_adapters(plain) +
+                        " to apply it at scale 1");
+                continue;
+            }
+            switch (backends::adapter_files(adapter, check)) {
+                case backends::AdapterFiles::Missing:
+                    add(report, Status::Fail, "Adapters", label, "not there: " + adapter.path,
+                        (promote_again.empty() ? std::string{}
+                                               : promote_again + " to make it again from its run, "
+                                                                 "or ") +
+                            take_off);
+                    continue;
+                case backends::AdapterFiles::WrongKind:
+                    // What the directory lacks, said as a load refuses it
+                    // (55e): its configuration, or the weights mlx-lm applies.
+                    add(report, Status::Fail, "Adapters", label,
+                        (mlx ? "not an mlx-lm adapter directory (" +
+                                   backends::adapter_kind_gap(adapter, check) + "): "
+                             : "not a file -- a llamacpp entry applies a GGUF LoRA file: ") +
+                            adapter.path,
+                        take_off);
+                    continue;
+                case backends::AdapterFiles::Unpinned:
+                    add(report, Status::Fail, "Adapters", label,
+                        "pinned to no base -- a load refuses it until the set is pinned to the "
+                        "weights it applies over",
+                        pin_all + " to pin the set to the weights model_path names");
+                    continue;
+                case backends::AdapterFiles::Pinned:
+                    break;
+            }
+            const std::string pin = adapter.base_sha256.substr(0, models::kWeightIdLength);
+            const auto point_back = [&] {
+                const std::filesystem::path pinned = stored_base(adapter.base_sha256);
+                return pinned.empty()
+                           ? std::string{}
+                           : set_backend + " --model-path " + shell_word(pinned.string()) +
+                                 " to run it over the weights it was pinned to";
+            };
+            if (backend.model_path.empty()) {
+                add(report, Status::Skipped, "Adapters", label,
+                    "its pin cannot be checked: " + name +
+                        " names no model_path, the weights it applies over",
+                    point_back());
+                continue;
+            }
+            if (!base_sha256.has_value()) {
+                // The slow part, when the memo does not hold the base: a
+                // whole read of its weights.
+                say(inputs, "checking adapters: " + name + "'s base");
+                base_sha256 = backends::weights_sha256(base, check.hashing);
+            }
+            if (base_sha256->empty()) {
+                add(report, Status::Skipped, "Adapters", label,
+                    "its pin cannot be checked: the base weights at " + base.string() +
+                        " could not be read -- the backend's own row says why",
+                    point_back());
+                continue;
+            }
+            if (*base_sha256 != adapter.base_sha256) {
+                // The re-promote door for a version the ledger knows: its
+                // gate runs again over the weights the entry serves now.
+                std::string doors;
+                const auto door = [&doors](const std::string& line) {
+                    if (!line.empty()) {
+                        doors += (doors.empty() ? "" : ", or ") + line;
+                    }
+                };
+                door(promote_again.empty()
+                         ? std::string{}
+                         : promote_again + " to promote its run again over these weights");
+                door(point_back());
+                door(promote_again.empty()
+                         ? pin_all +
+                               " to pin the set to these weights, if they are the ones "
+                               "it was made for"
+                         : std::string{});
+                add(report, Status::Fail, "Adapters", label,
+                    "pinned to other weights (sha256 " + pin + ") than the base " + base.string() +
+                        " holds now (" + base_sha256->substr(0, models::kWeightIdLength) +
+                        ") -- an adapter applies only over the weights it was trained on, so a "
+                        "load refuses it",
+                    doors);
+                continue;
+            }
+            add(report, Status::Ok, "Adapters", label,
+                "applies over " + models::weights_label(base) + " at scale " + scale.str() +
+                    ", pinned to its weights (sha256 " + pin + ")");
+        }
     }
 }
 
@@ -1705,11 +1998,90 @@ void check_graphs(CheckReport& report, const CheckInputs& inputs) {
     }
 }
 
+/// The setup that installs `set` into an environment on Python `on` (M19's
+/// rule): one its Python cannot take names the rebuild that can.
+[[nodiscard]] std::string setup_remedy(training::RequirementSet set,
+                                       const training::PythonVersion& on) {
+    const std::string name{training::to_string(set)};
+    return on.known() && !training::python_range(set).contains(on)
+               ? "apogee train setup --rebuild --with " + name
+               : "apogee train setup --with " + name;
+}
+
+/// One MLX set's row, once its package is there (M23).
+struct SetRow {
+    Status status = Status::Ok;
+    std::string detail{};
+    std::string remedy{};
+};
+
+/// An MLX set present in the environment, as its row says it (M23): the
+/// version -- or, for one built from a commit, the commit -- its
+/// distribution record states, against its floor or its pin, read from the
+/// record's files alone. Below its floor or off its pin is a warning naming
+/// the setup that brings it up; never a failure, since the older library
+/// still runs what it ran. A record that states nothing comparable is said
+/// as such and held to nothing. `declared` is the version the package's own
+/// files declare, said where no record states one; `use` closes a row that
+/// is not a warning.
+[[nodiscard]] SetRow present_set_row(const training::InstalledSet& installed,
+                                     const std::filesystem::path& venv, std::string_view declared,
+                                     std::string_view use, const training::PythonVersion& on) {
+    const training::SetRequirement& wants = installed.requirement;
+    std::string shown = !installed.version.empty() ? installed.version : std::string{declared};
+    if (wants.pin.has_value() && !installed.commit.empty()) {
+        shown +=
+            (shown.empty() ? "" : " ") + std::string{"at commit "} + installed.commit.substr(0, 12);
+    }
+    std::string detail = wants.package + " " + (shown.empty() ? "(version unstated)" : shown) +
+                         " is present in " + venv.string() + " (its files, not imported by check)";
+    const std::string against =
+        wants.pin.has_value() ? "its pin, " + wants.describe() : "its floor, " + wants.describe();
+    const std::string name{training::to_string(installed.set)};
+    switch (installed.standing) {
+        case training::SetStanding::Current:
+            detail += wants.pin.has_value()
+                          ? ", the commit Apogee pins (" + std::string{wants.pin->committed} + ")"
+                          : ", at or above " + against;
+            break;
+        case training::SetStanding::BelowFloor:
+            return {.status = Status::Warn,
+                    .detail = detail + ", below " + against +
+                              " -- kept from an earlier setup until the '" + name +
+                              "' set is installed again",
+                    .remedy = setup_remedy(installed.set, on)};
+        case training::SetStanding::OffPin:
+            return {.status = Status::Warn,
+                    .detail = detail +
+                              (installed.commit.empty()
+                                   ? ", but its record names no commit it was built from, so "
+                                     "it is not " +
+                                         against
+                                   : ", off " + against) +
+                              " -- the one commit this Apogee trusts",
+                    .remedy = setup_remedy(installed.set, on)};
+        case training::SetStanding::Unstated:
+            detail +=
+                installed.version.empty()
+                    ? "; its distribution record states no version, so it is not held to " + against
+                    : "; its distribution record's version, '" + installed.version +
+                          "', is not a release number, so it is not held to " + against;
+            break;
+        case training::SetStanding::NoRecord:
+            detail += "; no distribution record of it is there, so it is not held to " + against;
+            break;
+    }
+    return {.status = Status::Ok, .detail = detail + std::string{use}, .remedy = {}};
+}
+
 /// The MLX runtime (27a): whether this host can run an `mlx` backend at all,
 /// and the seeded driver against its compiled-in copy. Off Apple silicon it
 /// is skipped, never passed; an environment without mlx-lm is a warning only
 /// where an `mlx` entry needs it. A pass says what was found -- the package's
-/// files, never an import -- and nothing more.
+/// files, never an import -- and nothing more. Since M23 every MLX set's row
+/// says its version, or mlx-video's commit, against its floor or pin; and
+/// the opt-in sets, mlx-video and mlx-audio, have rows of their own, a skip
+/// while they are not installed, since nobody asked for them (M11).
 void check_mlx(CheckReport& report, const CheckInputs& inputs) {
     const backends::MlxHost host = mlx_host(inputs);
     if (host.target != backends::kMlxTarget) {
@@ -1723,6 +2095,9 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
                             return entry.second.type == harness::BackendType::Mlx;
                         });
     const backends::MlxReadiness runtime = backends::probe_mlx_runtime(host);
+    // The Python the environment is on (M19), so a set it cannot take names
+    // the rebuild -- read from its record and pyvenv.cfg, never asked.
+    const training::PythonVersion on = training::PythonEnv{host.venv}.status().base_version;
     switch (runtime.refusal) {
         case backends::MlxRefusal::NoEnvironment:
         case backends::MlxRefusal::NoMlxLm:
@@ -1732,17 +2107,22 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
                 runtime.remedy);
             break;
         case backends::MlxRefusal::None:
-        case backends::MlxRefusal::NoDriver:
-            add(report, Status::Ok, "MLX", "runtime",
-                "mlx-lm " +
-                    (runtime.version.empty() ? std::string{"(version unstated)"}
-                                             : runtime.version) +
-                    " is present in " + host.venv.string() + " (its files, not imported by check)");
+        case backends::MlxRefusal::NoDriver: {
+            const SetRow row = present_set_row(
+                training::read_installed_set(host.venv, training::RequirementSet::Mlx), host.venv,
+                runtime.version, "", on);
+            add(report, row.status, "MLX", "runtime", row.detail, row.remedy);
             break;
+        }
         case backends::MlxRefusal::Platform:
         case backends::MlxRefusal::NoModelPath:
         case backends::MlxRefusal::ModelMissing:
         case backends::MlxRefusal::NotAModelDirectory:
+        case backends::MlxRefusal::NoMlxVlm:
+        case backends::MlxRefusal::NoMlxEmbeddings:
+        case backends::MlxRefusal::Drafter:
+        case backends::MlxRefusal::Kind:
+        case backends::MlxRefusal::Draft:
             break;  // the runtime's rungs never answer these
     }
 
@@ -1762,11 +2142,10 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
         }
     }
     if (vlm.installed()) {
-        add(report, Status::Ok, "MLX", "vision",
-            "mlx-vlm " + (vlm.version.empty() ? std::string{"(version unstated)"} : vlm.version) +
-                " is present in " + host.venv.string() +
-                " (its files, not imported by check) -- an MLX vision model reads images as "
-                "they are");
+        const SetRow row = present_set_row(
+            training::read_installed_set(host.venv, training::RequirementSet::MlxVlm), host.venv,
+            vlm.version, " -- an MLX vision model reads images as they are", on);
+        add(report, row.status, "MLX", "vision", row.detail, row.remedy);
     } else if (!sighted.empty()) {
         add(report, Status::Warn, "MLX", "vision",
             "mlx-vlm is not installed in " + host.venv.string() + ", so " + sighted +
@@ -1780,11 +2159,77 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
             std::string{backends::kMlxVisionRemedy});
     }
 
-    // The two seeded drivers: the backend's, and `convert --mlx`'s (27b).
+    // The embedding dependency (53h): mlx-embeddings, which only an MLX
+    // embedding model needs -- reported from its files, as mlx-vlm is, and an
+    // embedding entry without it said to embed nothing.
+    const backends::MlxEmbeddingsPackage embeddings = backends::find_mlx_embeddings(host);
+    std::string embedders;
+    if (wanted) {
+        for (const auto& [name, backend] : inputs.config.backends) {
+            if (backends::mlx_entry_embeds(backend)) {
+                embedders += (embedders.empty() ? "" : ", ") + name;
+            }
+        }
+    }
+    if (embeddings.installed()) {
+        const SetRow row = present_set_row(
+            training::read_installed_set(host.venv, training::RequirementSet::MlxEmbeddings),
+            host.venv, embeddings.version, " -- an MLX embedding model embeds through it", on);
+        add(report, row.status, "MLX", "embeddings", row.detail, row.remedy);
+    } else if (!embedders.empty()) {
+        add(report, Status::Warn, "MLX", "embeddings",
+            "mlx-embeddings is not installed in " + host.venv.string() + ", so " + embedders +
+                " cannot embed",
+            std::string{backends::kMlxEmbeddingsRemedy});
+    } else {
+        add(report, Status::Skipped, "MLX", "embeddings",
+            "not set up -- only an MLX embedding model needs it (mlx-embeddings is not installed "
+            "in " +
+                host.venv.string() + ")",
+            std::string{backends::kMlxEmbeddingsRemedy});
+    }
+
+    // The opt-in sets (M23): mlx-video, built from its pinned commit (53k),
+    // and mlx-audio (53m), each found by its package's files and held to its
+    // pin or floor. Absent is a skip and never a warning -- nobody asked for
+    // either, and `check --fix` installs neither -- so a fresh install stays
+    // green (M11).
+    for (const auto& [set, label, package, use] :
+         {std::tuple{training::RequirementSet::MlxVideo, "video", "mlx_video",
+                     "'models convert --mlx' of a Wan set and 'video generate' on MLX"},
+          std::tuple{training::RequirementSet::MlxAudio, "voice", "mlx_audio",
+                     "'models convert --mlx' of a voice model and 'voice say' on MLX"}}) {
+        if (const std::filesystem::path found = training::find_site_package(host.venv, package);
+            !found.empty()) {
+            const SetRow row =
+                present_set_row(training::read_installed_set(host.venv, set), host.venv,
+                                training::installed_package_version(found),
+                                " -- " + std::string{use} + " run through it", on);
+            add(report, row.status, "MLX", label, row.detail, row.remedy);
+            continue;
+        }
+        const training::SetRequirement wants = training::set_requirement(set);
+        const training::PythonRange range = training::python_range(set);
+        add(report, Status::Skipped, "MLX", label,
+            "not installed (opt-in) -- only " + std::string{use} + " need it; " +
+                (wants.pin.has_value() ? "pip builds " + wants.package +
+                                             " from GitHub at its pin, " + wants.describe()
+                                       : wants.package + "'s floor is " + wants.describe()) +
+                (on.known() && !range.contains(on)
+                     ? "; the Python environment is on Python " + on.str() + ", and the '" +
+                           std::string{training::to_string(set)} + "' set runs on " +
+                           range.describe()
+                     : std::string{}),
+            setup_remedy(set, on));
+    }
+
+    // The seeded drivers: the backend's, `convert --mlx`'s (27b), and the
+    // embedding backend's (53h).
     for (const auto& [label, file] :
          {std::pair<std::string, std::filesystem::path>{"driver", host.driver},
           std::pair<std::string, std::filesystem::path>{
-              "conversion driver", inputs.home / harness::bundled_mlx_converter_relative_path()}}) {
+              "conversion driver", inputs.home / harness::bundled_mlx_converter_relative_path()},
+          std::pair<std::string, std::filesystem::path>{"embedding driver", host.embedder}}) {
         const std::string script = file.filename().string();
         switch (harness::inspect_seeded_script(inputs.home, script, inputs.retired_scripts)) {
             case harness::SeededScript::Missing:
@@ -1806,6 +2251,75 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
                         "file and run 'apogee check --fix' to restore the shipped one");
                 break;
         }
+    }
+}
+
+/// The command that brings an ffmpeg with `ability` on `host` (52e): a
+/// package that carries it, runnable as written.
+[[nodiscard]] std::string ffmpeg_remedy(std::string_view host, std::string_view ability) {
+    if (host.starts_with("macos")) {
+        // Homebrew's ffmpeg carries x264 and no libass; its keg-only
+        // ffmpeg-full carries both (2026-10-20).
+        return ability == "x264" ? "brew install ffmpeg" : remedy_line(macos_captions_remedy());
+    }
+    if (host.starts_with("windows")) {
+        return "winget install Gyan.FFmpeg";
+    }
+    return "sudo apt install ffmpeg";
+}
+
+/// What the ffmpeg on PATH can do for a video (52e): whether a
+/// composition's captions burn into its frames (the `subtitles` filter,
+/// libass) and whether its clips encode as H.264 (`libx264`), read from
+/// ffmpeg's own listings through the seam's one child. ffmpeg missing, or
+/// not answering, skips both -- never a pass. A missing ability is a skip
+/// too, with the command that brings it: an optional ability, as pdftotext
+/// is, so a fresh install still ends green (M11) -- a composition works
+/// without either, in a lesser form.
+void check_ffmpeg_abilities(CheckReport& report, const CheckInputs& inputs) {
+    const std::string host =
+        inputs.host_target.empty() ? std::string{platform::host_target()} : inputs.host_target;
+    constexpr std::string_view kCaptions = "ffmpeg captions";
+    constexpr std::string_view kH264 = "ffmpeg h264";
+    if (!inputs.ffmpeg_listing && platform::ffmpeg_path().empty()) {
+        for (const std::string_view name : {kCaptions, kH264}) {
+            add(report, Status::Skipped, "Video", std::string{name},
+                "ffmpeg is not installed -- video generate and compose need it to assemble",
+                ffmpeg_remedy(host, name == kH264 ? "x264" : "libass"));
+        }
+        return;
+    }
+    const auto ask = [&inputs](std::string_view flag, std::string& error) {
+        if (inputs.ffmpeg_listing) {
+            return inputs.ffmpeg_listing(flag, error);
+        }
+        return platform::ffmpeg_listing(flag, {}, error);
+    };
+    std::string error;
+    if (const std::optional<std::string> filters = ask("-filters", error); !filters.has_value()) {
+        add(report, Status::Skipped, "Video", std::string{kCaptions},
+            "could not ask ffmpeg for its filters -- " + error);
+    } else if (platform::filter_listed(*filters, "subtitles")) {
+        add(report, Status::Ok, "Video", std::string{kCaptions},
+            "libass -- a composition burns its captions into the frames");
+    } else {
+        add(report, Status::Skipped, "Video", std::string{kCaptions},
+            "no subtitles filter (this ffmpeg was built without libass) -- a composition keeps its "
+            "captions beside the video as an SRT",
+            ffmpeg_remedy(host, "libass"));
+    }
+    error.clear();
+    if (const std::optional<std::string> encoders = ask("-encoders", error);
+        !encoders.has_value()) {
+        add(report, Status::Skipped, "Video", std::string{kH264},
+            "could not ask ffmpeg for its encoders -- " + error);
+    } else if (platform::encoder_listed(*encoders, "libx264")) {
+        add(report, Status::Ok, "Video", std::string{kH264},
+            "libx264 -- clips and compositions encode as H.264");
+    } else {
+        add(report, Status::Skipped, "Video", std::string{kH264},
+            "no libx264 encoder -- clips encode as MPEG-4 Part 2, larger and less widely played",
+            ffmpeg_remedy(host, "x264"));
     }
 }
 
@@ -1840,10 +2354,23 @@ void check_video(CheckReport& report, const CheckInputs& inputs) {
     }
     // The speech runtime (50a): the same reading of files, its own set.
     const video::VideoReadiness voice = video::probe_voice(host);
+    // An environment on a Python the voice set does not run on can never
+    // take it by installing (M19): said, with the remedy that works.
+    const training::PythonVersion on = training::PythonEnv{host.venv}.status().base_version;
+    const training::PythonRange voice_range =
+        training::python_range(training::RequirementSet::Voice);
     switch (voice.refusal) {
         case video::VideoRefusal::NoEnvironment:
         case video::VideoRefusal::NoTorch:
         case video::VideoRefusal::NoKokoro:
+            if (voice.refusal != video::VideoRefusal::NoEnvironment && on.known() &&
+                !voice_range.contains(on)) {
+                add(report, Status::Skipped, "Video", "voice runtime",
+                    "not set up -- the Python environment is on Python " + on.str() +
+                        ", and the voice set runs on " + voice_range.describe(),
+                    "apogee train setup --rebuild --with voice");
+                break;
+            }
             add(report, Status::Skipped, "Video", "voice runtime", "not set up -- " + voice.reason,
                 std::string{video::kVoiceSetupRemedy});
             break;
@@ -1856,10 +2383,14 @@ void check_video(CheckReport& report, const CheckInputs& inputs) {
                     " in " + host.venv.string() + " (their files, not imported by check)");
             break;
     }
-    // The two seeded drivers: the video one (49b) and the speech one (50a).
+    // The seeded drivers: the video one (49b), the speech one (50a), the
+    // MLX engine's video one (53l) and its speech one (53m).
     for (const auto& [label, file] :
          {std::pair<std::string, std::filesystem::path>{"driver", host.driver},
-          std::pair<std::string, std::filesystem::path>{"voice driver", host.voice_driver}}) {
+          std::pair<std::string, std::filesystem::path>{"voice driver", host.voice_driver},
+          std::pair<std::string, std::filesystem::path>{"mlx driver", host.mlx_driver},
+          std::pair<std::string, std::filesystem::path>{"mlx voice driver",
+                                                        host.voice_mlx_driver}}) {
         const std::string script = file.filename().string();
         switch (harness::inspect_seeded_script(inputs.home, script, inputs.retired_scripts)) {
             case harness::SeededScript::Missing:
@@ -1914,6 +2445,8 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
         }
         add(report, Status::Ok, "Training", "python env",
             "at " + env.dir().string() +
+                (status.base_version.known() ? " (Python " + status.base_version.str() + ")"
+                                             : std::string{}) +
                 (sets.empty() ? std::string{"; no requirement sets installed"}
                               : "; sets: " + sets));
     }
@@ -2034,9 +2567,10 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
     }
 
     // Every version ledger: the active version's GGUF -- or MLX directory
-    // (27c) -- exists and the backend's model_path names it -- else the two
-    // have drifted, and a chat runs something other than what `train
-    // versions` says is active.
+    // (27c) -- exists and the backend's model_path names it -- or, for an
+    // adapter version (53b), its adapter exists and the backend's adapters
+    // name it -- else the two have drifted, and a chat runs something other
+    // than what `train versions` says is active.
     for (const training::VersionLedger& ledger : training::TrainingStore{training}.all_versions()) {
         const std::string label = "versions: " + ledger.backend;
         const training::VersionEntry* active = ledger.active();
@@ -2048,12 +2582,14 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
             continue;
         }
         const bool there = active->mlx()
-                               ? std::filesystem::is_directory(active->mlx_path, code)
-                               : std::filesystem::is_regular_file(active->gguf_path, code);
+                               ? std::filesystem::is_directory(active->weights(), code)
+                               : std::filesystem::is_regular_file(active->weights(), code);
+        const std::string kind = active->adapter() ? "an adapter"
+                                 : active->mlx()   ? "an MLX model"
+                                                   : "a GGUF";
         if (!there) {
             add(report, Status::Warn, "Training", label,
-                "active v" + std::to_string(active->version) + " names " +
-                    (active->mlx() ? "an MLX model" : "a GGUF") +
+                "active v" + std::to_string(active->version) + " names " + kind +
                     " that is not there: " + active->weights(),
                 "apogee train rollback " + ledger.backend + ", or promote again");
             continue;
@@ -2064,7 +2600,30 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
                 "active v" + std::to_string(active->version) +
                     " exists, but no backend of that name is configured",
                 "apogee config add-backend " + ledger.backend + " --type " +
-                    (active->mlx() ? "mlx" : "llamacpp") + " --model-path " + active->weights());
+                    (active->mlx() ? "mlx" : "llamacpp") +
+                    (active->adapter() ? " --model-path <base> && apogee config set-backend " +
+                                             ledger.backend + " --adapters "
+                                       : std::string{" --model-path "}) +
+                    active->weights());
+            continue;
+        }
+        if (active->adapter()) {
+            // 53b: the base is the entry's own; the version is an adapter on it.
+            const bool applied =
+                std::ranges::any_of(backend->adapters, [&](const harness::AdapterConfig& adapter) {
+                    return std::filesystem::path{adapter.path}.lexically_normal() ==
+                           std::filesystem::path{active->adapter_path}.lexically_normal();
+                });
+            if (!applied) {
+                add(report, Status::Warn, "Training", label,
+                    "the ledger says v" + std::to_string(active->version) + " (" +
+                        active->weights() + ") but the backend's adapters do not name it",
+                    "apogee train rollback " + ledger.backend + ", or promote again");
+                continue;
+            }
+            add(report, Status::Ok, "Training", label,
+                "active v" + std::to_string(active->version) + " of " +
+                    std::to_string(ledger.versions.size()) + ", and the backend applies it");
             continue;
         }
         if (harness::expand_env_and_home(backend->model_path) != active->weights()) {
@@ -2199,6 +2758,8 @@ CheckReport run_checks(const CheckInputs& inputs) {
     check_version(report, inputs);
     say(inputs, "checking config");
     check_config(report, inputs);
+    say(inputs, "checking adapters");
+    check_adapters(report, inputs);
     say(inputs, "checking providers");
     check_providers(report, inputs);
     say(inputs, "checking tools");
@@ -2220,6 +2781,7 @@ CheckReport run_checks(const CheckInputs& inputs) {
     check_mlx(report, inputs);
     say(inputs, "checking video");
     check_video(report, inputs);
+    check_ffmpeg_abilities(report, inputs);
     say(inputs, "checking the data directory");
     check_filesystem(report, inputs);
     say(inputs, "checking secrets");
@@ -2636,6 +3198,27 @@ bool run_check_pass(CheckInputs inputs, const CheckPassOptions& options) {
         ansi::Style::detect(options.no_color ? ansi::ColorMode::Never : ansi::ColorMode::Auto);
     std::cout << render_report(report, style.color_enabled());
     return report.passed();
+}
+
+std::vector<RemedyCommand> macos_captions_remedy() {
+    return {{.argv = {"brew", "install", "ffmpeg-full"}},
+            {.argv = {"brew", "unlink", "ffmpeg"}, .may_fail = true},
+            {.argv = {"brew", "link", "--force", "ffmpeg-full"}}};
+}
+
+std::string remedy_line(const std::vector<RemedyCommand>& commands) {
+    std::string out;
+    for (std::size_t index = 0; index < commands.size(); ++index) {
+        if (index > 0) {
+            out += commands[index - 1].may_fail ? "; " : " && ";
+        }
+        std::string words;
+        for (const std::string& word : commands[index].argv) {
+            words += (words.empty() ? "" : " ") + word;
+        }
+        out += words;
+    }
+    return out;
 }
 
 }  // namespace apogee::commands

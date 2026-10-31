@@ -1,0 +1,1 @@
+apogee train: pipeline aborted -- stage 'refusals' failed the cumulative eval gate (50% (1/2)). Fix the data or the suite and 'apogee train pipeline resume pipe-20261026-074112', or pass --continue-on-fail to go on regardless

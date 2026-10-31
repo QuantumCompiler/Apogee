@@ -10,6 +10,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "agentloop/retriever.h"
@@ -23,6 +24,7 @@
 #include "cli/task_cmd.h"
 #include "contracts/assets.h"
 #include "contracts/config.h"
+#include "contracts/config_edit.h"
 #include "contracts/layout.h"
 #include "embedstore/store.h"
 #include "knowledge/record.h"
@@ -32,6 +34,7 @@
 #include "modelstore/store.h"
 #include "platform/child_process.h"
 #include "secrets/resolve.h"
+#include "support/draft_head_configs.h"
 #include "support/env_guard.h"
 #include "support/mlx_model.h"
 #include "tasks/ledger.h"
@@ -332,6 +335,42 @@ embeddings:
         std::cerr.rdbuf(old_err);
         CHECK(code == 0);
     }
+}
+
+TEST_CASE("config get's completion offers every key it reads, each once",
+          "[commands][completion][sources]") {
+    // The reverse of the case above (55g): completion left out five scalars
+    // `config get` reads -- memory.recall among them -- and eight fields of
+    // every backend. Both now come from the tables the reads are declared
+    // in, so each is offered the day it is read.
+    const Home home;
+    const std::vector<std::string> keys = c::config_keys(home.config);
+    for (const apogee::harness::SettableScalar& scalar : apogee::harness::settable_scalars()) {
+        INFO(scalar.key);
+        CHECK(has(keys, scalar.key));
+    }
+    // M33: the allowed hosts are read as `tools.disabled` is, one per line.
+    for (const std::string_view key :
+         {"memory.recall", "knowledge.auto_capture", "tools.search.provider", "tools.search.url",
+          "tools.search.results", "tools.allowed_hosts"}) {
+        INFO(key);
+        CHECK(has(keys, key));
+    }
+    for (const std::string_view role : apogee::harness::models_role_fields()) {
+        INFO(role);
+        CHECK(has(keys, "models." + std::string{role}));
+    }
+    CHECK(has(keys, "models.default_video"));
+    CHECK(has(keys, "models.default_suite"));
+    for (const std::string& name : home.config.backend_names()) {
+        for (const std::string_view field : apogee::harness::backend_entry_keys()) {
+            INFO(field);
+            CHECK(has(keys, "backends." + name + "." + std::string{field}));
+        }
+    }
+    std::vector<std::string> sorted = keys;
+    std::ranges::sort(sorted);
+    CHECK(std::ranges::adjacent_find(sorted) == sorted.end());
 }
 
 TEST_CASE("every fixed word list is the one its validator accepts",
@@ -667,6 +706,86 @@ TEST_CASE("the store's MLX models complete as its GGUFs do, by name, handle and 
                          &said) == 0);
         CHECK(said.find("filled from the store") != std::string::npos);
     }
+}
+
+TEST_CASE(
+    "set-backend --draft offers the store's drafters that pair with the entry on the line, "
+    "and each is taken",
+    "[commands][completion][sources][mlx][drafter]") {
+    // 53i: what `config set-backend <name> --draft` is offered is asked as
+    // the editor asks it -- the pairing and mlx-vlm's word -- so nothing
+    // offered is refused, and every drafter it takes is offered.
+    Home home;
+    const std::filesystem::path models = home.home / "models";
+    const auto mlx = [&models](const std::string& model, const char* config, const char* kind,
+                               const std::string& bases) {
+        const std::filesystem::path dir = models / model / "mlx" / "aaaaaaaaaaaa";
+        apogee::testing::write_mlx_model(dir, {.bits = 0});
+        write_file(dir / "config.json", config);
+        write_file(dir / "apogee-snapshot.json",
+                   std::string{R"({"ref": "r", "source": "convert", "files": [], "kind": ")"} +
+                       kind + "\"" + (bases.empty() ? "" : R"(, "bases": [")" + bases + "\"]") +
+                       "}");
+        return dir;
+    };
+    const std::filesystem::path base =
+        mlx("Gemma4-E4B-Instruct", apogee::testing::kGemma4BaseE4BConfig, "vision", "");
+    (void)mlx("Gemma4-12B-Instruct", apogee::testing::kGemma4Base12BConfig, "vision", "");
+    (void)mlx("Gemma4-E4B-Assistant", apogee::testing::kGemma4AssistantE4BConfig, "drafter",
+              "Gemma4-E4B-Instruct");
+    (void)mlx("Gemma4-12B-Assistant", apogee::testing::kGemma4Assistant12BConfig, "drafter",
+              "Gemma4-12B-Instruct");
+    // mlx-vlm in the environment, drafting Gemma 4's assistant alone.
+    const std::filesystem::path vlm =
+        home.home / "training" / "venv" / "lib" / "python3.99" / "site-packages" / "mlx_vlm";
+    write_file(vlm / "__init__.py", "");
+    write_file(vlm / "speculative" / "drafters" / "gemma4_assistant" / "__init__.py",
+               "class Model:\n    pass\n");
+    apogee::harness::BackendConfig e4b;
+    e4b.type = apogee::harness::BackendType::Mlx;
+    e4b.model_path = base.string();
+    home.config.backends["e4b"] = e4b;
+
+    const c::NameList offered = home.names(c::kDrafterValue, {"e4b"});
+    CHECK(offered.names == std::vector<std::string>{"Gemma4-E4B-Assistant/mlx/aaaaaaaaaaaa"});
+    CHECK(offered.paths);
+    // Nothing named, or nothing beside it: said, never a guess.
+    CHECK(home.names(c::kDrafterValue).names.empty());
+    CHECK(home.names(c::kDrafterValue).none.find("name an mlx backend") != std::string::npos);
+    // The 12B's base, whose drafter this mlx-vlm does not draft: none offered.
+    const c::NameList twelve = home.names(
+        c::kDrafterValue, {"e4b"},
+        {{"--model-path", (models / "Gemma4-12B-Instruct" / "mlx" / "aaaaaaaaaaaa").string()}});
+    CHECK(twelve.names.empty());
+    CHECK(twelve.none.find("no stored drafter pairs with") != std::string::npos);
+
+    // The offer is the contract: set-backend takes it, by its handle.
+    const std::filesystem::path config_path = home.home / "config" / "config.yaml";
+    write_file(config_path,
+               "backends:\n  e4b:\n    type: mlx\n    model_path: " + base.string() + "\n");
+    std::string said;
+    CHECK(run_apogee({"--config", config_path.string(), "config", "set-backend", "e4b", "--draft",
+                      offered.names.front()},
+                     &said) == 0);
+    INFO(said);
+    CHECK(said.find("set draft; drafter " +
+                    (models / "Gemma4-E4B-Assistant" / "mlx" / "aaaaaaaaaaaa").string() +
+                    " beside " + base.string()) != std::string::npos);
+
+    // `models convert <a draft head>` is offered what it takes: MLX's
+    // precisions, no --model-type and no registration levels.
+    const std::string head = "Gemma4-E4B-Assistant/safetensors/bbbbbbbbbbbb";
+    apogee::testing::write_mlx_model(models / head, {.bits = 0, .format = "pt"});
+    write_file(models / head / "config.json", apogee::testing::kGemma4AssistantE4BConfig);
+    CHECK(home.names(c::kConvertPrecisionValue, {head}).names ==
+          apogee::training::mlx_precision_names());
+    CHECK(home.names(c::kMlxModelTypeValue, {head}).names.empty());
+    CHECK(home.names(c::kMlxModelTypeValue, {head}).none.find("--model-type does not apply") !=
+          std::string::npos);
+    CHECK(home.names(c::kRegisterLevelValue, {head}, {{"--mlx", ""}}).names.empty());
+    // A model of its own is offered as before.
+    CHECK_FALSE(
+        home.names(c::kRegisterLevelValue, {"Gemma4-E4B-Instruct"}, {{"--mlx", ""}}).names.empty());
 }
 
 TEST_CASE("chats complete newest first, the store by format then name, the rest in the one order",

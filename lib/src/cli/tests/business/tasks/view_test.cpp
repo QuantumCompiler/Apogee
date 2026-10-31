@@ -170,6 +170,52 @@ TEST_CASE("whether a process runs a task is the lock's to say, and only while it
     }
 }
 
+TEST_CASE("a listing's row says a task was interrupted exactly when its view does",
+          "[tasks][view][list]") {
+    // M32: one rule -- the row reads the view's -- so every status under
+    // every holder gives both the same answer, and every row says it.
+    t::Task task = rich_task();
+    const t::LockHolder ours{.pid = 4153, .task_id = task.id, .running = true};
+    const t::LockHolder other{.pid = 99, .task_id = "task-20261004-130000", .running = true};
+    const t::LockHolder dead{.pid = 4153, .task_id = task.id, .running = false};
+    int interrupted = 0;
+    for (const std::string_view status : {t::kPlanning, t::kRunning, t::kDone, t::kHalted,
+                                          t::kCancelled, t::kStalled, t::kFailed, t::kExhausted}) {
+        task.status = std::string{status};
+        for (const std::optional<t::LockHolder>& holder :
+             {std::optional<t::LockHolder>{}, std::optional{ours}, std::optional{other},
+              std::optional{dead}}) {
+            INFO(status << " " << (holder.has_value() ? holder->task_id : "no holder"));
+            const t::TaskSummary row = t::make_task_summary(task, holder);
+            CHECK(row.interrupted == t::make_task_view(task, holder).interrupted);
+            CHECK(t::to_json(row)["interrupted"] == row.interrupted);
+            interrupted += row.interrupted ? 1 : 0;
+        }
+    }
+    // Planning or running, under no holder, another task's or a dead one.
+    CHECK(interrupted == 6);
+
+    // The listing asks the one holder for every row: the task it runs is
+    // not interrupted, one killed mid-round is, one that stopped is not.
+    t::Task live = rich_task();
+    live.status = std::string{t::kRunning};
+    t::Task killed = rich_task();
+    killed.id = "task-20261004-110000";
+    killed.status = std::string{t::kRunning};
+    t::Task stopped = rich_task();
+    stopped.id = "task-20261004-100000";
+    const t::TaskListView list = t::make_task_list({live, killed, stopped}, true, ours);
+    REQUIRE(list.shown.size() == 3);
+    CHECK_FALSE(list.shown[0].interrupted);
+    CHECK(list.shown[1].interrupted);
+    CHECK_FALSE(list.shown[2].interrupted);
+    const nlohmann::json document = t::to_json(list);
+    for (const nlohmann::json& row : document["data"]) {
+        CHECK(row["interrupted"].is_boolean());
+    }
+    CHECK(document["data"][1]["interrupted"] == true);
+}
+
 TEST_CASE("before a round completes, no check has run and nothing is reported", "[tasks][view]") {
     t::Task task = rich_task();
     task.status = std::string{t::kRunning};
@@ -213,20 +259,20 @@ TEST_CASE("the listing is the newest fifty unless all, and says how many there a
         task.goal = "goal " + std::to_string(index);
         tasks.push_back(task);
     }
-    const t::TaskListView newest = t::make_task_list(tasks, false);
+    const t::TaskListView newest = t::make_task_list(tasks, false, std::nullopt);
     CHECK(newest.shown.size() == t::kListLimit);
     CHECK(newest.total == 60);
     CHECK(newest.shown.front().id == "task-1000");
-    const t::TaskListView all = t::make_task_list(tasks, true);
+    const t::TaskListView all = t::make_task_list(tasks, true, std::nullopt);
     CHECK(all.shown.size() == 60);
     const nlohmann::json document = t::to_json(newest);
     CHECK(document["object"] == "list");
     CHECK(document["total"] == 60);
     CHECK(document["data"].size() == 50);
     CHECK(document["data"][0] == nlohmann::json::parse(R"({"id": "task-1000", "status": "done",
-        "rounds_used": 2, "rounds_budget": 4, "goal": "goal 0"})"));
+        "interrupted": false, "rounds_used": 2, "rounds_budget": 4, "goal": "goal 0"})"));
     // Empty is a list, never null.
-    const nlohmann::json none = t::to_json(t::make_task_list({}, false));
+    const nlohmann::json none = t::to_json(t::make_task_list({}, false, std::nullopt));
     CHECK(none["data"].is_array());
     CHECK(none["data"].empty());
     CHECK(none["total"] == 0);

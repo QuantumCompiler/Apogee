@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <fstream>
@@ -311,6 +312,20 @@ constexpr std::string_view kLocalHost = "file.invalid";
     return file;
 }
 
+/// `[first, last]` from metadata's `key` pairs, when both carry it.
+template <typename T>
+[[nodiscard]] std::optional<std::array<T, 2>> span_of(const nlohmann::json& first,
+                                                      const nlohmann::json& last,
+                                                      std::string_view key) {
+    const auto it = first.find(key);
+    const auto end = last.find(key);
+    if (it == first.end() || end == last.end() || !it->is_array() || it->size() != 2 ||
+        !end->is_array() || end->size() != 2 || !(*it)[0].is_number() || !(*end)[1].is_number()) {
+        return std::nullopt;
+    }
+    return std::array<T, 2>{(*it)[0].get<T>(), (*end)[1].get<T>()};
+}
+
 /// `next` appended to `text`, whose last chunk ended at byte `end`: the
 /// overlap they share is not repeated.
 void append_after(std::string& text, std::int64_t end, const embedstore::Chunk& next,
@@ -453,6 +468,21 @@ std::string attachment_source(std::string_view sha256) {
     return "sha256:" + std::string{sha256};
 }
 
+harness::ExcerptSource excerpt_source(const embedstore::Chunk& first, const embedstore::Chunk& last,
+                                      double score, std::string retriever) {
+    const nlohmann::json head = metadata_of(first);
+    const nlohmann::json tail = metadata_of(last);
+    harness::ExcerptSource out;
+    const auto file = head.find("file");
+    out.file = file != head.end() && file->is_string() ? file->get<std::string>() : first.source;
+    out.pages = span_of<std::int64_t>(head, tail, "pages");
+    out.lines = span_of<std::int64_t>(head, tail, "lines");
+    out.times = span_of<double>(head, tail, "times");
+    out.score = score;
+    out.retriever = std::move(retriever);
+    return out;
+}
+
 std::vector<AttachmentExcerpt> attachment_excerpts(const std::vector<embedstore::SearchHit>& hits) {
     // Grouped by file, in reading order, so neighbours can merge.
     std::map<std::string, std::vector<const embedstore::SearchHit*>> by_source;
@@ -482,6 +512,8 @@ std::vector<AttachmentExcerpt> attachment_excerpts(const std::vector<embedstore:
                 ++next;
             }
             excerpt.label = label_of(first, last);
+            excerpt.origin = excerpt_source(group[index]->chunk, group[next - 1]->chunk,
+                                            excerpt.score, group[index]->retriever);
             out.push_back(std::move(excerpt));
             index = next;
         }

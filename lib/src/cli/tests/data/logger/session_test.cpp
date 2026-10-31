@@ -4,7 +4,9 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <filesystem>
 #include <functional>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -229,7 +231,7 @@ TEST_CASE("save then load round-trips through the filesystem", "[chat][session]"
     const TempDir dir{"session"};
     const EnvGuard home{"APOGEE_HOME", dir.path().string()};
 
-    const Session original = sample();
+    Session original = sample();
     apogee::logger::save(original);
 
     const auto loaded = apogee::logger::load(original.chat_id, {});
@@ -237,6 +239,55 @@ TEST_CASE("save then load round-trips through the filesystem", "[chat][session]"
     CHECK(loaded.session.messages.size() == 2);
     // save() stamps the write time.
     CHECK_FALSE(loaded.session.updated_at.empty());
+}
+
+TEST_CASE("a new chat is written once it has a turn, and a loaded one with none still is",
+          "[chat][session][unwritten]") {
+    // M28: a session closed before its first turn leaves no file -- whatever
+    // it set -- so no empty row joins `chats list`.
+    const TempDir dir{"session-unwritten-" + std::to_string(std::random_device{}())};
+    const EnvGuard home{"APOGEE_HOME", dir.path().string()};
+
+    Session fresh;
+    fresh.chat_id = apogee::logger::new_chat_id();
+    fresh.backend = "claude";
+    fresh.new_chat = true;
+    CHECK(fresh.unwritten());
+    apogee::logger::save(fresh);
+    fresh.custom_name = "named before asking";
+    fresh.params.temperature = 0.3;
+    apogee::logger::save(fresh);
+    CHECK_FALSE(std::filesystem::exists(apogee::logger::session_path(fresh.chat_id)));
+    CHECK(apogee::logger::list_sessions().empty());
+
+    // Its first turn writes it, with what was set before.
+    fresh.messages = {ChatMessage::user("hello"), ChatMessage::assistant("hi")};
+    fresh.turns = 1;
+    CHECK_FALSE(fresh.unwritten());
+    apogee::logger::save(fresh);
+    const auto loaded = apogee::logger::load(fresh.chat_id, {});
+    CHECK(loaded.session.custom_name == "named before asking");
+    CHECK(loaded.session.params.temperature == 0.3);
+    // The mark is this process's: a chat read back is not new.
+    CHECK_FALSE(loaded.session.new_chat);
+
+    // A chat already saved with no turn -- an older binary's -- is written as
+    // ever: `chats title` still renames it.
+    Session empty = sample();
+    empty.chat_id = "20260826-120000-0e0e";
+    empty.turns = 0;
+    empty.messages.clear();
+    CHECK_FALSE(empty.unwritten());
+    apogee::logger::save(empty);
+    CHECK(std::filesystem::exists(apogee::logger::session_path(empty.chat_id)));
+
+    // A private chat is never written, turns or not.
+    Session secret = sample();
+    secret.chat_id = "20260826-120000-5ec7";
+    secret.never_written = true;
+    CHECK(secret.unwritten());
+    apogee::logger::save(secret);
+    CHECK_FALSE(std::filesystem::exists(apogee::logger::session_path(secret.chat_id)));
 }
 
 TEST_CASE("a session is loadable by its custom name", "[chat][session]") {
@@ -628,4 +679,332 @@ TEST_CASE("a session's todo is saved and read back, and one without writes no ke
     edited["todo"].push_back({{"text", "bad"}, {"state", "doing"}});
     const auto degraded = deserialize(edited.dump(), {});
     CHECK(degraded.session.todo == original.todo);
+}
+
+// ---------------------------------------------------------------------------
+// A saved conversation's turns (M27)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+[[nodiscard]] ChatMessage calling(std::vector<ToolCall> calls, std::string text = {}) {
+    ChatMessage message = ChatMessage::assistant(std::move(text));
+    message.tool_calls = std::move(calls);
+    return message;
+}
+
+[[nodiscard]] ChatMessage compaction(const std::string& summary) {
+    return ChatMessage::system(std::string{apogee::logger::kCompactionPreamble} + summary);
+}
+
+[[nodiscard]] std::vector<std::int64_t> numbers(
+    const std::vector<apogee::logger::SavedTurn>& turns) {
+    std::vector<std::int64_t> out;
+    for (const apogee::logger::SavedTurn& turn : turns) {
+        out.push_back(turn.turn);
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("a saved history reads as turns, each user message and what followed it",
+          "[logger][session][turns]") {
+    Session session = sample();
+    session.turns = 2;
+    session.messages = {
+        ChatMessage::system("You are terse."),
+        ChatMessage::user("  hello  "),
+        ChatMessage::assistant("hi there"),
+        ChatMessage::user("what is in notes.md?"),
+        calling({ToolCall{"c1", "read_file", R"({"path": "notes.md"})"}}, "Let me look."),
+        ChatMessage::from_tool_result(ToolResult{"c1", "read_file", "line one\nline two\n", false}),
+        ChatMessage::assistant("It holds two lines."),
+    };
+    const std::vector<apogee::logger::SavedTurn> turns = apogee::logger::saved_turns(session);
+    REQUIRE(turns.size() == 2);
+    // The system prompt is a setting, not a turn.
+    CHECK(turns[0].user == "hello");
+    CHECK(turns[0].answer == std::vector<std::string>{"hi there"});
+    CHECK(turns[0].tools.empty());
+    CHECK(turns[0].answered);
+    CHECK_FALSE(turns[0].compacted.has_value());
+    // What the model said before calling is the answer's too, in order; the
+    // call is named with its arguments in one line, its result only sized.
+    CHECK(turns[1].user == "what is in notes.md?");
+    CHECK(turns[1].answer == std::vector<std::string>{"Let me look.", "It holds two lines."});
+    REQUIRE(turns[1].tools.size() == 1);
+    CHECK(turns[1].tools[0].name == "read_file");
+    CHECK(turns[1].tools[0].summary == R"({"path":"notes.md"})");
+    CHECK(turns[1].tools[0].result_bytes == std::optional<std::size_t>{18});
+    // Numbered as the session counts them: the last is `turns`.
+    CHECK(numbers(turns) == std::vector<std::int64_t>{1, 2});
+    // transcript_text renders the same grouping.
+    CHECK(apogee::logger::transcript_text(session.messages) ==
+          "User: hello\n\nAssistant: hi there\n\nUser: what is in notes.md?\n\nAssistant: Let "
+          "me look.\n\nAssistant: It holds two lines.");
+}
+
+TEST_CASE("a compaction is an entry of its own where it happened, with the answer it kept",
+          "[logger][session][turns][compaction]") {
+    Session session = sample();
+    // Five turns: the first four folded, twice -- a second compaction keeps
+    // the first's summary beside its own -- then the fifth.
+    session.turns = 5;
+    session.messages = {
+        ChatMessage::system("You are terse."),
+        compaction("They met."),
+        compaction("They chose Postgres.\nOn port 5432."),
+        ChatMessage::assistant("Postgres it is."),
+        ChatMessage::user("and the backups?"),
+        ChatMessage::assistant("Nightly."),
+    };
+    const std::vector<apogee::logger::SavedTurn> turns = apogee::logger::saved_turns(session);
+    REQUIRE(turns.size() == 3);
+    CHECK(turns[0].compacted == std::optional<std::string>{"They met."});
+    CHECK(turns[0].answer.empty());
+    CHECK_FALSE(turns[0].answered);
+    CHECK(turns[1].compacted == std::optional<std::string>{"They chose Postgres.\nOn port 5432."});
+    CHECK(turns[1].user.empty());
+    CHECK(turns[1].answer == std::vector<std::string>{"Postgres it is."});
+    CHECK(turns[1].answered);
+    CHECK(turns[2].user == "and the backups?");
+    // A compaction adds nothing to the count: it carries the turns it folded.
+    CHECK(numbers(turns) == std::vector<std::int64_t>{4, 4, 5});
+    // The summaries are not the participants' words; the answer kept is.
+    CHECK(apogee::logger::transcript_text(session.messages) ==
+          "Assistant: Postgres it is.\n\nUser: and the backups?\n\nAssistant: Nightly.");
+}
+
+TEST_CASE("a turn left unanswered adds nothing to the count, so the last entry stays the count",
+          "[logger][session][turns]") {
+    Session session = sample();
+    // A failed turn keeps its user message and no answer; a cancelled one at
+    // a terminal keeps the tool phase it finished, and no answer.
+    session.turns = 2;
+    session.messages = {
+        ChatMessage::user("first"),
+        ChatMessage::assistant("one"),
+        ChatMessage::user("this one failed"),
+        ChatMessage::user("second"),
+        calling({ToolCall{"c1", "run_command", R"({"command":"ls"})"}}),
+        ChatMessage::from_tool_result(ToolResult{"c1", "run_command", "a b", false}),
+        ChatMessage::assistant("two"),
+        ChatMessage::user("third, cancelled"),
+        calling({ToolCall{"c2", "read_file", R"({"path":"x"})"},
+                 ToolCall{"c3", "read_file", R"({"path":"y"})"}}),
+        ChatMessage::from_tool_result(ToolResult{"c3", "read_file", "yy", false}),
+    };
+    const std::vector<apogee::logger::SavedTurn> turns = apogee::logger::saved_turns(session);
+    REQUIRE(turns.size() == 4);
+    CHECK(numbers(turns) == std::vector<std::int64_t>{1, 1, 2, 2});
+    CHECK_FALSE(turns[1].answered);
+    CHECK(turns[2].answered);
+    CHECK_FALSE(turns[3].answered);
+    // A result is sized against its own call; one never answered says so.
+    REQUIRE(turns[3].tools.size() == 2);
+    CHECK_FALSE(turns[3].tools[0].result_bytes.has_value());
+    CHECK(turns[3].tools[1].result_bytes == std::optional<std::size_t>{2});
+
+    // A count short of the history's own answers -- a file older than the
+    // count -- numbers from 1, never below.
+    session.turns = 0;
+    CHECK(numbers(apogee::logger::saved_turns(session)) == std::vector<std::int64_t>{1, 1, 2, 2});
+    // Nothing said yet: no entries.
+    CHECK(apogee::logger::saved_turns(Session{}).empty());
+}
+
+TEST_CASE("a saved turn names what rode its message, and never carries its bytes",
+          "[logger][session][turns][attachments]") {
+    const std::string image = "iVBORw0KGgoAAAANSUhEUg==";
+    Session session = sample();
+    session.turns = 2;
+    session.messages = {
+        ChatMessage::user("read the report"),
+        ChatMessage::assistant("It covers Q3."),
+        ChatMessage::user(apogee::harness::MessageContent::from_parts(
+            {apogee::harness::ContentPart::from_text("and this chart?"),
+             apogee::harness::ContentPart::from_image_url("data:image/png;base64," + image),
+             apogee::harness::ContentPart::from_image_url("https://example.com/c.png")})),
+        ChatMessage::assistant("A rising line."),
+    };
+    session.attachments = {
+        apogee::logger::Attachment{.name = "report.pdf",
+                                   .files = {{.name = "report.pdf",
+                                              .path = "/work/report.pdf",
+                                              .sha256 = "ab12",
+                                              .reader = "pdftotext",
+                                              .bytes = 9000}},
+                                   .inline_at = 0,
+                                   .map_at = {},
+                                   .graph = {}},
+        apogee::logger::Attachment{.name = "src",
+                                   .files = {{.name = "src/a.cpp",
+                                              .path = "/work/src/a.cpp",
+                                              .sha256 = "cd34",
+                                              .reader = "text",
+                                              .bytes = 40},
+                                             {.name = "src/b.cpp",
+                                              .path = "/work/src/b.cpp",
+                                              .sha256 = "ef56",
+                                              .reader = "text",
+                                              .bytes = 2}},
+                                   .inline_at = {},
+                                   .map_at = 2,
+                                   .graph = {}},
+        // Retrieved rather than inlined: no message carries it.
+        apogee::logger::Attachment{.name = "big.log",
+                                   .files = {{.name = "big.log",
+                                              .path = "/work/big.log",
+                                              .sha256 = "0a",
+                                              .reader = "text",
+                                              .bytes = 5000000}},
+                                   .inline_at = {},
+                                   .map_at = {},
+                                   .graph = {}},
+    };
+    const std::vector<apogee::logger::SavedTurn> turns = apogee::logger::saved_turns(session);
+    REQUIRE(turns.size() == 2);
+    REQUIRE(turns[0].attachments.size() == 1);
+    CHECK(turns[0].attachments[0].name == "report.pdf");
+    CHECK(turns[0].attachments[0].files == 1);
+    CHECK(turns[0].attachments[0].bytes == std::optional<std::uint64_t>{9000});
+    // The message's own media first, by media type or URL, then the chat's.
+    REQUIRE(turns[1].attachments.size() == 3);
+    CHECK(turns[1].user == "and this chart?");
+    CHECK(turns[1].attachments[0].name == "image/png");
+    CHECK(turns[1].attachments[0].bytes == std::optional<std::uint64_t>{16});
+    CHECK(turns[1].attachments[1].name == "https://example.com/c.png");
+    CHECK_FALSE(turns[1].attachments[1].bytes.has_value());
+    CHECK(turns[1].attachments[2].name == "src");
+    CHECK(turns[1].attachments[2].files == 2);
+    CHECK(turns[1].attachments[2].bytes == std::optional<std::uint64_t>{42});
+    // Every one the chat holds, the retrieved one too.
+    std::vector<std::string> held;
+    for (const apogee::logger::SavedAttachment& attachment :
+         apogee::logger::saved_attachments(session)) {
+        held.push_back(attachment.name);
+    }
+    CHECK(held == std::vector<std::string>{"report.pdf", "src", "big.log"});
+    // No byte of the image, nor any path, anywhere in what was read.
+    for (const apogee::logger::SavedTurn& turn : turns) {
+        for (const apogee::logger::SavedAttachment& attachment : turn.attachments) {
+            CHECK(attachment.name.find(image) == std::string::npos);
+            CHECK(attachment.name.find("/work") == std::string::npos);
+        }
+        CHECK(turn.user.find(image) == std::string::npos);
+    }
+}
+
+TEST_CASE("a tool call's summary is its arguments in one clipped line",
+          "[logger][session][turns]") {
+    using apogee::logger::tool_call_summary;
+    CHECK(tool_call_summary(ToolCall{"c", "t", R"({ "path" : "a b.md" })"}) ==
+          R"({"path":"a b.md"})");
+    // A line break inside a value stays escaped; text that is not JSON has
+    // its own made spaces.
+    CHECK(tool_call_summary(ToolCall{"c", "t", R"({"text":"a\nb"})"}) == R"({"text":"a\nb"})");
+    CHECK(tool_call_summary(ToolCall{"c", "t", "not\njson\tat all"}) == "not json at all");
+    // Clipped on a character boundary.
+    const std::string long_path = std::string(119, 'p') + "é" + std::string(100, 'p');
+    CHECK(tool_call_summary(ToolCall{"c", "t", long_path}) == std::string(119, 'p') + "...");
+}
+
+// ---------------------------------------------------------------------------
+// The session record tells the truth (55b): one turn count, and a save that
+// keeps an outside rename or deletion
+// ---------------------------------------------------------------------------
+
+TEST_CASE("the turn count is the count kept, or the answers the history holds when more",
+          "[logger][session][turns][record-truth]") {
+    Session session = sample();
+    session.messages.push_back(ChatMessage::user("again"));
+    session.messages.push_back(ChatMessage::assistant("hi again"));  // two answered turns
+    session.turns = 0;                                               // a file older than the count
+    CHECK(apogee::logger::counted_turns(session) == 2);
+    session.turns = 5;  // turns a compaction folded are in the count
+    CHECK(apogee::logger::counted_turns(session) == 5);
+    session.messages.push_back(ChatMessage::user("unanswered"));
+    session.turns = 1;
+    CHECK(apogee::logger::counted_turns(session) == 2);
+    CHECK(apogee::logger::counted_turns(Session{}) == 0);
+
+    // A read carries it: `chats list`, `chats show` and a resume agree.
+    session.messages.pop_back();  // the unanswered question
+    nlohmann::json record = nlohmann::json::parse(apogee::logger::serialize(session));
+    record.erase("turns");
+    const auto loaded = deserialize(record.dump(), {});
+    CHECK(loaded.session.turns == 2);
+    CHECK(numbers(apogee::logger::saved_turns(loaded.session)) == std::vector<std::int64_t>{1, 2});
+}
+
+TEST_CASE("a save keeps a name given outside the session, and its own rename too",
+          "[logger][session][record-truth]") {
+    // `chats title` on a chat a session runs: the session's next save takes
+    // the file's name rather than writing its own copy over it.
+    const TempDir dir{"session-outside-name-" + std::to_string(std::random_device{}())};
+    const EnvGuard home{"APOGEE_HOME", dir.path().string()};
+    Session running = sample();
+    CHECK(apogee::logger::save(running) == apogee::logger::Saved::Written);
+
+    Session outside = apogee::logger::load(running.chat_id, {}).session;
+    outside.custom_name = "Renamed By GUI";
+    CHECK(apogee::logger::save(outside) == apogee::logger::Saved::Written);
+
+    running.messages.push_back(ChatMessage::user("next"));
+    running.messages.push_back(ChatMessage::assistant("answer"));
+    running.turns = 3;
+    CHECK(apogee::logger::save(running) == apogee::logger::Saved::Written);
+    CHECK(running.custom_name == "Renamed By GUI");
+    const Session saved = apogee::logger::load(running.chat_id, {}).session;
+    CHECK(saved.custom_name == "Renamed By GUI");
+    CHECK(saved.turns == 3);
+
+    // The session's own rename, with none outside since, is written.
+    running.custom_name = "renamed in the session";
+    REQUIRE(apogee::logger::save(running) == apogee::logger::Saved::Written);
+    CHECK(apogee::logger::load(running.chat_id, {}).session.custom_name ==
+          "renamed in the session");
+    // And a name cleared outside wins too.
+    Session cleared = apogee::logger::load(running.chat_id, {}).session;
+    cleared.custom_name.clear();
+    REQUIRE(apogee::logger::save(cleared) == apogee::logger::Saved::Written);
+    REQUIRE(apogee::logger::save(running) == apogee::logger::Saved::Written);
+    CHECK(running.custom_name.empty());
+}
+
+TEST_CASE("a chat deleted outside a running session stays deleted",
+          "[logger][session][unwritten][record-truth]") {
+    // `chats delete` on a chat a session runs: its next save finds the file
+    // gone, writes nothing, and writes nothing again.
+    const TempDir dir{"session-outside-delete-" + std::to_string(std::random_device{}())};
+    const EnvGuard home{"APOGEE_HOME", dir.path().string()};
+    Session running = sample();
+    running.chat_id = apogee::logger::new_chat_id();
+    running.new_chat = true;
+    REQUIRE(apogee::logger::save(running) == apogee::logger::Saved::Written);
+    const std::filesystem::path file = apogee::logger::session_path(running.chat_id);
+    REQUIRE(std::filesystem::remove(file));
+
+    running.turns = 3;
+    CHECK(apogee::logger::save(running) == apogee::logger::Saved::Deleted);
+    CHECK(running.deleted);
+    CHECK(running.unwritten());
+    CHECK_FALSE(std::filesystem::exists(file));
+    CHECK(apogee::logger::save(running) == apogee::logger::Saved::Unwritten);
+    CHECK_FALSE(std::filesystem::exists(file));
+
+    // A loaded chat is the same: the file it was read from, gone, stays gone.
+    Session kept = sample();
+    REQUIRE(apogee::logger::save(kept) == apogee::logger::Saved::Written);
+    Session resumed = apogee::logger::load(kept.chat_id, {}).session;
+    REQUIRE(std::filesystem::remove(apogee::logger::session_path(kept.chat_id)));
+    CHECK(apogee::logger::save(resumed) == apogee::logger::Saved::Deleted);
+    CHECK(apogee::logger::list_sessions().empty());
+
+    // A session that has read no file and written none writes its first.
+    Session fresh = sample();
+    fresh.chat_id = "20260826-120000-f1f1";
+    CHECK(apogee::logger::save(fresh) == apogee::logger::Saved::Written);
+    CHECK(std::filesystem::exists(apogee::logger::session_path(fresh.chat_id)));
 }

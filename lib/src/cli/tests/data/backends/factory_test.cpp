@@ -2,11 +2,21 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <filesystem>
+#include <map>
+#include <memory>
 #include <random>
 #include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
+#include "backends/provider_status.h"
+#include "backends/provider_table.h"
 #include "contracts/config.h"
+#include "contracts/provider.h"
+#include "platform/child_process.h"
 #include "secrets/store.h"
 #include "support/env_guard.h"
 
@@ -158,4 +168,107 @@ TEST_CASE("the factory resolves through the store and the environment, config fi
     BackendConfig other;
     other.type = BackendType::Anthropic;
     CHECK(make_provider("claude", other, reason, from_store) == nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// The skipped backends' reasons, handed to the router (M26)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// What the factory hands the registry it fills, kept: the providers it
+/// registered, the backends it skipped with why, and those skips as they
+/// stood when each router was installed -- the Harness seen from below, as
+/// the factory sees it.
+class RecordingRegistry final : public apogee::harness::ProviderRegistry {
+public:
+    explicit RecordingRegistry(apogee::harness::Config config) : config_{std::move(config)} {}
+
+    [[nodiscard]] const apogee::harness::Config& config() const noexcept override {
+        return config_;
+    }
+
+    void register_provider(std::string name,
+                           std::shared_ptr<apogee::harness::LLMProvider> provider) override {
+        if (provider != nullptr) {
+            registered.push_back(std::move(name));
+        }
+    }
+
+    void use_default_router() override {
+        routers.push_back(skipped);
+    }
+
+    void note_skipped(std::string name, std::string reason) override {
+        skipped[std::move(name)] = std::move(reason);
+    }
+
+    std::vector<std::string> registered{};
+    std::map<std::string, std::string> skipped{};
+    std::vector<std::map<std::string, std::string>> routers{};
+
+private:
+    apogee::harness::Config config_;
+};
+
+/// The user's run (2026-10-22): a claude-cli default that cannot start --
+/// its `binary` a path that does not exist, so no host's own `claude` is ever
+/// found -- beside a local backend that can.
+constexpr std::string_view kUsersRun = R"(
+models:
+  default: claude
+backends:
+  claude:
+    type: claude-cli
+    binary: /nonexistent/apogee-test/claude
+  Local-Mock:
+    type: mock
+)";
+
+}  // namespace
+
+TEST_CASE("a backend that could not be built is handed with its reason to the router installed",
+          "[backends][factory][skipped]") {
+    RecordingRegistry registry{apogee::harness::parse_config(kUsersRun, "<test>")};
+    const apogee::backends::BuildResult built = build_providers(registry, no_env());
+
+    // Still non-fatal: the mock runs.
+    REQUIRE(built.constructed_count() == 1);
+    CHECK(registry.registered == std::vector<std::string>{"Local-Mock"});
+
+    // The reason is the factory's own, the one the result records, handed
+    // before the router is installed -- so that router has it.
+    const auto skipped = std::ranges::find_if(
+        built.statuses, [](const apogee::backends::BackendStatus& s) { return !s.constructed; });
+    REQUIRE(skipped != built.statuses.end());
+    CHECK(skipped->name == "claude");
+    const std::map<std::string, std::string> expected{{"claude", skipped->reason}};
+    CHECK(registry.skipped == expected);
+    REQUIRE(registry.routers.size() == 1);
+    CHECK(registry.routers.front() == expected);
+
+    // And it is the doctor's sentence and remedy (28c), where a vendor CLI
+    // can be built at all.
+    if (apogee::platform::supports_child_processes()) {
+        CHECK(
+            skipped->reason.find(
+                apogee::backends::not_on_path("/nonexistent/apogee-test/claude") + ". " +
+                std::string{apogee::backends::provider_for_type(BackendType::ClaudeCli)->remedy}) !=
+            std::string::npos);
+    }
+}
+
+TEST_CASE("a rebuild hands on what it could not build, and nothing for a name not configured",
+          "[backends][factory][skipped]") {
+    RecordingRegistry registry{apogee::harness::parse_config(kUsersRun, "<test>")};
+    (void)build_providers(registry, no_env());
+    registry.skipped.clear();
+
+    const apogee::backends::BuildResult rebuilt =
+        apogee::backends::rebuild_providers(registry, {"claude", "ghost", "Local-Mock"}, no_env());
+    REQUIRE(rebuilt.statuses.size() == 3);
+    CHECK(registry.skipped.size() == 1);
+    CHECK(registry.skipped.at("claude") == rebuilt.statuses.front().reason);
+    REQUIRE(registry.routers.size() == 2);
+    CHECK(registry.routers.back() == registry.skipped);
 }

@@ -1,0 +1,7 @@
+[promote] run 20261026-065637 -> based v1 (adapter)
+[promote] no fuse: the adapter is the version, applied over the entry's base when it loads
+[promote]   trained on: /Users/someone/.apogee/models/tiny/safetensors/aaaaaaaaaaaa
+[promote]   adapter:    /Users/someone/.apogee/training/runs/20261026-065637/adapters
+[promote] converting the adapter to a GGUF LoRA (F16): /Users/someone/.apogee/training/versions/based/v1.lora.gguf
+[promote] mock converter: writing a minimal GGUF LoRA
+[promote] pinning the adapter to the base it applies over: /Users/someone/.apogee/models/tiny/gguf/bbbbbbbbbbbb/tiny-F16.gguf

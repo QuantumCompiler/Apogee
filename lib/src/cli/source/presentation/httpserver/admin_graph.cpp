@@ -21,6 +21,7 @@
 #include "harness/roles.h"
 #include "httpserver/handler.h"
 #include "operations/collections.h"
+#include "operations/graph_dedupe_pass.h"
 #include "operations/graph_members.h"
 #include "operations/graph_sources.h"
 
@@ -947,33 +948,10 @@ HttpResponse admin_dedupe_graph(const AdminConfigContext& context, std::string_v
         // Per layer, as the CLI reads it (27k): code entities are merged by
         // exact qualified name as they are built; the vector pass over prose
         // is skipped, and the reason said, when there is nothing to compare.
-        const embedstore::DedupeScope scope = store.dedupe_scope();
-        const std::string skip = scope.prose_skip_reason();
-        const std::vector<embedstore::MergeGroup> groups =
-            skip.empty() ? store.dedupe_nodes(threshold, dry_run)
-                         : std::vector<embedstore::MergeGroup>{};
-        nlohmann::json data = nlohmann::json::array();
-        std::size_t merged = 0;
-        for (const embedstore::MergeGroup& group : groups) {
-            nlohmann::json names = nlohmann::json::array();
-            for (const embedstore::GraphNode& node : group.merged) {
-                names.push_back(node.name);
-            }
-            merged += group.merged.size();
-            data.push_back(nlohmann::json{{"kept", group.kept.name},
-                                          {"kept_type", group.kept.type},
-                                          {"merged", std::move(names)}});
-        }
-        nlohmann::json out{{"groups", std::move(data)},
-                           {"merged_nodes", merged},
-                           {"threshold", threshold},
-                           {"dry_run", dry_run},
-                           {"code_entities", scope.code_entities},
-                           {"code_identity_merges", scope.code_identity_merges}};
-        if (!skip.empty()) {
-            out["prose_skipped"] = skip;
-        }
-        return json_response(200, out);
+        // One pass and one document with `graph dedupe` (M31).
+        operations::GraphDedupePass pass = operations::plan_graph_dedupe(store, threshold, dry_run);
+        operations::run_graph_dedupe(store, pass);
+        return json_response(200, operations::graph_dedupe_document(pass));
     } catch (const std::exception& e) {
         return error_response(500, std::string{"dedupe failed: "} + e.what());
     }

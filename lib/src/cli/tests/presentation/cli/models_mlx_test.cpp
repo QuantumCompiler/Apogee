@@ -2,14 +2,18 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -18,6 +22,7 @@
 #include "cli/models_pull.h"
 #include "contracts/assets.h"
 #include "contracts/config.h"
+#include "contracts/config_edit.h"
 #include "contracts/errors.h"
 #include "contracts/layout.h"
 #include "contracts/sha256.h"
@@ -28,8 +33,12 @@
 #include "platform/child_process.h"
 #include "platform/platform.h"
 #include "support/cli_home.h"
+#include "support/draft_head_configs.h"
 #include "support/env_guard.h"
 #include "support/mlx_model.h"
+#include "support/towered_configs.h"
+#include "support/voice_model.h"
+#include "support/wan_original.h"
 #include "training/mlx_convert.h"
 #include "transport/http_client.h"
 
@@ -139,10 +148,14 @@ public:
     std::vector<std::string> urls;
 
 private:
-    [[nodiscard]] std::vector<std::filesystem::path> files() const {
-        std::vector<std::filesystem::path> out;
-        for (const auto& entry : std::filesystem::directory_iterator(dir_)) {
-            out.push_back(entry.path());
+    /// Every file, by its path in the repository -- `voices/af_heart.safetensors`
+    /// beside the root's -- as the recursive tree lists them.
+    [[nodiscard]] std::vector<std::string> files() const {
+        std::vector<std::string> out;
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(dir_)) {
+            if (entry.is_regular_file()) {
+                out.push_back(entry.path().lexically_relative(dir_).generic_string());
+            }
         }
         std::ranges::sort(out);
         return out;
@@ -158,8 +171,8 @@ private:
 
     [[nodiscard]] std::string listing() const {
         nlohmann::json siblings = nlohmann::json::array();
-        for (const std::filesystem::path& file : files()) {
-            siblings.push_back({{"rfilename", file.filename().string()}});
+        for (const std::string& file : files()) {
+            siblings.push_back({{"rfilename", file}});
         }
         return nlohmann::json{{"id", repo_},
                               {"library_name", options_.library},
@@ -170,8 +183,7 @@ private:
 
     [[nodiscard]] std::string tree() const {
         nlohmann::json out = nlohmann::json::array();
-        for (const std::filesystem::path& file : files()) {
-            const std::string name = file.filename().string();
+        for (const std::string& name : files()) {
             const std::string bytes = served(name);
             nlohmann::json item{{"type", "file"}, {"path", name}, {"size", bytes.size()}};
             if (options_.digests && name.ends_with(".safetensors")) {
@@ -659,6 +671,74 @@ TEST_CASE(
     CHECK(out.find("vision:       no -- it is not a vision model") != std::string::npos);
 }
 
+TEST_CASE(
+    "models info and status say whether an mlx entry hears, beside whether it sees, by the rungs "
+    "its provider answers from",
+    "[commands][models][mlx][audio][m23]") {
+    // 53g's ladder, said as 27c's is (M23): an omni model mlx-vlm built,
+    // with the installed mlx-vlm holding its type's module, hears.
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    const std::filesystem::path text = home.home() / "text-model";
+    write_mlx_model(text);
+    const std::filesystem::path omni = home.home() / "omni-model";
+    write_mlx_model(omni, {.model_type = "gemma4"});
+    apogee::testing::write_fixture_file(omni / "config.json", apogee::testing::kGemma4Config);
+    apogee::testing::write_fixture_file(omni / "processor_config.json", "{}");
+    apogee::testing::write_fixture_file(
+        omni / "apogee-snapshot.json",
+        R"({"source": "convert", "transform": "mlx_vlm.convert 4bit", "files": [], )"
+        R"("kind": "vision"})");
+    std::string out;
+    REQUIRE(
+        home.run({"config", "add-backend", "words", "--type", "mlx", "--model-path", text.string()},
+                 &out) == 0);
+    REQUIRE(
+        home.run({"config", "add-backend", "ears", "--type", "mlx", "--model-path", omni.string()},
+                 &out) == 0);
+    REQUIRE(home.run({"config", "set-default-transcription", "ears"}, &out) == 0);
+
+    REQUIRE(home.run({"models", "info", "words", "-q"}, &out) == 0);
+    CHECK(out.find("hearing:      no -- not mlx-vlm's build: no record says mlx-vlm built it") !=
+          std::string::npos);
+    REQUIRE(home.run({"models", "info", "ears", "-q"}, &out) == 0);
+    CHECK(out.find("hearing:      no -- no mlx-vlm: it hears through mlx-vlm, which is not "
+                   "installed in the Python environment at ") != std::string::npos);
+    CHECK(out.find("(apogee train setup --with mlx-vlm)") != std::string::npos);
+    REQUIRE(home.run({"models", "status", "-q"}, &out) == 0);
+    CHECK(out.find("transcription: ears   [mlx: cannot hear recordings -- no mlx-vlm: it hears "
+                   "through mlx-vlm") != std::string::npos);
+
+    const std::filesystem::path site =
+        home.home() / "training" / "venv" / "lib" / "python3.14" / "site-packages";
+    apogee::testing::write_fixture_file(site / "mlx_vlm" / "__init__.py", "");
+    std::filesystem::create_directories(site / "mlx_vlm-0.6.1.dist-info");
+    REQUIRE(home.run({"models", "info", "ears", "-q"}, &out) == 0);
+    CHECK(out.find("hearing:      no -- no mlx-vlm module for its type: the installed mlx-vlm "
+                   "0.6.1 has no module for its type, gemma4") != std::string::npos);
+    apogee::testing::write_fixture_file(site / "mlx_vlm" / "models" / "gemma4" / "__init__.py", "");
+    REQUIRE(home.run({"models", "info", "ears", "-q"}, &out) == 0);
+    // Said right after its sight, as the provider answers both.
+    CHECK(out.find("vision:       reads images as they are -- mlx-vlm 0.6.1\n"
+                   "hearing:      hears recordings as they are -- mlx-vlm 0.6.1\n") !=
+          std::string::npos);
+    REQUIRE(home.run({"models", "status", "-q"}, &out) == 0);
+    CHECK(out.find("transcription: ears   [mlx: hears recordings as they are]") !=
+          std::string::npos);
+    // The JSON record carries it as one more field, additively (ADR 0006).
+    std::string err;
+    REQUIRE(home.run({"models", "info", "ears", "--output-format", "json"}, &out, &err) == 0);
+    const nlohmann::json document = nlohmann::json::parse(out);
+    bool vision = false;
+    bool heard = false;
+    for (const nlohmann::json& field : document.at("fields")) {
+        vision = vision || field.at("field") == "vision";
+        heard = heard || (field.at("field") == "hearing" &&
+                          field.at("value") == "hears recordings as they are -- mlx-vlm 0.6.1");
+    }
+    CHECK(vision);
+    CHECK(heard);
+}
+
 // ---- the command line, over the real driver ------------------------------------------
 
 namespace {
@@ -726,11 +806,61 @@ TEST_CASE("models convert --mlx on the command line: the real driver, listed, ch
     CHECK_FALSE(std::filesystem::exists(stored.front().dir));
 }
 
+TEST_CASE("MLX is offered only for a type the installed mlx-lm builds, and refused before it runs",
+          "[commands][models][mlx][convert][driver][model_type]") {
+    // The user's call (M21, 2026-10-21): never show a conversion that cannot
+    // work. The mlx-lm installed says which types it builds, by its own
+    // modules (M15's reader); with none installed, nothing is decided.
+    if (apogee::platform::host_target() != "macos-arm64" ||
+        apogee::platform::find_on_path("python3").empty()) {
+        SKIP("the mlx runtime is Apple silicon's, and the driver needs a python3");
+    }
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    const std::string vl = "Qwen3-VL-8B-Instruct/safetensors/63f2634a2019";
+    write_mlx_model(home.models() / "Qwen3-VL-8B-Instruct" / "safetensors" / "63f2634a2019",
+                    {.bits = 0, .model_type = "qwen3_vl", .format = "pt"});
+    const std::string llama = "Llama3.2-1B-Instruct/safetensors/edaba290ce7f";
+    write_mlx_model(home.models() / "Llama3.2-1B-Instruct" / "safetensors" / "edaba290ce7f",
+                    {.bits = 0, .format = "pt"});
+    std::string out;
+    std::string err;
+    const auto conversions = [&](const std::string& handle) {
+        REQUIRE(home.run({"models", "info", handle, "--output-format", "json"}, &out, &err) == 0);
+        return nlohmann::json::parse(out)["data"]["converts_to"];
+    };
+    // No mlx-lm installed to ask: both offered, as before.
+    CHECK(conversions(vl) == nlohmann::json::array({"gguf", "mlx"}));
+
+    fake_mlx_runtime(home.home());  // builds gemma3, gemma4, gemma4_text, llama
+    CHECK(conversions(vl) == nlohmann::json::array({"gguf"}));
+    CHECK(conversions(llama) == nlohmann::json::array({"gguf", "mlx"}));
+    REQUIRE(home.run({"models", "info", vl}, &out) == 0);
+    CHECK(out.find("makes a GGUF of it\n") != std::string::npos);
+
+    const apogee::testing::EnvGuard record{"STUB_MLX_CONVERT_RECORD",
+                                           (home.home() / "calls.jsonl").string()};
+    CHECK(home.run({"models", "convert", vl, "--mlx"}, &out) != 0);
+    INFO(out);
+    CHECK(out.find("'" + vl +
+                   "' is a qwen3_vl model, which the mlx-lm in Apogee's Python environment builds "
+                   "no model for -- convert it without --mlx") != std::string::npos);
+    CHECK(out.find("--model-type <type>") != std::string::npos);
+    CHECK(home.run({"models", "convert", vl, "--mlx", "--model-type", "nosuch"}, &out) != 0);
+    CHECK(out.find("--model-type nosuch is no type the mlx-lm in Apogee's Python environment "
+                   "builds") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(home.home() / "calls.jsonl"));  // the driver never ran
+    CHECK(apogee::models::list_store_mlx(StoreRoots::at(home.models())).empty());
+}
+
 TEST_CASE("a vendor's model_type is refused with its door, then converted as the type named",
           "[commands][models][mlx][convert][driver][model_type]") {
-    // M15, the user's transcript: an Assistant variant mlx-lm has no class
-    // for, its door and the nearest types now said; then converted as the
-    // base type through a view, the snapshot untouched, the record telling.
+    // M15: a vendor's spelling of a type mlx-lm has no class for, its door
+    // and the nearest types now said; then converted as the base type through
+    // a view, the snapshot untouched, the record telling. (The user's own
+    // Assistant models turned out to be draft heads, refused before this
+    // door: the next case. This fixture is a plain model under a vendor's
+    // type name.)
     if (apogee::platform::host_target() != "macos-arm64" ||
         apogee::platform::find_on_path("python3").empty()) {
         SKIP("the mlx runtime is Apple silicon's, and the driver needs a python3");
@@ -751,7 +881,10 @@ TEST_CASE("a vendor's model_type is refused with its door, then converted as the
     CHECK(home.run(
               {"models", "convert", "--mlx", "google--gemma-4-12B-it-assistant", "--type", "4bit"},
               &out) != 0);
-    CHECK(out.find("ValueError: Model type gemma4_unified_assistant not supported.") !=
+    // Refused by the installed mlx-lm's own modules before the driver starts
+    // (M21, the user's call), M15's door kept.
+    CHECK(out.find("'google--gemma-4-12B-it-assistant' is a gemma4_unified_assistant model, "
+                   "which the mlx-lm in Apogee's Python environment builds no model for") !=
           std::string::npos);
     CHECK(out.find("convert them as it: --model-type <type> (nearest here: gemma4_unified, "
                    "gemma4_text, gemma4, gemma3)") != std::string::npos);
@@ -771,7 +904,7 @@ TEST_CASE("a vendor's model_type is refused with its door, then converted as the
     for (std::string line; std::getline(calls, line);) {
         seen.push_back(nlohmann::json::parse(line));
     }
-    REQUIRE(seen.size() == 2);
+    REQUIRE(seen.size() == 1);  // the refused run never started the driver
     CHECK(seen.back()["model_type"] == "gemma4_unified");
     CHECK(seen.back()["hf_path"].get<std::string>().find(".incoming-") != std::string::npos);
     // The snapshot untouched, and no view left behind.
@@ -854,6 +987,220 @@ int chain(Convert& convert, const std::vector<std::string>& precisions, bool lis
 
 }  // namespace
 
+TEST_CASE("a draft head is refused at every conversion door, its base named, nothing run",
+          "[commands][models][mlx][convert][draft_head]") {
+    // The user's run (2026-10-21): converting Gemma4-12B-Assistant to MLX ended
+    // deep in mlx-lm, and M15's door offered an override that cannot work --
+    // the weights are a draft head, which runs beside its base and never alone.
+    // Now refused before anything runs, and framed wherever it is listed.
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    const std::filesystem::path head =
+        home.models() / "Gemma4-12B-Assistant" / "safetensors" / "43b42c6289a0";
+    write_mlx_model(head, {.bits = 0, .format = "pt"});
+    apogee::testing::write_fixture_file(head / "config.json",
+                                        R"({"architectures": ["Gemma4UnifiedAssistantForCausalLM"],
+            "model_type": "gemma4_unified_assistant", "backbone_hidden_size": 3840,
+            "text_config": {"model_type": "gemma4_unified_text", "hidden_size": 1024}})");
+    const std::filesystem::path base =
+        home.models() / "Gemma4-12B-Instruct" / "safetensors" / "920344fd2dac";
+    write_mlx_model(base, {.bits = 0, .format = "pt"});
+    apogee::testing::write_fixture_file(
+        base / "config.json",
+        R"({"architectures": ["Gemma4UnifiedForConditionalGeneration"],
+            "model_type": "gemma4_unified", "text_config": {"hidden_size": 3840}})");
+    const std::string refused =
+        "'Gemma4-12B-Assistant/safetensors/43b42c6289a0' is a draft head "
+        "(Gemma4UnifiedAssistantForCausalLM): speculative decoding runs it beside its base model "
+        "(Gemma4-12B-Instruct), reading that model's hidden states, and never alone -- nothing "
+        "converted from it could answer a chat; convert its base model instead";
+
+    std::string out;
+    // The user's exact command, refused before its chain announces a step --
+    // since 53i saying why a registration does not apply: its MLX build is a
+    // drafter, which no backend runs.
+    CHECK(home.run({"models", "convert", "Gemma4-12B-Assistant/safetensors/43b42c6289a0", "--mlx",
+                    "--register", "--type", "4bit", "--base-name", "Gemma4-12B-Assistant"},
+                   &out) != 0);
+    INFO(out);
+    CHECK(out.find(refused.substr(0, refused.find(" -- nothing converted"))) != std::string::npos);
+    CHECK(out.find("its MLX build is a drafter, which no backend runs, so --register and "
+                   "--register-with do not apply") != std::string::npos);
+    CHECK(out.find("[1/2]") == std::string::npos);
+    CHECK(out.find("--model-type") == std::string::npos);
+    // The GGUF door says it as it always did.
+    CHECK(home.run(
+              {"models", "convert", "Gemma4-12B-Assistant/safetensors/43b42c6289a0", "--register"},
+              &out) != 0);
+    CHECK(out.find(refused) != std::string::npos);
+    // M15's override renames the type, never what the weights are; nor is a
+    // GGUF of one a backend.
+    CHECK(home.run({"models", "convert", "Gemma4-12B-Assistant", "--mlx", "--model-type",
+                    "gemma4_unified"},
+                   &out) != 0);
+    CHECK(out.find("is a draft head (Gemma4UnifiedAssistantForCausalLM)") != std::string::npos);
+    CHECK(home.run({"models", "convert", "Gemma4-12B-Assistant"}, &out) != 0);
+    CHECK(out.find("is a draft head (Gemma4UnifiedAssistantForCausalLM)") != std::string::npos);
+    const StoreRoots roots = StoreRoots::at(home.models());
+    CHECK(apogee::models::list_store_mlx(roots).empty());
+    CHECK(apogee::models::list_store_ggufs(roots).empty());
+    CHECK(apogee::models::find_abandoned_staging(roots).empty());
+
+    // Framed for what it is wherever it is listed.
+    REQUIRE(home.run({"models", "list", "--no-color"}, &out) == 0);
+    CHECK(out.find("draft head -- runs beside Gemma4-12B-Instruct, never alone") !=
+          std::string::npos);
+    REQUIRE(home.run({"models", "info", "Gemma4-12B-Assistant/safetensors/43b42c6289a0"}, &out) ==
+            0);
+    CHECK(out.find("format:       SafeTensors -- a draft head's weights, not runnable and not "
+                   "convertible") != std::string::npos);
+    CHECK(out.find("draft head:   a draft head (Gemma4UnifiedAssistantForCausalLM): speculative "
+                   "decoding runs it beside its base model (Gemma4-12B-Instruct)") !=
+          std::string::npos);
+    REQUIRE(home.run({"config", "scan"}, &out) == 0);
+    CHECK(out.find("1 SafeTensors snapshot(s) not listed -- weights, not runnable; each registers "
+                   "when converted") != std::string::npos);
+    CHECK(out.find("1 draft head(s) not listed -- each runs beside its base model, never alone: "
+                   "Gemma4-12B-Assistant") != std::string::npos);
+    (void)home.run({"check", "--no-color"}, &out);
+    CHECK(out.find("SafeTensors weights, draft head -- runs beside Gemma4-12B-Instruct, never "
+                   "alone") != std::string::npos);
+}
+
+TEST_CASE("a diffusion model is refused at every conversion door, and offered no conversion",
+          "[commands][models][mlx][convert][diffusion]") {
+    // The user's run (M20, 2026-10-21): an MLX conversion of
+    // Wan-AI--Wan2.2-TI2V-5B ran three seconds and failed in mlx-lm's words.
+    // Its weights are a diffusers transformer, which neither converter takes:
+    // refused before anything runs, and `models info` offers no conversion.
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    const std::string handle = "Wan-AI--Wan2.2-TI2V-5B/safetensors/6ef9b00b8b83";
+    const std::filesystem::path wan =
+        home.models() / "Wan-AI--Wan2.2-TI2V-5B" / "safetensors" / "6ef9b00b8b83";
+    write_mlx_model(wan, {.bits = 0, .format = "pt"});
+    apogee::testing::write_fixture_file(wan / "config.json",
+                                        R"({"_class_name": "WanModel", "_diffusers_version":
+            "0.33.0", "model_type": "ti2v", "dim": 3072, "num_layers": 30})");
+    // Since 53j the refusal says it is Wan's original layout and what it
+    // lacks; with no record, no repository is named. Since 53k it says
+    // mlx-video converts it once complete, and that mlx-video is not here.
+    const std::string refused =
+        "'" + handle +
+        "' is Wan's original layout (WanModel), missing models_t5_umt5-xxl-enc-bf16.pth and "
+        "*_VAE.pth -- pulling its repository again with --safetensors fetches them into this "
+        "set; once it is complete, mlx-video converts it to an MLX video model (--mlx), and is "
+        "not installed in Apogee's Python environment -- 'apogee train setup --with mlx-video'; "
+        "llama.cpp's converter takes no diffusion model -- it finds a model by its "
+        "architectures";
+
+    std::string out;
+    // The user's command, and the chain the app now builds, refused alike.
+    CHECK(home.run({"models", "convert", handle, "--mlx"}, &out) != 0);
+    INFO(out);
+    CHECK(out.find(refused) != std::string::npos);
+    CHECK(home.run({"models", "convert", handle, "--mlx", "--register-with", "8bit,4bit"}, &out) !=
+          0);
+    CHECK(out.find(refused) != std::string::npos);
+    CHECK(out.find("[1/") == std::string::npos);
+    CHECK(home.run({"models", "convert", handle}, &out) != 0);
+    CHECK(out.find(refused) != std::string::npos);
+    const StoreRoots roots = StoreRoots::at(home.models());
+    CHECK(apogee::models::list_store_mlx(roots).empty());
+    CHECK(apogee::models::list_store_ggufs(roots).empty());
+    CHECK(apogee::models::find_abandoned_staging(roots).empty());
+
+    // `models info` says what it is and offers nothing; its data says none.
+    REQUIRE(home.run({"models", "info", handle}, &out) == 0);
+    CHECK(out.find("format:       SafeTensors -- a diffusion model's weights, not runnable and "
+                   "not convertible") != std::string::npos);
+    CHECK(out.find("made from it: nothing -- no conversion takes these weights") !=
+          std::string::npos);
+    CHECK(out.find("makes a GGUF of it") == std::string::npos);
+    std::string err;
+    REQUIRE(home.run({"models", "info", handle, "--output-format", "json"}, &out, &err) == 0);
+    const nlohmann::json document = nlohmann::json::parse(out);
+    CHECK(document["data"]["converts_to"] == nlohmann::json::array());
+
+    // A draft head is offered none either; a language model's snapshot both,
+    // its line as before.
+    const std::filesystem::path head =
+        home.models() / "Gemma4-12B-Assistant" / "safetensors" / "43b42c6289a0";
+    write_mlx_model(head, {.bits = 0, .format = "pt"});
+    apogee::testing::write_fixture_file(head / "config.json",
+                                        R"({"architectures": ["Gemma4UnifiedAssistantForCausalLM"],
+            "model_type": "gemma4_unified_assistant", "backbone_hidden_size": 3840})");
+    REQUIRE(home.run({"models", "info", "Gemma4-12B-Assistant/safetensors/43b42c6289a0"}, &out) ==
+            0);
+    CHECK(out.find("made from it: nothing -- no conversion takes these weights") !=
+          std::string::npos);
+    REQUIRE(home.run({"models", "info", "Gemma4-12B-Assistant/safetensors/43b42c6289a0",
+                      "--output-format", "json"},
+                     &out, &err) == 0);
+    CHECK(nlohmann::json::parse(out)["data"]["converts_to"] == nlohmann::json::array());
+    const std::filesystem::path llama =
+        home.models() / "Llama3.2-1B-Instruct" / "safetensors" / "edaba290ce7f";
+    write_mlx_model(llama, {.bits = 0, .format = "pt"});
+    REQUIRE(home.run({"models", "info", "Llama3.2-1B-Instruct/safetensors/edaba290ce7f"}, &out) ==
+            0);
+    CHECK(out.find("made from it: nothing yet -- 'apogee models convert "
+                   "Llama3.2-1B-Instruct/safetensors/edaba290ce7f' makes a GGUF of it (--mlx an "
+                   "MLX model)") != std::string::npos);
+    REQUIRE(home.run({"models", "info", "Llama3.2-1B-Instruct/safetensors/edaba290ce7f",
+                      "--output-format", "json"},
+                     &out, &err) == 0);
+    CHECK(nlohmann::json::parse(out)["data"]["converts_to"] ==
+          nlohmann::json::array({"gguf", "mlx"}));
+}
+
+TEST_CASE("an embedding model is refused MLX before its chain starts, and offered its GGUF alone",
+          "[commands][models][mlx][convert][embedding]") {
+    // The user's run (M21, 2026-10-21): converting Gemma-Embedding-300M to
+    // MLX announced [1/2] and stopped in mlx-lm's strict load, hundreds of
+    // weight names long. It is a sentence-transformers embedding model.
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    const std::string handle = "Gemma-Embedding-300M/safetensors/b6845e67fafb";
+    const std::filesystem::path embed =
+        home.models() / "Gemma-Embedding-300M" / "safetensors" / "b6845e67fafb";
+    write_mlx_model(embed, {.bits = 0, .format = "pt"});
+    apogee::testing::write_fixture_file(
+        embed / "config.json",
+        R"({"architectures": ["Gemma3TextModel"], "model_type": "gemma3_text"})");
+    apogee::testing::write_fixture_file(embed / "modules.json", R"([
+        {"idx": 0, "path": "", "type": "sentence_transformers.models.Transformer"},
+        {"idx": 1, "path": "1_Pooling", "type": "sentence_transformers.models.Pooling"},
+        {"idx": 2, "path": "2_Dense", "type": "sentence_transformers.models.Dense"},
+        {"idx": 3, "path": "3_Dense", "type": "sentence_transformers.models.Dense"},
+        {"idx": 4, "path": "4_Normalize", "type": "sentence_transformers.models.Normalize"}])");
+    apogee::testing::write_fixture_file(embed / "2_Dense" / "model.safetensors", "x");
+
+    std::string out;
+    // The user's exact command, refused before its chain announces a step.
+    CHECK(home.run({"models", "convert", handle, "--mlx", "--register", "--type", "8bit",
+                    "--base-name", "Gemma-Embed-300M"},
+                   &out) != 0);
+    INFO(out);
+    CHECK(out.find("'" + handle +
+                   "' is an embedding model (sentence-transformers: Transformer, Pooling, Dense, "
+                   "Dense, Normalize)") != std::string::npos);
+    CHECK(out.find("convert it without --mlx") != std::string::npos);
+    CHECK(out.find("[1/") == std::string::npos);
+    const StoreRoots roots = StoreRoots::at(home.models());
+    CHECK(apogee::models::list_store_mlx(roots).empty());
+    CHECK(apogee::models::find_abandoned_staging(roots).empty());
+
+    // `models info` offers the GGUF alone, and its data says so.
+    REQUIRE(home.run({"models", "info", handle}, &out) == 0);
+    CHECK(out.find("embedding:    an embedding model (sentence-transformers:") !=
+          std::string::npos);
+    CHECK(out.find("makes a GGUF of it\n") != std::string::npos);
+    CHECK(out.find("--mlx an MLX model") == std::string::npos);
+    std::string err;
+    REQUIRE(home.run({"models", "info", handle, "--output-format", "json"}, &out, &err) == 0);
+    CHECK(nlohmann::json::parse(out)["data"]["converts_to"] == nlohmann::json::array({"gguf"}));
+}
+
 TEST_CASE("convert --mlx --register converts once and registers what the hint would",
           "[commands][models][mlx][convert][chain]") {
     // M16: the printed `config add-backend … --type mlx` line, executed.
@@ -868,6 +1215,9 @@ TEST_CASE("convert --mlx --register converts once and registers what the hint wo
     CHECK(out.find("[1/2] convert to MLX 4bit") != std::string::npos);
     CHECK(out.find("[2/2] register m-4bit") != std::string::npos);
     CHECK(out.find("registered m-4bit") != std::string::npos);
+    // With no default set, the entry becomes it, said as add-backend says it (M33).
+    CHECK(out.find("registered m-4bit\nmodels.default set to 'm-4bit' (none was set)\n") !=
+          std::string::npos);
     CHECK(out.find("Use it by adding a backend") == std::string::npos);  // executed, not hinted
 
     // Byte for byte the hand-typed line's edit, in a twin home.
@@ -944,4 +1294,2035 @@ TEST_CASE("each engine's levels are its own, refused by name before anything run
             0);
     CHECK(out.find("Q4_K_M") != std::string::npos);
     CHECK(out.find("4bit\n") == std::string::npos);
+}
+
+// ---- what kind of MLX directory (53e) --------------------------------------------------
+
+namespace {
+
+/// An MLX directory in a store, the kind its record names, and the default
+/// name `config scan` registers it under.
+struct KindDir {
+    std::string model{};
+    std::string kind{};
+    std::string name{};
+
+    [[nodiscard]] std::string handle() const {
+        return model + "/mlx/bbbbbbbbbbbb";
+    }
+
+    /// An mlx backend chats with it.
+    [[nodiscard]] bool backend() const {
+        return kind == "chat" || kind == "vision";
+    }
+
+    /// An mlx backend runs it: chats with it, or embeds with it (53h).
+    [[nodiscard]] bool registers() const {
+        return backend() || kind == "embedding";
+    }
+};
+
+/// The line of `text` that `start` begins, followed by a space -- a scan's
+/// row by its name -- or empty.
+[[nodiscard]] std::string line_starting(const std::string& text, const std::string& start) {
+    std::istringstream lines{text};
+    for (std::string line; std::getline(lines, line);) {
+        if (line.starts_with(start + " ")) {
+            return line;
+        }
+    }
+    return {};
+}
+
+/// `models list --output-format json`'s rows, by the `key` each carries.
+[[nodiscard]] std::map<std::string, nlohmann::json> listed_by(const CliHome& home,
+                                                              const std::string& key) {
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"models", "list", "--output-format", "json"}, &out, &err) == 0);
+    const nlohmann::json document = nlohmann::json::parse(out);
+    std::map<std::string, nlohmann::json> rows;
+    for (const nlohmann::json& row : document.at("data")) {
+        rows[row.at(key).get<std::string>()] = row;
+    }
+    return rows;
+}
+
+}  // namespace
+
+TEST_CASE("an MLX directory recorded as each kind lists, informs and scans as that kind",
+          "[commands][models][mlx][kind]") {
+    // 53e: the record a conversion writes says what it made, and every
+    // surface follows it -- only what an mlx backend chats with registers as
+    // one, and since 53h what it embeds with; the rest are said apart with
+    // what uses them. A kind no build knows yet is shown as written and
+    // registered as nothing.
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    const std::vector<KindDir> dirs{
+        {.model = "org--talk", .kind = "chat", .name = "talk-4bit"},
+        {.model = "org--see", .kind = "vision", .name = "see-4bit"},
+        {.model = "org--embed", .kind = "embedding", .name = "embed-4bit"},
+        {.model = "org--draft", .kind = "drafter", .name = "draft-4bit"},
+        {.model = "org--film", .kind = "video", .name = "film-4bit"},
+        {.model = "org--speak", .kind = "voice", .name = "speak-4bit"},
+        {.model = "org--future", .kind = "hologram", .name = "future-4bit"},
+    };
+    for (const KindDir& dir : dirs) {
+        write_mlx_model(home.models() / dir.model / "mlx" / "bbbbbbbbbbbb", {.kind = dir.kind});
+    }
+
+    // Listed: every row's kind in the JSON; in the table, one no mlx backend
+    // chats with says what it is in place of a backend's summary.
+    const std::map<std::string, nlohmann::json> rows = listed_by(home, "model");
+    for (const KindDir& dir : dirs) {
+        INFO(dir.kind);
+        REQUIRE(rows.contains(dir.handle()));
+        const nlohmann::json& row = rows.at(dir.handle());
+        CHECK(row.at("kind") == dir.kind);
+        CHECK(row.at("format") == "mlx");
+        CHECK(row.at("group") == "mlx");
+        CHECK(row.at("state") == "mlx");
+        const std::string note = row.at("note").get<std::string>();
+        if (dir.backend()) {
+            CHECK(note.starts_with("llama, 4-bit (affine, group 64), 32768-token window"));
+        } else {
+            CHECK(note == apogee::models::describe_mlx_kind(dir.kind));
+        }
+    }
+    std::string out;
+    REQUIRE(home.run({"models", "list", "--no-color"}, &out) == 0);
+    CHECK(out.find("    an embedding model: the embedding role uses it, never a chat backend\n") !=
+          std::string::npos);
+    CHECK(out.find("    a drafter: it runs beside its base model, never alone\n") !=
+          std::string::npos);
+    CHECK(out.find("    kind 'hologram', not one this apogee knows: nothing here runs it\n") !=
+          std::string::npos);
+
+    // Informed: the kind line, where it came from, and what runs it; its
+    // data says the word.
+    for (const KindDir& dir : dirs) {
+        INFO(dir.kind);
+        REQUIRE(home.run({"models", "info", dir.handle(), "-q"}, &out) == 0);
+        CHECK(out.find("kind:         " + dir.kind + " (recorded) -- " +
+                       apogee::models::describe_mlx_kind(dir.kind) + "\n") != std::string::npos);
+        if (dir.backend()) {
+            CHECK(out.find("format:       MLX -- runs on an mlx backend (Apple silicon)\n") !=
+                  std::string::npos);
+            CHECK(out.find("backends:     none -- 'apogee config add-backend " + dir.name +
+                           " --type mlx --model-path <the path below>'\n") != std::string::npos);
+            CHECK(out.find("template:     ships with the model\n") != std::string::npos);
+        } else if (dir.registers()) {
+            // An embedding model (53h): an mlx entry the embedding role names.
+            CHECK(
+                out.find("format:       MLX -- an mlx backend embeds with it (Apple silicon)\n") !=
+                std::string::npos);
+            CHECK(out.find("backends:     none -- 'apogee config add-backend " + dir.name +
+                           " --type mlx --model-path <the path below>', then 'apogee config "
+                           "set-default-embedding " +
+                           dir.name + "'\n") != std::string::npos);
+            CHECK(out.find("vectors:      width unknown") != std::string::npos);
+            CHECK(out.find("template:") == std::string::npos);
+        } else if (dir.kind == "drafter") {
+            // A drafter runs as a backend's draft, never as one (53i).
+            CHECK(out.find("format:       MLX (Apple silicon)\n") != std::string::npos);
+            CHECK(out.find("backends:     none -- it runs as the draft of an mlx backend over its "
+                           "base: 'apogee config set-backend <that backend> --draft <the path "
+                           "below>'\n") != std::string::npos);
+            CHECK(out.find("template:") == std::string::npos);
+            CHECK(out.find("add-backend") == std::string::npos);
+        } else {
+            CHECK(out.find("format:       MLX (Apple silicon)\n") != std::string::npos);
+            CHECK(out.find("backends:     none -- no chat backend runs it; the kind line says "
+                           "what does\n") != std::string::npos);
+            CHECK(out.find("template:") == std::string::npos);
+            CHECK(out.find("add-backend") == std::string::npos);
+        }
+        std::string err;
+        REQUIRE(home.run({"models", "info", dir.handle(), "--output-format", "json"}, &out, &err) ==
+                0);
+        CHECK(nlohmann::json::parse(out).at("data").at("kind") == dir.kind);
+    }
+
+    // Scanned: a row each, and only chat, vision and embedding registerable.
+    REQUIRE(home.run({"config", "scan"}, &out) == 0);
+    INFO(out);
+    for (const KindDir& dir : dirs) {
+        INFO(dir.kind);
+        const std::string line = line_starting(out, dir.name);
+        REQUIRE_FALSE(line.empty());
+        CHECK(line.ends_with(dir.registers() ? "  not registered"
+                                             : "  not registered -- " +
+                                                   apogee::models::describe_mlx_kind(dir.kind)));
+    }
+    REQUIRE(home.run({"config", "scan", "--register"}, &out) == 0);
+    CHECK(out.find("added backend 'talk-4bit'\n") != std::string::npos);
+    CHECK(out.find("added backend 'see-4bit'\n") != std::string::npos);
+    CHECK(out.find("added backend 'embed-4bit' -- an embedding model, which answers no chat: "
+                   "'apogee config set-default-embedding embed-4bit' points the embedding role "
+                   "at it\n") != std::string::npos);
+    CHECK(out.find("registered 3 backend(s)") != std::string::npos);
+    const apogee::harness::Config config = apogee::harness::load_config(home.config_path());
+    for (const KindDir& dir : dirs) {
+        INFO(dir.kind);
+        CHECK(config.backends.contains(dir.name) == dir.registers());
+    }
+    CHECK(config.backends.at("embed-4bit").type == apogee::harness::BackendType::Mlx);
+    CHECK(config.backends.at("talk-4bit").type == apogee::harness::BackendType::Mlx);
+    CHECK(config.backends.at("talk-4bit").model_path ==
+          (home.models() / "org--talk" / "mlx" / "bbbbbbbbbbbb").lexically_normal().string());
+
+    // Registered: the entries' rows and info carry their directory's kind;
+    // the others stay said apart, and nothing is left to register.
+    const std::map<std::string, nlohmann::json> backends = listed_by(home, "backend");
+    CHECK(backends.at("talk-4bit").at("kind") == "chat");
+    CHECK(backends.at("see-4bit").at("kind") == "vision");
+    CHECK(backends.at("embed-4bit").at("kind") == "embedding");
+    // No entry names a drafter, so no row carries one (M32); nor does a
+    // stored drafter's own row, which is no backend's.
+    for (const auto& [name, row] : backends) {
+        INFO(name);
+        CHECK_FALSE(row.contains("draft"));
+    }
+    CHECK_FALSE(rows.at("org--draft/mlx/bbbbbbbbbbbb").contains("draft"));
+    REQUIRE(home.run({"models", "info", "see-4bit", "-q"}, &out) == 0);
+    CHECK(out.find("kind:         vision (recorded) -- a vision model: an mlx backend chats with "
+                   "it, and shows it images through mlx-vlm\n") != std::string::npos);
+    REQUIRE(home.run({"config", "scan", "--register"}, &out) == 0);
+    CHECK(line_starting(out, "talk-4bit").ends_with("  backend: talk-4bit"));
+    CHECK(line_starting(out, "embed-4bit").ends_with("  backend: embed-4bit"));
+    CHECK(line_starting(out, "draft-4bit")
+              .ends_with("  not registered -- " + apogee::models::describe_mlx_kind("drafter")));
+    CHECK(out.find("nothing to register") != std::string::npos);
+}
+
+TEST_CASE("an entry over a kind no mlx backend chats with is listed as needing attention",
+          "[commands][models][mlx][kind]") {
+    // Written into the file by hand (`config scan` never would, and since 55d
+    // `config add-backend` refuses it by its kind): its row says what the
+    // directory is, so the entry's mistake is seen; a chat entry beside it
+    // reads as it always did.
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    // The runtime's files, where the mlx backend runs: the ladder's answer is
+    // read from them, nothing started.
+    const bool apple = apogee::platform::host_target() == "macos-arm64";
+    if (apple) {
+        fake_mlx_runtime(home.home());
+    }
+    const std::filesystem::path film = home.models() / "org--film" / "mlx" / "bbbbbbbbbbbb";
+    write_mlx_model(film, {.kind = "video"});
+    const std::filesystem::path talk = home.models() / "org--talk" / "mlx" / "bbbbbbbbbbbb";
+    write_mlx_model(talk, {.kind = "chat"});
+    std::string out;
+    CHECK(
+        home.run({"config", "add-backend", "film", "--type", "mlx", "--model-path", film.string()},
+                 &out) == 1);
+    CHECK(out.find(film.string() + " is kind video (recorded) -- a video model: 'apogee video "
+                                   "generate' runs it, never a chat backend, so no mlx entry "
+                                   "runs it") != std::string::npos);
+    REQUIRE(
+        home.run({"config", "add-backend", "talk", "--type", "mlx", "--model-path", talk.string()},
+                 &out) == 0);
+    {
+        // Past the doors, as the one editor writes an entry: since M33 the
+        // add above also wrote `models:` after `backends:`, so a line appended
+        // to the file would land under it.
+        apogee::harness::BackendConfig backend;
+        backend.type = apogee::harness::BackendType::Mlx;
+        backend.model_path = film.string();
+        apogee::harness::edit_config_file(home.config_path(), [&backend](std::string_view content) {
+            return apogee::harness::append_backend(content, "film", backend, false);
+        });
+    }
+    const apogee::harness::Config config = apogee::harness::load_config(home.config_path());
+    const std::vector<apogee::commands::ModelRow> rows =
+        apogee::commands::build_model_rows(config, home.models());
+    const auto video = std::ranges::find(rows, "film", &apogee::commands::ModelRow::backend);
+    REQUIRE(video != rows.end());
+    CHECK(video->kind == "video");
+    CHECK(apogee::commands::model_row_json(*video).at("kind") == "video");
+    const auto chat = std::ranges::find(rows, "talk", &apogee::commands::ModelRow::backend);
+    REQUIRE(chat != rows.end());
+    CHECK(chat->kind == "chat");
+    if (apple) {
+        // The chat entry beside it reads as it always did: ready, nothing to fix.
+        CHECK_FALSE(chat->attention);
+        // The ladder turns it away by its kind (55d), saying what uses it.
+        REQUIRE(video->state == "wrong kind");
+        CHECK(video->attention);
+        CHECK(video->note.find(apogee::models::describe_mlx_kind("video")) != std::string::npos);
+        REQUIRE(chat->state == "ready");
+        CHECK(chat->note.starts_with("llama, 4-bit (affine, group 64), 32768-token window"));
+    } else {
+        // Elsewhere the runtime's refusal is what needs fixing first, for both
+        // entries alike: mlx runs on Apple silicon only.
+        CHECK(video->note == chat->note);
+        CHECK(chat->attention == video->attention);
+    }
+    REQUIRE(home.run({"models", "info", "film", "-q"}, &out) == 0);
+    CHECK(out.find("kind:         video (recorded) -- a video model: 'apogee video generate' runs "
+                   "it, never a chat backend\n") != std::string::npos);
+    REQUIRE(home.run({"models", "info", "talk", "-q"}, &out) == 0);
+    CHECK(out.find("kind:         chat (recorded) -- a language model: an mlx backend chats with "
+                   "it\n") != std::string::npos);
+
+    // An entry whose directory is gone claims no kind for it.
+    apogee::harness::Config gone;
+    apogee::harness::BackendConfig missing;
+    missing.type = apogee::harness::BackendType::Mlx;
+    missing.model_path = (home.models() / "org--gone" / "mlx" / "bbbbbbbbbbbb").string();
+    gone.backends.emplace("gone", missing);
+    const std::vector<apogee::commands::ModelRow> lost_rows =
+        apogee::commands::build_model_rows(gone, home.models());
+    const auto lost = std::ranges::find(lost_rows, "gone", &apogee::commands::ModelRow::backend);
+    REQUIRE(lost != lost_rows.end());
+    CHECK(lost->kind.empty());
+    CHECK_FALSE(apogee::commands::model_row_json(*lost).contains("kind"));
+    CHECK(apogee::commands::render_model_info(gone, "gone").find("kind:") == std::string::npos);
+}
+
+TEST_CASE("an MLX directory with no kind recorded lists, informs and registers as it did",
+          "[commands][models][mlx][kind]") {
+    // Every directory made before the record, or pulled ready-made: a chat
+    // model unless its files say vision (27c's tower and processor).
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    const std::filesystem::path plain = home.models() / "org--plain" / "mlx" / "bbbbbbbbbbbb";
+    write_mlx_model(plain);
+    const std::filesystem::path eyes = home.models() / "org--eyes" / "mlx" / "bbbbbbbbbbbb";
+    write_mlx_model(eyes, {.vision = true});
+    // A pull's record says where it came from, never a kind.
+    const std::filesystem::path pulled = home.models() / "org--pulled" / "mlx" / "bbbbbbbbbbbb";
+    write_mlx_model(pulled);
+    apogee::models::Snapshot record;
+    record.ref = "mlx-community/pulled-4bit";
+    record.source = "huggingface";
+    REQUIRE(apogee::models::write_snapshot(pulled, record));
+
+    const std::map<std::string, nlohmann::json> rows = listed_by(home, "model");
+    CHECK(rows.at("org--plain/mlx/bbbbbbbbbbbb").at("kind") == "chat");
+    CHECK(rows.at("org--eyes/mlx/bbbbbbbbbbbb").at("kind") == "vision");
+    CHECK(rows.at("org--pulled/mlx/bbbbbbbbbbbb").at("kind") == "chat");
+    for (const auto& [handle, row] : rows) {
+        if (row.contains("kind")) {
+            INFO(handle);
+            CHECK(row.at("note").get<std::string>().starts_with("llama, 4-bit (affine, group 64)"));
+        }
+    }
+
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"models", "info", "org--plain/mlx/bbbbbbbbbbbb", "-q"}, &out) == 0);
+    CHECK(out.find("kind:         chat (no kind recorded) -- a language model: an mlx backend "
+                   "chats with it\n") != std::string::npos);
+    CHECK(out.find("format:       MLX -- runs on an mlx backend (Apple silicon)\n") !=
+          std::string::npos);
+    REQUIRE(home.run({"models", "info", "org--eyes/mlx/bbbbbbbbbbbb", "-q"}, &out) == 0);
+    CHECK(out.find("kind:         vision (inferred from its files: a vision_config and an image "
+                   "processor) -- a vision model") != std::string::npos);
+    REQUIRE(home.run({"models", "info", "org--pulled/mlx/bbbbbbbbbbbb", "--output-format", "json"},
+                     &out, &err) == 0);
+    CHECK(nlohmann::json::parse(out).at("data").at("kind") == "chat");
+
+    // Every one registers, as M12's scan always did.
+    REQUIRE(home.run({"config", "scan", "--register"}, &out) == 0);
+    INFO(out);
+    CHECK(out.find("registered 3 backend(s)") != std::string::npos);
+    // And the backend reads images by the same file facts the kind was
+    // inferred from.
+    REQUIRE(home.run({"models", "info", "eyes-4bit", "-q"}, &out) == 0);
+    CHECK(out.find("vision:       no -- it is a vision model, but mlx-vlm is not installed") !=
+          std::string::npos);
+    REQUIRE(home.run({"models", "info", "plain-4bit", "-q"}, &out) == 0);
+    CHECK(out.find("vision:       no -- it is not a vision model") != std::string::npos);
+}
+
+namespace {
+
+/// One set as a pull leaves it (M22): the published shape its writer lays
+/// down, the pull's record naming no kind, the kind its files say and where
+/// `describe` says that came from.
+struct PulledShape {
+    KindDir dir{};
+    void (*write)(const std::filesystem::path&) = nullptr;
+    std::string source{};
+};
+
+}  // namespace
+
+TEST_CASE("an MLX set pulled ready-made lists, informs and scans as the kind its files say",
+          "[commands][models][mlx][kind][pulled]") {
+    // M22: a pull records where a set came from and never a kind. An
+    // embedding, voice or video set the MLX community publishes says its
+    // kind by its own files, every surface follows the one reader, and
+    // `config scan --register` adds only what an mlx entry runs -- the chat
+    // and vision sets pulled beside them reading as they always did.
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    const std::string embedding =
+        "inferred from its files: its modules.json names a sentence-transformers Pooling module";
+    const std::string video =
+        "inferred from its files: a config.json beside t5_encoder.safetensors and vae.safetensors";
+    const std::vector<PulledShape> shapes{
+        {.dir = {.model = "mlx-community--Talk-4bit", .kind = "chat", .name = "Talk-4bit"},
+         .write = [](const std::filesystem::path& at) { write_mlx_model(at); },
+         .source = "no kind recorded"},
+        {.dir = {.model = "mlx-community--See-4bit", .kind = "vision", .name = "See-4bit"},
+         .write = [](const std::filesystem::path& at) { write_mlx_model(at, {.vision = true}); },
+         .source = "inferred from its files: a vision_config and an image processor"},
+        {.dir = {.model = "mlx-community--embeddinggemma-300m-bf16",
+                 .kind = "embedding",
+                 .name = "embeddinggemma-300m-bf16"},
+         .write =
+             [](const std::filesystem::path& at) {
+                 apogee::testing::write_published_mlx_embedding(at);
+             },
+         .source = embedding},
+        {.dir = {.model = "mlx-community--embeddinggemma-2-bf16",
+                 .kind = "embedding",
+                 .name = "embeddinggemma-2-bf16"},
+         .write =
+             [](const std::filesystem::path& at) {
+                 apogee::testing::write_published_mlx_embedding(at, /*towers=*/true);
+             },
+         .source = embedding},
+        {.dir = {.model = "mlx-community--Kokoro-82M-bf16",
+                 .kind = "voice",
+                 .name = "Kokoro-82M-bf16"},
+         .write =
+             [](const std::filesystem::path& at) {
+                 apogee::testing::write_published_mlx_kokoro(at);
+             },
+         .source = "inferred from its files: a Kokoro config.json beside voices/*.safetensors"},
+        {.dir = {.model = "Anes1032--Wan2.2-TI2V-5B-mlx-q8",
+                 .kind = "video",
+                 .name = "Wan2.2-TI2V-5B-mlx-q8-8bit"},
+         .write =
+             [](const std::filesystem::path& at) { apogee::testing::write_published_mlx_wan(at); },
+         .source = video},
+        {.dir = {.model = "Anes1032--Wan2.2-I2V-A14B-mlx-q8",
+                 .kind = "video",
+                 .name = "Wan2.2-I2V-A14B-mlx-q8-8bit"},
+         .write =
+             [](const std::filesystem::path& at) {
+                 apogee::testing::write_published_mlx_wan(at, /*pair=*/true);
+             },
+         .source = video},
+    };
+    for (const PulledShape& shape : shapes) {
+        const std::filesystem::path at = home.models() / shape.dir.handle();
+        shape.write(at);
+        apogee::models::Snapshot record;
+        record.ref = shape.dir.model;
+        record.source = "huggingface";
+        REQUIRE(apogee::models::write_snapshot(at, record));
+    }
+
+    // Listed: each row's kind, its files read whole by its kind's layout,
+    // and one no mlx backend chats with saying what it is.
+    const std::map<std::string, nlohmann::json> rows = listed_by(home, "model");
+    for (const PulledShape& shape : shapes) {
+        INFO(shape.dir.model);
+        REQUIRE(rows.contains(shape.dir.handle()));
+        const nlohmann::json& row = rows.at(shape.dir.handle());
+        CHECK(row.at("kind") == shape.dir.kind);
+        CHECK(row.at("state") == "mlx");
+        CHECK(row.at("source") == "huggingface");
+        const std::string note = row.at("note").get<std::string>();
+        if (shape.dir.backend()) {
+            CHECK(note.starts_with("llama, 4-bit (affine, group 64), 32768-token window"));
+        } else {
+            CHECK(note == apogee::models::describe_mlx_kind(shape.dir.kind));
+        }
+    }
+
+    // Informed: the kind, where it came from and what runs it; the files
+    // whole; and the data's word.
+    std::string out;
+    std::string err;
+    for (const PulledShape& shape : shapes) {
+        INFO(shape.dir.model);
+        REQUIRE(home.run({"models", "info", shape.dir.handle(), "-q"}, &out) == 0);
+        CHECK(out.find("kind:         " + shape.dir.kind + " (" + shape.source + ") -- " +
+                       apogee::models::describe_mlx_kind(shape.dir.kind) + "\n") !=
+              std::string::npos);
+        CHECK(out.find("files:        whole -- ") != std::string::npos);
+        CHECK(out.find("repair:") == std::string::npos);
+        if (shape.dir.kind == "embedding") {
+            CHECK(out.find("backends:     none -- 'apogee config add-backend " + shape.dir.name +
+                           " --type mlx --model-path <the path below>', then 'apogee config "
+                           "set-default-embedding " +
+                           shape.dir.name + "'\n") != std::string::npos);
+        } else if (!shape.dir.backend()) {
+            CHECK(out.find("backends:     none -- no chat backend runs it; the kind line says "
+                           "what does\n") != std::string::npos);
+            CHECK(out.find("add-backend") == std::string::npos);
+        }
+        REQUIRE(home.run({"models", "info", shape.dir.handle(), "--output-format", "json"}, &out,
+                         &err) == 0);
+        CHECK(nlohmann::json::parse(out).at("data").at("kind") == shape.dir.kind);
+    }
+    REQUIRE(home.run({"models", "info", shapes.at(4).dir.handle(), "-q"}, &out) == 0);
+    CHECK(out.find("files:        whole -- config.json, the weights and its voices "
+                   "(voices/*.safetensors), 1 shard(s), each holding every byte its header "
+                   "lists\n") != std::string::npos);
+    CHECK(out.find("voices:       American English: af_heart, am_adam\n"
+                   "              British English: bf_emma\n") != std::string::npos);
+    REQUIRE(home.run({"models", "info", shapes.at(6).dir.handle(), "-q"}, &out) == 0);
+    CHECK(out.find(
+              "files:        whole -- config.json, the T5 text encoder (t5_encoder.safetensors), "
+              "the VAE (vae.safetensors) and the transformer's weights, 4 shard(s), each "
+              "holding every byte its header lists\n") != std::string::npos);
+
+    // Scanned: a row each, and only chat, vision and embedding registerable.
+    REQUIRE(home.run({"config", "scan"}, &out) == 0);
+    INFO(out);
+    for (const PulledShape& shape : shapes) {
+        INFO(shape.dir.model);
+        const std::string line = line_starting(out, shape.dir.name);
+        REQUIRE_FALSE(line.empty());
+        CHECK(line.ends_with(shape.dir.registers()
+                                 ? "  not registered"
+                                 : "  not registered -- " +
+                                       apogee::models::describe_mlx_kind(shape.dir.kind)));
+    }
+    REQUIRE(home.run({"config", "scan", "--register"}, &out) == 0);
+    CHECK(out.find("added backend 'embeddinggemma-300m-bf16' -- an embedding model, which answers "
+                   "no chat: 'apogee config set-default-embedding embeddinggemma-300m-bf16' points "
+                   "the embedding role at it\n") != std::string::npos);
+    CHECK(out.find("registered 4 backend(s)") != std::string::npos);
+    const apogee::harness::Config config = apogee::harness::load_config(home.config_path());
+    for (const PulledShape& shape : shapes) {
+        INFO(shape.dir.model);
+        CHECK(config.backends.contains(shape.dir.name) == shape.dir.registers());
+    }
+    const std::map<std::string, nlohmann::json> backends = listed_by(home, "backend");
+    CHECK(backends.at("Talk-4bit").at("kind") == "chat");
+    CHECK(backends.at("See-4bit").at("kind") == "vision");
+    CHECK(backends.at("embeddinggemma-300m-bf16").at("kind") == "embedding");
+    CHECK(backends.at("embeddinggemma-2-bf16").at("kind") == "embedding");
+}
+
+TEST_CASE("a pull of an MLX embedding, voice or video set lands it whole and says what uses it",
+          "[commands][models][mlx][pull][kind][pulled]") {
+    // M22: the pull's last rung reads a set by the layout its files say --
+    // a Kokoro or a Wan, which carry no tokenizer, land whole -- and it ends
+    // by saying the kind and what uses it, as a conversion of the kind does,
+    // never a chat backend's hint.
+    const Pull pull;
+    std::filesystem::remove_all(pull.repo);
+    std::string out;
+    const auto landed = [&pull]() {
+        const std::vector<apogee::models::StoredMlx> stored =
+            apogee::models::list_store_mlx(pull.roots);
+        REQUIRE(stored.size() == 1);
+        return stored.front();
+    };
+
+    SECTION("a Kokoro: its voices read whole, and voice say speaks with it") {
+        apogee::testing::write_published_mlx_kokoro(pull.repo);
+        REQUIRE(pull.run(&out) == 0);
+        INFO(out);
+        const apogee::models::StoredMlx stored = landed();
+        const apogee::models::MlxKind kind = apogee::models::read_mlx_kind(stored.dir);
+        CHECK(kind.word == "voice");
+        CHECK(kind.source == apogee::models::MlxKindSource::Files);
+        CHECK(apogee::models::read_mlx_info(stored.dir).complete);
+        // The SafeTensors packs landed; the original's .pt copies did not.
+        CHECK(std::filesystem::is_regular_file(stored.dir / "voices" / "bf_emma.safetensors"));
+        CHECK_FALSE(std::filesystem::exists(stored.dir / "voices" / "bf_emma.pt"));
+        CHECK(
+            out.find("; config.json, the weights and its voices (voices/*.safetensors) -- 1 shard "
+                     "header(s) and 3 voice(s) read whole\n") != std::string::npos);
+        CHECK(out.find("kind: voice (inferred from its files: a Kokoro config.json beside "
+                       "voices/*.safetensors) -- a voice model: 'apogee voice say' speaks with "
+                       "it, never a chat backend\n") != std::string::npos);
+        const std::string handle = "mlx-community--M-4bit/mlx/" + stored.id;
+        CHECK(out.find("\nSpeak with it on MLX:\n  apogee voice say \"<text>\" -o speech.wav "
+                       "--model " +
+                       handle + "\n") != std::string::npos);
+        CHECK(out.find("a tokenizer") == std::string::npos);
+        CHECK(out.find("add-backend") == std::string::npos);
+
+        // Pulled again: found before a byte moves, and said the same way.
+        pull.source->urls.clear();
+        REQUIRE(pull.run(&out) == 0);
+        CHECK(pull.source->downloads() == 0);
+        CHECK(out.find("kind: voice (inferred from its files: ") != std::string::npos);
+        CHECK(out.find("add-backend") == std::string::npos);
+    }
+    SECTION("a Wan: mlx-video's layout read whole, and no backend offered") {
+        apogee::testing::write_published_mlx_wan(pull.repo);
+        REQUIRE(pull.run(&out) == 0);
+        INFO(out);
+        const apogee::models::StoredMlx stored = landed();
+        CHECK(apogee::models::read_mlx_kind(stored.dir).word == "video");
+        CHECK(apogee::models::read_mlx_info(stored.dir).complete);
+        CHECK_FALSE(std::filesystem::exists(stored.dir / "LICENSE"));
+        CHECK(out.find("; config.json, the T5 text encoder (t5_encoder.safetensors), the VAE "
+                       "(vae.safetensors) and the transformer's weights -- 3 shard header(s) read "
+                       "whole\n") != std::string::npos);
+        CHECK(out.find("mlx model: ti2v, 8-bit (affine, group 64), ") != std::string::npos);
+        CHECK(out.find("kind: video (inferred from its files: a config.json beside "
+                       "t5_encoder.safetensors and vae.safetensors) -- a video model: 'apogee "
+                       "video generate' runs it, never a chat backend\n") != std::string::npos);
+        CHECK(out.find("a tokenizer") == std::string::npos);
+        CHECK(out.find("add-backend") == std::string::npos);
+    }
+    SECTION("an embedding model: the embedding role's backend offered") {
+        apogee::testing::write_published_mlx_embedding(pull.repo);
+        REQUIRE(pull.run(&out) == 0);
+        INFO(out);
+        const apogee::models::StoredMlx stored = landed();
+        CHECK(apogee::models::read_mlx_kind(stored.dir).word == "embedding");
+        CHECK(std::filesystem::is_regular_file(stored.dir / "modules.json"));
+        CHECK(out.find("; config.json, a tokenizer and 1 shard header(s) read whole\n") !=
+              std::string::npos);
+        CHECK(out.find("kind: embedding (inferred from its files: its modules.json names a "
+                       "sentence-transformers Pooling module) -- an embedding model: the "
+                       "embedding role uses it, never a chat backend\n") != std::string::npos);
+        const std::string name = apogee::models::stored_mlx_name(stored);
+        CHECK(out.find("\nUse it as the embedding role by adding a backend:\n  apogee config "
+                       "add-backend " +
+                       name + " --type mlx --model-path " + stored.dir.string() +
+                       "\n  apogee config set-default-embedding " + name + "\n") !=
+              std::string::npos);
+    }
+}
+
+TEST_CASE("convert --mlx records chat beside its transform, and a kind survives repair and rename",
+          "[commands][models][mlx][kind][convert]") {
+    Convert convert;
+    std::string out;
+    // mlx-lm's converter, its output carrying a vision tower and processor
+    // through: what it made is a language model all the same, and its record
+    // says so over its files.
+    const apogee::training::MlxConverter sighted =
+        [&convert](const std::filesystem::path&, const std::filesystem::path& output,
+                   const apogee::training::MessageSink&,
+                   const apogee::harness::CancellationToken&) {
+            ++convert.calls;
+            write_mlx_model(output, {.bits = 4, .vision = true});
+            return std::string{};
+        };
+    REQUIRE(convert.run("4bit", sighted, &out) == 0);
+    INFO(out);
+    std::vector<apogee::models::StoredMlx> stored =
+        apogee::models::list_store_mlx(convert.roots, "org--m");
+    REQUIRE(stored.size() == 1);
+    const std::optional<apogee::models::Snapshot> record =
+        apogee::models::load_snapshot(stored.front().dir);
+    REQUIRE(record.has_value());
+    CHECK(record->transform == "mlx_lm.convert 4bit");
+    CHECK(record->kind == "chat");
+    CHECK(apogee::models::mlx_vision_files(stored.front().dir));
+    const apogee::models::MlxKind converted = apogee::models::read_mlx_kind(stored.front().dir);
+    CHECK(converted.word == "chat");
+    CHECK(converted.source == apogee::models::MlxKindSource::Recorded);
+
+    // A recorded embedding model beside it, as its own converter will write
+    // one.
+    write_mlx_model(convert.home.models() / "org--embed" / "mlx" / "bbbbbbbbbbbb",
+                    {.kind = "embedding"});
+
+    // `models repair` re-verifies against the record and never rewrites it.
+    for (const std::string& handle :
+         {"org--m/mlx/" + stored.front().id, std::string{"org--embed/mlx/bbbbbbbbbbbb"}}) {
+        INFO(handle);
+        REQUIRE(convert.home.run({"models", "repair", handle}, &out) == 0);
+        CHECK(out.find("Nothing to repair.") != std::string::npos);
+    }
+    CHECK(apogee::models::read_mlx_kind(stored.front().dir).source ==
+          apogee::models::MlxKindSource::Recorded);
+    CHECK(
+        apogee::models::read_mlx_kind(convert.home.models() / "org--embed" / "mlx" / "bbbbbbbbbbbb")
+            .word == "embedding");
+
+    // `models rename` moves each directory whole, its record inside.
+    REQUIRE(convert.home.run({"models", "rename", "org--m", "org--renamed"}, &out) == 0);
+    REQUIRE(convert.home.run({"models", "rename", "org--embed", "org--embedder"}, &out) == 0);
+    stored = apogee::models::list_store_mlx(convert.roots, "org--renamed");
+    REQUIRE(stored.size() == 1);
+    const apogee::models::MlxKind renamed = apogee::models::read_mlx_kind(stored.front().dir);
+    CHECK(renamed.word == "chat");
+    CHECK(renamed.source == apogee::models::MlxKindSource::Recorded);
+    const std::vector<apogee::models::StoredMlx> embedder =
+        apogee::models::list_store_mlx(convert.roots, "org--embedder");
+    REQUIRE(embedder.size() == 1);
+    const apogee::models::MlxKind moved = apogee::models::read_mlx_kind(embedder.front().dir);
+    CHECK(moved.word == "embedding");
+    CHECK(moved.source == apogee::models::MlxKindSource::Recorded);
+    std::string err;
+    REQUIRE(convert.home.run(
+                {"models", "info", "org--embedder/mlx/bbbbbbbbbbbb", "--output-format", "json"},
+                &out, &err) == 0);
+    CHECK(nlohmann::json::parse(out).at("data").at("kind") == "embedding");
+}
+
+// ---- sets that see or hear (53f) ------------------------------------------------------
+
+namespace {
+
+/// The stub `mlx_vlm` laid beside the stub `mlx_lm` that `fake_mlx_runtime`
+/// laid (what `train setup --with mlx-vlm` installs), its packages building
+/// `gemma4`, `gemma4_unified`, `qwen3_5` and `qwen3_vl`. Its site-packages.
+std::filesystem::path fake_mlx_vlm(const std::filesystem::path& home) {
+    const std::filesystem::path stubs =
+        std::filesystem::path{APOGEE_TESTS_DIR} / "data" / "backends" / "scripts" / "stub_mlx_vlm";
+    const std::filesystem::path site =
+        home / "training" / "venv" / "lib" / "python3.99" / "site-packages";
+    std::filesystem::copy(stubs, site,
+                          std::filesystem::copy_options::recursive |
+                              std::filesystem::copy_options::overwrite_existing);
+    return site;
+}
+
+/// A full-weight set at `dir` whose `config.json` is `config` -- one of the
+/// user's (`support/towered_configs.h`) -- with the image processor a
+/// release that sees ships beside it.
+void towered_snapshot(const std::filesystem::path& dir, const char* config) {
+    write_mlx_model(dir, {.bits = 0, .format = "pt"});
+    apogee::testing::write_fixture_file(dir / "config.json", config);
+    apogee::testing::write_fixture_file(dir / "preprocessor_config.json", "{}");
+}
+
+[[nodiscard]] std::vector<nlohmann::json> converter_calls(const std::filesystem::path& file) {
+    std::vector<nlohmann::json> out;
+    std::ifstream in{file};
+    for (std::string line; std::getline(in, line);) {
+        out.push_back(nlohmann::json::parse(line));
+    }
+    return out;
+}
+
+/// The one MLX build of `model` made with `transform`, or an empty path.
+[[nodiscard]] std::filesystem::path mlx_made_by(const StoreRoots& roots, const std::string& model,
+                                                const std::string& transform) {
+    for (const apogee::models::StoredMlx& stored : apogee::models::list_store_mlx(roots, model)) {
+        const std::optional<apogee::models::Snapshot> record =
+            apogee::models::load_snapshot(stored.dir);
+        if (record.has_value() && record->transform == transform) {
+            return stored.dir;
+        }
+    }
+    return {};
+}
+
+}  // namespace
+
+TEST_CASE(
+    "a set with towers converts through mlx-vlm, kept and recorded vision; a language model as "
+    "before; --text-only asks for mlx-lm's build",
+    "[commands][models][mlx][convert][driver][towers]") {
+    if (apogee::platform::host_target() != "macos-arm64" ||
+        apogee::platform::find_on_path("python3").empty()) {
+        SKIP("the mlx runtime is Apple silicon's, and the driver needs a python3");
+    }
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    fake_mlx_runtime(home.home());
+    (void)fake_mlx_vlm(home.home());
+    const StoreRoots roots = StoreRoots::at(home.models());
+    const std::string vl = "Qwen3-VL-8B-Instruct/safetensors/63f2634a2019";
+    towered_snapshot(home.models() / vl, apogee::testing::kQwen3VlConfig);
+    const std::string gemma = "Gemma4-E4B-Instruct/safetensors/aaaaaaaaaaaa";
+    towered_snapshot(home.models() / gemma, apogee::testing::kGemma4Config);
+    const std::string llama = "Llama3.2-1B-Instruct/safetensors/edaba290ce7f";
+    write_mlx_model(home.models() / llama, {.bits = 0, .format = "pt"});
+    apogee::testing::write_fixture_file(home.models() / llama / "config.json",
+                                        apogee::testing::kLlamaConfig);
+    const std::filesystem::path calls_file = home.home() / "calls.jsonl";
+    const apogee::testing::EnvGuard record{"STUB_MLX_CONVERT_RECORD", calls_file.string()};
+    std::string out;
+
+    // Qwen3-VL: mlx-vlm's converter, its tower kept, recorded vision.
+    REQUIRE(home.run({"models", "convert", vl, "--mlx"}, &out) == 0);
+    INFO(out);
+    CHECK(out.find(") -- mlx-vlm's converter, its towers kept (vision_config), in Apogee's "
+                   "Python environment\n") != std::string::npos);
+    CHECK(out.find("kind: vision (recorded) -- a vision model: an mlx backend chats with it, "
+                   "and shows it images through mlx-vlm\n") != std::string::npos);
+    CHECK(out.find("[INFO]") == std::string::npos);  // the library's print stays off
+    std::vector<nlohmann::json> calls = converter_calls(calls_file);
+    REQUIRE(calls.size() == 1);
+    CHECK(calls[0]["converter"] == "mlx_vlm");
+    CHECK(calls[0]["q_bits"] == 4);
+    CHECK(calls[0]["q_group_size"] == 64);
+    CHECK(calls[0]["trust_remote_code"] == false);
+    const std::filesystem::path seeing =
+        mlx_made_by(roots, "Qwen3-VL-8B-Instruct", "mlx_vlm.convert 4bit");
+    REQUIRE_FALSE(seeing.empty());
+    CHECK(apogee::models::load_snapshot(seeing)->kind == "vision");
+    const apogee::models::MlxKind kind = apogee::models::read_mlx_kind(seeing);
+    CHECK(kind.word == "vision");
+    CHECK(kind.source == apogee::models::MlxKindSource::Recorded);
+    CHECK(apogee::models::mlx_vision_files(seeing));
+
+    // --text-only where the mlx-lm installed builds no qwen3_vl: refused
+    // before Python, mlx-vlm's way named.
+    CHECK(home.run({"models", "convert", vl, "--mlx", "--text-only"}, &out) != 0);
+    CHECK(out.find("'" + vl +
+                   "' is a qwen3_vl model, which the mlx-lm in Apogee's Python environment "
+                   "builds no model for") != std::string::npos);
+    CHECK(out.find(" -- without --text-only, mlx-vlm builds it with its towers kept") !=
+          std::string::npos);
+    CHECK(converter_calls(calls_file).size() == 1);
+
+    // Gemma 4: its language model alone with --text-only, mlx-lm's and
+    // recorded chat; its towers kept without -- two builds, each its own.
+    REQUIRE(home.run({"models", "convert", gemma, "--mlx", "--text-only"}, &out) == 0);
+    CHECK(out.find(") -- mlx-lm's converter, its language model alone (--text-only: "
+                   "vision_config, audio_config left out), in Apogee's Python environment\n") !=
+          std::string::npos);
+    REQUIRE(home.run({"models", "convert", gemma, "--mlx"}, &out) == 0);
+    calls = converter_calls(calls_file);
+    REQUIRE(calls.size() == 3);
+    CHECK_FALSE(calls[1].contains("converter"));  // the stub mlx-lm's
+    CHECK(calls[1]["model_type"] == "gemma4");
+    CHECK(calls[2]["converter"] == "mlx_vlm");
+    const std::filesystem::path text =
+        mlx_made_by(roots, "Gemma4-E4B-Instruct", "mlx_lm.convert 4bit");
+    const std::filesystem::path whole =
+        mlx_made_by(roots, "Gemma4-E4B-Instruct", "mlx_vlm.convert 4bit");
+    REQUIRE_FALSE(text.empty());
+    REQUIRE_FALSE(whole.empty());
+    CHECK(apogee::models::read_mlx_kind(text).word == "chat");
+    CHECK(apogee::models::read_mlx_kind(whole).word == "vision");
+    // Each recognised as itself before anything runs.
+    for (const std::vector<std::string>& again :
+         {std::vector<std::string>{"models", "convert", gemma, "--mlx", "--text-only"},
+          std::vector<std::string>{"models", "convert", gemma, "--mlx"}}) {
+        REQUIRE(home.run(again, &out) == 0);
+        CHECK(out.find("already converted:") != std::string::npos);
+    }
+    CHECK(converter_calls(calls_file).size() == 3);
+
+    // A language model: mlx-lm's, as it always was.
+    REQUIRE(home.run({"models", "convert", llama, "--mlx"}, &out) == 0);
+    CHECK(out.find(") -- mlx-lm's converter, in Apogee's Python environment\n") !=
+          std::string::npos);
+    CHECK(out.find("kind:") == std::string::npos);
+    calls = converter_calls(calls_file);
+    REQUIRE(calls.size() == 4);
+    CHECK_FALSE(calls[3].contains("converter"));
+    CHECK(calls[3]["quantize"] == true);
+    CHECK(calls[3]["q_bits"] == 4);
+    CHECK(calls[3]["q_group_size"] == 64);
+    CHECK(calls[3]["q_mode"] == "affine");
+    const std::filesystem::path chat =
+        mlx_made_by(roots, "Llama3.2-1B-Instruct", "mlx_lm.convert 4bit");
+    REQUIRE_FALSE(chat.empty());
+    CHECK(apogee::models::load_snapshot(chat)->kind == "chat");
+    // --text-only leaves nothing out of it, and says so.
+    REQUIRE(home.run({"models", "convert", llama, "--mlx", "--text-only"}, &out) == 0);
+    CHECK(out.find("the snapshot declares no vision or audio tower -- --text-only changes "
+                   "nothing; converting it as it is") != std::string::npos);
+    CHECK(out.find("already converted:") != std::string::npos);
+
+    // Without --mlx the flag means nothing, and is refused saying why.
+    CHECK(home.run({"models", "convert", gemma, "--text-only"}, &out) != 0);
+    CHECK(out.find("--text-only asks --mlx for mlx-lm's build of a model's language model "
+                   "alone") != std::string::npos);
+
+    // Registered, each build is the backend its kind is.
+    REQUIRE(home.run({"models", "convert", gemma, "--mlx", "--text-only", "--register",
+                      "--base-name", "gemma-text"},
+                     &out) == 0);
+    REQUIRE(home.run({"models", "convert", gemma, "--mlx", "--register", "--base-name", "gemma"},
+                     &out) == 0);
+    REQUIRE(home.run({"models", "info", "gemma-text-4bit", "-q"}, &out) == 0);
+    CHECK(out.find("kind:         chat (recorded)") != std::string::npos);
+    REQUIRE(home.run({"models", "info", "gemma-4bit", "-q"}, &out) == 0);
+    CHECK(out.find("kind:         vision (recorded)") != std::string::npos);
+    CHECK(converter_calls(calls_file).size() == 4);  // both found stored
+}
+
+TEST_CASE(
+    "a set with towers is offered MLX by the installed mlx-vlm's own packages, else mlx-lm's "
+    "text-only build, said -- the omni model refused before Python where neither builds it",
+    "[commands][models][mlx][convert][driver][towers]") {
+    if (apogee::platform::host_target() != "macos-arm64" ||
+        apogee::platform::find_on_path("python3").empty()) {
+        SKIP("the mlx runtime is Apple silicon's, and the driver needs a python3");
+    }
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    const std::string omni = "Qwen3-Omni-30B-A3B-Instruct/safetensors/bbbbbbbbbbbb";
+    towered_snapshot(home.models() / omni, apogee::testing::kQwen3OmniConfig);
+    const std::string gemma = "Gemma4-E4B-Instruct/safetensors/cccccccccccc";
+    towered_snapshot(home.models() / gemma, apogee::testing::kGemma4Config);
+    std::string out;
+    std::string err;
+    const auto data = [&](const std::string& handle) {
+        REQUIRE(home.run({"models", "info", handle, "--output-format", "json"}, &out, &err) == 0);
+        return nlohmann::json::parse(out)["data"];
+    };
+    const auto route = [](const nlohmann::json& towers, const nlohmann::json& converter,
+                          bool text_only) {
+        return nlohmann::json{
+            {"towers", towers}, {"converter", converter}, {"text_only", text_only}};
+    };
+    const nlohmann::json thinker = nlohmann::json::array({"thinker_config"});
+    const nlohmann::json both = nlohmann::json::array({"vision_config", "audio_config"});
+
+    // Nothing installed to ask: nothing decided (M21), its towers the default.
+    CHECK(data(omni)["converts_to"] == nlohmann::json::array({"gguf", "mlx"}));
+    CHECK(data(omni)["mlx_conversion"] == route(thinker, "mlx-vlm", true));
+
+    // mlx-lm alone, which builds gemma4 and no qwen3_omni_moe.
+    fake_mlx_runtime(home.home());
+    CHECK(data(omni)["converts_to"] == nlohmann::json::array({"gguf"}));
+    CHECK(data(omni)["mlx_conversion"].is_null());
+    REQUIRE(home.run({"models", "info", omni}, &out) == 0);
+    CHECK(out.find("towers:       thinker_config -- no MLX conversion: mlx-vlm is not installed "
+                   "in Apogee's Python environment, and the mlx-lm there builds no "
+                   "qwen3_omni_moe model\n") != std::string::npos);
+    CHECK(out.find("makes a GGUF of it\n") != std::string::npos);
+    const std::filesystem::path calls_file = home.home() / "calls.jsonl";
+    const apogee::testing::EnvGuard record{"STUB_MLX_CONVERT_RECORD", calls_file.string()};
+    CHECK(home.run({"models", "convert", omni, "--mlx"}, &out) != 0);
+    CHECK(out.find("'" + omni +
+                   "' declares towers (thinker_config): its MLX build keeps them through "
+                   "mlx-vlm, which is not installed in Apogee's Python environment -- apogee "
+                   "train setup --with mlx-vlm") != std::string::npos);
+    CHECK(out.find("--text-only") == std::string::npos);  // mlx-lm cannot build it either
+    // Gemma 4: its language model alone is offered, and said.
+    CHECK(data(gemma)["converts_to"] == nlohmann::json::array({"gguf", "mlx"}));
+    CHECK(data(gemma)["mlx_conversion"] == route(both, nullptr, true));
+    REQUIRE(home.run({"models", "info", gemma}, &out) == 0);
+    CHECK(out.find("towers:       vision_config, audio_config -- mlx-vlm is not installed in "
+                   "Apogee's Python environment, so --mlx --text-only builds its language model "
+                   "alone with mlx-lm; 'apogee train setup --with mlx-vlm' keeps them\n") !=
+          std::string::npos);
+    CHECK(out.find("makes a GGUF of it (--mlx --text-only an MLX model of its language model)\n") !=
+          std::string::npos);
+    CHECK(home.run({"models", "convert", gemma, "--mlx"}, &out) != 0);
+    CHECK(out.find("which is not installed in Apogee's Python environment -- apogee train setup "
+                   "--with mlx-vlm, or build its language model alone with mlx-lm: --text-only") !=
+          std::string::npos);
+
+    // mlx-vlm beside it, building gemma4 and no qwen3_omni_moe.
+    const std::filesystem::path site = fake_mlx_vlm(home.home());
+    CHECK(data(gemma)["mlx_conversion"] == route(both, "mlx-vlm", true));
+    REQUIRE(home.run({"models", "info", gemma}, &out) == 0);
+    CHECK(out.find("towers:       vision_config, audio_config -- --mlx builds it through mlx-vlm, "
+                   "its towers kept; --mlx --text-only builds its language model alone with "
+                   "mlx-lm\n") != std::string::npos);
+    CHECK(data(omni)["converts_to"] == nlohmann::json::array({"gguf"}));
+    CHECK(home.run({"models", "convert", omni, "--mlx"}, &out) != 0);
+    CHECK(out.find("'" + omni +
+                   "' is a qwen3_omni_moe model with towers (thinker_config), which the mlx-vlm "
+                   "in Apogee's Python environment builds no model for -- convert it without "
+                   "--mlx, or, if these weights are a type this mlx-vlm knows, convert them as "
+                   "it: --model-type <type> (nearest here: qwen3_5, qwen3_vl, qwen3_vl_moe)") !=
+          std::string::npos);
+    CHECK(home.run({"models", "convert", omni, "--mlx", "--model-type", "nosuch"}, &out) != 0);
+    CHECK(out.find("--model-type nosuch is no type the mlx-vlm in Apogee's Python environment "
+                   "builds") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(calls_file));  // no converter ever started
+    // --model-type completes from the converter the line's set routes to.
+    REQUIRE(home.run({"__complete", "models", "convert", omni, "--mlx", "--model-type", "qwen3"},
+                     &out) == 0);
+    CHECK(out == "qwen3_5\nqwen3_vl\nqwen3_vl_moe\n");
+    REQUIRE(home.run({"__complete", "models", "convert", gemma, "--mlx", "--text-only",
+                      "--model-type", "gemma4"},
+                     &out) == 0);
+    CHECK(out == "gemma4\ngemma4_text\ngemma4_unified\n");
+
+    // An mlx-vlm that builds qwen3_omni_moe: offered, and converted whole.
+    apogee::testing::write_fixture_file(
+        site / "mlx_vlm" / "models" / "qwen3_omni_moe" / "__init__.py",
+        "from .qwen3_omni_moe import Model\n");
+    CHECK(data(omni)["converts_to"] == nlohmann::json::array({"gguf", "mlx"}));
+    CHECK(data(omni)["mlx_conversion"] == route(thinker, "mlx-vlm", false));
+    REQUIRE(home.run({"models", "convert", omni, "--mlx"}, &out) == 0);
+    INFO(out);
+    const std::vector<nlohmann::json> calls = converter_calls(calls_file);
+    REQUIRE(calls.size() == 1);
+    CHECK(calls[0]["converter"] == "mlx_vlm");
+    CHECK(calls[0]["model_type"] == "qwen3_omni_moe");
+    const std::filesystem::path made = mlx_made_by(
+        StoreRoots::at(home.models()), "Qwen3-Omni-30B-A3B-Instruct", "mlx_vlm.convert 4bit");
+    REQUIRE_FALSE(made.empty());
+    CHECK(apogee::models::read_mlx_kind(made).word == "vision");
+
+    // A language model's document says its route too: mlx-lm's, no towers.
+    const std::string llama = "Llama3.2-1B-Instruct/safetensors/edaba290ce7f";
+    write_mlx_model(home.models() / llama, {.bits = 0, .format = "pt"});
+    CHECK(data(llama)["mlx_conversion"] == route(nlohmann::json::array(), "mlx-lm", false));
+    // What conversions make has none.
+    const std::vector<apogee::models::StoredMlx> stored = apogee::models::list_store_mlx(
+        StoreRoots::at(home.models()), "Qwen3-Omni-30B-A3B-Instruct");
+    REQUIRE(stored.size() == 1);
+    CHECK(data("Qwen3-Omni-30B-A3B-Instruct/mlx/" + stored.front().id)["mlx_conversion"].is_null());
+}
+
+// ---- embedding models on MLX (53h) ---------------------------------------------------
+
+namespace {
+
+/// The stub `mlx_embeddings` (53h) laid beside the stub mlx-lm -- what `train
+/// setup --with mlx-embeddings` installs. The site-packages directory.
+std::filesystem::path fake_mlx_embeddings(const std::filesystem::path& home) {
+    const std::filesystem::path stubs = std::filesystem::path{APOGEE_TESTS_DIR} / "data" /
+                                        "backends" / "scripts" / "stub_mlx_embeddings";
+    const std::filesystem::path site =
+        home / "training" / "venv" / "lib" / "python3.99" / "site-packages";
+    std::filesystem::create_directories(site);
+    std::filesystem::copy(stubs, site,
+                          std::filesystem::copy_options::recursive |
+                              std::filesystem::copy_options::overwrite_existing);
+    return site;
+}
+
+/// The user's Gemma-Embedding-300M as M21's fixture has it -- a bare
+/// `Gemma3TextModel` 768 wide, then Pooling, two Dense layers and Normalize
+/// (its `modules.json`) -- or the same pipeline over another `model_type`.
+void embedding_snapshot(const std::filesystem::path& dir,
+                        const std::string& model_type = "gemma3_text") {
+    write_mlx_model(dir, {.bits = 0, .format = "pt"});
+    apogee::testing::write_fixture_file(
+        dir / "config.json", R"({"architectures": ["Gemma3TextModel"], "model_type": ")" +
+                                 model_type + R"(", "hidden_size": 768})");
+    apogee::testing::write_fixture_file(dir / "modules.json", R"([
+        {"idx": 0, "path": "", "type": "sentence_transformers.models.Transformer"},
+        {"idx": 1, "path": "1_Pooling", "type": "sentence_transformers.models.Pooling"},
+        {"idx": 2, "path": "2_Dense", "type": "sentence_transformers.models.Dense"},
+        {"idx": 3, "path": "3_Dense", "type": "sentence_transformers.models.Dense"},
+        {"idx": 4, "path": "4_Normalize", "type": "sentence_transformers.models.Normalize"}])");
+    apogee::testing::write_fixture_file(dir / "2_Dense" / "model.safetensors", "x");
+}
+
+}  // namespace
+
+TEST_CASE(
+    "an embedding model mlx-embeddings lacks the type of, or with none installed, reads as "
+    "M21 left it",
+    "[commands][models][mlx][convert][embedding]") {
+    // 53h: the refusal is lifted only where the installed mlx-embeddings
+    // builds the set's type -- with none installed, or one without its
+    // module, the offer and the refusal are M21's, worded as they were.
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    const std::string handle = "Qwen3-Embedding-0.6B/safetensors/cccccccccccc";
+    embedding_snapshot(home.models() / handle, "qwen3");
+    const std::string gemma = "Gemma-Embedding-300M/safetensors/b6845e67fafb";
+    embedding_snapshot(home.models() / gemma);
+    std::string out;
+    std::string err;
+    const auto reads_as_m21 = [&](const std::string& set) {
+        INFO(set);
+        REQUIRE(home.run({"models", "info", set}, &out) == 0);
+        CHECK(out.find("embedding:    an embedding model (sentence-transformers: Transformer, "
+                       "Pooling, Dense, Dense, Normalize): it converts to a GGUF a llamacpp "
+                       "backend embeds with -- mlx-lm's converter builds language models, and "
+                       "the mlx backend does not embed\n") != std::string::npos);
+        CHECK(out.find("makes a GGUF of it\n") != std::string::npos);
+        REQUIRE(home.run({"models", "info", set, "--output-format", "json"}, &out, &err) == 0);
+        const nlohmann::json data = nlohmann::json::parse(out)["data"];
+        CHECK(data["converts_to"] == nlohmann::json::array({"gguf"}));
+        CHECK(data["mlx_conversion"].is_null());
+        CHECK(home.run({"models", "convert", set, "--mlx", "--register", "--type", "8bit"}, &out) !=
+              0);
+        CHECK(out.find("' is an embedding model (sentence-transformers: Transformer, Pooling, "
+                       "Dense, Dense, Normalize)") != std::string::npos);
+        CHECK(out.find("convert it without --mlx") != std::string::npos);
+        CHECK(out.find("[1/") == std::string::npos);
+    };
+    // Nothing installed: both as M21 left them.
+    reads_as_m21(handle);
+    reads_as_m21(gemma);
+    // An mlx-embeddings without qwen3's module: that one still M21's.
+    fake_mlx_runtime(home.home());
+    (void)fake_mlx_embeddings(home.home());
+    reads_as_m21(handle);
+    const StoreRoots roots = StoreRoots::at(home.models());
+    CHECK(apogee::models::list_store_mlx(roots).empty());
+    CHECK(apogee::models::find_abandoned_staging(roots).empty());
+    // The one it builds is offered, second, through it.
+    REQUIRE(home.run({"models", "info", gemma, "--output-format", "json"}, &out, &err) == 0);
+    const nlohmann::json data = nlohmann::json::parse(out)["data"];
+    CHECK(data["converts_to"] == nlohmann::json::array({"gguf", "mlx"}));
+    CHECK(data["mlx_conversion"] == nlohmann::json{{"towers", nlohmann::json::array()},
+                                                   {"converter", "mlx-embeddings"},
+                                                   {"text_only", false}});
+    REQUIRE(home.run({"models", "info", gemma}, &out) == 0);
+    CHECK(out.find("embedding:    an embedding model (sentence-transformers: Transformer, "
+                   "Pooling, Dense, Dense, Normalize): it converts to a GGUF a llamacpp backend "
+                   "embeds with, and through mlx-embeddings to an MLX model an mlx backend embeds "
+                   "with\n") != std::string::npos);
+    CHECK(out.find("makes a GGUF of it (--mlx an MLX model)\n") != std::string::npos);
+    // --model-type completes from mlx-embeddings' own types for such a set.
+    REQUIRE(home.run({"__complete", "models", "convert", gemma, "--mlx", "--model-type", ""},
+                     &out) == 0);
+    CHECK(out == "bert\ngemma3_text\n");
+}
+
+TEST_CASE(
+    "the user's embedding set converts through mlx-embeddings, registers, and embeds as the "
+    "embedding role",
+    "[commands][models][mlx][convert][driver][embedding]") {
+    // 53h's guardrail: the user's set's own files, converted through the stub
+    // mlx-embeddings, recorded `embedding`, registered, and asked by the
+    // embedding role for vectors of the stub's width -- through the real
+    // seeded drivers, as children.
+    if (apogee::platform::host_target() != "macos-arm64" ||
+        apogee::platform::find_on_path("python3").empty()) {
+        SKIP("the mlx runtime is Apple silicon's, and the driver needs a python3");
+    }
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    fake_mlx_runtime(home.home());
+    (void)fake_mlx_embeddings(home.home());
+    const std::string handle = "Gemma-Embedding-300M/safetensors/b6845e67fafb";
+    embedding_snapshot(home.models() / handle);
+    const std::filesystem::path calls_file = home.home() / "calls.jsonl";
+    const apogee::testing::EnvGuard record{"STUB_MLX_CONVERT_RECORD", calls_file.string()};
+    std::string out;
+    std::string err;
+
+    // Converted through mlx-embeddings: recorded embedding, its width said.
+    REQUIRE(home.run({"models", "convert", handle, "--mlx", "--type", "8bit"}, &out) == 0);
+    INFO(out);
+    CHECK(out.find(") -- mlx-embeddings' converter, an embedding model built whole (Transformer, "
+                   "Pooling, Dense, Dense, Normalize), in Apogee's Python environment\n") !=
+          std::string::npos);
+    CHECK(out.find("kind: embedding (recorded) -- an embedding model: the embedding role uses "
+                   "it, never a chat backend\n") != std::string::npos);
+    CHECK(out.find("vectors: 768 wide (its hidden_size)\n") != std::string::npos);
+    CHECK(out.find("  apogee config set-default-embedding Gemma-Embedding-300M-8bit\n") !=
+          std::string::npos);
+    CHECK(out.find("base model") == std::string::npos);
+    CHECK(out.find("[INFO]") == std::string::npos);  // the library's print stays off
+    const std::vector<nlohmann::json> calls = converter_calls(calls_file);
+    REQUIRE(calls.size() == 1);
+    CHECK(calls[0]["converter"] == "mlx_embeddings");
+    CHECK(calls[0]["q_bits"] == 8);
+    const std::filesystem::path made = mlx_made_by(
+        StoreRoots::at(home.models()), "Gemma-Embedding-300M", "mlx_embeddings.convert 8bit");
+    REQUIRE_FALSE(made.empty());
+    CHECK(apogee::models::read_mlx_kind(made).word == "embedding");
+    // The set still converts both ways.
+    REQUIRE(home.run({"models", "info", handle, "--output-format", "json"}, &out, &err) == 0);
+    CHECK(nlohmann::json::parse(out)["data"]["converts_to"] ==
+          nlohmann::json::array({"gguf", "mlx"}));
+    // Again: found, not made.
+    REQUIRE(home.run({"models", "convert", handle, "--mlx", "--type", "8bit"}, &out) == 0);
+    CHECK(out.find("already converted:") != std::string::npos);
+    CHECK(converter_calls(calls_file).size() == 1);
+
+    // Its own info says what it is and how wide.
+    const std::string built = "Gemma-Embedding-300M/mlx/" + made.filename().string();
+    REQUIRE(home.run({"models", "info", built}, &out) == 0);
+    CHECK(out.find("format:       MLX -- an mlx backend embeds with it (Apple silicon)\n") !=
+          std::string::npos);
+    CHECK(out.find("vectors:      768 wide (its hidden_size)\n") != std::string::npos);
+    REQUIRE(home.run({"models", "info", built, "--output-format", "json"}, &out, &err) == 0);
+    CHECK(nlohmann::json::parse(out)["data"]["kind"] == "embedding");
+    CHECK(nlohmann::json::parse(out)["data"]["vector_width"] == 768);
+
+    // Registered by the scan, as an mlx entry the embedding role can name.
+    REQUIRE(home.run({"config", "scan", "--register"}, &out) == 0);
+    CHECK(out.find("added backend 'Gemma-Embedding-300M-8bit' -- an embedding model") !=
+          std::string::npos);
+    const apogee::harness::Config config = apogee::harness::load_config(home.config_path());
+    REQUIRE(config.backends.contains("Gemma-Embedding-300M-8bit"));
+    CHECK(config.backends.at("Gemma-Embedding-300M-8bit").type ==
+          apogee::harness::BackendType::Mlx);
+    // Listed as what it is -- the embedding role's, its width -- never as an
+    // entry needing attention.
+    const std::map<std::string, nlohmann::json> rows = listed_by(home, "backend");
+    REQUIRE(rows.contains("Gemma-Embedding-300M-8bit"));
+    const nlohmann::json& row = rows.at("Gemma-Embedding-300M-8bit");
+    CHECK(row.at("kind") == "embedding");
+    CHECK(row.at("state") == "ready");
+    CHECK(row.at("note") ==
+          apogee::models::describe_mlx_kind("embedding") + "; vectors 768 wide (its hidden_size)");
+    REQUIRE(home.run({"models", "info", "Gemma-Embedding-300M-8bit"}, &out) == 0);
+    CHECK(out.find("vectors:      768 wide (its hidden_size)\n") != std::string::npos);
+    CHECK(out.find("embeds:       through mlx-embeddings 0.0-embeddings-stub -- the embedding "
+                   "role names this backend; it answers no chat\n") != std::string::npos);
+    CHECK(out.find("template:") == std::string::npos);
+    (void)home.run({"check", "--no-color"}, &out);
+    CHECK(out.find("an embedding model directory (gemma3_text)") != std::string::npos);
+    CHECK(out.find("mlx-embeddings 0.0-embeddings-stub is present") != std::string::npos);
+    CHECK(out.find("mlx_embed.py matches the shipped copy") != std::string::npos);
+
+    // The embedding role on it: a collection vectorised through the real
+    // driver, at the stub's width, bound to the backend's own space.
+    REQUIRE(home.run({"config", "set-default-embedding", "Gemma-Embedding-300M-8bit"}, &out) == 0);
+    const std::filesystem::path corpus = home.home() / "corpus";
+    apogee::testing::write_fixture_file(corpus / "cats.txt", "the cat sat on the warm mat\n");
+    apogee::testing::write_fixture_file(corpus / "dogs.txt", "dogs bark at the moon at night\n");
+    REQUIRE(home.run({"embed", "ingest", "notes", corpus.string()}, &out) == 0);
+    const std::string space = "mlx:" + made.lexically_normal().string();
+    CHECK(out.find("vector(s) [" + space + "]") != std::string::npos);
+    REQUIRE(home.run({"embed", "query", "notes", "cat mat"}, &out) == 0);
+    CHECK(out.find("[vector]") != std::string::npos);
+    CHECK(out.find("cats.txt") != std::string::npos);
+    // A chat on it is refused, saying what it is.
+    CHECK(home.run({"complete", "-m", "Gemma-Embedding-300M-8bit", "hello?"}, &out, &err) != 0);
+    CHECK((out + err).find("answers no chat or completion") != std::string::npos);
+
+    // One command, as M16 chains it: converted and registered, the entry's
+    // purpose said in place of a base model's note.
+    REQUIRE(home.run({"models", "convert", handle, "--mlx", "--register", "--type", "4bit"},
+                     &out) == 0);
+    CHECK(out.find("registered Gemma-Embedding-300M-4bit") != std::string::npos);
+    CHECK(out.find("point the embedding role at it: apogee config set-default-embedding "
+                   "Gemma-Embedding-300M-4bit") != std::string::npos);
+    CHECK(out.find("base model") == std::string::npos);
+    const apogee::harness::Config chained = apogee::harness::load_config(home.config_path());
+    REQUIRE(chained.backends.contains("Gemma-Embedding-300M-4bit"));
+    CHECK(chained.backends.at("Gemma-Embedding-300M-4bit").type ==
+          apogee::harness::BackendType::Mlx);
+    CHECK(converter_calls(calls_file).size() == 2);
+}
+
+// ---- draft heads as MLX drafters (53i) ------------------------------------------------
+
+namespace {
+
+/// The user's assistants and their bases as SafeTensors sets in `home`'s
+/// store: each head's set under `<head>/safetensors/aaaaaaaaaaaa`, each base's
+/// -- the processor beside it, as a release that sees ships one -- under
+/// `<base>/safetensors/bbbbbbbbbbbb`.
+void store_assistants(const CliHome& home) {
+    for (const apogee::testing::DraftHeadPair& pair : apogee::testing::kUserDraftHeads) {
+        const std::filesystem::path head =
+            home.models() / pair.head_model / "safetensors" / "aaaaaaaaaaaa";
+        write_mlx_model(head, {.bits = 0, .format = "pt"});
+        apogee::testing::write_fixture_file(head / "config.json", pair.head_config);
+        towered_snapshot(home.models() / pair.base_model / "safetensors" / "bbbbbbbbbbbb",
+                         pair.base_config);
+    }
+}
+
+/// The stub mlx-vlm in `home`'s environment made to draft the unified 12B's
+/// assistant too, as an mlx-vlm with its drafter does; or, with `drafts`
+/// false, not.
+void draft_unified(const CliHome& home, bool drafts) {
+    const std::filesystem::path package = home.home() / "training" / "venv" / "lib" / "python3.99" /
+                                          "site-packages" / "mlx_vlm" / "speculative" / "drafters" /
+                                          "gemma4_unified_assistant";
+    if (drafts) {
+        apogee::testing::write_fixture_file(package / "__init__.py",
+                                            "from ..gemma4_assistant import Model  # noqa\n");
+    } else {
+        std::filesystem::remove_all(package);
+    }
+}
+
+/// The one MLX build of `model`, its handle.
+[[nodiscard]] std::string mlx_handle(const StoreRoots& roots, const std::string& model) {
+    const std::vector<apogee::models::StoredMlx> stored =
+        apogee::models::list_store_mlx(roots, model);
+    REQUIRE(stored.size() == 1);
+    return model + "/mlx/" + stored.front().id;
+}
+
+}  // namespace
+
+TEST_CASE("an mlx backend's list row carries its drafter: where, whether it drafts, and why not",
+          "[commands][models][mlx][drafter][list]") {
+    // M32: the pairing an entry's `draft:` names, on the base's own row -- as
+    // `models info`'s draft line decides it (53i), from files -- so a driver
+    // marks a paired base without reading each entry's info. Nothing runs a
+    // driver, so every platform reads it.
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    fake_mlx_runtime(home.home());
+    const std::filesystem::path site = fake_mlx_vlm(home.home());
+    // The E4B as mlx-vlm builds it, and its assistant as a drafter beside it.
+    const std::filesystem::path base =
+        home.models() / "Gemma4-E4B-Instruct" / "mlx" / "bbbbbbbbbbbb";
+    write_mlx_model(base, {.bits = 0, .kind = "vision"});
+    apogee::testing::write_fixture_file(base / "config.json",
+                                        apogee::testing::kGemma4BaseE4BConfig);
+    const std::filesystem::path drafter =
+        home.models() / "Gemma4-E4B-Assistant" / "mlx" / "aaaaaaaaaaaa";
+    write_mlx_model(drafter, {.bits = 0, .kind = "drafter"});
+    apogee::testing::write_fixture_file(drafter / "config.json",
+                                        apogee::testing::kGemma4AssistantE4BConfig);
+    const auto configure = [&home, &base](const std::string& draft) {
+        std::ofstream{home.config_path()}
+            << "backends:\n  m:\n    type: mock\n  e4b:\n    type: mlx\n    model_path: '"
+            << base.string() << "'\n"
+            << (draft.empty() ? std::string{} : "    draft: '" + draft + "'\n");
+    };
+    // The entry's row in the document, its stream-json line the same object.
+    const auto row_of = [&home]() {
+        const std::map<std::string, nlohmann::json> rows = listed_by(home, "backend");
+        REQUIRE(rows.contains("e4b"));
+        CHECK_FALSE(rows.at("m").contains("draft"));
+        std::string out;
+        std::string err;
+        REQUIRE(home.run({"models", "list", "--output-format", "stream-json"}, &out, &err) == 0);
+        std::istringstream lines{out};
+        bool streamed = false;
+        for (std::string line; std::getline(lines, line);) {
+            const nlohmann::json row = nlohmann::json::parse(line);
+            if (row.value("backend", "") == "e4b") {
+                CHECK(row == rows.at("e4b"));
+                streamed = true;
+            }
+        }
+        CHECK(streamed);
+        return rows.at("e4b");
+    };
+    const auto draft_line = [&home]() {
+        std::string out;
+        REQUIRE(home.run({"models", "info", "e4b", "-q"}, &out) == 0);
+        return line_starting(out, "draft:");
+    };
+    const std::string said = "draft:        " + drafter.string() + " -- ";
+
+    // No drafter paired: no `draft`, as there is no draft line.
+    configure("");
+    CHECK_FALSE(row_of().contains("draft"));
+    CHECK(draft_line().empty());
+
+    // Paired, and it drafts: its path, and no refusal.
+    configure(drafter.string());
+    nlohmann::json row = row_of();
+    REQUIRE(row.contains("draft"));
+    CHECK(row.at("draft") == nlohmann::json{{"path", drafter.string()}, {"can_draft", true}});
+    CHECK(draft_line().starts_with(said + "drafts beside it through mlx-vlm's speculative path"));
+
+    // An mlx-vlm that drafts no gemma4_assistant: the ladder's words, as the
+    // draft line says them.
+    const std::filesystem::path drafters =
+        site / "mlx_vlm" / "speculative" / "drafters" / "gemma4_assistant";
+    std::filesystem::remove_all(drafters);
+    row = row_of();
+    REQUIRE(row.contains("draft"));
+    CHECK(row.at("draft").at("path") == drafter.string());
+    CHECK(row.at("draft").at("can_draft") == false);
+    const std::string unsupported = row.at("draft").value("refusal", "");
+    CHECK(
+        unsupported.starts_with("the installed mlx-vlm 0.0-vlm-stub drafts no gemma4_assistant "
+                                "model -- its speculative path holds no drafter of that type"));
+    CHECK(draft_line() == said + "cannot draft beside it: " + unsupported);
+    (void)fake_mlx_vlm(home.home());
+    CHECK(row_of().at("draft").at("can_draft") == true);
+
+    // The drafter deleted: refused, saying so -- the pairing stays the
+    // config's until it is cleared.
+    std::filesystem::remove_all(drafter);
+    row = row_of();
+    REQUIRE(row.contains("draft"));
+    CHECK(row.at("draft") ==
+          nlohmann::json{{"path", drafter.string()},
+                         {"can_draft", false},
+                         {"refusal", "there is no drafter at " + drafter.string() +
+                                         " -- 'apogee models convert <a draft head> --mlx' "
+                                         "makes one"}});
+    CHECK(draft_line() ==
+          said + "cannot draft beside it: " + row.at("draft").at("refusal").get<std::string>());
+
+    // Cleared: no `draft` again.
+    configure("");
+    CHECK_FALSE(row_of().contains("draft"));
+}
+
+TEST_CASE(
+    "each of the user's assistants converts --mlx to a drafter recorded beside its base, and "
+    "set-backend --draft pairs it with that base alone",
+    "[commands][models][mlx][convert][driver][drafter]") {
+    if (apogee::platform::host_target() != "macos-arm64" ||
+        apogee::platform::find_on_path("python3").empty()) {
+        SKIP("the mlx runtime is Apple silicon's, and the driver needs a python3");
+    }
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    fake_mlx_runtime(home.home());
+    (void)fake_mlx_vlm(home.home());
+    store_assistants(home);
+    const StoreRoots roots = StoreRoots::at(home.models());
+    const std::filesystem::path calls_file = home.home() / "calls.jsonl";
+    const apogee::testing::EnvGuard record{"STUB_MLX_CONVERT_RECORD", calls_file.string()};
+    std::string out;
+    std::string err;
+
+    // Offered exactly where the installed mlx-vlm drafts it: MLX alone.
+    const std::string e4b_head = "Gemma4-E4B-Assistant/safetensors/aaaaaaaaaaaa";
+    REQUIRE(home.run({"models", "info", e4b_head, "--output-format", "json"}, &out, &err) == 0);
+    const nlohmann::json info = nlohmann::json::parse(out).at("data");
+    CHECK(info.at("converts_to") == nlohmann::json::array({"mlx"}));
+    CHECK(info.at("mlx_conversion").at("converter") == "mlx-vlm");
+    REQUIRE(home.run({"models", "info", e4b_head, "-q"}, &out) == 0);
+    CHECK(out.find("format:       SafeTensors -- a draft head's weights, not runnable; --mlx "
+                   "converts it to a drafter") != std::string::npos);
+    CHECK(out.find("made from it: nothing yet -- 'apogee models convert " + e4b_head +
+                   " --mlx' makes an MLX drafter of it") != std::string::npos);
+
+    // The acceptance criterion: a drafter recorded beside Gemma4-E4B-Instruct.
+    REQUIRE(home.run({"models", "convert", e4b_head, "--mlx"}, &out) == 0);
+    INFO(out);
+    CHECK(out.find(" to MLX (bf16") != std::string::npos);  // a drafter's own precision
+    CHECK(out.find(") -- mlx-vlm's converter, a drafter to run beside Gemma4-E4B-Instruct, in "
+                   "Apogee's Python environment\n") != std::string::npos);
+    CHECK(out.find("kind: drafter (recorded) -- a drafter: it runs beside its base model, never "
+                   "alone\n") != std::string::npos);
+    CHECK(out.find("drafter: a drafter (Gemma4AssistantForCausalLM) for a 2560-wide gemma4 model, "
+                   "its record naming Gemma4-E4B-Instruct\n") != std::string::npos);
+    CHECK(out.find("apogee config set-backend <that backend> --draft ") != std::string::npos);
+    CHECK(out.find("add-backend") == std::string::npos);  // never a backend of its own
+    CHECK(out.find("[INFO]") == std::string::npos);
+    std::vector<nlohmann::json> calls = converter_calls(calls_file);
+    REQUIRE(calls.size() == 1);
+    CHECK(calls[0]["converter"] == "mlx_vlm");
+    CHECK(calls[0]["model_type"] == "gemma4_assistant");
+    CHECK(calls[0]["quantize"] == false);
+    CHECK(calls[0]["dtype"] == "bfloat16");
+    const std::filesystem::path e4b_drafter =
+        mlx_made_by(roots, "Gemma4-E4B-Assistant", "mlx_vlm.convert bf16");
+    REQUIRE_FALSE(e4b_drafter.empty());
+    const std::optional<apogee::models::Snapshot> made = apogee::models::load_snapshot(e4b_drafter);
+    REQUIRE(made.has_value());
+    CHECK(made->kind == "drafter");
+    CHECK(made->bases == std::vector<std::string>{"Gemma4-E4B-Instruct"});
+    CHECK(made->ref == e4b_head);
+    // Recognised before it runs, as every conversion is.
+    REQUIRE(home.run({"models", "convert", e4b_head, "--mlx"}, &out) == 0);
+    CHECK(out.find("already converted:") != std::string::npos);
+    CHECK(converter_calls(calls_file).size() == 1);
+
+    // Its base, mlx-vlm's build, registered; a turn on it alone, at
+    // temperature 0, then the drafter named as its draft.
+    REQUIRE(home.run({"models", "convert", "Gemma4-E4B-Instruct", "--mlx", "--register",
+                      "--base-name", "e4b"},
+                     &out) == 0);
+    REQUIRE(home.run({"config", "set-backend", "e4b-4bit", "--temperature", "0"}, &out) == 0);
+    const std::filesystem::path replies = home.home() / "replies.json";
+    apogee::testing::write_fixture_file(replies,
+                                        R"(["Speculative decoding: drafts, then one check."])");
+    const std::filesystem::path turns = home.home() / "turns.txt";
+    const apogee::testing::EnvGuard scripted{"STUB_MLX_REPLIES", replies.string()};
+    const apogee::testing::EnvGuard recorded{"STUB_MLX_RECORD", turns.string()};
+    std::string alone;
+    REQUIRE(home.run({"complete", "-m", "e4b-4bit", "Explain speculative decoding."}, &alone,
+                     &err) == 0);
+    CHECK(alone.find("Speculative decoding: drafts, then one check.") != std::string::npos);
+    CHECK(read_file(turns).find("vlm draft ") == std::string::npos);
+
+    // Unpaired, the base's row names no drafter (M32).
+    CHECK_FALSE(listed_by(home, "backend").at("e4b-4bit").contains("draft"));
+    const std::string handle = mlx_handle(roots, "Gemma4-E4B-Assistant");
+    REQUIRE(home.run({"config", "set-backend", "e4b-4bit", "--draft", handle}, &out) == 0);
+    CHECK(out.find("set draft; drafter " + e4b_drafter.string() + " beside ") != std::string::npos);
+    // Paired, its row carries the drafter and that it drafts (M32).
+    CHECK(listed_by(home, "backend").at("e4b-4bit").at("draft") ==
+          nlohmann::json{{"path", e4b_drafter.string()}, {"can_draft", true}});
+    const apogee::harness::Config paired = apogee::harness::load_config(home.config_path());
+    CHECK(paired.backends.at("e4b-4bit").draft == e4b_drafter.string());
+    REQUIRE(home.run({"models", "info", "e4b-4bit", "-q"}, &out) == 0);
+    CHECK(out.find("draft:        " + e4b_drafter.string() +
+                   " -- drafts beside it through mlx-vlm's speculative path (mtp, mlx-vlm's "
+                   "default block); the answer is the base's") != std::string::npos);
+    CHECK(out.find("runtime:      ready") != std::string::npos);
+
+    // The temperature-0 answer, drafted: the base's own.
+    std::filesystem::remove(turns);
+    std::string drafted;
+    REQUIRE(home.run({"complete", "-m", "e4b-4bit", "Explain speculative decoding."}, &drafted,
+                     &err) == 0);
+    CHECK(drafted == alone);
+    const std::string pairing = read_file(turns);
+    INFO(pairing);
+    CHECK(pairing.find("vlm drafter " + e4b_drafter.filename().string() +
+                       " kind=mtp type=gemma4_assistant") != std::string::npos);
+    CHECK(pairing.find("vlm draft " + e4b_drafter.filename().string() +
+                       " kind=mtp block=drafter:4") != std::string::npos);
+    // A block of its own, on the line.
+    REQUIRE(home.run({"config", "set-backend", "e4b-4bit", "--draft-block-size", "6"}, &out) == 0);
+    std::filesystem::remove(turns);
+    REQUIRE(home.run({"complete", "-m", "e4b-4bit", "Explain speculative decoding."}, &drafted,
+                     &err) == 0);
+    CHECK(drafted == alone);
+    CHECK(read_file(turns).find("kind=mtp block=6") != std::string::npos);
+
+    // The 26B's and the E2B's: each beside its own base, refused beside any
+    // other -- the config untouched by the refusal.
+    for (const auto& [head, base, name] :
+         {std::tuple{"Gemma4-26B-Assistant", "Gemma4-26B-Instruct", "g26b"},
+          std::tuple{"Gemma4-E2B-Assistant", "Gemma4-E2B-Instruct", "e2b"}}) {
+        INFO(head);
+        REQUIRE(home.run({"models", "convert", head, "--mlx"}, &out) == 0);
+        const std::filesystem::path dir = mlx_made_by(roots, head, "mlx_vlm.convert bf16");
+        REQUIRE_FALSE(dir.empty());
+        CHECK(apogee::models::load_snapshot(dir)->bases == std::vector<std::string>{base});
+        REQUIRE(home.run({"models", "convert", base, "--mlx", "--register", "--base-name", name},
+                         &out) == 0);
+        const std::string before = home.config_text();
+        CHECK(home.run({"config", "set-backend", std::string{name} + "-4bit", "--draft", handle},
+                       &out) != 0);
+        CHECK(out.find("a drafter runs only beside a base of its family and width") !=
+              std::string::npos);
+        CHECK(home.config_text() == before);
+        REQUIRE(home.run({"config", "set-backend", std::string{name} + "-4bit", "--draft",
+                          mlx_handle(roots, head)},
+                         &out) == 0);
+    }
+
+    // The drafter deleted from under its pairing: the row says it cannot
+    // draft, and why, in `models info`'s words (M32).
+    std::filesystem::remove_all(e4b_drafter);
+    const nlohmann::json orphaned = listed_by(home, "backend").at("e4b-4bit").at("draft");
+    CHECK(orphaned.at("path") == e4b_drafter.string());
+    CHECK(orphaned.at("can_draft") == false);
+    CHECK(orphaned.at("refusal") == "there is no drafter at " + e4b_drafter.string() +
+                                        " -- 'apogee models convert <a draft head> --mlx' "
+                                        "makes one");
+    REQUIRE(home.run({"models", "info", "e4b-4bit", "-q"}, &out) == 0);
+    CHECK(out.find("draft:        " + e4b_drafter.string() + " -- cannot draft beside it: " +
+                   orphaned.at("refusal").get<std::string>() + "\n") != std::string::npos);
+
+    // Cleared, it drafts with nothing again, and its row names none.
+    REQUIRE(home.run({"config", "set-backend", "e4b-4bit", "--draft", ""}, &out) == 0);
+    CHECK(out.find("cleared draft") != std::string::npos);
+    CHECK(apogee::harness::load_config(home.config_path()).backends.at("e4b-4bit").draft.empty());
+    CHECK_FALSE(listed_by(home, "backend").at("e4b-4bit").contains("draft"));
+}
+
+TEST_CASE(
+    "the unified 12B's assistant pairs only where the installed mlx-vlm drafts "
+    "gemma4_unified_assistant, and is refused saying so otherwise",
+    "[commands][models][mlx][convert][driver][drafter]") {
+    // The open call's default, taken: Google's drafters name the 31B, 26B,
+    // E2B and E4B; the 12B's drafts only where mlx-vlm holds its drafter.
+    if (apogee::platform::host_target() != "macos-arm64" ||
+        apogee::platform::find_on_path("python3").empty()) {
+        SKIP("the mlx runtime is Apple silicon's, and the driver needs a python3");
+    }
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    fake_mlx_runtime(home.home());
+    (void)fake_mlx_vlm(home.home());
+    store_assistants(home);
+    const StoreRoots roots = StoreRoots::at(home.models());
+    const std::filesystem::path calls_file = home.home() / "calls.jsonl";
+    const apogee::testing::EnvGuard record{"STUB_MLX_CONVERT_RECORD", calls_file.string()};
+    const std::string head = "Gemma4-12B-Assistant/safetensors/aaaaaaaaaaaa";
+    std::string out;
+    std::string err;
+
+    // This mlx-vlm drafts no gemma4_unified_assistant: offered nothing, and
+    // refused before anything is announced or staged.
+    REQUIRE(home.run({"models", "info", head, "--output-format", "json"}, &out, &err) == 0);
+    CHECK(nlohmann::json::parse(out).at("data").at("converts_to") == nlohmann::json::array());
+    REQUIRE(home.run({"models", "info", head, "-q"}, &out) == 0);
+    CHECK(out.find("drafter:      no MLX drafter: the mlx-vlm in Apogee's Python environment "
+                   "drafts no gemma4_unified_assistant model") != std::string::npos);
+    CHECK(home.run({"models", "convert", head, "--mlx"}, &out) != 0);
+    CHECK(out.find("its MLX build is a drafter mlx-vlm makes, and the mlx-vlm in Apogee's Python "
+                   "environment (0.0-vlm-stub) drafts no gemma4_unified_assistant model -- its "
+                   "speculative path holds no drafter of that type") != std::string::npos);
+    CHECK(out.find("converting") == std::string::npos);
+    CHECK(converter_calls(calls_file).empty());
+    CHECK(apogee::models::list_store_mlx(roots, "Gemma4-12B-Assistant").empty());
+
+    // An mlx-vlm that drafts it: converted, and paired with its base.
+    draft_unified(home, true);
+    REQUIRE(home.run({"models", "info", head, "--output-format", "json"}, &out, &err) == 0);
+    CHECK(nlohmann::json::parse(out).at("data").at("converts_to") ==
+          nlohmann::json::array({"mlx"}));
+    REQUIRE(home.run({"models", "convert", head, "--mlx"}, &out) == 0);
+    CHECK(out.find("a drafter to run beside Gemma4-12B-Instruct") != std::string::npos);
+    REQUIRE(home.run({"models", "convert", "Gemma4-12B-Instruct", "--mlx", "--register",
+                      "--base-name", "g12b"},
+                     &out) == 0);
+    const std::string drafter = mlx_handle(roots, "Gemma4-12B-Assistant");
+    REQUIRE(home.run({"config", "set-backend", "g12b-4bit", "--draft", drafter}, &out) == 0);
+    REQUIRE(home.run({"models", "info", "g12b-4bit", "-q"}, &out) == 0);
+    CHECK(out.find("runtime:      ready") != std::string::npos);
+
+    // That mlx-vlm gone again: the entry cannot run, saying why, and the
+    // drafter is refused anew.
+    draft_unified(home, false);
+    REQUIRE(home.run({"models", "info", "g12b-4bit", "-q"}, &out) == 0);
+    CHECK(out.find("runtime:      cannot run -- its draft cannot run beside it: the installed "
+                   "mlx-vlm") != std::string::npos);
+    CHECK(out.find("drafts no gemma4_unified_assistant model") != std::string::npos);
+    CHECK(home.run({"config", "set-backend", "g12b-4bit", "--draft", drafter}, &out) != 0);
+    CHECK(out.find("drafts no gemma4_unified_assistant model") != std::string::npos);
+}
+
+TEST_CASE(
+    "a draft head stays refused as chat and as GGUF; a drafter is never a backend's model, never "
+    "registered, and runs only beside the base its record names",
+    "[commands][models][mlx][convert][driver][drafter]") {
+    if (apogee::platform::host_target() != "macos-arm64" ||
+        apogee::platform::find_on_path("python3").empty()) {
+        SKIP("the mlx runtime is Apple silicon's, and the driver needs a python3");
+    }
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    fake_mlx_runtime(home.home());
+    (void)fake_mlx_vlm(home.home());
+    store_assistants(home);
+    const StoreRoots roots = StoreRoots::at(home.models());
+    const std::filesystem::path calls_file = home.home() / "calls.jsonl";
+    const apogee::testing::EnvGuard record{"STUB_MLX_CONVERT_RECORD", calls_file.string()};
+    const std::string head = "Gemma4-E4B-Assistant/safetensors/aaaaaaaaaaaa";
+    std::string out;
+
+    // GGUF, as before: a draft head's GGUF is no backend.
+    CHECK(home.run({"models", "convert", head}, &out) != 0);
+    CHECK(out.find("is a draft head (Gemma4AssistantForCausalLM)") != std::string::npos);
+    CHECK(home.run({"models", "convert", head, "--register"}, &out) != 0);
+    CHECK(out.find("is a draft head") != std::string::npos);
+    // Chat: no registration, no mlx-lm build, no type of the user's.
+    CHECK(home.run({"models", "convert", head, "--mlx", "--register"}, &out) != 0);
+    CHECK(out.find("its MLX build is a drafter, which no backend runs, so --register and "
+                   "--register-with do not apply") != std::string::npos);
+    CHECK(home.run({"models", "convert", head, "--mlx", "--register-with", "bf16,4bit"}, &out) !=
+          0);
+    CHECK(out.find("no backend runs") != std::string::npos);
+    CHECK(home.run({"models", "convert", head, "--mlx", "--text-only"}, &out) != 0);
+    CHECK(out.find("mlx-lm has no network for a draft head") != std::string::npos);
+    CHECK(home.run({"models", "convert", head, "--mlx", "--model-type", "gemma4"}, &out) != 0);
+    CHECK(out.find("--model-type does not apply: mlx-vlm builds it as the drafter its "
+                   "config.json names (gemma4_assistant)") != std::string::npos);
+    CHECK(converter_calls(calls_file).empty());
+    CHECK(apogee::models::list_store_mlx(roots, "Gemma4-E4B-Assistant").empty());
+    CHECK(apogee::harness::load_config(home.config_path()).backends.size() == 1);
+
+    // Converted, it is never registered by the scan...
+    REQUIRE(home.run({"models", "convert", head, "--mlx"}, &out) == 0);
+    const std::filesystem::path drafter =
+        mlx_made_by(roots, "Gemma4-E4B-Assistant", "mlx_vlm.convert bf16");
+    REQUIRE_FALSE(drafter.empty());
+    REQUIRE(home.run({"config", "scan", "--register"}, &out) == 0);
+    CHECK(out.find("a drafter: it runs beside its base model, never alone") != std::string::npos);
+    CHECK(apogee::harness::load_config(home.config_path()).backends.size() == 1);
+    // ...nor taken by add-backend, its kind refusing it with its door (55d)...
+    CHECK(home.run(
+              {"config", "add-backend", "alone", "--type", "mlx", "--model-path", drafter.string()},
+              &out) == 1);
+    CHECK(out.find(drafter.string() +
+                   " is a drafter: it runs beside its base model, never "
+                   "alone -- an mlx entry over its base names it as its "
+                   "draft -- apogee config set-backend <its base's mlx "
+                   "backend> --draft " +
+                   drafter.string()) != std::string::npos);
+    // ...and an entry over it, written into the file by hand, cannot run,
+    // saying what it is.
+    {
+        std::ofstream file{home.config_path(), std::ios::binary | std::ios::app};
+        file << "  alone:\n    type: mlx\n    model_path: " << drafter.string() << "\n";
+    }
+    REQUIRE(home.run({"models", "info", "alone", "-q"}, &out) == 0);
+    CHECK(out.find("runtime:      cannot run -- " + drafter.string() +
+                   " is a drafter: it runs beside its base model, never alone") !=
+          std::string::npos);
+    std::string err;
+    CHECK(home.run({"complete", "-m", "alone", "hello?"}, &out, &err) != 0);
+    CHECK((out + err).find("is a drafter") != std::string::npos);
+    REQUIRE(home.run({"models", "info", mlx_handle(roots, "Gemma4-E4B-Assistant"), "-q"}, &out) ==
+            0);
+    CHECK(out.find("kind:         drafter (recorded)") != std::string::npos);
+    CHECK(out.find("drafter:      a drafter (Gemma4AssistantForCausalLM) for a 2560-wide gemma4 "
+                   "model, its record naming Gemma4-E4B-Instruct") != std::string::npos);
+
+    // Its base's mlx-lm build: refused, conservatively, the way named.
+    REQUIRE(home.run({"models", "convert", "Gemma4-E4B-Instruct", "--mlx", "--text-only",
+                      "--register", "--base-name", "e4b-text"},
+                     &out) == 0);
+    CHECK(home.run({"config", "set-backend", "e4b-text-4bit", "--draft", drafter.string()}, &out) !=
+          0);
+    CHECK(out.find("is mlx-lm's build (kind chat, recorded), laid out for mlx-lm") !=
+          std::string::npos);
+    // A model of its family and width that its record does not name: refused.
+    towered_snapshot(home.models() / "Gemma4-E4B-Custom" / "safetensors" / "cccccccccccc",
+                     apogee::testing::kGemma4BaseE4BConfig);
+    REQUIRE(home.run({"models", "convert", "Gemma4-E4B-Custom", "--mlx", "--register",
+                      "--base-name", "custom"},
+                     &out) == 0);
+    CHECK(home.run({"config", "set-backend", "custom-4bit", "--draft", drafter.string()}, &out) !=
+          0);
+    CHECK(out.find("'s record names Gemma4-E4B-Instruct as its base, and ") != std::string::npos);
+    CHECK(out.find(" is a build of Gemma4-E4B-Custom -- a drafter runs only beside the base its "
+                   "record names") != std::string::npos);
+    // On a type that runs no drafter, the loader refuses it.
+    CHECK(home.run({"config", "set-backend", "m", "--draft", drafter.string()}, &out) != 0);
+    CHECK(out.find("a backend of type mock drafts with nothing") != std::string::npos);
+    // A model storing no drafter, or a name nothing stores, is said.
+    CHECK(home.run({"config", "set-backend", "custom-4bit", "--draft", "Gemma4-E4B-Custom"},
+                   &out) != 0);
+    CHECK(out.find("'Gemma4-E4B-Custom' stores no MLX drafter") != std::string::npos);
+    // By its model's name, its one drafter is taken -- beside its own base.
+    REQUIRE(home.run({"models", "convert", "Gemma4-E4B-Instruct", "--mlx", "--register",
+                      "--base-name", "e4b"},
+                     &out) == 0);
+    REQUIRE(home.run({"config", "set-backend", "e4b-4bit", "--draft", "Gemma4-E4B-Assistant"},
+                     &out) == 0);
+    CHECK(apogee::harness::load_config(home.config_path()).backends.at("e4b-4bit").draft ==
+          drafter.string());
+    // A drafter the entry keeps follows its model: moved to another base,
+    // the edit is refused.
+    CHECK(home.run({"config", "set-backend", "e4b-4bit", "--model-path",
+                    apogee::harness::load_config(home.config_path())
+                        .backends.at("custom-4bit")
+                        .model_path},
+                   &out) != 0);
+    CHECK(out.find("record names Gemma4-E4B-Instruct") != std::string::npos);
+}
+
+// ---- a pulled draft head's hints (55d) ------------------------------------------------
+
+namespace {
+
+/// The user's E4B assistant published as a full-weight repository, pulled
+/// into `home` through a fixture source serving it (no network); what the
+/// pull printed.
+int pull_assistant(const CliHome& home, std::string* out) {
+    const std::filesystem::path repo = home.home() / "fixture" / "assistant";
+    write_mlx_model(repo, {.bits = 0, .format = "pt"});
+    apogee::testing::write_fixture_file(repo / "config.json",
+                                        apogee::testing::kUserDraftHeads[3].head_config);
+    HttpClient client{std::make_unique<FixtureSource>(
+        "org/E4B-Assistant", repo, FixtureSource::Options{.library = "transformers"})};
+    const std::ostringstream captured;
+    std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
+    std::streambuf* old_err = std::cerr.rdbuf(captured.rdbuf());
+    int code = 0;
+    try {
+        (void)apogee::commands::pull_snapshot("org/E4B-Assistant", StoreRoots::at(home.models()),
+                                              client, {});
+    } catch (const CLI::RuntimeError& e) {
+        code = e.get_exit_code();
+    }
+    std::cout.rdbuf(old_out);
+    std::cerr.rdbuf(old_err);
+    *out = captured.str();
+    return code;
+}
+
+/// `models pull org/E4B-Assistant --safetensors --register` over the fixture
+/// source: the chain's exit code and narration.
+int chain_assistant(const CliHome& home, std::string* out) {
+    const std::filesystem::path repo = home.home() / "fixture" / "assistant";
+    write_mlx_model(repo, {.bits = 0, .format = "pt"});
+    apogee::testing::write_fixture_file(repo / "config.json",
+                                        apogee::testing::kUserDraftHeads[3].head_config);
+    const std::ostringstream captured;
+    std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
+    std::streambuf* old_err = std::cerr.rdbuf(captured.rdbuf());
+    int code = 0;
+    try {
+        apogee::commands::run_register_chain(
+            apogee::commands::RegisterChainRequest{.roots = StoreRoots::at(home.models()),
+                                                   .config_path = home.config_path(),
+                                                   .pull_ref = "org/E4B-Assistant",
+                                                   .snapshot = {},
+                                                   .snapshot_from = {},
+                                                   .levels = {},
+                                                   .base_name = {}},
+            apogee::commands::ChainTools{
+                .quantize = {},
+                .transport = [repo]() -> std::unique_ptr<apogee::backends::HttpTransport> {
+                    return std::make_unique<FixtureSource>(
+                        "org/E4B-Assistant", repo,
+                        FixtureSource::Options{.library = "transformers"});
+                }});
+    } catch (const CLI::RuntimeError& e) {
+        code = e.get_exit_code();
+    }
+    std::cout.rdbuf(old_out);
+    std::cerr.rdbuf(old_err);
+    *out = captured.str();
+    return code;
+}
+
+}  // namespace
+
+TEST_CASE("a pulled draft head's closing hint names only commands the binary takes on it",
+          "[commands][models][mlx][pull][draft_head]") {
+    // The audit's finding (55d): the pull suggested `models convert <repo>`
+    // and `--register-with Q4_K_M`, both refused for a draft head, and the
+    // refusal itself named no drafter door.
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    std::string out;
+
+    SECTION("with no mlx-vlm to draft it: what it is, and why nothing converts it here") {
+        REQUIRE(pull_assistant(home, &out) == 0);
+        INFO(out);
+        CHECK(out.find("\nThe set is a draft head (Gemma4AssistantForCausalLM): speculative "
+                       "decoding runs it beside its base model") != std::string::npos);
+        CHECK(out.find("Its one conversion, an MLX drafter, is not offered here: mlx-vlm is not "
+                       "installed in Apogee's Python environment -- apogee train setup --with "
+                       "mlx-vlm\n") != std::string::npos);
+        CHECK(out.find("apogee models convert") == std::string::npos);
+        CHECK(out.find("--register") == std::string::npos);
+        // Its refusal, as it always was: no door to name.
+        CHECK(home.run({"models", "convert", "org--E4B-Assistant"}, &out) != 0);
+        CHECK(out.find("nothing converted from it could answer a chat; convert its base model "
+                       "instead") != std::string::npos);
+    }
+    SECTION("with an mlx-vlm drafting its type: the --mlx door alone, and it runs") {
+        fake_mlx_runtime(home.home());
+        (void)fake_mlx_vlm(home.home());
+        REQUIRE(pull_assistant(home, &out) == 0);
+        INFO(out);
+        const std::string door = "apogee models convert org/E4B-Assistant --mlx";
+        CHECK(out.find("Make the drafter of it -- an MLX build an mlx backend over its base runs "
+                       "beside it, named as that backend's draft -- with\n  " +
+                       door + "\n") != std::string::npos);
+        CHECK(out.find("--register") == std::string::npos);
+        CHECK(out.find("make a GGUF of it") == std::string::npos);
+        // The GGUF door's refusal names the drafter's.
+        CHECK(home.run({"models", "convert", "org--E4B-Assistant"}, &out) != 0);
+        CHECK(out.find("nothing converted from it could answer a chat; its one conversion is an "
+                       "MLX drafter, which runs beside that base: apogee models convert "
+                       "org--E4B-Assistant --mlx\n") != std::string::npos);
+        // The door, as printed: taken, where the driver can run.
+        if (apogee::platform::host_target() == "macos-arm64" &&
+            !apogee::platform::find_on_path("python3").empty()) {
+            REQUIRE(home.run({"models", "convert", "org/E4B-Assistant", "--mlx"}, &out) == 0);
+            const std::vector<apogee::models::StoredMlx> made =
+                apogee::models::list_store_mlx(StoreRoots::at(home.models()), "org--E4B-Assistant");
+            REQUIRE(made.size() == 1);
+            CHECK(apogee::models::read_mlx_kind(made.front().dir).word == "drafter");
+        }
+    }
+    SECTION("pulled by the register chain: stopped at the pull, its door said, nothing to resume") {
+        fake_mlx_runtime(home.home());
+        (void)fake_mlx_vlm(home.home());
+        CHECK(chain_assistant(home, &out) == 1);
+        INFO(out);
+        CHECK(out.find("its one conversion is an MLX drafter, which runs beside that base: apogee "
+                       "models convert org--E4B-Assistant/safetensors/") != std::string::npos);
+        CHECK(out.find("stopped at [1/3] pull org/E4B-Assistant's full weights -- what the stages "
+                       "before it made is kept.\n") != std::string::npos);
+        CHECK(out.find("resume with") == std::string::npos);
+        CHECK(out.find("[2/3]") == std::string::npos);
+        CHECK(apogee::models::list_store_snapshots(StoreRoots::at(home.models()),
+                                                   "org--E4B-Assistant")
+                  .size() == 1);
+        CHECK(apogee::harness::load_config(home.config_path()).backends.size() == 1);
+    }
+}
+
+TEST_CASE("an MLX embedding chain ends on the embedding door, its note said with one prefix",
+          "[commands][models][mlx][convert][chain][embedding]") {
+    // The audit's findings (55d): the chain's last line told the person to
+    // chat with an entry that embeds, and its note came out `note: note:`.
+    // mlx-embeddings' build played in process, so it runs on every host.
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    fake_mlx_runtime(home.home());
+    (void)fake_mlx_embeddings(home.home());
+    const std::string handle = "Gemma-Embedding-300M/safetensors/b6845e67fafb";
+    embedding_snapshot(home.models() / handle);
+    const std::ostringstream captured;
+    std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
+    std::streambuf* old_err = std::cerr.rdbuf(captured.rdbuf());
+    int code = 0;
+    try {
+        apogee::commands::run_mlx_register_chain(
+            apogee::commands::MlxRegisterRequest{.roots = StoreRoots::at(home.models()),
+                                                 .config_path = home.config_path(),
+                                                 .snapshot = handle,
+                                                 .precisions = {"4bit"},
+                                                 .base_name = {},
+                                                 .listed = false},
+            [](const apogee::training::MlxPrecision&) {
+                return [](const std::filesystem::path&, const std::filesystem::path& output,
+                          const apogee::training::MessageSink&,
+                          const apogee::harness::CancellationToken&) {
+                    write_mlx_model(output, {.bits = 4});
+                    return std::string{};
+                };
+            });
+    } catch (const CLI::RuntimeError& e) {
+        code = e.get_exit_code();
+    }
+    std::cout.rdbuf(old_out);
+    std::cerr.rdbuf(old_err);
+    const std::string out = captured.str();
+    INFO(out);
+    REQUIRE(code == 0);
+    const std::string door =
+        "point the embedding role at it:  apogee config set-default-embedding "
+        "Gemma-Embedding-300M-4bit";
+    CHECK(out.ends_with("\n" + door + "\n"));
+    CHECK(out.find("chat with one") == std::string::npos);
+    CHECK(out.find("note: note:") == std::string::npos);
+    CHECK(out.find("\nnote: an embedding model -- the backend embeds and answers no chat; point "
+                   "the embedding role at it: apogee config set-default-embedding "
+                   "Gemma-Embedding-300M-4bit\n") != std::string::npos);
+    // An entry that answers no chat is never made the default (M33).
+    CHECK(out.find("models.default") == std::string::npos);
+    CHECK(apogee::harness::load_config(home.config_path()).models.default_backend.empty());
+    // The door, as printed, on that state.
+    std::string said;
+    REQUIRE(home.run({"config", "set-default-embedding", "Gemma-Embedding-300M-4bit"}, &said) == 0);
+    CHECK(apogee::harness::load_config(home.config_path()).models.default_embedding ==
+          "Gemma-Embedding-300M-4bit");
+}
+
+TEST_CASE("a stored voice or video set is never a chat backend, refused by its kind at every door",
+          "[commands][models][mlx][kind]") {
+    // The completeness pass's probe (55d): over a set whose record says
+    // `voice`, add-backend and set-default both succeeded, `check` said ok
+    // and `models info` listed it as chat beside its own "never a chat
+    // backend". The kind now decides, by `MlxKind::registers()` alone.
+    CliHome home{
+        "backends:\n  m:\n    type: mock\n  talk:\n    type: mock\nmodels:\n  default: m\n"};
+    const bool apple = apogee::platform::host_target() == "macos-arm64";
+    if (apple) {
+        fake_mlx_runtime(home.home());
+    }
+    const std::filesystem::path chat = home.models() / "org--talk" / "mlx" / "aaaaaaaaaaaa";
+    write_mlx_model(chat, {.kind = "chat"});
+    for (const char* kind : {"voice", "video"}) {
+        INFO(kind);
+        const std::filesystem::path set =
+            home.models() / (std::string{"org--"} + kind) / "mlx" / "bbbbbbbbbbbb";
+        write_mlx_model(set, {.kind = kind});
+        const std::string said = set.string() + " is kind " + kind + " (recorded) -- " +
+                                 apogee::models::describe_mlx_kind(kind) +
+                                 ", so no mlx entry runs it";
+        const std::string before = config_text(home);
+        std::string out;
+        // Made an entry: refused, the file untouched.
+        CHECK(home.run(
+                  {"config", "add-backend", "vox", "--type", "mlx", "--model-path", set.string()},
+                  &out) == 1);
+        CHECK(out.find(said) != std::string::npos);
+        // An entry moved onto it: refused the same way.
+        CHECK(home.run(
+                  {"config", "set-backend", "talk", "--type", "mlx", "--model-path", set.string()},
+                  &out) == 1);
+        CHECK(out.find(said) != std::string::npos);
+        CHECK(config_text(home) == before);
+        // One written by hand takes no role, chat or any other.
+        {
+            std::ofstream file{home.config_path(), std::ios::binary | std::ios::trunc};
+            file << "backends:\n  m:\n    type: mock\n  talk:\n    type: mock\n  vox:\n    type: "
+                    "mlx\n    model_path: "
+                 << set.string() << "\nmodels:\n  default: m\n";
+        }
+        const std::string written = config_text(home);
+        for (const char* role : {"set-default", "set-default-embedding", "set-default-utility"}) {
+            CHECK(home.run({"config", role, "vox"}, &out) == 1);
+            CHECK(out.find("backend 'vox' cannot take a role: " + said) != std::string::npos);
+        }
+        CHECK(config_text(home) == written);
+        // Its info names no role, and its runtime line the kind -- where the
+        // runtime's own rungs pass, here Apple silicon's.
+        REQUIRE(home.run({"models", "info", "vox", "-q"}, &out) == 0);
+        CHECK(out.find("roles:        -\n") != std::string::npos);
+        if (apple) {
+            CHECK(out.find("runtime:      cannot run -- " + said) != std::string::npos);
+            std::string err;
+            CHECK(home.run({"complete", "-m", "vox", "hello?"}, &out, &err) != 0);
+            CHECK((out + err).find(said) != std::string::npos);
+        }
+        // A chat set is taken by every door, as it always was.
+        REQUIRE(home.run({"config", "set-backend", "vox", "--model-path", chat.string()}, &out) ==
+                0);
+        REQUIRE(home.run({"config", "set-default", "vox"}, &out) == 0);
+        std::ofstream{home.config_path(), std::ios::binary | std::ios::trunc} << before;
+    }
+}
+
+namespace {
+
+/// `set-default-embedding` for `default_embedding`: each role's verb, spelled
+/// as `config` binds it.
+[[nodiscard]] std::string role_verb(std::string_view field) {
+    std::string verb = "set-" + std::string{field};
+    std::ranges::replace(verb, '_', '-');
+    return verb;
+}
+
+/// A config holding the mock default and two mlx entries written by hand --
+/// past every door -- one over an embedding set and one over a chat set.
+void two_mlx_entries(const CliHome& home, const std::filesystem::path& embedding,
+                     const std::filesystem::path& chat) {
+    std::ofstream file{home.config_path(), std::ios::binary | std::ios::trunc};
+    file << "backends:\n  m:\n    type: mock\n  Emb-4bit:\n    type: mlx\n    model_path: "
+         << embedding.string() << "\n  Chat-4bit:\n    type: mlx\n    model_path: " << chat.string()
+         << "\nmodels:\n  default: m\n";
+}
+
+}  // namespace
+
+TEST_CASE("each role takes its own kind: the embedding role what embeds, every other what chats",
+          "[commands][models][mlx][kind][roles]") {
+    // M33's finding: 55d's gate asked `registers()`, which 53h had widened to
+    // embeddings, so `config set-default Emb-4bit` answered `models.default
+    // = Emb-4bit` and every chat on it was then refused; `set-default-utility`
+    // took it too, and `set-default-embedding` took a chat set. The gate now
+    // knows the role.
+    const CliHome home{"backends:\n  m:\n    type: mock\nmodels:\n  default: m\n"};
+    const std::filesystem::path embedding = home.models() / "org--emb" / "mlx" / "aaaaaaaaaaaa";
+    write_mlx_model(embedding, {.kind = "embedding"});
+    const std::filesystem::path chat = home.models() / "org--chat" / "mlx" / "bbbbbbbbbbbb";
+    write_mlx_model(chat, {.kind = "chat"});
+    two_mlx_entries(home, embedding, chat);
+    const std::string written = config_text(home);
+
+    for (const std::string_view field : apogee::harness::models_role_fields()) {
+        INFO(field);
+        const bool embeds = field == "default_embedding";
+        const std::string refused_name = embeds ? "Chat-4bit" : "Emb-4bit";
+        const std::filesystem::path refused_set = embeds ? chat : embedding;
+        const std::string kind = embeds ? "chat" : "embedding";
+        std::string out;
+        CHECK(home.run({"config", role_verb(field), refused_name}, &out) == 1);
+        CHECK(out.find(
+                  "backend '" + refused_name + "' cannot take a role: " + refused_set.string() +
+                  " is kind " + kind + " (recorded) -- " + apogee::models::describe_mlx_kind(kind) +
+                  ", so models." + std::string{field} + " cannot name it") != std::string::npos);
+        // The way out named: the role the entry can take.
+        CHECK(out.find(embeds
+                           ? "apogee config set-default Chat-4bit"
+                           : "apogee config set-default-embedding Emb-4bit") != std::string::npos);
+        CHECK(config_text(home) == written);
+        // The entry of the role's own kind is taken, as it always was.
+        const std::string taken = embeds ? "Emb-4bit" : "Chat-4bit";
+        REQUIRE(home.run({"config", role_verb(field), taken}, &out) == 0);
+        CHECK(out == "models." + std::string{field} + " = " + taken + "\n");
+        two_mlx_entries(home, embedding, chat);
+    }
+}
+
+TEST_CASE(
+    "an embedding entry never becomes the default: add-backend and scan set it for one "
+    "that chats",
+    "[commands][models][mlx][kind][default]") {
+    // M33: once add-backend sets models.default when none is, finding 1's
+    // rule holds there too -- an entry over an embedding set is no chat
+    // backend, so it is never made the default on anyone's behalf.
+    const CliHome home{"backends:\n  m:\n    type: mock\n"};
+    const std::filesystem::path embedding = home.models() / "org--emb" / "mlx" / "aaaaaaaaaaaa";
+    write_mlx_model(embedding, {.kind = "embedding"});
+    const std::filesystem::path chat = home.models() / "org--chat" / "mlx" / "bbbbbbbbbbbb";
+    write_mlx_model(chat, {.kind = "chat"});
+    std::string out;
+    REQUIRE(home.run({"config", "add-backend", "Emb-4bit", "--type", "mlx", "--model-path",
+                      embedding.string()},
+                     &out) == 0);
+    CHECK(out.find("models.default") == std::string::npos);
+    CHECK(apogee::harness::load_config(home.config_path()).models.default_backend.empty());
+    REQUIRE(home.run({"config", "add-backend", "Chat-4bit", "--type", "mlx", "--model-path",
+                      chat.string()},
+                     &out) == 0);
+    CHECK(out.find("models.default set to 'Chat-4bit' (none was set)\n") != std::string::npos);
+    CHECK(apogee::harness::load_config(home.config_path()).models.default_backend == "Chat-4bit");
+
+    // The batch: the embedding set registered, the default left for the one
+    // that chats.
+    const CliHome scanned{"backends:\n  m:\n    type: mock\n"};
+    const std::filesystem::path stored = scanned.models() / "org--emb" / "mlx" / "aaaaaaaaaaaa";
+    write_mlx_model(stored, {.kind = "embedding"});
+    REQUIRE(scanned.run({"config", "scan", "--register"}, &out) == 0);
+    INFO(out);
+    CHECK(out.find("an embedding model, which answers no chat") != std::string::npos);
+    CHECK(out.find("models.default") == std::string::npos);
+    CHECK(apogee::harness::load_config(scanned.config_path()).models.default_backend.empty());
 }

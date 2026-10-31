@@ -120,6 +120,13 @@ struct CheckInputs {
     /// asks a provider built from the config (`provider_metered_probe`).
     MeteredProbe metered;
 
+    /// What ffmpeg says of itself (52e): its `-filters` and `-encoders`
+    /// listings, as `platform::ffmpeg_listing` reads them -- nullopt with
+    /// the reason when it could not be asked. Null asks the ffmpeg on PATH,
+    /// and a missing one is said as such; a test scripts its own.
+    std::function<std::optional<std::string>(std::string_view flag, std::string& error)>
+        ffmpeg_listing;
+
     /// What the Providers section sees of the filesystem (28c): whether a
     /// vendor CLI is on PATH and its evidence files exist -- never a read,
     /// never a spawn. Null is this machine's; a test hands its own.
@@ -202,6 +209,24 @@ struct CheckPassOptions {
 /// leaves is created by the one seeding path and verified by the doctor itself
 /// -- never by a second copy of either.
 [[nodiscard]] bool run_check_pass(CheckInputs inputs, const CheckPassOptions& options);
+
+/// One command a remedy runs, as typed, and whether the next one runs when
+/// it fails: `brew unlink ffmpeg` fails harmlessly where Homebrew's ffmpeg is
+/// not installed.
+struct RemedyCommand {
+    std::vector<std::string> argv;
+    bool may_fail = false;
+};
+
+/// What brings an ffmpeg that burns captions on macOS (52e): Homebrew's
+/// keg-only ffmpeg-full, linked over its ffmpeg. Declared once -- `check`'s
+/// `ffmpeg captions` remedy types it as one line, and `apogee bootstrap` runs
+/// it (2026-10-21).
+[[nodiscard]] std::vector<RemedyCommand> macos_captions_remedy();
+
+/// Commands as the one line a person types: `&&` after one that must
+/// succeed, `;` after one that may fail.
+[[nodiscard]] std::string remedy_line(const std::vector<RemedyCommand>& commands);
 
 class CheckCommand final : public Command {
 public:

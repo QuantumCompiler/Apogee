@@ -1,0 +1,7 @@
+hashing it (1 KiB) -- its SHA-256 names its folder in the store
+
+/Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/5703795782eb/Llama3.2-1B-Instruct-Q4_K_M.gguf
+2 KiB -> 1 KiB
+
+Use it by adding a backend:
+  apogee config add-backend <name> --type llamacpp --model-path /Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/5703795782eb/Llama3.2-1B-Instruct-Q4_K_M.gguf

@@ -43,14 +43,22 @@ nlohmann::json video_project_document(const VideoProject& project) {
         if (!scene.clip.empty()) {
             clip = {{"file", scene.clip.string()}, {"seconds", scene.clip_seconds}};
         }
-        scenes.push_back({{"index", index + 1},
-                          {"narration", scene.narration},
-                          {"visual", scene.visual},
-                          {"seconds", scene.seconds},
-                          {"asset", text_or_null(scene.asset)},
-                          {"seed", scene.seed},
-                          {"voice", voice},
-                          {"clip", clip}});
+        nlohmann::json item = {{"index", index + 1},
+                               {"narration", scene.narration},
+                               {"visual", scene.visual},
+                               {"seconds", scene.seconds},
+                               {"asset", text_or_null(scene.asset)},
+                               {"seed", scene.seed},
+                               {"voice", voice},
+                               {"clip", clip}};
+        if (scene.from.has_value()) {
+            // An edit's provenance (52c): additive, so a project no edit
+            // made reads exactly as before.
+            item["from"] = *scene.from == 0 ? nlohmann::json("new") : nlohmann::json(*scene.from);
+            item["changes"] = scene.changes;
+            item["moved"] = scene.moved;
+        }
+        scenes.push_back(std::move(item));
     }
     nlohmann::json edits = nlohmann::json::array();
     for (const ProjectEdit& edit : project.edits) {
@@ -62,30 +70,35 @@ nlohmann::json video_project_document(const VideoProject& project) {
     if (!project.captions_file.empty()) {
         captions = {{"file", project.captions_file.string()}, {"burned", project.captions_burned}};
     }
-    return {{"object", kVideoProjectObject},
-            {"version", kVideoProjectVersion},
-            {"status", project.status},
-            {"brief", project.brief},
-            {"title", project.title},
-            {"output", project.output.string()},
-            {"scenes_dir", project.scenes_dir.string()},
-            {"settings",
-             {{"model", project.pipeline},
-              {"voice_model", project.voice_model},
-              {"voice", project.voice},
-              {"crossfade", project.crossfade},
-              {"captions", project.captions},
-              {"music", path_or_null(project.music)},
-              {"assets", path_or_null(project.assets)}}},
-            {"plan", {{"backend", project.planner}, {"attempts", project.plan_attempts}}},
-            {"scenes", scenes},
-            {"captions", captions},
-            {"assembly", text_or_null(project.assembly)},
-            {"error", text_or_null(project.error)},
-            {"created", project.created},
-            {"platform", project.platform},
-            {"parent", path_or_null(project.parent)},
-            {"edits", edits}};
+    nlohmann::json document = {
+        {"object", kVideoProjectObject},
+        {"version", kVideoProjectVersion},
+        {"status", project.status},
+        {"brief", project.brief},
+        {"title", project.title},
+        {"output", project.output.string()},
+        {"scenes_dir", project.scenes_dir.string()},
+        {"settings",
+         {{"model", project.pipeline},
+          {"voice_model", project.voice_model},
+          {"voice", project.voice},
+          {"crossfade", project.crossfade},
+          {"captions", project.captions},
+          {"music", path_or_null(project.music)},
+          {"assets", path_or_null(project.assets)}}},
+        {"plan", {{"backend", project.planner}, {"attempts", project.plan_attempts}}},
+        {"scenes", scenes},
+        {"captions", captions},
+        {"assembly", text_or_null(project.assembly)},
+        {"error", text_or_null(project.error)},
+        {"created", project.created},
+        {"platform", project.platform},
+        {"parent", path_or_null(project.parent)},
+        {"edits", edits}};
+    if (!project.parent.empty()) {
+        document["removed"] = project.removed;
+    }
+    return document;
 }
 
 std::optional<VideoProject> read_video_project(const nlohmann::json& document, std::string& error) {
@@ -165,6 +178,24 @@ std::optional<VideoProject> read_video_project(const nlohmann::json& document, s
             scene.clip = string_at(*clip, "file");
             scene.clip_seconds = number_at(*clip, "seconds");
         }
+        if (const auto from = item.find("from"); from != item.end()) {
+            if (from->is_number_unsigned()) {
+                scene.from = from->get<std::size_t>();
+            } else if (from->is_string() && from->get<std::string>() == "new") {
+                scene.from = 0;
+            }
+        }
+        if (const auto changes = item.find("changes");
+            changes != item.end() && changes->is_array()) {
+            for (const nlohmann::json& change : *changes) {
+                if (change.is_string()) {
+                    scene.changes.push_back(change.get<std::string>());
+                }
+            }
+        }
+        if (const auto moved = item.find("moved"); moved != item.end() && moved->is_boolean()) {
+            scene.moved = moved->get<bool>();
+        }
         project.scenes.push_back(std::move(scene));
     }
     if (const auto captions = document.find("captions");
@@ -195,6 +226,14 @@ std::optional<VideoProject> read_video_project(const nlohmann::json& document, s
                 }
             }
             project.edits.push_back(std::move(edit));
+        }
+    }
+    if (const auto removed = document.find("removed");
+        removed != document.end() && removed->is_array()) {
+        for (const nlohmann::json& scene : *removed) {
+            if (scene.is_number_unsigned()) {
+                project.removed.push_back(scene.get<std::size_t>());
+            }
         }
     }
     return project;

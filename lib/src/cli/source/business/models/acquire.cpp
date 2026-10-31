@@ -7,12 +7,14 @@
 #include <ctime>
 #include <fstream>
 #include <iomanip>
+#include <optional>
 #include <sstream>
 #include <system_error>
 #include <utility>
 
 #include "contracts/sha256.h"
 #include "modelstore/gguf_inspect.h"
+#include "modelstore/snapshot.h"
 
 namespace apogee::models {
 namespace {
@@ -283,6 +285,79 @@ AcquireTreeResult acquire_tree(const std::filesystem::path& destination,
     }
     result.ok = true;
     result.path = destination;
+    return result;
+}
+
+AcquireTreeResult complete_snapshot(const std::filesystem::path& dir,
+                                    const std::vector<TreeItem>& items,
+                                    const TreeProgressFn& progress) {
+    AcquireTreeResult result;
+    std::optional<Snapshot> record = load_snapshot(dir);
+    if (!record.has_value()) {
+        result.error = "no " + snapshot_record_path(dir).filename().string() + " in " +
+                       dir.string() + ", so there is no record to complete";
+        return result;
+    }
+    // Refused before a byte moves: the set's id must not move, and its
+    // record must not list a file twice.
+    for (const TreeItem& item : items) {
+        if (item.relative.empty() || item.relative.find("..") != std::string::npos ||
+            item.relative.front() == '/') {
+            result.error = "refusing a file path that leaves the tree: '" + item.relative + "'";
+            return result;
+        }
+        if (item.relative.ends_with(".safetensors")) {
+            result.error = item.relative +
+                           ": completing a set never adds a shard -- its id is its shards' hash";
+            return result;
+        }
+        if (std::ranges::find(record->files, item.relative, &SnapshotFile::path) !=
+            record->files.end()) {
+            result.error = item.relative + ": already on the set's record";
+            return result;
+        }
+    }
+
+    std::error_code code;
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        const TreeItem& item = items[i];
+        const std::filesystem::path target = dir / item.relative;
+        // Fetched beside its place, so a file of unknown provenance there is
+        // replaced only by a verified one; a leftover from an interrupted run
+        // is discarded, never resumed.
+        std::filesystem::path beside = target;
+        beside += ".pull";
+        remove_quietly(beside);
+        const AcquireResult file =
+            acquire_file(beside, item.promise, item.source,
+                         [&progress, i, &items, &item](std::int64_t written, std::int64_t size) {
+                             if (progress) {
+                                 progress(i + 1, items.size(), item.relative, written, size);
+                             }
+                         });
+        if (!file.ok) {
+            result.error = item.relative + ": " + file.error;
+            return result;
+        }
+        std::filesystem::rename(beside, target, code);
+        if (code) {
+            remove_quietly(beside);
+            result.error = item.relative + ": could not move it into place: " + code.message();
+            return result;
+        }
+        record->files.push_back({.path = item.relative,
+                                 .size = file.sidecar.file_size,
+                                 .sha256 = file.sidecar.file_digest});
+        if (!write_snapshot(dir, *record)) {
+            result.error = item.relative + ": landed, but the set's record could not be written";
+            return result;
+        }
+        ++result.files;
+        result.bytes += file.sidecar.file_size;
+        result.sidecars.push_back(file.sidecar);
+    }
+    result.ok = true;
+    result.path = dir;
     return result;
 }
 

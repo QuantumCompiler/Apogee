@@ -16,7 +16,8 @@ Since 28d it also holds the declaration `capabilities` announces, and since
 `json_reporter.cpp` -- and, given the binary, the schema it prints
 (`apogee __machine-schema`): the third view of the one vocabulary, held to the
 code and the document, its tolerance and its strictness checked with a stock
-validator when one is installed (said when not).
+validator when one is installed (said when not). Since M27 the binary's reads
+too: every command it names as printing a JSON document is described.
 
 Usage: schema_conformance.py <json_reporter.cpp> <machine-mode.md> [<apogee>]
 """
@@ -26,6 +27,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 
 
 def main():
@@ -117,6 +119,28 @@ def main():
                     failures.append("the schema accepts a result with no text")
                 if ok({"type": "answer_delta", "text": 7}):
                     failures.append("the schema accepts an answer_delta whose text is a number")
+
+        # The reads (28h, M27): every command that prints a JSON document is
+        # named in the document as `apogee <command>`, so a host knows each
+        # read exists. The binary names them itself: a JSON face asked of a
+        # command with none is refused with the list, read from its parser.
+        # Its own empty home, so the run reads nothing of the user's.
+        with tempfile.TemporaryDirectory() as home:
+            refused = subprocess.run([binary, "version", "--output-format", "json"],
+                                     capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                                     timeout=60, env={**os.environ, "APOGEE_HOME": home})
+        listed = re.search(r"--output-format json is taken by: (.+)", refused.stderr)
+        if refused.returncode == 0 or listed is None:
+            failures.append("the refusal that names the JSON reads moved -- this check is now "
+                            f"blind to them: {refused.stderr.strip()!r}")
+        else:
+            readers = [name.strip() for name in listed.group(1).split(",") if name.strip()]
+            if not readers:
+                failures.append("the binary names no JSON read -- this check is now blind")
+            for reader in readers:
+                if f"apogee {reader}" not in prose:
+                    failures.append(f"'{reader}' prints a JSON document but {document} never "
+                                    f"describes it -- a host has no way to know it exists")
 
     # The session event's fields, and the capabilities object's (28d): each
     # named in the document, so a field a host reads is never undocumented.

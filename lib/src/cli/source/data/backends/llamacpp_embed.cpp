@@ -6,7 +6,7 @@
 
 namespace apogee::backends {
 
-std::vector<std::vector<float>> embed_with_llama(LlamaModel& model,
+std::vector<std::vector<float>> embed_with_llama(LlamaModel& model, const LlamaAdapters& adapters,
                                                  const std::vector<std::string>& inputs,
                                                  const harness::CancellationToken& cancellation) {
     std::vector<std::vector<float>> vectors;
@@ -17,7 +17,7 @@ std::vector<std::vector<float>> embed_with_llama(LlamaModel& model,
         const std::vector<std::string> slice(inputs.begin() + static_cast<std::ptrdiff_t>(begin),
                                              inputs.begin() + static_cast<std::ptrdiff_t>(end));
         std::string error;
-        std::vector<std::vector<float>> got = model.embed_batch(slice, error);
+        std::vector<std::vector<float>> got = model.embed_batch(slice, adapters, error);
         if (!error.empty()) {
             throw std::runtime_error(error);
         }

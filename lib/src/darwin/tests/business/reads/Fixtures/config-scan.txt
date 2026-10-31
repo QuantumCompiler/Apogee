@@ -1,0 +1,9 @@
+Llama3.2-1B-Instruct-F16       not registered
+                               /Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/3f0c2a9b7e41/Llama3.2-1B-Instruct-F16.gguf
+Llama3.2-1B-Instruct-Q4KM      backend: llama3.2-1b-Q4KM
+                               /Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/8d51e6c04a27/Llama3.2-1B-Instruct-Q4KM.gguf
+Gemma4-26B-Instruct-mixed_4_8  not registered
+                               /Users/someone/.apogee/models/Gemma4-26B-Instruct/mlx/a88b9f386aff
+2 SafeTensors snapshot(s) not listed -- weights, not runnable; each registers when converted
+
+register the unregistered ones as backends: apogee config scan --register

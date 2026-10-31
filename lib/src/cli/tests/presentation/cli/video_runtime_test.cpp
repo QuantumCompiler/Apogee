@@ -1,15 +1,22 @@
 #include "cli/video_runtime.h"
 
+#include <CLI/CLI.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <nlohmann/json.hpp>
 
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <iostream>
 #include <random>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
+#include "cli/job_stream.h"
+#include "contracts/config.h"
 #include "support/env_guard.h"
 #include "training/python_env.h"
 
@@ -119,4 +126,89 @@ TEST_CASE("a no, a pipe or a failed pip installs nothing and names the command t
         CHECK_THAT(failure, ContainsSubstring("No matching distribution found for diffusers"));
         CHECK_FALSE(env.status().has(apogee::training::RequirementSet::Video));
     }
+}
+
+namespace {
+
+/// A runtime asked for on a pipe, as a streamed job asks it (M29): `ready`
+/// run inside an open stream over a home whose environment holds nothing
+/// when `bare`, and none at all when not. The stream's events, and stderr.
+struct StreamedRefusal {
+    std::vector<nlohmann::json> events;
+    std::string err;
+};
+
+[[nodiscard]] StreamedRefusal refused_in_stream(
+    bool bare, const std::function<void(const apogee::harness::Config&)>& ready) {
+    const apogee::testing::TempDir home{"runtime-stream-" + std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
+    if (bare) {
+        const std::filesystem::path interpreter =
+            apogee::training::PythonEnv{home.path() / "training" / "venv"}.interpreter();
+        std::filesystem::create_directories(interpreter.parent_path());
+        std::ofstream{interpreter} << "#!fake";
+    }
+    std::ostringstream out;
+    std::ostringstream err;
+    std::streambuf* old_out = std::cout.rdbuf(out.rdbuf());
+    std::streambuf* old_err = std::cerr.rdbuf(err.rdbuf());
+    bool threw = false;
+    {
+        const apogee::commands::JobStream job{"video generate"};
+        try {
+            ready(apogee::harness::Config{});
+        } catch (const CLI::RuntimeError& e) {
+            threw = e.get_exit_code() == 1;
+        }
+    }
+    std::cout.rdbuf(old_out);
+    std::cerr.rdbuf(old_err);
+    CHECK(threw);
+    StreamedRefusal said;
+    std::istringstream lines{out.str()};
+    for (std::string line; std::getline(lines, line);) {
+        said.events.push_back(nlohmann::json::parse(line));
+    }
+    said.err = err.str();
+    return said;
+}
+
+}  // namespace
+
+TEST_CASE("a runtime refused on a pipe is said as the open stream's error, and on stderr",
+          "[cli][video][consent][stream]") {
+    // M29: the refusal went to stderr alone, and the stream ended on `job`.
+    const auto video = [](const apogee::harness::Config& config) {
+        (void)apogee::commands::ready_video_runtime(config, "video generate");
+    };
+    const auto voice = [](const apogee::harness::Config& config) {
+        (void)apogee::commands::ready_voice_runtime(config, "voice say");
+    };
+    for (const auto& [ready, purpose, refusal] :
+         {std::tuple{std::function<void(const apogee::harness::Config&)>{video},
+                     std::string{"video generate"},
+                     std::string{"torch and diffusers are not installed in Apogee's Python "
+                                 "environment -- apogee train setup --with video"}},
+          std::tuple{std::function<void(const apogee::harness::Config&)>{voice},
+                     std::string{"voice say"},
+                     std::string{"torch and kokoro are not installed in Apogee's Python "
+                                 "environment -- apogee train setup --with voice"}}}) {
+        INFO(purpose);
+        const StreamedRefusal said = refused_in_stream(true, ready);
+        REQUIRE(said.events.size() == 2);
+        CHECK(said.events.front().at("type") == "job");
+        CHECK(said.events.back().at("type") == "error");
+        CHECK(said.events.back().at("message") == refusal);
+        CHECK(said.err == "apogee " + purpose + ": " + refusal + "\n");
+    }
+
+    // No environment at all (`require_python_env`, the sibling): the same.
+    const StreamedRefusal none = refused_in_stream(false, video);
+    REQUIRE(none.events.size() == 2);
+    CHECK(none.events.back().at("type") == "error");
+    const std::string message = none.events.back().at("message").get<std::string>();
+    CHECK(
+        message.starts_with("the Python environment has not been created yet. Run 'apogee "
+                            "train setup' first"));
+    CHECK(none.err == "apogee video generate: " + message + "\n");
 }

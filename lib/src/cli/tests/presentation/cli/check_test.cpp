@@ -4,8 +4,10 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <random>
 #include <string>
 #include <tuple>
@@ -13,10 +15,13 @@
 #include <vector>
 
 #include "agentloop/recall.h"
+#include "backends/adapters.h"
 #include "backends/provider_cache.h"
 #include "backends/provider_table.h"
+#include "cli/line_tokens.h"
 #include "contracts/assets.h"
 #include "contracts/config.h"
+#include "contracts/config_edit.h"
 #include "contracts/layout.h"
 #include "contracts/sha256.h"
 #include "embedstore/store.h"
@@ -25,13 +30,16 @@
 #include "knowledge/store.h"
 #include "modelstore/store.h"
 #include "operations/code_exec_server.h"
+#include "platform/ffmpeg.h"
 #include "platform/platform.h"
 #include "secrets/store.h"
+#include "support/cli_home.h"
 #include "support/env_guard.h"
 #include "support/fake_existence_view.h"
 #include "support/gguf_builder.h"
 #include "support/mlx_model.h"
 #include "support/pipeline_model.h"
+#include "support/towered_configs.h"
 #include "training/python_env.h"
 
 /// The doctor, against a matrix of deliberately broken installs.
@@ -46,6 +54,12 @@ namespace {
 using apogee::commands::CheckInputs;
 using apogee::commands::CheckReport;
 using apogee::commands::Status;
+
+/// `word` as a printed command spells it: double-quoted where it holds a
+/// backslash -- a Windows path -- which a shell would read as an escape.
+[[nodiscard]] std::string printed(const std::string& word) {
+    return word.find('\\') == std::string::npos ? word : "\"" + word + "\"";
+}
 
 /// A throwaway install root, removed on scope exit.
 struct Install {
@@ -1467,6 +1481,46 @@ TEST_CASE(
     CHECK(row_with(report, "versions: tuned")->status == Status::Warn);
     CHECK(row_with(report, "versions: tuned")->detail.find("does not hold") != std::string::npos);
     CHECK(report.passed());  // warnings only: the install is not broken
+
+    // An adapter version (53b): its adapter there and on the entry's
+    // adapters -- the entry's model_path is its base, never the version.
+    std::filesystem::remove(install.root / "training" / "versions" / "tuned.json");
+    const std::filesystem::path lora =
+        install.root / "training" / "versions" / "based" / "v1.lora.gguf";
+    install.write("training/versions/based/v1.lora.gguf", "GGUF lora");
+    const nlohmann::json adapters = {
+        {"backend_name", "based"},
+        {"active_version", 1},
+        {"versions", nlohmann::json::array({{{"version", 1},
+                                             {"run_id", "r1"},
+                                             {"adapter_path", lora.string()},
+                                             {"base_sha256", std::string(64, 'a')},
+                                             {"promoted_at", "t"}}})}};
+    install.write("training/versions/based.json", adapters.dump() + "\n");
+    const std::string entry =
+        "backends:\n  based:\n    type: llamacpp\n    model_path: /base.gguf\n";
+    const auto based = [&](const std::string& config) {
+        install.write("config/config.yaml", config);
+        load_into(inputs);
+        return run_checks(inputs);
+    };
+    report = based(apogee::harness::set_backend_adapters(
+        entry, "based",
+        {apogee::harness::AdapterConfig{.path = lora.string(),
+                                        .base_sha256 = std::string(64, 'a')}}));
+    versions = row_with(report, "versions: based");
+    REQUIRE(versions != nullptr);
+    CHECK(versions->status == Status::Ok);
+    CHECK(versions->detail.find("active v1 of 1, and the backend applies it") != std::string::npos);
+    report = based(entry);
+    versions = row_with(report, "versions: based");
+    REQUIRE(versions != nullptr);
+    CHECK(versions->status == Status::Warn);
+    CHECK(versions->detail.find("the backend's adapters do not name it") != std::string::npos);
+    std::filesystem::remove(lora);
+    report = run_checks(inputs);
+    CHECK(row_with(report, "versions: based")->detail.find("names an adapter that is not there") !=
+          std::string::npos);
 }
 
 TEST_CASE(
@@ -2092,6 +2146,59 @@ void install_mlx_vlm(const Install& install) {
 }  // namespace
 
 TEST_CASE(
+    "an entry over a directory mlx-vlm built warns without mlx-vlm, which it runs on for every "
+    "turn; one recorded as mlx-lm's build claims no sight",
+    "[commands][check][mlx][vision][kind]") {
+    // 53f: the doctor asks the backend's own ladder, so it says what
+    // construction would -- by the directory's recorded kind.
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", "models:\n  default: local\n" + mlx_entry(install));
+    load_into(inputs);
+    inputs.host_target = "macos-arm64";
+    make_vision_model(install);
+    install.write("mlx-model/apogee-snapshot.json",
+                  R"({"source": "convert", "transform": "mlx_vlm.convert 4bit", "files": [], )"
+                  R"("kind": "vision"})");
+    {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->status == Status::Warn);
+        CHECK(entry->detail.find("was built by mlx-vlm (its record says vision), which loads it "
+                                 "for every turn, and mlx-vlm is not installed") !=
+              std::string::npos);
+        CHECK(entry->remedy == "apogee train setup --with mlx-vlm");
+    }
+    install_mlx_vlm(install);
+    {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->status == Status::Ok);
+        CHECK(entry->detail.find("a vision model, reading images through mlx-vlm") !=
+              std::string::npos);
+    }
+    install.write("mlx-model/apogee-snapshot.json",
+                  R"({"source": "convert", "transform": "mlx_lm.convert 4bit", "files": [], )"
+                  R"("kind": "chat"})");
+    {
+        // Its vision files came along; its record says mlx-lm left the tower.
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->status == Status::Ok);
+        CHECK(entry->detail.find("vision") == std::string::npos);
+    }
+}
+
+TEST_CASE(
     "the MLX vision row says what it found: mlx-vlm present passes on its files, absent is "
     "skipped until a vision model needs it, then a warning with the fix",
     "[commands][check][mlx][vision]") {
@@ -2211,7 +2318,8 @@ TEST_CASE(
     CHECK(elsewhere.detail.find("Apple silicon macOS only") != std::string::npos);
     inputs.host_target = "macos-arm64";
 
-    // A transcription role on an mlx entry: no audio here, said as such.
+    // A transcription role on an mlx entry that hears nothing: its rung said
+    // (since M23 by 53g's ladder, which an omni model mlx-vlm built passes).
     install.write("config/config.yaml",
                   "models:\n  default: chat\n  default_transcription: local\n" +
                       mlx_entry(install) + "  chat:\n    type: mock\n");
@@ -2220,7 +2328,9 @@ TEST_CASE(
     const apogee::commands::CheckRow* deaf = row_in(report, "Config", "default_transcription");
     REQUIRE(deaf != nullptr);
     CHECK(deaf->status == Status::Warn);
-    CHECK(deaf->detail.find("an mlx backend hears no audio") != std::string::npos);
+    CHECK(deaf->detail.starts_with("local -- not mlx-vlm's build: "));
+    CHECK(deaf->remedy.find("an mlx backend over an omni model mlx-vlm built") !=
+          std::string::npos);
 }
 
 TEST_CASE(
@@ -2372,6 +2482,16 @@ TEST_CASE("the video runtime is a skip until set up, then its packages and drive
     REQUIRE(driver != nullptr);
     CHECK(driver->status == Status::Ok);
     CHECK(driver->detail == "video_generate.py matches the shipped copy");
+    // The MLX engine's driver (53l), held the same way.
+    const apogee::commands::CheckRow* mlx_driver = video_row(fresh, "mlx driver");
+    REQUIRE(mlx_driver != nullptr);
+    CHECK(mlx_driver->status == Status::Ok);
+    CHECK(mlx_driver->detail == "video_generate_mlx.py matches the shipped copy");
+    // And its speech driver (53m), held the same way.
+    const apogee::commands::CheckRow* voice_mlx_driver = video_row(fresh, "mlx voice driver");
+    REQUIRE(voice_mlx_driver != nullptr);
+    CHECK(voice_mlx_driver->status == Status::Ok);
+    CHECK(voice_mlx_driver->detail == "voice_say_mlx.py matches the shipped copy");
 
     // Set up: both packages found by their files, their versions said.
     write_fake_interpreter(install);
@@ -2896,4 +3016,1065 @@ TEST_CASE("the code-execution server's registration line quotes a path only wher
     // No interpreter, no line: never a guessed command.
     registration.interpreter.clear();
     CHECK(registration.mcp_create_arguments("code").empty());
+}
+
+TEST_CASE(
+    "ffmpeg's captions and h264 are read from its own listings, skipped and never passed "
+    "when it cannot be asked",
+    "[check][video][ffmpeg]") {
+    // 52e: a scripted probe for each case -- both abilities, neither, and an
+    // ffmpeg that would not answer -- each warning with the command that
+    // brings what is missing on that platform.
+    const Install install;
+    const std::string with_libass =
+        " ... subtitles         V->V       Render text subtitles onto input video using the "
+        "libass library.\n";
+    const std::string with_x264 =
+        " V....D libx264              libx264 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (codec "
+        "h264)\n V....D mpeg4                MPEG-4 part 2\n";
+    const auto report_for = [&install](std::string filters, std::string encoders,
+                                       std::string host) {
+        CheckInputs inputs = inputs_for(install);
+        inputs.host_target = std::move(host);
+        inputs.ffmpeg_listing = [filters, encoders](
+                                    std::string_view flag,
+                                    std::string& error) -> std::optional<std::string> {
+            if (filters == "silent") {
+                error = "ffmpeg did not answer";
+                return std::nullopt;
+            }
+            return flag == "-filters" ? filters : encoders;
+        };
+        return apogee::commands::run_checks(inputs);
+    };
+
+    const CheckReport both = report_for(with_libass, with_x264, "macos-arm64");
+    const apogee::commands::CheckRow* captions = row_in(both, "Video", "ffmpeg captions");
+    const apogee::commands::CheckRow* h264 = row_in(both, "Video", "ffmpeg h264");
+    REQUIRE(captions != nullptr);
+    REQUIRE(h264 != nullptr);
+    CHECK(captions->status == Status::Ok);
+    CHECK(h264->status == Status::Ok);
+    CHECK(captions->remedy.empty());
+
+    const CheckReport neither =
+        report_for(" ... scale  V->V  Scale.\n", " V....D mpeg4  MPEG-4 part 2\n", "macos-arm64");
+    captions = row_in(neither, "Video", "ffmpeg captions");
+    h264 = row_in(neither, "Video", "ffmpeg h264");
+    // Optional abilities: skipped with the command, never a warning on a
+    // fresh install (M11) and never a pass.
+    CHECK(captions->status == Status::Skipped);
+    CHECK(captions->detail.find("an SRT") != std::string::npos);
+    CHECK(captions->remedy ==
+          "brew install ffmpeg-full && brew unlink ffmpeg; brew link --force ffmpeg-full");
+    CHECK(h264->status == Status::Skipped);
+    CHECK(h264->remedy == "brew install ffmpeg");
+    const CheckReport linux_neither = report_for("", "", "linux-x64");
+    CHECK(row_in(linux_neither, "Video", "ffmpeg captions")->remedy == "sudo apt install ffmpeg");
+    const CheckReport windows_neither = report_for("", "", "windows-x64");
+    CHECK(row_in(windows_neither, "Video", "ffmpeg h264")->remedy == "winget install Gyan.FFmpeg");
+
+    // Not answering: skipped, with why -- never a pass.
+    const CheckReport silent = report_for("silent", "", "linux-x64");
+    for (const std::string_view name : {"ffmpeg captions", "ffmpeg h264"}) {
+        const apogee::commands::CheckRow* row = row_in(silent, "Video", name);
+        REQUIRE(row != nullptr);
+        CHECK(row->status == Status::Skipped);
+        CHECK(row->detail.find("ffmpeg did not answer") != std::string::npos);
+    }
+}
+
+TEST_CASE("an encoder listing is read by its name column alone", "[check][video][ffmpeg]") {
+    CHECK(apogee::platform::encoder_listed(" V....D libx264  libx264 H.264\n", "libx264"));
+    CHECK_FALSE(apogee::platform::encoder_listed(" V....D libx264rgb  RGB\n", "libx264"));
+    // The name in a description is not the encoder.
+    CHECK_FALSE(apogee::platform::encoder_listed(" V....D mpeg4  not libx264\n", "libx264"));
+    CHECK_FALSE(apogee::platform::encoder_listed("Encoders:\n V..... = Video\n", "libx264"));
+}
+
+TEST_CASE("the environment's row names its Python, and voice it cannot take names the rebuild",
+          "[commands][check][training][m19]") {
+    // The user's environment (2026-10-21): Homebrew's 3.14.5, five sets, its
+    // version only in pyvenv.cfg. 'train setup --with voice' could never
+    // succeed there, so the row says why and names the remedy that does.
+    Install install;
+    install.seed();
+    REQUIRE(apogee::harness::seed_data_directory(install.root).ok());
+    CheckInputs inputs = inputs_for(install);
+    write_fake_interpreter(install);
+    install.write("training/venv/apogee.json",
+                  R"({"base_python": "/opt/homebrew/bin/python3", "created_at": "x",
+                      "sets": ["prepare", "mlx", "convert", "mlx-vlm", "video"]})");
+    install.write("training/venv/pyvenv.cfg", "home = /x\nversion = 3.14.5\n");
+
+    const CheckReport report = run_checks(inputs);
+    const apogee::commands::CheckRow* env = row_with(report, "python env");
+    REQUIRE(env != nullptr);
+    CHECK(env->detail.find("(Python 3.14.5); sets: prepare, mlx, convert, mlx-vlm, video") !=
+          std::string::npos);
+    const apogee::commands::CheckRow* voice = row_in(report, "Video", "voice runtime");
+    REQUIRE(voice != nullptr);
+    CHECK(voice->status == Status::Skipped);
+    CHECK(voice->detail ==
+          "not set up -- the Python environment is on Python 3.14.5, and the "
+          "voice set runs on >=3.10,<3.13");
+    CHECK(voice->remedy == "apogee train setup --rebuild --with voice");
+
+    // On a Python it runs on, the row is as it was: install it.
+    install.write("training/venv/pyvenv.cfg", "home = /x\nversion = 3.12.13\n");
+    const CheckReport fits = run_checks(inputs);
+    const apogee::commands::CheckRow* installable = row_in(fits, "Video", "voice runtime");
+    REQUIRE(installable != nullptr);
+    CHECK(installable->remedy == "apogee train setup --with voice");
+}
+
+// ---------------------------------------------------------------------------
+// The adapter rows (53c): every registered adapter's state, read through
+// 53a's one implementation, each failure's doors run as printed.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// The Adapters section's rows, in order, as copies.
+[[nodiscard]] std::vector<apogee::commands::CheckRow> adapters_section(const CheckReport& report) {
+    std::vector<apogee::commands::CheckRow> rows;
+    std::ranges::copy_if(report.rows, std::back_inserter(rows),
+                         [](const auto& row) { return row.section == "Adapters"; });
+    return rows;
+}
+
+/// An install whose entry `local` runs a base GGUF and applies adapters --
+/// written by the test into its own config, read as the command reads it.
+struct AdapterInstall {
+    Install install;
+    std::filesystem::path base = install.root / "local" / "m-Q4_K_M.gguf";
+    std::string base_bytes = apogee::testing::minimal_gguf("llama");
+    std::string pin = apogee::models::sha256_hex(base_bytes);
+    std::filesystem::path loras = install.root / "loras";
+
+    AdapterInstall() {
+        install.seed();
+        install.write("local/m-Q4_K_M.gguf", base_bytes);
+        install.write("loras/style.gguf", "a style");
+        install.write("loras/tone.gguf", "a tone");
+    }
+
+    /// `adapters` -- a flow list's items -- on the entry, and the inputs that
+    /// read it.
+    [[nodiscard]] CheckInputs with(const std::string& adapters) const {
+        CheckInputs inputs = inputs_for(install);
+        install.write("config/config.yaml",
+                      "backends:\n  local:\n    type: llamacpp\n    model_path: " + base.string() +
+                          "\n    adapters: [" + adapters + "]\n");
+        load_into(inputs);
+        REQUIRE(inputs.config_error.empty());
+        return inputs;
+    }
+
+    [[nodiscard]] std::string item(const std::string& file, const std::string& extra = {}) const {
+        return "{path: " + (loras / file).string() + extra + ", base_sha256: " + pin + "}";
+    }
+};
+
+}  // namespace
+
+TEST_CASE("the doctor names every adapter's state: applied, missing, the wrong kind, unpinned",
+          "[commands][check][adapters]") {
+    const AdapterInstall fixture;
+    std::filesystem::create_directories(fixture.loras / "a-directory");
+    const CheckInputs inputs = fixture.with(
+        fixture.item("style.gguf", ", scale: 0.5") + ", " + fixture.item("gone.gguf") + ", " +
+        fixture.item("a-directory") + ", {path: " + (fixture.loras / "tone.gguf").string() + "}");
+    const CheckReport report = run_checks(inputs);
+    const std::vector<apogee::commands::CheckRow> rows = adapters_section(report);
+    REQUIRE(rows.size() == 4);
+    const std::string all = (fixture.loras / "style.gguf").string() + ":0.5," +
+                            (fixture.loras / "gone.gguf").string() + "," +
+                            (fixture.loras / "a-directory").string() + "," +
+                            (fixture.loras / "tone.gguf").string();
+
+    // Applied: over the base it was pinned to, at its scale.
+    CHECK(rows[0].name == "local: style.gguf");
+    CHECK(rows[0].status == Status::Ok);
+    CHECK(rows[0].detail ==
+          "applies over m-Q4_K_M.gguf at scale 0.5, pinned to its weights "
+          "(sha256 " +
+              fixture.pin.substr(0, 12) + ")");
+    // Missing: named, and the set without it is the door that takes it off.
+    CHECK(rows[1].name == "local: gone.gguf");
+    CHECK(rows[1].status == Status::Fail);
+    CHECK(rows[1].detail == "not there: " + (fixture.loras / "gone.gguf").string());
+    CHECK(rows[1].remedy == "apogee config set-backend local --adapters " +
+                                printed((fixture.loras / "style.gguf").string() + ":0.5," +
+                                        (fixture.loras / "a-directory").string() + "," +
+                                        (fixture.loras / "tone.gguf").string()) +
+                                " to take it off");
+    // A directory where llama.cpp reads a GGUF LoRA file.
+    CHECK(rows[2].name == "local: a-directory");
+    CHECK(rows[2].status == Status::Fail);
+    CHECK(rows[2].detail.starts_with("not a file -- a llamacpp entry applies a GGUF LoRA file"));
+    // Written by hand, pinned to nothing: the whole set pinned is its door.
+    CHECK(rows[3].name == "local: tone.gguf");
+    CHECK(rows[3].status == Status::Fail);
+    CHECK(rows[3].detail.starts_with("pinned to no base"));
+    CHECK(rows[3].remedy == "apogee config set-backend local --adapters " + printed(all) +
+                                " to pin the set to the weights model_path names");
+
+    // The doctor writes nothing: not even the hash memo a load keeps.
+    CHECK_FALSE(std::filesystem::exists(fixture.install.root / "cache" / "weight-hashes.json"));
+    // And with no adapter anywhere, no section at all.
+    CheckInputs plain = inputs_for(fixture.install);
+    fixture.install.write(
+        "config/config.yaml",
+        "backends:\n  local:\n    type: llamacpp\n    model_path: " + fixture.base.string() + "\n");
+    load_into(plain);
+    CHECK(adapters_section(run_checks(plain)).empty());
+}
+
+TEST_CASE(
+    "the doctor's pin row: the base changed under it is a failure naming the base, and one it "
+    "cannot read is skipped, never passed",
+    "[commands][check][adapters]") {
+    const AdapterInstall fixture;
+    // The weights the adapter was pinned to, kept in the store under their id.
+    fixture.install.write("models/m/gguf/" + fixture.pin.substr(0, 12) + "/m-F16.gguf",
+                          fixture.base_bytes);
+    const std::filesystem::path stored =
+        fixture.install.root / "models" / "m" / "gguf" / fixture.pin.substr(0, 12) / "m-F16.gguf";
+    // The entry's base now holds other weights.
+    const std::string other = apogee::testing::minimal_gguf("qwen2");
+    fixture.install.write("local/m-Q4_K_M.gguf", other);
+    const CheckInputs inputs = fixture.with(fixture.item("style.gguf"));
+    const CheckReport report = run_checks(inputs);
+    const std::vector<apogee::commands::CheckRow> rows = adapters_section(report);
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0].status == Status::Fail);
+    CHECK(rows[0].detail == "pinned to other weights (sha256 " + fixture.pin.substr(0, 12) +
+                                ") than the base " + fixture.base.string() + " holds now (" +
+                                apogee::models::sha256_hex(other).substr(0, 12) +
+                                ") -- an adapter applies only over the weights it was trained "
+                                "on, so a load refuses it");
+    // Its doors: back to the weights it was made for, or -- these being them
+    // -- the set pinned again.
+    CHECK(rows[0].remedy == "apogee config set-backend local --model-path " +
+                                printed(stored.string()) +
+                                " to run it over the weights it was pinned to, or apogee config "
+                                "set-backend local --adapters " +
+                                printed((fixture.loras / "style.gguf").string()) +
+                                " to pin the set to these weights, if they are the ones it was "
+                                "made for");
+
+    // The memo a load keeps is read, never written: a base it holds is not
+    // read again -- the doctor's hash is 53a's own.
+    const std::filesystem::path memo = fixture.install.root / "cache" / "weight-hashes.json";
+    apogee::backends::WeightHashing remembered{.memo = memo};
+    REQUIRE(apogee::backends::weights_sha256(fixture.base, remembered) ==
+            apogee::models::sha256_hex(other));
+    nlohmann::json held = nlohmann::json::parse(std::ifstream{memo});
+    const std::string key = std::filesystem::absolute(fixture.base).lexically_normal().string();
+    held["files"][key]["sha256"] = fixture.pin;  // a memo that says it is the pinned base
+    std::ofstream{memo, std::ios::binary} << held.dump(2);
+    const std::string written = held.dump(2);
+    const CheckReport trusted = run_checks(inputs);
+    CHECK(adapters_section(trusted).front().status == Status::Ok);
+    std::ifstream after{memo, std::ios::binary};
+    CHECK(std::string{std::istreambuf_iterator<char>{after}, {}} == written);
+
+    // A base that cannot be read: the pin cannot be checked -- skipped, with
+    // the door back to the stored weights, never a pass.
+    std::filesystem::remove(fixture.base);
+    const CheckReport unread = run_checks(inputs);
+    const std::vector<apogee::commands::CheckRow> skipped = adapters_section(unread);
+    REQUIRE(skipped.size() == 1);
+    CHECK(skipped[0].status == Status::Skipped);
+    CHECK(skipped[0].detail.starts_with("its pin cannot be checked: the base weights at " +
+                                        fixture.base.string() + " could not be read"));
+    CHECK(skipped[0].remedy.starts_with("apogee config set-backend local --model-path " +
+                                        printed(stored.string())));
+    // The scale is the loader's to refuse; asked again of a config read any
+    // other way, out of range is a failure with the set at scale 1 its door.
+    CheckInputs scaled = fixture.with(fixture.item("style.gguf"));
+    scaled.config.backends.at("local").adapters.front().scale = 3.0;
+    const CheckReport strong = run_checks(scaled);
+    const std::vector<apogee::commands::CheckRow> out_of_range = adapters_section(strong);
+    REQUIRE(out_of_range.size() == 1);
+    CHECK(out_of_range[0].status == Status::Fail);
+    CHECK(out_of_range[0].detail == "applied at scale 3 -- a scale is above 0 and at most 2");
+    CHECK(out_of_range[0].remedy == "apogee config set-backend local --adapters " +
+                                        printed((fixture.loras / "style.gguf").string()) +
+                                        " to apply it at scale 1");
+}
+
+TEST_CASE("an mlx entry's adapter is a directory, pinned to the model directory's weights",
+          "[commands][check][adapters][mlx]") {
+    Install install;
+    install.seed();
+    // A stored MLX model, named by its handle; its adapter as mlx-lm writes one.
+    install.write("models/m/mlx/0123456789ab/config.json", R"({"model_type": "llama"})");
+    install.write("models/m/mlx/0123456789ab/model.safetensors", "the shard");
+    install.write("loras/tone/adapter_config.json", "{}");
+    install.write("loras/tone/adapters.safetensors", "the delta");
+    install.write("loras/flat.safetensors", "not a directory");
+    // 55e: a directory short of the weights mlx-lm applies.
+    install.write("loras/half/adapter_config.json", "{}");
+    const std::filesystem::path model = install.root / "models" / "m" / "mlx" / "0123456789ab";
+    const std::string pin = apogee::backends::weights_sha256(model);
+    CheckInputs inputs = inputs_for(install);
+    const auto entry = [&](const std::string& name, const std::string& adapter) {
+        return "  " + name + ":\n    type: mlx\n    model_path: " + model.string() +
+               "\n    adapters: [{path: " + (install.root / "loras" / adapter).string() +
+               ", base_sha256: " + pin + "}]\n";
+    };
+    install.write("config/config.yaml", "backends:\n" + entry("fast", "tone") +
+                                            entry("flat", "flat.safetensors") +
+                                            entry("half", "half"));
+    load_into(inputs);
+    REQUIRE(inputs.config_error.empty());
+    const CheckReport report = run_checks(inputs);
+    const std::vector<apogee::commands::CheckRow> rows = adapters_section(report);
+    REQUIRE(rows.size() == 3);
+    CHECK(rows[0].name == "fast: tone");
+    CHECK(rows[0].status == Status::Ok);
+    CHECK(rows[0].detail ==
+          "applies over m/mlx/0123456789ab at scale 1, pinned to its weights "
+          "(sha256 " +
+              pin.substr(0, 12) + ")");
+    CHECK(rows[1].name == "flat: flat.safetensors");
+    CHECK(rows[1].status == Status::Fail);
+    CHECK(
+        rows[1].detail.starts_with("not an mlx-lm adapter directory (it is a file, not a "
+                                   "directory)"));
+    CHECK(rows[1].remedy == "apogee config set-backend flat --adapters \"\" to take it off");
+    // Never an ok row for a directory a load would fail to read whole.
+    CHECK(rows[2].name == "half: half");
+    CHECK(rows[2].status == Status::Fail);
+    CHECK(rows[2].detail == "not an mlx-lm adapter directory (it holds no adapters.safetensors): " +
+                                (install.root / "loras" / "half").string());
+}
+
+namespace {
+
+/// Each door a remedy names -- `<command> to <what it does>`, joined by
+/// `, or ` -- as the words a person types after `apogee`.
+[[nodiscard]] std::vector<std::vector<std::string>> doors_of(const std::string& remedy) {
+    std::vector<std::vector<std::string>> doors;
+    std::size_t start = 0;
+    while (start < remedy.size()) {
+        const std::size_t end = remedy.find(", or ", start);
+        std::string door = remedy.substr(start, end == std::string::npos ? end : end - start);
+        if (const std::size_t to = door.find(" to "); to != std::string::npos) {
+            door.resize(to);
+        }
+        apogee::commands::LineTokens tokens = apogee::commands::line_tokens(door);
+        REQUIRE(tokens.error.empty());
+        REQUIRE_FALSE(tokens.words.empty());
+        REQUIRE(tokens.words.front() == "apogee");
+        tokens.words.erase(tokens.words.begin());
+        doors.push_back(std::move(tokens.words));
+        if (end == std::string::npos) {
+            break;
+        }
+        start = end + 5;
+    }
+    return doors;
+}
+
+/// The Adapters rows `check --output-format json` prints for `home`.
+[[nodiscard]] nlohmann::json adapter_rows(const apogee::testing::CliHome& home) {
+    std::string out;
+    std::string err;
+    (void)home.run({"check", "--output-format", "json"}, &out, &err);
+    const nlohmann::json document = nlohmann::json::parse(out);
+    nlohmann::json rows = nlohmann::json::array();
+    for (const nlohmann::json& row : document.at("rows")) {
+        if (row.at("section") == "Adapters") {
+            rows.push_back(row);
+        }
+    }
+    return rows;
+}
+
+/// A home whose entry `local` runs a base GGUF and applies `adapters` (a
+/// flow list's items, `{loras}` standing for the adapters' directory and
+/// `{pin}` for the base's hash), with the files a scenario breaks.
+struct DoorHome {
+    apogee::testing::CliHome home{""};
+    std::filesystem::path base = home.home() / "local" / "m-Q4_K_M.gguf";
+    std::string base_bytes = apogee::testing::minimal_gguf("llama");
+    std::string pin = apogee::models::sha256_hex(base_bytes);
+    std::filesystem::path loras = home.home() / "loras";
+
+    explicit DoorHome(std::string adapters) {
+        std::filesystem::create_directories(base.parent_path());
+        std::ofstream{base, std::ios::binary} << base_bytes;
+        std::filesystem::create_directories(loras / "a-directory");
+        std::ofstream{loras / "style.gguf", std::ios::binary} << "a style";
+        std::ofstream{loras / "tone.gguf", std::ios::binary} << "a tone";
+        for (const auto& [mark, value] :
+             {std::pair<std::string, std::string>{"{loras}", loras.string()}, {"{pin}", pin}}) {
+            for (std::size_t at = adapters.find(mark); at != std::string::npos;
+                 at = adapters.find(mark)) {
+                adapters.replace(at, mark.size(), value);
+            }
+        }
+        std::ofstream{home.config_path(), std::ios::binary}
+            << "backends:\n  local:\n    type: llamacpp\n    model_path: " + base.string() +
+                   "\n    adapters: [" + adapters + "]\n";
+    }
+};
+
+}  // namespace
+
+TEST_CASE("every door an adapter row names runs as printed, and the row then passes",
+          "[commands][check][adapters][doors]") {
+    // M14's bar for 53c's rows: each door run against the state it was
+    // named for -- a fresh copy of it per door -- and the doctor asked again.
+    const std::string style = "{path: {loras}/style.gguf, base_sha256: {pin}}";
+    const std::vector<std::pair<std::string, std::string>> scenarios{
+        {"missing", style + ", {path: {loras}/gone.gguf, base_sha256: {pin}}"},
+        {"the wrong kind", style + ", {path: {loras}/a-directory, base_sha256: {pin}}"},
+        {"unpinned", style + ", {path: {loras}/tone.gguf}"},
+        {"base changed", style},
+    };
+    for (const auto& [scenario, adapters] : scenarios) {
+        INFO(scenario);
+        // Init-captures: AppleClang 15 takes no structured binding as itself.
+        const auto broken = [&kind = scenario, &items = adapters] {
+            auto made = std::make_unique<DoorHome>(items);
+            if (kind == "base changed") {
+                // The weights it was pinned to kept in the store, and the
+                // entry's base rewritten under it.
+                const std::filesystem::path kept =
+                    made->home.models() / "m" / "gguf" / made->pin.substr(0, 12) / "m-F16.gguf";
+                std::filesystem::create_directories(kept.parent_path());
+                std::ofstream{kept, std::ios::binary} << made->base_bytes;
+                std::ofstream{made->base, std::ios::binary}
+                    << apogee::testing::minimal_gguf("qwen2");
+            }
+            return made;
+        };
+        const auto failing = [](const nlohmann::json& rows) {
+            std::vector<nlohmann::json> out;
+            std::ranges::copy_if(rows, std::back_inserter(out),
+                                 [](const nlohmann::json& row) { return row["status"] != "ok"; });
+            return out;
+        };
+        const std::unique_ptr<DoorHome> named = broken();
+        const std::vector<nlohmann::json> before = failing(adapter_rows(named->home));
+        REQUIRE(before.size() == 1U);
+        REQUIRE(before.front()["status"] == "fail");
+        const std::vector<std::vector<std::string>> doors =
+            doors_of(before.front()["remedy"].get<std::string>());
+        CHECK(doors.size() == (scenario == "base changed" ? 2U : 1U));
+        for (const std::vector<std::string>& door : doors) {
+            const std::unique_ptr<DoorHome> state = broken();
+            std::string out;
+            INFO(nlohmann::json(door).dump());
+            REQUIRE(state->home.run(door, &out) == 0);
+            const nlohmann::json after = adapter_rows(state->home);
+            CHECK_FALSE(after.empty());
+            CHECK(failing(after).empty());
+        }
+    }
+}
+
+TEST_CASE("an MLX embedding entry is checked as one: its width, mlx-embeddings, its own driver",
+          "[commands][check][mlx][embedding]") {
+    // 53h: the doctor asks the same ladder construction does -- for an
+    // embedding directory, mlx-embeddings and the embedding driver -- and
+    // says what the entry is for. mlx-embeddings is reported from its files,
+    // as mlx-vlm is, and a warning only where an entry needs it.
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    install.write("mlx-model/config.json", R"({"model_type": "gemma3_text", "hidden_size": 768})");
+    install.write("mlx-model/apogee-snapshot.json",
+                  R"({"source": "convert", "transform": "mlx_embeddings.convert 4bit", )"
+                  R"("files": [], "kind": "embedding"})");
+    CheckInputs inputs = inputs_for(install);
+    inputs.host_target = "macos-arm64";
+    {
+        // Nothing needs it yet: skipped, its fix named.
+        const CheckReport report = run_checks(inputs);
+        const apogee::commands::CheckRow* embeddings = row_in(report, "MLX", "embeddings");
+        REQUIRE(embeddings != nullptr);
+        CHECK(embeddings->status == Status::Skipped);
+        CHECK(embeddings->remedy == "apogee train setup --with mlx-embeddings");
+    }
+    install.write("config/config.yaml", mlx_entry(install));
+    load_into(inputs);
+    {
+        // An entry that needs it, without it: the entry and the row warn.
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->status == Status::Warn);
+        CHECK(entry->detail.find("is an embedding model mlx-embeddings built") !=
+              std::string::npos);
+        CHECK(entry->remedy == "apogee train setup --with mlx-embeddings");
+        const apogee::commands::CheckRow* embeddings = row_in(report, "MLX", "embeddings");
+        REQUIRE(embeddings != nullptr);
+        CHECK(embeddings->status == Status::Warn);
+        CHECK(embeddings->detail.find("so local cannot embed") != std::string::npos);
+    }
+    install.write("training/venv/lib/python3.14/site-packages/mlx_embeddings/__init__.py", "");
+    install.write(
+        "training/venv/lib/python3.14/site-packages/mlx_embeddings-0.1.0.dist-info/RECORD", "");
+    {
+        // Installed: the entry says what it is and how wide, and the seeded
+        // embedding driver is held to the shipped copy.
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->status == Status::Ok);
+        CHECK(entry->detail.find("an embedding model directory (gemma3_text)") !=
+              std::string::npos);
+        CHECK(entry->detail.find("vectors 768 wide (its hidden_size)") != std::string::npos);
+        CHECK(entry->detail.find("answers no chat") != std::string::npos);
+        const apogee::commands::CheckRow* embeddings = row_in(report, "MLX", "embeddings");
+        REQUIRE(embeddings != nullptr);
+        CHECK(embeddings->status == Status::Ok);
+        CHECK(embeddings->detail.find("mlx-embeddings 0.1.0 is present") != std::string::npos);
+        const apogee::commands::CheckRow* driver = row_in(report, "MLX", "embedding driver");
+        REQUIRE(driver != nullptr);
+        CHECK(driver->status == Status::Ok);
+        CHECK(driver->detail == "mlx_embed.py matches the shipped copy");
+    }
+    std::filesystem::remove(install.root / "training" / "scripts" / "mlx_embed.py");
+    {
+        // Its own driver gone: the entry's rung names it, never the chat one's.
+        const CheckReport report = run_checks(inputs);
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        REQUIRE(entry != nullptr);
+        CHECK(entry->status == Status::Warn);
+        CHECK(entry->detail.find("mlx_embed.py") != std::string::npos);
+        CHECK(entry->remedy == "apogee check --fix");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Every MLX set's version (M23): each row says what the environment's
+// distribution records state -- `*.dist-info/METADATA`'s `Version`, and for
+// mlx-video PEP 610's `direct_url.json` -- against the set's floor or pin.
+// The environments are files the test writes, and nothing is run.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// The environment's site-packages, as the fake runtime lays it out.
+[[nodiscard]] std::filesystem::path site_of(const Install& install) {
+    return install.root / "training" / "venv" / "lib" / "python3.14" / "site-packages";
+}
+
+[[nodiscard]] std::filesystem::path venv_of(const Install& install) {
+    return install.root / "training" / "venv";
+}
+
+/// `module`'s package and the distribution record pip writes beside it:
+/// `<module>-<version>.dist-info/METADATA` naming `name` at `version` (a
+/// header left out when `version` is empty) and, for a VCS install, a
+/// `direct_url.json` naming `commit` -- files only.
+void install_distribution(const Install& install, const std::string& module,
+                          const std::string& name, const std::string& version,
+                          const std::string& commit = {}) {
+    const std::filesystem::path site = site_of(install);
+    std::error_code code;
+    for (const auto& entry : std::filesystem::directory_iterator(site, code)) {
+        if (entry.path().filename().string().starts_with(module + "-")) {
+            std::filesystem::remove_all(entry.path(), code);  // one record, as pip leaves it
+        }
+    }
+    install.write(site_of(install).lexically_relative(install.root) / module / "__init__.py", "");
+    const std::filesystem::path record =
+        site_of(install).lexically_relative(install.root) /
+        (module + "-" + (version.empty() ? std::string{"0"} : version) + ".dist-info");
+    install.write(record / "METADATA",
+                  "Metadata-Version: 2.1\nName: " + name + "\n" +
+                      (version.empty() ? std::string{} : "Version: " + version + "\n") +
+                      "Summary: a stub\n\nIts long description.\nVersion: 9.9.9\n");
+    if (!commit.empty()) {
+        install.write(record / "direct_url.json",
+                      R"({"url": "https://github.com/Blaizzy/mlx-video.git", )"
+                      R"("vcs_info": {"vcs": "git", "commit_id": ")" +
+                          commit + R"(", "requested_revision": ")" + commit + R"("}})");
+    }
+}
+
+constexpr std::string_view kPinnedCommit = "87db56a51758fefb748a359b90a5283bb8ba4837";
+
+}  // namespace
+
+TEST_CASE(
+    "each MLX set's row says its version against its floor: current passes, below it warns "
+    "naming the setup, a record that states none is held to nothing",
+    "[commands][check][mlx][m23]") {
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    inputs.host_target = "macos-arm64";
+    const std::string venv = venv_of(install).string();
+    const std::string files = " is present in " + venv + " (its files, not imported by check)";
+    const auto mlx_row = [&inputs](std::string_view name) {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        CHECK(report.passed());  // a warning, never a failure
+        const apogee::commands::CheckRow* row = row_in(report, "MLX", name);
+        REQUIRE(row != nullptr);
+        return *row;
+    };
+
+    // mlx-lm's own files, no record (the fake runtime's, and the e2e stubs'):
+    // its declared version said, and held to nothing.
+    apogee::commands::CheckRow runtime = mlx_row("runtime");
+    CHECK(runtime.status == Status::Ok);
+    CHECK(runtime.detail == "mlx-lm 0.32.0" + files +
+                                "; no distribution record of it is there, so it is not held to "
+                                "its floor, >=0.21");
+
+    // Present and current, by its record.
+    install_distribution(install, "mlx_lm", "mlx-lm", "0.32.0");
+    runtime = mlx_row("runtime");
+    CHECK(runtime.status == Status::Ok);
+    CHECK(runtime.detail == "mlx-lm 0.32.0" + files + ", at or above its floor, >=0.21");
+    CHECK(runtime.remedy.empty());
+    // Below its floor: a warning naming the setup that brings it up.
+    install_distribution(install, "mlx_lm", "mlx-lm", "0.20.5");
+    runtime = mlx_row("runtime");
+    CHECK(runtime.status == Status::Warn);
+    CHECK(runtime.detail == "mlx-lm 0.20.5" + files +
+                                ", below its floor, >=0.21 -- kept from an earlier setup until "
+                                "the 'mlx' set is installed again");
+    CHECK(runtime.remedy == "apogee train setup --with mlx");
+    install_distribution(install, "mlx_lm", "mlx-lm", "0.32.0");
+
+    // mlx-vlm set up before 53f raised its floor: 0.3.x warns.
+    install_distribution(install, "mlx_vlm", "mlx-vlm", "0.3.9");
+    apogee::commands::CheckRow vision = mlx_row("vision");
+    CHECK(vision.status == Status::Warn);
+    CHECK(vision.detail == "mlx-vlm 0.3.9" + files +
+                               ", below its floor, >=0.6.1 -- kept from an earlier setup until "
+                               "the 'mlx-vlm' set is installed again");
+    CHECK(vision.remedy == "apogee train setup --with mlx-vlm");
+    // A candidate of the floor is below it; the floor and a post release meet it.
+    install_distribution(install, "mlx_vlm", "mlx-vlm", "0.6.1rc1");
+    CHECK(mlx_row("vision").status == Status::Warn);
+    install_distribution(install, "mlx_vlm", "mlx-vlm", "0.6.1");
+    vision = mlx_row("vision");
+    CHECK(vision.status == Status::Ok);
+    CHECK(vision.detail == "mlx-vlm 0.6.1" + files +
+                               ", at or above its floor, >=0.6.1 -- an MLX vision model reads "
+                               "images as they are");
+    install_distribution(install, "mlx_vlm", "mlx-vlm", "0.6.1.post1");
+    CHECK(mlx_row("vision").status == Status::Ok);
+    // A record that states no version, or none that is a release number:
+    // said, and compared with nothing.
+    install_distribution(install, "mlx_vlm", "mlx-vlm", "");
+    vision = mlx_row("vision");
+    CHECK(vision.status == Status::Ok);
+    CHECK(vision.detail.find("; its distribution record states no version, so it is not held to "
+                             "its floor, >=0.6.1") != std::string::npos);
+    install_distribution(install, "mlx_vlm", "mlx-vlm", "0.0-vlm-stub");
+    vision = mlx_row("vision");
+    CHECK(vision.status == Status::Ok);
+    CHECK(vision.detail == "mlx-vlm 0.0-vlm-stub" + files +
+                               "; its distribution record's version, '0.0-vlm-stub', is not a "
+                               "release number, so it is not held to its floor, >=0.6.1 -- an "
+                               "MLX vision model reads images as they are");
+
+    // mlx-embeddings, bootstrapped on Apple silicon: absent reads as before.
+    apogee::commands::CheckRow embeddings = mlx_row("embeddings");
+    CHECK(embeddings.status == Status::Skipped);
+    CHECK(embeddings.detail.starts_with("not set up -- only an MLX embedding model needs it"));
+    install_distribution(install, "mlx_embeddings", "mlx-embeddings", "0.0.5");
+    embeddings = mlx_row("embeddings");
+    CHECK(embeddings.status == Status::Warn);
+    CHECK(embeddings.detail.find(", below its floor, >=0.1.0") != std::string::npos);
+    CHECK(embeddings.remedy == "apogee train setup --with mlx-embeddings");
+    install_distribution(install, "mlx_embeddings", "mlx-embeddings", "0.1.0");
+    embeddings = mlx_row("embeddings");
+    CHECK(embeddings.status == Status::Ok);
+    CHECK(embeddings.detail == "mlx-embeddings 0.1.0" + files +
+                                   ", at or above its floor, >=0.1.0 -- an MLX embedding model "
+                                   "embeds through it");
+}
+
+TEST_CASE(
+    "mlx-video's row holds its commit to the pin: on it passes, another commit or none warns, "
+    "and absent it is a skip, opt-in",
+    "[commands][check][mlx][mlx_video][m23]") {
+    const Install install;
+    install.seed();
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    inputs.host_target = "macos-arm64";
+    const auto video_row = [&inputs] {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        CHECK(report.passed());
+        const apogee::commands::CheckRow* row = row_in(report, "MLX", "video");
+        REQUIRE(row != nullptr);
+        return *row;
+    };
+    constexpr std::string_view kAbsent =
+        "not installed (opt-in) -- only 'models convert --mlx' of a Wan set and 'video generate' "
+        "on MLX need it; pip builds mlx-video from GitHub at its pin, commit 87db56a51758 "
+        "(2026-05-13)";
+    // No environment at all, then one without it: nobody asked, so a skip.
+    apogee::commands::CheckRow video = video_row();
+    CHECK(video.status == Status::Skipped);
+    CHECK(video.detail == kAbsent);
+    CHECK(video.remedy == "apogee train setup --with mlx-video");
+    write_fake_mlx_runtime(install);
+    video = video_row();
+    CHECK(video.status == Status::Skipped);
+    CHECK(video.detail == kAbsent);
+
+    const std::string files =
+        " is present in " + venv_of(install).string() + " (its files, not imported by check)";
+    constexpr std::string_view kUse =
+        " -- 'models convert --mlx' of a Wan set and 'video generate' on MLX run through it";
+    // Built from the pinned commit, as pip records it.
+    install_distribution(install, "mlx_video", "mlx-video", "0.1.0", std::string{kPinnedCommit});
+    video = video_row();
+    CHECK(video.status == Status::Ok);
+    CHECK(video.detail == "mlx-video 0.1.0 at commit 87db56a51758" + files +
+                              ", the commit Apogee pins (2026-05-13)" + std::string{kUse});
+    // Another commit: off its pin, a warning naming the setup.
+    install_distribution(install, "mlx_video", "mlx-video", "0.1.0",
+                         "0123456789abcdef0123456789abcdef01234567");
+    video = video_row();
+    CHECK(video.status == Status::Warn);
+    CHECK(video.detail == "mlx-video 0.1.0 at commit 0123456789ab" + files +
+                              ", off its pin, commit 87db56a51758 (2026-05-13) -- the one commit "
+                              "this Apogee trusts");
+    CHECK(video.remedy == "apogee train setup --with mlx-video");
+    // A record naming no commit -- not a VCS install -- is not the pin either.
+    install_distribution(install, "mlx_video", "mlx-video", "0.1.0");
+    video = video_row();
+    CHECK(video.status == Status::Warn);
+    CHECK(video.detail == "mlx-video 0.1.0" + files +
+                              ", but its record names no commit it was built from, so it is not "
+                              "its pin, commit 87db56a51758 (2026-05-13) -- the one commit this "
+                              "Apogee trusts");
+    // The package with no record at all (the e2e stubs'): held to nothing.
+    std::filesystem::remove_all(site_of(install) / "mlx_video-0.1.0.dist-info");
+    video = video_row();
+    CHECK(video.status == Status::Ok);
+    CHECK(video.detail == "mlx-video (version unstated)" + files +
+                              "; no distribution record of it is there, so it is not held to its "
+                              "pin, commit 87db56a51758 (2026-05-13)" +
+                              std::string{kUse});
+}
+
+TEST_CASE(
+    "mlx-audio's row holds it to its floor, and absent it is a skip that names the rebuild where "
+    "the environment's Python cannot take it",
+    "[commands][check][mlx][mlx_audio][m23]") {
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    inputs.host_target = "macos-arm64";
+    const auto voice_row = [&inputs] {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        CHECK(report.passed());
+        const apogee::commands::CheckRow* row = row_in(report, "MLX", "voice");
+        REQUIRE(row != nullptr);
+        return *row;
+    };
+    constexpr std::string_view kAbsent =
+        "not installed (opt-in) -- only 'models convert --mlx' of a voice model and 'voice say' "
+        "on MLX need it; mlx-audio's floor is >=0.4.0";
+    apogee::commands::CheckRow voice = voice_row();
+    CHECK(voice.status == Status::Skipped);
+    CHECK(voice.detail == kAbsent);
+    CHECK(voice.remedy == "apogee train setup --with mlx-audio");
+    // On a Python its set does not run on (M19): the rebuild is the way.
+    install.write("training/venv/pyvenv.cfg", "home = /x\nversion = 3.14.5\n");
+    install.write("training/venv/apogee.json", R"({"base_python": "/x", "sets": ["mlx"]})");
+    voice = voice_row();
+    CHECK(voice.status == Status::Skipped);
+    CHECK(voice.detail == std::string{kAbsent} +
+                              "; the Python environment is on Python 3.14.5, and the 'mlx-audio' "
+                              "set runs on >=3.10,<3.13");
+    CHECK(voice.remedy == "apogee train setup --rebuild --with mlx-audio");
+    install.write("training/venv/pyvenv.cfg", "home = /x\nversion = 3.12.13\n");
+    CHECK(voice_row().remedy == "apogee train setup --with mlx-audio");
+
+    const std::string files =
+        " is present in " + venv_of(install).string() + " (its files, not imported by check)";
+    install_distribution(install, "mlx_audio", "mlx-audio", "0.3.1");
+    voice = voice_row();
+    CHECK(voice.status == Status::Warn);
+    CHECK(voice.detail == "mlx-audio 0.3.1" + files +
+                              ", below its floor, >=0.4.0 -- kept from an earlier setup until the "
+                              "'mlx-audio' set is installed again");
+    CHECK(voice.remedy == "apogee train setup --with mlx-audio");
+    install_distribution(install, "mlx_audio", "mlx-audio", "0.6.1");
+    voice = voice_row();
+    CHECK(voice.status == Status::Ok);
+    CHECK(voice.detail == "mlx-audio 0.6.1" + files +
+                              ", at or above its floor, >=0.4.0 -- 'models convert --mlx' of a "
+                              "voice model and 'voice say' on MLX run through it");
+}
+
+TEST_CASE(
+    "an environment with every bootstrapped MLX set current and no opt-in set warns nothing in "
+    "the MLX section",
+    "[commands][check][mlx][m23][m11]") {
+    // M11's rule for what this item adds: the install's bootstrap brings
+    // mlx-lm, mlx-vlm and mlx-embeddings and never an opt-in set, so their
+    // rows pass and the opt-in rows skip.
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    install_distribution(install, "mlx_lm", "mlx-lm", "0.32.0");
+    install_distribution(install, "mlx_vlm", "mlx-vlm", "0.6.1");
+    install_distribution(install, "mlx_embeddings", "mlx-embeddings", "0.1.0");
+    CheckInputs inputs = inputs_for(install);
+    inputs.host_target = "macos-arm64";
+    const CheckReport report = run_checks(inputs);
+    INFO(render_report(report, false));
+    std::size_t mlx_rows = 0;
+    for (const apogee::commands::CheckRow& row : report.rows) {
+        if (row.section == "MLX") {
+            ++mlx_rows;
+            INFO(row.name << ": " << row.detail);
+            CHECK(row.status != Status::Warn);
+            CHECK(row.status != Status::Fail);
+        }
+    }
+    CHECK(mlx_rows == 8);  // runtime, vision, embeddings, video, voice, three drivers
+    const apogee::commands::CheckRow* video = row_in(report, "MLX", "video");
+    const apogee::commands::CheckRow* voice = row_in(report, "MLX", "voice");
+    REQUIRE(video != nullptr);
+    REQUIRE(voice != nullptr);
+    CHECK(video->status == Status::Skipped);
+    CHECK(voice->status == Status::Skipped);
+    // Off Apple silicon the section is the one skip, as before.
+    inputs.host_target = "linux-x64";
+    const CheckReport elsewhere = run_checks(inputs);
+    CHECK(row_in(elsewhere, "MLX", "video") == nullptr);
+    CHECK(row_in(elsewhere, "MLX", "voice") == nullptr);
+}
+
+TEST_CASE(
+    "an mlx entry's hearing is said beside its sight, and a transcription role on one hears as "
+    "its provider's rungs say",
+    "[commands][check][mlx][audio][m23]") {
+    // 53g: an omni model mlx-vlm built hears through it; M23 says so where
+    // its sight is said, by the same file facts `accepts_audio` reads.
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml",
+                  "models:\n  default: chat\n  default_transcription: local\n" +
+                      mlx_entry(install) + "  chat:\n    type: mock\n");
+    load_into(inputs);
+    inputs.host_target = "macos-arm64";
+    install.write("mlx-model/config.json", apogee::testing::kGemma4Config);
+    install.write("mlx-model/processor_config.json", "{}");
+    install.write("mlx-model/apogee-snapshot.json",
+                  R"({"source": "convert", "transform": "mlx_vlm.convert 4bit", "files": [], )"
+                  R"("kind": "vision"})");
+    install_distribution(install, "mlx_vlm", "mlx-vlm", "0.6.1");
+    const auto rows = [&inputs] {
+        const CheckReport report = run_checks(inputs);
+        INFO(render_report(report, false));
+        const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+        const apogee::commands::CheckRow* pointer =
+            row_in(report, "Config", "default_transcription");
+        const apogee::commands::CheckRow* audio = row_in(report, "Attachments", "audio");
+        REQUIRE(entry != nullptr);
+        REQUIRE(pointer != nullptr);
+        REQUIRE(audio != nullptr);
+        return std::tuple{*entry, *pointer, *audio};
+    };
+    {
+        // An mlx-vlm without its type's module: the tower said, and why not.
+        const auto [entry, pointer, audio] = rows();
+        CHECK(entry.status == Status::Ok);
+        CHECK(entry.detail.find("; a vision model, reading images through mlx-vlm; it has an "
+                                "audio tower, but does not hear recordings as they are -- no "
+                                "mlx-vlm module for its type: the installed mlx-vlm 0.6.1 has no "
+                                "module for its type, gemma4, so it cannot build the model to "
+                                "hear with -- apogee train setup --with mlx-vlm; its runtime is "
+                                "present") != std::string::npos);
+        CHECK(pointer.status == Status::Warn);
+        CHECK(pointer.detail.starts_with("local -- no mlx-vlm module for its type: "));
+        CHECK(pointer.remedy == "apogee train setup --with mlx-vlm");
+        CHECK(audio.detail.find("transcribed by local") == std::string::npos);
+    }
+    install.write(site_of(install).lexically_relative(install.root) / "mlx_vlm" / "models" /
+                      "gemma4" / "__init__.py",
+                  "");
+    {
+        const auto [entry, pointer, audio] = rows();
+        CHECK(entry.detail.find("; it hears recordings as they are, through mlx-vlm; its runtime "
+                                "is present") != std::string::npos);
+        CHECK(pointer.status == Status::Ok);
+        CHECK(pointer.detail == "local");
+        CHECK(audio.detail.starts_with("transcribed by local"));
+    }
+    // mlx-vlm's build of a set that only sees: no tower, so no hearing said.
+    install.write("mlx-model/config.json", apogee::testing::kQwen3VlConfig);
+    install.write(site_of(install).lexically_relative(install.root) / "mlx_vlm" / "models" /
+                      "qwen3_vl" / "__init__.py",
+                  "");
+    {
+        const auto [entry, pointer, audio] = rows();
+        CHECK(entry.detail.find("hear") == std::string::npos);
+        CHECK(pointer.status == Status::Warn);
+        CHECK(pointer.detail.starts_with("local -- no audio tower: its config.json declares none"));
+    }
+}
+
+#if !defined(_WIN32)
+TEST_CASE("the MLX rows read files and start no Python: neither the environment's nor PATH's",
+          "[commands][check][mlx][m23]") {
+    // The rows' one rule (27a, M23): what is installed, and at what version
+    // or commit, is read from files. Here every interpreter that could be
+    // asked leaves a mark if it runs at all.
+    const Install install;
+    install.seed();
+    write_fake_mlx_runtime(install);
+    (void)apogee::harness::seed_data_directory(install.root);
+    const std::filesystem::path mark = install.root / "a-python-ran";
+    const std::string marker = "#!/bin/sh\n/usr/bin/touch '" + mark.string() + "'\n";
+    const apogee::testing::TempDir path{"check-python-" + std::to_string(std::random_device{}())};
+    for (const std::filesystem::path& python :
+         {venv_of(install) / "bin" / "python", path.path() / "python3", path.path() / "python"}) {
+        std::filesystem::create_directories(python.parent_path());
+        std::ofstream{python, std::ios::binary} << marker;
+        std::filesystem::permissions(python, std::filesystem::perms::owner_all);
+    }
+    const apogee::testing::EnvGuard on_path{"PATH", path.path().string()};
+    install.write("training/venv/pyvenv.cfg", "home = /x\nversion = 3.12.13\n");
+    install_distribution(install, "mlx_lm", "mlx-lm", "0.32.0");
+    install_distribution(install, "mlx_vlm", "mlx-vlm", "0.3.9");
+    install_distribution(install, "mlx_embeddings", "mlx-embeddings", "0.1.0");
+    install_distribution(install, "mlx_video", "mlx-video", "0.1.0", std::string{kPinnedCommit});
+    install_distribution(install, "mlx_audio", "mlx-audio", "0.6.1");
+    CheckInputs inputs = inputs_for(install);
+    install.write(
+        "config/config.yaml",
+        "models:\n  default: local\n  default_transcription: local\n" + mlx_entry(install));
+    load_into(inputs);
+    inputs.host_target = "macos-arm64";
+    const CheckReport report = run_checks(inputs);
+    INFO(render_report(report, false));
+    // Every row there, each read: the warning and the versions prove it.
+    const apogee::commands::CheckRow* vision = row_in(report, "MLX", "vision");
+    const apogee::commands::CheckRow* video = row_in(report, "MLX", "video");
+    const apogee::commands::CheckRow* voice = row_in(report, "MLX", "voice");
+    const apogee::commands::CheckRow* entry = row_with(report, "backend: local");
+    REQUIRE(vision != nullptr);
+    REQUIRE(video != nullptr);
+    REQUIRE(voice != nullptr);
+    REQUIRE(entry != nullptr);
+    CHECK(vision->status == Status::Warn);
+    CHECK(video->status == Status::Ok);
+    CHECK(voice->detail.starts_with("mlx-audio 0.6.1 is present"));
+    CHECK(entry->status == Status::Ok);
+    CHECK_FALSE(std::filesystem::exists(mark));
+    // The marker is live: the interpreter it was written into does run.
+    const std::string run = "'" + (venv_of(install) / "bin" / "python").string() + "'";
+    REQUIRE(std::system(run.c_str()) == 0);  // NOLINT(cert-env33-c)
+    CHECK(std::filesystem::exists(mark));
+}
+#endif
+
+TEST_CASE("a backend's unknown key is a named warning with the key it meant, and it still loads",
+          "[commands][check][unknown-keys]") {
+    // 55g's typo matrix: `check` said `parses cleanly` and nothing else over
+    // each of these, and the entry ran as if they were not there. Now each
+    // is a row of its own, the nearest known key suggested -- and only a
+    // warning, since an older binary reading a newer release's key must load.
+    const std::vector<std::pair<std::string, std::string>> formats{{"config.yaml", R"(backends:
+  m:
+    type: mock
+    model: m
+    adaptors: [{path: /a}]
+    drafter: /models/drafter
+    colour_scheme: dark
+  api:
+    type: mock
+    sever_tools: [web_search]
+    temprature: 0.2
+  clean:
+    type: mock
+    model: m
+)"},
+                                                                   {"config.json", R"({
+  "backends": {
+    "m": {"type": "mock", "model": "m", "adaptors": [{"path": "/a"}],
+          "drafter": "/models/drafter", "colour_scheme": "dark"},
+    "api": {"type": "mock", "sever_tools": ["web_search"], "temprature": 0.2},
+    "clean": {"type": "mock", "model": "m"}
+  }
+}
+)"}};
+    for (const auto& [file, text] : formats) {
+        INFO(file);
+        Install install;
+        install.seed();
+        CheckInputs inputs = inputs_for(install);
+        inputs.config_path = install.root / "config" / file;
+        install.write("config/" + file, text);
+        load_into(inputs);
+        REQUIRE(inputs.config_error.empty());
+
+        const CheckReport report = run_checks(inputs);
+        const auto unknown = [&report](std::string_view backend, std::string_view key) {
+            const std::string name = "backend: " + std::string{backend};
+            const std::string said = "unknown key '" + std::string{key} + "'";
+            const auto found = std::ranges::find_if(report.rows, [&](const auto& row) {
+                return row.name == name && row.detail.find(said) != std::string::npos;
+            });
+            return found == report.rows.end() ? nullptr : &*found;
+        };
+        for (const auto& [backend, key, meant] :
+             std::vector<std::tuple<std::string, std::string, std::string>>{
+                 {"m", "adaptors", "adapters"},
+                 {"m", "drafter", "draft"},
+                 {"api", "sever_tools", "server_tools"},
+                 {"api", "temprature", "temperature"}}) {
+            INFO(key);
+            const apogee::commands::CheckRow* row = unknown(backend, key);
+            REQUIRE(row != nullptr);
+            CHECK(row->status == Status::Warn);
+            CHECK(row->section == "Config");
+            CHECK(row->detail == "unknown key '" + key +
+                                     "' -- no backend reads it, so it does nothing; did you "
+                                     "mean '" +
+                                     meant + "'?");
+            CHECK(row->remedy == "rename it '" + meant + "' in " + file);
+        }
+        // A key near nothing known is named with no guess.
+        const apogee::commands::CheckRow* stranger = unknown("m", "colour_scheme");
+        REQUIRE(stranger != nullptr);
+        CHECK(stranger->status == Status::Warn);
+        CHECK(stranger->detail.find("did you mean") == std::string::npos);
+        CHECK(stranger->remedy == "remove it from " + file +
+                                      " ('apogee config set-backend --help' lists a backend's "
+                                      "fields)");
+        // An entry with none has no such row; nothing fails over them.
+        CHECK(std::ranges::none_of(report.rows, [](const auto& row) {
+            return row.name == "backend: clean" && row.detail.starts_with("unknown key");
+        }));
+        CHECK(report.count(Status::Fail) == 0);
+        CHECK(std::ranges::count_if(report.rows, [](const auto& row) {
+                  return row.detail.starts_with("unknown key");
+              }) == 5);
+    }
 }

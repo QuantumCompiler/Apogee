@@ -4,6 +4,8 @@
 
 #include <sqlite3.h>
 
+#include <array>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <random>
@@ -663,13 +665,37 @@ TEST_CASE("retrieval injects only the chunks that fit its share, and says how ma
         REQUIRE(result.prefix.size() == 1);
         CHECK(result.prefix.front().content.plain_text().size() <= 1200);
         CHECK(result.notes == std::vector<std::string>{"2 of 6 chunks fit the context budget"});
+        // The sources are the two sent, never the four trimmed (52a), each
+        // score beside its retriever.
+        REQUIRE(result.sources.size() == 2);
+        for (const apogee::harness::ExcerptSource& source : result.sources) {
+            CHECK(source.file == "doc");
+            CHECK(source.retriever == "lexical");
+            CHECK(source.score > 0.0);
+        }
+        CHECK(result.sources.front().score == result.top_score);
     }
 
     SECTION("an unknown window: the limit is the only cap") {
         const RagResult result = apogee::agentloop::retrieve_for_turn(turn);
         CHECK(result.chunks == 6);
         CHECK(result.notes.empty());
+        CHECK(result.sources.size() == 6);
     }
+}
+
+TEST_CASE("nothing sent is no sources", "[agentloop][rag][sources]") {
+    Scratch scratch;
+    {
+        Store store{scratch.db()};
+        store.replace_source("doc", {"bananas are yellow"});
+    }
+    const RagResult none = apogee::agentloop::retrieve_for_turn(turn_for(scratch, "zebra"));
+    CHECK(none.prefix.empty());
+    CHECK(none.sources.empty());
+    apogee::agentloop::RagTurn missing = turn_for(scratch, "bananas");
+    missing.store_path = scratch.dir / "absent.db";
+    CHECK(apogee::agentloop::retrieve_for_turn(missing).sources.empty());
 }
 
 TEST_CASE("a graph section that cannot fit the share even alone is dropped, and said",
@@ -724,6 +750,13 @@ TEST_CASE("a chat's attachments are searched as labelled excerpts, the inlined l
     CHECK(sent.find("also mentioned") == std::string::npos);
     CHECK(result.chunks == 1);
     CHECK(result.retriever == "lexical");
+    // The excerpt sent, as its label names it (52a): the file and its lines.
+    REQUIRE(result.sources.size() == 1);
+    CHECK(result.sources[0].file == "guide.md");
+    CHECK(result.sources[0].lines == std::array<std::int64_t, 2>{1, 1});
+    CHECK_FALSE(result.sources[0].pages.has_value());
+    CHECK(result.sources[0].retriever == "lexical");
+    CHECK(result.sources[0].score == result.top_score);
 }
 
 TEST_CASE("a moment the question names is looked up in a recording's timeline, first",

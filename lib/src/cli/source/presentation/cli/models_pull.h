@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -14,6 +15,7 @@
 #include "modelstore/mlx_info.h"
 #include "modelstore/pipeline_info.h"
 #include "modelstore/sidecar.h"
+#include "modelstore/snapshot.h"
 #include "modelstore/store.h"
 #include "modelstore/voice_info.h"
 #include "training/mlx_convert.h"
@@ -85,14 +87,17 @@ struct DeletePlan {
 [[nodiscard]] DeletePlan plan_delete(const models::StoreRoots& roots, const harness::Config& config,
                                      std::string_view name);
 
-/// Whether `models delete` removes the backend entries that point into what
-/// it removes, too (M14): `--and-backends` says yes without asking; else the
-/// `count` entries are asked about through `ask` -- the question in, the
-/// answer out, nullopt for nobody to ask -- and only a yes removes them.
-/// Never silently: no flag and nobody to ask keeps them.
+/// Whether `models delete` settles what it strands, too (M14): it removes the
+/// backend entries that point into what it removes and -- since 55d -- clears
+/// the other references into it, `cleared` naming each (a `draft:`, an
+/// adapter, `models.default_video`). `--and-backends` says yes without asking;
+/// else they are asked about through `ask`, in one question -- the question
+/// in, the answer out, nullopt for nobody to ask -- and only a yes settles
+/// them. Never silently: no flag and nobody to ask keeps them all.
 [[nodiscard]] bool remove_backends_too(
     bool and_backends, const std::vector<std::string>& backends,
-    const std::function<std::optional<std::string>(const std::string& question)>& ask);
+    const std::function<std::optional<std::string>(const std::string& question)>& ask,
+    const std::vector<std::string>& cleared = {});
 
 /// The two doors for a backend whose model is gone -- each a command the
 /// binary accepts on that state: repoint it, or remove it.
@@ -128,9 +133,156 @@ struct SnapshotChoice {
 /// `given` as a model (its newest set, or `from_id`), as one set, or as a
 /// snapshot directory outside the store (its model named after the
 /// directory). Something only the old layout has is refused with the
-/// migration named.
+/// migration named, and so is a draft head -- weights that run beside their
+/// base model and never alone, the stored base named (2026-10-21): every verb
+/// that chooses here converts, and nothing converted from one is a backend --
+/// unless `drafters`, which `models convert --mlx` alone passes: a draft
+/// head's MLX build is a drafter, run beside its base (53i). A diffusion
+/// model is refused too (M20), saying what it is -- for Wan's original
+/// layout, what it lacks and whether mlx-video is installed (53k) -- unless
+/// `videos`, which `models convert --mlx` alone passes, and the set is Wan's
+/// original layout, whole, with mlx-video installed: its MLX build is a video
+/// model.
 [[nodiscard]] SnapshotChoice choose_snapshot(const models::StoreRoots& roots,
-                                             std::string_view given, std::string_view from_id = {});
+                                             std::string_view given, std::string_view from_id = {},
+                                             bool drafters = false, bool videos = false);
+
+/// Which converter `models convert --mlx` runs for a set (53f), from its own
+/// files: mlx-video for Wan's original layout (53k,
+/// `models::snapshot_wan_layout`); mlx-vlm for a draft head (53i,
+/// `models::snapshot_draft_head`),
+/// built as the drafter its speculative path runs beside a base;
+/// mlx-embeddings for an embedding model (53h, by its `modules.json`,
+/// `models::snapshot_embedding_model`); mlx-vlm, its towers kept, for a set
+/// whose `config.json` declares one (`models::snapshot_towers`) -- unless
+/// `--text-only` asks for mlx-lm's build of its language model alone -- and
+/// mlx-lm for every other. Never a name.
+struct MlxRoute {
+    training::MlxConverterKind converter = training::MlxConverterKind::MlxLm;
+    /// The towers the set declares; empty for a language model's weights.
+    std::vector<std::string> towers{};
+    /// The set is an embedding model sentence-transformers publishes (53h).
+    bool embedding = false;
+    /// The set is a draft head (53i): its MLX build is a drafter.
+    bool drafter = false;
+    /// The set is Wan's original layout (53k): its MLX build is a video
+    /// model, mlx-video's.
+    bool video = false;
+
+    /// What its build records (53e): `video` for mlx-video's build of Wan's
+    /// original layout, `drafter` for mlx-vlm's build of a draft head,
+    /// `embedding` for mlx-embeddings', `vision` for mlx-vlm's, `chat` for
+    /// mlx-lm's -- and `voice` for mlx-audio's build of a voice model (53m),
+    /// whose route is a voice model's own (`convert_voice_to_mlx`).
+    [[nodiscard]] std::string_view kind() const noexcept;
+};
+
+[[nodiscard]] MlxRoute mlx_route(const std::filesystem::path& snapshot, bool text_only = false);
+
+/// The model types `converter` in Apogee's Python environment builds, read
+/// from its own files (M15's reader): empty when it is not installed to ask.
+[[nodiscard]] std::vector<std::string> installed_mlx_model_types(
+    training::MlxConverterKind converter = training::MlxConverterKind::MlxLm);
+
+/// Whether the converter `snapshot`'s route runs (`mlx_route`, `text_only`
+/// its flag) builds its model type -- its `config.json`'s, or `as` when named
+/// (`--model-type`): nullopt when that converter is not installed to ask, or
+/// the type is unsaid, so nothing is decided without it. What MLX is offered
+/// and refused by, before anything runs (M21, the user's call: never offer a
+/// conversion that cannot work).
+[[nodiscard]] std::optional<bool> installed_mlx_builds(const std::filesystem::path& snapshot,
+                                                       std::string_view as = {},
+                                                       bool text_only = false);
+
+/// Whether the mlx-embeddings in Apogee's Python environment builds a model
+/// type (53h), read from its own `models/` once: what `models::
+/// snapshot_conversions` is handed, so an embedding model is offered MLX
+/// exactly where it would convert. Answers false when it is not installed.
+[[nodiscard]] models::EmbeddingBuilds installed_mlx_embedding_builds();
+
+/// Whether the mlx-vlm in Apogee's Python environment drafts with a model
+/// type (53i), read from its own `speculative/drafters/` (`backends::
+/// mlx_vlm_drafts`): what `models::snapshot_conversions` is handed, so a draft
+/// head is offered MLX exactly where it would convert. Answers false when it
+/// is not installed.
+[[nodiscard]] models::DrafterBuilds installed_mlx_drafter_builds();
+
+/// Whether mlx-video's Wan converter is installed in Apogee's Python
+/// environment (53k), read from its own files (`training::
+/// find_mlx_video_converter`: the converter's module, and the torch it loads
+/// checkpoints through) -- never imported.
+[[nodiscard]] bool installed_mlx_video();
+
+/// The same, as `models::snapshot_conversions` and `snapshot_diffusion_model`
+/// are handed it: read once, when first asked.
+[[nodiscard]] models::VideoConverts installed_mlx_video_converts();
+
+/// Whether mlx-audio's converter is installed in Apogee's Python environment
+/// and builds Kokoro (53m), read from its own files (`training::
+/// find_mlx_audio_converter`: the converter's module, Kokoro's package and
+/// the torch the driver reads Kokoro's checkpoint through) -- never imported.
+[[nodiscard]] bool installed_mlx_audio();
+
+/// The same, as `models::voice_conversions` is handed it: read once, when
+/// first asked.
+[[nodiscard]] models::VoiceConverts installed_mlx_audio_converts();
+
+/// The stored voice model `models convert --mlx` takes (53m).
+struct VoiceSetChoice {
+    std::filesystem::path path{};
+    /// The model it belongs to -- where its MLX build goes.
+    std::string model{};
+    /// Its id, or empty for a directory outside the store.
+    std::string id{};
+    /// Why none, when `given` named voice models but not one of them.
+    std::string error{};
+};
+
+/// The voice model `given` names for an MLX conversion (53m), or nullopt
+/// where it names none -- a SafeTensors set's way, unchanged: a
+/// `<model>/voice/<id>` handle or its bare id; a model holding no SafeTensors
+/// set and voice models (`from_id`'s, else its one, else refused naming
+/// them); or a voice model's directory outside the store.
+[[nodiscard]] std::optional<VoiceSetChoice> locate_voice_set(const models::StoreRoots& roots,
+                                                             std::string_view given,
+                                                             std::string_view from_id = {});
+
+/// The MLX conversion a set is offered (53f), by the converters installed:
+/// a language model's is mlx-lm's, as M21 decided it; an embedding model's
+/// mlx-embeddings', where it builds its type (53h); a draft head's mlx-vlm's
+/// drafter, where it drafts its type (53i); Wan's original layout's
+/// mlx-video's, where the set is whole and mlx-video is installed (53k),
+/// its gap otherwise the files it lacks or mlx-video. A set with towers is
+/// offered mlx-vlm's build, its towers kept, where the mlx-vlm installed
+/// builds its type; otherwise mlx-lm's build of its language model alone,
+/// where the mlx-lm installed builds that, and said so; otherwise none. With
+/// neither installed to ask, nothing is decided and both stand (M21).
+struct MlxOffer {
+    /// The set's towers; empty for a language model's weights.
+    std::vector<std::string> towers{};
+    /// Its `model_type`, as `config.json` says it.
+    std::string type{};
+    /// What a plain `--mlx` runs, where it can: mlx-vlm for a set with
+    /// towers, mlx-lm for a language model. nullopt where only `--text-only`
+    /// can, or nothing.
+    std::optional<training::MlxConverterKind> converter{};
+    /// `--mlx --text-only` is offered: mlx-lm builds the language model of a
+    /// set with towers. Never for a language model, which has none to leave.
+    bool text_only = false;
+    /// Why a set with towers is not offered mlx-vlm's build: mlx-vlm not
+    /// installed, or building no model of its type. Empty when it is.
+    std::string gap{};
+    /// The command that would keep its towers, where one would: mlx-vlm's
+    /// set, when it is not installed -- or, for Wan's original layout,
+    /// mlx-video's (53k). Empty otherwise.
+    std::string remedy{};
+
+    [[nodiscard]] bool offered() const noexcept {
+        return converter.has_value() || text_only;
+    }
+};
+
+[[nodiscard]] MlxOffer installed_mlx_offer(const std::filesystem::path& snapshot);
 
 /// Which GGUF `models quantize` reads.
 struct GgufChoice {
@@ -164,6 +316,38 @@ struct GgufChoice {
 /// its record says it came, checked against the recorded size and sha256 --
 /// saying what it did on stdout. False when it could not.
 [[nodiscard]] bool repair_snapshot_in_place(const std::filesystem::path& dir);
+
+// --- SafeTensors snapshots ------------------------------------------------------------
+
+/// What `pull --safetensors` stored, found stored, or completed.
+struct PulledSnapshot {
+    std::string model;
+    std::string id;
+    std::filesystem::path dir;
+    /// The files pulling it again fetched into a set already stored: what its
+    /// record lacked of what the pull takes (53j). Empty otherwise.
+    std::vector<std::string> completed{};
+};
+
+/// `models pull <owner>/<repo> --safetensors`: the whole full-weight
+/// repository -- shards, configuration, tokenizer, and for Wan's original
+/// layout its root checkpoints (`snapshot_files`, 53j) -- through the tree
+/// ladder over `client`, each shard checked against the sha256 Hugging Face
+/// publishes for it, into `<model>/safetensors/<id>` and committed by rename
+/// so a half snapshot never appears. What the training track fine-tunes and
+/// `convert` reads.
+///
+/// The id is known before a byte moves -- Hugging Face publishes every
+/// shard's sha256 -- so weights already here are found, not fetched again.
+/// For Wan's original layout alone, what their record lacks of the files the
+/// pull takes is fetched into the same set (`complete_snapshot`), which keeps
+/// its id (53j); any other set is found and left as it is. The client is a
+/// parameter so a test serves a fixture source; `chained` (M3) leaves out
+/// what to do next.
+[[nodiscard]] PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& roots,
+                                           backends::HttpClient& client,
+                                           const harness::CancellationToken& cancellation,
+                                           bool chained = false);
 
 // --- MLX models (27b) ------------------------------------------------------------------
 
@@ -274,12 +458,33 @@ struct ConvertedMlx {
 /// `config.json` says so (`models::stage_model_type_overlay`, removed
 /// either way), the snapshot untouched, and the record says it was
 /// converted as that type and what the snapshot declared.
+///
+/// The set's route (`mlx_route`, 53f) names what is made: a set with towers
+/// is built by mlx-vlm and recorded `vision`, its transform
+/// `mlx_vlm.convert <precision>`; with `text_only`, or for a language model,
+/// mlx-lm's build, recorded `chat`, exactly as before; Wan's original layout,
+/// whole with mlx-video installed, mlx-video's build, recorded `video`, its
+/// transform `mlx_video.models.wan_2.convert <precision>` (53k). `converter`
+/// is the route's.
 [[nodiscard]] ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots,
                                                 std::string_view given, std::string_view from,
                                                 const training::MlxPrecision& precision,
                                                 const training::MlxConverter& converter,
                                                 std::string_view model_type = {},
-                                                bool chained = false);
+                                                bool chained = false, bool text_only = false);
+
+/// `models convert <voice model> --mlx` (53m): an MLX voice model of a
+/// stored voice model as Kokoro publishes it, at `precision`, made by
+/// `converter` (mlx-audio's `convert` through the seeded driver, or a test's
+/// stand-in) into a staging directory, verified whole by its kind's rule and
+/// committed under the model's `mlx/` with a record naming the voice model
+/// it was made from, its transform `mlx_audio.convert <precision>` and its
+/// kind `voice`. The same model at the same precision is recognised before
+/// anything runs; Ctrl-C mid-run, or mid-hash, removes the staging.
+[[nodiscard]] ConvertedMlx convert_voice_to_mlx(const models::StoreRoots& roots,
+                                                const VoiceSetChoice& source,
+                                                const training::MlxPrecision& precision,
+                                                const training::MlxConverter& converter);
 
 /// `--register-with`'s precisions with `--mlx` (M16): `--type`'s own MLX
 /// set, each once, in the order given. Fails before anything runs on any
@@ -293,21 +498,23 @@ using MlxConverterFor = std::function<training::MlxConverter(const training::Mlx
 
 /// One command from SafeTensors to runnable `mlx` backends (M16).
 struct MlxRegisterRequest {
-    models::StoreRoots roots;
-    std::filesystem::path config_path;
+    models::StoreRoots roots{};
+    std::filesystem::path config_path{};
     /// The SafeTensors set, as `convert` takes it.
-    std::string snapshot;
-    std::string snapshot_from;
+    std::string snapshot{};
+    std::string snapshot_from{};
     /// The MLX precisions: one conversion each -- MLX quantizes as it
     /// converts -- and each its own backend.
-    std::vector<std::string> precisions;
+    std::vector<std::string> precisions{};
     /// What each backend's name begins with; empty: the model's own name.
-    std::string base_name;
+    std::string base_name{};
     /// `--model-type` (M15): every conversion made as that type.
-    std::string model_type;
+    std::string model_type{};
     /// Typed as `--register-with <list>` rather than `--register --type`:
     /// the resume line says it the same way.
     bool listed = false;
+    /// `--text-only` (53f): mlx-lm's build of a set with towers, each time.
+    bool text_only = false;
 };
 
 /// For each precision: convert the set with `models convert --mlx`'s own
@@ -370,9 +577,18 @@ struct RegisterChainRequest {
     std::string base_name;
 };
 
-/// What the chain makes things with, so a test can stand in for llama.cpp.
+/// Makes the transport a pull reaches Hugging Face through, one per client:
+/// libcurl's, or a test's fixture source (55c).
+using TransportMaker = std::function<std::unique_ptr<backends::HttpTransport>()>;
+
+/// libcurl's transport, which every pull from the command line takes.
+[[nodiscard]] TransportMaker curl_transport();
+
+/// What the chain makes things with, so a test can stand in for llama.cpp --
+/// and, since 55c, for Hugging Face.
 struct ChainTools {
     Quantizer quantize = default_quantizer();
+    TransportMaker transport = curl_transport();
 };
 
 /// Pull (when asked), convert to F16 with its projector, quantize to each
@@ -385,6 +601,32 @@ struct ChainTools {
 /// output stays in the store, and the resumed chain finds it rather than
 /// making it again.
 void run_register_chain(const RegisterChainRequest& request, const ChainTools& tools = {});
+
+/// What `models pull` was asked for: its flags, as data (55c).
+struct PullRequest {
+    models::StoreRoots roots{};
+    std::filesystem::path config_path{};
+    std::string ref{};
+    /// `--yes`: no stop for the unrunnable-architecture warning.
+    bool yes = false;
+    bool safetensors = false;
+    /// `--register`, or `--register-with` given.
+    bool registers = false;
+    std::vector<std::string> register_with{};
+    std::string base_name{};
+    bool base_name_given = false;
+    /// `--output-format stream-json`: the pull's progress as events (52b).
+    bool stream = false;
+};
+
+/// `apogee models pull`, whole: a copy from the Ollama store, a GGUF, a
+/// SafeTensors snapshot, an MLX model, a pipeline, a voice model, or the
+/// register chain. Every path stops on Ctrl-C (55c): one `InterruptScope`
+/// over the pull's work -- for the chain, over its download, each later
+/// stage under its own -- so what it staged is removed, the exit is 130, and
+/// a stream ends on its `error`. On a stream, each set stored is said last
+/// as `models info` says it.
+void run_pull(const PullRequest& request, const ChainTools& tools = {});
 
 void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_dir,
                           const RootContext& context);

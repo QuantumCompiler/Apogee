@@ -1,8 +1,10 @@
 #include "cli/models_pull.h"
 
 #include <CLI/CLI.hpp>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <condition_variable>
@@ -22,10 +24,13 @@
 #include "cli/config_cmd.h"
 #include "cli/helpers.h"
 #include "cli/interrupt.h"
+#include "cli/job_stream.h"
 #include "cli/model_chain.h"
+#include "cli/models.h"
 #include "cli/models_migrate.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
+#include "contracts/errors.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
 #include "models/acquire.h"
@@ -39,7 +44,9 @@
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
 #include "modelstore/voice_info.h"
+#include "operations/backend_fields.h"
 #include "operations/renames.h"
+#include "operations/store_references.h"
 #include "platform/platform.h"
 #include "training/convert.h"
 #include "training/mlx_convert.h"
@@ -51,9 +58,54 @@
 namespace apogee::commands {
 namespace {
 
+/// What installs mlx-video's Wan converter (53k): opt-in, never at install.
+constexpr std::string_view kMlxVideoRemedy = "apogee train setup --with mlx-video";
+
+/// What installs mlx-audio's converter and its Kokoro (53m): opt-in too.
+constexpr std::string_view kMlxAudioRemedy = "apogee train setup --with mlx-audio";
+
+/// Whether `conversions` -- what `models::snapshot_conversions` answers for a
+/// set -- holds `format`.
+[[nodiscard]] bool offers(const std::vector<std::string>& conversions, std::string_view format) {
+    return std::ranges::find(conversions, format) != conversions.end();
+}
+
+/// A failure said on the job's stream too, when one is open (52b): its
+/// `error` event carries the words stderr gets.
+void tell_job(const std::string& message) {
+    if (JobStream* job = JobStream::current(); job != nullptr) {
+        job->failed(message);
+    }
+}
+
 [[noreturn]] void fail(const std::string& message) {
     std::cerr << "apogee models: " << message << "\n";
+    tell_job(message);
     throw CLI::RuntimeError(1);
+}
+
+/// A Ctrl-C said: `cancelled -- <what>`, on stderr and as the stream's
+/// error, exit 130.
+[[noreturn]] void say_cancelled(const std::string& what) {
+    std::cerr << "apogee models: cancelled -- " << what << "\n";
+    tell_job("cancelled -- " + what);
+    throw CLI::RuntimeError(kCancelled);
+}
+
+/// A run Ctrl-C stopped: what it staged removed (none when `staging` is
+/// empty), and said.
+[[noreturn]] void cancelled_nothing_written(const std::filesystem::path& staging) {
+    if (!staging.empty()) {
+        (void)models::remove_weights(staging);
+    }
+    say_cancelled("nothing was written");
+}
+
+/// A set of weights the pull stored, for the stream's documents (52b).
+void note_stored(const std::string& model, std::string_view format, const std::string& id) {
+    if (JobStream* job = JobStream::current(); job != nullptr) {
+        job->stored(models::weights_handle(model, format, id));
+    }
 }
 
 /// A ref shaped "owner/repo…" is Hugging Face; anything else is an Ollama ref.
@@ -124,7 +176,7 @@ models::ConvertResult run_conversion(const std::filesystem::path& snapshot,
                                      const training::Converter& converter, std::int64_t estimate) {
     const std::filesystem::path partial = models::conversion_partial_path(output);
     models::ConvertResult result;
-    DownloadProgress progress{std::cout, stdout_download_options()};
+    DownloadProgress progress{std::cout, job_download_options()};
     {
         const Ticker ticker{[&progress, &partial, estimate]() {
             std::error_code code;
@@ -161,7 +213,7 @@ models::StoredFile commit_with_progress(const models::StoreRoots& roots, std::st
               << ") -- its SHA-256 names its folder in the store\n";
     models::StoredFile stored;
     {
-        DownloadProgress progress{std::cout, stdout_download_options()};
+        DownloadProgress progress{std::cout, job_download_options()};
         const InterruptScope interrupt;
         stored = models::commit_gguf(roots, model, staging, file, std::move(record),
                                      [&progress, total](std::int64_t hashed) {
@@ -173,6 +225,7 @@ models::StoredFile commit_with_progress(const models::StoreRoots& roots, std::st
     if (stored.error == models::kStopped) {
         (void)models::remove_weights(staging);
         std::cerr << "apogee models: cancelled -- nothing was written\n";
+        tell_job("cancelled -- nothing was written");
         throw CLI::RuntimeError(kCancelled);
     }
     if (!stored.error.empty()) {
@@ -203,58 +256,140 @@ std::string projector_failure(const std::string& error) {
            "'-Instruct'); a base model is what fine-tuning starts from.";
 }
 
-/// The one command that puts a stored model to use, its projector included.
+/// The one command that puts a stored model to use, its projector included
+/// -- and for an embedding model (M21), the embedding role pointed at the
+/// entry, since it answers no chat (55d).
 void print_backend_hint(const std::filesystem::path& model_file,
-                        const std::filesystem::path& projector) {
-    std::cout << "\nUse it by adding a backend:\n"
+                        const std::filesystem::path& projector, bool embedding = false) {
+    std::cout << (embedding ? "\nUse it as the embedding role by adding a backend:\n"
+                            : "\nUse it by adding a backend:\n")
               << "  apogee config add-backend <name> --type llamacpp --model-path "
               << model_file.string();
     if (!projector.empty()) {
         std::cout << " --mmproj-path " << projector.string();
     }
     std::cout << "\n";
+    if (embedding) {
+        std::cout << "  apogee config set-default-embedding <name>\n";
+    }
 }
 
-/// The configured backends whose model or projector lies inside one of `dirs`.
-/// Best effort: a config that does not load names none.
-[[nodiscard]] std::vector<std::string> backends_inside(
-    const std::string& config_flag, const std::vector<std::filesystem::path>& dirs) {
-    std::vector<std::string> names;
+/// What a delete strands (M14, 55d): every reference the one walk lists
+/// (`store_references`) that points inside one of the weights directories it
+/// removes. A backend whose weights go is stranded whole -- its entry is what
+/// is removed -- and any other reference into what goes is one to clear: a
+/// `draft:`, an adapter, `models.default_video`. Best effort: a config that
+/// does not load strands nothing.
+struct Stranded {
+    std::filesystem::path path{};
+    harness::Config config{};
+    /// The entries whose weights go.
+    std::vector<std::string> backends{};
+    /// The references to clear, none on an entry that goes whole.
+    std::vector<StoreReference> cleared{};
+};
+
+[[nodiscard]] Stranded stranded_by(const models::StoreRoots& roots, const std::string& config_flag,
+                                   const std::vector<std::filesystem::path>& dirs) {
+    Stranded out;
     try {
-        const std::filesystem::path path = harness::resolve_config_path(config_flag);
+        out.path = harness::resolve_config_path(config_flag);
         std::error_code code;
-        if (!std::filesystem::exists(path, code)) {
-            return names;
+        if (!std::filesystem::exists(out.path, code)) {
+            return out;
         }
-        const harness::Config config = harness::load_config(path);
-        for (const auto& [name, backend] : config.backends) {
-            for (const std::string& field : {backend.model_path, backend.mmproj_path}) {
-                if (field.empty()) {
-                    continue;
-                }
-                const std::filesystem::path file{harness::expand_env_and_home(field)};
-                const bool inside = std::ranges::any_of(dirs, [&file](const auto& dir) {
-                    const std::filesystem::path relative = file.lexically_relative(dir);
-                    return !relative.empty() && *relative.begin() != "..";
-                });
-                if (inside) {
-                    names.push_back(name);
-                    break;
-                }
-            }
-        }
+        out.config = harness::load_config(out.path);
     } catch (const harness::ConfigError&) {
         // `check` reports a broken config; this only warns.
+        return out;
     }
-    return names;
+    std::vector<StoreReference> others;
+    for (StoreReference& reference : store_references(out.config)) {
+        const bool inside = std::ranges::any_of(dirs, [&](const std::filesystem::path& dir) {
+            return points_inside(roots, reference, dir);
+        });
+        if (!inside) {
+            continue;
+        }
+        if (!reference.weights) {
+            others.push_back(std::move(reference));
+        } else if (std::ranges::find(out.backends, reference.backend) == out.backends.end()) {
+            out.backends.push_back(reference.backend);
+        }
+    }
+    for (StoreReference& reference : others) {
+        if (std::ranges::find(out.backends, reference.backend) == out.backends.end()) {
+            out.cleared.push_back(std::move(reference));
+        }
+    }
+    return out;
+}
+
+/// A reference a delete clears, as its lines name it.
+[[nodiscard]] std::string stranded_name(const StoreReference& reference) {
+    if (reference.backend.empty()) {
+        return reference.where();
+    }
+    if (reference.field == "adapters") {
+        return "the adapter " + reference.value + " on backend '" + reference.backend + "'";
+    }
+    return "the " + reference.field + " of backend '" + reference.backend + "'";
+}
+
+/// What stops working when `reference` names nothing, said before (55d).
+[[nodiscard]] std::string stranded_warning(const StoreReference& reference) {
+    if (reference.backend.empty()) {
+        return reference.where() +
+               " names this, and 'apogee video generate' without --model finds nothing until it "
+               "names another.";
+    }
+    if (reference.field == "adapters") {
+        return "backend '" + reference.backend + "' applies an adapter from this (" +
+               reference.value + ") and is refused until it is dropped.";
+    }
+    return "backend '" + reference.backend + "' drafts with this (its " + reference.field +
+           ") and is refused until it is cleared.";
+}
+
+/// `names` as "a", "a and b", "a, b and c".
+[[nodiscard]] std::string spoken_list(const std::vector<std::string>& names) {
+    std::string out;
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        out += (index == 0 ? "" : index + 1 == names.size() ? " and " : ", ") + names[index];
+    }
+    return out;
+}
+
+/// What the delete does about the references it clears once the weights are
+/// gone (55d): with `clear`, every one let go in one edit through the one
+/// config editor (`clear_references`) and its own line said; else each kept,
+/// the one command that clears it said.
+[[nodiscard]] std::vector<std::string> settle_references(const Stranded& stranded, bool clear) {
+    std::vector<std::string> out;
+    if (stranded.cleared.empty()) {
+        return out;
+    }
+    if (clear) {
+        harness::edit_config_file(stranded.path, [&stranded](std::string_view content) {
+            return clear_references(std::string{content}, stranded.config, stranded.cleared);
+        });
+    }
+    for (const StoreReference& reference : stranded.cleared) {
+        out.push_back(
+            clear ? "cleared " + stranded_name(reference) + " in " + stranded.path.string()
+                  : "kept " + stranded_name(reference) + ", which names nothing now -- clear it: " +
+                        clear_door(stranded.config, stranded.cleared, reference));
+    }
+    return out;
 }
 
 }  // namespace
 
 bool remove_backends_too(
     bool and_backends, const std::vector<std::string>& backends,
-    const std::function<std::optional<std::string>(const std::string& question)>& ask) {
-    if (backends.empty()) {
+    const std::function<std::optional<std::string>(const std::string& question)>& ask,
+    const std::vector<std::string>& cleared) {
+    if (backends.empty() && cleared.empty()) {
         return false;
     }
     if (and_backends) {
@@ -267,9 +402,15 @@ bool remove_backends_too(
     for (const std::string& backend : backends) {
         named += (named.empty() ? "" : ", ") + backend;
     }
-    const std::optional<std::string> answer =
-        ask(std::string{"Remove the backend "} + (backends.size() == 1 ? "entry " : "entries ") +
-            named + " too? [y/N] ");
+    std::string question;
+    if (!backends.empty()) {
+        question = std::string{"Remove the backend "} +
+                   (backends.size() == 1 ? "entry " : "entries ") + named;
+    }
+    if (!cleared.empty()) {
+        question += (question.empty() ? "Clear " : ", and clear ") + spoken_list(cleared);
+    }
+    const std::optional<std::string> answer = ask(question + " too? [y/N] ");
     return answer.has_value() && (*answer == "y" || *answer == "Y" || *answer == "yes");
 }
 
@@ -332,23 +473,134 @@ namespace {
     return model_base_name(model);  // the base its backends are named after (46a reads it too)
 }
 
-/// What `pull --safetensors` stored, or found already stored.
-struct PulledSnapshot {
-    std::string model;
-    std::string id;
-    std::filesystem::path dir;
-};
+/// How a pull of a SafeTensors set ends, standalone: what to do next with
+/// what it is. A diffusion model's weights say what they are and what runs
+/// them (M20, 53j) -- its MLX conversion said made where one stands in the
+/// store under `roots` (M24). Every other set is told the conversions the one
+/// decision offers it (`snapshot_conversions`, 55d), so each command it names
+/// is one the binary accepts on that set: a draft head's MLX drafter where the
+/// installed mlx-vlm drafts its type, and why not where it does not -- never
+/// a GGUF, nor a registration, which a draft head is refused.
+void print_snapshot_next(const models::StoreRoots& roots, const std::filesystem::path& dir,
+                         const std::string& repo_id) {
+    if (const std::optional<models::DiffusionModel> diffusion =
+            models::stored_diffusion_model(roots, dir, installed_mlx_video_converts())) {
+        std::cout << "\nThe set is " << models::describe_diffusion_model(*diffusion) << "\n";
+        return;
+    }
+    const std::vector<std::string> conversions = models::snapshot_conversions(
+        dir, installed_mlx_embedding_builds(), installed_mlx_drafter_builds());
+    if (const std::optional<models::DraftHead> head = models::snapshot_draft_head(dir)) {
+        std::cout << "\nThe set is "
+                  << models::describe_draft_head(*head, models::draft_head_bases(roots, *head))
+                  << "\n";
+        if (offers(conversions, models::kMlxFormat)) {
+            std::cout << "Make the drafter of it -- an MLX build an mlx backend over its base runs "
+                         "beside it, named as that backend's draft -- with\n  apogee models "
+                         "convert "
+                      << repo_id << " --mlx\n";
+        } else {
+            const MlxOffer offer = installed_mlx_offer(dir);
+            std::cout << "Its one conversion, an MLX drafter, is not offered here: " << offer.gap
+                      << (offer.remedy.empty() ? std::string{} : " -- " + offer.remedy) << "\n";
+        }
+        return;
+    }
+    if (!offers(conversions, models::kGgufFormat)) {
+        std::cout << "\nNo conversion takes these weights.\n";
+        return;
+    }
+    std::cout << "\nA full-weight snapshot: trainable with 'apogee train', not runnable -- make "
+                 "a GGUF of it with\n  apogee models convert "
+              << repo_id
+              << "\nNext time one command pulls, converts and registers it:\n  apogee models "
+                 "pull "
+              << repo_id << " --safetensors --register-with Q4_K_M\n";
+}
 
-/// `models pull <owner>/<repo> --safetensors`: the whole full-weight
-/// repository -- shards, configuration, tokenizer -- through the tree ladder,
-/// each shard checked against the sha256 Hugging Face publishes for it, into
-/// `<model>/safetensors/<id>` and committed by rename so a half snapshot
-/// never appears. What the training track fine-tunes and `convert` reads.
-///
-/// The id is known before a byte moves -- Hugging Face publishes every shard's
-/// sha256 -- so weights already here are found, not fetched again.
+/// The items of a tree download over `client`, each promising what the
+/// listing published of its file.
+[[nodiscard]] std::vector<models::TreeItem> tree_items(
+    backends::HttpClient& client, const models::HfRef& ref,
+    const std::vector<models::HfFile>& files, std::string_view token,
+    const harness::CancellationToken& cancellation) {
+    std::vector<models::TreeItem> items;
+    for (const models::HfFile& file : files) {
+        models::SourcePromise promise;
+        models::TreeItem item;
+        item.relative = file.path;
+        item.source = models::http_source(client, ref, models::HfRepoKind::Model, file, token,
+                                          cancellation, promise);
+        item.promise = promise;
+        items.push_back(std::move(item));
+    }
+    return items;
+}
+
+/// Pulling a set already stored again (53j): what its record lacks of the
+/// files the pull takes, fetched into the same set -- which keeps its id --
+/// each checked against what the repository publishes and recorded as it
+/// lands.
+[[nodiscard]] std::vector<std::string> complete_stored_snapshot(
+    backends::HttpClient& client, const models::HfRef& ref, const std::filesystem::path& dir,
+    const std::vector<models::HfFile>& gaps, std::string_view token,
+    const harness::CancellationToken& cancellation) {
+    std::int64_t total = 0;
+    for (const models::HfFile& file : gaps) {
+        total += file.size;
+    }
+    std::cout << "its record lacks " << gaps.size() << " file(s) this pull takes, "
+              << human_size(total) << ": fetching them into the same set\n";
+    DownloadProgress progress{std::cout, job_download_options()};
+    const models::AcquireTreeResult result = models::complete_snapshot(
+        dir, tree_items(client, ref, gaps, token, cancellation),
+        [&progress](std::size_t index, std::size_t count, std::string_view relative,
+                    std::int64_t written,
+                    std::int64_t size) { progress.file(index, count, relative, written, size); });
+    progress.finish();
+    std::vector<std::string> landed;
+    for (std::size_t i = 0; i < result.sidecars.size() && i < gaps.size(); ++i) {
+        landed.push_back(gaps[i].path);
+    }
+    if (!result.ok || cancellation.stop_requested()) {
+        // What landed before the failure -- or the Ctrl-C (55c) -- stays, on
+        // the record: pulling again fetches the rest.
+        std::string kept;
+        for (const std::string& path : landed) {
+            kept += (kept.empty() ? "" : ", ") + path;
+        }
+        if (cancellation.stop_requested()) {
+            say_cancelled(kept.empty() ? std::string{"nothing was written"}
+                                       : kept +
+                                             " landed and stays on the set's record; pull again "
+                                             "for the rest");
+        }
+        fail(result.error + (kept.empty() ? std::string{}
+                                          : " (" + kept +
+                                                " landed and stays on the set's record; pull "
+                                                "again for the rest)"));
+    }
+    std::size_t digests = 0;
+    for (const models::Sidecar& sidecar : result.sidecars) {
+        digests += sidecar.verification.digest_checked ? 1U : 0U;
+    }
+    std::string fetched;
+    for (const std::string& path : landed) {
+        fetched += (fetched.empty() ? "" : ", ") + path;
+    }
+    std::cout << "\n"
+              << dir.string() << "\n"
+              << "completed: " << fetched << "\n"
+              << "verified: " << result.files << " file(s), " << human_size(result.bytes) << ", "
+              << digests << " checked against a published sha256 -- the set keeps its id\n";
+    return landed;
+}
+
+}  // namespace
+
 PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& roots,
-                             bool chained) {
+                             backends::HttpClient& client,
+                             const harness::CancellationToken& cancellation, bool chained) {
     if (!looks_like_hf(ref)) {
         fail("--safetensors takes a Hugging Face repository (owner/repo); '" + ref +
              "' is not one");
@@ -360,9 +612,7 @@ PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& r
     if (!parsed->file.empty()) {
         fail("--safetensors downloads the whole repository; drop ':" + parsed->file + "'");
     }
-    backends::HttpClient client{std::make_unique<backends::CurlTransport>()};
     const std::string token = models::hf_token({});
-    const harness::CancellationToken cancellation;
 
     const models::HfTree tree =
         models::list_repo_tree(client, *parsed, models::HfRepoKind::Model, token, cancellation);
@@ -379,23 +629,30 @@ PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& r
              "' is a diffusion pipeline (model_index.json at its root) -- pull it without "
              "--safetensors; it lands whole in the store's pipeline/ format");
     }
-    std::vector<models::HfFile> wanted;
-    std::vector<models::SnapshotFile> published;
-    bool any_shard = false;
-    std::int64_t total = 0;
-    for (const models::HfFile& file : tree.files) {
-        if (!models::snapshot_wanted(file.path)) {
-            continue;
-        }
-        any_shard = any_shard || file.path.ends_with(".safetensors");
-        total += file.size;
-        wanted.push_back(file);
-        published.push_back({file.path, file.size, file.sha256});
-    }
-    if (!any_shard) {
+    if (std::ranges::none_of(tree.files, [](const models::HfFile& file) {
+            return models::snapshot_wanted(file.path) && file.path.ends_with(".safetensors");
+        })) {
         fail("'" + parsed->repo_id() +
              "' holds no .safetensors shards -- nothing to snapshot. For a GGUF, pull it "
              "without --safetensors");
+    }
+    // Wan's original layout comes whole, its root checkpoints with it (53j);
+    // every other repository's list is the snapshot rule's alone.
+    const models::HfWanLayout wan =
+        models::read_wan_layout(client, *parsed, tree.files, token, cancellation);
+    if (!wan.ok) {
+        fail(wan.error);
+    }
+    const std::vector<models::HfFile> wanted = models::snapshot_files(tree.files, wan.layout());
+    std::vector<models::SnapshotFile> published;
+    std::int64_t total = 0;
+    std::string checkpoints;
+    for (const models::HfFile& file : wanted) {
+        total += file.size;
+        published.push_back({file.path, file.size, file.sha256});
+        if (models::root_checkpoint(file.path)) {
+            checkpoints += (checkpoints.empty() ? "" : ", ") + file.path;
+        }
     }
 
     const std::string model = models::repo_directory_name(*parsed);
@@ -407,36 +664,47 @@ PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& r
         if (std::filesystem::is_directory(existing, code)) {
             std::cout << "already here -- these exact weights are at\n  " << existing.string()
                       << "\n";
-            return PulledSnapshot{.model = model, .id = known_id, .dir = existing};
+            PulledSnapshot pulled{.model = model, .id = known_id, .dir = existing, .completed = {}};
+            // Its id is its shards' hash, so a Wan set pulled before the pull
+            // took its checkpoints is this one: completed in place, never moved
+            // (53j). Any other set is found and left exactly as before.
+            const std::optional<models::Snapshot> record =
+                wan.layout() ? models::load_snapshot(existing) : std::nullopt;
+            const std::vector<models::HfFile> gaps = record.has_value()
+                                                         ? models::snapshot_gaps(*record, wanted)
+                                                         : std::vector<models::HfFile>{};
+            if (!gaps.empty()) {
+                pulled.completed =
+                    complete_stored_snapshot(client, *parsed, existing, gaps, token, cancellation);
+                if (!chained) {
+                    print_snapshot_next(roots, existing, parsed->repo_id());
+                }
+            }
+            return pulled;
         }
     }
     // Without a published digest on every shard the id waits for the bytes.
     const std::filesystem::path destination =
         known_id.empty() ? models::incoming_path(roots, models::kSafetensorsFormat, model)
                          : models::weights_dir(roots, models::kSafetensorsFormat, model, known_id);
+    if (wan.layout()) {
+        std::cout << "Wan's original layout (" << wan.class_name
+                  << "): its root checkpoints come too -- " << checkpoints << "\n";
+    }
     std::cout << "downloading " << wanted.size() << " file(s), " << human_size(total) << ", into "
               << (known_id.empty() ? destination.parent_path() : destination).string() << "\n";
 
-    std::vector<models::TreeItem> items;
-    std::vector<models::SourcePromise> promises;
-    promises.reserve(wanted.size());
-    for (const models::HfFile& file : wanted) {
-        promises.emplace_back();
-        models::TreeItem item;
-        item.relative = file.path;
-        item.source = models::http_source(client, *parsed, models::HfRepoKind::Model, file, token,
-                                          cancellation, promises.back());
-        item.promise = promises.back();
-        items.push_back(std::move(item));
-    }
-
-    DownloadProgress progress{std::cout, stdout_download_options()};
+    DownloadProgress progress{std::cout, job_download_options()};
     const models::AcquireTreeResult result = models::acquire_tree(
-        destination, items,
+        destination, tree_items(client, *parsed, wanted, token, cancellation),
         [&progress](std::size_t index, std::size_t count, std::string_view relative,
                     std::int64_t written,
                     std::int64_t size) { progress.file(index, count, relative, written, size); });
     progress.finish();
+    if (cancellation.stop_requested()) {
+        // The ladder removed its staging tree; the claim on the name goes too.
+        cancelled_nothing_written(destination);
+    }
     if (!result.ok) {
         fail(result.error);
     }
@@ -465,8 +733,10 @@ PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& r
         if (commit.existed) {
             std::cout << "\nalready here -- these exact weights are at\n  " << commit.dir.string()
                       << "\n";
-            return PulledSnapshot{
-                .model = model, .id = commit.dir.filename().string(), .dir = commit.dir};
+            return PulledSnapshot{.model = model,
+                                  .id = commit.dir.filename().string(),
+                                  .dir = commit.dir,
+                                  .completed = {}};
         }
         final_dir = commit.dir;
     }
@@ -485,18 +755,11 @@ PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& r
               << "verified: " << result.files << " file(s), " << human_size(result.bytes) << ", "
               << digests << " checked against a published sha256\n";
     if (!chained) {
-        std::cout
-            << "\nA full-weight snapshot: trainable with 'apogee train', not runnable -- make "
-               "a GGUF of it with\n  apogee models convert "
-            << parsed->repo_id()
-            << "\nNext time one command pulls, converts and registers it:\n  apogee models "
-               "pull "
-            << parsed->repo_id() << " --safetensors --register-with Q4_K_M\n";
+        print_snapshot_next(roots, final_dir, parsed->repo_id());
     }
-    return PulledSnapshot{.model = model, .id = final_dir.filename().string(), .dir = final_dir};
+    return PulledSnapshot{
+        .model = model, .id = final_dir.filename().string(), .dir = final_dir, .completed = {}};
 }
-
-}  // namespace
 
 DeletePlan plan_delete(const models::StoreRoots& roots, std::string_view name) {
     DeletePlan plan;
@@ -689,7 +952,18 @@ models::StoreRoots store_roots(const std::filesystem::path& models_dir,
     return models::StoreRoots{models_dir, snapshot_root(models_dir, config_flag)};
 }
 
-SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view given,
+namespace {
+
+/// An embedding model's dense layers are there: llama.cpp's converter takes
+/// them only when asked (M21).
+[[nodiscard]] bool dense_modules(const std::filesystem::path& snapshot) {
+    const std::optional<models::EmbeddingModel> embedding =
+        models::snapshot_embedding_model(snapshot);
+    return embedding.has_value() && embedding->dense;
+}
+
+/// Which set `given` names, before asking what kind of weights it holds.
+SnapshotChoice locate_snapshot(const models::StoreRoots& roots, std::string_view given,
                                std::string_view from_id) {
     SnapshotChoice choice;
     const models::StoreTarget target = models::resolve_store_target(roots, given);
@@ -753,6 +1027,268 @@ SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view
     choice.path = newest->dir;
     choice.id = newest->id;
     return choice;
+}
+
+}  // namespace
+
+SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view given,
+                               std::string_view from_id, bool drafters, bool videos) {
+    SnapshotChoice choice = locate_snapshot(roots, given, from_id);
+    if (choice.path.empty()) {
+        return choice;
+    }
+    if (const std::optional<models::DraftHead> head = models::snapshot_draft_head(choice.path);
+        head.has_value() && !drafters) {
+        // Its one conversion named where it is offered -- the installed
+        // mlx-vlm drafting its type, by the one decision (53i, 55d).
+        const bool drafter =
+            offers(models::snapshot_conversions(choice.path, {}, installed_mlx_drafter_builds()),
+                   models::kMlxFormat);
+        choice.error = models::draft_head_refusal(
+            "'" + std::string{given} + "'", *head, models::draft_head_bases(roots, *head),
+            drafter ? "apogee models convert " + std::string{given} + " --mlx" : std::string{});
+        choice.path.clear();
+    } else if (const std::optional<models::DiffusionModel> diffusion =
+                   models::stored_diffusion_model(roots, choice.path,
+                                                  installed_mlx_video_converts());
+               diffusion.has_value() && !(videos && diffusion->mlx_convertible())) {
+        // Neither language model's converter takes one (M20): refused before
+        // any Python starts, saying what it is -- for Wan's original layout,
+        // what it lacks and whether mlx-video is there to convert it, which
+        // the MLX door alone passes it to once both are (53k).
+        choice.error = models::diffusion_model_refusal("'" + std::string{given} + "'", *diffusion);
+        choice.path.clear();
+    }
+    return choice;
+}
+
+std::string_view MlxRoute::kind() const noexcept {
+    if (drafter) {
+        return models::kMlxDrafter;
+    }
+    switch (converter) {
+        case training::MlxConverterKind::MlxVlm:
+            return models::kMlxVision;
+        case training::MlxConverterKind::MlxEmbeddings:
+            return models::kMlxEmbedding;
+        case training::MlxConverterKind::MlxVideo:
+            return models::kMlxVideo;
+        case training::MlxConverterKind::MlxAudio:
+            return models::kMlxVoice;
+        case training::MlxConverterKind::MlxLm:
+            break;
+    }
+    return models::kMlxChat;
+}
+
+MlxRoute mlx_route(const std::filesystem::path& snapshot, bool text_only) {
+    MlxRoute route;
+    route.towers = models::snapshot_towers(snapshot);
+    route.embedding = models::snapshot_embedding_model(snapshot).has_value();
+    route.drafter = models::snapshot_draft_head(snapshot).has_value();
+    route.video = models::snapshot_wan_layout(snapshot).has_value();
+    route.converter = training::choose_mlx_converter(!route.towers.empty(), text_only,
+                                                     route.embedding, route.drafter, route.video);
+    return route;
+}
+
+std::vector<std::string> installed_mlx_model_types(training::MlxConverterKind converter) {
+    const backends::MlxHost host = backends::MlxHost::current();
+    return training::mlx_model_types(
+        training::find_site_package(host.venv, training::mlx_converter_package(converter)));
+}
+
+std::optional<bool> installed_mlx_builds(const std::filesystem::path& snapshot, std::string_view as,
+                                         bool text_only) {
+    const std::string type =
+        as.empty() ? models::read_mlx_config(snapshot).model_type : std::string{as};
+    const std::vector<std::string> types =
+        installed_mlx_model_types(mlx_route(snapshot, text_only).converter);
+    if (type.empty() || types.empty()) {
+        return std::nullopt;
+    }
+    return std::ranges::find(types, type) != types.end();
+}
+
+models::EmbeddingBuilds installed_mlx_embedding_builds() {
+    return
+        [types = std::optional<std::vector<std::string>>{}](std::string_view model_type) mutable {
+            if (!types.has_value()) {
+                types = installed_mlx_model_types(training::MlxConverterKind::MlxEmbeddings);
+            }
+            return std::ranges::find(*types, model_type) != types->end();
+        };
+}
+
+bool installed_mlx_video() {
+    return !training::find_mlx_video_converter(backends::MlxHost::current().venv).empty();
+}
+
+models::VideoConverts installed_mlx_video_converts() {
+    return [installed = std::optional<bool>{}]() mutable {
+        if (!installed.has_value()) {
+            installed = installed_mlx_video();
+        }
+        return *installed;
+    };
+}
+
+bool installed_mlx_audio() {
+    return !training::find_mlx_audio_converter(backends::MlxHost::current().venv).empty();
+}
+
+models::VoiceConverts installed_mlx_audio_converts() {
+    return [installed = std::optional<bool>{}]() mutable {
+        if (!installed.has_value()) {
+            installed = installed_mlx_audio();
+        }
+        return *installed;
+    };
+}
+
+std::optional<VoiceSetChoice> locate_voice_set(const models::StoreRoots& roots,
+                                               std::string_view given, std::string_view from_id) {
+    const models::StoreTarget target = models::resolve_store_target(roots, given);
+    if (!target.error.empty()) {
+        return std::nullopt;
+    }
+    if (target.outside) {
+        if (!models::is_voice_dir(target.path)) {
+            return std::nullopt;
+        }
+        return VoiceSetChoice{.path = target.path,
+                              .model = models::safe_model_name(target.path.filename().string()),
+                              .id = {},
+                              .error = {}};
+    }
+    // A model by name is a voice model's only where it holds no SafeTensors
+    // set: what `convert` read before is read the same way.
+    if (target.format.empty() && !target.id.empty()) {
+        return std::nullopt;
+    }
+    if (target.format != models::kVoiceFormat &&
+        !(target.format.empty() && models::list_store_snapshots(roots, target.model).empty())) {
+        return std::nullopt;
+    }
+    const std::vector<models::StoredVoice> voices = models::list_store_voices(roots, target.model);
+    if (voices.empty()) {
+        if (target.format.empty()) {
+            return std::nullopt;
+        }
+        return VoiceSetChoice{.path = {},
+                              .model = target.model,
+                              .id = {},
+                              .error = "no voice model " + target.id + " for " + target.model};
+    }
+    VoiceSetChoice choice{.path = {}, .model = target.model, .id = {}, .error = {}};
+    const std::string id = !target.id.empty() ? target.id : std::string{from_id};
+    for (const models::StoredVoice& stored : voices) {
+        if (stored.id == id || (id.empty() && voices.size() == 1)) {
+            choice.path = stored.dir;
+            choice.id = stored.id;
+        }
+    }
+    if (choice.path.empty()) {
+        choice.error = id.empty() ? "'" + std::string{given} + "' holds " +
+                                        std::to_string(voices.size()) + " voice models -- name one:"
+                                  : "no voice model " + id + " for " + target.model + " -- it has:";
+        for (const models::StoredVoice& stored : voices) {
+            choice.error +=
+                "\n  " + models::weights_handle(stored.model, models::kVoiceFormat, stored.id);
+        }
+    }
+    return choice;
+}
+
+models::DrafterBuilds installed_mlx_drafter_builds() {
+    return [vlm = std::optional<backends::MlxVlmPackage>{}](std::string_view model_type) mutable {
+        if (!vlm.has_value()) {
+            vlm = backends::find_mlx_vlm(backends::MlxHost::current());
+        }
+        return backends::mlx_vlm_drafts(*vlm, model_type);
+    };
+}
+
+MlxOffer installed_mlx_offer(const std::filesystem::path& snapshot) {
+    MlxOffer offer;
+    offer.towers = models::snapshot_towers(snapshot);
+    offer.type = models::read_mlx_config(snapshot).model_type;
+    if (const std::optional<models::WanLayout> wan = models::snapshot_wan_layout(snapshot)) {
+        // mlx-video's build of Wan's original layout (53k), exactly where the
+        // set is whole and mlx-video installed; with either missing, nothing
+        // is offered, and the gap says which.
+        const bool installed = installed_mlx_video();
+        if (wan->whole() && installed) {
+            offer.converter = training::MlxConverterKind::MlxVideo;
+            return offer;
+        }
+        std::string missing;
+        for (const std::string& file : wan->missing()) {
+            missing += (missing.empty() ? "" : ", ") + file;
+        }
+        offer.gap = wan->whole()
+                        ? std::string{"mlx-video is not installed in Apogee's Python environment"}
+                        : "the set lacks " + missing;
+        if (!installed) {
+            offer.remedy = std::string{kMlxVideoRemedy};
+        }
+        return offer;
+    }
+    if (models::snapshot_draft_head(snapshot).has_value()) {
+        // mlx-vlm's drafter, where the one installed drafts its type (53i):
+        // with none installed to ask, the draft-heads change's answer stands
+        // -- nothing is offered.
+        const backends::MlxVlmPackage vlm = backends::find_mlx_vlm(backends::MlxHost::current());
+        if (backends::mlx_vlm_drafts(vlm, offer.type)) {
+            offer.converter = training::MlxConverterKind::MlxVlm;
+        } else if (vlm.installed()) {
+            offer.gap =
+                "the mlx-vlm in Apogee's Python environment drafts no " +
+                (offer.type.empty() ? std::string{"model of its type"} : offer.type + " model");
+        } else {
+            offer.gap = "mlx-vlm is not installed in Apogee's Python environment";
+            offer.remedy = std::string{backends::kMlxVisionRemedy};
+        }
+        return offer;
+    }
+    if (models::snapshot_embedding_model(snapshot).has_value()) {
+        // mlx-embeddings' build, where the one installed builds its type
+        // (53h): with none installed to ask, M21's answer stands -- nothing
+        // is offered, and the GGUF is the conversion.
+        if (installed_mlx_builds(snapshot) == true) {
+            offer.converter = training::MlxConverterKind::MlxEmbeddings;
+        } else {
+            offer.gap =
+                "mlx-embeddings in Apogee's Python environment builds no " +
+                (offer.type.empty() ? std::string{"model of its type"} : offer.type + " model");
+        }
+        return offer;
+    }
+    // mlx-lm's answer: the whole route of a language model, the text-only
+    // one of a set with towers.
+    const std::optional<bool> lm = installed_mlx_builds(snapshot, {}, /*text_only=*/true);
+    if (offer.towers.empty()) {
+        if (lm != false) {
+            offer.converter = training::MlxConverterKind::MlxLm;
+        }
+        return offer;
+    }
+    // Towers kept by default (2026-10-21): mlx-vlm's build where it can be
+    // made, mlx-lm's text-only one where it can, and nothing decided where
+    // neither is installed to ask (M21).
+    const std::optional<bool> vlm = installed_mlx_builds(snapshot);
+    const bool undecided = !vlm.has_value() && !lm.has_value();
+    if (vlm == true || undecided) {
+        offer.converter = training::MlxConverterKind::MlxVlm;
+    } else if (vlm.has_value()) {
+        offer.gap = "the mlx-vlm in Apogee's Python environment builds no " +
+                    (offer.type.empty() ? std::string{"model of its type"} : offer.type + " model");
+    } else {
+        offer.gap = "mlx-vlm is not installed in Apogee's Python environment";
+        offer.remedy = std::string{backends::kMlxVisionRemedy};
+    }
+    offer.text_only = lm == true || undecided;
+    return offer;
 }
 
 GgufChoice choose_gguf(const models::StoreRoots& roots, std::string_view given,
@@ -895,9 +1431,12 @@ bool repair_snapshot_in_place(const std::filesystem::path& dir) {
 // --- MLX models (27b) ------------------------------------------------------------------
 
 std::string mlx_summary(const models::MlxInfo& info, const harness::BackendConfig& backend) {
-    std::string line = info.quantization.describe() + ", " +
-                       models::describe(models::mlx_window(info, backend)) + ", " +
-                       format_progress_size(static_cast<std::int64_t>(info.bytes));
+    // A video model has no token window (53k), nor a voice model (53m).
+    std::string line =
+        info.quantization.describe() + ", " +
+        (info.video || info.voice ? std::string{}
+                                  : models::describe(models::mlx_window(info, backend)) + ", ") +
+        format_progress_size(static_cast<std::int64_t>(info.bytes));
     if (!info.model_type.empty()) {
         line = info.model_type + ", " + line;
     }
@@ -916,6 +1455,122 @@ void print_mlx_backend_hint(const models::StoredMlx& stored) {
         std::cout << "(the mlx backend runs on Apple silicon macOS only; this build is "
                   << platform::host_target() << ")\n";
     }
+}
+
+/// What a drafter runs beside, as its conversion says it (53i): the bases its
+/// record names, else the model it measures -- "a 2560-wide gemma4 model, none
+/// stored".
+[[nodiscard]] std::string drafts_beside(const std::optional<models::DraftHead>& head,
+                                        const std::vector<std::string>& bases) {
+    std::string out;
+    for (const std::string& base : bases) {
+        out += (out.empty() ? "" : ", ") + base;
+    }
+    if (!out.empty() || !head.has_value()) {
+        return out.empty() ? std::string{"its base model"} : out;
+    }
+    return "a " + std::to_string(head->backbone_hidden_size) + "-wide " +
+           (head->family.empty() ? std::string{"model"} : head->family + " model") +
+           ", none stored";
+}
+
+/// How a drafter is put to use (53i): named as its base's `mlx` entry's
+/// draft, never registered itself -- it runs beside that base and never alone.
+void print_mlx_drafter_hint(const models::StoredMlx& stored) {
+    std::cout << "\nDraft with it beside its base -- an mlx backend over its base's MLX build "
+                 "(converted with --mlx) -- by naming it as that backend's draft:\n"
+              << "  apogee config set-backend <that backend> --draft " << stored.dir.string()
+              << "\n";
+    if (platform::host_target() != "macos-arm64") {
+        std::cout << "(the mlx backend runs on Apple silicon macOS only; this build is "
+                  << platform::host_target() << ")\n";
+    }
+}
+
+/// What an `mlx` entry over an embedding model is for (53h): the role that
+/// names it, in the one wording the standalone verb and the chain share.
+[[nodiscard]] std::string embedding_role_note(const std::string& name) {
+    return "note: an embedding model -- the backend embeds and answers no chat; point the "
+           "embedding role at it: apogee config set-default-embedding " +
+           name;
+}
+
+/// The one thing to type once a chain has registered `name` (M3, M16): chat
+/// with it -- or, for an embedding model's entry, which answers no chat,
+/// point the embedding role at it (55d), on either route.
+[[nodiscard]] std::string next_step(const std::string& name, bool embedding) {
+    return embedding
+               ? "point the embedding role at it:  apogee config set-default-embedding " + name
+               : "chat with one:  apogee chat -m " + name;
+}
+
+/// The two commands that put an MLX embedding model to use (53h): an `mlx`
+/// entry over it, and the embedding role pointed at that entry.
+void print_mlx_embedding_hint(const models::StoredMlx& stored) {
+    const std::string name = models::stored_mlx_name(stored);
+    std::cout << "\nUse it as the embedding role by adding a backend:\n"
+              << "  apogee config add-backend " << name << " --type mlx --model-path "
+              << stored.dir.string() << "\n"
+              << "  apogee config set-default-embedding " << name << "\n";
+    if (platform::host_target() != "macos-arm64") {
+        std::cout << "(the mlx backend runs on Apple silicon macOS only; this build is "
+                  << platform::host_target() << ")\n";
+    }
+}
+
+/// An embedding model's modules, as its `modules.json` names them (M21):
+/// "Transformer, Pooling, Dense, Dense, Normalize".
+[[nodiscard]] std::string embedding_modules(const std::filesystem::path& snapshot) {
+    std::string out;
+    if (const std::optional<models::EmbeddingModel> model =
+            models::snapshot_embedding_model(snapshot)) {
+        for (const std::string& word : model->modules) {
+            out += (out.empty() ? "" : ", ") + word;
+        }
+    }
+    return out;
+}
+
+/// What mlx-video's README says an MLX build of a Wan transformer weighs
+/// (53k), as its Wan README states it at the pinned commit (read 2026-10-21):
+/// the 1.3B's and the 14B's, in bf16 and at 4 bits, and no other model or
+/// precision. Each is known by its transformer's width (`dim`), the fact its
+/// config states that tells them apart.
+struct WanReadmeSize {
+    std::int64_t dim = 0;
+    std::string_view model{};
+    std::string_view bf16{};
+    std::string_view four_bit{};
+};
+
+constexpr std::array<WanReadmeSize, 2> kWanReadmeSizes{{
+    {.dim = 1536, .model = "Wan2.1's 1.3B", .bf16 = "2.7 GB", .four_bit = "799 MB"},
+    {.dim = 5120, .model = "Wan's 14B", .bf16 = "about 28 GB", .four_bit = "about 8 GB"},
+}};
+
+/// The size a conversion of Wan's original layout says beside its precision
+/// (53k): the README's figure for its transformer where it states one, and
+/// that it states none otherwise -- never a figure of Apogee's own.
+[[nodiscard]] std::string wan_readme_estimate(const std::filesystem::path& snapshot,
+                                              const training::MlxPrecision& precision) {
+    std::ifstream in{snapshot / "config.json", std::ios::binary};
+    const nlohmann::json config = nlohmann::json::parse(in, nullptr, false);
+    const std::int64_t dim =
+        config.is_object() && config.contains("dim") && config["dim"].is_number_integer()
+            ? config["dim"].get<std::int64_t>()
+            : 0;
+    const auto row = std::ranges::find(kWanReadmeSizes, dim, &WanReadmeSize::dim);
+    const std::string_view figure = row == kWanReadmeSizes.end() ? std::string_view{}
+                                    : precision.name == "bf16"   ? row->bf16
+                                    : precision.name == "4bit"   ? row->four_bit
+                                                                 : std::string_view{};
+    if (figure.empty()) {
+        return "no size estimate -- mlx-video's README states none for this model" +
+               (row == kWanReadmeSizes.end() ? std::string{}
+                                             : " at " + std::string{precision.name});
+    }
+    return "its transformer " + std::string{figure} + ", as mlx-video's README states for " +
+           std::string{row->model};
 }
 
 [[nodiscard]] models::StoredMlx stored_at(const models::StoreRoots& roots, std::string_view model,
@@ -982,10 +1637,41 @@ void print_mlx_backend_hint(const models::StoredMlx& stored) {
            " against a published sha256" + none + "; " + std::string{read_whole};
 }
 
-[[noreturn]] void cancelled_nothing_written(const std::filesystem::path& staging) {
-    (void)models::remove_weights(staging);
-    std::cerr << "apogee models: cancelled -- nothing was written\n";
-    throw CLI::RuntimeError(kCancelled);
+/// What a pulled MLX set's last rung read whole, by its layout (M22): a
+/// language model's configuration, tokenizer and shards, or a video or voice
+/// model's own files, as its conversion says them.
+[[nodiscard]] std::string mlx_read_whole(const models::MlxInfo& info,
+                                         const std::filesystem::path& dir) {
+    const std::string shards = std::to_string(info.shards.size()) + " shard header(s)";
+    if (info.video) {
+        return std::string{models::kMlxVideoFiles} + " -- " + shards + " read whole";
+    }
+    if (info.voice) {
+        return std::string{models::kMlxVoiceFiles} + " -- " + shards + " and " +
+               std::to_string(models::read_mlx_voice_info(dir).voices.size()) +
+               " voice(s) read whole";
+    }
+    return "config.json, a tokenizer and " + shards + " read whole";
+}
+
+/// How a pulled MLX set is put to use, by what its files say it is (M22): a
+/// model an mlx backend chats with gets a backend's hint, as every pull did;
+/// any other kind its kind line, then what uses it, as its conversion says.
+void print_pulled_mlx_hint(const models::StoredMlx& stored, const models::MlxKind& kind) {
+    if (kind.backend()) {
+        print_mlx_backend_hint(stored);
+        return;
+    }
+    std::cout << "kind: " << models::describe(kind) << "\n";
+    if (kind.embeds()) {
+        print_mlx_embedding_hint(stored);
+    } else if (kind.word == models::kMlxDrafter) {
+        print_mlx_drafter_hint(stored);
+    } else if (kind.word == models::kMlxVoice) {
+        std::cout << "\nSpeak with it on MLX:\n  apogee voice say \"<text>\" -o speech.wav --model "
+                  << models::weights_handle(stored.model, models::kMlxFormat, stored.id) << "\n";
+    }
+    // A video model has no backend to add (53k): its kind line says what runs it.
 }
 
 }  // namespace
@@ -1038,7 +1724,8 @@ PulledMlx pull_mlx(const std::string& ref, const models::StoreRoots& roots,
             pulled.dir = existing;
             pulled.existed = true;
             pulled.info = models::read_mlx_info(existing);
-            print_mlx_backend_hint(stored_at(roots, pulled.model, existing));
+            print_pulled_mlx_hint(stored_at(roots, pulled.model, existing),
+                                  models::read_mlx_kind(existing));
             return pulled;
         }
     }
@@ -1061,7 +1748,7 @@ PulledMlx pull_mlx(const std::string& ref, const models::StoreRoots& roots,
         item.promise = promises.back();
         items.push_back(std::move(item));
     }
-    DownloadProgress progress{std::cout, stdout_download_options()};
+    DownloadProgress progress{std::cout, job_download_options()};
     const models::AcquireTreeResult result = models::acquire_tree(
         staging, items,
         [&progress](std::size_t index, std::size_t count, std::string_view relative,
@@ -1078,8 +1765,9 @@ PulledMlx pull_mlx(const std::string& ref, const models::StoreRoots& roots,
 
     // The last rung: the files make a model mlx-lm can load -- its
     // configuration, a tokenizer, every shard the index names and each
-    // shard's header within its file. A repository that is not one lands
-    // nothing.
+    // shard's header within its file -- or, where its files say it is a
+    // video or voice model (M22), that layout's files, each whole. A
+    // repository that is not one lands nothing.
     pulled.info = models::read_mlx_info(staging);
     if (!pulled.info.complete) {
         (void)models::remove_weights(staging);
@@ -1101,17 +1789,17 @@ PulledMlx pull_mlx(const std::string& ref, const models::StoreRoots& roots,
     } else {
         std::cout << "\n"
                   << stored.dir.string() << "\n"
-                  << pull_verification(result, "config.json, a tokenizer and " +
-                                                   std::to_string(pulled.info.shards.size()) +
-                                                   " shard header(s) read whole")
-                  << "\n";
+                  << pull_verification(result, mlx_read_whole(pulled.info, pulled.dir)) << "\n";
     }
     std::cout << "mlx model: " << mlx_summary(pulled.info) << "\n";
-    if (!pulled.info.mlx_format) {
+    // What its files say it is (M22) decides what is said of mlx-lm, and
+    // what puts it to use.
+    const models::MlxKind kind = models::read_mlx_kind(pulled.dir);
+    if (!pulled.info.mlx_format && kind.backend()) {
         std::cout << "note: its files carry no mlx-lm marks (no quantization, shards not saved by "
                      "mlx-lm) -- mlx-lm reads such weights all the same\n";
     }
-    print_mlx_backend_hint(stored_at(roots, pulled.model, pulled.dir));
+    print_pulled_mlx_hint(stored_at(roots, pulled.model, pulled.dir), kind);
     return pulled;
 }
 
@@ -1202,12 +1890,12 @@ PulledPipeline pull_pipeline(const std::string& ref, const models::StoreRoots& r
         item.promise = promises.back();
         items.push_back(std::move(item));
     }
-    DownloadProgress progress{std::cout, stdout_download_options()};
+    DownloadProgress progress{std::cout, job_download_options()};
     const models::AcquireTreeResult result = models::acquire_tree(
         staging, items,
-        [&progress](std::size_t index, std::size_t count, std::string_view relative,
+        [&progress](std::size_t nth, std::size_t count, std::string_view relative,
                     std::int64_t written,
-                    std::int64_t size) { progress.file(index, count, relative, written, size); });
+                    std::int64_t size) { progress.file(nth, count, relative, written, size); });
     progress.finish();
     if (cancellation.stop_requested()) {
         cancelled_nothing_written(staging);
@@ -1315,7 +2003,7 @@ PulledVoice pull_voice(const std::string& ref, const models::StoreRoots& roots,
         item.promise = promises.back();
         items.push_back(std::move(item));
     }
-    DownloadProgress progress{std::cout, stdout_download_options()};
+    DownloadProgress progress{std::cout, job_download_options()};
     const models::AcquireTreeResult result = models::acquire_tree(
         staging, items,
         [&progress](std::size_t index, std::size_t count, std::string_view relative,
@@ -1363,8 +2051,12 @@ PulledVoice pull_voice(const std::string& ref, const models::StoreRoots& roots,
 ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_view given,
                                   std::string_view from, const training::MlxPrecision& precision,
                                   const training::MlxConverter& converter,
-                                  std::string_view model_type, bool chained) {
-    const SnapshotChoice source = choose_snapshot(roots, given, from);
+                                  std::string_view model_type, bool chained, bool text_only) {
+    // A draft head is chosen too (53i): its MLX build is a drafter, which
+    // the command's door has already asked mlx-vlm about -- and Wan's
+    // original layout, whole with mlx-video installed (53k).
+    const SnapshotChoice source =
+        choose_snapshot(roots, given, from, /*drafters=*/true, /*videos=*/true);
     if (!source.error.empty()) {
         fail(source.error);
     }
@@ -1373,9 +2065,24 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
         fail(damaged + " -- or repair it in place with 'apogee models repair " + source.model +
              "'");
     }
-    if (const std::string refused = models::mlx_conversion_refusal(source.path, {});
+    // Which converter builds it, from its own files (53f): mlx-vlm keeps a
+    // set's towers, and mlx-lm builds a language model -- or, asked, a
+    // towered set's language model alone; mlx-embeddings an embedding model
+    // whole (53h), which the ladder lets through for it alone.
+    const MlxRoute route = mlx_route(source.path, text_only);
+    const bool vlm = route.converter == training::MlxConverterKind::MlxVlm;
+    // The ladder lifts M21's refusal for the embedding route only where the
+    // mlx-embeddings installed builds the set's type -- the door's own
+    // question, asked again here so no other way in skips it.
+    const bool embeds = route.embedding && installed_mlx_builds(source.path, model_type) == true;
+    if (const std::string refused = models::mlx_conversion_refusal(
+            source.path, {}, route.embedding && !embeds ? std::string_view{} : route.kind());
         !refused.empty()) {
         fail(refused);
+    }
+    if (text_only && route.towers.empty() && !route.video) {
+        std::cout << "the snapshot declares no vision or audio tower -- --text-only changes "
+                     "nothing; converting it as it is\n";
     }
 
     ConvertedMlx out;
@@ -1384,7 +2091,15 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
     record.ref =
         source.id.empty() ? source.path.string() : source.model + "/safetensors/" + source.id;
     record.source = "convert";
-    record.transform = "mlx_lm.convert " + std::string{precision.name};
+    record.transform = std::string{training::mlx_converter_entry(route.converter)} + " " +
+                       std::string{precision.name};
+    // A drafter names the bases it runs beside (53i): the stored models of
+    // its family as wide as it reads, measured now -- the draft-heads
+    // change's own finding, by the name each is stored under.
+    const std::optional<models::DraftHead> head = models::snapshot_draft_head(source.path);
+    if (route.drafter && head.has_value()) {
+        record.bases = models::draft_head_bases(roots, *head);
+    }
     // The user's word on the type (M15), recorded for good.
     std::string declared;
     if (!model_type.empty()) {
@@ -1412,18 +2127,44 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
             out.dir = stored.dir;
             out.existed = true;
             out.info = models::read_mlx_info(stored.dir);
-            if (!chained) {
+            if (!chained && route.drafter) {
+                print_mlx_drafter_hint(stored);
+            } else if (!chained && route.embedding) {
+                print_mlx_embedding_hint(stored);
+            } else if (!chained && !route.video) {
+                // A video model has no backend to add (53k).
                 print_mlx_backend_hint(stored);
             }
             return out;
         }
     }
 
-    const std::int64_t estimate = models::estimated_mlx_bytes(
-        models::snapshot_elements(source.path).value_or(0), precision.bits);
+    // A video model's size is mlx-video's README's to state, where it does
+    // (53k): never Apogee's own reckoning of its parts.
+    const std::int64_t estimate =
+        route.video ? 0
+                    : models::estimated_mlx_bytes(
+                          models::snapshot_elements(source.path).value_or(0), precision.bits);
+    const std::string towers = models::describe_towers(route.towers);
     std::cout << "converting " << source.path.string() << " to MLX (" << precision.name
-              << (estimate > 0 ? ", about " + format_progress_size(estimate) : std::string{})
-              << ") -- mlx-lm's converter, in Apogee's Python environment\n";
+              << (route.video    ? "; " + wan_readme_estimate(source.path, precision)
+                  : estimate > 0 ? ", about " + format_progress_size(estimate)
+                                 : std::string{})
+              << ") -- "
+              << (route.video     ? "mlx-video's converter, Wan's original layout (" +
+                                        models::snapshot_wan_layout(source.path)->class_name +
+                                        ") built into an MLX video model"
+                  : route.drafter ? "mlx-vlm's converter, a drafter to run beside " +
+                                        drafts_beside(head, record.bases)
+                  : route.embedding
+                      ? "mlx-embeddings' converter, an embedding model built whole (" +
+                            embedding_modules(source.path) + ")"
+                  : vlm ? "mlx-vlm's converter, its towers kept (" + towers + ")"
+                  : route.towers.empty()
+                      ? std::string{"mlx-lm's converter"}
+                      : "mlx-lm's converter, its language model alone (--text-only: " + towers +
+                            " left out)")
+              << ", in Apogee's Python environment\n";
     // A view the converter reads as the named type, gone however this ends.
     std::filesystem::path overlay;
     if (!model_type.empty()) {
@@ -1461,7 +2202,7 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
         models::incoming_path(roots, models::kMlxFormat, source.model);
     models::MlxConvertResult result;
     {
-        DownloadProgress progress{std::cout, stdout_download_options()};
+        DownloadProgress progress{std::cout, job_download_options()};
         {
             const Ticker ticker{[&progress, &staging, estimate]() {
                 progress.bytes(bytes_under(staging), estimate);
@@ -1475,7 +2216,7 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
                     return converter(overlay.empty() ? snapshot : overlay, output, {},
                                      cancellation);
                 },
-                InterruptScope::token());
+                InterruptScope::token(), route.kind());
         }
         progress.finish();
     }
@@ -1486,6 +2227,8 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
         (void)models::remove_weights(staging);
         fail(result.error);
     }
+    // What the converter made, beside how (53e).
+    record.kind = result.kind;
 
     // Its id is a digest over its shards' hashes: hashed now, said, and
     // stoppable like the conversion.
@@ -1494,7 +2237,7 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
               << ") -- its shards' SHA-256 names its folder in the store\n";
     models::StoredDirectory stored;
     {
-        DownloadProgress progress{std::cout, stdout_download_options()};
+        DownloadProgress progress{std::cout, job_download_options()};
         const InterruptScope interrupt;
         const auto bytes = static_cast<std::int64_t>(result.info.bytes);
         stored = models::commit_mlx(roots, source.model, staging, record,
@@ -1517,15 +2260,150 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
     std::cout << "\n"
               << (stored.existed ? "already here -- these exact weights are at\n  " : "")
               << stored.dir.string() << "\n"
-              << "verified: config.json, a tokenizer and " << out.info.shards.size()
-              << " shard header(s) read whole\n"
+              << "verified: "
+              << (route.video ? std::string{models::kMlxVideoFiles} + " -- "
+                              : std::string{"config.json, a tokenizer and "})
+              << out.info.shards.size() << " shard header(s) read whole\n"
               << "mlx model: " << mlx_summary(out.info) << "\n";
+    if (vlm || route.embedding || route.video) {
+        // What its record now says it is (53e), and so what runs it.
+        std::cout << "kind: " << models::describe(models::read_mlx_kind(out.dir)) << "\n";
+    }
+    if (const std::optional<models::MlxDrafter> drafter = models::read_mlx_drafter(out.dir);
+        route.drafter && drafter.has_value()) {
+        // What it drafts for, and the bases its record names (53i).
+        std::cout << "drafter: " << models::describe(*drafter) << "\n";
+    }
+    if (route.embedding) {
+        // How wide its vectors are, as its own config says (53h).
+        std::cout << "vectors: " << models::describe(models::read_mlx_embedding_width(out.dir))
+                  << "\n";
+    }
     if (!chained) {
+        if (route.video) {
+            // No backend runs a video model (53k): its kind line says what does.
+            return out;
+        }
+        if (route.drafter) {
+            print_mlx_drafter_hint(stored_at(roots, out.model, out.dir));
+            return out;
+        }
+        if (route.embedding) {
+            print_mlx_embedding_hint(stored_at(roots, out.model, out.dir));
+            return out;
+        }
         if (!models::snapshot_has_chat_template(source.path)) {
             std::cout << base_model_note() << "\n";
         }
         print_mlx_backend_hint(stored_at(roots, out.model, out.dir));
     }
+    return out;
+}
+
+ConvertedMlx convert_voice_to_mlx(const models::StoreRoots& roots, const VoiceSetChoice& source,
+                                  const training::MlxPrecision& precision,
+                                  const training::MlxConverter& converter) {
+    ConvertedMlx out;
+    out.model = source.model;
+    const std::string handle =
+        source.id.empty() ? source.path.string()
+                          : models::weights_handle(source.model, models::kVoiceFormat, source.id);
+    models::Snapshot record;
+    record.ref = handle;
+    record.source = "convert";
+    record.transform =
+        std::string{training::mlx_converter_entry(training::MlxConverterKind::MlxAudio)} + " " +
+        std::string{precision.name};
+
+    // Recognised before it runs: the same model at the same precision is the
+    // same weights.
+    for (const models::StoredMlx& stored : models::list_store_mlx(roots, source.model)) {
+        const std::optional<models::Snapshot> made = models::load_snapshot(stored.dir);
+        if (made.has_value() && made->source == "convert" && made->ref == record.ref &&
+            made->transform == record.transform) {
+            std::cout << "already converted:\n  " << stored.dir.string() << "\n"
+                      << "(to convert it again, delete it first: apogee models delete "
+                      << models::weights_handle(stored.model, models::kMlxFormat, stored.id)
+                      << ")\n";
+            out.dir = stored.dir;
+            out.existed = true;
+            out.info = models::read_mlx_info(stored.dir);
+            return out;
+        }
+    }
+
+    const models::VoiceInfo voice = models::read_voice_info(source.path);
+    std::cout << "converting " << source.path.string() << " to MLX (" << precision.name
+              << ") -- mlx-audio's converter, Kokoro's checkpoint and its " << voice.voices.size()
+              << (voice.voices.size() == 1 ? " voice" : " voices")
+              << " built into an MLX voice model, in Apogee's Python environment\n";
+    // Named and claimed, never created: the driver makes the directory.
+    const std::filesystem::path staging =
+        models::incoming_path(roots, models::kMlxFormat, source.model);
+    models::MlxConvertResult result;
+    {
+        DownloadProgress progress{std::cout, job_download_options()};
+        {
+            const Ticker ticker{
+                [&progress, &staging]() { progress.bytes(bytes_under(staging), 0); }};
+            const InterruptScope interrupt;
+            result = models::convert_snapshot_to_mlx(
+                source.path, staging, precision.bits,
+                [&converter](const std::filesystem::path& model,
+                             const std::filesystem::path& output,
+                             const harness::CancellationToken& cancellation) {
+                    return converter(model, output, {}, cancellation);
+                },
+                InterruptScope::token(), models::kMlxVoice);
+        }
+        progress.finish();
+    }
+    if (result.cancelled) {
+        cancelled_nothing_written(staging);
+    }
+    if (!result.ok) {
+        (void)models::remove_weights(staging);
+        fail(result.error);
+    }
+    record.kind = result.kind;
+
+    std::cout << "hashing it ("
+              << format_progress_size(static_cast<std::int64_t>(result.info.bytes))
+              << ") -- its shards' SHA-256 names its folder in the store\n";
+    models::StoredDirectory stored;
+    {
+        DownloadProgress progress{std::cout, job_download_options()};
+        const InterruptScope interrupt;
+        const auto bytes = static_cast<std::int64_t>(result.info.bytes);
+        stored = models::commit_mlx(roots, source.model, staging, record,
+                                    [&progress, bytes](std::int64_t hashed) {
+                                        progress.bytes(hashed, bytes);
+                                        return !InterruptScope::token().stop_requested();
+                                    });
+        progress.finish();
+    }
+    if (stored.error == models::kStopped) {
+        cancelled_nothing_written(staging);
+    }
+    if (!stored.error.empty()) {
+        (void)models::remove_weights(staging);
+        fail(stored.error);
+    }
+    out.dir = stored.dir;
+    out.existed = stored.existed;
+    out.info = models::read_mlx_info(stored.dir);
+    const models::VoiceInfo built = models::read_mlx_voice_info(stored.dir);
+    const std::string made =
+        models::weights_handle(source.model, models::kMlxFormat, stored.dir.filename().string());
+    std::cout << "\n"
+              << (stored.existed ? "already here -- these exact weights are at\n  " : "")
+              << stored.dir.string() << "\n"
+              << "verified: " << models::kMlxVoiceFiles << " -- " << out.info.shards.size()
+              << " shard header(s) and " << built.voices.size() << " voice(s) read whole\n"
+              << "mlx model: " << mlx_summary(out.info) << "\n"
+              << "kind: " << models::describe(models::read_mlx_kind(out.dir)) << "\n"
+              << "\nSpeak with it on MLX:\n  apogee voice say \"<text>\" -o speech.wav --model "
+              << made << "\n";
     return out;
 }
 
@@ -1539,6 +2417,9 @@ struct ConvertedModel {
     std::filesystem::path projector;
     /// No chat template: a base model, registered all the same.
     bool base_model = false;
+    /// An embedding model (M21): its GGUF embeds and answers no chat -- the
+    /// embedding role's, never a base model to chat with once tuned (55d).
+    bool embedding = false;
     /// Each as the standalone verb prints it, prefix and all.
     std::vector<std::string> warnings;
 };
@@ -1576,7 +2457,8 @@ ConvertedModel convert_model(const models::StoreRoots& roots, std::string_view g
 
     ConvertedModel out;
     out.model = source.model;
-    out.base_model = !models::snapshot_has_chat_template(source.path);
+    out.embedding = models::snapshot_embedding_model(source.path).has_value();
+    out.base_model = !out.embedding && !models::snapshot_has_chat_template(source.path);
     const auto finish = [&out, chained]() {
         if (!chained) {
             for (const std::string& warning : out.warnings) {
@@ -1618,7 +2500,7 @@ ConvertedModel convert_model(const models::StoreRoots& roots, std::string_view g
         out.id = done->id;
         finish();
         if (!chained) {
-            print_backend_hint(done->file, done->projector);
+            print_backend_hint(done->file, done->projector, out.embedding);
         }
         return out;
     }
@@ -1640,6 +2522,7 @@ ConvertedModel convert_model(const models::StoreRoots& roots, std::string_view g
     const auto cancelled = [&staging]() {
         (void)models::remove_weights(staging);
         std::cerr << "apogee models: cancelled -- nothing was written\n";
+        tell_job("cancelled -- nothing was written");
         throw CLI::RuntimeError(kCancelled);
     };
 
@@ -1656,9 +2539,12 @@ ConvertedModel convert_model(const models::StoreRoots& roots, std::string_view g
                   << (model_estimate > 0 ? ", about " + format_progress_size(model_estimate)
                                          : std::string{})
                   << ")\n";
-        const models::ConvertResult result = run_conversion(
-            source.path, model_output, training::script_converter(env.interpreter(), script, type),
-            model_estimate);
+        const models::ConvertResult result =
+            run_conversion(source.path, model_output,
+                           training::script_converter(env.interpreter(), script, type,
+                                                      training::ConverterOutput::Model,
+                                                      dense_modules(source.path)),
+                           model_estimate);
         if (result.cancelled) {
             cancelled();
         }
@@ -1766,7 +2652,7 @@ ConvertedModel convert_model(const models::StoreRoots& roots, std::string_view g
             std::cout << "\nMake it smaller:\n  apogee models quantize " << source.model
                       << " --type Q4_K_M\n";
         }
-        print_backend_hint(model_file, projector);
+        print_backend_hint(model_file, projector, out.embedding);
     }
     return out;
 }
@@ -1912,7 +2798,8 @@ QuantizedModel quantize_model(const models::StoreRoots& roots, std::string_view 
 /// Refuses, before the first stage, a chain whose registrations would refuse
 /// at its last: no config to register into, or a name already taken by a
 /// backend that is not this model's. One a previous run of this chain made
-/// -- pointing inside this model's directory -- is not in the way.
+/// -- its weights, by the one walk (`store_references`, 55d), inside this
+/// model's directory -- is not in the way.
 void check_registrations(const models::StoreRoots& roots, const std::filesystem::path& config_path,
                          const std::string& model, const std::vector<std::string>& names,
                          std::string_view format = models::kGgufFormat) {
@@ -1958,9 +2845,14 @@ void check_registrations(const models::StoreRoots& roots, const std::filesystem:
             }
             continue;
         }
-        const std::filesystem::path path = configured_path(found->second.model_path);
-        const std::filesystem::path relative = path.lexically_relative(home);
-        if (path.empty() || relative.empty() || *relative.begin() == "..") {
+        // This model's own, when its weights -- by the one walk (55d) -- lie
+        // in this model's directory.
+        const std::vector<StoreReference> held = backend_references(name, found->second);
+        const bool ours = std::ranges::any_of(held, [&roots, &home](const StoreReference& each) {
+            return each.weights && points_inside(roots, each, home);
+        });
+        if (!ours) {
+            const std::filesystem::path path = configured_path(found->second.model_path);
             fail("backend '" + name + "' already exists" +
                  (path.empty() ? std::string{} : " and points at " + path.string()) +
                  " -- remove it with 'apogee config delete-backend " + name +
@@ -1978,11 +2870,13 @@ struct Registration {
 
 /// Adds each as a `llamacpp` backend through the one config editor -- the
 /// very edit `config add-backend <name> --type llamacpp --model-path <file>
-/// [--mmproj-path <projector>]` makes, byte for byte. An entry already
-/// naming the same files is left as it is: a resumed chain registers what is
-/// missing and nothing twice.
+/// [--mmproj-path <projector>]` makes, byte for byte, `models.default` with
+/// the first when none is set, said (M33) -- never an embedding model's,
+/// which answers no chat. An entry already naming the same files is left as
+/// it is: a resumed chain registers what is missing and nothing twice.
 void register_backends(const std::filesystem::path& config_path,
-                       const std::vector<Registration>& wanted, bool base_model, ChainLog& log) {
+                       const std::vector<Registration>& wanted, bool base_model, bool embedding,
+                       ChainLog& log) {
     for (const Registration& entry : wanted) {
         harness::Config config;
         try {
@@ -2007,24 +2901,36 @@ void register_backends(const std::filesystem::path& config_path,
             backend.type = harness::BackendType::LlamaCpp;
             backend.model_path = entry.file.string();
             backend.mmproj_path = entry.projector.string();
+            bool default_set = false;
             try {
-                harness::edit_config_file(
-                    config_path, [&entry, &backend](std::string_view content) {
-                        return harness::append_backend(content, entry.name, backend, false);
-                    });
+                harness::edit_config_file(config_path, [&entry, &backend, embedding,
+                                                        &default_set](std::string_view content) {
+                    AddedBackend added =
+                        add_backend_text(content, entry.name, backend, false, !embedding);
+                    default_set = added.default_set;
+                    return std::move(added.text);
+                });
             } catch (const std::exception& e) {
                 fail(e.what());
             }
             std::cout << "registered " << entry.name << "\n";
+            if (default_set) {
+                std::cout << default_set_words(entry.name) << "\n";
+            }
         }
         log.ready.push_back(entry.name +
                             (base_model ? "  (a base model: it continues text rather than "
                                           "answering -- to chat, convert its instruction-tuned "
                                           "release)"
                                         : std::string{}));
+        if (embedding) {
+            // What the entry is for (M21, 55d): the embedding role, as the
+            // MLX route says it.
+            log.note(embedding_role_note(entry.name));
+        }
     }
     if (!wanted.empty()) {
-        log.next = "chat with one:  apogee chat -m " + wanted.back().name;
+        log.next = next_step(wanted.back().name, embedding);
     }
 }
 
@@ -2087,6 +2993,10 @@ Quantizer default_quantizer() {
     };
 }
 
+TransportMaker curl_transport() {
+    return [] { return std::make_unique<backends::CurlTransport>(); };
+}
+
 void run_register_chain(const RegisterChainRequest& request, const ChainTools& tools) {
     const models::StoreRoots& roots = request.roots;
     const std::vector<std::string>& levels = request.levels;
@@ -2142,9 +3052,31 @@ void run_register_chain(const RegisterChainRequest& request, const ChainTools& t
     std::vector<ChainStage> stages;
     if (pulls) {
         stages.push_back({"pull " + request.pull_ref + "'s full weights", [&](ChainLog& chain) {
-                              const PulledSnapshot pulled =
-                                  pull_snapshot(request.pull_ref, roots, /*chained=*/true);
+                              // Ctrl-C stops the download as it stops a
+                              // conversion (55c); each later stage has its own.
+                              const InterruptScope interrupt;
+                              backends::HttpClient client{tools.transport()};
+                              PulledSnapshot pulled;
+                              try {
+                                  pulled = pull_snapshot(request.pull_ref, roots, client,
+                                                         InterruptScope::token(),
+                                                         /*chained=*/true);
+                              } catch (const harness::CancelledError&) {
+                                  // Stopped in a request, before a byte was staged.
+                                  say_cancelled("nothing was written");
+                              }
+                              note_stored(pulled.model, models::kSafetensorsFormat, pulled.id);
                               snapshot = pulled.model + "/safetensors/" + pulled.id;
+                              // A set no GGUF is made of -- a draft head, a
+                              // diffusion model -- stops here, its refusal
+                              // naming its one door: no stage after this one
+                              // could run, so there is nothing to resume (55d).
+                              if (const SnapshotChoice landed =
+                                      choose_snapshot(roots, snapshot, {});
+                                  !landed.error.empty()) {
+                                  chain.resume.clear();
+                                  fail(landed.error);
+                              }
                               // Everything after the pull runs offline: resuming
                               // need not reach Hugging Face again.
                               chain.resume = convert_resume(snapshot);
@@ -2153,6 +3085,7 @@ void run_register_chain(const RegisterChainRequest& request, const ChainTools& t
     stages.push_back({"convert to F16", [&](ChainLog& chain) {
                           f16 = convert_model(roots, snapshot, snapshot_from, "f16",
                                               /*chained=*/true);
+                          note_stored(f16.model, models::kGgufFormat, f16.id);
                           for (const std::string& warning : f16.warnings) {
                               chain.note(warning);
                           }
@@ -2162,25 +3095,26 @@ void run_register_chain(const RegisterChainRequest& request, const ChainTools& t
                               QuantizedModel made =
                                   quantize_model(roots, f16.model + "/gguf/" + f16.id, {}, level,
                                                  tools.quantize, /*chained=*/true);
+                              note_stored(made.model, models::kGgufFormat, made.id);
                               for (const std::string& warning : made.warnings) {
                                   chain.note(warning);
                               }
                               quants.push_back(std::move(made));
                           }});
     }
-    stages.push_back({names.size() == 1 ? "register " + names.front()
-                                        : "register " + std::to_string(names.size()) + " backends",
-                      [&](ChainLog& chain) {
-                          std::vector<Registration> wanted{{.name = names.front(),
-                                                            .file = f16.file,
-                                                            .projector = f16.projector}};
-                          for (std::size_t index = 0; index < quants.size(); ++index) {
-                              wanted.push_back({.name = names[index + 1],
-                                                .file = quants[index].file,
-                                                .projector = quants[index].projector});
-                          }
-                          register_backends(request.config_path, wanted, f16.base_model, chain);
-                      }});
+    stages.push_back(
+        {names.size() == 1 ? "register " + names.front()
+                           : "register " + std::to_string(names.size()) + " backends",
+         [&](ChainLog& chain) {
+             std::vector<Registration> wanted{
+                 {.name = names.front(), .file = f16.file, .projector = f16.projector}};
+             for (std::size_t index = 0; index < quants.size(); ++index) {
+                 wanted.push_back({.name = names[index + 1],
+                                   .file = quants[index].file,
+                                   .projector = quants[index].projector});
+             }
+             register_backends(request.config_path, wanted, f16.base_model, f16.embedding, chain);
+         }});
 
     std::cout << (pulls ? "pulling " + request.pull_ref + ", then " : std::string{})
               << "converting it to F16"
@@ -2194,10 +3128,11 @@ namespace {
 
 /// Adds `name` as an `mlx` backend on `dir` through the one config editor --
 /// the edit `config add-backend <name> --type mlx --model-path <dir>` makes,
-/// byte for byte (M16). An entry already naming the same directory is left
-/// as it is: a resumed chain registers what is missing and nothing twice.
+/// byte for byte (M16), `models.default` with it when none is set and it
+/// chats, said (M33). An entry already naming the same directory is left as
+/// it is: a resumed chain registers what is missing and nothing twice.
 void register_mlx_backend(const std::filesystem::path& config_path, const std::string& name,
-                          const std::filesystem::path& dir, ChainLog& log) {
+                          const std::filesystem::path& dir, bool embedding, ChainLog& log) {
     harness::Config config;
     try {
         config = harness::load_config(config_path);
@@ -2217,17 +3152,25 @@ void register_mlx_backend(const std::filesystem::path& config_path, const std::s
         harness::BackendConfig backend;
         backend.type = harness::BackendType::Mlx;
         backend.model_path = dir.string();
+        const bool chats = role_refusal(name, backend, "default").empty();
+        bool default_set = false;
         try {
-            harness::edit_config_file(config_path, [&name, &backend](std::string_view content) {
-                return harness::append_backend(content, name, backend, false);
-            });
+            harness::edit_config_file(
+                config_path, [&name, &backend, chats, &default_set](std::string_view content) {
+                    AddedBackend added = add_backend_text(content, name, backend, false, chats);
+                    default_set = added.default_set;
+                    return std::move(added.text);
+                });
         } catch (const std::exception& e) {
             fail(e.what());
         }
         std::cout << "registered " << name << "\n";
+        if (default_set) {
+            std::cout << default_set_words(name) << "\n";
+        }
     }
     log.ready.push_back(name);
-    log.next = "chat with one:  apogee chat -m " + name;
+    log.next = next_step(name, embedding);
 }
 
 }  // namespace
@@ -2276,6 +3219,8 @@ void run_mlx_register_chain(const MlxRegisterRequest& request,
         joined += (joined.empty() ? "" : ",") + precision;
     }
     check_registrations(roots, request.config_path, source.model, names, models::kMlxFormat);
+    // An embedding model's entries embed, and chat with nothing (53h).
+    const bool embedding = models::snapshot_embedding_model(source.path).has_value();
 
     ChainLog log;
     log.resume =
@@ -2283,7 +3228,8 @@ void run_mlx_register_chain(const MlxRegisterRequest& request,
         (request.listed ? " --register-with " + joined
                         : " --register --type " + request.precisions.front()) +
         (request.base_name.empty() ? std::string{} : " --base-name " + request.base_name) +
-        (request.model_type.empty() ? std::string{} : " --model-type " + request.model_type);
+        (request.model_type.empty() ? std::string{} : " --model-type " + request.model_type) +
+        (request.text_only ? " --text-only" : "");
 
     std::vector<ChainStage> stages;
     std::vector<ConvertedMlx> made(request.precisions.size());
@@ -2294,14 +3240,17 @@ void run_mlx_register_chain(const MlxRegisterRequest& request,
             {"convert to MLX " + std::string{precision.name}, [&, index](ChainLog& chain) {
                  made[index] = convert_model_to_mlx(roots, snapshot, snapshot_from, precision,
                                                     converter_for(precision), request.model_type,
-                                                    /*chained=*/true);
-                 if (!models::snapshot_has_chat_template(source.path)) {
+                                                    /*chained=*/true, request.text_only);
+                 if (embedding) {
+                     // What the entry is for (53h): the embedding role.
+                     chain.note(embedding_role_note(names[index]));
+                 } else if (!models::snapshot_has_chat_template(source.path)) {
                      chain.note(base_model_note());
                  }
              }});
         stages.push_back({"register " + names[index], [&, index](ChainLog& chain) {
                               register_mlx_backend(request.config_path, names[index],
-                                                   made[index].dir, chain);
+                                                   made[index].dir, embedding, chain);
                           }});
     }
     std::cout << "converting it to MLX at " << joined << " and registering "
@@ -2311,23 +3260,275 @@ void run_mlx_register_chain(const MlxRegisterRequest& request,
 
 namespace {
 
+/// What a draft head's MLX conversion does not take (53i), each refused
+/// before anything is announced: a registration -- a drafter is no backend;
+/// it runs beside its base, named as that backend's draft -- mlx-lm's build
+/// (`--text-only`), which has no network for one, and a type named over its
+/// own (`--model-type`): mlx-vlm builds it as the drafter its config names.
+void refuse_drafter_misuse(const models::StoreRoots& roots, const std::string& subject,
+                           const models::DraftHead& head, bool registers, bool text_only,
+                           const std::string& model_type) {
+    const std::string what =
+        subject + " is " + models::describe_draft_head(head, models::draft_head_bases(roots, head));
+    if (registers) {
+        fail(what +
+             " -- its MLX build is a drafter, which no backend runs, so --register and "
+             "--register-with do not apply: convert it with --mlx alone, then name it as its "
+             "base's mlx backend's draft: apogee config set-backend <that backend> --draft "
+             "<the drafter>");
+    }
+    if (text_only) {
+        fail(what +
+             " -- --text-only asks for mlx-lm's build, and mlx-lm has no network for a draft "
+             "head: its MLX build is mlx-vlm's drafter, made by --mlx alone");
+    }
+    if (!model_type.empty()) {
+        fail(what +
+             " -- --model-type does not apply: mlx-vlm builds it as the drafter its "
+             "config.json names" +
+             (head.model_type.empty() ? std::string{} : " (" + head.model_type + ")"));
+    }
+}
+
+/// What Wan's original layout's MLX conversion does not take (53k), each
+/// refused before anything is announced: a registration -- no backend runs a
+/// video model -- mlx-lm's build of a language model (`--text-only`), which a
+/// video model has none of, and a type named over its own (`--model-type`):
+/// mlx-video converts it by its own config.
+void refuse_video_misuse(const std::string& subject, const std::string& class_name, bool registers,
+                         bool text_only, const std::string& model_type) {
+    const std::string what = subject + " is Wan's original layout (" + class_name +
+                             "), which mlx-video converts to an MLX video model";
+    if (registers) {
+        fail(what +
+             " -- no backend runs a video model, so --register and --register-with do not "
+             "apply: convert it with --mlx alone");
+    }
+    if (text_only) {
+        fail(what +
+             " -- --text-only asks for mlx-lm's build of a language model, and a video model "
+             "has none: convert it with --mlx alone");
+    }
+    if (!model_type.empty()) {
+        fail(what +
+             " -- --model-type does not apply: mlx-video converts it by its own "
+             "config.json");
+    }
+}
+
+/// `models convert <voice model> --mlx` (53m), the voice route's door: what
+/// it does not take refused first -- a registration (no backend runs a voice
+/// model), `--text-only` and `--model-type` -- then the model read whole, the
+/// precision (bf16 unless one is named), Apple silicon, mlx-audio installed
+/// and building Kokoro, the environment and the seeded driver, each asked
+/// before anything is announced; then the core.
+void convert_voice_to_mlx_command(const models::StoreRoots& roots, const std::string& name,
+                                  const VoiceSetChoice& source, std::string type,
+                                  const std::string& model_type, bool registers, bool text_only) {
+    const std::string what =
+        "'" + name + "' is a voice model, which mlx-audio converts to an MLX voice model";
+    if (registers) {
+        fail(what +
+             " -- no backend runs a voice model, so --register and --register-with do not "
+             "apply: convert it with --mlx alone, then speak with it: apogee voice say");
+    }
+    if (text_only) {
+        fail(what +
+             " -- --text-only asks for mlx-lm's build of a language model, and a voice model "
+             "has none: convert it with --mlx alone");
+    }
+    if (!model_type.empty()) {
+        fail(what + " -- --model-type does not apply: mlx-audio converts it as Kokoro");
+    }
+    if (!source.error.empty()) {
+        fail(source.error);
+    }
+    if (const models::VoiceInfo voice = models::read_voice_info(source.path); !voice.complete) {
+        fail("'" + name + "' " + voice.problem +
+             (source.id.empty()
+                  ? std::string{}
+                  : " -- apogee models repair " +
+                        models::weights_handle(source.model, models::kVoiceFormat, source.id)));
+    }
+    // bf16 unless one is named: the build mlx-audio's README loads first for
+    // Kokoro, and an 82M-parameter model costs little unquantized.
+    if (type.empty()) {
+        type = "bf16";
+    }
+    const training::MlxPrecision* precision = training::find_mlx_precision(type);
+    if (precision == nullptr ||
+        !training::mlx_converter_writes(training::MlxConverterKind::MlxAudio, *precision)) {
+        fail("--mlx writes no '" + type + "'");
+    }
+    const backends::MlxHost host = backends::MlxHost::current();
+    const backends::MlxReadiness runtime = backends::probe_mlx_runtime(host);
+    if (runtime.refusal == backends::MlxRefusal::Platform) {
+        fail("--mlx builds '" + name +
+             "' through mlx-audio, an MLX voice model: " + runtime.message());
+    }
+    if (!installed_mlx_audio()) {
+        fail(what + ", and mlx-audio is not installed in Apogee's Python environment (its " +
+             std::string{training::kMlxAudioConverter} + ", its Kokoro and the torch its " +
+             "checkpoint is read through, read from their files) -- " +
+             std::string{kMlxAudioRemedy});
+    }
+    if (runtime.refusal == backends::MlxRefusal::NoEnvironment) {
+        fail("--mlx builds '" + name +
+             "' through mlx-audio, an MLX voice model: " + runtime.message());
+    }
+    const std::filesystem::path script = training::mlx_converter_script();
+    std::error_code code;
+    if (!std::filesystem::is_regular_file(script, code)) {
+        fail("the MLX converter is missing: " + script.string() +
+             " -- run 'apogee check --fix' to seed it");
+    }
+    const std::filesystem::path package = training::find_site_package(
+        host.venv, training::mlx_converter_package(training::MlxConverterKind::MlxAudio));
+    (void)convert_voice_to_mlx(
+        roots, source, *precision,
+        training::script_mlx_converter(runtime.interpreter, script, *precision, package,
+                                       training::MlxConverterKind::MlxAudio));
+}
+
 /// `models convert <model> --mlx [--type <precision>]` (27b): the
 /// precision, the runtime -- the backend's own ladder, file facts only --
 /// and the seeded driver asked before anything is announced, then the core.
+/// The converter is the set's route (53f): mlx-vlm for a set with towers,
+/// unless `text_only`; mlx-video for Wan's original layout (53k); each
+/// refused before Python starts where it cannot build the set.
 void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& given,
-                            const std::string& from, const std::string& type,
-                            const std::string& model_type, const MlxRegisterRequest* registers) {
-    const training::MlxPrecision* precision = training::find_mlx_precision(type);
-    if (precision == nullptr) {
+                            const std::string& from, std::string type,
+                            const std::string& model_type, const MlxRegisterRequest* registers,
+                            bool text_only) {
+    if (!type.empty() && training::find_mlx_precision(type) == nullptr) {
         std::string names;
         for (const std::string& name : training::mlx_precision_names()) {
             names += (names.empty() ? "" : ", ") + name;
         }
         fail("--mlx writes " + names + "; '" + type + "' is a GGUF precision");
     }
+    // What the weights are before what this machine has, as the GGUF path
+    // orders it: a draft head is no conversion's input but this one, whose
+    // MLX build is a drafter (53i).
+    const std::string& name = registers != nullptr ? registers->snapshot : given;
+    // A stored voice model is mlx-audio's route's alone (53m): what names
+    // none is read below exactly as before.
+    if (const std::optional<VoiceSetChoice> voice =
+            locate_voice_set(roots, name, registers != nullptr ? registers->snapshot_from : from)) {
+        convert_voice_to_mlx_command(roots, name, *voice, type,
+                                     registers != nullptr ? registers->model_type : model_type,
+                                     registers != nullptr, text_only);
+        return;
+    }
+    // And Wan's original layout passes only whole, with mlx-video installed:
+    // otherwise refused saying which is missing (53k).
+    const SnapshotChoice source =
+        registers != nullptr
+            ? choose_snapshot(roots, registers->snapshot, registers->snapshot_from, true, true)
+            : choose_snapshot(roots, given, from, true, true);
+    if (!source.error.empty()) {
+        fail(source.error);
+    }
+    const std::string& as = registers != nullptr ? registers->model_type : model_type;
+    const std::optional<models::DraftHead> head = models::snapshot_draft_head(source.path);
+    if (head.has_value()) {
+        refuse_drafter_misuse(roots, "'" + name + "'", *head, registers != nullptr, text_only, as);
+        // The precision the MLX community publishes its drafters at, unless
+        // one is named: a drafter is small, and what it proposes is checked.
+        if (type.empty()) {
+            type = "bf16";
+        }
+    }
+    const std::optional<models::WanLayout> wan = models::snapshot_wan_layout(source.path);
+    if (wan.has_value()) {
+        refuse_video_misuse("'" + name + "'", wan->class_name, registers != nullptr, text_only, as);
+    }
+    // 4bit unless one is named: the community builds' usual choice, and
+    // mlx-video's README's quantization (53k).
+    if (type.empty()) {
+        type = "4bit";
+    }
+    const training::MlxPrecision* precision = training::find_mlx_precision(type);
+    if (precision == nullptr) {
+        fail("--mlx writes no '" + type + "'");
+    }
+    // mlx-video's converter quantizes 4 or 8 bits, or writes a float type
+    // (53k): any other precision refused before anything runs.
+    if (wan.has_value() &&
+        !training::mlx_converter_writes(training::MlxConverterKind::MlxVideo, *precision)) {
+        std::string names;
+        for (const std::string& known :
+             training::mlx_precision_names(training::MlxConverterKind::MlxVideo)) {
+            names += (names.empty() ? "" : ", ") + known;
+        }
+        fail("--mlx builds '" + name + "' through mlx-video, whose converter writes " + names +
+             "; '" + type + "' is not one of them");
+    }
+    // Nor is an embedding model an MLX conversion's (M21) -- unless the
+    // mlx-embeddings installed builds its type (53h). Everywhere else, that
+    // type unbuilt or no mlx-embeddings to ask, it is refused as M21 refused
+    // it, before the chain announces a step.
+    if (const std::optional<models::EmbeddingModel> embedding =
+            models::snapshot_embedding_model(source.path);
+        embedding.has_value() && installed_mlx_builds(source.path, as) != true) {
+        fail(models::embedding_model_mlx_refusal("'" + name + "'", *embedding));
+    }
+    // Which converter, by the set's own files (53f): its towers kept through
+    // mlx-vlm unless --text-only asks for mlx-lm's build; an embedding model
+    // built whole through mlx-embeddings (53h); a draft head built as
+    // mlx-vlm's drafter (53i).
+    const MlxRoute route = mlx_route(source.path, text_only);
+    const bool vlm = route.converter == training::MlxConverterKind::MlxVlm;
+    const std::string towers = models::describe_towers(route.towers);
+    const std::string_view converter_name = training::to_string(route.converter);
     const backends::MlxHost host = backends::MlxHost::current();
+    if (head.has_value()) {
+        // mlx-vlm drafts its type, or nothing converted from it could run:
+        // asked of its own files before anything is announced (M21's rule).
+        const backends::MlxVlmPackage installed = backends::find_mlx_vlm(host);
+        const std::string what =
+            "'" + name + "' is " +
+            models::describe_draft_head(*head, models::draft_head_bases(roots, *head)) +
+            " -- its MLX build is a drafter mlx-vlm makes, and ";
+        if (!installed.installed()) {
+            fail(what + "mlx-vlm is not installed in Apogee's Python environment -- " +
+                 std::string{backends::kMlxVisionRemedy});
+        }
+        if (!backends::mlx_vlm_drafts(installed, head->model_type)) {
+            fail(what + "the mlx-vlm in Apogee's Python environment" +
+                 (installed.version.empty() ? std::string{} : " (" + installed.version + ")") +
+                 " drafts no " +
+                 (head->model_type.empty() ? std::string{"model of its type"}
+                                           : head->model_type + " model") +
+                 " -- its speculative path holds no drafter of that type");
+        }
+    }
     const backends::MlxReadiness runtime = backends::probe_mlx_runtime(host);
-    if (!runtime.ready() && runtime.refusal != backends::MlxRefusal::NoDriver) {
+    if (route.video) {
+        // mlx-video's set brings mlx-lm with it, and the backend's driver is
+        // no part of a conversion: the platform and the environment are the
+        // runtime's rungs here, mlx-video's own asked by the door (53k).
+        if (runtime.refusal == backends::MlxRefusal::Platform ||
+            runtime.refusal == backends::MlxRefusal::NoEnvironment) {
+            fail("--mlx builds '" + name +
+                 "' through mlx-video, an MLX video model: " + runtime.message());
+        }
+    } else if (!runtime.ready() && runtime.refusal != backends::MlxRefusal::NoDriver) {
+        if (route.drafter) {
+            // mlx-vlm's set brings mlx-lm with it.
+            fail("--mlx builds '" + name + "' through mlx-vlm, as a drafter: " + runtime.reason +
+                 " -- apogee train setup --with mlx-vlm");
+        }
+        if (route.embedding) {
+            // mlx-embeddings' set brings mlx-lm with it, through mlx-vlm.
+            fail("--mlx builds '" + name + "' through mlx-embeddings, an embedding model built " +
+                 "whole: " + runtime.reason + " -- " + std::string{backends::kMlxEmbeddingsRemedy});
+        }
+        if (vlm) {
+            // mlx-vlm's set brings mlx-lm with it.
+            fail("--mlx builds '" + name + "' through mlx-vlm, its towers kept (" + towers +
+                 "): " + runtime.reason + " -- apogee train setup --with mlx-vlm");
+        }
         fail("--mlx runs mlx-lm's converter: " + runtime.message());
     }
     const std::filesystem::path script = training::mlx_converter_script();
@@ -2336,22 +3537,358 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
         fail("the MLX converter is missing: " + script.string() +
              " -- run 'apogee check --fix' to seed it");
     }
-    const std::filesystem::path mlx_lm = training::find_site_package(host.venv, "mlx_lm");
+    const std::filesystem::path package =
+        training::find_site_package(host.venv, training::mlx_converter_package(route.converter));
+    // The other route's answer, said beside a refusal where it would work:
+    // mlx-lm's text-only build for a set whose towers mlx-vlm cannot keep,
+    // mlx-vlm's for one --text-only sent to an mlx-lm that cannot build it.
+    const auto other_route = [&source, &as, &route, vlm]() -> std::string {
+        if (route.towers.empty()) {
+            return {};
+        }
+        if (vlm) {
+            return installed_mlx_builds(source.path, as, /*text_only=*/true) == true
+                       ? ", or build its language model alone with mlx-lm: --text-only"
+                       : "";
+        }
+        return installed_mlx_builds(source.path, as) == true
+                   ? " -- without --text-only, mlx-vlm builds it with its towers kept"
+                   : "";
+    };
+    if (vlm && package.empty()) {
+        fail("'" + name + "' declares towers (" + towers +
+             "): its MLX build keeps them through mlx-vlm, which is not installed in Apogee's "
+             "Python environment -- apogee train setup --with mlx-vlm" +
+             other_route());
+    }
+    // A type this converter builds no model for is refused here, by its own
+    // files, rather than in it once Python has started (M21, the user's
+    // call); M15's door -- naming the type it is -- stays open. A drafter's
+    // type is its speculative path's, asked above (53i).
+    if (const std::vector<std::string> types = training::mlx_model_types(package);
+        !types.empty() && !route.drafter && !route.video) {
+        const std::string wanted =
+            as.empty() ? models::read_mlx_config(source.path).model_type : as;
+        if (!wanted.empty() && std::ranges::find(types, wanted) == types.end()) {
+            std::string nearest;
+            for (const std::string& candidate : training::nearest_model_types(wanted, types)) {
+                nearest += (nearest.empty() ? "" : ", ") + candidate;
+            }
+            const std::string kept = vlm ? " with towers (" + towers + ")" : "";
+            fail(
+                (as.empty()
+                     ? "'" + name + "' is a " + wanted + " model" + kept + ", which the " +
+                           std::string{converter_name} +
+                           " in Apogee's Python environment builds no model for -- "
+                           "convert it without --mlx" +
+                           (vlm ? other_route() : std::string{}) +
+                           ", or, if these weights are a type this " + std::string{converter_name} +
+                           " knows, convert them as it: --model-type <type>"
+                     : "--model-type " + wanted + " is no type the " + std::string{converter_name} +
+                           " in Apogee's Python environment builds") +
+                (nearest.empty() ? std::string{} : " (nearest here: " + nearest + ")") +
+                (vlm ? std::string{} : other_route()));
+        }
+    }
     if (registers != nullptr) {
         // M16: the hint executed -- each precision converted and registered.
-        run_mlx_register_chain(
-            *registers, [&runtime, &script, &mlx_lm](const training::MlxPrecision& wanted) {
-                return training::script_mlx_converter(runtime.interpreter, script, wanted, mlx_lm);
-            });
+        run_mlx_register_chain(*registers, [&runtime, &script, &package,
+                                            &route](const training::MlxPrecision& wanted) {
+            return training::script_mlx_converter(runtime.interpreter, script, wanted, package,
+                                                  route.converter);
+        });
         return;
     }
-    (void)convert_model_to_mlx(
-        roots, given, from, *precision,
-        training::script_mlx_converter(runtime.interpreter, script, *precision, mlx_lm),
-        model_type);
+    (void)convert_model_to_mlx(roots, given, from, *precision,
+                               training::script_mlx_converter(runtime.interpreter, script,
+                                                              *precision, package, route.converter),
+                               model_type, /*chained=*/false, text_only);
+}
+
+/// `source`, asked between its chunks whether Ctrl-C was pressed (55c): the
+/// copy from the Ollama store reads a local file, which no transport stops.
+[[nodiscard]] models::ByteSource stoppable(models::ByteSource source,
+                                           const harness::CancellationToken& cancellation) {
+    return [source = std::move(source), cancellation](
+               const std::function<bool(std::string_view)>& write, std::string& error) {
+        const bool ok = source(
+            [&write, &cancellation](std::string_view chunk) {
+                return !cancellation.stop_requested() && write(chunk);
+            },
+            error);
+        if (cancellation.stop_requested()) {
+            error = "cancelled";
+            return false;
+        }
+        return ok;
+    };
+}
+
+/// A pull from Hugging Face or the Ollama store -- a SafeTensors snapshot,
+/// a pipeline, a voice model, an MLX model, or a GGUF -- every request, byte
+/// and file of it under `cancellation`, the one scope `pull_model` arms.
+void pull_stored(const PullRequest& request, const TransportMaker& transport,
+                 const harness::CancellationToken& cancellation) {
+    const std::string& ref = request.ref;
+    const models::StoreRoots& roots = request.roots;
+    if (request.safetensors) {
+        backends::HttpClient client{transport()};
+        const PulledSnapshot pulled =
+            pull_snapshot(ref, roots, client, cancellation, /*chained=*/false);
+        note_stored(pulled.model, models::kSafetensorsFormat, pulled.id);
+        return;
+    }
+
+    models::SourcePromise promise;
+    models::ByteSource source;
+
+    // Ollama first when the store actually has it: a ref like "user/model"
+    // is ambiguous, and a local copy is free while a download is not.
+    const std::filesystem::path store = models::ollama_store_root();
+    std::optional<models::OllamaEntry> entry = models::find_in_store(store, ref);
+
+    std::unique_ptr<backends::HttpClient> client;
+    models::HfRef hf;
+
+    if (entry.has_value()) {
+        promise = models::promise_for(*entry);
+        source = stoppable(models::blob_source(*entry), cancellation);
+    } else if (looks_like_hf(ref)) {
+        std::optional<models::HfRef> parsed = models::parse_hf_ref(ref);
+        if (!parsed.has_value()) {
+            fail("'" + ref + "' is not a Hugging Face ref (expected owner/repo[:file.gguf])");
+        }
+        hf = *parsed;
+
+        client = std::make_unique<backends::HttpClient>(transport());
+        const std::string token = models::hf_token({});
+
+        if (hf.file.empty()) {
+            // A diffusion pipeline is a directory, pulled whole, when
+            // its root carries model_index.json (49a); an MLX model is
+            // one when its model card says so and there is no GGUF to
+            // prefer (27b).
+            const models::HfListing listing =
+                models::list_gguf_files(*client, hf, token, cancellation);
+            if (listing.ok && listing.pipeline()) {
+                const auto pulled = pull_pipeline(ref, roots, *client, cancellation);
+                note_stored(pulled.model, models::kPipelineFormat, pulled.dir.filename().string());
+                return;
+            }
+            // A voice model is a directory too, pulled whole when its
+            // files are laid out as one (50a).
+            if (listing.ok && listing.gguf_files.empty() && listing.voice()) {
+                const auto pulled = pull_voice(ref, roots, *client, cancellation);
+                note_stored(pulled.model, models::kVoiceFormat, pulled.dir.filename().string());
+                return;
+            }
+            if (listing.ok && listing.gguf_files.empty() && listing.mlx()) {
+                const auto pulled = pull_mlx(ref, roots, *client, cancellation);
+                note_stored(pulled.model, models::kMlxFormat, pulled.dir.filename().string());
+                return;
+            }
+            std::string error;
+            if (!models::choose_file(listing, hf, error)) {
+                fail(error);
+            }
+        }
+        source = models::http_source(*client, hf, token, cancellation, promise);
+    } else if (models::store_has_manifest(store, ref)) {
+        // Found in the store, but with no model layer: a CLOUD model, whose
+        // weights are on Ollama's servers. Telling this user to `ollama
+        // pull` would send them to re-fetch what they already have.
+        fail("'" + ref +
+             "' is an Ollama cloud model -- its weights run on Ollama's servers, so there is "
+             "nothing local to copy. Use it through a 'ollama-cli' backend instead, or pull a "
+             "local variant such as '" +
+             std::string{models::split_ref(ref).first} + "' without the -cloud tag");
+    } else {
+        fail("'" + ref +
+             "' is not in your Ollama store and is not a Hugging Face ref. Pull it with "
+             "'ollama pull " +
+             ref + "' first, or name a Hugging Face repository as owner/repo");
+    }
+
+    // One directory per model, one per set of weights inside it.
+    const std::string model =
+        entry.has_value() ? models::safe_model_name(ref) : models::repo_directory_name(hf);
+    const std::string file_name =
+        entry.has_value() ? model + ".gguf" : std::filesystem::path{hf.file}.filename().string();
+
+    // Ollama names its blob by digest, so weights already here are found
+    // before a byte moves. (Hugging Face promises no digest for a single
+    // file; those are found once they land, below.)
+    if (const std::string known = models::weight_id_from_digest(promise.digest); !known.empty()) {
+        for (const models::StoredGguf& stored : models::list_store_ggufs(roots, model)) {
+            if (stored.id == known) {
+                std::cout << "already here -- these exact weights are at\n  "
+                          << stored.file.string() << "\n";
+                note_stored(model, models::kGgufFormat, stored.id);
+                return;
+            }
+        }
+    }
+    std::cout << (entry.has_value()
+                      ? "copying from your Ollama store (" + human_size(entry->size) + ")"
+                      : "downloading " + promise.source_url)
+              << "\n";
+
+    // The advisory warning, BEFORE the bytes move. It never refuses -- the
+    // open-model policy means the user's answer is final.
+    if (entry.has_value() && !request.yes) {
+        const models::GgufInfo peek = models::inspect_gguf(entry->blob);
+        if (peek.parsed && models::is_known_unrunnable(peek.architecture)) {
+            std::cout << "warning: architecture '" << peek.architecture
+                      << "' is not known to run in Apogee's llama.cpp.\n"
+                      << "         Pulling anyway is fine -- pass --yes to skip this notice.\n";
+        }
+    }
+
+    // Everything lands in a staging directory first and is renamed to its
+    // id once the bytes are verified and hashed.
+    const std::filesystem::path staging =
+        models::make_incoming_dir(roots, models::kGgufFormat, model);
+    DownloadProgress progress{std::cout, job_download_options()};
+    const models::AcquireResult result = models::acquire(
+        staging / file_name, promise, source,
+        [&progress](std::int64_t written, std::int64_t total) { progress.bytes(written, total); });
+    progress.finish();
+    if (cancellation.stop_requested()) {
+        cancelled_nothing_written(staging);
+    }
+    if (!result.ok) {
+        std::error_code code;
+        (void)models::remove_weights(staging);
+        fail(result.error);
+    }
+
+    // A vision model's projector is a SEPARATE layer in Ollama's manifest,
+    // and useless to leave behind: without it the model can only do text,
+    // and the user has no way to know a second file was sitting there. It
+    // lives beside its model, in the same directory.
+    bool projector_copied = false;
+    const std::string projector_name =
+        std::filesystem::path{file_name}.stem().string() + "-mmproj.gguf";
+    if (entry.has_value() && entry->has_projector()) {
+        std::cout << "this model has a vision projector; copying that too ("
+                  << human_size(entry->projector_size) << ")\n";
+        const models::AcquireResult vision =
+            models::acquire(staging / projector_name, models::projector_promise_for(*entry),
+                            stoppable(models::projector_source(*entry), cancellation));
+        if (cancellation.stop_requested()) {
+            cancelled_nothing_written(staging);
+        }
+        if (!vision.ok) {
+            // The model is already in place and usable for text, so this is
+            // a warning rather than a failure of the whole pull.
+            std::cout << "warning: the projector could not be copied -- " << vision.error
+                      << "\n         this model will work for text but not for images\n";
+        } else {
+            projector_copied = true;
+        }
+    }
+
+    std::string id = models::weight_id_from_digest(result.sidecar.file_digest);
+    if (id.empty()) {
+        id = models::random_weight_id();
+    }
+    const models::Commit commit =
+        models::commit_weights(staging, models::weights_dir(roots, models::kGgufFormat, model, id));
+    if (!commit.error.empty()) {
+        fail(commit.error);
+    }
+    std::filesystem::path model_file = commit.dir / file_name;
+    std::filesystem::path projector = projector_copied ? commit.dir / projector_name : "";
+    if (commit.existed) {
+        // Identical weights were already stored, perhaps under another name.
+        for (const models::StoredGguf& stored : models::list_store_ggufs(roots, model)) {
+            if (stored.id == id) {
+                model_file = stored.file;
+                projector = stored.projector;
+            }
+        }
+        std::cout << "\nalready here -- these exact weights are at\n  " << model_file.string()
+                  << "\n";
+    } else {
+        std::cout << "\n" << model_file.string() << "\n";
+        std::cout << "verified: " << result.sidecar.verification.summary() << "\n";
+        if (!result.error.empty()) {
+            std::cout << "note: " << result.error << "\n";
+        }
+    }
+
+    print_backend_hint(model_file, projector);
+    note_stored(model, models::kGgufFormat, id);
+}
+
+/// `models pull` on its one path (55c): the register chain, whose download
+/// has its own scope beside its conversions', or any other pull under one
+/// `InterruptScope` over all of it -- a listing, a download, a copy -- so a
+/// Ctrl-C anywhere is noticed between chunks.
+void pull_model(const PullRequest& request, const ChainTools& tools) {
+    check_base_name(request.base_name, request.base_name_given, request.registers);
+    if (request.registers) {
+        if (!request.safetensors) {
+            fail(
+                "--register needs --safetensors: the chain converts a full-weight pull. A "
+                "GGUF pull is runnable as it lands -- it prints the backend to add");
+        }
+        run_register_chain(
+            RegisterChainRequest{
+                .roots = request.roots,
+                .config_path = request.config_path,
+                .pull_ref = request.ref,
+                .snapshot = {},
+                .snapshot_from = {},
+                .levels = buildable_levels(request.register_with),
+                .base_name = request.base_name,
+            },
+            tools);
+        return;
+    }
+    const InterruptScope interrupt;
+    try {
+        pull_stored(request, tools.transport, InterruptScope::token());
+    } catch (const harness::CancelledError&) {
+        // Stopped in a request, before anything was staged.
+        cancelled_nothing_written({});
+    }
 }
 
 }  // namespace
+
+void run_pull(const PullRequest& request, const ChainTools& tools) {
+    if (!request.stream) {
+        pull_model(request, tools);
+        return;
+    }
+    // The same pull, its progress as events (52b), and each set it stored
+    // said last as `models info` says it.
+    JobStream job{"models pull"};
+    try {
+        pull_model(request, tools);
+    } catch (const CLI::RuntimeError&) {
+        job.failed("the pull failed; stderr says why");
+        throw;
+    } catch (const std::exception& e) {
+        job.failed(e.what());
+        throw;
+    }
+    harness::Config config;
+    try {
+        config = harness::load_config(request.config_path);
+    } catch (const std::exception&) {
+        config = harness::Config{};
+    }
+    for (const std::string& handle : job.handles()) {
+        const nlohmann::json document = model_info_document(config, handle, request.config_path);
+        if (document.is_null()) {
+            job.events().on_notice("no document for " + handle);
+            continue;
+        }
+        job.events().emit_document(document);
+    }
+}
 
 void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_dir,
                           const RootContext& context) {
@@ -2411,213 +3948,24 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         "With --register: what each backend's name begins with, before -F16, -Q4KM ... "
         "(default: the model's name)");
 
+    auto pull_format = std::make_shared<JobFormat>(JobFormat::Text);
+    add_job_format(pull, pull_format, /*document=*/false);
+
     pull->callback([pull_ref, pull_yes, pull_safetensors, pull_register, pull_register_with,
-                    pull_register_option, pull_base_name, pull_base_name_option, models_dir,
-                    &context]() {
-        const std::string& ref = *pull_ref;
-        const models::StoreRoots roots = store_roots(models_dir, context.config_path);
-        const bool registers = *pull_register || pull_register_option->count() > 0;
-        check_base_name(*pull_base_name, pull_base_name_option->count() > 0, registers);
-        if (registers) {
-            if (!*pull_safetensors) {
-                fail(
-                    "--register needs --safetensors: the chain converts a full-weight pull. A "
-                    "GGUF pull is runnable as it lands -- it prints the backend to add");
-            }
-            run_register_chain(RegisterChainRequest{
-                .roots = roots,
-                .config_path = harness::resolve_config_path(context.config_path),
-                .pull_ref = ref,
-                .snapshot = {},
-                .snapshot_from = {},
-                .levels = buildable_levels(*pull_register_with),
-                .base_name = *pull_base_name,
-            });
-            return;
-        }
-        if (*pull_safetensors) {
-            (void)pull_snapshot(ref, roots, /*chained=*/false);
-            return;
-        }
-
-        models::SourcePromise promise;
-        models::ByteSource source;
-
-        // Ollama first when the store actually has it: a ref like "user/model"
-        // is ambiguous, and a local copy is free while a download is not.
-        const std::filesystem::path store = models::ollama_store_root();
-        std::optional<models::OllamaEntry> entry = models::find_in_store(store, ref);
-
-        std::unique_ptr<backends::HttpClient> client;
-        models::HfRef hf;
-        const harness::CancellationToken cancellation;
-
-        if (entry.has_value()) {
-            promise = models::promise_for(*entry);
-            source = models::blob_source(*entry);
-        } else if (looks_like_hf(ref)) {
-            std::optional<models::HfRef> parsed = models::parse_hf_ref(ref);
-            if (!parsed.has_value()) {
-                fail("'" + ref + "' is not a Hugging Face ref (expected owner/repo[:file.gguf])");
-            }
-            hf = *parsed;
-
-            client =
-                std::make_unique<backends::HttpClient>(std::make_unique<backends::CurlTransport>());
-            const std::string token = models::hf_token({});
-
-            if (hf.file.empty()) {
-                // A diffusion pipeline is a directory, pulled whole, when
-                // its root carries model_index.json (49a); an MLX model is
-                // one when its model card says so and there is no GGUF to
-                // prefer (27b).
-                const models::HfListing listing =
-                    models::list_gguf_files(*client, hf, token, cancellation);
-                if (listing.ok && listing.pipeline()) {
-                    const InterruptScope interrupt;
-                    (void)pull_pipeline(ref, roots, *client, InterruptScope::token());
-                    return;
-                }
-                // A voice model is a directory too, pulled whole when its
-                // files are laid out as one (50a).
-                if (listing.ok && listing.gguf_files.empty() && listing.voice()) {
-                    const InterruptScope interrupt;
-                    (void)pull_voice(ref, roots, *client, InterruptScope::token());
-                    return;
-                }
-                if (listing.ok && listing.gguf_files.empty() && listing.mlx()) {
-                    const InterruptScope interrupt;
-                    (void)pull_mlx(ref, roots, *client, InterruptScope::token());
-                    return;
-                }
-                std::string error;
-                if (!models::choose_file(listing, hf, error)) {
-                    fail(error);
-                }
-            }
-            source = models::http_source(*client, hf, token, cancellation, promise);
-        } else if (models::store_has_manifest(store, ref)) {
-            // Found in the store, but with no model layer: a CLOUD model, whose
-            // weights are on Ollama's servers. Telling this user to `ollama
-            // pull` would send them to re-fetch what they already have.
-            fail("'" + ref +
-                 "' is an Ollama cloud model -- its weights run on Ollama's servers, so there is "
-                 "nothing local to copy. Use it through a 'ollama-cli' backend instead, or pull a "
-                 "local variant such as '" +
-                 std::string{models::split_ref(ref).first} + "' without the -cloud tag");
-        } else {
-            fail("'" + ref +
-                 "' is not in your Ollama store and is not a Hugging Face ref. Pull it with "
-                 "'ollama pull " +
-                 ref + "' first, or name a Hugging Face repository as owner/repo");
-        }
-
-        // One directory per model, one per set of weights inside it.
-        const std::string model =
-            entry.has_value() ? models::safe_model_name(ref) : models::repo_directory_name(hf);
-        const std::string file_name = entry.has_value()
-                                          ? model + ".gguf"
-                                          : std::filesystem::path{hf.file}.filename().string();
-
-        // Ollama names its blob by digest, so weights already here are found
-        // before a byte moves. (Hugging Face promises no digest for a single
-        // file; those are found once they land, below.)
-        if (const std::string known = models::weight_id_from_digest(promise.digest);
-            !known.empty()) {
-            for (const models::StoredGguf& stored : models::list_store_ggufs(roots, model)) {
-                if (stored.id == known) {
-                    std::cout << "already here -- these exact weights are at\n  "
-                              << stored.file.string() << "\n";
-                    return;
-                }
-            }
-        }
-        std::cout << (entry.has_value()
-                          ? "copying from your Ollama store (" + human_size(entry->size) + ")"
-                          : "downloading " + promise.source_url)
-                  << "\n";
-
-        // The advisory warning, BEFORE the bytes move. It never refuses -- the
-        // open-model policy means the user's answer is final.
-        if (entry.has_value() && !*pull_yes) {
-            const models::GgufInfo peek = models::inspect_gguf(entry->blob);
-            if (peek.parsed && models::is_known_unrunnable(peek.architecture)) {
-                std::cout << "warning: architecture '" << peek.architecture
-                          << "' is not known to run in Apogee's llama.cpp.\n"
-                          << "         Pulling anyway is fine -- pass --yes to skip this notice.\n";
-            }
-        }
-
-        // Everything lands in a staging directory first and is renamed to its
-        // id once the bytes are verified and hashed.
-        const std::filesystem::path staging =
-            models::make_incoming_dir(roots, models::kGgufFormat, model);
-        DownloadProgress progress{std::cout, stdout_download_options()};
-        const models::AcquireResult result =
-            models::acquire(staging / file_name, promise, source,
-                            [&progress](std::int64_t written, std::int64_t total) {
-                                progress.bytes(written, total);
-                            });
-        progress.finish();
-        if (!result.ok) {
-            std::error_code code;
-            (void)models::remove_weights(staging);
-            fail(result.error);
-        }
-
-        // A vision model's projector is a SEPARATE layer in Ollama's manifest,
-        // and useless to leave behind: without it the model can only do text,
-        // and the user has no way to know a second file was sitting there. It
-        // lives beside its model, in the same directory.
-        bool projector_copied = false;
-        const std::string projector_name =
-            std::filesystem::path{file_name}.stem().string() + "-mmproj.gguf";
-        if (entry.has_value() && entry->has_projector()) {
-            std::cout << "this model has a vision projector; copying that too ("
-                      << human_size(entry->projector_size) << ")\n";
-            const models::AcquireResult vision =
-                models::acquire(staging / projector_name, models::projector_promise_for(*entry),
-                                models::projector_source(*entry));
-            if (!vision.ok) {
-                // The model is already in place and usable for text, so this is
-                // a warning rather than a failure of the whole pull.
-                std::cout << "warning: the projector could not be copied -- " << vision.error
-                          << "\n         this model will work for text but not for images\n";
-            } else {
-                projector_copied = true;
-            }
-        }
-
-        std::string id = models::weight_id_from_digest(result.sidecar.file_digest);
-        if (id.empty()) {
-            id = models::random_weight_id();
-        }
-        const models::Commit commit = models::commit_weights(
-            staging, models::weights_dir(roots, models::kGgufFormat, model, id));
-        if (!commit.error.empty()) {
-            fail(commit.error);
-        }
-        std::filesystem::path model_file = commit.dir / file_name;
-        std::filesystem::path projector = projector_copied ? commit.dir / projector_name : "";
-        if (commit.existed) {
-            // Identical weights were already stored, perhaps under another name.
-            for (const models::StoredGguf& stored : models::list_store_ggufs(roots, model)) {
-                if (stored.id == id) {
-                    model_file = stored.file;
-                    projector = stored.projector;
-                }
-            }
-            std::cout << "\nalready here -- these exact weights are at\n  " << model_file.string()
-                      << "\n";
-        } else {
-            std::cout << "\n" << model_file.string() << "\n";
-            std::cout << "verified: " << result.sidecar.verification.summary() << "\n";
-            if (!result.error.empty()) {
-                std::cout << "note: " << result.error << "\n";
-            }
-        }
-
-        print_backend_hint(model_file, projector);
+                    pull_register_option, pull_base_name, pull_base_name_option, pull_format,
+                    models_dir, &context]() {
+        run_pull(PullRequest{
+            .roots = store_roots(models_dir, context.config_path),
+            .config_path = harness::resolve_config_path(context.config_path),
+            .ref = *pull_ref,
+            .yes = *pull_yes,
+            .safetensors = *pull_safetensors,
+            .registers = *pull_register || pull_register_option->count() > 0,
+            .register_with = *pull_register_with,
+            .base_name = *pull_base_name,
+            .base_name_given = pull_base_name_option->count() > 0,
+            .stream = *pull_format == JobFormat::StreamJson,
+        });
     });
 
     // ---- delete -------------------------------------------------------------
@@ -2664,13 +4012,19 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         for (const std::filesystem::path& dir : plan.removes) {
             std::cout << "  " << dir.string() << "\n";
         }
-        // A backend pointing into what goes stops working: say which, and
-        // what will be done about it, before (M14).
-        const std::vector<std::string> affected =
-            backends_inside(context.config_path, plan.removes);
+        // A backend pointing into what goes stops working, and so does every
+        // other reference into it: say which, and what will be done about
+        // them, before (M14, 55d) -- every one the one walk lists.
+        const Stranded stranded = stranded_by(roots, context.config_path, plan.removes);
+        const std::vector<std::string>& affected = stranded.backends;
+        std::vector<std::string> cleared;
         for (const std::string& backend : affected) {
             std::cout << "\nbackend '" << backend
                       << "' points into this and will stop working until it is repointed.\n";
+        }
+        for (const StoreReference& reference : stranded.cleared) {
+            std::cout << "\n" << stranded_warning(reference) << "\n";
+            cleared.push_back(stranded_name(reference));
         }
         if (!affected.empty()) {
             const bool one = affected.size() == 1;
@@ -2683,6 +4037,15 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                                                  (one ? "entry stays" : "entries stay") +
                                                  " unless you say -- --and-backends removes " +
                                                  (one ? "it" : "them") + " with the weights.\n");
+        }
+        if (!cleared.empty()) {
+            const bool one = cleared.size() == 1;
+            std::cout << (*delete_backends
+                              ? "--and-backends: " + spoken_list(cleared) + (one ? " is" : " are") +
+                                    " cleared too, through the config editor.\n"
+                              : spoken_list(cleared) + (one ? " stays" : " stay") +
+                                    " unless you say -- --and-backends clears " +
+                                    (one ? "it" : "them") + " with the weights.\n");
         }
         if (plan.ollama_sourced) {
             // Apogee's copy only. Ollama's blobs are shared between models, so
@@ -2712,19 +4075,23 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                     return std::string{};
                 }
                 return answer;
-            });
+            },
+            cleared);
         for (const std::filesystem::path& dir : plan.removes) {
             if (const std::string error = models::remove_weights(dir); !error.empty()) {
                 fail(error);
             }
         }
         std::cout << "\nremoved.\n";
-        if (affected.empty()) {
+        if (affected.empty() && cleared.empty()) {
             return;
         }
         try {
-            for (const std::string& line : settle_backends(
-                     harness::resolve_config_path(context.config_path), affected, remove_entries)) {
+            for (const std::string& line :
+                 settle_backends(stranded.path, affected, remove_entries)) {
+                std::cout << line << "\n";
+            }
+            for (const std::string& line : settle_references(stranded, remove_entries)) {
                 std::cout << line << "\n";
             }
         } catch (const std::exception& e) {
@@ -2778,7 +4145,7 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
     convert
         ->add_option("model", *convert_in,
                      "A model (its newest SafeTensors download), <model>/safetensors/<id>, or a "
-                     "snapshot directory")
+                     "snapshot directory -- with --mlx, a voice model too (<model>/voice/<id>)")
         ->type_name(kSnapshotValue)
         ->required();
     // One --type, two engines' precisions: each is checked against its own
@@ -2794,20 +4161,28 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         convert
             ->add_option("-t,--type", *convert_type,
                          "Precision to write: a GGUF's (default f16; make it smaller with "
-                         "'models quantize'), or with --mlx an MLX model's (default 4bit)")
+                         "'models quantize'), or with --mlx an MLX model's (default 4bit; bf16 "
+                         "for a draft head's drafter and a voice model)")
             ->type_name(kConvertPrecisionValue)
             ->check(CLI::IsMember(convert_types));
     convert->add_flag("--mlx", *convert_mlx,
-                      "Make an MLX model with mlx-lm's converter (Apple silicon), quantized to "
-                      "--type, into the model's mlx/");
+                      "Make an MLX model (Apple silicon), quantized to --type, into the model's "
+                      "mlx/: mlx-lm's converter, or for weights with a vision or audio tower "
+                      "mlx-vlm's, the towers kept -- for a draft head mlx-vlm's drafter, run "
+                      "beside its base, for Wan's original layout mlx-video's video model, and "
+                      "for a voice model mlx-audio's");
+    auto convert_text_only = std::make_shared<bool>(false);
+    convert->add_flag("--text-only", *convert_text_only,
+                      "With --mlx: build only the language model of weights with a vision or "
+                      "audio tower, with mlx-lm's converter -- the towers left out");
     convert->add_option("--from", *convert_from, "Which of the model's SafeTensors sets, by id")
         ->type_name(kSnapshotIdValue);
     auto convert_model_type = std::make_shared<std::string>();
     convert
         ->add_option("--model-type", *convert_model_type,
-                     "With --mlx: convert these weights as a type mlx-lm knows -- your word, for "
-                     "a vendor's variant its converter does not list; the snapshot is untouched "
-                     "and the record says so")
+                     "With --mlx: convert these weights as a type their converter knows (mlx-lm, "
+                     "or mlx-vlm for weights with a tower) -- your word, for a vendor's variant "
+                     "it does not list; the snapshot is untouched and the record says so")
         ->type_name(kMlxModelTypeValue);
     auto convert_register = std::make_shared<bool>(false);
     auto convert_register_with = std::make_shared<std::vector<std::string>>();
@@ -2829,17 +4204,21 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         "with --mlx -4bit, -8bit ... (default: the model's name)");
 
     convert->callback([convert_in, convert_type, convert_type_option, convert_mlx, convert_from,
-                       convert_model_type, convert_register, convert_register_with,
-                       register_with_option, convert_base_name, convert_base_name_option,
-                       models_dir, &context]() {
+                       convert_model_type, convert_text_only, convert_register,
+                       convert_register_with, register_with_option, convert_base_name,
+                       convert_base_name_option, models_dir, &context]() {
         const models::StoreRoots roots = store_roots(models_dir, context.config_path);
         const bool registers = *convert_register || register_with_option->count() > 0;
         if (*convert_mlx) {
             const std::string type = convert_type_option->count() > 0 ? *convert_type : "4bit";
             check_base_name(*convert_base_name, convert_base_name_option->count() > 0, registers);
             if (!registers) {
-                convert_to_mlx_command(roots, *convert_in, *convert_from, type, *convert_model_type,
-                                       nullptr);
+                // Unnamed, the precision is the set's own default: 4bit, or
+                // bf16 for a drafter (53i) and a voice model (53m).
+                convert_to_mlx_command(
+                    roots, *convert_in, *convert_from,
+                    convert_type_option->count() > 0 ? *convert_type : std::string{},
+                    *convert_model_type, nullptr, *convert_text_only);
                 return;
             }
             // M16: with --mlx the chain converts once a precision.
@@ -2859,15 +4238,21 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                 .base_name = *convert_base_name,
                 .model_type = *convert_model_type,
                 .listed = listed,
+                .text_only = *convert_text_only,
             };
             convert_to_mlx_command(roots, *convert_in, *convert_from, request.precisions.front(),
-                                   *convert_model_type, &request);
+                                   *convert_model_type, &request, *convert_text_only);
             return;
         }
         if (!convert_model_type->empty()) {
             fail(
                 "--model-type names the type mlx-lm converts these weights as -- it works with "
                 "--mlx; the GGUF converter finds a model by its architectures");
+        }
+        if (*convert_text_only) {
+            fail(
+                "--text-only asks --mlx for mlx-lm's build of a model's language model alone, "
+                "its vision or audio tower left out -- it works with --mlx");
         }
         if (std::ranges::find(training::converter_out_types(), *convert_type) ==
             training::converter_out_types().end()) {

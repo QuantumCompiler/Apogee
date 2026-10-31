@@ -1,0 +1,1 @@
+apogee execute: backend 'mlxgone' is configured but could not be started: there is no Python environment at /Users/someone/.apogee/training/venv -- the mlx backend runs mlx-lm there, never the system Python -- apogee train setup --with mlx (started backends: good)

@@ -1,0 +1,3 @@
+Community #1 -- 3 entities (top: Compressor, Heat pump, Outdoor unit)
+  The heat pump, its compressor and its outdoor unit: one machine moving heat indoors.
+

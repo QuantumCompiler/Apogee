@@ -1,0 +1,3 @@
+registered codex (codex-cli)
+models.default set to 'codex' (none was set)
+fetched codex-cli's models: 2 on the roster

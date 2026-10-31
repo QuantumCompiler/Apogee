@@ -1,17 +1,25 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <filesystem>
+#include <memory>
+#include <random>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "agentloop/embed_func.h"
 #include "agentloop/retriever.h"
+#include "backends/mlx_embed.h"
 #include "backends/mock.h"
 #include "backends/openai.h"
 #include "contracts/config.h"
+#include "embedstore/store.h"
 #include "harness/harness.h"
+#include "support/env_guard.h"
+#include "support/fake_mlx_driver.h"
 #include "support/fake_transport.h"
+#include "support/mlx_model.h"
 
 /// The resolution rules, encoded as an exhaustive table. Every
 /// row is one turn: what the user said (flag, pin), what exists (embedder,
@@ -304,6 +312,157 @@ TEST_CASE("the embedder is resolved through the role chain and reports model and
     // A backend that cannot embed resolves to nothing, with the reason.
     CHECK_FALSE(apogee::agentloop::resolve_embedder(harness, config, "chat", reason).has_value());
     CHECK(reason.find("cannot embed") != std::string::npos);
+}
+
+TEST_CASE(
+    "a collection an MLX embedder built is bound to it, and the set's GGUF build is another "
+    "space",
+    "[agentloop][retrieval][embedder][mlx][embedding]") {
+    // 53h: an `mlx` entry over an embedding model joins the one-retriever rule
+    // unchanged. Its vectors are named for the backend that made them, so the
+    // same set's GGUF build -- whose llamacpp embedder names its space by the
+    // entry's `model:` -- never queries a collection the MLX build vectorised:
+    // auto demotes it wholesale to lexical with the re-ingest hint, and an
+    // explicit vector ask is refused naming lexical.
+    apogee::harness::Config config;
+    apogee::harness::BackendConfig mlx_entry;
+    mlx_entry.type = apogee::harness::BackendType::Mlx;
+    mlx_entry.model = "Gemma-Embedding-300M";
+    config.backends.emplace("mlx-embed", mlx_entry);
+    apogee::harness::BackendConfig gguf_entry;
+    gguf_entry.type = apogee::harness::BackendType::Mock;
+    config.backends.emplace("gguf-embed", gguf_entry);
+    config.models.default_embedding = "mlx-embed";
+
+    apogee::harness::Harness harness{config};
+    const auto driver = std::make_shared<apogee::testing::DriverState>();
+    driver->startup = std::string{apogee::testing::kEmbeddingReady};
+    driver->embed_width = 4;
+    apogee::backends::MlxEmbedProvider::Options options;
+    options.backend_name = "mlx-embed";
+    options.model = "Gemma-Embedding-300M";
+    options.width = 4;
+    harness.register_provider(
+        "mlx-embed", std::make_shared<apogee::backends::MlxEmbedProvider>(
+                         options, [driver](const apogee::platform::ChildCommand&, std::string&) {
+                             return std::make_unique<apogee::testing::FakeDriver>(driver);
+                         }));
+    // The same set's GGUF build, as a llamacpp embedder names its space.
+    auto gguf = std::make_shared<apogee::backends::MockEmbeddingProvider>("gguf-embed");
+    gguf->set_model_name("Gemma-Embedding-300M");
+    harness.register_provider("gguf-embed", gguf);
+    harness.use_default_router();
+
+    // The role resolves to it, discovered as any embedder is: free, its width
+    // the directory's, its space named for the backend.
+    CHECK(harness.can_embed("mlx-embed"));
+    std::string reason;
+    const auto embedder = apogee::agentloop::resolve_embedder(harness, config, "", reason);
+    REQUIRE(embedder.has_value());
+    CHECK(embedder->backend == "mlx-embed");
+    CHECK(embedder->model == "mlx:Gemma-Embedding-300M");
+    CHECK_FALSE(embedder->metered);
+    CHECK(embedder->dimensions == 4);
+    const EmbedderFacts mlx_facts{.available = true, .model = embedder->model, .metered = false};
+    // Unmetered: a whole collection is vectorised on Apogee's initiative.
+    CHECK(resolve_ingest_retriever("", "", mlx_facts).retriever == Retriever::Vector);
+
+    // A collection it builds, bound to it.
+    const apogee::testing::TempDir dir{"retrieval-mlx-" + std::to_string(std::random_device{}())};
+    apogee::embedstore::Store store{dir.path() / "notes.db"};
+    const std::vector<std::string> chunks{"the cat sat on the mat", "dogs bark at night"};
+    const std::vector<std::vector<float>> vectors = embedder->embed(chunks, {});
+    REQUIRE(vectors.size() == chunks.size());
+    store.replace_source("notes.txt", chunks, vectors);
+    store.set_embedding_model(embedder->model, static_cast<std::int64_t>(vectors.front().size()));
+    const apogee::embedstore::Store::Stats stats = store.stats();
+    const StoreFacts facts{.exists = true,
+                           .chunk_count = stats.chunk_count,
+                           .recorded_model = store.embedding_model().model,
+                           .dimension = stats.dimension,
+                           .lexical_only = stats.lexical_only,
+                           .vector_dims = stats.vector_dims};
+    CHECK(facts.recorded_model == "mlx:Gemma-Embedding-300M");
+    const TurnRetrieval bound = resolve_turn_retriever("", "", mlx_facts, facts);
+    CHECK(bound.retriever == Retriever::Vector);
+    CHECK(bound.error.empty());
+
+    // Asked under the GGUF build of the same set: another vector space.
+    const auto other = apogee::agentloop::resolve_embedder(harness, config, "gguf-embed", reason);
+    REQUIRE(other.has_value());
+    CHECK(other->model == "Gemma-Embedding-300M");
+    const EmbedderFacts gguf_facts{.available = true, .model = other->model, .metered = false};
+    const TurnRetrieval demoted = resolve_turn_retriever("", "", gguf_facts, facts);
+    CHECK(demoted.retriever == Retriever::Lexical);
+    CHECK(demoted.note.find("re-run") != std::string::npos);
+    const TurnRetrieval refused = resolve_turn_retriever("vector", "", gguf_facts, facts);
+    CHECK(refused.error.find("lexical") != std::string::npos);
+}
+
+TEST_CASE(
+    "a collection's space is its embedder's model and adapter set, so a change falls to lexical",
+    "[agentloop][retrieval][embedder][adapters][space]") {
+    // 55e: the binding named the model alone while `embed` applied the
+    // entry's adapters, so a register, a clear or a promote left it the same
+    // and vectors were queried across two spaces. The adapter set is in the
+    // name now; the one retriever rule is unchanged and catches the change.
+    const apogee::testing::TempDir dir{"retrieval-space-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path model = dir.path() / "model";
+    apogee::testing::write_fixture_file(model / "model.safetensors", "weights");
+    const auto adapter = [&](const std::string& name, const std::string& weights) {
+        const std::filesystem::path path = dir.path() / name;
+        apogee::testing::write_fixture_file(path / "adapter_config.json", "{}");
+        apogee::testing::write_fixture_file(path / "adapters.safetensors", weights);
+        return apogee::harness::AdapterConfig{.path = path.string()};
+    };
+    const apogee::harness::AdapterConfig tone = adapter("tone", "tone delta");
+    const apogee::harness::AdapterConfig v2 = adapter("v2.lora", "a promoted delta");
+    const apogee::harness::AdapterConfig copied = adapter("elsewhere", "tone delta");
+    // The space an mlx embedding entry over `model` names, under `adapters`.
+    const auto space = [&](std::vector<apogee::harness::AdapterConfig> adapters) {
+        apogee::backends::MlxEmbedProvider::Options options;
+        options.model = "Gemma-Embedding-300M";
+        options.model_dir = model;
+        options.adapters = std::move(adapters);
+        options.weight_hashing.memo = dir.path() / "cache" / "weight-hashes.json";
+        const apogee::backends::MlxEmbedProvider provider{
+            options, [](const apogee::platform::ChildCommand&, std::string&) {
+                return std::unique_ptr<apogee::platform::ChildProcess>{};
+            }};
+        return provider.embedding_model_name();
+    };
+    const auto turn = [](const std::string& asked, const std::string& recorded) {
+        return resolve_turn_retriever("", "", EmbedderFacts{.available = true, .model = asked},
+                                      vector_store(recorded));
+    };
+
+    const std::string bound = space({tone});
+    // The same set asks the same space: vector, as it always was.
+    CHECK(turn(space({tone}), bound).retriever == Retriever::Vector);
+    // The same adapter's bytes elsewhere are the same space.
+    CHECK(turn(space({copied}), bound).retriever == Retriever::Vector);
+    // Another adapter -- a promote's next version -- or none: lexical, with
+    // the re-ingest hint, never a query across the two.
+    for (const std::string& asked : {space({v2}), space({})}) {
+        INFO(asked);
+        const TurnRetrieval demoted = turn(asked, bound);
+        CHECK(demoted.retriever == Retriever::Lexical);
+        CHECK(demoted.note.find("re-run") != std::string::npos);
+    }
+    // An explicit vector ask across the change is refused naming lexical.
+    CHECK(resolve_turn_retriever("vector", "",
+                                 EmbedderFacts{.available = true, .model = space({v2})},
+                                 vector_store(bound))
+              .error.find("lexical") != std::string::npos);
+
+    // ADR 0006: a collection bound before 55e recorded the model alone. With
+    // no adapters it is the space it always was, read as before; under an
+    // adapter set it cannot be told from the bare model's, so it falls to
+    // lexical until it is ingested again -- readable, never mis-scored.
+    const std::string before_55e = "mlx:Gemma-Embedding-300M";
+    CHECK(space({}) == before_55e);
+    CHECK(turn(space({}), before_55e).retriever == Retriever::Vector);
+    CHECK(turn(space({tone}), before_55e).retriever == Retriever::Lexical);
 }
 
 TEST_CASE("each retriever's strength is read on its own scale, and each has its floor",

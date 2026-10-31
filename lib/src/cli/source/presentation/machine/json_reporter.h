@@ -9,6 +9,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "agent/tool.h"
@@ -110,9 +111,18 @@ public:
     /// once, before the first turn -- unprompted: the child speaks first, and
     /// a driver's `hello` refines what it reads, never gates it. A session of
     /// `user` lines also names `next_turn` (28f): the number its next turn
-    /// will carry, past those a resumed conversation already holds.
+    /// will carry, past those a resumed conversation already holds. A session
+    /// that writes a chat names it, `chat_id` (M28): the id `chats list` lists
+    /// it by and `--resume` takes -- a resumed one's, the chat it resumed. A
+    /// private one (52d) writes none, so names none. A session under a suite
+    /// names it, `suite` (M29), fresh or resumed -- none names none -- and an
+    /// execute session says whether it orchestrates, `orchestrating`: nullopt
+    /// leaves it out, as a chat's.
     void begin_session(std::string_view model, const MachineCapabilities& capabilities,
-                       std::optional<std::int64_t> next_turn = std::nullopt);
+                       std::optional<std::int64_t> next_turn = std::nullopt,
+                       bool private_chat = false, std::string_view chat_id = {},
+                       std::string_view suite = {},
+                       std::optional<bool> orchestrating = std::nullopt);
 
     /// A `user` line was accepted as turn `turn` (28f): every event until
     /// `end_turn` carries `"turn": turn`, so a driver can attribute any event
@@ -129,7 +139,10 @@ public:
     /// A `thinking` event carrying `budget_reached: true` (26i).
     void on_thinking_budget_reached() override;
     /// A `memory` event: the past chats and decisions a turn was handed (26l).
-    void on_recall(int chats, int decisions) override;
+    /// A `memory` event, naming each recalled chat (52a).
+    void on_recall(const std::vector<agentloop::RecalledChat>& chats, int decisions) override;
+    /// A `sources` event, before the answer, when anything was sent (52a).
+    void on_sources(const std::vector<harness::ExcerptSource>& sources) override;
     /// `todo` (41d): the session's todo, whole, `items` an array of
     /// `{text, state}`; empty when cleared.
     void on_todo(const harness::TodoList& todo) override;
@@ -189,6 +202,69 @@ public:
     /// `task_grant`: a call the task's grant let through (27i) in `round` --
     /// the tool, its target and `by: grant`.
     void emit_task_grant(const tasks::Task& task, int round, const tasks::Permit& permit);
+
+    // --- a long job's stream (52b) ------------------------------------------
+    //
+    // `models pull`, `video generate`, `video compose` and `voice say` under
+    // `--output-format stream-json`: the progress each already narrates,
+    // framed as events by its one producer -- and since 55h `train pipeline
+    // run|resume` and `train cycle run`. `scene` is 0 outside a composer's
+    // scene, and `stage` outside a pipeline's, and then omitted.
+
+    /// `job`, first: the verb, and the protocol's and the vocabulary's
+    /// versions.
+    void begin_job(std::string_view verb);
+
+    /// `stage`: a chain's step -- `index` of `count`, its label -- `started`,
+    /// `done` or `failed`. A pipeline's stage (55h) is said as its manifest
+    /// records it: `state` the manifest's word, with the pipeline run it
+    /// belongs to, its own run once it has one, and its cumulative score once
+    /// the gate has scored it -- each left out when empty.
+    void emit_stage(std::size_t index, std::size_t count, std::string_view label,
+                    std::string_view state, std::string_view pipeline_run_id = {},
+                    std::string_view run_id = {},
+                    std::optional<double> cumulative_score = std::nullopt);
+
+    /// `bytes`: `done` moved of `total` (left out when unknown -- never
+    /// guessed); in a tree of files, the file and its place.
+    void emit_bytes(std::int64_t done, std::int64_t total, std::string_view file, std::size_t index,
+                    std::size_t count);
+
+    /// `ready`: a runtime loaded -- its device, and its dtype and mode where
+    /// the driver says them, and since M24 the engine the run takes (`torch`,
+    /// `mlx`) where the job says it.
+    void emit_ready(std::string_view device, std::string_view dtype, std::string_view mode,
+                    std::size_t scene, std::string_view engine = {});
+
+    /// `step`: a denoising step, `step` of `steps`.
+    void emit_step(int step, int steps, std::size_t scene);
+
+    /// `frames`: the driver wrote its frames, `width` x `height`.
+    void emit_frames(int frames, int width, int height, std::size_t scene);
+
+    /// `assembling`: the frames going into the clip.
+    void emit_assembling(int frames, std::size_t scene);
+
+    /// `segment`: speech, `index` of `of`, its seconds as the driver counted.
+    void emit_segment(int index, int of, double seconds, std::size_t scene);
+
+    /// `scene`: a composer's scene, `scene` of `scenes`, at `state` --
+    /// `speaking`, `rendering` or `asset` (its asset taken as it is).
+    void emit_scene(std::size_t scene, std::size_t scenes, std::string_view state);
+
+    /// `iteration` (55h): a trainer's tick, `iteration` of `iterations` (left
+    /// out when the trainer did not say), its loss, learning rate and
+    /// throughput -- what the status line shows -- in pipeline stage `stage`.
+    void emit_iteration(int iteration, int iterations, double loss, double lr, double throughput,
+                        std::size_t stage);
+
+    /// `pass` (55h): a line of a cycle pass's narration, `text`, and where the
+    /// pass is, `state`.
+    void emit_pass(std::string_view state, std::string_view text);
+
+    /// `document`, last: the verb's own document -- what `--output-format
+    /// json` prints, whole.
+    void emit_document(const nlohmann::json& document);
 
     /// Whether any answer text was emitted this run.
     [[nodiscard]] bool wrote_answer() const noexcept;
@@ -250,6 +326,22 @@ enum class ReadFormat : std::uint8_t {
     Json,
 };
 
+/// How a long job renders (52b): `--output-format` on `models pull` and the
+/// media runs. `text` is the people's view; `json` the verb's one document,
+/// where it has one; `stream-json` its progress as events on stdout, that
+/// document last.
+enum class JobFormat : std::uint8_t {
+    Text,
+    Json,
+    StreamJson,
+};
+
+[[nodiscard]] std::string_view to_string(JobFormat format) noexcept;
+[[nodiscard]] std::optional<JobFormat> job_format_from_string(std::string_view name) noexcept;
+/// The words a job's `--output-format` takes: `json` only for a verb with a
+/// document.
+[[nodiscard]] std::vector<std::string_view> job_format_names(bool document);
+
 [[nodiscard]] std::string_view to_string(ReadFormat format) noexcept;
 [[nodiscard]] std::optional<ReadFormat> read_format_from_string(std::string_view name) noexcept;
 /// The words a read's `--output-format` takes, for its help and completion.
@@ -276,6 +368,13 @@ struct DriverMessage {
         /// Stop the turn in flight, as Ctrl-C would (28f). Read by the
         /// session's stdin reader, never queued.
         Cancel,
+        /// Detach an attachment, as `/detach` does (52d); `text` is its name.
+        Detach,
+        /// Move the session's run settings, as their slash commands do
+        /// (52d): `settings`, and the keys `refused`.
+        Set,
+        /// Compact the conversation's history, as `/compact` does (52d).
+        Compact,
         /// A line that parsed but carried no recognised type.
         Unknown,
     };
@@ -291,7 +390,17 @@ struct DriverMessage {
     std::string client_name;
     std::string client_version;
     std::string wants;
+    /// A `set` line's settings (52d), in the order they apply -- `model`,
+    /// `system`, `think`, `effort`, `temperature` -- each value as text (a
+    /// number as written); and each key it named that is no setting a
+    /// session moves, or whose value is neither a string nor a number.
+    std::vector<std::pair<std::string, std::string>> settings;
+    std::vector<std::string> refused;
 };
+
+/// The run settings a `set` line moves (52d), in the order they apply:
+/// exactly the ones the session's slash commands move.
+[[nodiscard]] std::vector<std::string_view> settable_keys();
 
 /// What a driver's `hello` is recorded as (28d): one line for the
 /// operational log, never a value from the config or a secret -- the client's

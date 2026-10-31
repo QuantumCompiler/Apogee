@@ -5,6 +5,7 @@
 #include <utility>
 #include <vector>
 
+#include "agentloop/rag.h"
 #include "agentloop/recall.h"
 #include "platform/platform.h"
 
@@ -179,11 +180,18 @@ void CliReporter::on_model_load(std::string_view backend, const harness::StatusE
     }
 }
 
-void CliReporter::on_recall(int chats, int decisions) {
-    if (chats <= 0 && decisions <= 0) {
+void CliReporter::on_recall(const std::vector<agentloop::RecalledChat>& chats, int decisions) {
+    if (chats.empty() && decisions <= 0) {
         return;
     }
-    keep_line(options_.style.dim("[memory] " + agentloop::describe_recall(chats, decisions)));
+    keep_line(options_.style.dim(
+        "[memory] " + agentloop::describe_recall(static_cast<int>(chats.size()), decisions)));
+}
+
+void CliReporter::on_sources(const std::vector<harness::ExcerptSource>& sources) {
+    if (!sources.empty()) {
+        on_progress(agentloop::describe_sources(sources));
+    }
 }
 
 void CliReporter::on_todo(const harness::TodoList& todo) {

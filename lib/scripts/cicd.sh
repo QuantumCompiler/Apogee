@@ -11,10 +11,16 @@
 # the GitHub Actions matrix runs one native runner per target, and each runner
 # invokes THIS script with its native --platform — one build path, everywhere.
 #
-# Each application under lib/src/<app>/ is a self-contained CMake project that
-# owns its presets, cmake helpers, pinned third-party code, and style config.
-# This script builds each one into lib/src/<app>/build/<target>/. Today that is
-# just the CLI; the GUI applications join the APPS list when they land.
+# Each application under lib/src/<app>/ owns its build and builds into
+# lib/src/<app>/build/<target>/. Two kinds of build entry are understood: a
+# self-contained CMake project (the CLI -- its presets, cmake helpers, pinned
+# third-party code and style config beside it), or an application's own
+# scripts/build.sh (the macOS app, an Xcode project). Each application builds
+# for its own targets: the CLI for all five, the macOS app for macos-arm64
+# alone. --app picks which applications run; without it, every one does --
+# which is what a developer's `cicd.sh --test` wants -- so each CI pipeline
+# names its own deliverable (`--app cli`, `--app darwin`) and never builds
+# another's.
 #
 # With --fresh it performs a CI-style clean-room build: clone the repo at the
 # current branch into a temp directory and build there.
@@ -34,10 +40,24 @@ set -euo pipefail
 REPO_URL="https://github.com/QuantumCompiler/Apogee"
 ALL_TARGETS=(linux-x64 linux-arm64 macos-arm64 windows-x64 windows-arm64)
 
-# Each application under lib/src/<app>/ owns its own self-contained CMake build
-# (presets, cmake helpers, third_party, style config). This script drives them;
-# the GUI applications join this list when they land.
-APPS=(cli)
+# Each application under lib/src/<app>/ owns its own build (see the header).
+# This script drives them; the linux and windows GUI applications join this
+# list when they land, with their targets in app_targets below.
+APPS=(cli darwin)
+
+# The targets an application builds for.
+app_targets() {
+    case "$1" in
+        cli)    printf '%s\n' "${ALL_TARGETS[@]}" ;;
+        darwin) printf '%s\n' macos-arm64 ;;
+    esac
+}
+
+app_builds_for() {
+    local app="$1" target="$2" t
+    while IFS= read -r t; do [[ "$t" == "$target" ]] && return 0; done < <(app_targets "$app")
+    return 1
+}
 
 CLEAN=0
 RUN_TESTS=0
@@ -48,6 +68,7 @@ FRESH=0
 NO_DEFER=0
 BRANCH=""
 PLATFORMS=()
+SELECTED_APPS=()
 JOBS="$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
 
 usage() {
@@ -61,12 +82,18 @@ Options:
                        Repeatable. Default: this machine's native target.
                        Targets this host cannot compile are listed and left
                        to the CI matrix (whose runners call this script).
+  -a, --app NAME       Application to build: ${APPS[*]}, or 'all'.
+                       Repeatable. Default: all of them. Each builds only for
+                       its own targets (darwin: macos-arm64); a CI pipeline
+                       names its own application.
   -c, --clean          Remove the target's build directory before building
-  -t, --test           Run the test suite (ctest) after a successful build
-                       (host-native target only — cross-built binaries can't run here)
-  -u, --unit-tests     Build ONLY the test binary and run it directly: the
+  -t, --test           Run the test suite after a successful build (ctest
+                       for the CLI, the Xcode scheme's tests for darwin) (host-native target
+                       only — cross-built binaries can't run here)
+  -u, --unit-tests     Build ONLY the tests and run them: for the CLI the
                        source-level suite, with no apogee executable built and
-                       no ctest. Implies the tests; --test is not needed.
+                       no ctest; for darwin its whole suite, with no app built.
+                       Implies the tests; --test is not needed.
                        Host-native target only, same reason.
       --clone-llama    Clone llama.cpp at the commit the CLI's third_party
                        build pins, prove it resolved, and stop: the first CI
@@ -151,6 +178,12 @@ valid_target() {
     return 1
 }
 
+valid_app() {
+    local a
+    for a in "${APPS[@]}"; do [[ "$1" == "$a" ]] && return 0; done
+    return 1
+}
+
 # Can this host natively compile the given target?
 buildable_here() {
     local host="$1" target="$2"
@@ -172,6 +205,15 @@ while [[ $# -gt 0 ]]; do
                 PLATFORMS+=("$2")
             fi
             shift ;;
+        -a|--app)
+            [[ $# -ge 2 ]] || die "--app needs an application"
+            if [[ "$2" == "all" ]]; then
+                SELECTED_APPS=("${APPS[@]}")
+            else
+                valid_app "$2" || die "unknown application '$2' (valid: ${APPS[*]}, all)"
+                SELECTED_APPS+=("$2")
+            fi
+            shift ;;
         -c|--clean)  CLEAN=1 ;;
         -t|--test)   RUN_TESTS=1 ;;
         -u|--unit-tests) UNIT_TESTS=1 ;;
@@ -189,6 +231,7 @@ done
 
 HOST="$(host_target)"
 [[ ${#PLATFORMS[@]} -gt 0 ]] || PLATFORMS=("$HOST")
+[[ ${#SELECTED_APPS[@]} -gt 0 ]] || SELECTED_APPS=("${APPS[@]}")
 if [[ $PRINT_HOST -eq 1 ]]; then
     printf '%s\n' "$HOST"
     exit 0
@@ -218,16 +261,87 @@ clone_llama() {
 
 # Builds one application for one target, in the checkout at $1.
 # $3 is the app name; its build root is <root>/lib/src/<app>.
+# One run at a time in a build tree (2026-10-20, after M17). Two runs of this
+# script in one checkout -- `make test` started while a gate ran -- built and
+# tested in the same build/<target> at once: the suite's scratch homes collided
+# (M17 gave each run its own) and the builds raced each other. A run now holds
+# <tree>.lock, a directory beside the tree with its pid in it, from configure
+# to the last test, and a second run says it is waiting and on whom, and
+# continues when the first lets go -- tree by tree, so it can start on one
+# application while the first is busy with the next. mkdir is atomic on every
+# host this runs on; a lock whose run is gone is taken over; the EXIT trap lets
+# go on any way out, a failure and Ctrl-C included. Outside a tree's own
+# directory, so --clean never removes a lock a run holds.
+build_lock=""
+acquire_build_lock() {
+    local tree="$1" lock="$1.lock" holder said=0
+    mkdir -p "$(dirname "$tree")"
+    until mkdir "$lock" 2>/dev/null; do
+        holder="$(cat "${lock}/pid" 2>/dev/null || true)"
+        if [[ -n "$holder" ]] && ! kill -0 "$holder" 2>/dev/null; then
+            log "taking over ${lock}: the run that held it (pid ${holder}) is gone"
+            rm -rf "$lock"
+            continue
+        fi
+        if [[ $said -eq 0 ]]; then
+            log "waiting: another run (pid ${holder:-unknown}) is building in ${tree}; this one continues when it ends (remove ${lock} if no run is)"
+            said=1
+        fi
+        sleep 5
+    done
+    echo "$$" >"${lock}/pid"
+    build_lock="$lock"
+}
+release_build_lock() {
+    if [[ -n "$build_lock" ]]; then
+        rm -rf "$build_lock"
+    fi
+    build_lock=""
+}
+trap release_build_lock EXIT
+
 build_target() {
+    local root="$1" target="$2" app="$3"
+    local app_dir="${root}/lib/src/${app}"
+    if [[ -f "${app_dir}/CMakeLists.txt" ]]; then
+        acquire_build_lock "${app_dir}/build/${target}"
+        build_cmake_app "$root" "$target" "$app"
+        release_build_lock
+    elif [[ -x "${app_dir}/scripts/build.sh" ]]; then
+        acquire_build_lock "${app_dir}/build/${target}"
+        build_script_app "$root" "$target" "$app"
+        release_build_lock
+    else
+        log "NOTICE: no CMakeLists.txt or scripts/build.sh at ${app_dir} — skipping app '${app}'."
+    fi
+}
+
+# An application that owns a scripts/build.sh (the macOS app): this script
+# asks it for each step and knows nothing of how it compiles.
+build_script_app() {
+    local root="$1" target="$2" app="$3"
+    local entry="${root}/lib/src/${app}/scripts/build.sh"
+    [[ $CLEAN -eq 1 ]] && "$entry" clean --target "$target"
+    if [[ $UNIT_TESTS -eq 1 ]]; then
+        log "[${app}/${target}] running the suite alone (no app built)"
+        "$entry" test --target "$target" --jobs "${JOBS}"
+        return 0
+    fi
+    log "[${app}/${target}] building"
+    "$entry" build --target "$target" --jobs "${JOBS}"
+    if [[ $RUN_TESTS -eq 1 ]]; then
+        log "[${app}/${target}] running tests"
+        "$entry" test --target "$target" --jobs "${JOBS}"
+    fi
+    log "[${app}/${target}] done (branch '$(git -C "$root" rev-parse --abbrev-ref HEAD)')"
+}
+
+# A self-contained CMake project (the CLI).
+build_cmake_app() {
     local root="$1" target="$2" app="$3"
     local app_dir="${root}/lib/src/${app}"
     local build_dir="build/${target}"
     cd "$app_dir"
-
-    if [[ ! -f CMakeLists.txt ]]; then
-        log "NOTICE: no CMakeLists.txt at ${app_dir} — skipping app '${app}'."
-        return 0
-    fi
 
     [[ $CLEAN -eq 1 ]] && { log "cleaning ${app_dir}/${build_dir}/"; rm -rf "${build_dir}"; }
 
@@ -281,7 +395,15 @@ build_target() {
         [[ -x "$unit_bin" ]] || die "no test binary at ${build_dir}/tests/apogee_tests"
 
         log "[${app}/${target}] running the source-level suite"
-        "$unit_bin"
+        # One line per test case as it completes, with its time and its result
+        # (M18, 2026-10-20): the console reporter's `--durations yes` prints
+        # `<seconds> s: <name>`, and the Automake reporter's `:test-result:
+        # PASS|FAIL|SKIP <name>` follows it. No stock reporter prints both, so
+        # both write to stdout, in that order. The console's own report -- each
+        # failure's block and the totals -- is unchanged, and it is what
+        # ci-annotate.sh reads. Declared here, once, so a local --unit-tests run
+        # and every CI runner print the same lines.
+        "$unit_bin" --reporter console --reporter automake::out=- --durations yes
         log "[${app}/${target}] unit tests done"
         return 0
     fi
@@ -304,8 +426,20 @@ build_target() {
 build_all_requested() {
     local root="$1" target app deferred=()
     for target in "${PLATFORMS[@]}"; do
+        # Only the selected applications that build for this target; the
+        # others are said, never an error -- the macOS app has no Linux build
+        # to defer.
+        local apps_here=()
+        for app in "${SELECTED_APPS[@]}"; do
+            if app_builds_for "$app" "$target"; then
+                apps_here+=("$app")
+            else
+                log "${app} builds only for $(app_targets "$app" | tr '\n' ' ')— nothing of it for ${target}"
+            fi
+        done
+        [[ ${#apps_here[@]} -gt 0 ]] || continue
         if buildable_here "$HOST" "$target"; then
-            for app in "${APPS[@]}"; do
+            for app in "${apps_here[@]}"; do
                 build_target "$root" "$target" "$app"
             done
         else

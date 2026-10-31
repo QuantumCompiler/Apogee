@@ -407,11 +407,19 @@ Handler::TurnOutcome Handler::run_turn(TurnPlan& plan, agentloop::Reporter& repo
         // messages and is never compacted -- only warned.
         // The utility model summarises when one is set, else the session's
         // own backend (26b).
-        history = agentloop::compact_history(
-            *harness_, history,
-            commands::helper_backend(config, harness::ModelRole::Utility, plan.backend),
-            cancellation);
-        ++plan.session->compactions;
+        const std::string compactor =
+            commands::helper_backend(config, harness::ModelRole::Utility, plan.backend);
+        agentloop::Compaction compaction =
+            agentloop::compact_history(*harness_, history, compactor, cancellation);
+        // Counted only when it folded something (55b); a failure is logged,
+        // the request going on over the history as it stands.
+        if (compaction.compacted()) {
+            history = std::move(compaction.history);
+            ++plan.session->compactions;
+        } else if (compaction.outcome == agentloop::Compaction::Outcome::Failed) {
+            logger::log(logger::Level::Warn, "serve",
+                        "compaction by " + compactor + " failed: " + compaction.failure);
+        }
     }
 
     for (const harness::ChatMessage& message : plan.incoming) {
@@ -498,6 +506,7 @@ Handler::TurnOutcome Handler::run_turn(TurnPlan& plan, agentloop::Reporter& repo
             meta.retriever = rag.retriever;
             meta.reranked = rag.reranked;
             meta.graph_entities = rag.graph_entities;
+            meta.sources = rag.error.empty() ? rag.sources : std::vector<harness::ExcerptSource>{};
             result.rag = meta;
             result.detail = rag.error.empty() ? join(rag.notes, "; ") : rag.error;
             sse->emit_meta(result);
@@ -542,7 +551,10 @@ Handler::TurnOutcome Handler::run_turn(TurnPlan& plan, agentloop::Reporter& repo
         // never landed in it, and thinking never reached it. What the client
         // received is what is saved.
         plan.session->messages = history;
+        // One count (55b): a client that sent several exchanges at once has
+        // the turns its history answers, as `chats show` numbers them.
         ++plan.session->turns;
+        plan.session->turns = logger::counted_turns(*plan.session);
         sessions_.commit(*plan.session);
         outcome.session_id = plan.session->chat_id;
     }

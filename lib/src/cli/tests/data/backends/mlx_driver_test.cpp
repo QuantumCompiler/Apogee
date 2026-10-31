@@ -3,11 +3,13 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <deque>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <random>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -852,5 +854,447 @@ TEST_CASE(
         CHECK(ready["vision"] == false);
         CHECK(ready["mlx_vlm"].is_null());
         CHECK(driver.close() == 0);
+    }
+}
+
+TEST_CASE(
+    "a directory mlx-vlm built answers its text turns through mlx-vlm alone, never mlx-lm's "
+    "model",
+    "[backends][mlx][driver][vision][kind]") {
+    // 53f: the backend starts the driver with --vision for every turn of a
+    // directory recorded as mlx-vlm's; a conversation with no picture in it
+    // is still mlx-vlm's model and processor, mlx-lm lending its format only.
+    REQUIRE_PYTHON();
+    const apogee::testing::TempDir dir{"mlx-driver"};
+    Driver driver{dir, {}, {"first", "second"}, kModel, std::string{kWithVlm}, {"--vision"}};
+    const json ready = driver.next();
+    CHECK(ready["vision"] == true);
+    CHECK(ready["mlx_vlm"] == "0.0-vlm-stub");
+    driver.send(generate(1, json::array({user("hello")})));
+    const std::vector<json> first = driver.until_done(1);
+    CHECK(joined(first, "text") == "first");
+    CHECK(first.back()["finish"] == "stop");
+    CHECK(first.back()["cached_tokens"] == 0);
+    driver.send(generate(
+        2, json::array(
+               {user("hello"), {{"role", "assistant"}, {"content", "first"}}, user("and again")})));
+    CHECK(joined(driver.until_done(2), "text") == "second");
+    CHECK(driver.close() == 0);
+
+    const std::vector<std::string> record = driver.record();
+    CHECK(count(record, "vlm load ") == 1);
+    CHECK(count(record, "vlm generate images=0 ") == 2);
+    // mlx-lm's tokenizer read the format; its model was never loaded, nor a
+    // turn generated through it.
+    CHECK(count(record, "tokenizer ") == 1);
+    CHECK(count(record, "load ") == 0);
+    CHECK(count(record, "prefill ") == 0);
+    CHECK(count(record, "step ") == 0);
+    CHECK(count(record, "cache new") == 0);
+}
+
+TEST_CASE("the driver hands its --adapter directory to the loader, and ready names it",
+          "[backends][mlx][driver][adapters]") {
+    // 53a: mlx-lm's own adapter_path, applied over the weights at load and
+    // never fused; and a ready line naming it, so the backend can tell this
+    // driver from one older than adapters.
+    REQUIRE_PYTHON();
+    const apogee::testing::TempDir dir{"mlx-driver-adapter-" +
+                                       std::to_string(std::random_device{}())};
+    const std::filesystem::path adapter = dir.path() / "style-adapter";
+    std::filesystem::create_directories(adapter);
+    std::ofstream{adapter / "adapter_config.json"} << "{}";
+    {
+        Driver driver{dir, {}, {"Styled."}, kModel, "stub_mlx", {"--adapter", adapter.string()}};
+        const json ready = driver.next();
+        CHECK(ready["type"] == "ready");
+        CHECK(ready["adapter"] == adapter.string());
+        driver.send(generate(1, json::array({user("Hello?")})));
+        CHECK(joined(driver.until_done(1), "text") == "Styled.");
+        CHECK(driver.close() == 0);
+        const std::vector<std::string> record = driver.record();
+        CHECK(count(record, "load model") == 1);
+        CHECK(count(record, "adapter style-adapter") == 1);
+    }
+    {
+        // Through mlx-vlm the same way, when a turn needs pictures.
+        Driver driver{dir,
+                      {},
+                      {"Seen."},
+                      kModel,
+                      std::string{kWithVlm},
+                      {"--vision", "--adapter", adapter.string()}};
+        const json ready = driver.next();
+        CHECK(ready["vision"] == true);
+        CHECK(ready["adapter"] == adapter.string());
+        CHECK(driver.close() == 0);
+        CHECK(count(driver.record(), "vlm adapter style-adapter") == 1);
+    }
+    {
+        // Without one, the ready line names none and the loader is asked
+        // exactly what it was before adapters.
+        const apogee::testing::TempDir plain{"mlx-driver-plain-" +
+                                             std::to_string(std::random_device{}())};
+        Driver driver{plain, {}, {"Plain."}};
+        const json ready = driver.next();
+        CHECK_FALSE(ready.contains("adapter"));
+        CHECK(driver.close() == 0);
+        CHECK(count(driver.record(), "adapter ") == 0);
+    }
+}
+
+TEST_CASE("an --adapter that is not an adapter directory fails the load, naming it",
+          "[backends][mlx][driver][adapters][errors]") {
+    REQUIRE_PYTHON();
+    const apogee::testing::TempDir dir{"mlx-driver-adapter-" +
+                                       std::to_string(std::random_device{}())};
+    const std::filesystem::path empty = dir.path() / "not-an-adapter";
+    std::filesystem::create_directories(empty);
+    {
+        Driver driver{dir, {}, {"x"}, kModel, "stub_mlx", {"--adapter", empty.string()}};
+        const json error = driver.next();
+        CHECK(error["kind"] == "load");
+        CHECK(error["message"].get<std::string>().find(
+                  empty.string() + " is not an mlx-lm adapter directory") != std::string::npos);
+        CHECK(driver.close() == 4);
+    }
+    {
+        // An --adapter naming nothing is a usage error.
+        Driver driver{dir, {}, {"x"}, kModel, "stub_mlx", {"--adapter"}};
+        const json error = driver.next();
+        CHECK(error["kind"] == "protocol");
+        CHECK(error["message"].get<std::string>().find("[--adapter <directory>]") !=
+              std::string::npos);
+        CHECK(driver.close() == 2);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Audio (53g)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A WAV of `samples` bytes, written where the backend would write one: the
+/// RIFF header Apogee's ffmpeg runner puts before the samples.
+std::filesystem::path recording(const std::filesystem::path& dir, const std::string& name,
+                                std::size_t samples) {
+    const auto le = [](std::uint32_t value, int width) {
+        std::string out;
+        for (int at = 0; at < width; ++at) {
+            out.push_back(static_cast<char>((value >> (8U * static_cast<unsigned>(at))) & 0xFFU));
+        }
+        return out;
+    };
+    const auto size = static_cast<std::uint32_t>(samples);
+    const std::filesystem::path path = dir / name;
+    std::ofstream{path, std::ios::binary} << "RIFF" + le(36 + size, 4) + "WAVE" + "fmt " +
+                                                 le(16, 4) + le(1, 2) + le(1, 2) + le(16000, 4) +
+                                                 le(32000, 4) + le(2, 2) + le(16, 2) + "data" +
+                                                 le(size, 4) + std::string(samples, '\0');
+    return path;
+}
+
+json sound(const std::filesystem::path& path) {
+    return {{"type", "audio"}, {"audio", path.string()}};
+}
+
+}  // namespace
+
+TEST_CASE(
+    "under --vision the driver hands each recording to mlx-vlm as audio=, its WAV where its part "
+    "sat, and leaves the backend's files where they are",
+    "[backends][mlx][driver][vision][audio]") {
+    REQUIRE_PYTHON();
+    const apogee::testing::TempDir dir{"mlx-driver"};
+    const std::filesystem::path first = recording(dir.path(), "audio-0.wav", 100);
+    const std::filesystem::path second = recording(dir.path(), "audio-1.wav", 4);
+    Driver driver{dir,
+                  {},
+                  {"I hear {audio}.", "And see {images}, hearing {audio}.", "Plain words."},
+                  kModel,
+                  std::string{kWithVlm},
+                  {"--vision"}};
+    const json ready = driver.next();
+    CHECK(ready["vision"] == true);
+    CHECK(ready["audio"] == true);
+
+    driver.send(generate(1, json::array({seeing(json::array(
+                                {{{"type", "text"}, {"text", "What is said?"}}, sound(first)}))})));
+    const std::vector<json> heard = driver.until_done(1);
+    CHECK(joined(heard, "text") == "I hear 1 recording: 144 bytes .wav, a WAV.");
+    CHECK(heard.back()["finish"] == "stop");
+
+    // A picture and two recordings in two messages: each in its place.
+    driver.send(generate(
+        2, json::array(
+               {seeing(json::array({sound(first), picture("image/png", "QUJD")})),
+                {{"role", "assistant"}, {"content", "Noted."}},
+                seeing(json::array({{{"type", "text"}, {"text", "And this?"}}, sound(second)}))})));
+    CHECK(joined(driver.until_done(2), "text") ==
+          "And see 1 image: 3 bytes .png, hearing 2 recordings: 144 bytes .wav, a WAV; 48 bytes "
+          ".wav, a WAV.");
+
+    // A turn with no recording asks mlx-vlm exactly as before: no audio=.
+    driver.send(generate(3, json::array({user("And now?")})));
+    CHECK(joined(driver.until_done(3), "text") == "Plain words.");
+    CHECK(driver.close() == 0);
+
+    const std::vector<std::string> record = driver.record();
+    CHECK(count(record, "vlm audio " + first.string()) == 2);
+    CHECK(count(record, "vlm audio " + second.string()) == 1);
+    // In prompt order: the first message's recording, then the third's.
+    std::vector<std::string> order;
+    for (const std::string& line : record) {
+        if (line.starts_with("vlm audio ")) {
+            order.push_back(line.substr(10));
+        }
+    }
+    CHECK(order == std::vector<std::string>{first.string(), first.string(), second.string()});
+    // The options a turn is asked with are unchanged by a recording.
+    CHECK(count(record, "vlm generate images=0 options=logits_processors,max_tokens,sampler") == 2);
+    CHECK(count(record, "vlm generate images=1 options=logits_processors,max_tokens,sampler") == 1);
+    // The backend wrote them, and the backend removes them.
+    CHECK(std::filesystem::exists(first));
+    CHECK(std::filesystem::exists(second));
+}
+
+TEST_CASE(
+    "a recording the driver cannot take is refused and the model stays loaded: a remote one, a "
+    "missing file, one that is no WAV",
+    "[backends][mlx][driver][vision][audio]") {
+    REQUIRE_PYTHON();
+    const apogee::testing::TempDir dir{"mlx-driver"};
+    const std::filesystem::path mp3 = dir.path() / "note.mp3";
+    std::ofstream{mp3, std::ios::binary} << "ID3\x04 not a wave at all";
+    Driver driver{dir, {}, {"fine"}, kModel, std::string{kWithVlm}, {"--vision"}};
+    REQUIRE(driver.next()["audio"] == true);
+
+    const auto refused = [&driver](std::int64_t id, const json& part) {
+        driver.send(generate(id, json::array({seeing(json::array({part}))})));
+        const json error = driver.until_done(id).back();
+        CHECK(error["type"] == "error");
+        CHECK(error["kind"] == "request");
+        return error["message"].get<std::string>();
+    };
+    CHECK(refused(1, {{"type", "audio"}, {"audio", "https://example.com/note.wav"}})
+              .find("never fetched") != std::string::npos);
+    CHECK(refused(2, sound(dir.path() / "gone.wav")).find("cannot be read") != std::string::npos);
+    CHECK(refused(3, sound(mp3)).find("is not a WAV") != std::string::npos);
+    CHECK(refused(4, {{"type", "audio"}}).find("must name the WAV file") != std::string::npos);
+
+    driver.send(generate(5, json::array({user("q")})));
+    CHECK(joined(driver.until_done(5), "text") == "fine");
+    CHECK(driver.close() == 0);
+    // None of them reached mlx-vlm.
+    CHECK(count(driver.record(), "vlm audio ") == 0);
+    CHECK(count(driver.record(), "vlm generate") == 1);
+}
+
+TEST_CASE("a text driver says it hands no recording on", "[backends][mlx][driver][audio]") {
+    REQUIRE_PYTHON();
+    const apogee::testing::TempDir dir{"mlx-driver"};
+    Driver driver{dir, {}, {"x"}, kModel, std::string{kWithVlm}};
+    const json ready = driver.next();
+    CHECK(ready["vision"] == false);
+    CHECK(ready["audio"] == false);
+    CHECK(driver.close() == 0);
+}
+
+// ---------------------------------------------------------------------------
+// A drafter beside the model (53i)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A drafter directory as mlx-vlm's conversion of the user's E4B assistant
+/// leaves one: its config.json, `block_size` stated when given.
+std::filesystem::path drafter(const std::filesystem::path& root, int block = 0) {
+    const std::filesystem::path dir = root / "Gemma4-E4B-Assistant-bf16";
+    std::filesystem::create_directories(dir);
+    json config{{"architectures", json::array({"Gemma4AssistantForCausalLM"})},
+                {"model_type", "gemma4_assistant"},
+                {"backbone_hidden_size", 2560}};
+    if (block > 0) {
+        config["block_size"] = block;
+    }
+    std::ofstream{dir / "config.json"} << config.dump();
+    return dir;
+}
+
+/// The texts of a whole conversation's turns, the same requests each time.
+std::vector<std::string> conversation(Driver& driver) {
+    std::vector<std::string> texts;
+    driver.send(generate(1, json::array({user("Explain speculative decoding.")})));
+    texts.push_back(joined(driver.until_done(1), "text"));
+    driver.send(generate(
+        2,
+        json::array({seeing(json::array({picture("image/png", "QUJDREVGR0g="),
+                                         {{"type", "text"}, {"text", "And this picture?"}}}))})));
+    texts.push_back(joined(driver.until_done(2), "text"));
+    driver.send(generate(3, json::array({user("Go on")}), json::array(), {{"max_tokens", 7}}));
+    const std::vector<json> capped = driver.until_done(3);
+    texts.push_back(joined(capped, "text") + " | " + capped.back()["finish"].get<std::string>());
+    return texts;
+}
+
+}  // namespace
+
+TEST_CASE(
+    "under --draft the driver loads the drafter by mlx-vlm's load_drafter as mtp, every turn "
+    "runs its speculative path, and the temperature-0 answer is the model's own",
+    "[backends][mlx][driver][drafter]") {
+    REQUIRE_PYTHON();
+    const apogee::testing::TempDir dir{"mlx-driver"};
+    const std::vector<std::string> replies{
+        "Drafts are proposed, then the model verifies them in one pass.", "I see {images}.",
+        "A long answer that the cap will cut."};
+    // The model alone: the answer, turn by turn.
+    std::vector<std::string> alone;
+    {
+        Driver driver{dir, {}, replies, kModel, std::string{kWithVlm}, {"--vision"}};
+        const json ready = driver.next();
+        CHECK_FALSE(ready.contains("draft"));
+        alone = conversation(driver);
+        CHECK(driver.close() == 0);
+        CHECK(count(driver.record(), "vlm draft") == 0);
+    }
+    REQUIRE(alone.size() == 3);
+    CHECK(alone[0] == replies[0]);
+    CHECK(alone[2] == "A long  | length");
+
+    // Beside its drafter, a block of 3 asked: the same text, every turn.
+    std::filesystem::remove(dir.path() / "record.txt");
+    const std::filesystem::path draft = drafter(dir.path());
+    Driver driver{dir,
+                  {},
+                  replies,
+                  kModel,
+                  std::string{kWithVlm},
+                  {"--draft", draft.string(), "--draft-block-size", "3"}};
+    const json ready = driver.next();
+    // --draft implies mlx-vlm's load: the speculative path loads the base.
+    CHECK(ready["vision"] == true);
+    CHECK(ready["draft"] == draft.string());
+    CHECK(ready["draft_kind"] == "mtp");
+    CHECK(ready["draft_block_size"] == 3);
+    CHECK(conversation(driver) == alone);
+    CHECK(driver.close() == 0);
+
+    const std::vector<std::string> record = driver.record();
+    // Loaded once, as an MTP drafter of its own type, and checked against
+    // the model by mlx-vlm's own compatibility check.
+    CHECK(count(record, "vlm drafter Gemma4-E4B-Assistant-bf16 kind=mtp type=gemma4_assistant") ==
+          1);
+    CHECK(count(record, "vlm drafter check kind=mtp") == 1);
+    CHECK(count(record, "vlm load model") == 1);
+    // Every turn through the speculative path, the picture's included, with
+    // the pairing as asked.
+    CHECK(count(record, "vlm draft Gemma4-E4B-Assistant-bf16 kind=mtp block=3") == 3);
+    CHECK(count(record,
+                "vlm generate images=0 options=draft_block_size,draft_kind,draft_model,"
+                "logits_processors,max_tokens,sampler") == 2);
+    CHECK(count(record,
+                "vlm generate images=1 options=draft_block_size,draft_kind,draft_model,"
+                "logits_processors,max_tokens,sampler") == 1);
+    // mlx-lm lends its format only.
+    CHECK(count(record, "load ") == 0);
+}
+
+TEST_CASE("without --draft-block-size the drafter's own block applies, and ready says null",
+          "[backends][mlx][driver][drafter]") {
+    REQUIRE_PYTHON();
+    const apogee::testing::TempDir dir{"mlx-driver"};
+    const std::filesystem::path draft = drafter(dir.path(), 6);
+    Driver driver{dir,
+                  {},
+                  {"Same words."},
+                  kModel,
+                  std::string{kWithVlm},
+                  {"--vision", "--draft", draft.string()}};
+    const json ready = driver.next();
+    CHECK(ready["draft"] == draft.string());
+    CHECK(ready["draft_block_size"].is_null());
+    driver.send(generate(1, json::array({user("hi")})));
+    CHECK(joined(driver.until_done(1), "text") == "Same words.");
+    CHECK(driver.close() == 0);
+    const std::vector<std::string> record = driver.record();
+    CHECK(count(record, "vlm draft Gemma4-E4B-Assistant-bf16 kind=mtp block=drafter:6") == 1);
+    CHECK(count(record,
+                "vlm generate images=0 options=draft_kind,draft_model,logits_processors,"
+                "max_tokens,sampler") == 1);
+}
+
+TEST_CASE(
+    "a drafter that does not fit, one mlx-vlm has no type for, or an mlx-vlm with no speculative "
+    "path fails the load -- never a quiet run without it",
+    "[backends][mlx][driver][drafter][errors]") {
+    REQUIRE_PYTHON();
+    const apogee::testing::TempDir dir{"mlx-driver"};
+    const std::filesystem::path draft = drafter(dir.path());
+    {
+        Driver driver{dir,
+                      {{"STUB_MLX_VLM_DRAFT_MISMATCH", "hidden sizes differ: 2560 and 3840"}},
+                      {"x"},
+                      kModel,
+                      std::string{kWithVlm},
+                      {"--draft", draft.string()}};
+        const json error = driver.next();
+        CHECK(error["kind"] == "load");
+        CHECK(error["message"].get<std::string>().find("does not fit the model: hidden sizes "
+                                                       "differ: 2560 and 3840") !=
+              std::string::npos);
+        CHECK(driver.close() == 4);
+    }
+    {
+        // The unified 12B's assistant: no drafter of its type in this mlx-vlm.
+        const std::filesystem::path unified = dir.path() / "unified";
+        std::filesystem::create_directories(unified);
+        std::ofstream{unified / "config.json"}
+            << R"({"model_type": "gemma4_unified_assistant", "backbone_hidden_size": 3840})";
+        Driver driver{dir, {}, {"x"}, kModel, std::string{kWithVlm}, {"--draft", unified.string()}};
+        const json error = driver.next();
+        CHECK(error["kind"] == "load");
+        CHECK(error["message"].get<std::string>().find(
+                  "gemma4_unified_assistant not supported as a drafter") != std::string::npos);
+        CHECK(driver.close() == 4);
+    }
+    {
+        // An mlx-vlm from before speculative drafting.
+        const std::filesystem::path older = dir.path() / "older-vlm";
+        std::filesystem::copy(kStubs / "stub_mlx_vlm", older,
+                              std::filesystem::copy_options::recursive);
+        std::filesystem::remove_all(older / "mlx_vlm" / "speculative");
+        Driver driver{
+            dir, {}, {"x"}, kModel, "stub_mlx:" + older.string(), {"--draft", draft.string()}};
+        const json error = driver.next();
+        CHECK(error["kind"] == "missing_dependency");
+        CHECK(error["message"].get<std::string>().find("cannot draft") != std::string::npos);
+        CHECK(error["message"].get<std::string>().find("apogee train setup --with mlx-vlm") !=
+              std::string::npos);
+        CHECK(driver.close() == 3);
+    }
+    {
+        // A drafter directory with no config, and a block with no drafter.
+        Driver gone{dir,
+                    {},
+                    {"x"},
+                    kModel,
+                    std::string{kWithVlm},
+                    {"--draft", (dir.path() / "nothing").string()}};
+        CHECK(gone.next()["kind"] == "load");
+        CHECK(gone.close() == 4);
+        Driver orphan{
+            dir, {}, {"x"}, kModel, std::string{kWithVlm}, {"--vision", "--draft-block-size", "3"}};
+        CHECK(orphan.next()["kind"] == "protocol");
+        CHECK(orphan.close() == 2);
+        Driver tiny{dir,
+                    {},
+                    {"x"},
+                    kModel,
+                    std::string{kWithVlm},
+                    {"--draft", draft.string(), "--draft-block-size", "1"}};
+        CHECK(tiny.next()["kind"] == "protocol");
+        CHECK(tiny.close() == 2);
     }
 }

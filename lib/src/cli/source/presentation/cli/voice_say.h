@@ -21,7 +21,9 @@
 /// spoken into one WAV, and its record -- the `voice.speech` document,
 /// printed under `--output-format json` and written beside a file that
 /// landed as `<file>.json`. The composer (50c) speaks its narration through
-/// the same resolution and the same core.
+/// the same resolution and the same core. Since 53m on either engine: a voice
+/// model as Kokoro publishes it on PyTorch, mlx-audio's MLX build of one on
+/// MLX -- the model's directory says which, and the record says `engine`.
 namespace apogee::commands {
 
 /// The most text one run speaks.
@@ -40,22 +42,34 @@ struct VoiceSayOptions {
     std::string voice{};
     std::optional<double> speed{};
     std::filesystem::path output{};
+    /// `--engine` (53m): `auto`, `torch` or `mlx`, or empty when not given.
+    /// It only names the engine the model's directory says, or is refused.
+    std::string engine{};
 };
 
-/// The voice model a run speaks with, resolved and read.
+/// The voice model a run speaks with, resolved and read: a voice model as
+/// Kokoro publishes it, or since 53m an MLX voice model -- mlx-audio's build
+/// of one, its voices the presets that build carries.
 struct ResolvedVoiceModel {
-    std::string handle;
-    std::filesystem::path dir;
+    std::string handle{};
+    std::filesystem::path dir{};
     std::string ref{};
     std::string revision{};
-    models::VoiceInfo info;
+    models::VoiceInfo info{};
+    /// What its directory speaks on (53m, `video::voice_engine_of_directory`).
+    video::VideoEngine engine = video::VideoEngine::Torch;
 };
 
 /// `given`, else the store's one voice model: a handle, a bare id, a model
-/// holding exactly one, or a path. The refusal names what to do instead;
-/// empty means `out` is set.
+/// holding exactly one, or a path -- a voice model as Kokoro publishes it,
+/// or since 53m an MLX directory whose kind is `voice`, counted among the
+/// store's voice models as one. The refusal names what to do instead -- with
+/// several in the store, the verb's own flag for one, `flag` (`--model` for
+/// `voice say`, `--voice-model` for `video compose`, M29); empty means `out`
+/// is set.
 [[nodiscard]] std::string resolve_voice_model(const models::StoreRoots& roots,
-                                              std::string_view given, ResolvedVoiceModel& out);
+                                              std::string_view given, ResolvedVoiceModel& out,
+                                              std::string_view flag = "--model");
 
 /// The voice to speak with: `given` when the model has it -- refused,
 /// naming its voices, when not -- else `kDefaultVoice`, else the first.
@@ -64,8 +78,9 @@ struct ResolvedVoiceModel {
 
 /// What a run needs from outside.
 struct VoiceSaySeams {
-    /// The ladder for the resolved model -- in the command, the consent to
-    /// install the runtime first.
+    /// The ladder for the resolved model on its engine -- in the command, on
+    /// PyTorch the consent to install the runtime first; on MLX the ladder
+    /// alone (53m).
     std::function<video::VideoReadiness(const ResolvedVoiceModel&)> ready;
     training::Spawner spawn = training::default_spawner();
     video::VoiceEventSink on_event{};
@@ -85,7 +100,8 @@ struct VoiceSayResult {
 
 /// One `voice say`, composed: refused before anything runs on an empty or
 /// overlong text, a speed outside the caps, an existing output or a missing
-/// directory, no voice model, an unknown voice or the ladder; else one run,
+/// directory, no voice model, an unknown voice, an engine asked for that is
+/// not the model's (53m) or the ladder; else one run on the model's engine,
 /// its record written beside the file on success.
 [[nodiscard]] VoiceSayResult say_text(const models::StoreRoots& roots,
                                       const VoiceSayOptions& options, const VoiceSaySeams& seams,

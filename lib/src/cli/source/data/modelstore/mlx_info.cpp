@@ -9,9 +9,11 @@
 #include <set>
 #include <string_view>
 #include <system_error>
+#include <utility>
 
 #include "modelstore/kv_cache.h"
 #include "modelstore/snapshot.h"
+#include "modelstore/store.h"
 
 namespace apogee::models {
 namespace {
@@ -337,8 +339,73 @@ MlxInfo read_mlx_config(const std::filesystem::path& dir) {
     return info;
 }
 
-MlxInfo read_mlx_info(const std::filesystem::path& dir) {
+namespace {
+
+/// What an MLX video model lacks of mlx-video's Wan layout (53k), or empty:
+/// the text encoder, the VAE, and the transformer's weights -- one model's,
+/// or both of a pair's.
+[[nodiscard]] std::string video_files_problem(const std::filesystem::path& dir) {
+    std::error_code code;
+    const auto has = [&dir, &code](const char* name) {
+        return std::filesystem::is_regular_file(dir / name, code);
+    };
+    if (!has("t5_encoder.safetensors")) {
+        return "no T5 text encoder (t5_encoder.safetensors) in " + dir.string();
+    }
+    if (!has("vae.safetensors")) {
+        return "no VAE (vae.safetensors) in " + dir.string();
+    }
+    if (!has("model.safetensors") &&
+        !(has("low_noise_model.safetensors") && has("high_noise_model.safetensors"))) {
+        return "no transformer weights (model.safetensors, or low_noise_model.safetensors and "
+               "high_noise_model.safetensors) in " +
+               dir.string();
+    }
+    return {};
+}
+
+/// What an MLX voice model lacks of mlx-audio's Kokoro layout (53m), or
+/// empty: a `voices/` directory holding at least one voice pack, each a whole
+/// SafeTensors file -- what Kokoro on MLX loads a voice from.
+[[nodiscard]] std::string voice_files_problem(const std::filesystem::path& dir) {
+    std::error_code code;
+    std::vector<std::filesystem::path> packs;
+    for (const auto& entry : std::filesystem::directory_iterator(dir / "voices", code)) {
+        std::error_code type;
+        if (entry.is_regular_file(type) && entry.path().extension() == ".safetensors") {
+            packs.push_back(entry.path());
+        }
+    }
+    if (packs.empty()) {
+        return "no voices (voices/*.safetensors) in " + dir.string();
+    }
+    std::ranges::sort(packs);
+    for (const std::filesystem::path& pack : packs) {
+        std::error_code size;
+        if (std::string problem =
+                safetensors_shard_problem(pack, std::filesystem::file_size(pack, size));
+            !problem.empty()) {
+            return "voices/" + problem;
+        }
+    }
+    return {};
+}
+
+}  // namespace
+
+MlxInfo read_mlx_info(const std::filesystem::path& dir, std::string_view kind) {
     MlxInfo info;
+    // A video model's own layout (53k), and a voice model's (53m), by what
+    // the caller knows or the one reader says -- the record's word, else what
+    // the files unambiguously say (M22) -- never by its files' names alone.
+    if (kind.empty()) {
+        const MlxKind read = read_mlx_kind(dir);
+        info.video = read.word == kMlxVideo;
+        info.voice = read.word == kMlxVoice;
+    } else {
+        info.video = kind == kMlxVideo;
+        info.voice = kind == kMlxVoice;
+    }
     std::error_code code;
     if (!std::filesystem::is_directory(dir, code)) {
         info.problem = "cannot load: " + dir.string() + " is not a directory";
@@ -367,6 +434,22 @@ MlxInfo read_mlx_info(const std::filesystem::path& dir) {
         info.problem = "cannot load: " + problem;
         return info;
     }
+    if (info.video) {
+        if (const std::string problem = video_files_problem(dir); !problem.empty()) {
+            info.problem = "cannot load: " + problem;
+            return info;
+        }
+        info.complete = true;
+        return info;
+    }
+    if (info.voice) {
+        if (const std::string problem = voice_files_problem(dir); !problem.empty()) {
+            info.problem = "cannot load: " + problem;
+            return info;
+        }
+        info.complete = true;
+        return info;
+    }
     if (!has_tokenizer(dir)) {
         info.problem =
             "cannot load: no tokenizer (tokenizer.json, tokenizer.model or "
@@ -383,6 +466,358 @@ bool is_mlx_model_dir(const std::filesystem::path& dir) {
         return false;
     }
     return read_mlx_info(dir).mlx_format;
+}
+
+namespace {
+
+/// Each kind's word, what it is, and what uses it -- the one wording.
+struct KindWording {
+    std::string_view word{};
+    std::string_view description{};
+    bool backend = false;
+};
+
+constexpr std::array<KindWording, 6> kKinds{{
+    {.word = kMlxChat,
+     .description = "a language model: an mlx backend chats with it",
+     .backend = true},
+    {.word = kMlxVision,
+     .description = "a vision model: an mlx backend chats with it, and shows it images through "
+                    "mlx-vlm",
+     .backend = true},
+    {.word = kMlxEmbedding,
+     .description = "an embedding model: the embedding role uses it, never a chat backend",
+     .backend = false},
+    {.word = kMlxDrafter,
+     .description = "a drafter: it runs beside its base model, never alone",
+     .backend = false},
+    {.word = kMlxVideo,
+     .description = "a video model: 'apogee video generate' runs it, never a chat backend",
+     .backend = false},
+    {.word = kMlxVoice,
+     .description = "a voice model: 'apogee voice say' speaks with it, never a chat backend",
+     .backend = false},
+}};
+
+[[nodiscard]] const KindWording* kind_wording(std::string_view word) noexcept {
+    const auto found = std::ranges::find(kKinds, word, &KindWording::word);
+    return found == kKinds.end() ? nullptr : &*found;
+}
+
+}  // namespace
+
+bool MlxKind::known() const noexcept {
+    return kind_wording(word) != nullptr;
+}
+
+bool MlxKind::backend() const noexcept {
+    const KindWording* wording = kind_wording(word);
+    return wording != nullptr && wording->backend;
+}
+
+bool MlxKind::embeds() const noexcept {
+    return word == kMlxEmbedding;
+}
+
+bool MlxKind::registers() const noexcept {
+    return backend() || embeds();
+}
+
+bool mlx_vision_files(const std::filesystem::path& dir) {
+    const nlohmann::json config = read_json(dir / "config.json");
+    if (object_at(config, "vision_config") == nullptr) {
+        return false;
+    }
+    std::error_code code;
+    return std::filesystem::is_regular_file(dir / "preprocessor_config.json", code) ||
+           std::filesystem::is_regular_file(dir / "processor_config.json", code);
+}
+
+namespace {
+
+// What a pulled set's own files say it is (M22), each read off the layout the
+// MLX community publishes -- the presence of the kind's own files, never their
+// wholeness, which `read_mlx_info` then reads by the kind's layout.
+
+/// mlx-video's Wan layout (53k), as `Anes1032/Wan2.2-TI2V-5B-mlx-q8` publishes
+/// it: a `config.json` beside the T5 text encoder and the VAE, files no
+/// language model's directory holds.
+[[nodiscard]] bool mlx_video_files(const std::filesystem::path& dir) {
+    std::error_code code;
+    return read_json(dir / "config.json").is_object() &&
+           std::filesystem::is_regular_file(dir / "t5_encoder.safetensors", code) &&
+           std::filesystem::is_regular_file(dir / "vae.safetensors", code);
+}
+
+/// An MLX build of Kokoro (53m), as `mlx-community/Kokoro-82M-bf16` publishes
+/// it: a `config.json` naming Kokoro -- `model_type: kokoro`, as mlx-audio's
+/// converter writes it, or Kokoro's own shape, its `istftnet` decoder and its
+/// `plbert` text encoder, as the community's builds keep it -- beside a
+/// `voices/` directory holding a voice pack in SafeTensors.
+[[nodiscard]] bool mlx_voice_files(const std::filesystem::path& dir) {
+    const nlohmann::json config = read_json(dir / "config.json");
+    if (string_at(config, "model_type") != "kokoro" &&
+        (object_at(config, "istftnet") == nullptr || object_at(config, "plbert") == nullptr)) {
+        return false;
+    }
+    std::error_code code;
+    for (const auto& entry : std::filesystem::directory_iterator(dir / "voices", code)) {
+        std::error_code type;
+        if (entry.is_regular_file(type) && entry.path().extension() == ".safetensors") {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// A sentence-transformers embedding pipeline (M21's reader): a `modules.json`
+/// naming a `Pooling` module, as the `mlx-community` builds that carry one
+/// publish it (`embeddinggemma-300m-bf16`, `Qwen3-Embedding-0.6B-8bit`).
+[[nodiscard]] bool mlx_embedding_files(const std::filesystem::path& dir) {
+    return snapshot_embedding_model(dir).has_value();
+}
+
+}  // namespace
+
+MlxKind read_mlx_kind(const std::filesystem::path& dir) {
+    MlxKind kind;
+    if (const std::optional<Snapshot> record = load_snapshot(dir);
+        record.has_value() && !record->kind.empty()) {
+        kind.word = record->kind;
+        kind.source = MlxKindSource::Recorded;
+        return kind;
+    }
+    // Inference covers what came before the record -- a vision model is the
+    // kind an MLX directory's files said apart (27c) -- and, since 53i, a
+    // draft head, which no MLX directory can be chatted with: a drafter a pull
+    // brought whole is never taken for a chat model.
+    if (snapshot_draft_head(dir).has_value()) {
+        kind.word = std::string{kMlxDrafter};
+        kind.source = MlxKindSource::Files;
+        return kind;
+    }
+    // Since M22, what a pull brings ready-made: an embedding, voice or video
+    // model the MLX community publishes, each by its own files. Exactly one
+    // must say so -- files that say two kinds say nothing certain, and read
+    // as they did. An embedding pipeline with a vision tower is an embedding
+    // model: its Pooling says what the model gives back.
+    const std::array<std::pair<std::string_view, bool>, 3> said{{
+        {kMlxVideo, mlx_video_files(dir)},
+        {kMlxVoice, mlx_voice_files(dir)},
+        {kMlxEmbedding, mlx_embedding_files(dir)},
+    }};
+    std::string_view inferred;
+    int saying = 0;
+    for (const auto& [word, says] : said) {
+        if (says) {
+            inferred = word;
+            ++saying;
+        }
+    }
+    if (saying == 1) {
+        kind.word = std::string{inferred};
+        kind.source = MlxKindSource::Files;
+        return kind;
+    }
+    if (mlx_vision_files(dir)) {
+        kind.word = std::string{kMlxVision};
+        kind.source = MlxKindSource::Files;
+    }
+    return kind;
+}
+
+std::string describe_mlx_kind(std::string_view word) {
+    if (const KindWording* wording = kind_wording(word)) {
+        return std::string{wording->description};
+    }
+    return "kind '" + std::string{word} + "', not one this apogee knows: nothing here runs it";
+}
+
+std::string describe(const MlxKind& kind) {
+    std::string source;
+    switch (kind.source) {
+        case MlxKindSource::Recorded:
+            source = "recorded";
+            break;
+        case MlxKindSource::Files:
+            // Each inference says the files it was read from.
+            if (kind.word == kMlxDrafter) {
+                source = "inferred from its files: its config.json declares a draft head";
+            } else if (kind.word == kMlxEmbedding) {
+                source =
+                    "inferred from its files: its modules.json names a sentence-transformers "
+                    "Pooling module";
+            } else if (kind.word == kMlxVoice) {
+                source =
+                    "inferred from its files: a Kokoro config.json beside voices/*.safetensors";
+            } else if (kind.word == kMlxVideo) {
+                source =
+                    "inferred from its files: a config.json beside t5_encoder.safetensors and "
+                    "vae.safetensors";
+            } else {
+                source = "inferred from its files: a vision_config and an image processor";
+            }
+            break;
+        case MlxKindSource::Default:
+            source = "no kind recorded";
+            break;
+    }
+    return kind.word + " (" + source + ") -- " + describe_mlx_kind(kind.word);
+}
+
+std::optional<MlxDrafter> read_mlx_drafter(const std::filesystem::path& dir) {
+    if (read_mlx_kind(dir).word != kMlxDrafter) {
+        return std::nullopt;
+    }
+    const std::optional<DraftHead> head = snapshot_draft_head(dir);
+    if (!head.has_value()) {
+        return std::nullopt;
+    }
+    MlxDrafter drafter{.head = *head};
+    if (const std::optional<Snapshot> record = load_snapshot(dir)) {
+        drafter.bases = record->bases;
+    }
+    return drafter;
+}
+
+namespace {
+
+/// "a 2560-wide gemma4 model", or as much of it as is known.
+[[nodiscard]] std::string model_of(std::int64_t width, const std::string& family) {
+    const std::string kind = family.empty() ? std::string{"model"} : family + " model";
+    return width > 0 ? "a " + std::to_string(width) + "-wide " + kind
+                     : "a " + kind + " whose config.json states no width";
+}
+
+[[nodiscard]] std::string joined_names(const std::vector<std::string>& names) {
+    std::string out;
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        out += (i == 0 ? "" : i + 1 == names.size() ? " or " : ", ") + names[i];
+    }
+    return out;
+}
+
+}  // namespace
+
+std::string describe(const MlxDrafter& drafter) {
+    return "a drafter (" + drafter.head.architecture + ") for " +
+           model_of(drafter.head.backbone_hidden_size, drafter.head.family) +
+           (drafter.bases.empty() ? std::string{", its record naming no base"}
+                                  : ", its record naming " + joined_names(drafter.bases));
+}
+
+std::string mlx_drafter_refusal(const std::filesystem::path& base,
+                                const std::filesystem::path& drafter,
+                                const std::filesystem::path& models_root) {
+    std::error_code code;
+    const std::string named = drafter.string();
+    if (!std::filesystem::is_directory(drafter, code)) {
+        return "there is no drafter at " + named + " -- 'apogee models convert <a draft head> " +
+               "--mlx' makes one";
+    }
+    if (!std::filesystem::is_regular_file(drafter / "config.json", code)) {
+        return named + " is not an MLX directory: it has no config.json";
+    }
+    const MlxKind kind = read_mlx_kind(drafter);
+    if (kind.word != kMlxDrafter) {
+        return named + " is not a drafter: it is " + describe(kind);
+    }
+    const std::optional<MlxDrafter> read = read_mlx_drafter(drafter);
+    if (!read.has_value()) {
+        return named +
+               " is recorded as a drafter, and its config.json declares no draft head -- "
+               "nothing says which base it reads";
+    }
+    const DraftHead& head = read->head;
+    if (head.backbone_hidden_size <= 0) {
+        return named +
+               "'s config.json does not say how wide a model it reads "
+               "(backbone_hidden_size), so no base can be measured against it";
+    }
+    // The base: a model mlx-vlm loads to chat with.
+    const MlxKind base_kind = read_mlx_kind(base);
+    if (base_kind.word == kMlxDrafter) {
+        return base.string() + " is itself a drafter: a drafter runs beside a base, never alone";
+    }
+    if (base_kind.word == kMlxChat) {
+        // mlx-vlm's speculative path loads the base through mlx-vlm; mlx-lm's
+        // build is laid out for mlx-lm, its towers left out (53f).
+        return base.string() + " is mlx-lm's build (kind " + base_kind.word +
+               (base_kind.source == MlxKindSource::Recorded ? ", recorded" : ", none recorded") +
+               "), laid out for mlx-lm, and drafting runs through mlx-vlm's speculative path, "
+               "which loads the base through mlx-vlm -- 'apogee models convert <its SafeTensors "
+               "set> --mlx' builds it through mlx-vlm, and the drafter runs beside that";
+    }
+    if (base_kind.word != kMlxVision) {
+        return base.string() + " is " + describe(base_kind) +
+               " -- a drafter runs beside a model an mlx backend chats with";
+    }
+    // Only the base it reads: the family and the width, measured.
+    const ConfigWidth width = config_width(base);
+    if (width.family != head.family || width.hidden_size != head.backbone_hidden_size) {
+        return named + " drafts for " + model_of(head.backbone_hidden_size, head.family) +
+               ", reading its hidden states, and " + base.string() + " is " +
+               model_of(width.hidden_size, width.family) +
+               " -- a drafter runs only beside a base of its family and width";
+    }
+    // And the one its record names, where it names any.
+    if (!read->bases.empty()) {
+        const std::optional<StoredMlx> stored =
+            stored_mlx_at(list_store_mlx(StoreRoots::at(models_root)), base);
+        if (!stored.has_value() ||
+            std::ranges::find(read->bases, stored->model) == read->bases.end()) {
+            return named + "'s record names " + joined_names(read->bases) + " as its base, and " +
+                   base.string() + " is " +
+                   (stored.has_value() ? "a build of " + stored->model
+                                       : std::string{"no stored model"}) +
+                   " -- a drafter runs only beside the base its record names";
+        }
+    }
+    return {};
+}
+
+MlxEmbeddingWidth read_mlx_embedding_width(const std::filesystem::path& dir) {
+    MlxEmbeddingWidth out;
+    // The pipeline's own last word on it: the last Dense whose configuration
+    // is there and states its output.
+    if (const nlohmann::json modules = read_json(dir / "modules.json"); modules.is_array()) {
+        for (const nlohmann::json& module : modules) {
+            const std::string type = string_at(module, "type");
+            const std::string path = string_at(module, "path");
+            if (!type.ends_with(".Dense") || path.empty()) {
+                continue;
+            }
+            const nlohmann::json dense = read_json(dir / path / "config.json");
+            if (const int features = dense.is_object() ? int_at(dense, "out_features") : 0;
+                features > 0) {
+                out.width = features;
+                out.source = "the last Dense's out_features (" + path + ")";
+            }
+        }
+    }
+    if (out.known()) {
+        return out;
+    }
+    // Else the pooled vector's own width: the model's hidden size.
+    const nlohmann::json config = read_json(dir / "config.json");
+    if (const int hidden = config.is_object() ? int_at(config, "hidden_size") : 0; hidden > 0) {
+        out.width = hidden;
+        out.source = "its hidden_size";
+    } else if (const nlohmann::json* text = object_at(config, "text_config")) {
+        if (const int nested = int_at(*text, "hidden_size"); nested > 0) {
+            out.width = nested;
+            out.source = "its text_config.hidden_size";
+        }
+    }
+    return out;
+}
+
+std::string describe(const MlxEmbeddingWidth& width) {
+    if (!width.known()) {
+        return "width unknown -- its config.json states no hidden_size, and no Dense module "
+               "states its out_features";
+    }
+    return std::to_string(width.width) + " wide (" + width.source + ")";
 }
 
 MlxWindow mlx_window(const MlxInfo& info, const harness::BackendConfig& backend) {

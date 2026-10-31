@@ -19,7 +19,9 @@
 /// every installed CLI its version again, fingerprint or not. `--register`
 /// then writes one entry per detected provider that has none, through the
 /// one config editor (`cli/provider_offer.h`) -- an explicit yes, typed.
-/// Nothing is written without it.
+/// Nothing is written without it. `providers register <id>` (M33) is that
+/// pass for one provider over the last scan -- the core the shell's
+/// Providers view runs on `r` (`register_provider`).
 namespace apogee::commands {
 
 /// One provider as `providers scan` reports it (37b): the one row function
@@ -62,12 +64,26 @@ struct ProviderRow {
 [[nodiscard]] std::vector<backends::ProviderStatus> scan_providers_now(
     const std::filesystem::path& config_path, bool refresh);
 
+/// What registering one provider did (M33): `render_registration`'s lines,
+/// and the rosters fetched on the user's word (M13), a line each -- the
+/// `registration` and `rosters` of `providers scan --register`'s document.
+struct ProviderRegistration {
+    std::vector<std::string> registration{};
+    std::vector<std::string> rosters{};
+
+    /// Both, a line each: what the Providers view's `r` and `providers
+    /// register` say.
+    [[nodiscard]] std::string said() const;
+};
+
 /// `providers scan --register` for one provider (37b): the registration core
 /// over the last scan's status for `provider` alone, the entry written through
-/// the one editor and its type's roster fetched -- the command's own words for
-/// whatever happened, a refusal included.
-[[nodiscard]] std::string register_provider(const std::filesystem::path& config_path,
-                                            std::string_view provider);
+/// the one editor -- `models.default` with it when none is set, said -- and
+/// its type's roster fetched: the command's own words for whatever happened, a
+/// refusal included. The shell's Providers view runs it on `r`, and
+/// `providers register <id>` from the command line (M33).
+[[nodiscard]] ProviderRegistration register_provider(const std::filesystem::path& config_path,
+                                                     std::string_view provider);
 
 class ProvidersCommand final : public Command {
 public:

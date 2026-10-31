@@ -1,6 +1,6 @@
 # The HTTP API reference, pinned to the route table.
 #
-# `documentation/reference/http-api.md` is what a remote-client author reads,
+# `documentation/cli/reference/http-api.md` is what a remote-client author reads,
 # and a reference that drifts is worse than none: they build against it and
 # debug Apogee for a fault that is in the prose. So every route in
 # `httpserver/mux.cpp`'s table must have a heading in the document, and every

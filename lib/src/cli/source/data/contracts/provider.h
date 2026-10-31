@@ -239,7 +239,8 @@ public:
 };
 
 /// Implemented by a provider that can take audio (26b): a local model whose
-/// projector has an audio encoder, read through mtmd.
+/// projector has an audio encoder, read through mtmd -- and, since 53g, an
+/// MLX omni model mlx-vlm built, heard through mlx-vlm.
 ///
 /// Unlike images, a provider that does not declare it is taken to have none:
 /// no cloud backend here is sent audio, so the only way to transcribe is a
@@ -428,8 +429,8 @@ public:
 struct Config;
 
 /// What the provider factory fills, seen from below (A1): the config it reads
-/// the backends from, the registration of each provider it builds, and the
-/// default router installed over them. The Harness implements it, so
+/// the backends from, the registration of each provider it builds, the ones
+/// it could not build, and the default router installed over them. The Harness implements it, so
 /// `backends/factory` builds providers into a Harness without including one --
 /// the Data layer never reaches up for the Business object it fills. The
 /// capability-interface pattern, pointed the other way.
@@ -451,6 +452,16 @@ public:
 
     virtual void observe_turns(TurnObserver observer) {
         (void)observer;
+    }
+
+    /// Hears a configured backend the factory could not build, and why
+    /// (M26), before the router it installs next: that router names the
+    /// backend, with this reason, when a refusal is about it -- configured,
+    /// but not started. A name registered since is no longer skipped. A
+    /// registry that routes nothing ignores it.
+    virtual void note_skipped(std::string name, std::string reason) {
+        (void)name;
+        (void)reason;
     }
 
 protected:

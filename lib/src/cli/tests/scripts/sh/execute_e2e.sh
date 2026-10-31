@@ -40,7 +40,8 @@ set -uo pipefail
 APOGEE_BIN="${1:?usage: execute_e2e.sh <apogee-binary> <work-dir>}"
 WORK_DIR="${2:?usage: execute_e2e.sh <apogee-binary> <work-dir>}"
 
-rm -rf "$WORK_DIR"
+. "$(dirname "$0")/sandbox.sh"
+WORK_DIR="$(sandbox_dir "$WORK_DIR")"
 mkdir -p "$WORK_DIR/scripts"
 export APOGEE_HOME="$WORK_DIR/home"
 export HOME="$WORK_DIR"
@@ -222,18 +223,24 @@ transcript "$SESSION" | grep -q '^user: /play echo2 one$' && fail "/compact: the
 printf '{"type":"user","text":"/play echo2 hello"}\n{"type":"user","text":"next"}\n{"type":"user","text":"/play nope x"}\n' |
     "$APOGEE_BIN" execute --output-format stream-json >"$WORK_DIR/events.jsonl" 2>"$WORK_DIR/err.txt" ||
     fail "machine mode: $(cat "$WORK_DIR/err.txt")"
-python3 - "$WORK_DIR/events.jsonl" <<'PY' || fail "machine mode: $(cat "$WORK_DIR/events.jsonl")"
+python3 - "$WORK_DIR/events.jsonl" "$(newest_session)" <<'PY' || fail "machine mode: $(cat "$WORK_DIR/events.jsonl")"
 import json, sys
 events = [json.loads(line) for line in open(sys.argv[1])]
 types = [e["type"] for e in events]
 known = {"session", "thinking", "thinking_delta", "memory", "tool_status", "notice",
          "answer_start", "answer_delta", "answer_end", "result", "question", "error"}
 assert set(types) <= known, f"a type the protocol does not have: {set(types) - known}"
-assert types[:7] == ["session", "tool_status", "tool_status", "answer_start", "answer_delta",
-                     "answer_end", "result"], types
-assert events[1]["text"].startswith("stage 1/2 first — asking utility (helper): One: hello"), events[1]
-assert events[2]["text"].startswith("stage 2/2 second — asking chat (root): Two: HELPER<"), events[2]
-assert events[6]["text"] == "ROOT<Two: HELPER<One: hello>>", events[6]
+# The chat it writes, named as chat's is (M28): the conversation just saved.
+assert events[0]["chat_id"] == json.load(open(sys.argv[2]))["chat_id"], (events[0], sys.argv[2])
+# The suite it runs under, and that it does not orchestrate, said on the
+# session event; what the suite takes of the machine a notice after it (M29).
+assert events[0]["suite"] == "duo" and events[0]["orchestrating"] is False, events[0]
+assert types[:8] == ["session", "notice", "tool_status", "tool_status", "answer_start",
+                     "answer_delta", "answer_end", "result"], types
+assert events[1]["text"] == "suite duo: no member holds memory on this machine", events[1]
+assert events[2]["text"].startswith("stage 1/2 first — asking utility (helper): One: hello"), events[2]
+assert events[3]["text"].startswith("stage 2/2 second — asking chat (root): Two: HELPER<"), events[3]
+assert events[7]["text"] == "ROOT<Two: HELPER<One: hello>>", events[7]
 assert types[-1] == "error" and "no symphony named 'nope'" in events[-1]["message"], events[-1]
 assert types.count("result") == 2, types
 PY
@@ -297,11 +304,11 @@ assert types[-1] == "result", types
 PY
 
 # --- completion ------------------------------------------------------------------------
-"$APOGEE_BIN" __complete "" </dev/null | grep -qx execute || fail "completion: no execute command"
-"$APOGEE_BIN" __complete execute -- </dev/null | grep -qx -- --suite || fail "completion: no --suite"
+"$APOGEE_BIN" __complete "" </dev/null | grep -x execute >/dev/null || fail "completion: no execute command"
+"$APOGEE_BIN" __complete execute -- </dev/null | grep -x -- --suite >/dev/null || fail "completion: no --suite"
 SUITES=$("$APOGEE_BIN" __complete execute --suite "" </dev/null)
 [ "$SUITES" = "duo
 fast" ] || fail "completion: --suite offered '$SUITES'"
-"$APOGEE_BIN" __complete execute --resume "" </dev/null | grep -qx "$ID" || fail "completion: --resume lacks $ID"
+"$APOGEE_BIN" __complete execute --resume "" </dev/null | grep -x "$ID" >/dev/null || fail "completion: --resume lacks $ID"
 
 echo "execute: OK"

@@ -1,0 +1,33 @@
+{"protocol_version":1,"schema":"2026-10-25","type":"job","verb":"train pipeline run"}
+{"text":"[pipeline] skills as pipe-20261026-074112: 2 stage(s), mock on aaaaaaaaaaaa; no judge: unmatched items skip","type":"notice"}
+{"count":2,"index":1,"label":"greetings","pipeline_run_id":"pipe-20261026-074112","state":"pending","type":"stage"}
+{"count":2,"index":2,"label":"refusals","pipeline_run_id":"pipe-20261026-074112","state":"pending","type":"stage"}
+{"count":2,"index":1,"label":"greetings","pipeline_run_id":"pipe-20261026-074112","run_id":"pipe-20261026-074112-s0","state":"training","type":"stage"}
+{"text":"[train] stage 1/2 'greetings': mock lora on aaaaaaaaaaaa, dataset starter.jsonl","type":"notice"}
+{"text":"[train] mock trainer: 4 iteration(s), method lora","type":"notice"}
+{"iteration":1,"iterations":4,"loss":0.72,"lr":0.0001,"stage":1,"throughput":10.0,"type":"iteration"}
+{"iteration":2,"iterations":4,"loss":0.62,"lr":0.0001,"stage":1,"throughput":10.0,"type":"iteration"}
+{"iteration":3,"iterations":4,"loss":0.52,"lr":0.0001,"stage":1,"throughput":10.0,"type":"iteration"}
+{"iteration":4,"iterations":4,"loss":0.42,"lr":0.0001,"stage":1,"throughput":10.0,"type":"iteration"}
+{"text":"[train] adapter saved to /Users/someone/.apogee/training/runs/pipe-20261026-074112-s0/adapters","type":"notice"}
+{"count":2,"index":1,"label":"greetings","pipeline_run_id":"pipe-20261026-074112","run_id":"pipe-20261026-074112-s0","state":"evaluating","type":"stage"}
+{"text":"[eval] cumulative suite: 1 suite(s), 1 item(s); no judge: unmatched items skip","type":"notice"}
+{"text":"[gate] stage 'greetings' PASSED the cumulative eval -- 100% (1/1)","type":"notice"}
+{"count":2,"cumulative_score":1.0,"index":1,"label":"greetings","pipeline_run_id":"pipe-20261026-074112","run_id":"pipe-20261026-074112-s0","state":"fusing","type":"stage"}
+{"text":"[fuse] merging stage 1's adapter into its base for stage 2","type":"notice"}
+{"text":"[fuse] mock fuse: /Users/someone/.apogee/training/runs/pipe-20261026-074112-s0/adapters into /Users/someone/.apogee/models/tiny/safetensors/aaaaaaaaaaaa","type":"notice"}
+{"count":2,"cumulative_score":1.0,"index":1,"label":"greetings","pipeline_run_id":"pipe-20261026-074112","run_id":"pipe-20261026-074112-s0","state":"passed","type":"stage"}
+{"count":2,"index":2,"label":"refusals","pipeline_run_id":"pipe-20261026-074112","run_id":"pipe-20261026-074112-s1","state":"training","type":"stage"}
+{"text":"[train] stage 2/2 'refusals': mock lora on fused, dataset regress.jsonl","type":"notice"}
+{"text":"[train] mock trainer: 4 iteration(s), method lora","type":"notice"}
+{"iteration":1,"iterations":4,"loss":0.72,"lr":0.0001,"stage":2,"throughput":10.0,"type":"iteration"}
+{"iteration":2,"iterations":4,"loss":0.62,"lr":0.0001,"stage":2,"throughput":10.0,"type":"iteration"}
+{"iteration":3,"iterations":4,"loss":0.52,"lr":0.0001,"stage":2,"throughput":10.0,"type":"iteration"}
+{"iteration":4,"iterations":4,"loss":0.42,"lr":0.0001,"stage":2,"throughput":10.0,"type":"iteration"}
+{"text":"[train] adapter saved to /Users/someone/.apogee/training/runs/pipe-20261026-074112-s1/adapters","type":"notice"}
+{"count":2,"index":2,"label":"refusals","pipeline_run_id":"pipe-20261026-074112","run_id":"pipe-20261026-074112-s1","state":"evaluating","type":"stage"}
+{"text":"[eval] cumulative suite: 2 suite(s), 2 item(s); no judge: unmatched items skip","type":"notice"}
+{"text":"[gate] stage 'refusals' FAILED the cumulative eval -- 50% (1/2)","type":"notice"}
+{"count":2,"cumulative_score":0.5,"index":2,"label":"refusals","pipeline_run_id":"pipe-20261026-074112","run_id":"pipe-20261026-074112-s1","state":"failed","type":"stage"}
+{"document":{"kind":"pipeline","pipeline":{"base_model":"/Users/someone/.apogee/models/tiny/safetensors/aaaaaaaaaaaa","pipeline_run_id":"pipe-20261026-074112","spec_name":"skills","stages":[{"adapter_dir":"/Users/someone/.apogee/training/runs/pipe-20261026-074112-s0/adapters","base_model":"/Users/someone/.apogee/models/tiny/safetensors/aaaaaaaaaaaa","cumulative_passed":true,"cumulative_score":1.0,"dataset":"/Users/someone/.apogee/training/datasets/starter.jsonl","eval_results":{"items":[{"check_type":"contains","expected":"hello","got":"say hello","passed":true,"prompt":"say hello"}],"num_passed":1,"num_skipped":0,"passed":true,"run_at":"2026-10-26T07:41:12Z","score":1.0,"suite":"/Users/someone/.apogee/training/suites/hello.jsonl","total":1},"fused_dir":"/Users/someone/.apogee/training/runs/pipe-20261026-074112-s0/fused","index":0,"name":"greetings","run_id":"pipe-20261026-074112-s0","status":"passed"},{"adapter_dir":"/Users/someone/.apogee/training/runs/pipe-20261026-074112-s1/adapters","base_model":"/Users/someone/.apogee/training/runs/pipe-20261026-074112-s0/fused","cumulative_passed":false,"cumulative_score":0.5,"dataset":"/Users/someone/.apogee/training/datasets/regress.jsonl","eval_results":{"items":[{"check_type":"contains","expected":"hello","got":"nope","passed":false,"prompt":"say hello"},{"check_type":"contains","expected":"nope","got":"nope","passed":true,"prompt":"say nope"}],"num_passed":1,"num_skipped":0,"passed":false,"run_at":"2026-10-26T07:41:12Z","score":0.5,"suite":"/Users/someone/.apogee/training/suites/hello.jsonl + /Users/someone/.apogee/training/suites/nope.jsonl","total":2},"fused_dir":"","index":1,"name":"refusals","run_id":"pipe-20261026-074112-s1","status":"failed"}],"started_at":"2026-10-26T07:41:12Z","status":"aborted","student":"tiny"}},"type":"document"}
+{"message":"pipeline aborted -- stage 'refusals' failed the cumulative eval gate (50% (1/2)). Fix the data or the suite and 'apogee train pipeline resume pipe-20261026-074112', or pass --continue-on-fail to go on regardless","type":"error"}

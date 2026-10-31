@@ -15,6 +15,7 @@
 #include "cli/providers_cmd.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
+#include "support/cli_home.h"
 #include "support/env_guard.h"
 
 /// Registration offers (28b): the pass `providers scan --register` runs and
@@ -198,6 +199,89 @@ TEST_CASE("the plan: one entry per detected provider that has none", "[providers
         CHECK(plan.steps[0].detail == "mock");
         CHECK(plan.default_backend.empty());
     }
+}
+
+TEST_CASE("the default a registration sets is add-backend's, byte for byte and word for word",
+          "[providers][register][default]") {
+    // M33: `config add-backend` now points models.default at a new entry that
+    // chats when none is set, as this pass always has (28b) -- one rule, one
+    // wording, the same bytes from either door.
+    constexpr const char* kNoDefault = R"(# my own notes, kept through every edit
+backends:
+  # the local one
+  mock:
+    type: mock
+    model: mock-1
+)";
+    const Sandbox box{kNoDefault};
+    const RegistrationPlan plan = apogee::commands::plan_registration(
+        scan_with({"codex"}), apogee::harness::load_config(box.config));
+    REQUIRE(plan.default_backend == "codex");
+    apogee::commands::apply_registration(box.config, plan);
+
+    const apogee::testing::CliHome typed{kNoDefault};
+    std::string said;
+    REQUIRE(typed.run({"config", "add-backend", "codex", "--type", "codex-cli"}, &said) == 0);
+    CHECK(read(box.config) == typed.config_text());
+    const std::string words = "models.default set to 'codex' (none was set)\n";
+    CHECK(said.ends_with(words));
+    CHECK(apogee::commands::render_registration(plan, /*applied=*/true) ==
+          "registered codex (codex-cli)\n" + words);
+}
+
+TEST_CASE("Ollama's one model registers it as add-backend would; several are named, none chosen",
+          "[providers][register][ollama]") {
+    // 2026-10-21, the user's call: their Ollama holds one model, a cloud one.
+    const Sandbox box;
+    const std::string before = read(box.config);
+    const RegistrationPlan plan = apogee::commands::plan_registration(
+        scan_with({"ollama"}), apogee::harness::load_config(box.config), {"gpt-oss:20b-cloud"});
+    REQUIRE(plan.steps.size() == 1);
+    CHECK(plan.steps[0].outcome == Outcome::Register);
+    CHECK(plan.steps[0].model == "gpt-oss:20b-cloud");
+    apogee::commands::apply_registration(box.config, plan);
+    // Exactly what `config add-backend ollama --type ollama-cli --model …`
+    // writes: the one editor, the same entry.
+    apogee::harness::BackendConfig ollama;
+    ollama.type = BackendType::OllamaCli;
+    ollama.model = "gpt-oss:20b-cloud";
+    CHECK(read(box.config) == apogee::harness::append_backend(before, "ollama", ollama, false));
+    CHECK(apogee::commands::render_registration(plan, true) ==
+          "registered ollama (ollama-cli, with Ollama's one model, gpt-oss:20b-cloud)\n");
+    // A second pass finds it registered.
+    const RegistrationPlan again = apogee::commands::plan_registration(
+        scan_with({"ollama"}), apogee::harness::load_config(box.config), {"gpt-oss:20b-cloud"});
+    CHECK(again.steps[0].outcome == Outcome::AlreadyRegistered);
+
+    // Several: which one is the person's to say.
+    const RegistrationPlan several = apogee::commands::plan_registration(
+        scan_with({"ollama"}), config_of(kConfig), {"llama3.2:3b", "qwen3:8b"});
+    REQUIRE(several.steps.size() == 1);
+    CHECK(several.steps[0].outcome == Outcome::NeedsModel);
+    CHECK(apogee::commands::render_registration(several, true) ==
+          "ollama: not registered -- an ollama-cli backend needs a model, and Ollama has several: "
+          "llama3.2:3b and qwen3:8b; add one with: apogee config add-backend ollama --type "
+          "ollama-cli --model <model>\n"
+          "nothing written\n");
+}
+
+TEST_CASE("Ollama's models are read from its store, cloud models among them, sorted",
+          "[providers][register][ollama]") {
+    const apogee::testing::TempDir store{"ollama-store-" + std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard guard{"OLLAMA_MODELS", store.path().string()};
+    // The suite's own run points OLLAMA_MODELS at an empty directory.
+    CHECK(apogee::commands::ollama_models_here().empty());
+    const std::filesystem::path library =
+        store.path() / "manifests" / "registry.ollama.ai" / "library";
+    std::filesystem::create_directories(library / "gpt-oss");
+    std::ofstream{library / "gpt-oss" / "20b-cloud", std::ios::binary}
+        << R"({"schemaVersion":2,"layers":[]})";
+    CHECK(apogee::commands::ollama_models_here() == std::vector<std::string>{"gpt-oss:20b-cloud"});
+    std::filesystem::create_directories(library / "llama3.2");
+    std::ofstream{library / "llama3.2" / "3b", std::ios::binary}
+        << R"({"schemaVersion":2,"layers":[]})";
+    CHECK(apogee::commands::ollama_models_here() ==
+          std::vector<std::string>{"gpt-oss:20b-cloud", "llama3.2:3b"});
 }
 
 TEST_CASE("register writes through the editor: the user's bytes kept, a second pass a no-op",

@@ -1,0 +1,27 @@
+{
+ "description": "Summarize then check.",
+ "input": {
+  "description": "The text to summarize.",
+  "image": false
+ },
+ "name": "notes-digest",
+ "object": "symphony",
+ "overrides": false,
+ "path": "/Users/someone/.apogee/symphonies/notes-digest.yaml",
+ "problems": [],
+ "source": "file",
+ "stages": [
+  {
+   "image": false,
+   "name": "summarize",
+   "prompt": "Summarize: {{input}}",
+   "role": "utility"
+  },
+  {
+   "image": false,
+   "name": "verify",
+   "prompt": "Check this summary against the text. Summary: {{summarize}} Text: {{input}}",
+   "role": "chat"
+  }
+ ]
+}

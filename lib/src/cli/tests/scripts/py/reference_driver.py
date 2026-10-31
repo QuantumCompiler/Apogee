@@ -26,6 +26,11 @@ Two disciplines a real driver needs, both exercised here:
     driver can discard it. Dropping every thinking event must leave exactly the
     answer.
 
+And the launch, both ways (M29): a session under a suite names it on its
+`session` event and says what it takes of the machine as a `notice` after it;
+a launch the child refuses writes no `session` at all -- stdout closes empty,
+the child exits 1, and stderr says why.
+
 Usage: reference_driver.py <apogee-binary> <work-dir>
 """
 
@@ -33,10 +38,11 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import sys
 
 
-def drive(apogee, env, prompts):
+def drive(apogee, env, prompts, flags=()):
     """Run ONE apogee child through several turns, the way a GUI would.
 
     The child stays alive across turns -- that is the whole reason machine mode
@@ -49,7 +55,7 @@ def drive(apogee, env, prompts):
         # refused: a driven session speaks the protocol both ways.
         [apogee, "chat",
          "--output-format", "stream-json",
-         "--input-format", "stream-json"],
+         "--input-format", "stream-json", *flags],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -67,6 +73,7 @@ def drive(apogee, env, prompts):
     session = None
     answer = []
     dropped = []
+    notices = []
 
     for line in child.stdout:
         line = line.strip()
@@ -88,14 +95,19 @@ def drive(apogee, env, prompts):
             results.append(event["text"])
         elif kind == "error":
             print(f"driver: apogee reported: {event['message']}", file=sys.stderr)
+        elif kind == "notice":
+            # Words for the user that are neither progress nor an error: shown
+            # and kept, never fatal.
+            notices.append(event["text"])
         else:
             # thinking, thinking_delta, tool_status, and anything a later build
             # introduces. Dropping them silently is REQUIRED of a driver, not a
             # shortcut taken here.
             dropped.append(kind)
 
-    child.wait(timeout=60)
-    return session, turns, results, dropped, child.stderr.read()
+    code = child.wait(timeout=60)
+    return {"session": session, "turns": turns, "results": results, "dropped": dropped,
+            "notices": notices, "stderr": child.stderr.read(), "code": code}
 
 
 def main():
@@ -104,8 +116,17 @@ def main():
         return 2
     apogee, work = sys.argv[1], sys.argv[2]
 
-    shutil.rmtree(work, ignore_errors=True)
-    os.makedirs(work, exist_ok=True)
+    # A home of this run's own beside the path ctest gives, removed when the
+    # run ends: two runs of the suite in one build tree once shared it (M17).
+    os.makedirs(os.path.dirname(work), exist_ok=True)
+    work = tempfile.mkdtemp(prefix=os.path.basename(work) + ".", dir=os.path.dirname(work))
+    try:
+        return run(apogee, work)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def run(apogee, work):
     env = dict(os.environ, APOGEE_HOME=work)
 
     for args in (["config", "init"],
@@ -115,7 +136,9 @@ def main():
                        stdout=subprocess.DEVNULL)
 
     prompts = ["what is 2+2?", "and 3+3?"]
-    session, turns, results, dropped, err = drive(apogee, env, prompts)
+    first = drive(apogee, env, prompts)
+    session, turns, results, dropped, err = (first["session"], first["turns"], first["results"],
+                                             first["dropped"], first["stderr"])
 
     failures = []
 
@@ -154,6 +177,28 @@ def main():
 
     if err.strip() and "error" in err.lower():
         failures.append(f"stderr reported an error: {err.strip()}")
+
+    # Under a suite, the session names it, and what it takes of the machine is
+    # a notice -- read from the stream, never from stderr (M29).
+    subprocess.run([apogee, "config", "add-suite", "pair", "--chat", "mock"], env=env,
+                   check=True, stdout=subprocess.DEVNULL)
+    suited = drive(apogee, env, ["hello"], ("--suite", "pair"))
+    if suited["session"] is None or suited["session"].get("suite") != "pair":
+        failures.append(f"a session under a suite does not name it: {suited['session']}")
+    if not any(note.startswith("suite pair") for note in suited["notices"]):
+        failures.append(f"the suite's admission is no notice: {suited['notices']}")
+    if "suite pair" in suited["stderr"]:
+        failures.append(f"the suite's admission went to stderr: {suited['stderr'].strip()}")
+
+    # A launch refused: no session event -- nothing at all on stdout -- exit
+    # 1, and the reason on stderr, where a driver reads why it never began.
+    refused = drive(apogee, env, ["hello"], ("--suite", "nope"))
+    if refused["session"] is not None or refused["turns"] or refused["notices"]:
+        failures.append("a refused launch wrote on stdout")
+    if refused["code"] != 1:
+        failures.append(f"a refused launch exited {refused['code']}, not 1")
+    if "no suite named 'nope'" not in refused["stderr"]:
+        failures.append(f"a refused launch did not say why on stderr: {refused['stderr'].strip()}")
 
     if failures:
         print("reference driver: the machine-mode contract is broken", file=sys.stderr)

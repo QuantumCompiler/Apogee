@@ -1,5 +1,7 @@
 #pragma once
 
+#include <nlohmann/json_fwd.hpp>
+
 #include <functional>
 #include <optional>
 #include <string>
@@ -36,7 +38,12 @@ using MachineBudgetSource = std::function<models::MachineBudget()>;
 /// `suite research needs 10600 MiB of this machine's 98304 MiB: root 7468 +
 /// helper 2108 + 1024 margin -- fits`. A member whose size is unknown is
 /// named as unknown and the sum reads "at least"; a budget that is not known
-/// is said so; `forced` marks a suite run over its budget anyway.
+/// is said so; `forced` marks a suite run over its budget anyway. A member on
+/// another's base adds its cache and adapters alone, and says whose weights
+/// it shares and what that saves: `helper 241 (shares root's weights, 1926
+/// MiB saved)` (53d). A member's drafter is in its figure; where the rest of
+/// the member is unknown, the drafter is added on its own -- `e4b unknown
+/// (...) + e4b's drafter 300` -- since its size is known (M25).
 [[nodiscard]] std::string admission_line(const models::SuiteFootprint& footprint,
                                          bool forced = false);
 
@@ -50,12 +57,34 @@ using MachineBudgetSource = std::function<models::MachineBudget()>;
 using ResidencyProbe = std::function<std::optional<bool>(std::string_view backend)>;
 
 /// The footprint block: a line per backend the suite puts to use -- its
-/// roles, its bytes as weights and cache at its window, or why unknown, and,
+/// roles, its bytes as weights (or whose it shares, 53d), cache at its window,
+/// adapters and its drafter's weights (M25), or why unknown -- with what its
+/// drafter adds all the same -- and,
 /// when `resident` can say, whether its model is in memory now -- then the
 /// set's total as the admission line states it. `resident` is a session's
 /// (`/suite`); `models status`, which loads nothing, passes none.
 [[nodiscard]] std::vector<std::string> footprint_lines(const models::SuiteFootprint& footprint,
                                                        const ResidencyProbe& resident = {});
+
+/// The verdict a footprint's admission is, in the CLI's words (M31): `fits`,
+/// `fits as far as known`, `does not fit`, `budget not known here`, `no
+/// member holds memory` -- what the admission line ends with, as one word
+/// set a host can switch on.
+[[nodiscard]] std::string_view footprint_verdict(models::Admission admission);
+
+/// The footprint as data (M31), beside `footprint_lines`: `{suite, members:
+/// [{backend, roles, local, bytes, known, shares, note}], total_bytes,
+/// margin_bytes, budget_bytes, verdict}`. A member's `bytes` is what the sum
+/// counts of it -- its whole figure (weights unless it `shares` another's
+/// base, cache, adapters, drafter) when `known`, else only what is known of
+/// it, its drafter's weights (M25), or 0 -- and 0 for one holding nothing
+/// here; `note` is the reason the text gives in place of a figure -- why its
+/// size is unknown, or a backend configured nowhere -- empty when it gives
+/// none. `total_bytes` is the members' bytes and the margin, as the
+/// admission line's sum; `budget_bytes` is the machine's, null when not
+/// known or not asked; `verdict` is `footprint_verdict`'s. Exact bytes, where
+/// the text rounds each part to MiB.
+[[nodiscard]] nlohmann::json footprint_document(const models::SuiteFootprint& footprint);
 
 /// `/suite`'s argument, read (27e): the suite or `off`, then `--force` and
 /// `--warm` in any order.

@@ -182,6 +182,30 @@ struct Session {
     /// removed if it had one. Absent from an older file: false.
     bool private_chat = false;
 
+    /// Opened with `chat --private` (52d): never written at all -- `save` is
+    /// a no-op for it, so not one byte of the conversation lands under
+    /// `sessions/`, not even to be deleted later. Never serialised: a file
+    /// that exists was, by definition, not this.
+    bool never_written = false;
+
+    /// Opened new by this process, never resumed (M28): `save` writes it only
+    /// once it has a turn, so a session closed before its first leaves no
+    /// file and no row in `chats list` -- its title and settings, set before,
+    /// ride the first turn's save. Never serialised: a loaded chat was not.
+    bool new_chat = false;
+
+    /// The chat's file as this process last read or wrote it (55b): its
+    /// `custom_name` then, or unset while this process has read no file and
+    /// written none. What `save` compares the file with before it writes, so
+    /// a running session never undoes an outside edit. Never serialised.
+    std::optional<std::string> filed_name{};
+
+    /// Deleted outside this session while it ran (55b): the file `save` last
+    /// wrote, or `load` read, was gone at the next save. It stays deleted --
+    /// `save` writes nothing more for it, and the session says so. Never
+    /// serialised.
+    bool deleted = false;
+
     /// The session's `--retriever` SETTING (`lexical` / `vector` / `hybrid`;
     /// empty means auto) and its `--rerank` setting (a backend, `off`, or
     /// empty for the collections' pins). What the user chose, never what auto
@@ -211,6 +235,11 @@ struct Session {
     /// The name shown in listings: `custom_name` when set, else `title`, else
     /// the id.
     [[nodiscard]] std::string display_name() const;
+
+    /// Whether `save` writes nothing for this session as it stands: a private
+    /// chat's (52d), ever, a new chat's while it has no turn (M28), and one
+    /// deleted while it ran (55b), from then on.
+    [[nodiscard]] bool unwritten() const noexcept;
 };
 
 /// What currently exists, so a resume can flag what does not.
@@ -251,12 +280,44 @@ struct LoadedSession {
 /// that reopens with a note.
 [[nodiscard]] LoadedSession deserialize(std::string_view text, const KnownDependencies& known);
 
-/// Writes `session` atomically. Called after every completed turn.
-void save(const Session& session);
+/// What `save` did (55b).
+enum class Saved : std::uint8_t {
+    /// The file holds the session.
+    Written,
+    /// Nothing written: `unwritten()` -- a private chat, a new one with no
+    /// turn yet, or one deleted while it ran.
+    Unwritten,
+    /// Nothing written, now or later: the file this session had was found
+    /// gone -- deleted outside it -- and the session is marked `deleted`.
+    Deleted,
+};
+
+/// Writes `session` atomically. Called after every completed turn. An
+/// `unwritten()` one writes nothing: a private chat (52d), and a new chat with
+/// no turn yet (M28).
+///
+/// **One session store, edited from outside too** (55b): `chats title` and
+/// `chats delete` may act on a chat while a session runs it. So once this
+/// process has read or written the chat's file, `save` reads it again first:
+/// a name it no longer holds as this process left it was changed outside,
+/// and is taken into `session` -- an outside rename wins -- and a file gone
+/// was deleted outside, so nothing is written, `session.deleted` is set, and
+/// the chat stays deleted. Otherwise the session is written whole, its own
+/// rename included.
+Saved save(Session& session);
+
+/// The conversation's turn count (55b): the count the session keeps, or the
+/// answered turns its history holds when that is more -- a file older than
+/// the count, or a served client's several exchanges sent at once. The one
+/// count: `chats show` numbers by it, a loaded session carries it, and a
+/// resumed one's `next_turn` follows it.
+[[nodiscard]] int counted_turns(const Session& session);
 
 /// Loads by chat id or by custom name.
 /// Throws std::runtime_error only when the session cannot be found or read at
-/// all -- every recoverable problem is a warning.
+/// all -- every recoverable problem is a warning. The session's `turns` is
+/// `counted_turns`, and its `filed_name` the file's name, so a later `save`
+/// keeps an outside edit (55b).
 [[nodiscard]] LoadedSession load(const std::string& name, const KnownDependencies& known);
 
 /// What renaming a backend did to the saved chats (46a).
@@ -288,6 +349,78 @@ struct SessionSweep {
 /// the knowledge clerk, above all: `User: ...` and `Assistant: ...` turns
 /// separated by blank lines, system messages, tool results and empty turns
 /// left out. Only the participants' words are the participants' words.
+/// Rendered from the same grouping `saved_turns` reads (M27).
 [[nodiscard]] std::string transcript_text(const std::vector<harness::ChatMessage>& messages);
+
+/// How a compaction's summary message opens: `agentloop::compact_history`
+/// writes it, and a read of a saved history knows a compaction by it (M27)
+/// -- one declaration for both, so the two cannot drift.
+inline constexpr std::string_view kCompactionPreamble =
+    "The following is a summary of the conversation so far. Earlier messages have been "
+    "compacted to preserve context window space. Use this summary as the authoritative "
+    "record of what has been discussed:\n\n";
+
+/// A tool call's arguments as one line: compact JSON (the text as written
+/// when it is not JSON, its line breaks made spaces), clipped on a character
+/// boundary. What a saved turn lists a call by, and what a stubbed tool
+/// result repeats of the call it answers.
+[[nodiscard]] std::string tool_call_summary(const harness::ToolCall& call);
+
+/// A tool the model called in a saved turn (M27): its name, its arguments in
+/// one line, and how much its result held -- never the result itself.
+struct SavedTool {
+    std::string name{};
+    std::string summary{};
+    /// The result's size in bytes; unset when the history keeps no result for
+    /// the call.
+    std::optional<std::size_t> result_bytes{};
+};
+
+/// Something attached, named -- never its bytes (M27).
+struct SavedAttachment {
+    /// As the user named it (`report.pdf`, `src`, `docs/*.md`); for media a
+    /// message carries itself, its media type (`image/png`) or its URL.
+    std::string name{};
+    std::size_t files = 0;
+    /// Its size in bytes; unset where the history does not say (an image
+    /// named by URL).
+    std::optional<std::uint64_t> bytes{};
+};
+
+/// One entry of a saved conversation (M27): a turn -- a user message and
+/// everything after it up to the next -- or a compaction, where it happened,
+/// with what the history kept after it up to the next user message.
+struct SavedTurn {
+    /// The conversation's turn count once the entry ended: the count a
+    /// resumed session numbers on from (`next_turn` is the last entry's plus
+    /// one), so an answered turn carries the number a machine session gave
+    /// it. A turn left unanswered and a compaction add nothing: each carries
+    /// the count before it.
+    std::int64_t turn = 0;
+    /// The user's words, trimmed; empty for a compaction.
+    std::string user{};
+    /// What rode the user's message: the media it carries itself, then what
+    /// the chat attached on it, in the order attached.
+    std::vector<SavedAttachment> attachments{};
+    /// The model's words, a part per message in order -- what it said before
+    /// a tool call too -- trimmed, empty ones left out.
+    std::vector<std::string> answer{};
+    /// The tools it called, in order.
+    std::vector<SavedTool> tools{};
+    /// Whether the history holds the model's answer: false for a turn
+    /// cancelled at a terminal or failed, and for a compaction that kept no
+    /// answer.
+    bool answered = false;
+    /// The summary, without its preamble, when the entry is a compaction.
+    std::optional<std::string> compacted{};
+};
+
+/// `session`'s conversation as entries, in order (M27): what `chats show`
+/// prints. Its system prompt is a setting, not a turn, and is left out; the
+/// history holds no thinking and no injected context to leave out.
+[[nodiscard]] std::vector<SavedTurn> saved_turns(const Session& session);
+
+/// Every attachment `session` holds, named, in the order attached (M27).
+[[nodiscard]] std::vector<SavedAttachment> saved_attachments(const Session& session);
 
 }  // namespace apogee::logger

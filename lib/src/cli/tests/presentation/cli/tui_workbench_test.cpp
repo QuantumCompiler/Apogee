@@ -14,6 +14,7 @@
 #include "cli/models.h"
 #include "logger/session.h"
 #include "support/cli_home.h"
+#include "support/mlx_model.h"
 #include "tui/list_view.h"
 #include "tui/pump.h"
 #include "tui/shell.h"
@@ -246,6 +247,32 @@ TEST_CASE("a stale row is refused as the command refuses it, and nothing is writ
     CHECK(slurp(home.config_path()) == after_cli);
 }
 
+TEST_CASE("make default refuses an entry of a kind the chat role cannot use, writing nothing",
+          "[cli][tui][workbench][kind]") {
+    // M33: the view's d runs `config set-default`'s own core, so the role
+    // gate that knows the role refuses here as there -- an entry over an
+    // embedding set is no chat backend.
+    const apogee::testing::CliHome home{kConfig};
+    const fs::path embedding = home.models() / "org--emb" / "mlx" / "aaaaaaaaaaaa";
+    apogee::testing::write_mlx_model(embedding, {.kind = "embedding"});
+    std::ofstream{home.config_path(), std::ios::binary | std::ios::trunc}
+        << "backends:\n  local:\n    type: mock\n    model: mock-1\n  Emb-4bit:\n    type: mlx\n"
+           "    model_path: "
+        << embedding.string() << "\nmodels:\n  default: local\n";
+    const std::string before = slurp(home.config_path());
+    std::string refused;
+    CHECK(home.run({"config", "set-default", "Emb-4bit"}, &refused) == 1);
+    CHECK(has(refused, "cannot take a role: " + embedding.string() + " is kind embedding"));
+    CHECK(slurp(home.config_path()) == before);
+
+    Bench bench{home, apogee::commands::config_view_options};
+    bench.select("Emb-4bit");
+    bench.press(Key::character("d"));
+    CHECK(has(bench.frame(), "not done"));
+    CHECK_FALSE(has(bench.frame(), "models.default = Emb-4bit"));
+    CHECK(slurp(home.config_path()) == before);
+}
+
 TEST_CASE("make default on a suite leaves the file config set-default-suite leaves",
           "[cli][tui][workbench]") {
     const apogee::testing::CliHome twin{kConfig};
@@ -280,8 +307,8 @@ TEST_CASE(
                                                      },
                                                  .use_suite = {},
                                                  .show_session = [&shown]() { ++shown; }};
-    Bench bench{home, [&hooks](const apogee::commands::RootContext& /*context*/) {
-                    return apogee::commands::chats_view_options(hooks);
+    Bench bench{home, [&hooks](const apogee::commands::RootContext& context) {
+                    return apogee::commands::chats_view_options(context, hooks);
                 }};
     std::string out;
     std::string err;
@@ -309,6 +336,35 @@ TEST_CASE(
     CHECK(fs::exists(apogee::logger::session_path("20261009-100000-aaaa")));
     // `chats delete` refuses what the view refused: the chat is gone.
     CHECK(home.run({"chats", "delete", "20261009-090000-bbbb"}, &out) != 0);
+}
+
+TEST_CASE("the chats view compacts a chat as chats compact does, confirmed first",
+          "[cli][tui][workbench][doors]") {
+    // 52d's parity row: the view's `c` runs the verb's own core once the
+    // question is answered, as `chats compact` runs it once asked.
+    const apogee::testing::CliHome home{kConfig};
+    apogee::logger::Session session;
+    session.chat_id = "20261009-110000-cccc";
+    session.title = "long one";
+    session.backend = "local";
+    session.turns = 2;
+    session.messages = {apogee::harness::ChatMessage::user("one"),
+                        apogee::harness::ChatMessage::assistant("first"),
+                        apogee::harness::ChatMessage::user("two"),
+                        apogee::harness::ChatMessage::assistant("second")};
+    apogee::logger::save(session);
+    Bench bench{home, [](const apogee::commands::RootContext& context) {
+                    return apogee::commands::chats_view_options(context, {});
+                }};
+    bench.select("long one");
+    bench.press(Key::character("c"));
+    CHECK(has(bench.frame(), "Compact chat long one (20261009-110000-cccc)?"));
+    bench.press(Key::character("n"));
+    CHECK(apogee::logger::load("20261009-110000-cccc", {}).session.compactions == 0);
+    bench.press(Key::character("c"));
+    bench.press(Key::character("y"));
+    CHECK(has(bench.frame(), "compacted 20261009-110000-cccc"));
+    CHECK(apogee::logger::load("20261009-110000-cccc", {}).session.compactions == 1);
 }
 
 TEST_CASE("the suites view hands the session the suite chosen", "[cli][tui][workbench]") {

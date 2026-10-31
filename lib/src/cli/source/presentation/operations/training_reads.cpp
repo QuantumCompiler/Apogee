@@ -2,8 +2,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <filesystem>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "contracts/layout.h"
@@ -90,6 +93,103 @@ std::optional<nlohmann::json> training_versions_document(const std::string& back
         data.push_back(training::ledger_to_json(ledger));
     }
     return nlohmann::json{{"object", "list"}, {"data", std::move(data)}};
+}
+
+nlohmann::json training_runs_document(std::string_view kind) {
+    // Both kinds, newest first by start time, each row tagged with its
+    // kind; the filter keeps one.
+    std::vector<std::pair<std::string, nlohmann::json>> rows;
+    const training::TrainingStore reads{harness::training_dir()};
+    if (kind != "pipeline") {
+        for (const training::RunSummary& run : reads.list_runs()) {
+            rows.emplace_back(run.started_at + "\n" + run.id, training::run_summary_json(run));
+        }
+    }
+    if (kind != "run") {
+        for (const training::PipelineSummary& pipeline : reads.list_pipelines()) {
+            rows.emplace_back(pipeline.started_at + "\n" + pipeline.id,
+                              training::pipeline_summary_json(pipeline));
+        }
+    }
+    std::stable_sort(rows.begin(), rows.end(),
+                     [](const auto& a, const auto& b) { return a.first > b.first; });
+    nlohmann::json data = nlohmann::json::array();
+    for (auto& [unused, row] : rows) {
+        data.push_back(std::move(row));
+    }
+    return nlohmann::json{{"object", "list"}, {"data", std::move(data)}};
+}
+
+std::optional<nlohmann::json> training_run_document(std::string_view id) {
+    const training::TrainingStore reads{harness::training_dir()};
+    if (const std::optional<training::RunManifest> manifest = reads.get_run(id);
+        manifest.has_value()) {
+        return nlohmann::json{{"kind", "run"}, {"run", training::manifest_to_json(*manifest)}};
+    }
+    return training_pipeline_document(id);
+}
+
+std::optional<nlohmann::json> training_pipeline_document(std::string_view id) {
+    const training::TrainingStore reads{harness::training_dir()};
+    const std::optional<training::PipelineRunManifest> pipeline = reads.get_pipeline(id);
+    if (!pipeline.has_value()) {
+        return std::nullopt;
+    }
+    return nlohmann::json{{"kind", "pipeline"},
+                          {"pipeline", training::pipeline_manifest_to_json(*pipeline)}};
+}
+
+nlohmann::json training_pipeline_spec_document(const harness::PipelineSpec& spec,
+                                               const std::filesystem::path& path) {
+    nlohmann::json stages = nlohmann::json::array();
+    nlohmann::json gate = nlohmann::json::array();
+    for (const harness::PipelineStageSpec& stage : spec.stages) {
+        gate.push_back(stage.eval_suite);
+        stages.push_back({{"name", stage.name},
+                          {"dataset", stage.dataset},
+                          {"eval_suite", stage.eval_suite},
+                          {"gate", gate},
+                          {"method", stage.method},
+                          {"iters", stage.iters},
+                          {"batch_size", stage.batch_size},
+                          {"num_layers", stage.num_layers},
+                          {"grad_checkpoint", stage.grad_checkpoint},
+                          {"mask_prompt", stage.mask_prompt},
+                          {"rehearsal_fraction", stage.rehearsal_fraction}});
+    }
+    return nlohmann::json{
+        {"object", "training.pipeline"},
+        {"name", spec.name},
+        {"path", path.empty() ? nlohmann::json(nullptr) : nlohmann::json(path.string())},
+        {"student", spec.student},
+        {"stages", std::move(stages)}};
+}
+
+nlohmann::json training_pipeline_specs_document(const harness::Config& config) {
+    nlohmann::json data = nlohmann::json::array();
+    for (const auto& [name, spec] : config.training.pipelines) {
+        // By the name a run's --pipeline takes: its entry's.
+        nlohmann::json row = training_pipeline_spec_document(spec);
+        row["name"] = name;
+        row.erase("object");
+        data.push_back(std::move(row));
+    }
+    return nlohmann::json{{"object", "list"}, {"data", std::move(data)}};
+}
+
+std::optional<nlohmann::json> training_cycle_document(std::string& error) {
+    error.clear();
+    const std::filesystem::path cycle_dir = harness::training_cycle_dir();
+    if (!training::history_exists(cycle_dir)) {
+        return std::nullopt;
+    }
+    const training::CycleHistory history = training::load_history(cycle_dir, {}, error);
+    if (!error.empty()) {
+        return std::nullopt;
+    }
+    nlohmann::json out = training::history_to_json(history);
+    out["active"] = training::cycle_lock_held(cycle_dir);
+    return out;
 }
 
 }  // namespace apogee::operations

@@ -2,12 +2,16 @@
 
 #include <CLI/CLI.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 
+#include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "cli/job_stream.h"
 
 /// The chain's orchestration (M3) as a table over stand-in stages: what runs,
 /// in what order, what is said when one fails, and that the failure goes on
@@ -82,6 +86,41 @@ TEST_CASE("a chain runs every stage in order, then says what is ready",
     CHECK(said.find("stopped at") == std::string::npos);
 }
 
+TEST_CASE("a note is said with one prefix, never two and never none", "[commands][models][chain]") {
+    // 55d: notes arrive worded as their standalone verb says them, prefix
+    // and all, and the summary once added its own -- `note: note:`.
+    std::ostringstream out;
+    const std::vector<ChainStage> stages{{"convert to F16", [](ChainLog& log) {
+                                              log.note("note: a base model");
+                                              log.note("warning: no projector");
+                                              log.note("an embedding model");
+                                          }}};
+    (void)run_chain(stages, start(), out);
+    const std::string said = out.str();
+    CHECK(said.find("\nnote: a base model\nwarning: no projector\nnote: an embedding model\n") !=
+          std::string::npos);
+    CHECK(said.find("note: note:") == std::string::npos);
+    CHECK(said.find("note: warning:") == std::string::npos);
+}
+
+TEST_CASE("a stage that finds nothing after it can run stops the chain with nothing to resume",
+          "[commands][models][chain]") {
+    // 55d: a pulled set no GGUF is made of -- a draft head -- stops at the
+    // pull; resuming the chain would only be refused again.
+    std::ostringstream out;
+    const std::vector<ChainStage> stages{{"pull org/head's full weights",
+                                          [](ChainLog& log) {
+                                              log.resume.clear();
+                                              throw CLI::RuntimeError(1);
+                                          }},
+                                         {"convert to F16", [](ChainLog&) {}}};
+    CHECK_THROWS_AS(run_chain(stages, start(), out), CLI::RuntimeError);
+    CHECK(
+        out.str().ends_with("\nstopped at [1/2] pull org/head's full weights -- what the stages "
+                            "before it made is kept.\n"));
+    CHECK(out.str().find("resume with") == std::string::npos);
+}
+
 TEST_CASE("once the pull is done the cheaper resume is said, before anything can stop",
           "[commands][models][chain]") {
     Table table;
@@ -144,4 +183,100 @@ TEST_CASE("any failure, not only a verb's, is said where it stopped and passed o
         {"convert to F16", [](ChainLog&) { throw std::runtime_error("disk full"); }}};
     CHECK_THROWS_AS(run_chain(stages, start(), out), std::runtime_error);
     CHECK(out.str().find("stopped at [1/1] convert to F16") != std::string::npos);
+}
+
+namespace {
+
+/// stdout captured for a test, restored after it.
+struct CapturedStdout {
+    std::ostringstream text;
+    std::streambuf* original = std::cout.rdbuf(text.rdbuf());
+
+    CapturedStdout() = default;
+    CapturedStdout(const CapturedStdout&) = delete;
+    CapturedStdout& operator=(const CapturedStdout&) = delete;
+    CapturedStdout(CapturedStdout&&) = delete;
+    CapturedStdout& operator=(CapturedStdout&&) = delete;
+
+    ~CapturedStdout() {
+        std::cout.rdbuf(original);
+    }
+
+    [[nodiscard]] std::vector<nlohmann::json> events() const {
+        std::vector<nlohmann::json> out;
+        std::istringstream in{text.str()};
+        for (std::string line; std::getline(in, line);) {
+            out.push_back(nlohmann::json::parse(line));
+        }
+        return out;
+    }
+};
+
+}  // namespace
+
+TEST_CASE("on a job's stream each stage is an event, and the rest of what it says a notice",
+          "[commands][models][chain][job]") {
+    // 52b: the chain's one narration, framed -- `[i/n]` becomes `stage`
+    // events, every other line it prints a `notice`, nothing else on stdout.
+    SECTION("every stage done") {
+        CapturedStdout stdout_;
+        {
+            apogee::commands::JobStream job{"models pull"};
+            Table table;
+            (void)run_chain(table.stages(-1), start(), std::cout);
+        }
+        const std::vector<nlohmann::json> events = stdout_.events();
+        std::vector<std::string> stages;
+        std::vector<std::string> notices;
+        for (const nlohmann::json& event : events) {
+            if (event.at("type") == "stage") {
+                stages.push_back(std::to_string(event.at("index").get<int>()) + "/" +
+                                 std::to_string(event.at("count").get<int>()) + " " +
+                                 event.at("label").get<std::string>() + " " +
+                                 event.at("state").get<std::string>());
+            } else if (event.at("type") == "notice") {
+                notices.push_back(event.at("text").get<std::string>());
+            } else {
+                CHECK(event.at("type") == "job");
+            }
+        }
+        CHECK(stages == std::vector<std::string>{
+                            "1/4 pull org/model's full weights started",
+                            "1/4 pull org/model's full weights done", "2/4 convert to F16 started",
+                            "2/4 convert to F16 done", "3/4 quantize to Q4_K_M started",
+                            "3/4 quantize to Q4_K_M done", "4/4 register 2 backends started",
+                            "4/4 register 2 backends done"});
+        CHECK(notices == std::vector<std::string>{
+                             "from here on, if this stops, resume with:",
+                             "  apogee models convert org--model/safetensors/a --register-with "
+                             "Q4_K_M",
+                             "ready:", "  model-F16", "  model-Q4_K_M", "note: a base model",
+                             "chat with one:  apogee chat -m model-Q4_K_M"});
+    }
+    SECTION("a stage that fails: failed, then where and how to resume") {
+        CapturedStdout stdout_;
+        int code = 0;
+        {
+            apogee::commands::JobStream job{"models pull"};
+            Table table;
+            try {
+                (void)run_chain(table.stages(1), start(), std::cout);
+            } catch (const CLI::RuntimeError& e) {
+                code = e.get_exit_code();
+            }
+        }
+        CHECK(code == 1);
+        const std::vector<nlohmann::json> events = stdout_.events();
+        REQUIRE(events.size() >= 4);
+        const auto at = [&](std::size_t from_end) { return events[events.size() - from_end]; };
+        CHECK(at(4).at("type") == "stage");
+        CHECK(at(4).at("state") == "failed");
+        CHECK(at(4).at("label") == "convert to F16");
+        CHECK(at(3).at("text") ==
+              "stopped at [2/4] convert to F16 -- what the stages before it "
+              "made is kept.");
+        CHECK(at(2).at("text") == "resume with:");
+        CHECK(at(1).at("text") ==
+              "  apogee models convert org--model/safetensors/a --register-with Q4_K_M");
+    }
 }

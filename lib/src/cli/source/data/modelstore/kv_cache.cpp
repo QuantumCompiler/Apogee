@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <optional>
 #include <vector>
 
 namespace apogee::models {
@@ -234,6 +235,35 @@ std::int64_t cache_bytes(std::int64_t values, harness::KvCacheType type) noexcep
             return values * 18 / 32;
     }
     return values * 2;
+}
+
+std::optional<std::int64_t> header_window_fit(const CacheShape& shape, std::int64_t trained,
+                                              harness::KvCacheType type, const WindowRoom& room,
+                                              std::int64_t minimum) {
+    // Resident weights are already missing from what is free: counting them
+    // here as well would price a shared base twice (55e).
+    const std::int64_t loading = room.resident ? 0 : room.weights;
+    const auto fits = [&](std::int64_t window) {
+        return loading + cache_bytes(cache_values(shape, window), type) + room.margin <= room.free;
+    };
+    const std::int64_t window = default_local_window(trained, 0);
+    if (fits(window)) {
+        return 0;
+    }
+    if (!room.resident) {
+        return std::nullopt;
+    }
+    // The same arithmetic solved for the window: the cache grows with it, so
+    // the first multiple of the padding that fits, walking down, is the most.
+    for (std::int64_t positions = window / kPositionPadding * kPositionPadding; positions > minimum;
+         positions -= kPositionPadding) {
+        if (fits(positions)) {
+            return positions;
+        }
+    }
+    // Nothing above the floor fits: the floor is still the least to ask for,
+    // as llama.cpp's fitter answers when even its smallest window does not.
+    return minimum;
 }
 
 LocalWindow local_window(const GgufInfo& info, const harness::BackendConfig& backend) {

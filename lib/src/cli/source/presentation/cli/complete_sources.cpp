@@ -11,9 +11,13 @@
 #include <utility>
 #include <vector>
 
+#include "backends/mlx_local.h"
 #include "cli/config_cmd.h"
 #include "cli/embed.h"
 #include "cli/graph.h"
+#include "cli/models_pull.h"
+#include "cli/provider_offer.h"
+#include "cli/providers_cmd.h"
 #include "cli/task_cmd.h"
 #include "contracts/assets.h"
 #include "contracts/cancellation.h"
@@ -25,6 +29,8 @@
 #include "models/quantize.h"
 #include "models/source_ollama.h"
 #include "modelstore/kv_cache.h"
+#include "modelstore/mlx_info.h"
+#include "modelstore/snapshot.h"
 #include "modelstore/store.h"
 #include "modelstore/voice_info.h"
 #include "operations/knowledge_core.h"
@@ -280,6 +286,59 @@ void note_store(const models::StoreRoots& roots, NameList& list) {
     return out;
 }
 
+/// Whether the set the command's first positional names is a draft head
+/// (53i): what `models convert` takes to MLX alone, as a drafter.
+[[nodiscard]] bool draft_head_on_line(const CompletionContext& context) {
+    if (context.positionals.empty() || context.config == nullptr) {
+        return false;
+    }
+    const SnapshotChoice set =
+        choose_snapshot(store_roots(*context.config), context.positionals.front(), {}, true);
+    return !set.path.empty() && models::snapshot_draft_head(set.path).has_value();
+}
+
+/// Whether the set the command's first positional names is Wan's original
+/// layout that `models convert --mlx` takes (53k): whole, with mlx-video
+/// installed -- the door's own choice, so what completes is what it accepts.
+[[nodiscard]] bool video_set_on_line(const CompletionContext& context) {
+    if (context.positionals.empty() || context.config == nullptr) {
+        return false;
+    }
+    const SnapshotChoice set =
+        choose_snapshot(store_roots(*context.config), context.positionals.front(), {}, true, true);
+    return !set.path.empty() && models::snapshot_wan_layout(set.path).has_value();
+}
+
+/// The stored voice model the command's first positional names for an MLX
+/// conversion (53m): what `models convert --mlx` takes through mlx-audio --
+/// the door's own choice, so what completes is what it accepts.
+[[nodiscard]] bool voice_set_on_line(const CompletionContext& context) {
+    if (context.positionals.empty() || context.config == nullptr) {
+        return false;
+    }
+    const std::optional<VoiceSetChoice> set =
+        locate_voice_set(store_roots(*context.config), context.positionals.front());
+    return set.has_value() && !set->path.empty();
+}
+
+/// The store's voice models by model then handle, with their notes: each as
+/// Kokoro publishes it (50a) and, since 53m, each MLX build of one -- by its
+/// record's kind -- which is what `voice say` resolves.
+void voice_models(const models::StoreRoots& roots, NameList& list) {
+    std::vector<std::pair<std::string, std::string>> found;
+    for (const models::StoredVoice& stored : models::list_store_voices(roots)) {
+        found.emplace_back(stored.model,
+                           models::weights_handle(stored.model, models::kVoiceFormat, stored.id));
+    }
+    for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
+        if (models::read_mlx_kind(stored.dir).word == models::kMlxVoice) {
+            found.emplace_back(stored.model,
+                               models::weights_handle(stored.model, models::kMlxFormat, stored.id));
+        }
+    }
+    push_format(list.names, std::move(found));
+}
+
 [[nodiscard]] std::vector<std::string> kit_names() {
     std::vector<std::string> out;
     for (const harness::BundledKit& kit : harness::bundled_kits()) {
@@ -465,6 +524,16 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         list.none = "no models -- 'apogee models pull' stores one";
     } else if (kind == kSnapshotValue) {
         list.names = stored_models(store_roots(config), false, true);
+        // And with --mlx, the voice models mlx-audio converts where it is
+        // installed (53m) -- what `models convert --mlx` takes.
+        if (context.flags.contains("--mlx") && installed_mlx_audio()) {
+            for (std::string& name :
+                 stored_models(store_roots(config), false, false, false, false, true)) {
+                if (std::ranges::find(list.names, name) == list.names.end()) {
+                    list.names.push_back(std::move(name));
+                }
+            }
+        }
         list.paths = true;
         list.as_listed = true;
         note_store(store_roots(config), list);
@@ -508,34 +577,146 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         list.none = "the model store is empty -- 'apogee models pull'";
         list.as_listed = true;
     } else if (kind == kVideoPipelineValue) {
-        // The store's pipelines, by model then handle (49c).
-        list.names = stored_models(store_roots(config), false, false, false, true);
-        list.none = "no pipeline in the store -- 'apogee models pull <owner>/<repo>' stores one";
+        // The store's video models, by model then handle: its pipelines
+        // (49c) and, since 53l, its MLX video models -- by their records'
+        // kind -- which is what the resolver takes.
+        const models::StoreRoots roots = store_roots(config);
+        std::vector<std::pair<std::string, std::string>> found;
+        for (const models::StoredPipeline& stored : models::list_store_pipelines(roots)) {
+            found.emplace_back(stored.model, models::weights_handle(
+                                                 stored.model, models::kPipelineFormat, stored.id));
+        }
+        for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
+            if (models::read_mlx_kind(stored.dir).word == models::kMlxVideo) {
+                found.emplace_back(stored.model, models::weights_handle(
+                                                     stored.model, models::kMlxFormat, stored.id));
+            }
+        }
+        push_format(list.names, std::move(found));
+        list.none =
+            "no pipeline or MLX video model in the store -- 'apogee models pull <owner>/<repo>' "
+            "stores a pipeline";
         list.as_listed = true;
-        note_store(store_roots(config), list);
+        note_store(roots, list);
     } else if (kind == kVoiceModelValue) {
-        // The store's voice models, by model then handle (50a).
-        list.names = stored_models(store_roots(config), false, false, false, false, true);
+        // The store's voice models, by model then handle (50a) -- and their
+        // MLX builds (53m).
+        voice_models(store_roots(config), list);
         list.none = "no voice model in the store -- 'apogee models pull hexgrad/Kokoro-82M'";
         list.as_listed = true;
         note_store(store_roots(config), list);
     } else if (kind == kRegisterLevelValue) {
-        // Each engine's own (M16): what `--mlx`, earlier on the line, chose.
+        // Each engine's own (M16): what `--mlx`, earlier on the line, chose --
+        // and none for a draft head, which registers as nothing (53i).
+        if (draft_head_on_line(context)) {
+            list.none = "a draft head's MLX build is a drafter, which no backend runs";
+            return list;
+        }
+        // Nor Wan's original layout, whose MLX build is a video model (53k).
+        if (context.flags.contains("--mlx") && video_set_on_line(context)) {
+            list.none = "Wan's original layout's MLX build is a video model, which no backend runs";
+            return list;
+        }
+        // Nor a voice model, whose MLX build is a voice model (53m).
+        if (context.flags.contains("--mlx") && voice_set_on_line(context)) {
+            list.none = "a voice model's MLX build is a voice model, which no backend runs";
+            return list;
+        }
         list.names = context.flags.contains("--mlx") ? training::mlx_precision_names()
                                                      : models::quant_type_names();
     } else if (kind == kMlxModelTypeValue) {
-        // M15: the types the installed mlx-lm converts, read from its files.
-        list.names = training::mlx_model_types(
-            training::find_site_package(harness::training_venv_dir(), "mlx_lm"));
-        list.none = "no mlx-lm in Apogee's Python environment -- 'apogee train setup --with mlx'";
+        // M15: the types the converter the line's set routes to builds, read
+        // from its files -- mlx-vlm's for a set with towers, unless
+        // --text-only came earlier on the line (53f); mlx-lm's otherwise.
+        training::MlxConverterKind converter = training::MlxConverterKind::MlxLm;
+        if (!context.positionals.empty() && context.config != nullptr) {
+            if (draft_head_on_line(context)) {
+                // A draft head converts as the drafter its config names (53i):
+                // the flag is refused on one, so nothing is offered.
+                list.none =
+                    "a draft head converts as the drafter its config.json names -- "
+                    "--model-type does not apply";
+                return list;
+            }
+            if (video_set_on_line(context)) {
+                // mlx-video converts Wan's original layout by its own config
+                // (53k): the flag is refused on one.
+                list.none =
+                    "mlx-video converts Wan's original layout by its own config.json -- "
+                    "--model-type does not apply";
+                return list;
+            }
+            if (voice_set_on_line(context)) {
+                // mlx-audio converts a voice model as Kokoro (53m): the flag
+                // is refused on one.
+                list.none =
+                    "mlx-audio converts a voice model as Kokoro -- --model-type does not "
+                    "apply";
+                return list;
+            }
+            const SnapshotChoice set =
+                choose_snapshot(store_roots(*context.config), context.positionals.front());
+            if (!set.path.empty()) {
+                converter = mlx_route(set.path, context.flags.contains("--text-only")).converter;
+            }
+        }
+        list.names = training::mlx_model_types(training::find_site_package(
+            harness::training_venv_dir(), training::mlx_converter_package(converter)));
+        list.none = "no " + std::string{training::to_string(converter)} +
+                    " in Apogee's Python environment -- 'apogee train setup --with " +
+                    std::string{training::to_string(training::mlx_converter_set(converter))} + "'";
+    } else if (kind == kDrafterValue) {
+        // 53i: the store's drafters the entry on the line pairs with -- its
+        // model, or the one `--model-path` gives it on the same line -- asked
+        // as the editor asks (`probe_mlx_draft`), so none offered is refused.
+        list.paths = true;
+        list.as_listed = true;
+        const harness::BackendConfig* entry =
+            context.positionals.empty() ? nullptr
+                                        : config.find_backend(context.positionals.front());
+        const auto moved = context.flags.find("--model-path");
+        const std::string base = moved != context.flags.end() ? moved->second
+                                 : entry != nullptr           ? entry->model_path
+                                                              : std::string{};
+        if (base.empty()) {
+            list.none = "name an mlx backend over a model first -- its drafter runs beside it";
+            return list;
+        }
+        const std::filesystem::path base_dir{harness::expand_env_and_home(base)};
+        const backends::MlxHost host = backends::MlxHost::current();
+        const models::StoreRoots roots = store_roots(config);
+        for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
+            if (models::read_mlx_drafter(stored.dir).has_value() &&
+                backends::probe_mlx_draft(base_dir, stored.dir.string(), host).pairs()) {
+                const std::string handle =
+                    models::weights_handle(stored.model, models::kMlxFormat, stored.id);
+                list.names.push_back(handle);
+                list.notes[handle] = {.group = "MLX", .description = "a drafter"};
+            }
+        }
+        list.none = "no stored drafter pairs with " + base_dir.filename().string() +
+                    " -- 'apogee models convert <its draft head> --mlx' makes one";
     } else if (kind == kVoiceValue) {
-        // Every voice the store's voice models carry, each with its language.
-        for (const models::StoredVoice& stored : models::list_store_voices(store_roots(config))) {
-            for (const models::VoicePack& voice : models::read_voice_info(stored.dir).voices) {
-                if (std::ranges::find(list.names, voice.name) == list.names.end()) {
-                    list.names.push_back(voice.name);
-                    list.notes[voice.name] = {.group = voice.language, .description = {}};
+        // Every voice the store's voice models carry, each with its language
+        // -- and since 53m every voice their MLX builds carry.
+        const models::StoreRoots roots = store_roots(config);
+        std::vector<models::VoicePack> voices;
+        for (const models::StoredVoice& stored : models::list_store_voices(roots)) {
+            for (models::VoicePack& voice : models::read_voice_info(stored.dir).voices) {
+                voices.push_back(std::move(voice));
+            }
+        }
+        for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
+            if (models::read_mlx_kind(stored.dir).word == models::kMlxVoice) {
+                for (models::VoicePack& voice : models::read_mlx_voice_info(stored.dir).voices) {
+                    voices.push_back(std::move(voice));
                 }
+            }
+        }
+        for (const models::VoicePack& voice : voices) {
+            if (std::ranges::find(list.names, voice.name) == list.names.end()) {
+                list.names.push_back(voice.name);
+                list.notes[voice.name] = {.group = voice.language, .description = {}};
             }
         }
         std::ranges::sort(list.names);
@@ -549,7 +730,12 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
     } else if (kind == kConvertPrecisionValue) {
         // `--mlx` after `--type` cannot be seen: the line is read up to the
         // cursor.
-        if (context.flags.contains("--mlx")) {
+        // A draft head converts with --mlx alone (53i): its precisions only.
+        // Wan's original layout, whole with mlx-video installed, takes the
+        // precisions mlx-video's converter writes (53k).
+        if (context.flags.contains("--mlx") && video_set_on_line(context)) {
+            list.names = training::mlx_precision_names(training::MlxConverterKind::MlxVideo);
+        } else if (context.flags.contains("--mlx") || draft_head_on_line(context)) {
             list.names = training::mlx_precision_names();
         } else {
             list.names = training::converter_out_types();
@@ -586,6 +772,19 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
     } else if (kind == kAllowedHostValue) {
         list.names = config.tools.allowed_hosts;
         list.none = "no allowed hosts yet -- 'apogee config add-allowed-host'";
+    } else if (kind == kProviderValue) {
+        // What the last scan found to register (M33), read from the provider
+        // cache -- never a scan -- each with what the scan's row says of it.
+        const std::vector<backends::ProviderStatus> statuses = last_provider_scan();
+        const std::vector<ProviderRow> rows = provider_rows(statuses, &config);
+        for (std::size_t i = 0; i < statuses.size() && i < rows.size(); ++i) {
+            if (offerable(statuses[i])) {
+                list.names.push_back(rows[i].provider);
+                list.notes[rows[i].provider] = {.group = {}, .description = rows[i].backend};
+            }
+        }
+        list.as_listed = true;  // the knowledge table's order, as the scan lists them
+        list.none = "no provider the last scan found to register -- 'apogee providers scan' looks";
     } else {
         // A kind declared in `kNameValues` with no branch here: a test calls
         // every kind, so this is a failure there, never a silent nothing.

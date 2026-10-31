@@ -5,6 +5,7 @@
 
 #include "agentloop/budget.h"
 #include "contracts/errors.h"
+#include "logger/session.h"
 
 namespace apogee::agentloop {
 namespace {
@@ -15,11 +16,6 @@ constexpr std::string_view kSummaryPrompt =
     "Please provide a concise but complete summary of our conversation so far. Capture all "
     "key facts, decisions, and context that would be needed to continue this conversation "
     "meaningfully. Be thorough but succinct.";
-
-constexpr std::string_view kSummaryPreamble =
-    "The following is a summary of the conversation so far. Earlier messages have been "
-    "compacted to preserve context window space. Use this summary as the authoritative "
-    "record of what has been discussed:\n\n";
 
 }  // namespace
 
@@ -101,10 +97,10 @@ std::vector<harness::ChatMessage> splice_transient(
     return out;
 }
 
-std::vector<harness::ChatMessage> compact_history(const harness::Harness& harness,
-                                                  const std::vector<harness::ChatMessage>& history,
-                                                  const std::string& model,
-                                                  const harness::CancellationToken& cancellation) {
+Compaction compact_history(const harness::Harness& harness,
+                           const std::vector<harness::ChatMessage>& history,
+                           const std::string& model,
+                           const harness::CancellationToken& cancellation) {
     std::vector<harness::ChatMessage> system_messages;
     std::vector<harness::ChatMessage> conversation;
     for (const harness::ChatMessage& message : history) {
@@ -115,9 +111,19 @@ std::vector<harness::ChatMessage> compact_history(const harness::Harness& harnes
         }
     }
 
-    if (conversation.empty()) {
-        return history;
+    // Nothing to fold without an exchange (55b): an empty conversation, or
+    // only the answer the last compaction kept -- summarising that again would
+    // stack a second summary and fold nothing.
+    if (std::ranges::none_of(conversation, [](const harness::ChatMessage& message) {
+            return message.role == harness::Role::User;
+        })) {
+        return Compaction{
+            .outcome = Compaction::Outcome::Nothing, .history = history, .failure = {}};
     }
+    const auto failed = [&history](std::string why) {
+        return Compaction{
+            .outcome = Compaction::Outcome::Failed, .history = history, .failure = std::move(why)};
+    };
 
     harness::ChatRequest request;
     request.model = model;
@@ -135,17 +141,20 @@ std::vector<harness::ChatMessage> compact_history(const harness::Harness& harnes
     std::string summary;
     try {
         summary = harness.chat(request, cancellation).message.content.plain_text();
-    } catch (const harness::HarnessError&) {
+    } catch (const harness::HarnessError& e) {
         // A failed compaction degrades to a longer prompt, never to a lost
-        // conversation. The caller may be told, but the history is intact.
-        return history;
+        // conversation: the history is intact, and the caller says why.
+        return failed(e.what());
     }
-    if (summary.empty()) {
-        return history;
+    if (summary.find_first_not_of(" \t\r\n") == std::string::npos) {
+        return failed("the summary came back empty");
     }
 
+    // Opened by the preamble a read of the saved history knows a compaction
+    // by (M27): `chats show` puts the summary where it happened.
     std::vector<harness::ChatMessage> compacted = std::move(system_messages);
-    compacted.push_back(harness::ChatMessage::system(std::string{kSummaryPreamble} + summary));
+    compacted.push_back(
+        harness::ChatMessage::system(std::string{logger::kCompactionPreamble} + summary));
 
     // Keep the most recent assistant message so the model has at least one
     // prior turn to reference, rather than a confusing "no prior context".
@@ -155,7 +164,8 @@ std::vector<harness::ChatMessage> compact_history(const harness::Harness& harnes
             break;
         }
     }
-    return compacted;
+    return Compaction{
+        .outcome = Compaction::Outcome::Compacted, .history = std::move(compacted), .failure = {}};
 }
 
 }  // namespace apogee::agentloop

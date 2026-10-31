@@ -18,6 +18,10 @@
 namespace apogee::commands {
 namespace {
 
+/// Compose's flag for its narration's voice model: `--model` names its
+/// pipeline, so a refusal asking for a voice model names this one (M29).
+constexpr std::string_view kVoiceModelFlag = "--voice-model";
+
 /// `seconds` for a line: `3.4 s`.
 [[nodiscard]] std::string seconds_words(double seconds) {
     std::array<char, 32> buffer{};
@@ -67,31 +71,81 @@ namespace {
 }
 
 /// What a resumed project's flags would have changed, said: a project keeps
-/// its own settings.
-[[nodiscard]] std::vector<std::string> ignored_flags(const VideoComposeOptions& options) {
+/// its own settings. A flag naming what `kept` already has changes nothing
+/// and is not said (55c): `-m` naming the kept plan's own pipeline is
+/// applied, not ignored. `--planner` is the edit's own when `plans`.
+[[nodiscard]] std::vector<std::string> ignored_flags(const VideoComposeOptions& options,
+                                                     const harness::VideoProject& kept,
+                                                     const models::StoreRoots& roots, bool plans) {
     std::vector<std::string> out;
+    std::error_code code;
+    const auto same_path = [&code](const std::filesystem::path& given,
+                                   const std::filesystem::path& recorded) {
+        return !recorded.empty() && std::filesystem::absolute(given, code).lexically_normal() ==
+                                        recorded.lexically_normal();
+    };
     if (!options.model.empty()) {
-        out.emplace_back("--model");
+        ResolvedPipeline named;
+        if (!resolve_video_pipeline(roots, options.model, {}, named).empty() ||
+            named.handle != kept.pipeline) {
+            out.emplace_back("--model");
+        }
     }
     if (!options.voice_model.empty()) {
-        out.emplace_back("--voice-model");
+        ResolvedVoiceModel named;
+        if (!resolve_voice_model(roots, options.voice_model, named, kVoiceModelFlag).empty() ||
+            named.handle != kept.voice_model) {
+            out.emplace_back(kVoiceModelFlag);
+        }
     }
-    if (!options.voice.empty()) {
+    if (!options.voice.empty() && options.voice != kept.voice) {
         out.emplace_back("--voice");
     }
-    if (!options.planner.empty()) {
+    if (!options.planner.empty() && !plans && options.planner != kept.planner) {
         out.emplace_back("--planner");
     }
-    if (!options.music.empty()) {
+    if (!options.music.empty() && !same_path(options.music, kept.music)) {
         out.emplace_back("--music");
     }
-    if (!options.assets.empty()) {
+    if (!options.assets.empty() && !same_path(options.assets, kept.assets)) {
         out.emplace_back("--assets");
     }
-    if (!options.captions) {
+    if (!options.captions && kept.captions) {
         out.emplace_back("--no-captions");
     }
     return out;
+}
+
+/// Whether the flags ask for the edit `kept` holds last -- the same command
+/// run again, which resumes it rather than editing it again (55c).
+[[nodiscard]] bool asks_kept_edit(const harness::VideoProject& kept,
+                                  const VideoComposeOptions& options) {
+    return !kept.edits.empty() && kept.edits.back().instruction == options.edit &&
+           kept.edits.back().redo == options.redo;
+}
+
+/// Where an edit over a kept project carries its files first: beside its
+/// scenes, under a name nothing on disk holds yet.
+[[nodiscard]] std::filesystem::path carry_dir(const std::filesystem::path& scenes_dir) {
+    std::filesystem::path out = scenes_dir;
+    out += ".edit-" + models::random_weight_id();
+    return out;
+}
+
+/// Whether `dir` is `scenes_dir`, or a directory an edit over its project
+/// carried into.
+[[nodiscard]] bool scenes_or_carry(const std::filesystem::path& dir,
+                                   const std::filesystem::path& scenes_dir) {
+    return dir == scenes_dir ||
+           (dir.parent_path() == scenes_dir.parent_path() &&
+            dir.filename().string().starts_with(scenes_dir.filename().string() + ".edit-"));
+}
+
+/// `file` in `to` when it is in `from`, else as it is.
+[[nodiscard]] std::filesystem::path moved_to(const std::filesystem::path& file,
+                                             const std::filesystem::path& from,
+                                             const std::filesystem::path& to) {
+    return !file.empty() && file.parent_path() == from ? to / file.filename() : file;
 }
 
 /// `text` lowercased.
@@ -143,7 +197,7 @@ std::vector<std::string> plan_lines(const harness::VideoProject& project, bool c
             out.push_back("     shows: " + shortened(scene.visual, 120) +
                           (scene.asset.empty() ? std::string{} : " (from " + scene.asset + ")"));
         }
-        spoken += held(scene.voice) ? 0 : 1;
+        spoken += held(scene.voice) ? 0U : 1U;
         if (held(scene.clip)) {
             ++kept;
         } else if (asset_clip) {
@@ -240,12 +294,21 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
         }
     };
     const auto draw = [&seams] { return seams.random_seed ? seams.random_seed() : 0; };
+    const auto say_ignored = [&say](const std::vector<std::string>& ignored) {
+        if (ignored.empty()) {
+            return;
+        }
+        std::string named;
+        for (const std::string& flag : ignored) {
+            named += (named.empty() ? "" : ", ") + flag;
+        }
+        say("a resumed project keeps its own settings: " + named + " not applied");
+    };
     std::error_code code;
 
     const bool editing = !options.from.empty();
-    if (!editing && (!options.edit.empty() || !options.redo.empty() || options.dry_run)) {
-        return refuse(
-            "--edit, --redo-scene and --dry-run work on a project -- name it with --from");
+    if (!editing && (!options.edit.empty() || !options.redo.empty())) {
+        return refuse("--edit and --redo-scene work on a project -- name it with --from");
     }
     std::string brief = trimmed(options.brief);
     if (editing && !brief.empty()) {
@@ -318,6 +381,20 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
                           "away to start again");
         }
     }
+    // A kept edit given an edit it does not hold (55c): the user asked for a
+    // change, so the edit runs over the kept project -- its plan the parent
+    // of this one -- never dropped. The same command again resumes instead.
+    const bool edits_again = resumed.has_value() && editing &&
+                             (!options.edit.empty() || !options.redo.empty()) &&
+                             !asks_kept_edit(*resumed, options);
+    if (edits_again && std::ranges::any_of(resumed->scenes, [](const harness::ProjectScene& scene) {
+            return !scene.from.has_value();
+        })) {
+        return refuse(sidecar.string() +
+                      " was edited by a build that did not record where its scenes came from, "
+                      "so --edit and --redo-scene cannot run over it -- finish it with the "
+                      "command that made it, or name another -o");
+    }
 
     harness::VideoProject project;
     std::vector<std::string> asset_names;
@@ -351,9 +428,10 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
                               "webm)");
             }
         }
-        if (!project.assets.empty()) {
-            asset_names = video::list_assets(project.assets);
-        }
+    }
+    // The files an edit offers its plan: the project's own, kept or given.
+    if (!project.assets.empty()) {
+        asset_names = video::list_assets(project.assets);
     }
 
     // What runs it: a resumed project's own; an edit's parent's, unless a
@@ -380,7 +458,7 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
             chosen(options.voice_model, resumed.has_value() ? resumed->voice_model
                                         : editing           ? parent->voice_model
                                                             : std::string{}),
-            voice_model);
+            voice_model, kVoiceModelFlag);
         !why.empty()) {
         return refuse(why);
     }
@@ -396,7 +474,14 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
         return refuse(why);
     }
     const bool can_burn = project.captions && (!seams.can_burn || seams.can_burn());
-    if (project.captions && !can_burn && !resumed.has_value() && !options.dry_run &&
+    // Never write over (55c): on every path that renders -- a fresh run, a
+    // resumed one, the plan a dry run kept -- refused before anything runs,
+    // unless the file is the project's own, its record naming the captions
+    // it kept there. A dry run writes nothing beside the video but its plan,
+    // and like the runtimes' readiness the render checks this.
+    const bool own_captions = resumed.has_value() && resumed->captions_file.lexically_normal() ==
+                                                         captions_beside(output).lexically_normal();
+    if (project.captions && !can_burn && !options.dry_run && !own_captions &&
         std::filesystem::exists(captions_beside(output), code)) {
         return refuse(captions_beside(output).string() +
                       " exists -- this ffmpeg cannot burn the captions, so they would be kept "
@@ -415,28 +500,30 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
         harness::write_file_atomically(sidecar,
                                        harness::video_project_document(state).dump(2) + "\n");
     };
-    if (resumed.has_value()) {
+    if (resumed.has_value() && !edits_again) {
         std::size_t spoken = 0;
         std::size_t rendered = 0;
         for (const harness::ProjectScene& scene : project.scenes) {
-            spoken += std::filesystem::is_regular_file(scene.voice, code) ? 1 : 0;
-            rendered += std::filesystem::is_regular_file(scene.clip, code) ? 1 : 0;
+            spoken += std::filesystem::is_regular_file(scene.voice, code) ? 1U : 0U;
+            rendered += std::filesystem::is_regular_file(scene.clip, code) ? 1U : 0U;
         }
-        say("resuming " + sidecar.string() + ": " + std::to_string(spoken) + " of " +
-            std::to_string(project.scenes.size()) + " narrations and " + std::to_string(rendered) +
-            " clips already there");
-        if (const std::vector<std::string> ignored = ignored_flags(options); !ignored.empty()) {
-            std::string named;
-            for (const std::string& flag : ignored) {
-                named += (named.empty() ? "" : ", ") + flag;
-            }
-            say("a resumed project keeps its own settings: " + named + " not applied");
+        if (project.status == "planned") {
+            // A dry run's plan (52c): rendered as planned, never planned
+            // again -- or, on paper again, read and said (55c).
+            say((options.dry_run ? "reading" : "rendering") +
+                std::string{" the plan a dry run kept at "} + sidecar.string());
+        } else {
+            say("resuming " + sidecar.string() + ": " + std::to_string(spoken) + " of " +
+                std::to_string(project.scenes.size()) + " narrations and " +
+                std::to_string(rendered) + " clips already there");
         }
+        say_ignored(ignored_flags(options, *resumed, roots, /*plans=*/false));
     } else if (editing) {
         // One edit pass, or none; the re-rolls; the diff said before anything
-        // renders.
-        video::EditedScenes edited;
-        std::string backend = parent->planner;
+        // renders. Over the parent -- or, given a kept edit, over that (55c).
+        const harness::VideoProject& base = edits_again ? *resumed : *parent;
+        video::EditedScenes step;
+        std::string backend = base.planner;
         if (!options.edit.empty()) {
             backend = harness::resolve_chat_backend(config, options.planner);
             if (backend.empty()) {
@@ -444,63 +531,121 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
                     "no backend is configured to edit with -- add one with 'apogee config "
                     "add-backend', or name one with --planner");
             }
-            say("editing " + parent_document.string() + " with " + backend + ": \"" + options.edit +
-                "\"");
-            edited = video::edit_scenes(
-                *parent, options.edit, asset_names,
+            say("editing " +
+                (edits_again ? "the project kept at " + sidecar.string()
+                             : parent_document.string()) +
+                " with " + backend + ": \"" + options.edit + "\"");
+            step = video::edit_scenes(
+                base, options.edit, asset_names,
                 [&](const std::string& system, const std::string& user, const std::string& schema) {
                     return seams.plan(backend, system, user, schema);
                 },
                 draw);
-            if (!edited.error.empty()) {
-                return refuse(edited.error);
+            if (!step.error.empty()) {
+                return refuse(step.error);
             }
         } else {
-            edited = video::same_scenes(*parent);
+            if (edits_again) {
+                say("editing the project kept at " + sidecar.string());
+            }
+            step = video::same_scenes(base);
         }
         for (const std::size_t scene : options.redo) {
-            if (std::string why = video::redo_scene(edited, scene, draw()); !why.empty()) {
+            if (std::string why = video::redo_scene(step, scene, draw()); !why.empty()) {
                 return refuse(why);
             }
         }
+        // What the document records and the diff says: this project against
+        // its parent, an edit over a kept one followed through it.
+        const video::EditedScenes edited =
+            edits_again ? video::through_kept(*parent, *resumed, step) : step;
         for (const std::string& line : video::diff_lines(edited, parent->scenes.size())) {
             say(line);
         }
-        const bool same_voice = voice_model.handle == parent->voice_model && voice == parent->voice;
-        const bool same_pipeline = pipeline.handle == parent->pipeline;
-        if (!same_voice) {
-            say("the voice is not the project's: every narration is spoken again");
-        }
-        if (!same_pipeline) {
-            say("the pipeline is not the project's: every clip renders again, its seed held");
+        const bool same_voice = voice_model.handle == base.voice_model && voice == base.voice;
+        const bool same_pipeline = pipeline.handle == base.pipeline;
+        if (edits_again) {
+            say_ignored(ignored_flags(options, *resumed, roots, !options.edit.empty()));
+        } else {
+            if (!same_voice) {
+                say("the voice is not the project's: every narration is spoken again");
+            }
+            if (!same_pipeline) {
+                say("the pipeline is not the project's: every clip renders again, its seed held");
+            }
         }
         project.title = edited.title;
         project.pipeline = pipeline.handle;
         project.voice_model = voice_model.handle;
         project.voice = voice;
         project.planner = backend;
-        project.plan_attempts = options.edit.empty() ? parent->plan_attempts : edited.attempts;
+        project.plan_attempts = options.edit.empty() ? base.plan_attempts : step.attempts;
         project.parent = parent_document;
-        project.edits = parent->edits;
+        project.edits = base.edits;
         project.edits.push_back(harness::ProjectEdit{
             .instruction = options.edit, .redo = options.redo, .from = parent_document});
         project.created = models::now_rfc3339();
         project.platform = seams.platform;
         if (options.dry_run) {
             project.scenes = edited.scenes;
+            video::record_provenance(project, edited);
             project.status = "planned";
             result.document = harness::video_project_document(project);
             result.lines.emplace_back("a dry run: nothing was rendered or written");
             return result;
         }
-        if (std::string why =
-                video::carry_scenes(*parent, edited, project.scenes_dir, same_voice, same_pipeline);
-            !why.empty()) {
-            return refuse(why);
+        if (!edits_again) {
+            if (std::string why = video::carry_scenes(*parent, step, project.scenes_dir, same_voice,
+                                                      same_pipeline);
+                !why.empty()) {
+                return refuse(why);
+            }
+            project.scenes = step.scenes;
+            video::record_provenance(project, edited);
+            project.status = "rendering";
+            save(project);
+        } else {
+            // The kept files are renumbered in the very directory they are
+            // carried from, so they go through one of their own: carried
+            // there, the project saved over the copies before the kept files
+            // go, then the copies moved into place and the project saved
+            // again -- at every moment, each file a project on disk names is
+            // the file it means.
+            const std::filesystem::path carried = carry_dir(project.scenes_dir);
+            if (std::string why =
+                    video::carry_scenes(*resumed, step, carried, same_voice, same_pipeline);
+                !why.empty()) {
+                std::filesystem::remove_all(carried, code);
+                return refuse(why);
+            }
+            project.scenes = step.scenes;
+            video::record_provenance(project, edited);
+            project.status = "rendering";
+            save(project);
+            std::vector<std::filesystem::path> kept_dirs{project.scenes_dir};
+            for (const harness::ProjectScene& scene : resumed->scenes) {
+                for (const std::filesystem::path& file : {scene.voice, scene.clip}) {
+                    if (!file.empty() && scenes_or_carry(file.parent_path(), project.scenes_dir)) {
+                        kept_dirs.push_back(file.parent_path());
+                    }
+                }
+            }
+            for (const std::filesystem::path& dir : kept_dirs) {
+                std::filesystem::remove_all(dir, code);
+            }
+            std::filesystem::rename(carried, project.scenes_dir, code);
+            if (code) {
+                return refuse("could not move the carried scenes into " +
+                              project.scenes_dir.string() + ": " + code.message() +
+                              " -- they stay in " + carried.string() +
+                              ", and the same command resumes");
+            }
+            for (harness::ProjectScene& scene : project.scenes) {
+                scene.voice = moved_to(scene.voice, carried, project.scenes_dir);
+                scene.clip = moved_to(scene.clip, carried, project.scenes_dir);
+            }
+            save(project);
         }
-        project.scenes = edited.scenes;
-        project.status = "rendering";
-        save(project);
     } else {
         const std::string backend = harness::resolve_chat_backend(config, options.planner);
         if (backend.empty()) {
@@ -527,13 +672,28 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
         project.voice = voice;
         project.planner = backend;
         project.plan_attempts = planned.attempts;
-        project.status = "rendering";
+        project.status = options.dry_run ? "planned" : "rendering";
         project.created = models::now_rfc3339();
         project.platform = seams.platform;
         save(project);
     }
     for (const std::string& line : plan_lines(project, can_burn)) {
         say(line);
+    }
+    if (options.dry_run) {
+        // On paper (52c): the plan call alone -- or none, for a plan already
+        // kept -- the project written beside the video as `planned`, and
+        // nothing spoken or rendered. The same command without --dry-run
+        // renders this plan.
+        result.document = harness::video_project_document(project);
+        result.lines = {resumed.has_value()
+                            ? "a dry run: the plan kept at " + sidecar.string() +
+                                  " -- nothing was planned again, spoken or rendered"
+                            : "a dry run: one planning call to " + project.planner +
+                                  ", nothing spoken or rendered",
+                        "the plan, beside it: " + sidecar.string() +
+                            " -- the same command without --dry-run renders it"};
+        return result;
     }
 
     video::ComposeSeams compose = seams.assembly;
@@ -545,6 +705,7 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
     };
     compose.can_burn = can_burn;
     compose.say = seams.say;
+    compose.on_scene = seams.on_scene;
     compose.save = save;
     const video::ComposeOutcome outcome = video::render_project(project, compose, cancellation);
     result.document = harness::video_project_document(project);

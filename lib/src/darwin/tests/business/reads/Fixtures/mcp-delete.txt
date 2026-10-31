@@ -1,0 +1,1 @@
+removed MCP server 'notes' from /Users/someone/.apogee/config/config.json

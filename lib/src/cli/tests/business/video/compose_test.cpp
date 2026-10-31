@@ -791,3 +791,91 @@ TEST_CASE("an edit carries over byte for byte what it did not change, and render
         apogee::video::carry_scenes(parent.project, third, another.path(), true, false).empty());
     CHECK(std::ranges::all_of(third.scenes, [](const ProjectScene& s) { return s.clip.empty(); }));
 }
+
+namespace {
+
+/// The diff read back off a project document's fields (52c): each scene's
+/// `from`, `changes` and `moved`, and the parent's scenes `removed`, in the
+/// printed diff's own words -- so the two can be held equal line for line.
+[[nodiscard]] std::vector<std::string> diff_from_document(const nlohmann::json& document) {
+    const auto words = [](const std::string& record) -> std::string {
+        if (record == "duration") {
+            return "its length changed";
+        }
+        if (record == "seed") {
+            return "a new seed";
+        }
+        return "its " + record + " changed";
+    };
+    std::vector<std::string> out;
+    for (const nlohmann::json& scene : document.at("scenes")) {
+        std::string line = "  " + std::to_string(scene.at("index").get<int>()) + ". ";
+        if (scene.at("from") == "new") {
+            CHECK(scene.at("changes").empty());
+            out.push_back(line + "new");
+            continue;
+        }
+        const bool moved = scene.at("moved").get<bool>();
+        line += "scene " + std::to_string(scene.at("from").get<int>()) + (moved ? ", moved" : "");
+        const nlohmann::json& changes = scene.at("changes");
+        if (changes.empty()) {
+            line += moved ? "" : ", untouched";
+        } else {
+            line += "; ";
+            for (std::size_t at = 0; at < changes.size(); ++at) {
+                line += (at == 0 ? "" : ", ") + words(changes[at].get<std::string>());
+            }
+        }
+        out.push_back(line);
+    }
+    for (const nlohmann::json& removed : document.at("removed")) {
+        out.push_back("  scene " + std::to_string(removed.get<int>()) + " removed");
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("an edited project's document names each scene's source and changes, as the diff says",
+          "[video][compose][edit][provenance]") {
+    // 52c: one comparison, two faces -- the matrix of 50d's diff, each case
+    // read back off the document and held equal to the printed lines.
+    const Parent parent;
+    std::vector<apogee::video::EditedScenes> cases{
+        parent.edit(Parent::answer({{1, "Line 1.", "shot 1", 4},
+                                    {2, "Line 2.", "shot 2", 4},
+                                    {3, "Line 3.", "shot 3", 4}})),
+        parent.edit(Parent::answer({{1, "Line 1.", "shot 1", 4}, {3, "Line 3.", "shot 3", 4}})),
+        parent.edit(Parent::answer({{0, "Welcome.", "a title card", 3},
+                                    {1, "Line 1.", "shot 1", 4},
+                                    {2, "Line 2.", "shot 2", 4},
+                                    {3, "Line 3.", "shot 3", 4}})),
+        parent.edit(Parent::answer({{3, "Line 3.", "shot 3", 4},
+                                    {1, "Line 1.", "shot 1", 4},
+                                    {2, "Line 2.", "shot 2", 4}})),
+        parent.edit(Parent::answer({{1, "Line 1.", "shot 1", 4},
+                                    {2, "A new line.", "shot 2", 4},
+                                    {3, "Line 3.", "the moon", 6}})),
+        apogee::video::same_scenes(parent.project)};
+    REQUIRE(apogee::video::redo_scene(cases.back(), 2, 555).empty());
+    for (const apogee::video::EditedScenes& edited : cases) {
+        apogee::harness::VideoProject project = parent.project;
+        project.parent = "/videos/parent.mp4.json";
+        project.scenes = edited.scenes;
+        apogee::video::record_provenance(project, edited);
+        const nlohmann::json document = apogee::harness::video_project_document(project);
+        std::vector<std::string> said = apogee::video::diff_lines(edited, 3);
+        said.erase(said.begin());  // the header counts, which the document's lengths hold
+        INFO(document.dump(2));
+        CHECK(diff_from_document(document) == said);
+    }
+    // The fields themselves, for the case with the most in it.
+    apogee::harness::VideoProject project = parent.project;
+    project.parent = "/videos/parent.mp4.json";
+    project.scenes = cases[4].scenes;
+    apogee::video::record_provenance(project, cases[4]);
+    const nlohmann::json third = apogee::harness::video_project_document(project)["scenes"][2];
+    CHECK(third["from"] == 3);
+    CHECK(third["changes"] == nlohmann::json{"prompt", "duration"});
+    CHECK(third["moved"] == false);
+}
