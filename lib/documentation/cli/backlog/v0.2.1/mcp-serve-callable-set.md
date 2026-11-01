@@ -20,4 +20,4 @@
 - [ ] With nothing listed, `tools/list` is the read set; listing `complete` serves it against eligible backends only, bounded, the description honest.
 - [ ] A metered or unknown-cost backend cannot be listed (refused at the editor, naming the rule); `search_documents`' retriever story verified; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.1 (track 54); gated on [`mcp-serve-public.md`](mcp-serve-public.md) (54a). Out of scope: further callables (each a deliberate later listing), the forge tools, adapters arguments (the 53 follow-on, recorded).
+**Scope note.** Earmarked for v0.2.1 (track 54); its gate, 54a, shipped 2026-11-01 ([Milestone W](../../assistant/MILESTONES.md#milestone-w--the-mcp-client): `apogee mcp serve` public, the status reads served through `mcp::with_reads`). Out of scope: further callables (each a deliberate later listing), the forge tools, adapters arguments (the 53 follow-on, recorded).

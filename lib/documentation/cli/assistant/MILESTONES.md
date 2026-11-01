@@ -5260,6 +5260,91 @@ Decisions taken while building, for veto:
 
 **Verified.** `lib/scripts/cicd.sh --test`: all 3350 tests pass, with the one test skipped where it always is. The build is warning-free and the format clean. On the real binary, `mcp presets` lists both, `mcp create code --from code-exec` connects the server's two tools, and `mcp test code run_python` answers.
 
+### 2026-11-01 — `mcp-serve-public` (backlog item 54a): the hidden server made a mode
+
+**Why.** The mod spike (2026-10-21) found Apogee's MCP stdio server already answering: `apogee __mcp-tools`, as `apogee-tools`, with 17 read-only tools. But it was hidden plumbing, with no help, no completion and no documentation beyond the `self` preset's line. It also lacked the status reads another host's user wants: the models, training and check documents, each already a `--output-format json` read. The Apogee mod is the first consumer of this server (track 54's consumer, `lib/documentation/mod/`).
+
+- [x] **`apogee mcp serve`**, a public verb. It has help (its footer names the tools, the pipes-only promise and `apogee mcp presets` for the host entry), and it completes under `mcp`.
+  - **The alias.** The hidden `__mcp-tools` is kept indefinitely for hosts registered with it. Both spellings run one callback over one server (`cli/mcp_serve`'s `serve_mcp`). The alias stays out of `--help` and completion.
+- [x] **The status reads join the served set.** There are five, each read-only, listed after the native tools and in this order:
+  - `models_list`, taking `all`;
+  - `models_status`, taking `suite`;
+  - `train_status`;
+  - `train_versions`, taking `backend`;
+  - `check`.
+
+  Each answers with the document `apogee <verb> --output-format json` prints, byte for byte, less the newline that ends the command's stdout (the 27l precedent). The handshake now lists 22 read-only tools.
+- [x] **No rendering of their own.** Each read composes the functions its command prints from:
+  - `read_model_rows` + `render_model_document`;
+  - `select_suite` + `role_status_document`;
+  - `operations::training_status_document`;
+  - `train_versions_document`;
+  - `read_check_report` + `render_report_document`.
+
+  Two seams were carved so both surfaces share them. `machine/json_reporter`'s `document_text` is the one encoder `write_document` now writes through. `cli/train`'s `train_versions_document` is the `train versions` JSON path, its two refusals included, which the command now calls.
+- [x] **`serve_stdio` grows** (`mcp::ServedRead`, `mcp::with_reads`). A read is served beside a registry's tools:
+  - listed after them and marked read-only;
+  - answered by its own function;
+  - its text mended to UTF-8 where it enters, and an exception said as an error result, so a failed read never ends the server.
+
+  A read that would shadow a tool, or another read, is refused when the set is built: tools are only added, never shadowed.
+- [x] **Reads run at their call.** Each read loads the config, the store and the ledgers when asked, as its command does at its run, so a host asking after a promotion sees it.
+  - A read that cannot answer returns `isError` with `Error: ` and the command's own reason: a config that will not load, no version history, an unknown suite.
+  - An argument of the wrong type is refused by name. A boolean sent as `"true"`, `"yes"` or `"1"` is read, as the graph tools read one.
+- [x] **`mcp presets`' `self`** now registers `["mcp", "serve"]`. Its description and `provides` name the status reads. The `--from self` refusal is unchanged.
+- [x] **The parity rows.**
+  - **The shell** ([ADR 0010](../adrs/the-shell-is-a-mode.md)): `mcp serve` is a verb of the MCP view's row, and the row's detail now says it is the stdio server another host spawns. `__mcp-tools` stays runner-covered, its detail naming it the alias.
+  - **HTTP**: `mcp serve` is a carve-out (the stdio mode: pipes, never a port), and the `__mcp-tools` row's reason names it the alias.
+- [x] **The reference.**
+  - tools.md gains *Apogee as an MCP server: `apogee mcp serve`*: the host entry, the two kinds of tool, the status reads' table, read-at-call, the error results, and additive growth (ADR 0006's law restated for the server's tools: added, never renamed or removed; the hidden spelling still answered).
+  - The `self` preset row and the graph chapter name `mcp serve`.
+  - machine-mode.md says which five reads are also MCP tools.
+- [x] **The tests.**
+  - `mcp/serve_stdio_test`: three `with_reads` cases.
+  - `cli/mcp_serve_test`, new, seven cases through the real command tree with stdin fed its own frames:
+    - the handshake, every tool read-only and no writer, the five reads last, and the alias serving the identical list;
+    - each read byte for byte against its command over a planted ledger and a consumed snapshot, so `all` is seen to change the document;
+    - a promotion seen by reads built before it landed;
+    - the refusals in the commands' own words, and a broken config;
+    - help and completion, with the alias in neither;
+    - the names in order.
+  - `mcp_presets_test` and `mcp_presets_cmd_test`: the `["mcp", "serve"]` entry.
+  - `tui_parity_test`: `mcp serve` unrefused on the exec line, and the alias's row.
+  - `parity_test`: the carve-out.
+  - On the real binary, `cli.mcp_lifecycle` gains three checks:
+    - an external raw JSON-RPC client (`tests/scripts/py/mcp_serve_client.py`) holds both spellings to one 22-tool list and each read to the CLI's own document;
+    - `mcp presets`' `self` names `mcp serve`;
+    - `mcp serve`, registered as a server, answers `models_status` through the production client.
+
+Decisions taken while building, for veto:
+- 2026-11-01 — **The default taken**: the reads are named in the server's style, the command's words joined (`models_list`, `models_status`, `train_status`, `train_versions`, `check`), and the alias is kept indefinitely.
+- 2026-11-01 — **Five reads, not four** *(flagged for veto)*. The document named the models, train-status, train-versions and check documents; the backlog index named `models list|status`. Both models reads are served.
+  - Each read takes its verb's read-only arguments: `all`, `suite` and `backend`.
+  - `check` takes neither `--fix` (it writes) nor `--refresh-providers` (it starts vendor CLIs), so nothing served writes or spawns a vendor.
+- 2026-11-01 — **"Byte for byte" means the command's stdout less its final newline** *(flagged for veto)*. This is the graph tools' precedent (`mcp_graph_client.py` strips it). One encoder sits behind both, so the rest cannot differ.
+- 2026-11-01 — **No exec-line refusal for `mcp serve`** *(flagged for veto)*. In the shell its stdin is closed, so it ends at once with nothing said, as a script's `apogee mcp serve </dev/null` does. That matches the parity floor and the alias's existing runner-covered row.
+  - A new refusal would also have opened a drift with the macOS app, whose console pins the CLI's refusal set word for word (`ParityTests.refusalSet`).
+  - The `mcp` row's detail says what `serve` is instead.
+- 2026-11-01 — **The reads load at their call; the native tools still load the config once at start**, as they did before. A status read is about now. A file tool's sandbox is fixed for the server's life, as before.
+- 2026-11-01 — **The server keeps its name, `apogee-tools`**, in `initialize`. A host keys nothing on it, and nothing gains by moving it.
+- 2026-11-01 — **The reads are listed after the native tools.** Existing tools keep their places, and later growth appends.
+- 2026-11-01 — **The SPEC is unchanged.** `mcp serve` is a capability's protocol face beside machine mode, not a new core surface. The ADRs are unchanged too: ADR 0006's law is restated in the reference, as the document asked.
+
+**Verified.**
+- **The full gate** (`lib/scripts/cicd.sh --app cli --test`, then `--app darwin --test`) passes:
+  - the CLI: 4071 of 4071 ctest cases, 4070 passed and the usual one skipped (no `pdftotext`), 10 of them new;
+  - the macOS app: 979 of 979 (the xcresult's `totalTestCount`), unchanged.
+- **Warnings and format.** Neither build raised a compiler warning. All 14 changed C++ files, the tests among them, compile clean under MinGW g++ 16 with CI's Windows flags. clang-format is clean on every touched file.
+- **Planted violations, both caught.**
+  - A `models_list` that ignored `all` failed the byte-for-byte and consumed-snapshot checks.
+  - A `with_reads` that skipped the UTF-8 mend failed the mend case.
+- **On the real binary** (`cli.mcp_lifecycle`, hermetic home, the macos-arm64 build): `mcp serve` and `__mcp-tools` each list the same 22 tools, the spike's 17 plus the five reads, all read-only. All six read calls (`models_list` twice, with and without `all`, then the other four) answer with the CLI's own documents, byte for byte, under both spellings. `mcp test public models_status` answers through the production client.
+
+**Not done.**
+- **A live pass in a real MCP host** (Claude Desktop, Claude Code, an editor) is yours: register `apogee-dev mcp serve` with the entry `apogee-dev mcp presets` prints, and ask it for `models_status` or `check`. This run had no host to drive, and the hermetic tests stand in: an external raw JSON-RPC client on the real binary, plus the production client.
+- **Windows**: `cli.mcp_lifecycle` is a POSIX shell check. The unit cases run on CI's Windows rows after your push; the changed sources compile clean under MinGW g++ here.
+- **The model-calling set** is 54b's, now unblocked.
+
 ## Milestone X — Agents as data
 
 **Goal.** A named workflow the user runs with `apogee analyze --agent <name>`: a persona from prompt files, an output schema the answer must satisfy, a tool policy that is the agent's permission model, executed by the same loop every other surface runs — so an agent behaves identically on every backend the loop drives — with structured output validated on every provider, an in-process renderer, deterministic branch review from flags, `apogee agents` and its admin twins over one scaffold core, and three review agents re-authored for the owned loop.

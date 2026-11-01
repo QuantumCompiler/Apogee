@@ -1,8 +1,15 @@
 #include "mcp/serve_stdio.h"
 
+#include <exception>
 #include <istream>
+#include <memory>
 #include <ostream>
+#include <set>
+#include <stdexcept>
 #include <string>
+#include <utility>
+
+#include "contracts/utf8.h"
 
 namespace apogee::mcp {
 namespace {
@@ -119,6 +126,49 @@ Dispatch dispatch_through(const agent::ToolRegistry& registry) {
         result.is_error = outcome.is_error;
         return result;
     };
+}
+
+ServedSet with_reads(std::vector<ServedTool> tools, Dispatch dispatch,
+                     std::vector<ServedRead> reads) {
+    std::set<std::string> names;
+    for (const ServedTool& tool : tools) {
+        names.insert(tool.name);
+    }
+    for (const ServedRead& read : reads) {
+        if (!names.insert(read.name).second) {
+            throw std::invalid_argument("the read '" + read.name +
+                                        "' would shadow a tool of the same name");
+        }
+        ServedTool served;
+        served.name = read.name;
+        served.description = read.description;
+        served.input_schema =
+            read.input_schema.is_object() ? read.input_schema : nlohmann::json{{"type", "object"}};
+        served.read_only = true;
+        tools.push_back(std::move(served));
+    }
+    auto shared = std::make_shared<const std::vector<ServedRead>>(std::move(reads));
+    Dispatch grown = [shared, fallback = std::move(dispatch)](std::string_view name,
+                                                              const nlohmann::json& args) {
+        for (const ServedRead& read : *shared) {
+            if (read.name != name) {
+                continue;
+            }
+            ToolCallResult result;
+            try {
+                result = read.answer(args);
+            } catch (const std::exception& e) {
+                result.text = std::string{"Error: "} + e.what();
+                result.is_error = true;
+            }
+            // Text enters the server here, so it is mended here: a frame
+            // that is not UTF-8 would end the server at the reply's dump.
+            result.text = harness::valid_utf8(result.text);
+            return result;
+        }
+        return fallback(name, args);
+    };
+    return ServedSet{std::move(tools), std::move(grown)};
 }
 
 }  // namespace apogee::mcp

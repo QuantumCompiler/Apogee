@@ -237,6 +237,8 @@ apogee_add_module(cli
     cli/serve_cmd.cpp
     cli/mcp_cmd.h
     cli/mcp_cmd.cpp
+    cli/mcp_serve.h
+    cli/mcp_serve.cpp
     cli/permissions.h
     cli/permissions.cpp
     cli/auth_cmd.h

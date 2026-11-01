@@ -352,6 +352,11 @@ enum class JobFormat : std::uint8_t {
 /// newline.
 void write_document(std::ostream& out, const nlohmann::json& document);
 
+/// The line `write_document` writes, without its newline (54a): what `apogee
+/// mcp serve`'s status reads answer, so a served read and the command's
+/// `--output-format json` cannot differ by a byte.
+[[nodiscard]] std::string document_text(const nlohmann::json& document);
+
 /// One user turn read from a driver over stdin, in machine mode.
 struct DriverMessage {
     enum class Kind : std::uint8_t {

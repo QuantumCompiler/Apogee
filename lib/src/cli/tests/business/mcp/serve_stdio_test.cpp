@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -137,4 +138,132 @@ TEST_CASE("a served tool's output that is not UTF-8 reaches the client as a fram
     const std::vector<nlohmann::json> frames = frames_of(out.str());
     REQUIRE(frames.size() == 1);
     CHECK(frames[0]["result"]["content"][0]["text"] == "caf\xEF\xBF\xBD");
+}
+
+TEST_CASE("reads join the served set after the tools, read-only, each answered by its own name",
+          "[mcp][serve][reads]") {
+    // 54a: the status reads ride beside a registry's tools -- listed after
+    // them, marked read-only, called by name -- and every other name still
+    // reaches the registry's dispatch.
+    std::vector<apogee::mcp::ServedTool> tools{
+        {"echo", "Echo", nlohmann::json{{"type", "object"}}, true}};
+    const apogee::mcp::Dispatch dispatch = [](std::string_view name, const nlohmann::json&) {
+        return apogee::mcp::ToolCallResult{"tool " + std::string{name}, false};
+    };
+    nlohmann::json seen_args;
+    std::vector<apogee::mcp::ServedRead> reads;
+    reads.push_back(apogee::mcp::ServedRead{
+        .name = "status",
+        .description = "A status document",
+        .input_schema =
+            nlohmann::json{{"type", "object"}, {"properties", {{"which", {{"type", "string"}}}}}},
+        .answer =
+            [&seen_args](const nlohmann::json& args) {
+                seen_args = args;
+                return apogee::mcp::ToolCallResult{R"({"ok":true})", false};
+            },
+    });
+    reads.push_back(apogee::mcp::ServedRead{
+        .name = "bare",
+        .description = "No schema given",
+        .input_schema = {},
+        .answer = [](const nlohmann::json&) { return apogee::mcp::ToolCallResult{"{}", false}; },
+    });
+    const apogee::mcp::ServedSet served =
+        apogee::mcp::with_reads(tools, dispatch, std::move(reads));
+
+    REQUIRE(served.tools.size() == 3);
+    CHECK(served.tools[0].name == "echo");
+    CHECK(served.tools[1].name == "status");
+    CHECK(served.tools[1].read_only);
+    CHECK(served.tools[1].input_schema["properties"]["which"]["type"] == "string");
+    CHECK(served.tools[2].name == "bare");
+    CHECK(served.tools[2].input_schema == nlohmann::json{{"type", "object"}});
+
+    std::istringstream in{
+        R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})"
+        "\n"
+        R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"status","arguments":{"which":"x"}}})"
+        "\n"
+        R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo"}})"
+        "\n"};
+    std::ostringstream out;
+    CHECK(apogee::mcp::serve_stdio(in, out, "s", "1", served.tools, served.dispatch) == 0);
+    const std::vector<nlohmann::json> frames = frames_of(out.str());
+    REQUIRE(frames.size() == 3);
+    REQUIRE(frames[0]["result"]["tools"].size() == 3);
+    CHECK(frames[0]["result"]["tools"][1]["name"] == "status");
+    CHECK(frames[0]["result"]["tools"][1]["annotations"]["readOnlyHint"] == true);
+    CHECK(frames[1]["result"]["content"][0]["text"] == R"({"ok":true})");
+    CHECK(frames[1]["result"]["isError"] == false);
+    CHECK(seen_args == nlohmann::json{{"which", "x"}});
+    CHECK(frames[2]["result"]["content"][0]["text"] == "tool echo");
+}
+
+TEST_CASE("a read that throws answers an error and the server goes on; its text is mended",
+          "[mcp][serve][reads][utf8]") {
+    std::vector<apogee::mcp::ServedRead> reads;
+    reads.push_back(apogee::mcp::ServedRead{
+        .name = "broken",
+        .description = "Throws",
+        .input_schema = nlohmann::json{{"type", "object"}},
+        .answer = [](const nlohmann::json&) -> apogee::mcp::ToolCallResult {
+            throw std::runtime_error("the config at /tmp/caf\xE9 will not load");
+        },
+    });
+    reads.push_back(apogee::mcp::ServedRead{
+        .name = "latin",
+        .description = "Not UTF-8",
+        .input_schema = nlohmann::json{{"type", "object"}},
+        .answer =
+            [](const nlohmann::json&) { return apogee::mcp::ToolCallResult{"caf\xE9", false}; },
+    });
+    const apogee::mcp::ServedSet served = apogee::mcp::with_reads(
+        {},
+        [](std::string_view, const nlohmann::json&) {
+            return apogee::mcp::ToolCallResult{"fallback", true};
+        },
+        std::move(reads));
+
+    std::istringstream in{
+        R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"broken"}})"
+        "\n"
+        R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"latin"}})"
+        "\n"
+        R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"nope"}})"
+        "\n"};
+    std::ostringstream out;
+    REQUIRE_NOTHROW(apogee::mcp::serve_stdio(in, out, "s", "1", served.tools, served.dispatch));
+    const std::vector<nlohmann::json> frames = frames_of(out.str());
+    REQUIRE(frames.size() == 3);
+    CHECK(frames[0]["result"]["isError"] == true);
+    CHECK(frames[0]["result"]["content"][0]["text"] ==
+          "Error: the config at /tmp/caf\xEF\xBF\xBD will not load");
+    CHECK(frames[1]["result"]["isError"] == false);
+    CHECK(frames[1]["result"]["content"][0]["text"] == "caf\xEF\xBF\xBD");
+    CHECK(frames[2]["result"]["content"][0]["text"] == "fallback");
+}
+
+TEST_CASE("a read never shadows a served tool or another read", "[mcp][serve][reads]") {
+    // Tools are only ever added (54a): a host's registered names keep their
+    // meaning, so a collision is refused where the set is built.
+    const apogee::mcp::Dispatch dispatch = [](std::string_view, const nlohmann::json&) {
+        return apogee::mcp::ToolCallResult{};
+    };
+    const auto read_named = [](std::string name) {
+        return apogee::mcp::ServedRead{
+            .name = std::move(name),
+            .description = "d",
+            .input_schema = nlohmann::json{{"type", "object"}},
+            .answer = [](const nlohmann::json&) { return apogee::mcp::ToolCallResult{}; },
+        };
+    };
+    const std::vector<apogee::mcp::ServedTool> tools{
+        {"read_file", "Reads", nlohmann::json{{"type", "object"}}, true}};
+    CHECK_THROWS_AS(apogee::mcp::with_reads(tools, dispatch, {read_named("read_file")}),
+                    std::invalid_argument);
+    CHECK_THROWS_AS(
+        apogee::mcp::with_reads(tools, dispatch, {read_named("check"), read_named("check")}),
+        std::invalid_argument);
+    CHECK_NOTHROW(apogee::mcp::with_reads(tools, dispatch, {read_named("check")}));
 }

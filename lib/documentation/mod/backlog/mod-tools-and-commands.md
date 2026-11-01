@@ -6,7 +6,7 @@
 
 **Seam + files.** `src/business/` (the client: reads, the complete runner, poll logic), `src/presentation/` (tool/command/status registration), `src/data/` (the document types). Tests: handler matrices over scripted documents; the confirm gates; the async pattern (launch → toast → poll) on a scripted clock; argv pins per command.
 
-**Reference.** The mod spike (2026-10-21) — the server handshake, the measured documents, the one-shot complete; the CLI's [54a/54b](../../cli/backlog/v0.2.1/mcp-serve-public.md) siblings — referenced with fallbacks; the GUI's jobs/read-back disciplines mirrored in miniature.
+**Reference.** The mod spike (2026-10-21) — the server handshake, the measured documents, the one-shot complete; the CLI's 54a ([shipped 2026-11-01](../../cli/assistant/MILESTONES.md#milestone-w--the-mcp-client): `apogee mcp serve`, the status reads served) and [54b](../../cli/backlog/v0.2.1/mcp-serve-callable-set.md) siblings — referenced with fallbacks; the GUI's jobs/read-back disciplines mirrored in miniature.
 
 **Decisions made** (dated):
 - 2026-10-21 — `apogee_complete` ships on the CLI path first; 54b's served tool replaces the plumbing, not the surface.

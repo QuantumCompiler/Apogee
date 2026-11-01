@@ -2,7 +2,9 @@
 # The MCP client end to end, on the real binary: a scaffolded server created,
 # listed, tested through the production client, connected by a tool-using
 # run, disabled and deleted -- and the in-binary server driven by the client
-# as one more server, so the fixture is Apogee itself with nothing installed.
+# as one more server, so the fixture is Apogee itself with nothing installed:
+# `mcp serve` (54a) and its hidden alias `__mcp-tools`, the status reads held
+# to the CLI's own documents byte for byte by an external client.
 #
 # POSIX only, like the other shell checks. Needs python3 for the scaffolded
 # server (the same interpreter the PTY checks already need).
@@ -60,6 +62,36 @@ grep -q "No notes yet" "$WORK_DIR/self.txt" || fail "__mcp-tools did not answer 
 if "$APOGEE_BIN" mcp test self write_note '{"key":"k","content":"x"}' </dev/null >"$WORK_DIR/write.txt" 2>/dev/null; then
     fail "a writing tool was reachable over stdio: $(cat "$WORK_DIR/write.txt")"
 fi
+
+# --- mcp serve (54a): the public verb, its alias, the status reads ----------
+# An external client over raw JSON-RPC: both spellings list the same tools,
+# all read-only, the five status reads last; each read answers with the CLI's
+# own --output-format json document, byte for byte.
+"$APOGEE_BIN" models list --output-format json </dev/null >"$WORK_DIR/doc-models-list.json" 2>/dev/null || fail "models list --output-format json"
+"$APOGEE_BIN" models list --all --output-format json </dev/null >"$WORK_DIR/doc-models-list-all.json" 2>/dev/null || fail "models list --all --output-format json"
+"$APOGEE_BIN" models status --output-format json </dev/null >"$WORK_DIR/doc-models-status.json" 2>/dev/null || fail "models status --output-format json"
+"$APOGEE_BIN" train status --output-format json </dev/null >"$WORK_DIR/doc-train-status.json" 2>/dev/null || fail "train status --output-format json"
+"$APOGEE_BIN" train versions --output-format json </dev/null >"$WORK_DIR/doc-train-versions.json" 2>/dev/null || fail "train versions --output-format json"
+# check exits 1 on a failure, its document printed all the same.
+"$APOGEE_BIN" check --output-format json </dev/null >"$WORK_DIR/doc-check.json" 2>/dev/null || true
+[ -s "$WORK_DIR/doc-check.json" ] || fail "check --output-format json printed nothing"
+cat >"$WORK_DIR/serve-calls.json" <<EOF
+[
+  {"tool": "models_list", "arguments": {}, "expect": "$WORK_DIR/doc-models-list.json"},
+  {"tool": "models_list", "arguments": {"all": true}, "expect": "$WORK_DIR/doc-models-list-all.json"},
+  {"tool": "models_status", "arguments": {}, "expect": "$WORK_DIR/doc-models-status.json"},
+  {"tool": "train_status", "arguments": {}, "expect": "$WORK_DIR/doc-train-status.json"},
+  {"tool": "train_versions", "arguments": {}, "expect": "$WORK_DIR/doc-train-versions.json"},
+  {"tool": "check", "arguments": {}, "expect": "$WORK_DIR/doc-check.json"}
+]
+EOF
+python3 "$(dirname "$0")/../py/mcp_serve_client.py" "$APOGEE_BIN" "$WORK_DIR/serve-calls.json" </dev/null >"$WORK_DIR/serve.txt" 2>&1 || fail "mcp serve's handshake: $(cat "$WORK_DIR/serve.txt")"
+# The public spelling registered as one more server, through the production
+# client: the entry `mcp presets` prints for another host.
+[ "$("$APOGEE_BIN" mcp presets --output-format json </dev/null | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["data"][1]["args"]))')" = '["mcp", "serve"]' ] || fail "mcp presets' self does not name mcp serve"
+"$APOGEE_BIN" mcp create public --command "$APOGEE_BIN" --args mcp serve </dev/null >/dev/null || fail "register mcp serve"
+"$APOGEE_BIN" mcp test public models_status </dev/null >"$WORK_DIR/public.txt" 2>/dev/null || fail "mcp test against mcp serve: $(cat "$WORK_DIR/public.txt")"
+grep -q '"fields"' "$WORK_DIR/public.txt" || fail "mcp serve did not answer models_status: $(cat "$WORK_DIR/public.txt")"
 
 # --- a tool-using run connects at startup, and a dead server is skipped ------
 "$APOGEE_BIN" mcp create dead --command /bin/sh --args -c 'echo "fatal: no upstream" >&2; exit 1' </dev/null >/dev/null || fail "register the dying server"

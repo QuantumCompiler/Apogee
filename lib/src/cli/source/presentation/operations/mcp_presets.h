@@ -22,10 +22,11 @@
 /// still lists, saying what is missing and the command that provides it;
 /// `--from` refuses it with the same words.
 ///
-/// **`self` is informational.** It is Apogee's own read-only tools served
-/// over stdio (`apogee __mcp-tools`), listed with the entry another MCP host
-/// takes. Registered into Apogee it would serve Apogee the tools it already
-/// has natively, so `--from self` is refused with that reason.
+/// **`self` is informational.** It is Apogee's own read-only tools and
+/// status reads served over stdio (`apogee mcp serve`, 54a), listed with the
+/// entry another MCP host takes. Registered into Apogee it would serve Apogee
+/// the tools it already has natively, so `--from self` is refused with that
+/// reason.
 namespace apogee::operations {
 
 /// What `mcp list` and the shell's MCP view say with no server configured:

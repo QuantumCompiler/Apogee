@@ -596,8 +596,12 @@ std::vector<std::string_view> read_format_names() {
 }
 
 void write_document(std::ostream& out, const nlohmann::json& document) {
-    out << document.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace) << "\n";
+    out << document_text(document) << "\n";
     out.flush();
+}
+
+std::string document_text(const nlohmann::json& document) {
+    return document.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 
 std::optional<OutputFormat> output_format_from_string(std::string_view name) noexcept {

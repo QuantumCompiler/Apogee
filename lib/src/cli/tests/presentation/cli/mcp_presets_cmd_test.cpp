@@ -58,6 +58,7 @@ TEST_CASE("mcp presets lists what the box ships, with its document", "[cli][mcp]
         out, ContainsSubstring("runs:     " + ready.python.string() + " " + ready.script.string()));
     CHECK_THAT(out, ContainsSubstring("self       Apogee's own read-only tools"));
     CHECK_THAT(out, ContainsSubstring("for another MCP host: \"apogee\": "));
+    CHECK_THAT(out, ContainsSubstring(R"("args":["mcp","serve"])"));
     CHECK_THAT(out, ContainsSubstring("not registered into Apogee"));
 
     REQUIRE(ready.home.run({"mcp", "presets", "--output-format", "json"}, &out, &err) == 0);
@@ -65,7 +66,7 @@ TEST_CASE("mcp presets lists what the box ships, with its document", "[cli][mcp]
     REQUIRE(document["data"].size() == 2);
     CHECK(document["data"][0]["command"] == ready.python.string());
     CHECK(document["data"][0]["args"] == nlohmann::json::array({ready.script.string()}));
-    CHECK(document["data"][1]["args"] == nlohmann::json::array({"__mcp-tools"}));
+    CHECK(document["data"][1]["args"] == nlohmann::json::array({"mcp", "serve"}));
 }
 
 TEST_CASE("create --from writes the config byte for byte as the hand-typed registration",

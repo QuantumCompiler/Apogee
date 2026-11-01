@@ -7,8 +7,9 @@ and beside it **validation**, the same member checking the others' work;
 **graph navigation**, answered by a knowledge graph you build; the
 **Orchestrator**, an `execute` session's symphonies offered to its model as
 tools; **code execution**, the Python server Apogee ships, registered
-with one command; and the **MCP presets**, every server Apogee ships, listed
-with what it needs.
+with one command; the **MCP presets**, every server Apogee ships, listed
+with what it needs; and **`apogee mcp serve`**, Apogee itself as an MCP server
+for another host.
 
 The native toolsets (files, the shell, git, notes, document search, graph
 navigation) and `fetch_url` need no setup beyond that, and nor do the
@@ -179,11 +180,70 @@ json`, in [machine-mode.md](machine-mode.md)), and the admin plane's `POST
 | Preset | What it is |
 |---|---|
 | `code-exec` | The code-execution server below: `run_python` and `write_input`, registered as `code`. It needs the server seeded (`apogee check --fix`) and a Python: the training environment's, else `python3` on PATH. |
-| `self` | Apogee's own read-only tools (files, git, notes, document search, graph navigation), served on stdio by `apogee __mcp-tools` **for another MCP host**: a desktop assistant or an editor takes the entry the listing prints. It is never registered into Apogee, which already has these tools natively, so `--from self` is refused with that reason. |
+| `self` | Apogee's own read-only tools (files, git, notes, document search, graph navigation) and its status reads, served on stdio by [`apogee mcp serve`](#apogee-as-an-mcp-server-apogee-mcp-serve) **for another MCP host**: a desktop assistant or an editor takes the entry the listing prints. It is never registered into Apogee, which already has these tools natively, so `--from self` is refused with that reason. |
 
 Web search is not a preset. It stays yours: point Apogee at a SearXNG
 instance you run, as [*Web search through SearXNG*](#web-search-through-searxng)
 above walks through.
+
+## Apogee as an MCP server: `apogee mcp serve`
+
+`apogee mcp serve` makes Apogee an MCP server for another host: a desktop
+assistant, an editor, a Claude plugin. The host spawns it and speaks MCP's
+JSON-RPC over its stdin and stdout until it closes stdin. It is pipes only:
+no port is opened, and stdout carries the protocol and nothing else. The
+entry a host takes is the one `apogee mcp presets` prints for `self`:
+
+```json
+"apogee": {"command": "/path/to/apogee", "args": ["mcp", "serve"]}
+```
+
+with this machine's path to the binary filled in (`--output-format json`
+gives it as `host_entry`). `apogee mcp serve --help` says the same.
+
+**What it serves.** Two kinds of tool, and every one is read-only
+(`readOnlyHint: true`). Nothing writes, nothing calls a model, and nothing
+asks a question, since a server has nobody to ask:
+
+- **The native read-only tools**: `read_file`, `list_directory`,
+  `search_files`, `grep_files`, the git reads (`git_status`, `git_log`,
+  `git_diff`, `git_show`), the notes reads (`list_notes`, `read_note`),
+  `search_documents` and the collection reads (`list_collections`,
+  `collection_info`), and the four [graph tools](#navigating-a-knowledge-graph).
+  These are the same tools a tool-using run offers a model, with the same
+  `tools:` settings: `fs_root` is the folder the file tools start in, and
+  `tools.disabled` switches a toolset off here too. The writers (`write_file`,
+  `edit_file`, `write_note`, `run_command`, ...) are withheld, because
+  Apogee's permission gate lives in its own loop.
+- **The status reads** (since 54a). Each one answers with the JSON document
+  its command prints under `--output-format json`, byte for byte, minus the
+  newline that ends the command's output:
+
+| Tool | Arguments | The document of |
+|---|---|---|
+| `models_list` | `all` (boolean) | `apogee models list [--all]`: every configured backend and stored model |
+| `models_status` | `suite` (a suite, or `off`) | `apogee models status [--suite]`: which backend each role resolves to |
+| `train_status` | none | `apogee train status`: the cycle, the active pipeline, the newest runs, the active versions |
+| `train_versions` | `backend` | `apogee train versions [<backend>]`: the promoted versions, every ledger or one |
+| `check` | none | `apogee check`: every row with its status, detail and remedy, and the counts. Nothing is repaired: `check --fix` stays yours. |
+
+The shapes are in [machine-mode.md](machine-mode.md#everything-else-is-a-cli-command), since they are the
+very documents a GUI renders. Each read runs at its call, so a host asking
+after a promotion sees the promotion. A read that cannot answer returns an
+error result (`isError: true`) with the command's own reason after
+`Error: `: a config that will not load, a backend with no version history,
+an unknown suite, or an argument of the wrong type, named.
+
+**The tool set only grows.** Tools are added and never renamed or removed,
+and a new Apogee keeps every tool an older one served. This is the same
+promise the machine protocol makes ([ADR 0006](../adrs/backwards-compatibility.md)).
+A host registered against an older Apogee keeps working, and the new tools
+appear in its next `tools/list`. The server still answers to its earlier,
+hidden spelling, `apogee __mcp-tools`. A host registered with it before 54a
+needs no change and gets the same tools.
+
+Calling a model through the server is a separate, opt-in step. It is not
+served today.
 
 ## Running code: the code-execution server
 
@@ -377,7 +437,7 @@ them, and with none, it says how to build one.
 (switch it off with `tools.disabled: [graph]`, or leave it out of a suite
 member's `toolset:`); tool selection (26g) keeps the four off the menu for a
 question they do not fit. None writes or reaches out, so the permission gate
-never asks about one, on any surface -- and `apogee __mcp-tools` serves all
+never asks about one, on any surface -- and `apogee mcp serve` serves all
 four to an MCP client. Every cap is an argument with a ceiling: a tool never
 returns an unbounded subgraph.
 

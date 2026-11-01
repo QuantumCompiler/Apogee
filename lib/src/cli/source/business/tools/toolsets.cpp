@@ -92,7 +92,7 @@ void register_native_toolsets(agent::ToolRegistry& registry, const ToolsetOption
         register_rag_tools(registry, options.harness, options.config);
     }
     if (!disabled(options, "graph")) {
-        // Read-only (27l): ungated, and served by `__mcp-tools` with the rest.
+        // Read-only (27l): ungated, and served by `mcp serve` with the rest.
         register_graph_tools(registry, GraphToolsOptions{.config = options.config, .scope = {}});
     }
 

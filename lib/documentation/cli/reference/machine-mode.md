@@ -1172,7 +1172,7 @@ apogee graph query "<question>" --output-format json                            
 
 Each takes `--graph <name>` or `--collection <name>` (neither: the one graph
 built). Each document is byte for byte what the `graph` tools return — to a
-model in a turn, and to any MCP client of `apogee __mcp-tools` — and what `GET
+model in a turn, and to any MCP client of `apogee mcp serve` — and what `GET
 /v1/admin/graph/{id}/path|explain|neighbors|query` serves; the shapes are in
 [http-api.md](http-api.md#get-v1admingraphidpath). A node that cannot be
 resolved, or a name several nodes answer to, exits `1` with the message — the
@@ -1274,6 +1274,11 @@ apogee train pipeline list --output-format json      # {"object":"list","data":[
 apogee train pipeline show <name> --output-format json   # {"object":"training.pipeline",…}
 apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: metadata only
 ```
+
+Five of these are also MCP tools since 54a: `apogee mcp serve` answers
+`models_list`, `models_status`, `train_status`, `train_versions` and `check`
+with these same documents, byte for byte, less the newline that ends the
+command's stdout ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve)).
 
 - **`models list`**: one object per row the table shows — `backend`,
   `backend_type`, `model`, `roles`, `source`, `architecture`, `profile`,

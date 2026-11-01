@@ -1,6 +1,6 @@
 # Apogee Mod — Developer Reference
 
-The architecture reference for the Claude plugin. The contributor entry point is [CLAUDE.md](CLAUDE.md); the contracts the mod consumes are the CLI's ([machine-mode.md](../../cli/reference/machine-mode.md), the 28h JSON documents, and `apogee mcp serve` once the CLI's track 54 lands).
+The architecture reference for the Claude plugin. The contributor entry point is [CLAUDE.md](CLAUDE.md); the contracts the mod consumes are the CLI's ([machine-mode.md](../../cli/reference/machine-mode.md), the 28h JSON documents, and `apogee mcp serve`, public since the CLI's 54a, 2026-11-01 -- its tools in [tools.md](../../cli/reference/tools.md#apogee-as-an-mcp-server-apogee-mcp-serve)).
 
 ---
 
@@ -24,7 +24,7 @@ lib/src/mod/
 
 - The `--output-format json` documents (models, train status/versions, check, …) — measured live by the mod spike (2026-10-21).
 - Machine mode, for anything session-grade later.
-- `apogee __mcp-tools` / `mcp serve` — the MCP server (17 read-only tools today; the registration JSON printed by `apogee mcp presets`).
+- `apogee mcp serve` (the hidden `__mcp-tools` its alias) — the MCP server: 22 read-only tools since the CLI's 54a, the spike's 17 plus the five status reads (`models_list`, `models_status`, `train_status`, `train_versions`, `check`), each answering with its command's JSON document byte for byte; the registration JSON printed by `apogee mcp presets`.
 
 ## Build & test
 

@@ -284,6 +284,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/providers_cmd_test.cpp
     presentation/cli/read_documents_test.cpp
     presentation/cli/mcp_presets_cmd_test.cpp
+    presentation/cli/mcp_serve_test.cpp
     presentation/cli/review_cmd_test.cpp
     presentation/cli/review_mr_test.cpp
     presentation/cli/system_cmd_test.cpp
@@ -892,7 +893,10 @@ if(UNIX)
     # The MCP client on the real binary: a scaffolded server created, tested
     # through the production client, connected by a tool-using run, a dying
     # one skipped with its stderr tail, and the in-binary server as one more
-    # server. Needs python3 for the scaffold (skips itself without one).
+    # server -- since 54a `mcp serve` beside its `__mcp-tools` alias, an
+    # external client (`mcp_serve_client.py`) holding both spellings to one
+    # tool list and each status read to its command's JSON byte for byte.
+    # Needs python3 for the scaffold (skips itself without one).
     add_test(NAME cli.mcp_lifecycle
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/mcp_e2e.sh"
             $<TARGET_FILE:apogee>

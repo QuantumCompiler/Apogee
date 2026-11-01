@@ -1,5 +1,7 @@
 #pragma once
 
+#include <nlohmann/json_fwd.hpp>
+
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -149,6 +151,14 @@ struct SuiteResolution {
 /// `train status` as a person reads it (37f): the cycle, the pipeline, the
 /// newest runs and the active versions -- the Train view's heading.
 [[nodiscard]] std::string train_status_text(const RootContext& context);
+
+/// `train versions [backend] --output-format json`'s document (54a): every
+/// ledger, or `backend`'s alone -- or none, with `refusal` saying why: that
+/// ledger cannot be read, or the backend has no history. What the command
+/// prints and `mcp serve`'s `train_versions` answers, one function, so the
+/// two cannot differ by a byte.
+[[nodiscard]] std::optional<nlohmann::json> train_versions_document(const std::string& backend,
+                                                                    std::string& refusal);
 
 /// One status-line rendering of an iteration: `iter n/N · loss L · lr R ·
 /// T it/s`.

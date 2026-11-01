@@ -199,8 +199,12 @@ const std::map<std::string, Classification>& table() {
                    "there is deliberately no POST .../cycle/halt")},
         {"train cycle resume",
          carve_out("edits the cycle's state on the host; training control is CLI-only")},
+        {"mcp serve",
+         carve_out("the MCP server mode (54a): this process's own stdio, spawned by another MCP "
+                   "host -- pipes, never a port")},
         {"__mcp-tools",
-         carve_out("an MCP server on this process's own stdio, spawned by another client")},
+         carve_out("the hidden alias of mcp serve, kept for hosts registered with it: this "
+                   "process's own stdio, spawned by another MCP host")},
         {"task run",
          carve_out("an unattended run of the host's own session and tools, under its lock; task "
                    "control is CLI-only -- the reads are served under /v1/admin/tasks*")},

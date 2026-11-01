@@ -52,7 +52,7 @@ This item closes that gap. The stdio servers a host names in `session/new` join 
 
 **Reference.**
 - **The config fleet**, `Registry::connect_all` (`registry.cpp:13-86`): `[mcp] connecting:` goes out before each dial, a bad server is skipped, and a 20 s bound covers connect and handshake (`registry.h:48`). This item reuses it whole. The only change is where the specs come from.
-- **`tests/scripts/sh/mcp_e2e.sh`** has the two real-process fixtures. One is the binary's own server registered as a server (lines 56-58: `--args __mcp-tools`, or `mcp serve` once [54a](mcp-serve-public.md) lands). The other is a `/bin/sh` server that dies, whose stderr is folded once (lines 64-71). This item passes both in `session/new` instead of writing them to config.
+- **`tests/scripts/sh/mcp_e2e.sh`** has the two real-process fixtures. One is the binary's own server registered as a server (lines 58-60: `--args __mcp-tools`; since [54a](../../assistant/MILESTONES.md#milestone-w--the-mcp-client) shipped, `mcp serve` too, lines 92-94). The other is a `/bin/sh` server that dies, whose stderr is folded once (lines 96-103). This item passes both in `session/new` instead of writing them to config.
 - **The mock backend's script** (`data/backends/mock.h:66-72`): `tool_calls` lets a test make a turn call a host server's tool without a model.
 - **Prior art.**
   - ACP's session setup: Apogee follows it on stdio. It departs from it on http, which "new Agents SHOULD support": not until the client grows a remote transport.
@@ -112,6 +112,6 @@ Out of scope:
 - the filesystem security layer (56a's, wall W4);
 - signing (W3, not fixable here);
 - the Xcode plug-in (a ROADMAP idea, the user's call);
-- Apogee's own MCP server ([54a](mcp-serve-public.md)).
+- Apogee's own MCP server ([54a](../../assistant/MILESTONES.md#milestone-w--the-mcp-client), `apogee mcp serve`).
 
 The app's side of the track is [5a](../../../gui/backlog/v0.2.1/xcode-in-settings.md), gated on 56d. This item needs nothing from the app.

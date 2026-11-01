@@ -49,7 +49,10 @@ constexpr std::array kSurfaces{
     ShellSurface{"datasets", View, "Datasets", ShellDoor{.view = "Datasets"}},
     ShellSurface{"agents", View, "Agents (edit stays the $EDITOR's, refused below)",
                  ShellDoor{.view = "Agents"}},
-    ShellSurface{"mcp", View, "MCP", ShellDoor{.view = "MCP"}},
+    // `mcp serve` (54a) is a protocol another MCP host spawns: on the exec
+    // line its stdin is closed, so it ends at once, as a script's would.
+    ShellSurface{"mcp", View, "MCP (serve is the stdio server another host spawns)",
+                 ShellDoor{.view = "MCP"}},
     ShellSurface{"auth", View,
                  "Auth, metadata only (a key is stored at a real prompt: add's secret input "
                  "never enters the shell)",
@@ -80,7 +83,8 @@ constexpr std::array kSurfaces{
                  "the shell stubs' completion protocol -- the exec line's Tab asks the same "
                  "core in-process"},
     ShellSurface{"__mcp-tools", RunnerCovered,
-                 "the MCP stdio server a client spawns -- a protocol, not a page"},
+                 "the hidden alias of mcp serve (54a), kept for hosts registered with it -- a "
+                 "protocol, not a page"},
     ShellSurface{"__machine-schema", RunnerCovered,
                  "the machine protocol's JSON Schema, for a driver to read"},
     // --- carved out: no surface, refused by the exec line ----------------------

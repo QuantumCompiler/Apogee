@@ -123,16 +123,20 @@ TEST_CASE("code-exec resolves to the seeded script under the interpreter it woul
     CHECK(resolution.args == std::vector<std::string>{machine.script().string()});
 }
 
-TEST_CASE("self resolves to this binary's __mcp-tools and is refused into Apogee",
+TEST_CASE("self resolves to this binary's mcp serve and is refused into Apogee",
           "[operations][mcp][presets]") {
     Machine machine;
     const McpPresetResolution resolution =
         apogee::operations::resolve_mcp_preset(preset("self"), machine.host());
     CHECK(resolution.runnable());
     CHECK(resolution.command == "/opt/apogee/bin/apogee");
-    CHECK(resolution.args == std::vector<std::string>{"__mcp-tools"});
+    // The public spelling (54a); the hidden `__mcp-tools` stays its alias.
+    CHECK(resolution.args == std::vector<std::string>{"mcp", "serve"});
     CHECK(apogee::operations::mcp_host_entry(resolution) ==
-          nlohmann::json{{"command", "/opt/apogee/bin/apogee"}, {"args", {"__mcp-tools"}}});
+          nlohmann::json{{"command", "/opt/apogee/bin/apogee"}, {"args", {"mcp", "serve"}}});
+    CHECK_THAT(
+        std::string{preset("self").provides},
+        ContainsSubstring("models_list, models_status, train_status, train_versions, check"));
     // The circularity, said.
     CHECK_THAT(refusal_of("self", machine.host()),
                ContainsSubstring("registered into Apogee it would serve Apogee the tools it "
@@ -163,7 +167,7 @@ TEST_CASE("the presets document says each preset's facts and where it stands her
     CHECK(self["host_entry"] ==
           nlohmann::json{
               {"name", "apogee"},
-              {"server", {{"command", "/opt/apogee/bin/apogee"}, {"args", {"__mcp-tools"}}}}});
+              {"server", {{"command", "/opt/apogee/bin/apogee"}, {"args", {"mcp", "serve"}}}}});
 
     machine.seed();
     machine.make_venv();

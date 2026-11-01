@@ -5,10 +5,12 @@
 #include <algorithm>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "cli/registry.h"
 #include "cli/root.h"
+#include "cli/tui_runner.h"
 #include "support/fake_command.h"
 
 /// The shell is a mode (ADR 0010, 37a): every root subcommand the binary
@@ -76,6 +78,12 @@ TEST_CASE("the table is today's truth: the views, no backfill left, the exec lin
         INFO(surface.command);
         CHECK(surface.kind != ShellSurfaceKind::Backfill);
     }
+    // `mcp serve` (54a) is a verb of the MCP view's command, run by the exec
+    // line as typed; its hidden alias stays plumbing, named for what it is.
+    CHECK(apogee::commands::exec_refusal({"mcp", "serve"}).empty());
+    CHECK(kind("__mcp-tools") == ShellSurfaceKind::RunnerCovered);
+    CHECK(std::string_view{apogee::commands::find_shell_surface("__mcp-tools")->detail}.find(
+              "alias of mcp serve") != std::string_view::npos);
     CHECK(kind("complete") == ShellSurfaceKind::RunnerCovered);
     CHECK(kind("analyze") == ShellSurfaceKind::RunnerCovered);
     for (const char* carved : {"serve", "uninstall", "reset"}) {

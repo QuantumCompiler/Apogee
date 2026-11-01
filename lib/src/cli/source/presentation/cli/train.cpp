@@ -1806,6 +1806,22 @@ std::string eval_glyph(const std::optional<bool>& passed, const std::optional<do
     return std::string{*passed ? "pass " : "FAIL "} + percent(score.value_or(0.0));
 }
 
+std::optional<nlohmann::json> train_versions_document(const std::string& backend,
+                                                      std::string& refusal) {
+    const training::TrainingStore store{harness::training_dir()};
+    std::string error;
+    (void)training::load_ledger(store.versions_dir(), backend, error);
+    if (!backend.empty() && !error.empty()) {
+        refusal = "the version ledger is unreadable: " + error;
+        return std::nullopt;
+    }
+    std::optional<nlohmann::json> document = operations::training_versions_document(backend);
+    if (!document.has_value()) {
+        refusal = "no version history for backend '" + backend + "'";
+    }
+    return document;
+}
+
 std::string train_status_text(const RootContext& context) {
     std::ostringstream out;
     const harness::Config config = load_config_or_default(context);
@@ -2712,16 +2728,13 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     versions->callback([versions_backend, versions_format]() {
         const training::TrainingStore store{harness::training_dir()};
         if (*versions_format == ReadFormat::Json) {
-            // The body `GET /v1/admin/training/versions` serves (37f).
-            std::string error;
-            (void)training::load_ledger(store.versions_dir(), *versions_backend, error);
-            if (!versions_backend->empty() && !error.empty()) {
-                fail_user("the version ledger is unreadable: " + error);
-            }
+            // The body `GET /v1/admin/training/versions` serves (37f), and
+            // what `mcp serve`'s `train_versions` answers (54a).
+            std::string refusal;
             const std::optional<nlohmann::json> document =
-                operations::training_versions_document(*versions_backend);
+                train_versions_document(*versions_backend, refusal);
             if (!document.has_value()) {
-                fail_user("no version history for backend '" + *versions_backend + "'");
+                fail_user(refusal);
             }
             write_document(std::cout, *document);
             return;

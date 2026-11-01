@@ -29,10 +29,11 @@ constexpr std::array<McpPreset, 2> kPresets{{
     },
     McpPreset{
         .name = kSelf,
-        .description = "Apogee's own read-only tools, served on stdio for another MCP host "
-                       "(a desktop assistant, an editor)",
+        .description = "Apogee's own read-only tools, served on stdio by apogee mcp serve for "
+                       "another MCP host (a desktop assistant, an editor)",
         .provides = "the read-only native tools: files, git, notes, document search, graph "
-                    "navigation",
+                    "navigation; and the status reads: models_list, models_status, train_status, "
+                    "train_versions, check",
         .server_name = "apogee",
         .try_tool = "list_notes",
         .try_arguments = "{}",
@@ -88,7 +89,9 @@ McpPresetResolution resolve_mcp_preset(const McpPreset& preset, const McpPresetH
             return out;
         }
         out.command = host.executable.string();
-        out.args = {"__mcp-tools"};
+        // The public spelling (54a); `__mcp-tools` stays its alias for hosts
+        // registered with it before.
+        out.args = {"mcp", "serve"};
         return out;
     }
     // code-exec: the seeded script under the interpreter it would run under.
