@@ -50,7 +50,7 @@ Priority-ordered: the topmost item whose gate is satisfied is the next one to bu
 - **Track 3, MLX kinds in the app** (3a, 3b), opened 2026-10-21 from the CLI's MLX-for-every-kind spike: each MLX set's kind, engines and drafters, in [Milestone D](../assistant/MILESTONES.md#milestone-d--mlx-kinds-in-the-app).
 - **Track 4, the CLI/GUI audit's GUI findings** (4a–4l), opened 2026-10-22 (the user's call: a thorough bug and feature-disparity audit over both applications), in [Milestone E](../assistant/MILESTONES.md#milestone-e--the-audits-gui-findings).
 
-Their story is [ROADMAP.md](../assistant/ROADMAP.md), and each item's record is in [MILESTONES.md](../assistant/MILESTONES.md). No version table is open; the standing Maintenance table holds the GUI's upkeep.
+Their story is [ROADMAP.md](../assistant/ROADMAP.md), and each item's record is in [MILESTONES.md](../assistant/MILESTONES.md). The earliest version table open is **v0.2.1**'s, Apogee in Xcode; the standing Maintenance table holds the GUI's upkeep.
 
 ### Maintenance
 
@@ -62,10 +62,13 @@ Upkeep and fixes, claimable at any time by name: opened 2026-10-20 with its firs
 
 ### v0.2.1
 
+**Track 5, Apogee in Xcode, the app's side**, opened 2026-10-31 (the user's call, from that day's Xcode research; the CLI's track 56 is the capability, in [its v0.2.1 table](../../cli/backlog/README.md#v021)). Xcode 26.6 and later run Apogee as an agent once someone types its executable's absolute path and `acp` into Xcode's Add an Agent sheet, and Apogee's agents gain Xcode's tools once `xcrun mcpbridge` is registered; the CLI's 56d makes both a command (`acp registration`, the `xcode` MCP preset) and has `check` name the installed Xcode. ADR 0003 asks a place for every new verb, so **5a** gives them one in Settings, gated on the CLI's 56d. The user's calls: 5a alone -- a proposed 5b, marking chats begun in Xcode in the Sessions library, was not queued -- and no Xcode plug-in for now.
+
 **Track 6, the second bug sweep's GUI findings**, opened 2026-10-31 (the user's call: a second bug sweep over both applications, every finding queued in v0.2.1 per queue; the method and the counts are the CLI's [track 57 preamble](../../cli/backlog/README.md#v021)). 41 GUI findings and the app's side of 18 shared ones group into **10 items (6a–6j)**. Two wait on their CLI siblings: **6g** (the Tasks screen) on CLI 57u's halt during a resume, and **6i** (the Training screens) on CLI 57g's lock and 57h's resume and status truth. Every call is a recorded default; no [user] call blocks any of them.
 
 | # | Item | Version | File | Status |
 |---|---|---|---|---|
+| 5a | Xcode in Settings — `check`'s Xcode rows, Apogee given Xcode's tools through the CLI's `xcode` preset, and the fields to paste into Xcode's Add an Agent sheet with Copy; `acp` classified in the parity table | v0.2.1 | [`xcode-in-settings.md`](v0.2.1/xcode-in-settings.md) | 🔒 CLI 56d |
 | 6a | Session lines survive restarts and deaths — an older binary's new or private session never adopts or deletes an unrelated chat, a suite switch on a first turn carries the chat on, lines sent during a stop are kept or said lost, a dead child's answer stops streaming, quit signals before giving up | v0.2.1 | [`session-lines-survive-restarts.md`](v0.2.1/session-lines-survive-restarts.md) | 🟢 |
 | 6b | The Sessions place reads the binary it runs, current and in order — a binary found by Try again is adopted by the library and every place, a failed recall read clears Forget's stale listing, a saved chat's Compact… runs as a supervised job (not killed at 60 s), place changes wait for the capability re-ask and apply in order, and the inspector's Roles follow the session's own suite | v0.2.1 | [`sessions-reads-stay-current.md`](v0.2.1/sessions-reads-stay-current.md) | 🟢 |
 | 6c | One install at a time, Settings recoverable — an install, a rebuild offer or Settings' bootstrap asks the registry when it starts; a failed Health fix gives its buttons back with Stop; a change made during another is queued; an unset web search address says "not set" | v0.2.1 | [`installs-and-settings-one-at-a-time.md`](v0.2.1/installs-and-settings-one-at-a-time.md) | 🟢 |

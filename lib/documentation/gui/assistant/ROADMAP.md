@@ -79,6 +79,12 @@ Opened 2026-10-22 (the user's call): a thorough bug and feature-disparity audit 
 
 ## Up next
 
+### v0.2.1 — Track 5, Apogee in Xcode
+
+Opened 2026-10-31 from that day's Xcode research (the user's call). The capability is the CLI's track 56: `apogee acp`, Apogee as a custom agent in Xcode 26.6 and later over the Agent Client Protocol on stdio, and the setup it prints (the CLI's 56d). The app gives that setup a place, and asks nothing of Xcode itself.
+
+- [ ] **Xcode in Settings** *(5a — [backlog](../backlog/v0.2.1/xcode-in-settings.md))* — `check`'s Xcode rows in the CLI's words; "Let Apogee use Xcode's tools" through the CLI's `xcode` preset; the fields to paste into Xcode's Add an Agent sheet, with Copy; `acp` classified in the parity table as run by an agent host, never from the app. Gated on the CLI's 56d.
+
 ### v0.2.1 — Track 6, the second bug sweep's findings
 
 Opened 2026-10-31 (the user's call): a second bug sweep over the CLI and GUI — 16 hunters, three skeptics per finding, the critic's leads hunted too; 155 of 162 findings survived (the CLI's track 57 carries the method and the counts). The app's 41 findings and its side of 18 shared ones are ten items; 6g and 6i wait on their CLI siblings.

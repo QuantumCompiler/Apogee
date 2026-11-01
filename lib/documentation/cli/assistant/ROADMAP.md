@@ -339,9 +339,16 @@ The standing upkeep queue *(created 2026-10-03, the user's call)* — release-ag
 
 ## Up next
 
-### v0.2.1 — The mod's CLI siblings (track 54) and the second bug sweep (track 57)
+### v0.2.1 — The mod's CLI siblings (track 54), Apogee in Xcode (track 56) and the second bug sweep (track 57)
 
 Opened 2026-10-21 from the mod spike: the hidden MCP stdio server (it answers today with 17 read-only tools; the spike's handshake is the measurement) becomes the public `apogee mcp serve` with the status reads served byte-for-byte *([54a](../backlog/v0.2.1/mcp-serve-public.md))*, and `complete` joins as the first callable tool — opt-in per tool through config, local-and-unmetered providers only, bounded *([54b](../backlog/v0.2.1/mcp-serve-callable-set.md))*. The consumer is the new third application, the Apogee mod (`lib/documentation/mod/`).
+
+The release's Xcode track *(track 56, opened 2026-10-31 from that day's Xcode research, the user's call)*: Xcode 26.6 and later launch any Agent Client Protocol agent over stdio, and Xcode 26.3 and later offer their own tools to outside agents through `xcrun mcpbridge`; Apogee speaks no ACP. The SPEC gains a fifth core surface for it, ACP over stdio only (2026-10-31) -- `serve` stays server-only, so Xcode's "Locally Hosted" chat provider is not pointed at it. The macOS app's side is the GUI's 5a. In build order:
+
+- [ ] **`apogee acp`** *(56a — [backlog](../backlog/v0.2.1/acp-agent-mode.md))* — Apogee as a custom agent in Xcode's coding assistant: each prompt one turn of the one agent loop, opened as `execute` opens a project, streamed as ACP session updates; Apogee's permission gate asks through the host; every configured chat backend a model, the subscription CLIs included.
+- [ ] **Xcode's tools in an ACP session** *(56b — [backlog](../backlog/v0.2.1/acp-host-tools.md))* — the stdio MCP servers a host hands a session, Xcode's own tools among them, joined for that session's life; the config never written.
+- [ ] **ACP sessions saved and resumed** *(56c — [backlog](../backlog/v0.2.1/acp-sessions-saved.md))* — an ACP session is a chat that names its origin; Xcode's history reopens it.
+- [ ] **Setting Xcode up from Apogee** *(56d — [backlog](../backlog/v0.2.1/xcode-setup-from-apogee.md))* — `check` says the installed Xcode and what it can host, `mcp create xcode --from xcode` gives Apogee's agents Xcode's build, test and preview tools, and `acp registration` prints the fields Xcode's Add an Agent sheet takes.
 
 The release's second-sweep track *(track 57, opened 2026-10-31, the user's call: "another sweep of potential bug issues, in both the CLI and GUI")*: 16 hunters over what shipped since the first audit and the areas it never read, three skeptics per finding, a completeness critic's leads hunted too — 155 of 162 findings survived, 23 CLI items here and the GUI's track 6 beside them. **57m comes first**: no required checks gate `stable` today, and restoring them is the user's call (a repository setting).
 
@@ -380,6 +387,7 @@ The release's second-sweep track *(track 57, opened 2026-10-31, the user's call:
 - Plugin system (`plugin.yaml` overlay — deliberately left out of the initial plan; separable later on top of the config engine)
 - **Self-update (`apogee update`)** — deliberately deferred out of v0.1.0 *(decided 2026-09-01)*, and now unblocked: the distribution host is settled and the release pipeline exists. It becomes the **third parity path** alongside the two installers, so it must go through `apogee check --fix` like they do rather than seeding anything itself. Needs its own backlog item; the background update notifier (TTY-only, 24h cache, subcommand skip-list) rides with it.
 - Remote MCP transports + OAuth connectors (and the connector-driven review agents that ride them)
+- **An Xcode plug-in for Apogee** *(2026-10-31, the user's call: not now)* — Xcode 27 installs plug-ins from a git URL (skills, MCP servers and an ACP agent configuration, in Anthropic's Claude Code plugin format), which would make track 56's setup one click. A plug-in that ships its own binary wants Developer ID signing and notarization, against the ad-hoc signing the release uses; until then Apogee is added by hand with `acp registration`'s fields.
 - **Forge integration for the review agents** — a GitHub and/or GitLab tool server for the merge-request agent's MR mode (read the MR, its discussions and diff; look up a ticket) and the forge credential slots deferred from the credential store (2026-09-13). The forge target, once the user's call gating this item, was answered by track 48 (2026-10-18): both, through the spawned `gh` and `glab` whose logins stay theirs — so no forge credential slot is needed — over the `forge/` seam v0.1.9 shipped for the review agent. What remains is that seam offered to a chat agent as tools; it would be the first user of the in-binary MCP server pattern beyond Apogee's own tools.
 
 ## Explicit non-goals
