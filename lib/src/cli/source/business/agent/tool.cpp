@@ -69,6 +69,20 @@ std::map<std::string, std::string, std::less<>> ToolRegistry::definition_hashes(
     return out;
 }
 
+std::string_view to_string(ToolCallState state) noexcept {
+    switch (state) {
+        case ToolCallState::Running:
+            return "running";
+        case ToolCallState::Done:
+            return "done";
+        case ToolCallState::Failed:
+            return "failed";
+        case ToolCallState::Pending:
+            break;
+    }
+    return "pending";
+}
+
 bool gated(const Tool& tool) noexcept {
     return tool.writes || tool.outbound;
 }
@@ -92,7 +106,8 @@ namespace {
 /// checker settles -- allowed by the config, accept-edits, an `always` --
 /// never shows it.
 bool resolve(const Tool& tool, std::string_view target, std::string_view detail,
-             const std::function<std::string()>& late_detail, const DispatchContext& context) {
+             const std::function<std::string()>& late_detail, const DispatchContext& context,
+             std::string_view call_id) {
     // An address the gate cannot read is not one it can allow. The tool's own
     // parser is what named the target, so a call it could not name one for is
     // a call it would refuse anyway; denying here keeps that true even for a
@@ -101,7 +116,7 @@ bool resolve(const Tool& tool, std::string_view target, std::string_view detail,
         return false;
     }
 
-    const GateRequest request{tool.name, target, detail, tool.outbound, tool.edits};
+    const GateRequest request{tool.name, target, detail, tool.outbound, tool.edits, call_id};
     const Permission decision = context.permission ? context.permission(request) : Permission::Ask;
 
     switch (decision) {
@@ -123,14 +138,15 @@ bool resolve(const Tool& tool, std::string_view target, std::string_view detail,
         return context.confirm(request);
     }
     const std::string shown = late_detail();
-    return context.confirm(GateRequest{tool.name, target, shown, tool.outbound, tool.edits});
+    return context.confirm(
+        GateRequest{tool.name, target, shown, tool.outbound, tool.edits, call_id});
 }
 
 }  // namespace
 
 bool permitted_target(const Tool& tool, std::string_view target, std::string_view detail,
-                      const DispatchContext& context) {
-    return resolve(tool, target, detail, {}, context);
+                      const DispatchContext& context, std::string_view call_id) {
+    return resolve(tool, target, detail, {}, context, call_id);
 }
 
 namespace {
@@ -149,7 +165,8 @@ std::string refusal_reason(const Tool& tool, std::string_view target, std::strin
 
 }  // namespace
 
-bool permitted(const Tool& tool, std::string_view arguments, const DispatchContext& context) {
+bool permitted(const Tool& tool, std::string_view arguments, const DispatchContext& context,
+               std::string_view call_id) {
     // A read-only tool never prompts. Asking about every read trains the user
     // to approve without reading, which is worse than not asking.
     if (!gated(tool)) {
@@ -158,16 +175,26 @@ bool permitted(const Tool& tool, std::string_view arguments, const DispatchConte
     const std::string target =
         tool.describe_target ? tool.describe_target(arguments) : std::string{};
     if (!tool.describe_detail) {
-        return resolve(tool, target, {}, {}, context);
+        return resolve(tool, target, {}, {}, context, call_id);
     }
     return resolve(
-        tool, target, {}, [&tool, arguments] { return tool.describe_detail(arguments); }, context);
+        tool, target, {}, [&tool, arguments] { return tool.describe_detail(arguments); }, context,
+        call_id);
 }
 
 ToolOutcome dispatch(const ToolRegistry& registry, const harness::ToolCall& call,
                      const DispatchContext& context) {
+    // Each call's state, said as it moves (56a): pending before its gate,
+    // running where `[tool] <name>` is said, then done or failed.
+    const auto report = [&context, &call](ToolCallState state, std::string_view target) {
+        if (context.on_call) {
+            context.on_call(ToolCallReport{call.id, call.name, state, target});
+        }
+    };
     const Tool* tool = registry.find(call.name);
     if (tool == nullptr) {
+        report(ToolCallState::Pending, {});
+        report(ToolCallState::Failed, {});
         // A hallucinated tool name is an ERROR RESULT, not an exception. The
         // model reads it and picks a real tool; aborting the turn would throw
         // away the conversation over a name.
@@ -181,9 +208,28 @@ ToolOutcome dispatch(const ToolRegistry& registry, const harness::ToolCall& call
                            true};
     }
 
+    // What the call acts on, as the gate will be told it.
+    const std::string named =
+        tool->describe_target ? tool->describe_target(call.arguments) : std::string{};
+    report(ToolCallState::Pending, named);
+    // A gate that throws ends the call `failed` before the turn unwinds: the
+    // turn cancelled while its question was open (`CancelledError`), or a
+    // driver gone mid-question. The call never ran, and no surface is left
+    // drawing it as `pending` -- a cancelled question is a no, as the
+    // question's own answers have it.
+    const auto asked = [&report, &named](const auto& gate) {
+        try {
+            return gate();
+        } catch (...) {
+            report(ToolCallState::Failed, named);
+            throw;
+        }
+    };
+
     if (tool->outbound) {
-        const std::string target = tool->describe_target(call.arguments);
+        const std::string& target = named;
         if (target.empty()) {
+            report(ToolCallState::Failed, named);
             return ToolOutcome{"Error: could not tell which website '" + call.name +
                                    "' would reach from these arguments, so nothing was sent. "
                                    "Give an absolute http or https URL.",
@@ -191,7 +237,8 @@ ToolOutcome dispatch(const ToolRegistry& registry, const harness::ToolCall& call
         }
         const std::string detail =
             tool->describe_detail ? tool->describe_detail(call.arguments) : std::string{};
-        if (!permitted_target(*tool, target, detail, context)) {
+        if (!asked([&] { return permitted_target(*tool, target, detail, context, call.id); })) {
+            report(ToolCallState::Failed, named);
             return ToolOutcome{"Error: permission to reach " + target +
                                    " was not given, so nothing was sent to it. " +
                                    refusal_reason(*tool, target, detail, context) +
@@ -199,10 +246,9 @@ ToolOutcome dispatch(const ToolRegistry& registry, const harness::ToolCall& call
                                    "instead.",
                                true};
         }
-    } else if (!permitted(*tool, call.arguments, context)) {
-        const std::string target =
-            tool->describe_target ? tool->describe_target(call.arguments) : std::string{};
-        const std::string reason = refusal_reason(*tool, target, {}, context);
+    } else if (!asked([&] { return permitted(*tool, call.arguments, context, call.id); })) {
+        report(ToolCallState::Failed, named);
+        const std::string reason = refusal_reason(*tool, named, {}, context);
         return ToolOutcome{
             (reason.empty() ? "Error: the user denied permission to run '" + call.name + "'. "
                             : "Error: '" + call.name + "' was not run: " + reason) +
@@ -214,13 +260,14 @@ ToolOutcome dispatch(const ToolRegistry& registry, const harness::ToolCall& call
     if (context.on_status) {
         context.on_status("[tool] " + call.name);
     }
+    report(ToolCallState::Running, named);
 
     ToolOutcome outcome;
     try {
         if (tool->run_gated) {
-            const TargetGate gate = [tool, &context](std::string_view target,
-                                                     std::string_view detail) {
-                return permitted_target(*tool, target, detail, context);
+            const TargetGate gate = [tool, &context, &call](std::string_view target,
+                                                            std::string_view detail) {
+                return permitted_target(*tool, target, detail, context, call.id);
             };
             outcome = tool->run_gated(call.arguments, gate);
         } else {
@@ -234,6 +281,7 @@ ToolOutcome dispatch(const ToolRegistry& registry, const harness::ToolCall& call
     // What the tool found, made text: history, the session file, the next
     // request and an MCP client's frame are each a strict JSON dump.
     outcome.content = harness::valid_utf8(outcome.content);
+    report(outcome.is_error ? ToolCallState::Failed : ToolCallState::Done, named);
 
     if (context.on_status) {
         context.on_status("");

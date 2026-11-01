@@ -38,6 +38,12 @@ struct ChildCommand {
     /// injects credentials of its own can silently redirect a user's
     /// subscription plan to per-token billing.
     std::vector<std::pair<std::string, std::string>> extra_environment;
+
+    /// The folder the child starts in (56a), applied in the spawn; empty
+    /// starts it where this process stands, as every child started before.
+    /// Everything the child starts in turn inherits it. A folder that does not
+    /// exist fails the start, naming it.
+    std::string working_directory{};
 };
 
 /// Why a read stopped.

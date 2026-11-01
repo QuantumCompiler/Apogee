@@ -22,9 +22,10 @@ thread_local DelegateContext* current_context = nullptr;
 /// The sub-session's tool lines, said as side calls in the parent (26n):
 /// each opened when its tool starts and closed when the next step does, so
 /// the parent's surface draws them inside its thinking block as a consult's
-/// are -- and machine mode says them as `tool_status`. The sub-session's own
-/// answer and reasoning are never shown: the parent reads the answer as the
-/// tool's result.
+/// are -- and machine mode says them as `tool_status`; each call's states go
+/// to the parent as its own calls' do (56a). The sub-session's own answer and
+/// reasoning are never shown: the parent reads the answer as the tool's
+/// result.
 class Narrator final : public agentloop::Reporter {
 public:
     explicit Narrator(agentloop::Reporter* parent) : parent_{parent} {}
@@ -36,6 +37,15 @@ public:
         }
         open_ = agentloop::SideCall{.role = "delegate", .detail = std::string{detail}};
         parent_->on_side_call(*open_);
+    }
+
+    /// Each sub-call's state, to the parent's surface as its own calls' (56a):
+    /// the sub-session asks the parent's gate under the call's id, so a host
+    /// that draws each call draws this one too, and sees it end.
+    void on_tool_call(const agent::ToolCallReport& report) override {
+        if (parent_ != nullptr) {
+            parent_->on_tool_call(report);
+        }
     }
 
     void on_thinking() override {

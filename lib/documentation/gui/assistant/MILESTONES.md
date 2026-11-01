@@ -2754,3 +2754,22 @@ Twenty-two of 35 new cases failed first. The rest pin the older binary and the d
 **Not done:**
 - The build path is proven on the stubbed `gh` only: the first real proof is the next release pull request's rehearsal (`gh workflow run CI --ref <branch> -f release_rehearsal_pr=<PR>`), the first whose Darwin artifact carries a `.source`.
 - Notarization and a Developer ID stay out (the 2026-10-20 call).
+
+### 2026-11-01 — the session reads the CLI's `tool_call` (beside the CLI's 56a)
+
+**Why.** The CLI's 56a (`apogee acp`, [its record](../../cli/assistant/MILESTONES.md#milestone-as--apogee-in-xcode)) grew machine mode a `tool_call` event for every driver: each dispatched call's state, `pending`, `running`, then `done` or `failed`, keyed on the model's call id -- at least three events a call. The app's decoder had no case for it, so each decoded as `unknown`, and the transcript keeps an unknown event as a quiet row ("apogee said something this app does not know yet: tool_call"), with nothing folding repeats. A development build driving an `apogee-dev` from v0.2.1 would have drawn three or more of those rows for every tool call. 56a's review found it, and that no item owned it: 5a classifies `acp` and nothing more.
+
+- [x] **`DataProtocol`**: `ProtocolEvent.Kind.toolCall(ToolCall)` -- `id`, `name`, `state` as written (a state a later build adds kept as it is), `target` when the tool names one. One missing its `id`, `name` or `state` is kept as `unknown`, as every known type is.
+- [x] **`Transcript`** folds a `toolCall` into no row. The call is drawn by its `tool_status` line (`[tool] <name>`) in the activity row, which the CLI keeps writing, so the session reads as it did before the event.
+
+**Decisions made** (2026-11-01, recorded for veto): built with the CLI item that grew the event, through this home's docs flow, as the CLI's M19 rebuild was on 2026-10-31 -- the conservative route of the two the review offered, since it changes nothing a person sees; the other was a GUI backlog item, with the noise standing until it shipped. A card per call, as an ACP host draws one, is not drawn: the design has none.
+
+**Verified.**
+- `EventDecoderTests/toolCall` (new): a pending call with its target, a done call naming none, a later state kept as written, and one with no id kept as `unknown`.
+- `TranscriptTests/toolCallsAddNoRow` (new): a turn with a read's three states and a call to no such tool folds to the same rows as the turn without them -- the user's line, the activity with `[tool] read_file`, the answer -- and ends ready.
+- `lib/scripts/cicd.sh --test`, with the CLI's 56a: the CLI's 4,116 tests passed (one skipped, no `pdftotext`). The app's run had one failure, `JobGroupTests/stopEndsTheJob` (a grandchild's PID file not seen within its 2 s wait, the CLI's suite just ended), which nothing here touches: it passed 3 of 3 alone, and the app's whole suite then passed through `cicd.sh --app darwin --test`, 981 of 981 cases (979 before), with no Swift warning.
+- Run again with the CLI's last 56a fixes, which end a call stopped at its permission question `failed` rather than leave it `pending` -- a state this decoder already reads, so nothing here changed: the full gate's own app run passed 981 of 981 (the xcresult's `totalTestCount`), no failure.
+
+**Not done:**
+- No live pass of the app (M18 has not shipped).
+- The recorded `mock-actor.jsonl` predates the event; its next re-recording (`scripts/capture-fixture.sh`) will carry `tool_call` lines, which now decode, so `EventDecoderTests/recordedStream` stays green.

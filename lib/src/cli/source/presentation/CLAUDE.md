@@ -1,8 +1,8 @@
 # The Presentation layer
 
-**Position.** The top of the four ([ADR 0001](../../../../documentation/cli/adrs/layer-enforcement.md)): how Apogee is shown and driven -- the command line, the terminal views, the full-screen shell, machine mode, the HTTP server.
+**Position.** The top of the four ([ADR 0001](../../../../documentation/cli/adrs/layer-enforcement.md)): how Apogee is shown and driven -- the command line, the terminal views, the full-screen shell, machine mode, ACP, the HTTP server.
 
-**Modules:** `markdown`, `render`, `views`, `machine`, `operations`, `httpserver`, `tui`, `cli` -- one static library each, `apogee_presentation_<module>`, linked as its row in [`cmake/modules.cmake`](../../cmake/modules.cmake) says ([ADR 0008](../../../../documentation/cli/adrs/module-map.md)).
+**Modules:** `markdown`, `render`, `views`, `machine`, `operations`, `httpserver`, `tui`, `acp`, `cli` -- one library each, `apogee_presentation_<module>`, linked as [`cmake/modules.cmake`](../../cmake/modules.cmake) says ([ADR 0008](../../../../documentation/cli/adrs/module-map.md)).
 
 **May include:** every layer.
 

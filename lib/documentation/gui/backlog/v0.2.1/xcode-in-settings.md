@@ -1,7 +1,7 @@
 # Xcode in Settings
 
 **What / why.** The user asked whether Apogee could plug into Xcode. The research of 2026-10-31 (five angles, each checked by a skeptic, then a completeness critic) found two routes. Both run over pipes, and both belong to the CLI:
-- **Apogee as an agent in Xcode.** Xcode 26.6 and later starts any Agent Client Protocol (ACP) agent that a person adds under Xcode › Settings › Intelligence › Agents › "Add an Agent" (Apple, *Setting up coding intelligence*). The CLI's track 56 makes Apogee one: `apogee acp`, the fifth core surface the CLI SPEC gained that day ([SPEC.md](../../../cli/assistant/SPEC.md), line 32; [56a](../../../cli/backlog/v0.2.1/acp-agent-mode.md)).
+- **Apogee as an agent in Xcode.** Xcode 26.6 and later starts any Agent Client Protocol (ACP) agent that a person adds under Xcode › Settings › Intelligence › Agents › "Add an Agent" (Apple, *Setting up coding intelligence*). The CLI's track 56 makes Apogee one: `apogee acp`, the fifth core surface the CLI SPEC gained that day ([SPEC.md](../../../cli/assistant/SPEC.md), line 32; [56a](../../../cli/assistant/MILESTONES.md#milestone-as--apogee-in-xcode)).
 - **Xcode's tools in Apogee.** Since Xcode 26.3, Xcode is an MCP server, reached through `xcrun mcpbridge` once Xcode's "Allow external agents to use Xcode tools" is on and a project is open (Apple, *Giving external agents access to Xcode*). The CLI's [56d](../../../cli/backlog/v0.2.1/xcode-setup-from-apogee.md) adds an `xcode` MCP preset and `check` rows for Xcode. It also adds `apogee acp registration`, which prints the fields Xcode's sheet asks for.
 
 The app has no place for any of this (wall **W7**). Measured, not guessed (2026-10-31, by reading the source on `v0.2.1`):
@@ -119,7 +119,7 @@ The app writes nothing into Xcode's settings: the person adds the agent in Xcode
 
 This item closes wall **W7**. W3, Xcode's trust tied to signing, is not fixed here; it is shown here in the CLI's words.
 
-Its CLI siblings are [56a](../../../cli/backlog/v0.2.1/acp-agent-mode.md) (`apogee acp`), [56b](../../../cli/backlog/v0.2.1/acp-host-tools.md) (Xcode's tools in an ACP session), [56c](../../../cli/backlog/v0.2.1/acp-sessions-saved.md) (ACP sessions saved) and 56d (the documents read here).
+Its CLI siblings are [56a](../../../cli/assistant/MILESTONES.md#milestone-as--apogee-in-xcode) (`apogee acp`, shipped 2026-11-01), [56b](../../../cli/backlog/v0.2.1/acp-host-tools.md) (Xcode's tools in an ACP session), [56c](../../../cli/backlog/v0.2.1/acp-sessions-saved.md) (ACP sessions saved) and 56d (the documents read here).
 
 Out of scope:
 - writing Xcode's settings or its `~/Library/Developer/Xcode/CodingAssistant` folders;

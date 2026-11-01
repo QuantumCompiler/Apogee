@@ -1,6 +1,7 @@
 #include "platform/child_process.h"
 
 #include <array>
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -8,6 +9,10 @@
 #include <string>
 #include <system_error>
 #include <vector>
+
+#if defined(__APPLE__)
+#include <Availability.h>
+#endif
 
 #if !defined(_WIN32)
 #include <fcntl.h>
@@ -98,6 +103,24 @@ void suppress_sigpipe(int fd) {
     (void)fd;
     static std::once_flag once;
     std::call_once(once, [] { ::signal(SIGPIPE, SIG_IGN); });
+#endif
+}
+
+/// Adds "change into `folder`" to a spawn's actions (56a), by the call the
+/// platform has: POSIX 2024's on a macOS 26 target, where the older `_np`
+/// spelling is deprecated, and that spelling before it and on glibc 2.29 and
+/// later. Elsewhere it fails, and the start is refused saying so.
+[[nodiscard]] int add_chdir(posix_spawn_file_actions_t& actions, const char* folder) {
+#if defined(__APPLE__) && defined(__MAC_OS_X_VERSION_MIN_REQUIRED) && \
+    __MAC_OS_X_VERSION_MIN_REQUIRED >= 260000
+    return posix_spawn_file_actions_addchdir(&actions, folder);
+#elif defined(__APPLE__) || \
+    (defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 29)))
+    return posix_spawn_file_actions_addchdir_np(&actions, folder);
+#else
+    (void)actions;
+    (void)folder;
+    return ENOSYS;
 #endif
 }
 
@@ -395,6 +418,16 @@ std::unique_ptr<ChildProcess> start_child(const ChildCommand& command, std::stri
         error = "'" + command.program + "' was not found on PATH";
         return nullptr;
     }
+    if (!command.working_directory.empty()) {
+        // Said here, by name, rather than as the spawn's errno: a folder that
+        // is not there is the caller's to report.
+        std::error_code code;
+        if (!std::filesystem::is_directory(command.working_directory, code)) {
+            error = "could not start '" + resolved + "' in " + command.working_directory +
+                    ": no such folder";
+            return nullptr;
+        }
+    }
 
     // Three pipes: to the child's stdin, from its stdout, from its stderr.
     std::array<int, 2> in{-1, -1};
@@ -439,6 +472,16 @@ std::unique_ptr<ChildProcess> start_child(const ChildCommand& command, std::stri
 #elif defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 34))
     posix_spawn_file_actions_addclosefrom_np(&actions, STDERR_FILENO + 1);
 #endif
+    // The child's folder (56a), changed into in the child before it runs, so
+    // this process's own folder never moves -- every thread here reads it.
+    if (!command.working_directory.empty() &&
+        add_chdir(actions, command.working_directory.c_str()) != 0) {
+        posix_spawn_file_actions_destroy(&actions);
+        posix_spawnattr_destroy(&attributes);
+        error = "could not start '" + resolved + "' in " + command.working_directory +
+                ": this platform cannot start a child in another folder";
+        return nullptr;
+    }
 
     std::vector<std::string> storage;
     storage.push_back(resolved);

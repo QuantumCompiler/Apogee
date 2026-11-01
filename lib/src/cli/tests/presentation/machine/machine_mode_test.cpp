@@ -773,6 +773,42 @@ TEST_CASE("a permission prompt is a question event with kind, tool and target",
     CHECK(labels == std::vector<std::string>{"yes", "no", "always", "session"});
 }
 
+TEST_CASE("a tool call is a tool_call event as it moves, and a permission question names it",
+          "[commands][machine][tools]") {
+    // 56a: the structured twin of tool_status, for a driver that draws each
+    // call -- the id the model gave it, the tool, the state, the target.
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    reporter.begin_turn(4);
+    reporter.on_tool_call(apogee::agent::ToolCallReport{
+        "call-7", "write_file", apogee::agent::ToolCallState::Pending, "notes/out.txt"});
+    reporter.emit_permission_question(apogee::agent::GateRequest{
+        .tool = "write_file", .target = "notes/out.txt", .edits = true, .call_id = "call-7"});
+    reporter.on_tool_call(apogee::agent::ToolCallReport{
+        "call-7", "write_file", apogee::agent::ToolCallState::Running, "notes/out.txt"});
+    reporter.on_tool_call(
+        apogee::agent::ToolCallReport{"call-8", "git_status", apogee::agent::ToolCallState::Done});
+    // Asked outside a call, a question names none.
+    reporter.emit_permission_question(apogee::agent::GateRequest{"run_command", "make"});
+    reporter.end_turn();
+
+    const std::vector<nlohmann::json> lines = events(out.str());
+    REQUIRE(lines.size() == 5);
+    CHECK(lines[0] == nlohmann::json{{"type", "tool_call"},
+                                     {"id", "call-7"},
+                                     {"name", "write_file"},
+                                     {"state", "pending"},
+                                     {"target", "notes/out.txt"},
+                                     {"turn", 4}});
+    CHECK(lines[1].at("type") == "question");
+    CHECK(lines[1].at("tool_call_id") == "call-7");
+    CHECK(lines[2].at("state") == "running");
+    // A tool that names no target carries none -- absent, not empty.
+    CHECK_FALSE(lines[3].contains("target"));
+    CHECK(lines[3].at("state") == "done");
+    CHECK_FALSE(lines[4].contains("tool_call_id"));
+}
+
 TEST_CASE("an outbound permission prompt names the host, flags it, and carries the URL",
           "[commands][machine][permission]") {
     std::ostringstream out;
@@ -1058,7 +1094,14 @@ TEST_CASE("the session's own doors parse: detach, set, compact", "[commands][mac
     CHECK(refused.refused == std::vector<std::string>{"think", "max_tokens"});
     CHECK(refused.settings == std::vector<std::pair<std::string, std::string>>{{"effort", "high"}});
     CHECK(apogee::commands::settable_keys() ==
-          std::vector<std::string_view>{"model", "system", "think", "effort", "temperature"});
+          std::vector<std::string_view>{"model", "system", "think", "effort", "temperature",
+                                        "permission_mode"});
+    // 56a: the permission mode, as --permission-mode spells it.
+    const DriverMessage mode =
+        apogee::commands::parse_driver_line(R"({"type":"set","permission_mode":"plan"})");
+    CHECK(mode.refused.empty());
+    CHECK(mode.settings ==
+          std::vector<std::pair<std::string, std::string>>{{"permission_mode", "plan"}});
 }
 
 TEST_CASE("a private session says so on its session event", "[commands][machine][private]") {
@@ -1387,6 +1430,10 @@ TEST_CASE("every event every emitter writes is the declaration's, field for fiel
     reporter.on_thinking_budget_reached();
     reporter.on_thinking_token("hmm");
     reporter.on_tool_status("read_file x");
+    reporter.on_tool_call(apogee::agent::ToolCallReport{
+        "call-1", "read_file", apogee::agent::ToolCallState::Pending, "x"});
+    reporter.on_tool_call(
+        apogee::agent::ToolCallReport{"call-1", "todo_write", apogee::agent::ToolCallState::Done});
     apogee::agentloop::SideCall side;
     side.role = "utility";
     side.detail = "titling";
@@ -1400,6 +1447,8 @@ TEST_CASE("every event every emitter writes is the declaration's, field for fiel
     reporter.emit_question(one_question());
     reporter.emit_permission_question(
         apogee::agent::GateRequest{"fetch_url", "example.test", "https://example.test/x", true});
+    reporter.emit_permission_question(apogee::agent::GateRequest{
+        .tool = "write_file", .target = "out.txt", .edits = true, .call_id = "call-2"});
     apogee::harness::ChatResponse response;
     response.message = apogee::harness::ChatMessage::assistant("hi");
     response.model = "m";

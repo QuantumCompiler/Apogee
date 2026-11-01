@@ -161,7 +161,34 @@ constexpr std::array<FieldSpec, 4> kQuestionEntry{{
     {"options", "array", true, "Offered answers -- free text is always accepted too.", kOption, {}},
 }};
 
-constexpr std::array<FieldSpec, 6> kQuestion{{
+constexpr std::array<FieldSpec, 4> kToolCall{{
+    {"id",
+     "string",
+     true,
+     "The model's id for the call, as every later event of it names it. It can repeat where "
+     "the provider's wire gives none (Gemini's API uses the tool's name): a pending event "
+     "under an id seen before is a new call.",
+     {},
+     {}},
+    {"name", "string", true, "The tool.", {}, {}},
+    {"state",
+     "string",
+     true,
+     "pending (before its gate), running, done or failed (an error, a refusal, no such tool, "
+     "a turn stopped while its permission prompt waited) -- every pending call ends done or "
+     "failed; more may be added.",
+     {},
+     {}},
+    {"target",
+     "string",
+     false,
+     "What it acts on, as the gate is told: a path, a command, a host; absent when the tool "
+     "names none.",
+     {},
+     {}},
+}};
+
+constexpr std::array<FieldSpec, 7> kQuestion{{
     {"questions",
      "array",
      true,
@@ -183,6 +210,12 @@ constexpr std::array<FieldSpec, 6> kQuestion{{
      false,
      "An outbound question: the whole URL. A write_file or edit_file question: the change as "
      "a unified diff, cut at 32 KB with a last line saying so.",
+     {},
+     {}},
+    {"tool_call_id",
+     "string",
+     false,
+     "A permission question: the id of the tool_call it asks about.",
      {},
      {}},
 }};
@@ -394,7 +427,7 @@ constexpr std::array<FieldSpec, 1> kDetachLine{{
     {"path", "string", true, "The attachment to detach, by the name it was attached as.", {}, {}},
 }};
 
-constexpr std::array<FieldSpec, 5> kSetLine{{
+constexpr std::array<FieldSpec, 6> kSetLine{{
     {"model",
      "string",
      false,
@@ -410,11 +443,18 @@ constexpr std::array<FieldSpec, 5> kSetLine{{
      "The sampling temperature, as /temperature takes it.",
      {},
      {}},
+    {"permission_mode",
+     "string",
+     false,
+     "manual, accept-edits, plan, dont-ask or bypass, as --permission-mode takes it; bypass "
+     "only in a session launched allowing it.",
+     {},
+     {}},
 }};
 
 // --- the lines -----------------------------------------------------------------
 
-constexpr std::array<LineSpec, 31> kOutbound{{
+constexpr std::array<LineSpec, 32> kOutbound{{
     LineSpec{"session",
              "Once, first, unprompted: the protocol version, the model, the session's "
              "capabilities.",
@@ -425,6 +465,8 @@ constexpr std::array<LineSpec, 31> kOutbound{{
     LineSpec{"memory", "What a turn was handed from earlier conversations.", kMemory},
     LineSpec{"sources", "The excerpts retrieval sent the model, before the answer.", kSources},
     LineSpec{"tool_status", "A tool running, or another model call the turn makes.", kText},
+    LineSpec{"tool_call", "One tool call's state, as it moves: pending, running, done, failed.",
+             kToolCall},
     LineSpec{"notice", "A line for the user that is neither progress nor an error.", kText},
     LineSpec{"todo", "The session's todo, whole, as the model last wrote it.", kTodo},
     LineSpec{"answer_start", "An answer begins.", {}},

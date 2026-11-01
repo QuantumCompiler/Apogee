@@ -286,6 +286,10 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/read_documents_test.cpp
     presentation/cli/mcp_presets_cmd_test.cpp
     presentation/cli/mcp_serve_test.cpp
+    presentation/cli/acp_cmd_test.cpp
+    presentation/acp/jsonrpc_test.cpp
+    presentation/acp/server_test.cpp
+    presentation/acp/translate_test.cpp
     presentation/cli/review_cmd_test.cpp
     presentation/cli/review_mr_test.cpp
     presentation/cli/system_cmd_test.cpp
@@ -1198,6 +1202,20 @@ if(UNIX)
                 ${CMAKE_CURRENT_BINARY_DIR}/reference-driver-home
         )
         set_tests_properties(cli.reference_driver PROPERTIES TIMEOUT 120)
+
+        # `apogee acp` (56a) driven as an ACP host drives it -- Xcode's Add an
+        # Agent -- over pipes: the protocol, a session in a project folder,
+        # prompts, cancel, every permission answer, repeated call ids, a mode
+        # chosen mid-sheet, switching, bad input, a dying child, notices, and
+        # the protocol's own examples replayed.
+        add_test(NAME cli.acp_conformance
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/acp_host_check.py"
+                $<TARGET_FILE:apogee>
+                ${CMAKE_CURRENT_BINARY_DIR}/acp-conformance-home
+                "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/acp"
+        )
+        set_tests_properties(cli.acp_conformance PROPERTIES TIMEOUT 300)
 
         # The protocol document, pinned to the code that implements it. A GUI
         # author trusts that document and debugs Apogee for faults that are

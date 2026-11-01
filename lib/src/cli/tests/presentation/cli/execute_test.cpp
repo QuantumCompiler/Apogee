@@ -1197,10 +1197,13 @@ TEST_CASE("a driver sees the model's play as ordinary tool-call narration, no ne
     std::string err;
     REQUIRE(home.run({"execute", "--suite", "orch", "--output-format", "stream-json"}, &out, &err,
                      "{\"type\":\"user\",\"text\":\"go\"}\n") == 0);
-    // `notice` is the suite's admission, said after `session` since M29.
-    const std::set<std::string> known{"session",      "notice",       "thinking",   "tool_status",
-                                      "answer_start", "answer_delta", "answer_end", "result"};
+    // `notice` is the suite's admission, said after `session` since M29; and
+    // since 56a every call is a `tool_call` as it moves, a play's as any.
+    const std::set<std::string> known{"session",      "notice",     "thinking",
+                                      "tool_status",  "tool_call",  "answer_start",
+                                      "answer_delta", "answer_end", "result"};
     std::vector<std::string> statuses;
+    std::vector<std::string> states;
     std::istringstream lines{out};
     for (std::string line; std::getline(lines, line);) {
         const nlohmann::json event = nlohmann::json::parse(line);
@@ -1208,7 +1211,12 @@ TEST_CASE("a driver sees the model's play as ordinary tool-call narration, no ne
         if (event.at("type") == "tool_status") {
             statuses.push_back(event.at("text").get<std::string>());
         }
+        if (event.at("type") == "tool_call") {
+            CHECK(event.at("name") == "play_echo2");
+            states.push_back(event.at("state").get<std::string>());
+        }
     }
+    CHECK(states == std::vector<std::string>{"pending", "running", "done"});
     // The call, the labeled line -- the model's choice and its cost -- and a
     // line for each stage.
     REQUIRE(statuses.size() == 4);

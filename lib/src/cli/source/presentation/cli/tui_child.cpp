@@ -3,6 +3,7 @@
 #include <chrono>
 #include <memory>
 #include <optional>
+#include <system_error>
 #include <utility>
 
 #include "cli/line_tokens.h"
@@ -37,6 +38,15 @@ struct Lines {
     }
 };
 
+/// `path` made absolute against this process's folder, so a child started in
+/// another (an ACP session, in its project) names the same file; as given
+/// when the folder cannot be read.
+[[nodiscard]] std::string absolute_here(const std::filesystem::path& path) {
+    std::error_code code;
+    const std::filesystem::path absolute = std::filesystem::absolute(path, code);
+    return code ? path.string() : absolute.string();
+}
+
 }  // namespace
 
 platform::ChildCommand self_command(const RootContext& context, const std::filesystem::path& binary,
@@ -44,12 +54,13 @@ platform::ChildCommand self_command(const RootContext& context, const std::files
     platform::ChildCommand command;
     command.program = binary.string();
     if (!context.config_path.empty()) {
-        command.arguments = {"--config", context.config_path};
+        command.arguments = {"--config", absolute_here(context.config_path)};
     }
     command.arguments.insert(command.arguments.end(), words.begin(), words.end());
     // The root this shell runs under, whichever rung chose it.
     try {
-        command.extra_environment.emplace_back("APOGEE_HOME", harness::apogee_home().string());
+        command.extra_environment.emplace_back("APOGEE_HOME",
+                                               absolute_here(harness::apogee_home()));
     } catch (const std::exception&) {
         // No root resolved: the child resolves its own, and says why it cannot.
     }

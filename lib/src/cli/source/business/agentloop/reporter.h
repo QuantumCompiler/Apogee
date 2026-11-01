@@ -4,6 +4,7 @@
 #include <string_view>
 #include <vector>
 
+#include "agent/tool.h"
 #include "agentloop/side_call.h"
 #include "contracts/todo.h"
 #include "contracts/types.h"
@@ -81,6 +82,15 @@ public:
     /// empty string -- the return to rest is signalled by the next
     /// on_thinking.
     virtual void on_tool_status(std::string_view) {}
+
+    /// One tool call's state as dispatch moves it (56a) -- pending before its
+    /// gate, running, then done or failed -- keyed on the model's call id,
+    /// beside `on_tool_status`'s line, which every terminal surface keeps
+    /// drawing. Machine mode says it as a `tool_call` event, for a driver that
+    /// draws each call (an ACP host's tool cards); everything else ignores it.
+    virtual void on_tool_call(const agent::ToolCallReport& report) {
+        (void)report;
+    }
 
     /// A line from the provider the user should read, and keep: neither
     /// progress nor an error (`harness::StatusEvent::Type::Notice`). A local

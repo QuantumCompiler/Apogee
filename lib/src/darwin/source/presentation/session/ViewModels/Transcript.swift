@@ -385,6 +385,11 @@ public struct Transcript: Equatable {
         case .toolStatus(let text):
             updateActivity(turn) { $0.lines.append(text) }
             setStatus(.working(turn: turn ?? 0))
+        case .toolCall:
+            // A call's states (the CLI's 56a) are for a driver that draws a
+            // card per call, an ACP host's; here the call is its `tool_status`
+            // line in the activity row, so its states add no row.
+            break
         case .memory(let chats, let decisions):
             let named = event.recalled
             if named.isEmpty {

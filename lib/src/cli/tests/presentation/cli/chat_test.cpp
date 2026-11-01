@@ -2191,15 +2191,48 @@ TEST_CASE("a set line names what it refuses and sets nothing; a model moves the 
     const std::vector<std::string> notices = notices_of(driven_events(chat.out));
     CHECK(said(notices,
                "set: 'max_tokens' is not a setting a session moves, as text -- model, system, "
-               "think, effort or temperature; nothing was set"));
+               "think, effort, temperature or permission_mode; nothing was set"));
     CHECK(std::ranges::any_of(notices, [](const std::string& line) {
         return line.starts_with("set effort: not an effort level: 'loud'");
     }));
-    CHECK(said(notices, "set: nothing to set -- model, system, think, effort or temperature"));
+    CHECK(said(notices,
+               "set: nothing to set -- model, system, think, effort, temperature or "
+               "permission_mode"));
     CHECK(said(notices, "switched to helper -- from the next turn"));
     const apogee::logger::Session session = HelperChat::only_session();
     CHECK(session.params.system_prompt.empty());  // the refused line set nothing
     CHECK(session.backend == "helper");
+}
+
+TEST_CASE("a set line moves the permission mode, bypass only where the launch allowed it",
+          "[chat][cli][machine][doors][modes]") {
+    // 56a: `/permission-mode`'s setting through the driver's door -- what an
+    // ACP host's mode menu sends -- in the words --permission-mode takes.
+    HelperChat chat{texts({"one"}), {"Title"}};
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat", "--input-format", "stream-json", "--output-format", "stream-json"},
+                     std::string{R"({"type":"set","permission_mode":"plan"})"} + "\n" +
+                         R"({"type":"set","permission_mode":"bypass"})" + "\n" +
+                         R"({"type":"set","permission_mode":"reckless"})" + "\n") == 0);
+    const std::vector<std::string> notices = notices_of(driven_events(chat.out));
+    CHECK(std::ranges::any_of(notices, [](const std::string& line) {
+        return line.starts_with("permission mode: plan -- ") &&
+               line.ends_with(" -- from the next turn");
+    }));
+    CHECK(said(notices,
+               "set permission_mode: bypass needs --allow-bypass (or --permission-mode bypass) at "
+               "launch -- permission mode: plan"));
+    CHECK(said(notices,
+               "set permission_mode: not a permission mode: 'reckless' (manual, accept-edits, "
+               "plan, dont-ask or bypass)"));
+
+    REQUIRE(chat.run({"chat", "--input-format", "stream-json", "--output-format", "stream-json",
+                      "--allow-bypass"},
+                     std::string{R"({"type":"set","permission_mode":"bypass"})"} + "\n") == 0);
+    const std::vector<std::string> allowed = notices_of(driven_events(chat.out));
+    CHECK(std::ranges::any_of(allowed, [](const std::string& line) {
+        return line.starts_with("permission mode: bypass -- ");
+    }));
 }
 
 TEST_CASE("detach and compact lines reach the chat's own detach and compaction",

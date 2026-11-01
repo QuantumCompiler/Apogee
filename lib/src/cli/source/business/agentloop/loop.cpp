@@ -365,6 +365,10 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
             reporter.on_tool_status(detail);
         }
     };
+    // Each call's state, for a surface that draws each call (56a).
+    dispatch_context.on_call = [&reporter](const agent::ToolCallReport& report) {
+        reporter.on_tool_call(report);
+    };
 
     // Whether this run's reasoning is summarised, and by whom (43) -- or, when
     // a surface asked and none can be had, why, said once.

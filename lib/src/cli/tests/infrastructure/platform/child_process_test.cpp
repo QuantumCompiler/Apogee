@@ -4,7 +4,10 @@
 
 #include <array>
 #include <chrono>
+#include <filesystem>
+#include <random>
 #include <string>
+#include <system_error>
 
 #if !defined(_WIN32)
 #include <fcntl.h>
@@ -264,4 +267,52 @@ TEST_CASE("a child inherits its three pipes and nothing else the parent holds",
     ::close(held[0]);
     ::close(held[1]);
 #endif
+}
+
+TEST_CASE("a child starts in the folder it is given, and where this process stands without one",
+          "[platform][child]") {
+    // 56a: an ACP session's apogee runs in the host's project folder, and
+    // everything it starts inherits that folder -- while this process's own
+    // never moves.
+    if (!apogee::platform::supports_child_processes()) {
+        SUCCEED("no child-process support on this platform");
+        return;
+    }
+    std::error_code code;
+    const std::filesystem::path here = std::filesystem::current_path(code);
+    const std::filesystem::path folder =
+        std::filesystem::temp_directory_path() /
+        ("apogee-child-folder-" + std::to_string(std::random_device{}()) + " with a space");
+    std::filesystem::create_directories(folder);
+
+    const auto pwd_of = [](const ChildCommand& command) {
+        std::string error;
+        auto child = apogee::platform::start_child(command, error);
+        INFO(error);
+        REQUIRE(child != nullptr);
+        child->close_stdin();
+        std::string out = drain(*child, std::chrono::seconds{5});
+        while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) {
+            out.pop_back();
+        }
+        return out;
+    };
+
+    ChildCommand command;
+    command.program = "sh";
+    command.arguments = {"-c", "pwd -P"};
+    CHECK(pwd_of(command) == std::filesystem::canonical(here).string());
+
+    command.working_directory = folder.string();
+    CHECK(pwd_of(command) == std::filesystem::canonical(folder).string());
+    CHECK(std::filesystem::current_path(code) == here);
+
+    // A folder that is not there is refused by name, before anything starts.
+    command.working_directory = (folder / "missing").string();
+    std::string error;
+    CHECK(apogee::platform::start_child(command, error) == nullptr);
+    CHECK(error.find((folder / "missing").string()) != std::string::npos);
+    CHECK(error.find("no such folder") != std::string::npos);
+
+    std::filesystem::remove_all(folder, code);
 }

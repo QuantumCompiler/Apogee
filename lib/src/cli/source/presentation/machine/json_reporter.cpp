@@ -198,6 +198,17 @@ void JsonReporter::on_tool_status(std::string_view detail) {
     write(object);
 }
 
+void JsonReporter::on_tool_call(const agent::ToolCallReport& report) {
+    nlohmann::json object = event("tool_call");
+    object["id"] = std::string{report.id};
+    object["name"] = std::string{report.name};
+    object["state"] = std::string{agent::to_string(report.state)};
+    if (!report.target.empty()) {
+        object["target"] = std::string{report.target};
+    }
+    write(object);
+}
+
 void JsonReporter::on_clear_status() {
     // Erasing a transient indicator is a *terminal* concern -- there is nothing
     // to erase in a stream of records. Emitting an event for it would put a
@@ -280,6 +291,10 @@ void JsonReporter::emit_permission_question(const agent::GateRequest& request) {
     }
     if (!request.detail.empty()) {
         object["detail"] = std::string{request.detail};
+    }
+    if (!request.call_id.empty()) {
+        // The call it asks about (56a), as its `tool_call` events name it.
+        object["tool_call_id"] = std::string{request.call_id};
     }
     nlohmann::json entry;
     entry["header"] = "Permission";
@@ -702,7 +717,7 @@ DriverMessage parse_driver_line(std::string_view line) {
 }
 
 std::vector<std::string_view> settable_keys() {
-    return {"model", "system", "think", "effort", "temperature"};
+    return {"model", "system", "think", "effort", "temperature", "permission_mode"};
 }
 
 std::string describe_hello(const DriverMessage& hello) {

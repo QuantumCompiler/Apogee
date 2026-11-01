@@ -335,10 +335,13 @@ printf '{"type":"user","text":"what is the codeword?"}\n' \
     || fail "the driven consulting chat failed: $(cat "$WORK_DIR/consult-machine.err")"
 python3 - "$WORK_DIR/consult.jsonl" <<'PY' || fail "machine mode carried the consult unlike a tool call: $(cat "$WORK_DIR/consult.jsonl")"
 import json, sys
-known = {"session", "thinking", "thinking_delta", "memory", "tool_status", "notice",
+# Since 56a every call is a tool_call as it moves -- a consult as any.
+known = {"session", "thinking", "thinking_delta", "memory", "tool_status", "tool_call", "notice",
          "answer_start", "answer_delta", "answer_end", "result", "question", "error"}
 events = [json.loads(line) for line in open(sys.argv[1]) if line.strip()]
 assert all(event["type"] in known for event in events), [e["type"] for e in events]
+calls = [(e["name"], e["state"]) for e in events if e["type"] == "tool_call"]
+assert calls == [("consult", "pending"), ("consult", "running"), ("consult", "done")], calls
 statuses = [e["text"] for e in events if e["type"] == "tool_status"]
 assert "[tool] consult" in statuses, statuses
 assert "consult \u2014 asking utility (oracle): What is the codeword?" in statuses, statuses
@@ -421,10 +424,15 @@ echo draft >"$WORK_DIR/ws/notes/draft.md"
     || fail "the driven validated chat failed: $(cat "$WORK_DIR/validate-machine.err")"
 python3 - "$WORK_DIR/validate.jsonl" <<'PY' || fail "machine mode carried validation in an unknown shape: $(cat "$WORK_DIR/validate.jsonl")"
 import json, sys
-known = {"session", "thinking", "thinking_delta", "memory", "tool_status", "notice",
+known = {"session", "thinking", "thinking_delta", "memory", "tool_status", "tool_call", "notice",
          "answer_start", "answer_delta", "answer_end", "result", "question", "error"}
 events = [json.loads(line) for line in open(sys.argv[1]) if line.strip()]
 assert all(event["type"] in known for event in events), [e["type"] for e in events]
+# Since 56a a dispatched call is a tool_call as it moves: the call the
+# verifier objected to never ran, so only the revised one has a card.
+calls = [(e["name"], e["state"]) for e in events if e["type"] == "tool_call"]
+assert calls == [("delete_file", "pending"), ("delete_file", "running"),
+                 ("delete_file", "done")], calls
 notices = [e["text"] for e in events if e["type"] == "notice"]
 assert any(n.startswith("validate: utility (verifier) objected to delete_file") for n in notices), notices
 statuses = [e["text"] for e in events if e["type"] == "tool_status"]

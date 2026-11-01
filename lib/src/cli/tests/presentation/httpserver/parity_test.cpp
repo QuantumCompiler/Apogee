@@ -199,6 +199,9 @@ const std::map<std::string, Classification>& table() {
                    "there is deliberately no POST .../cycle/halt")},
         {"train cycle resume",
          carve_out("edits the cycle's state on the host; training control is CLI-only")},
+        {"acp",
+         carve_out("an ACP agent on this process's own stdio, spawned by an agent host such as "
+                   "Xcode (56a) -- pipes, never a port")},
         {"mcp serve",
          carve_out("the MCP server mode (54a): this process's own stdio, spawned by another MCP "
                    "host -- pipes, never a port")},

@@ -56,6 +56,20 @@ apogee_add_module(machine
 )
 target_link_libraries(apogee_presentation_machine PUBLIC nlohmann_json::nlohmann_json)
 
+# `apogee acp` (56a): the Agent Client Protocol on stdio, each session a
+# captured child of the binary's own execute in machine mode.
+apogee_add_module(acp
+    acp/jsonrpc.h
+    acp/jsonrpc.cpp
+    acp/translate.h
+    acp/translate.cpp
+    acp/session.h
+    acp/session.cpp
+    acp/server.h
+    acp/server.cpp
+)
+target_link_libraries(apogee_presentation_acp PUBLIC nlohmann_json::nlohmann_json)
+
 apogee_add_module(operations
     operations/backend_fields.h
     operations/backend_fields.cpp
@@ -239,6 +253,8 @@ apogee_add_module(cli
     cli/mcp_cmd.cpp
     cli/mcp_serve.h
     cli/mcp_serve.cpp
+    cli/acp_cmd.h
+    cli/acp_cmd.cpp
     cli/permissions.h
     cli/permissions.cpp
     cli/auth_cmd.h

@@ -336,3 +336,48 @@ TEST_CASE("with nothing started, a named backend is refused for itself before th
         CHECK(out.empty());
     }
 }
+
+TEST_CASE("a backend that cannot start is refused when switched to mid-session, as at launch",
+          "[chat][session][named-backend]") {
+    // 56a's review: `/model gone` and a driver's `set` took the name, and
+    // the next turn was answered by the default under it -- not even by the
+    // backend the session was on. The one setter refuses it in M26's words,
+    // and the session stays where it was.
+    const NamedHome home;
+    std::string out;
+    std::string err;
+    const std::string refusal = "backend 'gone' is configured but could not be started: ";
+    // Piped, the refusal is a line on stderr, and the answer the only one on
+    // stdout.
+    REQUIRE(home.run({"chat", "-m", "helper"}, out, err, "/model gone\nhi\n") == 0);
+    CHECK(err.find(refusal) != std::string::npos);
+    CHECK(err.find(" (started backends: helper, root)\n") != std::string::npos);
+    CHECK(err.find("switched to gone") == std::string::npos);
+    CHECK(out == "HELPER<hi>\n");
+
+    for (const std::string mode : {"chat", "execute"}) {
+        INFO(mode);
+        REQUIRE(home.run({mode, "-m", "helper", "--output-format", "stream-json", "--input-format",
+                          "stream-json"},
+                         out, err,
+                         "{\"type\":\"set\",\"model\":\"gone\"}\n" + std::string{kDrivenHi}) == 0);
+        std::istringstream lines{out};
+        std::vector<nlohmann::json> events;
+        for (std::string line; std::getline(lines, line);) {
+            events.push_back(nlohmann::json::parse(line));
+        }
+        std::vector<std::string> notices;
+        for (const nlohmann::json& event : events) {
+            if (event.at("type") == "notice") {
+                notices.push_back(event.at("text").get<std::string>());
+            }
+        }
+        REQUIRE(notices.size() == 1);
+        CHECK(notices.front().starts_with("set model: " + refusal));
+        CHECK(notices.front().ends_with(" (started backends: helper, root)"));
+        REQUIRE_FALSE(events.empty());
+        CHECK(events.back().at("type") == "result");
+        CHECK(events.back().at("model") == "helper");
+        CHECK(events.back().at("text") == "HELPER<hi>");
+    }
+}

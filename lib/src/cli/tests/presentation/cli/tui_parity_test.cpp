@@ -86,10 +86,15 @@ TEST_CASE("the table is today's truth: the views, no backfill left, the exec lin
               "alias of mcp serve") != std::string_view::npos);
     CHECK(kind("complete") == ShellSurfaceKind::RunnerCovered);
     CHECK(kind("analyze") == ShellSurfaceKind::RunnerCovered);
-    for (const char* carved : {"serve", "uninstall", "reset"}) {
+    for (const char* carved : {"serve", "uninstall", "reset", "acp"}) {
         INFO(carved);
         CHECK(kind(carved) == ShellSurfaceKind::CarvedOut);
     }
+    // `acp` (56a) is an agent host's stdio protocol: refused by word prefix,
+    // so a verb under it is refused with it.
+    CHECK(apogee::commands::exec_refusal({"acp"}).starts_with(
+        "refused: 'acp' -- speaks the Agent Client Protocol to the host that started it"));
+    CHECK_FALSE(apogee::commands::exec_refusal({"acp", "registration"}).empty());
     CHECK(apogee::commands::find_shell_surface("nonsense") == nullptr);
 
     // The exec line's refusals: the doors, the `$EDITOR` verbs, the three.
@@ -99,8 +104,8 @@ TEST_CASE("the table is today's truth: the views, no backfill left, the exec lin
         CHECK_FALSE(refusal.reason.empty());
     }
     CHECK(refused == std::vector<std::string_view>{"chat", "execute", "tui", "agents edit",
-                                                   "symphonies edit", "reset", "uninstall",
-                                                   "serve"});
+                                                   "symphonies edit", "reset", "uninstall", "serve",
+                                                   "acp"});
 }
 
 TEST_CASE("every view names its door; a door missing, unsaid or misplaced is named",

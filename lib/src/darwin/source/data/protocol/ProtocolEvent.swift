@@ -23,6 +23,9 @@ public struct ProtocolEvent: Sendable, Equatable {
         case sources([Source])
         /// A tool, or another model call, at work -- a line for display.
         case toolStatus(String)
+        /// One tool call's state as it moves (the CLI's 56a), beside its
+        /// `tool_status` line -- the line is what a transcript draws of it.
+        case toolCall(ToolCall)
         /// A line for the user that is neither progress nor an error.
         case notice(String)
         /// The session's todo, whole: drawn in place of the last.
@@ -196,6 +199,28 @@ public struct Capabilities: Sendable, Equatable {
         self.tools = tools
         self.ask = ask
         self.schema = schema
+    }
+}
+
+/// A `tool_call` event (the CLI's 56a): one dispatched call's state, keyed on
+/// the model's id for it. The id can repeat where a provider's wire gives a
+/// call none, so a `pending` under an id seen before is a new call.
+public struct ToolCall: Sendable, Equatable {
+    public let id: String
+    /// The tool.
+    public let name: String
+    /// `pending` (before its permission gate), `running`, `done` or `failed`
+    /// -- or a state a later build adds.
+    public let state: String
+    /// What the call acts on, as the gate is told -- a path, a command, a
+    /// host -- or `nil` when the tool names none.
+    public let target: String?
+
+    public init(id: String, name: String, state: String, target: String?) {
+        self.id = id
+        self.name = name
+        self.state = state
+        self.target = target
     }
 }
 

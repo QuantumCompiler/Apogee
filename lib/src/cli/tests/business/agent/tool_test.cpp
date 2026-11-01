@@ -2,12 +2,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "agent/fetch_url.h"
 #include "agent/readable.h"
+#include "contracts/errors.h"
 
 using apogee::agent::dispatch;
 using apogee::agent::DispatchContext;
@@ -163,6 +165,128 @@ TEST_CASE("dispatch reports progress and clears it", "[agent][tool]") {
     REQUIRE(statuses.size() == 2);
     CHECK(statuses[0] == "[tool] thing");
     CHECK(statuses[1].empty());  // back to rest
+}
+
+TEST_CASE("dispatch reports each call's state, keyed on its id, beside the status line",
+          "[agent][tool][calls]") {
+    // 56a: pending before the gate, running where `[tool] <name>` is said,
+    // then done or failed -- what an ACP host draws as the call's card.
+    using apogee::agent::ToolCallReport;
+    using apogee::agent::ToolCallState;
+
+    struct Seen {
+        std::string id;
+        std::string name;
+        ToolCallState state;
+        std::string target;
+    };
+
+    std::vector<Seen> seen;
+    std::vector<std::string> asked_for;
+    DispatchContext context;
+    context.on_call = [&seen](const ToolCallReport& report) {
+        seen.push_back({std::string{report.id}, std::string{report.name}, report.state,
+                        std::string{report.target}});
+    };
+    context.permission = [](const GateRequest&) { return Permission::Ask; };
+    bool answer = true;
+    context.confirm = [&answer, &asked_for](const GateRequest& request) {
+        asked_for.emplace_back(request.call_id);
+        return answer;
+    };
+
+    ToolRegistry registry;
+    Tool reader = simple_tool("read_file");
+    reader.describe_target = [](std::string_view) { return std::string{"notes.md"}; };
+    registry.add(reader);
+    Tool writer = simple_tool("write_file", true);
+    writer.describe_target = [](std::string_view) { return std::string{"out.txt"}; };
+    registry.add(writer);
+    Tool broken = simple_tool("broken");
+    broken.run = [](std::string_view) { return ToolOutcome{"Error: no", true}; };
+    registry.add(broken);
+
+    (void)dispatch(registry, ToolCall{"call-1", "read_file", "{}"}, context);
+    REQUIRE(seen.size() == 3);
+    CHECK(seen[0].id == "call-1");
+    CHECK(seen[0].name == "read_file");
+    CHECK(seen[0].target == "notes.md");
+    CHECK(seen[0].state == ToolCallState::Pending);
+    CHECK(seen[1].state == ToolCallState::Running);
+    CHECK(seen[2].state == ToolCallState::Done);
+    // A read asks nobody.
+    CHECK(asked_for.empty());
+
+    seen.clear();
+    (void)dispatch(registry, ToolCall{"call-2", "write_file", "{}"}, context);
+    REQUIRE(seen.size() == 3);
+    CHECK(seen[2].state == ToolCallState::Done);
+    // The prompt is told which call it is asking about.
+    CHECK(asked_for == std::vector<std::string>{"call-2"});
+
+    seen.clear();
+    answer = false;
+    const ToolOutcome refused = dispatch(registry, ToolCall{"call-3", "write_file", "{}"}, context);
+    CHECK(refused.is_error);
+    REQUIRE(seen.size() == 2);
+    CHECK(seen[0].state == ToolCallState::Pending);
+    CHECK(seen[1].state == ToolCallState::Failed);
+    CHECK(seen[1].id == "call-3");
+
+    seen.clear();
+    (void)dispatch(registry, ToolCall{"call-4", "broken", "{}"}, context);
+    REQUIRE(seen.size() == 3);
+    CHECK(seen[2].state == ToolCallState::Failed);
+
+    seen.clear();
+    (void)dispatch(registry, ToolCall{"call-5", "no_such_tool", "{}"}, context);
+    REQUIRE(seen.size() == 2);
+    CHECK(seen[0].state == ToolCallState::Pending);
+    CHECK(seen[1].state == ToolCallState::Failed);
+    CHECK(seen[1].name == "no_such_tool");
+
+    // A gate that throws -- the turn cancelled while its question was open,
+    // or a driver gone mid-question -- still ends the call, `failed`, before
+    // the throw goes on: no surface is left drawing it `pending`, and the
+    // tool never ran.
+    seen.clear();
+    bool ran = false;
+    Tool guarded = simple_tool("edit_file", true);
+    guarded.describe_target = [](std::string_view) { return std::string{"a.txt"}; };
+    guarded.run = [&ran](std::string_view) {
+        ran = true;
+        return ToolOutcome{"ran", false};
+    };
+    registry.add(guarded);
+    context.confirm = [](const GateRequest&) -> bool { throw apogee::harness::CancelledError(); };
+    CHECK_THROWS_AS(dispatch(registry, ToolCall{"call-6", "edit_file", "{}"}, context),
+                    apogee::harness::CancelledError);
+    CHECK_FALSE(ran);
+    REQUIRE(seen.size() == 2);
+    CHECK(seen[0].state == ToolCallState::Pending);
+    CHECK(seen[1].state == ToolCallState::Failed);
+    CHECK(seen[1].id == "call-6");
+    CHECK(seen[1].target == "a.txt");
+
+    seen.clear();
+    Tool fetcher = simple_tool("fetch_url");
+    fetcher.outbound = true;
+    fetcher.describe_target = [](std::string_view) { return std::string{"example.com"}; };
+    registry.add(fetcher);
+    context.confirm = [](const GateRequest&) -> bool {
+        throw std::runtime_error("the driver closed stdin with a permission prompt unanswered");
+    };
+    CHECK_THROWS_AS(dispatch(registry, ToolCall{"call-7", "fetch_url", "{}"}, context),
+                    std::runtime_error);
+    REQUIRE(seen.size() == 2);
+    CHECK(seen[0].state == ToolCallState::Pending);
+    CHECK(seen[1].state == ToolCallState::Failed);
+    CHECK(seen[1].target == "example.com");
+
+    CHECK(apogee::agent::to_string(ToolCallState::Pending) == "pending");
+    CHECK(apogee::agent::to_string(ToolCallState::Running) == "running");
+    CHECK(apogee::agent::to_string(ToolCallState::Done) == "done");
+    CHECK(apogee::agent::to_string(ToolCallState::Failed) == "failed");
 }
 
 TEST_CASE("a tool's output that is not UTF-8 leaves dispatch as UTF-8", "[agent][tool][utf8]") {

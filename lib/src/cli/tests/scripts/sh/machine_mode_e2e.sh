@@ -399,16 +399,23 @@ PY
 # with nothing in flight changes nothing; a cancel mid-stream ends the turn in
 # one `result` with finish_reason `cancelled` and the text streamed so far, the
 # half-turn kept out of the saved session, and the same child answers the next
-# turn; a cancel while a question waits fails the turn the same way; a turn
-# that fails ends in `error`, never a `result` carrying the user's own words.
+# turn; a cancel while a question waits fails the turn the same way, and one
+# at a permission question ends the call it asks about `failed` first (56a); a
+# question a `delegate` sub-session asks names a call the stream reported, and
+# that call ends; a turn that fails ends in `error`, never a `result` carrying
+# the user's own words.
 TC_DIR="$WORK_DIR/turns"
 mkdir -p "$TC_DIR/bin"
 printf '%s' '{"turns":[{"text":"aaaaaaaabbbbbbbbccccccccddddddddeeeeeeeeffffffffgggggggghhhhhhhh","delay_ms":150},{"text":"echo: {{last_user}}"}]}' >"$TC_DIR/slow.json"
 printf '%s' '{"turns":[{"text":"","tool_calls":[{"name":"ask_user","arguments":{"questions":[{"header":"Pick","question":"Which?","multi_select":false,"options":[{"label":"a","description":"A"},{"label":"b","description":"B"}]}]}}]},{"text":"echo: {{last_user}}"}]}' >"$TC_DIR/asks.json"
+printf '%s' '{"turns":[{"text":"","tool_calls":[{"id":"w-1","name":"write_file","arguments":{"path":"never.txt","content":"x"}}]},{"text":"echo: {{last_user}}"}]}' >"$TC_DIR/writes.json"
+printf '%s' '{"turns":[{"text":"","tool_calls":[{"id":"d-1","name":"delegate","arguments":{"brief":"write sub.txt"}}]},{"text":"","tool_calls":[{"id":"s-1","name":"write_file","arguments":{"path":"sub.txt","content":"x"}}]},{"text":"sub: {{last_tool_result}}"},{"text":"delegated: {{last_tool_result}}"}]}' >"$TC_DIR/delegates.json"
 printf '#!/bin/sh\necho x\n' >"$TC_DIR/bin/ollama"
 chmod +x "$TC_DIR/bin/ollama"
 "$APOGEE_BIN" config add-backend slow --type mock --model-path "$TC_DIR/slow.json" >/dev/null || fail "add slow"
 "$APOGEE_BIN" config add-backend asks --type mock --model-path "$TC_DIR/asks.json" >/dev/null || fail "add asks"
+"$APOGEE_BIN" config add-backend writes --type mock --model-path "$TC_DIR/writes.json" >/dev/null || fail "add writes"
+"$APOGEE_BIN" config add-backend delegates --type mock --model-path "$TC_DIR/delegates.json" >/dev/null || fail "add delegates"
 "$APOGEE_BIN" config add-backend down --type ollama-cli --model m >/dev/null || fail "add down"
 python3 - "$APOGEE_HOME/config/config.json" "$TC_DIR/bin/ollama" <<'PY' || fail "could not point the down backend"
 import json, sys
@@ -419,17 +426,17 @@ assert entry in text
 text = text.replace(entry, entry + '      "host": "127.0.0.1:9",\n      "binary": ' + json.dumps(binary) + ',\n', 1)
 open(path, "w").write(text)
 PY
-python3 - "$APOGEE_BIN" "$APOGEE_HOME" <<'PY' || fail "turn ids and cancel"
+python3 - "$APOGEE_BIN" "$APOGEE_HOME" "$TC_DIR" <<'PY' || fail "turn ids and cancel"
 import glob, json, os, subprocess, sys, time
 
-binary, home = sys.argv[1], sys.argv[2]
+binary, home, folder = sys.argv[1], sys.argv[2], sys.argv[3]
 
 class Child:
-    def __init__(self, *args):
+    def __init__(self, *args, cwd=None):
         self.p = subprocess.Popen([binary, "chat", "--no-recall", "--output-format", "stream-json",
                                    "--input-format", "stream-json", *args],
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE, text=True, bufsize=1)
+                                  stderr=subprocess.PIPE, text=True, bufsize=1, cwd=cwd)
     def send(self, obj):
         self.p.stdin.write(json.dumps(obj) + "\n")
         self.p.stdin.flush()
@@ -503,6 +510,55 @@ if again[-1].get("text") != "echo: again" or again[-1].get("turn") != 2:
     fail(f"the turn after a cancelled question: {again}")
 child.close()
 
+# A cancel while a permission question waits (56a): the call it asks about
+# ends `failed` before the turn's cancelled result -- no call is left
+# `pending` -- and nothing is written.
+child = Child("-m", "writes", "--tools", cwd=folder)
+child.read()
+child.send({"type": "user", "text": "write it"})
+asked = child.until({"question", "result", "error"})
+if asked[-1]["type"] != "question" or asked[-1].get("tool_call_id") != "w-1":
+    fail(f"no permission question for the write: {asked}")
+child.send({"type": "cancel"})
+ended = child.until({"result", "error"})
+if ended[-1]["type"] != "result" or ended[-1].get("finish_reason") != "cancelled":
+    fail(f"the turn asked about a write did not end cancelled: {ended}")
+states = [e["state"] for e in asked + ended if e["type"] == "tool_call" and e.get("id") == "w-1"]
+if states != ["pending", "failed"]:
+    fail(f"a call cancelled at its question did not end failed: {states}")
+if os.path.exists(os.path.join(folder, "never.txt")):
+    fail("a write cancelled at its question ran")
+child.close()
+
+# A gated call inside a `delegate` sub-session (56a's review): its question
+# names a call the stream reported -- every `tool_call_id` names an id with
+# `tool_call` events before it -- and that call ends, `failed` when denied.
+child = Child("-m", "delegates", "--tools", cwd=folder)
+child.read()
+child.send({"type": "user", "text": "delegate it"})
+asked = child.until({"question", "result", "error"})
+if asked[-1]["type"] != "question" or asked[-1].get("tool_call_id") != "s-1":
+    fail(f"no permission question for the delegated write: {asked}")
+child.send({"type": "answer", "text": "no"})
+ended = child.until({"result", "error"})
+if ended[-1]["type"] != "result" or not ended[-1]["text"].startswith("delegated: "):
+    fail(f"the delegating turn did not end in its answer: {ended}")
+stream = asked + ended
+for at, event in enumerate(stream):
+    named = event.get("tool_call_id") if event["type"] == "question" else None
+    if named and not any(e["type"] == "tool_call" and e.get("id") == named
+                         for e in stream[:at]):
+        fail(f"a question names a call the stream never reported: {event}")
+def moves(call):
+    return [e["state"] for e in stream if e["type"] == "tool_call" and e.get("id") == call]
+if moves("s-1") != ["pending", "failed"]:
+    fail(f"the delegated write denied did not end failed: {moves('s-1')}")
+if moves("d-1") != ["pending", "running", "done"]:
+    fail(f"the delegation's own call moved {moves('d-1')}")
+if os.path.exists(os.path.join(folder, "sub.txt")):
+    fail("a delegated write denied ran")
+child.close()
+
 # A turn that fails ends in error, numbered -- one terminal event per line.
 child = Child("-m", "down")
 child.read()
@@ -513,7 +569,7 @@ if failed[-1]["type"] != "error" or failed[-1].get("turn") != 1:
 if any(e["type"] == "result" for e in failed):
     fail(f"a failed turn emitted a result: {failed}")
 child.close()
-print("turns: ids on every turn event, cancel mid-stream and mid-question, a failure an error - OK")
+print("turns: ids on every turn event, cancel mid-stream, mid-question and at a permission question, a delegated call's question named, a failure an error - OK")
 PY
 
 # --- a default that could not start says why (M26) -----------------------------

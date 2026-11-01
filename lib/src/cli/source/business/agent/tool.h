@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <optional>
@@ -55,6 +56,32 @@ struct GateRequest {
     /// The tool edits a file or a note (`Tool::edits`): what a session's
     /// accept-edits mode lets run without asking (39b).
     bool edits = false;
+    /// The model's id for the call being decided (56a), as `dispatch` reports
+    /// it: what a host that draws each call ties its prompt to. Empty when the
+    /// gate is asked outside a call.
+    std::string_view call_id{};
+};
+
+/// Where one call is in `dispatch` (56a), reported as it moves: `Pending`
+/// before its gate, `Running` once it runs, then `Done`, or `Failed` -- an
+/// error outcome, a refusal, no such tool, or a gate that threw (the turn
+/// cancelled while its question was open), reported before the throw goes on.
+/// Every call reported `Pending` ends `Done` or `Failed`.
+enum class ToolCallState : std::uint8_t { Pending, Running, Done, Failed };
+
+/// `pending`, `running`, `done`, `failed`: machine mode's words.
+[[nodiscard]] std::string_view to_string(ToolCallState state) noexcept;
+
+/// One call's progress, keyed on the model's call id (56a): the structured
+/// twin of `on_status`'s line, for a surface that draws each call -- an ACP
+/// host's tool cards.
+struct ToolCallReport {
+    std::string_view id;
+    std::string_view name;
+    ToolCallState state = ToolCallState::Pending;
+    /// What the call acts on, as the tool names it for the gate -- a path, a
+    /// command, a host -- or empty for a tool that names none.
+    std::string_view target{};
 };
 
 /// Consulted before a gated tool runs -- one that `writes`, or is `outbound`.
@@ -207,6 +234,9 @@ struct DispatchContext {
     RefusalNote refusal{};
     /// Reports progress. Optional.
     std::function<void(std::string_view)> on_status{};
+    /// Reports each call's state as it moves (56a), beside `on_status`.
+    /// Optional.
+    std::function<void(const ToolCallReport&)> on_call{};
 };
 
 /// Runs one tool call.
@@ -229,11 +259,14 @@ struct DispatchContext {
 /// surface -- a pipe, a cron job, `serve` -- has nobody to ask, and silently
 /// allowing a destructive operation because no one was around to object is the
 /// wrong direction to fail. An outbound call with no target is denied too.
+///
+/// `call_id`, when given, rides the request to the prompt (56a).
 [[nodiscard]] bool permitted(const Tool& tool, std::string_view arguments,
-                             const DispatchContext& context);
+                             const DispatchContext& context, std::string_view call_id = {});
 
 /// The same resolution for one named target -- what a `TargetGate` asks.
 [[nodiscard]] bool permitted_target(const Tool& tool, std::string_view target,
-                                    std::string_view detail, const DispatchContext& context);
+                                    std::string_view detail, const DispatchContext& context,
+                                    std::string_view call_id = {});
 
 }  // namespace apogee::agent

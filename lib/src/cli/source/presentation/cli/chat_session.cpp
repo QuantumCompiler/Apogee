@@ -273,6 +273,35 @@ struct SettingSaid {
     std::string warning{};
 };
 
+/// The permission mode, said as `/permission-mode` says it.
+[[nodiscard]] std::string permission_mode_line(PermissionMode mode) {
+    return "permission mode: " + std::string{to_string(mode)} + " -- " +
+           std::string{permission_mode_description(mode)};
+}
+
+/// The permission mode moved to `word` (39b): the words `--permission-mode`
+/// takes, read by the gate at each call -- the one setter `/permission-mode`
+/// and a driver's `set` line (56a) each reach. Bypass only in a session that
+/// allows it: launched so, or given the yes `/permission-mode` asks for at a
+/// keyboard first -- a driver has nobody there to say it.
+[[nodiscard]] SettingSaid set_permission_mode(SessionApprovals& approvals, std::string_view word) {
+    const std::optional<PermissionMode> chosen = permission_mode_from_string(word);
+    if (!chosen.has_value()) {
+        return SettingSaid{.ok = false,
+                           .line = "not a permission mode: '" + std::string{word} +
+                                   "' (manual, accept-edits, plan, dont-ask or bypass)"};
+    }
+    if (*chosen == PermissionMode::Bypass && !approvals.bypass_allowed) {
+        return SettingSaid{.ok = false,
+                           .line =
+                               "bypass needs --allow-bypass (or --permission-mode bypass) at "
+                               "launch -- permission mode: " +
+                               std::string{to_string(approvals.mode.load())}};
+    }
+    approvals.mode = *chosen;
+    return SettingSaid{.ok = true, .line = permission_mode_line(*chosen)};
+}
+
 /// The prompt is the transcript's first message, put there as the chat
 /// opened: replaced in place -- matched by the prompt it held, so a
 /// compaction's summary is never taken for it -- or added at the head, so
@@ -345,16 +374,33 @@ struct SettingSaid {
 /// What -m takes (33): a backend, an entry's model, or a roster's model on
 /// its sole configured owner -- read against the file's view, so a pin is
 /// never mistaken for its entry's own model. `settle` runs before a pin
-/// moves: rebuilding a backend is a model call's business.
+/// moves: rebuilding a backend is a model call's business. A backend this
+/// session is not running -- configured, but it did not start -- is refused
+/// in M26's words, from what the session's start built (`built`), as `-m`
+/// refuses it at launch (56a).
 [[nodiscard]] SettingSaid switch_model(harness::Harness& harness, logger::Session& session,
                                        const harness::Config& config, const std::string& argument,
-                                       const backends::BuildOptions& options, bool tools,
+                                       const backends::BuildOptions& options,
+                                       const backends::BuildResult& built, bool tools,
                                        const std::function<void()>& settle) {
     const SessionModel asked = resolve_session_model(config, argument);
     if (asked.backend.empty()) {
         return {
             .ok = false,
             .line = asked.refusal.empty() ? "no backend named '" + argument + "'" : asked.refusal};
+    }
+    // Asked of the harness, which knows a backend a rebuild has started
+    // since: the router would answer for one it does not run from the
+    // default, under this one's name, without a word.
+    if (const std::vector<std::string> running = harness.provider_names();
+        !std::ranges::binary_search(running, asked.backend)) {
+        std::string refused = named_backend_refusal(
+            config, built,
+            configured_backend_key(config, argument).empty() ? asked.backend : argument);
+        if (refused.empty()) {
+            refused = "backend '" + asked.backend + "' is not running in this session";
+        }
+        return {.ok = false, .line = refused};
     }
     if (!asked.pinned.empty() || !session.model.empty()) {
         settle();
@@ -1652,7 +1698,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 continue;
             }
             if (message.kind == DriverMessage::Kind::Set) {
-                const std::string keys = "model, system, think, effort or temperature";
+                const std::string keys =
+                    "model, system, think, effort, temperature or permission_mode";
                 if (!message.refused.empty()) {
                     std::string named;
                     for (const std::string& key : message.refused) {
@@ -1673,7 +1720,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         // A rebuild is a model call's business: the title in
                         // flight settles first, as before `/model` (55a).
                         title.settle(session);
-                        said = switch_model(harness, session, config, value, build_options,
+                        said = switch_model(harness, session, config, value, build_options, built,
                                             flags->tools, [&attached]() { attached.settle(); });
                         if (said.ok) {
                             reoffer_tools();
@@ -1684,6 +1731,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         said = set_thinking(session, value);
                     } else if (key == "effort") {
                         said = set_effort(session, harness, value);
+                    } else if (key == "permission_mode") {
+                        said = set_permission_mode(*approvals, value);
                     } else {
                         said = set_temperature(session, value);
                     }
@@ -2149,16 +2198,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 case ChatVerb::PermissionMode: {
                     // How much runs without asking (39b): the mode is read by
                     // the gate at each call, so it holds from the next one.
+                    // The setter is the one a driver's `set` line reaches.
                     if (!argument.empty()) {
-                        const std::optional<PermissionMode> chosen =
-                            permission_mode_from_string(argument);
-                        if (!chosen.has_value()) {
-                            out.print_line(style.tag(ansi::Role::Error) +
-                                           " not a permission mode: '" + argument +
-                                           "' (manual, accept-edits, plan, dont-ask or bypass)");
-                            break;
-                        }
-                        if (*chosen == PermissionMode::Bypass && !approvals->bypass_allowed) {
+                        if (permission_mode_from_string(argument) == PermissionMode::Bypass &&
+                            !approvals->bypass_allowed) {
                             // Not allowed at launch: asked once (39b, the
                             // user's call), and a yes puts bypass in this
                             // session's Shift+Tab cycle too. Nobody to ask
@@ -2179,12 +2222,14 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                             }
                             approvals->bypass_allowed = true;
                         }
-                        approvals->mode = *chosen;
+                        if (const SettingSaid said = set_permission_mode(*approvals, argument);
+                            !said.ok) {
+                            out.print_line(style.tag(ansi::Role::Error) + " " + said.line);
+                            break;
+                        }
                     }
-                    const PermissionMode now = approvals->mode.load();
-                    out.print_line(style.tag(ansi::Role::Permission) +
-                                   " permission mode: " + std::string{to_string(now)} + " -- " +
-                                   std::string{permission_mode_description(now)} +
+                    out.print_line(style.tag(ansi::Role::Permission) + " " +
+                                   permission_mode_line(approvals->mode.load()) +
                                    (argument.empty()
                                         ? std::string{" (manual, accept-edits, plan, dont-ask "
                                                       "or bypass; Shift+Tab cycles)"}
@@ -2271,7 +2316,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         break;
                     }
                     const SettingSaid said =
-                        switch_model(harness, session, config, argument, build_options,
+                        switch_model(harness, session, config, argument, build_options, built,
                                      flags->tools, [&attached]() { attached.settle(); });
                     if (!said.ok) {
                         out.print_line(style.tag(ansi::Role::Error) + " " + said.line);

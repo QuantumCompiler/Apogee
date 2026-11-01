@@ -17,9 +17,11 @@
 # recorded per-item skip (CLAUDE.md -> Platforms), and the script also skips
 # itself cleanly wherever lsof is simply absent.
 #
-# Three phases: a mock turn, a turn answered by the mlx backend's real driver
-# (27a), and a turn that driver answers under `serve` (27c) -- where serve's
-# own process is the one allowed a port, and its driver child never is.
+# The phases: a mock turn, a code-exec turn (47b), an ACP turn across
+# `apogee acp`'s process tree (56a), a turn answered by the mlx backend's real
+# driver (27a), and a turn that driver answers under `serve` (27c) -- where
+# serve's own process is the one allowed a port, and its driver child never
+# is.
 
 set -uo pipefail
 
@@ -159,6 +161,88 @@ if command -v python3 >/dev/null 2>&1; then
     echo "no listening sockets across a code-exec turn and its server - OK"
 else
     echo "no_listen_check: the code-exec phase needs python3; skipping it"
+fi
+
+# --- apogee acp: an agent host's stdio, each session a child (56a) -----------
+#
+# The same continuous sample over an ACP turn: a scripted host drives
+# `apogee acp` over pipes, as Xcode would, through initialize, session/new and
+# a slow prompt, while the sample walks acp's whole process tree -- which must
+# SEE the session's child, apogee's own execute, or it proved nothing.
+# Skipped without python3, which plays the host.
+if command -v python3 >/dev/null 2>&1; then
+    mkdir -p "$WORK_DIR/acp-project"
+    printf '# Rules\n' >"$WORK_DIR/acp-project/AGENTS.md"
+    python3 -c 'import json; print(json.dumps({"turns": [{"text": "slowly " * 40, "delay_ms": 50}]}))' \
+        >"$WORK_DIR/acp.json"
+    "$APOGEE_BIN" config add-backend acp-slow --type mock --model-path "$WORK_DIR/acp.json" \
+        >/dev/null || exit 1
+    rm -f "$WORK_DIR/acp.pid"
+    python3 - "$APOGEE_BIN" "$WORK_DIR/acp-project" "$WORK_DIR/acp.pid" \
+        >"$WORK_DIR/acp-out.txt" 2>"$WORK_DIR/acp-err.txt" <<'HOST' &
+import json, subprocess, sys
+apogee, project, pidfile = sys.argv[1:4]
+acp = subprocess.Popen([apogee, "acp", "-m", "acp-slow"], stdin=subprocess.PIPE,
+                       stdout=subprocess.PIPE, text=True, bufsize=1)
+with open(pidfile, "w") as handle:
+    handle.write(str(acp.pid))
+def call(i, method, params):
+    acp.stdin.write(json.dumps({"jsonrpc": "2.0", "id": i, "method": method,
+                                "params": params}) + "\n")
+    acp.stdin.flush()
+    for line in acp.stdout:
+        frame = json.loads(line)
+        if frame.get("id") == i:
+            return frame
+call(1, "initialize", {"protocolVersion": 1})
+session = call(2, "session/new", {"cwd": project, "mcpServers": []})["result"]["sessionId"]
+done = call(3, "session/prompt", {"sessionId": session,
+                                  "prompt": [{"type": "text", "text": "go"}]})
+print(done["result"]["stopReason"])
+acp.stdin.close()
+sys.exit(acp.wait(timeout=60))
+HOST
+    HOST_PID=$!
+    for _ in $(seq 1 100); do
+        [ -s "$WORK_DIR/acp.pid" ] && break
+        sleep 0.05
+    done
+    ACP_PID="$(cat "$WORK_DIR/acp.pid" 2>/dev/null)"
+    LISTENING=""
+    SESSION_SEEN=""
+    while [ -n "$ACP_PID" ] && kill -0 "$ACP_PID" 2>/dev/null; do
+        PIDS="$ACP_PID"
+        for pid in $(code_descendants "$ACP_PID"); do
+            PIDS="$PIDS,$pid"
+            if ps -o command= -p "$pid" 2>/dev/null | grep ' execute ' >/dev/null; then
+                SESSION_SEEN=1
+            fi
+        done
+        HIT="$(lsof -a -p "$PIDS" -i -sTCP:LISTEN -Fn 2>/dev/null)"
+        if [ -n "$HIT" ]; then
+            LISTENING="$HIT"
+            break
+        fi
+    done
+    wait "$HOST_PID"
+    STATUS=$?
+    if [ -n "$LISTENING" ]; then
+        echo "INVARIANT VIOLATED: an ACP turn's process tree opened a listening socket:" >&2
+        echo "$LISTENING" >&2
+        exit 1
+    fi
+    if [ "$STATUS" -ne 0 ] || ! grep -q "end_turn" "$WORK_DIR/acp-out.txt"; then
+        echo "no_listen_check: the ACP turn failed (exit $STATUS)" >&2
+        cat "$WORK_DIR/acp-out.txt" "$WORK_DIR/acp-err.txt" >&2
+        exit 1
+    fi
+    if [ -z "$SESSION_SEEN" ]; then
+        echo "no_listen_check: the sample never saw the ACP session's child, so it proved nothing" >&2
+        exit 1
+    fi
+    echo "no listening sockets across an ACP turn and its session's child - OK"
+else
+    echo "no_listen_check: the ACP phase needs python3; skipping it"
 fi
 
 # --- the mlx backend: a child over pipes, never a port (27a) -------------------

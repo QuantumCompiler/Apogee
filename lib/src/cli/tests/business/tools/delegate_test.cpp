@@ -6,6 +6,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "agent/tool.h"
@@ -108,12 +109,17 @@ struct World {
     }
 };
 
-/// Every side call the delegation said.
+/// Every side call the delegation said, and every call's state (56a).
 struct Recorder final : apogee::agentloop::Reporter {
     std::vector<apogee::agentloop::SideCall> calls;
+    std::vector<std::pair<std::string, apogee::agent::ToolCallState>> states;
 
     void on_side_call(const apogee::agentloop::SideCall& call) override {
         calls.push_back(call);
+    }
+
+    void on_tool_call(const apogee::agent::ToolCallReport& report) override {
+        states.emplace_back(std::string{report.id}, report.state);
     }
 };
 
@@ -225,6 +231,36 @@ TEST_CASE("the parent's gate, whole: a sub-tool that asks reaches the parent's p
         CHECK(world.poked == 0);
         CHECK_THAT(outcome.content, ContainsSubstring("Could not: "));
     }
+}
+
+TEST_CASE("each sub-call's states reach the parent's surface, under the id its question names",
+          "[tools][delegate][gate][calls]") {
+    // 56a's review: the sub-session asked the parent's gate under its call's
+    // id, but its states stopped at the delegation -- an ACP host held a
+    // permission card no tool_call ever drew or ended.
+    using State = apogee::agent::ToolCallState;
+    const auto delegated = [](bool allow) {
+        World world{
+            {MockTurn{.tool_calls = {ToolCall{.id = "s-1", .name = "poke", .arguments = "{}"}}},
+             MockTurn{.text = "Done: {{last_tool_result}}"}}};
+        Recorder said;
+        t::DelegateContext context = world.context(&said);
+        std::vector<std::string> asked;
+        context.parent.confirm = [&asked, allow](const apogee::agent::GateRequest& request) {
+            asked.emplace_back(request.call_id);
+            return allow;
+        };
+        const apogee::agent::ToolOutcome outcome =
+            t::run_delegate(context, R"({"brief": "Change it"})");
+        CHECK_FALSE(outcome.is_error);
+        CHECK(asked == std::vector<std::string>{"s-1"});
+        CHECK(world.poked == (allow ? 1 : 0));
+        return said.states;
+    };
+    using Moves = std::vector<std::pair<std::string, State>>;
+    CHECK(delegated(false) == Moves{{"s-1", State::Pending}, {"s-1", State::Failed}});
+    CHECK(delegated(true) ==
+          Moves{{"s-1", State::Pending}, {"s-1", State::Running}, {"s-1", State::Done}});
 }
 
 TEST_CASE("the parent's cancellation stops the delegation, and reaches the parent",

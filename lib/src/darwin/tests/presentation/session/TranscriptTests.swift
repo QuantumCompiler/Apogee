@@ -122,6 +122,33 @@ struct TranscriptTests {
         #expect(transcript.status == .ready)
     }
 
+    @Test("a tool call's states (the CLI's 56a) add no row: the call is its tool_status line, as before them")
+    func toolCallsAddNoRow() {
+        let turn = [
+            #"{"type":"thinking","turn":1}"#,
+            #"{"type":"tool_call","id":"c1","name":"read_file","state":"pending","target":"notes.md","turn":1}"#,
+            #"{"type":"tool_status","text":"[tool] read_file","turn":1}"#,
+            #"{"type":"tool_call","id":"c1","name":"read_file","state":"running","target":"notes.md","turn":1}"#,
+            #"{"type":"tool_call","id":"c1","name":"read_file","state":"done","target":"notes.md","turn":1}"#,
+            #"{"type":"tool_call","id":"c2","name":"nonesuch","state":"pending","turn":1}"#,
+            #"{"type":"tool_call","id":"c2","name":"nonesuch","state":"failed","turn":1}"#,
+            #"{"type":"answer_delta","text":"It says hi.","turn":1}"#,
+            #"{"type":"result","text":"It says hi.","finish_reason":"stop","turn":1}"#,
+        ]
+        func folded(_ lines: [String]) -> Transcript {
+            var transcript = Transcript()
+            transcript.apply(decoded(#"{"type":"session","protocol_version":1,"model":"m"}"#))
+            transcript.userSent("what do my notes say?")
+            for line in lines { transcript.apply(decoded(line)) }
+            return transcript
+        }
+        let withCalls = folded(turn)
+        let without = folded(turn.filter { !$0.contains(#""type":"tool_call""#) })
+        #expect(shape(withCalls) == ["user: what do my notes say?", "activity: |[tool] read_file", "answer: It says hi."])
+        #expect(shape(withCalls) == shape(without))
+        #expect(withCalls.status == .ready)
+    }
+
     @Test("what this client does not know is a quiet row, never dropped")
     func unknownRows() {
         var transcript = Transcript()

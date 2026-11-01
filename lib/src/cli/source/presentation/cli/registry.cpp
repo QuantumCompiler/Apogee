@@ -5,6 +5,7 @@
 #include <string>
 #include <utility>
 
+#include "cli/acp_cmd.h"
 #include "cli/agents_cmd.h"
 #include "cli/analyze.h"
 #include "cli/auth_cmd.h"
@@ -81,6 +82,7 @@ void CommandRegistry::bind_all(CLI::App& root, const RootContext& context) {
 
 CommandRegistry default_registry(ShellEntry shell) {
     CommandRegistry registry;
+    registry.add(std::make_unique<AcpCommand>());
     registry.add(std::make_unique<AgentsCommand>());
     registry.add(std::make_unique<AnalyzeCommand>());
     registry.add(std::make_unique<AuthCommand>());

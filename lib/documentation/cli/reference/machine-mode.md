@@ -9,6 +9,11 @@ This document is the reference for that protocol. The worked example is
 [`reference_driver.py`](../../../src/cli/tests/scripts/py/reference_driver.py), which is also
 the test that keeps this document true.
 
+Apogee drives it too: `apogee acp` (56a) runs each Agent Client Protocol
+session as a child of its own `execute` in this mode and translates between
+the two -- so an ACP host such as Xcode is told exactly what a driver here is
+told, and nothing more ([acp.md](acp.md)).
+
 ## The two flags
 
 ```bash
@@ -48,12 +53,13 @@ document last (see [A long job's run](#a-long-jobs-run)) -- and since 55h
 One JSON object per line on stdout. Every object has a `type`.
 
 ```jsonl
-{"type":"session","protocol_version":1,"model":"claude-sonnet-5","chat_id":"20261024-120000-a1b2","next_turn":1,"capabilities":{"events":["session","thinking","…"],"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"tools":true,"ask":true,"schema":"2026-10-26"}}
+{"type":"session","protocol_version":1,"model":"claude-sonnet-5","chat_id":"20261024-120000-a1b2","next_turn":1,"capabilities":{"events":["session","thinking","…"],"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"tools":true,"ask":true,"schema":"2026-11-01"}}
 {"type":"thinking"}
 {"type":"thinking_delta","text":"…"}
 {"type":"memory","chats":1,"decisions":1,"sessions":[{"id":"20261019-142233-a1b2c3","name":"asyncio timeouts in the scraper","updated":"2026-10-19T14:40:02Z"}]}
 {"type":"sources","sources":[{"file":"report.pdf","pages":[41,42],"score":0.81,"retriever":"vector"},{"file":"notes.md","lines":[12,40],"score":0.4,"retriever":"lexical"}]}
 {"type":"tool_status","text":"fetch_url https://…"}
+{"type":"tool_call","id":"call_1","name":"fetch_url","state":"running","target":"docs.python.org"}
 {"type":"answer_start"}
 {"type":"answer_delta","text":"…"}
 {"type":"answer_end"}
@@ -71,6 +77,7 @@ One JSON object per line on stdout. Every object has a `type`.
 | `memory` | `chat` only: what a turn was handed from earlier conversations -- `chats`, past chats' summaries, and `decisions`, recorded knowledge records -- injected for this turn and never into the transcript (26l). Sent before the turn, only when it recalled something. Since 52a `sessions` names each past chat recalled, in the order sent: its `id` (what `chats list` and `--resume` take), and the `name` and `updated` time the recall index recorded when it summarised the chat -- what the model was handed, so a later rename shows only once the chat is summarised again (its next run with a turn). Since 55b that `name` is the chat's name as `chats list` gives it -- the one `chats title` or `/title` gave it, else its generated title, else its id -- never a generated title it was renamed from. Absent when `chats` is 0. |
 | `sources` | The excerpts retrieval sent the model this turn (52a), before the answer: `sources`, each `{file, pages?, lines?, times?, score, retriever}` in the order sent -- the chat's attachments' excerpts first, then a collection's. `file` is the file as its index names it (an attachment's file name, a collection's source path); `pages`, `lines` and `times` (seconds, for a recording) are `[first, last]` when the excerpt's chunks record them. **What was sent, never what was found**: an excerpt the context budget trimmed is not here, and with nothing sent there is no event. `score` is on its `retriever`'s scale -- `lexical`, `vector` or `hybrid` scores do not compare. Number them in order to draw citations. Past chats' recall is `memory`'s, not this. |
 | `tool_status` | A tool is running, described in `text` for display -- or another model call the turn makes besides the chat model's own (the embedder, the utility model, the rerank judge, the knowledge clerk, a suite member the model consults), as `<role> — <what it is doing>` (26n). A `consult` (27f) is an ordinary tool call: `[tool] consult`, then `consult — asking utility (<backend>): <the question's first words>` while the member answers, and the answer reaches the model as the tool's result. A suite's verifier checking a tool call or an answer (27g) is said the same way: `validate — asking utility (<backend>): Check …`. A symphony the root model plays on its own (27t, an orchestrating `execute` session) is an ordinary tool call too: `[tool] play_<symphony>`, then `play — the model chose <symphony>: <n> member calls, <roles>`, then a line per stage. A tool the **vendor** ran on its own servers (47a: an entry's `server_tools:`, or the run's `--search`) is said here too, never dispatched: `<tool>, run by <vendor>: <what>` -- `web_search, run by Anthropic: "apogee harness"`, then `web_search, run by Anthropic: 5 results` -- and since it can fall between two parts of an answer, the answer's events end before it and start again after. |
+| `tool_call` | One tool call's state as it moves (56a), beside its `tool_status` line: `id`, the model's id for the call -- which can repeat: where a provider's wire gives a call no id, one is made for it (Gemini's API uses the tool's name), and every call is reported `pending` first, so a `pending` under an id seen before is a new call; `name`, the tool; `state` -- `pending` (before its permission gate), `running`, then `done` or `failed` (an error result, a refusal, a tool that does not exist, or a turn stopped while the call's permission prompt waited -- a `cancel`, or stdin closed -- reported before that turn's `result` or `error`; more states may be added), so every call reported `pending` ends `done` or `failed`; and `target` when the tool names one -- the path, the command or the host the gate is told, absent otherwise. A call answered without running (an `ask_user`, a repeated call, a tool withdrawn for the turn) has none. Draw it as a card keyed on `id`, a new card at each `pending`; `tool_status` is unchanged, and the terminal and the shell keep drawing it. |
 | `notice` | A line for the user in `text` that is neither progress nor an error — a local model answering without the tools it was given because its chat template cannot take them, or a reply kept as text because it did not match the template's format, or a request trimmed to fit the model's window (`context budget: 2 earlier exchanges not sent`), or what a suite's verifier said (27g): an objection to a tool call returned to the model, a dispute the call runs over, the two positions on an answer under `answers: always` (`validate: …`), a check that could not be made; what a resumed chat could not carry over (55b, `resume: …`, [below](#which-chat-chat_id)); what the session's suite takes of this machine and its warnings at launch (M29, [below](#which-suite-suite-and-orchestrating)); a compaction that folded nothing or failed ([below](#the-sessions-own-doors-detach-set-compact)); a chat deleted while its session ran. Show it and keep it; it never ends the turn. |
 | `todo` | The session's todo, whole (41d): `items`, an array of `{text, state}` -- `state` `pending`, `active` (being done now) or `done` -- in the model's order, empty when it cleared it. Sent each time the model rewrites it with `todo_write` (a session with tools), and once as a resumed session opens, right after `session`, when it was left holding one. Draw it in place of the last: it is the plan, not a log. |
 | `answer_start` / `answer_end` | Bracket one answer's deltas. |
@@ -212,8 +219,8 @@ launch is refused for, among others:
   -- `backend 'mlx' is configured but could not be started: … (started
   backends: claude)` -- or a name the config defines nowhere, `no backend named
   'nope' (configured: …)` (M29). Nothing else answers under the name asked
-  for. The check is the launch's: a `set` line's `model` mid-session routes as
-  it always has (M26);
+  for. A `set` line's `model` naming such a backend mid-session is refused
+  the same way, as a `notice` (56a; `set` below);
 - a suite that does not fit this machine: `suite vast needs 247056 MiB of this
   machine's 110100 MiB: … -- it does not fit; --force runs it anyway`, and a
   suite that does not exist, `--suite: no suite named 'nope' (configured: …)`;
@@ -344,7 +351,7 @@ diagnostics, as ever. Without the flag every verb prints exactly what it did
 before.
 
 ```jsonl
-{"type":"job","verb":"models pull","protocol_version":1,"schema":"2026-10-26"}
+{"type":"job","verb":"models pull","protocol_version":1,"schema":"2026-11-01"}
 {"type":"notice","text":"pulling org/model, then converting it to F16 and registering it"}
 {"type":"stage","index":1,"count":3,"label":"pull org/model's full weights","state":"started"}
 {"type":"bytes","done":67108864,"total":4971201024,"file":"model-00001-of-00002.safetensors","index":1,"count":4}
@@ -355,7 +362,7 @@ before.
 ```
 
 ```jsonl
-{"type":"job","verb":"video compose","protocol_version":1,"schema":"2026-10-26"}
+{"type":"job","verb":"video compose","protocol_version":1,"schema":"2026-11-01"}
 {"type":"notice","text":"plan: \"Tides\" -- 2 scenes, about 5.5 s of video"}
 {"type":"scene","scene":1,"scenes":2,"state":"speaking"}
 {"type":"ready","device":"mps","engine":"torch","scene":1}
@@ -372,7 +379,7 @@ before.
 ```
 
 ```jsonl
-{"type":"job","verb":"datasets pull","protocol_version":1,"schema":"2026-10-26"}
+{"type":"job","verb":"datasets pull","protocol_version":1,"schema":"2026-11-01"}
 {"type":"notice","text":"downloading 2 file(s), 1.2 MiB, into /Users/you/.apogee/training/datasets/raw/org--ds"}
 {"type":"bytes","done":524288,"total":1048576,"file":"data/train.jsonl","index":1,"count":2}
 …
@@ -445,7 +452,7 @@ as well as in the stream's `error`. Without the flag every verb prints exactly
 what it did before.
 
 ```jsonl
-{"type":"job","verb":"train pipeline run","protocol_version":1,"schema":"2026-10-26"}
+{"type":"job","verb":"train pipeline run","protocol_version":1,"schema":"2026-11-01"}
 {"type":"notice","text":"[pipeline] skills as pipe-20261025-120000: 2 stage(s), mlx on aaaaaaaaaaaa; no judge: unmatched items skip"}
 {"type":"stage","index":1,"count":2,"label":"a","state":"pending","pipeline_run_id":"pipe-20261025-120000"}
 {"type":"stage","index":2,"count":2,"label":"b","state":"pending","pipeline_run_id":"pipe-20261025-120000"}
@@ -462,7 +469,7 @@ what it did before.
 ```
 
 ```jsonl
-{"type":"job","verb":"train cycle run","protocol_version":1,"schema":"2026-10-26"}
+{"type":"job","verb":"train cycle run","protocol_version":1,"schema":"2026-11-01"}
 {"type":"pass","state":"collecting","text":"[cycle] directory: 1 file(s) in /Users/you/queue"}
 {"type":"pass","state":"merging","text":"[cycle] 12 example(s) from directory"}
 {"type":"pass","state":"training","text":"[cycle] pipeline cycle-20261025-030000 (nightly): 1 stage(s)"}
@@ -562,7 +569,9 @@ the next `user` line. A `cancel` reaches the turn of the last `user` line sent
 that has not ended, even one sent a moment before that has not started; with
 no turn open it is ignored, so a cancel racing a turn that just finished is
 harmless. While a `question` or a permission prompt waits, a `cancel` fails the
-turn as closing stdin would — without ending the session. Turns are serial, so
+turn as closing stdin would — without ending the session; the call a permission
+prompt asked about is reported `failed` first, never left `pending` (it never
+ran). Turns are serial, so
 `cancel` names no turn. `complete` has no `cancel`: it is one-shot, and a host
 stops it by ending the process.
 
@@ -661,17 +670,24 @@ waits, and not mid-turn when the turn may ask one.
 - **`{"type":"set",…}`** moves the run settings the slash commands move —
   `model` (a backend, a roster model or `backend:model`, as `/model` and `-m`
   take it), `system` (the system prompt, replaced whole), `think` (`on`,
-  `off`, `auto`), `effort` (a level or `auto`) and `temperature` (a number,
-  or its text). Several in one line apply in that order — the model first,
+  `off`, `auto`), `effort` (a level or `auto`), `temperature` (a number,
+  or its text) and since 56a `permission_mode` (the words `--permission-mode`
+  takes: `manual`, `accept-edits`, `plan`, `dont-ask` -- and `bypass` only in a
+  session launched with `--allow-bypass` or `--permission-mode bypass`, since
+  a driver has nobody at a keyboard to say yes to it: `set permission_mode:
+  bypass needs --allow-bypass (or --permission-mode bypass) at launch --
+  permission mode: manual`). Several in one line apply in that order — the model first,
   so thinking and effort are judged on the backend that will answer. Each is
   said as a `notice` ending `-- from the next turn` (`switched to claude --
   from the next turn`), or refused by name (`set effort: not an effort level:
-  'loud' (…)`) while the rest still apply. **Any key that is no setting — or
+  'loud' (…)`) while the rest still apply. A `model` that is configured but
+  did not start is refused in the launch's words, and the session stays on
+  the backend it was on (56a): `set model: backend 'mlx' is configured but
+  could not be started: … (started backends: claude)`. **Any key that is no setting — or
   a value neither text nor a number — refuses the whole line by name, and
   nothing is set**: `set: 'max_tokens' is not a setting a session moves, as
-  text -- model, system, think, effort or temperature; nothing was set`. A
-  line with no setting says so. The permission mode is not among them: it is
-  chosen at launch.
+  text -- model, system, think, effort, temperature or permission_mode;
+  nothing was set`. A line with no setting says so.
 - **`{"type":"compact"}`** compacts the conversation now, as `/compact`
   does — the utility model, else the chat's own backend, folds the earlier
   exchanges into a summary — said as `history compacted by <backend>`
@@ -812,6 +828,16 @@ emits a `question` with `"kind": "permission"`, the `tool` and its `target`
 {"type":"question","kind":"permission","tool":"write_file","target":"notes/todo.md","questions":[{"header":"Permission","question":"Allow write_file on notes/todo.md?","multi_select":false,"options":[{"label":"yes","description":"Allow this once"},{"label":"no","description":"Deny"},{"label":"always","description":"Allow, and remember it in the config"},{"label":"session","description":"Allow for the rest of this session"}]}]}
 ```
 
+Since 56a a question asked about a tool call names it: `tool_call_id`, the
+`id` of the call's `tool_call` events, so a driver that draws each call can put
+the question on its card -- `"tool_call_id":"call_7"` beside `tool` and
+`target`. A question asked outside a call carries none. Where ids repeat (see
+`tool_call` above), it is the call last reported `pending` under that id; its
+own `tool` and `target` say what is being asked about. A call a `delegate`
+sub-session makes asks under its own id, and is reported as `tool_call` events
+too, while the `delegate` call is `running` -- so every `tool_call_id` names a
+call the stream reported, and that call ends `done` or `failed`.
+
 Reply with one `{"type":"answer","text":"…"}` line: `yes` allows this once,
 `session` allows the tool for the rest of the run, `always` allows it and
 writes `permissions.<tool>: allow` to the config through the same editor the
@@ -860,8 +886,8 @@ the counts, not the diff.
 **The session's permission mode** decides what is asked at all. It is set at
 launch with `--permission-mode manual|accept-edits|plan|dont-ask|bypass`, the
 same modes a terminal session moves between with `/permission-mode` and
-Shift+Tab. No line moves it — `set` moves only the run settings — so a
-driver chooses the mode when it starts the child.
+Shift+Tab, and since 56a moved between turns by a `set` line's
+`permission_mode` ([above](#the-sessions-own-doors-detach-set-compact)).
 
 - `manual`, the default, asks as above.
 - `accept-edits` runs the file and note edits unasked.
@@ -870,9 +896,10 @@ driver chooses the mode when it starts the child.
   a driver that must never be asked.
 - `bypass` asks nothing.
 
-A config `deny` refuses in every mode. A driver chooses the mode at launch,
-`bypass` included: in the terminal and the shell `/permission-mode bypass`
-asks the person once, and a machine-mode child has nobody to ask that of.
+A config `deny` refuses in every mode. `bypass` is chosen at launch, or by a
+`set` line in a session launched allowing it: in the terminal and the shell
+`/permission-mode bypass` asks the person once, and a machine-mode child has
+nobody to ask that of.
 
 ## Everything else is a CLI command
 
