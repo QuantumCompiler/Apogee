@@ -5345,6 +5345,97 @@ Decisions taken while building, for veto:
 - **Windows**: `cli.mcp_lifecycle` is a POSIX shell check. The unit cases run on CI's Windows rows after your push; the changed sources compile clean under MinGW g++ here.
 - **The model-calling set** is 54b's, now unblocked.
 
+### 2026-11-01 — `mcp-serve-callable-set` (backlog item 54b): a local model served on the person's word
+
+**Why.** 54a left `apogee mcp serve` with 22 read-only tools and no model call, by design: a model call is not a read, and any MCP host the user registers Apogee into could otherwise spend GPU time with nobody's consent. The mod's headline feature needs exactly one such call, Claude handing a prompt to a local backend, which the mod spike (2026-10-21) measured as a CLI spawn of `apogee complete -m <backend>`. The user's call at the spike: serve it **opt-in per tool**, local and unmetered providers only, bounded, with an honest description. The spike also left one verification open: whether the served `search_documents` ran the full retriever resolver or searched chunks alone.
+
+- [x] **The consent: an entry's `mcp_serve:`.** A backend entry lists the calls `apogee mcp serve` may make on it -- `"mcp_serve": ["complete"]` -- the 47a shape (an entry's `server_tools:`) pointed the other way. It is empty by default.
+  - **The one editor writes it.** `config set-backend <name> --mcp-serve complete` (completed from the table; `""` takes it back) and its admin twin, `PATCH /v1/admin/backends/{id}` with `mcp_serve`, byte for byte the CLI's. `config get backends.<name>.mcp_serve` reads it, one per line.
+  - **The table is data.** `contracts/mcp_serve.h` holds the one name (`complete`), the loader's refusal for any other name, the rule's one wording, and the bound. The loader reads a list once per name, in YAML and JSONC. It never judges by type: whether an entry may serve is its provider's to say.
+- [x] **Eligibility is the provider's word, asked at every door.** `LLMProvider::generation_is_metered`, through `provider_metered_probe` (the probe the suite verbs use since 27f). A provider that bills each call, or one that cannot say, is refused, since unknown counts as billed. The rule's words, everywhere: `'<name>' cannot serve complete: its provider bills each call -- a served call runs on another host's initiative, so only a backend local and unmetered by its own provider's word may serve one`.
+  - **At write.** `set_backend_fields` asks the entry in the very text the write lands, inside the write's transform under the config's lock, whenever that text leaves a listing. That covers setting it and also a type or path moved under one, whatever else the same call changes. A refused edit says `(nothing was edited)`, and the file is untouched. The CLI hands the probe; the admin twin hands the one its composition root gave it. With no probe, nothing can be told, and the edit is refused.
+  - **The review's fix.** The first cut asked a trial of the edit made beside the write: it left the `adapters` edit out of the trial, and it counted a trial that would not load as eligible. So one call moving a llama.cpp entry with adapters onto a billed mock, clearing its adapters and listing `complete` (`--type mock --model-path <paid> --adapters "" --mcp-serve complete`) failed the trial's load and wrote the listing; the server's start still left it out. Asking the written text closes that, and any other way a trial could differ from the write.
+  - **At the server's start.** A listing written by hand on a billed backend is left out, and the server says so on its stderr.
+  - **At the call.** The built provider is asked again.
+- [x] **`complete`, served.** It is listed only where a backend lists it and its provider says yes. Otherwise it is absent from `tools/list` (a call to it answers `no such tool`), never refused at call. It comes last, after the reads, the one tool with `readOnlyHint: false`.
+  - **The arguments**: `prompt`, `backend` (the schema's `enum` of the served backends) and an optional `max_tokens`. A host's model may send `max_tokens` as a number or a string of digits. A whole number past a 64-bit integer's range (`1e300`, `-1e300`, 2^64 - 1) is read as the range's end and refused by the bound in its words; the range is checked before any cast, since casting a double past it is undefined.
+  - **The bound**: at most 1024 tokens a call, or the backend's own `max_tokens` when lower. A host asks for fewer, never more.
+  - **The description is the contract** (a golden in the tests). It says what one call is, which backends it may name with each one's bound, that the spend is this machine's time and never money, and that the config's listing is why it is offered.
+  - **Consent is read again at each call.** A listing taken back since the server started refuses the call, and nothing runs.
+  - **Narrated on stderr**, the stream a host captures: `complete on '<backend>', at most N tokens`, then `answered`, or `stopped at its bound`, or the failure.
+  - **Refusals are error results in words**: a backend it does not name, no prompt, no backend, a bound out of range, an argument of the wrong type, the backend's own failure in `apogee complete`'s words (`named_backend_refusal`, `validate_active_suite`).
+- [x] **The one calling path.** `one_shot` (`cli/complete.h`) is now the core of `apogee complete`. It builds the request (the system prompt, the context, the prompt) and the loop options (the model, sampling, bound and thinking, each the flag else the entry's).
+  - Both of `complete`'s own paths, the terminal and machine mode, start from it.
+  - The served call runs it whole, with `utility` off: no tools, no attachments, no retrieval, and no utility-model call. So every model call a served call makes is the named, eligible backend's.
+  - Its answer is the text `apogee complete -m <backend> -n <bound>` prints.
+- [x] **The providers are built once, lazily.** `ServedModels` is one Harness over the config the server started with. Its providers are built at the first call that needs them, `complete` or `search_documents`, and kept for the server's life. So a local model loads once, not per call, and a server whose host only reads builds none.
+- [x] **`search_documents`, verified and grown.** **The verification:** before 54b the served tool was chunk-only. The server registered the RAG tools with no Harness, so no embedder reached the one resolver: an explicit `vector` was refused, and `auto` ran lexical over a vectorised collection. Measured on the 0.2.0 binary (`build/default`, `07e26c6d`, `__mcp-tools`) in a scratch home, over a collection ingested with vectors by a mock embedder:
+  - `retriever: vector` answered `Error: vector search cannot run: no embedding backend is configured...`;
+  - `auto` answered `retriever: lexical`.
+
+  **The growth:** the server now hands the tool its Harness, and the providers are built before a search. So the tool resolves exactly as a chat's does: the branch binary answered `retriever: vector` to both. The 2026-09-13 spend rule applies unchanged: a query against a collection already built is one small embedding call. That call is a model call made on the host's initiative, billed when the collection's embedder is a paid one, and the help and tools.md say so.
+- [x] **`mcp/serve_stdio` grows `with_calls`.** `ServedCall` has the shape of a read. A call is listed with `readOnlyHint: false`, guarded and mended as a read is (one body behind both), and a call named like a tool, a read or another call is refused where the set is built.
+- [x] **The reference.**
+  - tools.md's serve chapter gains *Calling a local model: `complete`*: the consent line, the rules, the arguments and the refusals. `search_documents` is said to search with the collection's embedder, and its query embedding is named as the one model call besides `complete`: one small call per search, billed by a paid embedder, none for a `lexical` search.
+  - http-api.md's `PATCH /v1/admin/backends/{id}` names `mcp_serve` and its refusal.
+  - `mcp serve --help` says when a model generates (only through a listed `complete`), and that `search_documents` may embed a query through the collection's embedder, one small call that a paid embedder bills.
+  - `mcp presets`' `self` now `provides` `complete` where the config lists it.
+  - The starter config teaches `mcp_serve` in the llama.cpp section, and `config upgrade` carries the block to an older file: the 0.2.1 row of `commented_options`.
+  - The mock gains `{{max_tokens}}`, so the bound is seen to reach a backend.
+- [x] **The tests** (18 new cases):
+  - `contracts/mcp_serve_test`: the table, the loader, the editor in both formats, the rule's two wordings and the bound.
+  - `mcp/serve_stdio_test`: `with_calls`.
+  - `operations/backend_fields_test`, three cases: the command, its completion, the refusals on a billed mock and an anthropic entry, a type moved under a listing, and the pristine file after the round trip; `set_backend_fields` asking the probe of the entry as the edit leaves it, and only then; and (the review's guardrail) a llama.cpp entry with a pinned adapter moved onto the billed mock with `--adapters ""` and `--mcp-serve complete` in one call, refused naming the rule with the file byte-identical, while the same call onto a free mock lands.
+  - `admin_config_test`: the twin byte-identical, the view, and the refusals with and without a probe.
+  - `cli/mcp_serve_test`, eight cases:
+    - nothing listed is the read set;
+    - the served call: its golden, its schema, the command's answer, the bounds and the narration;
+    - the refusals, with the server going on, `max_tokens` past a 64-bit integer either way among them;
+    - a hand-written billed listing left out and said;
+    - consent read again at the call, and the providers built once;
+    - `complete_backends` asking only the listed;
+    - the one-shot core;
+    - `search_documents` by vector.
+  - The field enumerations (`config_test`, `config_edit_test`, `config_cmd_test`) and `mock_test` grow by the new field and the placeholder.
+  - **On the real binary**, `cli.mcp_lifecycle` gains a phase: `--mcp-serve complete` written on a mock that answers with its bound, refused on one whose script bills (the rule named, the file byte for byte as it was), and the external client (`mcp_serve_client.py --callables=complete`) holding `complete` last, not read-only, its answer exactly `apogee complete -m served -n 1024`'s.
+
+Decisions taken while building, for veto:
+- 2026-11-01 — **The default taken: the config unit is spelled `mcp_serve`, a list on the backend entry** (`"mcp_serve": ["complete"]`, `--mcp-serve`). It mirrors 47a's `server_tools:` per entry, so eligibility attaches to the entry its provider answers for. `complete` is the only call; each further one is a deliberate later listing. The name keeps clear of `server_tools`, one letter from `serve_tools`.
+- 2026-11-01 — **The default taken: the served bound is 1024 tokens a call** *(flagged for veto)*. A backend's own lower `max_tokens` lowers it, and a host asks for fewer, never more. Nothing raises it at build: a configurable bound would be a later listing.
+- 2026-11-01 — **The served call is the command's core with nothing added** *(flagged for veto)*. No tools, no attachments, no retrieval -- not even the config's `auto_rag` -- and the utility model off, so a thinking `auto` is decided by rule. This is the conservative reading of "spend is local": every call a served call makes is the named backend's. One consequence: with `auto_rag` set, `apogee complete -m <b>` retrieves and the served call does not.
+- 2026-11-01 — **Eligibility is asked at write, at the server's start and at the call.** At write, by any edit that leaves a listing, so a type moved under one is refused. At start, a hand-written billed listing is left out and said. At the call, the built provider is asked again. There is no `check` row for a hand-written billed listing: the server says it.
+- 2026-11-01 — **Consent is read again at each call; the tool list is fixed at start** *(flagged for veto)*. A listing taken back stops the next call. A listing added shows at the host's next start, since hosts list tools once.
+- 2026-11-01 — **`backend` is required, even with one backend listed** *(flagged for veto)*: the contract names its choice, and the schema's `enum` lists it.
+- 2026-11-01 — **A reply cut at its bound ends there.** The cut is said on stderr and in the description, never appended to the answer.
+- 2026-11-01 — **`search_documents` keeps the 2026-09-13 spend rule** *(flagged for veto)*. Grown to the one resolver with the collection's embedder, it embeds a query through that embedder even when the embedder bills, as a chat's tool and `embed search` do, so the three cannot disagree. This is a different rule from `complete`'s local-only one: one small call against a collection already built, not a generation.
+- 2026-11-01 — **The write asks the text it writes** *(flagged for veto; the review's fix)*. The eligibility check runs inside `edit_config_file`'s transform, on the final text, rather than on a trial beside it. So the probe builds the entry's provider while the config's lock is held. A local provider's construction loads nothing (llama.cpp's loads lazily), and a cloud one resolves its key; a slow probe holds a concurrent edit up to the lock's 10-second wait. The refusal now comes after the adapter and drafter checks, so an edit wrong in both ways is refused by those first.
+- 2026-11-01 — **A served `max_tokens` past a 64-bit integer is read as the range's end** *(flagged for veto)*. The review asked for a range check before the cast. A whole number past the range is past every bound, so the bound refuses it in its own words (`max_tokens must be from 1 to 1024, ...`) rather than calling it not a whole number. A fraction, or a value that is not finite, is still `must be a whole number`.
+- 2026-11-01 — **The providers build lazily and live for the server's life** (`ServedModels`), so a model loads once.
+- 2026-11-01 — **`ServedCall` is `ServedRead`'s shape**, and `with_calls` and `with_reads` share one body. A call differs from a read only in its hint.
+- 2026-11-01 — **SPEC and the ADRs are unchanged.** The served `complete` is a capability's protocol face (54a's call). Its consent applies two existing rules: the suites' "model initiative never spends" (27f, 27t) and 47a's consent-as-config.
+
+**Verified.**
+- **The full gate** (`lib/scripts/cicd.sh --app cli --test`, then `--app darwin --test`) passes:
+  - the CLI: 4089 of 4089 ctest cases, 4088 passed and the usual one skipped (no `pdftotext`), 18 of them new (the review's guardrail the eighteenth), run again on the final code after the review's fixes;
+  - the macOS app: 979 of 979 (the xcresult's `totalTestCount`), unchanged.
+- **Warnings and format.** Neither build raised a compiler warning. All 23 changed C++ source and test files compile clean under MinGW g++ 16 with CI's Windows flags; after the review's fixes, the five `.cpp` files they touched (and the two headers through them) were compiled again, clean. clang-format is clean on every touched file. clang-tidy over the 23 raised no error, nor did it over the fixes' `backend_fields.cpp`, `cli/mcp_serve.cpp` and `backend_fields_test.cpp` (its naming note on the fix's new locals taken).
+- **Planted violations, all caught.**
+  - A served call that dropped its bound failed six checks across three cases.
+  - An editor that skipped the eligibility check failed nine checks in the command's case. Planted again in its new place, the write's transform, it failed 21 checks across four cases: the command's, the probe's, the guardrail's and the admin twin's.
+  - The review's bypass planted back (the check skipped when the edit carries `adapters`) failed the guardrail's three checks -- the exit, the rule's words, the byte-identical file -- and nothing else.
+- **The review's repro, on the fixed binary** (scratch home): `foo`, a llama.cpp entry with one pinned adapter; `config set-backend foo --type mock --model-path paid.json --adapters "" --mcp-serve complete` now exits 1 with `'foo' cannot serve complete: its provider bills each call -- ... (nothing was edited)`, the file byte-identical; the same call with `--model-path ""` (a free mock) lands and writes `"mcp_serve": ["complete"]`.
+- **On the real binary** (the macos-arm64 build, scratch homes, `</dev/null`):
+  - `config set-backend echo --mcp-serve complete` was written. On a mock that bills, it was refused in the rule's words. On an anthropic entry with no key, it was refused naming the factory's reason. Completion offered `complete`.
+  - A raw JSON-RPC session listed 23 tools, `complete` last with the golden description. The calls answered `max_tokens=1024 asked=hello there` and `max_tokens=64 asked=hi` (from `"max_tokens": "64"`).
+  - A hand-written listing on the billed mock was left out, said on stderr, and refused by name at the call. `max_tokens: 5000` was refused with the bound named.
+  - The search verification above, before and after.
+
+**Not done.**
+- **A live pass with a real MCP host and a real local model** is yours: `apogee-dev config set-backend <a local backend> --mcp-serve complete`, then register `apogee-dev mcp serve` (the entry `apogee-dev mcp presets` prints) in Claude Code or Claude Desktop, and ask it to hand a prompt to the model. This run loads no weights; the mock and the external client stand in.
+- **Cancellation**: the server does not read MCP's `notifications/cancelled`, so a served call runs to its answer or its bound.
+- **Windows**: `cli.mcp_lifecycle` is a POSIX shell check. The unit cases run on CI's Windows rows after your push; the changed sources compile clean under MinGW g++ here.
+- **The mod's side**: its 1b switching `apogee_complete` to the served tool, with the CLI path as the fallback where nothing is listed, is the mod's own item.
+
 ## Milestone X — Agents as data
 
 **Goal.** A named workflow the user runs with `apogee analyze --agent <name>`: a persona from prompt files, an output schema the answer must satisfy, a tool policy that is the agent's permission model, executed by the same loop every other surface runs — so an agent behaves identically on every backend the loop drives — with structured output validated on every provider, an in-process renderer, deterministic branch review from flags, `apogee agents` and its admin twins over one scaffold core, and three review agents re-authored for the owned loop.

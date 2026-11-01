@@ -422,6 +422,14 @@
     // model when one is set. thinking_budget caps the tokens it may think for.
     // Both work on cloud backends too, mapped to each vendor's own control;
     // --think and --think-budget, and /think in a chat, outrank them.
+    // mcp_serve lists the model calls `apogee mcp serve` may make on an entry
+    // for another MCP host -- complete, the one there is: a prompt in, this
+    // model's answer out, at most 1024 tokens a call (fewer when the entry's
+    // max_tokens is lower). Nothing is served until an entry lists it, and
+    // only an entry whose provider says it is local and unmetered may, since a
+    // served call runs on the host's initiative. `apogee config set-backend
+    // local --mcp-serve complete` writes it:
+    //   "mcp_serve": ["complete"]
     // adapters applies LoRA adapters over the model as it loads -- GGUF LoRA
     // files, each set on every context at its scale (1 unless given), never
     // merged into the weights, so a fine-tune is a small file beside its base.

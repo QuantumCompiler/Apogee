@@ -266,6 +266,11 @@ TEST_CASE("placeholders expand against the request: the last tool result and the
     // A level (39a) after `@`.
     request.thinking = apogee::harness::Thinking{.effort = apogee::harness::Effort::XHigh};
     CHECK(apogee::backends::expand_mock_text("{{thinking}}", request) == "on@xhigh");
+    // The bound the request carried (54b), or none.
+    CHECK(apogee::backends::expand_mock_text("{{max_tokens}}", request) == "none");
+    request.max_tokens = 256;
+    CHECK(apogee::backends::expand_mock_text("at most {{max_tokens}}", request) == "at most 256");
+    request.max_tokens.reset();
     request.thinking =
         apogee::harness::Thinking{.mode = apogee::harness::ThinkingMode::Off, .budget = 64};
     // The :json forms are string literals, quotes included, so a scripted JSON

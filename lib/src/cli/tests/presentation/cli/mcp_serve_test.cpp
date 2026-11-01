@@ -5,17 +5,24 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
+#include <random>
 #include <set>
 #include <sstream>
 #include <string>
 #include <vector>
 
+#include "cli/complete.h"
+#include "contracts/config.h"
+#include "contracts/mcp_serve.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
 #include "support/cli_home.h"
+#include "support/env_guard.h"
 #include "support/gguf_builder.h"
 #include "training/store.h"
 
@@ -391,4 +398,356 @@ TEST_CASE("the status reads are named once, in order", "[cli][mcp][serve]") {
         CHECK(reads[i].input_schema["type"] == "object");
         CHECK_THAT(reads[i].description, ContainsSubstring("byte for byte"));
     }
+}
+
+namespace {
+
+/// Mock scripts outside the install, and a config naming them, for the
+/// callable set (54b): `echo` answers with the bound its request carried and
+/// the prompt it was asked; `paid` says each call is billed.
+struct CallableFiles {
+    apogee::testing::TempDir dir{"mcp-serve-calls-" + std::to_string(std::random_device{}())};
+    std::filesystem::path echo = dir.path() / "echo.json";
+    std::filesystem::path paid = dir.path() / "paid.json";
+
+    CallableFiles() {
+        std::ofstream{echo, std::ios::binary}
+            << R"({"turns": [{"text": "max_tokens={{max_tokens}} asked={{last_user}}"}]})";
+        std::ofstream{paid, std::ios::binary}
+            << R"({"metered": true, "turns": [{"text": "paid"}]})";
+    }
+
+    /// `local` and `short` answer from `echo` (`short` with its own lower
+    /// max_tokens), `spare` is a plain mock and `paid` bills; `listed` is
+    /// written into the entries named as a hand edit would.
+    [[nodiscard]] std::string config(const std::vector<std::string>& listed = {}) const {
+        const auto serve = [&listed](const std::string& name) {
+            return std::ranges::find(listed, name) != listed.end()
+                       ? std::string{"    mcp_serve: [complete]\n"}
+                       : std::string{};
+        };
+        return "backends:\n  local:\n    type: mock\n    model_path: " + echo.string() + "\n" +
+               serve("local") + "  short:\n    type: mock\n    model_path: " + echo.string() +
+               "\n    max_tokens: 256\n" + serve("short") +
+               "  spare:\n    type: mock\n    model: mock-2\n" + serve("spare") +
+               "  paid:\n    type: mock\n    model_path: " + paid.string() + "\n" + serve("paid") +
+               "models:\n  default: local\n";
+    }
+};
+
+[[nodiscard]] std::vector<std::string> names_in(const nlohmann::json& tools) {
+    std::vector<std::string> names;
+    for (const nlohmann::json& tool : tools) {
+        names.push_back(tool["name"].get<std::string>());
+    }
+    return names;
+}
+
+}  // namespace
+
+TEST_CASE("with nothing listed, the served set is the read set and complete is absent",
+          "[cli][mcp][serve][callable]") {
+    // 54b: consent is config; a call no entry lists is not there to refuse.
+    const CallableFiles files;
+    const CliHome home{files.config()};
+    const Served served =
+        serve(home, {"mcp", "serve"},
+              {list_tools(), call(10, "complete", {{"prompt", "hi"}, {"backend", "local"}})});
+    REQUIRE(served.code == 0);
+    const nlohmann::json& tools = served.reply(2)["result"]["tools"];
+    const std::vector<std::string> names = names_in(tools);
+    CHECK(std::ranges::find(names, "complete") == names.end());
+    for (const nlohmann::json& tool : tools) {
+        INFO(tool["name"]);
+        CHECK(tool["annotations"]["readOnlyHint"] == true);
+    }
+    CHECK(names.back() == "check");
+    const Answer absent = answer_of(served, 10);
+    CHECK(absent.is_error);
+    CHECK(absent.text == "Error: no such tool 'complete'");
+    // Nothing was built or asked, so nothing is said.
+    CHECK(served.err.empty());
+}
+
+TEST_CASE("a listed complete is the command's own one-shot, bounded, its description honest",
+          "[cli][mcp][serve][callable]") {
+    const CallableFiles files;
+    const CliHome home{files.config()};
+    std::string out;
+    std::string err;
+    // Listed through the one editor, as a person lists it.
+    REQUIRE(home.run({"config", "set-backend", "local", "--mcp-serve", "complete"}, &out, &err) ==
+            0);
+    REQUIRE(home.run({"config", "set-backend", "short", "--mcp-serve", "complete"}, &out, &err) ==
+            0);
+    const Served served = serve(
+        home, {"mcp", "serve"},
+        {initialize(), list_tools(),
+         call(10, "complete", {{"prompt", "hello there"}, {"backend", "local"}}),
+         call(11, "complete", {{"prompt", "hi"}, {"backend", "short"}}),
+         call(12, "complete", {{"prompt", "hi"}, {"backend", "local"}, {"max_tokens", 64}}),
+         call(13, "complete", {{"prompt", "hi"}, {"backend", "local"}, {"max_tokens", "32"}})});
+    INFO(served.err);
+    REQUIRE(served.code == 0);
+
+    const nlohmann::json& tools = served.reply(2)["result"]["tools"];
+    const std::vector<std::string> names = names_in(tools);
+    // Last, after the reads: the set only grows, and every tool before it is
+    // read-only.
+    REQUIRE(names.back() == "complete");
+    CHECK(names[names.size() - 2] == "check");
+    const nlohmann::json& complete = tools.back();
+    CHECK(complete["annotations"]["readOnlyHint"] == false);
+    for (std::size_t i = 0; i + 1 < tools.size(); ++i) {
+        CHECK(tools[i]["annotations"]["readOnlyHint"] == true);
+    }
+    // The description golden: what a call is, the backends and their
+    // bounds, that the spend is this machine's, and why it is offered.
+    CHECK(complete["description"] ==
+          "Hand a prompt to one of Apogee's local models and answer with its reply. One call is "
+          "the one-shot `apogee complete -m <backend> \"<prompt>\"` runs: the backend's own "
+          "system prompt and sampling, no tools, no retrieval. backend may name: local (at most "
+          "1024 tokens), short (at most 256 tokens). Each runs on this machine and is unmetered "
+          "by its own provider's word, so a call spends this machine's time, never money. "
+          "max_tokens asks for fewer tokens than the backend's bound, never more, and a reply "
+          "that reaches its bound ends there. Offered because Apogee's config lists complete "
+          "under these backends' mcp_serve.");
+    const nlohmann::json& schema = complete["inputSchema"];
+    CHECK(schema["properties"]["backend"]["enum"] == nlohmann::json::array({"local", "short"}));
+    CHECK(schema["properties"]["max_tokens"]["maximum"] == 1024);
+    CHECK(schema["properties"]["max_tokens"]["minimum"] == 1);
+    CHECK(schema["required"] == nlohmann::json::array({"prompt", "backend"}));
+    CHECK(schema["properties"]["prompt"]["type"] == "string");
+
+    // The call is the command's own answer, at the served bound.
+    const Answer local = answer_of(served, 10);
+    CHECK_FALSE(local.is_error);
+    CHECK(local.text == "max_tokens=1024 asked=hello there");
+    REQUIRE(home.run({"complete", "-m", "local", "-n", "1024", "hello there"}, &out, &err) == 0);
+    CHECK(local.text + "\n" == out);
+    // A backend's own lower max_tokens is its bound; a host asks for fewer.
+    CHECK(answer_of(served, 11).text == "max_tokens=256 asked=hi");
+    CHECK(answer_of(served, 12).text == "max_tokens=64 asked=hi");
+    CHECK(answer_of(served, 13).text == "max_tokens=32 asked=hi");
+    // Narrated on stderr, the stream a host captures; stdout held frames only.
+    CHECK_THAT(served.err, ContainsSubstring("apogee mcp serve: complete on 'local', at most "
+                                             "1024 tokens\napogee mcp serve: complete on "
+                                             "'local' answered\n"));
+    CHECK_THAT(served.err, ContainsSubstring("complete on 'short', at most 256 tokens"));
+}
+
+TEST_CASE("a served complete refuses what it cannot run, in words, and the server goes on",
+          "[cli][mcp][serve][callable]") {
+    const CallableFiles files;
+    const CliHome home{files.config({"local"})};
+    const Served served = serve(
+        home, {"mcp", "serve"},
+        {call(10, "complete", {{"prompt", "hi"}, {"backend", "spare"}}),
+         call(11, "complete", {{"prompt", ""}, {"backend", "local"}}),
+         call(12, "complete", {{"prompt", "hi"}}),
+         call(13, "complete", {{"prompt", "hi"}, {"backend", "local"}, {"max_tokens", 2048}}),
+         call(14, "complete", {{"prompt", "hi"}, {"backend", "local"}, {"max_tokens", 0}}),
+         call(15, "complete", {{"prompt", "hi"}, {"backend", "local"}, {"max_tokens", "lots"}}),
+         call(16, "complete", {{"prompt", 5}, {"backend", "local"}}),
+         call(17, "complete", {{"prompt", "still here"}, {"backend", "local"}}),
+         // Past a 64-bit integer either way: read as the range's end, refused
+         // by the bound -- never cast undefined.
+         call(18, "complete", {{"prompt", "hi"}, {"backend", "local"}, {"max_tokens", 1e300}}),
+         call(19, "complete", {{"prompt", "hi"}, {"backend", "local"}, {"max_tokens", -1e300}}),
+         call(20, "complete",
+              {{"prompt", "hi"},
+               {"backend", "local"},
+               {"max_tokens", std::numeric_limits<std::uint64_t>::max()}}),
+         call(21, "complete", {{"prompt", "hi"}, {"backend", "local"}, {"max_tokens", 2.5}})});
+    REQUIRE(served.code == 0);
+    const auto refused = [&served](int id, std::string_view text) {
+        const Answer answer = answer_of(served, id);
+        INFO(id);
+        CHECK(answer.is_error);
+        CHECK(answer.text == text);
+    };
+    refused(10, "Error: 'spare' is not a backend complete runs on here -- it may name local");
+    refused(11, "Error: prompt is required: what the model is asked");
+    refused(12, "Error: backend is required: one of local");
+    refused(13, "Error: max_tokens must be from 1 to 1024, local's bound");
+    refused(14, "Error: max_tokens must be from 1 to 1024, local's bound");
+    refused(15, "Error: max_tokens must be a whole number");
+    refused(16, "Error: prompt must be a string");
+    CHECK(answer_of(served, 17).text == "max_tokens=1024 asked=still here");
+    refused(18, "Error: max_tokens must be from 1 to 1024, local's bound");
+    refused(19, "Error: max_tokens must be from 1 to 1024, local's bound");
+    refused(20, "Error: max_tokens must be from 1 to 1024, local's bound");
+    refused(21, "Error: max_tokens must be a whole number");
+    // Nothing ran for a refusal: one call narrated.
+    CHECK(served.err ==
+          "apogee mcp serve: complete on 'local', at most 1024 tokens\n"
+          "apogee mcp serve: complete on 'local' answered\n");
+}
+
+TEST_CASE("a listing the editor would refuse is left out at the server's start, and said",
+          "[cli][mcp][serve][callable]") {
+    // A hand edit can write what the editor refuses: the server asks the
+    // provider's word again, and a billed backend is never offered.
+    const CallableFiles files;
+    {
+        const CliHome home{files.config({"paid"})};
+        const Served served = serve(home, {"mcp", "serve"}, {list_tools()});
+        REQUIRE(served.code == 0);
+        const std::vector<std::string> names = names_in(served.reply(2)["result"]["tools"]);
+        CHECK(std::ranges::find(names, "complete") == names.end());
+        CHECK(served.err ==
+              "apogee mcp serve: 'paid' cannot serve complete: its provider bills each call -- a "
+              "served call runs on another host's initiative, so only a backend local and "
+              "unmetered by its own provider's word may serve one; it is not served\n");
+    }
+    const CliHome home{files.config({"local", "paid"})};
+    const Served served =
+        serve(home, {"mcp", "serve"},
+              {list_tools(), call(10, "complete", {{"prompt", "hi"}, {"backend", "paid"}})});
+    REQUIRE(served.code == 0);
+    const nlohmann::json& complete = served.reply(2)["result"]["tools"].back();
+    REQUIRE(complete["name"] == "complete");
+    CHECK(complete["inputSchema"]["properties"]["backend"]["enum"] ==
+          nlohmann::json::array({"local"}));
+    CHECK(answer_of(served, 10).text ==
+          "Error: 'paid' is not a backend complete runs on here -- it may name local");
+    CHECK_THAT(served.err, ContainsSubstring("'paid' cannot serve complete"));
+}
+
+TEST_CASE("consent is read again at each call: a listing taken back is not run",
+          "[cli][mcp][serve][callable]") {
+    const CallableFiles files;
+    const CliHome home{files.config({"local"})};
+    apogee::commands::RootContext context;
+    context.config_path = home.config_path().string();
+    const apogee::harness::Config config = apogee::harness::load_config(home.config_path());
+    apogee::commands::ServedModels models{config, home.config_path()};
+    std::ostringstream narration;
+    const apogee::mcp::ServedCall complete = apogee::commands::served_complete(
+        context, models, {{.name = "local", .max_tokens = 1024}}, narration);
+    const nlohmann::json args{{"prompt", "hi"}, {"backend", "local"}};
+    const apogee::mcp::ToolCallResult first = complete.answer(args);
+    CHECK_FALSE(first.is_error);
+    CHECK(first.text == "max_tokens=1024 asked=hi");
+    // The providers are built once, for the server's life.
+    const apogee::backends::BuildResult* built = &models.ready();
+    CHECK(&models.ready() == built);
+
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"config", "set-backend", "local", "--mcp-serve", ""}, &out, &err) == 0);
+    const apogee::mcp::ToolCallResult second = complete.answer(args);
+    CHECK(second.is_error);
+    CHECK(second.text ==
+          "Error: 'local' no longer lists complete under mcp_serve -- the config changed since "
+          "this server started, and nothing was run");
+    CHECK(narration.str() ==
+          "apogee mcp serve: complete on 'local', at most 1024 tokens\n"
+          "apogee mcp serve: complete on 'local' answered\n");
+}
+
+TEST_CASE("complete_backends takes the provider's word for each listed backend, in name order",
+          "[cli][mcp][serve][callable]") {
+    const CallableFiles files;
+    const apogee::harness::Config config =
+        apogee::harness::parse_config(files.config({"short", "local", "paid"}), "<test>");
+    std::vector<std::string> asked;
+    const apogee::commands::MeteredProbe probe = [&asked](const apogee::harness::Config&,
+                                                          std::string_view backend) {
+        asked.emplace_back(backend);
+        return backend == "paid" ? apogee::commands::MeteredAnswer{.metered = true}
+                                 : apogee::commands::MeteredAnswer{.metered = false};
+    };
+    const apogee::commands::CallableBackends callable =
+        apogee::commands::complete_backends(config, probe);
+    // Only the listed are asked; spare is not.
+    CHECK(asked == std::vector<std::string>{"local", "paid", "short"});
+    REQUIRE(callable.backends.size() == 2);
+    CHECK(callable.backends[0].name == "local");
+    CHECK(callable.backends[0].max_tokens == 1024);
+    CHECK(callable.backends[1].name == "short");
+    CHECK(callable.backends[1].max_tokens == 256);
+    REQUIRE(callable.left_out.size() == 1);
+    CHECK_THAT(callable.left_out.front(), StartsWith("'paid' cannot serve complete: its provider "
+                                                     "bills each call"));
+    // No probe tells nothing, and unknown is metered: none is served.
+    const apogee::commands::CallableBackends blind =
+        apogee::commands::complete_backends(config, {});
+    CHECK(blind.backends.empty());
+    CHECK(blind.left_out.size() == 3);
+}
+
+TEST_CASE("the one-shot core resolves a request as apogee complete does, the utility off on ask",
+          "[cli][complete][one-shot]") {
+    const apogee::harness::Config config = apogee::harness::parse_config(
+        "backends:\n  local:\n    type: mock\n    temperature: 0.4\n    max_tokens: 300\n"
+        "    system_prompt: Be brief.\n    thinking: auto\n  helper:\n    type: mock\n"
+        "models:\n  default: local\n  default_utility: helper\n",
+        "<test>");
+    const apogee::commands::OneShot entry =
+        apogee::commands::one_shot(config, "local", "why?", apogee::commands::OneShotSettings{});
+    CHECK(entry.options.model == "local");
+    CHECK(entry.options.temperature == 0.4);
+    CHECK(entry.options.max_tokens == 300);
+    CHECK(entry.options.thinking.mode == apogee::harness::ThinkingMode::Auto);
+    CHECK(entry.options.thinking_judge == "helper");
+    CHECK(entry.options.summary_model == "helper");
+    REQUIRE(entry.messages.size() == 2);
+    CHECK(entry.messages.front().content.plain_text() == "Be brief.");
+    CHECK(entry.messages.back().content.plain_text() == "why?");
+
+    // The flags win, as on the command line; the served call turns the
+    // utility model off, so `auto` is decided by rule.
+    const apogee::commands::OneShot served = apogee::commands::one_shot(
+        config, "local", "why?",
+        apogee::commands::OneShotSettings{
+            .system_prompt = "Be exact.", .temperature = 0.0, .max_tokens = 64, .utility = false});
+    CHECK(served.options.temperature == 0.0);
+    CHECK(served.options.max_tokens == 64);
+    CHECK(served.options.thinking_judge.empty());
+    CHECK(served.options.summary_model.empty());
+    CHECK(served.messages.front().content.plain_text() == "Be exact.");
+}
+
+TEST_CASE("search_documents searches with the collection's embedder, as chat's tool does",
+          "[cli][mcp][serve][rag]") {
+    // 54b's verification: the served search was chunk-only -- no embedder
+    // reached it, so `vector` was refused and auto ran lexical over a
+    // vectorised collection. It resolves through the one resolver now, with
+    // the providers the server builds at its first search.
+    const CliHome home{std::string{R"(backends:
+  local:
+    type: mock
+    model: mock-1
+  embed:
+    type: mock
+    embedding_model: mock-space
+
+models:
+  default: local
+  default_embedding: embed
+)"}};
+    const std::filesystem::path docs = home.home() / "docs";
+    std::filesystem::create_directories(docs);
+    std::ofstream{docs / "paint.md"} << "The painter mixed ultramarine pigment with oil.\n";
+    std::ofstream{docs / "rust.md"} << "Rust ownership moves values between bindings.\n";
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"embed", "ingest", "notes", docs.string(), "--retriever", "vector"}, &out,
+                     &err) == 0);
+    const Served served =
+        serve(home, {"mcp", "serve"},
+              {call(10, "search_documents",
+                    {{"query", "pigment"}, {"collection", "notes"}, {"retriever", "vector"}}),
+               call(11, "search_documents", {{"query", "pigment"}, {"collection", "notes"}}),
+               call(12, "search_documents",
+                    {{"query", "pigment"}, {"collection", "notes"}, {"retriever", "lexical"}})});
+    INFO(served.err);
+    REQUIRE(served.code == 0);
+    const Answer vector = answer_of(served, 10);
+    INFO(vector.text);
+    CHECK_FALSE(vector.is_error);
+    CHECK_THAT(vector.text, StartsWith("collection: notes  retriever: vector\n"));
+    CHECK_THAT(answer_of(served, 11).text, StartsWith("collection: notes  retriever: vector\n"));
+    CHECK_THAT(answer_of(served, 12).text, StartsWith("collection: notes  retriever: lexical\n"));
 }

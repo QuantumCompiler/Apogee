@@ -11,7 +11,12 @@ line by line as any MCP host would, and checks that:
 - each status read answers with the document `apogee <verb>
   --output-format json` printed for the same question, byte for byte.
 
-usage: mcp_serve_client.py <apogee-binary> <calls.json>
+With `--callables=<name,...>` (54b), the calls the config lists follow the
+status reads, each marked not read-only, and a call's expected text is what
+the command it serves printed -- `apogee complete -m <backend> ...` for the
+served `complete`.
+
+usage: mcp_serve_client.py <apogee-binary> <calls.json> [--callables=<name,...>]
 
 `calls.json` is a list of {"tool": ..., "arguments": {...}, "expect": <path
 of the CLI's JSON output>}. Exit 0 on success; a failure names what differed.
@@ -61,9 +66,15 @@ def converse(binary, spelling, calls):
 
 
 def main():
-    if len(sys.argv) != 3:
-        fail("usage: mcp_serve_client.py <apogee-binary> <calls.json>")
+    if len(sys.argv) not in (3, 4):
+        fail("usage: mcp_serve_client.py <apogee-binary> <calls.json> [--callables=<name,...>]")
     binary, calls_path = sys.argv[1], sys.argv[2]
+    callables = []
+    if len(sys.argv) == 4:
+        if not sys.argv[3].startswith("--callables="):
+            fail("unknown argument: " + sys.argv[3])
+        callables = [name for name in sys.argv[3][len("--callables="):].split(",") if name]
+    tail = STATUS_READS + callables
     with open(calls_path, encoding="utf-8") as handle:
         calls = json.load(handle)
 
@@ -76,10 +87,15 @@ def main():
             fail("%s: initialize did not offer tools: %r" % (words, replies.get(1)))
         tools = replies.get(2, {}).get("result", {}).get("tools", [])
         names = [tool["name"] for tool in tools]
-        if names[-len(STATUS_READS):] != STATUS_READS:
-            fail("%s: the status reads are not listed last, in order: %s" % (words, names))
+        if names[-len(tail):] != tail:
+            fail("%s: the status reads and calls are not listed last, in order: %s"
+                 % (words, names))
         for tool in tools:
-            if tool.get("annotations", {}).get("readOnlyHint") is not True:
+            read_only = tool.get("annotations", {}).get("readOnlyHint")
+            if tool["name"] in callables:
+                if read_only is not False:
+                    fail("%s: the call %s is not marked as one" % (words, tool["name"]))
+            elif read_only is not True:
                 fail("%s: %s is not marked read-only" % (words, tool["name"]))
             if tool.get("inputSchema", {}).get("type") != "object":
                 fail("%s: %s has no object input schema" % (words, tool["name"]))

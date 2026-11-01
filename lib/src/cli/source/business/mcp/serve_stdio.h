@@ -67,4 +67,17 @@ struct ServedSet {
 [[nodiscard]] ServedSet with_reads(std::vector<ServedTool> tools, Dispatch dispatch,
                                    std::vector<ServedRead> reads);
 
+/// A call served beside the reads (54b): the same shape as a read -- listed,
+/// and answered by its own function -- but one that makes a model call, so
+/// listed with `readOnlyHint` false. What the person's config lists, and
+/// nothing a host can ask for.
+using ServedCall = ServedRead;
+
+/// `set` grown by `calls` (54b) as `with_reads` grows a set: each call listed
+/// after what `set` lists, in order, marked as not read-only, called by its
+/// own name, its text mended to UTF-8 and an exception said as an error
+/// result. A call named like anything `set` lists, or like another call,
+/// throws `std::invalid_argument`.
+[[nodiscard]] ServedSet with_calls(ServedSet set, std::vector<ServedCall> calls);
+
 }  // namespace apogee::mcp

@@ -20,6 +20,7 @@
 
 #include "cli/config_suites.h"
 #include "cli/graph.h"
+#include "cli/helpers.h"
 #include "cli/video_generate.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
@@ -27,6 +28,7 @@
 #include "contracts/host.h"
 #include "contracts/jsonc.h"
 #include "contracts/layout.h"
+#include "contracts/mcp_serve.h"
 #include "contracts/paths.h"
 #include "contracts/server_tools.h"
 #include "graph/code_languages.h"
@@ -302,6 +304,7 @@ const std::vector<FieldRead>& backend_field_reads() {
         {"idle_unload_seconds",
          [](const BackendConfig& b) { return whole(b.idle_unload_seconds); }},
         {"server_tools", [](const BackendConfig& b) { return one_per_line(b.server_tools); }},
+        {"mcp_serve", [](const BackendConfig& b) { return one_per_line(b.mcp_serve); }},
         {"adapters", [](const BackendConfig& b) { return adapter_lines(b.adapters); }},
         {"draft", [](const BackendConfig& b) { return render(b.draft); }},
         {"draft_block_size", [](const BackendConfig& b) { return whole(b.draft_block_size); }},
@@ -1101,6 +1104,9 @@ void bind_set_backend(CLI::App& parent, const RootContext& context) {
     // A comma-separated list of the vendors' server-side tools (47a): the
     // loader refuses a name the entry's vendor does not run.
     static const std::string kServerToolsType = word_list_value(harness::server_tool_names());
+    // The model calls `apogee mcp serve` may make on the entry (54b): the
+    // editor asks the entry's provider whether it may serve one.
+    static const std::string kMcpServeType = word_list_value(harness::mcp_serve_tool_names());
     // One flag per editable field, spelled as `add-backend` spells it.
     const std::vector<FieldFlag> flags{
         {"type", "", "Backend type", types},
@@ -1132,6 +1138,10 @@ void bind_set_backend(CLI::App& parent, const RootContext& context) {
          "The vendor's own server-side tools this entry may run, comma-separated: "
          "web_search, code_execution -- consent for that vendor to search or run code "
          "under your key, where the host gate cannot see"},
+        {"mcp_serve", kMcpServeType,
+         "The model calls 'apogee mcp serve' may make on this entry for another MCP host, "
+         "comma-separated: complete -- consent for a host to run this model, given only where "
+         "its provider says it is local and unmetered"},
         // 53a: each adapter pinned to the base's weights as they are now.
         {"adapters", kPathValue,
          "LoRA adapters applied over model_path, never merged into it: <path>[:<scale>], "
@@ -1170,8 +1180,9 @@ void bind_set_backend(CLI::App& parent, const RootContext& context) {
         for (const auto& [field, value] : *values) {
             edits.push_back({.field = field, .value = value});
         }
+        const std::filesystem::path path = config_path_for(context);
         const BackendFieldsOutcome outcome =
-            set_backend_fields(config_path_for(context), *name, edits);
+            set_backend_fields(path, *name, edits, provider_metered_probe(path));
         if (!outcome.refusal.empty()) {
             fail(outcome.refusal);
         }

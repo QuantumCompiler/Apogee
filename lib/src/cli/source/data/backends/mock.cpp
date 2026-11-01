@@ -68,6 +68,10 @@ std::string expand_mock_text(std::string_view text, const harness::ChatRequest& 
                 nlohmann::json(request.transient.response_schema).dump());
     replace_all(out, "{{last_tool_result}}", last_tool_result);
     replace_all(out, "{{system}}", system);
+    // The bound the request carried (54b), or `none`: so a check on the real
+    // binary can see a surface's bound reach the backend.
+    replace_all(out, "{{max_tokens}}",
+                request.max_tokens.has_value() ? std::to_string(*request.max_tokens) : "none");
     // Whether the model was asked to think, and for how long (26i):
     // `on`, `off` or `auto`, with `:N` for a budget and `@level` for a
     // level (39a).

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "contracts/config.h"
+#include "operations/suites.h"
 
 /// Editing a backend in place (46b): the one core `config set-backend` and
 /// its admin twin call, so an entry edited over HTTP is byte for byte the
@@ -57,9 +58,22 @@ struct BackendFieldsOutcome {
 ///
 /// An edit that leaves an `mlx` entry over an MLX directory whose kind no mlx
 /// entry runs is refused by that kind (`kind_refusal`, 55d).
+///
+/// An edit that leaves the entry with an `mcp_serve:` list (54b) -- the list
+/// set, or kept under a moved type or path -- is asked of the entry's
+/// provider through `metered`, on the config as the edit leaves it: asked
+/// inside the write, of the very text it writes, so every edit the write
+/// applies (an adapter set cleared beside a moved type among them) is asked
+/// as it lands. A provider that bills each call, or one that cannot say,
+/// refuses the edit naming the rule (`harness::mcp_serve_ineligible`), the
+/// file untouched. A null probe tells nothing, and unknown is metered; the
+/// CLI hands its own
+/// (`provider_metered_probe`), the admin twin the one its composition root
+/// gave it.
 [[nodiscard]] BackendFieldsOutcome set_backend_fields(const std::filesystem::path& path,
                                                       std::string_view name,
-                                                      const std::vector<BackendFieldEdit>& edits);
+                                                      const std::vector<BackendFieldEdit>& edits,
+                                                      const MeteredProbe& metered = {});
 
 /// **The kind decides the role** (55d): why entry `name` may not run what it
 /// names, or empty when it may. An `mlx` entry over an MLX directory is held

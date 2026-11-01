@@ -1855,10 +1855,11 @@ std::vector<std::string_view> backend_editable_fields() {
 }
 
 /// `value`, a comma-separated list of names (`web_search,code_execution`),
-/// as the YAML flow list a `server_tools:` line holds. Each name is a bare
-/// word, so the list needs no quoting; whether the vendor runs it is the
-/// loader's question, asked on the edit's own re-parse.
-std::string flow_list_of_names(std::string_view value) {
+/// as the YAML flow list a `server_tools:` or `mcp_serve:` (54b) line holds.
+/// Each name is a bare word, so the list needs no quoting; whether it names
+/// something the entry can run is the loader's question, asked on the
+/// edit's own re-parse. `field` names the line in a refusal.
+std::string flow_list_of_names(std::string_view field, std::string_view value) {
     std::string list;
     std::size_t start = 0;
     while (start <= value.size()) {
@@ -1874,9 +1875,10 @@ std::string flow_list_of_names(std::string_view value) {
         if (word.empty() || !std::ranges::all_of(word, [](char c) {
                 return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
             })) {
-            throw ConfigEditError("server_tools: '" + std::string{value} +
-                                  "' is not a comma-separated list of tool names "
-                                  "(e.g. web_search,code_execution)");
+            throw ConfigEditError(
+                std::string{field} + ": '" + std::string{value} +
+                "' is not a comma-separated list of tool names (e.g. " +
+                (field == "mcp_serve" ? "complete" : "web_search,code_execution") + ")");
         }
         list += (list.empty() ? "" : ", ") + std::string{word};
         if (comma == std::string_view::npos) {
@@ -1907,8 +1909,8 @@ std::string set_backend_field(std::string_view content, std::string_view name,
         }
         return remove_backend_field(content, name, field);
     }
-    if (field == "server_tools") {
-        return set_backend_path_field(content, name, field, "", flow_list_of_names(value),
+    if (field == "server_tools" || field == "mcp_serve") {
+        return set_backend_path_field(content, name, field, "", flow_list_of_names(field, value),
                                       /*quote=*/false);
     }
     if (field == "adapters") {

@@ -9,7 +9,7 @@ and beside it **validation**, the same member checking the others' work;
 tools; **code execution**, the Python server Apogee ships, registered
 with one command; the **MCP presets**, every server Apogee ships, listed
 with what it needs; and **`apogee mcp serve`**, Apogee itself as an MCP server
-for another host.
+for another host -- its local models among the tools where you list them.
 
 The native toolsets (files, the shell, git, notes, document search, graph
 navigation) and `fetch_url` need no setup beyond that, and nor do the
@@ -180,7 +180,7 @@ json`, in [machine-mode.md](machine-mode.md)), and the admin plane's `POST
 | Preset | What it is |
 |---|---|
 | `code-exec` | The code-execution server below: `run_python` and `write_input`, registered as `code`. It needs the server seeded (`apogee check --fix`) and a Python: the training environment's, else `python3` on PATH. |
-| `self` | Apogee's own read-only tools (files, git, notes, document search, graph navigation) and its status reads, served on stdio by [`apogee mcp serve`](#apogee-as-an-mcp-server-apogee-mcp-serve) **for another MCP host**: a desktop assistant or an editor takes the entry the listing prints. It is never registered into Apogee, which already has these tools natively, so `--from self` is refused with that reason. |
+| `self` | Apogee's own read-only tools (files, git, notes, document search, graph navigation) and its status reads -- and `complete`, where you list it on a local backend -- served on stdio by [`apogee mcp serve`](#apogee-as-an-mcp-server-apogee-mcp-serve) **for another MCP host**: a desktop assistant or an editor takes the entry the listing prints. It is never registered into Apogee, which already has these tools natively, so `--from self` is refused with that reason. |
 
 Web search is not a preset. It stays yours: point Apogee at a SearXNG
 instance you run, as [*Web search through SearXNG*](#web-search-through-searxng)
@@ -201,9 +201,12 @@ entry a host takes is the one `apogee mcp presets` prints for `self`:
 with this machine's path to the binary filled in (`--output-format json`
 gives it as `host_entry`). `apogee mcp serve --help` says the same.
 
-**What it serves.** Two kinds of tool, and every one is read-only
-(`readOnlyHint: true`). Nothing writes, nothing calls a model, and nothing
-asks a question, since a server has nobody to ask:
+**What it serves.** Two kinds of tool, every one read-only
+(`readOnlyHint: true`), and a third you switch on yourself. Nothing writes,
+and nothing asks a question, since a server has nobody to ask. A model
+generates text only where your config lists it ([*Calling a local model:
+`complete`*](#calling-a-local-model-complete), below). The one other model
+call is `search_documents` embedding a query (next):
 
 - **The native read-only tools**: `read_file`, `list_directory`,
   `search_files`, `grep_files`, the git reads (`git_status`, `git_log`,
@@ -214,7 +217,18 @@ asks a question, since a server has nobody to ask:
   `tools:` settings: `fs_root` is the folder the file tools start in, and
   `tools.disabled` switches a toolset off here too. The writers (`write_file`,
   `edit_file`, `write_note`, `run_command`, ...) are withheld, because
-  Apogee's permission gate lives in its own loop.
+  Apogee's permission gate lives in its own loop. `search_documents`
+  searches as it does for a model in a chat (since 54b): its retriever is
+  decided by the one resolver, with the collection's embedder, so a
+  collection ingested with vectors is searched by vector, and `retriever`
+  takes `vector` and `hybrid` as well as `lexical`. Before 54b the server
+  reached no embedder, so every search ran lexical. A vector search embeds
+  the query through the collection's embedder: one small model call per
+  search, made on the host's initiative. When that embedder is a paid one,
+  the call is billed, under the same rule a chat's search keeps (a question
+  against a collection already built with a model may embed through it;
+  vectorising a whole collection through a paid embedder needs your yes).
+  A search asked for `lexical` makes no model call at all.
 - **The status reads** (since 54a). Each one answers with the JSON document
   its command prints under `--output-format json`, byte for byte, minus the
   newline that ends the command's output:
@@ -242,8 +256,65 @@ appear in its next `tools/list`. The server still answers to its earlier,
 hidden spelling, `apogee __mcp-tools`. A host registered with it before 54a
 needs no change and gets the same tools.
 
-Calling a model through the server is a separate, opt-in step. It is not
-served today.
+### Calling a local model: `complete`
+
+Since 54b, the server can hand a host's prompt to one of your local models
+-- the one-shot `apogee complete -m <backend> "<prompt>"` runs -- as the
+tool `complete`. It is off until you list it, backend by backend, in the
+backend's entry:
+
+```sh
+apogee config set-backend local --mcp-serve complete
+```
+
+which writes one line, `"mcp_serve": ["complete"]`, through the one config
+editor (`--mcp-serve ""` takes it back). That line is your consent for a host
+to run that model. The rules:
+
+- **Absent until listed.** With no entry listing it, `complete` is not in
+  `tools/list` at all. A host cannot pass a flag that opens it, and calling
+  it anyway answers `Error: no such tool 'complete'`.
+- **Local and unmetered only, by the provider's own word.** A served
+  generation runs on the host's initiative, which never spends: only a
+  backend whose provider says it runs locally and bills nothing per call (a
+  llama.cpp or MLX model, today) may list it. `config set-backend` asks the
+  provider, and refuses a cloud API, a vendor CLI or a backend that cannot
+  be built here, naming the rule, with the file untouched. It asks of the
+  entry exactly as the edit writes it, so an edit that moves the entry's
+  type or path under a listing is asked again, whatever else the same call
+  changes. A listing written by hand on a backend that bills is left out
+  when the server starts, and said on its stderr.
+- **Bounded.** A call generates at most 1024 tokens, or the backend's own
+  `max_tokens` when that is lower. A host's `max_tokens` argument asks for
+  fewer, never more, and a reply that reaches its bound ends there.
+- **The command's own call.** A call runs the core `apogee complete` runs
+  with the backend's own system prompt and sampling, and nothing more: no
+  tools, no retrieval (not even `auto_rag`), and no call to the utility
+  model, so a thinking `auto` is decided by rule. Its answer is the text
+  `apogee complete -m <backend> -n <bound>` prints.
+- **Read again at each call.** The config is read when a call arrives: a
+  listing taken back since the server started is refused with that reason,
+  and nothing runs.
+- **Narrated on stderr.** Each call says `complete on '<backend>', at most N
+  tokens` and how it ended on the server's stderr, the stream a host
+  captures. stdout stays the protocol's.
+
+The tool's description tells the host's model the same: what one call is,
+the backends it may name with each one's bound, that the spend is this
+machine's time and never money, and why it is offered. Its arguments:
+
+| Argument | Required | Takes |
+|---|---|---|
+| `prompt` | yes | What the model is asked |
+| `backend` | yes | One of the listed backends (the schema's `enum`) |
+| `max_tokens` | no | 1 to the backend's bound; the bound when omitted |
+
+A refusal is an error result in the CLI's words after `Error: `: a backend
+the tool does not name, a bound out of range, a listing taken back, or the
+backend's own failure.
+
+`complete` is the one call there is. Each further one would be a deliberate
+listing of its own, with its own rules.
 
 ## Running code: the code-execution server
 

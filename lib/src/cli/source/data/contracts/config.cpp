@@ -17,6 +17,7 @@
 #include <utility>
 
 #include "contracts/jsonc.h"
+#include "contracts/mcp_serve.h"
 #include "contracts/server_tools.h"
 #include "contracts/symphony_walk.h"
 #include "platform/platform.h"
@@ -73,7 +74,7 @@ constexpr std::array<std::pair<std::string_view, AgentOutputFormat>, 3> kAgentOu
 /// `api_key`, then the rest of the fields `config set-backend` writes, in the
 /// order `config get` completes them. A field added to the loader is a row
 /// here, or `check` names it as a key no backend reads.
-constexpr std::array<std::string_view, 27> kBackendEntryKeys{
+constexpr std::array<std::string_view, 28> kBackendEntryKeys{
     "type",
     "api_key",
     "model",
@@ -98,6 +99,7 @@ constexpr std::array<std::string_view, 27> kBackendEntryKeys{
     "host",
     "idle_unload_seconds",
     "server_tools",
+    "mcp_serve",
     "adapters",
     "draft",
     "draft_block_size",
@@ -379,6 +381,17 @@ BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
     if (const std::string refusal = server_tools_refusal(backend.type, backend.server_tools);
         !refusal.empty()) {
         fail(origin, where + ".server_tools: " + refusal);
+    }
+    // The model calls a host may run on this entry (54b), each once, in order;
+    // whether the entry may serve one is its provider's to say, asked by the
+    // editor and the server, never by type here.
+    for (std::string& tool : string_list(node["mcp_serve"], origin, where + ".mcp_serve", false)) {
+        if (std::ranges::find(backend.mcp_serve, tool) == backend.mcp_serve.end()) {
+            backend.mcp_serve.push_back(std::move(tool));
+        }
+    }
+    if (const std::string refusal = mcp_serve_refusal(backend.mcp_serve); !refusal.empty()) {
+        fail(origin, where + ".mcp_serve: " + refusal);
     }
     backend.adapters = parse_adapters(node["adapters"], origin, where + ".adapters", backend.type);
     // A drafter beside the model (53i): an mlx entry's alone, mlx-vlm's

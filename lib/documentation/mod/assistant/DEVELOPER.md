@@ -24,7 +24,7 @@ lib/src/mod/
 
 - The `--output-format json` documents (models, train status/versions, check, …) — measured live by the mod spike (2026-10-21).
 - Machine mode, for anything session-grade later.
-- `apogee mcp serve` (the hidden `__mcp-tools` its alias) — the MCP server: 22 read-only tools since the CLI's 54a, the spike's 17 plus the five status reads (`models_list`, `models_status`, `train_status`, `train_versions`, `check`), each answering with its command's JSON document byte for byte; the registration JSON printed by `apogee mcp presets`.
+- `apogee mcp serve` (the hidden `__mcp-tools` its alias) — the MCP server: 22 read-only tools since the CLI's 54a, the spike's 17 plus the five status reads (`models_list`, `models_status`, `train_status`, `train_versions`, `check`), each answering with its command's JSON document byte for byte; since the CLI's 54b also `complete`, the one tool not read-only, listed only where the person's config lists it under a local backend's `mcp_serve:` (absent otherwise -- the mod's fallback is the CLI path); the registration JSON printed by `apogee mcp presets`.
 
 ## Build & test
 

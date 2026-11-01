@@ -44,7 +44,8 @@ struct MockTurn {
     /// tool definitions the request carried (26r), `{{tool_names}}` their
     /// names, comma-separated in the request's order (27o). `{{model}}` is
     /// the model the provider was built to run -- its entry's `model:`, or a
-    /// roster model pinned on it (33).
+    /// roster model pinned on it (33). `{{max_tokens}}` is the bound the
+    /// request carried, or `none` (54b).
     std::string text{};
 
     /// Tool calls to attach to the response.

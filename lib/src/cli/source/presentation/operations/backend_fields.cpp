@@ -16,6 +16,7 @@
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/layout.h"
+#include "contracts/mcp_serve.h"
 #include "modelstore/mlx_info.h"
 #include "modelstore/store.h"
 #include "operations/renames.h"
@@ -268,6 +269,31 @@ namespace {
     }
 }
 
+/// Why the entry `text` gives backend `name` may not serve what its
+/// `mcp_serve:` lists (54b): when it lists a call, its provider asked
+/// through `metered` whether each call is billed, on the config as `text`
+/// holds it. Asked of the text an edit writes, inside the write, so every
+/// edit the write applies -- a type or a path moved under a listing, an
+/// adapter set cleared beside it -- is asked as it lands. A null probe tells
+/// nothing, and unknown is metered. Empty when it may; a text the loader
+/// refuses throws its refusal, as the write's own re-parse would.
+[[nodiscard]] std::string serve_refusal(std::string_view text, std::string_view name,
+                                        const MeteredProbe& metered) {
+    const harness::Config edited = harness::parse_config(text, "<edited config>");
+    const harness::BackendConfig* entry = edited.find_backend(name);
+    if (entry == nullptr || entry->mcp_serve.empty()) {
+        return {};
+    }
+    const MeteredAnswer answer =
+        metered ? metered(edited, name)
+                : MeteredAnswer{.metered = true, .unknown = "nothing here can build its provider"};
+    if (!answer.metered && answer.unknown.empty()) {
+        return {};
+    }
+    return harness::mcp_serve_ineligible(name, entry->mcp_serve, answer.metered, answer.unknown) +
+           " (nothing was edited)";
+}
+
 /// Each `models:` role pointer (`models_role_fields()`, in its order) and
 /// where the loaded config holds it -- what a delete clears (M33).
 constexpr std::array<std::pair<std::string_view, std::string harness::ModelsConfig::*>, 6>
@@ -371,7 +397,8 @@ DeletedBackend delete_backend_text(std::string_view content, std::string_view na
 }
 
 BackendFieldsOutcome set_backend_fields(const std::filesystem::path& path, std::string_view name,
-                                        const std::vector<BackendFieldEdit>& requested) {
+                                        const std::vector<BackendFieldEdit>& requested,
+                                        const MeteredProbe& metered) {
     BackendFieldsOutcome out;
     // Each edit as it will be written: a drafter's resolved below (53i).
     std::vector<BackendFieldEdit> edits = requested;
@@ -465,6 +492,12 @@ BackendFieldsOutcome set_backend_fields(const std::filesystem::path& path, std::
                 text = &edit == adapters_edit
                            ? harness::set_backend_adapters(text, name, pinned)
                            : harness::set_backend_field(text, name, edit.field, edit.value);
+            }
+            // Only a backend local and unmetered by its own provider's word
+            // serves a call to another host (54b): asked of the very text
+            // this edit writes, so no edit reaches a listing unasked.
+            if (const std::string refused = serve_refusal(text, name, metered); !refused.empty()) {
+                throw harness::ConfigEditError(refused);
             }
             return text;
         });

@@ -36,6 +36,8 @@ apogee_add_module(contracts
     contracts/text_diff.cpp
     contracts/server_tools.h
     contracts/server_tools.cpp
+    contracts/mcp_serve.h
+    contracts/mcp_serve.cpp
     contracts/assets.h
     contracts/assets.cpp
     contracts/assets_agents.cpp

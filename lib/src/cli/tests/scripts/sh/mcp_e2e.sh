@@ -93,6 +93,35 @@ python3 "$(dirname "$0")/../py/mcp_serve_client.py" "$APOGEE_BIN" "$WORK_DIR/ser
 "$APOGEE_BIN" mcp test public models_status </dev/null >"$WORK_DIR/public.txt" 2>/dev/null || fail "mcp test against mcp serve: $(cat "$WORK_DIR/public.txt")"
 grep -q '"fields"' "$WORK_DIR/public.txt" || fail "mcp serve did not answer models_status: $(cat "$WORK_DIR/public.txt")"
 
+# --- the callable set (54b): complete, listed by the person, local only ------
+# Nothing listed is the read set (checked above). A mock that answers with the
+# bound its request carried is listed through the one editor; one that bills
+# each call is refused there, naming the rule, the file untouched; and a host
+# then sees complete after the reads, not read-only, answering exactly what
+# `apogee complete` answers at the served bound.
+printf '%s' '{"turns": [{"text": "max_tokens={{max_tokens}} asked={{last_user}}"}]}' >"$WORK_DIR/echo.json"
+printf '%s' '{"metered": true, "turns": [{"text": "paid"}]}' >"$WORK_DIR/paid.json"
+"$APOGEE_BIN" config add-backend served --type mock --model-path "$WORK_DIR/echo.json" </dev/null >/dev/null || fail "add the served backend"
+"$APOGEE_BIN" config add-backend paid --type mock --model-path "$WORK_DIR/paid.json" </dev/null >/dev/null || fail "add the billed backend"
+"$APOGEE_BIN" config set-backend served --mcp-serve complete </dev/null >/dev/null || fail "list complete on a local backend"
+cp "$APOGEE_HOME/config/config.json" "$WORK_DIR/listed.json"
+if "$APOGEE_BIN" config set-backend paid --mcp-serve complete </dev/null >/dev/null 2>"$WORK_DIR/paid.err"; then
+    fail "a backend that bills each call was listed"
+fi
+grep -q "'paid' cannot serve complete: its provider bills each call" "$WORK_DIR/paid.err" || fail "the billed backend's refusal did not name the rule: $(cat "$WORK_DIR/paid.err")"
+cmp -s "$APOGEE_HOME/config/config.json" "$WORK_DIR/listed.json" || fail "the refused listing changed the config"
+"$APOGEE_BIN" complete -m served -n 1024 "hello from a host" </dev/null >"$WORK_DIR/doc-complete.txt" 2>/dev/null || fail "complete -m served"
+[ "$(cat "$WORK_DIR/doc-complete.txt")" = "max_tokens=1024 asked=hello from a host" ] || fail "complete did not answer at the bound: $(cat "$WORK_DIR/doc-complete.txt")"
+cat >"$WORK_DIR/callable-calls.json" <<EOF2
+[
+  {"tool": "complete", "arguments": {"prompt": "hello from a host", "backend": "served"}, "expect": "$WORK_DIR/doc-complete.txt"},
+  {"tool": "models_status", "arguments": {}, "expect": "$WORK_DIR/doc-models-status-now.json"}
+]
+EOF2
+"$APOGEE_BIN" models status --output-format json </dev/null >"$WORK_DIR/doc-models-status-now.json" 2>/dev/null || fail "models status --output-format json"
+python3 "$(dirname "$0")/../py/mcp_serve_client.py" "$APOGEE_BIN" "$WORK_DIR/callable-calls.json" --callables=complete </dev/null >"$WORK_DIR/callable.txt" 2>&1 || fail "mcp serve's callable set: $(cat "$WORK_DIR/callable.txt")"
+"$APOGEE_BIN" config set-backend served --mcp-serve "" </dev/null >/dev/null || fail "take complete back"
+
 # --- a tool-using run connects at startup, and a dead server is skipped ------
 "$APOGEE_BIN" mcp create dead --command /bin/sh --args -c 'echo "fatal: no upstream" >&2; exit 1' </dev/null >/dev/null || fail "register the dying server"
 "$APOGEE_BIN" complete --tools "hi" </dev/null >"$WORK_DIR/run.txt" 2>"$WORK_DIR/run.err" || fail "complete --tools with servers configured: $(cat "$WORK_DIR/run.err")"

@@ -243,6 +243,14 @@ struct BackendConfig {
     /// offer, and any list on a backend whose API runs none.
     std::vector<std::string> server_tools{};
 
+    /// The model calls `apogee mcp serve` may make on this entry for another
+    /// MCP host (54b): `complete` -- `contracts/mcp_serve.h` holds the table.
+    /// Empty, the default, serves none. Listing one is recorded consent for a
+    /// host to run this entry's model; only an entry whose provider says it
+    /// is local and unmetered may, which the editor asks at write and the
+    /// server again at its start. The loader refuses a name it cannot run.
+    std::vector<std::string> mcp_serve{};
+
     /// The LoRA adapters a local entry applies over `model_path`, in order
     /// (53a): llama.cpp sets every one on each context at its scale; mlx-lm
     /// loads one adapter directory, at the scale its training wrote. Empty,

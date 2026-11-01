@@ -61,6 +61,7 @@ add_library(apogee_tests_data OBJECT
     data/contracts/symphony_walk_test.cpp
     data/contracts/host_test.cpp
     data/contracts/server_tools_test.cpp
+    data/contracts/mcp_serve_test.cpp
     data/contracts/config_adapters_test.cpp
     data/contracts/review_skill_test.cpp
     data/contracts/review_targets_test.cpp

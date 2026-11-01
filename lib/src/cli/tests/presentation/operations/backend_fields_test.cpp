@@ -188,6 +188,165 @@ TEST_CASE("set-backend lists a vendor's server tools, completed, refused where i
 
 namespace {
 
+/// A config whose mock `paid` says each call is billed (its script's
+/// `"metered": true`), beside the free mock `free` and the vendor API
+/// `claude`, for the mcp_serve cases (54b).
+struct ServeFiles {
+    apogee::testing::TempDir dir{"set-backend-serve-" + std::to_string(std::random_device{}())};
+    std::filesystem::path paid = dir.path() / "paid.json";
+
+    ServeFiles() {
+        std::ofstream{paid, std::ios::binary} << R"({"metered": true, "turns": [{"text": "x"}]})";
+    }
+
+    [[nodiscard]] std::string config() const {
+        return "backends:\n  free:\n    type: mock   # on this machine\n    model: mock-1\n"
+               "  paid:\n    type: mock\n    model_path: " +
+               paid.string() + "\n  claude:\n    type: anthropic\nmodels:\n  default: free\n";
+    }
+};
+
+}  // namespace
+
+TEST_CASE("set-backend lists mcp_serve only where the provider says local and unmetered",
+          "[set-backend][cli][mcp-serve]") {
+    // 54b: consent is one visible line the one editor writes, and only an
+    // entry whose provider is local and unmetered by its own word may hold it.
+    const ServeFiles files;
+    const apogee::testing::CliHome home{files.config()};
+    const std::string pristine = slurp(home.config_path());
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"__complete", "config", "set-backend", "free", "--mcp-serve", ""}, &out,
+                     &err) == 0);
+    CHECK(out == "complete\n");
+    REQUIRE(home.run({"config", "set-backend", "free", "--mcp-serve", "complete"}, &out, &err) ==
+            0);
+    CHECK_THAT(
+        slurp(home.config_path()),
+        ContainsSubstring("    type: mock   # on this machine\n    mcp_serve: [complete]\n"));
+    REQUIRE(home.run({"config", "get", "backends.free.mcp_serve"}, &out, &err) == 0);
+    CHECK(out == "complete\n");
+
+    // A provider that bills each call, and one that cannot say: refused
+    // naming the rule, the file untouched.
+    const std::string listed = slurp(home.config_path());
+    CHECK(home.run({"config", "set-backend", "paid", "--mcp-serve", "complete"}, &out, &err) != 0);
+    CHECK_THAT(err, ContainsSubstring("'paid' cannot serve complete: its provider bills each "
+                                      "call -- a served call runs on another host's initiative, "
+                                      "so only a backend local and unmetered by its own "
+                                      "provider's word may serve one (nothing was edited)"));
+    CHECK(home.run({"config", "set-backend", "claude", "--mcp-serve", "complete"}, &out, &err) !=
+          0);
+    CHECK_THAT(err, ContainsSubstring("'claude' cannot serve complete: "));
+    CHECK(slurp(home.config_path()) == listed);
+
+    // A type moved under a listing is asked again, as the edit leaves it.
+    CHECK(home.run({"config", "set-backend", "free", "--type", "anthropic"}, &out, &err) != 0);
+    CHECK_THAT(err, ContainsSubstring("'free' cannot serve complete: "));
+    CHECK(slurp(home.config_path()) == listed);
+    // So is any edit that leaves the listing: a free entry's passes.
+    REQUIRE(home.run({"config", "set-backend", "free", "--model", "mock-2"}, &out, &err) == 0);
+    REQUIRE(home.run({"config", "set-backend", "free", "--model", "mock-1"}, &out, &err) == 0);
+
+    // A name it cannot run is the loader's refusal; clearing is always free.
+    CHECK(home.run({"config", "set-backend", "free", "--mcp-serve", "chat"}, &out, &err) != 0);
+    CHECK_THAT(err, ContainsSubstring("'chat' is not a call apogee mcp serve makes"));
+    REQUIRE(home.run({"config", "set-backend", "free", "--mcp-serve", ""}, &out, &err) == 0);
+    CHECK(slurp(home.config_path()) == pristine);
+}
+
+TEST_CASE("set_backend_fields asks the probe of the entry as the edit leaves it",
+          "[set-backend][mcp-serve]") {
+    const ServeFiles files;
+    const apogee::testing::CliHome home{files.config()};
+    const std::string pristine = slurp(home.config_path());
+    std::vector<std::string> asked;
+    const apogee::commands::MeteredProbe free = [&asked](const apogee::harness::Config& config,
+                                                         std::string_view backend) {
+        const apogee::harness::BackendConfig* entry = config.find_backend(backend);
+        asked.push_back(std::string{backend} + ":" +
+                        (entry == nullptr           ? "none"
+                         : entry->mcp_serve.empty() ? "unlisted"
+                                                    : "listed"));
+        return apogee::commands::MeteredAnswer{.metered = false};
+    };
+    const std::vector<apogee::commands::BackendFieldEdit> listing{
+        {.field = "mcp_serve", .value = "complete"}};
+    // The probe sees the listing the edit would write, before it is written.
+    CHECK(apogee::commands::set_backend_fields(home.config_path(), "free", listing, free)
+              .refusal.empty());
+    CHECK(asked == std::vector<std::string>{"free:listed"});
+    // An edit that leaves no listing asks nothing.
+    asked.clear();
+    CHECK(apogee::commands::set_backend_fields(home.config_path(), "paid",
+                                               {{.field = "model", .value = "m"}}, free)
+              .refusal.empty());
+    CHECK(asked.empty());
+
+    // Unknown is metered: a probe that cannot say, and no probe at all.
+    const apogee::commands::MeteredProbe unknown = [](const apogee::harness::Config&,
+                                                      std::string_view) {
+        return apogee::commands::MeteredAnswer{.metered = true, .unknown = "it would not build"};
+    };
+    const std::string before = slurp(home.config_path());
+    CHECK(apogee::commands::set_backend_fields(home.config_path(), "free",
+                                               {{.field = "model", .value = "other"}}, unknown)
+              .refusal ==
+          "'free' cannot serve complete: whether its provider bills each call could not be asked "
+          "(it would not build), and unknown counts as billed -- a served call runs on another "
+          "host's initiative, so only a backend local and unmetered by its own provider's word "
+          "may serve one (nothing was edited)");
+    CHECK_THAT(apogee::commands::set_backend_fields(home.config_path(), "free",
+                                                    {{.field = "model", .value = "other"}})
+                   .refusal,
+               ContainsSubstring("could not be asked (nothing here can build its provider)"));
+    CHECK(slurp(home.config_path()) == before);
+    CHECK(before != pristine);
+}
+
+TEST_CASE("set-backend asks a listing of every edit it writes, an adapter clear among them",
+          "[set-backend][cli][mcp-serve][adapters]") {
+    // 54b review: the check once tried the edit without its `adapters`, so
+    // moving an entry with adapters onto a billed mock and clearing them in
+    // the same call failed that trial's load and passed unasked -- the
+    // listing written onto a provider that bills each call.
+    const ServeFiles files;
+    const std::filesystem::path base = files.dir.path() / "base.gguf";
+    const std::filesystem::path style = files.dir.path() / "style.gguf";
+    std::ofstream{base, std::ios::binary} << "base weights";
+    std::ofstream{style, std::ios::binary} << "style delta";
+    std::string config = files.config();
+    config.insert(config.find("models:\n"),
+                  "  local:\n    type: llamacpp\n    model_path: " + base.string() + "\n");
+    const apogee::testing::CliHome home{config};
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"config", "set-backend", "local", "--adapters", style.string()}, &out,
+                     &err) == 0);
+    const std::string pinned = slurp(home.config_path());
+    REQUIRE_THAT(pinned, ContainsSubstring("base_sha256"));
+
+    CHECK(home.run({"config", "set-backend", "local", "--type", "mock", "--model-path",
+                    files.paid.string(), "--adapters", "", "--mcp-serve", "complete"},
+                   &out, &err) != 0);
+    CHECK_THAT(err, ContainsSubstring("'local' cannot serve complete: its provider bills each "
+                                      "call -- a served call runs on another host's initiative, "
+                                      "so only a backend local and unmetered by its own "
+                                      "provider's word may serve one (nothing was edited)"));
+    CHECK(slurp(home.config_path()) == pinned);
+
+    // The same edit onto a free mock lands: the check refuses the billed
+    // provider, not the clear.
+    REQUIRE(home.run({"config", "set-backend", "local", "--type", "mock", "--model-path", "",
+                      "--adapters", "", "--mcp-serve", "complete"},
+                     &out, &err) == 0);
+    REQUIRE(home.run({"config", "get", "backends.local.mcp_serve"}, &out, &err) == 0);
+    CHECK(out == "complete\n");
+}
+
+namespace {
+
 /// A base and two adapters outside any install, and a config naming them.
 struct AdapterFiles {
     apogee::testing::TempDir dir{"set-backend-adapters-" + std::to_string(std::random_device{}())};

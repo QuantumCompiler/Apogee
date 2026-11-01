@@ -1,6 +1,7 @@
 #include "mcp/serve_stdio.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <nlohmann/json.hpp>
 
 #include <sstream>
@@ -266,4 +267,64 @@ TEST_CASE("a read never shadows a served tool or another read", "[mcp][serve][re
         apogee::mcp::with_reads(tools, dispatch, {read_named("check"), read_named("check")}),
         std::invalid_argument);
     CHECK_NOTHROW(apogee::mcp::with_reads(tools, dispatch, {read_named("check")}));
+}
+
+TEST_CASE("calls join after the reads, not read-only, each answered by its own name",
+          "[mcp][serve][calls]") {
+    // 54b: a model-calling tool is listed as one -- readOnlyHint false -- and
+    // answered, mended and guarded as a read is; nothing it is named shadows.
+    const auto answering = [](std::string name, std::string text) {
+        return apogee::mcp::ServedRead{
+            .name = std::move(name),
+            .description = "d",
+            .input_schema = nlohmann::json{{"type", "object"}},
+            .answer =
+                [text = std::move(text)](const nlohmann::json&) {
+                    return apogee::mcp::ToolCallResult{text, false};
+                },
+        };
+    };
+    const std::vector<apogee::mcp::ServedTool> tools{
+        {"read_file", "Reads", nlohmann::json{{"type", "object"}}, true}};
+    const apogee::mcp::Dispatch dispatch = [](std::string_view name, const nlohmann::json&) {
+        return apogee::mcp::ToolCallResult{"tool " + std::string{name}, false};
+    };
+    apogee::mcp::ServedSet served =
+        apogee::mcp::with_reads(tools, dispatch, {answering("check", "{}")});
+    served = apogee::mcp::with_calls(
+        std::move(served), {answering("complete", "an answer caf\xE9"), answering("second", "")});
+    REQUIRE(served.tools.size() == 4);
+    CHECK(served.tools[2].name == "complete");
+    CHECK_FALSE(served.tools[2].read_only);
+    CHECK(served.tools[1].read_only);
+
+    std::istringstream in{
+        R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})"
+        "\n"
+        R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"complete"}})"
+        "\n"
+        R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"check"}})"
+        "\n"
+        R"({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"read_file"}})"
+        "\n"};
+    std::ostringstream out;
+    CHECK(apogee::mcp::serve_stdio(in, out, "s", "1", served.tools, served.dispatch) == 0);
+    const std::vector<nlohmann::json> frames = frames_of(out.str());
+    REQUIRE(frames.size() == 4);
+    CHECK(frames[0]["result"]["tools"][2]["annotations"]["readOnlyHint"] == false);
+    CHECK(frames[0]["result"]["tools"][1]["annotations"]["readOnlyHint"] == true);
+    CHECK(frames[1]["result"]["content"][0]["text"] == "an answer caf\xEF\xBF\xBD");
+    CHECK(frames[2]["result"]["content"][0]["text"] == "{}");
+    CHECK(frames[3]["result"]["content"][0]["text"] == "tool read_file");
+
+    // A call named like a tool, a read or another call is refused where the
+    // set is built.
+    for (const char* taken : {"read_file", "check", "complete"}) {
+        INFO(taken);
+        CHECK_THROWS_AS(apogee::mcp::with_calls(served, {answering(taken, "")}),
+                        std::invalid_argument);
+    }
+    CHECK_THROWS_WITH(apogee::mcp::with_calls(apogee::mcp::ServedSet{tools, dispatch},
+                                              {answering("c", ""), answering("c", "")}),
+                      "the call 'c' would shadow a tool of the same name");
 }

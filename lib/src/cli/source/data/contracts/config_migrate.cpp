@@ -941,6 +941,10 @@ std::vector<CommentedOption> commented_options() {
          .option = "backends.*.draft, draft_block_size (mlx)",
          .opens = "// draft runs a drafter beside the model -- an MLX directory mlx-vlm builds",
          .closes = R"(//   "draft_block_size": 4)"},
+        {.release = "0.2.1",
+         .option = "backends.*.mcp_serve",
+         .opens = "// mcp_serve lists the model calls `apogee mcp serve` may make on an entry",
+         .closes = R"(//   "mcp_serve": ["complete"])"},
     };
 }
 

@@ -1917,6 +1917,7 @@ TEST_CASE("the editable fields are the loader's, and every one add-backend write
                                                           {"host", "h"},
                                                           {"idle_unload_seconds", "30"},
                                                           {"server_tools", "web_search"},
+                                                          {"mcp_serve", "complete"},
                                                           {"adapters", "/a.gguf"},
                                                           {"draft", "/drafter"},
                                                           {"draft_block_size", "4"}};
@@ -1953,10 +1954,11 @@ TEST_CASE("the editable fields are the loader's, and every one add-backend write
         const std::string edited =
             apogee::harness::set_backend_field(kBase, "all", field, samples.at(field));
         const apogee::harness::Config config = apogee::harness::parse_config(edited, "edited");
-        // The writer shows what the loader read -- but for the five it never
+        // The writer shows what the loader read -- but for the six it never
         // writes, checked by name below.
         const bool hand_written = field == "binary" || field == "mode" || field == "host" ||
-                                  field == "idle_unload_seconds" || field == "adapters";
+                                  field == "idle_unload_seconds" || field == "adapters" ||
+                                  field == "mcp_serve";
         const bool read = apogee::harness::append_backend("", "all", *config.find_backend("all"),
                                                           false) != base_json;
         CHECK((read || hand_written));
@@ -1978,8 +1980,8 @@ TEST_CASE("the editable fields are the loader's, and every one add-backend write
             ++seen;
         }
     }
-    CHECK(seen == 18);  // the writer's fields: all but the seven written by hand
-    // The seven the writer never writes are read by the loader all the same.
+    CHECK(seen == 18);  // the writer's fields: all but the eight written by hand
+    // The eight the writer never writes are read by the loader all the same.
     const apogee::harness::BackendConfig& entry = *config.find_backend("all");
     CHECK(entry.binary == "/bin/x");
     CHECK(entry.mode == "m");
@@ -1989,6 +1991,7 @@ TEST_CASE("the editable fields are the loader's, and every one add-backend write
           std::vector<apogee::harness::AdapterConfig>{{.path = "/a.gguf", .scale = 1.0}});
     CHECK(entry.draft == "/drafter");
     CHECK(entry.draft_block_size == 4);
+    CHECK(entry.mcp_serve == std::vector<std::string>{"complete"});
 }
 
 TEST_CASE("config set moves each allow-listed scalar in place, comments kept, as its kind reads",

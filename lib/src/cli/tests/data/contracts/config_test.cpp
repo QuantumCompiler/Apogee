@@ -1583,7 +1583,8 @@ TEST_CASE("every key the declaration names, the loader reads, and none is unknow
     editable.insert(editable.begin() + 1, "api_key");
     CHECK(declared == editable);
 
-    // An mlx entry holds all but server_tools, which only a vendor API runs.
+    // An mlx entry holds all but server_tools, which only a vendor API runs --
+    // mcp_serve (54b) among them.
     const Config config = load_text(R"({
   "backends": {
     "m": {
@@ -1593,7 +1594,8 @@ TEST_CASE("every key the declaration names, the loader reads, and none is unknow
       "top_p": 0.9, "top_k": 40, "min_p": 0.05, "repeat_penalty": 1.1,
       "presence_penalty": 0.5, "seed": 7, "thinking": "auto", "thinking_budget": 512,
       "binary": "/bin/b", "mode": "bare", "host": "127.0.0.1:1", "idle_unload_seconds": 30,
-      "adapters": [{"path": "/a"}], "draft": "/models/drafter", "draft_block_size": 4
+      "adapters": [{"path": "/a"}], "draft": "/models/drafter", "draft_block_size": 4,
+      "mcp_serve": ["complete"]
     },
     "api": {"type": "anthropic", "server_tools": ["web_search"]}
   }
@@ -1608,6 +1610,7 @@ TEST_CASE("every key the declaration names, the loader reads, and none is unknow
     CHECK(m.draft == "/models/drafter");
     CHECK(m.draft_block_size == 4);
     CHECK(m.adapters.size() == 1);
+    CHECK(m.mcp_serve == std::vector<std::string>{"complete"});
     CHECK(config.find_backend("api")->server_tools == std::vector<std::string>{"web_search"});
     // And each declared key alone, unset, on an entry of any type: known.
     for (const std::string_view key : declared) {

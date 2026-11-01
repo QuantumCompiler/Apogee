@@ -342,8 +342,16 @@ directory, its stored handle, or a model storing one drafter, on an mlx
 entry -- and pairs it with the entry's model before it is written: a base of
 the drafter's family and width, mlx-vlm's build, the one its record names,
 with an mlx-vlm that drafts its type; it is written as the drafter's
-absolute directory, and the view lists `draft` and `draft_block_size`. The
-config it leaves is byte for byte the CLI's. `200 {edited, said,
+absolute directory, and the view lists `draft` and `draft_block_size`.
+`mcp_serve` takes what `--mcp-serve` takes (54b) -- `complete`, the call
+`apogee mcp serve` may make on the entry for an MCP host -- and is asked of
+the entry's provider through the probe the server was started with, on the
+config as the edit leaves it: a provider that bills each call, or one that
+cannot say, is a `400` naming the rule, the file untouched, as the CLI
+refuses it; so is a `type` or a `model_path` moved under a listing,
+whatever else the same body changes (`adapters` cleared beside it among
+them), since the check reads the config exactly as it is written. The
+view then lists `mcp_serve`. The config it leaves is byte for byte the CLI's. `200 {edited, said,
 restart_required}`; `404` when unknown; `400` naming why for a field no
 backend has, a value its field cannot hold, an adapter that is not there or
 a base that cannot be read, a drafter that cannot run beside the entry's

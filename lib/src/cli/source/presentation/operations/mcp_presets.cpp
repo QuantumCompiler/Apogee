@@ -32,8 +32,9 @@ constexpr std::array<McpPreset, 2> kPresets{{
         .description = "Apogee's own read-only tools, served on stdio by apogee mcp serve for "
                        "another MCP host (a desktop assistant, an editor)",
         .provides = "the read-only native tools: files, git, notes, document search, graph "
-                    "navigation; and the status reads: models_list, models_status, train_status, "
-                    "train_versions, check",
+                    "navigation; the status reads: models_list, models_status, train_status, "
+                    "train_versions, check; and complete, where the config lists it under a "
+                    "local backend's mcp_serve",
         .server_name = "apogee",
         .try_tool = "list_notes",
         .try_arguments = "{}",

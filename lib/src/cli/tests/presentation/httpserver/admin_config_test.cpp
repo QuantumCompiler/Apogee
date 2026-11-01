@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "cli/helpers.h"
 #include "cli/registry.h"
 #include "cli/root.h"
 #include "contracts/assets.h"
@@ -707,6 +708,47 @@ TEST_CASE("a backend edited over HTTP is byte-identical to the CLI's, and never 
     CHECK(Fixture::bytes(fixture.http_config) == before);
     CHECK(admin_set_backend_fields(fixture.context(), "nope", post(nlohmann::json{{"model", "x"}}))
               .status == 404);
+}
+
+TEST_CASE("mcp_serve over HTTP is the CLI's edit, asked of the provider the same way",
+          "[httpserver][admin][parity][set-backend][mcp-serve]") {
+    // 54b: the twin passes the probe its composition root gave it, so a
+    // listing over HTTP is byte for byte the CLI's, and refused in its words.
+    const Fixture fixture;
+    const std::filesystem::path paid = fixture.home.path() / "paid.json";
+    std::ofstream{paid, std::ios::binary} << R"({"metered": true, "turns": [{"text": "x"}]})";
+    fixture.cli({"config", "add-backend", "free", "--type", "mock", "--model", "m1"});
+    fixture.cli({"config", "add-backend", "paid", "--type", "mock", "--model-path", paid.string()});
+    AdminConfigContext context = fixture.context();
+    for (const char* name : {"free", "paid"}) {
+        nlohmann::json body{{"name", name}, {"type", "mock"}};
+        if (std::string_view{name} == "free") {
+            body["model"] = "m1";
+        } else {
+            body["model_path"] = paid.string();
+        }
+        REQUIRE(admin_create_backend(context, post(body)).status == 201);
+    }
+    context.metered = apogee::commands::provider_metered_probe(fixture.http_config);
+
+    fixture.cli({"config", "set-backend", "free", "--mcp-serve", "complete"});
+    HttpRequest listing = post(nlohmann::json{{"mcp_serve", "complete"}});
+    listing.method = "PATCH";
+    REQUIRE(admin_set_backend_fields(context, "free", listing).status == 200);
+    CHECK(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
+    CHECK(parsed(admin_get_backend(context, "free")).dump().find(R"("mcp_serve":["complete"])") !=
+          std::string::npos);
+
+    const std::string before = Fixture::bytes(fixture.http_config);
+    const HttpResponse billed = admin_set_backend_fields(context, "paid", listing);
+    CHECK(billed.status == 400);
+    CHECK(billed.body.find("'paid' cannot serve complete: its provider bills each call") !=
+          std::string::npos);
+    // With no probe to ask, unknown is metered.
+    const HttpResponse blind = admin_set_backend_fields(fixture.context(), "free", listing);
+    CHECK(blind.status == 400);
+    CHECK(blind.body.find("could not be asked") != std::string::npos);
+    CHECK(Fixture::bytes(fixture.http_config) == before);
 }
 
 TEST_CASE("adapters pinned over HTTP are byte-identical to the CLI's, and the view shows them",
