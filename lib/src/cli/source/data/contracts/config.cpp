@@ -306,10 +306,11 @@ BackendConfig parse_backend(const YAML::Node& node, std::string_view origin,
     // A key no backend reads is kept for `check` to name (55g), never
     // refused: an older binary still loads a newer release's entry.
     for (const auto& field : node) {
-        if (const std::string key = field.first.Scalar();
-            std::ranges::find(kBackendEntryKeys, key) == kBackendEntryKeys.end()) {
+        const std::string key = field.first.Scalar();
+        if (std::ranges::find(kBackendEntryKeys, key) == kBackendEntryKeys.end()) {
             backend.unknown_keys.push_back(key);
         }
+        backend.written_keys.push_back(key);
     }
 
     const std::string type_name = scalar(node["type"], origin, where + ".type");

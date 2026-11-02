@@ -460,15 +460,46 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
         // A key no backend reads does nothing, and said nothing until 55g: a
         // warning naming it, with the key it most likely meant. The entry
         // still loads -- a newer release's key read here is one of these.
+        // A remedy followed leaves a config that loads (57f): a key whose
+        // nearest the entry already writes is a stray twin, removed -- a
+        // rename would write that key twice, which JSONC refuses -- and two
+        // typos of one key are not both renamed into it.
         for (const std::string& key : backend.unknown_keys) {
             const std::string_view meant = harness::nearest_backend_key(key);
+            const std::string said =
+                "unknown key '" + key + "' -- no backend reads it, so it does nothing";
+            if (meant.empty()) {
+                add(report, Status::Warn, "Config", label, said,
+                    "remove it from " + file +
+                        " ('apogee config set-backend --help' lists a backend's fields)");
+                continue;
+            }
+            if (std::ranges::find(backend.written_keys, meant) != backend.written_keys.end()) {
+                add(report, Status::Warn, "Config", label,
+                    said + "; the entry already sets '" + std::string{meant} + "'",
+                    "remove '" + key + "' from " + file);
+                continue;
+            }
+            std::vector<std::string> rivals;
+            for (const std::string& other : backend.unknown_keys) {
+                if (harness::nearest_backend_key(other) == meant) {
+                    rivals.push_back("'" + other + "'");
+                }
+            }
+            std::string remedy = "rename it '" + std::string{meant} + "' in " + file;
+            if (rivals.size() > 1) {
+                std::string named;
+                for (std::size_t i = 0; i < rivals.size(); ++i) {
+                    if (i > 0) {
+                        named += i + 1 == rivals.size() ? " and " : ", ";
+                    }
+                    named += rivals[i];
+                }
+                remedy = "rename one of " + named + " to '" + std::string{meant} + "' in " + file +
+                         ", and remove " + (rivals.size() == 2 ? "the other" : "the others");
+            }
             add(report, Status::Warn, "Config", label,
-                "unknown key '" + key + "' -- no backend reads it, so it does nothing" +
-                    (meant.empty() ? std::string{}
-                                   : "; did you mean '" + std::string{meant} + "'?"),
-                meant.empty() ? "remove it from " + file +
-                                    " ('apogee config set-backend --help' lists a backend's fields)"
-                              : "rename it '" + std::string{meant} + "' in " + file);
+                said + "; did you mean '" + std::string{meant} + "'?", remedy);
         }
 
         if (backend.type == harness::BackendType::LlamaCpp) {

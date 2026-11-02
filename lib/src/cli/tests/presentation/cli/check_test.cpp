@@ -4091,6 +4091,112 @@ TEST_CASE("a backend's unknown key is a named warning with the key it meant, and
     }
 }
 
+TEST_CASE("an unknown key whose twin the entry already sets is removed, never renamed into it",
+          "[commands][check][unknown-keys]") {
+    // 57f, finding 3: a stray `Model` beside the entry's own `model` was told
+    // `rename it 'model'`, and following that wrote `model` twice -- which
+    // the JSONC loader refuses, so no command loaded the config. Now the row
+    // says the entry already sets it and the remedy removes the stray key; a
+    // lone `Model` keeps the rename; and two typos of one key are not both
+    // renamed into it.
+    const std::string text = R"({
+  "backends": {
+    "twin": {
+      "type": "mock",
+      "model": "x",
+      "Model": "y"
+    },
+    "lone": {
+      "type": "mock",
+      "Model": "y"
+    },
+    "pair": {
+      "type": "mock",
+      "Model": "y",
+      "modle": "z"
+    }
+  }
+}
+)";
+    const std::string file = "config.json";
+    Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+    inputs.config_path = install.root / "config" / file;
+    install.write("config/" + file, text);
+    load_into(inputs);
+    REQUIRE(inputs.config_error.empty());
+    const CheckReport report = run_checks(inputs);
+    const auto rows_of = [&report](std::string_view backend) {
+        std::vector<apogee::commands::CheckRow> rows;
+        for (const auto& row : report.rows) {
+            if (row.name == "backend: " + std::string{backend} &&
+                row.detail.starts_with("unknown key")) {
+                rows.push_back(row);
+            }
+        }
+        return rows;
+    };
+
+    const std::vector<apogee::commands::CheckRow> twin = rows_of("twin");
+    REQUIRE(twin.size() == 1);
+    CHECK(twin.front().status == Status::Warn);
+    CHECK(twin.front().detail ==
+          "unknown key 'Model' -- no backend reads it, so it does nothing; the entry already "
+          "sets 'model'");
+    CHECK(twin.front().remedy == "remove 'Model' from config.json");
+
+    const std::vector<apogee::commands::CheckRow> lone = rows_of("lone");
+    REQUIRE(lone.size() == 1);
+    CHECK(lone.front().detail ==
+          "unknown key 'Model' -- no backend reads it, so it does nothing; did you mean "
+          "'model'?");
+    CHECK(lone.front().remedy == "rename it 'model' in config.json");
+
+    const std::vector<apogee::commands::CheckRow> pair = rows_of("pair");
+    REQUIRE(pair.size() == 2);
+    for (const auto& row : pair) {
+        INFO(row.detail);
+        CHECK(row.detail.ends_with("did you mean 'model'?"));
+        CHECK(row.remedy ==
+              "rename one of 'Model' and 'modle' to 'model' in config.json, and remove the other");
+    }
+    // No row anywhere renames a key into one its entry already writes.
+    CHECK(std::ranges::none_of(report.rows, [](const auto& row) {
+        return row.name == "backend: twin" && row.remedy.starts_with("rename");
+    }));
+
+    // Followed, each remedy leaves a config that loads; the old rename did
+    // not.
+    const auto without_line = [&text](std::string_view from, std::string_view line) {
+        std::string out = text;
+        const std::size_t entry = out.find(from);
+        const std::size_t at = out.find(line, entry);
+        REQUIRE(at != std::string::npos);
+        out.erase(at, line.size());
+        return out;
+    };
+    std::string followed = without_line("\"twin\"", ",\n      \"Model\": \"y\"");
+    {
+        const std::size_t lone_at = followed.find("\"Model\"", followed.find("\"lone\""));
+        followed.replace(lone_at, 7, "\"model\"");
+        const std::size_t pair_at = followed.find("\"Model\"", followed.find("\"pair\""));
+        followed.replace(pair_at, 7, "\"model\"");
+        const std::string modle = ",\n      \"modle\": \"z\"";
+        followed.erase(followed.find(modle), modle.size());
+    }
+    const apogee::harness::Config loaded = apogee::harness::parse_config(followed, file);
+    for (const char* name : {"twin", "lone", "pair"}) {
+        INFO(name);
+        CHECK(loaded.find_backend(name)->unknown_keys.empty());
+    }
+    CHECK(loaded.find_backend("twin")->model == "x");
+    std::string renamed = text;
+    renamed.replace(renamed.find("\"Model\"", renamed.find("\"twin\"")), 7, "\"model\"");
+    CHECK_THROWS_WITH(apogee::harness::parse_config(renamed, file),
+                      Catch::Matchers::ContainsSubstring("appears twice"));
+}
+
 // ---------------------------------------------------------------------------
 // The Xcode section (56d): the two routes joining Apogee and Xcode, read from
 // Xcode's own command-line tools -- every case Ok or Skipped, never a warning,

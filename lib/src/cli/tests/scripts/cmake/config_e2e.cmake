@@ -785,6 +785,74 @@ if(NOT APOGEE_OUT MATCHES "is current")
     message(FATAL_ERROR "a second upgrade was not a no-op:\n${APOGEE_OUT}")
 endif()
 
+# A file that writes a commented option's key itself has it (57f): the
+# shipped template without its default_video block, the key set live -- the
+# file is current, check counts nothing, and the example never goes in under
+# the live key.
+set(VIDEO_ABOVE "\n\n    // The pipeline `apogee video generate` runs when --model names none")
+set(VIDEO_CLOSES "    // \"default_video\": \"Wan-AI--Wan2.2-TI2V-5B-Diffusers\"\n")
+string(FIND "${PRISTINE}" "${VIDEO_ABOVE}" video_begin)
+string(FIND "${PRISTINE}" "${VIDEO_CLOSES}" video_end)
+if(video_begin EQUAL -1 OR video_end EQUAL -1)
+    message(FATAL_ERROR "the shipped template has no default_video block to take out")
+endif()
+string(LENGTH "${VIDEO_CLOSES}" closes_length)
+math(EXPR video_begin "${video_begin} + 1")
+math(EXPR video_stop "${video_end} + ${closes_length}")
+string(SUBSTRING "${PRISTINE}" 0 ${video_begin} BEFORE_VIDEO)
+string(SUBSTRING "${PRISTINE}" ${video_stop} -1 AFTER_VIDEO)
+string(REPLACE "  \"models\": {\n" "  \"models\": {\n    \"default_video\": \"mypipe\"\n"
+       LIVE_VIDEO "${BEFORE_VIDEO}${AFTER_VIDEO}")
+file(WRITE "${CONFIG_FILE}" "${LIVE_VIDEO}")
+apogee_run(0 check --output-format json)
+if(APOGEE_OUT MATCHES "not in the file")
+    message(FATAL_ERROR "check counts a live default_video as missing:\n${APOGEE_OUT}")
+endif()
+apogee_run(0 config upgrade)
+if(NOT APOGEE_OUT MATCHES "is current")
+    message(FATAL_ERROR "config upgrade added to a file that sets default_video:\n${APOGEE_OUT}")
+endif()
+file(READ "${CONFIG_FILE}" AFTER_LIVE_VIDEO)
+if(NOT AFTER_LIVE_VIDEO STREQUAL LIVE_VIDEO)
+    message(FATAL_ERROR "config upgrade changed a file that sets default_video:\n${AFTER_LIVE_VIDEO}")
+endif()
+apogee_run(0 config get models.default_video)
+expect_equal("${APOGEE_OUT}" "mypipe" "a live default_video after upgrade")
+
+# A stray twin of a key the entry sets is removed, never renamed into it
+# (57f): the rename wrote `model` twice, which the JSONC loader refuses, so no
+# command loaded the config. Followed, the remedy leaves one that loads.
+file(WRITE "${CONFIG_FILE}" [=[{
+  "backends": {
+    "m": {"type": "mock", "model": "x", "Model": "y"},
+    "n": {"type": "mock", "Model": "y"}
+  }
+}
+]=])
+apogee_run(0 check --output-format json)
+if(NOT APOGEE_OUT MATCHES "\"detail\": *\"unknown key 'Model' -- no backend reads it, so it does nothing; the entry already sets 'model'\"" OR
+   NOT APOGEE_OUT MATCHES "\"remedy\": *\"remove 'Model' from config.json\"")
+    message(FATAL_ERROR "check does not say to remove a stray twin:\n${APOGEE_OUT}")
+endif()
+string(REGEX MATCHALL "rename it 'model'" renames "${APOGEE_OUT}")
+list(LENGTH renames rename_count)
+if(NOT rename_count EQUAL 1)
+    message(FATAL_ERROR "check renames into a key the entry has, or not the lone typo:\n${APOGEE_OUT}")
+endif()
+file(WRITE "${CONFIG_FILE}" [=[{
+  "backends": {
+    "m": {"type": "mock", "model": "x"},
+    "n": {"type": "mock", "model": "y"}
+  }
+}
+]=])
+apogee_run(0 config get backends.m.model)
+expect_equal("${APOGEE_OUT}" "x" "the entry once the stray twin is removed")
+apogee_run(0 check --output-format json)
+if(APOGEE_OUT MATCHES "unknown key")
+    message(FATAL_ERROR "the followed remedies left an unknown key:\n${APOGEE_OUT}")
+endif()
+
 # --- 57e: the editor writes what it says, and keeps what it does not edit ---
 # A legacy YAML config whose sections sit on their headers' lines: every
 # editor refuses by name, prints no success, and leaves the bytes as they

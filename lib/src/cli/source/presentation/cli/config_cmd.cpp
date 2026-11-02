@@ -875,27 +875,46 @@ void bind_upgrade(CLI::App& parent, const RootContext& context) {
         "comments that explain it; nothing already there changes");
     cmd->callback([&context]() {
         const std::filesystem::path path = config_path_for(context);
+        const std::string yaml = path.string() +
+                                 " is in the older YAML format -- 'apogee config migrate' converts "
+                                 "it to JSON first; upgrade adds options to a JSON config";
+        const std::string current =
+            path.string() +
+            " is current -- it has every option this release's starter config has\n";
         try {
+            // A first read answers the read-only cases -- a YAML config, a
+            // broken one, one that is current -- and takes no lock.
             const std::string content = harness::read_config_file(path);
             if (!harness::jsonc::looks_like_jsonc(content)) {
-                fail(path.string() +
-                     " is in the older YAML format -- 'apogee config migrate' converts it to "
-                     "JSON first; upgrade adds options to a JSON config");
+                fail(yaml);
             }
             (void)harness::parse_config(content, path.string());
-            const harness::Upgrade upgrade =
-                harness::upgrade_config_text(content, harness::config_template());
-            if (upgrade.added.empty()) {
-                std::cout << path.string()
-                          << " is current -- it has every option this release's starter config "
-                             "has\n";
+            if (harness::upgrade_config_text(content, harness::config_template()).added.empty()) {
+                std::cout << current;
                 return;
             }
-            harness::edit_config_file(path, [&upgrade](std::string_view) { return upgrade.text; });
-            std::cout << "added " << upgrade.added.size()
-                      << (upgrade.added.size() == 1 ? " option" : " options") << " to "
-                      << path.string() << ":\n";
-            for (const std::string& option : upgrade.added) {
+            // What is written is computed from the text read under the lock
+            // (57f): an edit that landed while this waited for it -- a
+            // backend added from Settings or the admin plane -- is upgraded
+            // with the rest, never written over with the first read's text.
+            std::vector<std::string> added;
+            harness::edit_config_file(path, [&yaml, &added](std::string_view locked) {
+                if (!harness::jsonc::looks_like_jsonc(locked)) {
+                    throw ConfigEditError(yaml);
+                }
+                harness::Upgrade upgrade =
+                    harness::upgrade_config_text(locked, harness::config_template());
+                added = std::move(upgrade.added);
+                return std::move(upgrade.text);
+            });
+            if (added.empty()) {
+                // Another upgrade landed first: the file came back as it was.
+                std::cout << current;
+                return;
+            }
+            std::cout << "added " << added.size() << (added.size() == 1 ? " option" : " options")
+                      << " to " << path.string() << ":\n";
+            for (const std::string& option : added) {
                 std::cout << "  " << option << "\n";
             }
         } catch (const ConfigEditError& e) {

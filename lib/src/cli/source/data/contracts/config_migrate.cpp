@@ -678,9 +678,10 @@ struct Placement {
 /// -- else right before it -- when the file has that line once and the
 /// template once, so it lands where the template puts it; else last in that
 /// object. nullopt when this template carries no such block, the file holds
-/// it already (its first line, anywhere), or the file has no such object, or
-/// writes it on one line (a block cannot go inside it without rewriting a
-/// line of the file's).
+/// it already (its first line, anywhere, or since 57f the key it teaches, in
+/// that object), or the file has no such object, or writes it on one line (a
+/// block cannot go inside it without rewriting a line of the file's). One
+/// rule, so upgrade and `check`'s count cannot disagree.
 [[nodiscard]] std::optional<Placement> place(std::string_view text, std::string_view tmpl,
                                              const jsonc::Value& written,
                                              const CommentedOption& option) {
@@ -700,6 +701,11 @@ struct Placement {
     const std::size_t at = static_cast<std::size_t>(from[block->first].data() - tmpl.data());
     const jsonc::Value* object = object_at(*live, object_path_at(written, at));
     if (object == nullptr) {
+        return std::nullopt;
+    }
+    // A file that writes the key itself has the option, whatever its
+    // comments say: its example would go in beside the live key (57f).
+    if (!option.key.empty() && std::ranges::find(object->keys, option.key) != object->keys.end()) {
         return std::nullopt;
     }
     const std::size_t open = line_at(text, object->begin);
@@ -911,11 +917,13 @@ std::vector<CommentedOption> commented_options() {
         {.release = "0.1.9",
          .option = "models.default_video",
          .opens = "// The pipeline `apogee video generate` runs when --model names none: a",
-         .closes = R"(// "default_video": "Wan-AI--Wan2.2-TI2V-5B-Diffusers")"},
+         .closes = R"(// "default_video": "Wan-AI--Wan2.2-TI2V-5B-Diffusers")",
+         .key = "default_video"},
         {.release = "0.1.9",
          .option = "review",
          .opens = "// Review sweep targets: what `apogee review sweep` watches -- a repository, or",
-         .closes = "// },"},
+         .closes = "// },",
+         .key = "review"},
         {.release = "0.1.9",
          .option = "backends.*.server_tools",
          .opens = "// A vendor's own server-side tools -- its web search, its code execution --",

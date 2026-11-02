@@ -279,6 +279,11 @@ struct BackendConfig {
     /// (a newer release's key read by an older binary is one of these), so
     /// they are kept here for `check` to name, never refused.
     std::vector<std::string> unknown_keys{};
+    /// Every key the entry writes, known or not, in the file's order (57f):
+    /// so `check` can tell a typo from a stray twin -- a `Model` beside the
+    /// entry's own `model` is removed, never renamed into a second `model`,
+    /// which the JSONC loader refuses.
+    std::vector<std::string> written_keys{};
 };
 
 /// Every key a backend entry may hold (55g), declared once: each field

@@ -12,6 +12,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 #include "contracts/config.h"
@@ -539,4 +540,117 @@ TEST_CASE("an object written on one line takes no commented option, and none is 
     CHECK(upgraded.added == missing);
     CHECK(upgraded.text.find("\"backends\": {}") != std::string::npos);
     CHECK(apogee::harness::missing_template_options(upgraded.text).empty());
+}
+
+TEST_CASE("a commented option that is one key names it, and its block's example writes it",
+          "[config][upgrade][commented]") {
+    // 57f: the options that are one concrete key declare it, so a file that
+    // writes the key itself has the option; the `backends.*` examples name
+    // no one key and keep the comment-line rule alone.
+    const std::vector<std::string> lines = lines_of(apogee::harness::config_template());
+    std::size_t keyed = 0;
+    for (const CommentedOption& option : apogee::harness::commented_options()) {
+        INFO(option.option);
+        if (option.key.empty()) {
+            CHECK(option.option.starts_with("backends.*."));
+            continue;
+        }
+        ++keyed;
+        CHECK_FALSE(option.option.starts_with("backends."));
+        CHECK((option.option == option.key ||
+               option.option.ends_with("." + std::string{option.key})));
+        // The block's own example is the key, commented out.
+        const std::string example = "// \"" + std::string{option.key} + "\": ";
+        bool found = false;
+        for (std::size_t line = opening_line(lines, option); line < lines.size() && !found;
+             ++line) {
+            found = trim(lines[line]).starts_with(example);
+            if (trim(lines[line]) == option.closes) {
+                break;
+            }
+        }
+        CHECK(found);
+    }
+    CHECK(keyed == 2);
+}
+
+TEST_CASE("a file that writes a commented option's key has it: nothing added, nothing counted",
+          "[config][upgrade][commented]") {
+    // 57f, finding 2: a v0.1.6-shaped config -- seeded before 0.1.9 brought
+    // the default_video and review blocks -- that sets the key itself. Upgrade
+    // named it added and put the template's example under the live key, and
+    // check counted it missing, though its default did not apply.
+    const std::string written{apogee::harness::config_template()};
+    const std::vector<CommentedOption> options = apogee::harness::commented_options();
+    const auto option_named = [&options](std::string_view name) {
+        const auto found = std::ranges::find(options, name, &CommentedOption::option);
+        REQUIRE(found != options.end());
+        return *found;
+    };
+    std::string old = written;
+    for (const CommentedOption& option : options) {
+        if (release_of(option.release) >= release_of("0.1.9")) {
+            old = without(old, option);
+        }
+    }
+    const CommentedOption video = option_named("models.default_video");
+    const CommentedOption review = option_named("review");
+
+    // The models object in the template writes no key of its own; the file's
+    // sets the pipeline. The top level gains a real review target.
+    const std::string models_opens = "  \"models\": {\n";
+    REQUIRE(old.find(models_opens) != std::string::npos);
+    std::string live_video = old;
+    live_video.insert(live_video.find(models_opens) + models_opens.size(),
+                      "    \"default_video\": \"mypipe\"\n");
+    std::string live_review = old;
+    live_review.insert(live_review.find("\n{\n") + 3,
+                       "  \"review\": {\"widget\": {\"repo\": \"acme/widget\"}},\n");
+    std::string both = live_video;
+    both.insert(both.find("\n{\n") + 3,
+                "  \"review\": {\"widget\": {\"repo\": \"acme/widget\"}},\n");
+
+    for (const auto& [name, text, held] :
+         std::vector<std::tuple<std::string, std::string, std::vector<std::string>>>{
+             {"default_video", live_video, {"models.default_video"}},
+             {"review", live_review, {"review"}},
+             {"both", both, {"models.default_video", "review"}}}) {
+        INFO(name);
+        (void)apogee::harness::parse_config(text, "<live key>");
+        const std::vector<std::string> missing = apogee::harness::missing_template_options(text);
+        const apogee::harness::Upgrade upgraded =
+            apogee::harness::upgrade_config_text(text, written);
+        CHECK(upgraded.added == missing);
+        for (const std::string& option : held) {
+            INFO(option);
+            CHECK(std::ranges::find(missing, option) == missing.end());
+            CHECK(std::ranges::find(upgraded.added, option) == upgraded.added.end());
+        }
+        // Every other option still comes in; the held ones' examples do not.
+        CHECK(upgraded.added.size() + held.size() ==
+              static_cast<std::size_t>(std::ranges::count_if(options, [](const auto& option) {
+                  return release_of(option.release) >= release_of("0.1.9");
+              })));
+        const bool video_held = std::ranges::find(held, "models.default_video") != held.end();
+        const bool review_held = std::ranges::find(held, "review") != held.end();
+        CHECK((upgraded.text.find(video.opens) == std::string::npos) == video_held);
+        CHECK((upgraded.text.find(review.opens) == std::string::npos) == review_held);
+        if (video_held) {
+            CHECK(upgraded.text.find("\"default_video\": \"mypipe\"") != std::string::npos);
+            CHECK(upgraded.text.find("\"default_video\": \"Wan-AI") == std::string::npos);
+        }
+        // The values are the file's, it loads, and a second run is current.
+        CHECK(apogee::harness::jsonc::parse_json(upgraded.text) ==
+              apogee::harness::jsonc::parse_json(text));
+        (void)apogee::harness::parse_config(upgraded.text, "<upgraded>");
+        CHECK(apogee::harness::missing_template_options(upgraded.text).empty());
+        CHECK(apogee::harness::upgrade_config_text(upgraded.text, written).added.empty());
+    }
+
+    // A key written somewhere else is not the option: a `default_video` at
+    // the top level leaves models without it, and the block still comes in.
+    std::string stray = without(written, video);
+    stray.insert(stray.find("\n{\n") + 3, "  \"default_video\": \"mypipe\",\n");
+    CHECK(apogee::harness::missing_template_options(stray) ==
+          std::vector<std::string>{"models.default_video"});
 }
