@@ -137,6 +137,7 @@ TEST_CASE(
     CHECK(empty["active_pipeline"].is_null());
     CHECK(empty["cycle_active"] == false);
     CHECK(empty["cycle"].is_null());
+    CHECK(empty["cycle_error"].is_null());
     CHECK(empty["pipelines"] == 0);
 
     fixture.run("20260919-100000", "complete", true);
@@ -195,6 +196,7 @@ TEST_CASE(
     CHECK(busy["cycle"]["consecutive_fails"] == 2);
     CHECK(busy["cycle"]["anchor_version"] == 1);
     CHECK(busy["cycle"]["total_runs"] == 4);
+    CHECK(busy["cycle_error"].is_null());
 
     // A pass killed outright (57g): its lock left with a dead id is never a
     // running pass -- `cycle_active` false, the file named.
@@ -204,6 +206,20 @@ TEST_CASE(
         parsed(apogee::httpserver::admin_training_status(fixture.context()));
     CHECK(stale["cycle_active"] == false);
     CHECK(stale["stale_lock"] == (cycle_dir / "cycle.lock").string());
+
+    // An unreadable history (57h): `cycle` null and `cycle_error` naming the
+    // file -- never the fresh install's two nulls.
+    for (const std::string body :
+         {R"({"backend":"x","runs":[)", R"({"backend":"x","runs":{}})", R"({"halted": "yes"})"}) {
+        INFO(body);
+        std::ofstream{cycle_dir / "history.json", std::ios::binary} << body;
+        const nlohmann::json unreadable =
+            parsed(apogee::httpserver::admin_training_status(fixture.context()));
+        CHECK(unreadable["cycle"].is_null());
+        REQUIRE(unreadable["cycle_error"].is_string());
+        CHECK(unreadable["cycle_error"].get<std::string>().starts_with(
+            (cycle_dir / "history.json").string()));
+    }
 }
 
 TEST_CASE(
@@ -245,7 +261,21 @@ TEST_CASE(
     CHECK(parsed(one)["pipeline"]["pipeline_run_id"] == "pipe-20260919-113000");
     CHECK(parsed(one)["pipeline"]["stages"][0]["run_id"] == "pipe-20260919-113000-s0");
     CHECK(parsed(one)["holder"].is_null());
+    // Complete: no resume, and no spec reference recorded (57h).
+    CHECK(parsed(one)["resume"].is_null());
+    CHECK(parsed(one)["spec_ref"].is_null());
     CHECK(apogee::httpserver::admin_get_training_run(fixture.context(), "pipe-nope").status == 404);
+    // There and unreadable is said, never a 404 (57h).
+    std::filesystem::create_directories(fixture.store.pipeline_dir("pipe-mistyped"));
+    std::ofstream{fixture.store.pipeline_dir("pipe-mistyped") / "manifest.json"}
+        << R"({"pipeline_run_id": "pipe-mistyped", "stages": [{"index": "one"}]})";
+    const HttpResponse mistyped =
+        apogee::httpserver::admin_get_training_run(fixture.context(), "pipe-mistyped");
+    CHECK(mistyped.status == 500);
+    CHECK(mistyped.body.find("manifest.json") != std::string::npos);
+    // The listing skips it, as it skips a malformed one.
+    CHECK(parsed(apogee::httpserver::admin_list_training_runs(fixture.context(), pipelines))["data"]
+              .size() == 2);
 
     CHECK(apogee::httpserver::admin_training_cycle(fixture.context()).status == 404);
     apogee::training::CycleHistory history;

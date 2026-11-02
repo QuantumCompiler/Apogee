@@ -172,6 +172,21 @@ TEST_CASE("the history round-trips, loads empty for a backend, saves atomically,
     write(apogee::training::history_path(fixture.cycle), "{\"runs\": 3}");
     (void)apogee::training::load_history(fixture.cycle, "tuned", error);
     CHECK(error.find("runs must be an array") != std::string::npos);
+    // A field of the wrong type names the file too (57h), never the library's
+    // bare message -- and every writer refuses it as unreadable.
+    const std::string path = apogee::training::history_path(fixture.cycle).string();
+    for (const std::string_view body :
+         {R"({"halted": "yes"})", R"({"backend": "x", "total_runs": "3"})",
+          R"({"runs": [{"gate": "fail", "cycle_score": "high"}]})"}) {
+        INFO(body);
+        write(apogee::training::history_path(fixture.cycle), body);
+        (void)apogee::training::load_history(fixture.cycle, "tuned", error);
+        CHECK(error.starts_with(path + ": "));
+        CHECK(error.find("type must be") != std::string::npos);
+        const apogee::training::HistoryUpdate update = apogee::training::update_history(
+            fixture.cycle, "tuned", [](CycleHistory& /*history*/) { return true; });
+        CHECK(update.error.starts_with("the cycle history is unreadable: " + path + ": "));
+    }
     CHECK_THROWS_AS(apogee::training::history_from_json(nlohmann::json::array()),
                     std::runtime_error);
 }
@@ -543,10 +558,27 @@ TEST_CASE(
     // A regressing candidate: the pipeline aborts, the cycle fails, nothing
     // is promoted, the file stays queued, the count grows.
     write(fixture.queue / "day2.jsonl", "{\"mock\": {\"answer\": \"nope\"}}\n");
+    said.clear();
     outcome = apogee::training::run_cycle(request);
     REQUIRE(outcome.ok);
     CHECK(outcome.record->gate == "fail");
     CHECK(outcome.record->gate_reason.find("pipeline aborted") != std::string::npos);
+    // The cycle's own words (57h): no pipeline door in its reason or its
+    // narration, which says the candidate is discarded and the queue waits.
+    CHECK(outcome.record->gate_reason.find("pipeline resume") == std::string::npos);
+    CHECK(outcome.record->gate_reason.find("--continue-on-fail") == std::string::npos);
+    bool failed_said = false;
+    for (const std::string& line : said) {
+        CHECK(line.find("pipeline resume") == std::string::npos);
+        CHECK(line.find("--continue-on-fail") == std::string::npos);
+        if (line.starts_with("[cycle] FAILED -- ")) {
+            failed_said = true;
+            CHECK(
+                line.ends_with("-- the candidate is discarded; the queue keeps its files for "
+                               "the next 'apogee train cycle run'"));
+        }
+    }
+    CHECK(failed_said);
     CHECK(fixture.promoted.size() == 1);
     CHECK(std::filesystem::exists(fixture.queue / "day2.jsonl"));
     CHECK(fixture.history().consecutive_fails == 1);

@@ -370,6 +370,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/operations/store_references_test.cpp
     presentation/operations/backend_fields_test.cpp
     presentation/operations/mcp_presets_test.cpp
+    presentation/operations/training_reads_test.cpp
     presentation/cli/chat_completer_test.cpp
     presentation/cli/chat_roster_test.cpp
     presentation/cli/chat_session_test.cpp

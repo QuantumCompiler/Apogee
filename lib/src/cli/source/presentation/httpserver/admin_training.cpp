@@ -27,13 +27,20 @@ HttpResponse admin_list_training_runs(const AdminConfigContext& /*context*/,
     return json_response(200, operations::training_runs_document(kind));
 }
 
-HttpResponse admin_get_training_run(const AdminConfigContext& /*context*/, std::string_view id) {
+HttpResponse admin_get_training_run(const AdminConfigContext& context, std::string_view id) {
     if (!training::valid_run_id(id)) {
         return error_response(400, "'" + std::string{id} + "' is not a run id");
     }
     // A pipeline's: `train pipeline status <id> --output-format json`,
-    // byte for byte (55h).
-    std::optional<nlohmann::json> document = operations::training_run_document(id);
+    // byte for byte (55h) -- its `resume` naming the spec from the config on
+    // disk, as the command reads it (57h).
+    std::string error;
+    std::optional<nlohmann::json> document = operations::training_run_document(
+        id, operations::config_for_reads(context.config_path), error);
+    if (!error.empty()) {
+        // There and unreadable is said, never a 404 (57h).
+        return error_response(500, "the pipeline run is unreadable: " + error);
+    }
     if (!document.has_value()) {
         return error_response(404, "no run or pipeline '" + std::string{id} + "'");
     }

@@ -130,6 +130,8 @@ CycleHistory load_history(const std::filesystem::path& cycle_dir, std::string_vi
         error = path.string() + " is not JSON";
         return fresh;
     }
+    // A field of the wrong type throws the library's own error, not a
+    // runtime_error (57h): caught beside it, so the read names the file.
     try {
         CycleHistory history = history_from_json(json);
         if (history.backend.empty()) {
@@ -137,6 +139,9 @@ CycleHistory load_history(const std::filesystem::path& cycle_dir, std::string_vi
         }
         return history;
     } catch (const std::runtime_error& e) {
+        error = path.string() + ": " + e.what();
+        return fresh;
+    } catch (const nlohmann::json::exception& e) {
         error = path.string() + ": " + e.what();
         return fresh;
     }
@@ -651,6 +656,15 @@ CycleOutcome run_cycle(const CycleRequest& request) {
         return outcome;
     }
 
+    // What a failed pass leaves (57h): its own words, never a pipeline's door
+    // -- the candidate is the cycle's alone, and the data waits for the next
+    // pass, which is how a cycle retries.
+    const std::string retried =
+        queues.empty()
+            ? std::string{"the candidate is discarded; the next 'apogee train cycle run' takes "
+                          "the same sessions again"}
+            : std::string{"the candidate is discarded; the queue keeps its files for the next "
+                          "'apogee train cycle run'"};
     auto fail = [&](std::string reason) {
         record.gate = std::string{kGateFail};
         record.gate_reason = std::move(reason);
@@ -665,7 +679,7 @@ CycleOutcome run_cycle(const CycleRequest& request) {
                 current.runs.back().note = current.halt_reason;
             }
         });
-        say(kPassFailed, "[cycle] FAILED -- " + history.runs.back().gate_reason);
+        say(kPassFailed, "[cycle] FAILED -- " + history.runs.back().gate_reason + " -- " + retried);
         if (outcome.halted_now) {
             say(kPassHalted, "[cycle] " + history.halt_reason +
                                  " -- the loop is halted; 'apogee train cycle "

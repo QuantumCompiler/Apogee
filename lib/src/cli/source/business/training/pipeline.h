@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -31,7 +32,11 @@
 /// `<id>-s<N>` under `training/runs/` carrying `parent_run` and
 /// `pipeline_run_id`, so `train eval` and `train promote` can target one
 /// directly. A run that stopped -- a failed gate, a crash, Ctrl-C -- resumes
-/// from the first stage that has not passed.
+/// after its last passed stage, from that stage's fused checkpoint (57h):
+/// under the hard gate that is the first stage that has not passed, and an
+/// earlier stage that failed its gate under `--continue-on-fail` or
+/// `gate_mode: soft` stays as it is. A cycle pass's pipeline is the cycle's
+/// alone and is never resumed.
 ///
 /// **One process owns a run** (57g). `run_pipeline` and `resume_pipeline`
 /// hold the pipeline's PID lock, `pipelines/<id>/pipeline.lock`, for the
@@ -46,6 +51,10 @@
 namespace apogee::training {
 
 inline constexpr std::string_view kPipelineIdPrefix = "pipe-";
+/// Every cycle pass's pipeline id carries it (`run_cycle` mints it): its
+/// candidate is the cycle's alone (57h). Declared here, where the resume rule
+/// reads it, rather than in `cycle.h`, which includes this.
+inline constexpr std::string_view kCycleIdPrefix = "cycle-";
 inline constexpr std::string_view kPipelinesDirName = "pipelines";
 /// The pipeline's PID lock, beside its manifest (57g).
 inline constexpr std::string_view kPipelineLockFileName = "pipeline.lock";
@@ -87,6 +96,10 @@ struct PipelineStageRecord {
 struct PipelineRunManifest {
     std::string pipeline_run_id;
     std::string spec_name;
+    /// The `--pipeline` value the run took (57h): a `training.pipelines` key,
+    /// or a spec file's absolute path -- what a resume without `--pipeline`
+    /// tries first. Empty for a run written before it, and for a cycle pass.
+    std::string spec_ref;
     /// The student as named.
     std::string student;
     /// The resolved snapshot.
@@ -102,9 +115,16 @@ struct PipelineRunManifest {
 
     /// The index of the last passed stage, or -1.
     [[nodiscard]] int last_passed() const noexcept;
-    /// The index of the first stage that has not passed; `stages.size()`
-    /// when every stage has.
-    [[nodiscard]] std::size_t first_unpassed() const noexcept;
+    /// Where a resume starts (57h), the one point the runner and every
+    /// surface read: one past the last passed stage, trained from that
+    /// stage's fused checkpoint -- 0 when none passed, `stages.size()` when
+    /// the last one did.
+    [[nodiscard]] std::size_t resume_from() const noexcept;
+    /// The stages before the resume point that did not pass -- a gate failed
+    /// and the run went on (`--continue-on-fail`, `gate_mode: soft`): a
+    /// resume leaves them as they are, since retraining one would change the
+    /// base the later stages passed on.
+    [[nodiscard]] std::vector<std::size_t> kept_failed() const;
     /// The run id `promote` takes: the last passed stage's, or empty.
     [[nodiscard]] std::string promote_run_id() const;
 };
@@ -123,6 +143,26 @@ struct PipelineRunManifest {
 
 /// `<pipeline id>-s<index>`.
 [[nodiscard]] std::string stage_run_id(std::string_view pipeline_run_id, int index);
+
+/// Whether `pipeline_run_id` is a cycle pass's (57h), by the prefix every
+/// pass's id carries and no other verb mints.
+[[nodiscard]] bool is_cycle_pass(std::string_view pipeline_run_id) noexcept;
+
+/// How a resume without `--pipeline` finds a run's spec (57h): the run's
+/// `spec_ref` -- a spec file that is still there, or a key still under
+/// `training.pipelines` -- then its `spec_name` as a key, then the one entry
+/// whose `name:` is `spec_name`. A spec file that has gone is not looked
+/// past: another entry of the same name is not the plan the run passed on.
+struct ResumeSpec {
+    /// The `--pipeline` value that names the spec now, or empty.
+    std::string ref{};
+    /// Why none does, without a door: the caller names `--pipeline`.
+    std::string problem{};
+};
+
+[[nodiscard]] ResumeSpec find_resume_spec(
+    const PipelineRunManifest& manifest,
+    const std::map<std::string, harness::PipelineSpec, std::less<>>& pipelines);
 
 /// A stage's inputs as the caller resolved them from the spec's names: the
 /// dataset file and the suite's items. The core never resolves a name.
@@ -154,6 +194,10 @@ struct PipelineRequest {
     /// `runs/` and `pipelines/` are beneath it.
     std::filesystem::path training_dir;
     Trainer* trainer = nullptr;
+    /// The `--pipeline` value that named the spec (57h), recorded as the
+    /// manifest's `spec_ref`; a resume that names one records it in place of
+    /// the run's.
+    std::string spec_ref{};
     /// Recorded in every eval; empty means judge items skip.
     std::string judge_backend;
     JudgeFn judge;
@@ -172,6 +216,10 @@ struct PipelineOutcome {
     /// The run ended `complete`.
     bool ok = false;
     bool cancelled = false;
+    /// It stopped at a stage that failed its cumulative gate under the hard
+    /// gate (57h): `error` says why and nothing more, and the verb that ran
+    /// it adds the way on.
+    bool gate_failed = false;
     /// Why it did not, or empty.
     std::string error;
     PipelineRunManifest manifest;
@@ -193,10 +241,19 @@ struct PipelineOutcome {
 /// <pid>)`.
 [[nodiscard]] std::string pipeline_holder_text(const platform::PidLock::Holder& holder);
 
-/// Whether `existing` may be resumed against `spec`: not already complete,
-/// and the spec's stage count unchanged (a drifted spec would train stage
-/// N on a different plan than stages 0..N-1 passed under). Empty when it
-/// may.
+/// Why `existing` cannot be resumed whatever spec is named, or empty: it is
+/// already complete, or it is a cycle pass (57h) -- whose candidate is the
+/// cycle's, judged by its dual gate and discarded on a fail, so no other verb
+/// trains, overwrites or promotes it.
+[[nodiscard]] std::string resume_refusal(const PipelineRunManifest& existing);
+
+/// The same, and first whether a live process runs the pipeline now (57g).
+[[nodiscard]] std::string resume_refusal(const PipelineRunManifest& existing,
+                                         const std::filesystem::path& training_dir);
+
+/// Whether `existing` may be resumed against `spec`: `resume_refusal`, and
+/// the spec's stage count unchanged (a drifted spec would train stage N on a
+/// different plan than stages 0..N-1 passed under). Empty when it may.
 [[nodiscard]] std::string resume_check(const PipelineRunManifest& existing,
                                        const harness::PipelineSpec& spec);
 
@@ -208,10 +265,11 @@ struct PipelineOutcome {
                                        const harness::PipelineSpec& spec,
                                        const std::filesystem::path& training_dir);
 
-/// Continues from the first stage that has not passed, the passed ones
-/// untouched -- under the pipeline's lock, refused while a live process
-/// holds it, and from the manifest as it reads once the lock is held (a
-/// holder that finished while this one waited to begin has rewritten it).
+/// Continues from `resume_from()` (57h) -- after the last passed stage, from
+/// its fused checkpoint, the stages before it untouched -- under the
+/// pipeline's lock, refused while a live process holds it, and from the
+/// manifest as it reads once the lock is held (a holder that finished while
+/// this one waited to begin has rewritten it). A cycle pass is refused.
 [[nodiscard]] PipelineOutcome resume_pipeline(const PipelineRequest& request,
                                               PipelineRunManifest existing);
 

@@ -128,9 +128,14 @@ std::optional<RunManifest> read_manifest(const std::filesystem::path& run_dir, s
         error = manifest_path(run_dir).string() + " is not JSON";
         return std::nullopt;
     }
+    // A mistyped field throws the library's own error (57h), named here as
+    // a malformed one is, so a list skips it.
     try {
         return manifest_from_json(json);
     } catch (const std::runtime_error& e) {
+        error = manifest_path(run_dir).string() + ": " + e.what();
+        return std::nullopt;
+    } catch (const nlohmann::json::exception& e) {
         error = manifest_path(run_dir).string() + ": " + e.what();
         return std::nullopt;
     }

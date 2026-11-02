@@ -71,6 +71,10 @@ TEST_CASE(
     std::ofstream{apogee::training::manifest_path(store.run_dir("broken")), std::ios::binary}
         << "nope";
     std::filesystem::create_directories(store.run_dir("empty"));
+    // A field of the wrong type is skipped as a malformed one is (57h).
+    std::filesystem::create_directories(store.run_dir("mistyped"));
+    std::ofstream{apogee::training::manifest_path(store.run_dir("mistyped")), std::ios::binary}
+        << R"({"run_id": "mistyped", "iters": "two"})";
 
     const std::vector<apogee::training::RunSummary> runs = store.list_runs();
     REQUIRE(runs.size() == 3);
@@ -186,6 +190,9 @@ TEST_CASE("a ledger round-trips, is saved atomically, and every ledger lists by 
     CHECK(apogee::training::save_ledger(store.versions_dir(), other).empty());
     std::ofstream{store.versions_dir() / "broken.json", std::ios::binary} << "{";
     std::ofstream{store.versions_dir() / "notes.txt", std::ios::binary} << "x";
+    // A field of the wrong type is skipped as a malformed one is (57h).
+    std::ofstream{store.versions_dir() / "mistyped.json", std::ios::binary}
+        << R"({"backend_name": "mistyped", "active_version": "one"})";
     const std::vector<VersionLedger> all = store.all_versions();
     REQUIRE(all.size() == 2);
     CHECK(all[0].backend == "alpha");
@@ -194,6 +201,9 @@ TEST_CASE("a ledger round-trips, is saved atomically, and every ledger lists by 
     std::string error;
     CHECK_FALSE(apogee::training::load_ledger(store.versions_dir(), "broken", error).has_value());
     CHECK(error.find("not JSON") != std::string::npos);
+    CHECK_FALSE(apogee::training::load_ledger(store.versions_dir(), "mistyped", error).has_value());
+    CHECK(error.starts_with((store.versions_dir() / "mistyped.json").string() + ": "));
+    CHECK(error.find("type must be number") != std::string::npos);
     CHECK_THROWS_AS(apogee::training::ledger_from_json(nlohmann::json{{"versions", "x"}}),
                     std::runtime_error);
 }
@@ -336,6 +346,11 @@ TEST_CASE(
     pipeline("pipe-20260919-090000", "aborted", "2026-09-19T09:00:00Z");
     std::filesystem::create_directories(store.pipeline_dir("broken"));
     std::ofstream{store.pipeline_dir("broken") / "manifest.json"} << "{";
+    // A field of the wrong type is skipped as a malformed one is (57h), never
+    // the whole list's failure.
+    std::filesystem::create_directories(store.pipeline_dir("mistyped"));
+    std::ofstream{store.pipeline_dir("mistyped") / "manifest.json"}
+        << R"({"pipeline_run_id": "mistyped", "stages": [{"index": "one"}]})";
     const std::vector<apogee::training::PipelineSummary> listed = store.list_pipelines();
     REQUIRE(listed.size() == 3);
     CHECK(listed[0].id == "pipe-20260919-110000");
@@ -364,6 +379,17 @@ TEST_CASE(
     CHECK(one->spec_name == "skills");
     CHECK_FALSE(store.get_pipeline("../pipe-20260919-100000").has_value());
     CHECK_FALSE(store.get_pipeline("broken").has_value());
+    // One by id says why it cannot be read (57h); an unknown one is nothing.
+    std::string error;
+    CHECK_FALSE(store.get_pipeline("mistyped", error).has_value());
+    CHECK(error.starts_with((store.pipeline_dir("mistyped") / "manifest.json").string() + ": "));
+    CHECK(error.find("type must be number") != std::string::npos);
+    CHECK_FALSE(store.get_pipeline("broken", error).has_value());
+    CHECK(error.find("is not JSON") != std::string::npos);
+    CHECK_FALSE(store.get_pipeline("pipe-1", error).has_value());
+    CHECK(error.empty());
+    CHECK(store.get_pipeline("pipe-20260919-100000", error).has_value());
+    CHECK(error.empty());
     const nlohmann::json json = apogee::training::pipeline_summary_json(listed[1]);
     CHECK(json["kind"] == "pipeline");
     CHECK(json["id"] == "pipe-20260919-100000");

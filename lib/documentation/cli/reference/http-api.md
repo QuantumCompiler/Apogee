@@ -1221,7 +1221,7 @@ The training track's state, read off the filesystem the CLI writes:
 "active_pipeline": <id> | null, "latest_pipeline": <pipeline summary> |
 null, "cycle_active": bool, "stale_lock": <path> | null, "cycle": {backend,
 halted, halt_reason, consecutive_fails, anchor_version, anchor_score,
-total_runs} | null}`.
+total_runs} | null, "cycle_error": <reason> | null}`.
 `recent_runs` is the newest five, each as `GET /v1/admin/training/runs`
 lists a run; `active_pipeline` is the newest pipeline run whose manifest
 says `running` and whose lock a live process holds -- since 57g a crashed
@@ -1230,8 +1230,12 @@ whatever its status; `cycle_active` is whether a running `train cycle run`
 holds the lock right now -- since 57g false for a lock whose process is
 gone, which `stale_lock` (added then) names by its path, `null` otherwise:
 `cycle run` refuses such a lock until the person removes it;
-`cycle` is the history's headline, `null` until the first cycle has run.
-Since 37f `apogee train status --output-format json` prints this body byte
+`cycle` is the history's headline, `null` until the first cycle has run --
+or, since 57h, when the history cannot be read (not JSON, the wrong shape,
+a field of the wrong type), and then `cycle_error` is why, naming the file
+(`<path>: <reason>`); it is `null` otherwise, so a fresh install has both
+`null`. `cycle` never becomes an object with an error inside: a client
+reading `cycle.halted` would see a halted loop as not halted. Since 37f `apogee train status --output-format json` prints this body byte
 for byte, and `recent_runs`, `latest_pipeline`, `halt_reason` and
 `anchor_score` joined it then -- the facts the human status lists of the
 runs, the pipelines and the cycle's history (whether a cycle is configured
@@ -1269,11 +1273,25 @@ pipeline_run_id]}}` -- a pipeline's stage run carries the last two -- or one
 pipeline run's: `200 {"kind": "pipeline", "pipeline": {pipeline_run_id,
 spec_name, student, base_model, status, started_at[, completed_at], stages:
 [{index, name, run_id, base_model, dataset, adapter_dir, fused_dir, status,
-cumulative_score, cumulative_passed[, eval_results]}]}, "holder": {"pid": N}
-| null}` -- since 57g `holder` names the live process running that pipeline
-(its lock's holder; a resume is refused while there is one), `null` when
-none does; `404` when
-neither, `400` for an id that is not a plain name. Since 55h `apogee train
+cumulative_score, cumulative_passed[, eval_results]}], spec_ref?}, "holder":
+{"pid": N} | null, "spec_ref": <ref> | null, "resume": {stage, index, name,
+pipeline, note} | null}` -- since 57g `holder` names the live process
+running that pipeline (its lock's holder; a resume is refused while there
+is one), `null` when none does. Since 57h `spec_ref` is the `--pipeline`
+value the run took (a `training.pipelines` key, or a spec file's absolute
+path; `null` for a run written before it and for a cycle pass), and
+`resume` is where `train pipeline resume` starts: after the last passed
+stage -- `stage` as the text says it (1-based), `index` the manifest's,
+`name` -- with `pipeline` the `--pipeline` value that finds the run's spec
+in the config now (`null` when none does: the resume would be refused
+naming `--pipeline`) and `note` the stages before it that failed their gate
+and stay as they are, in the text's words (`stage 1, a, failed its gate and
+stays as it is`), or `null`. `resume` is `null` for a complete run, a cycle
+pass (`cycle-`; its candidate is the cycle's, and `pipeline resume` refuses
+it) and a run with no stage left. `404` when
+neither, `400` for an id that is not a plain name, and since 57h `500` --
+`the pipeline run is unreadable: <path>: <reason>` -- for a pipeline whose
+manifest is there and cannot be read (the list skips it). Since 55h `apogee train
 pipeline status <id> --output-format json` prints a pipeline run's body byte for
 byte, from the same builder.
 

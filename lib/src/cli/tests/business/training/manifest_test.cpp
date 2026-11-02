@@ -149,6 +149,13 @@ TEST_CASE("write_manifest lands the file atomically and read_manifest names what
     std::ofstream{apogee::training::manifest_path(run_dir), std::ios::binary} << "{\"a\": 1}";
     CHECK_FALSE(apogee::training::read_manifest(run_dir, error).has_value());
     CHECK(error.find("run_id") != std::string::npos);
+    // A field of the wrong type is named with its file (57h), as a malformed
+    // one is -- never the library's bare message, so a list can skip it.
+    std::ofstream{apogee::training::manifest_path(run_dir), std::ios::binary}
+        << R"({"run_id": "20260919-120000", "iters": "two"})";
+    CHECK_FALSE(apogee::training::read_manifest(run_dir, error).has_value());
+    CHECK(error.starts_with(apogee::training::manifest_path(run_dir).string() + ": "));
+    CHECK(error.find("type must be number") != std::string::npos);
 }
 
 namespace {

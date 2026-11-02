@@ -132,6 +132,8 @@ std::optional<VersionLedger> load_ledger(const std::filesystem::path& versions_d
         error = path.string() + " is not JSON";
         return std::nullopt;
     }
+    // A mistyped field throws the library's own error (57h), named here as
+    // a malformed one is, so `all_versions` skips it.
     try {
         VersionLedger ledger = ledger_from_json(json);
         if (ledger.backend.empty()) {
@@ -139,6 +141,9 @@ std::optional<VersionLedger> load_ledger(const std::filesystem::path& versions_d
         }
         return ledger;
     } catch (const std::runtime_error& e) {
+        error = path.string() + ": " + e.what();
+        return std::nullopt;
+    } catch (const nlohmann::json::exception& e) {
         error = path.string() + ": " + e.what();
         return std::nullopt;
     }
@@ -378,10 +383,22 @@ std::vector<PipelineSummary> TrainingStore::list_pipelines() const {
 }
 
 std::optional<PipelineRunManifest> TrainingStore::get_pipeline(std::string_view id) const {
+    std::string error;
+    return get_pipeline(id, error);
+}
+
+std::optional<PipelineRunManifest> TrainingStore::get_pipeline(std::string_view id,
+                                                               std::string& error) const {
+    error.clear();
     if (!valid_run_id(id)) {
         return std::nullopt;
     }
-    std::string error;
+    // No manifest at all is no run; one that is there and cannot be read is
+    // said (57h).
+    std::error_code code;
+    if (!std::filesystem::exists(pipeline_manifest_path(pipeline_dir(id)), code)) {
+        return std::nullopt;
+    }
     return read_pipeline_manifest(pipeline_dir(id), error);
 }
 

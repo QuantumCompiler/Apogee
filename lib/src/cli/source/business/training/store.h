@@ -217,6 +217,11 @@ public:
     /// nullopt for an unknown, invalid or unreadable one.
     [[nodiscard]] std::optional<PipelineRunManifest> get_pipeline(std::string_view id) const;
 
+    /// The same, with `error` saying why one that is there cannot be read
+    /// (57h) -- `<path>: <reason>` -- and empty for an unknown or invalid id.
+    [[nodiscard]] std::optional<PipelineRunManifest> get_pipeline(std::string_view id,
+                                                                  std::string& error) const;
+
     /// The newest pipeline whose manifest says `running` and whose lock a
     /// live process holds (57g), if any: a crashed run's `running` manifest
     /// is not one.

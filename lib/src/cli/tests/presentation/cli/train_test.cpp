@@ -3001,6 +3001,374 @@ TEST_CASE(
     CHECK_FALSE(std::filesystem::exists(dir / "pipeline.lock"));
 }
 
+// --- 57h: a resume continues the run it names; the reads say what they cannot read --
+
+namespace {
+
+/// The command a read printed under its `Resume from` line, as argv without
+/// `apogee` -- what a person copies and runs.
+std::vector<std::string> printed_resume(const std::string& out) {
+    const std::size_t at = out.find("Resume from ");
+    REQUIRE(at != std::string::npos);
+    const std::size_t line = out.find("\n  apogee ", at);
+    REQUIRE(line != std::string::npos);
+    const std::size_t start = line + std::string_view{"\n  apogee "}.size();
+    std::istringstream words{out.substr(start, out.find('\n', start) - start)};
+    std::vector<std::string> args;
+    for (std::string word; words >> word;) {
+        args.push_back(word);
+    }
+    return args;
+}
+
+/// `nightly`, whose `name:` is not its key, over two stages: the second
+/// aborts its gate until `regress` is mended.
+constexpr std::string_view kNamedBlock =
+    "training:\n  trainer: mock\n  pipelines:\n    nightly:\n      name: Nightly SFT\n"
+    "      student: tiny\n      stages:\n        - name: a\n          dataset: starter\n"
+    "          eval_suite: hello\n          iters: 2\n        - name: b\n"
+    "          dataset: regress\n          eval_suite: nope\n          iters: 2\n";
+
+}  // namespace
+
+TEST_CASE(
+    "a failed cycle pass passes on no pipeline door, its pipeline is refused by pipeline resume "
+    "naming the cycle's verb with the candidate untouched, and no read offers it a resume",
+    "[commands][train][pipeline][cycle][57h]") {
+    const PipelineFixture fixture{std::string{kCycleBlock}};
+    std::string out;
+    std::string err;
+    const std::filesystem::path queue = fixture.home / "queue";
+    write_file(queue / "day1.jsonl", "{\"mock\": {\"answer\": \"nope\"}}\n");
+    CHECK(fixture.run({"train", "cycle", "run"}, &out, &err) == 2);
+    CHECK(out.find("cycle FAILED") != std::string::npos);
+    for (const std::string* said : {&out, &err}) {
+        CHECK(said->find("pipeline resume") == std::string::npos);
+        CHECK(said->find("--continue-on-fail") == std::string::npos);
+    }
+    CHECK(err.find("-- the candidate is discarded; the queue keeps its files for the next "
+                   "'apogee train cycle run'") != std::string::npos);
+    const std::string id = fixture.pipelines().front().id;
+    REQUIRE(id.starts_with("cycle-"));
+    std::string error;
+    const apogee::training::CycleHistory history =
+        apogee::training::load_history(fixture.training / "cycle", "nightly-model", error);
+    REQUIRE_FALSE(history.runs.empty());
+    CHECK(history.runs.back().gate_reason.find("pipeline resume") == std::string::npos);
+
+    const std::filesystem::path adapter =
+        fixture.training / "runs" / (id + "-s0") / "adapters" / "adapter_config.json";
+    const std::string before = read_file(adapter);
+    CHECK(fixture.run({"train", "pipeline", "resume", id}, &out, &err) == 1);
+    CHECK(err.find("is a cycle pass, and its candidate was discarded -- 'apogee train cycle run' "
+                   "runs the next pass") != std::string::npos);
+    // Named spec or not, the same refusal: a spec cannot make it the cycle's.
+    CHECK(fixture.run({"train", "pipeline", "resume", id, "--pipeline", "nightly"}, &out, &err) ==
+          1);
+    CHECK(err.find("is a cycle pass") != std::string::npos);
+    CHECK(read_file(adapter) == before);
+    CHECK(fixture.pipeline(id).status == "aborted");
+    CHECK(std::filesystem::exists(queue / "day1.jsonl"));
+
+    REQUIRE(fixture.run({"train", "pipeline", "status", id}, &out, &err) == 0);
+    CHECK(out.find("Resume from") == std::string::npos);
+    CHECK(out.find("apogee train promote") == std::string::npos);
+    CHECK(out.find("A cycle pass: its candidate was discarded") != std::string::npos);
+    REQUIRE(fixture.run({"train", "pipeline", "status", id, "--output-format", "json"}, &out,
+                        &err) == 0);
+    CHECK(nlohmann::json::parse(out)["resume"].is_null());
+}
+
+TEST_CASE(
+    "a cycle pass with a stage passed, aborted or complete, is offered neither promote nor "
+    "resume by its status, while its pipe- twin is offered both",
+    "[commands][train][pipeline][cycle][57h]") {
+    // `nightly`'s a passes and b aborts its gate: stages [passed, failed].
+    const PipelineFixture fixture{std::string{kNamedBlock}};
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"train", "pipeline", "run", "--pipeline", "nightly"}, &out, &err) == 2);
+    const std::string pipe = fixture.pipelines().front().id;
+    REQUIRE(pipe.starts_with(apogee::training::kPipelineIdPrefix));
+    apogee::training::PipelineRunManifest manifest = fixture.pipeline(pipe);
+    REQUIRE(manifest.status == apogee::training::kPipelineAborted);
+    REQUIRE(manifest.stages.size() == 2);
+    REQUIRE(manifest.stages[0].status == apogee::training::kStagePassed);
+    REQUIRE(manifest.stages[1].status == apogee::training::kStageFailed);
+    REQUIRE_FALSE(manifest.promote_run_id().empty());
+
+    // Its twin by hand: the same stages under a cycle pass's id.
+    const std::string cycle = std::string{apogee::training::kCycleIdPrefix} +
+                              pipe.substr(apogee::training::kPipelineIdPrefix.size());
+    const auto write_both = [&](const apogee::training::PipelineRunManifest& written) {
+        apogee::training::PipelineRunManifest twin = written;
+        twin.pipeline_run_id = cycle;
+        REQUIRE(apogee::training::write_pipeline_manifest(fixture.training / "pipelines" / pipe,
+                                                          written)
+                    .empty());
+        REQUIRE(
+            apogee::training::write_pipeline_manifest(fixture.training / "pipelines" / cycle, twin)
+                .empty());
+    };
+    write_both(manifest);
+    const auto check_offers = [&](const bool resumable) {
+        const std::string promote =
+            "Promote the last passing stage:\n  apogee train promote " + manifest.promote_run_id();
+        REQUIRE(fixture.run({"train", "pipeline", "status", pipe}, &out, &err) == 0);
+        CHECK(out.find(promote) != std::string::npos);
+        CHECK((out.find("Resume from stage 2, b") != std::string::npos) == resumable);
+        REQUIRE(fixture.run({"train", "pipeline", "status", pipe, "--output-format", "json"}, &out,
+                            &err) == 0);
+        CHECK(nlohmann::json::parse(out)["resume"].is_null() != resumable);
+
+        REQUIRE(fixture.run({"train", "pipeline", "status", cycle}, &out, &err) == 0);
+        CHECK(out.find(cycle) != std::string::npos);
+        CHECK(out.find("Promote the last passing stage") == std::string::npos);
+        CHECK(out.find("apogee train promote") == std::string::npos);
+        CHECK(out.find("Resume from") == std::string::npos);
+        CHECK(out.find("pipeline resume") == std::string::npos);
+        // The cycle-pass line stands in for the resume while the pass is not
+        // complete.
+        CHECK((out.find("A cycle pass: its candidate was discarded") != std::string::npos) ==
+              resumable);
+        REQUIRE(fixture.run({"train", "pipeline", "status", cycle, "--output-format", "json"}, &out,
+                            &err) == 0);
+        CHECK(nlohmann::json::parse(out)["resume"].is_null());
+    };
+    {
+        INFO("aborted, stage 1 passed");
+        check_offers(/*resumable=*/true);
+    }
+
+    manifest.stages[1].status = std::string{apogee::training::kStagePassed};
+    manifest.status = std::string{apogee::training::kPipelineComplete};
+    manifest.completed_at = manifest.started_at;
+    REQUIRE(manifest.promote_run_id() == manifest.stages[1].run_id);
+    write_both(manifest);
+    {
+        INFO("complete");
+        check_offers(/*resumable=*/false);
+    }
+}
+
+TEST_CASE(
+    "a named pipeline whose name: is not its key, and a spec-file run, resume by the command "
+    "their status prints; an older manifest resumes through its name; two of one name refused",
+    "[commands][train][pipeline][resume][57h]") {
+    const PipelineFixture fixture{std::string{kNamedBlock}};
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"train", "pipeline", "run", "--pipeline", "nightly", "--trainer", "mock"},
+                        &out, &err) == 2);
+    const std::string id = fixture.pipelines().front().id;
+    CHECK(fixture.pipeline(id).spec_name == "Nightly SFT");
+    CHECK(fixture.pipeline(id).spec_ref == "nightly");
+    // The gate's door is the verb's, and runs as printed.
+    CHECK(err.find("Fix the data or the suite and 'apogee train pipeline resume " + id +
+                   "', or pass --continue-on-fail") != std::string::npos);
+    CHECK(out.find("Resume from stage 2, b:\n  apogee train pipeline resume " + id + "\n") !=
+          std::string::npos);
+    REQUIRE(fixture.run({"train", "pipeline", "status", id}, &out, &err) == 0);
+    std::vector<std::string> hint = printed_resume(out);
+    CHECK(hint == std::vector<std::string>{"train", "pipeline", "resume", id});
+    REQUIRE(fixture.run({"train", "pipeline", "status", id, "--output-format", "json"}, &out,
+                        &err) == 0);
+    nlohmann::json document = nlohmann::json::parse(out);
+    CHECK(document["spec_ref"] == "nightly");
+    CHECK(document["resume"]["stage"] == 2);
+    CHECK(document["resume"]["name"] == "b");
+    CHECK(document["resume"]["pipeline"] == "nightly");
+    write_file(fixture.training / "datasets" / "regress.jsonl",
+               read_file(fixture.training / "datasets" / "starter.jsonl"));
+    write_file(fixture.training / "suites" / "nope.jsonl",
+               read_file(fixture.training / "suites" / "hello.jsonl"));
+    REQUIRE(fixture.run(hint, &out, &err) == 0);
+    CHECK(fixture.pipeline(id).complete());
+
+    // An older run, written before spec_ref: found by its name.
+    write_file(fixture.training / "datasets" / "regress.jsonl",
+               "{\"mock\": {\"answer\": \"nope\"}}\n");
+    write_file(fixture.training / "suites" / "nope.jsonl",
+               "{\"prompt\": \"say nope\", \"expected\": \"nope\"}\n");
+    const std::vector<apogee::training::PipelineSummary> before = fixture.pipelines();
+    REQUIRE(fixture.run({"train", "pipeline", "run", "--pipeline", "nightly"}, &out, &err) == 2);
+    const std::string older = fixture.pipeline_since(before);
+    apogee::training::PipelineRunManifest manifest = fixture.pipeline(older);
+    manifest.spec_ref.clear();
+    REQUIRE(
+        apogee::training::write_pipeline_manifest(fixture.training / "pipelines" / older, manifest)
+            .empty());
+    // Two entries of that name: refused, naming both, and the hint names
+    // `--pipeline`.
+    const std::string config = read_file(fixture.base.base.config_path);
+    write_file(fixture.base.base.config_path,
+               config +
+                   "    twin:\n      name: Nightly SFT\n      student: tiny\n      stages:\n"
+                   "        - name: a\n          dataset: starter\n          eval_suite: hello\n"
+                   "        - name: b\n          dataset: starter\n          eval_suite: hello\n");
+    CHECK(fixture.run({"train", "pipeline", "resume", older}, &out, &err) == 1);
+    CHECK(err.find("'nightly', 'twin'") != std::string::npos);
+    CHECK(err.find("pass --pipeline <spec> to resume " + older) != std::string::npos);
+    REQUIRE(fixture.run({"train", "pipeline", "status", older}, &out, &err) == 0);
+    CHECK(printed_resume(out) ==
+          std::vector<std::string>{"train", "pipeline", "resume", older, "--pipeline", "<spec>"});
+    write_file(fixture.base.base.config_path, config);
+    write_file(fixture.training / "datasets" / "regress.jsonl",
+               read_file(fixture.training / "datasets" / "starter.jsonl"));
+    write_file(fixture.training / "suites" / "nope.jsonl",
+               read_file(fixture.training / "suites" / "hello.jsonl"));
+    REQUIRE(fixture.run({"train", "pipeline", "resume", older}, &out, &err) == 0);
+    CHECK(fixture.pipeline(older).complete());
+    // Found once, recorded for the next.
+    CHECK(fixture.pipeline(older).spec_ref == "nightly");
+
+    // A spec-file run: its absolute path recorded, its hint bare and runnable.
+    write_file(fixture.training / "datasets" / "regress.jsonl",
+               "{\"mock\": {\"answer\": \"nope\"}}\n");
+    write_file(fixture.training / "suites" / "nope.jsonl",
+               "{\"prompt\": \"say nope\", \"expected\": \"nope\"}\n");
+    const std::string spec = fixture.spec_file("regress");
+    const std::vector<apogee::training::PipelineSummary> earlier = fixture.pipelines();
+    REQUIRE(fixture.run({"train", "pipeline", "run", "--pipeline", spec}, &out, &err) == 2);
+    const std::string from_file = fixture.pipeline_since(earlier);
+    CHECK(fixture.pipeline(from_file).spec_ref ==
+          std::filesystem::absolute(spec).lexically_normal().string());
+    REQUIRE(fixture.run({"train", "pipeline", "status", from_file}, &out, &err) == 0);
+    hint = printed_resume(out);
+    CHECK(hint == std::vector<std::string>{"train", "pipeline", "resume", from_file});
+    write_file(fixture.training / "datasets" / "regress.jsonl",
+               read_file(fixture.training / "datasets" / "starter.jsonl"));
+    write_file(fixture.training / "suites" / "nope.jsonl",
+               read_file(fixture.training / "suites" / "hello.jsonl"));
+    REQUIRE(fixture.run(hint, &out, &err) == 0);
+    CHECK(fixture.pipeline(from_file).complete());
+}
+
+TEST_CASE(
+    "after --continue-on-fail every surface names the stage the runner resumes from and says "
+    "an earlier failed stage stays as it is, and the resume trains only that stage",
+    "[commands][train][pipeline][resume][57h]") {
+    // The sweep's pE: a fails its gate, b passes, c's training errors.
+    const PipelineFixture fixture{
+        "training:\n  trainer: mock\n  pipelines:\n    three:\n      student: tiny\n"
+        "      stages:\n        - name: a\n          dataset: regress\n"
+        "          eval_suite: hello\n          iters: 2\n        - name: b\n"
+        "          dataset: fixed\n          eval_suite: hello\n          iters: 2\n"
+        "        - name: c\n          dataset: broken\n          eval_suite: hello\n"
+        "          iters: 2\n"};
+    write_file(fixture.training / "datasets" / "fixed.jsonl",
+               "{\"mock\": {\"answer\": \"hello\"}}\n");
+    write_file(fixture.training / "datasets" / "broken.jsonl",
+               "{\"mock\": {\"error\": \"GPU on fire\"}}\n");
+    std::string out;
+    std::string err;
+    CHECK(fixture.run({"train", "pipeline", "run", "--pipeline", "three", "--continue-on-fail"},
+                      &out, &err) == 2);
+    const std::string id = fixture.pipelines().front().id;
+    const std::string said =
+        "Resume from stage 3, c; stage 1, a, failed its gate and stays as it is:\n"
+        "  apogee train pipeline resume " +
+        id + "\n";
+    CHECK(out.find(said) != std::string::npos);  // the summary
+    REQUIRE(fixture.run({"train", "pipeline", "status", id}, &out, &err) == 0);
+    CHECK(out.find(said) != std::string::npos);
+    REQUIRE(fixture.run({"train", "pipeline", "status", id, "--output-format", "json"}, &out,
+                        &err) == 0);
+    const nlohmann::json resume = nlohmann::json::parse(out)["resume"];
+    CHECK(resume["stage"] == 3);
+    CHECK(resume["name"] == "c");
+    CHECK(resume["note"] == "stage 1, a, failed its gate and stays as it is");
+
+    const std::string a_started = fixture.base.manifest(id + "-s0").started_at;
+    const std::string b_started = fixture.base.manifest(id + "-s1").started_at;
+    write_file(fixture.training / "datasets" / "broken.jsonl",
+               "{\"mock\": {\"answer\": \"hello\"}}\n");
+    REQUIRE(fixture.run({"train", "pipeline", "resume", id}, &out, &err) == 0);
+    CHECK(err.find("[pipeline] resuming three as " + id + " from stage 3, c:") !=
+          std::string::npos);
+    CHECK(err.find("[pipeline] stage 1, a, failed its gate and stays as it is") !=
+          std::string::npos);
+    CHECK(err.find("stage 3/3 'c'") != std::string::npos);
+    CHECK(err.find("stage 1/3 'a'") == std::string::npos);
+    CHECK(err.find("stage 2/3 'b'") == std::string::npos);
+    CHECK(fixture.base.manifest(id + "-s0").started_at == a_started);
+    CHECK(fixture.base.manifest(id + "-s1").started_at == b_started);
+    const apogee::training::PipelineRunManifest m = fixture.pipeline(id);
+    CHECK(m.complete());
+    CHECK(m.stages[0].status == "failed");
+    CHECK(m.stages[2].status == "passed");
+
+    // The help says the same.
+    REQUIRE(fixture.run({"train", "pipeline", "resume", "--help"}, &out, &err) == 0);
+    CHECK(out.find("after its last passed stage") != std::string::npos);
+    CHECK(out.find("an earlier stage that failed its gate stays as it is") != std::string::npos);
+    CHECK(out.find("a cycle pass is never resumed") != std::string::npos);
+}
+
+TEST_CASE(
+    "a training file with a field of the wrong type is skipped by the lists and named by its own "
+    "read; the history reads as unreadable naming its file on every verb",
+    "[commands][train][pipeline][cycle][57h]") {
+    // `cycle run` reads the history only where a cycle is configured.
+    const PipelineFixture fixture{std::string{kNamedBlock} +
+                                  "  cycle:\n    pipeline: nightly\n    backend: nightly-model\n"
+                                  "    sources:\n      - type: directory\n"
+                                  "        dir: {home}/queue\n"};
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"train", "pipeline", "run", "--pipeline", "nightly"}, &out, &err) == 2);
+    const std::string bad = fixture.pipelines().front().id;
+    const std::vector<apogee::training::PipelineSummary> before = fixture.pipelines();
+    REQUIRE(fixture.run({"train", "pipeline", "run", "--pipeline", "nightly"}, &out, &err) == 2);
+    const std::string good = fixture.pipeline_since(before);
+    const std::filesystem::path manifest = fixture.training / "pipelines" / bad / "manifest.json";
+    nlohmann::json json = nlohmann::json::parse(read_file(manifest));
+    json["stages"][0]["index"] = "one";
+    write_file(manifest, json.dump());
+
+    for (const std::vector<std::string>& read :
+         {std::vector<std::string>{"train", "status"},
+          std::vector<std::string>{"train", "status", "--output-format", "json"},
+          std::vector<std::string>{"train", "pipeline", "status"},
+          std::vector<std::string>{"train", "pipeline", "status", "--output-format", "json"}}) {
+        INFO(read.back());
+        REQUIRE(fixture.run(read, &out, &err) == 0);
+        CHECK(err.find("json.exception") == std::string::npos);
+        CHECK(out.find(good) != std::string::npos);
+        CHECK(out.find(bad + " ") == std::string::npos);
+    }
+    for (const std::vector<std::string>& read :
+         {std::vector<std::string>{"train", "pipeline", "status", bad},
+          std::vector<std::string>{"train", "pipeline", "status", bad, "--output-format", "json"},
+          std::vector<std::string>{"train", "pipeline", "resume", bad}}) {
+        INFO(read.back());
+        CHECK(fixture.run(read, &out, &err) == 1);
+        CHECK(err.find("apogee train: the pipeline run is unreadable: " + manifest.string() +
+                       ": [json.exception.type_error.302]") != std::string::npos);
+        CHECK(err.find("no pipeline run") == std::string::npos);
+    }
+
+    const std::filesystem::path history = fixture.training / "cycle" / "history.json";
+    for (const std::string body : {R"({"halted": "yes"})", R"({"total_runs": "3"})"}) {
+        INFO(body);
+        write_file(history, body);
+        for (const std::vector<std::string>& verb :
+             {std::vector<std::string>{"train", "cycle", "status"},
+              std::vector<std::string>{"train", "cycle", "status", "--output-format", "json"},
+              std::vector<std::string>{"train", "cycle", "run"},
+              std::vector<std::string>{"train", "cycle", "halt"}}) {
+            INFO(verb.back());
+            CHECK(fixture.run(verb, &out, &err) == 1);
+            CHECK(err.find("the cycle history is unreadable: " + history.string() + ": ") !=
+                  std::string::npos);
+        }
+        REQUIRE(fixture.run({"train", "status", "--output-format", "json"}, &out, &err) == 0);
+        const nlohmann::json status = nlohmann::json::parse(out);
+        CHECK(status["cycle"].is_null());
+        CHECK(status["cycle_error"].get<std::string>().starts_with(history.string() + ": "));
+    }
+}
+
 TEST_CASE("the pipeline and cycle verbs complete their output formats",
           "[commands][train][pipeline][cycle][completion]") {
     // ADR 0007: each new flag and its words, offered the moment they exist.

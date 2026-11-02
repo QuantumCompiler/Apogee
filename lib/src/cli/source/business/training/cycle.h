@@ -41,7 +41,8 @@
 /// twice.
 namespace apogee::training {
 
-inline constexpr std::string_view kCycleIdPrefix = "cycle-";
+// `kCycleIdPrefix`, the prefix a pass's pipeline id carries, is
+// `pipeline.h`'s (57h): the resume rule there refuses a pass by it.
 inline constexpr std::string_view kCycleDirName = "cycle";
 inline constexpr std::string_view kHistoryFileName = "history.json";
 inline constexpr std::string_view kLockFileName = "cycle.lock";

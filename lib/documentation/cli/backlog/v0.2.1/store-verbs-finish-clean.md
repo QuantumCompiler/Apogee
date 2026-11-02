@@ -59,7 +59,7 @@ What already works: every other `models pull` path, and the chain's download, st
 - M23 (`mlx-runtimes-in-check`, [Milestone AQ](../../assistant/MILESTONES.md#milestone-aq--mlx-for-every-kind)): the off-pin warning and its remedy, finding 4.
 - M25 (`drafters-follow-renames`, Milestone AQ) and 46a (`rename-propagation`): the rename record walk finding 5 extends from `bases` to `ref`.
 - 53l (`mlx-video-generate`, Milestone AQ): the tokenizer read from the source set by `ref`.
-- Sibling 57g (shipped 2026-11-01, [Milestone AT](../../assistant/MILESTONES.md#milestone-at--the-second-sweeps-cli-findings); since then a promotion holds `versions/<backend>.promote.lock` from reading the ledger to saving it) and [`training-resume-and-reads-truthful.md`](training-resume-and-reads-truthful.md) (57h) hold the sweep's other training findings. This item owns only promote's adapter check.
+- Sibling 57g (shipped 2026-11-01, [Milestone AT](../../assistant/MILESTONES.md#milestone-at--the-second-sweeps-cli-findings); since then a promotion holds `versions/<backend>.promote.lock` from reading the ledger to saving it) and 57h (shipped 2026-11-01, the same milestone: a pipeline resume continues the run it names, and the training reads say when a file cannot be read) hold the sweep's other training findings. This item owns only promote's adapter check.
 
 **Decisions made** (dated):
 - 2026-10-31: Specced from the second CLI/GUI bug sweep (the user's call: every finding becomes a v0.2.1 item in its queue, CLI track 57, GUI track 6).

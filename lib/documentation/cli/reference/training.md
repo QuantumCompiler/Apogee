@@ -681,12 +681,47 @@ stage's manifest records it as what trained).
 of suites 0..N at 100%, so a stage that improves its own task but regresses
 an earlier one fails. Under the default hard gate the run stops there --
 `aborted`, the stage `failed`, the later ones `pending` -- and the fix is
-`pipeline resume`, which continues from the first stage that has not
-passed, the passed ones untouched. `--continue-on-fail` (or `training.gate_mode:
-soft`) goes on instead, the failed stage still fused for the next; the
-summary shows the mixed statuses. A resume refuses a complete run, and a
-spec whose stage count changed (the passed stages did so under a different
-plan). Ctrl-C -- or SIGTERM -- leaves the run `aborted` and resumable.
+`pipeline resume`. `--continue-on-fail` (or `training.gate_mode: soft`)
+goes on instead, the failed stage still fused for the next; the summary
+shows the mixed statuses.
+
+**Where a resume starts** (57h): after the last stage that passed, from
+that stage's fused checkpoint, the stages before it untouched. Under the
+hard gate that is the first stage that has not passed. After
+`--continue-on-fail` or a soft gate it may not be: a run whose stage 1, a,
+failed its gate, whose stage 2, b, passed and whose stage 3, c, failed to
+train resumes at c, and a stays failed -- retraining a would change the
+base b passed on. Every surface says that one point: `pipeline status`
+(`Resume from stage 3, c; stage 1, a, failed its gate and stays as it
+is:` and the command), the summary a run prints, the resume's own first
+line (`[pipeline] resuming <spec> as <id> from stage 3, c: …`) and the
+document's `resume`.
+
+**The command printed is the command that runs.** A run records the
+`--pipeline` value it took as its manifest's `spec_ref` -- a
+`training.pipelines` key, or a spec file's absolute path -- and a resume
+without `--pipeline` finds the spec by it, then by the run's `spec_name`
+as a key, then by the one entry whose `name:` is `spec_name` (a run
+written before 57h has no `spec_ref`, and resumes through the last two).
+Two entries of that name are refused naming both, and a spec file that
+has gone stays a refusal naming `--pipeline` -- another entry of the same
+name is not the plan the run passed on. The status hint, the gate's
+door (`Fix the data or the suite and 'apogee train pipeline resume
+<id>', or pass --continue-on-fail to go on regardless`) and the cancel
+line print the bare command when that lookup finds the spec, and
+`--pipeline <spec>` with the reason when it does not; a resume that names
+`--pipeline` records it as the run's `spec_ref`. A resume refuses a
+complete run, a spec whose stage count changed (the passed stages did so
+under a different plan), and **a cycle pass** (its id starts `cycle-`):
+`pipeline <id> is a cycle pass, and its candidate was discarded --
+'apogee train cycle run' runs the next pass` -- its pipeline trained on
+the pass's merged data, under the cycle's dual gate, and no other verb
+trains, overwrites or promotes its candidate, so its status offers neither
+a resume nor a promote. Ctrl-C -- or SIGTERM -- leaves the run `aborted`
+and resumable. A manifest that is there and cannot be read -- not JSON, the
+wrong shape, a field of the wrong type -- is skipped by the lists and said
+by its own read, `pipeline status <id>` and `pipeline resume <id>`: `the
+pipeline run is unreadable: <path>: <reason>`, never `no pipeline run`.
 **One process owns a pipeline** (57g): `pipeline run` and `pipeline
 resume` -- and a cycle pass, whose pipeline it is -- hold its lock,
 `pipelines/<id>/pipeline.lock` (the process's id), for the whole run. A
@@ -851,7 +886,13 @@ an anchor gate that could never fail.) **Pass** promotes into
 own gate runs again), moves the consumed queue files to `consumed/`,
 advances the sessions watermark and resets the failure count; **fail**
 discards the candidate -- **nothing reaches inference** -- counts toward
-the breaker, and at `k` halts the loop with the reason in the record. The
+the breaker, and at `k` halts the loop with the reason in the record. A
+cycle retries by running its next pass, never by resuming this one (57h):
+the failure says `-- the candidate is discarded; the queue keeps its files
+for the next 'apogee train cycle run'` (for a sessions-only cycle, `the
+next 'apogee train cycle run' takes the same sessions again`), the
+recorded reason carries no pipeline door, and `pipeline resume` refuses
+the pass's pipeline. The
 history is `cycle/history.json`, written atomically at every outcome, and
 `cycle halt` / `cycle resume` are the two edits to it, so nobody edits the
 file by hand. Each write -- a pass's outcome, a halt, a resume -- is made to
@@ -859,7 +900,16 @@ the file as it stands, under `cycle/history.lock`, held for that write
 alone: so either verb works while a pass runs, and the pass keeps what it
 wrote. A pass halted while it ran finishes, says the halt is kept, and the
 next `cycle run` refuses. A failed or refused pass
-exits non-zero, so a scheduler's log shows it.
+exits non-zero, so a scheduler's log shows it. **A history that cannot be
+read is said, never drawn as none** (57h): only outside damage does it --
+a hand edit, a bad disk, a field of the wrong type -- and then `train
+status` says `Cycle: history unreadable -- <path>: <reason>`, its JSON
+keeps `cycle` null and names the reason in `cycle_error` (null otherwise),
+and `cycle status`, `cycle run` and `cycle halt` refuse with `the cycle
+history is unreadable: <path>: <reason>`. The same holds for every
+training file a read lists -- a run's manifest, a pipeline's, a version
+ledger: one that cannot be read, a mistyped field included, is skipped by
+the lists and named by its own read, never a bare library error.
 
 **A pass stopped by its scheduler unwinds** (57g): SIGTERM -- launchd
 unloading the job, the user logging out -- cancels it as Ctrl-C does: the

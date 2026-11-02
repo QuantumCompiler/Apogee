@@ -9,6 +9,9 @@ no pipeline runs yet ('apogee train pipeline run --pipeline <spec>')
 pipeline aborted -- pipe-<id>
   1.  a                     passed      100% (1/1)
   2.  b                     failed      50% (1/2)
+
+Resume from stage 2, b:
+  apogee train pipeline resume pipe-<id>
 --- stderr
 [pipeline] two as pipe-<id>: 2 stage(s), mock on aaaaaaaaaaaa; no judge: unmatched items skip
 -- stage 1/2: a
@@ -52,7 +55,7 @@ pipeline pipe-<id>
 
 Promote the last passing stage:
   apogee train promote pipe-<id>-s0 --as <backend>
-Resume from stage 2:
+Resume from stage 2, b:
   apogee train pipeline resume pipe-<id>
 --- stderr
 === apogee train pipeline status nope
@@ -75,7 +78,7 @@ pipeline complete -- pipe-<id>
 Promote the last passing stage:
   apogee train promote pipe-<id>-s1 --as <backend>
 --- stderr
-[pipeline] resuming two as pipe-<id>: 2 stage(s), mock on aaaaaaaaaaaa; no judge: unmatched items skip
+[pipeline] resuming two as pipe-<id> from stage 2, b: 2 stage(s), mock on aaaaaaaaaaaa; no judge: unmatched items skip
 -- stage 2/2: b
 [train] stage 2/2 'b': mock lora on fused, dataset regress.jsonl
 [train] mock trainer: 2 iteration(s), method lora
@@ -170,7 +173,7 @@ cycle PASSED -- nightly-model promoted to v1 (100%)
 === apogee train cycle run
 --- exit 2
 --- stdout
-cycle FAILED -- pipeline aborted: pipeline aborted -- stage 'base' failed the cumulative eval gate (0% (0/1)). Fix the data or the suite and 'apogee train pipeline resume cycle-<id>', or pass --continue-on-fail to go on regardless
+cycle FAILED -- pipeline aborted: pipeline aborted -- stage 'base' failed the cumulative eval gate (0% (0/1))
   the candidate was discarded; nothing reached inference
   circuit breaker: 1 consecutive failed cycle(s) reached circuit_breaker_k 1
   the loop is halted: fix the data or the suite, then 'apogee train cycle resume'
@@ -187,7 +190,7 @@ cycle FAILED -- pipeline aborted: pipeline aborted -- stage 'base' failed the cu
 [eval] cumulative suite: 1 suite(s), 1 item(s); no judge: unmatched items skip
 [gate] stage 'base' FAILED the cumulative eval -- 0% (0/1)
 -- stage 0/1: 
-[cycle] FAILED -- pipeline aborted: pipeline aborted -- stage 'base' failed the cumulative eval gate (0% (0/1)). Fix the data or the suite and 'apogee train pipeline resume cycle-<id>', or pass --continue-on-fail to go on regardless
+[cycle] FAILED -- pipeline aborted: pipeline aborted -- stage 'base' failed the cumulative eval gate (0% (0/1)) -- the candidate is discarded; the queue keeps its files for the next 'apogee train cycle run'
 [cycle] circuit breaker: 1 consecutive failed cycle(s) reached circuit_breaker_k 1 -- the loop is halted; 'apogee train cycle resume' after fixing the data or the suite
 === apogee train cycle run
 --- exit 1
@@ -207,6 +210,6 @@ cycle for backend nightly-model
       no new training data in any source
   <time>  directory           pass     100%   -      -       v1
   <time>  directory           fail     -      -      -       -
-      pipeline aborted: pipeline aborted -- stage 'base' failed the cumulative eval gate (0% (0/1)). Fix the data or the suite and 'apogee train pipeline resume cycle-<id>', or pass --continue-on-fail to go on regardless
+      pipeline aborted: pipeline aborted -- stage 'base' failed the cumulative eval gate (0% (0/1))
       circuit breaker: 1 consecutive failed cycle(s) reached circuit_breaker_k 1
 --- stderr

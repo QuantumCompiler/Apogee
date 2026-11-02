@@ -521,7 +521,7 @@ what it did before.
 
 | Event | Meaning |
 |---|---|
-| `stage` | A pipeline's stage as its manifest records it: `index` of `count` (from 1), its `label` the stage's name, `state` the manifest's own word -- `pending`, `training`, `evaluating`, `fusing` (an intermediate stage merged into the next one's base), `passed` or `failed` -- with `pipeline_run_id`, the stage's own `run_id` once it has one (what `train eval` and `train promote` take), and `cumulative_score`, 0 to 1, once its cumulative gate has scored it -- this attempt's: a stage trained again (a resume's first unpassed) carries none from `training` until it is scored again, and its manifest holds none of the last attempt's `eval_results`, score, `adapter_dir` or `fused_dir` meanwhile (M30). A run Ctrl-C stopped leaves its stage where the manifest left it; the pipeline's own status is the document's. |
+| `stage` | A pipeline's stage as its manifest records it: `index` of `count` (from 1), its `label` the stage's name, `state` the manifest's own word -- `pending`, `training`, `evaluating`, `fusing` (an intermediate stage merged into the next one's base), `passed` or `failed` -- with `pipeline_run_id`, the stage's own `run_id` once it has one (what `train eval` and `train promote` take), and `cumulative_score`, 0 to 1, once its cumulative gate has scored it -- this attempt's: a stage trained again (the stage a resume starts from, the one after the last passed) carries none from `training` until it is scored again, and its manifest holds none of the last attempt's `eval_results`, score, `adapter_dir` or `fused_dir` meanwhile (M30). A run Ctrl-C stopped leaves its stage where the manifest left it; the pipeline's own status is the document's. |
 | `iteration` | A training iteration, as the trainer reported it: `iteration` of `iterations` (absent when the trainer did not say), `loss`, `lr` and `throughput` (iterations a second) -- the status line's facts -- and the pipeline `stage` it belongs to, from 1. As often as the trainer reports, never more. |
 | `pass` | A line of a cycle pass's narration, `text` as the terminal says it, and `state`, where the pass is: `collecting` (its sources read), `merging`, `training` (its pipeline -- whose `stage`s, `iteration`s and `notice`s follow), `gating` (the dual gate against the last passing pass and the anchor), `promoting` -- or how it ended: `skipped` (no new data), `failed`, `halted` (the circuit breaker tripped on this pass) or `passed`. More states may be added. |
 
@@ -1709,7 +1709,9 @@ command's stdout ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve))
   the `active_pipeline` (since 57g, only one a live process runs) and
   `latest_pipeline`, whether a running pass holds the cycle's lock
   (`cycle_active`; since 57g false for a lock a dead pass left, whose path
-  `stale_lock` gives, `null` otherwise) and the cycle's headline; a version
+  `stale_lock` gives, `null` otherwise) and the cycle's headline -- since 57h
+  `null` with `cycle_error` naming the file and why when the history cannot
+  be read, `cycle_error` `null` otherwise; a version
   ledger, or every one in
   a list -- each version its `gguf_path`, an MLX one's `mlx_path`, or since
   53b an adapter version's `adapter_path` (a GGUF LoRA, or an mlx-lm adapter
@@ -1726,12 +1728,21 @@ command's stdout ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve))
   run's manifest whole, `{"kind": "pipeline", "pipeline": {pipeline_run_id,
   spec_name, student, base_model, status, started_at[, completed_at], stages:
   [{index, name, run_id, base_model, dataset, adapter_dir, fused_dir, status,
-  cumulative_score, cumulative_passed[, eval_results]}]}, "holder": {"pid": N}
-  | null}` -- each stage's `status` the word a run's `stage` events carry, and
-  since 57g `holder` the live process running the pipeline (a resume is
-  refused while there is one), `null` when none does. An id no pipeline run
-  answers is refused as the text refuses it, and so is one that is not a plain
-  name. The cycle's is its history, `{backend, anchor_version, anchor_score,
+  cumulative_score, cumulative_passed[, eval_results]}], spec_ref?}, "holder":
+  {"pid": N} | null, "spec_ref": <ref> | null, "resume": {stage, index, name,
+  pipeline, note} | null}` -- each stage's `status` the word a run's `stage`
+  events carry, and since 57g `holder` the live process running the pipeline
+  (a resume is refused while there is one), `null` when none does. Since 57h
+  `spec_ref` is the `--pipeline` value the run took, and `resume` where
+  `train pipeline resume` starts -- after the last passed stage, `stage`
+  1-based as the text says it, `index` the manifest's, `name`, `pipeline` the
+  `--pipeline` value that finds the spec now (`null` when none does) and
+  `note` the earlier stages that failed their gate and stay as they are --
+  `null` for a complete run, a cycle pass and a run with no stage left (the
+  [HTTP reference](http-api.md#get-v1admintrainingrunsid) has it whole). An
+  id no pipeline run answers is refused as the text refuses it, and so is one
+  that is not a plain name; a manifest that is there and cannot be read is
+  refused as `the pipeline run is unreadable: <path>: <reason>`. The cycle's is its history, `{backend, anchor_version, anchor_score,
   consecutive_fails, total_runs, halted, halt_reason, sessions_until, runs:
   [{run_at, source, dataset_rows, pipeline_id, gate, gate_reason, cycle_score,
   prev_score, anchor_score, promoted_version[, note]}], active, stale_lock}`,
@@ -1740,8 +1751,9 @@ command's stdout ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve))
   never read as a running pass. **Until the first pass has written the
   history there is no document**: the read is refused (`no cycle history yet`,
   exit `1`), as the route answers `404`, where the text view says `no cycle
-  runs yet` -- `train status`'s `cycle` is `null` until then. Whether a cycle
-  is configured at all is the config's to say.
+  runs yet` -- `train status`'s `cycle` is `null` until then, and since 57h
+  also when the history cannot be read, `cycle_error` then saying why. Whether
+  a cycle is configured at all is the config's to say.
 - **`datasets list`**, **`datasets info`** and **`datasets kits`** (since
   37f): the control plane's bodies -- each dataset's `name`, `path`, `lines`,
   `bytes` and `shape`; each kit's `name`, `path`, `description`,

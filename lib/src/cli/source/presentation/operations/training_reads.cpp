@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -62,6 +63,10 @@ nlohmann::json training_status_document() {
     const std::filesystem::path cycle_dir = harness::training_cycle_dir();
     const training::CycleLockState lock = training::cycle_lock_state(cycle_dir);
     nlohmann::json cycle = nullptr;
+    // An unreadable history is said, never drawn as none (57h): `cycle`
+    // stays null -- an object with an error inside would read as not halted
+    // -- and `cycle_error` is why.
+    nlohmann::json cycle_error = nullptr;
     if (training::history_exists(cycle_dir)) {
         std::string error;
         const training::CycleHistory history = training::load_history(cycle_dir, {}, error);
@@ -73,6 +78,8 @@ nlohmann::json training_status_document() {
                                    {"anchor_version", history.anchor_version},
                                    {"anchor_score", history.anchor_score},
                                    {"total_runs", history.total_runs}};
+        } else {
+            cycle_error = error;
         }
     }
     return nlohmann::json{
@@ -86,7 +93,8 @@ nlohmann::json training_status_document() {
                                               : training::pipeline_summary_json(pipelines.front())},
         {"cycle_active", lock.running()},
         {"stale_lock", stale_lock_json(lock)},
-        {"cycle", std::move(cycle)}};
+        {"cycle", std::move(cycle)},
+        {"cycle_error", std::move(cycle_error)}};
 }
 
 std::optional<nlohmann::json> training_versions_document(const std::string& backend) {
@@ -130,18 +138,46 @@ nlohmann::json training_runs_document(std::string_view kind) {
     return nlohmann::json{{"object", "list"}, {"data", std::move(data)}};
 }
 
-std::optional<nlohmann::json> training_run_document(std::string_view id) {
+std::optional<nlohmann::json> training_run_document(std::string_view id,
+                                                    const harness::Config& config,
+                                                    std::string& error) {
+    error.clear();
     const training::TrainingStore reads{harness::training_dir()};
     if (const std::optional<training::RunManifest> manifest = reads.get_run(id);
         manifest.has_value()) {
         return nlohmann::json{{"kind", "run"}, {"run", training::manifest_to_json(*manifest)}};
     }
-    return training_pipeline_document(id);
+    return training_pipeline_document(id, config, error);
 }
 
-std::optional<nlohmann::json> training_pipeline_document(std::string_view id) {
+std::string resume_stage_text(const training::PipelineRunManifest& manifest) {
+    const std::size_t from = manifest.resume_from();
+    if (manifest.complete() || training::is_cycle_pass(manifest.pipeline_run_id) ||
+        from >= manifest.stages.size()) {
+        return {};
+    }
+    return "stage " + std::to_string(from + 1) + ", " + manifest.stages[from].name;
+}
+
+std::string kept_failed_text(const training::PipelineRunManifest& manifest) {
+    std::string out;
+    const std::vector<std::size_t> kept = manifest.kept_failed();
+    for (std::size_t i = 0; i < kept.size(); ++i) {
+        out += (i == 0 ? "" : (i + 1 == kept.size() ? " and " : ", ")) + std::string{"stage "} +
+               std::to_string(kept[i] + 1) + ", " + manifest.stages[kept[i]].name;
+    }
+    if (out.empty()) {
+        return out;
+    }
+    return out + (kept.size() == 1 ? ", failed its gate and stays as it is"
+                                   : ", failed their gates and stay as they are");
+}
+
+std::optional<nlohmann::json> training_pipeline_document(std::string_view id,
+                                                         const harness::Config& config,
+                                                         std::string& error) {
     const training::TrainingStore reads{harness::training_dir()};
-    const std::optional<training::PipelineRunManifest> pipeline = reads.get_pipeline(id);
+    const std::optional<training::PipelineRunManifest> pipeline = reads.get_pipeline(id, error);
     if (!pipeline.has_value()) {
         return std::nullopt;
     }
@@ -153,9 +189,28 @@ std::optional<nlohmann::json> training_pipeline_document(std::string_view id) {
         live.has_value()) {
         holder = nlohmann::json{{"pid", live->pid}};
     }
-    return nlohmann::json{{"kind", "pipeline"},
-                          {"pipeline", training::pipeline_manifest_to_json(*pipeline)},
-                          {"holder", std::move(holder)}};
+    // Where a resume starts, and the spec to name (57h): the point the
+    // runner takes, never the first stage that has not passed.
+    nlohmann::json resume = nullptr;
+    if (!resume_stage_text(*pipeline).empty()) {
+        const std::size_t from = pipeline->resume_from();
+        const training::ResumeSpec spec =
+            training::find_resume_spec(*pipeline, config.training.pipelines);
+        const std::string note = kept_failed_text(*pipeline);
+        resume = nlohmann::json{
+            {"stage", from + 1},
+            {"index", pipeline->stages[from].index},
+            {"name", pipeline->stages[from].name},
+            {"pipeline", spec.ref.empty() ? nlohmann::json(nullptr) : nlohmann::json(spec.ref)},
+            {"note", note.empty() ? nlohmann::json(nullptr) : nlohmann::json(note)}};
+    }
+    return nlohmann::json{
+        {"kind", "pipeline"},
+        {"pipeline", training::pipeline_manifest_to_json(*pipeline)},
+        {"holder", std::move(holder)},
+        {"spec_ref",
+         pipeline->spec_ref.empty() ? nlohmann::json(nullptr) : nlohmann::json(pipeline->spec_ref)},
+        {"resume", std::move(resume)}};
 }
 
 nlohmann::json training_pipeline_spec_document(const harness::PipelineSpec& spec,
@@ -194,6 +249,18 @@ nlohmann::json training_pipeline_specs_document(const harness::Config& config) {
         data.push_back(std::move(row));
     }
     return nlohmann::json{{"object", "list"}, {"data", std::move(data)}};
+}
+
+harness::Config config_for_reads(const std::filesystem::path& path) {
+    std::error_code code;
+    if (path.empty() || !std::filesystem::exists(path, code)) {
+        return harness::Config{};
+    }
+    try {
+        return harness::load_config(path);
+    } catch (const harness::ConfigError&) {
+        return harness::Config{};
+    }
 }
 
 std::optional<nlohmann::json> training_cycle_document(std::string& error) {
