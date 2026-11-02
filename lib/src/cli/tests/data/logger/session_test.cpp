@@ -5,7 +5,9 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <functional>
+#include <iterator>
 #include <random>
 #include <string>
 #include <vector>
@@ -1099,4 +1101,56 @@ TEST_CASE("a chat deleted outside a running session stays deleted",
     fresh.chat_id = "20260826-120000-f1f1";
     CHECK(apogee::logger::save(fresh) == apogee::logger::Saved::Written);
     CHECK(std::filesystem::exists(apogee::logger::session_path(fresh.chat_id)));
+}
+
+TEST_CASE("a delete is learned without a save, and only of a file this process filed",
+          "[logger][session][unwritten][record-truth]") {
+    // 57a: a close that writes nothing -- a resumed chat left as it was --
+    // never called `save`, so never learned its chat was deleted, and went
+    // on to summarise, capture and call it saved. `learn_deleted` asks only
+    // whether the file this process read or wrote is still there.
+    const TempDir dir{"session-learn-delete-" + std::to_string(std::random_device{}())};
+    const EnvGuard home{"APOGEE_HOME", dir.path().string()};
+    Session kept = sample();
+    REQUIRE(apogee::logger::save(kept) == apogee::logger::Saved::Written);
+    Session resumed = apogee::logger::load(kept.chat_id, {}).session;
+    const std::filesystem::path file = apogee::logger::session_path(kept.chat_id);
+    const std::string before = [&file] {
+        std::ifstream in{file, std::ios::binary};
+        return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    }();
+
+    // Still there: nothing learned, nothing written.
+    CHECK_FALSE(apogee::logger::filed_and_gone(resumed));
+    CHECK_FALSE(apogee::logger::learn_deleted(resumed));
+    CHECK_FALSE(resumed.deleted);
+    {
+        std::ifstream in{file, std::ios::binary};
+        CHECK(std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}} ==
+              before);
+    }
+
+    // Deleted outside: learned, and kept -- the save after it writes nothing.
+    REQUIRE(std::filesystem::remove(file));
+    CHECK(apogee::logger::filed_and_gone(resumed));
+    CHECK_FALSE(resumed.deleted);  // the query alone marks nothing
+    CHECK(apogee::logger::learn_deleted(resumed));
+    CHECK(resumed.deleted);
+    CHECK(resumed.unwritten());
+    CHECK(apogee::logger::save(resumed) == apogee::logger::Saved::Unwritten);
+    CHECK_FALSE(std::filesystem::exists(file));
+
+    // A session that filed nothing has nothing to lose: a new chat before its
+    // first save, and a private one.
+    Session fresh = sample();
+    fresh.chat_id = "20260826-120000-f2f2";
+    fresh.new_chat = true;
+    CHECK_FALSE(apogee::logger::filed_and_gone(fresh));
+    CHECK_FALSE(apogee::logger::learn_deleted(fresh));
+    Session secret = sample();
+    secret.chat_id = "20260826-120000-f3f3";
+    secret.never_written = true;
+    secret.filed_name = "";  // even had it one
+    CHECK_FALSE(apogee::logger::learn_deleted(secret));
+    CHECK_FALSE(secret.deleted);
 }

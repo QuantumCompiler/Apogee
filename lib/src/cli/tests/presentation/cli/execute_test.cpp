@@ -654,6 +654,36 @@ TEST_CASE("a driver's play that cannot run ends in an error event, and nothing i
     CHECK(home.sessions().empty());
 }
 
+TEST_CASE("a driver's play cancelled keeps the title settled before it",
+          "[execute][play][machine][title]") {
+    // 57a, finding 5: a `/play` turn's snapshot was taken before the title
+    // asked after the last turn was settled, so a cancel put the chat back
+    // to its bare id. The cancel is read as soon as it is sent, so it
+    // reaches the play before it starts: the title settled, then stopped.
+    const Home home;
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"execute", "--suite", "duo", "--output-format", "stream-json"}, &out, &err,
+                     "{\"type\":\"user\",\"text\":\"hi\"}\n"
+                     "{\"type\":\"user\",\"text\":\"/play echo2 hello\"}\n"
+                     "{\"type\":\"cancel\"}\n") == 0);
+    INFO(out << err);
+    std::vector<std::string> finishes;
+    std::istringstream lines{out};
+    for (std::string line; std::getline(lines, line);) {
+        const nlohmann::json event = nlohmann::json::parse(line);
+        if (event.at("type") == "result") {
+            finishes.push_back(event.at("finish_reason").get<std::string>());
+        }
+    }
+    CHECK(finishes == std::vector<std::string>{"stop", "cancelled"});
+    const std::vector<apogee::logger::Session> saved = home.sessions();
+    REQUIRE(saved.size() == 1);
+    // The utility titled it after the first turn; the cancel kept it.
+    CHECK_FALSE(saved.front().title.empty());
+    CHECK(transcript(saved.front()) == std::vector<std::string>{"user: hi", "assistant: ROOT<hi>"});
+}
+
 // --- the turn functions ---------------------------------------------------------------
 
 namespace {

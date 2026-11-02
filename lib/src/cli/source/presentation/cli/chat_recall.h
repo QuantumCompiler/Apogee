@@ -82,7 +82,9 @@ RecallHoldings forget_all_recall();
                                             std::string_view conversation, std::string& reason);
 
 /// Summarises `session` into the index and removes its marker. Returns the
-/// line to say: what was kept, or why nothing was.
+/// line to say: what was kept, or why nothing was -- or nothing at all for a
+/// chat deleted while it was summarised (57a), whose summary is never left in
+/// the index.
 [[nodiscard]] std::string summarise_for_recall(const harness::Harness& harness,
                                                const harness::Config& config,
                                                const logger::Session& session,

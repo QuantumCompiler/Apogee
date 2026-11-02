@@ -619,6 +619,21 @@ Saved save(Session& session) {
     return Saved::Written;
 }
 
+bool filed_and_gone(const Session& session) {
+    if (session.never_written || !session.filed_name.has_value()) {
+        return false;
+    }
+    std::error_code missing;
+    return !std::filesystem::exists(session_path(session.chat_id), missing);
+}
+
+bool learn_deleted(Session& session) {
+    if (!session.deleted && filed_and_gone(session)) {
+        session.deleted = true;
+    }
+    return session.deleted;
+}
+
 int counted_turns(const Session& session) {
     const std::vector<Grouped> grouped = group_turns(session.messages);
     const auto answered = static_cast<int>(std::ranges::count_if(

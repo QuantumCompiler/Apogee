@@ -1,7 +1,9 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -201,5 +203,64 @@ void run_session(const RootContext& context, const SessionFlags& flags,
 /// The banner's word for what an orchestrating session offers its model
 /// (27t): `orchestrating 2`, or `orchestrating none`.
 [[nodiscard]] std::string orchestration_count(std::size_t offered);
+
+/// What a private chat's folder in the system's temporary directory is named
+/// by (52d): `apogee-private-<pid>-<n>` since 57a, the process that owns it
+/// first, then the count of the private chats it has opened.
+inline constexpr std::string_view kPrivateFolderPrefix = "apogee-private-";
+
+/// Removes every private chat's folder in `temporary` that no running chat
+/// holds (57a): what a run killed outright -- SIGKILL, a power cut -- could
+/// not remove itself, its attachments' text in plain sight until the system
+/// swept its temporary directory. One whose owner is no longer running goes;
+/// so does one named for this very process that no private chat of this
+/// process holds -- a killed run's, whose id this process was given again
+/// (a restarted container's apogee is always the same pid). A folder whose
+/// other owner runs is left, as is anything not named `<prefix><pid>-<n>` --
+/// an older run's folder, named by a random number, says nothing of whether
+/// that run still goes -- and anything another user owns. Run as a private
+/// chat opens.
+void sweep_private_folders(const std::filesystem::path& temporary);
+
+/// A private chat's own folder (52d), in the system's temporary directory and
+/// removed with the run: where its attachments are indexed, so nothing of the
+/// conversation lands in the data directory. Inert when not `used`.
+///
+/// Claimed, never found (57a): named for the process that owns it,
+/// `apogee-private-<pid>-<n>`, it is made by this run -- created where
+/// nothing was, 0700 from its first instant -- after the opening's sweep
+/// (`sweep_private_folders`) removed what a killed run left. A name something
+/// still holds -- another user's folder, which the sweep never touches -- is
+/// passed over for the next. A folder that cannot be made is an error: the
+/// chat never indexes into one it did not make.
+class PrivateFolder {
+public:
+    explicit PrivateFolder(bool used);
+    ~PrivateFolder();
+
+    PrivateFolder(const PrivateFolder&) = delete;
+    PrivateFolder& operator=(const PrivateFolder&) = delete;
+    PrivateFolder(PrivateFolder&&) = delete;
+    PrivateFolder& operator=(PrivateFolder&&) = delete;
+
+    /// The folder, or empty when not used.
+    [[nodiscard]] const std::filesystem::path& path() const noexcept {
+        return path_;
+    }
+
+private:
+    std::filesystem::path path_;
+};
+
+/// Removes this process's own private folders from the system's temporary
+/// directory (57a): what a run ended by a signal must not leave, when its
+/// session could not close in time to remove its own -- the full-screen
+/// shell's, whose conversation runs on a thread of its own.
+void remove_own_private_folders();
+
+/// How long a session asked to end by a signal has to close on its own
+/// before what it holds is forced (57a): under the two seconds the macOS app
+/// gives a child between SIGTERM and SIGKILL.
+inline constexpr std::chrono::milliseconds kSignalGrace{1000};
 
 }  // namespace apogee::commands

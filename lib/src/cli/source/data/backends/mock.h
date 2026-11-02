@@ -157,6 +157,12 @@ public:
     void save_conversation(std::string_view conversation_id,
                            const harness::StatusSink& on_status) override;
 
+    /// How many times any mock in this process was asked to save a
+    /// conversation's state: how a surface that shows nothing of the save --
+    /// machine mode's -- is seen to save none (57a: a chat deleted while its
+    /// session ran).
+    [[nodiscard]] static std::size_t conversations_saved() noexcept;
+
     /// How many turns have been served.
     [[nodiscard]] std::size_t turn_count() const noexcept {
         return turn_index_;

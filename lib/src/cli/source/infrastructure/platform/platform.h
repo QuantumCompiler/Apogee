@@ -110,6 +110,22 @@ struct LocalDate {
 [[nodiscard]] bool create_exclusive_file(const std::filesystem::path& path,
                                          std::string_view content, bool& exists);
 
+/// Creates the directory `path` only if nothing is there yet, readable,
+/// writable and searchable by its owner alone (0700) from its first instant
+/// -- one atomic create-or-fail (`mkdir`; `CreateDirectory` on Windows,
+/// whose temporary directory is the user's own), so a folder another run or
+/// another local user made under that name is never taken for this one's
+/// (57a: a private chat's attachment index). False when something is there
+/// or the directory cannot be made; `exists` says which.
+[[nodiscard]] bool create_private_directory(const std::filesystem::path& path, bool& exists);
+
+/// Whether `path` itself -- a link, never what it points at -- belongs to the
+/// user this process runs as: what a sweep of a shared temporary directory
+/// may remove is this user's leftover alone (57a). False when `path` cannot
+/// be read. On Windows, whose temporary directory is the user's own, whether
+/// anything is there.
+[[nodiscard]] bool owned_by_this_user(const std::filesystem::path& path) noexcept;
+
 /// The three standard streams, for terminal detection.
 enum class StandardStream : std::uint8_t { In, Out, Err };
 

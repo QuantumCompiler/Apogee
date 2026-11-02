@@ -316,6 +316,20 @@ enum class Saved : std::uint8_t {
 /// rename included.
 Saved save(Session& session);
 
+/// Whether the chat this process filed is gone (57a): `session`'s file, once
+/// this process has read or written it, no longer exists -- deleted outside
+/// it. A session that has filed nothing (a private chat, a new one before its
+/// first turn) has no file to lose, and answers false. Reads only whether the
+/// file exists.
+[[nodiscard]] bool filed_and_gone(const Session& session);
+
+/// What `save` learns of a delete, learned without a save (57a): marks
+/// `session` deleted when `filed_and_gone`, so a close that writes nothing --
+/// a resumed chat left as it was -- still knows its chat was deleted, and
+/// saves, summarises, captures and says nothing more of it. Returns
+/// `session.deleted`.
+bool learn_deleted(Session& session);
+
 /// The conversation's turn count (55b): the count the session keeps, or the
 /// answered turns its history holds when that is more -- a file older than
 /// the count, or a served client's several exchanges sent at once. The one

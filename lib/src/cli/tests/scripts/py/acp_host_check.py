@@ -842,9 +842,11 @@ def dying_child(start, project, check):
     killed = []
 
     def on_update(update):
+        # SIGKILL: a child that dies. SIGTERM asks it to end, and since 57a
+        # it does, as a closed input ends it -- the turn cancelled first.
         if update.get("sessionUpdate") == "agent_message_chunk" and not killed:
             for pid in host.children():
-                os.kill(pid, signal.SIGTERM)
+                os.kill(pid, signal.SIGKILL)
                 killed.append(pid)
 
     response, _ = host.call("session/prompt", {

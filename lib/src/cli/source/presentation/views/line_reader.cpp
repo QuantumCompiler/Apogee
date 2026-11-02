@@ -1,6 +1,7 @@
 #include "views/line_reader.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <iostream>
 #include <replxx.hxx>
@@ -12,6 +13,11 @@
 
 namespace apogee::commands {
 namespace {
+
+/// The key `EditingLineReader::end` presses (57a): Meta+Ctrl+F24, which no
+/// keyboard sends.
+constexpr char32_t kEndKey =
+    replxx::Replxx::KEY::meta(replxx::Replxx::KEY::control(replxx::Replxx::KEY::F24));
 
 /// Codepoints in `text` -- how replxx counts positions and spans.
 std::size_t codepoints(std::string_view text) {
@@ -245,6 +251,8 @@ struct EditingLineReader::Impl {
     /// The prompt `read` was handed, before the tag: what Shift+Tab redraws
     /// with the tag it now reads (39b).
     std::string base_prompt;
+    /// Asked to end (57a): every read from now on is an end of input.
+    std::atomic<bool> ended{false};
 
     /// `base` with the tag ahead of it, when there is one.
     [[nodiscard]] std::string prompt_for(std::string_view base) const {
@@ -257,6 +265,8 @@ EditingLineReader::EditingLineReader(Options options) : impl_{std::make_unique<I
     impl_->options = std::move(options);
 
     impl_->editor.set_max_history_size(static_cast<int>(impl_->options.history_limit));
+    // The key `end` presses: the editor left as an end of input leaves it.
+    impl_->editor.bind_key(kEndKey, [](char32_t) { return replxx::Replxx::ACTION_RESULT::BAIL; });
 
     if (!impl_->options.history_path.empty()) {
         std::error_code ec;
@@ -376,6 +386,10 @@ EditingLineReader::~EditingLineReader() {
 std::optional<std::string> EditingLineReader::read(std::string_view prompt) {
     // replxx reports an aborted line (Ctrl-C) by setting errno to EAGAIN
     // before returning null; a plain end of input (Ctrl-D) leaves it alone.
+    if (impl_->ended.load()) {
+        interrupted_ = false;
+        return std::nullopt;
+    }
     impl_->base_prompt = std::string{prompt};
     const std::string shown = impl_->prompt_for(prompt);
     impl_->prompt_cells = prompt_cells(shown);
@@ -392,11 +406,16 @@ std::optional<std::string> EditingLineReader::read(std::string_view prompt) {
         // EOF (Ctrl-D) or an interrupt (Ctrl-C). Both end the session, which
         // is what a user pressing either expects -- but only one of them is
         // a clean exit, and the surface may want to know which.
-        interrupted_ = error == EAGAIN;
+        interrupted_ = error == EAGAIN && !impl_->ended.load();
         return std::nullopt;
     }
     interrupted_ = false;
     return std::string{line};
+}
+
+void EditingLineReader::end() {
+    impl_->ended.store(true);
+    impl_->editor.emulate_key_press(kEndKey);
 }
 
 void EditingLineReader::remember(std::string_view line) {

@@ -159,6 +159,10 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
     std::size_t cursor = 0;
     std::vector<std::string> history;
     std::optional<std::size_t> history_at;
+    /// A private conversation runs (57a): `history` is its own, and the
+    /// shell's lines wait in `kept_history` until it ends.
+    bool private_history = false;
+    std::vector<std::string> kept_history;
     commands::Suggester suggest;
     /// Whether a turn's reasoning is drawn as its one-line summary (43).
     bool summarize_reasoning = false;
@@ -267,7 +271,24 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
         blocks.push_back(Block{.kind = Block::Kind::Line, .text = std::move(line)});
     }
 
-    void begin_conversation(commands::Suggester completer) {
+    /// A private conversation's lines dropped, the shell's put back (57a):
+    /// nothing typed in one is recalled into another.
+    void end_private_history() {
+        if (private_history) {
+            history = std::move(kept_history);
+            kept_history.clear();
+            private_history = false;
+        }
+        history_at.reset();
+    }
+
+    void begin_conversation(commands::Suggester completer, bool private_conversation) {
+        end_private_history();
+        if (private_conversation) {
+            kept_history = std::move(history);
+            history.clear();
+            private_history = true;
+        }
         mode = Mode::Conversation;
         blocks.clear();
         header.clear();
@@ -1044,14 +1065,20 @@ void SessionView::show_picker(std::vector<PickerEntry> entries,
     });
 }
 
-void SessionView::begin_session() {
+void SessionView::begin_session(bool private_conversation) {
     {
         // A line left for a conversation that never read it -- one that
         // refused to start -- is not the next one's.
         const std::lock_guard lock{state_->mutex};
         state_->entered.clear();
     }
-    state_->post([](State& state) { state.begin_conversation({}); });
+    state_->post([private_conversation](State& state) {
+        state.begin_conversation({}, private_conversation);
+    });
+}
+
+void SessionView::end_session() {
+    state_->post([](State& state) { state.end_private_history(); });
 }
 
 void SessionView::set_completion(commands::Suggester suggest) {

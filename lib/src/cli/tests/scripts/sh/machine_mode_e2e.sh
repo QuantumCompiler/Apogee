@@ -394,6 +394,169 @@ assert refused.returncode == 1 and "compaction by broken failed: " in refused.st
 print("record-truth: compaction, numbering, resume notices and outside edits told truly - OK")
 PY
 
+# --- a deleted chat stays deleted, a private one leaves nothing (57a) ---------
+# The second bug sweep's probes, on the real binary in a home of its own and a
+# temporary directory of its own: a private driven chat -- a driver's hello,
+# an attachment, a turn, a compact -- leaves the data directory byte for byte
+# as it was, `logs/` included; ended by SIGTERM or SIGHUP while idle, it
+# still ends by that signal, and leaves no `apogee-private-*` folder behind;
+# one a killed run left is swept by the next private chat -- even one whose
+# pid that chat was given again, which never indexes into it; and a resumed
+# chat deleted from outside, then closed with no turn, says so once.
+GN_HOME="$WORK_DIR/gone"
+GN_TMP="$WORK_DIR/gone-tmp"
+mkdir -p "$GN_HOME" "$GN_TMP"
+gn() { APOGEE_HOME="$GN_HOME" TMPDIR="$GN_TMP" "$APOGEE_BIN" "$@" </dev/null >/dev/null; }
+gn config init || fail "gone: config init"
+gn config add-backend mock --type mock --model mock-1 || fail "gone: add mock"
+gn config set-default mock || fail "gone: set-default"
+printf 'zebra private attachment text\n' >"$WORK_DIR/gone-note.txt"
+python3 - "$APOGEE_BIN" "$GN_HOME" "$GN_TMP" "$WORK_DIR/gone-note.txt" <<'PY' || fail "a deleted or private chat left something behind"
+import json, os, signal, subprocess, sys, time
+
+binary, home, tmp, note = sys.argv[1:5]
+env = {**os.environ, "APOGEE_HOME": home, "TMPDIR": tmp}
+
+def tree():
+    out = {}
+    for root, dirs, files in os.walk(home):
+        for name in dirs:
+            out[os.path.relpath(os.path.join(root, name), home) + "/"] = b""
+        for name in files:
+            path = os.path.join(root, name)
+            with open(path, "rb") as f:
+                out[os.path.relpath(path, home)] = f.read()
+    return out
+
+def private_left():
+    return sorted(n for n in os.listdir(tmp) if n.startswith("apogee-private-"))
+
+opening = [{"type": "hello", "client": {"name": "e2e-host"}},
+           {"type": "attach", "path": note},
+           {"type": "user", "text": "first question"}]
+
+def private_child():
+    child = subprocess.Popen([binary, "chat", "--private", "--output-format", "stream-json",
+                              "--input-format", "stream-json"], env=env, stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+    for line in opening:
+        child.stdin.write(json.dumps(line) + "\n")
+    child.stdin.flush()
+    while True:
+        line = child.stdout.readline()
+        assert line, "the private chat ended early: " + child.stderr.read()
+        if json.loads(line)["type"] in ("result", "error"):
+            return child
+
+before = tree()
+
+# A clean close: nothing under the home, and its folder gone with it.
+text = "".join(json.dumps(l) + "\n" for l in opening + [{"type": "compact"}])
+got = subprocess.run([binary, "chat", "--private", "--output-format", "stream-json",
+                      "--input-format", "stream-json"], env=env, input=text,
+                     capture_output=True, text=True, timeout=60)
+assert got.returncode == 0, got.stderr
+assert private_left() == [], private_left()
+
+# Ended by a signal while idle: still ended by that signal, and no folder.
+for signum in (signal.SIGTERM, signal.SIGHUP):
+    child = private_child()
+    held = private_left()
+    assert len(held) == 1, held  # the run's own, while it runs
+    child.send_signal(signum)
+    code = child.wait(timeout=30)
+    assert code == -signum, (signum, code, child.stderr.read())
+    assert private_left() == [], (signum, private_left())
+
+# A run killed outright leaves its folder; the next private chat's opening
+# sweeps it -- and leaves a live run's.
+child = private_child()
+held = private_left()
+assert len(held) == 1, held
+child.kill()
+child.wait(timeout=30)
+assert private_left() == held, private_left()
+live = private_child()
+got = subprocess.run([binary, "chat", "--private", "--output-format", "stream-json",
+                      "--input-format", "stream-json"], env=env, input=text,
+                     capture_output=True, text=True, timeout=60)
+assert got.returncode == 0, got.stderr
+left = private_left()
+assert held[0] not in left, left
+assert len(left) == 1 and left[0].startswith("apogee-private-%d-" % live.pid), left
+live.stdin.close()
+assert live.wait(timeout=30) == 0, live.stderr.read()
+assert private_left() == [], private_left()
+
+# A run killed outright whose id the next private chat is given again -- a
+# reused pid, a restarted container's apogee always the same one: the folder
+# it left under that id is no folder of the new run's. Its attachment's text
+# never reaches the new conversation, and the folder does not survive it.
+# `sh` renames the leftover for its own pid, then `exec`s the chat in place.
+work = os.path.dirname(note)
+secret = os.path.join(work, "gone-secret.txt")
+with open(secret, "w") as f:
+    f.write("the zebra launch code is 7741 confidential\n")
+other = os.path.join(work, "gone-other.txt")
+with open(other, "w") as f:
+    f.write("a short note about giraffes and their long necks\n")
+driven = ["chat", "--private", "--output-format", "stream-json", "--input-format", "stream-json"]
+child = subprocess.Popen([binary] + driven, env=env, stdin=subprocess.PIPE,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+for line in ({"type": "attach", "path": secret}, {"type": "user", "text": "keep this safe"}):
+    child.stdin.write(json.dumps(line) + "\n")
+child.stdin.flush()
+while json.loads(child.stdout.readline() or '{"type": "error"}')["type"] not in ("result", "error"):
+    pass
+held = private_left()
+assert len(held) == 1, held
+child.kill()
+child.wait(timeout=30)
+assert private_left() == held, private_left()
+asked = [{"type": "attach", "path": other},
+         {"type": "user", "text": "what is the zebra launch code?"}]
+got = subprocess.run(["sh", "-c", 't=$1 p=$2 b=$3; shift 3; '
+                      'mv "$t/$p" "$t/apogee-private-$$-1" && exec "$b" "$@"', "sh",
+                      tmp, held[0], binary] + driven, env=env,
+                     input="".join(json.dumps(l) + "\n" for l in asked),
+                     capture_output=True, text=True, timeout=60)
+assert got.returncode == 0, got.stderr
+reused = [json.loads(l) for l in got.stdout.splitlines() if l.strip()]
+named = [s["file"] for e in reused if e["type"] == "sources" for s in e["sources"]]
+assert all("gone-secret" not in n for n in named), named
+assert "gone-secret" not in got.stdout and "7741" not in got.stdout, got.stdout
+assert private_left() == [], private_left()
+
+# Nothing of any of them under the home: no log line naming one, no hello.
+after = tree()
+assert after == before, sorted(set(after) ^ set(before))
+
+# A resumed chat deleted from outside, closed with no turn: said once.
+lines = [{"type": "user", "text": "first q"}, {"type": "user", "text": "second q"}]
+got = subprocess.run([binary, "chat", "--no-recall", "--output-format", "stream-json",
+                      "--input-format", "stream-json"], env=env,
+                     input="".join(json.dumps(l) + "\n" for l in lines),
+                     capture_output=True, text=True, timeout=60)
+assert got.returncode == 0, got.stderr
+chat_id = json.loads(got.stdout.splitlines()[0])["chat_id"]
+child = subprocess.Popen([binary, "chat", "--output-format", "stream-json", "--input-format",
+                          "stream-json", "--resume", chat_id], env=env, stdin=subprocess.PIPE,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+opened = json.loads(child.stdout.readline())
+assert opened["type"] == "session" and opened["chat_id"] == chat_id, opened
+deleted = subprocess.run([binary, "chats", "delete", chat_id], env=env, capture_output=True,
+                         text=True, stdin=subprocess.DEVNULL, timeout=60)
+assert deleted.stdout.strip() == "deleted " + chat_id, deleted
+child.stdin.close()
+rest = [json.loads(l) for l in child.stdout.read().splitlines() if l.strip()]
+assert child.wait(timeout=60) == 0, child.stderr.read()
+said = [e["text"] for e in rest if e["type"] == "notice"]
+assert said == ["chat " + chat_id + " was deleted while this session ran -- it stays deleted, "
+                "and nothing more of it is saved"], rest
+assert not os.path.exists(os.path.join(home, "sessions", chat_id + ".json"))
+print("gone: deleted and private chats leave nothing, on every close - OK")
+PY
+
 # --- a session's MCP warnings reach the driver (56b) ---------------------------
 # A driver reads no stderr: a configured server that will not start was said
 # there alone. Now what the startup said that stays -- each warning -- is one

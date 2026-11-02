@@ -27,6 +27,7 @@ add_library(apogee_tests_infrastructure OBJECT
     infrastructure/platform/ffmpeg_test.cpp
     infrastructure/platform/ffmpeg_assembly_test.cpp
     infrastructure/platform/system_info_test.cpp
+    infrastructure/platform/termination_test.cpp
     infrastructure/platform/xcode_test.cpp
     infrastructure/ansi/ansi_test.cpp
     infrastructure/events/bus_test.cpp

@@ -28,6 +28,10 @@ records the terminal's modes (`stty -g`) before it and after it:
             what it can play -- then Ctrl-D, the terminal put back.
   launch    `apogee tui -m local` (44c): the shell opened inside that chat, its
             banner on screen with no key pressed -- then Ctrl-D.
+  private   `apogee tui --private` (57a), a file attached so the private
+            chat's folder exists, then SIGTERM, and again SIGHUP, from
+            outside: the terminal put back, the process dying of the signal,
+            and no `apogee-private-*` folder left in its temporary directory.
   pipe      A pipe on stdout: no screen at all, the help as `--help` prints it.
   dumb      TERM=dumb: the refusal said, the help printed, no screen.
 
@@ -319,6 +323,37 @@ def main():
 
         screen_case(binary, env, "launch", launch, 0, ready=b"[1 Session]", cwd=work,
                     args=" tui -m local")
+
+        # A private launch ended by a signal (57a): the shell's screen owns
+        # the signal, leaves its loop and raises it again; the conversation
+        # closes first, and its folder in the temporary directory goes with it.
+        temporary = os.path.join(home, "tmp")
+        os.makedirs(temporary)
+        with open(os.path.join(work, "secret.txt"), "w") as out:
+            out.write("zebra private attachment text\n")
+        private_env = dict(env, TMPDIR=temporary)
+
+        def private_folders():
+            return [n for n in os.listdir(temporary) if n.startswith("apogee-private-")]
+
+        for signum in (signal.SIGTERM, signal.SIGHUP):
+            name = "private-" + signal.Signals(signum).name.lower()
+
+            def end_private(session, signum=signum, name=name):
+                session.wait_for(b"/help for commands", 15, name)
+                session.send(b"/attach secret.txt\r")
+                session.wait_for(b"secret.txt", 15, name)
+                deadline = time.time() + 15
+                while not private_folders():
+                    if time.time() > deadline:
+                        fail(name, "the private chat's folder never appeared", session.output)
+                    session.read_for(0.1)
+                os.kill(session.apogee_pid(name), signum)
+
+            screen_case(binary, private_env, name, end_private, 128 + signum,
+                        ready=b"[1 Session]", cwd=work, args=" tui --private")
+            if private_folders():
+                fail(name, f"the private chat's folder was left: {private_folders()}")
 
         help_text = subprocess.run([binary, "--help"], stdin=subprocess.DEVNULL,
                                    capture_output=True, env=env).stdout

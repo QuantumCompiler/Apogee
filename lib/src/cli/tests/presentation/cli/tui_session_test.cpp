@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "backends/model_roster.h"
+#include "cli/chat_history.h"
 #include "cli/chat_session.h"
 #include "cli/execute.h"
 #include "cli/permissions.h"
@@ -1065,4 +1066,102 @@ TEST_CASE("apogee tui's flags open that session first, as the same flags open it
     CHECK(transcript(saved.at(0)) == std::vector<std::string>{"user: hi", "assistant: HELPER<hi>"});
     CHECK(saved.at(0).backend == "helper");
     CHECK(saved.at(1).backend == "helper");
+}
+
+TEST_CASE(
+    "a private launch's lines are never recalled into the next conversation, a written one's are",
+    "[cli][tui][session][launch][private]") {
+    // 57a, finding 7: the shell kept one Up history for its whole run, so a
+    // line typed in `apogee tui --private`'s conversation was recalled into
+    // the next one -- written, and, sent, kept in its transcript.
+    const nlohmann::json script = {{"turns", {{{"text", "answer to {{last_user}}"}}}}};
+    Conversation chat{script};
+    CLI::App app{"tui"};
+    const std::shared_ptr<apogee::commands::SessionFlags> flags = tui_flags(app, {"--private"});
+    apogee::commands::TuiSessionDriver driver{chat.view, chat.pump, chat.context,
+                                              []() { return apogee::models::MachineBudget{}; }};
+    driver.start(flags, apogee::commands::launch_mode(*flags));
+    chat.until([&chat]() { return chat.view.waiting_for_line(); }, "the private session");
+    chat.send("our confidential merger closes Friday");
+    chat.until(
+        [&chat]() {
+            return chat.view.waiting_for_line() &&
+                   has(chat.frame(), "answer to our confidential merger closes Friday");
+        },
+        "the private answer");
+    // Its own Up recalls it, while it runs.
+    (void)chat.shell.press(Key::named(Key::Name::Up));
+    CHECK(has(chat.frame(), " › our confidential merger closes Friday"));
+    (void)chat.shell.press(Key::named(Key::Name::Down));
+    chat.send("/exit");
+
+    // The next conversation, a written one: Up offers nothing of it.
+    chat.until([&chat]() { return has(chat.frame(), " › New chat"); }, "the picker");
+    (void)chat.shell.press(Key::named(Key::Name::Return));
+    chat.until([&chat]() { return chat.view.waiting_for_line(); }, "the written chat");
+    for (int i = 0; i < 3; ++i) {
+        (void)chat.shell.press(Key::named(Key::Name::Up));
+        CHECK_FALSE(has(chat.frame(), "confidential merger"));
+        CHECK_FALSE(has(chat.frame(), " › /exit"));
+    }
+    for (int i = 0; i < 3; ++i) {
+        (void)chat.shell.press(Key::named(Key::Name::Down));
+    }
+    chat.send("a written line");
+    chat.until(
+        [&chat]() {
+            return chat.view.waiting_for_line() && has(chat.frame(), "answer to a written line");
+        },
+        "the written answer");
+    chat.send("/exit");
+
+    // And the one after it recalls the written line, as ever.
+    chat.until([&chat]() { return has(chat.frame(), " › New chat"); }, "the picker again");
+    (void)chat.shell.press(Key::named(Key::Name::Return));
+    chat.until([&chat]() { return chat.view.waiting_for_line(); }, "the third chat");
+    // Its lines, newest first: the `/exit` that ended it, then the line.
+    (void)chat.shell.press(Key::named(Key::Name::Up));
+    CHECK(has(chat.frame(), " › /exit"));
+    (void)chat.shell.press(Key::named(Key::Name::Up));
+    CHECK(has(chat.frame(), " › a written line"));
+    for (int i = 0; i < 4; ++i) {
+        (void)chat.shell.press(Key::named(Key::Name::Up));
+        CHECK_FALSE(has(chat.frame(), "confidential merger"));
+    }
+    driver.stop();
+    // Nothing of the private conversation was written.
+    for (const apogee::logger::Session& saved : apogee::logger::list_sessions()) {
+        for (const std::string& line : transcript(saved)) {
+            CHECK(line.find("confidential") == std::string::npos);
+        }
+    }
+}
+
+TEST_CASE("a chat deleted while the shell runs it ends saying it was not saved, never saved",
+          "[cli][tui][session][record-truth][deleted]") {
+    // 57a's review: the closing line drawn where the output is decorated --
+    // the shell's, as a terminal's -- in place of `saved <id>` for a chat
+    // deleted outside while it ran, resumed and closed with no turn (55b's
+    // first finding).
+    const nlohmann::json script = {{"turns", {{{"text", "answer to {{last_user}}"}}}}};
+    Conversation chat{script};
+    chat.open();
+    chat.send("question one");
+    chat.until([&chat]() { return has(chat.frame(), "answer to question one"); }, "the first");
+    chat.finish();
+    const std::vector<apogee::logger::Session> saved = apogee::logger::list_sessions();
+    REQUIRE(saved.size() == 1);
+    const std::string id = saved.front().chat_id;
+    // The control: a chat kept says it was saved.
+    CHECK(chat.count(" saved " + id) == 1);
+
+    chat.open(id);
+    chat.until([&chat]() { return chat.view.waiting_for_line(); }, "the resumed chat");
+    const std::size_t said_saved = chat.count(" saved " + id);
+    REQUIRE(apogee::commands::delete_chat(id) == "deleted " + id);
+    chat.finish();
+    CHECK(chat.failure.empty());
+    CHECK(chat.count("not saved -- " + id + " was deleted while this session ran") == 1);
+    CHECK(chat.count(" saved " + id) <= said_saved);
+    CHECK_FALSE(std::filesystem::exists(apogee::logger::session_path(id)));
 }

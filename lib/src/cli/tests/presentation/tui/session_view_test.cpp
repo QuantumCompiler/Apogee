@@ -587,6 +587,62 @@ TEST_CASE("a recalled line opens no menu: the arrows go on through history", "[t
     CHECK(has(stage.frame(), " › hello"));
 }
 
+namespace {
+
+/// Enters `lines` in the conversation the stage has open, each read by a
+/// session thread as it is entered.
+void enter_lines(Stage& stage, const std::vector<std::string>& lines) {
+    for (const std::string& line : lines) {
+        std::future<std::optional<std::string>> read =
+            std::async(std::launch::async, [&stage]() { return stage.view.read_line(); });
+        stage.until([&stage]() { return !has(stage.frame(), "working…"); });
+        stage.type(line);
+        (void)stage.shell.press(Key::named(Key::Name::Return));
+        REQUIRE(read.get() == std::optional<std::string>{line});
+    }
+}
+
+}  // namespace
+
+TEST_CASE("a private conversation's lines are its own, never recalled into another",
+          "[tui][session][private]") {
+    // 57a: the shell kept one Up history for its whole run, so a line typed
+    // in `apogee tui --private`'s conversation was recalled into the next,
+    // written one -- and, sent, landed in its transcript.
+    Stage stage;
+    stage.view.begin_session();
+    enter_lines(stage, {"a written line"});
+
+    stage.view.begin_session(/*private_conversation=*/true);
+    (void)stage.frame();
+    // Its own history starts empty: the shell's lines are not offered in it.
+    (void)stage.shell.press(Key::named(Key::Name::Up));
+    CHECK_FALSE(has(stage.frame(), " › a written line"));
+    enter_lines(stage, {"our confidential merger closes Friday"});
+    (void)stage.shell.press(Key::named(Key::Name::Up));
+    CHECK(has(stage.frame(), " › our confidential merger closes Friday"));
+    stage.view.end_session();
+
+    // The next conversation: the private line is gone, the written one back.
+    stage.view.begin_session();
+    (void)stage.frame();
+    (void)stage.shell.press(Key::named(Key::Name::Up));
+    CHECK(has(stage.frame(), " › a written line"));
+    (void)stage.shell.press(Key::named(Key::Name::Up));
+    CHECK_FALSE(has(stage.frame(), "confidential"));
+
+    // Ended by the next conversation alone, without `end_session`, the
+    // private line is dropped all the same.
+    stage.view.begin_session(/*private_conversation=*/true);
+    enter_lines(stage, {"zebra secret"});
+    stage.view.begin_session();
+    (void)stage.frame();
+    (void)stage.shell.press(Key::named(Key::Name::Up));
+    (void)stage.shell.press(Key::named(Key::Name::Up));
+    CHECK_FALSE(has(stage.frame(), "zebra"));
+    CHECK(has(stage.frame(), " › a written line"));
+}
+
 TEST_CASE(
     "a transcript taller than the stage scrolls inside its own region, the input always "
     "on screen",

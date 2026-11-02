@@ -5,7 +5,10 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <random>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -151,4 +154,37 @@ TEST_CASE("a terminal that cannot place the cursor is refused a full screen, wit
         const apogee::testing::EnvGuard term{"TERM", "xterm-256color"};
         CHECK(apogee::platform::full_screen_refusal().empty());
     }
+}
+
+TEST_CASE("a private directory is made where nothing was, its owner's alone, never found",
+          "[platform][private]") {
+    // 57a: a private chat's folder is claimed, never taken over -- a
+    // directory, file or link already under the name is refused, and what is
+    // made is 0700 from its first instant.
+    const apogee::testing::TempDir root{"platform-private-" +
+                                        std::to_string(std::random_device{}())};
+    const std::filesystem::path made = root.path() / "made";
+    bool exists = true;
+    REQUIRE(apogee::platform::create_private_directory(made, exists));
+    CHECK_FALSE(exists);
+    CHECK(std::filesystem::is_directory(made));
+    CHECK(apogee::platform::owned_by_this_user(made));
+#if !defined(_WIN32)
+    CHECK((std::filesystem::status(made).permissions() & std::filesystem::perms::all) ==
+          std::filesystem::perms::owner_all);
+#endif
+
+    // Something already there -- a directory, a file -- is never this one's.
+    CHECK_FALSE(apogee::platform::create_private_directory(made, exists));
+    CHECK(exists);
+    const std::filesystem::path file = root.path() / "file";
+    std::ofstream{file} << "planted";
+    CHECK_FALSE(apogee::platform::create_private_directory(file, exists));
+    CHECK(exists);
+    CHECK(std::filesystem::is_regular_file(file));
+
+    // Nowhere to make it: refused, and not for being there.
+    CHECK_FALSE(apogee::platform::create_private_directory(root.path() / "no" / "such", exists));
+    CHECK_FALSE(exists);
+    CHECK_FALSE(apogee::platform::owned_by_this_user(root.path() / "no" / "such"));
 }

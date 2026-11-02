@@ -3,6 +3,8 @@
 #include <CLI/CLI.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <charconv>
 #include <chrono>
 #include <filesystem>
 #include <future>
@@ -11,8 +13,9 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <random>
+#include <set>
 #include <sstream>
+#include <stdexcept>
 #include <system_error>
 #include <utility>
 
@@ -65,6 +68,7 @@
 #include "operations/knowledge_core.h"
 #include "operations/suites.h"
 #include "platform/platform.h"
+#include "platform/termination.h"
 #include "symphony/tools.h"
 #include "tools/consult.h"
 #include "tools/delegate.h"
@@ -245,36 +249,101 @@ constexpr std::string_view kPrivateLine =
            "saved";
 }
 
-/// A private chat's own folder (52d), in the system's temporary directory
-/// and removed with the run: where its attachments are indexed, so nothing
-/// of the conversation lands in the data directory. Inert for any other.
-class PrivateFolder {
+/// What `/title` says when a name given outside since the session's last
+/// save won over the one typed (57a; the outside name winning is 55b's): the
+/// file keeps it, and a second `/title` -- the outside name now the one the
+/// session last left there -- replaces it.
+[[nodiscard]] std::string title_kept_line(const logger::Session& session) {
+    return "not renamed -- " + session.chat_id + " was renamed outside to '" + session.custom_name +
+           "' meanwhile; /title again to replace it";
+}
+
+/// A session asked to end by a signal (57a): SIGTERM, SIGHUP -- and SIGINT
+/// while it waits at a terminal's prompt -- end it the way a closed input
+/// does. The watch's thread asks (`request`): the turn running is cancelled
+/// and the read waiting woken, and the session closes as it would at the end
+/// of its input, its destructors run -- a private chat's folder among them.
+/// What cannot be reached in time is forced (`force`): the folder removed
+/// before the process goes.
+class SessionEnd {
 public:
-    explicit PrivateFolder(bool used) {
-        if (used) {
-            path_ = std::filesystem::temp_directory_path() /
-                    ("apogee-private-" + std::to_string(std::random_device{}()));
+    /// What wakes the session's read while it lives -- the driver's input,
+    /// the line editor. A read the session cannot wake (a plain read on a
+    /// pipe) registers nothing, and is forced.
+    class Wake {
+    public:
+        Wake(SessionEnd& end, std::function<void()> wake) : end_{end} {
+            const std::lock_guard lock{end_.mutex_};
+            end_.wake_ = std::move(wake);
+            if (end_.requested_.load() && end_.wake_) {
+                end_.wake_();
+            }
+        }
+
+        ~Wake() {
+            const std::lock_guard lock{end_.mutex_};
+            end_.wake_ = {};
+        }
+
+        Wake(const Wake&) = delete;
+        Wake& operator=(const Wake&) = delete;
+        Wake(Wake&&) = delete;
+        Wake& operator=(Wake&&) = delete;
+
+    private:
+        SessionEnd& end_;
+    };
+
+    /// From the watch's thread: the turn running cancelled, the read woken.
+    void request() {
+        const std::lock_guard lock{mutex_};
+        requested_.store(true);
+        turn_.cancel();
+        if (wake_) {
+            wake_();
         }
     }
 
-    PrivateFolder(const PrivateFolder&) = delete;
-    PrivateFolder& operator=(const PrivateFolder&) = delete;
-    PrivateFolder(PrivateFolder&&) = delete;
-    PrivateFolder& operator=(PrivateFolder&&) = delete;
+    [[nodiscard]] bool requested() const noexcept {
+        return requested_.load();
+    }
 
-    ~PrivateFolder() {
-        if (!path_.empty()) {
+    /// The turn now running: cancelled when an end comes -- at once, when
+    /// one already has.
+    void turn(const harness::CancellationToken& token) {
+        const std::lock_guard lock{mutex_};
+        turn_ = token;
+        if (requested_.load()) {
+            turn_.cancel();
+        }
+    }
+
+    /// The private chat's folder, which `force` removes.
+    void private_folder(std::filesystem::path folder) {
+        const std::lock_guard lock{mutex_};
+        folder_ = std::move(folder);
+    }
+
+    /// From the watch's thread, the session not ended in time: what must not
+    /// outlive the process goes now.
+    void force() {
+        std::filesystem::path folder;
+        {
+            const std::lock_guard lock{mutex_};
+            folder = folder_;
+        }
+        if (!folder.empty()) {
             std::error_code code;
-            std::filesystem::remove_all(path_, code);
+            std::filesystem::remove_all(folder, code);
         }
-    }
-
-    [[nodiscard]] const std::filesystem::path& path() const noexcept {
-        return path_;
     }
 
 private:
-    std::filesystem::path path_;
+    std::mutex mutex_;
+    std::atomic<bool> requested_{false};
+    harness::CancellationToken turn_;
+    std::function<void()> wake_;
+    std::filesystem::path folder_;
 };
 
 /// A new chat closed before its first turn writes nothing (M28) -- and so
@@ -595,10 +664,10 @@ public:
     /// a model that cannot produce one is not asked again after every turn.
     /// Never for a private chat (55a): nothing would keep its title, and
     /// asking for one sends its questions to a second model, perhaps a cloud
-    /// one.
+    /// one -- nor for one deleted while it ran (57a), for the same reasons.
     void start_if_due(const logger::Session& session) {
-        if (asked_ || session.never_written || session.turns < 1 || !session.title.empty() ||
-            !session.custom_name.empty()) {
+        if (asked_ || session.never_written || session.deleted || session.turns < 1 ||
+            !session.title.empty() || !session.custom_name.empty()) {
             return;
         }
         asked_ = true;
@@ -1172,11 +1241,25 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // not; a chat a process that died left due is summarised now.
     ChatRecall recall{harness, config, session,
                       config.memory.recall && !flags->no_recall && !flags->private_chat};
+    // A signal ends the session as a closed input does (57a): declared
+    // before everything it must see released -- the private folder first --
+    // and raised again, as the process ends, once they have been. Never
+    // under the shell, whose screen owns the signals and closes its
+    // conversation itself.
+    SessionEnd session_end;
+    std::optional<platform::TerminationWatch> watch;
+    if (front == nullptr) {
+        watch.emplace(
+            platform::TerminationWatch::Hooks{.end = [&session_end]() { session_end.request(); },
+                                              .force = [&session_end]() { session_end.force(); }},
+            kSignalGrace);
+    }
     // Where the chat's attachments are indexed: its own index beside its
     // file -- or, for a private chat (52d), a folder of the run's own,
     // removed as it ends, so nothing of the conversation stays in the data
     // directory.
     const PrivateFolder private_folder{flags->private_chat};
+    session_end.private_folder(private_folder.path());
     // A new chat that ends with no turn was never written (M28), so its index
     // goes too -- after everything reading it, declared below, has gone.
     const UnwrittenIndex unwritten_index{session};
@@ -1231,8 +1314,12 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         session.messages.push_back(harness::ChatMessage::system(session.params.system_prompt));
     }
 
-    logger::log(logger::Level::Info, std::string{session_command(mode)},
-                "session " + session.chat_id + " on backend " + model);
+    // The operational log names the chat, when, and on which model -- never
+    // a private one's (57a): that it happened at all is the conversation's.
+    if (!flags->private_chat) {
+        logger::log(logger::Level::Info, std::string{session_command(mode)},
+                    "session " + session.chat_id + " on backend " + model);
+    }
 
     // --- the review context, from flags -----------------------------------
     if (flags->fetch && flags->no_fetch) {
@@ -1668,6 +1755,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         // it (28f); the loop, a question and the permission prompt all take
         // their lines from this one reader.
         DriverInput driver{std::cin};
+        // A signal ends the driver's input as its closing would (57a).
+        const SessionEnd::Wake driver_wake{session_end, [&driver]() { driver.end(); }};
 
         const auto machine_notice = [](const std::string& message) {
             // stdout carries ONLY protocol events, so a diagnostic goes to
@@ -1731,10 +1820,14 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             const bool opening = std::exchange(first_line, false);
             if (message.kind == DriverMessage::Kind::Hello) {
                 // A driver introducing itself (28d): recorded on the first
-                // line, harmless anywhere -- never a session-ending error.
+                // line, harmless anywhere -- never a session-ending error. A
+                // private chat records nothing, its driver's name included
+                // (57a).
                 if (opening) {
-                    logger::log(logger::Level::Info, std::string{session_command(mode)},
-                                describe_hello(message));
+                    if (!flags->private_chat) {
+                        logger::log(logger::Level::Info, std::string{session_command(mode)},
+                                    describe_hello(message));
+                    }
                 } else {
                     machine_notice("a hello after the first line is ignored");
                 }
@@ -1837,6 +1930,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             // the last finished turn left it.
             const std::int64_t turn = next_turn++;
             machine_reporter.begin_turn(turn);
+            // The title asked after the last turn is recorded first (57a),
+            // so the session a cancel rolls back to holds it: taken before
+            // it, the snapshot put the chat back to its bare id.
+            title.settle(session);
             const logger::Session before = session;
             const auto close_turn = [&machine_reporter, &driver, &got]() {
                 machine_reporter.end_turn();
@@ -1852,7 +1949,6 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 response.finish_reason = harness::FinishReason::Cancelled;
                 machine_reporter.emit_result(response);
             };
-            title.settle(session);
             // An execute session plays a `user` line that is a `/play`
             // command, as its REPL does (27s): found through the one table,
             // whose execute rows alone offer it, its stages the `tool_status`
@@ -1940,13 +2036,18 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         // stdin closed: the driver is done. Everything is already persisted
         // by the per-turn save, so exiting is clean by construction -- and a
         // session never sent a turn writes nothing (M28), nor one deleted
-        // while it ran (55b).
+        // while it ran (55b). A delete is learned here even when nothing
+        // changed and nothing is saved (57a), and again after the exit
+        // summary -- the model call a delete can land in.
         title.settle(session);
         save_if_changed();
+        (void)logger::learn_deleted(session);
         say_deleted();
         if (const std::string said = recall.finish({}); !said.empty()) {
             machine_notice(said);
         }
+        (void)logger::learn_deleted(session);
+        say_deleted();
         save_state(progress_sink(machine_reporter));
         return;
     }
@@ -2057,6 +2158,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         return permission_mode_label(approvals->mode.load(), style);
     };
     const std::unique_ptr<LineReader> reader = out.line_reader(std::move(reader_options));
+    // A signal ends the read waiting as an end of input would (57a) -- the
+    // editor's; nothing reaches a plain read on a pipe, which is forced.
+    const SessionEnd::Wake reader_wake{session_end, [&reader]() { reader->end(); }};
 
     // How the reasoning is drawn while it streams (43): the config's, flipped
     // for this chat by `/thinking-display`. A summary is asked for only where
@@ -2153,22 +2257,30 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         }
     };
     bool running = true;
-    while (running) {
+    while (running && !session_end.requested()) {
         say_deleted();
         report_held();
         // The editor draws its own prompt; the plain reader ignores it and
         // the prompt goes to stderr so a piped run's stdout stays clean.
         std::optional<std::string> line;
         if (reader->interactive()) {
+            // Idle at a terminal's prompt, SIGINT ends the session as a
+            // signal's end does (57a); in a turn it does what it always did.
+            if (watch.has_value()) {
+                watch->catch_interrupt(true);
+            }
             line = reader->read(style.colorize("You: ", ansi::Color::Green));
+            if (watch.has_value()) {
+                watch->catch_interrupt(false);
+            }
         } else {
             if (decorate) {
                 std::cerr << style.colorize("You: ", ansi::Color::Green) << std::flush;
             }
             line = reader->read({});
         }
-        if (!line.has_value()) {
-            break;  // EOF, or Ctrl-D / Ctrl-C at the editor
+        if (!line.has_value() || session_end.requested()) {
+            break;  // EOF, or Ctrl-D / Ctrl-C at the editor, or a signal (57a)
         }
 
         const std::string input = trim(*line);
@@ -2674,11 +2786,24 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         out.print_line(style.tag(ansi::Role::Rag) + " rerank set to " + argument);
                     }
                     break;
-                case ChatVerb::Title:
+                case ChatVerb::Title: {
+                    // Says what the save did (57a): a name given outside
+                    // since the last save wins (55b), and a deleted chat is
+                    // renamed nowhere.
                     session.custom_name = argument;
-                    logger::save(session);
-                    out.print_line(style.tag(ansi::Role::Apogee) + " renamed");
+                    (void)logger::save(session);
+                    if (session.deleted) {
+                        deleted_said = true;
+                        out.print_line(style.tag(ansi::Role::Warning) + " not renamed -- " +
+                                       deleted_line(session.chat_id));
+                    } else if (session.custom_name != argument) {
+                        out.print_line(style.tag(ansi::Role::Warning) + " " +
+                                       title_kept_line(session));
+                    } else {
+                        out.print_line(style.tag(ansi::Role::Apogee) + " renamed");
+                    }
                     break;
+                }
                 case ChatVerb::Attach: {
                     // The path first, then its flags (27p): `--graph`
                     // over the config's default, for this attach alone.
@@ -2814,6 +2939,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                                                                       : "Thinking…");
         {
             const TurnScope turn{out};
+            // A signal stops the turn as a closed input ends the session
+            // (57a): the turn cancelled, the session closed after it.
+            session_end.turn(turn.token);
             run_chat_turn(
                 harness, session, input, tools_on() ? offered : nullptr, selection.get(),
                 member_calls.get(), flags->tools ? out.ask_fn() : agentloop::AskFn{},
@@ -2827,6 +2955,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     out.keep_line(style.tag(ansi::Role::Warning) + " " + message);
                 },
                 rag_settings, review_note, &attached, &recall, turn.token, summarizing(), standing);
+            session_end.turn({});
+        }
+        if (session_end.requested()) {
+            break;
         }
         title.start_if_due(session);
         if (session.compactions != saved_compactions) {
@@ -2846,6 +2978,11 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     }
     title.settle(session);
     save_if_changed();
+    // Deleted outside while it ran (55b), learned even with nothing to save
+    // (57a): a resumed chat left as it was writes nothing, and its close
+    // must not go on to summarise, save state for, capture and call saved a
+    // chat that is gone.
+    (void)logger::learn_deleted(session);
     say_deleted();
     // The model's state too, on a clean exit only (26j): an interrupt
     // asked for nothing more, and the transcript is saved either way.
@@ -2854,6 +2991,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         if (const std::string said = recall.finish({}); !said.empty()) {
             out.print_line(style.dim("[memory] " + said));
         }
+        // A delete that landed while the summary was written (57a).
+        (void)logger::learn_deleted(session);
+        say_deleted();
         save_state(progress_sink(out.reporter()));
     }
     // Opt-in auto-capture on a CLEAN exit -- /exit, /quit, the end of the
@@ -2879,6 +3019,143 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         out.print_line(style.tag(ansi::Role::Apogee) + left);
     }
     out.set_held({});
+}
+
+namespace {
+
+/// What this process's private chats hold (57a): each folder's name, and the
+/// count the next one's carries. A claim and a sweep each run under the lock,
+/// so a sweep never takes a folder a chat of this process holds -- or one a
+/// claim on another thread has just made.
+struct HeldPrivateFolders {
+    std::mutex mutex;
+    std::set<std::string> names;
+    unsigned long next = 1;
+};
+
+/// How many names a private chat's opening tries before it gives up.
+constexpr int kPrivateNamesTried = 64;
+
+[[nodiscard]] HeldPrivateFolders& held_private_folders() {
+    static HeldPrivateFolders held;
+    return held;
+}
+
+/// The process a private folder's name says owns it -- `<prefix><pid>-<n>`
+/// -- or 0 for any other name.
+[[nodiscard]] long private_folder_owner(std::string_view name) {
+    if (!name.starts_with(kPrivateFolderPrefix)) {
+        return 0;
+    }
+    const std::string_view rest = name.substr(kPrivateFolderPrefix.size());
+    long owner = 0;
+    const auto [stop, error] = std::from_chars(rest.data(), rest.data() + rest.size(), owner);
+    if (error != std::errc{} || stop == rest.data() || owner <= 0 ||
+        stop == rest.data() + rest.size() || *stop != '-') {
+        return 0;
+    }
+    return owner;
+}
+
+/// `sweep_private_folders`, the lock held.
+void sweep_unheld_private_folders(const std::filesystem::path& temporary,
+                                  const std::set<std::string>& held) {
+    const long self = platform::current_process_id();
+    std::error_code code;
+    std::vector<std::filesystem::path> orphaned;
+    for (std::filesystem::directory_iterator it{temporary, code}, end; !code && it != end;
+         it.increment(code)) {
+        const std::string name = it->path().filename().string();
+        // `<pid>-<n>`: the owner's id, a dash, the run's count. Anything else
+        // -- an older run's random number among it -- is left alone: such a
+        // name says nothing of whether its run is still going.
+        const long owner = private_folder_owner(name);
+        std::error_code kind;
+        if (owner == 0 || !it->is_directory(kind)) {
+            continue;
+        }
+        // Named for this process, yet held by none of its chats: a killed
+        // run's, whose id this process was given again.
+        const bool left = owner == self ? !held.contains(name) : !platform::process_running(owner);
+        if (left && platform::owned_by_this_user(it->path())) {
+            orphaned.push_back(it->path());
+        }
+    }
+    for (const std::filesystem::path& folder : orphaned) {
+        std::filesystem::remove_all(folder, code);
+    }
+}
+
+}  // namespace
+
+void sweep_private_folders(const std::filesystem::path& temporary) {
+    HeldPrivateFolders& held = held_private_folders();
+    const std::lock_guard lock{held.mutex};
+    sweep_unheld_private_folders(temporary, held.names);
+}
+
+PrivateFolder::PrivateFolder(bool used) {
+    if (!used) {
+        return;
+    }
+    const std::filesystem::path temporary = std::filesystem::temp_directory_path();
+    HeldPrivateFolders& held = held_private_folders();
+    const std::lock_guard lock{held.mutex};
+    sweep_unheld_private_folders(temporary, held.names);
+    // Made here, where nothing was, or not at all: a name still taken after
+    // the sweep is another user's folder, never this chat's, and the next
+    // name is tried -- a bounded number of times.
+    const std::string own =
+        std::string{kPrivateFolderPrefix} + std::to_string(platform::current_process_id()) + "-";
+    for (int tried = 0; tried < kPrivateNamesTried; ++tried) {
+        const std::string name = own + std::to_string(held.next++);
+        bool exists = false;
+        if (platform::create_private_directory(temporary / name, exists)) {
+            held.names.insert(name);
+            path_ = temporary / name;
+            return;
+        }
+        if (!exists) {
+            break;
+        }
+    }
+    throw std::runtime_error{"a private chat's folder could not be made in " + temporary.string() +
+                             " -- check that the temporary directory (TMPDIR) is writable"};
+}
+
+PrivateFolder::~PrivateFolder() {
+    if (path_.empty()) {
+        return;
+    }
+    std::error_code code;
+    std::filesystem::remove_all(path_, code);
+    try {
+        HeldPrivateFolders& held = held_private_folders();
+        const std::lock_guard lock{held.mutex};
+        held.names.erase(path_.filename().string());
+    } catch (...) {
+        (void)0;  // the folder is gone; its name merely stays held
+    }
+}
+
+void remove_own_private_folders() {
+    std::error_code code;
+    const std::filesystem::path temporary = std::filesystem::temp_directory_path(code);
+    if (code) {
+        return;
+    }
+    const std::string own =
+        std::string{kPrivateFolderPrefix} + std::to_string(platform::current_process_id()) + "-";
+    std::vector<std::filesystem::path> folders;
+    for (std::filesystem::directory_iterator it{temporary, code}, end; !code && it != end;
+         it.increment(code)) {
+        if (it->path().filename().string().starts_with(own) && it->is_directory(code)) {
+            folders.push_back(it->path());
+        }
+    }
+    for (const std::filesystem::path& folder : folders) {
+        std::filesystem::remove_all(folder, code);
+    }
 }
 
 std::string execute_suite_refusal(const harness::Config& config) {

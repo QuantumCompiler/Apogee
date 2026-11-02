@@ -18,12 +18,14 @@
 #include <mach-o/dyld.h>
 #include <signal.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <termios.h>
 #include <unistd.h>
 #else
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <termios.h>
 #include <unistd.h>
 #endif
@@ -214,6 +216,43 @@ bool create_exclusive_file(const std::filesystem::path& path, std::string_view c
     const ssize_t written = ::write(fd, content.data(), content.size());
     ::close(fd);
     return written == static_cast<ssize_t>(content.size());
+#endif
+}
+
+bool create_private_directory(const std::filesystem::path& path, bool& exists) {
+    exists = false;
+#if defined(_WIN32)
+    if (CreateDirectoryW(path.c_str(), nullptr) == 0) {
+        exists = GetLastError() == ERROR_ALREADY_EXISTS;
+        return false;
+    }
+    return true;
+#else
+    if (::mkdir(path.c_str(), S_IRWXU) != 0) {
+        exists = errno == EEXIST;
+        return false;
+    }
+    // The mode exactly, whatever the umask took from it: the folder is
+    // this process's, and only ever its owner's.
+    if (::chmod(path.c_str(), S_IRWXU) != 0) {
+        (void)::rmdir(path.c_str());
+        return false;
+    }
+    return true;
+#endif
+}
+
+bool owned_by_this_user(const std::filesystem::path& path) noexcept {
+#if defined(_WIN32)
+    // The temporary directory is the user's own: whatever is there is.
+    std::error_code code;
+    return std::filesystem::exists(std::filesystem::symlink_status(path, code));
+#else
+    struct ::stat info{};
+    if (::lstat(path.c_str(), &info) != 0) {
+        return false;
+    }
+    return info.st_uid == ::geteuid();
 #endif
 }
 

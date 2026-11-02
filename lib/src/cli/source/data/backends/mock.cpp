@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <atomic>
 #include <fstream>
 #include <functional>
 #include <sstream>
@@ -13,6 +14,9 @@
 
 namespace apogee::backends {
 namespace {
+
+/// Every mock's conversation saves in this process (`conversations_saved`).
+std::atomic<std::size_t> g_conversations_saved{0};
 
 const MockTurn& default_turn() {
     static const MockTurn turn{"mock response", {}, harness::FinishReason::Stop, {}};
@@ -359,6 +363,7 @@ void MockProvider::resume_conversation(std::string_view conversation_id) {
 
 void MockProvider::save_conversation(std::string_view conversation_id,
                                      const harness::StatusSink& on_status) {
+    g_conversations_saved.fetch_add(1);
     if (!on_status) {
         return;
     }
@@ -369,6 +374,10 @@ void MockProvider::save_conversation(std::string_view conversation_id,
     event.detail =
         "nothing saved for " + std::string{conversation_id} + ": the mock keeps no state";
     on_status(event);
+}
+
+std::size_t MockProvider::conversations_saved() noexcept {
+    return g_conversations_saved.load();
 }
 
 }  // namespace apogee::backends

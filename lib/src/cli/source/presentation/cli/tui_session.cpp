@@ -411,7 +411,10 @@ std::string TuiSessionDriver::use_model(const std::string& model) {
 }
 
 void TuiSessionDriver::run(const Opening& opening) {
-    view_.begin_session();
+    // A private conversation -- only ever `apogee tui --private`'s launched
+    // one -- types into an Up history of its own, dropped as it ends (57a),
+    // as a private chat's REPL keeps its lines (55a).
+    view_.begin_session(opening.launch != nullptr && opening.launch->private_chat);
     if (!opening.first_line.empty()) {
         view_.queue_line(opening.first_line);
     }
@@ -441,6 +444,7 @@ void TuiSessionDriver::run(const Opening& opening) {
     } catch (const std::exception& e) {
         view_.say(output.style().tag(ansi::Role::Error) + " " + e.what());
     }
+    view_.end_session();
     open_ = false;
     execute_ = false;
     if (view_.closed()) {

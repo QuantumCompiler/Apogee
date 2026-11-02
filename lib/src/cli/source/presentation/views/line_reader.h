@@ -126,6 +126,12 @@ public:
     [[nodiscard]] virtual bool interrupted() const noexcept {
         return false;
     }
+
+    /// Ends the read in progress, and every later one, as an end of input
+    /// ends it (57a: the session asked to end by a signal). Safe from any
+    /// thread. A no-op for the plain reader: nothing reaches a read blocked
+    /// on a pipe.
+    virtual void end() {}
 };
 
 /// `std::getline`, for a pipe or a redirect.
@@ -192,6 +198,10 @@ public:
     [[nodiscard]] bool interrupted() const noexcept override {
         return interrupted_;
     }
+
+    /// A key no keyboard sends, bound to leave the editor, pressed from
+    /// whichever thread asks: replxx wakes its read for an emulated key.
+    void end() override;
 
 private:
     struct Impl;

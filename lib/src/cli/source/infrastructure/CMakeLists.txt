@@ -19,6 +19,8 @@ apogee_add_module(platform
     platform/platform.cpp
     platform/system_info.h
     platform/system_info.cpp
+    platform/termination.h
+    platform/termination.cpp
     platform/xcode.h
     platform/xcode.cpp
 )

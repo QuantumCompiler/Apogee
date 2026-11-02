@@ -139,7 +139,14 @@ since is kept, and the session goes on under it; a chat deleted outside stays
 deleted -- the session writes nothing more of it (no transcript, no recall
 summary, no saved model state), answers its turns as before, and says so once in
 a `notice`: `chat <id> was deleted while this session ran -- it stays deleted,
-and nothing more of it is saved`.
+and nothing more of it is saved`. Since 57a the close learns of a delete too,
+not only a save: a resumed chat closed with no new turn -- which writes nothing
+-- and one deleted while its exit summary was being written are told by the
+same `notice`, once, and nothing follows them: no recall summary (none put
+back, and one written in the same moment taken out again), no saved model
+state, no auto-capture. A cancelled turn rolls back to a session that holds
+the title asked after the last turn: Stop never puts a titled chat back to its
+bare id.
 
 ### Which suite: `suite` and `orchestrating`
 
@@ -591,7 +598,8 @@ stops it by ending the process.
 
 A host may send one optional `hello` as its **first** line: its `client` name
 and version, and what it `wants`, a list of words. It is recorded in Apogee's
-operational log for diagnostics and changes nothing in this release — the
+operational log for diagnostics -- never for a private chat (57a), which logs
+nothing of itself -- and changes nothing in this release — the
 session has already announced its `capabilities`, because the child speaks
 first and never waits for a `hello` (a driver that predates it would wait
 forever). A `hello` anywhere but the first line is ignored with a note on
@@ -660,6 +668,23 @@ Closing stdin ends the session: the child drains its queued output, persists the
 conversation, and exits cleanly -- a new chat with no answered turn writes
 nothing (M28, [above](#which-chat-chat_id)).
 
+**A signal ends it the same way** (57a). SIGTERM or SIGHUP to a driven `chat`
+or `execute` ends the session as closing stdin would: the turn in flight is
+cancelled, a question waiting fails, and the session closes as above, its
+temporary files removed -- then the process ends by that signal, as it always
+did, so a host that stops a child after a grace period sees what it expects. A
+close that has not finished a second after the signal, or a second signal, is
+not waited for: what a private chat keeps in the temporary directory is
+removed first, and the process ends at once. SIGKILL can be caught by
+nothing; what it leaves is swept by the next private chat ([below](#a-private-chat-chat---private)).
+The terminal REPL ends the same way -- and on SIGINT while it waits at its
+prompt; Ctrl-C in a turn there still ends the process, as ever -- and the
+full-screen shell closes its conversation before it goes, a private one's
+folder with it. Windows has no
+SIGHUP, and no console program is sent SIGTERM: there the sweep alone stands.
+A signal ignored when the child started -- SIGHUP under `nohup` -- stays
+ignored.
+
 ### The session's own doors: `detach`, `set`, `compact`
 
 Since 52d a driven `chat` or `execute` takes three lines that reach exactly
@@ -726,10 +751,21 @@ writes **nothing** of the conversation: no transcript under `sessions/` —
 not written and later deleted, never written — no recall summary and no
 recall of earlier chats, no saved model state, no auto-capture, no title
 asked of any model (55a: one would be kept nowhere, and asking for it sent the
-chat's questions to the utility model), and its attachments indexed in a
-folder of the run's own in the system's temporary directory, removed as the
-run ends. At a terminal its typed lines are its own up-arrow's alone: the line
-editor's history file (`chat_history`) is neither read nor written. The
+chat's questions to the utility model), no line in the operational log -- not
+its id, its time, its backend, nor a driver's `hello` (57a; a turn that fails
+still logs the provider's error, which names neither the chat nor its words) --
+and its attachments indexed in a folder of the run's own in the system's
+temporary directory, `apogee-private-<pid>-<n>` -- made by the run where
+nothing was, readable by its user alone, never one found under that name --
+removed as the run ends -- by a signal too ([above](#attaching-files)) -- and,
+when a run was killed outright, by the next private chat's opening, which
+removes every such folder of this user's whose process is gone, or whose
+process id the opening chat was itself given again. The data directory is left
+byte for byte as it was. At a terminal its typed lines are its own up-arrow's
+alone: the line editor's history file (`chat_history`) is neither read nor
+written, and in the full-screen shell (`apogee tui --private`) its
+conversation's Up history is its own, dropped as it ends -- never recalled
+into the next conversation. The
 `session` event carries `"private": true`, and a `notice` says it: `private:
 nothing of this chat is written -- no transcript, no recall`; the terminal and
 the shell say the same line at the start. A saved chat cannot be resumed

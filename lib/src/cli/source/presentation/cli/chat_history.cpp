@@ -659,8 +659,11 @@ std::string compact_saved_chat(const std::string& name, const std::filesystem::p
                     .built_in_graph = harness::AttachmentGraphMethod::Code}};
             attached.after_compaction();
         }
-        // Deleted while the summary was written (55b): it stays deleted.
-        if (logger::save(session) == logger::Saved::Deleted) {
+        // Deleted while the summary was written (55b): it stays deleted --
+        // whichever save found it gone (57a): the attachments' own, above,
+        // finds it first when the compaction folded one they rode.
+        (void)logger::save(session);
+        if (session.deleted) {
             fail(session.chat_id + " was deleted while it was compacted -- it stays deleted");
         }
         std::string out = "compacted " + session.chat_id + ": " + std::to_string(before) +
