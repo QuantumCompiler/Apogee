@@ -13,6 +13,7 @@
 #include <optional>
 #include <random>
 #include <sstream>
+#include <system_error>
 #include <utility>
 
 #include "agentloop/content.h"
@@ -1031,6 +1032,15 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         session.chat_id = logger::new_chat_id();
         // Written once it has a turn (M28): one closed before leaves nothing.
         session.new_chat = true;
+        // Begun by an ACP host (56c): who, and in the folder its
+        // `session/new` named -- written with that first turn, and kept as
+        // they are by every resume after.
+        if (!flags->acp_origin.empty()) {
+            session.origin = flags->acp_origin;
+            std::error_code here;
+            session.cwd = !flags->acp_cwd.empty() ? flags->acp_cwd
+                                                  : std::filesystem::current_path(here).string();
+        }
     }
     // A private chat (52d) is never written -- `save` does nothing for it --
     // and never summarised.

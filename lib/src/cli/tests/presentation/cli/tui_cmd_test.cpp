@@ -210,10 +210,11 @@ TEST_CASE("apogee tui takes the session table: every flag execute takes, nothing
     CHECK(tui.contains("--effort"));
     CHECK(tui.contains("--orchestrate"));
     CHECK(std::ranges::includes(tui, option_spellings(root.app(), "chat")));
-    // Execute's one piece of plumbing, `apogee acp`'s handover of a host's MCP
-    // servers (56b), is execute's alone: the shell's door never takes it.
+    // Execute's plumbing for `apogee acp` -- the handover of a host's MCP
+    // servers (56b), and who began a chat and where (56c) -- is execute's
+    // alone: the shell's door never takes it.
     CHECK(option_spellings(root.app(), "execute", true) ==
-          std::set<std::string>{"--acp-host-servers"});
+          std::set<std::string>{"--acp-host-servers", "--acp-origin", "--acp-cwd"});
     CHECK(option_spellings(root.app(), "tui", true).empty());
 }
 

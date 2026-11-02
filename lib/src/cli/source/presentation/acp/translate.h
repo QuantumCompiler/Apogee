@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -241,5 +242,73 @@ struct ModelChoice {
 /// The setting a child's notice refuses, when it is the answer to a `set`
 /// line that did not take -- `set model: ...` names `model` -- or empty.
 [[nodiscard]] std::string refused_setting(std::string_view notice);
+
+/// The hidden `execute` options a new session's child is started with (56c):
+/// who began the chat -- the host's `clientInfo.name`, `acp` when it gave
+/// none -- and the folder its `session/new` named, as it named it. The chat
+/// saves them as its `origin` and `cwd`. Plumbing, never completed.
+inline constexpr std::string_view kOriginOption = "--acp-origin";
+inline constexpr std::string_view kCwdOption = "--acp-cwd";
+
+/// The origin a chat is saved with when the host named itself nothing.
+inline constexpr std::string_view kNoClientOrigin = "acp";
+
+/// A saved chat as `session/list` reads it (56c): `chats list`'s row, with
+/// who began it and where.
+struct ListedChat {
+    /// The chat's id: the session's id, as `chats list`, `chats show` and
+    /// `--resume` take it.
+    std::string id{};
+    /// The name `chats list` shows -- the id itself while it has none.
+    std::string name{};
+    /// Its `updated_at`, ISO 8601 UTC.
+    std::string updated_at{};
+    /// Who began it, and in which folder; empty for a chat no host began.
+    std::string origin{};
+    std::string cwd{};
+};
+
+/// `session/list`'s `sessions` (56c): every chat an ACP host began -- one
+/// with an origin and a folder -- in the order given (newest first, as
+/// `chats list`), each its `sessionId`, `cwd`, `title` (the name, left out
+/// while that is the bare id) and `updatedAt`. With `cwd` non-empty, only the
+/// chats begun in exactly that folder.
+[[nodiscard]] nlohmann::json listed_sessions(const std::vector<ListedChat>& chats,
+                                             std::string_view cwd);
+
+/// One entry of a saved chat as a replay sends it (56c): `logger::
+/// saved_turns`' entry, in the words `chats show` prints it.
+struct SavedEntry {
+    /// The user's words, with what rode them named as `chats show` names
+    /// them (`attached: report.pdf (1 file, 9 KiB)`); empty for a
+    /// compaction.
+    std::string user{};
+
+    /// Each tool called, as `chats show` lists it: its name and its
+    /// arguments in one line.
+    struct Tool {
+        std::string name{};
+        std::string summary{};
+    };
+
+    std::vector<Tool> tools{};
+    /// The model's words, a part per message.
+    std::vector<std::string> answer{};
+    /// The summary, when the entry is a compaction.
+    std::optional<std::string> compacted{};
+};
+
+/// The `session/update`s a `session/load` replays (56c), in order: for each
+/// entry, a compaction as an `agent_message_chunk` holding `chats show`'s
+/// "history compacted" line and its summary; the user's words as one
+/// `user_message_chunk`; each tool call as a `tool_call`, `completed`,
+/// titled by its name and arguments, with no result; each answer part as an
+/// `agent_message_chunk`. Ids come from the entry's index in `entries` --
+/// the index of `chats show --output-format json`'s `turns` -- so every
+/// `messageId` is distinct: `entry-<i>-user`, `entry-<i>-compaction`,
+/// `entry-<i>-agent-<n>` and `toolCallId` `entry-<i>-tool-<n>`, `n` from 1.
+/// Nothing hidden is replayed: a saved chat holds no thinking and no
+/// injected context.
+[[nodiscard]] std::vector<nlohmann::json> replay_updates(const std::vector<SavedEntry>& entries);
 
 }  // namespace apogee::acp

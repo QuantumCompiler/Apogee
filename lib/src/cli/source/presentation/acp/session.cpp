@@ -19,6 +19,19 @@ constexpr std::chrono::milliseconds kSlice{100};
     return found != object.end() && found->is_string() ? found->get<std::string>() : std::string{};
 }
 
+/// The request that opened a session, as the host sent it.
+[[nodiscard]] std::string_view opening_method(OpenAs as) {
+    switch (as) {
+        case OpenAs::Load:
+            return "session/load";
+        case OpenAs::Resume:
+            return "session/resume";
+        case OpenAs::New:
+            break;
+    }
+    return "session/new";
+}
+
 }  // namespace
 
 void Diagnostics::line(std::string_view text) {
@@ -55,9 +68,17 @@ Session::~Session() {
     discard_handover(handover_);
 }
 
-void Session::open(const nlohmann::json& request_id, const HostServers& servers) {
+std::string Session::id() {
+    const std::unique_lock lock{mutex_};
+    return id_;
+}
+
+void Session::open(const nlohmann::json& request_id, const HostServers& servers, OpenAs as,
+                   std::vector<SavedEntry> replay) {
     platform::ChildCommand command = setup_.child;
     command.working_directory = cwd_.string();
+    opened_as_ = as;
+    replay_ = std::move(replay);
     std::string error;
     if (!servers.empty()) {
         // Names and env keys on stderr, a host's log -- never a value.
@@ -76,6 +97,21 @@ void Session::open(const nlohmann::json& request_id, const HostServers& servers)
             command.arguments.emplace_back(kHandoverOption);
             command.arguments.push_back(handover_.string());
         }
+    }
+    if (as == OpenAs::New) {
+        // A new chat, the host's (56c): who began it and in which folder,
+        // saved with its first answered turn -- the folder as the host
+        // named it, since the child's own reads back resolved (`/tmp` is
+        // `/private/tmp` on macOS) and a host filters by its own spelling.
+        command.arguments.emplace_back(kOriginOption);
+        command.arguments.emplace_back(host_.name.empty() ? std::string{kNoClientOrigin}
+                                                          : host_.name);
+        command.arguments.emplace_back(kCwdOption);
+        command.arguments.push_back(cwd_.string());
+    } else {
+        // A saved chat: execute's own resume, its notes and its fallbacks.
+        command.arguments.emplace_back("--resume");
+        command.arguments.push_back(id_);
     }
     std::unique_ptr<platform::ChildProcess> child = platform::start_child(command, error);
     const std::unique_lock lock{mutex_};
@@ -120,9 +156,8 @@ void Session::prompt(const nlohmann::json& request_id, const nlohmann::json& par
     }
     if (!started_) {
         peer_.send(error_response(request_id, kInvalidParams,
-                                  "session " + id_ +
-                                      " is still opening: wait for session/new's "
-                                      "answer"));
+                                  "session " + id_ + " is still opening: wait for " +
+                                      std::string{opening_method(opened_as_)} + "'s answer"));
         return;
     }
     if (prompt_id_.has_value()) {
@@ -418,6 +453,13 @@ void Session::translate_event(std::string_view line) {
     switch (rule->disposition) {
         case Disposition::SessionStart: {
             started_ = true;
+            // A new session is its chat from here on (56c): one id names the
+            // conversation everywhere -- `chats list`, `chats show`,
+            // `--resume` -- and `session/new`'s answer gives it.
+            if (const std::string chat = string_of(event, "chat_id");
+                opened_as_ == OpenAs::New && !chat.empty()) {
+                id_ = chat;
+            }
             // Open, so the child has read and removed its handover; one it
             // could not remove goes now.
             discard_handover(std::exchange(handover_, {}));
@@ -431,9 +473,21 @@ void Session::translate_event(std::string_view line) {
                 fallback_model_ = model;
             }
             if (open_id_.has_value()) {
-                peer_.send(response(*open_id_, nlohmann::json{{"sessionId", id_},
-                                                              {"modes", modes_state(modes_, mode_)},
-                                                              {"configOptions", options()}}));
+                // A load replays the saved turns first, as `chats show` reads
+                // them; the resume's own notes follow, as notices, never as
+                // history.
+                if (opened_as_ == OpenAs::Load) {
+                    for (nlohmann::json& update : replay_updates(replay_)) {
+                        send_update(std::move(update));
+                    }
+                    replay_.clear();
+                }
+                nlohmann::json result{{"modes", modes_state(modes_, mode_)},
+                                      {"configOptions", options()}};
+                if (opened_as_ == OpenAs::New) {
+                    result["sessionId"] = id_;
+                }
+                peer_.send(response(*open_id_, std::move(result)));
                 open_id_.reset();
             }
             return;

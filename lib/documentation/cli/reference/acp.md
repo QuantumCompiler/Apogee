@@ -9,7 +9,8 @@ and nothing else, every diagnostic goes to stderr, and nothing listens.
 
 What the person gets in the host's coding assistant: Apogee's models in its
 model menu, Apogee's own tools, Apogee's permission gate asking through the
-host's permission sheet, and a working Stop button.
+host's permission sheet, a working Stop button, and every conversation saved
+as an Apogee chat the host can list, reopen and continue (56c).
 
 ## Adding it to Xcode
 
@@ -32,8 +33,14 @@ machine mode ([machine-mode.md](machine-mode.md)), started in the session's
 folder:
 
 ```
-apogee [--config …] execute --input-format stream-json --output-format stream-json --tools --private <the acp line's flags>
+apogee [--config …] execute --input-format stream-json --output-format stream-json --tools <the acp line's flags> \
+       [--acp-host-servers <handover>] (--acp-origin <host> --acp-cwd <folder> | --resume <id>)
 ```
+
+-- a new session's child told who began it and the folder its `session/new`
+named, a loaded or resumed one's started with `--resume` on its chat (below).
+`--acp-host-servers`, `--acp-origin` and `--acp-cwd` are `execute`'s hidden
+plumbing: no help, no completion.
 
 So a prompt is **one turn of execute's loop**, opened through execute's own
 path (ADR 0011): the project's `AGENTS.md` (else `CLAUDE.md`) read into every
@@ -52,10 +59,10 @@ child as given, and it runs in the project folder, so a relative `--attach` or
 - **One live session per process.** A `session/new` ends the session before it
   (its child's stdin closed, a turn in flight cancelled), so one model is in
   memory; a prompt to it is answered `-32602`, "a newer session replaced it".
-- **Nothing is saved.** Every session runs `--private`: no transcript, no
-  recall, its attachments indexed where the run's end removes them.
-  `loadSession` is false and no `sessionCapabilities` are advertised; saving,
-  loading, listing, resuming and closing sessions are 56c's.
+- **Every session is a saved chat** (56c), in the one store `chats list`,
+  `chats show` and `chat --resume` read -- written by its child once a turn is
+  answered, so a session closed before any writes nothing. Its id is the
+  chat's. [Saved sessions](#saved-sessions) has the four methods.
 - **The host's MCP servers** in `session/new` are that session's (56b): its
   child connects the stdio ones beside the config's, for its life alone, through
   the same gate -- [below](#sessionnew).
@@ -66,7 +73,8 @@ child as given, and it runs in the project folder, so a relative `--attach` or
 
 ```json
 {"protocolVersion":1,
- "agentCapabilities":{"loadSession":false,
+ "agentCapabilities":{"loadSession":true,
+                      "sessionCapabilities":{"list":{},"resume":{},"close":{}},
                       "promptCapabilities":{"image":false,"audio":false,"embeddedContext":false},
                       "mcpCapabilities":{"http":false,"sse":false}},
  "agentInfo":{"name":"apogee","title":"Apogee","version":"<apogee version>"},
@@ -79,6 +87,10 @@ child as given, and it runs in the project folder, so a relative `--attach` or
   touched and at every release roll, as the carried model lists are (ADR
   0009). A host asking for another version is answered 1, as the protocol
   says.
+- **Saved sessions** (56c): `loadSession`, and `session/list`,
+  `session/resume` and `session/close` under `sessionCapabilities`, each
+  advertised because it works. `session/delete` is not: `chats delete` is the
+  door, and Xcode 27.1's ACP client has no delete message.
 - **No sign-in.** `authMethods` is empty: a vendor CLI signs itself in
   (SPEC.md → Principles), and an API key lives in Apogee's own store.
 - What `acp` reads of the host's capabilities: `session.notices` (it shows ACP's
@@ -91,7 +103,9 @@ child as given, and it runs in the project folder, so a relative `--attach` or
 `cwd` must be an absolute path to a folder that exists, else `-32602` naming it.
 The answer, once the child says it is open (its `session` event):
 
-- `sessionId` -- `apogee-` and sixteen hex digits.
+- `sessionId` -- the chat's id (56c), the one `chats list` lists it by and
+  `chats show` and `--resume` take, so one id names the conversation
+  everywhere. It is the child's `session` event's `chat_id`.
 - `modes` -- **manual**, **accept-edits** and **plan**; **bypass** too when the
   `acp` line carries `--allow-bypass` (or `--permission-mode bypass`).
   Dont-ask is not offered: a host is always there to ask -- but a session
@@ -129,6 +143,77 @@ the next session sees none of them. What is taken and skipped, the gate, Xcode's
 own consent prompt and the `xcode` preset to fall back on are in
 [tools.md → Servers an ACP host hands a session](tools.md#servers-an-acp-host-hands-a-session).
 
+## Saved sessions
+
+*(56c.)* An ACP session is an ordinary Apogee chat, saved in the one session
+store -- never a store of the protocol's own. It is written by its child after
+every answered turn, as any chat is, and **names its origin**: the host's
+`clientInfo.name` as sent (`acp` when it sent none) and the `cwd` its
+`session/new` named, as named. Both are set when the chat begins and never
+rewritten by a resume, from anywhere. `chats list` ends its row
+`(from <origin>)`, `chats info` gains `origin:` and `cwd:` lines, and their
+JSON documents carry `origin` and `cwd`
+([machine-mode.md](machine-mode.md#everything-else-is-a-cli-command)). A host's MCP servers
+are never saved with the chat.
+
+**`session/list`** -- the chats an ACP host began (an `origin` and a folder),
+newest first, as `chats list` orders them; with `cwd`, only those begun in
+exactly that folder (a relative `cwd` is `-32602`). Each entry is
+`sessionId`, `cwd`, `title` -- the name `chats list` shows, left out while
+that is the bare id -- and `updatedAt`, the chat's `updated_at` (ISO 8601
+UTC). One page, with no `nextCursor`; a page asked for after it is empty. A
+chat begun in a terminal has no folder, which every entry needs, so it is not
+listed -- though it opens.
+
+**`session/load`** -- any saved chat's id, since the store is one: a chat begun
+anywhere opens. Its id alone: a chat's name or title, which `--resume` takes,
+is no `sessionId` here, and neither is a path. Its child is started with `--resume <id>` -- `execute`'s own
+resume, its notes and its fallback for a backend gone (ADR 0011) -- in the
+request's `cwd`, with the request's `mcpServers` handed over as
+`session/new`'s are. Once the child is open, the chat's turns are **replayed**
+as `chats show` reads them (`logger::saved_turns`), and only then is the
+request answered (`modes`, `configOptions`):
+
+| Saved | Replayed as |
+|---|---|
+| the user's words | one `user_message_chunk`, what rode them named as `chats show`'s text names it (`attached: report.pdf (1 file, 9 KiB)`), never their bytes |
+| each tool call | a `tool_call`, `completed`, titled by its name and its one-line arguments, its kind from the table below -- never its result, which `chats show` never shows |
+| each part of the answer | an `agent_message_chunk` |
+| a compaction | an `agent_message_chunk`: `history compacted; what came before is this summary:` and the summary |
+
+Every update carries an id from the entry's index in `chats show
+--output-format json`'s `turns` -- `messageId` `entry-<i>-user`,
+`entry-<i>-agent-<n>`, `entry-<i>-compaction`, and `toolCallId`
+`entry-<i>-tool-<n>` -- never its turn number, which an unanswered turn and a
+compaction share with the turn before them. So a replay and `chats show`'s
+JSON line up entry by entry, and every id is distinct. Nothing hidden is
+replayed: a saved chat holds no thinking and no injected context. The
+resume's own notes -- a backend gone, a field dropped -- follow the replay as
+notices, never as history.
+
+**`session/resume`** -- the same opening, with nothing replayed: the answer
+comes once the child is open. A resumed session's next turn is numbered on
+from the chat's count, as a resumed machine session numbers (`chats show`
+lists it after the earlier turns).
+
+An id no chat has is refused **`-32002`** (the protocol's "resource not
+found"), its message naming it as `chats show` does -- `no chat named
+'<id>'` -- and `data.sessionId` the id asked for; nothing ends. A chat's name
+or title, or anything holding a `/` or a `\`, is refused the same way, as
+`no chat has the id '<id>': a saved chat opens by its id, as session/list
+gives it, never by its name` -- a path never reaches the store. A load or
+resume of a chat this process still holds -- live, or still ending -- ends
+that session and waits for its child first (30 s, then it is terminated), so
+one chat has one writer here -- a session's id is its chat's, so one spelling
+names it; across processes there is no lock, and a chat open in Xcode and
+resumed in a terminal goes to the last writer, turn by turn, as two terminals
+do. 55b's outside rename and delete are honoured.
+
+**`session/close`** -- cancels the session's turn, as `session/cancel` does,
+and ends its child; its chat is already saved after its last answered turn. A
+prompt to it afterwards is refused, "the host closed it". Closing an unknown
+or already closed session answers success.
+
 ## The mapping
 
 ### Out: machine events → ACP
@@ -138,7 +223,7 @@ fails a type with no rule (`acp/translate.cpp`'s `event_rules`).
 
 | Machine event | ACP |
 |---|---|
-| `session` | answers `session/new` |
+| `session` | answers `session/new`, `session/load` (after its replay) or `session/resume` |
 | `thinking_delta` | `agent_thought_chunk` |
 | `answer_delta` | `agent_message_chunk` |
 | `tool_call` | `tool_call` on its first report (`pending`), then `tool_call_update` as it moves: `running` → `in_progress`, `done` → `completed`, `failed` → `failed` -- every card ends `completed` or `failed`, a call stopped at its sheet included. Each call is its own card, keyed on the model's id -- and where that id repeats (Gemini's API uses the tool's name), a later call opens a card of its own under a fresh id (`write_file-2`), never the earlier call's again. A call a `delegate` sub-session makes is a card of its own too, under its own id, drawn while the delegation's card is `in_progress`: its sheet names that card, and it ends as any call does |
@@ -228,8 +313,9 @@ reaches nobody and changes nothing.
 |---|---|
 | `-32700` | a line that is not JSON |
 | `-32600` | JSON that is no message: a batch, a bare value, a bad id or method |
-| `-32601` | a method this agent does not take (`session/load`, `session/list`, `session/resume`, `session/close`, `authenticate`, `logout`, `session/set_model` among them) |
-| `-32602` | bad params: a `cwd` that is not an absolute folder, an unknown session, a replaced session, a prompt it cannot carry, a model or mode not offered |
+| `-32601` | a method this agent does not take (`session/delete`, `session/fork`, `authenticate`, `logout`, `session/set_model` among them) |
+| `-32602` | bad params: a `cwd` that is not an absolute folder, an unknown session, a replaced or closed session, a prompt it cannot carry, a model or mode not offered |
+| `-32002` | `session/load` or `session/resume` naming no chat's id: an id no chat has (`no chat named '<id>'`), or a chat's name or title, or a path (`no chat has the id '<id>': ...`); `data.sessionId` the id asked for |
 | `-32603` | the turn failed, in Apogee's words; or the session's apogee ended -- `apogee's session ended (exit N): <its last stderr line>` -- after which a new session is needed |
 
 An unknown field is ignored, and after any of these the process lives on.
@@ -242,7 +328,10 @@ An unknown field is ignored, and after any of these the process lives on.
 reach every session's child as given. The flags the protocol owns --
 `--output-format`, `--input-format`, `--resume`, `-c`, `--private`,
 `--no-color`, `--raw` -- are refused at launch, in the command's words, and
-hidden from its help and completion. A launch with no backend to chat with is
+hidden from its help and completion: `--resume` and `-c` because the host
+reopens a chat itself (`session/load`, `session/resume`), and `--private`
+because every session is saved -- a private mode is not offered here, and
+`chats delete` removes a chat. A launch with no backend to chat with is
 refused before the protocol starts.
 
 ## The fixtures
@@ -260,6 +349,13 @@ conversation and send one prompt, then copy the capture to
 paths are redacted as it is written) and remove the stub from Xcode's list. The
 suite replays that file whenever it is there. The capture changes Xcode's
 settings, so it is the person's to run.
+
+The saved sessions (56c) are driven by the same check, in a home of their own
+with `clientInfo.name` `acp-test`: new, two prompts, close, then list, load,
+resume, a `cwd` filter, an empty session, an unknown id, a chat's name and a
+path to its file -- and
+`tests/fixtures/acp/saved_chat.json`, a saved chat with a compaction and a
+cancelled turn, loaded with every replayed id distinct.
 
 ## Limits
 
@@ -286,6 +382,10 @@ settings, so it is the person's to run.
   `xcode-tools`, `MCP_XCODE_SESSION_ID`), and the user's live pass records what
   it sent. If it sends none, the `xcode` preset (56d) registers `xcrun mcpbridge`
   for every session, from the config.
-- **Not this item's:** saved, loaded and resumed sessions (56c); `check`'s Xcode rows and `acp
-  registration` (56d); `fs/*` and `terminal/*`; image, audio and embedded
-  prompt content; slash commands and `available_commands_update`.
+- **Saved sessions** (56c): no `session/delete` (`chats delete` is the door)
+  and no `session/fork`, neither of which Xcode 27.1's client sends; no
+  private mode; a `compaction_update` is never sent, a compaction replayed as
+  words; and no lock across processes (above).
+- **Not this item's:** `check`'s Xcode rows and `acp registration` (56d);
+  `fs/*` and `terminal/*`; image, audio and embedded prompt content; slash
+  commands and `available_commands_update`.

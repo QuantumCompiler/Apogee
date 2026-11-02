@@ -135,6 +135,13 @@ struct SessionFlags {
     /// acp` -- read and removed as the session opens, its servers connected
     /// beside the config's for this session alone.
     std::string host_servers;
+    /// Execute only, hidden (56c): who began this chat -- an ACP host's
+    /// `clientInfo.name`, `acp` for one that gave none -- and the folder its
+    /// `session/new` named, both written by `apogee acp` for a new session.
+    /// Saved as the chat's `origin` and `cwd` with its first answered turn
+    /// (M28); a resume ignores them, so a chat's origin is never rewritten.
+    std::string acp_origin;
+    std::string acp_cwd;
     /// No busy line while the members load.
     bool quiet = false;
     /// The arbitrary-branch review: the git tools' defaults and a system

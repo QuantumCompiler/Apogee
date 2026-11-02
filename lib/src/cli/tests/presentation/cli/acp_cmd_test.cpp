@@ -7,11 +7,14 @@
 #include <algorithm>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "cli/chat_session.h"
 #include "cli/tui_child.h"
+#include "contracts/types.h"
+#include "logger/session.h"
 #include "platform/child_process.h"
 #include "support/cli_home.h"
 
@@ -177,4 +180,88 @@ TEST_CASE("a relative --config reaches each session's child absolute, though it 
     context.config_path.clear();
     CHECK(apogee::commands::self_command(context, "/bin/apogee", {"execute"}).arguments ==
           std::vector<std::string>{"execute"});
+}
+
+TEST_CASE("the store acp reads is the one chats list and chats show read", "[cli][acp][sessions]") {
+    // 56c: session/list's chats are chats list's, with who began each and
+    // where; a load's entries are chats show's turns in its words.
+    const CliHome home{std::string{kConfig}};
+    apogee::logger::Session hosted;
+    hosted.chat_id = "20261101-120000-acp0";
+    hosted.title = "Read the notes";
+    hosted.backend = "local";
+    hosted.origin = "acp-test";
+    hosted.cwd = "/work/app";
+    apogee::harness::ChatMessage calls = apogee::harness::ChatMessage::assistant("Reading it.");
+    calls.tool_calls = {apogee::harness::ToolCall{"c1", "read_file", R"({"path": "notes.md"})"}};
+    hosted.messages = {
+        apogee::harness::ChatMessage::user("What is in notes.md?"),
+        calls,
+        apogee::harness::ChatMessage::from_tool_result(
+            apogee::harness::ToolResult{"c1", "read_file", "line one\n", false}),
+        apogee::harness::ChatMessage::assistant("One line."),
+        apogee::harness::ChatMessage::user("and then?"),
+    };
+    hosted.turns = 1;
+    hosted.attachments = {apogee::logger::Attachment{.name = "notes.md",
+                                                     .files = {{.name = "notes.md",
+                                                                .path = "/work/app/notes.md",
+                                                                .sha256 = "ab12",
+                                                                .reader = "text",
+                                                                .bytes = 9}},
+                                                     .inline_at = 0,
+                                                     .map_at = {},
+                                                     .graph = {}}};
+    apogee::logger::save(hosted);
+    apogee::logger::Session plain;
+    plain.chat_id = "20261101-110000-0000";
+    plain.backend = "local";
+    plain.turns = 1;
+    plain.messages = {apogee::harness::ChatMessage::user("hi"),
+                      apogee::harness::ChatMessage::assistant("hello")};
+    apogee::logger::save(plain);
+
+    const apogee::acp::SavedChats chats = apogee::commands::acp_saved_chats();
+    const std::vector<apogee::acp::ListedChat> listed = chats.list();
+    REQUIRE(listed.size() == 2);
+    const auto found = std::ranges::find(listed, hosted.chat_id, &apogee::acp::ListedChat::id);
+    REQUIRE(found != listed.end());
+    CHECK(found->name == "Read the notes");
+    CHECK(found->origin == "acp-test");
+    CHECK(found->cwd == "/work/app");
+    CHECK(apogee::acp::listed_sessions(listed, "").size() == 1);
+
+    std::string error;
+    const std::optional<apogee::acp::SavedChat> chat = chats.read(hosted.chat_id, error);
+    REQUIRE(chat.has_value());
+    CHECK(error.empty());
+    CHECK(chat->id == hosted.chat_id);
+    const std::vector<apogee::acp::SavedEntry>& entries = chat->entries;
+    REQUIRE(entries.size() == 2);
+    CHECK(entries.at(0).user == "What is in notes.md?\nattached: notes.md (1 file, 9 B)");
+    REQUIRE(entries.at(0).tools.size() == 1);
+    CHECK(entries.at(0).tools[0].name == "read_file");
+    CHECK(entries.at(0).tools[0].summary == R"({"path":"notes.md"})");
+    CHECK(entries.at(0).answer == std::vector<std::string>{"Reading it.", "One line."});
+    // A turn left unanswered: the user's words, nothing after.
+    CHECK(entries.at(1).user == "and then?");
+    CHECK(entries.at(1).answer.empty());
+
+    // Read as `--resume` reads: its title answers too, and the chat's own id
+    // says it was not the id (the agent opens by the id alone).
+    const std::optional<apogee::acp::SavedChat> by_title = chats.read("Read the notes", error);
+    REQUIRE(by_title.has_value());
+    CHECK(by_title->id == hosted.chat_id);
+
+    error.clear();
+    CHECK_FALSE(chats.read("no-such-chat", error).has_value());
+    CHECK(error == "no chat named 'no-such-chat'");
+
+    // The protocol's flags still refused, in words that say what changed.
+    std::string out;
+    std::string err;
+    CHECK(home.run({"acp", "--private"}, &out, &err) == 1);
+    CHECK_THAT(err, ContainsSubstring("saved as a chat"));
+    CHECK(home.run({"acp", "--resume", "x"}, &out, &err) == 1);
+    CHECK_THAT(err, ContainsSubstring("session/load or session/resume"));
 }

@@ -1476,3 +1476,21 @@ TEST_CASE("a turn's standing context is injected, so the budget counts it, never
         CHECK(message.content.plain_text().find("PERSONA TEXT") == std::string::npos);
     }
 }
+
+TEST_CASE("execute --acp-origin with no --acp-cwd saves the folder it runs in",
+          "[execute][project][sessions]") {
+    // 56c: an ACP session's child is always told both; one run by hand with
+    // the origin alone saves the folder it runs in, as the child sees it.
+    const ProjectHome home;
+    const WorkingDirectory here{home.project};
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"execute", "--attach", "", "--acp-origin", "acp-test"}, &out, &err, "hi\n") ==
+            0);
+    const std::vector<apogee::logger::Session> saved = home.sessions();
+    REQUIRE(saved.size() == 1);
+    CHECK(saved.front().origin == "acp-test");
+    std::error_code ignored;
+    CHECK(saved.front().cwd == std::filesystem::current_path(ignored).string());
+    CHECK_FALSE(saved.front().cwd.empty());
+}

@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -41,7 +42,48 @@
 /// connects them beside the config's for its life alone, and says what it
 /// could not in one notice. The file is removed once read -- by the child,
 /// and by the session once the child has opened or ended, should it not.
+///
+/// **A session is a saved chat (56c).** A new one is an ordinary Apogee
+/// chat, written by its child with its first answered turn (M28) and named
+/// by its `chat_id`, which is the session's id from `session/new`'s answer
+/// on; the host's name and the folder ride hidden `execute` options, saved
+/// as the chat's `origin` and `cwd`. A loaded or resumed one is the child
+/// started with `--resume <id>` -- execute's own resume, its notes and its
+/// fallbacks (ADR 0011) -- and a load replays the saved turns before it
+/// answers.
 namespace apogee::acp {
+
+/// A saved chat as a load or a resume reads it (56c).
+struct SavedChat {
+    /// The chat's own id, whatever the store was asked by: a session opens
+    /// a chat by this id alone.
+    std::string id{};
+    /// Its entries, in order.
+    std::vector<SavedEntry> entries{};
+};
+
+/// The one session store, as the composition root reads it for `acp` (56c):
+/// the store `chats list` and `chats show` read, never one of ACP's own.
+struct SavedChats {
+    /// Every saved chat, newest first.
+    std::function<std::vector<ListedChat>()> list{};
+    /// The chat `id` names -- read as `--resume` reads it, so a name or a
+    /// title answers too, and the chat's own id says which it was; nullopt,
+    /// with `error` saying so (`no chat named '<id>'`), when no chat answers
+    /// to it.
+    std::function<std::optional<SavedChat>(const std::string& id, std::string& error)> read{};
+};
+
+/// How a session opens (56c).
+enum class OpenAs : std::uint8_t {
+    /// `session/new`: a new chat, the host's.
+    New,
+    /// `session/load`: a saved chat resumed, its turns replayed before the
+    /// answer.
+    Load,
+    /// `session/resume`: a saved chat resumed, nothing replayed.
+    Resume,
+};
 
 /// What every session of one `apogee acp` is launched with, composed by
 /// `cli/acp_cmd`.
@@ -67,6 +109,9 @@ struct AgentSetup {
     /// Where a session's handover of the host's MCP servers is made (56b);
     /// empty, the system's temporary folder.
     std::filesystem::path handover_root{};
+    /// The saved chats `session/list` and `session/load` read (56c); unset,
+    /// there are none.
+    SavedChats chats{};
 };
 
 /// What the host said of itself at `initialize`.
@@ -107,16 +152,19 @@ public:
     Session(Session&&) = delete;
     Session& operator=(Session&&) = delete;
 
-    [[nodiscard]] const std::string& id() const noexcept {
-        return id_;
-    }
+    /// The session's id: the one it was opened under, and for a new one,
+    /// from its child's `session` event on, the chat's `chat_id` (56c).
+    [[nodiscard]] std::string id();
 
     /// Starts the child, handing it `servers` -- the host's MCP servers
-    /// (56b), when it named any. `session/new` -- request `request_id` -- is
-    /// answered when the child says it is open (its `session` event), after
-    /// it has connected them, or with an error when it cannot start or ends
-    /// first.
-    void open(const nlohmann::json& request_id, const HostServers& servers = {});
+    /// (56b), when it named any. The request -- `request_id`, a
+    /// `session/new`, or as `as` says a `session/load` or `session/resume`
+    /// of the chat this session's id names (56c) -- is answered when the
+    /// child says it is open (its `session` event), after it has connected
+    /// them and, for a load, after `replay` is sent; or with an error when it
+    /// cannot start or ends first.
+    void open(const nlohmann::json& request_id, const HostServers& servers = {},
+              OpenAs as = OpenAs::New, std::vector<SavedEntry> replay = {});
 
     /// `session/prompt`: one `user` line, the turn answered when its
     /// `result` or `error` arrives.
@@ -174,6 +222,8 @@ private:
     [[nodiscard]] nlohmann::json options() const;
     [[nodiscard]] std::string last_stderr_line();
 
+    /// Under `mutex_` once the child runs: its reader names a new session
+    /// by its chat as it opens.
     std::string id_;
     std::filesystem::path cwd_;
     const AgentSetup& setup_;
@@ -197,6 +247,9 @@ private:
     std::string mode_;
     std::string fallback_mode_;
     std::optional<nlohmann::json> open_id_;
+    /// How it opened, and for a load the saved turns its answer follows.
+    OpenAs opened_as_ = OpenAs::New;
+    std::vector<SavedEntry> replay_;
     std::optional<nlohmann::json> prompt_id_;
     /// A setting chosen while a turn runs, held until it ends: written then,
     /// it would wait in the child's queue, where a question asked later in

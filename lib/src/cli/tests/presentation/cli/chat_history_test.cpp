@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -423,6 +424,8 @@ TEST_CASE("chats info --output-format json carries the facts its text says, type
                                  {"title", "Project setup"},
                                  {"backend", "local"},
                                  {"model", ""},
+                                 {"origin", ""},
+                                 {"cwd", ""},
                                  {"started", saved.started_at},
                                  {"updated", saved.updated_at},
                                  {"turns", 5},
@@ -476,6 +479,59 @@ TEST_CASE("chats info --output-format json carries the facts its text says, type
     CHECK(renamed_text.out.find("backend:   (default)\n") != std::string::npos);
     CHECK(renamed_text.out.find("temp:      0.25\n") != std::string::npos);
     CHECK(renamed_text.out.find("max_tok:   512\n") != std::string::npos);
+}
+
+TEST_CASE("a chat an ACP host began says where it came from, in list and info, text and JSON",
+          "[chats][info][history][reads][json][acp]") {
+    // 56c: `origin` on the row -- `""` for any other chat -- and `cwd` in
+    // the details; the text's row ends `(from <origin>)` and its details
+    // gain two lines, only for such a chat.
+    const CliHome home{kConfig};
+    save_fixture();
+    apogee::logger::Session hosted;
+    hosted.chat_id = "20261101-120000-acp0";
+    hosted.title = "Fix the build";
+    hosted.backend = "local";
+    hosted.origin = "Xcode";
+    hosted.cwd = "/Users/me/Project";
+    hosted.turns = 1;
+    hosted.messages = {ChatMessage::user("why does it fail?"), ChatMessage::assistant("a typo")};
+    apogee::logger::save(hosted);
+
+    const nlohmann::json listed = document(run(home, {"chats", "list", "--output-format", "json"}));
+    std::map<std::string, nlohmann::json> rows;
+    for (const nlohmann::json& row : listed.at("data")) {
+        rows[row.at("id").get<std::string>()] = row;
+    }
+    REQUIRE(rows.size() == 2);
+    CHECK(rows.at(hosted.chat_id).at("origin") == "Xcode");
+    CHECK(rows.at(kChatId).at("origin") == "");
+    CHECK_FALSE(rows.at(hosted.chat_id).contains("cwd"));
+
+    const nlohmann::json info =
+        document(run(home, {"chats", "info", hosted.chat_id, "--output-format", "json"}));
+    CHECK(info.at("origin") == "Xcode");
+    CHECK(info.at("cwd") == "/Users/me/Project");
+    for (const auto& [key, value] : rows.at(hosted.chat_id).items()) {
+        CHECK(info.at(key) == value);
+    }
+
+    const Run text = run(home, {"chats", "list"});
+    INFO(text.err);
+    REQUIRE(text.code == 0);
+    CHECK(text.out.find(hosted.chat_id + "  " +
+                        apogee::logger::load(hosted.chat_id, {}).session.updated_at +
+                        "  1 turns  Fix the build  (from Xcode)\n") != std::string::npos);
+    // A chat no host began: its row ends at its name, as before.
+    const apogee::logger::Session plain = apogee::logger::load(kChatId, {}).session;
+    CHECK(text.out.find(std::string{kChatId} + "  " + plain.updated_at +
+                        "  5 turns  Project setup\n") != std::string::npos);
+
+    const Run details = run(home, {"chats", "info", hosted.chat_id});
+    CHECK(details.out.find("backend:   local\n"
+                           "origin:    Xcode\n"
+                           "cwd:       /Users/me/Project\n"
+                           "started:   ") != std::string::npos);
 }
 
 TEST_CASE("chats info refuses a name no chat answers the same in JSON as in text",

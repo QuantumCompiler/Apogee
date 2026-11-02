@@ -290,6 +290,35 @@ TEST_CASE("a new chat is written once it has a turn, and a loaded one with none 
     CHECK_FALSE(std::filesystem::exists(apogee::logger::session_path(secret.chat_id)));
 }
 
+TEST_CASE("an ACP host's new chat closed before an answered turn writes nothing, origin or not",
+          "[chat][session][unwritten][acp]") {
+    // 56c on M28: a session an ACP host opened and closed with nothing
+    // answered leaves no file, no row and no title -- its origin and folder
+    // ride only the first answered turn's save.
+    const TempDir dir{"session-acp-unwritten-" + std::to_string(std::random_device{}())};
+    const EnvGuard home{"APOGEE_HOME", dir.path().string()};
+
+    Session hosted;
+    hosted.chat_id = apogee::logger::new_chat_id();
+    hosted.backend = "claude";
+    hosted.new_chat = true;
+    hosted.origin = "Xcode";
+    hosted.cwd = "/Users/me/Project";
+    CHECK(hosted.unwritten());
+    CHECK(apogee::logger::save(hosted) == apogee::logger::Saved::Unwritten);
+    CHECK_FALSE(std::filesystem::exists(apogee::logger::session_path(hosted.chat_id)));
+    CHECK(apogee::logger::list_sessions().empty());
+
+    hosted.messages = {ChatMessage::user("hello"), ChatMessage::assistant("hi")};
+    hosted.turns = 1;
+    CHECK(apogee::logger::save(hosted) == apogee::logger::Saved::Written);
+    const auto loaded = apogee::logger::load(hosted.chat_id, {});
+    CHECK(loaded.session.origin == "Xcode");
+    CHECK(loaded.session.cwd == "/Users/me/Project");
+    REQUIRE(apogee::logger::list_sessions().size() == 1);
+    CHECK(apogee::logger::list_sessions().front().origin == "Xcode");
+}
+
 TEST_CASE("a session is loadable by its custom name", "[chat][session]") {
     const TempDir dir{"session-name"};
     const EnvGuard home{"APOGEE_HOME", dir.path().string()};
@@ -639,6 +668,69 @@ TEST_CASE("a chat's roster pin is saved with it, and a chat with none saves as b
     const auto odd = deserialize(R"({"schema_version": 2, "chat_id": "c", "model": 7})", {});
     CHECK(odd.session.model.empty());
     REQUIRE(odd.warnings.size() == 1);
+    CHECK(odd.warnings.front().kind == WarningKind::FieldDropped);
+}
+
+TEST_CASE("a chat an ACP host began names it and its folder, and every other saves as before",
+          "[logger][session][acp]") {
+    // 56c, additive (ADR 0006): a chat begun anywhere else is byte for byte
+    // the file it was before -- the golden is today's -- and the schema stays
+    // 2.
+    const Session plain = sample();
+    const std::string plain_text = apogee::logger::serialize(plain);
+    CHECK(plain_text == R"({
+  "backend": "claude",
+  "chat_id": "20260826-120000-abcd",
+  "compactions": 0,
+  "messages": [
+    {
+      "content": "hello",
+      "role": "user"
+    },
+    {
+      "content": "hi there",
+      "role": "assistant"
+    }
+  ],
+  "params": {
+    "max_tokens": 512,
+    "temperature": 0.4
+  },
+  "schema_version": 2,
+  "started_at": "2026-08-26T12:00:00Z",
+  "turns": 2,
+  "updated_at": "2026-08-26T12:05:00Z"
+}
+)");
+    const auto read_plain = deserialize(plain_text, {});
+    CHECK(read_plain.warnings.empty());
+    CHECK(read_plain.session.origin.empty());
+    CHECK(read_plain.session.cwd.empty());
+
+    // A host's: both written, both read back, and nothing else moved.
+    Session hosted = sample();
+    hosted.origin = "Xcode";
+    hosted.cwd = "/Users/me/Project";
+    const std::string text = apogee::logger::serialize(hosted);
+    nlohmann::json written = nlohmann::json::parse(text);
+    CHECK(written.at("origin") == "Xcode");
+    CHECK(written.at("cwd") == "/Users/me/Project");
+    CHECK(written.at("schema_version") == apogee::logger::kCurrentSchemaVersion);
+    written.erase("origin");
+    written.erase("cwd");
+    CHECK(written == nlohmann::json::parse(plain_text));
+    const auto loaded = deserialize(text, {});
+    CHECK(loaded.warnings.empty());
+    CHECK(loaded.session.origin == "Xcode");
+    CHECK(loaded.session.cwd == "/Users/me/Project");
+    CHECK(apogee::logger::serialize(loaded.session) == text);
+
+    // A shape it cannot read is dropped with a warning, the chat resumed.
+    const auto odd =
+        deserialize(R"({"schema_version": 2, "chat_id": "c", "origin": 7, "cwd": []})", {});
+    CHECK(odd.session.origin.empty());
+    CHECK(odd.session.cwd.empty());
+    REQUIRE(odd.warnings.size() == 2);
     CHECK(odd.warnings.front().kind == WarningKind::FieldDropped);
 }
 

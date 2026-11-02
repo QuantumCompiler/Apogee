@@ -82,9 +82,10 @@ namespace {
     return out;
 }
 
-/// `report.pdf (1 file, 9 KiB)`, each named as attached.
-[[nodiscard]] std::string attachments_line(
-    const std::vector<logger::SavedAttachment>& attachments) {
+}  // namespace
+
+std::string attachments_line(const std::vector<logger::SavedAttachment>& attachments) {
+    // `report.pdf (1 file, 9 KiB)`, each named as attached.
     std::string out;
     for (const logger::SavedAttachment& attachment : attachments) {
         out += out.empty() ? "" : ", ";
@@ -98,14 +99,14 @@ namespace {
     return out;
 }
 
-}  // namespace
-
 nlohmann::json session_row_view(const logger::Session& session) {
     // The backend and the roster model it pinned (52a), as the session file
     // records them -- the model empty for a chat on its backend's own.
+    // And since 56c who began it: the ACP host's name, `""` for any other.
     return nlohmann::json{{"id", session.chat_id},      {"updated", session.updated_at},
                           {"turns", session.turns},     {"name", session.display_name()},
-                          {"backend", session.backend}, {"model", session.model}};
+                          {"backend", session.backend}, {"model", session.model},
+                          {"origin", session.origin}};
 }
 
 nlohmann::json session_info_view(const logger::Session& session) {
@@ -127,6 +128,8 @@ nlohmann::json session_info_view(const logger::Session& session) {
                              ? nlohmann::json(*session.params.max_tokens)
                              : nlohmann::json(nullptr);
     view["schema_version"] = session.schema_version;
+    // The folder an ACP host began it in (56c), `""` for any other chat.
+    view["cwd"] = session.cwd;
     return view;
 }
 
@@ -134,6 +137,11 @@ std::string format_session_row(const logger::Session& session) {
     std::ostringstream out;
     out << session.chat_id << "  " << session.updated_at << "  " << session.turns << " turns  "
         << session.display_name();
+    // Who began it, for a chat an ACP host began (56c); every other row is
+    // as it was.
+    if (!session.origin.empty()) {
+        out << "  (from " << session.origin << ")";
+    }
     return out.str();
 }
 
@@ -146,8 +154,15 @@ std::string format_session_info(const logger::Session& session) {
     if (!session.title.empty()) {
         out << "title:     " << session.title << "\n";
     }
-    out << "backend:   " << (session.backend.empty() ? "(default)" : session.backend) << "\n"
-        << "started:   " << session.started_at << "\n"
+    out << "backend:   " << (session.backend.empty() ? "(default)" : session.backend) << "\n";
+    // Who began it and where, for a chat an ACP host began (56c).
+    if (!session.origin.empty()) {
+        out << "origin:    " << session.origin << "\n";
+    }
+    if (!session.cwd.empty()) {
+        out << "cwd:       " << session.cwd << "\n";
+    }
+    out << "started:   " << session.started_at << "\n"
         << "updated:   " << session.updated_at << "\n"
         << "turns:     " << session.turns << "\n"
         << "messages:  " << session.messages.size() << "\n";

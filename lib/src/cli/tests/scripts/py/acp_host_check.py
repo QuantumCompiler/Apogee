@@ -47,6 +47,19 @@ and checks what the Agent Client Protocol promises and what 56a decided:
     stdout, no argv, no file of the home, no handover left behind); a config
     entry of the same name set aside for the session, never spawned; and the
     server's child gone once its session ends, by a newer one or stdin's end;
+  - saved sessions (56c): initialize advertises loadSession and list, resume
+    and close; new -> prompt -> prompt -> close leaves a chat listed with its
+    folder, title and updatedAt, its origin the host's clientInfo name in
+    `chats list`; a load replays exactly its turns, in order and before its
+    answer, each text `chats show`'s, and the next prompt is `chats show`'s
+    turn 3; a resume replays nothing and numbers on; a chat with a
+    compaction and a cancelled turn (tests/fixtures/acp/saved_chat.json)
+    replays with every messageId distinct; an empty session saves nothing;
+    a cwd filter leaves out another folder's chat; closing twice succeeds;
+    an unknown id is refused with -32002, naming it, and so are a chat's
+    name and a path to its file (a chat opens by its id alone); and the
+    same chat resumes in a terminal (`chat --resume`), numbered on, its
+    origin kept;
   - the protocol's own examples (tests/fixtures/acp/schema_examples.jsonl)
     replayed, standing in for a captured Xcode transcript -- and that
     transcript replayed too, once it is captured (xcode-27.1.jsonl).
@@ -348,6 +361,7 @@ def run(apogee, work, fixtures):
         dying_child(start, project, check)
         notices(start, project, check)
         host_servers(apogee, work, env, start, project, check)
+        saved_sessions(apogee, work, env, start, project, fixtures, check)
         replay(start, project, fixtures, check)
     except (EOFError, queue.Empty, KeyError, TypeError) as error:
         failures.append(f"the conversation broke off: {error!r}")
@@ -367,8 +381,8 @@ def run(apogee, work, fixtures):
         return 1
     print("acp conformance: initialize, sessions, prompts, cancel, permission, a cancel at the "
           "sheet, repeated call ids, a mode chosen mid-sheet, switching, a backend that did not "
-          "start, a delegated call, bad input, a dying child, notices, the host's MCP servers and "
-          "the protocol's examples -- OK")
+          "start, a delegated call, bad input, a dying child, notices, the host's MCP servers, "
+          "saved sessions and the protocol's examples -- OK")
     return 0
 
 
@@ -380,7 +394,10 @@ def protocol_and_session(start, project, check):
     result = response.get("result", {})
     check(result.get("protocolVersion") == 1, f"initialize answered {response!r}")
     capabilities = result.get("agentCapabilities", {})
-    check(capabilities.get("loadSession") is False, "loadSession is not false")
+    # Saved sessions (56c): advertised, now that each works.
+    check(capabilities.get("loadSession") is True, "loadSession is not true")
+    check(capabilities.get("sessionCapabilities") == {"list": {}, "resume": {}, "close": {}},
+          f"sessionCapabilities: {capabilities.get('sessionCapabilities')!r}")
     check(capabilities.get("promptCapabilities") ==
           {"image": False, "audio": False, "embeddedContext": False},
           f"promptCapabilities: {capabilities.get('promptCapabilities')!r}")
@@ -1080,6 +1097,242 @@ def host_servers(apogee, work, env, start, project, check):
     check(len([pid for pid, args in descendants(host.process.pid)
                if args.endswith("mcp serve")]) == 1, "not one `self` connection")
     check(host.close() == 0, "the colliding acp did not exit 0")
+
+
+def human_size(size):
+    """A size as `chats show` says it."""
+    for unit, scale in (("GiB", 1024 ** 3), ("MiB", 1024 ** 2), ("KiB", 1024)):
+        if size >= scale:
+            return f"{size // scale} {unit}"
+    return f"{size} B"
+
+
+def shown_user(turn):
+    """A `chats show` turn's user words as a replay sends them: the text, and
+    what rode it named as the text form names it."""
+    text = turn["user"]["text"]
+    named = []
+    for attachment in turn["user"]["attachments"]:
+        files = attachment["files"]
+        part = f"{attachment['name']} ({files} {'file' if files == 1 else 'files'}"
+        if attachment.get("bytes") is not None:
+            part += ", " + human_size(attachment["bytes"])
+        named.append(part + ")")
+    if named:
+        text += ("\n" if text else "") + "attached: " + ", ".join(named)
+    return text
+
+
+def saved_sessions(apogee, work, env, start, project, fixtures, check):
+    """56c: an ACP session is a chat a host can find, reopen and continue."""
+    home = os.path.join(work, "saved-home")
+    os.makedirs(home)
+    home_env = dict(env, APOGEE_HOME=home)
+    echo = os.path.join(work, "saved-echo.json")
+    write_script(echo, [{"text": "answer: {{last_user}}"}])
+    helper = os.path.join(work, "saved-helper.json")
+    write_script(helper, [{"text": "Saved chat"}])
+    for args in (["config", "init"],
+                 ["config", "add-backend", "echo", "--type", "mock", "--model", "mock-e",
+                  "--model-path", echo],
+                 ["config", "add-backend", "helper", "--type", "mock", "--model", "mock-h",
+                  "--model-path", helper],
+                 ["config", "set-default", "echo"],
+                 ["config", "set-default-utility", "helper"]):
+        subprocess.run([apogee, *args], env=home_env, check=True, stdout=subprocess.DEVNULL,
+                       stdin=subprocess.DEVNULL)
+    sessions_dir = os.path.join(home, "sessions")
+    other = os.path.realpath(os.path.join(work, "other-project"))
+    os.makedirs(other)
+
+    def apogee_json(*args):
+        done = subprocess.run([apogee, *args, "--output-format", "json"], env=home_env,
+                              capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        check(done.returncode == 0, f"apogee {' '.join(args)}: {done.stderr!r}")
+        return json.loads(done.stdout or "{}")
+
+    def saved_files():
+        if not os.path.isdir(sessions_dir):
+            return set()
+        return {name for name in os.listdir(sessions_dir) if name.endswith(".json")}
+
+    def prompt(host, session, text):
+        response, updates = host.call("session/prompt", {
+            "sessionId": session, "prompt": [{"type": "text", "text": text}]})
+        check(response.get("result", {}).get("stopReason") == "end_turn",
+              f"the prompt {text!r}: {response!r}")
+        return updates
+
+    def close_and_wait(host, session):
+        children = host.children()
+        response, _ = host.call("session/close", {"sessionId": session})
+        check(response.get("result") == {}, f"session/close: {response!r}")
+        check(all(gone_within(pid) for pid in children),
+              "a closed session's child lives on")
+
+    host = start(home_env=home_env)
+    response, _ = host.call("initialize", {
+        "protocolVersion": 1, "clientCapabilities": {},
+        "clientInfo": {"name": "acp-test", "version": "1"}})
+    capabilities = response.get("result", {}).get("agentCapabilities", {})
+    check(capabilities.get("loadSession") is True and
+          capabilities.get("sessionCapabilities") == {"list": {}, "resume": {}, "close": {}},
+          f"saved sessions are not advertised: {capabilities!r}")
+
+    # An empty session saves nothing: no file, no list entry, no chats row.
+    before = saved_files()
+    response, _ = host.call("session/new", {"cwd": project, "mcpServers": []})
+    empty = response.get("result", {}).get("sessionId")
+    check(bool(empty), f"session/new: {response!r}")
+    close_and_wait(host, empty)
+    check(saved_files() == before, "an empty session wrote a file")
+
+    # new -> prompt -> prompt -> close -> list.
+    response, _ = host.call("session/new", {"cwd": project, "mcpServers": []})
+    session = response.get("result", {}).get("sessionId", "")
+    check(bool(session) and not session.startswith("apogee-"),
+          f"a new session's id is not its chat's: {response!r}")
+    prompt(host, session, "first question")
+    prompt(host, session, "second question")
+    close_and_wait(host, session)
+    # Closing twice, and closing what never was, succeed.
+    for closing in (session, "never-opened"):
+        response, _ = host.call("session/close", {"sessionId": closing})
+        check(response.get("result") == {}, f"closing {closing!r} again: {response!r}")
+    check(session + ".json" in saved_files(), "the session's chat was not saved")
+    check(empty + ".json" not in saved_files(), "the empty session's chat was saved")
+
+    rows = {row["id"]: row for row in apogee_json("chats", "list").get("data", [])}
+    check(rows.get(session, {}).get("origin") == "acp-test",
+          f"chats list does not say where the chat came from: {rows.get(session)!r}")
+    check(empty not in rows, "the empty session is in chats list")
+    response, _ = host.call("session/list", {})
+    listed = {entry["sessionId"]: entry for entry in
+              response.get("result", {}).get("sessions", [])}
+    entry = listed.get(session, {})
+    check(entry.get("cwd") == project, f"session/list's folder: {entry!r}")
+    check(entry.get("updatedAt") == rows.get(session, {}).get("updated"),
+          f"session/list's updatedAt is not chats list's: {entry!r}")
+    name = rows.get(session, {}).get("name")
+    check(entry.get("title") == name if name != session else "title" not in entry,
+          f"session/list's title is not chats list's name {name!r}: {entry!r}")
+    check(empty not in listed, "the empty session is in session/list")
+    check("nextCursor" not in response.get("result", {}), "session/list paged")
+
+    shown = apogee_json("chats", "show", session).get("turns", [])
+    check([turn["turn"] for turn in shown] == [1, 2], f"chats show's turns: {shown!r}")
+
+    # load: exactly the two turns, in order, before the answer, chats show's
+    # texts entry by entry; the next prompt is turn 3.
+    response, updates = host.call("session/load",
+                                  {"sessionId": session, "cwd": project, "mcpServers": []})
+    check("result" in response and "sessionId" not in response.get("result", {}),
+          f"session/load: {response!r}")
+    users = [u for u in updates if u.get("sessionUpdate") == "user_message_chunk"]
+    agents = [u for u in updates if u.get("sessionUpdate") == "agent_message_chunk"]
+    check([u["content"]["text"] for u in users] == [shown_user(turn) for turn in shown],
+          f"the replayed user turns: {users!r} against {shown!r}")
+    check([u["content"]["text"] for u in agents] ==
+          [turn["answer"]["text"] for turn in shown],
+          f"the replayed answers: {agents!r} against {shown!r}")
+    check([u["messageId"] for u in users] == ["entry-0-user", "entry-1-user"],
+          f"the replayed user ids: {users!r}")
+    check(all(u.get("sessionUpdate") in ("user_message_chunk", "agent_message_chunk")
+              for u in updates), f"a replay sent more than the turns: {updates!r}")
+    updates = prompt(host, session, "third question")
+    check("answer: third question" in texts(updates, "agent_message_chunk"),
+          "the loaded session did not answer")
+    close_and_wait(host, session)
+    shown = apogee_json("chats", "show", session).get("turns", [])
+    check([turn["turn"] for turn in shown] == [1, 2, 3] and
+          shown[-1]["user"]["text"] == "third question",
+          f"the turn after a load is not chats show's turn 3: {shown!r}")
+
+    # resume: nothing before its answer, and the numbering goes on.
+    response, updates = host.call("session/resume", {"sessionId": session, "cwd": project})
+    check("result" in response, f"session/resume: {response!r}")
+    check(updates == [], f"session/resume replayed: {updates!r}")
+    prompt(host, session, "fourth question")
+    close_and_wait(host, session)
+    shown = apogee_json("chats", "show", session).get("turns", [])
+    check([turn["turn"] for turn in shown] == [1, 2, 3, 4] and
+          shown[-1]["user"]["text"] == "fourth question",
+          f"the turn after a resume is not listed after the others: {shown!r}")
+    # The same chat resumes in a terminal: `chat --resume`, a driven turn.
+    resumed = subprocess.run(
+        [apogee, "chat", "--resume", session, "--input-format", "stream-json",
+         "--output-format", "stream-json"],
+        input=json.dumps({"type": "user", "text": "fifth question"}) + "\n", env=home_env,
+        cwd=project, capture_output=True, text=True, timeout=TIMEOUT)
+    events = [json.loads(line) for line in resumed.stdout.splitlines() if line.strip()]
+    check(resumed.returncode == 0 and events and events[0].get("chat_id") == session and
+          any(e.get("type") == "result" for e in events),
+          f"chat --resume of the ACP chat: {resumed.returncode} {resumed.stderr[-400:]!r}")
+    shown = apogee_json("chats", "show", session).get("turns", [])
+    check([turn["turn"] for turn in shown] == [1, 2, 3, 4, 5] and
+          shown[-1]["user"]["text"] == "fifth question",
+          f"the terminal's turn is not listed after the host's: {shown!r}")
+    rows = {row["id"]: row for row in apogee_json("chats", "list").get("data", [])}
+    check(rows.get(session, {}).get("origin") == "acp-test",
+          "a reopened chat's origin was rewritten")
+
+    # A cwd filter leaves out a chat begun in another folder.
+    response, _ = host.call("session/new", {"cwd": other, "mcpServers": []})
+    elsewhere = response.get("result", {}).get("sessionId", "")
+    prompt(host, elsewhere, "over here")
+    close_and_wait(host, elsewhere)
+    response, _ = host.call("session/list", {"cwd": project})
+    here = [entry["sessionId"] for entry in response.get("result", {}).get("sessions", [])]
+    check(session in here and elsewhere not in here, f"the cwd filter: {here!r}")
+    response, _ = host.call("session/list", {"cwd": other})
+    there = [entry["sessionId"] for entry in response.get("result", {}).get("sessions", [])]
+    check(there == [elsewhere], f"the other folder's list: {there!r}")
+    info = apogee_json("chats", "info", elsewhere)
+    check(info.get("origin") == "acp-test" and info.get("cwd") == other,
+          f"chats info's origin and cwd: {info!r}")
+
+    # An unknown id is refused, naming it.
+    response, _ = host.call("session/load",
+                            {"sessionId": "no-such-chat", "cwd": project, "mcpServers": []})
+    error = response.get("error", {})
+    check(error.get("code") == -32002 and "no-such-chat" in error.get("message", "") and
+          error.get("data", {}).get("sessionId") == "no-such-chat",
+          f"loading an unknown id: {response!r}")
+    # A chat opens by its id alone: its name, which `--resume` takes, and a
+    # path to its file are refused the same way, so no session of a chat
+    # this process holds is ever passed by another spelling.
+    subprocess.run([apogee, "chats", "title", elsewhere, "Over here"], env=home_env, check=True,
+                   stdout=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+    for method in ("session/load", "session/resume"):
+        for spelling in ("Over here", os.path.join("..", "sessions", elsewhere)):
+            response, updates = host.call(method, {"sessionId": spelling, "cwd": other,
+                                                   "mcpServers": []})
+            error = response.get("error", {})
+            check(error.get("code") == -32002 and
+                  f"no chat has the id '{spelling}'" in error.get("message", "") and
+                  error.get("data", {}).get("sessionId") == spelling and updates == [],
+                  f"{method} by {spelling!r}, not the chat's id: {response!r}")
+
+    # A chat with a compaction and a cancelled turn: every messageId distinct.
+    with open(os.path.join(fixtures, "saved_chat.json"), encoding="utf-8") as handle:
+        fixture = json.loads(handle.read().replace("{{cwd}}", project))
+    with open(os.path.join(sessions_dir, fixture["chat_id"] + ".json"), "w",
+              encoding="utf-8") as handle:
+        json.dump(fixture, handle)
+    response, updates = host.call("session/load", {
+        "sessionId": fixture["chat_id"], "cwd": project, "mcpServers": []})
+    check("result" in response, f"loading the fixture: {response!r}")
+    ids = [u.get("messageId") for u in updates]
+    check(len(ids) == 7 and len(set(ids)) == len(ids) and None not in ids,
+          f"the fixture's replayed ids: {ids!r}")
+    check(updates and "history compacted" in updates[0]["content"]["text"] and
+          "They chose Postgres." in updates[0]["content"]["text"],
+          f"the compaction is not said first: {updates[:1]!r}")
+    check([u["content"]["text"] for u in updates
+           if u.get("sessionUpdate") == "user_message_chunk"] ==
+          ["Which port?", "And the password?", "Which host?"],
+          f"the fixture's user turns: {updates!r}")
+    check(host.close() == 0, "the saved-sessions acp did not exit 0")
 
 
 def replay(start, project, fixtures, check):

@@ -536,3 +536,105 @@ TEST_CASE("the lines a session's child reads, and the refusals it answers a sett
     CHECK(notice.at("title") == "persona: coder");
     CHECK(notice.at("description") == "more");
 }
+
+TEST_CASE("session/list lists the chats a host began, newest first, by exact folder",
+          "[acp][translate][sessions]") {
+    // 56c: a chat begun in a terminal has no folder, and the protocol needs
+    // one for every entry; the title is the name chats list shows, left out
+    // while that is the bare id.
+    const std::vector<apogee::acp::ListedChat> chats{
+        {.id = "c3",
+         .name = "Fix the build",
+         .updated_at = "2026-11-01T12:03:00Z",
+         .origin = "Xcode",
+         .cwd = "/work/app"},
+        {.id = "c2",
+         .name = "c2",
+         .updated_at = "2026-11-01T12:02:00Z",
+         .origin = "acp",
+         .cwd = "/work/other"},
+        {.id = "c1", .name = "From a terminal", .updated_at = "2026-11-01T12:01:00Z"},
+        {.id = "c0", .name = "Elsewhere", .updated_at = "", .origin = "Xcode", .cwd = "/work/app"},
+    };
+    const nlohmann::json all = apogee::acp::listed_sessions(chats, "");
+    CHECK(all == nlohmann::json::parse(R"([
+        {"sessionId": "c3", "cwd": "/work/app", "title": "Fix the build",
+         "updatedAt": "2026-11-01T12:03:00Z"},
+        {"sessionId": "c2", "cwd": "/work/other", "updatedAt": "2026-11-01T12:02:00Z"},
+        {"sessionId": "c0", "cwd": "/work/app", "title": "Elsewhere"}])"));
+    const nlohmann::json here = apogee::acp::listed_sessions(chats, "/work/app");
+    REQUIRE(here.size() == 2);
+    CHECK(here.at(0).at("sessionId") == "c3");
+    CHECK(here.at(1).at("sessionId") == "c0");
+    // Exactly the folder: never a prefix, never a parent.
+    CHECK(apogee::acp::listed_sessions(chats, "/work").empty());
+    CHECK(apogee::acp::listed_sessions(chats, "/work/app/").empty());
+}
+
+TEST_CASE("a load replays each saved entry as chats show reads it, every id distinct",
+          "[acp][translate][sessions]") {
+    // 56c: the user's words, the calls as finished cards without results,
+    // the answer's parts, a compaction as words -- ids from the entry's index
+    // in chats show's turns, so an unanswered turn and a compaction that
+    // share a turn number never share an id.
+    std::vector<apogee::acp::SavedEntry> entries(4);
+    entries[0].compacted = "They chose Postgres.";
+    entries[0].answer = {"Postgres it is."};
+    entries[1].user = "What is in notes.md?\nattached: notes.md (1 file, 12 B)";
+    entries[1].tools = {{.name = "read_file", .summary = R"({"path":"notes.md"})"},
+                        {.name = "mcp__xcode__build", .summary = ""}};
+    entries[1].answer = {"Reading it.", "It holds two lines."};
+    entries[2].user = "and then?";  // cancelled: no answer kept
+    entries[3].user = "again";
+    entries[3].answer = {"Done."};
+    const std::vector<nlohmann::json> updates = apogee::acp::replay_updates(entries);
+
+    std::vector<std::string> kinds;
+    std::set<std::string> ids;
+    for (const nlohmann::json& update : updates) {
+        kinds.push_back(update.at("sessionUpdate").get<std::string>());
+        const std::string id = update.contains("messageId")
+                                   ? update.at("messageId").get<std::string>()
+                                   : update.at("toolCallId").get<std::string>();
+        INFO(id);
+        CHECK(ids.insert(id).second);
+    }
+    CHECK(kinds == std::vector<std::string>{
+                       "agent_message_chunk", "agent_message_chunk", "user_message_chunk",
+                       "tool_call", "tool_call", "agent_message_chunk", "agent_message_chunk",
+                       "user_message_chunk", "user_message_chunk", "agent_message_chunk"});
+    CHECK(updates.at(0) == nlohmann::json{{"sessionUpdate", "agent_message_chunk"},
+                                          {"content",
+                                           {{"type", "text"},
+                                            {"text",
+                                             "history compacted; what came before is this "
+                                             "summary:\nThey chose Postgres."}}},
+                                          {"messageId", "entry-0-compaction"}});
+    CHECK(updates.at(1).at("messageId") == "entry-0-agent-1");
+    CHECK(updates.at(2) == nlohmann::json{{"sessionUpdate", "user_message_chunk"},
+                                          {"content",
+                                           {{"type", "text"},
+                                            {"text",
+                                             "What is in notes.md?\nattached: notes.md (1 file, "
+                                             "12 B)"}}},
+                                          {"messageId", "entry-1-user"}});
+    CHECK(updates.at(3) == nlohmann::json{{"sessionUpdate", "tool_call"},
+                                          {"toolCallId", "entry-1-tool-1"},
+                                          {"title", R"(read_file {"path":"notes.md"})"},
+                                          {"kind", "read"},
+                                          {"status", "completed"}});
+    CHECK(updates.at(4).at("title") == "mcp__xcode__build");
+    CHECK(updates.at(4).at("kind") == "other");
+    CHECK(updates.at(6).at("content").at("text") == "It holds two lines.");
+    CHECK(updates.at(6).at("messageId") == "entry-1-agent-2");
+    CHECK(updates.at(7).at("messageId") == "entry-2-user");
+    CHECK(updates.at(9).at("messageId") == "entry-3-agent-1");
+    CHECK(apogee::acp::replay_updates({}).empty());
+}
+
+TEST_CASE("a new session's child is told who began the chat, under options no one completes",
+          "[acp][translate][sessions]") {
+    CHECK(apogee::acp::kOriginOption == "--acp-origin");
+    CHECK(apogee::acp::kCwdOption == "--acp-cwd");
+    CHECK(apogee::acp::kNoClientOrigin == "acp");
+}

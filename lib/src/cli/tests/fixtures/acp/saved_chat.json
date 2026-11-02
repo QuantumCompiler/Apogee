@@ -1,0 +1,42 @@
+{
+  "schema_version": 2,
+  "chat_id": "20261101-090000-c0de",
+  "backend": "echo",
+  "origin": "acp-test",
+  "cwd": "{{cwd}}",
+  "title": "Database setup",
+  "started_at": "2026-11-01T09:00:00Z",
+  "updated_at": "2026-11-01T09:05:00Z",
+  "turns": 3,
+  "compactions": 1,
+  "messages": [
+    {
+      "role": "system",
+      "content": "The following is a summary of the conversation so far. Earlier messages have been compacted to preserve context window space. Use this summary as the authoritative record of what has been discussed:\n\nThey set up the project.\nThey chose Postgres."
+    },
+    {
+      "role": "assistant",
+      "content": "Postgres it is."
+    },
+    {
+      "role": "user",
+      "content": "Which port?"
+    },
+    {
+      "role": "assistant",
+      "content": "5432."
+    },
+    {
+      "role": "user",
+      "content": "And the password?"
+    },
+    {
+      "role": "user",
+      "content": "Which host?"
+    },
+    {
+      "role": "assistant",
+      "content": "localhost."
+    }
+  ]
+}

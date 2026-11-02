@@ -159,12 +159,13 @@ TEST_CASE("chats list: every saved chat, newest first, the row's facts", "[reads
         document(read(home, {"chats", "list", "--output-format", "json"}));
     REQUIRE(listed.at("data").size() == 2);
     // Each row's backend, and the roster model it pinned -- empty on the
-    // backend's own -- as its session file records them (52a).
+    // backend's own -- as its session file records them (52a); and the ACP
+    // host that began it, `""` for a chat begun anywhere else (56c).
     nlohmann::json newest = listed.at("data")[0];
     newest.erase("updated");  // the save's own stamp
     CHECK(newest == nlohmann::json::parse(R"({"id":"20261007-100500-bbbb","turns":2,)"
                                           R"("name":"second","backend":"claude",)"
-                                          R"("model":"claude-opus-5-5"})"));
+                                          R"("model":"claude-opus-5-5","origin":""})"));
     CHECK(listed.at("data")[1].at("backend") == "local");
     CHECK(listed.at("data")[1].at("model") == "");
     const Read text = read(home, {"chats", "list"});

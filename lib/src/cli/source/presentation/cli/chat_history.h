@@ -19,23 +19,33 @@ namespace apogee::commands {
 /// One saved conversation as `chats list --output-format json` carries it
 /// (28h): the row's facts -- `id`, `updated`, `turns`, `name` -- and since
 /// 52a the `backend` it ran on and the roster `model` it pinned there (empty
-/// for the backend's own), as its session file records them.
+/// for the backend's own), as its session file records them; and since 56c
+/// its `origin`, the ACP host that began it (`""` for a chat begun anywhere
+/// else).
 [[nodiscard]] nlohmann::json session_row_view(const logger::Session& session);
 
 /// One saved conversation as `chats info --output-format json` carries it
 /// (M31): `session_row_view`'s facts, then what the text says beside them --
-/// `{object: "chat.info", id, name, updated, turns, backend, model,
+/// `{object: "chat.info", id, name, updated, turns, backend, model, origin,
 /// custom_name, title, started, messages, compactions, temperature,
-/// max_tokens, schema_version}`, `backend` empty for the default,
+/// max_tokens, schema_version, cwd}`, `backend` empty for the default,
 /// `temperature` and `max_tokens` null when unset, `schema_version` 0 for a
-/// file written before the schema existed.
+/// file written before the schema existed, `cwd` (56c) the folder an ACP host
+/// began it in, `""` for any other.
 [[nodiscard]] nlohmann::json session_info_view(const logger::Session& session);
 
-/// One row of `apogee chats list`.
+/// One row of `apogee chats list`: `  (from <origin>)` at its end for a chat
+/// an ACP host began (56c), and nothing more for any other.
 [[nodiscard]] std::string format_session_row(const logger::Session& session);
 
-/// The body of `apogee chats info <name>`.
+/// The body of `apogee chats info <name>`: `origin:` and `cwd:` lines only
+/// for a chat an ACP host began (56c).
 [[nodiscard]] std::string format_session_info(const logger::Session& session);
+
+/// What rode a turn, named as `chats show`'s text names it -- `report.pdf (1
+/// file, 9 KiB)`, each joined by a comma -- never its bytes. What an ACP
+/// replay names a turn's attachments by too (56c).
+[[nodiscard]] std::string attachments_line(const std::vector<logger::SavedAttachment>& attachments);
 
 /// A saved conversation as `chats show --output-format json` carries it
 /// (M27): `{object: "chat", id, name, title, backend, model, attachments,

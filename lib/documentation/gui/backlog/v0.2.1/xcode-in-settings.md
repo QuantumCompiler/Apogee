@@ -119,7 +119,7 @@ The app writes nothing into Xcode's settings: the person adds the agent in Xcode
 
 This item closes wall **W7**. W3, Xcode's trust tied to signing, is not fixed here; it is shown here in the CLI's words.
 
-Its CLI siblings are [56a](../../../cli/assistant/MILESTONES.md#milestone-as--apogee-in-xcode) (`apogee acp`, shipped 2026-11-01), [56b](../../../cli/assistant/MILESTONES.md#milestone-as--apogee-in-xcode) (Xcode's tools in an ACP session, shipped 2026-11-01), [56c](../../../cli/backlog/v0.2.1/acp-sessions-saved.md) (ACP sessions saved) and 56d (the documents read here).
+Its CLI siblings are [56a](../../../cli/assistant/MILESTONES.md#milestone-as--apogee-in-xcode) (`apogee acp`, shipped 2026-11-01), [56b](../../../cli/assistant/MILESTONES.md#milestone-as--apogee-in-xcode) (Xcode's tools in an ACP session, shipped 2026-11-01), [56c](../../../cli/assistant/MILESTONES.md#milestone-as--apogee-in-xcode) (ACP sessions saved, shipped 2026-11-01) and 56d (the documents read here).
 
 Out of scope:
 - writing Xcode's settings or its `~/Library/Developer/Xcode/CodingAssistant` folders;

@@ -301,6 +301,13 @@ std::string serialize(const Session& session) {
     if (!session.task.empty()) {
         out["task"] = session.task;
     }
+    // Who began it and where (56c): a chat no ACP host began writes neither.
+    if (!session.origin.empty()) {
+        out["origin"] = session.origin;
+    }
+    if (!session.cwd.empty()) {
+        out["cwd"] = session.cwd;
+    }
     if (!session.todo.empty()) {
         out["todo"] = harness::todo_to_json(session.todo);
     }
@@ -428,6 +435,9 @@ LoadedSession deserialize(std::string_view text, const KnownDependencies& known)
         session.suite.reset();
     }
     session.task = string_field(parsed, "task", loaded.warnings);
+    // An older file has neither (56c): a chat begun elsewhere.
+    session.origin = string_field(parsed, "origin", loaded.warnings);
+    session.cwd = string_field(parsed, "cwd", loaded.warnings);
     // The todo (41d): an older file has none; a malformed entry is left out,
     // never fatal.
     if (const auto todo = parsed.find("todo"); todo != parsed.end()) {

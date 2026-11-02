@@ -34,6 +34,9 @@ inline constexpr int kInvalidRequest = -32600;
 inline constexpr int kMethodNotFound = -32601;
 inline constexpr int kInvalidParams = -32602;
 inline constexpr int kInternalError = -32603;
+/// ACP's own (the protocol's error page): "a referenced resource, such as a
+/// session or file, does not exist" -- its `data.sessionId` the id asked for.
+inline constexpr int kResourceNotFound = -32002;
 
 /// One line from the host, classified.
 struct Frame {

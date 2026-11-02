@@ -682,6 +682,63 @@ std::string hello_line(std::string_view client, std::string_view version) {
     return line_of(line);
 }
 
+nlohmann::json listed_sessions(const std::vector<ListedChat>& chats, std::string_view cwd) {
+    nlohmann::json sessions = nlohmann::json::array();
+    for (const ListedChat& chat : chats) {
+        // A chat begun in a terminal has no folder, and the protocol needs
+        // one for every entry: only a host's chats are listed.
+        if (chat.origin.empty() || chat.cwd.empty() || (!cwd.empty() && chat.cwd != cwd)) {
+            continue;
+        }
+        nlohmann::json entry{{"sessionId", chat.id}, {"cwd", chat.cwd}};
+        if (!chat.name.empty() && chat.name != chat.id) {
+            entry["title"] = chat.name;
+        }
+        if (!chat.updated_at.empty()) {
+            entry["updatedAt"] = chat.updated_at;
+        }
+        sessions.push_back(std::move(entry));
+    }
+    return sessions;
+}
+
+std::vector<nlohmann::json> replay_updates(const std::vector<SavedEntry>& entries) {
+    std::vector<nlohmann::json> out;
+    for (std::size_t index = 0; index < entries.size(); ++index) {
+        const SavedEntry& entry = entries[index];
+        const std::string prefix = "entry-" + std::to_string(index) + "-";
+        const auto message = [&](std::string_view kind, const std::string& id,
+                                 std::string_view text) {
+            nlohmann::json update = chunk(kind, text);
+            update["messageId"] = prefix + id;
+            out.push_back(std::move(update));
+        };
+        if (entry.compacted.has_value()) {
+            // Where the chat said `history compacted`, as `chats show` says
+            // it: a host that took no compaction update reads it as words.
+            message("agent_message_chunk", "compaction",
+                    "history compacted; what came before is this summary:\n" + *entry.compacted);
+        } else if (!entry.user.empty()) {
+            message("user_message_chunk", "user", entry.user);
+        }
+        for (std::size_t n = 0; n < entry.tools.size(); ++n) {
+            const SavedEntry::Tool& tool = entry.tools[n];
+            // A finished call, drawn as `chats show` lists it: never its
+            // result, which the listing never shows either.
+            out.push_back(nlohmann::json{
+                {"sessionUpdate", "tool_call"},
+                {"toolCallId", prefix + "tool-" + std::to_string(n + 1)},
+                {"title", tool.summary.empty() ? tool.name : tool.name + " " + tool.summary},
+                {"kind", std::string{tool_kind(tool.name)}},
+                {"status", "completed"}});
+        }
+        for (std::size_t n = 0; n < entry.answer.size(); ++n) {
+            message("agent_message_chunk", "agent-" + std::to_string(n + 1), entry.answer[n]);
+        }
+    }
+    return out;
+}
+
 std::string refused_setting(std::string_view notice) {
     // A set line that did not take is said `set <key>: <why>` (52d); one the
     // line named wrongly, `set: ...`.

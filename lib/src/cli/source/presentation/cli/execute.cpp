@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "acp/host_servers.h"
+#include "acp/translate.h"
 #include "cli/chat_session.h"
 #include "harness/roles.h"
 
@@ -70,6 +71,14 @@ void ExecuteCommand::bind(CLI::App& root, const RootContext& context) {
     cmd->set_help_flag();
     cmd->add_option(std::string{acp::kHandoverOption}, flags->host_servers,
                     "The MCP servers an ACP host handed this session (apogee acp's own)")
+        ->group("");
+    // And who began a new session, in which folder (56c): the chat's
+    // `origin` and `cwd`, hidden and bound here alone in the same way.
+    cmd->add_option(std::string{acp::kOriginOption}, flags->acp_origin,
+                    "The ACP host that began this chat (apogee acp's own)")
+        ->group("");
+    cmd->add_option(std::string{acp::kCwdOption}, flags->acp_cwd,
+                    "The folder an ACP host began this chat in (apogee acp's own)")
         ->group("");
     cmd->set_help_flag("-h,--help", "Print this help message and exit");
     bind_session_flags(*cmd, flags, SessionMode::Execute);

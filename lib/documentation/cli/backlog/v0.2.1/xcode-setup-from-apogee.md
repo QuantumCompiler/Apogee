@@ -86,6 +86,6 @@ Measured, not guessed (2026-10-31, the dev Mac, read-only commands). `xcodebuild
 - presets for the headless `xcrun mcp-server` preview (its long-lived grants are for code-signed agents) and for `lldb-mcp`;
 - the agent itself and W4, Xcode 27's filesystem security layer (56a);
 - Xcode's tools inside an ACP session (56b, shipped 2026-11-01 -- [Milestone AS](../../assistant/MILESTONES.md#milestone-as--apogee-in-xcode)), which decided how a configured `xcode` server meets the servers Xcode hands a session: a host's server of the same name, or the same command and arguments (`xcrun` found on `PATH`), sets the config's aside for that session;
-- saving ACP sessions (56c, [`acp-sessions-saved.md`](acp-sessions-saved.md)).
+- saving ACP sessions (56c, shipped 2026-11-01 -- [Milestone AS](../../assistant/MILESTONES.md#milestone-as--apogee-in-xcode)).
 
 GUI sibling: [5a, Xcode in Settings](../../../gui/backlog/v0.2.1/xcode-in-settings.md), reads this item's JSON (`check`'s Xcode rows, `mcp presets`, `acp.registration`) and classifies the verb in its ParityTable. 5a is gated on this item; neither blocks the other's spec.

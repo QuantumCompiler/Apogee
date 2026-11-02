@@ -4,15 +4,18 @@
 
 #include <algorithm>
 #include <array>
+#include <exception>
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <system_error>
 #include <utility>
 
 #include "acp/host_servers.h"
 #include "acp/server.h"
+#include "cli/chat_history.h"
 #include "cli/chat_session.h"
 #include "cli/helpers.h"
 #include "cli/tui_child.h"
@@ -42,11 +45,12 @@ constexpr std::array<std::string_view, 7> kProtocolFlags{
                "stdio, and each session's apogee runs in machine mode";
     }
     if (flag == "--resume" || flag == "--continue") {
-        return "each ACP session is a new one; saving and resuming them is a later Apogee's "
-               "(56c)";
+        return "the host reopens a saved chat itself, with session/load or session/resume, by "
+               "the id chats list gives it";
     }
     if (flag == "--private") {
-        return "every ACP session is private already: nothing of it is written";
+        return "every ACP session is saved as a chat, which chats delete removes; a private "
+               "mode is not offered here";
     }
     return "the host draws the session: there is no terminal to colour or render for";
 }
@@ -96,11 +100,13 @@ void run_acp(const RootContext& context, const SessionFlags& flags, const CLI::A
     setup.bypass_allowed = flags.allow_bypass || setup.mode == "bypass";
     setup.verbose = flags.verbose;
     setup.home = platform::home_directory().value_or(std::string{});
+    // The one session store (56c): what the host lists and reopens.
+    setup.chats = acp_saved_chats();
 
-    // Execute's own session, in machine mode, with what this line carries.
+    // Execute's own session, in machine mode, with what this line carries --
+    // saved as an ordinary chat (56c), never --private.
     std::vector<std::string> words{"execute",         "--input-format", "stream-json",
-                                   "--output-format", "stream-json",    "--tools",
-                                   "--private"};
+                                   "--output-format", "stream-json",    "--tools"};
     for (std::string& word : forwarded_flags(command)) {
         words.push_back(std::move(word));
     }
@@ -191,6 +197,57 @@ std::vector<mcp::ServerSpec> host_mcp_servers(const std::filesystem::path& hando
     return specs;
 }
 
+std::vector<acp::SavedEntry> replay_entries(const logger::Session& session) {
+    std::vector<acp::SavedEntry> entries;
+    for (const logger::SavedTurn& turn : logger::saved_turns(session)) {
+        acp::SavedEntry entry;
+        if (turn.compacted.has_value()) {
+            entry.compacted = *turn.compacted;
+        } else {
+            // `chats show`'s `You:` line, and its `attached:` line under it.
+            entry.user = turn.user;
+            if (!turn.attachments.empty()) {
+                entry.user += (entry.user.empty() ? "" : "\n") + std::string{"attached: "} +
+                              attachments_line(turn.attachments);
+            }
+        }
+        for (const logger::SavedTool& tool : turn.tools) {
+            entry.tools.push_back(
+                acp::SavedEntry::Tool{.name = tool.name, .summary = tool.summary});
+        }
+        entry.answer = turn.answer;
+        entries.push_back(std::move(entry));
+    }
+    return entries;
+}
+
+acp::SavedChats acp_saved_chats() {
+    return acp::SavedChats{
+        .list =
+            [] {
+                // `chats list`'s own read, newest first.
+                std::vector<acp::ListedChat> chats;
+                for (const logger::Session& session : logger::list_sessions()) {
+                    chats.push_back(acp::ListedChat{.id = session.chat_id,
+                                                    .name = session.display_name(),
+                                                    .updated_at = session.updated_at,
+                                                    .origin = session.origin,
+                                                    .cwd = session.cwd});
+                }
+                return chats;
+            },
+        .read = [](const std::string& id, std::string& error) -> std::optional<acp::SavedChat> {
+            // Read as `chats show` reads it: the loader a resume reads with.
+            try {
+                const logger::Session session = logger::load(id, {}).session;
+                return acp::SavedChat{.id = session.chat_id, .entries = replay_entries(session)};
+            } catch (const std::exception& e) {
+                error = e.what();
+                return std::nullopt;
+            }
+        }};
+}
+
 std::string_view AcpCommand::name() const noexcept {
     return "acp";
 }
@@ -220,7 +277,8 @@ void AcpCommand::bind(CLI::App& root, const RootContext& context) {
         "reaches out asked about through the host's permission sheet. Every configured chat "
         "backend is offered as a model, the subscription CLIs included, the default first; "
         "manual, accept-edits and plan as modes (bypass with --allow-bypass). Every session is "
-        "private: nothing of it is saved. The flags here reach every session, as execute's "
+        "saved as a chat that names the host that began it (chats list, chats show), and the "
+        "host can list, reopen and resume it. The flags here reach every session, as execute's "
         "own, run in the project folder: a relative --attach or --image is found there. In "
         "Xcode 26.6 or later: Settings > Intelligence > Agents > Add an Agent, this "
         "binary's absolute path, and the argument acp.");

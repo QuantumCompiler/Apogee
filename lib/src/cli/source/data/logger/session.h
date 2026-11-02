@@ -224,6 +224,16 @@ struct Session {
     /// The ledger names the chat and the chat names its task; `chats delete`
     /// refuses a chat whose task is live.
     std::string task;
+    /// Who began this chat (56c): an ACP host's `clientInfo.name` as it sent
+    /// it -- `acp` when it sent none -- for a chat begun through `apogee
+    /// acp`. Set when the chat begins and never rewritten by a resume, from
+    /// anywhere, as `started_at` answers when. Empty for a chat begun anywhere
+    /// else, which writes nothing, so it saves exactly as before.
+    std::string origin;
+    /// The folder an ACP host began this chat in (56c), as its `session/new`
+    /// named it -- what its `session/list` filters by. Empty, as `origin` is,
+    /// for a chat no host began, writing nothing.
+    std::string cwd;
     /// The plan the model keeps with `todo_write` (41d), as it last left it
     /// -- shown again when the chat resumes. Empty writes nothing, so a chat
     /// that never kept one saves exactly as before.

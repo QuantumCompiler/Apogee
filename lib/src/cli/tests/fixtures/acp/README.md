@@ -13,3 +13,10 @@ with its temporary project and the session `session/new` minted.
 `session/prompt`, env and header values and home-folder paths redacted by the
 stub. The capture changes Xcode's settings, so it is the user's to run; the
 suite replays it whenever the file is here.
+
+`saved_chat.json` -- a saved chat as the session store writes it (56c): a
+compaction, an answered turn, a turn left unanswered (cancelled) and another
+answered, begun by `acp-test` in `{{cwd}}`. `cli.acp_conformance` copies it
+into its home's `sessions/` and loads it with `session/load`: the compaction
+and the unanswered turn share turn numbers with their neighbours, and every
+replayed `messageId` must still be distinct.

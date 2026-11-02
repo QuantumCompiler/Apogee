@@ -1284,8 +1284,8 @@ Since 28h the listings a host UI renders are reads of the same kind:
 apogee models list --output-format json     # {"object":"list","data":[…],"folded":N}; --all for the folded ones too
 apogee models info <backend> --output-format json    # {"name":…,"fields":[{"field":"backend","value":…},…]}
 apogee models status --output-format json            # {"fields":[{"field":"chat","value":…},…]}
-apogee chats list --output-format json      # {"object":"list","data":[{"id","updated","turns","name","backend","model"},…]}
-apogee chats info <id|name> --output-format json     # {"object":"chat.info","id",…,"messages","compactions",…}
+apogee chats list --output-format json      # {"object":"list","data":[{"id","updated","turns","name","backend","model","origin"},…]}
+apogee chats info <id|name> --output-format json     # {"object":"chat.info","id",…,"messages","compactions",…,"cwd"}
 apogee chats recall --output-format json    # {"object":"list","data":[{"chat","name","updated","summary"},…],"index","pending"}
 apogee agents list --output-format json     # byte for byte GET /v1/admin/agents
 apogee mcp list --output-format json        # GET /v1/admin/mcp-servers's entries, with what connecting found
@@ -1495,7 +1495,14 @@ command's stdout ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve))
 - **`chats list`**: newest first, each conversation's `id`, `updated`, `turns`
   and `name`, and since 52a the `backend` it runs on and the roster `model` it
   pinned there with `-m` or `/model` — empty when it runs on the backend's own
-  model — as its session file records them.
+  model — as its session file records them. Since 56c, `origin`: who began
+  it -- the `clientInfo.name` of the ACP host whose `apogee acp` session it is
+  ([acp.md](acp.md#saved-sessions)), `acp` for a host that sent none -- and
+  `""` for a chat begun anywhere else. It is set when the chat begins and never
+  rewritten by a resume; a binary older than 56c that resumes such a chat
+  writes it back without `origin` and `cwd`, since it saves only what it
+  knows, and the chat then reads as one begun elsewhere. The text row ends
+  `  (from <origin>)` only when it is set.
 - **`chats info`** (since M31): one conversation's details, `object`
   `chat.info` -- `chats list`'s row (`id`, `updated`, `turns`, `name`,
   `backend`, `model`), then what the text says beside it: `custom_name` (the
@@ -1503,7 +1510,10 @@ command's stdout ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve))
   generated title), `started`, `messages` (how many its history holds),
   `compactions`, `temperature` and `max_tokens` (`null` where unset, the lines
   the text leaves out) and `schema_version` (`0` for a file written before
-  the schema existed, the text's `legacy`). `backend` is `""` where the text
+  the schema existed, the text's `legacy`), and since 56c `cwd`, the folder
+  an ACP host began it in, as its `session/new` named it (`""` for any other
+  chat; `origin` rides the row). The text gains `origin:` and `cwd:` lines
+  only when they are set. `backend` is `""` where the text
   says `(default)`. A name no chat answers is refused as the text refuses it:
   `apogee chats: no chat named '<name>'` on stderr, exit `1`, nothing on
   stdout.

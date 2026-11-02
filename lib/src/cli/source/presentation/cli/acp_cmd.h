@@ -6,9 +6,11 @@
 #include <string_view>
 #include <vector>
 
+#include "acp/session.h"
 #include "acp/translate.h"
 #include "cli/command.h"
 #include "contracts/config.h"
+#include "logger/session.h"
 #include "mcp/registry.h"
 
 namespace CLI {
@@ -35,6 +37,10 @@ class App;
 /// `--input-format`, `--resume`, `-c`, `--private`, `--no-color`, `--raw` --
 /// are refused at launch, in the command's words, and hidden from its help
 /// and completion.
+///
+/// **Every session is a saved chat (56c)**, in the one store: what the host
+/// lists and reopens is read here, the composition root, with the reads
+/// `chats list` and `chats show` use -- `acp/` holds no store of its own.
 namespace apogee::commands {
 
 /// The flags the protocol owns, as the session table spells them.
@@ -61,6 +67,20 @@ namespace apogee::commands {
 /// text of an `[mcp] warning:` line.
 [[nodiscard]] std::vector<mcp::ServerSpec> host_mcp_servers(const std::filesystem::path& handover,
                                                             std::vector<std::string>& notes);
+
+/// A saved chat's entries as an ACP load replays them (56c):
+/// `logger::saved_turns`, in order, each in the words `chats show` prints --
+/// the user's words with what rode them named (`attached: ...`), each tool
+/// call's name and one-line arguments, the answer's parts, a compaction's
+/// summary.
+[[nodiscard]] std::vector<acp::SavedEntry> replay_entries(const logger::Session& session);
+
+/// The one session store as `acp` reads it (56c): `logger::list_sessions`
+/// for `session/list`, `logger::load` and `replay_entries` for
+/// `session/load` and `session/resume` -- the chat's own id beside its
+/// entries, so the agent can tell an id from a name; refused in
+/// `chats show`'s words (`no chat named '<id>'`).
+[[nodiscard]] acp::SavedChats acp_saved_chats();
 
 class AcpCommand final : public Command {
 public:
