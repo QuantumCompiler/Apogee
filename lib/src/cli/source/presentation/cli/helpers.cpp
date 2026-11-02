@@ -25,7 +25,9 @@
 #include "contracts/utf8.h"
 #include "harness/harness.h"
 #include "harness/roles.h"
+#include "platform/child_process.h"
 #include "platform/platform.h"
+#include "scaffold/mcp_server.h"
 #include "transport/http_client.h"
 #include "version/version.h"
 
@@ -228,6 +230,73 @@ agent::UrlFetcher make_http_fetcher(std::shared_ptr<backends::HttpClient> client
     };
 }
 
+namespace {
+
+/// Whether two server names are one, as the config compares them.
+[[nodiscard]] bool same_name(std::string_view lhs, std::string_view rhs) {
+    const harness::CaseInsensitiveLess less;
+    return !less(lhs, rhs) && !less(rhs, lhs);
+}
+
+/// `command` as a comparison sees it: a bare program name found on PATH,
+/// else as written -- either way in one form, `lexically_normal` (a PATH
+/// entry such as `/usr//bin` finds `xcrun` as `/usr//bin/xcrun`) and then
+/// generic, since the normal form spells every separator the preferred way
+/// (`\usr\bin\xcrun` on Windows).
+[[nodiscard]] std::string resolved_command(
+    const std::string& command, const std::function<std::string(std::string_view)>& find) {
+    const bool written_as_path =
+        command.find('/') != std::string::npos || command.find('\\') != std::string::npos;
+    const std::string found = written_as_path || !find ? std::string{} : find(command);
+    return std::filesystem::path{found.empty() ? command : found}
+        .lexically_normal()
+        .generic_string();
+}
+
+}  // namespace
+
+std::vector<mcp::ServerSpec> session_mcp_specs(
+    std::vector<mcp::ServerSpec> configured, const std::vector<mcp::ServerSpec>& hosted,
+    const std::function<std::string(std::string_view)>& find_on_path,
+    std::vector<std::string>& said) {
+    std::vector<mcp::ServerSpec> taken;
+    for (const mcp::ServerSpec& host : hosted) {
+        mcp::ServerSpec spec = host;
+        try {
+            spec.name = scaffold::sanitize_server_name(host.name);
+        } catch (const std::exception& e) {
+            said.push_back("[mcp] warning: the host's server '" + host.name +
+                           "' was skipped: " + e.what());
+            continue;
+        }
+        if (std::ranges::any_of(taken, [&spec](const mcp::ServerSpec& other) {
+                return same_name(other.name, spec.name);
+            })) {
+            said.push_back("[mcp] warning: the host's server '" + host.name +
+                           "' was skipped: the host named a server '" + spec.name + "' already");
+            continue;
+        }
+        spec.enabled = true;
+        const std::string command = resolved_command(spec.command, find_on_path);
+        std::erase_if(configured, [&](const mcp::ServerSpec& entry) {
+            const bool same = same_name(entry.name, spec.name) ||
+                              (resolved_command(entry.command, find_on_path) == command &&
+                               entry.args == spec.args);
+            if (same) {
+                said.push_back("[mcp] warning: " + entry.name +
+                               ": the config's server is set aside for this session -- the "
+                               "host's '" +
+                               spec.name + "' takes its place");
+            }
+            return same;
+        });
+        taken.push_back(std::move(spec));
+    }
+    configured.insert(configured.end(), std::make_move_iterator(taken.begin()),
+                      std::make_move_iterator(taken.end()));
+    return configured;
+}
+
 agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options) {
     agent::ToolRegistry registry;
     if (options.policy == harness::AgentToolPolicy::None) {
@@ -266,11 +335,12 @@ agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options) {
     tools::register_native_toolsets(registry, toolsets);
 
     // Third-party servers last, so a namespaced name can never shadow a
-    // native one -- the registry refuses duplicates either way.
-    if (options.mcp != nullptr && options.config != nullptr &&
-        !options.config->mcp_servers.empty()) {
+    // native one -- the registry refuses duplicates either way. The config's
+    // entries, then an ACP host's (56b): one list, one dial, one register.
+    const bool configured = options.config != nullptr && !options.config->mcp_servers.empty();
+    if (options.mcp != nullptr && (configured || !options.session_mcp_servers.empty())) {
         std::vector<mcp::ServerSpec> specs;
-        if (options.mcp_servers.has_value()) {
+        if (configured && options.mcp_servers.has_value()) {
             // Only what the agent named, in the config's own spelling.
             for (const std::string& wanted : *options.mcp_servers) {
                 const auto it = options.config->mcp_servers.find(wanted);
@@ -284,10 +354,20 @@ agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options) {
                 specs.push_back(mcp::ServerSpec{it->first, it->second.command, it->second.args,
                                                 it->second.env, it->second.enabled});
             }
-        } else {
+        } else if (configured) {
             for (const auto& [name, server] : options.config->mcp_servers) {
                 specs.push_back(
                     mcp::ServerSpec{name, server.command, server.args, server.env, server.enabled});
+            }
+        }
+        if (!options.session_mcp_servers.empty()) {
+            std::vector<std::string> said;
+            specs = session_mcp_specs(std::move(specs), options.session_mcp_servers,
+                                      platform::find_on_path, said);
+            if (options.mcp_status) {
+                for (const std::string& line : said) {
+                    options.mcp_status(line);
+                }
             }
         }
         mcp::RegistryOptions mcp_options;
@@ -295,6 +375,9 @@ agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options) {
         mcp_options.server_log = options.mcp_server_log;
         mcp_options.spawn = options.mcp_spawn;
         mcp_options.client_version = std::string{version::semantic()};
+        if (options.mcp_connect_timeout.has_value()) {
+            mcp_options.connect_timeout = *options.mcp_connect_timeout;
+        }
         if (!specs.empty()) {
             options.mcp->connect_all(specs, mcp_options);
             options.mcp->register_into(registry);

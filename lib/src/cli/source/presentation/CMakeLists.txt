@@ -67,6 +67,8 @@ apogee_add_module(acp
     acp/session.cpp
     acp/server.h
     acp/server.cpp
+    acp/host_servers.h
+    acp/host_servers.cpp
 )
 target_link_libraries(apogee_presentation_acp PUBLIC nlohmann_json::nlohmann_json)
 

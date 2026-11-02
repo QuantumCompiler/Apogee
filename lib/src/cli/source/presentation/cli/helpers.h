@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -107,7 +108,40 @@ struct BuiltInToolOptions {
     std::function<std::unique_ptr<mcp::Transport>(const mcp::ServerSpec&, mcp::StderrTail::Sink,
                                                   std::string&)>
         mcp_spawn{};
+
+    /// The stdio servers an ACP host handed this session (56b), as the host
+    /// named them: this session's alone, never written to the config. They
+    /// join the config's entries in the one `connect_all` -- after them, on
+    /// `mcp`, under the same bound -- through `session_mcp_specs`'s rules,
+    /// so a host's server connects even when the config lists none.
+    std::vector<mcp::ServerSpec> session_mcp_servers{};
+    /// The bound on each server's connect and handshake; unset, the
+    /// registry's own (20 s).
+    std::optional<std::chrono::milliseconds> mcp_connect_timeout{};
 };
+
+/// The servers a session connects (56b): `configured` -- the config's
+/// entries, as the agent's list chose them -- then `hosted`, the ACP host's.
+///
+/// - **Names.** Each host name is made a server name by `mcp create`'s rule
+///   (`scaffold::sanitize_server_name`: `.` and `:` become `-`; anything but
+///   letters, digits, `_` and `-`, or a `__`, refused): one it refuses is
+///   skipped, and so is a second host server of one name.
+/// - **Displacement.** A host server displaces, for this session only, every
+///   config entry that shares its name (case-insensitively, as config
+///   compares names) or its command and arguments -- a bare command found on
+///   PATH by `find_on_path` first, and both commands compared in one form
+///   (`lexically_normal`, generic separators): the host's copy carries the
+///   session's own binding (Xcode's `MCP_XCODE_SESSION_ID`), and two of one
+///   server would offer the model every tool twice.
+///
+/// So no two servers share a name, and no tool is registered twice. What it
+/// skipped or displaced goes to `said`, one `[mcp] warning:` line each --
+/// naming servers, never an env value.
+[[nodiscard]] std::vector<mcp::ServerSpec> session_mcp_specs(
+    std::vector<mcp::ServerSpec> configured, const std::vector<mcp::ServerSpec>& hosted,
+    const std::function<std::string(std::string_view)>& find_on_path,
+    std::vector<std::string>& said);
 
 /// The status callback for an interactive surface: progress repaints the one
 /// transient line, a warning stays -- a server that failed to connect is

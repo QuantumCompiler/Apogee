@@ -52,15 +52,35 @@ Session::Session(std::string id, std::filesystem::path cwd, const AgentSetup& se
 Session::~Session() {
     end();
     wait(std::chrono::seconds{10});
+    discard_handover(handover_);
 }
 
-void Session::open(const nlohmann::json& request_id) {
+void Session::open(const nlohmann::json& request_id, const HostServers& servers) {
     platform::ChildCommand command = setup_.child;
     command.working_directory = cwd_.string();
     std::string error;
+    if (!servers.empty()) {
+        // Names and env keys on stderr, a host's log -- never a value.
+        if (!servers.servers.empty()) {
+            diagnostics_.line("session " + id_ + ": the host's MCP servers: " + describe(servers));
+        }
+        // The values ride a file only the child reads, never its argv or
+        // its environment; a handover that cannot be made leaves the
+        // session without them, said, and never fatal.
+        handover_ = write_handover(servers, setup_.handover_root, error);
+        if (handover_.empty()) {
+            diagnostics_.line("session " + id_ +
+                              ": the host's MCP servers could not be handed to it: " + error);
+            error.clear();
+        } else {
+            command.arguments.emplace_back(kHandoverOption);
+            command.arguments.push_back(handover_.string());
+        }
+    }
     std::unique_ptr<platform::ChildProcess> child = platform::start_child(command, error);
     const std::unique_lock lock{mutex_};
     if (child == nullptr) {
+        discard_handover(std::exchange(handover_, {}));
         ended_ = true;
         ended_reason_ = "apogee's session could not start: " + error;
         peer_.send(error_response(request_id, kInternalError, ended_reason_));
@@ -348,6 +368,8 @@ void Session::child_ended() {
 
     const std::unique_lock lock{mutex_};
     ended_ = true;
+    // A child that ended before it read its handover: the values go now.
+    discard_handover(std::exchange(handover_, {}));
     if (open_id_.has_value()) {
         peer_.send(error_response(*open_id_, kInternalError,
                                   "apogee's session could not open: it ended" + how));
@@ -396,6 +418,9 @@ void Session::translate_event(std::string_view line) {
     switch (rule->disposition) {
         case Disposition::SessionStart: {
             started_ = true;
+            // Open, so the child has read and removed its handover; one it
+            // could not remove goes now.
+            discard_handover(std::exchange(handover_, {}));
             // The child says what it runs: a suite's root, a model pinned
             // on a backend -- the menu shows it, among the others.
             if (const std::string model = string_of(event, "model"); !model.empty()) {

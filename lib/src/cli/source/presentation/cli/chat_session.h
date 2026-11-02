@@ -130,6 +130,11 @@ struct SessionFlags {
     /// Execute only (27t): offer the suite's root model the symphonies as
     /// tools for this session, as a suite's `orchestrate: true` does.
     bool orchestrate = false;
+    /// Execute only, hidden (56b): the handover of the MCP servers an ACP
+    /// host named for this session (`acp/host_servers.h`), written by `apogee
+    /// acp` -- read and removed as the session opens, its servers connected
+    /// beside the config's for this session alone.
+    std::string host_servers;
     /// No busy line while the members load.
     bool quiet = false;
     /// The arbitrary-branch review: the git tools' defaults and a system

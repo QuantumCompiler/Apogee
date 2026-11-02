@@ -16,6 +16,7 @@
 #include <thread>
 #include <vector>
 
+#include "acp/host_servers.h"
 #include "acp/jsonrpc.h"
 #include "acp/translate.h"
 #include "platform/child_process.h"
@@ -34,6 +35,12 @@
 /// second drains its stderr into an 8 KiB tail -- folded into a failure,
 /// and under `--verbose` copied raw to `acp`'s own stderr. The child is ended
 /// by closing its stdin, as any driver ends machine mode.
+///
+/// **The host's MCP servers (56b)** reach the child in a handover file
+/// (`acp/host_servers.h`) named by a hidden `execute` option: the child
+/// connects them beside the config's for its life alone, and says what it
+/// could not in one notice. The file is removed once read -- by the child,
+/// and by the session once the child has opened or ended, should it not.
 namespace apogee::acp {
 
 /// What every session of one `apogee acp` is launched with, composed by
@@ -57,6 +64,9 @@ struct AgentSetup {
     /// The home folder each child inherits: where a call's `~/...` target is
     /// located. Empty, such a target is drawn with no location.
     std::filesystem::path home{};
+    /// Where a session's handover of the host's MCP servers is made (56b);
+    /// empty, the system's temporary folder.
+    std::filesystem::path handover_root{};
 };
 
 /// What the host said of itself at `initialize`.
@@ -101,10 +111,12 @@ public:
         return id_;
     }
 
-    /// Starts the child. `session/new` -- request `request_id` -- is
-    /// answered when the child says it is open (its `session` event), or
-    /// with an error when it cannot start or ends first.
-    void open(const nlohmann::json& request_id);
+    /// Starts the child, handing it `servers` -- the host's MCP servers
+    /// (56b), when it named any. `session/new` -- request `request_id` -- is
+    /// answered when the child says it is open (its `session` event), after
+    /// it has connected them, or with an error when it cannot start or ends
+    /// first.
+    void open(const nlohmann::json& request_id, const HostServers& servers = {});
 
     /// `session/prompt`: one `user` line, the turn answered when its
     /// `result` or `error` arrives.
@@ -170,6 +182,8 @@ private:
     Diagnostics& diagnostics_;
 
     std::unique_ptr<platform::ChildProcess> child_;
+    /// The handover of the host's MCP servers, until it is gone.
+    std::filesystem::path handover_;
     std::thread reader_;
     std::thread stderr_reader_;
 

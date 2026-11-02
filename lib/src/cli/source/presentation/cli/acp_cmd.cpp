@@ -11,6 +11,7 @@
 #include <system_error>
 #include <utility>
 
+#include "acp/host_servers.h"
 #include "acp/server.h"
 #include "cli/chat_session.h"
 #include "cli/helpers.h"
@@ -168,6 +169,26 @@ std::vector<std::string> forwarded_flags(const CLI::App& command) {
         }
     }
     return words;
+}
+
+std::vector<mcp::ServerSpec> host_mcp_servers(const std::filesystem::path& handover,
+                                              std::vector<std::string>& notes) {
+    std::string error;
+    acp::HostServers read = acp::read_handover(handover, error);
+    if (!error.empty()) {
+        notes.push_back("the host's MCP servers could not be read: " + error);
+        return {};
+    }
+    notes.insert(notes.end(), read.notes.begin(), read.notes.end());
+    std::vector<mcp::ServerSpec> specs;
+    for (acp::HostServer& server : read.servers) {
+        specs.push_back(mcp::ServerSpec{.name = std::move(server.name),
+                                        .command = std::move(server.command),
+                                        .args = std::move(server.args),
+                                        .env = std::move(server.env),
+                                        .enabled = true});
+    }
+    return specs;
 }
 
 std::string_view AcpCommand::name() const noexcept {

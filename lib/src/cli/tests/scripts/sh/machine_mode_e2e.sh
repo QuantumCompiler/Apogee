@@ -394,6 +394,37 @@ assert refused.returncode == 1 and "compaction by broken failed: " in refused.st
 print("record-truth: compaction, numbering, resume notices and outside edits told truly - OK")
 PY
 
+# --- a session's MCP warnings reach the driver (56b) ---------------------------
+# A driver reads no stderr: a configured server that will not start was said
+# there alone. Now what the startup said that stays -- each warning -- is one
+# `notice` after the `session` event, the dying server's last line in it once;
+# stderr keeps it as before, and the server that connected is no notice.
+MW_HOME="$WORK_DIR/mcp-warnings"
+mkdir -p "$MW_HOME"
+printf '#!/bin/sh\necho "fatal: no upstream" >&2\nexit 1\n' >"$MW_HOME/dying.sh"
+chmod +x "$MW_HOME/dying.sh"
+mw() { APOGEE_HOME="$MW_HOME" "$APOGEE_BIN" "$@" </dev/null >/dev/null; }
+mw config init || fail "mcp-warnings: config init"
+mw config add-backend mock --type mock --model mock-1 || fail "mcp-warnings: add mock"
+mw config set-default mock || fail "mcp-warnings: set-default"
+mw mcp create dying --command "$MW_HOME/dying.sh" || fail "mcp-warnings: register dying"
+mw mcp create self --command "$APOGEE_BIN" --args mcp serve || fail "mcp-warnings: register self"
+APOGEE_HOME="$MW_HOME" "$APOGEE_BIN" chat --tools --private --output-format stream-json \
+    --input-format stream-json </dev/null >"$MW_HOME/out.jsonl" 2>"$MW_HOME/err.txt" \
+    || fail "mcp-warnings: the driven chat failed: $(cat "$MW_HOME/err.txt")"
+python3 - "$MW_HOME/out.jsonl" "$MW_HOME/err.txt" <<'PY' || fail "a session's MCP warnings did not reach the driver"
+import json, sys
+events = [json.loads(line) for line in open(sys.argv[1]) if line.strip()]
+assert events and events[0]["type"] == "session", events
+said = [e["text"] for e in events if e["type"] == "notice" and "[mcp]" in e["text"]]
+assert len(said) == 1, said
+assert said[0].startswith("[mcp] warning: dying: connect failed (skipped)"), said
+assert said[0].count("fatal: no upstream") == 1, said
+assert "connected" not in said[0] and "connecting" not in said[0], said
+assert "[mcp] warning: dying: connect failed" in open(sys.argv[2]).read()
+print("mcp-warnings: one notice after the session, stderr as before - OK")
+PY
+
 # --- turn ids and cancel (28f) ------------------------------------------------
 # A driver over real pipes: every turn-scoped event carries its turn; a cancel
 # with nothing in flight changes nothing; a cancel mid-stream ends the turn in

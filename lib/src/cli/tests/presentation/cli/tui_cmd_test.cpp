@@ -175,13 +175,15 @@ TEST_CASE("tui completes, and its help says what it opens", "[cli][tui][completi
 
 namespace {
 
-/// Every spelling of every option `name` takes, help aside.
-[[nodiscard]] std::set<std::string> option_spellings(const CLI::App& root,
-                                                     const std::string& name) {
+/// Every spelling of every option `name` takes, help aside -- the ones a
+/// person is shown, or with `hidden` the plumbing no help or completion shows
+/// (`group("")`).
+[[nodiscard]] std::set<std::string> option_spellings(const CLI::App& root, const std::string& name,
+                                                     bool hidden = false) {
     std::set<std::string> out;
     const CLI::App* sub = root.get_subcommand(name);
     for (const CLI::Option* option : sub->get_options()) {
-        if (option == sub->get_help_ptr()) {
+        if (option == sub->get_help_ptr() || option->get_group().empty() != hidden) {
             continue;
         }
         for (const std::string& spelling : option->get_lnames()) {
@@ -208,6 +210,11 @@ TEST_CASE("apogee tui takes the session table: every flag execute takes, nothing
     CHECK(tui.contains("--effort"));
     CHECK(tui.contains("--orchestrate"));
     CHECK(std::ranges::includes(tui, option_spellings(root.app(), "chat")));
+    // Execute's one piece of plumbing, `apogee acp`'s handover of a host's MCP
+    // servers (56b), is execute's alone: the shell's door never takes it.
+    CHECK(option_spellings(root.app(), "execute", true) ==
+          std::set<std::string>{"--acp-host-servers"});
+    CHECK(option_spellings(root.app(), "tui", true).empty());
 }
 
 TEST_CASE("apogee tui's flags open the shell inside that session, the mode the flags' own",

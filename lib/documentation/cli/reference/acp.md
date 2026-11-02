@@ -56,8 +56,9 @@ child as given, and it runs in the project folder, so a relative `--attach` or
   recall, its attachments indexed where the run's end removes them.
   `loadSession` is false and no `sessionCapabilities` are advertised; saving,
   loading, listing, resuming and closing sessions are 56c's.
-- **The host's MCP servers** in `session/new` are accepted and left unused, said
-  on stderr, until Xcode's tools join a session (56b).
+- **The host's MCP servers** in `session/new` are that session's (56b): its
+  child connects the stdio ones beside the config's, for its life alone, through
+  the same gate -- [below](#sessionnew).
 - When the host closes `acp`'s stdin, each session's turn is cancelled and its
   child's stdin closed; `acp` exits 0 once every child has ended.
 
@@ -112,6 +113,21 @@ attached -- is said as **notices**: to a host that shows them (`session.notices`
 advertised), as ACP's `notice` update at once; otherwise they lead the next
 turn's `agent_thought_chunk` stream, where the person can unfold them, never
 inside the answer. Every notice also goes to stderr.
+
+**The host's MCP servers** (`mcpServers`, 56b) -- Xcode's own build, test and
+preview tools, should it send them -- join **that session** for its life: its
+child connects every stdio entry beside the config's servers, before
+`session/new` answers, and its tools reach the model as `mcp__<server>__<tool>`,
+asked about through the permission sheet as any MCP tool's are. An http or sse
+entry is never dialled (`initialize` advertises neither), and a server that
+will not start is skipped; what was set aside is said in **one** notice. The
+values of an entry's `env` -- credentials, by the protocol's word -- reach the
+server alone: `acp`'s stderr names each server, its command and its env
+variables' names (`the host's MCP servers: xcode-tools (/usr/bin/xcrun; env
+MCP_XCODE_SESSION_ID)`), never a value. The config file is never written, and
+the next session sees none of them. What is taken and skipped, the gate, Xcode's
+own consent prompt and the `xcode` preset to fall back on are in
+[tools.md → Servers an ACP host hands a session](tools.md#servers-an-acp-host-hands-a-session).
 
 ## The mapping
 
@@ -265,7 +281,11 @@ settings, so it is the person's to run.
   off and then on.
 - **A managed Mac** with `CodingAssistantAllowExternalIntegrations=false` has
   the coding assistant's external agents turned off.
-- **Not this item's:** Xcode's own build and test tools in a session (56b);
-  saved, loaded and resumed sessions (56c); `check`'s Xcode rows and `acp
+- **Xcode's own tools** reach a session only if Xcode names its server in
+  `session/new`: the strings in Xcode 27.1 suggest it does (`mcpServers`,
+  `xcode-tools`, `MCP_XCODE_SESSION_ID`), and the user's live pass records what
+  it sent. If it sends none, the `xcode` preset (56d) registers `xcrun mcpbridge`
+  for every session, from the config.
+- **Not this item's:** saved, loaded and resumed sessions (56c); `check`'s Xcode rows and `acp
   registration` (56d); `fs/*` and `terminal/*`; image, audio and embedded
   prompt content; slash commands and `available_commands_update`.

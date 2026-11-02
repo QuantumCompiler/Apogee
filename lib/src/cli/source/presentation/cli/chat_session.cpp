@@ -9,6 +9,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <random>
 #include <sstream>
@@ -28,6 +29,7 @@
 #include "backends/factory.h"
 #include "backends/model_roster.h"
 #include "backends/provider_cache.h"
+#include "cli/acp_cmd.h"
 #include "cli/chat_attachments.h"
 #include "cli/chat_completer.h"
 #include "cli/chat_history.h"
@@ -143,6 +145,41 @@ std::optional<SlashCommand> parse_slash(std::string_view line) {
 }
 
 namespace {
+
+/// The lines an MCP startup said that stay -- its warnings: a server skipped,
+/// one an ACP host's displaced (56b) -- kept for a driver, which reads no
+/// stderr, and said as one `notice`. The registry's writer may also be
+/// called from a client's reader thread, so the lines are kept under a lock,
+/// and only until they are taken.
+class McpWarnings {
+public:
+    void add(std::string_view line) {
+        if (line.find("warning") == std::string_view::npos) {
+            return;  // progress: transient, as the status line has it
+        }
+        const std::lock_guard lock{mutex_};
+        if (open_) {
+            lines_.emplace_back(line);
+        }
+    }
+
+    /// Every line kept, one to a line; none are kept after.
+    [[nodiscard]] std::string take() {
+        const std::lock_guard lock{mutex_};
+        open_ = false;
+        std::string said;
+        for (const std::string& line : lines_) {
+            said += (said.empty() ? "" : "\n") + line;
+        }
+        lines_.clear();
+        return said;
+    }
+
+private:
+    std::mutex mutex_;
+    std::vector<std::string> lines_;
+    bool open_ = true;
+};
 
 /// What the conversation runs on, as the banner, the header and `/model` say
 /// it: its backend, and the roster model pinned on it (33).
@@ -774,6 +811,14 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // decorates as a terminal does: its banner, its spacing.
     const bool decorate = front != nullptr || platform::is_terminal(platform::StandardStream::Out);
 
+    // The MCP servers an ACP host handed this session (56b), read first and
+    // the handover removed: its env values are credentials, and they live in
+    // this process from here, never on disk.
+    std::vector<std::string> host_server_notes;
+    const std::vector<mcp::ServerSpec> host_servers =
+        flags->host_servers.empty() ? std::vector<mcp::ServerSpec>{}
+                                    : host_mcp_servers(flags->host_servers, host_server_notes);
+
     harness::Config config;
     std::filesystem::path config_path;
     try {
@@ -1203,6 +1248,27 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // --- tools ----------------------------------------------------------
     agent::ToolRegistry registry;
     const auto mcp_registry = std::make_shared<mcp::Registry>();
+    // What the servers' startup said that stays -- a server skipped, one a
+    // host's displaced (56b) -- kept for a driver, which reads no stderr:
+    // one `notice` after its `session` event, every line of it. The status
+    // line has them as before.
+    const auto mcp_warnings = std::make_shared<McpWarnings>();
+    const auto mcp_status = [status = out.mcp_status(), mcp_warnings,
+                             keep = machine_stream](std::string_view line) {
+        if (status) {
+            status(line);
+        }
+        if (keep) {
+            mcp_warnings->add(line);
+        }
+    };
+    if (!flags->tools && !host_servers.empty()) {
+        host_server_notes.emplace_back(
+            "the host's MCP servers are not connected: this session runs without --tools");
+    }
+    for (const std::string& note : host_server_notes) {
+        mcp_status("[mcp] warning: " + note);
+    }
     if (flags->tools) {
         registry = make_built_in_tools(BuiltInToolOptions{
             .config = &config,
@@ -1210,20 +1276,24 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             .review = *live_review,
             .live_review = live_review,
             .mcp = mcp_registry,
-            .mcp_status = out.mcp_status(),
+            .mcp_status = mcp_status,
             // A server's stderr never reaches the terminal unless asked
             // for: with --verbose it is the raw stream, otherwise the
             // bounded tail rides the connect-failure message.
             .mcp_server_log = flags->verbose ? mcp::StderrTail::Sink{[](std::string_view bytes) {
                 std::cerr << bytes << std::flush;
             }}
-                                             : mcp::StderrTail::Sink{}});
+                                             : mcp::StderrTail::Sink{},
+            .session_mcp_servers = host_servers});
         // The session todo (41d): the plan, kept by the model, drawn by
         // every front end; its board is this session's, set below.
         tools::register_todo_tool(registry);
         // The delegate (41e): a bounded sub-session, re-entering the loop
         // under this session's gate; its context is each turn's.
         tools::register_delegate_tool(registry);
+    }
+    if (std::string said = mcp_warnings->take(); !said.empty()) {
+        opening_notes.push_back(std::move(said));
     }
     // What the chat's backend is offered: every registered tool, or the
     // toolset the active suite pins on that backend (27d), and the

@@ -6,6 +6,7 @@
 #include <string>
 #include <utility>
 
+#include "acp/host_servers.h"
 #include "cli/chat_session.h"
 #include "harness/roles.h"
 
@@ -60,6 +61,17 @@ void ExecuteCommand::bind(CLI::App& root, const RootContext& context) {
     // model as chat runs.
     auto flags = std::make_shared<SessionFlags>();
     CLI::App* cmd = root.add_subcommand(std::string{name()}, std::string{summary()});
+    // `apogee acp`'s plumbing (56b): the handover of the MCP servers a host
+    // named for one session. Hidden -- no help, no completion -- and bound
+    // here alone, so neither `acp`'s line nor the shell's door takes it. Made
+    // before the help flag, which is made again after it: CLI11 ends a help's
+    // options with a stray blank line when the hidden group is the last one
+    // it met, and execute's help stays as it was.
+    cmd->set_help_flag();
+    cmd->add_option(std::string{acp::kHandoverOption}, flags->host_servers,
+                    "The MCP servers an ACP host handed this session (apogee acp's own)")
+        ->group("");
+    cmd->set_help_flag("-h,--help", "Print this help message and exit");
     bind_session_flags(*cmd, flags, SessionMode::Execute);
     cmd->callback([&context, flags, machine = machine_]() {
         open_execute_session(context, *flags, machine);

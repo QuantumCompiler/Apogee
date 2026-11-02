@@ -39,6 +39,14 @@ and checks what the Agent Client Protocol promises and what 56a decided:
     keeps answering; a second session/new ends the first; closing acp's stdin
     ends every child and exits 0;
   - a host that shows notices gets them as ACP's notice update;
+  - the host's MCP servers (56b): a stdio server joins its session alone --
+    its tool answers there and is unknown to the next session -- the config
+    byte-identical and `mcp list` never naming it; an http server set aside
+    and named in the one notice, a dying server's last stderr line in it
+    once; an env value reaching the server and nowhere else (no stderr, no
+    stdout, no argv, no file of the home, no handover left behind); a config
+    entry of the same name set aside for the session, never spawned; and the
+    server's child gone once its session ends, by a newer one or stdin's end;
   - the protocol's own examples (tests/fixtures/acp/schema_examples.jsonl)
     replayed, standing in for a captured Xcode transcript -- and that
     transcript replayed too, once it is captured (xcode-27.1.jsonl).
@@ -49,6 +57,7 @@ start yet (a recorded skip, as for the vendor CLIs).
 Usage: acp_host_check.py <apogee-binary> <work-dir> <fixtures-dir>
 """
 
+import hashlib
 import json
 import os
 import queue
@@ -322,8 +331,8 @@ def run(apogee, work, fixtures):
 
     hosts = []
 
-    def start(*args, **kwargs):
-        host = Host(apogee, env, *args, **kwargs)
+    def start(*args, home_env=env, **kwargs):
+        host = Host(apogee, home_env, *args, **kwargs)
         hosts.append(host)
         return host
 
@@ -338,6 +347,7 @@ def run(apogee, work, fixtures):
         delegated_calls(start, project, check)
         dying_child(start, project, check)
         notices(start, project, check)
+        host_servers(apogee, work, env, start, project, check)
         replay(start, project, fixtures, check)
     except (EOFError, queue.Empty, KeyError, TypeError) as error:
         failures.append(f"the conversation broke off: {error!r}")
@@ -357,8 +367,8 @@ def run(apogee, work, fixtures):
         return 1
     print("acp conformance: initialize, sessions, prompts, cancel, permission, a cancel at the "
           "sheet, repeated call ids, a mode chosen mid-sheet, switching, a backend that did not "
-          "start, a delegated call, bad input, a dying child, notices and the protocol's "
-          "examples -- OK")
+          "start, a delegated call, bad input, a dying child, notices, the host's MCP servers and "
+          "the protocol's examples -- OK")
     return 0
 
 
@@ -862,6 +872,216 @@ def notices(start, project, check):
     check(host.close() == 0, "the notices host's acp did not exit 0")
 
 
+def descendants(pid):
+    """Every process under `pid`, with its command line."""
+    listed = subprocess.run(["ps", "-axww", "-o", "pid=,ppid=,args="], capture_output=True,
+                            text=True).stdout
+    rows = []
+    for line in listed.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) >= 2:
+            rows.append((int(parts[0]), int(parts[1]), parts[2] if len(parts) > 2 else ""))
+    found, frontier = [], [pid]
+    while frontier:
+        parent = frontier.pop()
+        for child, ppid, args in rows:
+            if ppid == parent:
+                found.append((child, args))
+                frontier.append(child)
+    return found
+
+
+def gone_within(pid, seconds=10):
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if not alive(pid):
+            return True
+        time.sleep(0.1)
+    return not alive(pid)
+
+
+def mcp_home(apogee, work, name, env, entry=None):
+    """A home of its own for the host-server phases: a mock that calls the
+    `self` server's list_notes, then says what it got -- and, given `entry`,
+    a config MCP server registered through the one editor."""
+    home = os.path.join(work, name)
+    os.makedirs(home)
+    home_env = dict(env, APOGEE_HOME=home, TMPDIR=os.path.join(work, name + "-tmp"))
+    os.makedirs(home_env["TMPDIR"])
+    script = os.path.join(work, name + "-caller.json")
+    write_script(script, [
+        {"tool_calls": [{"id": "n-1", "name": "mcp__self__list_notes", "arguments": {}}]},
+        {"text": "notes: {{last_tool_result}}"},
+    ])
+    helper = os.path.join(work, name + "-helper.json")
+    write_script(helper, [{"text": "the search query"}])
+    commands = [["config", "init"],
+                ["config", "add-backend", "caller", "--type", "mock", "--model", "mock-c",
+                 "--model-path", script],
+                ["config", "add-backend", "helper", "--type", "mock", "--model", "mock-h",
+                 "--model-path", helper],
+                ["config", "set-default", "caller"],
+                ["config", "set-default-utility", "helper"]]
+    if entry:
+        commands.append(["mcp", "create", *entry])
+    for args in commands:
+        subprocess.run([apogee, *args], env=home_env, check=True, stdout=subprocess.DEVNULL,
+                       stdin=subprocess.DEVNULL)
+    return home, home_env
+
+
+def sha256_of(path):
+    with open(path, "rb") as handle:
+        return hashlib.sha256(handle.read()).hexdigest()
+
+
+def everything_under(folder):
+    """Every file's bytes under `folder`, by path."""
+    found = {}
+    for root, _, files in os.walk(folder):
+        for name in files:
+            path = os.path.join(root, name)
+            try:
+                with open(path, "rb") as handle:
+                    found[path] = handle.read()
+            except OSError:
+                continue
+    return found
+
+
+def host_servers(apogee, work, env, start, project, check):
+    """56b: the stdio MCP servers a host names in session/new."""
+    home, home_env = mcp_home(apogee, work, "mcp-home", env)
+    config = os.path.join(home, "config", "config.json")
+    before = sha256_of(config)
+    sentinel = "apogee-sentinel-" + os.urandom(8).hex()
+    probe = os.path.join(work, "env-probe.txt")
+    token = [{"name": "APOGEE_TEST_TOKEN", "value": sentinel}]
+    servers = [
+        {"name": "self", "command": apogee, "args": ["mcp", "serve"], "env": token},
+        {"type": "http", "name": "remote", "url": "http://127.0.0.1:9/mcp",
+         "headers": [{"name": "Authorization", "value": "Bearer " + sentinel}]},
+        {"name": "envprobe", "command": "/bin/sh",
+         "args": ["-c", 'printf %s "$APOGEE_TEST_TOKEN" > "$0"; exit 1', probe], "env": token},
+        {"name": "dying", "command": "/bin/sh",
+         "args": ["-c", 'echo "fatal: no upstream" >&2; exit 1']},
+    ]
+    mine = []
+    host = start(home_env=home_env)
+    mine.append(host)
+    initialize(host)
+    began = time.time()
+    response, _ = host.call("session/new", {"cwd": project, "mcpServers": servers})
+    took = time.time() - began
+    first = response.get("result", {}).get("sessionId")
+    check(bool(first), f"session/new with the host's servers: {response!r}")
+    print(f"acp conformance: session/new with four host MCP servers took {took:.2f} s")
+    tree = descendants(host.process.pid)
+    served = [pid for pid, args in tree if args.endswith("mcp serve")]
+    check(len(served) == 1, f"one `self` server for the session, not {tree!r}")
+    check(not any(sentinel in args for _, args in tree),
+          "an env value is on a process's argv")
+    check(not any(name.startswith("apogee-acp-") for name in os.listdir(home_env["TMPDIR"])),
+          "the handover was left behind once the session opened")
+    try:
+        with open(probe, encoding="utf-8") as handle:
+            check(handle.read() == sentinel, "the env value did not reach the server as given")
+    except OSError:
+        check(False, "the env probe server never wrote its file")
+
+    asked = []
+
+    def answer(frame):
+        asked.append(frame["method"])
+        return {"outcome": {"outcome": "selected", "optionId": "no"}}
+
+    response, updates = host.call("session/prompt", {
+        "sessionId": first, "prompt": [{"type": "text", "text": "what notes are there?"}]},
+        answer=answer)
+    message = texts(updates, "agent_message_chunk")
+    check(response.get("result", {}).get("stopReason") == "end_turn" and
+          "No notes yet" in message, f"the host's server answered nothing: {message!r}")
+    check(asked == [], f"a read-only host tool asked the gate: {asked!r}")
+    cards = [u for u in updates if u.get("sessionUpdate") == "tool_call"
+             and u.get("toolCallId") == "n-1"]
+    check(len(cards) == 1 and cards[0].get("kind") == "other",
+          f"the host tool's call was not drawn as its card: {cards!r}")
+    thought = texts(updates, "agent_thought_chunk")
+    check("Apogee connects stdio MCP servers only; skipped: remote" in thought,
+          f"the http server is not named in the notice: {thought!r}")
+    check(thought.count("fatal: no upstream") == 1,
+          f"the dying server's last line, folded once: {thought!r}")
+    check("envprobe" in thought and "dying" in thought,
+          f"the failing servers are not named in the notice: {thought!r}")
+    said = [line for line in host.stderr
+            if line.startswith("apogee acp: session") and "[mcp] warning:" in line]
+    check(len(said) == 1,
+          f"the session's MCP warnings are not one notice on acp's stderr: {said!r}")
+
+    # A second session, with no servers: the first's server ends with it, and
+    # its tool is unknown here.
+    response, _ = host.call("session/new", {"cwd": project, "mcpServers": []})
+    second = response.get("result", {}).get("sessionId")
+    check(bool(second), f"a second session/new: {response!r}")
+    check(all(gone_within(pid) for pid in served),
+          "the first session's MCP server outlived its session")
+    response, updates = host.call("session/prompt", {
+        "sessionId": second, "prompt": [{"type": "text", "text": "and here?"}]})
+    message = texts(updates, "agent_message_chunk")
+    check("no tool named 'mcp__self__list_notes'" in message and "No notes yet" not in message,
+          f"the second session reached the first's server: {message!r}")
+    check(host.close() == 0, "the host-servers acp did not exit 0")
+
+    # A third: its server is gone once stdin ends.
+    host = start(home_env=home_env)
+    mine.append(host)
+    initialize(host)
+    response, _ = host.call("session/new", {"cwd": project, "mcpServers": servers[:1]})
+    check(bool(response.get("result", {}).get("sessionId")), f"session/new: {response!r}")
+    served = [pid for pid, args in descendants(host.process.pid) if args.endswith("mcp serve")]
+    check(len(served) == 1, "no `self` server for the third session")
+    check(host.close() == 0, "the third acp did not exit 0")
+    check(all(gone_within(pid) for pid in served), "an MCP server outlived acp's stdin")
+
+    # The config is the user's: untouched, and no other process sees `self`.
+    check(sha256_of(config) == before, "the config file changed")
+    listed = subprocess.run([apogee, "mcp", "list", "--output-format", "json"], env=home_env,
+                            capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    names = [entry.get("name") for entry in json.loads(listed.stdout or "{}").get("data", [])]
+    check("self" not in names, f"`mcp list` names the host's server: {names!r}")
+    for path, data in everything_under(home).items():
+        check(sentinel.encode() not in data, f"an env value was written to {path}")
+    for line in [line for each in mine for line in (*each.stderr, *each.stdout_lines)]:
+        check(sentinel not in line, "an env value reached acp's stderr or stdout")
+
+    # A config entry of the host's name: set aside for the session, never
+    # spawned; one connection, the host's, said once.
+    marker = os.path.join(work, "config-self-ran")
+    config_self = os.path.join(work, "config-self.sh")
+    with open(config_self, "w", encoding="utf-8") as handle:
+        handle.write(f'#!/bin/sh\ntouch "{marker}"\nexec "{apogee}" mcp serve\n')
+    os.chmod(config_self, 0o755)
+    _, collide_env = mcp_home(apogee, work, "mcp-collide", env,
+                              entry=["self", "--command", config_self])
+    host = start(home_env=collide_env)
+    initialize(host)
+    response, _ = host.call("session/new", {
+        "cwd": project,
+        "mcpServers": [{"name": "self", "command": apogee, "args": ["mcp", "serve"]}]})
+    session = response.get("result", {}).get("sessionId")
+    check(bool(session), f"a session whose host server collides: {response!r}")
+    response, updates = host.call("session/prompt", {
+        "sessionId": session, "prompt": [{"type": "text", "text": "notes?"}]})
+    check("No notes yet" in texts(updates, "agent_message_chunk"),
+          f"the host's `self` did not answer: {response!r}")
+    check(not os.path.exists(marker), "the config's `self` was spawned beside the host's")
+    check("the config's server is set aside for this session" in
+          texts(updates, "agent_thought_chunk"), "the displacement is not said")
+    check(len([pid for pid, args in descendants(host.process.pid)
+               if args.endswith("mcp serve")]) == 1, "not one `self` connection")
+    check(host.close() == 0, "the colliding acp did not exit 0")
+
+
 def replay(start, project, fixtures, check):
     for name in ("schema_examples.jsonl", "xcode-27.1.jsonl"):
         path = os.path.join(fixtures, name)
@@ -886,8 +1106,13 @@ def replay(start, project, fixtures, check):
                 session = response.get("result", {}).get("sessionId")
         check(host.close() == 0, f"{name}: acp did not exit 0")
         if name == "schema_examples.jsonl":
-            check(any("left unused" in line for line in host.stderr),
-                  "the host's MCP servers are not said to be left unused")
+            # Its stdio server is a placeholder path: handed over, dialled,
+            # skipped with a warning -- and the session answered all the same.
+            check(any("the host's MCP servers: filesystem (/path/to/mcp-server)" in line
+                      for line in host.stderr),
+                  "the host's MCP server is not named on stderr")
+            check(any("[mcp] warning: filesystem" in line for line in host.stderr),
+                  "the placeholder MCP server's skip is not said")
 
 
 if __name__ == "__main__":

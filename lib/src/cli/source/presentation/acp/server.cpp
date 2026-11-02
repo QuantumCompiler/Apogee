@@ -10,6 +10,7 @@
 #include <system_error>
 #include <utility>
 
+#include "acp/host_servers.h"
 #include "version/version.h"
 
 namespace apogee::acp {
@@ -197,12 +198,10 @@ void Agent::open_session(const Frame& frame) {
                            "cwd must be an absolute path to a folder that exists: '" + cwd + "'"));
         return;
     }
-    if (frame.params.contains("mcpServers") && frame.params["mcpServers"].is_array() &&
-        !frame.params["mcpServers"].empty()) {
-        diagnostics_.line("the host's " + std::to_string(frame.params["mcpServers"].size()) +
-                          " MCP server(s) are accepted and left unused: the host's tools join a "
-                          "session in a later Apogee (56b)");
-    }
+    // The host's MCP servers (56b): this session's alone, handed to its
+    // child -- the stdio ones taken, the rest set aside for its notice.
+    const HostServers servers =
+        host_servers(frame.params.value("mcpServers", nlohmann::json::array()));
     // One live session: the one before ends, its child's stdin closed.
     for (const std::unique_ptr<Session>& session : sessions_) {
         if (!replaced_.contains(session->id())) {
@@ -218,7 +217,7 @@ void Agent::open_session(const Frame& frame) {
                   [](const std::unique_ptr<Session>& session) { return session->finished(); });
     sessions_.push_back(std::make_unique<Session>(mint_session_id(), std::filesystem::path{cwd},
                                                   setup_, host_, peer_, diagnostics_));
-    sessions_.back()->open(frame.id);
+    sessions_.back()->open(frame.id, servers);
 }
 
 Session* Agent::named(const Frame& frame) {

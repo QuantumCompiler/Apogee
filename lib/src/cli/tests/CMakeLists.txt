@@ -287,8 +287,10 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/mcp_presets_cmd_test.cpp
     presentation/cli/mcp_serve_test.cpp
     presentation/cli/acp_cmd_test.cpp
+    presentation/cli/host_mcp_servers_test.cpp
     presentation/acp/jsonrpc_test.cpp
     presentation/acp/server_test.cpp
+    presentation/acp/host_servers_test.cpp
     presentation/acp/translate_test.cpp
     presentation/cli/review_cmd_test.cpp
     presentation/cli/review_mr_test.cpp

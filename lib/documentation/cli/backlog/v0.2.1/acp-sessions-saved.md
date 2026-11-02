@@ -32,7 +32,7 @@ It removes **W5**.
   - `session/new`: the child's line drops the `--private` 56a runs it under, and gains `origin` through a hidden `execute` option (`group("")`, never completed). `cwd` is the folder 56a starts the child in. M28 writes both with the first answered turn.
   - `session/load`: the resume door (the child started with `--resume <id>`), then the replay, then the answer.
   - `session/resume`: the resume door, with no replay.
-  - Both hand their request's `mcpServers` to [56b](acp-host-tools.md)'s mapping, as `session/new` does; until 56b lands they are accepted and left unused, as 56a leaves them. A host's servers are never saved with the chat.
+  - Both hand their request's `mcpServers` to [56b](../../assistant/MILESTONES.md#milestone-as--apogee-in-xcode)'s mapping, as `session/new` does (56b shipped 2026-11-01: `acp::host_servers`, then `Session::open`'s handover to the child). A host's servers are never saved with the chat.
   - `session/list`: `list_sessions`, filtered.
   - `session/close`: cancels the session's turn as `session/cancel` does and releases the session. Its file is already current.
 - `lib/src/cli/source/presentation/cli/chat_history.cpp`: `session_row_view` (`:103-109`) gains `origin`, so `chats list` (`:352`) carries it, and so does `chats info`, whose `session_info_view` (`:111-131`) is built on the row. `session_info_view` also gains `cwd`. The text forms are in the open calls.
@@ -95,7 +95,7 @@ This item adds no verb and no visible flag (the hidden `origin` option is plumbi
 - [ ] The same chat resumes in a terminal with `apogee-dev chat --resume <id>`.
 
 **Scope note.** Status: earmarked for v0.2.1 (track 56, "Apogee in Xcode"). Gate: none, 🟢 -- [56a](../../assistant/MILESTONES.md#milestone-as--apogee-in-xcode), which owns the protocol, the door and the scripted client (`tests/scripts/py/acp_host_check.py`), shipped 2026-11-01. This item removes wall **W5**. Out of scope:
-- Xcode's tools inside the session ([56b](acp-host-tools.md)).
+- Xcode's tools inside the session ([56b](../../assistant/MILESTONES.md#milestone-as--apogee-in-xcode), shipped 2026-11-01).
 - Printing Xcode's setup and stating the signing limits ([56d](xcode-setup-from-apogee.md)).
 - `session/fork` (Xcode 27.1 has none) and `session/delete`.
 - A private ACP mode, and HTTP's session plane.

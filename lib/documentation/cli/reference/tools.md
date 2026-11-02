@@ -8,8 +8,10 @@ and beside it **validation**, the same member checking the others' work;
 **Orchestrator**, an `execute` session's symphonies offered to its model as
 tools; **code execution**, the Python server Apogee ships, registered
 with one command; the **MCP presets**, every server Apogee ships, listed
-with what it needs; and **`apogee mcp serve`**, Apogee itself as an MCP server
-for another host -- its local models among the tools where you list them.
+with what it needs; the **servers an ACP host hands a session** -- Xcode's own
+tools in an `apogee acp` session; and **`apogee mcp serve`**, Apogee itself as
+an MCP server for another host -- its local models among the tools where you
+list them.
 
 The native toolsets (files, the shell, git, notes, document search, graph
 navigation) and `fetch_url` need no setup beyond that, and nor do the
@@ -185,6 +187,61 @@ json`, in [machine-mode.md](machine-mode.md)), and the admin plane's `POST
 Web search is not a preset. It stays yours: point Apogee at a SearXNG
 instance you run, as [*Web search through SearXNG*](#web-search-through-searxng)
 above walks through.
+
+## Servers an ACP host hands a session
+
+An agent host that runs Apogee over the Agent Client Protocol -- Xcode, through
+[`apogee acp`](acp.md) -- may name MCP servers of its own when it opens a
+session (`session/new`'s `mcpServers`). That is how a host gives its agent its
+own tools: Xcode's are its build, test, preview, documentation and file tools,
+served by `xcrun mcpbridge`. Apogee connects them **for that session alone**:
+
+- **Stdio servers are taken.** Each stdio entry -- its name, command, arguments
+  and `env` -- is connected by the session beside the config's own servers,
+  before `session/new` answers, under the same 20-second bound on connecting and
+  the handshake. Its tools reach the model as `mcp__<server>__<tool>`, the name
+  made a server name by `mcp create`'s rule (`.` and `:` become `-`). An entry
+  of the same name as a config server (compared without case), or with the same
+  command and arguments (a bare command found on `PATH` first), sets the
+  config's aside for that session: the host's copy carries the session's own
+  binding, and two copies would show the model every tool twice.
+- **Nothing else is.** An http or sse entry is never dialled -- Apogee's MCP
+  client speaks stdio, and `initialize` advertises neither (`mcpCapabilities:
+  {http: false, sse: false}`) -- and is named in the session's notice:
+  `Apogee connects stdio MCP servers only; skipped: <names>`. So is an entry
+  whose name `mcp create` would refuse, a second entry of one name, one whose
+  `env` names a variable that is empty or holds `=`, and a server that will not
+  start, dies, or never finishes its handshake -- with its last stderr line. A
+  server skipped is never fatal: the session opens without it. Everything set
+  aside is said in **one** notice -- shown by the host, or leading the next
+  answer's thinking, and on `acp`'s stderr.
+- **The session's, never yours.** The config file is never written -- byte for
+  byte the same afterwards -- and `apogee mcp list` never shows a host's
+  server. Nothing of them is saved with the session, and the next session sees
+  only what its own `session/new` names. When the session ends -- a newer one
+  replaces it, or the host closes `acp` -- its servers end with it.
+- **The values are the host's.** An `env` value is a credential by the
+  protocol's word: it reaches the server's process and nothing else -- never a
+  command line, a log line, a notice or stderr, which name a server, its command
+  and its variables' names. It is passed as given: `${VAR}` and `~` are expanded
+  in the config's entries, never in a host's.
+- **The gate is Apogee's.** A host handing over a server is not you agreeing to
+  its calls. Each of its tools is gated as any MCP tool is: one its server marks
+  `readOnlyHint` runs unasked, and every other asks through the host's
+  permission sheet -- in accept-edits mode too, which never covers an MCP tool.
+
+**Xcode asks too.** The first time an agent reaches Xcode's tools, Xcode shows
+its own prompt ("Do you want to allow the agent …"), answered in Xcode -- Apogee
+never answers or hides it. Xcode ties the approval to the agent's binary, which
+Apogee does not sign, so expect it again after every install or update of
+`apogee` (or `apogee-dev`).
+
+**If Xcode names no server** in `session/new`, its tools can still reach every
+session from the config: register `xcrun mcpbridge` as an ordinary server. The
+`xcode` preset (56d) will do it by name; until then, `apogee mcp create xcode
+--command xcrun --args mcpbridge`. It needs Xcode's own switch, "Allow external
+agents to use Xcode tools" (Settings › Intelligence › Model Context Protocol),
+turned on, and the project open in Xcode.
 
 ## Apogee as an MCP server: `apogee mcp serve`
 

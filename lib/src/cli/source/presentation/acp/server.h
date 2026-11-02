@@ -25,8 +25,9 @@
 ///     `cwd` -- an absolute path to a folder that exists, else `-32602` --
 ///     and ends the one before it: one live session per process, so one
 ///     model in memory -- and a replaced session whose child has ended is let
-///     go. Its `mcpServers` are accepted and left unused until Xcode's tools
-///     join a session (56b), said on stderr.
+///     go. Its `mcpServers` are that session's (56b): the stdio servers
+///     connected by its child for its life, beside the config's and through
+///     the same gate; an http or sse one set aside and named in its notice.
 ///   - `session/prompt`, `session/cancel`, `session/set_mode` and
 ///     `session/set_config_option` reach the session they name; a session a
 ///     newer one replaced says so.

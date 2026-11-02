@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <span>
 #include <string>
 #include <string_view>
@@ -8,6 +9,7 @@
 #include "acp/translate.h"
 #include "cli/command.h"
 #include "contracts/config.h"
+#include "mcp/registry.h"
 
 namespace CLI {
 class App;
@@ -50,6 +52,15 @@ namespace apogee::commands {
 /// every option the line set, each spelled by its long name, the protocol's
 /// own and `--tools` (every session has it) left out.
 [[nodiscard]] std::vector<std::string> forwarded_flags(const CLI::App& command);
+
+/// The child's half of a session's handover (56b): the MCP servers an ACP
+/// host named, read from the file `execute`'s hidden `--acp-host-servers`
+/// names -- removed as it is read -- as the specs the session connects
+/// (`BuiltInToolOptions::session_mcp_servers`). What the host's entries could
+/// not be, and a handover that could not be read, go to `notes`, each the
+/// text of an `[mcp] warning:` line.
+[[nodiscard]] std::vector<mcp::ServerSpec> host_mcp_servers(const std::filesystem::path& handover,
+                                                            std::vector<std::string>& notes);
 
 class AcpCommand final : public Command {
 public:

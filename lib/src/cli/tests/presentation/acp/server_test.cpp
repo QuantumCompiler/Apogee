@@ -5,9 +5,12 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <ostream>
 #include <random>
+#include <sstream>
 #include <streambuf>
 #include <string>
 #include <string_view>
@@ -20,7 +23,9 @@
 /// `apogee acp` across chats opens a session per chat, and each one whose
 /// child has ended is let go at the next `session/new` -- unless the host
 /// still holds a question of it, which would answer into a session gone.
-/// The protocol itself is `cli.acp_conformance`'s, on the real binary.
+/// The protocol itself is `cli.acp_conformance`'s, on the real binary. And
+/// the host's MCP servers (56b) reach a session's child in a handover, the
+/// option and a path on its argv and the values in the file alone.
 namespace {
 
 using Catch::Matchers::ContainsSubstring;
@@ -185,5 +190,101 @@ TEST_CASE(
     agent.handle(R"({"jsonrpc":"2.0","id":3,"error":{"code":-32603,"message":"gone"}})");
     agent.handle(open_request(5, folder.path()));
     CHECK(agent.sessions_held() == 1);
+    agent.finish();
+}
+
+TEST_CASE("the host's MCP servers reach the session's child in a handover, never on its argv",
+          "[acp][server][host-servers]") {
+    if (!apogee::platform::supports_child_processes()) {
+        SKIP("this platform spawns no child processes");
+    }
+    const apogee::testing::TempDir folder{"acp-server-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path seen = folder.path() / "seen.txt";
+    // A child that writes down its arguments and what the handover holds --
+    // and how it may be read -- then opens.
+    apogee::acp::AgentSetup setup;
+    setup.child.program = "sh";
+    setup.child.arguments = {
+        "-c",
+        "printf '%s\\n' \"$@\" > \"$0\"; ls -l \"$2\" >> \"$0\"; "
+        "ls -ld \"$(dirname \"$2\")\" >> \"$0\"; cat \"$2\" >> \"$0\"; "
+        "printf '%s\\n' '{\"type\":\"session\",\"model\":\"m\"}'; cat >/dev/null",
+        seen.string()};
+    setup.model = "m";
+    setup.handover_root = folder.path();
+    LockedSink out;
+    LockedSink err;
+    std::ostream out_stream{&out};
+    std::ostream err_stream{&err};
+    apogee::acp::Agent agent{setup, out_stream, err_stream};
+
+    agent.handle(nlohmann::json{
+        {"jsonrpc", "2.0"},
+        {"id", 1},
+        {"method", "session/new"},
+        {"params",
+         {{"cwd", folder.path().string()},
+          {"mcpServers",
+           nlohmann::json::parse(
+               R"([{"name":"xcode-tools","command":"/usr/bin/xcrun","args":["mcpbridge"],
+                        "env":[{"name":"MCP_XCODE_SESSION_ID","value":"s3cr3t-value"}]},
+                       {"type":"http","name":"remote","url":"http://x/","headers":[]}])")}}}}
+                     .dump());
+    REQUIRE(says(out, "\"sessionId\""));
+    std::string recorded;
+    {
+        std::ifstream in{seen};
+        std::ostringstream buffer;
+        buffer << in.rdbuf();
+        recorded = buffer.str();
+    }
+    // The option and a path on argv; the value in the file alone.
+    REQUIRE_THAT(recorded, ContainsSubstring("--acp-host-servers\n"));
+    const std::size_t at = recorded.find("--acp-host-servers\n") + 19;
+    const std::string handover = recorded.substr(at, recorded.find('\n', at) - at);
+    CHECK_THAT(recorded.substr(0, at + handover.size()), !ContainsSubstring("s3cr3t-value"));
+    CHECK(std::filesystem::path{handover}.parent_path().parent_path() == folder.path());
+    CHECK_THAT(recorded, ContainsSubstring("-rw-------"));
+    CHECK_THAT(recorded, ContainsSubstring("drwx------"));
+    CHECK_THAT(recorded, ContainsSubstring("MCP_XCODE_SESSION_ID=s3cr3t-value"));
+    CHECK_THAT(recorded, ContainsSubstring("skipped: remote"));
+    // The child opened without removing it: the session did.
+    CHECK_FALSE(std::filesystem::exists(handover));
+    CHECK_FALSE(std::filesystem::exists(std::filesystem::path{handover}.parent_path()));
+    // stderr names the server and the env variable, never the value.
+    CHECK_THAT(err.text(),
+               ContainsSubstring("the host's MCP servers: xcode-tools (/usr/bin/xcrun; env "
+                                 "MCP_XCODE_SESSION_ID)"));
+    CHECK_THAT(err.text(), !ContainsSubstring("s3cr3t-value"));
+    CHECK_THAT(out.text(), !ContainsSubstring("s3cr3t-value"));
+    agent.finish();
+}
+
+TEST_CASE("a session with no host servers gets no handover", "[acp][server][host-servers]") {
+    if (!apogee::platform::supports_child_processes()) {
+        SKIP("this platform spawns no child processes");
+    }
+    const apogee::testing::TempDir folder{"acp-server-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path seen = folder.path() / "seen.txt";
+    apogee::acp::AgentSetup setup;
+    setup.child.program = "sh";
+    setup.child.arguments = {"-c",
+                             "printf '%s\\n' \"$#\" > \"$0\"; printf '%s\\n' "
+                             "'{\"type\":\"session\",\"model\":\"m\"}'; cat >/dev/null",
+                             seen.string()};
+    setup.model = "m";
+    setup.handover_root = folder.path();
+    LockedSink out;
+    LockedSink err;
+    std::ostream out_stream{&out};
+    std::ostream err_stream{&err};
+    apogee::acp::Agent agent{setup, out_stream, err_stream};
+    agent.handle(open_request(1, folder.path()));
+    REQUIRE(says(out, "\"sessionId\""));
+    std::ifstream in{seen};
+    std::string count;
+    std::getline(in, count);
+    CHECK(count == "0");
+    CHECK_THAT(err.text(), !ContainsSubstring("MCP"));
     agent.finish();
 }
