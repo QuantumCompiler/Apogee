@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <system_error>
@@ -216,6 +217,60 @@ bool create_exclusive_file(const std::filesystem::path& path, std::string_view c
     const ssize_t written = ::write(fd, content.data(), content.size());
     ::close(fd);
     return written == static_cast<ssize_t>(content.size());
+#endif
+}
+
+bool write_new_file(const std::filesystem::path& path, std::string_view content,
+                    std::filesystem::perms mode, std::string& error) {
+#if defined(_WIN32)
+    (void)mode;
+    std::error_code code;
+    if (std::filesystem::exists(std::filesystem::symlink_status(path, code))) {
+        error = "something is already there";
+        return false;
+    }
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            error = "cannot create it";
+            return false;
+        }
+        out.write(content.data(), static_cast<std::streamsize>(content.size()));
+        out.flush();
+        if (out) {
+            return true;
+        }
+    }
+    error = "cannot write it";
+    std::filesystem::remove(path, code);
+    return false;
+#else
+    const int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+                          static_cast<mode_t>(mode & std::filesystem::perms::mask));
+    if (fd < 0) {
+        error = std::error_code{errno, std::generic_category()}.message();
+        return false;
+    }
+    std::size_t written = 0;
+    while (written < content.size()) {
+        const ssize_t wrote = ::write(fd, content.data() + written, content.size() - written);
+        if (wrote < 0 && errno == EINTR) {
+            continue;
+        }
+        if (wrote <= 0) {
+            error = std::error_code{wrote < 0 ? errno : EIO, std::generic_category()}.message();
+            (void)::close(fd);
+            (void)::unlink(path.c_str());
+            return false;
+        }
+        written += static_cast<std::size_t>(wrote);
+    }
+    if (::close(fd) != 0) {
+        error = std::error_code{errno, std::generic_category()}.message();
+        (void)::unlink(path.c_str());
+        return false;
+    }
+    return true;
 #endif
 }
 

@@ -11,6 +11,7 @@
 #include "contracts/layout.h"
 #include "httpserver/http_types.h"
 #include "support/env_guard.h"
+#include "support/temp_mode_watch.h"
 
 /// The bearer gate, exhaustively over header shapes, and the token file.
 namespace {
@@ -113,4 +114,30 @@ TEST_CASE("the token is generated once, beside the config, and private", "[https
     const std::string regenerated = load_or_create_admin_token(config);
     CHECK(regenerated.size() == 64);
     CHECK(regenerated != first);
+}
+
+TEST_CASE("the token's temporary file is never readable beyond its owner, not even while written",
+          "[httpserver][auth][57e]") {
+    if (!apogee::harness::supports_private_modes()) {
+        SKIP("no file modes on this platform");
+    }
+    // Regenerated -- an emptied file is written anew -- until a watch beside
+    // it has caught three of its temporary files (57e).
+    const apogee::testing::UmaskGuard umask;
+    const apogee::testing::TempDir home{"admin-token-watch-" +
+                                        std::to_string(std::random_device{}())};
+    const std::filesystem::path config = home.path() / "config" / "config.yaml";
+    (void)load_or_create_admin_token(config);
+    apogee::testing::TempModeWatch watch{admin_token_path(config).parent_path()};
+    for (int i = 0; i < 20000 && watch.seen() < 3; ++i) {
+        std::ofstream{admin_token_path(config), std::ios::trunc} << "\n";
+        (void)load_or_create_admin_token(config);
+    }
+    watch.stop();
+    CHECK(watch.wider() == 0);
+    REQUIRE(watch.seen() > 0);
+    const std::filesystem::perms mode =
+        std::filesystem::status(admin_token_path(config)).permissions() &
+        std::filesystem::perms::mask;
+    CHECK(mode == (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write));
 }

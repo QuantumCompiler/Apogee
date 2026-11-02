@@ -3,9 +3,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <optional>
 #include <random>
@@ -17,7 +19,9 @@
 #include <vector>
 
 #include "contracts/config.h"
+#include "contracts/layout.h"
 #include "support/env_guard.h"
+#include "support/temp_mode_watch.h"
 
 using apogee::harness::append_agent;
 using apogee::harness::append_backend;
@@ -1659,12 +1663,15 @@ TEST_CASE("attachments.graph off its set, or on a line the editor cannot see int
                       "attachments.graph: unknown value 'tree' (accepted: code, off)");
     CHECK_THROWS_AS(set_attachments_graph(kCommented, ""), ConfigEditError);
     CHECK_THROWS_AS(set_attachments_graph(kCommented, "Off"), ConfigEditError);
-    // A one-line mapping, or a header with a comment: appending a block
-    // beside it would be a second key the loader never reads.
-    CHECK_THROWS_AS(set_attachments_graph("attachments: { graph: off }\n", "code"),
-                    ConfigEditError);
-    CHECK_THROWS_AS(set_attachments_graph("attachments:   # how\n  graph: off\n", "code"),
-                    ConfigEditError);
+    // A one-line mapping: appending a block beside it would be a second key
+    // the loader never reads -- refused by the section lookup every editor
+    // shares (57e).
+    CHECK_THROWS_WITH(set_attachments_graph("attachments: { graph: off }\n", "code"),
+                      ContainsSubstring("the attachments: line holds more than its key"));
+    // A header with a comment is the section's header: edited under it, the
+    // comment kept (57e).
+    CHECK(set_attachments_graph("attachments:   # how\n  graph: off\n", "code") ==
+          "attachments:   # how\n  graph: code\n");
     // A comment naming the key is not the key.
     CHECK(set_attachments_graph("# attachments: { graph: off }\n", "off") ==
           "# attachments: { graph: off }\n\nattachments:\n  graph: off\n");
@@ -2442,4 +2449,372 @@ TEST_CASE("an edit of a config that is not there says so, and leaves no lock beh
             fixture.path, [](std::string_view content) { return std::string{content}; }),
         apogee::harness::ConfigError);
     CHECK(std::filesystem::is_empty(fixture.dir.path()));
+}
+
+// --- 57e: the editor writes what it says it did, and keeps what it does not edit
+
+namespace {
+
+/// How many times each top-level key is written in `text` -- a key written
+/// twice is a shadow the loader never reads.
+std::map<std::string, int> top_level_keys(std::string_view text) {
+    std::map<std::string, int> keys;
+    std::istringstream in{std::string{text}};
+    for (std::string line; std::getline(in, line);) {
+        if (line.empty() || line[0] == ' ' || line[0] == '#' || line[0] == '\t') {
+            continue;
+        }
+        ++keys[line.substr(0, line.find(':'))];
+    }
+    return keys;
+}
+
+/// The four sandbox shapes the sweep found shadowed (57e): a header with a
+/// comment, and three sections written on their header's own line.
+constexpr std::string_view kCommentHeader =
+    "backends:   # my models\n  a:\n    type: mock\n    model: m\n";
+constexpr std::string_view kFlowModels =
+    "backends:\n  a:\n    type: mock\nmodels: {default: a, default_utility: a}\n";
+constexpr std::string_view kFlowMemory =
+    "backends:\n  a:\n    type: mock\nmemory: {recall: true}\n";
+constexpr std::string_view kFlowTools =
+    "backends:\n  a:\n    type: mock\ntools: {allowed_hosts: [a.com]}\n";
+
+BackendConfig mock_entry() {
+    BackendConfig backend;
+    backend.type = BackendType::Mock;
+    backend.model = "m";
+    return backend;
+}
+
+std::string bytes_of(const std::filesystem::path& path) {
+    std::ifstream in{path, std::ios::binary};
+    std::ostringstream out;
+    out << in.rdbuf();
+    return out.str();
+}
+
+std::filesystem::perms mode_of(const std::filesystem::path& path) {
+    return std::filesystem::status(path).permissions() & std::filesystem::perms::mask;
+}
+
+constexpr std::filesystem::perms kOwnerOnly =
+    std::filesystem::perms::owner_read | std::filesystem::perms::owner_write;
+
+}  // namespace
+
+TEST_CASE("a section header with a comment is edited under it, the comment kept",
+          "[config_edit][57e][headers][golden]") {
+    using apogee::harness::add_allowed_host;
+    using apogee::harness::parse_config;
+    using apogee::harness::section_entry_names;
+    // What `config add-backend c` printed success for while the loader read
+    // only `a`: the entry lands under the header, its comment where it was.
+    const std::string added = append_backend(kCommentHeader, "c", mock_entry(), false);
+    CHECK(added == std::string{kCommentHeader} + "\n  c:\n    type: mock\n    model: m\n");
+    CHECK(section_entry_names(added, "backends") == std::vector<std::string>{"a", "c"});
+    CHECK(parse_config(added, "<test>").backend_names() == std::vector<std::string>{"a", "c"});
+    CHECK(delete_backend(added, "c") == kCommentHeader);
+    // Deleted, the header and its comment stay; nothing says "not found".
+    CHECK(delete_backend(kCommentHeader, "a") == "backends:   # my models\n");
+    // A field set, a role set: in place, under the one header.
+    CHECK(apogee::harness::set_backend_field(kCommentHeader, "a", "model", "n") ==
+          "backends:   # my models\n  a:\n    type: mock\n    model: n\n");
+    const std::string roled =
+        set_models_role("models:  # who answers\n  default: a\n", "default", "b");
+    CHECK(roled == "models:  # who answers\n  default: b\n");
+    CHECK(add_allowed_host("tools:   # web\n  allowed_hosts: [a.com]\n", "b.com") ==
+          "tools:   # web\n  allowed_hosts: [a.com, b.com]\n");
+    CHECK(apogee::harness::set_scalar("memory:  # recall\n  recall: true\n", "memory.recall",
+                                      "false") == "memory:  # recall\n  recall: false\n");
+}
+
+TEST_CASE("a section written on its header's line is refused by every editor, never shadowed",
+          "[config_edit][57e][headers]") {
+    using apogee::harness::add_allowed_host;
+    using apogee::harness::parse_config;
+    using apogee::harness::remove_allowed_host;
+    using apogee::harness::set_scalar;
+    using Verb = std::function<std::string(std::string_view)>;
+    const std::vector<std::pair<std::string_view, Verb>> verbs{
+        {"add-backend",
+         [](std::string_view c) { return append_backend(c, "c", mock_entry(), false); }},
+        {"delete-backend", [](std::string_view c) { return delete_backend(c, "a"); }},
+        {"set memory.recall",
+         [](std::string_view c) { return set_scalar(c, "memory.recall", "false"); }},
+        {"add-allowed-host", [](std::string_view c) { return add_allowed_host(c, "b.com"); }},
+        {"set-default", [](std::string_view c) { return set_models_role(c, "default", ""); }},
+        {"remove-allowed-host", [](std::string_view c) { return remove_allowed_host(c, "a.com"); }},
+        {"set tools.search.url",
+         [](std::string_view c) { return set_scalar(c, "tools.search.url", "http://x"); }},
+    };
+    for (const std::string_view shape : {kCommentHeader, kFlowModels, kFlowMemory, kFlowTools}) {
+        for (const auto& [name, verb] : verbs) {
+            INFO(std::string{shape} + "  <- " + std::string{name});
+            try {
+                const std::string edited = verb(shape);
+                // A landed edit: parsed, and no key written twice.
+                REQUIRE_NOTHROW(parse_config(edited, "<edited>"));
+                for (const auto& [key, count] : top_level_keys(edited)) {
+                    INFO(key);
+                    CHECK(count == 1);
+                }
+            } catch (const ConfigEditError& e) {
+                const std::string said = e.what();
+                // A refusal says what it cannot edit, or is the verb's own
+                // honest one (no such host in an empty list).
+                const bool shape_refusal =
+                    said.find("line holds more than its key") != std::string::npos;
+                CHECK((shape_refusal ||
+                       said.find("is not in tools.allowed_hosts") != std::string::npos));
+                if (shape_refusal) {
+                    CHECK_THAT(said, ContainsSubstring("'apogee config migrate'"));
+                }
+            }
+        }
+    }
+    // Each flow shape's own verb, refused by name.
+    CHECK_THROWS_WITH(set_models_role(kFlowModels, "default", ""),
+                      "the models: line holds more than its key -- the editor edits the block "
+                      "form, 'models:' alone with its fields under it; rewrite it so, or carry "
+                      "the file to JSONC with 'apogee config migrate', whose every form the "
+                      "editor edits");
+    CHECK_THROWS_WITH(set_scalar(kFlowMemory, "memory.recall", "false"),
+                      ContainsSubstring("the memory: line holds more than its key"));
+    CHECK_THROWS_WITH(add_allowed_host(kFlowTools, "b.com"),
+                      ContainsSubstring("the tools: line holds more than its key"));
+    CHECK_THROWS_WITH(remove_allowed_host(kFlowTools, "a.com"),
+                      ContainsSubstring("the tools: line holds more than its key"));
+    CHECK_THROWS_WITH(append_backend("backends: {}\n", "c", mock_entry(), false),
+                      ContainsSubstring("the backends: line holds more than its key"));
+    CHECK_THROWS_WITH(apogee::harness::rename_backend("backends: {a: {type: mock}}\n", "a", "b"),
+                      ContainsSubstring("the backends: line holds more than its key"));
+
+    // Through the file layer: refused, the file's bytes as they were.
+    const EditFixture fixture;
+    apogee::harness::write_file_atomically(fixture.path, kFlowMemory);
+    CHECK_THROWS_AS(apogee::harness::edit_config_file(
+                        fixture.path,
+                        [](std::string_view c) { return set_scalar(c, "memory.recall", "false"); }),
+                    ConfigEditError);
+    CHECK(fixture.bytes() == kFlowMemory);
+}
+
+TEST_CASE("an entry line with a comment is the entry; one holding its value is refused by name",
+          "[config_edit][57e][headers]") {
+    using apogee::harness::section_entry_names;
+    using apogee::harness::set_backend_field;
+    constexpr std::string_view kTailed = "backends:\n  a:   # mine\n    type: mock\n";
+    CHECK(section_entry_names(kTailed, "backends") == std::vector<std::string>{"a"});
+    CHECK(set_backend_field(kTailed, "a", "model", "x") ==
+          "backends:\n  a:   # mine\n    type: mock\n    model: x\n");
+    CHECK_THROWS_WITH(append_backend(kTailed, "a", mock_entry(), false),
+                      "backend 'a' already exists; pass --force to replace it");
+    CHECK(delete_backend(kTailed, "a") == "backends:\n");
+
+    // `  a: {type: mock}`: neither "not found" nor a second `a:` beside it.
+    constexpr std::string_view kInline = "backends:\n  a: {type: mock}\n";
+    const std::string refusal =
+        "the backends.a: line holds more than its key -- the editor edits the block form, 'a:' "
+        "alone with its fields under it";
+    CHECK_THROWS_WITH(set_backend_field(kInline, "a", "model", "x"), ContainsSubstring(refusal));
+    CHECK_THROWS_WITH(set_backend_field(kInline, "A", "model", "x"),
+                      ContainsSubstring("the backends.A: line holds more than its key"));
+    CHECK_THROWS_WITH(delete_backend(kInline, "a"), ContainsSubstring(refusal));
+    CHECK_THROWS_WITH(append_backend(kInline, "a", mock_entry(), true), ContainsSubstring(refusal));
+    // A tab after the colon is the same line to YAML, and to the refusal.
+    constexpr std::string_view kTabbed = "backends:\n  a:\t{type: mock, model: m}\n";
+    CHECK_THROWS_WITH(set_backend_field(kTabbed, "a", "model", "z"), ContainsSubstring(refusal));
+    CHECK_THROWS_WITH(delete_backend(kTabbed, "a"), ContainsSubstring(refusal));
+    // Another name is another entry, added beside it.
+    const std::string other = append_backend(kInline, "b", mock_entry(), false);
+    CHECK(other == std::string{kInline} + "\n  b:\n    type: mock\n    model: m\n");
+    require_parses(other);
+}
+
+TEST_CASE("a multi-line value is written on one line, escaped, and reads back exactly",
+          "[config_edit][57e][multiline][golden]") {
+    using apogee::harness::parse_config;
+    using apogee::harness::set_backend_field;
+    const std::string prompt = "You are terse.\nAnswer in French.\n\nBe kind.";
+    const std::string set =
+        set_backend_field(with_backend_lines("    type: mock\n"), "e", "system_prompt", prompt);
+    CHECK(set == with_backend_lines("    type: mock\n    system_prompt: \"You are terse.\\nAnswer "
+                                    "in French.\\n\\nBe kind.\"\n"));
+    CHECK(parse_config(set, "<set>").find_backend("e")->system_prompt == prompt);
+    // Replaced: the old text goes whole, and the file stays one an add can
+    // follow.
+    const std::string shorter = set_backend_field(set, "e", "system_prompt", "short");
+    CHECK(shorter == with_backend_lines("    type: mock\n    system_prompt: short\n"));
+    const std::string after = append_backend(shorter, "zz", mock_entry(), false);
+    require_parses(after);
+    // Added: the same bytes, the same read.
+    BackendConfig backend = mock_entry();
+    backend.system_prompt = prompt;
+    const std::string added = append_backend("", "d", backend, false);
+    CHECK_THAT(added,
+               ContainsSubstring(
+                   "    system_prompt: \"You are terse.\\nAnswer in French.\\n\\nBe kind.\"\n"));
+    CHECK(parse_config(added, "<add>").find_backend("d")->system_prompt == prompt);
+    // A tab, a carriage return and another control character, exactly.
+    for (const std::string& text :
+         {std::string{"a\tb\r\nc"}, std::string{"bell\x07"}, std::string{"q\"uo\\te\n"}}) {
+        INFO(text);
+        const std::string written =
+            set_backend_field(with_backend_lines("    type: mock\n"), "e", "system_prompt", text);
+        CHECK(written.find('\t') == std::string::npos);
+        CHECK(std::count(written.begin(), written.end(), '\n') == 4);  // its four lines
+        CHECK(parse_config(written, "<test>").find_backend("e")->system_prompt == text);
+    }
+}
+
+TEST_CASE("yaml_scalar quotes text the bridge would read as a number, and only text",
+          "[config_edit][57e][numbers]") {
+    using apogee::harness::yaml_scalar;
+    for (const std::string_view number : {"1.50", "1e3", "2.0", "-2", "0", "1E-3", "~"}) {
+        INFO(number);
+        CHECK(yaml_scalar(number) == "\"" + std::string{number} + "\"");
+    }
+    for (const std::string_view text : {"9b", "1.5.0", "v2", "gemma4-12b", "0x10", "1_000"}) {
+        INFO(text);
+        CHECK(yaml_scalar(text) == text);
+    }
+    CHECK(yaml_scalar("a\nb") == "\"a\\nb\"");
+    // A number field stays the number it is; a text field the text.
+    using apogee::harness::set_backend_field;
+    const std::string base = with_backend_lines("    type: mock\n");
+    CHECK(set_backend_field(base, "e", "max_tokens", "9") ==
+          with_backend_lines("    type: mock\n    max_tokens: 9\n"));
+    CHECK(set_backend_field(base, "e", "temperature", "0.5") ==
+          with_backend_lines("    type: mock\n    temperature: 0.5\n"));
+    CHECK(set_backend_field(base, "e", "model", "1.50") ==
+          with_backend_lines("    type: mock\n    model: \"1.50\"\n"));
+    // The text fields are fields a backend has.
+    const std::vector<std::string_view> editable = apogee::harness::backend_editable_fields();
+    for (const std::string_view field : apogee::harness::backend_text_fields()) {
+        INFO(field);
+        CHECK(std::ranges::find(editable, field) != editable.end());
+    }
+}
+
+TEST_CASE("a value quoted with '' keeps its own text and the comment after it",
+          "[config_edit][57e][hash][golden]") {
+    using apogee::harness::parse_config;
+    using apogee::harness::set_backend_field;
+    const std::string quoted = with_backend_lines("    type: mock\n    model: 'it''s #1'  # c1\n");
+    CHECK(parse_config(quoted, "<test>").find_backend("e")->model == "it's #1");
+    const std::string set = set_backend_field(quoted, "e", "model", "NEWa");
+    CHECK(set == with_backend_lines("    type: mock\n    model: NEWa  # c1\n"));
+    CHECK(parse_config(set, "<test>").find_backend("e")->model == "NEWa");
+    // A rename reads the same quote: the comment is the line's, the value
+    // the scalar's.
+    const std::string named =
+        "backends:\n  x:\n    type: mock\nmodels:\n  default: 'x'  # 'q''s #2'\n";
+    CHECK(apogee::harness::rename_backend(named, "x", "y") ==
+          "backends:\n  y:\n    type: mock\nmodels:\n  default: y  # 'q''s #2'\n");
+}
+
+TEST_CASE("a config reached through a link is edited at its target, the link kept",
+          "[config_edit][57e][link]") {
+    const apogee::testing::TempDir dir{"edit-link-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path dot = dir.path() / "dot" / "config.json";
+    const std::filesystem::path home = dir.path() / "home" / "config";
+    std::filesystem::create_directories(home);
+    apogee::harness::write_file_atomically(dot, kCommented);
+    const std::filesystem::path link = home / "config.json";
+    std::error_code code;
+    std::filesystem::create_symlink(std::filesystem::path{"../../dot/config.json"}, link, code);
+    if (code) {
+        SKIP("no symbolic links here: " + code.message());
+    }
+    CHECK(apogee::harness::config_edit_target(link) == std::filesystem::canonical(dot));
+    apogee::harness::edit_config_file(
+        link, [](std::string_view c) { return set_models_role(c, "default", "local"); });
+    // The link is still a link, its target holds the edit, and nothing of the
+    // edit's is left beside the target.
+    CHECK(std::filesystem::is_symlink(link));
+    CHECK(std::filesystem::read_symlink(link) == std::filesystem::path{"../../dot/config.json"});
+    CHECK_THAT(bytes_of(dot), ContainsSubstring("  default: local   # the backend used"));
+    CHECK(apogee::harness::load_config(link).models.default_backend == "local");
+    std::size_t beside_target = 0;
+    for (const auto& entry : std::filesystem::directory_iterator{dot.parent_path()}) {
+        (void)entry;
+        ++beside_target;
+    }
+    CHECK(beside_target == 1);
+    std::filesystem::path lock = link;
+    lock += ".lock";
+    CHECK(std::filesystem::exists(lock));
+
+    // A link that leads nowhere is refused, both ends named, nothing made.
+    const std::filesystem::path dangling = home / "dangling.json";
+    std::filesystem::create_symlink(dir.path() / "nowhere" / "config.json", dangling);
+    try {
+        apogee::harness::edit_config_file(
+            dangling, [](std::string_view c) { return set_models_role(c, "default", "local"); });
+        FAIL("a dangling link was edited");
+    } catch (const ConfigEditError& e) {
+        CHECK_THAT(e.what(), ContainsSubstring(dangling.string() + " is a link to " +
+                                               (dir.path() / "nowhere" / "config.json").string() +
+                                               ", which is not there -- nothing was changed"));
+    }
+    CHECK_FALSE(std::filesystem::exists(dir.path() / "nowhere"));
+    CHECK(std::filesystem::is_symlink(dangling));
+}
+
+TEST_CASE("an edit keeps the file's mode, and a write never sits wider than it ends",
+          "[config_edit][57e][modes]") {
+    if (!apogee::harness::supports_private_modes()) {
+        SKIP("no file modes on this platform");
+    }
+    const apogee::testing::UmaskGuard umask;
+    const EditFixture fixture;
+    // A config chmodded 0600 for the key it holds stays 0600 across an edit.
+    apogee::harness::write_file_atomically(fixture.path, kCommented);
+    CHECK(mode_of(fixture.path) ==
+          (kOwnerOnly | std::filesystem::perms::group_read | std::filesystem::perms::others_read));
+    std::filesystem::permissions(fixture.path, kOwnerOnly);
+    apogee::harness::edit_config_file(
+        fixture.path, [](std::string_view c) { return set_models_role(c, "default", "local"); });
+    CHECK(mode_of(fixture.path) == kOwnerOnly);
+    // Any mode, kept: a 0640 file written over is 0640.
+    const std::filesystem::path shared = fixture.dir.path() / "ledger.json";
+    apogee::harness::write_file_atomically(shared, "{}\n");
+    const std::filesystem::perms group = kOwnerOnly | std::filesystem::perms::group_read;
+    std::filesystem::permissions(shared, group);
+    apogee::harness::write_file_atomically(shared, "{\"a\": 1}\n");
+    CHECK(mode_of(shared) == group);
+    // Private wins over what was there.
+    apogee::harness::write_file_atomically(shared, "{}\n", /*private_mode=*/true);
+    CHECK(mode_of(shared) == kOwnerOnly);
+
+    // Watched while written: a private file's temporary file, and a 0600
+    // config's, are never caught readable beyond the owner -- the probe
+    // that caught 149 of 150 credential writes at 0644 (57e).
+    const std::string secret(std::size_t{64} * 1024, 'k');
+    {
+        apogee::testing::TempModeWatch watch{fixture.dir.path()};
+        for (int i = 0; i < 20000 && watch.seen() < 3; ++i) {
+            apogee::harness::write_file_atomically(fixture.dir.path() / "credentials.json", secret,
+                                                   /*private_mode=*/true);
+        }
+        watch.stop();
+        CHECK(watch.wider() == 0);
+        REQUIRE(watch.seen() > 0);
+    }
+    {
+        const std::string config = std::string{kCommented} + "# " + secret + "\n";
+        apogee::harness::write_file_atomically(fixture.path, config);
+        std::filesystem::permissions(fixture.path, kOwnerOnly);
+        apogee::testing::TempModeWatch watch{fixture.dir.path()};
+        for (int i = 0; i < 20000 && watch.seen() < 3; ++i) {
+            apogee::harness::edit_config_file(fixture.path, [i](std::string_view c) {
+                return set_models_role(c, "default", i % 2 == 0 ? "local" : "claude");
+            });
+        }
+        watch.stop();
+        CHECK(watch.wider() == 0);
+        REQUIRE(watch.seen() > 0);
+        CHECK(mode_of(fixture.path) == kOwnerOnly);
+    }
 }

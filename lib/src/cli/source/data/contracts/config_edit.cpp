@@ -22,6 +22,7 @@
 #include "contracts/host.h"
 #include "contracts/jsonc.h"
 #include "contracts/layout.h"
+#include "platform/platform.h"
 
 namespace apogee::harness {
 namespace {
@@ -130,21 +131,58 @@ bool is_top_level(std::string_view line_body) {
            line_body[0] != '\t';
 }
 
-/// `<section>:` at column 0.
-bool is_section_header(std::string_view line_body, std::string_view section) {
-    if (!is_top_level(line_body)) {
-        return false;
+/// What follows `<key>:` at `at` on `line_body`: nothing (or blanks), a
+/// comment, or a value -- the three shapes a key's own line can take.
+enum class AfterKey : std::uint8_t { Nothing, Comment, Value };
+
+AfterKey after_key(std::string_view line_body, std::size_t at) {
+    const std::size_t next = line_body.find_first_not_of(" \t", at);
+    if (next == std::string_view::npos) {
+        return AfterKey::Nothing;
     }
-    return line_body.size() == section.size() + 1 &&
-           line_body.substr(0, section.size()) == section && line_body.back() == ':';
+    // A `#` is a comment only after a blank: `key:#x` is no key at all.
+    return next > at && line_body[next] == '#' ? AfterKey::Comment : AfterKey::Value;
 }
 
-/// The name in a `  <name>:` entry line, or nullopt.
+/// `<section>:` at column 0, alone or with a comment after it (57e):
+/// `backends:   # my models` is the section's header as YAML reads it, and
+/// an edit lands under it with the comment kept.
+bool is_section_header(std::string_view line_body, std::string_view section) {
+    if (!is_top_level(line_body) || !line_body.starts_with(section) ||
+        line_body.size() <= section.size() || line_body[section.size()] != ':') {
+        return false;
+    }
+    return after_key(line_body, section.size() + 1) != AfterKey::Value;
+}
+
+/// The refusal for a key whose own line holds its value -- a flow mapping
+/// (`memory: {recall: true}`), a flow list, a scalar -- where the editor edits
+/// only the block form (57e). Appending a block beside it would be a second
+/// key the loader never reads, so every editor refuses it by name instead,
+/// and the file is never touched: `set_attachments_graph`'s refusal, made
+/// every editor's.
+ConfigEditError inline_value_refusal(std::string_view dotted, std::string_view key) {
+    return ConfigEditError(
+        "the " + std::string{dotted} + ": line holds more than its key -- the editor edits the " +
+        "block form, '" + std::string{key} +
+        ":' alone with its fields under it; rewrite it so, or carry the file to JSONC with "
+        "'apogee config migrate', whose every form the editor edits");
+}
+
+/// The name in a `  <name>:` entry line -- a comment after it allowed (57e:
+/// `  a:   # mine` is entry `a`) -- or nullopt.
 std::optional<std::string_view> entry_name(std::string_view line_body) {
     if (is_blank(line_body) || is_comment(line_body)) {
         return std::nullopt;
     }
-    if (indent_of(line_body) != kEntryIndent || line_body.back() != ':') {
+    if (indent_of(line_body) != kEntryIndent) {
+        return std::nullopt;
+    }
+    if (const std::size_t colon = line_body.find(':', kEntryIndent);
+        colon != std::string_view::npos && after_key(line_body, colon + 1) == AfterKey::Comment) {
+        line_body = line_body.substr(0, colon + 1);
+    }
+    if (line_body.back() != ':') {
         return std::nullopt;
     }
     std::string_view name = line_body.substr(kEntryIndent, line_body.size() - kEntryIndent - 1);
@@ -169,14 +207,27 @@ bool equals_folded(std::string_view lhs, std::string_view rhs) {
 /// Half-open line range of a section's body, excluding its header.
 struct SectionRange {
     bool found = false;
-    std::size_t header = 0;  ///< index of the `<section>:` line
-    std::size_t begin = 0;   ///< first body line
-    std::size_t end = 0;     ///< one past the last body line
+    std::size_t header = 0;   ///< index of the `<section>:` line
+    std::size_t begin = 0;    ///< first body line
+    std::size_t end = 0;      ///< one past the last body line
+    std::string_view name{};  ///< the section's key, as a refusal names it
 };
 
+/// The section `<section>:` -- its header, alone or with a comment after it,
+/// and its body. Throws ConfigEditError when the file writes the section on
+/// its header's own line (`memory: {recall: true}`, 57e): a shape the editor
+/// does not see into, refused before any editor appends a second block
+/// beside it and prints a success the loader never reads.
 SectionRange find_section(const Lines& lines, std::string_view section) {
     SectionRange range;
+    range.name = section;
     for (std::size_t i = 0; i < lines.size(); ++i) {
+        if (const std::string_view text = body(lines[i]);
+            is_top_level(text) && text.starts_with(section) && text.size() > section.size() &&
+            text[section.size()] == ':' && after_key(text, section.size() + 1) == AfterKey::Value &&
+            (text[section.size() + 1] == ' ' || text[section.size() + 1] == '\t')) {
+            throw inline_value_refusal(section, section);
+        }
         if (!is_section_header(body(lines[i]), section)) {
             continue;
         }
@@ -200,13 +251,16 @@ SectionRange find_section(const Lines& lines, std::string_view section) {
 /// none. A path quoted for its `#` is not a comment; a quote mark inside a
 /// plain scalar (`it's`) opens nothing. Every scan for a value's comment asks
 /// this one (55f): a URL's fragment or a quoted path's `#` is the value's own.
+/// Inside single quotes `''` is YAML's escaped quote, not a close (57e): in
+/// `'it''s #1'` the ` #1` is the value's.
 std::size_t comment_start(std::string_view line, std::size_t from) {
     char quote = 0;
     for (std::size_t i = from; i < line.size(); ++i) {
         const char c = line[i];
         const char before = i > 0 ? line[i - 1] : ' ';
-        if (quote == '"' && c == '\\') {
-            ++i;  // an escaped character, a quote among them
+        if ((quote == '"' && c == '\\') ||
+            (quote == '\'' && c == '\'' && i + 1 < line.size() && line[i + 1] == '\'')) {
+            ++i;  // an escaped character (a quote among them), or `''`: one quote inside
         } else if (quote != 0) {
             quote = c == quote ? 0 : quote;
         } else if ((c == '"' || c == '\'') &&
@@ -311,28 +365,120 @@ void remove_field(Lines& lines, std::size_t key, std::size_t limit, std::size_t 
 
 }  // namespace
 
+namespace {
+
+/// The digits a `\xNN` escape is written with.
+constexpr std::string_view kHexDigits = "0123456789abcdef";
+
+/// `value` double-quoted, every character YAML would not keep escaped: the
+/// quote and the backslash, a newline, a carriage return and a tab as `\n`,
+/// `\r` and `\t` (57e: written raw, YAML folded a newline into a space and
+/// a later edit left the value's second line behind), and any other control
+/// character as `\xNN` -- so the value stays on one line and reads back
+/// exactly through yaml-cpp and the JSONC bridge.
+std::string quoted_text(std::string_view value) {
+    std::string out = "\"";
+    for (const char c : value) {
+        switch (c) {
+            case '"':
+                out += "\\\"";
+                break;
+            case '\\':
+                out += "\\\\";
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            case '\r':
+                out += "\\r";
+                break;
+            case '\t':
+                out += "\\t";
+                break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+                    out += "\\x";
+                    out += kHexDigits[(static_cast<unsigned char>(c) >> 4U) & 0x0FU];
+                    out += kHexDigits[static_cast<unsigned char>(c) & 0x0FU];
+                } else {
+                    out += c;
+                }
+        }
+    }
+    return out + "\"";
+}
+
+/// A hex digit's value, either case, or 16 for any other character.
+unsigned hex_digit(char c) {
+    const std::size_t at =
+        kHexDigits.find(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    return at == std::string_view::npos ? 16U : static_cast<unsigned>(at);
+}
+
+/// The text between a double-quoted scalar's quotes, its escapes read as
+/// yaml-cpp reads them (57e): what `quoted_text` writes -- `\"`, `\\`, `\n`,
+/// `\r`, `\t`, `\xNN` -- and, for any other escape, the character after the
+/// backslash.
+std::string unescaped(std::string_view inner) {
+    std::string out;
+    out.reserve(inner.size());
+    for (std::size_t i = 0; i < inner.size(); ++i) {
+        if (inner[i] != '\\' || i + 1 >= inner.size()) {
+            out += inner[i];
+            continue;
+        }
+        const char escape = inner[++i];
+        if (escape == 'n') {
+            out += '\n';
+        } else if (escape == 'r') {
+            out += '\r';
+        } else if (escape == 't') {
+            out += '\t';
+        } else if (escape == 'x' && i + 2 < inner.size() && hex_digit(inner[i + 1]) < 16U &&
+                   hex_digit(inner[i + 2]) < 16U) {
+            out += static_cast<char>((hex_digit(inner[i + 1]) << 4U) | hex_digit(inner[i + 2]));
+            i += 2;
+        } else {
+            out += escape;
+        }
+    }
+    return out;
+}
+
+/// Whether YAML would misread `value` written plain: empty, a blank at
+/// either end, a character YAML gives a meaning, a control character, or a
+/// word YAML's older schema reads as a boolean or null.
+bool yaml_misreads(std::string_view value) {
+    return value.empty() || value.front() == ' ' || value.back() == ' ' ||
+           value.find_first_of(":#{}[]&*!|>'\"%@`,") != std::string_view::npos ||
+           std::ranges::any_of(
+               value, [](char c) { return static_cast<unsigned char>(c) < 0x20 || c == 0x7F; }) ||
+           equals_folded(value, "true") || equals_folded(value, "false") ||
+           equals_folded(value, "null") || equals_folded(value, "yes") ||
+           equals_folded(value, "no");
+}
+
+/// `value` for a field its loader reads as a number (`max_tokens`,
+/// `temperature`, ...): plain, so `9` stays the number 9 in either format,
+/// quoted only where YAML would misread the text itself -- and then the
+/// re-parse refuses it as no number.
+std::string typed_scalar(std::string_view value) {
+    return yaml_misreads(value) ? quoted_text(value) : std::string{value};
+}
+
+}  // namespace
+
 // Public (declared in config_edit.h) so a test pinning the written bytes goes
 // through the same rule: a Windows model_path carries a drive colon and is
 // written quoted, and an expectation built from the raw path is wrong there.
+// The string renderer: text the JSONC bridge would read as something other
+// than text -- a number (`1.50`, `1e3`), `~` -- is quoted too (57e), so a
+// name or a model that looks like a number stays the string it is.
 std::string yaml_scalar(std::string_view value) {
-    const bool needs_quotes =
-        value.empty() || value.front() == ' ' || value.back() == ' ' ||
-        value.find_first_of(":#{}[]&*!|>'\"%@`,\n\r\t") != std::string_view::npos ||
-        equals_folded(value, "true") || equals_folded(value, "false") ||
-        equals_folded(value, "null") || equals_folded(value, "yes") || equals_folded(value, "no");
-
-    if (!needs_quotes) {
-        return std::string{value};
+    if (yaml_misreads(value) || !json_of_yaml_scalar(value, /*plain=*/true).is_string()) {
+        return quoted_text(value);
     }
-    std::string out = "\"";
-    for (const char c : value) {
-        if (c == '"' || c == '\\') {
-            out.push_back('\\');
-        }
-        out.push_back(c);
-    }
-    out.push_back('"');
-    return out;
+    return std::string{value};
 }
 
 namespace {
@@ -475,12 +621,29 @@ std::pair<std::size_t, std::size_t> entry_extent(const Lines& lines, std::size_t
     return {key_index, last_content + 1};
 }
 
+/// The key line of entry `name` (folded) in `section`, or nullopt. An entry
+/// written on its own line -- `  a: {type: mock}`, or a tab after the colon
+/// as `find_section` takes it -- is refused by name (57e), as a section
+/// written so is: neither "not found" nor a second `a:` appended beside it
+/// would be true.
 std::optional<std::size_t> find_entry_line(const Lines& lines, const SectionRange& section,
                                            std::string_view name) {
     for (std::size_t i = section.begin; i < section.end; ++i) {
-        const std::optional<std::string_view> candidate = entry_name(body(lines[i]));
+        const std::string_view line = body(lines[i]);
+        const std::optional<std::string_view> candidate = entry_name(line);
         if (candidate.has_value() && equals_folded(*candidate, name)) {
             return i;
+        }
+        if (candidate.has_value() || is_blank(line) || is_comment(line) ||
+            indent_of(line) != kEntryIndent) {
+            continue;
+        }
+        if (const std::size_t colon = line.find(':', kEntryIndent);
+            colon != std::string_view::npos && colon + 1 < line.size() &&
+            (line[colon + 1] == ' ' || line[colon + 1] == '\t') &&
+            equals_folded(line.substr(kEntryIndent, colon - kEntryIndent), name) &&
+            after_key(line, colon + 1) == AfterKey::Value) {
+            throw inline_value_refusal(std::string{section.name} + "." + std::string{name}, name);
         }
     }
     return std::nullopt;
@@ -515,6 +678,25 @@ std::optional<std::string> fold_collision(const std::vector<std::string>& existi
 }
 
 namespace {
+
+/// The refusal for an entry `name` the editor did not find in `section` (57e):
+/// a name no key both config formats edit (55f's rule) is said to be one --
+/// whether or not the config holds it, since a JSONC config's quoted key is
+/// one the editor never finds -- with `rename-backend` as the way out for a
+/// backend; any other name is not in the config.
+ConfigEditError missing_entry(std::string_view noun, std::string_view section,
+                              std::string_view name) {
+    if (!name.empty() && !yaml_plain_key(name)) {
+        std::string refusal = std::string{noun} + " '" + std::string{name} +
+                              "' is not one both config formats can edit -- " +
+                              std::string{kEntryNameRule};
+        if (section == "backends") {
+            refusal += "; rename it with 'apogee config rename-backend'";
+        }
+        return ConfigEditError(refusal);
+    }
+    return ConfigEditError(std::string{noun} + " '" + std::string{name} + "' not found in config");
+}
 
 /// Appends `entry` (key line first, every line terminated) under `section:`,
 /// creating the section at the end of the file when absent.
@@ -645,8 +827,7 @@ std::string delete_entry(std::string_view content, std::string_view section, std
 
     const std::optional<std::size_t> key_line = find_entry_line(lines, range, name);
     if (!key_line.has_value()) {
-        throw ConfigEditError(std::string{noun} + " '" + std::string{name} +
-                              "' not found in config");
+        throw missing_entry(noun, section, name);
     }
 
     auto [begin, end] = entry_extent(lines, *key_line, range.end);
@@ -792,7 +973,7 @@ std::string set_mcp_server_enabled(std::string_view content, std::string_view na
     }
     const std::optional<std::size_t> key_line = find_entry_line(lines, range, name);
     if (!key_line.has_value()) {
-        throw ConfigEditError("MCP server '" + std::string{name} + "' not found in config");
+        throw missing_entry("MCP server", "mcp_servers", name);
     }
     const auto [begin, end] = entry_extent(lines, *key_line, range.end);
     const std::string value = enabled ? "true" : "false";
@@ -1159,9 +1340,6 @@ namespace {
 constexpr std::array<std::string_view, 13> kYamlKeywords{
     "true", "false", "null", "yes", "no", "on", "off", "y", "n", "~", ".nan", ".inf", "-.inf"};
 
-/// The digits a `\xNN` escape is written with.
-constexpr std::string_view kHexDigits = "0123456789abcdef";
-
 /// A word YAML would read as something other than the string it spells.
 bool yaml_keyword(std::string_view value) {
     return std::ranges::any_of(kYamlKeywords,
@@ -1191,39 +1369,6 @@ bool plain_safe(std::string_view value) {
         return std::isalnum(static_cast<unsigned char>(c)) != 0 ||
                std::string_view{" _-.,;()/+='?!"}.find(c) != std::string_view::npos;
     });
-}
-
-/// `value` double-quoted, every character YAML would not keep escaped.
-std::string quoted_text(std::string_view value) {
-    std::string out = "\"";
-    for (const char c : value) {
-        switch (c) {
-            case '"':
-                out += "\\\"";
-                break;
-            case '\\':
-                out += "\\\\";
-                break;
-            case '\n':
-                out += "\\n";
-                break;
-            case '\r':
-                out += "\\r";
-                break;
-            case '\t':
-                out += "\\t";
-                break;
-            default:
-                if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
-                    out += "\\x";
-                    out += kHexDigits[(static_cast<unsigned char>(c) >> 4U) & 0x0FU];
-                    out += kHexDigits[static_cast<unsigned char>(c) & 0x0FU];
-                } else {
-                    out += c;
-                }
-        }
-    }
-    return out + "\"";
 }
 
 /// Whether a literal block can carry `value` exactly: printable lines (a tab
@@ -1484,7 +1629,7 @@ std::string set_suite_member(std::string_view content, std::string_view suite,
     }
     const std::optional<std::size_t> key = find_entry_line(lines, section, suite);
     if (!key.has_value()) {
-        throw ConfigEditError("suite '" + std::string{suite} + "' not found in config");
+        throw missing_entry("suite", "suites", suite);
     }
     const auto [entry_begin, entry_end] = entry_extent(lines, *key, section.end);
     const std::string missing =
@@ -1585,7 +1730,7 @@ std::string set_suite_field(std::string_view content, std::string_view suite, st
     }
     const std::optional<std::size_t> entry = find_entry_line(lines, section, suite);
     if (!entry.has_value()) {
-        throw ConfigEditError("suite '" + std::string{suite} + "' not found in config");
+        throw missing_entry("suite", "suites", suite);
     }
     const auto [entry_begin, entry_end] = entry_extent(lines, *entry, section.end);
     std::optional<std::size_t> field_line;
@@ -1664,9 +1809,11 @@ namespace {
 /// -- the whole old value replaced, a block list's or a block scalar's lines
 /// with it (55f) -- or, when the entry has none, after `after_field` (else
 /// after `type:`, else first) -- where a reader looks for it.
+/// `rendered` is the value as written: `yaml_scalar` for text, a flow list
+/// or `typed_scalar` for the rest.
 std::string set_backend_path_field(std::string_view content, std::string_view name,
                                    std::string_view key, std::string_view after_field,
-                                   std::string_view path, bool quote = true) {
+                                   std::string_view rendered) {
     Lines lines = split_lines(content);
     const std::string terminator = dominant_terminator(lines);
     const SectionRange range = find_section(lines, "backends");
@@ -1675,10 +1822,10 @@ std::string set_backend_path_field(std::string_view content, std::string_view na
     }
     const std::optional<std::size_t> key_line = find_entry_line(lines, range, name);
     if (!key_line.has_value()) {
-        throw ConfigEditError("backend '" + std::string{name} + "' not found in config");
+        throw missing_entry("backend", "backends", name);
     }
     const auto [begin, end] = entry_extent(lines, *key_line, range.end);
-    const std::string value = quote ? yaml_scalar(std::string{path}) : std::string{path};
+    const std::string value{rendered};
 
     const std::string prefix = std::string{key} + ":";
     const std::string after_prefix = std::string{after_field} + ":";
@@ -1725,7 +1872,7 @@ std::string remove_backend_field(std::string_view content, std::string_view name
     }
     const std::optional<std::size_t> key_line = find_entry_line(lines, range, name);
     if (!key_line.has_value()) {
-        throw ConfigEditError("backend '" + std::string{name} + "' not found in config");
+        throw missing_entry("backend", "backends", name);
     }
     const auto [begin, end] = entry_extent(lines, *key_line, range.end);
     const std::string prefix = std::string{key} + ":";
@@ -1775,7 +1922,7 @@ std::string set_backend_adapters(std::string_view content, std::string_view name
     }
     const std::optional<std::size_t> key_line = find_entry_line(lines, range, name);
     if (!key_line.has_value()) {
-        throw ConfigEditError("backend '" + std::string{name} + "' not found in config");
+        throw missing_entry("backend", "backends", name);
     }
     const auto [begin, end] = entry_extent(lines, *key_line, range.end);
     std::optional<std::size_t> field_line;
@@ -1854,6 +2001,15 @@ std::vector<std::string_view> backend_editable_fields() {
     return fields;
 }
 
+std::vector<std::string_view> backend_text_fields() {
+    // The fields whose value is text (57e), written through `yaml_scalar`:
+    // a model, a path, a word from a set, a prompt. Every other editable
+    // field is a number (`typed_scalar`) or a list of its own.
+    return {"type",          "model",      "model_path", "mmproj_path", "embedding_model",
+            "system_prompt", "cache_type", "thinking",   "binary",      "mode",
+            "host",          "draft"};
+}
+
 /// `value`, a comma-separated list of names (`web_search,code_execution`),
 /// as the YAML flow list a `server_tools:` or `mcp_serve:` (54b) line holds.
 /// Each name is a bare word, so the list needs no quoting; whether it names
@@ -1910,33 +2066,37 @@ std::string set_backend_field(std::string_view content, std::string_view name,
         return remove_backend_field(content, name, field);
     }
     if (field == "server_tools" || field == "mcp_serve") {
-        return set_backend_path_field(content, name, field, "", flow_list_of_names(field, value),
-                                      /*quote=*/false);
+        return set_backend_path_field(content, name, field, "", flow_list_of_names(field, value));
     }
     if (field == "adapters") {
         // The list as given, pinned to nothing: `config set-backend` records
         // each pin through `set_backend_adapters` itself (53a).
         return yaml_text::set_backend_adapters(content, name, parse_adapter_list(value));
     }
+    // Text as the string it is, a number as the number (57e): `--model 1.50`
+    // stays "1.50" in a JSONC config, `--max-tokens 9` stays 9.
+    const std::vector<std::string_view> text = backend_text_fields();
+    const std::string rendered =
+        std::ranges::find(text, field) != text.end() ? yaml_scalar(value) : typed_scalar(value);
     // A drafter beside the model it drafts for (53i), its block size beside
     // it, where a reader looks for them.
     if (field == "draft") {
-        return set_backend_path_field(content, name, field, "model_path", value);
+        return set_backend_path_field(content, name, field, "model_path", rendered);
     }
     if (field == "draft_block_size") {
-        return set_backend_path_field(content, name, field, "draft", value);
+        return set_backend_path_field(content, name, field, "draft", rendered);
     }
-    return set_backend_path_field(content, name, field, "", value);
+    return set_backend_path_field(content, name, field, "", rendered);
 }
 
 std::string set_backend_model_path(std::string_view content, std::string_view name,
                                    std::string_view path) {
-    return set_backend_path_field(content, name, "model_path", "", path);
+    return set_backend_path_field(content, name, "model_path", "", yaml_scalar(path));
 }
 
 std::string set_backend_mmproj_path(std::string_view content, std::string_view name,
                                     std::string_view path) {
-    return set_backend_path_field(content, name, "mmproj_path", "model_path", path);
+    return set_backend_path_field(content, name, "mmproj_path", "model_path", yaml_scalar(path));
 }
 
 std::string set_embedding_graph_enabled(std::string_view content, std::string_view collection,
@@ -1949,7 +2109,7 @@ std::string set_embedding_graph_enabled(std::string_view content, std::string_vi
     }
     const std::optional<std::size_t> key_line = find_entry_line(lines, range, collection);
     if (!key_line.has_value()) {
-        throw ConfigEditError("collection '" + std::string{collection} + "' not found in config");
+        throw missing_entry("collection", "embeddings", collection);
     }
     const auto [begin, end] = entry_extent(lines, *key_line, range.end);
     const std::string value = enabled ? "true" : "false";
@@ -2116,10 +2276,7 @@ std::string set_subsection_rendered(std::string_view content, std::string_view s
                 rest.remove_prefix(1);
             }
             if (!rest.empty() && rest.front() != '#') {
-                throw ConfigEditError("the " + std::string{section_name} + "." + std::string{sub} +
-                                      " line holds more than its key -- the editor sets the block "
-                                      "form, '" +
-                                      std::string{sub} + ":' alone with its fields under it");
+                throw inline_value_refusal(std::string{section_name} + "." + std::string{sub}, sub);
             }
             header = i;
         }
@@ -2176,18 +2333,9 @@ std::string set_attachments_graph(std::string_view content, std::string_view met
     if (!attachment_graph_method_from_string(method).has_value()) {
         throw ConfigEditError(attachment_graph_values_message("attachments.graph", method));
     }
-    // `attachments: { graph: off }` -- or a header carrying a comment -- is a
-    // section the line editor does not see: a block appended beside it would
-    // be a second key, and the loader reads the first. Refused, never misread.
-    for (const std::string& line : split_lines(content)) {
-        const std::string_view text = body(line);
-        if (is_top_level(text) && text.starts_with("attachments:") &&
-            !is_section_header(text, "attachments")) {
-            throw ConfigEditError(
-                "the attachments: line holds more than its key -- the editor sets the block "
-                "form, 'attachments:' alone with '  graph: <code|off>' under it");
-        }
-    }
+    // `attachments: { graph: off }` is a section the line editor does not
+    // see into: refused by the section's own lookup, as every editor's is
+    // (57e), never a block appended beside it.
     return set_section_scalar(content, "attachments", "graph", method);
 }
 
@@ -2240,17 +2388,11 @@ std::string checked_host(std::string_view host) {
 }
 
 /// A YAML scalar as written -- plain, `"double"` or `'single'` quoted --
-/// read back to its value. Only as much YAML as a host name can need.
+/// read back to its value, a double-quoted one's escapes decoded as
+/// yaml-cpp decodes them (`unescaped`, 57e).
 std::string unquote(std::string_view token) {
     if (token.size() >= 2 && token.front() == '"' && token.back() == '"') {
-        std::string out;
-        for (std::size_t i = 1; i + 1 < token.size(); ++i) {
-            if (token[i] == '\\' && i + 2 < token.size()) {
-                ++i;
-            }
-            out.push_back(token[i]);
-        }
-        return out;
+        return unescaped(token.substr(1, token.size() - 2));
     }
     if (token.size() >= 2 && token.front() == '\'' && token.back() == '\'') {
         std::string out;
@@ -2524,8 +2666,8 @@ std::string format_config(std::string_view content) {
 
 namespace {
 
-/// A scalar token's text: a quoted one unquoted (a double-quoted one's `\"`
-/// and `\\` read), a plain one as it stands.
+/// A scalar token's text: a quoted one unquoted (a double-quoted one's
+/// escapes read, `unescaped`), a plain one as it stands.
 std::string token_text_of(std::string_view token) {
     if (token.size() >= 2 && token.front() == '\'' && token.back() == '\'') {
         std::string out;
@@ -2538,14 +2680,7 @@ std::string token_text_of(std::string_view token) {
         return out;
     }
     if (token.size() >= 2 && token.front() == '"' && token.back() == '"') {
-        std::string out;
-        for (std::size_t i = 1; i + 1 < token.size(); ++i) {
-            if (token[i] == '\\' && i + 2 < token.size()) {
-                ++i;
-            }
-            out += token[i];
-        }
-        return out;
+        return unescaped(token.substr(1, token.size() - 2));
     }
     return std::string{token};
 }
@@ -2585,8 +2720,9 @@ std::size_t value_token_end(std::string_view line, std::size_t from) {
     for (std::size_t i = from; i < line.size(); ++i) {
         const char c = line[i];
         if (quote != 0) {
-            if (quote == '"' && c == '\\') {
-                ++i;
+            if ((quote == '"' && c == '\\') ||
+                (quote == '\'' && c == '\'' && i + 1 < line.size() && line[i + 1] == '\'')) {
+                ++i;  // an escape, or `''`: one quote inside the scalar (57e)
             } else if (c == quote) {
                 quote = 0;
             }
@@ -3005,6 +3141,10 @@ std::string set_backend_model_path(std::string_view content, std::string_view na
 
 std::vector<std::string_view> backend_editable_fields() {
     return yaml_text::backend_editable_fields();
+}
+
+std::vector<std::string_view> backend_text_fields() {
+    return yaml_text::backend_text_fields();
 }
 
 std::string set_backend_field(std::string_view content, std::string_view name,
@@ -3444,53 +3584,80 @@ platform::FileLock lock_config_file(const std::filesystem::path& path,
     return std::move(*lock);
 }
 
+std::filesystem::path config_edit_target(const std::filesystem::path& path) {
+    std::error_code code;
+    if (!std::filesystem::is_symlink(path, code)) {
+        return path;
+    }
+    // Every link in the chain followed, as the read follows it: the file the
+    // config's bytes are in. A link that leads nowhere is refused with both
+    // ends named -- creating its target, or replacing the link with a file,
+    // would each be a guess at what the user meant.
+    std::filesystem::path target = std::filesystem::canonical(path, code);
+    if (code) {
+        const std::filesystem::path points_at = std::filesystem::read_symlink(path, code);
+        throw ConfigEditError(path.string() + " is a link to " + points_at.string() +
+                              ", which is not there -- nothing was changed; point the link at a "
+                              "config, or put one where it points");
+    }
+    return target;
+}
+
 void write_file_atomically(const std::filesystem::path& path, std::string_view content,
                            bool private_mode) {
-    const std::filesystem::path directory =
-        path.has_parent_path() ? path.parent_path() : std::filesystem::path{"."};
+    namespace fs = std::filesystem;
+    const fs::path directory = path.has_parent_path() ? path.parent_path() : fs::path{"."};
 
     std::error_code ec;
-    std::filesystem::create_directories(directory, ec);
+    fs::create_directories(directory, ec);
     if (ec) {
         throw ConfigEditError(directory.string() + ": cannot create directory: " + ec.message());
     }
 
     // A unique sibling name, so two concurrent writers cannot collide on it.
     std::random_device entropy;
-    const std::filesystem::path temp_path =
+    const fs::path temp_path =
         directory / (path.filename().string() + ".tmp." + std::to_string(entropy()));
 
-    {
-        std::ofstream out(temp_path, std::ios::binary | std::ios::trunc);
-        if (!out) {
-            throw ConfigEditError(temp_path.string() + ": cannot create temporary file");
-        }
-        out.write(content.data(), static_cast<std::streamsize>(content.size()));
-        out.flush();
-        if (!out) {
-            std::filesystem::remove(temp_path, ec);
-            throw ConfigEditError(temp_path.string() + ": error writing temporary file");
+    // The mode the file ends with (57e): private, or the mode the file it
+    // replaces has -- a config chmodded 0600 for the key it holds stays 0600
+    // -- or, for a new file, the umask's. The temporary file is created under
+    // it, so what it holds is never on disk under a wider mode, not even
+    // before its first byte (a secret's temporary file was caught at the
+    // umask's mode while it was written). Windows, where modes do not exist,
+    // is as it was.
+    std::optional<fs::perms> mode;
+    if (supports_private_modes()) {
+        if (private_mode) {
+            mode = fs::perms::owner_read | fs::perms::owner_write;
+        } else if (const fs::file_status existing = fs::status(path, ec);
+                   !ec && fs::is_regular_file(existing)) {
+            mode = existing.permissions() & fs::perms::all;
         }
     }
-
-    if (private_mode && supports_private_modes()) {
-        // On the temporary file, BEFORE the rename: the secret is never on
-        // disk under the umask's mode, not even between two syscalls.
-        std::filesystem::permissions(
-            temp_path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
-            std::filesystem::perm_options::replace, ec);
+    if (std::string error;
+        !platform::write_new_file(temp_path, content,
+                                  mode.value_or(fs::perms::owner_read | fs::perms::owner_write |
+                                                fs::perms::group_read | fs::perms::group_write |
+                                                fs::perms::others_read | fs::perms::others_write),
+                                  error)) {
+        throw ConfigEditError(temp_path.string() + ": cannot write temporary file: " + error);
+    }
+    if (mode.has_value()) {
+        // Exactly, whatever the umask took at the create -- which only ever
+        // narrows it -- and still before the rename.
+        fs::permissions(temp_path, *mode, fs::perm_options::replace, ec);
         if (ec) {
             std::error_code cleanup;
-            std::filesystem::remove(temp_path, cleanup);
-            throw ConfigEditError(temp_path.string() +
-                                  ": cannot set private mode: " + ec.message());
+            fs::remove(temp_path, cleanup);
+            throw ConfigEditError(temp_path.string() + ": cannot set its mode: " + ec.message());
         }
     }
 
-    std::filesystem::rename(temp_path, path, ec);
+    fs::rename(temp_path, path, ec);
     if (ec) {
         std::error_code cleanup;
-        std::filesystem::remove(temp_path, cleanup);
+        fs::remove(temp_path, cleanup);
         throw ConfigEditError(path.string() + ": cannot replace file: " + ec.message());
     }
 }

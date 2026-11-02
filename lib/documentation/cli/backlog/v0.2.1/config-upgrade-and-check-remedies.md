@@ -25,7 +25,7 @@ What already works: upgrade is idempotent on every template and inserts each blo
 - `presentation/cli/check.cpp:460-468`: when the entry already writes the nearest key, the row says so and the remedy is to remove the stray key.
 - Tests: `tests/data/contracts/config_migrate_test.cpp` (`[commented]`), `tests/presentation/cli/config_lifecycle_test.cpp` (upgrade under a held lock; the count `check` gives), `tests/presentation/cli/check_test.cpp` (`[unknown-keys]`), `tests/scripts/cmake/config_e2e.cmake` (55g's section).
 
-**Reference.** 55f (`config-editor-correctness`, MILESTONES 2026-10-25): the lock around every edit, which finding 1 regresses. 55g (`config-reads-and-validation`, MILESTONES 2026-10-25): the commented options and the typo rows, which findings 2 and 3 extend. Sibling [`config-editor-text-fidelity.md`](config-editor-text-fidelity.md) (57e) is the sweep's other config-editing item: it covers the editor's own text, and this item covers the remedies.
+**Reference.** 55f (`config-editor-correctness`, MILESTONES 2026-10-25): the lock around every edit, which finding 1 regresses. 55g (`config-reads-and-validation`, MILESTONES 2026-10-25): the commented options and the typo rows, which findings 2 and 3 extend. Sibling 57e (`config-editor-text-fidelity`, shipped 2026-11-01, [Milestone AT](../../assistant/MILESTONES.md#milestone-at--the-second-sweeps-cli-findings)) was the sweep's other config-editing item: it covered the editor's own text, and this item covers the remedies.
 
 **Decisions made** (dated):
 - 2026-10-31: Specced from the second CLI/GUI bug sweep (the user's call: every finding becomes a v0.2.1 item in its queue, CLI track 57, GUI track 6).
@@ -51,4 +51,4 @@ What already works: upgrade is idempotent on every template and inserts each blo
 - [ ] `check` never tells the user to rename a key to one its entry already has; its remedy, followed, leaves a config every command loads.
 - [ ] A live pass on `apogee-dev` over a scratchpad `APOGEE_HOME` reproduces each probe's fixed result; the full suite is green.
 
-**Scope note.** Earmarked for v0.2.1 (track 57); ungated. Out of scope: `config migrate` and `config init --force`'s lock (55f's decision); the editor's own text handling (57e); `thinking_display` and any other option upgrade would have to rewrite a line to carry (55g's decision).
+**Scope note.** Earmarked for v0.2.1 (track 57); ungated. Out of scope: `config migrate` and `config init --force`'s lock (55f's decision); the editor's own text handling (57e, shipped 2026-11-01 -- which also made `edit_config_file` read and write a linked config at its target, `config_edit_target`, the lock staying beside the path named, and keep the file's mode: the transform this item fixes runs inside that); `thinking_display` and any other option upgrade would have to rewrite a line to carry (55g's decision).

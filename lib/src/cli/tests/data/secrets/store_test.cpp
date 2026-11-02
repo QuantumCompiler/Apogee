@@ -12,6 +12,7 @@
 
 #include "contracts/layout.h"
 #include "support/env_guard.h"
+#include "support/temp_mode_watch.h"
 
 /// The credential store: a private file, a type with no key field, and a
 /// corrupt file that degrades to nothing rather than to a crash or a clobber.
@@ -106,4 +107,28 @@ TEST_CASE("a corrupt store reads as empty with a warning and is never overwritte
         << R"({"version":1,"credentials":{"openai":{"key":"ok"},"bad":42}})";
     CHECK(*fixture.store.key_for("openai") == "ok");
     CHECK(fixture.store.list().size() == 1);
+}
+
+TEST_CASE("a key's temporary file is never readable beyond its owner, not even while written",
+          "[secrets][store][57e]") {
+    if (!apogee::harness::supports_private_modes()) {
+        SKIP("no file modes on this platform");
+    }
+    // The sweep's probe (57e) as a test: the store written until a watch
+    // beside it has caught three of its temporary files (each write's is
+    // caught, so three writes in practice). Created 0644 and narrowed after,
+    // 149 of 150 were caught holding the key at 0644.
+    const apogee::testing::UmaskGuard umask;
+    Fixture fixture;
+    fixture.store.put("openai", "sk-test-0");
+    apogee::testing::TempModeWatch watch{fixture.store.path().parent_path()};
+    for (int i = 0; i < 20000 && watch.seen() < 3; ++i) {
+        fixture.store.put("openai", "sk-test-" + std::to_string(i));
+    }
+    watch.stop();
+    CHECK(watch.wider() == 0);
+    REQUIRE(watch.seen() > 0);
+    const std::filesystem::perms mode =
+        std::filesystem::status(fixture.store.path()).permissions() & std::filesystem::perms::mask;
+    CHECK(mode == (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write));
 }

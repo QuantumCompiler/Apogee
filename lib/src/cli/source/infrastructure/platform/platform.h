@@ -110,6 +110,18 @@ struct LocalDate {
 [[nodiscard]] bool create_exclusive_file(const std::filesystem::path& path,
                                          std::string_view content, bool& exists);
 
+/// Creates `path` -- nothing may be there yet, a link included -- holding
+/// `content`, under `mode` (permission bits; the umask takes what it takes)
+/// from its first instant: the mode is given to the create itself
+/// (`O_CREAT|O_EXCL`), so the file is never on disk under a wider one, not
+/// even before its first byte is written (57e: a secret's temporary file was
+/// caught at the umask's mode while it was written). False, with `error`
+/// saying why, when it cannot be made or written -- and then nothing of this
+/// call's is left at `path`. Windows, where modes do not exist, writes it as a
+/// stream does and ignores `mode`.
+[[nodiscard]] bool write_new_file(const std::filesystem::path& path, std::string_view content,
+                                  std::filesystem::perms mode, std::string& error);
+
 /// Creates the directory `path` only if nothing is there yet, readable,
 /// writable and searchable by its owner alone (0700) from its first instant
 /// -- one atomic create-or-fail (`mkdir`; `CreateDirectory` on Windows,

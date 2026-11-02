@@ -138,13 +138,19 @@ public:
 /// edit is byte-exact and the entry's other fields and comments survive.
 ///
 /// Throws ConfigEditError when the section or the entry is missing.
-/// Quotes `value` when YAML would otherwise misread it: empty, leading or
-/// trailing space, any of `:#{}[]&*!|>'"%@\`,` or a control character, or a
-/// bare boolean/null word. Erring toward quoting is deliberate -- an api_key
-/// of `${VAR}` or a Windows model_path with a drive colon must survive a
-/// round trip, and a needlessly quoted string reads the same to the loader.
-/// Every value this file writes goes through it, which is why it is public:
-/// a test that pins the written bytes must apply the same rule.
+/// `value`, text, as YAML writes it to read back as exactly that text: quoted
+/// when YAML would otherwise misread it -- empty, leading or trailing space,
+/// any of `:#{}[]&*!|>'"%@\`,` or a control character, or a bare
+/// boolean/null word -- or when the JSONC bridge would read it as something
+/// other than text: a number (`1.50`, `1e3`) or `~` (57e). Quoted, a newline,
+/// a carriage return and a tab are written as `\n`, `\r` and `\t` and any
+/// other control character as `\xNN`, so the value stays on its line (57e).
+/// Erring toward quoting is deliberate -- an api_key of `${VAR}` or a Windows
+/// model_path with a drive colon must survive a round trip, and a needlessly
+/// quoted string reads the same to the loader. Every text value this file
+/// writes goes through it, which is why it is public: a test that pins the
+/// written bytes must apply the same rule. A number a field's loader reads
+/// as one (`max_tokens`) is written plain instead (`backend_text_fields`).
 [[nodiscard]] std::string yaml_scalar(std::string_view value);
 
 [[nodiscard]] std::string set_backend_model_path(std::string_view content, std::string_view name,
@@ -182,6 +188,13 @@ public:
 /// Since 55g it is `backend_entry_keys()` but `api_key`, the one declaration
 /// the loader, `config get` and its completion read too.
 [[nodiscard]] std::vector<std::string_view> backend_editable_fields();
+
+/// The editable backend fields whose value is text (57e) -- `model`, the
+/// paths, a prompt, a word from a set -- written through `yaml_scalar`, so a
+/// model named `1.50` stays the string "1.50" in a JSONC config. Every other
+/// editable field is a number, written plain so `9` stays 9, or a list
+/// (`server_tools`, `mcp_serve`, `adapters`) written as one.
+[[nodiscard]] std::vector<std::string_view> backend_text_fields();
 
 /// Sets `backends.<name>.<field>` to `value` in place (46b): the value token
 /// replaced where it stands, a comment after it kept, or the field written
@@ -453,11 +466,24 @@ struct SettableScalar {
 /// Same-directory matters: rename is only atomic within a filesystem, and a
 /// temp file in /tmp can land on a different one. An interrupted write leaves
 /// the original file intact rather than a truncated config.
-/// With `private_mode`, the file is `0600` before it is renamed into place
-/// (POSIX; a no-op where modes do not exist), so a secret is never on disk
-/// under a permissive mode, not even between two syscalls.
+///
+/// The temporary file is created under the mode the file ends with, before
+/// its first byte (POSIX; Windows, where modes do not exist, is unchanged):
+/// with `private_mode` `0600`, so a secret is never on disk under a permissive
+/// mode, not even while it is written (57e found it written first and chmodded
+/// after); otherwise the mode of the file it replaces, so a config chmodded
+/// `0600` for the key it holds stays `0600` across an edit; and for a new file
+/// the umask's. A link at `path` is replaced, not written through -- the
+/// config's edit resolves its own (`config_edit_target`).
 void write_file_atomically(const std::filesystem::path& path, std::string_view content,
                            bool private_mode = false);
+
+/// The file an edit of the config at `path` writes (57e): `path` itself, or,
+/// when `path` is a link -- a config kept in a dotfiles repository -- the
+/// file the link leads to, so the edit lands there and the link stays a link.
+/// Throws ConfigEditError naming the link and its target when the link leads
+/// nowhere; nothing is created.
+[[nodiscard]] std::filesystem::path config_edit_target(const std::filesystem::path& path);
 
 /// How long a config edit waits for another to finish before it fails (55f).
 /// An edit holds the lock for milliseconds; this is the bound past which one
@@ -489,11 +515,17 @@ inline constexpr std::chrono::milliseconds kConfigLockWait{10000};
 /// The lock is what makes two edits at once both land (55f): without it, each
 /// read the file before the other wrote, and the second rename dropped the
 /// first's change. `lock_wait` bounds the wait for another edit to finish.
+///
+/// A config reached through a link is edited at the link's target, the link
+/// left a link (57e: the rename used to replace it with a regular file, and
+/// the dotfiles copy it pointed at kept the old text); the lock stays beside
+/// `path`. The file keeps its mode (`write_file_atomically`).
 template <typename Transform>
 void edit_config_file(const std::filesystem::path& path, Transform&& transform,
                       std::chrono::milliseconds lock_wait = kConfigLockWait) {
+    const std::filesystem::path target = config_edit_target(path);
     const platform::FileLock lock = lock_config_file(path, lock_wait);
-    const std::string original = read_config_file(path);
+    const std::string original = read_config_file(target);
     (void)parse_config(original, path.string());
 
     std::string edited = std::forward<Transform>(transform)(std::string_view{original});
@@ -502,7 +534,7 @@ void edit_config_file(const std::filesystem::path& path, Transform&& transform,
     // user's file exactly as it was.
     (void)parse_config(edited, "<edited config>");
 
-    write_file_atomically(path, edited);
+    write_file_atomically(target, edited);
 }
 
 }  // namespace apogee::harness

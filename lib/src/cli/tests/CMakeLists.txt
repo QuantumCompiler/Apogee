@@ -35,6 +35,8 @@ add_library(apogee_tests_infrastructure OBJECT
     support/env_guard.cpp
     support/file_time.h
     support/file_time.cpp
+    support/temp_mode_watch.h
+    support/temp_mode_watch.cpp
     support/fake_child.h
     support/fake_mlx_driver.h
     support/fake_ffmpeg.h

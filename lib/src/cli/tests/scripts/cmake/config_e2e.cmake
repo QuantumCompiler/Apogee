@@ -785,6 +785,98 @@ if(NOT APOGEE_OUT MATCHES "is current")
     message(FATAL_ERROR "a second upgrade was not a no-op:\n${APOGEE_OUT}")
 endif()
 
+# --- 57e: the editor writes what it says, and keeps what it does not edit ---
+# A legacy YAML config whose sections sit on their headers' lines: every
+# editor refuses by name, prints no success, and leaves the bytes as they
+# were -- never a second block appended at the end that the loader ignores.
+set(FLOW_FILE "${APOGEE_WORK_DIR}/flow.yaml")
+set(FLOW_TEXT "backends:\n  a:\n    type: mock\n    model: m\nmodels: {default: a, default_utility: a}\nmemory: {recall: true}\ntools: {allowed_hosts: [a.com]}\n")
+file(WRITE "${FLOW_FILE}" "${FLOW_TEXT}")
+foreach(edit IN ITEMS "delete-backend|a" "set|memory.recall|false" "add-allowed-host|b.com"
+                      "set-default|a")
+    string(REPLACE "|" ";" edit "${edit}")
+    apogee_run_fails(--config "${FLOW_FILE}" config ${edit})
+    if(NOT APOGEE_ERR MATCHES "line holds more than its key" OR
+       NOT APOGEE_ERR MATCHES "apogee config migrate" OR APOGEE_OUT MATCHES "cleared|set to|=")
+        message(FATAL_ERROR "config ${edit} on a flow-mapping header was not refused by name:\n"
+                            "stdout: ${APOGEE_OUT}\nstderr: ${APOGEE_ERR}")
+    endif()
+    file(READ "${FLOW_FILE}" FLOW_AFTER)
+    if(NOT FLOW_AFTER STREQUAL FLOW_TEXT)
+        message(FATAL_ERROR "a refused config ${edit} changed the file:\n${FLOW_AFTER}")
+    endif()
+endforeach()
+# A header with a comment is the section's header: the add lands under it.
+set(TAILED_FILE "${APOGEE_WORK_DIR}/tailed.yaml")
+file(WRITE "${TAILED_FILE}" "backends:   # my models\n  a:\n    type: mock\n    model: m\nmodels:\n  default: a\n")
+apogee_run(0 --config "${TAILED_FILE}" config add-backend c --type mock --model m)
+apogee_run(0 --config "${TAILED_FILE}" config get backends)
+# Windows' text-mode stdout says each newline as CRLF; the list is the names.
+string(REPLACE "\r\n" "\n" TAILED_LISTED "${APOGEE_OUT}")
+expect_equal("${TAILED_LISTED}" "a\nc" "an add under a header with a comment")
+file(READ "${TAILED_FILE}" TAILED_AFTER)
+if(NOT TAILED_AFTER MATCHES "^backends:   # my models\n" OR TAILED_AFTER MATCHES "\nbackends:")
+    message(FATAL_ERROR "the add did not land under the commented header:\n${TAILED_AFTER}")
+endif()
+
+# On JSONC: a multi-line prompt reads back with its newlines, and a
+# number-looking name, default and model stay text -- check names no
+# unconfigured backend.
+file(WRITE "${CONFIG_FILE}" "${PRISTINE}")
+apogee_run(0 config add-backend 1e3 --type mock --model 1.50)
+apogee_run(0 config set-default 1e3)
+apogee_run(0 config get models.default)
+expect_equal("${APOGEE_OUT}" "1e3" "a number-looking default")
+apogee_run(0 config get backends.1e3.model)
+expect_equal("${APOGEE_OUT}" "1.50" "a number-looking model")
+file(READ "${CONFIG_FILE}" NUMBERED)
+if(NOT NUMBERED MATCHES "\"default\": \"1e3\"" OR NOT NUMBERED MATCHES "\"model\": \"1.50\"")
+    message(FATAL_ERROR "a number-looking name or model was retyped:\n${NUMBERED}")
+endif()
+apogee_run(0 check --output-format json)
+if(APOGEE_OUT MATCHES "names a backend that is not configured")
+    message(FATAL_ERROR "check names the number-looking default unconfigured:\n${APOGEE_OUT}")
+endif()
+apogee_run(0 config set-backend 1e3 --system-prompt "You are terse.\nAnswer in French.\n\nBe kind.")
+execute_process(COMMAND "${APOGEE_BIN}" config get backends.1e3.system_prompt
+    RESULT_VARIABLE prompt_code OUTPUT_VARIABLE prompt_out ERROR_VARIABLE prompt_err)
+string(REPLACE "\r\n" "\n" prompt_out "${prompt_out}")
+if(NOT prompt_code EQUAL 0 OR
+   NOT prompt_out STREQUAL "You are terse.\nAnswer in French.\n\nBe kind.\n")
+    message(FATAL_ERROR "a multi-line prompt did not read back exactly:\n[${prompt_out}]${prompt_err}")
+endif()
+
+# A config reached through a link -- a dotfiles repository's -- is edited
+# at its target and stays a link; one that leads nowhere is refused, both
+# ends named. (Windows makes a link only with a privilege the runners lack.)
+if(NOT WIN32)
+    set(DOT_FILE "${APOGEE_WORK_DIR}/dot/config.json")
+    file(MAKE_DIRECTORY "${APOGEE_WORK_DIR}/dot")
+    file(WRITE "${DOT_FILE}" "${PRISTINE}")
+    file(REMOVE "${CONFIG_FILE}")
+    file(CREATE_LINK "${DOT_FILE}" "${CONFIG_FILE}" SYMBOLIC)
+    apogee_run(0 config set memory.recall false)
+    if(NOT IS_SYMLINK "${CONFIG_FILE}")
+        message(FATAL_ERROR "an edit replaced the linked config with a file of its own")
+    endif()
+    file(READ "${DOT_FILE}" DOT_AFTER)
+    if(NOT DOT_AFTER MATCHES "\"recall\": false")
+        message(FATAL_ERROR "the edit did not land at the link's target:\n${DOT_AFTER}")
+    endif()
+    apogee_run(0 config get memory.recall)
+    expect_equal("${APOGEE_OUT}" "false" "memory.recall through the link")
+    file(REMOVE "${CONFIG_FILE}")
+    file(CREATE_LINK "${APOGEE_WORK_DIR}/nowhere/config.json" "${CONFIG_FILE}" SYMBOLIC)
+    apogee_run_fails(config set memory.recall true)
+    if(NOT APOGEE_ERR MATCHES "is a link to .*nowhere/config.json, which is not there")
+        message(FATAL_ERROR "a dangling config link was not refused by name:\n${APOGEE_ERR}")
+    endif()
+    if(EXISTS "${APOGEE_WORK_DIR}/nowhere")
+        message(FATAL_ERROR "a refused edit made the dangling link's target")
+    endif()
+    file(REMOVE "${CONFIG_FILE}")
+endif()
+
 # --- delete restores the original bytes ------------------------------------
 # Rebuild from pristine so the role edits above do not muddy the comparison --
 # with a default already set, since M33's first add on a config with none

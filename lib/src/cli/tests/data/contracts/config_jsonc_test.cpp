@@ -1,8 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <functional>
+#include <initializer_list>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -12,6 +14,7 @@
 
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
+#include "contracts/jsonc.h"
 #include "support/env_guard.h"
 
 /// The config in JSONC (28i): the loader reads it as the same config its
@@ -577,7 +580,8 @@ TEST_CASE("an odd name a JSONC config already holds is reached through rename-ba
           "[config_edit][jsonc][names]") {
     using namespace apogee::harness;
     // Hand-written, or added before 55f: the bridge quotes the key, so the line
-    // editor cannot find it -- but rename-backend reads the JSONC itself.
+    // editor cannot find it -- but rename-backend reads the JSONC itself, and
+    // every set and delete says so rather than "not found" (57e).
     constexpr std::string_view kOdd = R"({
   "backends": {
     "qwen@home": {"type": "mock"} // the odd one
@@ -585,7 +589,9 @@ TEST_CASE("an odd name a JSONC config already holds is reached through rename-ba
 }
 )";
     CHECK_THROWS_WITH(set_backend_field(kOdd, "qwen@home", "max_tokens", "9"),
-                      "backend 'qwen@home' not found in config");
+                      "backend 'qwen@home' is not one both config formats can edit -- a name is "
+                      "letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not "
+                      "null; rename it with 'apogee config rename-backend'");
     const std::string renamed = rename_backend(kOdd, "qwen@home", "qwen-home");
     CHECK(renamed == R"({
   "backends": {
@@ -668,4 +674,114 @@ tools:
         CHECK(json.tools.search.url == "http://10.0.0.2:8080/#x");
         CHECK(yaml.tools.search.url == json.tools.search.url);
     }
+}
+
+// --- 57e: text stays text, and an odd name is said to be one ------------------
+
+namespace {
+
+/// A JSONC config with no entries yet, a comment to keep.
+constexpr std::string_view kEmptyJsonc = "{\n  // mine\n  \"backends\": {}\n}\n";
+
+/// The JSON value at `section`.`key`(.`field`) in `text`.
+nlohmann::ordered_json json_at(std::string_view text, std::initializer_list<std::string> path) {
+    nlohmann::ordered_json node = apogee::harness::jsonc::parse_json(text);
+    for (const std::string& key : path) {
+        node = nlohmann::ordered_json(node.at(key));
+    }
+    return node;
+}
+
+}  // namespace
+
+TEST_CASE("a number-looking name, default and model stay text in JSONC",
+          "[config_edit][jsonc][57e][numbers]") {
+    using namespace apogee::harness;
+    for (const std::string_view name : {"1.50", "1e3", "2.0"}) {
+        INFO(name);
+        // Added, made the default, given a model of the same spelling.
+        std::string text = append_backend(kEmptyJsonc, name, mock_backend(), false);
+        text = set_models_role(text, "default", name);
+        text = set_backend_field(text, name, "model", name);
+        CHECK(json_at(text, {"models", "default"}) == std::string{name});
+        CHECK(json_at(text, {"backends", std::string{name}, "model"}) == std::string{name});
+        const Config config = parse_config(text, "<test>");
+        CHECK(config.models.default_backend == name);
+        CHECK(config.find_backend(config.models.default_backend) != nullptr);
+        CHECK(config.find_backend(name)->model == name);
+        CHECK_THAT(text, Catch::Matchers::ContainsSubstring("// mine"));
+        // A number field stays a number.
+        const std::string capped = set_backend_field(text, name, "max_tokens", "9");
+        CHECK(json_at(capped, {"backends", std::string{name}, "max_tokens"}) == 9);
+        // Renamed to a number-looking name: still the key, still text where
+        // it is named.
+        const std::string renamed = rename_backend(text, name, "3.0");
+        CHECK(json_at(renamed, {"models", "default"}) == "3.0");
+    }
+    // Every editable field that is neither text nor a list is written as the
+    // number it is; every text field as text.
+    const std::string base = append_backend(kEmptyJsonc, "b", mock_backend(), false);
+    const std::vector<std::string_view> text_fields = backend_text_fields();
+    for (const std::string_view field : backend_editable_fields()) {
+        if (field == "type" || field == "server_tools" || field == "mcp_serve" ||
+            field == "adapters") {
+            continue;
+        }
+        INFO(field);
+        const nlohmann::ordered_json written = json_at(set_backend_field(base, "b", field, "1"),
+                                                       {"backends", "b", std::string{field}});
+        const bool text = std::ranges::find(text_fields, field) != text_fields.end();
+        CHECK(written.is_string() == text);
+        CHECK(written.is_number() == !text);
+    }
+}
+
+TEST_CASE("a multi-line prompt round-trips byte for byte through the JSONC bridge",
+          "[config_edit][jsonc][57e][multiline]") {
+    using namespace apogee::harness;
+    const std::string prompt = "You are terse.\nAnswer in French.\n\nBe kind.\ttab\r\n";
+    const std::string added = append_backend(kEmptyJsonc, "c", mock_backend(), false);
+    const std::string set = set_backend_field(added, "c", "system_prompt", prompt);
+    CHECK(json_at(set, {"backends", "c", "system_prompt"}) == prompt);
+    CHECK(parse_config(set, "<test>").find_backend("c")->system_prompt == prompt);
+    CHECK_THAT(set,
+               Catch::Matchers::ContainsSubstring(
+                   R"("system_prompt": "You are terse.\nAnswer in French.\n\nBe kind.\ttab\r\n")"));
+    apogee::harness::BackendConfig backend = mock_backend();
+    backend.system_prompt = prompt;
+    const std::string with = append_backend(kEmptyJsonc, "d", backend, false);
+    CHECK(parse_config(with, "<test>").find_backend("d")->system_prompt == prompt);
+    // And replaced, the file still one every later edit takes.
+    const std::string shorter = set_backend_field(set, "c", "system_prompt", "short");
+    CHECK(json_at(shorter, {"backends", "c", "system_prompt"}) == "short");
+    CHECK(parse_config(append_backend(shorter, "zz", mock_backend(), false), "<test>")
+              .find_backend("zz") != nullptr);
+}
+
+TEST_CASE("every set and delete on an odd JSONC name names rename-backend, never 'not found'",
+          "[config_edit][jsonc][57e][names]") {
+    using namespace apogee::harness;
+    constexpr std::string_view kOdd = R"({
+  "backends": {
+    "my model": {"type": "mock"},
+    "qwen@home": {"type": "mock"}
+  }
+}
+)";
+    for (const std::string_view name : {"my model", "qwen@home"}) {
+        INFO(name);
+        const std::string said = "backend '" + std::string{name} +
+                                 "' is not one both config formats can edit -- a name is "
+                                 "letters, digits, '_', '-', '.' and '/', first neither '-' nor "
+                                 "'.', and not null; rename it with 'apogee config rename-backend'";
+        CHECK_THROWS_WITH(set_backend_field(kOdd, name, "model", "m"), said);
+        CHECK_THROWS_WITH(set_backend_field(kOdd, name, "model", ""), said);
+        CHECK_THROWS_WITH(set_backend_field(kOdd, name, "adapters", "/a"), said);
+        CHECK_THROWS_WITH(set_backend_model_path(kOdd, name, "/m.gguf"), said);
+        CHECK_THROWS_WITH(delete_backend(kOdd, name), said);
+        // Whether or not the config holds it, both halves are true.
+        CHECK_THROWS_WITH(delete_backend(kEmptyJsonc, name), said);
+    }
+    // A name the rule takes, absent, is simply not there.
+    CHECK_THROWS_WITH(delete_backend(kOdd, "absent"), "backend 'absent' not found in config");
 }
