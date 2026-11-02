@@ -81,6 +81,19 @@ struct ClaudeCliInvocation {
 
 [[nodiscard]] std::vector<std::string> build_arguments(const ClaudeCliInvocation& invocation);
 
+/// What a failed Claude CLI turn says, in Claude Code's own words (57b): the
+/// one wording every path shares -- the conversation's turn, a side request
+/// and `complete_structured` -- so Claude has one failure message, and M34
+/// (the main turn's `/login` hint) extends this function rather than writing
+/// a second.
+///
+/// Claude Code reports a failed request with `is_error: true`, often under
+/// `subtype: "success"`, and its reason in `result`. So the subtype is named
+/// only when it is not `success` (`error_max_turns`), the reason follows when
+/// there is one, and "success" is never said: `the Claude CLI reported an
+/// error: Failed to authenticate: …`.
+[[nodiscard]] std::string claude_cli_failure(const TurnComplete& complete);
+
 class ClaudeCliProvider final : public harness::LLMProvider,
                                 public harness::StatusReporting,
                                 public harness::ModelBehaviorReporting {
@@ -181,7 +194,17 @@ private:
     [[nodiscard]] TurnOutcome pump_turn(platform::ChildProcess& child,
                                         const harness::StreamOptions& options, bool suppress_text);
 
+    /// Throws the turn's failure -- the deadline passed, or the CLI reported
+    /// an error -- in the one wording (`claude_cli_failure`). Every path asks
+    /// it before a word of the answer is used.
+    void throw_if_failed(const TurnOutcome& outcome) const;
+
     /// Runs a whole one-shot invocation and returns its terminal event.
+    ///
+    /// The session's framing, its queued events and its session id are put
+    /// back as they were on every exit (57b): a one-shot's terminal event
+    /// names the one-shot's own session, and a conversation resumed from it
+    /// would answer with no history.
     [[nodiscard]] TurnOutcome run_one_shot(const ClaudeCliInvocation& invocation,
                                            std::string_view prompt,
                                            const harness::StreamOptions& options,

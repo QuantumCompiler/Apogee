@@ -228,8 +228,8 @@ harness::ChatResponse OllamaCliProvider::stream_chat(const harness::ChatRequest&
         break;
     }
 
-    // stderr is terminal chrome in the success case, so it is only worth
-    // surfacing when there is nothing else to explain a failure.
+    // stderr is terminal chrome in the success case, so it is only surfaced
+    // when the run fails -- where its `Error:` line is the reason.
     std::string diagnostics;
     std::string piece;
     while (child->read_stderr(piece, std::chrono::milliseconds{0}) == platform::ReadStatus::Data) {
@@ -239,8 +239,11 @@ harness::ChatResponse OllamaCliProvider::stream_chat(const harness::ChatRequest&
         }
     }
 
+    // A non-zero exit fails the turn whatever streamed first (57b): a server
+    // or a cloud model that fails mid-generation leaves half an answer, which
+    // is not a turn, and the CLI's own words say why.
     const std::optional<int> status = child->wait_for_exit(std::chrono::seconds{5});
-    if (status.has_value() && *status != 0 && demux.answer().empty()) {
+    if (status.has_value() && *status != 0) {
         throw harness::ProviderError(
             options_.backend_name, "the Ollama CLI exited with status " + std::to_string(*status) +
                                        (diagnostics.empty() ? "" : ": " + diagnostics));

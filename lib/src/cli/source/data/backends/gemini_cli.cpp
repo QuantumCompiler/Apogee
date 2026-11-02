@@ -9,6 +9,7 @@
 #include "backends/gemini_cli_events.h"
 #include "backends/provider_status.h"
 #include "backends/provider_table.h"
+#include "backends/restore_on_exit.h"
 #include "contracts/errors.h"
 #include "transport/jsonl_framer.h"
 
@@ -277,8 +278,24 @@ GeminiCliProvider::Outcome GeminiCliProvider::run_turn(const std::string& prompt
                         outcome.model = event.model;
                     }
                     if (event.is_error) {
+                        // Latched: a later successful result does not clear
+                        // an error event's failure. The detail is the last
+                        // the CLI gave words for -- a result that names none
+                        // leaves the earlier one standing.
                         outcome.is_error = true;
-                        outcome.error_detail = event.error_subtype;
+                        if (!event.error_subtype.empty()) {
+                            outcome.error_detail = event.error_subtype;
+                        }
+                    }
+                } else if constexpr (std::is_same_v<T, Notice>) {
+                    // A warning (57b) is said, and the turn stands on its
+                    // result: the answer already streamed is kept.
+                    if (event.kind == "warning" && !event.detail.empty() && options.on_status) {
+                        harness::StatusEvent status;
+                        status.type = harness::StatusEvent::Type::Notice;
+                        status.phase = harness::StatusEvent::Phase::Done;
+                        status.detail = "the Gemini CLI warned: " + event.detail;
+                        options.on_status(status);
                     }
                 }
                 // A `session` Notice is deliberately not consulted: the id was
@@ -323,7 +340,10 @@ GeminiCliProvider::Outcome GeminiCliProvider::run_turn(const std::string& prompt
     }
 
     const std::optional<int> status = child->wait_for_exit(std::chrono::seconds{5});
-    if (status.has_value() && *status != 0 && outcome.answer.empty()) {
+    // A non-zero exit with nothing streamed fails the turn, as before; one the
+    // stream already failed without words (57b: a result naming no error)
+    // says the exit status and stderr in their place.
+    if (status.has_value() && *status != 0 && (outcome.is_error || outcome.answer.empty())) {
         outcome.is_error = true;
         if (outcome.error_detail.empty()) {
             outcome.error_detail = "exited with status " + std::to_string(*status) +
@@ -346,10 +366,18 @@ harness::ChatResponse GeminiCliProvider::stream_chat(const harness::ChatRequest&
         throw harness::ProviderError(options_.backend_name, "a request needs at least one message");
     }
 
-    // A side request is not a turn of this conversation, so it must not join
-    // the session -- the same rule the other backends apply.
+    // The conversation's session as this turn found it, put back however the
+    // turn ends -- returned, failed, cancelled, timed out, never spawned --
+    // unless it is the conversation's own turn and it succeeded (57b):
+    //  - A side request is not a turn of this conversation, so it must not
+    //    join the session -- the same rule the other backends apply. It runs
+    //    on a fresh session, and whatever it minted is discarded.
+    //  - A failed first turn forgets the id it minted: the CLI may never have
+    //    recorded that session (a failed spawn, an auth or quota error at
+    //    startup), and every later turn would resume one it refuses. A
+    //    failed resumed turn keeps its id -- the CLI holds that session.
     const bool side_request = request.transient.side_request;
-    const std::string saved_session = session_id_;
+    RestoreOnExit<std::string> found{session_id_};
     if (side_request) {
         session_id_.clear();
     }
@@ -357,17 +385,14 @@ harness::ChatResponse GeminiCliProvider::stream_chat(const harness::ChatRequest&
     const std::string prompt = prompt_for(request.messages, !session_id_.empty());
     Outcome outcome = run_turn(prompt, options);
 
-    if (side_request) {
-        // Whatever session the side request created is discarded; the
-        // conversation's own session is untouched.
-        session_id_ = saved_session;
-    }
-
     if (outcome.is_error) {
         throw harness::ProviderError(
             options_.backend_name,
             "the Gemini CLI reported an error" +
                 (outcome.error_detail.empty() ? std::string{} : ": " + outcome.error_detail));
+    }
+    if (!side_request) {
+        found.keep();
     }
 
     harness::ChatResponse response;

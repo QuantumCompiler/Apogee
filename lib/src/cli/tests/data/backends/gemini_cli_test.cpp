@@ -3,10 +3,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "backends/gemini_cli_events.h"
@@ -47,12 +49,14 @@ struct Fixture {
     std::shared_ptr<FakeSpawner> spawner = std::make_shared<FakeSpawner>();
     std::unique_ptr<GeminiCliProvider> provider;
 
-    explicit Fixture(std::vector<std::string> scripts = {}) {
+    explicit Fixture(std::vector<std::string> scripts = {}, GeminiCliProvider::IdFactory ids = {},
+                     std::chrono::milliseconds turn_timeout = std::chrono::milliseconds{600000}) {
         spawner->stdout_scripts = std::move(scripts);
 
         GeminiCliProvider::Options options;
         options.backend_name = "gem-sub";
         options.model = "gemini-3.5-flash";
+        options.turn_timeout = turn_timeout;
 
         auto copy = spawner;
         provider = std::make_unique<GeminiCliProvider>(
@@ -60,9 +64,80 @@ struct Fixture {
             [copy](const apogee::platform::ChildCommand& command, std::string& error) {
                 return (*copy)(command, error);
             },
-            [] { return std::string{kPinnedId}; });
+            ids ? std::move(ids) : [] { return std::string{kPinnedId}; });
     }
 };
+
+/// Ids that differ per mint -- `sid-1`, `sid-2`, … -- so a test can tell the
+/// conversation's session from one a side request or a failed turn minted.
+[[nodiscard]] GeminiCliProvider::IdFactory counting_ids() {
+    auto next = std::make_shared<int>(0);
+    return [next] { return "sid-" + std::to_string(++*next); };
+}
+
+/// 0.46.0's `handleError` under stream-json (57b), the shape every fatal
+/// error ends in -- read from the CLI's own bundle
+/// (`gemini-YXO2QQ66.js:10059-10069`), not invented: `status` is `error`
+/// and the reason is the `error` object beside it.
+constexpr std::string_view kQuotaMessage =
+    "You have exhausted your daily quota on this model. Try again tomorrow.";
+
+[[nodiscard]] std::string result_error_script(std::string_view error_object) {
+    std::string out =
+        R"({"type":"init","timestamp":"2026-10-31T20:16:45.000Z","session_id":"s","model":"auto"})"
+        "\n";
+    out += R"({"type":"result","timestamp":"2026-10-31T20:16:46.000Z","status":"error")";
+    if (!error_object.empty()) {
+        out += R"(,"error":)";
+        out += error_object;
+    }
+    out += R"(,"stats":{"total_tokens":0,"input_tokens":0,"output_tokens":0}})";
+    out += "\n";
+    return out;
+}
+
+[[nodiscard]] std::string quota_script() {
+    return result_error_script(std::string{R"({"type":"QuotaError","message":")"} +
+                               std::string{kQuotaMessage} + R"("})");
+}
+
+/// A warning `error` event, then an answer, then a successful result -- what
+/// 0.46.0 sends when it stops a loop (`gemini-YXO2QQ66.js:10915-10923`).
+[[nodiscard]] std::string warning_script(std::string_view severity) {
+    std::string out =
+        R"({"type":"init","timestamp":"2026-10-31T20:16:45.000Z","session_id":"s","model":"auto"})"
+        "\n";
+    out += R"({"type":"error","timestamp":"2026-10-31T20:16:46.000Z","severity":")";
+    out += severity;
+    out += R"(","message":"Loop detected, stopping execution"})";
+    out += "\n";
+    out +=
+        R"({"type":"message","timestamp":"2026-10-31T20:16:46.100Z","role":"assistant","content":"Here is the answer.","delta":true})"
+        "\n";
+    out +=
+        R"({"type":"result","timestamp":"2026-10-31T20:16:46.200Z","status":"success","stats":{"input_tokens":3,"output_tokens":4}})"
+        "\n";
+    return out;
+}
+
+/// An answer that never finishes: a child that hangs mid-turn.
+[[nodiscard]] std::string stalled_script() {
+    return R"({"type":"init","timestamp":"2026-10-31T20:16:45.000Z","session_id":"s","model":"auto"})"
+           "\n"
+           R"({"type":"message","timestamp":"2026-10-31T20:16:46.100Z","role":"assistant","content":"Half","delta":true})"
+           "\n";
+}
+
+/// The message a call threw, or empty when it returned.
+template <typename Call>
+[[nodiscard]] std::string thrown_by(Call&& call) {
+    try {
+        (void)std::forward<Call>(call)();
+    } catch (const apogee::harness::ProviderError& error) {
+        return error.what();
+    }
+    return {};
+}
 
 [[nodiscard]] ChatRequest turn(std::vector<ChatMessage> messages) {
     ChatRequest request;
@@ -349,15 +424,100 @@ TEST_CASE("an unknown event type is ignored rather than fatal",
     CHECK(response.message.content.plain_text() == "fine");
 }
 
-TEST_CASE("a failing result becomes a provider error", "[backends][gemini][errors]") {
-    const std::string bytes = R"({"type":"init","session_id":"s","model":"auto"})"
-                              "\n"
-                              R"({"type":"result","status":"quota_exceeded","stats":{}})"
-                              "\n";
+TEST_CASE("a failing result says the CLI's own words, never 'reported an error: error'",
+          "[backends][gemini][errors]") {
+    // 0.46.0's shape for every fatal error -- a quota, a failed login, a turn
+    // limit. The detail used to be `status` alone, so every surface said
+    // `the Gemini CLI reported an error: error` and nothing said why. It
+    // replaces an invented `status: quota_exceeded` the CLI never emits.
+    Fixture fixture{{quota_script()}};
+    fixture.spawner->exit_status = 1;
 
-    Fixture fixture{{bytes}};
-    CHECK_THROWS_AS(fixture.provider->chat(turn({ChatMessage::user("hi")}), {}),
-                    apogee::harness::ProviderError);
+    const std::string message = thrown_by(
+        [&fixture] { return fixture.provider->chat(turn({ChatMessage::user("hi")}), {}); });
+    CHECK(message.find(std::string{"the Gemini CLI reported an error: "} +
+                       std::string{kQuotaMessage}) != std::string::npos);
+    CHECK(message.find("reported an error: error") == std::string::npos);
+}
+
+TEST_CASE("a failing result with no message names its type, and with neither the exit says why",
+          "[backends][gemini][errors]") {
+    {
+        Fixture fixture{{result_error_script(R"({"type":"FatalAuthenticationError"})")}};
+        fixture.spawner->exit_status = 41;
+        CHECK(thrown_by([&fixture] {
+                  return fixture.provider->chat(turn({ChatMessage::user("hi")}), {});
+              }).find("reported an error: FatalAuthenticationError") != std::string::npos);
+    }
+    {
+        // Neither: the exit status and stderr say it, as they do when the
+        // CLI exits before any event at all.
+        Fixture fixture{{result_error_script({})}};
+        fixture.spawner->exit_status = 41;
+        fixture.spawner->stderr_script = "Error authenticating: please sign in\n";
+        const std::string message = thrown_by(
+            [&fixture] { return fixture.provider->chat(turn({ChatMessage::user("hi")}), {}); });
+        CHECK(message.find("exited with status 41: Error authenticating: please sign in") !=
+              std::string::npos);
+        CHECK(message.find(": error") == std::string::npos);
+    }
+    {
+        // A failure spelling no release has used (hypothetical, not a vendor
+        // shape) is still named, so it fails loudly rather than quietly.
+        const std::string bytes =
+            R"({"type":"init","session_id":"s","model":"auto"})"
+            "\n"
+            R"({"type":"result","status":"a_later_failure_spelling","stats":{}})"
+            "\n";
+        Fixture fixture{{bytes}};
+        CHECK(thrown_by([&fixture] {
+                  return fixture.provider->chat(turn({ChatMessage::user("hi")}), {});
+              }).find("reported an error: a_later_failure_spelling") != std::string::npos);
+    }
+}
+
+TEST_CASE("a result error's type rides in the event's description beside its message",
+          "[backends][gemini][errors]") {
+    const auto events = apogee::backends::gemini_cli::parse_stream(quota_script());
+    REQUIRE(events.size() == 2);
+    CHECK(apogee::backends::gemini_cli::describe(events.back()) ==
+          "turn:QuotaError:" + std::string{kQuotaMessage});
+
+    const auto warned = apogee::backends::gemini_cli::parse_stream(warning_script("warning"));
+    REQUIRE(warned.size() == 4);
+    CHECK(apogee::backends::gemini_cli::describe(warned[1]) == "notice:warning");
+}
+
+TEST_CASE("a warning keeps the turn and is said as a notice", "[backends][gemini][errors]") {
+    // 0.46.0 sends `severity: "warning"` before a result that succeeded --
+    // a loop stopped, an agent's execution blocked. The answer had already
+    // streamed; it used to be thrown away after the fact.
+    Fixture fixture{{warning_script("warning")}, counting_ids()};
+
+    std::vector<std::string> notices;
+    std::string streamed;
+    apogee::harness::StreamOptions options;
+    options.on_token = [&streamed](std::string_view chunk) { streamed += chunk; };
+    options.on_status = [&notices](const apogee::harness::StatusEvent& event) {
+        if (event.type == apogee::harness::StatusEvent::Type::Notice) {
+            notices.push_back(event.detail);
+        }
+    };
+
+    const auto response = fixture.provider->stream_chat(turn({ChatMessage::user("hi")}), options);
+    CHECK(response.message.content.plain_text() == "Here is the answer.");
+    CHECK(streamed == "Here is the answer.");
+    REQUIRE(notices.size() == 1);
+    CHECK(notices.front() == "the Gemini CLI warned: Loop detected, stopping execution");
+    CHECK(fixture.provider->session_id() == "sid-1");
+}
+
+TEST_CASE("an error-severity event still fails the turn, whatever the result says",
+          "[backends][gemini][errors]") {
+    Fixture fixture{{warning_script("error")}};
+    CHECK(thrown_by([&fixture] {
+              return fixture.provider->chat(turn({ChatMessage::user("hi")}), {});
+          }).find("reported an error: Loop detected, stopping execution") != std::string::npos);
 }
 
 TEST_CASE("stdout noise on stderr cannot corrupt the event stream", "[backends][gemini][replay]") {
@@ -405,5 +565,158 @@ TEST_CASE("gemini: the event stream parses identically at every chunk size",
             framer.flush(handle);
             CHECK(seen == whole);
         }
+    }
+}
+
+// --- 57b: a failed first turn forgets the id it minted ----------------------
+
+TEST_CASE("gemini: a failed first turn leaves no session, and the next starts fresh",
+          "[backends][gemini][session][errors]") {
+    // The id is minted before the spawn. If the CLI never recorded that
+    // session -- signed out, out of quota, never started -- every later
+    // `--resume` is refused, and the chat stays broken after the cause is
+    // fixed. So a first turn keeps its id only once the CLI answered on it.
+    const std::string answered = read_fixture("simple_text.jsonl");
+    const std::vector<ChatMessage> again = {ChatMessage::user("my name is Zed"),
+                                            ChatMessage::user("again")};
+
+    SECTION("a result error") {
+        Fixture fixture{{quota_script(), answered}, counting_ids()};
+        fixture.spawner->exit_statuses = {1};
+        CHECK_FALSE(thrown_by([&fixture] {
+                        return fixture.provider->chat(turn({ChatMessage::user("my name is Zed")}),
+                                                      {});
+                    }).empty());
+        CHECK(fixture.provider->session_id().empty());
+
+        (void)fixture.provider->chat(turn(again), {});
+        const std::vector<std::string>& second = fixture.spawner->commands.back();
+        CHECK(value_after(second, "--session-id") == "sid-2");
+        CHECK_FALSE(has(second, "--resume"));
+        // Fresh, so the whole history goes: the CLI holds none of it.
+        CHECK(second.back().find("my name is Zed") != std::string::npos);
+        CHECK(fixture.provider->session_id() == "sid-2");
+    }
+    SECTION("a spawn failure") {
+        Fixture fixture{{answered}, counting_ids()};
+        fixture.spawner->failing_spawns = {0};
+        CHECK_FALSE(thrown_by([&fixture] {
+                        return fixture.provider->chat(turn({ChatMessage::user("my name is Zed")}),
+                                                      {});
+                    }).empty());
+        CHECK(fixture.provider->session_id().empty());
+
+        (void)fixture.provider->chat(turn(again), {});
+        CHECK_FALSE(has(fixture.spawner->commands.back(), "--resume"));
+        CHECK(value_after(fixture.spawner->commands.back(), "--session-id") == "sid-2");
+    }
+    SECTION("the deadline") {
+        Fixture fixture{
+            {stalled_script(), answered}, counting_ids(), std::chrono::milliseconds{200}};
+        fixture.spawner->stalling_spawns = {0};
+        CHECK(thrown_by([&fixture] {
+                  return fixture.provider->chat(turn({ChatMessage::user("my name is Zed")}), {});
+              }).find("did not finish in time") != std::string::npos);
+        CHECK(fixture.provider->session_id().empty());
+
+        (void)fixture.provider->chat(turn(again), {});
+        CHECK_FALSE(has(fixture.spawner->commands.back(), "--resume"));
+    }
+    SECTION("a cancel") {
+        Fixture fixture{{answered}, counting_ids()};
+        const auto cancellation = apogee::harness::CancellationToken::create();
+        cancellation.cancel();
+        CHECK_THROWS_AS(
+            fixture.provider->chat(turn({ChatMessage::user("my name is Zed")}), cancellation),
+            apogee::harness::CancelledError);
+        CHECK(fixture.provider->session_id().empty());
+    }
+}
+
+TEST_CASE("gemini: a failed resumed turn keeps its session",
+          "[backends][gemini][session][errors]") {
+    // The CLI recorded that session when it answered on it, so resuming with
+    // only the new message stays right.
+    Fixture fixture{
+        {read_fixture("simple_text.jsonl"), quota_script(), read_fixture("resumed_session.jsonl")},
+        counting_ids()};
+    fixture.spawner->exit_statuses = {0, 1};
+
+    (void)fixture.provider->chat(turn({ChatMessage::user("one")}), {});
+    REQUIRE(fixture.provider->session_id() == "sid-1");
+    CHECK_FALSE(thrown_by([&fixture] {
+                    return fixture.provider->chat(
+                        turn({ChatMessage::user("one"), ChatMessage::assistant("OK"),
+                              ChatMessage::user("two")}),
+                        {});
+                }).empty());
+    CHECK(fixture.provider->session_id() == "sid-1");
+
+    (void)fixture.provider->chat(
+        turn({ChatMessage::user("one"), ChatMessage::assistant("OK"), ChatMessage::user("three")}),
+        {});
+    CHECK(value_after(fixture.spawner->commands.back(), "--resume") == "sid-1");
+}
+
+// --- 57b: a throwing side request leaves the conversation's session ---------
+
+TEST_CASE("gemini: a cancelled or timed-out side request leaves the conversation's session",
+          "[backends][gemini][session][side]") {
+    // The side request runs on a session it mints; a throw used to skip the
+    // put-back, and the next turn resumed the side request's session -- with
+    // none of the conversation's history.
+    SECTION("answered") {
+        // The ordinary return, with ids that differ: the side request's own
+        // is discarded even when it succeeded.
+        Fixture fixture{{read_fixture("simple_text.jsonl")}, counting_ids()};
+        (void)fixture.provider->chat(turn({ChatMessage::user("real question")}), {});
+        ChatRequest background = turn({ChatMessage::user("title this")});
+        background.transient.side_request = true;
+        (void)fixture.provider->chat(background, {});
+        CHECK(value_after(fixture.spawner->commands.back(), "--session-id") == "sid-2");
+        CHECK(fixture.provider->session_id() == "sid-1");
+    }
+    SECTION("cancelled") {
+        Fixture fixture{{read_fixture("simple_text.jsonl"), read_fixture("simple_text.jsonl"),
+                         read_fixture("resumed_session.jsonl")},
+                        counting_ids()};
+        (void)fixture.provider->chat(turn({ChatMessage::user("real question")}), {});
+        REQUIRE(fixture.provider->session_id() == "sid-1");
+
+        ChatRequest background = turn({ChatMessage::user("rewrite this query")});
+        background.transient.side_request = true;
+        const auto cancellation = apogee::harness::CancellationToken::create();
+        cancellation.cancel();
+        CHECK_THROWS_AS(fixture.provider->chat(background, cancellation),
+                        apogee::harness::CancelledError);
+        CHECK(value_after(fixture.spawner->commands.back(), "--session-id") == "sid-2");
+        CHECK(fixture.provider->session_id() == "sid-1");
+
+        (void)fixture.provider->chat(
+            turn({ChatMessage::user("real question"), ChatMessage::assistant("OK"),
+                  ChatMessage::user("next")}),
+            {});
+        CHECK(value_after(fixture.spawner->commands.back(), "--resume") == "sid-1");
+    }
+    SECTION("timed out") {
+        Fixture fixture{{read_fixture("simple_text.jsonl"), stalled_script(),
+                         read_fixture("resumed_session.jsonl")},
+                        counting_ids(),
+                        std::chrono::milliseconds{200}};
+        fixture.spawner->stalling_spawns = {1};
+        (void)fixture.provider->chat(turn({ChatMessage::user("real question")}), {});
+
+        ChatRequest background = turn({ChatMessage::user("title this")});
+        background.transient.side_request = true;
+        CHECK(thrown_by([&fixture, &background] {
+                  return fixture.provider->chat(background, {});
+              }).find("did not finish in time") != std::string::npos);
+        CHECK(fixture.provider->session_id() == "sid-1");
+
+        (void)fixture.provider->chat(
+            turn({ChatMessage::user("real question"), ChatMessage::assistant("OK"),
+                  ChatMessage::user("next")}),
+            {});
+        CHECK(value_after(fixture.spawner->commands.back(), "--resume") == "sid-1");
     }
 }

@@ -45,12 +45,14 @@ struct Fixture {
     std::shared_ptr<FakeSpawner> spawner = std::make_shared<FakeSpawner>();
     std::unique_ptr<CodexCliProvider> provider;
 
-    explicit Fixture(std::vector<std::string> scripts = {}) {
+    explicit Fixture(std::vector<std::string> scripts = {},
+                     std::chrono::milliseconds turn_timeout = std::chrono::milliseconds{600000}) {
         spawner->stdout_scripts = std::move(scripts);
 
         CodexCliProvider::Options options;
         options.backend_name = "codex";
         options.model = "gpt-5-codex";
+        options.turn_timeout = turn_timeout;
 
         auto copy = spawner;
         provider = std::make_unique<CodexCliProvider>(
@@ -414,4 +416,78 @@ TEST_CASE("a catalog run that hangs is cut off at its bound", "[backends][codex]
                                         std::string& error) { return (*spawner)(command, error); }};
     CHECK_THROWS_AS(provider.list_catalog({}), apogee::harness::ProviderError);
     CHECK(spawner->children.front()->terminated);
+}
+
+// --- 57b: a throwing side request leaves the conversation's thread ----------
+
+namespace {
+
+/// A side request's run that started its own thread and then hung: its
+/// `thread.started` is already recorded when the cancel or the deadline
+/// comes.
+[[nodiscard]] std::string stalled_side_script() {
+    return R"({"type":"thread.started","thread_id":"side-thread"})"
+           "\n"
+           R"({"type":"turn.started"})"
+           "\n"
+           R"({"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Half"}})"
+           "\n";
+}
+
+constexpr std::string_view kConversationThread = "01a078e2-8493-7be1-80d8-a677340a062a";
+
+}  // namespace
+
+TEST_CASE("a cancelled or timed-out side request leaves the conversation's thread",
+          "[backends][codex][session][side]") {
+    // The side request runs on a fresh thread and records it from
+    // `thread.started`; a throw used to skip the put-back, and the next turn
+    // ran `codex exec resume side-thread` -- the validate objection's or a
+    // query rewrite's thread, none of the conversation's history.
+    const auto next_turn = turn({ChatMessage::user("Say exactly: hello"),
+                                 ChatMessage::assistant("hello"), ChatMessage::user("and again?")});
+
+    SECTION("cancelled") {
+        Fixture fixture{{read_fixture("simple_text.jsonl"), stalled_side_script(),
+                         read_fixture("resumed_thread.jsonl")}};
+        fixture.spawner->stalling_spawns = {1};
+        (void)fixture.provider->chat(turn({ChatMessage::user("Say exactly: hello")}), {});
+        REQUIRE(fixture.provider->thread_id() == kConversationThread);
+
+        ChatRequest background = turn({ChatMessage::user("object to this answer")});
+        background.transient.side_request = true;
+        const auto cancellation = apogee::harness::CancellationToken::create();
+        apogee::harness::StreamOptions options;
+        options.cancellation = cancellation;
+        options.on_token = [&cancellation](std::string_view) { cancellation.cancel(); };
+        CHECK_THROWS_AS(fixture.provider->stream_chat(background, options),
+                        apogee::harness::CancelledError);
+        CHECK(fixture.provider->thread_id() == kConversationThread);
+
+        (void)fixture.provider->chat(next_turn, {});
+        const std::vector<std::string>& resumed = fixture.spawner->commands.back();
+        CHECK(has(resumed, "resume"));
+        CHECK(has(resumed, std::string{kConversationThread}));
+        CHECK_FALSE(has(resumed, "side-thread"));
+    }
+    SECTION("timed out") {
+        Fixture fixture{{read_fixture("simple_text.jsonl"), stalled_side_script(),
+                         read_fixture("resumed_thread.jsonl")},
+                        std::chrono::milliseconds{200}};
+        fixture.spawner->stalling_spawns = {1};
+        (void)fixture.provider->chat(turn({ChatMessage::user("Say exactly: hello")}), {});
+
+        ChatRequest background = turn({ChatMessage::user("rewrite this query")});
+        background.transient.side_request = true;
+        try {
+            (void)fixture.provider->chat(background, {});
+            FAIL("expected the deadline to throw");
+        } catch (const apogee::harness::ProviderError& error) {
+            CHECK(std::string{error.what()}.find("did not finish in time") != std::string::npos);
+        }
+        CHECK(fixture.provider->thread_id() == kConversationThread);
+
+        (void)fixture.provider->chat(next_turn, {});
+        CHECK(has(fixture.spawner->commands.back(), std::string{kConversationThread}));
+    }
 }

@@ -180,6 +180,7 @@ apogee_add_module(backends
     backends/google.h
     backends/google.cpp
     backends/cli_event.h
+    backends/restore_on_exit.h
     backends/claude_cli.h
     backends/claude_cli.cpp
     backends/claude_cli_events.h

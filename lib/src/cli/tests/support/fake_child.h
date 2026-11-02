@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <string>
@@ -54,6 +55,11 @@ public:
     /// hangs without printing.
     bool hang = false;
 
+    /// When set, the child says its whole script and then hangs: every read
+    /// after the last times out, as a child that stalls mid-turn -- after its
+    /// `thread.started`, after half an answer.
+    bool hang_when_drained = false;
+
     [[nodiscard]] platform::ReadStatus read_stdout(std::string& out,
                                                    std::chrono::milliseconds) override {
         out.clear();
@@ -66,7 +72,8 @@ public:
             return platform::ReadStatus::Eof;
         }
         if (offset_ >= stdout_script.size()) {
-            return platform::ReadStatus::Eof;
+            return hang_when_drained && !dead_ ? platform::ReadStatus::Timeout
+                                               : platform::ReadStatus::Eof;
         }
         const std::size_t take = chunk_size == 0
                                      ? stdout_script.size() - offset_
@@ -88,7 +95,7 @@ public:
     }
 
     [[nodiscard]] bool exited() override {
-        return dead_ || (stdin_closed && offset_ >= stdout_script.size());
+        return dead_ || (!hang_when_drained && stdin_closed && offset_ >= stdout_script.size());
     }
 
     [[nodiscard]] std::optional<int> wait_for_exit(std::chrono::milliseconds) override {
@@ -141,6 +148,13 @@ public:
     int exit_status = 0;
     bool hang = false;
 
+    /// Per-spawn exit statuses, by index; a spawn past the end exits with
+    /// `exit_status`. A turn that fails beside one that answers.
+    std::vector<int> exit_statuses;
+
+    /// Spawns that say their script and then hang, by index.
+    std::vector<int> stalling_spawns;
+
     [[nodiscard]] std::unique_ptr<platform::ChildProcess> operator()(
         const platform::ChildCommand& command, std::string& error) {
         const int index = static_cast<int>(commands.size());
@@ -160,8 +174,12 @@ public:
         }
         state->chunk_size = chunk_size;
         state->stderr_script = stderr_script;
-        state->exit_status = exit_status;
+        state->exit_status = static_cast<std::size_t>(index) < exit_statuses.size()
+                                 ? exit_statuses[static_cast<std::size_t>(index)]
+                                 : exit_status;
         state->hang = hang;
+        state->hang_when_drained = std::find(stalling_spawns.begin(), stalling_spawns.end(),
+                                             index) != stalling_spawns.end();
         children.push_back(state);
         return std::make_unique<Handle>(state);
     }

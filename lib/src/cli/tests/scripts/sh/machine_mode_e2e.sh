@@ -801,6 +801,199 @@ for name in ("chat.jsonl", "complete.jsonl"):
     assert not [e for e in events if e["type"] == "result"], (name, events)
 PY
 
+# --- a vendor CLI's failure says why (57b) ------------------------------------
+# The second bug sweep's probes, on the real binary: fake vendor binaries on a
+# path of their own, each saying what the real CLI says when it fails.
+#  - Gemini 0.46.0 ends every fatal error in a result whose `error` object says
+#    why: the `error` event carries its message, never `reported an error:
+#    error`.
+#  - A warning before a successful result is a notice, and the answer stands.
+#  - A first turn that fails signed out leaves no session behind: signed in,
+#    the same chat answers, on a fresh session told the whole history, never
+#    `--resume` of one the CLI never recorded.
+#  - Claude Code's expired login (is_error under subtype "success") reads in
+#    its own words on the conversation's turn, and as a title is no title.
+# Its own home, so no other section's config moves.
+VF_HOME="$WORK_DIR/vendor-failures"
+VF_STATE="$VF_HOME/state"
+mkdir -p "$VF_HOME/bin" "$VF_STATE"
+cat >"$VF_HOME/bin/gemini" <<EOF
+#!/bin/sh
+{ for arg in "\$@"; do printf '%s\n' "\$arg"; done; printf -- '--\n'; } >>"$VF_STATE/gemini-argv.log"
+echo "[STARTUP] Phase 'cleanup_ops' was started but never ended." >&2
+init='{"type":"init","timestamp":"2026-10-31T20:16:45.000Z","session_id":"s","model":"auto"}'
+answer() {
+    printf '%s\n' "\$init" \\
+        "{\"type\":\"message\",\"timestamp\":\"2026-10-31T20:16:46.000Z\",\"role\":\"assistant\",\"content\":\"\$1\",\"delta\":true}" \\
+        '{"type":"result","timestamp":"2026-10-31T20:16:46.100Z","status":"success","stats":{"input_tokens":3,"output_tokens":4}}'
+}
+case "\$(cat "$VF_STATE/gemini-mode")" in
+quota)
+    printf '%s\n' "\$init" \\
+        '{"type":"result","timestamp":"2026-10-31T20:16:46.000Z","status":"error","error":{"type":"QuotaError","message":"You have exhausted your daily quota on this model."},"stats":{"total_tokens":0,"input_tokens":0,"output_tokens":0}}'
+    exit 1 ;;
+warning)
+    printf '%s\n' '{"type":"error","timestamp":"2026-10-31T20:16:45.500Z","severity":"warning","message":"Loop detected, stopping execution"}'
+    answer "Here is the answer."
+    exit 0 ;;
+login)
+    resume=""; sid=""; prev=""
+    for arg in "\$@"; do
+        case "\$prev" in --resume) resume="\$arg" ;; --session-id) sid="\$arg" ;; esac
+        prev="\$arg"
+    done
+    if [ ! -e "$VF_STATE/signed-in" ]; then
+        printf '%s\n' "\$init" \\
+            '{"type":"result","timestamp":"2026-10-31T20:16:46.000Z","status":"error","error":{"type":"FatalAuthenticationError","message":"Please sign in to continue."},"stats":{}}'
+        exit 41
+    fi
+    if [ -n "\$resume" ] && ! grep -qx "\$resume" "$VF_STATE/gemini-sessions" 2>/dev/null; then
+        echo "Error resuming session: No session found" >&2
+        exit 1
+    fi
+    [ -n "\$sid" ] && printf '%s\n' "\$sid" >>"$VF_STATE/gemini-sessions"
+    answer "Welcome back."
+    exit 0 ;;
+esac
+EOF
+cat >"$VF_HOME/bin/claude" <<EOF
+#!/bin/sh
+expired='{"type":"result","subtype":"success","is_error":true,"session_id":"expired-sess","result":"Failed to authenticate: OAuth session expired and could not be refreshed","num_turns":1}'
+case " \$* " in
+*" --input-format "*)
+    # The conversation's child: hears the question, then answers as Claude
+    # Code 2.1.289 does with an expired login.
+    read -r question
+    printf '%s\n' '{"type":"system","subtype":"init","session_id":"expired-sess","model":"claude-sonnet-5"}' \\
+        '{"type":"assistant","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"Failed to authenticate: OAuth session expired and could not be refreshed"}]},"error":"authentication_failed","session_id":"expired-sess"}' \\
+        "\$expired" ;;
+*)
+    # A one-shot -- the title: logged, so its absence proves nothing unasked.
+    for last in "\$@"; do :; done
+    printf '%s\n' "\$last" >>"$VF_STATE/claude-one-shots.log"
+    printf '%s\n' "\$expired" ;;
+esac
+EOF
+chmod +x "$VF_HOME/bin/gemini" "$VF_HOME/bin/claude"
+vf() { APOGEE_HOME="$VF_HOME" "$APOGEE_BIN" "$@"; }
+vf config init >/dev/null || fail "vendor-failures: config init"
+vf config add-backend mock --type mock --model mock-1 >/dev/null || fail "vendor-failures: add mock"
+vf config set-default mock >/dev/null || fail "vendor-failures: set-default"
+vf config add-backend gem --type gemini-cli >/dev/null || fail "vendor-failures: add gem"
+vf config set-backend gem --binary "$VF_HOME/bin/gemini" >/dev/null || fail "vendor-failures: point gem"
+vf config add-backend claude --type claude-cli >/dev/null || fail "vendor-failures: add claude"
+vf config set-backend claude --binary "$VF_HOME/bin/claude" >/dev/null || fail "vendor-failures: point claude"
+vf config set-default-utility claude >/dev/null || fail "vendor-failures: set-default-utility"
+python3 - "$APOGEE_BIN" "$VF_HOME" "$VF_STATE" <<'PY' || fail "a vendor CLI's failure does not say why"
+import json, os, subprocess, sys
+
+binary, home, state = sys.argv[1], sys.argv[2], sys.argv[3]
+env = {**os.environ, "APOGEE_HOME": home}
+
+def mode(name):
+    with open(os.path.join(state, "gemini-mode"), "w") as out:
+        out.write(name)
+
+def events(text):
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+def complete(model, prompt):
+    got = subprocess.run([binary, "complete", "-m", model, "--output-format", "stream-json", prompt],
+                         env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                         timeout=60)
+    return got.returncode, events(got.stdout)
+
+def errors(stream):
+    return [e["message"] for e in stream if e["type"] == "error"]
+
+# Gemini's result-shaped failure, in its own words.
+mode("quota")
+code, stream = complete("gem", "hi")
+assert code != 0, stream
+said = errors(stream)
+assert len(said) == 1, stream
+assert "the Gemini CLI reported an error: You have exhausted your daily quota on this model." \
+    in said[0], said
+assert "reported an error: error" not in said[0], said
+assert not [e for e in stream if e["type"] == "result"], stream
+
+# A warning is a notice, and the answer stands.
+mode("warning")
+code, stream = complete("gem", "hi")
+assert code == 0, stream
+notices = [e["text"] for e in stream if e["type"] == "notice"]
+assert "the Gemini CLI warned: Loop detected, stopping execution" in notices, stream
+results = [e for e in stream if e["type"] == "result"]
+assert len(results) == 1 and results[0]["text"] == "Here is the answer.", stream
+assert not errors(stream), stream
+
+# A first turn that fails signed out; signed in, the same chat answers.
+mode("login")
+open(os.path.join(state, "gemini-argv.log"), "w").close()
+child = subprocess.Popen([binary, "chat", "-m", "gem", "--no-recall", "--output-format",
+                          "stream-json", "--input-format", "stream-json"], env=env,
+                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, text=True)
+
+def ask(text):
+    child.stdin.write(json.dumps({"type": "user", "text": text}) + "\n")
+    child.stdin.flush()
+    seen = []
+    while True:
+        line = child.stdout.readline()
+        assert line, f"the chat ended mid-turn: {seen}"
+        event = json.loads(line)
+        seen.append(event)
+        if event["type"] in ("result", "error"):
+            return seen
+
+first = ask("my name is Zed")
+assert first[-1]["type"] == "error", first
+assert "Please sign in to continue." in first[-1]["message"], first
+open(os.path.join(state, "signed-in"), "w").close()
+second = ask("what is my name?")
+assert second[-1]["type"] == "result" and second[-1]["text"] == "Welcome back.", second
+child.stdin.close()
+assert child.wait(timeout=60) == 0
+runs = open(os.path.join(state, "gemini-argv.log")).read().split("--\n")
+runs = [run.splitlines() for run in runs if run.strip()]
+assert len(runs) == 2, runs
+assert "--session-id" in runs[1] and "--resume" not in runs[1], runs[1]
+asked = runs[1][runs[1].index("--prompt") + 1:]
+assert any("my name is Zed" in line for line in asked), runs[1]
+
+# Claude Code's expired login on the conversation's turn: its own words.
+code, stream = complete("claude", "hi")
+assert code != 0, stream
+said = errors(stream)
+assert len(said) == 1, stream
+assert ("the Claude CLI reported an error: Failed to authenticate: OAuth session expired and "
+        "could not be refreshed") in said[0], said
+assert "reported success" not in said[0], said
+
+# ...and as a title: no title, and the sentence nowhere in the chats list.
+got = subprocess.run([binary, "chat", "--no-recall", "--output-format", "stream-json",
+                      "--input-format", "stream-json"], env=env, capture_output=True, text=True,
+                     input=json.dumps({"type": "user", "text": "an ordinary question"}) + "\n",
+                     timeout=60)
+assert got.returncode == 0, got.stderr
+assert [e for e in events(got.stdout) if e["type"] == "result"], got.stdout
+assert os.path.getsize(os.path.join(state, "claude-one-shots.log")) > 0, \
+    "the utility was never asked for a title -- the absence below proves nothing"
+for flags in ([], ["--output-format", "json"]):
+    listed = subprocess.run([binary, "chats", "list", *flags], env=env, capture_output=True,
+                            text=True, stdin=subprocess.DEVNULL, timeout=60)
+    assert listed.returncode == 0, listed.stderr
+    assert "Failed to authenticate" not in listed.stdout, listed.stdout
+rows = json.loads(subprocess.run([binary, "chats", "list", "--output-format", "json"], env=env,
+                                 capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                                 timeout=60).stdout)["data"]
+# Untitled, each keeps the name an untitled chat has: its id.
+assert len(rows) == 2 and all(row["name"] == row["id"] for row in rows), rows
+print("vendor failures: Gemini's quota and login in its own words, a warning a notice, a failed "
+      "first turn fresh again, Claude's expired login said and never a title - OK")
+PY
+
 # --- a pull stops on Ctrl-C, its stream ending on the cancel (55c) -------------
 # `models pull` from an Ollama store whose blob is a FIFO fed a MiB at a time
 # -- the scripted slow source -- and a real SIGINT to the binary mid-copy, as

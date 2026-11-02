@@ -58,22 +58,27 @@ struct ToolOutcome {
 
 /// The terminal event of a turn. Carries everything the turn is accounted by.
 struct TurnComplete {
-    std::string session_id;
-    std::string final_text;
+    std::string session_id{};
+    std::string final_text{};
     /// Which model actually answered, when the CLI reports it and it is not
     /// simply what was asked for. Empty means "the configured model", which is
     /// what most of the family reports; the gemini CLI routes one turn across
     /// several models and names them, so the concept is real rather than
     /// gemini-shaped -- it is turn accounting, which is what this event is.
-    std::string model;
+    std::string model{};
     /// Raw JSON from `--json-schema` runs; empty when no schema was set.
-    std::string structured_output;
+    std::string structured_output{};
     double cost_usd = 0.0;
     std::int64_t num_turns = 0;
     std::int64_t input_tokens = 0;
     std::int64_t output_tokens = 0;
     bool is_error = false;
-    std::string error_subtype;
+    std::string error_subtype{};
+    /// The vendor's own name for the failure's kind, when it gives one beside
+    /// its message (Gemini's `error.type`, `QuotaError`, 57b): in the message
+    /// only where the vendor gave no words, and in `describe`'s test label.
+    /// Nothing logs it: the vendor-CLI backends write no operational log line.
+    std::string error_type{};
 };
 
 /// Something worth telling the user that is not part of the answer: session

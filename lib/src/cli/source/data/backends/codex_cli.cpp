@@ -2,11 +2,13 @@
 
 #include <nlohmann/json.hpp>
 
+#include <optional>
 #include <utility>
 
 #include "backends/codex_cli_events.h"
 #include "backends/provider_status.h"
 #include "backends/provider_table.h"
+#include "backends/restore_on_exit.h"
 #include "contracts/errors.h"
 #include "transport/jsonl_framer.h"
 
@@ -424,21 +426,19 @@ harness::ChatResponse CodexCliProvider::stream_chat(const harness::ChatRequest& 
     // A side request is not a turn of this conversation, so it must not join
     // the thread -- the same rule the other backends apply. Running it against
     // a fresh thread is how that is achieved when the session IS the thread id.
+    // Whatever thread it created is discarded and the conversation's put back
+    // however it ends (57b): a cancelled or timed-out side request has already
+    // recorded its own thread from `thread.started`, and the next turn would
+    // resume that one, with none of the conversation's history.
     const bool side_request = request.transient.side_request;
-    const std::string saved_thread = thread_id_;
+    std::optional<RestoreOnExit<std::string>> conversation;
     if (side_request) {
-        thread_id_.clear();
+        conversation.emplace(thread_id_, std::string{});
     }
 
     const std::string prompt = prompt_for(request.messages, !thread_id_.empty());
     Outcome outcome = run_turn(prompt, {}, options,
                                side_request ? std::string{} : codex_effort(request.thinking));
-
-    if (side_request) {
-        // Whatever thread the side request created is discarded; the
-        // conversation's own thread is untouched.
-        thread_id_ = saved_thread;
-    }
 
     if (outcome.is_error) {
         throw harness::ProviderError(
