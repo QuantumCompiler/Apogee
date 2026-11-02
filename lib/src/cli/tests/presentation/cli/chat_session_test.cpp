@@ -381,3 +381,223 @@ TEST_CASE("a backend that cannot start is refused when switched to mid-session, 
         CHECK(events.back().at("text") == "HELPER<hi>");
     }
 }
+
+// --- a resumed chat's backend and a suite's members (57d) ----------------------
+
+namespace {
+
+/// The one chat `home` saved: its id, from its file's name.
+std::string saved_chat_id(const NamedHome& home) {
+    std::error_code code;
+    for (std::filesystem::directory_iterator it{home.home.home() / "sessions", code}, end;
+         !code && it != end; it.increment(code)) {
+        if (it->path().extension() == ".json") {
+            return it->path().stem().string();
+        }
+    }
+    return {};
+}
+
+/// `home`'s config written again: `root` the default, which starts; each of
+/// `unstartable` a vendor CLI whose binary is nowhere -- configured, never
+/// started; recall on, so a resume that ran would be summarised; `rest`
+/// appended at the top level.
+void reconfigure(const NamedHome& home, const std::vector<std::string>& unstartable,
+                 const std::string& rest = {}) {
+    std::string config = "backends:\n  root:\n    type: mock\n    model_path: " +
+                         (home.home.home() / "scripts" / "root.json").generic_string() + "\n";
+    for (const std::string& name : unstartable) {
+        config += "  " + name + ":\n    type: claude-cli\n    binary: \"" +
+                  home.binary.generic_string() + "\"\n";
+    }
+    config += "models:\n  default: root\nmemory:\n  recall: true\n" + rest;
+    std::ofstream{home.home.config_path(), std::ios::binary | std::ios::trunc} << config;
+}
+
+/// Three suites over `NamedHome`'s backends: `broke`'s chat member never
+/// starts, `quiet`'s utility member never starts, `fine` starts whole.
+constexpr const char* kSuites =
+    "suites:\n"
+    "  broke:\n    members:\n      chat: gone\n      utility: root\n"
+    "  quiet:\n    members:\n      chat: root\n      utility: gone\n"
+    "  fine:\n    members:\n      chat: root\n      utility: helper\n";
+
+/// `home`'s config with `kSuites` added.
+void add_suites(const NamedHome& home) {
+    std::ofstream{home.home.config_path(), std::ios::binary | std::ios::app} << kSuites;
+}
+
+/// The saved chat `id` of `home`, parsed.
+nlohmann::json saved_chat(const NamedHome& home, const std::string& id) {
+    const std::optional<std::string> text = slurp(home.home.home() / "sessions" / (id + ".json"));
+    return text.has_value() ? nlohmann::json::parse(*text) : nlohmann::json{};
+}
+
+constexpr const char* kDrivenTwo = "{\"type\":\"user\",\"text\":\"two\"}\n";
+
+}  // namespace
+
+TEST_CASE("a resumed chat whose backend can no longer start is refused, its file untouched",
+          "[chat][session][named-backend][resume]") {
+    // The sweep's probe: a chat on `other`, then `other` configured again as
+    // a backend that cannot start, and `--resume` answered from the default
+    // under `other`'s name -- `{"model":"other","text":"GOOD-SAYS"}`, exit 0,
+    // the chat summarised for recall by `other`.
+    for (const std::string mode : {"chat", "execute"}) {
+        INFO(mode);
+        const NamedHome home;
+        std::string out;
+        std::string err;
+        REQUIRE(home.run({mode, "-m", "helper"}, out, err) == 0);
+        REQUIRE(out == "HELPER<hi>\n");
+        const std::string id = saved_chat_id(home);
+        REQUIRE_FALSE(id.empty());
+        const std::filesystem::path file = home.home.home() / "sessions" / (id + ".json");
+        const std::optional<std::string> before = slurp(file);
+        REQUIRE(before.has_value());
+
+        reconfigure(home, {"gone", "helper"});
+        const std::string refusal =
+            "apogee " + mode + ": chat " + id +
+            " cannot resume: backend 'helper' is configured but could not be started: ";
+        const std::string remedy =
+            " (started backends: root) -- resume it on another backend with: apogee " + mode +
+            " --resume " + id + " -m <backend>\n";
+        const std::vector<std::string> driven{"--output-format", "stream-json", "--input-format",
+                                              "stream-json"};
+        for (const std::vector<std::string>& launch :
+             std::vector<std::vector<std::string>>{{"--resume", id}, {"--continue"}}) {
+            for (const bool machine : {false, true}) {
+                std::vector<std::string> args{mode};
+                args.insert(args.end(), launch.begin(), launch.end());
+                if (machine) {
+                    args.insert(args.end(), driven.begin(), driven.end());
+                }
+                INFO(args.size());
+                CHECK(home.run(args, out, err, machine ? kDrivenTwo : "two\n") == 1);
+                CHECK(out.empty());
+                CHECK(err.starts_with(refusal));
+                CHECK(err.ends_with(remedy));
+                CHECK(err.find("helper: ") == std::string::npos);
+                // Untouched: no turn added, the backend as it was left.
+                CHECK(slurp(file) == before);
+            }
+        }
+        // Nothing summarised for recall, nothing marked due.
+        CHECK_FALSE(std::filesystem::exists(home.home.home() / "memory" / "chats.db"));
+        CHECK_FALSE(std::filesystem::exists(home.home.home() / "memory" / "pending" / id));
+
+        // The way out it names: -m resumes it on a backend that started.
+        REQUIRE(home.run({mode, "--resume", id, "-m", "root"}, out, err, "two\n") == 0);
+        CHECK(out == "ROOT<two>\n");
+        CHECK(saved_chat(home, id).at("backend") == "root");
+    }
+}
+
+TEST_CASE("a resumed chat whose backend was deleted still falls back to the default, said",
+          "[chat][session][named-backend][resume]") {
+    // M29's recorded decision, kept: a backend the config no longer has is
+    // let go with a note, and the default answers under its own name.
+    const NamedHome home;
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"chat", "-m", "helper"}, out, err) == 0);
+    const std::string id = saved_chat_id(home);
+    REQUIRE_FALSE(id.empty());
+    reconfigure(home, {"gone"});
+    REQUIRE(home.run({"chat", "--resume", id}, out, err, "two\n") == 0);
+    CHECK(out == "ROOT<two>\n");
+    CHECK(err.find("backend 'helper' is no longer configured; using the default instead") !=
+          std::string::npos);
+    CHECK(saved_chat(home, id).at("backend") == "root");
+}
+
+TEST_CASE("a suite whose member cannot start is refused at launch, never answered by the default",
+          "[chat][session][named-backend][suite]") {
+    // The sweep's probe: `chat --suite broke`, its chat member an mlx entry
+    // with no Python, answered `{"model":"mlxgone","text":"GOOD-SAYS"}`.
+    for (const std::string mode : {"chat", "execute"}) {
+        INFO(mode);
+        const NamedHome home;
+        add_suites(home);
+        std::string out;
+        std::string err;
+        const std::string refusal =
+            "apogee " + mode + ": backend 'gone' is configured but could not be started: ";
+        for (const bool machine : {false, true}) {
+            std::vector<std::string> args{mode, "--suite", "broke"};
+            if (machine) {
+                args.insert(args.end(), {"--output-format", "stream-json"});
+            }
+            CHECK(home.run(args, out, err, machine ? kDrivenHi : "hi\n") == 1);
+            CHECK(out.empty());
+            CHECK(err.starts_with(refusal));
+            CHECK(
+                err.ends_with(" (started backends: helper, root) -- suite broke's chat member; "
+                              "fix it with: apogee config set-suite broke --chat <backend>\n"));
+            CHECK(home.saved() == 0);
+        }
+        // Every member, not the chat member alone: the utility's chores would
+        // fall to the default under its name the same way.
+        CHECK(home.run({mode, "--suite", "quiet"}, out, err) == 1);
+        CHECK(out.empty());
+        CHECK(err.starts_with(refusal));
+        CHECK(
+            err.ends_with(" -- suite quiet's utility member; fix it with: apogee config "
+                          "set-suite quiet --utility <backend>\n"));
+        CHECK(home.saved() == 0);
+
+        // A suite whose members all started runs.
+        REQUIRE(home.run({mode, "--suite", "fine"}, out, err) == 0);
+        CHECK(out == "ROOT<hi>\n");
+    }
+}
+
+TEST_CASE("a resumed chat carrying a suite whose member can no longer start is refused",
+          "[chat][session][named-backend][suite][resume]") {
+    const NamedHome home;
+    add_suites(home);
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"chat", "--suite", "fine"}, out, err) == 0);
+    const std::string id = saved_chat_id(home);
+    REQUIRE_FALSE(id.empty());
+    REQUIRE(saved_chat(home, id).at("suite") == "fine");
+    const std::filesystem::path file = home.home.home() / "sessions" / (id + ".json");
+    const std::optional<std::string> before = slurp(file);
+
+    // `fine`'s utility member, `helper`, is configured again as a backend
+    // that cannot start.
+    reconfigure(home, {"gone", "helper"}, kSuites);
+    for (const std::string mode : {"chat", "execute"}) {
+        INFO(mode);
+        CHECK(home.run({mode, "--resume", id, "--output-format", "stream-json", "--input-format",
+                        "stream-json"},
+                       out, err, kDrivenTwo) == 1);
+        CHECK(out.empty());
+        CHECK(err.starts_with("apogee " + mode + ": chat " + id +
+                              " cannot resume: backend 'helper' is configured but could not be "
+                              "started: "));
+        CHECK(
+            err.ends_with(" (started backends: root) -- suite fine's utility member; fix it "
+                          "with: apogee config set-suite fine --utility <backend>\n"));
+        CHECK(slurp(file) == before);
+    }
+}
+
+TEST_CASE("/suite to a suite whose member cannot start is refused, the session keeping its own",
+          "[chat][session][named-backend][suite]") {
+    const NamedHome home;
+    add_suites(home);
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"chat", "--suite", "fine"}, out, err, "/suite broke\nhi\n") == 0);
+    CHECK(err.find("backend 'gone' is configured but could not be started: ") != std::string::npos);
+    CHECK(err.find(" -- suite broke's chat member; fix it with: apogee config set-suite broke "
+                   "--chat <backend>") != std::string::npos);
+    CHECK(out == "ROOT<hi>\n");
+    const std::string id = saved_chat_id(home);
+    REQUIRE_FALSE(id.empty());
+    CHECK(saved_chat(home, id).at("suite") == "fine");
+    CHECK(saved_chat(home, id).at("backend") == "root");
+}

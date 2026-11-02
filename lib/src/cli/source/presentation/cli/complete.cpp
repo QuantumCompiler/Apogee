@@ -754,8 +754,9 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
             fail_user(message);
         }
 
-        // A suite member naming nothing is refused, never routed around (27d).
-        if (const std::string refused = validate_active_suite(config); !refused.empty()) {
+        // A suite member naming nothing, or one that did not start (57d), is
+        // refused, never routed around (27d).
+        if (const std::string refused = validate_active_suite(config, built); !refused.empty()) {
             fail_user(refused);
         }
         // `--graph` is how this run's attaches are indexed (27p): with none,

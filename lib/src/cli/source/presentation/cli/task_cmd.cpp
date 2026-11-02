@@ -672,14 +672,25 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
             chosen_suite = probe.models.default_suite;
         }
     }
+    // Every member of the suite the task runs under answers under its own
+    // name or the task is refused before anything is made -- one that did not
+    // start as well as one naming nothing (57d), as chat's opening holds it:
+    // asked before the suite is switched to, so nothing is rebuilt for it.
+    {
+        harness::Config probe = config;
+        if (chosen_suite.has_value()) {
+            probe.models.default_suite = *chosen_suite;
+        }
+        if (const std::string refused = validate_active_suite(probe, built); !refused.empty()) {
+            fail_user(what.existing.has_value() ? "task " + task.id + " cannot resume: " + refused
+                                                : refused);
+        }
+    }
     if (chosen_suite.has_value() && *chosen_suite != config.models.default_suite) {
         for (const std::string& line :
              activate_suite(harness, config, *chosen_suite, build_options)) {
             reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + line);
         }
-    }
-    if (const std::string refused = validate_active_suite(config); !refused.empty()) {
-        fail_user(refused);
     }
     std::optional<models::SuiteFootprint> footprint;
     if (!config.models.default_suite.empty()) {

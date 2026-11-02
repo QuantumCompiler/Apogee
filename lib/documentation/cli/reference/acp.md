@@ -244,7 +244,13 @@ compaction share with the turn before them. So a replay and `chats show`'s
 JSON line up entry by entry, and every id is distinct. Nothing hidden is
 replayed: a saved chat holds no thinking and no injected context. The
 resume's own notes -- a backend gone, a field dropped -- follow the replay as
-notices, never as history.
+notices, never as history. A chat whose backend is still configured but no
+longer starts -- its CLI missing, its MLX environment gone -- or whose suite
+has such a member is refused by the child at its opening, as a terminal's
+`--resume` is (57d): the load answers `-32603`, `apogee's session could not
+open: it ended (exit 1): apogee execute: chat <id> cannot resume: backend
+'claude' is configured but could not be started: …`, and nothing of the chat
+changes.
 
 **`session/resume`** -- the same opening, with nothing replayed: the answer
 comes once the child is open. A resumed session's next turn is numbered on

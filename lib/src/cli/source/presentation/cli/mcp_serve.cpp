@@ -417,7 +417,7 @@ mcp::ServedCall served_complete(const RootContext& context, ServedModels& models
             !refusal.empty()) {
             return refused(refusal);
         }
-        if (const std::string refusal = validate_active_suite(config); !refusal.empty()) {
+        if (const std::string refusal = validate_active_suite(config, built); !refusal.empty()) {
             return refused(refusal);
         }
         // The built provider's own word again: what would run is what was

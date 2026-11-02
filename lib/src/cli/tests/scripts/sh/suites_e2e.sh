@@ -7,7 +7,9 @@
 # refused at config time, and machine mode carrying the consult as any tool
 # call; since 27g, validation -- a tool call objected to as its round-one
 # result and its revision run, /check, and a capture's planted wrong field
-# disputed -- with the run's own records as the evidence:
+# disputed; and since 57d, a member configured but never started, and a chat
+# resumed on such a backend, refused at launch -- with the run's own records as
+# the evidence:
 #
 #   * who titled the chat: the utility role does, so a title from the helper's
 #     script proves `--suite research` resolved utility to `helper` (and the
@@ -141,6 +143,65 @@ grep -q "no backend named 'gone'" "$WORK_DIR/broken.txt" \
 grep -q "SAYS" "$WORK_DIR/broken.txt" && fail "a model answered under the broken suite"
 "$APOGEE_BIN" config delete-suite broken >/dev/null || fail "delete-suite broken"
 
+# --- a member configured but never started: refused at launch (57d) ---------
+# An mlx entry with no Python environment in this home is configured and never
+# starts. The router answers a name it does not run from models.default, under
+# that name -- so the launch refuses it, with the member's own reason, before
+# anything is written.
+"$APOGEE_BIN" config add-backend stalled --type mlx --model-path "$WORK_DIR/nowhere" \
+    >/dev/null || fail "add-backend stalled"
+"$APOGEE_BIN" config add-suite stalls --chat stalled --utility helper >/dev/null \
+    || fail "add-suite stalls"
+for mode in chat execute; do
+    echo '{"type":"user","text":"question"}' \
+        | "$APOGEE_BIN" "$mode" --suite stalls --output-format stream-json \
+            >"$WORK_DIR/stalls.out" 2>"$WORK_DIR/stalls.err" \
+        && fail "$mode ran under a suite whose chat member never started"
+    [ -s "$WORK_DIR/stalls.out" ] \
+        && fail "$mode wrote to stdout under the stalled suite: $(cat "$WORK_DIR/stalls.out")"
+    grep -q "backend 'stalled' is configured but could not be started: .* -- suite stalls's chat member; fix it with: apogee config set-suite stalls --chat <backend>" \
+        "$WORK_DIR/stalls.err" \
+        || fail "$mode did not refuse the stalled member in its words: $(cat "$WORK_DIR/stalls.err")"
+done
+"$APOGEE_BIN" task run "question" --suite stalls --rounds 1 --output-format stream-json \
+    </dev/null >"$WORK_DIR/stalls.out" 2>"$WORK_DIR/stalls.err" \
+    && fail "task run ran under a suite whose chat member never started"
+[ -s "$WORK_DIR/stalls.out" ] \
+    && fail "task run wrote to stdout under the stalled suite: $(cat "$WORK_DIR/stalls.out")"
+grep -q "suite stalls's chat member" "$WORK_DIR/stalls.err" \
+    || fail "task run did not refuse the stalled member: $(cat "$WORK_DIR/stalls.err")"
+"$APOGEE_BIN" task list </dev/null 2>&1 | grep -q "no tasks yet" \
+    || fail "a task was made under the stalled suite"
+"$APOGEE_BIN" config delete-suite stalls >/dev/null || fail "delete-suite stalls"
+
+# A chat resumed on a backend configured again as one that never starts is
+# refused too, its saved file untouched -- as `task resume` refuses it.
+"$APOGEE_BIN" config add-backend left --type mock --model-path "$WORK_DIR/scripts/root.json" \
+    >/dev/null || fail "add-backend left"
+echo "first" | "$APOGEE_BIN" chat -m left >/dev/null 2>&1 || fail "a chat on left failed"
+LEFT_FILE=$(python3 - "$APOGEE_HOME/sessions" <<'PY'
+import glob, json, os, sys
+print(next(path for path in glob.glob(os.path.join(sys.argv[1], "*.json"))
+           if json.load(open(path)).get("backend") == "left"))
+PY
+) || fail "no chat saved on left"
+LEFT_ID=$(basename "$LEFT_FILE" .json)
+cp "$LEFT_FILE" "$WORK_DIR/left-before.json"
+"$APOGEE_BIN" config delete-backend left >/dev/null || fail "delete-backend left"
+"$APOGEE_BIN" config add-backend left --type mlx --model-path "$WORK_DIR/nowhere" >/dev/null \
+    || fail "add-backend left as mlx"
+echo '{"type":"user","text":"second"}' \
+    | "$APOGEE_BIN" chat --resume "$LEFT_ID" --output-format stream-json \
+        --input-format stream-json >"$WORK_DIR/left.out" 2>"$WORK_DIR/left.err" \
+    && fail "a chat resumed on a backend that never starts"
+[ -s "$WORK_DIR/left.out" ] \
+    && fail "the refused resume wrote to stdout: $(cat "$WORK_DIR/left.out")"
+grep -q "chat $LEFT_ID cannot resume: backend 'left' is configured but could not be started: .* -- resume it on another backend with: apogee chat --resume $LEFT_ID -m <backend>" \
+    "$WORK_DIR/left.err" || fail "the resume was not refused in its words: $(cat "$WORK_DIR/left.err")"
+cmp -s "$LEFT_FILE" "$WORK_DIR/left-before.json" || fail "the refused resume changed the saved chat"
+"$APOGEE_BIN" config delete-backend left >/dev/null || fail "delete-backend left"
+"$APOGEE_BIN" config delete-backend stalled >/dev/null || fail "delete-backend stalled"
+
 # --- /suite mid-chat: the bundle switches, and off restores the pointers ----
 printf 'switch question\n/suite fast\nsecond question\n/suite\n' \
     | "$APOGEE_BIN" chat --suite research >"$WORK_DIR/switch.txt" 2>&1 \
@@ -205,8 +266,9 @@ LC_ALL=C grep -q "$(printf '\033')" "$WORK_DIR/warm.txt" && fail "--warm painted
 
 # A local member whose record claims a pebibyte: no machine fits it. With
 # llama.cpp built in, the machine's budget is known and the suite is refused
-# with its numbers until --force; without it the budget is unknown, said so,
-# and the chat runs. Its role (extraction) is never asked in a chat, so no
+# with its numbers until --force. Without it the member is configured but
+# never starts, so the launch refuses the suite by that member (57d) before
+# anything is priced. Its role (extraction) is never asked in a chat, so no
 # model is loaded either way.
 python3 - "$WORK_DIR/vast.gguf" <<'PY'
 import struct, sys
@@ -227,13 +289,18 @@ printf '{"file": "vast.gguf", "file_size": 1125899906842624}\n' >"$WORK_DIR/vast
     >/dev/null || fail "add-backend vast"
 "$APOGEE_BIN" config add-suite vast --chat root --extraction vast >/dev/null || fail "add-suite vast"
 VAST="vast 1073742368 + 1024 margin"
-if echo "vast question" | "$APOGEE_BIN" chat --suite vast >"$WORK_DIR/vast.txt" 2>&1; then
-    grep -q "suite vast needs 1073743392 MiB: $VAST -- this machine's budget is not known here" \
-        "$WORK_DIR/vast.txt" || fail "an unknown budget was not said: $(cat "$WORK_DIR/vast.txt")"
+echo "vast question" | "$APOGEE_BIN" chat --suite vast >"$WORK_DIR/vast.txt" 2>&1 \
+    && fail "a chat ran under a suite that cannot run here: $(cat "$WORK_DIR/vast.txt")"
+grep -q "SAYS" "$WORK_DIR/vast.txt" && fail "a model answered under a refused suite"
+if grep -q "llama.cpp was not compiled in" "$WORK_DIR/vast.txt"; then
+    grep -q "backend 'vast' is configured but could not be started: .* -- suite vast's extraction member; fix it with: apogee config set-suite vast --extraction <backend>" \
+        "$WORK_DIR/vast.txt" \
+        || fail "the never-started member was not refused in its words: $(cat "$WORK_DIR/vast.txt")"
+    grep -q "suite vast needs" "$WORK_DIR/vast.txt" \
+        && fail "a suite refused at launch was priced: $(cat "$WORK_DIR/vast.txt")"
 else
     grep -q "suite vast needs 1073743392 MiB of this machine's [0-9]* MiB: $VAST -- it does not fit; --force runs it anyway" \
         "$WORK_DIR/vast.txt" || fail "the refusal does not name the numbers: $(cat "$WORK_DIR/vast.txt")"
-    grep -q "SAYS" "$WORK_DIR/vast.txt" && fail "a model answered under a refused suite"
     echo "vast question" | "$APOGEE_BIN" chat --suite vast --force >"$WORK_DIR/forced.txt" 2>&1 \
         || fail "--force did not run the suite: $(cat "$WORK_DIR/forced.txt")"
     grep -q "$VAST -- over budget, run anyway (--force)" "$WORK_DIR/forced.txt" \

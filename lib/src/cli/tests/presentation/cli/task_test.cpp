@@ -361,6 +361,94 @@ TEST_CASE("a task whose backend can no longer start is refused at resume, not ru
     CHECK(home.task().transitions.size() == transitions);
 }
 
+namespace {
+
+/// Whether `home` saved no conversation at all.
+[[nodiscard]] bool no_chat_saved(const Home& home) {
+    std::error_code code;
+    for (fs::directory_iterator it{home.home.home() / "sessions", code}, end; !code && it != end;
+         it.increment(code)) {
+        if (it->path().extension() == ".json") {
+            return false;
+        }
+    }
+    return true;
+}
+
+}  // namespace
+
+TEST_CASE("task run under a suite whose member cannot start is refused, nothing made",
+          "[commands][task][named-backend][suite]") {
+    // The sweep's probe: `task run --suite broke`, its chat member an mlx
+    // entry with no Python -- the plan and every round answered by the
+    // default under the member's name, `[task] ... · mlxgone · suite broke`.
+    const Home home{R"({"text": "1. Answer."}, {"text": "It is 42.\nTASK STATUS: DONE"})"};
+    write_config(home,
+                 "  m:\n    type: mock\n    model_path: " + home.script.string() + "\n" +
+                     unstartable(home, "gone"),
+                 "m");
+    std::ofstream{home.home.config_path(), std::ios::binary | std::ios::app}
+        << "suites:\n  broke:\n    members:\n      chat: gone\n      utility: m\n";
+    for (const bool machine : {false, true}) {
+        INFO(machine);
+        std::vector<std::string> args{"task", "run", "say hi", "--suite", "broke", "--rounds", "1"};
+        if (machine) {
+            args.insert(args.end(), {"--output-format", "stream-json"});
+        }
+        std::string out;
+        std::string err;
+        CHECK(home.run(args, &out, &err) == 1);
+        CHECK(out.empty());
+        CHECK(err.starts_with(
+            "apogee task: backend 'gone' is configured but could not be started: "));
+        CHECK(
+            err.ends_with(" (started backends: m) -- suite broke's chat member; fix it with: "
+                          "apogee config set-suite broke --chat <backend>\n"));
+        CHECK_FALSE(has(err, "[task]"));
+        CHECK(t::list_tasks(home.tasks()).empty());
+        CHECK(no_chat_saved(home));
+    }
+}
+
+TEST_CASE("a task whose suite's member can no longer start is refused at resume",
+          "[commands][task][resume][named-backend][suite]") {
+    const Home home{R"({"text": "1. Plan."}, {"text": "not yet"})"};
+    const fs::path chores = home.home.home() / "chores.json";
+    std::ofstream{chores} << R"({"turns": [{"text": "CHORE"}]})";
+    const std::string suite = "suites:\n  pair:\n    members:\n      chat: m\n      utility: u\n";
+    write_config(home,
+                 "  m:\n    type: mock\n    model_path: " + home.script.string() +
+                     "\n  u:\n    type: mock\n    model_path: " + chores.string() + "\n",
+                 "m");
+    std::ofstream{home.home.config_path(), std::ios::binary | std::ios::app} << suite;
+    std::string out;
+    REQUIRE(home.run({"task", "run", "goal", "--suite", "pair", "--require", "42", "--rounds", "1"},
+                     &out) == 1);
+    t::Task task = home.task();
+    REQUIRE(task.status == t::kExhausted);
+    task.status = std::string{t::kHalted};
+    task.rounds_budget = 3;
+    REQUIRE(t::save_task(home.tasks(), task).empty());
+    const std::size_t transitions = task.transitions.size();
+
+    // The suite's utility member, `u`, can no longer start; its chat member
+    // -- the backend the task's conversation was left on -- still can.
+    write_config(home,
+                 "  m:\n    type: mock\n    model_path: " + home.script.string() + "\n" +
+                     unstartable(home, "u"),
+                 "m");
+    std::ofstream{home.home.config_path(), std::ios::binary | std::ios::app} << suite;
+    std::string err;
+    CHECK(home.run({"task", "resume", task.id}, &out, &err) == 1);
+    CHECK(err.starts_with("apogee task: task " + task.id +
+                          " cannot resume: backend 'u' is configured but could not be started: "));
+    CHECK(
+        err.ends_with(" (started backends: m) -- suite pair's utility member; fix it with: "
+                      "apogee config set-suite pair --utility <backend>\n"));
+    CHECK(home.task().status == t::kHalted);
+    CHECK(home.task().transitions.size() == transitions);
+}
+
 TEST_CASE("task verbs with no task say how to start one", "[commands][task]") {
     const Home home{R"({"text": "x"})"};
     std::string out;

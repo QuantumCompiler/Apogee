@@ -167,9 +167,11 @@ the line saying so -- `suite research needs 10600 MiB of this machine's 98304
 MiB: root 7468 + helper 2108 + 1024 margin -- fits`, `suite research: no member
 holds memory on this machine`, or a run forced over budget, `... -- over budget,
 run anyway (--force)` -- is a `notice` after the `session` event, as are the
-suite's warnings at launch: a member that could not be rebuilt at the window
-the suite pins (`gone keeps its old window -- it could not be rebuilt: …`), a
-member `--warm` could not load. They are said with a resume's own notices,
+suite's warnings at launch: a member that started but could not be rebuilt
+at the window the suite pins (`small keeps its old window -- it could not be
+rebuilt: …`), a member `--warm` could not load (`could not warm small -- its
+first use will try again: …`). A member that never started is no warning: the
+launch is refused ([below](#a-launch-refused), 57d). They are said with a resume's own notices,
 in the order they arose, before anything the session reads, carrying no
 `turn`; stderr carries none of them. The terminal prints them on stderr as
 before.
@@ -240,6 +242,18 @@ launch is refused for, among others:
   'nope' (configured: …)` (M29). Nothing else answers under the name asked
   for. A `set` line's `model` naming such a backend mid-session is refused
   the same way, as a `notice` (56a; `set` below);
+- a resumed chat (`--resume`, `-c`) whose saved backend is configured but did
+  not start, with no `-m`: `chat <id> cannot resume: backend 'other' is
+  configured but could not be started: … (started backends: good) -- resume
+  it on another backend with: apogee chat --resume <id> -m <backend>` (57d).
+  Nothing of the chat changes. One the config no longer defines still resumes
+  on the default, said as a `resume:` notice;
+- a suite with a member -- of any role -- that names no backend, or that is
+  configured but did not start: `backend 'mlx' is configured but could not
+  be started: … -- suite broke's chat member; fix it with: apogee config
+  set-suite broke --chat <backend>` (27d; 57d for a member that did not
+  start), prefixed `chat <id> cannot resume: ` on a resume. The router would
+  answer a member it does not run from the default, under the member's name;
 - a suite that does not fit this machine: `suite vast needs 247056 MiB of this
   machine's 110100 MiB: … -- it does not fit; --force runs it anyway`, and a
   suite that does not exist, `--suite: no suite named 'nope' (configured: …)`;
@@ -350,8 +364,11 @@ answer is refused at launch, as [a session's is](#a-launch-refused): `-m`
 naming a backend that did not start or one the config defines nowhere, and on
 `task resume` the backend its conversation was left on, if it no longer
 starts -- `task <id> cannot resume: backend 'm' is configured but could not
-be started: … (started backends: …)`. Nothing is made or run, nothing is
-written on stdout, and the exit code is `1`, the reason on stderr. A resumed
+be started: … (started backends: …)`. So is a task whose suite -- `--suite`
+on `task run`, its conversation's own on `task resume` -- has a member that
+names no backend or did not start, in the suite's words (57d). Nothing is
+made or run, nothing is written on stdout, and the exit code is `1`, the
+reason on stderr. A resumed
 task whose backend is no longer configured at all runs on the default, said
 on stderr as a `[resume]` line, as a chat's resume says it.
 

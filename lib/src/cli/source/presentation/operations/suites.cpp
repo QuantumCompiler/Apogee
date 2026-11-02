@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "harness/roles.h"
+#include "operations/backend_names.h"
 #include "symphony/tools.h"
 
 namespace apogee::commands {
@@ -246,24 +247,52 @@ std::string validate_suite(const harness::Config& config, std::string_view name,
     return validate_suite_orchestrate(config, name, suite, metered, symphonies);
 }
 
-std::string validate_active_suite(const harness::Config& config) {
+namespace {
+
+/// The active suite's first member that cannot answer, refused: `unstarted`
+/// says why a member the config defines cannot (empty when it can, or when
+/// nothing was built to ask), then the suite and the way to fix it.
+std::string active_suite_refusal(
+    const harness::Config& config,
+    const std::function<std::string(const std::string& backend)>& unstarted) {
     const harness::SuiteConfig* suite = harness::active_suite(config);
     if (suite == nullptr) {
         return {};
     }
     for (const std::string_view role : harness::suite_role_names()) {
         const auto it = suite->members.find(role);
-        if (it == suite->members.end() || config.find_backend(it->second.backend) != nullptr) {
+        if (it == suite->members.end()) {
             continue;
         }
-        const std::vector<std::string> known = config.backend_names();
-        return "no backend named '" + it->second.backend + "'" +
-               (known.empty() ? std::string{} : " (configured: " + joined(known) + ")") +
-               " -- suite " + config.models.default_suite + "'s " + std::string{role} +
+        std::string refused;
+        if (config.find_backend(it->second.backend) == nullptr) {
+            const std::vector<std::string> known = config.backend_names();
+            refused = "no backend named '" + it->second.backend + "'" +
+                      (known.empty() ? std::string{} : " (configured: " + joined(known) + ")");
+        } else {
+            refused = unstarted(it->second.backend);
+        }
+        if (refused.empty()) {
+            continue;
+        }
+        return refused + " -- suite " + config.models.default_suite + "'s " + std::string{role} +
                " member; fix it with: apogee config set-suite " + config.models.default_suite +
                " --" + std::string{role} + " <backend>";
     }
     return {};
+}
+
+}  // namespace
+
+std::string validate_active_suite(const harness::Config& config) {
+    return active_suite_refusal(config, [](const std::string&) { return std::string{}; });
+}
+
+std::string validate_active_suite(const harness::Config& config,
+                                  const backends::BuildResult& built) {
+    return active_suite_refusal(config, [&config, &built](const std::string& backend) {
+        return named_backend_refusal(config, built, backend);
+    });
 }
 
 std::string validate_suite_delete(const harness::Config& config, std::string_view name) {

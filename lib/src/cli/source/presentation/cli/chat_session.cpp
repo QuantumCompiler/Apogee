@@ -1139,6 +1139,24 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             chosen_suite = probe.models.default_suite;
         }
     }
+    // A member naming nothing, or one that did not start (57d), is refused
+    // before a turn could fall back to models.default and answer from a model
+    // nobody chose, under the member's name -- every role, the chat member
+    // included, whether the suite came from the flag, the resumed chat or the
+    // config. Asked of the suite the session would run under before it is
+    // switched to, so nothing is rebuilt or said for a suite refused; a
+    // resume says which chat it could not reopen, as a task's does.
+    {
+        harness::Config probe = config;
+        if (chosen_suite.has_value()) {
+            probe.models.default_suite = *chosen_suite;
+        }
+        if (const std::string refused = validate_active_suite(probe, built); !refused.empty()) {
+            fail_user(mode, !flags->resume.empty() || flags->cont
+                                ? "chat " + session.chat_id + " cannot resume: " + refused
+                                : refused);
+        }
+    }
     if (chosen_suite.has_value() && *chosen_suite != config.models.default_suite) {
         for (const std::string& line :
              activate_suite(harness, config, *chosen_suite, build_options)) {
@@ -1150,11 +1168,6 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // suite can.
     if (mode == SessionMode::Execute && config.models.default_suite.empty() && flags->orchestrate) {
         fail_user(mode, execute_orchestrate_refusal(config));
-    }
-    // A member naming nothing is refused before a turn could fall back to
-    // models.default and answer from a model nobody chose.
-    if (const std::string refused = validate_active_suite(config); !refused.empty()) {
-        fail_user(mode, refused);
     }
     // Admission (27e): the set the session runs under, priced against
     // this machine. Over budget it is refused here, before anything is
@@ -1204,6 +1217,21 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // named no backend, under a config with no default.
     if (mode == SessionMode::Execute && model.empty()) {
         fail_user(mode, execute_suite_refusal(config));
+    }
+    // A resumed chat opens on the backend it was left on, which answers under
+    // its own name or not at all (57d, M29 finished), as `task resume` holds
+    // it: one still configured that did not start is refused here, before
+    // anything is said, written or summarised -- the router would answer
+    // every turn from the default under the saved name. One the config no
+    // longer has was let go above, said, and falls to the default (M29).
+    if (flags->model.empty() && !saved_backend.empty() && session.backend == saved_backend) {
+        if (const std::string refused = named_backend_refusal(config, built, model);
+            !refused.empty()) {
+            fail_user(mode, "chat " + session.chat_id + " cannot resume: " + refused +
+                                " -- resume it on another backend with: apogee " +
+                                std::string{session_command(mode)} + " --resume " +
+                                session.chat_id + " -m <backend>");
+        }
     }
     session.backend = model;
     // The chat's roster pin (33): the launch's; else, unless -m named a
@@ -2553,8 +2581,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     if (refused.empty()) {
                         refused = select_suite(probe, asked.suite);
                     }
+                    // Every member answers for itself, as at launch (57d):
+                    // the session keeps its suite.
                     if (refused.empty()) {
-                        refused = validate_active_suite(probe);
+                        refused = validate_active_suite(probe, built);
                     }
                     // Admission (27e), before anything is rebuilt.
                     std::optional<models::SuiteFootprint> priced;
