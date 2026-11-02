@@ -92,4 +92,13 @@ struct RequestOptions {
 /// Extracts a human-readable message from an OpenAI error body.
 [[nodiscard]] std::string error_message(long status, std::string_view body);
 
+/// What a stream that failed mid-answer says (57c), from the failing event:
+/// an `error` event's own top-level `code` and `message`, `response.failed`'s
+/// `response.error`, or an `error` object nested in either -- said as
+/// `code: message`. With none of them, `kStreamFailure`; never `HTTP 0`, a
+/// status the stream's 200 does not mean.
+[[nodiscard]] std::string stream_error_message(const nlohmann::json& event);
+
+inline constexpr std::string_view kStreamFailure = "the response stream reported a failure";
+
 }  // namespace apogee::backends::openai

@@ -313,6 +313,62 @@ std::string error_message(long status, std::string_view body) {
     return "HTTP " + std::to_string(status);
 }
 
+namespace {
+
+/// `object[key]` when it is a string; empty otherwise. A stream's error
+/// fields are null as often as absent, and `value()` throws on a null.
+std::string string_at(const nlohmann::json& object, std::string_view key) {
+    if (!object.is_object()) {
+        return {};
+    }
+    const auto it = object.find(key);
+    return it != object.end() && it->is_string() ? it->get<std::string>() : std::string{};
+}
+
+/// `code: message` from one error object, or empty when it says nothing.
+/// `type` stands in for a missing `code`, as a body's error is said.
+std::string said_by(const nlohmann::json& error, bool type_is_code) {
+    std::string code = string_at(error, "code");
+    if (code.empty() && type_is_code) {
+        code = string_at(error, "type");
+    }
+    const std::string message = string_at(error, "message");
+    if (message.empty()) {
+        return code;
+    }
+    return code.empty() ? message : code + ": " + message;
+}
+
+}  // namespace
+
+std::string stream_error_message(const nlohmann::json& event) {
+    if (!event.is_object()) {
+        return std::string{kStreamFailure};
+    }
+    std::string said;
+    if (string_at(event, "type") == "response.failed") {
+        // The failed response carries its error: `{"response":{"status":
+        // "failed","error":{"code":"server_error","message":"..."}}}`.
+        if (const auto response = event.find("response");
+            response != event.end() && response->is_object()) {
+            if (const auto error = response->find("error"); error != response->end()) {
+                said = said_by(*error, true);
+            }
+        }
+    } else {
+        // The `error` event says it at its own top level: `{"type":"error",
+        // "code":"...","message":"..."}` -- whose `type` is the event's, so
+        // never taken for a code.
+        said = said_by(event, false);
+    }
+    if (said.empty()) {
+        if (const auto error = event.find("error"); error != event.end()) {
+            said = said_by(*error, true);
+        }
+    }
+    return said.empty() ? std::string{kStreamFailure} : said;
+}
+
 std::optional<std::string> server_tool_line(const nlohmann::json& item) {
     if (!item.is_object()) {
         return std::nullopt;

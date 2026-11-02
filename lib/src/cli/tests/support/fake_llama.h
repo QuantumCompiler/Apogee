@@ -15,9 +15,11 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "backends/llama_runtime.h"
@@ -155,6 +157,12 @@ public:
         // And never past the cache's end: a position skipped is a token the
         // model is told it has seen and never did.
         REQUIRE(position <= resident);
+        if (!decode_error.empty() && tokens.size() > 1) {
+            // Half the batch lands, as a failed llama_decode may leave it,
+            // and the failure is llama_real.cpp's plain runtime_error (57c).
+            resident = position + static_cast<std::int64_t>(tokens.size() / 2);
+            throw std::runtime_error(std::exchange(decode_error, {}));
+        }
         if (overlap != nullptr) {
             overlap->pass();
         }
@@ -177,6 +185,11 @@ public:
     /// When set, a generation with a thinking budget reports it spent from
     /// this many samples on (26i).
     std::optional<std::size_t> budget_spent_after;
+
+    /// When set, the next prompt decode (a batch of more than one token)
+    /// writes half its tokens and fails with this, once -- llama_real.cpp's
+    /// word for a failed decode or a missing KV slot (57c).
+    std::string decode_error;
 
     [[nodiscard]] bool reasoning_budget_spent() const override {
         return budget_spent_after.has_value() && !samplings.empty() &&
@@ -597,6 +610,10 @@ public:
     /// A grammar rendering fails to compile with this, on every context --
     /// and a schema's, compiled as it is rendered, at `render_chat`.
     std::string grammar_error;
+    /// When set, `make_context` fails with it, as llama_real.cpp does for a
+    /// context it could not create -- a `cache_type` or window the hardware
+    /// cannot hold (57c).
+    std::string context_error;
     /// When set, `render_chat` cannot hold a schema, with this reason: a
     /// format with no place for one, or a schema the converter cannot
     /// express (26f).
@@ -904,6 +921,11 @@ public:
 
     [[nodiscard]] std::unique_ptr<backends::LlamaContext> make_context(
         std::int64_t context_size) override {
+        if (!context_error.empty()) {
+            // llama_real.cpp's refusal of a context it could not create: a
+            // plain runtime_error, the model loaded and no context made (57c).
+            throw std::runtime_error(context_error);
+        }
         context_sizes.push_back(context_size);
         auto state = std::make_shared<FakeLlamaContext>();
         state->script = script;
@@ -998,6 +1020,8 @@ public:
     std::vector<std::string> stops;
     std::string grammar_error;
     std::string schema_error;
+    /// Given to every model it loads: see FakeLlamaModel (57c).
+    std::string context_error;
 
     /// Generation scripted as the exact PIECES a model emits, rather than as
     /// token ids.
@@ -1042,6 +1066,7 @@ public:
         loaded->special_words = special_words;
         loaded->stops = stops;
         loaded->grammar_error = grammar_error;
+        loaded->context_error = context_error;
         loaded->thinking_tags = thinking_tags;
         loaded->budget_spent_after = budget_spent_after;
         loaded->refuse_load = refuse_load;

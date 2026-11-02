@@ -17,6 +17,7 @@
 #include "contracts/config.h"
 #include "contracts/errors.h"
 #include "logger/operational.h"
+#include "tasks/unattended.h"
 #include "tools/delegate.h"
 
 namespace apogee::commands {
@@ -314,6 +315,18 @@ ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& s
         notice("cancelled");
         outcome.cancelled = true;
     } catch (const harness::HarnessError& e) {
+        logger::log(logger::Level::Error, "chat", e.what());
+        notice(e.what());
+        outcome.error = e.what();
+    } catch (const tasks::UnansweredQuestion&) {
+        // A task's own ending, which its runner catches one frame up: not a
+        // failure of the turn's to report here.
+        throw;
+    } catch (const std::exception& e) {
+        // The backstop (57c): a provider that let anything else out still
+        // fails only its turn -- one `error`, the session alive to serve the
+        // next line -- rather than ending the process with exit 1. The
+        // turn's accounting does not depend on every provider being right.
         logger::log(logger::Level::Error, "chat", e.what());
         notice(e.what());
         outcome.error = e.what();

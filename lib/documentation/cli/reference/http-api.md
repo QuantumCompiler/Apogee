@@ -49,7 +49,7 @@ into its usual typed exception:
 | 404 | `session_not_found` | An unknown or evicted `session_id`; the body also carries `session_id` |
 | 405 | `invalid_request_error` | Wrong method; the `Allow` header names the right one |
 | 501 | `backend_unavailable` | An admin route that needs a generation backend on a server that serves none (`/v1/admin/knowledge/capture`) |
-| 502 | `backend_error` | The provider failed; the knowledge clerk returned no record |
+| 502 | `backend_error` | The provider failed -- since 57c a connection that could not be made or was dropped, a stream cut before its end, a Gemini prompt blocked, and a llama.cpp context or decode refused among them, never a 500 or an answer finished with `stop`; the knowledge clerk returned no record |
 | 503 | `backend_unavailable` | A backend that is configured but could not be built, with its reason |
 
 On a streamed response an error arrives as a `data:` frame carrying the same

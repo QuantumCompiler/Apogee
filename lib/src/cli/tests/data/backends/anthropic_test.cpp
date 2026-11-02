@@ -561,6 +561,93 @@ TEST_CASE("an error mid-stream surfaces as a provider error", "[backends][anthro
     }
 }
 
+TEST_CASE("a transport failure is the entry's provider error, before and after the first byte",
+          "[backends][anthropic][error][transport]") {
+    // A connection refused, or dropped mid-answer, was a bare HttpError that
+    // ended `chat`'s whole process with exit 1 and no `error` event (57c):
+    // it is the entry's own failure now, in the transport's words.
+    AnthropicProvider::Options options;
+    options.backend_name = "claude";
+    const FakeTransport::Reply refused{
+        .status = 0,
+        .transport_error = true,
+        .error_message = "request failed: Couldn't connect to server"};
+    const FakeTransport::Reply dropped{
+        .status = 200, .body = std::string{kTextStream}, .chunk_size = 16, .fail_after_bytes = 200};
+
+    const auto entry_failure = [](auto&& call) -> std::string {
+        try {
+            call();
+        } catch (const ProviderError& e) {
+            CHECK(e.backend() == "claude");
+            return e.what();
+        }
+        FAIL("expected ProviderError");
+        return {};
+    };
+    {
+        Fixture f = make_provider({refused}, options);
+        CHECK(entry_failure([&f] { (void)f.provider->chat(chat_request(), {}); }) ==
+              "claude: request failed: Couldn't connect to server");
+    }
+    {
+        Fixture f = make_provider({refused}, options);
+        CHECK(entry_failure([&f] { (void)f.provider->stream_chat(chat_request(), {}); }) ==
+              "claude: request failed: Couldn't connect to server");
+        CHECK(f.transport->attempts() == 3);  // retried before any byte, as ever
+    }
+    {
+        Fixture f = make_provider({dropped}, options);
+        std::string streamed;
+        StreamOptions stream;
+        stream.on_token = [&streamed](std::string_view chunk) { streamed += chunk; };
+        CHECK(entry_failure([&] { (void)f.provider->stream_chat(chat_request(), stream); }) ==
+              "claude: connection dropped mid-stream");
+        CHECK(f.transport->attempts() == 1);  // never retried once a byte arrived
+    }
+    {
+        // count_tokens and the catalogue take the same door.
+        Fixture f = make_provider({refused}, options);
+        CHECK(entry_failure([&f] {
+                  (void)f.provider->count_tokens(chat_request(), {});
+              }).starts_with("claude: "));
+        Fixture g = make_provider({refused}, options);
+        CHECK(entry_failure([&g] { (void)g.provider->list_catalog({}); }).starts_with("claude: "));
+    }
+}
+
+TEST_CASE("a stream cut before message_stop fails, never answers",
+          "[backends][anthropic][error][cut]") {
+    // A clean early end -- HTTP/2's END_STREAM, a proxy closing the body --
+    // with the message unfinished. Kept, it would be saved as a whole answer
+    // with the Stop it defaults to (57c).
+    std::string cut{kTextStream};
+    cut.resize(cut.find("event: message_delta"));
+    Fixture f = make_provider({sse(cut)});
+    std::string streamed;
+    StreamOptions options;
+    options.on_token = [&streamed](std::string_view chunk) { streamed += chunk; };
+    try {
+        (void)f.provider->stream_chat(chat_request(), options);
+        FAIL("expected ProviderError");
+    } catch (const ProviderError& e) {
+        CHECK(std::string{e.what()} ==
+              "anthropic: the response stream ended before the answer finished");
+    }
+    CHECK(streamed == "Hello, world");  // what was shown stays shown
+
+    // Cut after the stop reason and before message_stop is still cut.
+    std::string late{kTextStream};
+    late.resize(late.find("event: message_stop"));
+    Fixture g = make_provider({sse(late)});
+    CHECK_THROWS_AS((void)g.provider->stream_chat(chat_request(), {}), ProviderError);
+
+    // The same stream whole answers.
+    Fixture whole = make_provider({sse(kTextStream)});
+    CHECK(whole.provider->stream_chat(chat_request(), {}).message.content.plain_text() ==
+          "Hello, world");
+}
+
 TEST_CASE("a 429 is retried before the request is given up", "[backends][anthropic][error]") {
     Fixture f = make_provider({
         FakeTransport::Reply{.status = 429, .body = R"({"error":{"message":"rate limited"}})"},
@@ -636,6 +723,28 @@ TEST_CASE("no error path can emit the API key", "[backends][anthropic][secrets]"
             message = e.what();
         }
         CHECK(message.find(kKey) == std::string::npos);
+        CHECK(message.find("SUPERSECRET") == std::string::npos);
+    }
+
+    // The streamed failures (57c): a connection that failed or dropped, and a
+    // stream cut before message_stop -- each the entry's ProviderError, built
+    // from the transport or the response, never the request.
+    std::string cut{kTextStream};
+    cut.resize(cut.find("event: message_stop"));
+    const std::vector<FakeTransport::Reply> streamed{
+        {.status = 0, .transport_error = true, .error_message = "connection reset by peer"},
+        {.status = 200, .body = std::string{kTextStream}, .chunk_size = 16, .fail_after_bytes = 64},
+        sse(cut),
+    };
+    for (const FakeTransport::Reply& failure : streamed) {
+        Fixture f = make_provider({failure}, options);
+        std::string message;
+        try {
+            (void)f.provider->stream_chat(chat_request(), {});
+        } catch (const ProviderError& e) {
+            message = e.what();
+        }
+        CHECK_FALSE(message.empty());
         CHECK(message.find("SUPERSECRET") == std::string::npos);
     }
 }

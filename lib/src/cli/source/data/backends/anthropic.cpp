@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <utility>
 
+#include "backends/provider_send.h"
 #include "contracts/errors.h"
 #include "contracts/server_tools.h"
 #include "transport/sse_parser.h"
@@ -34,6 +35,8 @@ public:
         return error_;
     }
 
+    /// Whether the stream reached its terminal event. A stream without one
+    /// was cut, and fails its turn (57c).
     [[nodiscard]] bool saw_message_stop() const noexcept {
         return saw_message_stop_;
     }
@@ -415,7 +418,8 @@ harness::ChatResponse AnthropicProvider::chat(const harness::ChatRequest& reques
     nlohmann::json turn = nlohmann::json::array();
     for (int round = 0;; ++round) {
         const HttpResponse response =
-            client_->send(build_http_request(round == 0 ? body : continued(body, turn),
+            provider_send(*client_, options_.backend_name,
+                          build_http_request(round == 0 ? body : continued(body, turn),
                                              "/v1/messages", beta_for(request)),
                           {}, cancellation);
         if (!response.ok()) {
@@ -472,7 +476,8 @@ harness::ChatResponse AnthropicProvider::stream_chat(const harness::ChatRequest&
                                                       "/v1/messages", beta_for(request));
         http_request.headers.push_back({"accept", "text/event-stream"});
 
-        const HttpResponse response = client_->send(http_request, sink, options.cancellation);
+        const HttpResponse response = provider_send(*client_, options_.backend_name, http_request,
+                                                    sink, options.cancellation);
 
         if (!response.ok()) {
             fail(response.status, response.body);
@@ -482,6 +487,12 @@ harness::ChatResponse AnthropicProvider::stream_chat(const harness::ChatRequest&
 
         if (!accumulator.error().empty()) {
             throw harness::ProviderError(options_.backend_name, accumulator.error());
+        }
+        if (!accumulator.saw_message_stop()) {
+            // The body ended cleanly with the message unfinished: what
+            // arrived is a fragment, and kept it would be saved as a whole
+            // answer with a stop it never had (57c).
+            throw harness::ProviderError(options_.backend_name, std::string{kStreamCutMessage});
         }
         for (const nlohmann::json& block : accumulator.raw_blocks()) {
             turn.push_back(block);
@@ -534,7 +545,8 @@ std::vector<harness::ModelInfo> AnthropicProvider::list_catalog(
         request.headers = {{"x-api-key", options_.api_key},
                            {"anthropic-version", options_.api_version}};
         request.timeout = std::chrono::seconds{120};
-        const HttpResponse response = client_->send(request, {}, cancellation);
+        const HttpResponse response =
+            provider_send(*client_, options_.backend_name, request, {}, cancellation);
         if (!response.ok()) {
             fail(response.status, response.body);
         }
@@ -580,7 +592,8 @@ std::int64_t AnthropicProvider::count_tokens(const harness::ChatRequest& request
     body.erase("stream");
 
     const HttpResponse response =
-        client_->send(build_http_request(body, "/v1/messages/count_tokens"), {}, cancellation);
+        provider_send(*client_, options_.backend_name,
+                      build_http_request(body, "/v1/messages/count_tokens"), {}, cancellation);
     if (!response.ok()) {
         fail(response.status, response.body);
     }

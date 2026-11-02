@@ -354,6 +354,128 @@ TEST_CASE("an API error surfaces its message", "[backends][openai][error]") {
     }
 }
 
+TEST_CASE("a transport failure is the entry's provider error, before and after the first byte",
+          "[backends][openai][error][transport]") {
+    // A connection refused, or dropped mid-answer, was a bare HttpError that
+    // ended `chat`'s whole process (57c): it is the entry's own failure now,
+    // in curl's words, which every surface turns into a failed turn.
+    OpenAIProvider::Options options;
+    options.backend_name = "gpt";
+    const FakeTransport::Reply refused{
+        .status = 0, .transport_error = true, .error_message = "request failed: Couldn't connect"};
+    const FakeTransport::Reply dropped{
+        .status = 200, .body = std::string{kTextStream}, .chunk_size = 16, .fail_after_bytes = 90};
+
+    const auto expect_entry_failure = [](auto&& call) {
+        try {
+            call();
+            FAIL("expected ProviderError");
+        } catch (const ProviderError& e) {
+            CHECK(e.backend() == "gpt");
+            CHECK(std::string{e.what()}.starts_with("gpt: "));
+        }
+    };
+    {
+        Fixture f = make_provider({refused}, options);
+        expect_entry_failure([&f] { (void)f.provider->chat(chat_request(), {}); });
+    }
+    {
+        Fixture f = make_provider({refused}, options);
+        expect_entry_failure([&f] { (void)f.provider->stream_chat(chat_request(), {}); });
+        CHECK(f.transport->attempts() == 3);  // retried before any byte, as ever
+    }
+    {
+        Fixture f = make_provider({dropped}, options);
+        std::string streamed;
+        StreamOptions stream;
+        stream.on_token = [&streamed](std::string_view chunk) { streamed += chunk; };
+        expect_entry_failure([&] { (void)f.provider->stream_chat(chat_request(), stream); });
+        CHECK(f.transport->attempts() == 1);  // never retried once a byte arrived
+    }
+    {
+        // The message is the transport's own.
+        Fixture f = make_provider({refused}, options);
+        try {
+            (void)f.provider->chat(chat_request(), {});
+        } catch (const ProviderError& e) {
+            CHECK(std::string{e.what()} == "gpt: request failed: Couldn't connect");
+        }
+    }
+}
+
+TEST_CASE("a mid-stream failure says the vendor's code and message, never HTTP 0",
+          "[backends][openai][error]") {
+    struct Case {
+        std::string_view name;
+        std::string event;
+        std::string said;
+    };
+
+    const std::vector<Case> cases{
+        {"the error event's own fields",
+         R"({"type":"error","code":"rate_limit_exceeded","message":"Slow down","param":null,"sequence_number":3})",
+         "openai: rate_limit_exceeded: Slow down"},
+        {"response.failed's response.error",
+         R"({"type":"response.failed","response":{"id":"r1","status":"failed","error":{"code":"server_error","message":"The model failed to generate a response."}}})",
+         "openai: server_error: The model failed to generate a response."},
+        {"an error object nested in the event",
+         R"({"type":"error","error":{"type":"invalid_request_error","code":null,"message":"Bad input"}})",
+         "openai: invalid_request_error: Bad input"},
+        {"a null code and the message alone",
+         R"({"type":"error","code":null,"message":"Content policy"})", "openai: Content policy"},
+        {"a failure that says nothing",
+         R"({"type":"response.failed","response":{"status":"failed","error":null}})",
+         "openai: the response stream reported a failure"},
+    };
+    for (const Case& c : cases) {
+        INFO(c.name);
+        const std::string stream =
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hel\"}\n\n"
+            "data: " +
+            c.event + "\n\n";
+        Fixture f = make_provider({sse(stream)});
+        try {
+            (void)f.provider->stream_chat(chat_request(), {});
+            FAIL("expected ProviderError");
+        } catch (const ProviderError& e) {
+            CHECK(std::string{e.what()} == c.said);
+            CHECK(std::string{e.what()}.find("HTTP 0") == std::string::npos);
+        }
+    }
+}
+
+TEST_CASE("a stream cut before its terminal event fails, never answers",
+          "[backends][openai][error][cut]") {
+    // A clean early end -- HTTP/2's END_STREAM, a proxy closing the body --
+    // with the answer unfinished: kept, it would be saved as a whole answer
+    // with a stop it never had (57c).
+    constexpr std::string_view kCut =
+        "data: {\"type\":\"response.created\",\"response\":{\"model\":\"gpt-5\"}}\n\n"
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello\"}\n\n";
+    Fixture f = make_provider({sse(kCut)});
+    std::string streamed;
+    StreamOptions options;
+    options.on_token = [&streamed](std::string_view chunk) { streamed += chunk; };
+    try {
+        (void)f.provider->stream_chat(chat_request(), options);
+        FAIL("expected ProviderError");
+    } catch (const ProviderError& e) {
+        CHECK(std::string{e.what()} ==
+              "openai: the response stream ended before the answer finished");
+    }
+    CHECK(streamed == "Hello");  // what was shown stays shown
+
+    // An incomplete response is a terminal event: it answers, with its reason.
+    constexpr std::string_view kIncomplete =
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hel\"}\n\n"
+        R"(data: {"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}})"
+        "\n\n";
+    Fixture whole = make_provider({sse(kIncomplete)});
+    const auto response = whole.provider->stream_chat(chat_request(), {});
+    CHECK(response.message.content.plain_text() == "Hel");
+    CHECK(response.finish_reason == FinishReason::Length);
+}
+
 TEST_CASE("no error path can emit the OpenAI API key", "[backends][openai][secrets]") {
     constexpr std::string_view kKey = "sk-SUPERSECRET-openai";
     OpenAIProvider::Options options;
@@ -374,6 +496,32 @@ TEST_CASE("no error path can emit the OpenAI API key", "[backends][openai][secre
             message = e.what();
         }
         CHECK(message.find("SUPERSECRET") == std::string::npos);
+    }
+
+    // The streamed failures (57c): a mid-stream error event and a failed
+    // response, said in the vendor's words; a cut stream; a dropped
+    // connection. Each is built from the response or the transport, never
+    // the request.
+    const std::vector<FakeTransport::Reply> streamed{
+        sse(R"(data: {"type":"error","code":"server_error","message":"boom"})"
+            "\n\n"),
+        sse(R"(data: {"type":"response.failed","response":{"error":{"code":"server_error","message":"boom"}}})"
+            "\n\n"),
+        sse("data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hel\"}\n\n"),
+        {.status = 200, .body = std::string{kTextStream}, .fail_after_bytes = 40},
+        {.status = 0, .transport_error = true, .error_message = "reset"},
+    };
+    for (const auto& failure : streamed) {
+        Fixture f = make_provider({failure}, options);
+        std::string message;
+        try {
+            (void)f.provider->stream_chat(chat_request(), {});
+        } catch (const ProviderError& e) {
+            message = e.what();
+        }
+        CHECK_FALSE(message.empty());
+        CHECK(message.find("SUPERSECRET") == std::string::npos);
+        CHECK(message.find("HTTP 0") == std::string::npos);
     }
 
     // And it rides a header, never the body.

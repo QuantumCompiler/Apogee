@@ -1,9 +1,11 @@
 #include "backends/google.h"
 
+#include <optional>
 #include <utility>
 
 #include "backends/embedding_batch.h"
 #include "backends/google_embed.h"
+#include "backends/provider_send.h"
 #include "contracts/errors.h"
 #include "transport/sse_parser.h"
 
@@ -49,6 +51,11 @@ bool StreamAccumulator::handle(const SseEvent& event) {
     }
     if (payload.contains("error")) {
         error_ = google::error_message(0, event.data);
+        return false;
+    }
+    if (std::optional<std::string> blocked = google::blocked_prompt(payload)) {
+        // Refused before any answer: a failed turn, never an empty one (57c).
+        error_ = std::move(*blocked);
         return false;
     }
 
@@ -216,7 +223,8 @@ std::vector<std::vector<float>> GoogleProvider::embed(
                                              inputs.begin() + static_cast<std::ptrdiff_t>(end));
 
         const nlohmann::json body = google_embed::build_request(embedding_model(), batch);
-        const HttpResponse response = client_->send(build_embed_request(body), {}, cancellation);
+        const HttpResponse response = provider_send(*client_, options_.backend_name,
+                                                    build_embed_request(body), {}, cancellation);
         if (!response.ok()) {
             fail(response.status, response.body);
         }
@@ -252,7 +260,8 @@ harness::ChatResponse GoogleProvider::chat(const harness::ChatRequest& request,
     cancellation.throw_if_cancelled();
 
     const nlohmann::json body = google::build_request(request, request_options(request));
-    const HttpResponse response = client_->send(build_http_request(body, false), {}, cancellation);
+    const HttpResponse response = provider_send(*client_, options_.backend_name,
+                                                build_http_request(body, false), {}, cancellation);
     if (!response.ok()) {
         fail(response.status, response.body);
     }
@@ -261,6 +270,10 @@ harness::ChatResponse GoogleProvider::chat(const harness::ChatRequest& request,
     if (parsed.is_discarded()) {
         throw harness::ProviderError(options_.backend_name,
                                      "the API returned a response that was not valid JSON");
+    }
+    if (const std::optional<std::string> blocked = google::blocked_prompt(parsed)) {
+        // A 200 with no answer in it: said as the refusal it is (57c).
+        throw harness::ProviderError(options_.backend_name, *blocked);
     }
     return google::parse_response(parsed);
 }
@@ -282,7 +295,8 @@ harness::ChatResponse GoogleProvider::stream_chat(const harness::ChatRequest& re
     HttpRequest http_request = build_http_request(body, true);
     http_request.headers.push_back({"accept", "text/event-stream"});
 
-    const HttpResponse response = client_->send(http_request, sink, options.cancellation);
+    const HttpResponse response =
+        provider_send(*client_, options_.backend_name, http_request, sink, options.cancellation);
     if (!response.ok()) {
         fail(response.status, response.body);
     }
@@ -315,7 +329,8 @@ std::vector<harness::ModelInfo> GoogleProvider::list_catalog(
                       (token.empty() ? std::string{} : "&pageToken=" + token);
         request.headers = {{"x-goog-api-key", options_.api_key}};
         request.timeout = std::chrono::seconds{120};
-        const HttpResponse response = client_->send(request, {}, cancellation);
+        const HttpResponse response =
+            provider_send(*client_, options_.backend_name, request, {}, cancellation);
         if (!response.ok()) {
             fail(response.status, response.body);
         }

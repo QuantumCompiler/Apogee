@@ -155,6 +155,8 @@ apogee_add_module(backends
     backends/backends.h
     backends/mock.h
     backends/mock.cpp
+    backends/provider_send.h
+    backends/provider_send.cpp
     backends/anthropic_wire.h
     backends/anthropic_wire.cpp
     backends/anthropic.h

@@ -994,6 +994,60 @@ print("vendor failures: Gemini's quota and login in its own words, a warning a n
       "first turn fresh again, Claude's expired login said and never a title - OK")
 PY
 
+# --- a direct-API failure fails its turn, never the session (57c) --------------
+# The second bug sweep's probe, on the real binary: an `anthropic` entry with
+# a fake key, every request sent through a proxy at a closed loopback port, so
+# nothing reaches a provider and the connection fails as a dropped network
+# does. The driven chat's turn ends in an `error` in curl's words, the session
+# lives -- a `set` moves it to a mock and the next line is served -- and the
+# child exits 0; a one-shot `complete` exits 2 on its `error` event. Before
+# 57c the transport's error reached `main`: exit 1, no `error`, the next line
+# never read. Its own home, so no other section's config moves.
+DA_HOME="$WORK_DIR/direct-api"
+mkdir -p "$DA_HOME"
+printf '{"turns":[{"text":"echo: {{last_user}}"}]}' >"$DA_HOME/echo.json"
+da() {
+    env APOGEE_HOME="$DA_HOME" ANTHROPIC_API_KEY=sk-ant-not-a-real-key \
+        https_proxy=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 \
+        all_proxy=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 no_proxy= NO_PROXY= \
+        "$APOGEE_BIN" "$@"
+}
+da config init >/dev/null || fail "direct-api: config init"
+da config add-backend claude --type anthropic --model claude-sonnet-5 >/dev/null \
+    || fail "direct-api: add claude"
+da config add-backend echo --type mock --model-path "$DA_HOME/echo.json" >/dev/null \
+    || fail "direct-api: add echo"
+printf '%s\n' '{"type":"user","text":"one"}' '{"type":"set","model":"echo"}' \
+    '{"type":"user","text":"two"}' \
+    | da chat -m claude --no-recall --output-format stream-json --input-format stream-json \
+        >"$DA_HOME/chat.jsonl" 2>"$DA_HOME/chat-err.txt" \
+    || fail "direct-api: the driven chat did not exit 0 past a failed turn: $(cat "$DA_HOME/chat-err.txt")"
+da complete -m claude --output-format stream-json "hi" </dev/null \
+    >"$DA_HOME/complete.jsonl" 2>"$DA_HOME/complete-err.txt"
+DA_CODE=$?
+[ "$DA_CODE" -eq 2 ] || fail "direct-api: complete exited $DA_CODE, not 2: $(cat "$DA_HOME/complete-err.txt")"
+python3 - "$DA_HOME" <<'PY' || fail "direct-api: a failed turn is not one error and a served next line"
+import json, os, sys
+root = sys.argv[1]
+def events(name):
+    return [json.loads(line) for line in open(os.path.join(root, name)) if line.strip()]
+said = "claude: request failed: Couldn't connect to server"
+chat = events("chat.jsonl")
+ends = [e for e in chat if e["type"] in ("result", "error")]
+assert [e["type"] for e in ends] == ["error", "result"], chat
+assert ends[0]["message"] == said and ends[0].get("turn") == 1, ends[0]
+assert ends[1]["text"] == "echo: two" and ends[1].get("turn") == 2, ends[1]
+once = events("complete.jsonl")
+assert [e["message"] for e in once if e["type"] == "error"] == [said], once
+assert not [e for e in once if e["type"] == "result"], once
+for name in ("chat-err.txt", "complete-err.txt"):
+    text = open(os.path.join(root, name)).read()
+    assert "sk-ant-not-a-real-key" not in text, (name, text)
+for name in ("chat.jsonl", "complete.jsonl"):
+    assert "sk-ant-not-a-real-key" not in open(os.path.join(root, name)).read(), name
+print("direct-api: a connection that failed is one error, the next line served, complete exit 2 - OK")
+PY
+
 # --- a pull stops on Ctrl-C, its stream ending on the cancel (55c) -------------
 # `models pull` from an Ollama store whose blob is a FIFO fed a MiB at a time
 # -- the scripted slow source -- and a real SIGINT to the binary mid-copy, as

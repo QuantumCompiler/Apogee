@@ -5,6 +5,7 @@
 
 #include "backends/embedding_batch.h"
 #include "backends/openai_embed.h"
+#include "backends/provider_send.h"
 #include "contracts/errors.h"
 #include "transport/sse_parser.h"
 
@@ -31,6 +32,13 @@ public:
         return error_;
     }
 
+    /// Whether the stream reached its terminal event -- `response.completed`
+    /// or `response.incomplete`. A stream without one was cut, and fails
+    /// its turn (57c).
+    [[nodiscard]] bool finished() const noexcept {
+        return finished_;
+    }
+
 private:
     struct PendingCall {
         std::string id;
@@ -45,6 +53,7 @@ private:
     harness::FinishReason finish_reason_ = harness::FinishReason::Stop;
     harness::Usage usage_;
     std::string error_;
+    bool finished_ = false;
 };
 
 bool StreamAccumulator::handle(const SseEvent& event) {
@@ -55,7 +64,9 @@ bool StreamAccumulator::handle(const SseEvent& event) {
     const std::string type = payload.value("type", event.name);
 
     if (type == "error" || type == "response.failed") {
-        error_ = openai::error_message(0, event.data);
+        // The vendor's own code and message, read where each event keeps
+        // them -- never the "HTTP 0" a body reader says of a 200 (57c).
+        error_ = openai::stream_error_message(payload);
         return false;
     }
 
@@ -118,6 +129,7 @@ bool StreamAccumulator::handle(const SseEvent& event) {
     }
 
     if (type == "response.completed" || type == "response.incomplete") {
+        finished_ = true;
         if (const auto response = payload.find("response"); response != payload.end()) {
             if (const std::string model = response->value("model", std::string{}); !model.empty()) {
                 model_ = model;
@@ -260,7 +272,8 @@ std::vector<std::vector<float>> OpenAIProvider::embed(
                                              inputs.begin() + static_cast<std::ptrdiff_t>(end));
 
         const nlohmann::json body = openai_embed::build_request(embedding_model(), batch);
-        const HttpResponse response = client_->send(build_embed_request(body), {}, cancellation);
+        const HttpResponse response = provider_send(*client_, options_.backend_name,
+                                                    build_embed_request(body), {}, cancellation);
         if (!response.ok()) {
             fail(response.status, response.body);
         }
@@ -298,7 +311,8 @@ harness::ChatResponse OpenAIProvider::chat(const harness::ChatRequest& request,
     cancellation.throw_if_cancelled();
 
     const nlohmann::json body = openai::build_request(request, request_options(request, false));
-    const HttpResponse response = client_->send(build_http_request(body), {}, cancellation);
+    const HttpResponse response =
+        provider_send(*client_, options_.backend_name, build_http_request(body), {}, cancellation);
     if (!response.ok()) {
         fail(response.status, response.body);
     }
@@ -328,7 +342,8 @@ harness::ChatResponse OpenAIProvider::stream_chat(const harness::ChatRequest& re
     HttpRequest http_request = build_http_request(body);
     http_request.headers.push_back({"accept", "text/event-stream"});
 
-    const HttpResponse response = client_->send(http_request, sink, options.cancellation);
+    const HttpResponse response =
+        provider_send(*client_, options_.backend_name, http_request, sink, options.cancellation);
     if (!response.ok()) {
         fail(response.status, response.body);
     }
@@ -336,6 +351,11 @@ harness::ChatResponse OpenAIProvider::stream_chat(const harness::ChatRequest& re
 
     if (!accumulator.error().empty()) {
         throw harness::ProviderError(options_.backend_name, accumulator.error());
+    }
+    if (!accumulator.finished()) {
+        // The body ended cleanly with the response unfinished: a fragment,
+        // never kept as a whole answer with a stop it never had (57c).
+        throw harness::ProviderError(options_.backend_name, std::string{kStreamCutMessage});
     }
     return accumulator.take_response();
 }
@@ -356,7 +376,8 @@ std::vector<harness::ModelInfo> OpenAIProvider::list_catalog(
     request.url = options_.base_url + "/v1/models";
     request.headers = {{"authorization", "Bearer " + options_.api_key}};
     request.timeout = std::chrono::seconds{120};
-    const HttpResponse response = client_->send(request, {}, cancellation);
+    const HttpResponse response =
+        provider_send(*client_, options_.backend_name, request, {}, cancellation);
     if (!response.ok()) {
         fail(response.status, response.body);
     }

@@ -32,7 +32,7 @@ What already works: a turn that completes ends in a plain answer, which compacti
 **Reference.**
 - [MILESTONES.md](../../assistant/MILESTONES.md) → Milestone F, `agentloop::run` (:513-517): the rollback finding 1 breaks. The 26c `context-budget` entry (:549): the table finding 6 breaks, and the stubs findings 3 and 5 sit in. The 52d `session-inbound-lines` entry (:9341): the `/system` fix finding 2 completes. The 26d (:998) and 26q (:1246) entries: the anchors. The 41b entry (:8497): the standing context. The 27g `suite-validation` entry (:6506): the objection. The 55b entry (:10748): compaction's "nothing to fold".
 - `ChatAttachments::after_compaction` (`chat_attachments.cpp:1038-1066`): the in-house precedent for moving anchors when the history's indexes change.
-- [57c `api-and-local-failures-keep-the-session.md`](api-and-local-failures-keep-the-session.md): it makes a transport failure a failed turn, not a dead session. Once that ships, finding 1's tail survives more often, which makes this item more urgent, not less. [57r `retrieval-and-pre-loop-cancel.md`](retrieval-and-pre-loop-cancel.md) owns the cancellation reaching compaction.
+- 57c (shipped 2026-11-01, [Milestone AT](../../assistant/MILESTONES.md#milestone-at--the-second-sweeps-cli-findings)): it made a transport failure a failed turn, not a dead session. Now that it has shipped, finding 1's tail survives more often, which makes this item more urgent, not less. [57r `retrieval-and-pre-loop-cancel.md`](retrieval-and-pre-loop-cancel.md) owns the cancellation reaching compaction.
 
 **Decisions made** (dated):
 - 2026-10-31: Specced from the second CLI/GUI bug sweep (the user's call: every finding becomes a v0.2.1 item in its queue, CLI track 57, GUI track 6).
@@ -65,4 +65,4 @@ What already works: a turn that completes ends in a plain answer, which compacti
 - [ ] An `ask_user` answer is never stubbed, in any turn.
 - [ ] The full suite is green.
 
-**Scope note.** Earmarked for v0.2.1 (track 57); ungated. Out: the cancellation token that compaction, query rewrite and rerank run under (57r); a transport failure killing the session (57c); the GUI, which needs no change; the order in which the budget trims its sources, which is unchanged; and a context-window table for vendors beyond the GPT-4 family's rows here.
+**Scope note.** Earmarked for v0.2.1 (track 57); ungated. Out: the cancellation token that compaction, query rewrite and rerank run under (57r); a transport failure killing the session (57c, shipped); the GUI, which needs no change; the order in which the budget trims its sources, which is unchanged; and a context-window table for vendors beyond the GPT-4 family's rows here.

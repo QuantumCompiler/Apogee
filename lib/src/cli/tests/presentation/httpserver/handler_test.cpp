@@ -16,6 +16,9 @@
 
 #include "agent/fetch_url.h"
 #include "agent/tool.h"
+#include "backends/anthropic.h"
+#include "backends/google.h"
+#include "backends/llamacpp.h"
 #include "backends/mlx_local.h"
 #include "backends/mock.h"
 #include "cli/embed.h"
@@ -27,7 +30,9 @@
 #include "httpserver/mux.h"
 #include "logger/session.h"
 #include "support/env_guard.h"
+#include "support/fake_llama.h"
 #include "support/fake_mlx_driver.h"
+#include "support/fake_transport.h"
 #include "tools/todo.h"
 
 /// The conformance suite: every route, driven through the listener-free mux.
@@ -803,6 +808,105 @@ TEST_CASE("a provider failure is a 502, or an error frame that still ends the st
     }
     CHECK(saw_error);
     CHECK(content_of(parsed_frames) == "one");
+}
+
+namespace {
+
+/// A provider over a scripted wire, served as `mock`: one attempt, no sleep.
+template <typename Provider>
+std::shared_ptr<Provider> over_the_wire(apogee::testing::FakeTransport::Reply reply) {
+    typename Provider::Options options;
+    options.backend_name = "mock";
+    options.api_key = "test-key";
+    apogee::backends::RetryPolicy policy;
+    policy.max_attempts = 1;
+    auto client = std::make_unique<apogee::backends::HttpClient>(
+        std::make_unique<apogee::testing::FakeTransport>(
+            std::vector<apogee::testing::FakeTransport::Reply>{std::move(reply)}),
+        policy);
+    client->set_sleeper([](std::chrono::milliseconds) {});
+    return std::make_shared<Provider>(std::move(options), std::move(client));
+}
+
+}  // namespace
+
+TEST_CASE("a direct-API or local backend's failure is a 502 backend_error, streamed and not",
+          "[httpserver][errors]") {
+    // Each reached `serve` as something other than the entry's failure
+    // (57c): a transport failure as a 500 server_error, a cut stream or a
+    // blocked prompt as an answer finished with `stop`, a llama.cpp context
+    // refused as server_error.
+    using apogee::testing::FakeTransport;
+
+    struct Case {
+        std::string_view name;
+        std::shared_ptr<apogee::harness::LLMProvider> provider;
+        std::string said;
+    };
+
+    auto local = [] {
+        auto runtime = std::make_unique<apogee::testing::FakeLlamaRuntime>();
+        runtime->context_error = "llama.cpp: could not create a context for this model";
+        apogee::backends::LlamaCppProvider::Options options;
+        options.backend_name = "mock";
+        options.model = "test-model";
+        options.model_path = "/models/test.gguf";
+        return std::make_shared<apogee::backends::LlamaCppProvider>(std::move(options),
+                                                                    std::move(runtime));
+    };
+    const std::string anthropic_cut =
+        "event: message_start\n"
+        R"(data: {"type":"message_start","message":{"model":"m","usage":{"input_tokens":3}}})"
+        "\n\nevent: content_block_start\n"
+        R"(data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}})"
+        "\n\nevent: content_block_delta\n"
+        R"(data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"half an"}})"
+        "\n\n";
+    std::vector<Case> cases;
+    cases.push_back({"a connection that could not be made",
+                     over_the_wire<apogee::backends::AnthropicProvider>(
+                         {.status = 0,
+                          .transport_error = true,
+                          .error_message = "request failed: Couldn't connect to server"}),
+                     "mock: request failed: Couldn't connect to server"});
+    cases.push_back(
+        {"a stream cut before its end",
+         over_the_wire<apogee::backends::AnthropicProvider>({.status = 200, .body = anthropic_cut}),
+         "mock: the response stream ended before the answer finished"});
+    cases.push_back({"a blocked prompt",
+                     over_the_wire<apogee::backends::GoogleProvider>(
+                         {.status = 200,
+                          .body = "data: {\"promptFeedback\":{\"blockReason\":\"SAFETY\"}}\n\n"}),
+                     "mock: the prompt was blocked (SAFETY)"});
+    cases.push_back({"a context llama.cpp could not make", local(),
+                     "mock: llama.cpp: could not create a context for this model"});
+
+    for (const Case& c : cases) {
+        INFO(c.name);
+        const Fixture fixture{{}, served_default(), false, c.provider};
+        const HttpResponse blocking = fixture.send(post("/v1/chat/completions", chat_body("hi")));
+        CHECK(blocking.status == 502);
+        CHECK(parsed(blocking)["error"]["type"] == "backend_error");
+        CHECK(parsed(blocking)["error"]["message"] == c.said);
+
+        nlohmann::json body = chat_body("hi");
+        body["stream"] = true;
+        const Frames streamed = frames(collect(fixture.send(post("/v1/chat/completions", body))));
+        CHECK(streamed.done_last);
+        bool saw_error = false;
+        for (const nlohmann::json& frame : streamed.data) {
+            if (frame.contains("error")) {
+                saw_error = true;
+                CHECK(frame["error"]["type"] == "backend_error");
+                CHECK(frame["error"]["message"] == c.said);
+            }
+            // Never an answer finished as if it were whole.
+            if (frame.contains("choices")) {
+                CHECK(frame["choices"][0]["finish_reason"].is_null());
+            }
+        }
+        CHECK(saw_error);
+    }
 }
 
 namespace {

@@ -338,6 +338,93 @@ TEST_CASE("an API error surfaces its message", "[backends][google][error]") {
     }
 }
 
+TEST_CASE("a transport failure is the entry's provider error, before and after the first byte",
+          "[backends][google][error][transport]") {
+    // A bare HttpError ended `chat`'s whole process (57c): it is the entry's
+    // own failure now, in the transport's words.
+    GoogleProvider::Options options;
+    options.backend_name = "gem";
+    const FakeTransport::Reply refused{
+        .status = 0, .transport_error = true, .error_message = "request failed: Couldn't connect"};
+    const FakeTransport::Reply dropped{
+        .status = 200, .body = std::string{kTextStream}, .chunk_size = 16, .fail_after_bytes = 150};
+
+    const auto entry_failure = [](auto&& call) -> std::string {
+        try {
+            call();
+        } catch (const ProviderError& e) {
+            CHECK(e.backend() == "gem");
+            return e.what();
+        }
+        FAIL("expected ProviderError");
+        return {};
+    };
+    {
+        Fixture f = make_provider({refused}, options);
+        CHECK(entry_failure([&f] { (void)f.provider->chat(chat_request(), {}); }) ==
+              "gem: request failed: Couldn't connect");
+    }
+    {
+        Fixture f = make_provider({refused}, options);
+        CHECK(entry_failure([&f] { (void)f.provider->stream_chat(chat_request(), {}); }) ==
+              "gem: request failed: Couldn't connect");
+    }
+    {
+        Fixture f = make_provider({dropped}, options);
+        CHECK(entry_failure([&f] { (void)f.provider->stream_chat(chat_request(), {}); }) ==
+              "gem: connection dropped mid-stream");
+        CHECK(f.transport->attempts() == 1);
+    }
+}
+
+TEST_CASE("a blocked prompt fails its turn, naming why, streamed and not",
+          "[backends][google][error][blocked]") {
+    // Gemini answers a blocked prompt with 200, no candidates and
+    // promptFeedback.blockReason. Read as an answer it was an empty one,
+    // saved, and served as a normal `stop` (57c).
+    constexpr std::string_view kBlocked =
+        R"({"promptFeedback":{"blockReason":"SAFETY","safetyRatings":[{"category":"HARM_CATEGORY_DANGEROUS_CONTENT","probability":"HIGH"}]},"usageMetadata":{"promptTokenCount":8},"modelVersion":"gemini-2.5-pro"})";
+    {
+        Fixture f =
+            make_provider({FakeTransport::Reply{.status = 200, .body = std::string{kBlocked}}});
+        try {
+            (void)f.provider->chat(chat_request(), {});
+            FAIL("expected ProviderError");
+        } catch (const ProviderError& e) {
+            CHECK(std::string{e.what()} == "google: the prompt was blocked (SAFETY)");
+        }
+    }
+    {
+        Fixture f = make_provider({sse("data: " + std::string{kBlocked} + "\n\n")});
+        std::string streamed;
+        StreamOptions options;
+        options.on_token = [&streamed](std::string_view chunk) { streamed += chunk; };
+        try {
+            (void)f.provider->stream_chat(chat_request(), options);
+            FAIL("expected ProviderError");
+        } catch (const ProviderError& e) {
+            CHECK(std::string{e.what()} == "google: the prompt was blocked (SAFETY)");
+        }
+        CHECK(streamed.empty());
+    }
+    {
+        // The vendor's own sentence rides along when it sends one.
+        const json blocked = json::parse(
+            R"({"promptFeedback":{"blockReason":"OTHER","blockReasonMessage":"The prompt was flagged."}})");
+        CHECK(apogee::backends::google::blocked_prompt(blocked) ==
+              "the prompt was blocked (OTHER): The prompt was flagged.");
+    }
+    // A response with a candidate, or no block reason, is not one.
+    CHECK_FALSE(apogee::backends::google::blocked_prompt(
+                    json::parse(R"({"candidates":[{"content":{"parts":[{"text":"hi"}]}}],
+                                    "promptFeedback":{"blockReason":"SAFETY"}})"))
+                    .has_value());
+    CHECK_FALSE(apogee::backends::google::blocked_prompt(json::parse(R"({"promptFeedback":{}})"))
+                    .has_value());
+    CHECK_FALSE(
+        apogee::backends::google::blocked_prompt(json::parse(R"({"candidates":[]})")).has_value());
+}
+
 TEST_CASE("no error path can emit the Gemini API key", "[backends][google][secrets]") {
     constexpr std::string_view kKey = "AIza-SUPERSECRET-google";
     GoogleProvider::Options options;
@@ -357,6 +444,24 @@ TEST_CASE("no error path can emit the Gemini API key", "[backends][google][secre
         } catch (const std::exception& e) {
             message = e.what();
         }
+        CHECK(message.find("SUPERSECRET") == std::string::npos);
+    }
+
+    // The streamed failures (57c): a dropped connection and a blocked prompt.
+    const std::vector<FakeTransport::Reply> streamed{
+        {.status = 200, .body = std::string{kTextStream}, .chunk_size = 16, .fail_after_bytes = 32},
+        sse(R"(data: {"promptFeedback":{"blockReason":"SAFETY"}})"
+            "\n\n"),
+    };
+    for (const auto& failure : streamed) {
+        Fixture f = make_provider({failure}, options);
+        std::string message;
+        try {
+            (void)f.provider->stream_chat(chat_request(), {});
+        } catch (const ProviderError& e) {
+            message = e.what();
+        }
+        CHECK_FALSE(message.empty());
         CHECK(message.find("SUPERSECRET") == std::string::npos);
     }
 

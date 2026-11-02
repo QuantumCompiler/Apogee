@@ -363,6 +363,13 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
             // stderr so a human tailing the log sees it too.
             reporter.emit_error(e.what());
             fail_backend(e.what());
+        } catch (const std::exception& e) {
+            // The backstop (57c): anything else a provider let out is still
+            // the run's backend failure -- its `error` event and exit 2,
+            // never exit 1 with no event.
+            logger::log(logger::Level::Error, "complete", e.what());
+            reporter.emit_error(e.what());
+            fail_backend(e.what());
         }
     }
 
@@ -545,6 +552,10 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     } catch (const harness::NoAvailableBackendError& e) {
         fail_user(e.what());
     } catch (const harness::HarnessError& e) {
+        fail_backend(e.what());
+    } catch (const std::exception& e) {
+        // The backstop (57c), as the driven run's.
+        logger::log(logger::Level::Error, "complete", e.what());
         fail_backend(e.what());
     }
 }

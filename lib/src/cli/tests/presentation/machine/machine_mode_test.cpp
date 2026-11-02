@@ -6,9 +6,13 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <random>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -20,13 +24,19 @@
 #include <vector>
 
 #include "agentloop/loop.h"
+#include "backends/llamacpp.h"
+#include "backends/mock.h"
+#include "cli/chat_turn.h"
 #include "contracts/config.h"
 #include "contracts/errors.h"
 #include "contracts/provider.h"
 #include "harness/harness.h"
+#include "logger/session.h"
 #include "machine/driver_input.h"
 #include "machine/json_reporter.h"
 #include "machine/protocol.h"
+#include "support/env_guard.h"
+#include "support/fake_llama.h"
 #include "tasks/ledger.h"
 #include "tasks/task.h"
 #include "tasks/view.h"
@@ -738,6 +748,160 @@ TEST_CASE("every question must be answered before the turn resumes", "[commands]
 
     CHECK_THROWS_AS(apogee::commands::make_driver_ask_fn(reporter, driver)(two),
                     std::runtime_error);
+}
+
+namespace {
+
+/// One backend's turns, driven as machine mode drives them -- through the
+/// one chat turn, its events on a JsonReporter -- in a throwaway home (57c).
+struct DrivenTurns {
+    apogee::testing::TempDir home{"machine-failed-turn-" + std::to_string(std::random_device{}())};
+    apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
+    std::filesystem::path config_path = home.path() / "config" / "config.yaml";
+    std::unique_ptr<apogee::harness::Harness> harness;
+    apogee::logger::Session session;
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    std::vector<std::string> notices;
+
+    DrivenTurns(const std::string& backend, std::shared_ptr<apogee::harness::LLMProvider> provider,
+                const std::string& type) {
+        const std::string text = "models:\n  default: " + backend + "\nbackends:\n  " + backend +
+                                 ":\n    type: " + type + "\n" +
+                                 (type == "llamacpp" ? "    model_path: /models/test.gguf\n" : "");
+        std::filesystem::create_directories(config_path.parent_path());
+        std::ofstream{config_path, std::ios::binary} << text;
+        harness = std::make_unique<apogee::harness::Harness>(
+            apogee::harness::parse_config(text, config_path.string()));
+        harness->register_provider(backend, std::move(provider));
+        harness->use_default_router();
+        session.chat_id = "failed-turn";
+        session.backend = backend;
+    }
+
+    /// One `user` line's turn: what it ended in, as machine mode reads it.
+    apogee::commands::ChatTurnResult turn(const std::string& text) {
+        return apogee::commands::run_chat_turn(
+            *harness, session, text, nullptr, nullptr, nullptr, {}, apogee::commands::ToolGate{},
+            reporter, [this](const std::string& line) { notices.push_back(line); },
+            apogee::commands::RagSettings{.config_path = config_path}, {}, nullptr, nullptr);
+    }
+
+    /// The saved conversation, one line per message.
+    [[nodiscard]] std::vector<std::string> saved() const {
+        std::vector<std::string> lines;
+        for (const apogee::harness::ChatMessage& message :
+             apogee::logger::load(session.chat_id, {}).session.messages) {
+            lines.push_back(std::string{apogee::harness::to_string(message.role)} + ": " +
+                            message.content.plain_text());
+        }
+        return lines;
+    }
+};
+
+/// A mock whose first turn fails with `failure`, and whose next answers.
+std::shared_ptr<apogee::backends::MockProvider> failing_first(std::function<void()> failure) {
+    apogee::backends::MockProvider::Options options;
+    options.backend_name = "flaky";
+    options.turns = {apogee::backends::MockTurn{.text = "fine"}};
+    auto calls = std::make_shared<int>(0);
+    options.on_request = [calls,
+                          failure = std::move(failure)](const apogee::harness::ChatRequest&) {
+        if ((*calls)++ == 0) {
+            failure();
+        }
+    };
+    return std::make_shared<apogee::backends::MockProvider>(std::move(options));
+}
+
+}  // namespace
+
+TEST_CASE("a provider's failure fails its turn, and the session serves the next",
+          "[commands][machine][turns][failure]") {
+    // A connection refused reached `main` as a bare transport error: exit 1,
+    // no `error` event, every queued line lost -- a regression of 28f's "a
+    // failed turn ends in `error`" (57c). The providers throw the entry's
+    // ProviderError now; anything else a provider lets out is caught by the
+    // turn's backstop. Either way: one error, and the next line is served.
+    struct Case {
+        std::string_view name;
+        std::function<void()> failure;
+        std::string said;
+    };
+
+    const std::vector<Case> cases{
+        {"the entry's provider error",
+         [] {
+             throw apogee::harness::ProviderError("flaky",
+                                                  "request failed: Couldn't connect to server");
+         },
+         "flaky: request failed: Couldn't connect to server"},
+        {"a bare runtime error, the backstop's",
+         [] { throw std::runtime_error("a provider that let its own failure out"); },
+         "a provider that let its own failure out"},
+    };
+    for (const Case& c : cases) {
+        INFO(c.name);
+        DrivenTurns driven{"flaky", failing_first(c.failure), "mock"};
+
+        const apogee::commands::ChatTurnResult first = driven.turn("one");
+        CHECK_FALSE(first.completed);
+        CHECK_FALSE(first.cancelled);
+        CHECK(first.error == c.said);
+        CHECK(driven.notices == std::vector<std::string>{c.said});  // the terminal's line
+
+        const apogee::commands::ChatTurnResult second = driven.turn("two");
+        CHECK(second.completed);
+        CHECK(second.error.empty());
+        CHECK(second.run.answer == "fine");
+
+        // Both turns on disk: the failed one's question, never an answer.
+        CHECK(driven.saved() ==
+              std::vector<std::string>{"user: one", "user: two", "assistant: fine"});
+    }
+}
+
+TEST_CASE("a llama.cpp context or decode failure fails its turn, and the session lives",
+          "[commands][machine][turns][failure][llamacpp]") {
+    auto owned = std::make_unique<apogee::testing::FakeLlamaRuntime>();
+    owned->eog_token = -1;
+    apogee::testing::FakeLlamaRuntime* runtime = owned.get();
+    runtime->context_error =
+        "llama.cpp: could not create a context for this model with "
+        "cache_type q8_0 -- try cache_type: f16";
+    apogee::backends::LlamaCppProvider::Options options;
+    options.backend_name = "local";
+    options.model = "test-model";
+    options.model_path = "/models/test.gguf";
+    DrivenTurns driven{
+        "local",
+        std::make_shared<apogee::backends::LlamaCppProvider>(std::move(options), std::move(owned)),
+        "llamacpp"};
+
+    // The context refused: the turn fails as the entry's.
+    const apogee::commands::ChatTurnResult refused = driven.turn("one");
+    CHECK_FALSE(refused.completed);
+    CHECK(refused.error == "local: " + runtime->context_error);
+
+    // Room again: the next turn makes its context and answers.
+    REQUIRE(runtime->model != nullptr);
+    runtime->model->context_error.clear();
+    const apogee::commands::ChatTurnResult made = driven.turn("two");
+    CHECK(made.completed);
+    REQUIRE(runtime->model->contexts.size() == 1);
+
+    // A decode refused mid-prompt: that turn fails, the next reads its whole
+    // prompt again from position 0 and answers.
+    auto context = runtime->model->contexts.front();
+    context->decode_error = "llama.cpp: decode failed (-1)";
+    const apogee::commands::ChatTurnResult undecoded = driven.turn("three");
+    CHECK_FALSE(undecoded.completed);
+    CHECK(undecoded.error == "local: llama.cpp: decode failed (-1)");
+    const std::size_t before = context->decodes.size();
+    const apogee::commands::ChatTurnResult after = driven.turn("four");
+    CHECK(after.completed);
+    REQUIRE(context->decodes.size() > before);
+    CHECK(context->decodes[before].position == 0);
 }
 
 TEST_CASE("the input format parses independently of the output one", "[commands][machine]") {
