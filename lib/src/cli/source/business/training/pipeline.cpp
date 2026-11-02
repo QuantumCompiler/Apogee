@@ -38,6 +38,28 @@ std::string percent_of(double score) {
     return std::to_string(static_cast<int>(std::lround(score * 100.0))) + "%";
 }
 
+/// A live holder's refusal, the same words a resume check and a run that
+/// lost the lock to it say.
+std::string held_refusal(std::string_view id, const platform::PidLock::Holder& holder) {
+    return "pipeline " + std::string{id} + " is " + pipeline_holder_text(holder) +
+           " -- it cannot be resumed while it runs; 'apogee train pipeline status " +
+           std::string{id} + "' shows how far it has got";
+}
+
+/// The pipeline's lock for the whole run (57g): taken over from a dead
+/// holder, so a crashed run resumes with nothing to delete; refused while a
+/// live one has it. nullopt with `error` set.
+std::optional<platform::PidLock> take_pipeline_lock(const std::filesystem::path& pipeline_dir,
+                                                    std::string_view id, std::string& error) {
+    platform::PidLock::Refusal refusal;
+    std::optional<platform::PidLock> lock = platform::PidLock::acquire(
+        pipeline_dir / kPipelineLockFileName, id, /*take_stale=*/true, refusal);
+    if (!lock.has_value()) {
+        error = refusal.holder.has_value() ? held_refusal(id, *refusal.holder) : refusal.error;
+    }
+    return lock;
+}
+
 /// The whole orchestration, shared by `run_pipeline` and `resume_pipeline`:
 /// every stage from the first unpassed one.
 class StageRunner {
@@ -514,7 +536,42 @@ PipelineOutcome run_pipeline(const PipelineRequest& request) {
         record.dataset = stage.dataset;
         manifest.stages.push_back(std::move(record));
     }
+    std::string held;
+    const std::optional<platform::PidLock> lock =
+        take_pipeline_lock(request.training_dir / kPipelinesDirName / request.pipeline_run_id,
+                           request.pipeline_run_id, held);
+    if (!lock.has_value()) {
+        outcome.error = held;
+        return outcome;
+    }
     return StageRunner{request, std::move(manifest)}.run();
+}
+
+std::optional<platform::PidLock::Holder> pipeline_holder(
+    const std::filesystem::path& pipeline_dir) {
+    std::optional<platform::PidLock::Holder> holder =
+        platform::PidLock::holder(pipeline_dir / kPipelineLockFileName);
+    // A file that names no process is never taken over, so it holds the
+    // pipeline as surely as a running one.
+    if (holder.has_value() && !holder->running && holder->pid != 0) {
+        return std::nullopt;
+    }
+    return holder;
+}
+
+std::string pipeline_holder_text(const platform::PidLock::Holder& holder) {
+    return holder.pid > 0 ? "running now (process " + std::to_string(holder.pid) + ")"
+                          : std::string{"running now (its lock names no process it can read)"};
+}
+
+std::string resume_check(const PipelineRunManifest& existing, const harness::PipelineSpec& spec,
+                         const std::filesystem::path& training_dir) {
+    if (const std::optional<platform::PidLock::Holder> holder =
+            pipeline_holder(training_dir / kPipelinesDirName / existing.pipeline_run_id);
+        holder.has_value()) {
+        return held_refusal(existing.pipeline_run_id, *holder);
+    }
+    return resume_check(existing, spec);
 }
 
 std::string resume_check(const PipelineRunManifest& existing, const harness::PipelineSpec& spec) {
@@ -535,6 +592,28 @@ PipelineOutcome resume_pipeline(const PipelineRequest& request, PipelineRunManif
     if (request.spec == nullptr || request.trainer == nullptr) {
         outcome.error = request.spec == nullptr ? "the pipeline spec has no stages" : "no trainer";
         return outcome;
+    }
+    if (!valid_run_id(existing.pipeline_run_id)) {
+        outcome.error = "'" + existing.pipeline_run_id + "' is not a pipeline run id";
+        outcome.manifest = std::move(existing);
+        return outcome;
+    }
+    const std::filesystem::path dir =
+        request.training_dir / kPipelinesDirName / existing.pipeline_run_id;
+    std::string held;
+    const std::optional<platform::PidLock> lock =
+        take_pipeline_lock(dir, existing.pipeline_run_id, held);
+    if (!lock.has_value()) {
+        outcome.error = held;
+        outcome.manifest = std::move(existing);
+        return outcome;
+    }
+    // The record as it reads under the lock: a holder that finished between
+    // the caller's read and this has moved it on.
+    std::string unread;
+    if (std::optional<PipelineRunManifest> current = read_pipeline_manifest(dir, unread);
+        current.has_value()) {
+        existing = std::move(*current);
     }
     if (const std::string refusal = resume_check(existing, *request.spec); !refusal.empty()) {
         outcome.error = refusal;

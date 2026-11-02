@@ -2,12 +2,16 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <chrono>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "contracts/cancellation.h"
+#include "platform/file_lock.h"
 #include "training/manifest.h"
 #include "training/pipeline.h"
 
@@ -114,6 +118,47 @@ struct VersionLedger {
 [[nodiscard]] std::string save_ledger(const std::filesystem::path& versions_dir,
                                       const VersionLedger& ledger);
 
+/// How long a promotion waits for another into the same backend before it
+/// refuses (57g). A fuse, a GGUF conversion and a quantization of a large
+/// model can run an hour, and the one that waits may be a cycle pass whose
+/// failed promotion would count toward its circuit breaker: so, generously.
+inline constexpr std::chrono::minutes kPromotionWait{120};
+
+/// One promotion into a backend at a time (57g): what a promotion holds from
+/// reading the backend's ledger to saving it again, so two of them never
+/// both plan the same next version and the second's save never drops the
+/// first's. `versions/<backend>.promote.lock`, a `FileLock` (55f) -- the
+/// system lets go of it when its holder dies, so a killed promotion strands
+/// nothing.
+struct PromotionLock {
+    /// Held while set; let go on destruction.
+    std::optional<platform::FileLock> lock{};
+    /// Another promotion held it first: the ledger and the config it was
+    /// writing are to be read again, under this one.
+    bool waited = false;
+    /// The wait was stopped by the cancellation token.
+    bool cancelled = false;
+    /// Why it was not taken: the wait ran out, or the file could not be
+    /// locked. Names the backend and the file.
+    std::string error{};
+
+    [[nodiscard]] bool held() const noexcept {
+        return lock.has_value();
+    }
+};
+
+[[nodiscard]] std::filesystem::path promotion_lock_path(const std::filesystem::path& versions_dir,
+                                                        std::string_view backend);
+
+/// Takes `backend`'s promotion lock: at once when it is free; otherwise
+/// `on_wait` is told once -- the notice a person or a stream reads -- and it
+/// waits, up to `wait` or until `cancellation` stops it.
+[[nodiscard]] PromotionLock lock_promotion(const std::filesystem::path& versions_dir,
+                                           std::string_view backend,
+                                           const std::function<void()>& on_wait,
+                                           const harness::CancellationToken& cancellation,
+                                           std::chrono::milliseconds wait = kPromotionWait);
+
 /// A run as a listing shows it.
 struct RunSummary {
     std::string id;
@@ -172,7 +217,9 @@ public:
     /// nullopt for an unknown, invalid or unreadable one.
     [[nodiscard]] std::optional<PipelineRunManifest> get_pipeline(std::string_view id) const;
 
-    /// The newest pipeline whose manifest says `running`, if any.
+    /// The newest pipeline whose manifest says `running` and whose lock a
+    /// live process holds (57g), if any: a crashed run's `running` manifest
+    /// is not one.
     [[nodiscard]] std::optional<PipelineSummary> active_pipeline() const;
 
     [[nodiscard]] std::optional<VersionLedger> list_versions(std::string_view backend) const;

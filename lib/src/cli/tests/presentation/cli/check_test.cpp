@@ -1623,7 +1623,9 @@ TEST_CASE(
     install.write("training/cycle/history.json",
                   "{\"backend\": \"nightly\", \"halted\": false, \"anchor_version\": 2, "
                   "\"consecutive_fails\": 0, \"total_runs\": 5, \"runs\": []}\n");
-    install.write("training/cycle/cycle.lock", "123\n");
+    // A live pass's lock -- this process's id -- keeps the row ok.
+    install.write("training/cycle/cycle.lock",
+                  std::to_string(apogee::platform::current_process_id()) + "\n");
     report = run_checks(inputs);
     history = row_with(report, "cycle history");
     REQUIRE(history != nullptr);
@@ -1631,6 +1633,24 @@ TEST_CASE(
     CHECK(history->detail.find("5 run(s)") != std::string::npos);
     CHECK(history->detail.find("anchor v2") != std::string::npos);
     CHECK(history->detail.find("running now") != std::string::npos);
+    CHECK(row_with(report, "cycle lock") == nullptr);
+    // A dead pass's lock (57g): never "running now", but a warning of its
+    // own naming the file and the way out.
+    install.write("training/cycle/cycle.lock", "999999999\n");
+    report = run_checks(inputs);
+    history = row_with(report, "cycle history");
+    REQUIRE(history != nullptr);
+    CHECK(history->status == Status::Ok);
+    CHECK(history->detail.find("running now") == std::string::npos);
+    const apogee::commands::CheckRow* stale = row_with(report, "cycle lock");
+    REQUIRE(stale != nullptr);
+    CHECK(stale->status == Status::Warn);
+    CHECK(stale->detail.find("left by process 999999999, which is not running") !=
+          std::string::npos);
+    CHECK(stale->remedy.starts_with("remove "));
+    CHECK(stale->remedy.find("cycle.lock") != std::string::npos);
+    CHECK(stale->remedy.ends_with(" to run again"));
+    CHECK(report.passed());
     install.write("training/cycle/history.json", "{");
     report = run_checks(inputs);
     CHECK(row_with(report, "cycle history")->status == Status::Warn);

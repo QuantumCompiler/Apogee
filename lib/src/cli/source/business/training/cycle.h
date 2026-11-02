@@ -145,7 +145,9 @@ struct HistoryUpdate {
 
 /// The PID lock: created exclusively, removed on release -- the platform
 /// seam's `PidLock`, which the task runner shares (27h). A lock left by a
-/// crashed cycle is named in the refusal with the way out, never taken over.
+/// crashed cycle is named in the refusal with the way out, never taken over;
+/// the reads tell it from a running pass (`cycle_lock_state`, 57g). A pass
+/// also holds its pipeline's lock, which `run_pipeline` takes.
 class CycleLock {
 public:
     /// nullopt with `error` set when the lock is held or cannot be made.
@@ -167,8 +169,39 @@ private:
     platform::PidLock lock_;
 };
 
-/// Whether a cycle holds the lock now.
-[[nodiscard]] bool cycle_lock_held(const std::filesystem::path& cycle_dir);
+/// Whether a pass holds the cycle's lock (57g) -- three answers, read from
+/// the lock file's holder (`PidLock::holder`): no file, a process that is
+/// running, or a file whose process is not running. A file that names no
+/// process it can read counts as running, as `PidLock` never takes one over.
+struct CycleLockState {
+    enum class Kind { Idle, Running, Stale };
+    Kind kind = Kind::Idle;
+    /// The holder's process id; 0 when idle, or when the file names none.
+    long pid = 0;
+    /// The lock file, when there is one.
+    std::filesystem::path path{};
+
+    [[nodiscard]] bool running() const noexcept {
+        return kind == Kind::Running;
+    }
+
+    /// Left by a dead pass -- a kill, a crash, a power loss. `cycle run`
+    /// still refuses it, never taking it over (27h); every read says so, and
+    /// names the file.
+    [[nodiscard]] bool stale() const noexcept {
+        return kind == Kind::Stale;
+    }
+};
+
+/// The one liveness answer every read of the cycle asks: `train cycle
+/// status`, `train status`, `check`, their JSON, the admin route and `cycle
+/// halt`.
+[[nodiscard]] CycleLockState cycle_lock_state(const std::filesystem::path& cycle_dir);
+
+/// What a read says of a stale lock: `stopped -- cycle.lock is left by
+/// process <pid>, which is not running; remove <path> to run again`. Empty
+/// unless the lock is stale.
+[[nodiscard]] std::string stale_lock_text(const CycleLockState& state);
 
 /// Why the cycle must not run -- halted, or `k` consecutive failures (0
 /// disables that check) -- naming `apogee train cycle resume`. Empty when

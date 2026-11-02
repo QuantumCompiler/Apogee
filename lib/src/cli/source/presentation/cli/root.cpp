@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "cli/interrupt.h"
 #include "cli/version_command.h"
 #include "contracts/paths.h"
 
@@ -295,8 +296,10 @@ int RootCommand::run(int argc, const char* const* argv) {
         app_->parse(argc, argv);
     } catch (const CLI::ParseError& e) {
         // Covers --help and --version (exit 0) as well as usage errors and any
-        // CLI::RuntimeError a command threw to set its own exit code.
-        const int code = app_->exit(e);
+        // CLI::RuntimeError a command threw to set its own exit code -- a
+        // cancel SIGTERM caused reported as 143 (57g), whichever command
+        // threw it.
+        const int code = InterruptScope::exit_code(app_->exit(e));
         // A JSON face asked of a command that has none (28h): the refusal
         // names the commands that take one -- read from the parser itself,
         // so a new read joins the list the day it gains the flag.

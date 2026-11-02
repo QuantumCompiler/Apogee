@@ -540,7 +540,15 @@ resolve, the cycle's lock held, the loop halted, a source that cannot be read
 -- sends `job` and its `error` and no document. The exit codes are the text
 view's: a pipeline `0` complete, `2` aborted or failed, `130` cancelled, `1`
 refused; a pass `0` passed or skipped, `2` failed, `130` cancelled, `1`
-refused.
+refused. Since 57g SIGTERM -- launchd unloading a scheduled pass, another
+scheduler's stop, a `kill` -- cancels a run as Ctrl-C does, the stream ending
+on the same `error` and its locks let go, and the process exits `143` (`130`
+stays Ctrl-C's); so does every command that stops on Ctrl-C this way
+(`models pull`, `datasets pull`, `video generate`, `task run` …), while a
+chat or `execute` session keeps its own SIGTERM rule (57a). The first signal
+names the exit: the macOS app's Stop sends SIGINT, so a run it stops exits
+`130`, and the SIGTERM it sends after its 10-second grace reaches a run
+already cancelling and changes neither the exit nor the stream's `error`.
 
 ## Validating and generating: the schema
 
@@ -1698,8 +1706,11 @@ command's stdout ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve))
   control plane serves for the same reads (`operations/training_reads`, one
   builder for both) -- the status's run count, the runs `running`, the newest
   five as `recent_runs`, each backend's `versions` headline, the pipelines,
-  the `active_pipeline` and `latest_pipeline`, whether a cycle holds the lock
-  (`cycle_active`) and the cycle's headline; a version ledger, or every one in
+  the `active_pipeline` (since 57g, only one a live process runs) and
+  `latest_pipeline`, whether a running pass holds the cycle's lock
+  (`cycle_active`; since 57g false for a lock a dead pass left, whose path
+  `stale_lock` gives, `null` otherwise) and the cycle's headline; a version
+  ledger, or every one in
   a list -- each version its `gguf_path`, an MLX one's `mlx_path`, or since
   53b an adapter version's `adapter_path` (a GGUF LoRA, or an mlx-lm adapter
   directory, registered on the entry's `adapters:` over its untouched base)
@@ -1715,14 +1726,18 @@ command's stdout ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve))
   run's manifest whole, `{"kind": "pipeline", "pipeline": {pipeline_run_id,
   spec_name, student, base_model, status, started_at[, completed_at], stages:
   [{index, name, run_id, base_model, dataset, adapter_dir, fused_dir, status,
-  cumulative_score, cumulative_passed[, eval_results]}]}}` -- each stage's
-  `status` the word a run's `stage` events carry. An id no pipeline run
+  cumulative_score, cumulative_passed[, eval_results]}]}, "holder": {"pid": N}
+  | null}` -- each stage's `status` the word a run's `stage` events carry, and
+  since 57g `holder` the live process running the pipeline (a resume is
+  refused while there is one), `null` when none does. An id no pipeline run
   answers is refused as the text refuses it, and so is one that is not a plain
   name. The cycle's is its history, `{backend, anchor_version, anchor_score,
   consecutive_fails, total_runs, halted, halt_reason, sessions_until, runs:
   [{run_at, source, dataset_rows, pipeline_id, gate, gate_reason, cycle_score,
-  prev_score, anchor_score, promoted_version[, note]}], active}`, `active`
-  whether a pass holds the lock now. **Until the first pass has written the
+  prev_score, anchor_score, promoted_version[, note]}], active, stale_lock}`,
+  `active` whether a running pass holds the lock now, and since 57g
+  `stale_lock` the path of a lock a dead pass left (`null` otherwise) --
+  never read as a running pass. **Until the first pass has written the
   history there is no document**: the read is refused (`no cycle history yet`,
   exit `1`), as the route answers `404`, where the text view says `no cycle
   runs yet` -- `train status`'s `cycle` is `null` until then. Whether a cycle

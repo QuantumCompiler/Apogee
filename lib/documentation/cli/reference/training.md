@@ -28,9 +28,9 @@ environment under its data directory**:
 ~/.apogee/training/datasets/      trainer-ready datasets, one .jsonl per dataset
 ~/.apogee/training/datasets/raw/  downloaded dataset files, for `datasets prepare`
 ~/.apogee/training/runs/<id>/     one directory per run: manifest.json, adapters/
-~/.apogee/training/versions/      one ledger per backend (<backend>.json), and adapter versions (<backend>/v<N>.lora.gguf, or the directory <backend>/v<N>.lora)
+~/.apogee/training/versions/      one ledger per backend (<backend>.json), its promotion lock (<backend>.promote.lock), and adapter versions (<backend>/v<N>.lora.gguf, or the directory <backend>/v<N>.lora)
 ~/.apogee/training/suites/        your hand-written eval suites
-~/.apogee/training/pipelines/<id>/ one manifest per pipeline run (its stage runs live under runs/)
+~/.apogee/training/pipelines/<id>/ one manifest per pipeline run (its stage runs live under runs/), and pipeline.lock while a process runs it
 ~/.apogee/training/regime/<id>/   a regime's synthesised dataset and materialised suite per kit
 ~/.apogee/training/cycle/         the cycle's history.json, cycle.lock, queue/ (and consumed/), work/
 ```
@@ -429,7 +429,10 @@ in-process trainer that needs no Python, for trying the whole chain.
 
 The driver's JSONL progress becomes the status line -- `iter n/N · loss L ·
 lr R · T it/s` -- and on a pipe a line every tenth. Ctrl-C terminates the
-child and records the run as `cancelled`. Every run gets a directory
+child and records the run as `cancelled`; so does SIGTERM (a scheduler's
+stop, launchd unloading a job), the command exiting 143 where Ctrl-C's
+exits 130 -- as every long training, conversion and download command does
+(57g). Every run gets a directory
 `training/runs/<YYYYMMDD-HHMMSS>/` with `adapters/` and a `manifest.json`
 recording the trainer, the student, the dataset and its sha256, the
 hyperparameters, the final loss, `status` (`running` while it runs, then
@@ -437,7 +440,13 @@ hyperparameters, the final loss, `status` (`running` while it runs, then
 is a failed run, never a silent success**: an `{"error"}` line is its own
 event, a non-JSON line (a stack trace) is kept as a message, and the exit
 code is carried -- three gaps that would otherwise be silent, closed by the
-protocol.
+protocol. **A run's id is reserved before it is used** (57g): its directory
+is made exclusively as the id is chosen, so two runs started in the same
+second -- a script, the app and a cron job at once -- get two ids
+(`-2`, `-3` …) and two directories; the same holds for a pipeline's and a
+regime's id. A directory that cannot be made fails the command with the
+path and the reason before anything trains, and an empty one a command left
+on failing before its first manifest is skipped by every listing.
 
 | Flag | Default | Description |
 |---|---|---|
@@ -508,7 +517,16 @@ numbers are `max + 1`, never the count. `retain_versions` (default 3) prunes
 the oldest inactive GGUFs, never the active one, and keeps the pruned
 entries as history. The fused checkpoint is removed after a successful
 conversion unless `--keep-fused`. **A failure at any step leaves the config
-and the ledger unchanged.**
+and the ledger unchanged.** **One promotion into a backend at a time**
+(57g): a promotion holds `training/versions/<backend>.promote.lock` from
+reading the ledger to saving it -- a lock the system lets go of if its
+holder dies. A second promotion into the same backend (a cycle pass's, and
+yours by hand) says `[promote] waiting for another promotion into
+<backend>` and waits for it -- up to two hours, then refuses naming the
+file -- and once it holds the lock reads the config and the ledger again,
+so it plans the next version after the first's and repoints the entry the
+first made. Both versions land in the ledger; none of their weights is
+left untracked.
 
 **`--target mlx`** (Apple silicon, the `mlx` backend): the same plan with the
 conversion taken out -- the gate, then the **fuse straight into the model
@@ -613,8 +631,11 @@ pinned to other weights -- the base pulled again, requantized or moved since
 promote that registers the version's run again over today's weights while
 its run is there.
 The filesystem is the source of truth for all three: nothing is cached.
-`status` also rolls up the cycle (idle, running now, or halted with the
-reason; the anchor) and the pipelines (the running one, else the latest).
+`status` also rolls up the cycle (idle, running now, halted with the
+reason, or stopped with a dead pass's lock left -- see the cycle below; the
+anchor) and the pipelines (the one a live process runs, else the latest --
+a latest whose manifest still says `running` with no live process is
+`stopped mid-run`).
 
 ## Pipelines
 
@@ -665,7 +686,19 @@ passed, the passed ones untouched. `--continue-on-fail` (or `training.gate_mode:
 soft`) goes on instead, the failed stage still fused for the next; the
 summary shows the mixed statuses. A resume refuses a complete run, and a
 spec whose stage count changed (the passed stages did so under a different
-plan). Ctrl-C leaves the run `aborted` and resumable. A stage trained
+plan). Ctrl-C -- or SIGTERM -- leaves the run `aborted` and resumable.
+**One process owns a pipeline** (57g): `pipeline run` and `pipeline
+resume` -- and a cycle pass, whose pipeline it is -- hold its lock,
+`pipelines/<id>/pipeline.lock` (the process's id), for the whole run. A
+resume while another process runs it is refused naming that process
+(`pipeline <id> is running now (process <pid>) -- it cannot be resumed
+while it runs`), the manifest untouched; `pipeline status <id>` says
+`This pipeline is running now (process <pid>)` in place of the resume
+hint, and `--output-format json` carries `holder: {"pid": …}` (null when
+none). A run whose process died -- a kill, a crash -- leaves its manifest
+`running` and its lock behind: the reads say `running -- stopped: no
+process holds it`, and its resume takes the dead process's lock over, with
+nothing to delete by hand. A stage trained
 again holds no score until it is evaluated again: its last attempt's eval,
 score and weights are cleared from the manifest as it starts training.
 
@@ -789,7 +822,8 @@ launchd or cron. Configure it under `training.cycle:`:
 ```
 
 One pass: the **lock** (`cycle/cycle.lock`, created exclusively; a second
-scheduler firing at once is refused naming it), the **circuit breaker**
+scheduler firing at once is refused naming it -- and the pass's pipeline
+holds its own lock beside it), the **circuit breaker**
 (halted, or `consecutive_fails ≥ circuit_breaker_k`, refused naming
 `cycle resume`), then the sources -- a `directory` queue of `*.jsonl`
 (`--source <dir>` replaces the first one for this run), and `sessions`,
@@ -826,6 +860,21 @@ alone: so either verb works while a pass runs, and the pass keeps what it
 wrote. A pass halted while it ran finishes, says the halt is kept, and the
 next `cycle run` refuses. A failed or refused pass
 exits non-zero, so a scheduler's log shows it.
+
+**A pass stopped by its scheduler unwinds** (57g): SIGTERM -- launchd
+unloading the job, the user logging out -- cancels it as Ctrl-C does: the
+trainer child is terminated, the pipeline recorded `aborted`, both locks
+removed, and the process exits 143, so the next scheduled pass runs. Only
+SIGKILL (or a crash, or power loss) leaves `cycle.lock` behind. **A lock
+whose process is gone is never taken over** -- the next `cycle run`
+refuses it, as it always has -- **and never read as a running pass**: `train
+cycle status` and `train status` say `stopped -- cycle.lock is left by
+process <pid>, which is not running; remove <path> to run again`; their
+JSON (and `GET /v1/admin/training/cycle`, `/status`) gives `active` /
+`cycle_active` false and `stale_lock` the file's path (null otherwise);
+`check` warns with a `cycle lock` row naming the file; and `cycle halt`
+says the same rather than promising a pass that does not exist. Remove the
+file, as they say, and the next pass runs.
 
 Schedule it with launchd:
 

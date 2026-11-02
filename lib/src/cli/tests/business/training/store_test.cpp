@@ -3,13 +3,19 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <random>
 #include <string>
+#include <thread>
 
+#include "platform/pid_lock.h"
 #include "support/env_guard.h"
 #include "training/manifest.h"
+#include "training/promote.h"
 
 /// The read side: runs listed newest first with an unreadable manifest
 /// skipped and a running one shown as such, an unknown or path-shaped id
@@ -339,8 +345,20 @@ TEST_CASE(
     CHECK(listed[1].id == "pipe-20260919-100000");
     CHECK(listed[1].passed == 2);
     CHECK(listed[2].id == "pipe-20260919-090000");
-    REQUIRE(store.active_pipeline().has_value());
-    CHECK(store.active_pipeline()->id == "pipe-20260919-110000");
+    // A `running` manifest no live process holds is a run that stopped
+    // without saying so (57g): not the active one.
+    CHECK_FALSE(store.active_pipeline().has_value());
+    {
+        apogee::platform::PidLock::Refusal refusal;
+        const std::optional<apogee::platform::PidLock> held = apogee::platform::PidLock::acquire(
+            store.pipeline_dir("pipe-20260919-110000") / "pipeline.lock", "pipe-20260919-110000",
+            false, refusal);
+        REQUIRE(held.has_value());
+        REQUIRE(store.active_pipeline().has_value());
+        CHECK(store.active_pipeline()->id == "pipe-20260919-110000");
+    }
+    std::ofstream{store.pipeline_dir("pipe-20260919-110000") / "pipeline.lock"} << "999999999\n";
+    CHECK_FALSE(store.active_pipeline().has_value());
     const auto one = store.get_pipeline("pipe-20260919-100000");
     REQUIRE(one.has_value());
     CHECK(one->spec_name == "skills");
@@ -354,4 +372,122 @@ TEST_CASE(
     CHECK(json["passed"] == 2);
     CHECK(json["started_at"] == "2026-09-19T10:00:00Z");
     CHECK_FALSE(json.contains("completed_at"));
+}
+
+TEST_CASE(
+    "two promotions into one backend: the second waits for the first with a notice, then "
+    "plans after it, and the ledger keeps both versions",
+    "[training][store][promote][lock]") {
+    // The race 57g closes: two promotions each read a ledger ending at v3,
+    // each planned v4, and the second save dropped the first's entry. Under
+    // the promotion lock the second reads the ledger the first saved.
+    const apogee::testing::TempDir root{"store-promote-lock-" +
+                                        std::to_string(std::random_device{}())};
+    const TrainingStore store{root.path()};
+    VersionLedger seeded{.backend = "nightly-model"};
+    for (int v = 1; v <= 3; ++v) {
+        seeded.versions.push_back(VersionEntry{.version = v,
+                                               .run_id = "r" + std::to_string(v),
+                                               .gguf_path = "/v" + std::to_string(v) + ".gguf",
+                                               .promoted_at = "2026-10-31T00:00:00Z"});
+    }
+    seeded.active_version = 3;
+    REQUIRE(apogee::training::save_ledger(store.versions_dir(), seeded).empty());
+
+    /// One promotion's ledger work, as `promote_run` does it under the lock:
+    /// read, plan the next version, record it, save.
+    const auto promote = [&](const std::string& run_id) {
+        std::string error;
+        VersionLedger ledger =
+            apogee::training::load_ledger(store.versions_dir(), "nightly-model", error)
+                .value_or(VersionLedger{.backend = "nightly-model"});
+        REQUIRE(error.empty());
+        const int version = apogee::training::next_version(ledger);
+        ledger.versions.push_back(VersionEntry{.version = version,
+                                               .run_id = run_id,
+                                               .gguf_path = "/" + run_id + ".gguf",
+                                               .promoted_at = "2026-10-31T00:00:00Z"});
+        ledger.active_version = version;
+        REQUIRE(apogee::training::save_ledger(store.versions_dir(), ledger).empty());
+    };
+
+    const apogee::harness::CancellationToken never = apogee::harness::CancellationToken::create();
+    apogee::training::PromotionLock first =
+        apogee::training::lock_promotion(store.versions_dir(), "nightly-model", {}, never);
+    REQUIRE(first.held());
+    CHECK_FALSE(first.waited);
+    CHECK(first.lock->path() ==
+          apogee::training::promotion_lock_path(store.versions_dir(), "nightly-model"));
+
+    std::atomic<bool> waiting{false};
+    std::atomic<bool> second_waited{false};
+    std::thread second{[&]() {
+        apogee::training::PromotionLock held = apogee::training::lock_promotion(
+            store.versions_dir(), "nightly-model", [&waiting]() { waiting.store(true); }, never,
+            std::chrono::seconds{30});
+        if (held.held()) {
+            second_waited.store(held.waited);
+            promote("second");
+        }
+    }};
+    for (int i = 0; i < 500 && !waiting.load(); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    }
+    CHECK(waiting.load());
+    // The first, still holding it, saves v4 -- and only then lets go.
+    promote("first");
+    first.lock.reset();
+    second.join();
+    CHECK(second_waited.load());
+
+    std::string error;
+    const std::optional<VersionLedger> ledger =
+        apogee::training::load_ledger(store.versions_dir(), "nightly-model", error);
+    REQUIRE(ledger.has_value());
+    REQUIRE(ledger->versions.size() == 5);
+    CHECK(ledger->find(4)->run_id == "first");
+    CHECK(ledger->find(5)->run_id == "second");
+    CHECK(ledger->active_version == 5);
+    // The lock file is not a ledger: the listing still sees one backend.
+    CHECK(store.all_versions().size() == 1);
+}
+
+TEST_CASE(
+    "a promotion that waits past its bound refuses naming the backend and the file, and a "
+    "cancel stops the wait",
+    "[training][store][promote][lock]") {
+    const apogee::testing::TempDir root{"store-promote-wait-" +
+                                        std::to_string(std::random_device{}())};
+    const TrainingStore store{root.path()};
+    const apogee::harness::CancellationToken never = apogee::harness::CancellationToken::create();
+    const apogee::training::PromotionLock held =
+        apogee::training::lock_promotion(store.versions_dir(), "tuned", {}, never);
+    REQUIRE(held.held());
+
+    int told = 0;
+    const apogee::training::PromotionLock timed_out = apogee::training::lock_promotion(
+        store.versions_dir(), "tuned", [&told]() { ++told; }, never,
+        std::chrono::milliseconds{300});
+    CHECK_FALSE(timed_out.held());
+    CHECK(timed_out.waited);
+    CHECK_FALSE(timed_out.cancelled);
+    CHECK(told == 1);
+    CHECK(timed_out.error.find("another promotion into 'tuned'") != std::string::npos);
+    CHECK(timed_out.error.find(
+              apogee::training::promotion_lock_path(store.versions_dir(), "tuned").string()) !=
+          std::string::npos);
+    CHECK(timed_out.error.find("300 ms") != std::string::npos);
+
+    const apogee::harness::CancellationToken stop = apogee::harness::CancellationToken::create();
+    stop.cancel();
+    const apogee::training::PromotionLock cancelled = apogee::training::lock_promotion(
+        store.versions_dir(), "tuned", {}, stop, std::chrono::seconds{30});
+    CHECK_FALSE(cancelled.held());
+    CHECK(cancelled.cancelled);
+
+    // Another backend's promotion is not this one's to wait for.
+    const apogee::training::PromotionLock other =
+        apogee::training::lock_promotion(store.versions_dir(), "other", {}, never);
+    CHECK(other.held());
+    CHECK_FALSE(other.waited);
 }

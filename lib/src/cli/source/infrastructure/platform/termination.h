@@ -63,4 +63,10 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+/// Whether SIGTERM is free for a command to catch as its cancel (57g): at
+/// its default action, so no watch, no `serve` and no inherited ignore has
+/// it -- a command that catches it then never takes it from them. False on
+/// Windows, where nothing sends a console program SIGTERM.
+[[nodiscard]] bool termination_signal_free() noexcept;
+
 }  // namespace apogee::platform

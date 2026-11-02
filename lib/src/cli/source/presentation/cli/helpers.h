@@ -58,6 +58,10 @@ enum ExitCode : int {
     kBackendError = 2,
     /// Interrupted. 130 is the shell convention for SIGINT.
     kCancelled = 130,
+    /// Stopped by SIGTERM (57g) -- a scheduler's stop, launchd unloading a
+    /// job: 128 + 15, as a shell reports a process SIGTERM ended, and the
+    /// full-screen shell's convention. A command cancels on it as on Ctrl-C.
+    kTerminated = 143,
 };
 
 /// The built-in tool set behind `--tools` on every surface.

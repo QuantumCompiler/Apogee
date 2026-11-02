@@ -21,6 +21,11 @@ namespace {
 /// How many of the newest runs the status names, as `train status` lists them.
 constexpr std::size_t kRecentRuns = 5;
 
+/// The lock a dead pass left (57g): its path, or null when there is none.
+[[nodiscard]] nlohmann::json stale_lock_json(const training::CycleLockState& lock) {
+    return lock.stale() ? nlohmann::json(lock.path.string()) : nlohmann::json(nullptr);
+}
+
 }  // namespace
 
 nlohmann::json training_status_document() {
@@ -44,14 +49,18 @@ nlohmann::json training_status_document() {
                             {"total", ledger.versions.size()}});
     }
     const std::vector<training::PipelineSummary> pipelines = reads.list_pipelines();
+    // A pipeline a live process runs (57g): a crashed run's manifest still
+    // says `running`, and is not one.
     nlohmann::json active_pipeline = nullptr;
     for (const training::PipelineSummary& pipeline : pipelines) {
-        if (pipeline.status == training::kPipelineRunning) {
+        if (pipeline.status == training::kPipelineRunning &&
+            training::pipeline_holder(reads.pipeline_dir(pipeline.id)).has_value()) {
             active_pipeline = pipeline.id;
             break;
         }
     }
     const std::filesystem::path cycle_dir = harness::training_cycle_dir();
+    const training::CycleLockState lock = training::cycle_lock_state(cycle_dir);
     nlohmann::json cycle = nullptr;
     if (training::history_exists(cycle_dir)) {
         std::string error;
@@ -75,7 +84,8 @@ nlohmann::json training_status_document() {
         {"active_pipeline", std::move(active_pipeline)},
         {"latest_pipeline", pipelines.empty() ? nlohmann::json(nullptr)
                                               : training::pipeline_summary_json(pipelines.front())},
-        {"cycle_active", training::cycle_lock_held(cycle_dir)},
+        {"cycle_active", lock.running()},
+        {"stale_lock", stale_lock_json(lock)},
         {"cycle", std::move(cycle)}};
 }
 
@@ -135,8 +145,17 @@ std::optional<nlohmann::json> training_pipeline_document(std::string_view id) {
     if (!pipeline.has_value()) {
         return std::nullopt;
     }
+    // Who runs it now (57g): a live holder's process, else null -- a resume
+    // is refused while there is one.
+    nlohmann::json holder = nullptr;
+    if (const std::optional<platform::PidLock::Holder> live =
+            training::pipeline_holder(reads.pipeline_dir(id));
+        live.has_value()) {
+        holder = nlohmann::json{{"pid", live->pid}};
+    }
     return nlohmann::json{{"kind", "pipeline"},
-                          {"pipeline", training::pipeline_manifest_to_json(*pipeline)}};
+                          {"pipeline", training::pipeline_manifest_to_json(*pipeline)},
+                          {"holder", std::move(holder)}};
 }
 
 nlohmann::json training_pipeline_spec_document(const harness::PipelineSpec& spec,
@@ -188,7 +207,9 @@ std::optional<nlohmann::json> training_cycle_document(std::string& error) {
         return std::nullopt;
     }
     nlohmann::json out = training::history_to_json(history);
-    out["active"] = training::cycle_lock_held(cycle_dir);
+    const training::CycleLockState lock = training::cycle_lock_state(cycle_dir);
+    out["active"] = lock.running();
+    out["stale_lock"] = stale_lock_json(lock);
     return out;
 }
 

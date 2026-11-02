@@ -48,7 +48,7 @@ What already works: under the default hard gate, a resume of a `train pipeline r
 - 55h (`train-pipeline-cycle-json`, line 10985) defined the status document's `cycle` and the null contract that entry 4 restores.
 - Sibling items:
   - [6i](../../../gui/backlog/v0.2.1/training-screens-follow-the-cli.md) owns the app's part: Resume kept off cycle runs and passing the spec, the resume stage read from the CLI's `resume`, the cycle error shown and `cycleHalted` not defaulting to false.
-  - [training-runs-one-at-a-time.md](training-runs-one-at-a-time.md) (57g) owns concurrent training runs.
+  - 57g (shipped 2026-11-01, [Milestone AT](../../assistant/MILESTONES.md#milestone-at--the-second-sweeps-cli-findings)) owns concurrent training runs. What it left this item builds on: `run_pipeline` and `resume_pipeline` hold the pipeline's `PidLock` (`pipelines/<id>/pipeline.lock`) for the whole run, and `resume_pipeline` reads the manifest again once it holds it; `resume_check` gained an overload with the training directory that first refuses a live holder (the command calls it); `print_pipeline_table` takes the holder and prints `This pipeline is running now (process <pid>)` in place of the resume hint while one runs it; the pipeline document gained `holder` (`{"pid"}` or null) beside where this item's `resume` goes; and `new_run_id` now reserves the id's directory and takes an error out-parameter.
 
 **Decisions made** (dated):
 - 2026-10-31: Specced from the second CLI/GUI bug sweep (the user's call: every finding becomes a v0.2.1 item in its queue, CLI track 57, GUI track 6).
@@ -85,5 +85,5 @@ What already works: under the default hard gate, a resume of a `train pipeline r
 - The app's part ([6i](../../../gui/backlog/v0.2.1/training-screens-follow-the-cli.md)).
 - Resuming a cycle pass on its own merged data (a cycle retries by running its next pass).
 - Retraining from the first unpassed stage.
-- Concurrent training runs ([training-runs-one-at-a-time.md](training-runs-one-at-a-time.md)).
+- Concurrent training runs (57g, shipped 2026-11-01 -- [Milestone AT](../../assistant/MILESTONES.md#milestone-at--the-second-sweeps-cli-findings)).
 - A field-by-field typed reader for the training files.

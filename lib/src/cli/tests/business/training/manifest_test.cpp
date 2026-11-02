@@ -3,11 +3,16 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <random>
+#include <set>
 #include <string>
+#include <string_view>
+#include <thread>
+#include <vector>
 
 #include "support/env_guard.h"
 
@@ -146,16 +151,37 @@ TEST_CASE("write_manifest lands the file atomically and read_manifest names what
     CHECK(error.find("run_id") != std::string::npos);
 }
 
-TEST_CASE("run ids are UTC timestamps, suffixed on collision, and never path-shaped",
-          "[training][manifest][id]") {
+namespace {
+
+/// A reserved id, its error required empty.
+std::string reserved(const std::filesystem::path& dir, std::chrono::system_clock::time_point at,
+                     std::string_view prefix = {}) {
+    std::string error;
+    std::string id = apogee::training::new_run_id(dir, at, prefix, error);
+    INFO(error);
+    REQUIRE(error.empty());
+    return id;
+}
+
+}  // namespace
+
+TEST_CASE(
+    "run ids are UTC timestamps, reserved by their directory, suffixed on collision, "
+    "and never path-shaped",
+    "[training][manifest][id]") {
     const apogee::testing::TempDir root{"runid-" + std::to_string(std::random_device{}())};
     const std::chrono::system_clock::time_point at =
         std::chrono::system_clock::from_time_t(1789000000);  // 2026-09-10T00:26:40Z
-    CHECK(apogee::training::new_run_id(root.path(), at) == "20260910-002640");
-    std::filesystem::create_directories(root.path() / "20260910-002640");
-    CHECK(apogee::training::new_run_id(root.path(), at) == "20260910-002640-2");
-    std::filesystem::create_directories(root.path() / "20260910-002640-2");
-    CHECK(apogee::training::new_run_id(root.path(), at) == "20260910-002640-3");
+    // Each reservation makes its directory (57g), so the next in the same
+    // second takes the next suffix with nothing written in between.
+    CHECK(reserved(root.path(), at) == "20260910-002640");
+    CHECK(std::filesystem::is_directory(root.path() / "20260910-002640"));
+    CHECK(reserved(root.path(), at) == "20260910-002640-2");
+    CHECK(std::filesystem::is_directory(root.path() / "20260910-002640-2"));
+    // A directory already there, and a file of the name, are both taken.
+    std::filesystem::create_directories(root.path() / "20260910-002640-3");
+    std::ofstream{root.path() / "20260910-002640-4", std::ios::binary} << "x";
+    CHECK(reserved(root.path(), at) == "20260910-002640-5");
 
     CHECK(apogee::training::valid_run_id("20260910-002640-2"));
     CHECK(apogee::training::valid_run_id("pipe_x-s1"));
@@ -195,9 +221,58 @@ TEST_CASE("a stage run's lineage round-trips and is absent from a plain run; a p
                                         std::to_string(std::random_device{}())};
     const std::chrono::system_clock::time_point at =
         std::chrono::system_clock::from_time_t(1789000000);
-    CHECK(apogee::training::new_run_id(root.path(), at, "pipe-") == "pipe-20260910-002640");
-    CHECK(apogee::training::new_run_id(root.path(), at, "cycle-") == "cycle-20260910-002640");
-    std::filesystem::create_directories(root.path() / "pipe-20260910-002640");
-    CHECK(apogee::training::new_run_id(root.path(), at, "pipe-") == "pipe-20260910-002640-2");
+    CHECK(reserved(root.path(), at, "pipe-") == "pipe-20260910-002640");
+    CHECK(reserved(root.path(), at, "cycle-") == "cycle-20260910-002640");
+    CHECK(reserved(root.path(), at, "pipe-") == "pipe-20260910-002640-2");
     CHECK(apogee::training::valid_run_id("pipe-20260910-002640-2-s0"));
+}
+
+TEST_CASE(
+    "two reservations of one second's id, from two threads at once, get two ids and "
+    "two directories",
+    "[training][manifest][id]") {
+    // The race `train pipeline run` twice at once ran into (57g, probe pI):
+    // every taker of one second's id at the same moment, each its own.
+    const apogee::testing::TempDir root{"runid-race-" + std::to_string(std::random_device{}())};
+    const std::chrono::system_clock::time_point at =
+        std::chrono::system_clock::from_time_t(1789000000);
+    constexpr int kTakers = 8;
+    std::vector<std::string> ids(kTakers);
+    std::vector<std::string> errors(kTakers);
+    {
+        std::vector<std::thread> takers;
+        std::atomic<bool> go{false};
+        for (int i = 0; i < kTakers; ++i) {
+            takers.emplace_back([&, i]() {
+                while (!go.load()) {
+                    std::this_thread::yield();
+                }
+                ids[static_cast<std::size_t>(i)] = apogee::training::new_run_id(
+                    root.path(), at, "pipe-", errors[static_cast<std::size_t>(i)]);
+            });
+        }
+        go.store(true);
+        for (std::thread& taker : takers) {
+            taker.join();
+        }
+    }
+    const std::set<std::string> distinct{ids.begin(), ids.end()};
+    CHECK(distinct.size() == static_cast<std::size_t>(kTakers));
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        CHECK(errors[i].empty());
+        CHECK(ids[i].starts_with("pipe-20260910-002640"));
+        CHECK(std::filesystem::is_directory(root.path() / ids[i]));
+    }
+}
+
+TEST_CASE("a run id that cannot be reserved is an error naming the place, before anything runs",
+          "[training][manifest][id]") {
+    const apogee::testing::TempDir root{"runid-blocked-" + std::to_string(std::random_device{}())};
+    // `runs` is a file: nothing can be made under it.
+    std::ofstream{root.path() / "runs", std::ios::binary} << "not a directory";
+    std::string error;
+    const std::string id = apogee::training::new_run_id(
+        root.path() / "runs", std::chrono::system_clock::from_time_t(1789000000), {}, error);
+    CHECK(id.empty());
+    CHECK(error.find((root.path() / "runs").string()) != std::string::npos);
 }

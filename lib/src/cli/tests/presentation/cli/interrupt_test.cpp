@@ -1,0 +1,115 @@
+#include "cli/interrupt.h"
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <csignal>
+
+#include "cli/helpers.h"
+#include "platform/termination.h"
+
+/// SIGTERM joins Ctrl-C (57g): a scope catches it as the same cancel while
+/// it is free, a command it cancelled exits 143 where Ctrl-C's exits 130,
+/// and what was there before is put back -- while a handler someone else
+/// stands keeps SIGTERM, untouched. Each case stands SIGTERM where it needs
+/// it and puts back what the test runner had there.
+#if !defined(_WIN32)
+namespace {
+
+using apogee::commands::InterruptScope;
+using apogee::commands::kCancelled;
+using apogee::commands::kTerminated;
+
+volatile std::sig_atomic_t g_recorded = 0;
+
+void record_signal(int signal) {
+    g_recorded = signal;
+}
+
+/// `signal` set to `action` while it lives; what was there before put back.
+class Standing {
+public:
+    Standing(int signal, void (*action)(int)) : signal_{signal} {
+        previous_ = std::signal(signal_, action);
+    }
+
+    ~Standing() {
+        (void)std::signal(signal_, previous_);
+    }
+
+    Standing(const Standing&) = delete;
+    Standing& operator=(const Standing&) = delete;
+    Standing(Standing&&) = delete;
+    Standing& operator=(Standing&&) = delete;
+
+private:
+    int signal_;
+    void (*previous_)(int) = nullptr;
+};
+
+/// The action SIGTERM has now, read without changing it.
+[[nodiscard]] void (*current_term_action())(int) {
+    void (*action)(int) = std::signal(SIGTERM, SIG_DFL);
+    (void)std::signal(SIGTERM, action);
+    return action;
+}
+
+}  // namespace
+
+TEST_CASE("SIGTERM cancels a scope as Ctrl-C does, and the command it cancelled exits 143",
+          "[commands][interrupt][sigterm]") {
+    // The test runner stands its own handler; a command's process has none.
+    const Standing free_term{SIGTERM, SIG_DFL};
+    REQUIRE(apogee::platform::termination_signal_free());
+    {
+        const InterruptScope scope;
+        // Armed: raising it now reaches the scope, never the default action.
+        REQUIRE(current_term_action() != SIG_DFL);
+        CHECK_FALSE(InterruptScope::token().stop_requested());
+        (void)std::raise(SIGTERM);
+        CHECK(InterruptScope::token().stop_requested());
+    }
+    // Put back as it was, and the cancel it caused said as 143 -- once.
+    CHECK(current_term_action() == SIG_DFL);
+    CHECK(InterruptScope::exit_code(kCancelled) == kTerminated);
+    CHECK(InterruptScope::exit_code(kCancelled) == kCancelled);
+    // A code that is not a cancel is the command's own.
+    {
+        const InterruptScope scope;
+        REQUIRE(current_term_action() != SIG_DFL);
+        (void)std::raise(SIGTERM);
+    }
+    CHECK(InterruptScope::exit_code(2) == 2);
+}
+
+TEST_CASE("Ctrl-C still exits 130, and a fresh scope forgets an earlier scope's signal",
+          "[commands][interrupt][sigterm]") {
+    const Standing free_term{SIGTERM, SIG_DFL};
+    {
+        const InterruptScope scope;
+        REQUIRE(current_term_action() != SIG_DFL);
+        (void)std::raise(SIGTERM);
+    }
+    {
+        const InterruptScope scope;
+        (void)std::raise(SIGINT);
+        CHECK(InterruptScope::token().stop_requested());
+    }
+    CHECK(InterruptScope::exit_code(kCancelled) == kCancelled);
+}
+
+TEST_CASE("a SIGTERM someone else stands -- a session's watch, serve -- is left to them",
+          "[commands][interrupt][sigterm]") {
+    g_recorded = 0;
+    const Standing theirs{SIGTERM, record_signal};
+    CHECK_FALSE(apogee::platform::termination_signal_free());
+    {
+        const InterruptScope scope;
+        CHECK(current_term_action() == record_signal);
+        (void)std::raise(SIGTERM);
+        CHECK(g_recorded == SIGTERM);
+        CHECK_FALSE(InterruptScope::token().stop_requested());
+    }
+    CHECK(current_term_action() == record_signal);
+    CHECK(InterruptScope::exit_code(kCancelled) == kCancelled);
+}
+#endif

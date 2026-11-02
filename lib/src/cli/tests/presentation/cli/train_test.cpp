@@ -1398,7 +1398,10 @@ TEST_CASE(
     CHECK(err.find("cannot fuse") != std::string::npos);
     CHECK(err.find("unchanged") != std::string::npos);
     CHECK(read_file(fixture.base.config_path) == before);
-    CHECK_FALSE(std::filesystem::exists(fixture.training / "versions"));
+    // No ledger; only the promotion lock's file (57g), which stays as the
+    // config's own lock file does.
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "versions" / "tuned.json"));
+    CHECK(std::filesystem::exists(fixture.training / "versions" / "tuned.promote.lock"));
     CHECK_FALSE(std::filesystem::exists(fixture.training / "runs" / id / "fused"));
     // Nothing half-built left in the store either.
     CHECK_FALSE(std::filesystem::exists(fixture.home / "models" / "tiny" / "gguf"));
@@ -2115,6 +2118,8 @@ TEST_CASE(
 #include <regex>
 #include <string_view>
 
+#include "platform/pid_lock.h"
+#include "platform/platform.h"
 #include "training/cycle.h"
 
 namespace {
@@ -2872,6 +2877,128 @@ TEST_CASE("train cycle halt and resume write while a pass holds the cycle's lock
           "cycle halted -- 'apogee train cycle run' refuses until 'apogee train cycle resume'\n");
     // Neither left its own lock behind.
     CHECK_FALSE(std::filesystem::exists(cycle_dir / "history.lock"));
+}
+
+TEST_CASE(
+    "a dead pass's cycle.lock reads stopped everywhere, naming the file and the way out, "
+    "and is still refused by the next pass",
+    "[commands][train][cycle][lock]") {
+    // 57g: the lock a killed pass left is the cycle's rule to refuse (27h),
+    // and every read now tells it from a running pass.
+    const PipelineFixture fixture{std::string{kCycleBlock}};
+    const std::filesystem::path cycle_dir = fixture.training / "cycle";
+    const std::filesystem::path lock = cycle_dir / "cycle.lock";
+    std::string out;
+    std::string err;
+    // No history yet: the reads still say it.
+    write_file(lock, "999999999\n");
+    const std::string stopped =
+        "stopped -- cycle.lock is left by process 999999999, which is "
+        "not running; remove " +
+        lock.string() + " to run again";
+    REQUIRE(fixture.run({"train", "cycle", "status"}, &out, &err) == 0);
+    CHECK(out.find(stopped) != std::string::npos);
+    REQUIRE(fixture.run({"train", "status"}, &out, &err) == 0);
+    CHECK(out.find("Cycle: " + stopped) != std::string::npos);
+
+    // With a history: the state line, the JSON, halt.
+    std::filesystem::remove(lock);
+    REQUIRE(fixture.run({"train", "cycle", "run"}, &out, &err) == 0);  // skipped: no data
+    write_file(lock, "999999999\n");
+    REQUIRE(fixture.run({"train", "cycle", "status"}, &out, &err) == 0);
+    CHECK(out.find("  state:             " + stopped + "\n") != std::string::npos);
+    CHECK(out.find("running now") == std::string::npos);
+    REQUIRE(fixture.run({"train", "cycle", "status", "--output-format", "json"}, &out, &err) == 0);
+    const nlohmann::json cycle = nlohmann::json::parse(out);
+    CHECK(cycle["active"] == false);
+    CHECK(cycle["stale_lock"] == lock.string());
+    REQUIRE(fixture.run({"train", "status"}, &out, &err) == 0);
+    CHECK(out.find("Cycle: " + stopped + "; backend nightly-model") != std::string::npos);
+    REQUIRE(fixture.run({"train", "status", "--output-format", "json"}, &out, &err) == 0);
+    const nlohmann::json status = nlohmann::json::parse(out);
+    CHECK(status["cycle_active"] == false);
+    CHECK(status["stale_lock"] == lock.string());
+    REQUIRE(fixture.run({"train", "cycle", "halt"}, &out, &err) == 0);
+    CHECK(out.find("the pass running now") == std::string::npos);
+    CHECK(out.find("  " + stopped + "\n") != std::string::npos);
+    // Halted and stale: both said.
+    REQUIRE(fixture.run({"train", "cycle", "status"}, &out, &err) == 0);
+    CHECK(out.find("  state:             HALTED") != std::string::npos);
+    CHECK(out.find("  lock:              " + stopped) != std::string::npos);
+    REQUIRE(fixture.run({"train", "status"}, &out, &err) == 0);
+    CHECK(out.find("Cycle lock: " + stopped) != std::string::npos);
+    REQUIRE(fixture.run({"train", "cycle", "resume"}, &out, &err) == 0);
+
+    // The rule stands: the next pass is refused, the file untouched.
+    CHECK(fixture.run({"train", "cycle", "run"}, &out, &err) == 1);
+    CHECK(err.find("If none is, remove the file and run again") != std::string::npos);
+    CHECK(read_file(lock) == "999999999\n");
+    // Removed as the reads say: idle again, and the pass runs.
+    std::filesystem::remove(lock);
+    REQUIRE(fixture.run({"train", "cycle", "status", "--output-format", "json"}, &out, &err) == 0);
+    CHECK(nlohmann::json::parse(out)["stale_lock"].is_null());
+    REQUIRE(fixture.run({"train", "cycle", "run"}, &out, &err) == 0);
+}
+
+TEST_CASE(
+    "a pipeline a live process runs shows running now in place of the resume hint, and a "
+    "resume of it is refused naming the process; once it is gone, it resumes",
+    "[commands][train][pipeline][lock]") {
+    const PipelineFixture fixture;
+    std::string out;
+    std::string err;
+    const std::string spec = fixture.spec_file("regress");
+    REQUIRE(fixture.run({"train", "pipeline", "run", "--pipeline", spec, "--trainer", "mock"}, &out,
+                        &err) == 2);
+    const std::string id = fixture.pipelines().front().id;
+    const std::filesystem::path dir = fixture.training / "pipelines" / id;
+    // What a running pipeline's record and lock look like from outside.
+    apogee::training::PipelineRunManifest running = fixture.pipeline(id);
+    running.status = "running";
+    REQUIRE(apogee::training::write_pipeline_manifest(dir, running).empty());
+    write_file(fixture.training / "datasets" / "regress.jsonl",
+               read_file(fixture.training / "datasets" / "starter.jsonl"));
+    const std::string self = std::to_string(apogee::platform::current_process_id());
+    {
+        apogee::platform::PidLock::Refusal refusal;
+        const std::optional<apogee::platform::PidLock> held =
+            apogee::platform::PidLock::acquire(dir / "pipeline.lock", id, false, refusal);
+        REQUIRE(held.has_value());
+        REQUIRE(fixture.run({"train", "pipeline", "status", id}, &out, &err) == 0);
+        CHECK(out.find("This pipeline is running now (process " + self +
+                       "); a resume is refused while it runs") != std::string::npos);
+        CHECK(out.find("Resume from stage") == std::string::npos);
+        REQUIRE(fixture.run({"train", "pipeline", "status", id, "--output-format", "json"}, &out,
+                            &err) == 0);
+        CHECK(nlohmann::json::parse(out)["holder"]["pid"] ==
+              apogee::platform::current_process_id());
+        REQUIRE(fixture.run({"train", "status"}, &out, &err) == 0);
+        CHECK(out.find("Pipeline: " + id + " RUNNING") != std::string::npos);
+        CHECK(fixture.run(
+                  {"train", "pipeline", "resume", id, "--pipeline", spec, "--trainer", "mock"},
+                  &out, &err) == 1);
+        CHECK(err.find("pipeline " + id + " is running now (process " + self + ")") !=
+              std::string::npos);
+        CHECK(fixture.pipeline(id).status == "running");
+    }
+    // Its process gone without a word -- a crash: the record says running,
+    // the reads say stopped, and the resume takes the run with nothing deleted.
+    write_file(dir / "pipeline.lock", "999999999\n" + id + "\n");
+    REQUIRE(fixture.run({"train", "pipeline", "status", id}, &out, &err) == 0);
+    CHECK(out.find("status:  running -- stopped: no process holds it") != std::string::npos);
+    CHECK(out.find("Resume from stage 2") != std::string::npos);
+    REQUIRE(fixture.run({"train", "pipeline", "status", id, "--output-format", "json"}, &out,
+                        &err) == 0);
+    CHECK(nlohmann::json::parse(out)["holder"].is_null());
+    REQUIRE(fixture.run({"train", "status"}, &out, &err) == 0);
+    CHECK(out.find("latest " + id + " stopped mid-run") != std::string::npos);
+    REQUIRE(fixture.run({"train", "status", "--output-format", "json"}, &out, &err) == 0);
+    CHECK(nlohmann::json::parse(out)["active_pipeline"].is_null());
+    REQUIRE(
+        fixture.run({"train", "pipeline", "resume", id, "--pipeline", spec, "--trainer", "mock"},
+                    &out, &err) == 0);
+    CHECK(fixture.pipeline(id).complete());
+    CHECK_FALSE(std::filesystem::exists(dir / "pipeline.lock"));
 }
 
 TEST_CASE("the pipeline and cycle verbs complete their output formats",

@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include "platform/pid_lock.h"
+#include "platform/platform.h"
 #include "support/env_guard.h"
 #include "training/manifest.h"
 #include "training/mock_trainer.h"
@@ -334,6 +336,98 @@ TEST_CASE(
     CHECK(outcome.manifest.stages[1].status == "pending");
     // Resumable: not complete, the spec unchanged.
     CHECK(apogee::training::resume_check(outcome.manifest, cancelled.spec).empty());
+}
+
+TEST_CASE(
+    "one process owns a pipeline: the run holds its lock and lets it go; a resume under a live "
+    "holder is refused naming it, the manifest untouched; a dead holder's lock is taken and the "
+    "resume runs",
+    "[training][pipeline][lock]") {
+    Fixture fixture;
+    fixture.add_stage("a", kPlain, {{"say hello", "hello"}});
+    fixture.add_stage("b", "{\"mock\": {\"answer\": \"nope\"}}\n", {{"say nope", "nope"}});
+    const std::filesystem::path dir = fixture.training / "pipelines" / "pipe-30";
+    const std::filesystem::path lock_path = dir / "pipeline.lock";
+    const long self = apogee::platform::current_process_id();
+
+    // While it runs, this process holds it; once it ends, no one does.
+    std::vector<long> seen;
+    PipelineRequest request = fixture.request("pipe-30");
+    request.on_manifest = [&](const PipelineRunManifest& /*manifest*/) {
+        const auto holder = apogee::training::pipeline_holder(dir);
+        seen.push_back(holder.has_value() ? holder->pid : 0);
+    };
+    const PipelineOutcome first = apogee::training::run_pipeline(request);
+    REQUIRE_FALSE(first.ok);
+    CHECK(first.manifest.status == "aborted");
+    REQUIRE_FALSE(seen.empty());
+    for (const long pid : seen) {
+        CHECK(pid == self);
+    }
+    CHECK_FALSE(apogee::training::pipeline_holder(dir).has_value());
+    CHECK_FALSE(std::filesystem::exists(lock_path));
+
+    // A live holder -- this process's own lock, from a second acquire, as
+    // another `train pipeline run` or a cycle pass would hold it.
+    write(fixture.spec.stages[1].dataset, kPlain);
+    {
+        apogee::platform::PidLock::Refusal refusal;
+        const std::optional<apogee::platform::PidLock> held =
+            apogee::platform::PidLock::acquire(lock_path, "pipe-30", false, refusal);
+        REQUIRE(held.has_value());
+        const auto holder = apogee::training::pipeline_holder(dir);
+        REQUIRE(holder.has_value());
+        CHECK(holder->pid == self);
+        CHECK(apogee::training::pipeline_holder_text(*holder) ==
+              "running now (process " + std::to_string(self) + ")");
+        const std::string before = read(dir / "manifest.json");
+        const std::string refusal_text = apogee::training::resume_check(
+            fixture.on_disk("pipe-30"), fixture.spec, fixture.training);
+        CHECK(refusal_text.find("pipeline pipe-30 is running now (process " + std::to_string(self) +
+                                ")") != std::string::npos);
+        CHECK(refusal_text.find("cannot be resumed while it runs") != std::string::npos);
+        // The pure check knows nothing of holders.
+        CHECK(apogee::training::resume_check(fixture.on_disk("pipe-30"), fixture.spec).empty());
+        const PipelineOutcome refused = apogee::training::resume_pipeline(
+            fixture.request("pipe-30"), fixture.on_disk("pipe-30"));
+        CHECK_FALSE(refused.ok);
+        CHECK_FALSE(refused.cancelled);
+        CHECK(refused.error == refusal_text);
+        CHECK(read(dir / "manifest.json") == before);
+        CHECK(fixture.on_disk("pipe-30").status == "aborted");
+    }
+
+    // A holder that died -- a kill, a crash: nothing to delete by hand. The
+    // read says no one holds it, and the resume takes the lock and runs.
+    write(lock_path, "999999999\npipe-30\n");
+    CHECK_FALSE(apogee::training::pipeline_holder(dir).has_value());
+    CHECK(apogee::training::resume_check(fixture.on_disk("pipe-30"), fixture.spec, fixture.training)
+              .empty());
+    const PipelineOutcome resumed =
+        apogee::training::resume_pipeline(fixture.request("pipe-30"), fixture.on_disk("pipe-30"));
+    INFO(resumed.error);
+    REQUIRE(resumed.ok);
+    CHECK(resumed.manifest.complete());
+    CHECK_FALSE(std::filesystem::exists(lock_path));
+}
+
+TEST_CASE(
+    "a resume reads the manifest again once it holds the lock: a holder that finished "
+    "meanwhile is not run over",
+    "[training][pipeline][lock]") {
+    Fixture fixture;
+    fixture.add_stage("a", kPlain, {{"say hello", "hello"}});
+    const PipelineOutcome done = apogee::training::run_pipeline(fixture.request("pipe-31"));
+    REQUIRE(done.ok);
+    // A copy read while the run was still going says `running`.
+    PipelineRunManifest stale = done.manifest;
+    stale.status = "running";
+    stale.stages[0].status = "training";
+    const PipelineOutcome again =
+        apogee::training::resume_pipeline(fixture.request("pipe-31"), stale);
+    CHECK_FALSE(again.ok);
+    CHECK(again.error.find("already complete") != std::string::npos);
+    CHECK(fixture.on_disk("pipe-31").complete());
 }
 
 TEST_CASE(

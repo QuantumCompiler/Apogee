@@ -137,14 +137,38 @@ std::optional<RunManifest> read_manifest(const std::filesystem::path& run_dir, s
 }
 
 std::string new_run_id(const std::filesystem::path& runs_dir,
-                       std::chrono::system_clock::time_point now, std::string_view prefix) {
-    const std::string base = std::string{prefix} + format_utc(now, "%Y%m%d-%H%M%S");
-    std::string id = base;
+                       std::chrono::system_clock::time_point now, std::string_view prefix,
+                       std::string& error) {
+    error.clear();
     std::error_code code;
-    for (int suffix = 2; std::filesystem::exists(runs_dir / id, code); ++suffix) {
-        id = base + "-" + std::to_string(suffix);
+    std::filesystem::create_directories(runs_dir, code);
+    if (code) {
+        error = "could not create " + runs_dir.string() + ": " + code.message();
+        return {};
     }
-    return id;
+    // Reserved by making its directory: `create_directory` is one mkdir,
+    // false when the name is taken -- by a run, or by another process's
+    // reservation a moment ago -- so the next suffix is tried. Bounded, so a
+    // directory that cannot be listed or written is said, never spun on.
+    const std::string base = std::string{prefix} + format_utc(now, "%Y%m%d-%H%M%S");
+    constexpr int kMostSuffixes = 1000;
+    for (int suffix = 1; suffix <= kMostSuffixes; ++suffix) {
+        const std::string id = suffix == 1 ? base : base + "-" + std::to_string(suffix);
+        const std::filesystem::path dir = runs_dir / id;
+        if (std::filesystem::create_directory(dir, code)) {
+            return id;
+        }
+        // A file of that name refuses the mkdir with an error, and is as
+        // taken as a directory.
+        if (std::error_code probe; code && !std::filesystem::exists(dir, probe)) {
+            error =
+                "could not reserve the run id " + id + " (" + dir.string() + "): " + code.message();
+            return {};
+        }
+    }
+    error = "could not reserve a run id under " + runs_dir.string() + ": " + base + " and " +
+            std::to_string(kMostSuffixes - 1) + " suffixes after it are taken";
+    return {};
 }
 
 bool valid_run_id(std::string_view id) noexcept {

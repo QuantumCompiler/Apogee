@@ -705,18 +705,85 @@ struct PromoteOutcome {
     return error;
 }
 
+/// What a promotion holds while it runs (57g): its backend's promotion lock,
+/// and the config and the checks as they stand under it.
+struct PromotionHold {
+    training::PromotionLock lock;
+    harness::Config config;
+    PromoteChecks checks;
+};
+
+/// One promotion per backend (57g), for `promote_run` and
+/// `promote_adapter_run` alike: the backend's lock taken before its ledger is
+/// read -- waiting, with a notice, for a promotion already running into it --
+/// and then, under it, the config read again and the checks made again, since
+/// the promotion waited for may have created the entry or repointed it.
+/// nullopt with `outcome` refused or cancelled when it cannot be held.
+[[nodiscard]] std::optional<PromotionHold> hold_promotion(
+    const harness::Config& given, const std::filesystem::path& config_path,
+    const training::TrainingStore& store, const training::RunManifest& manifest,
+    const PromoteRequest& request, const training::MessageSink& on_message,
+    const harness::CancellationToken& cancellation, PromoteOutcome& outcome) {
+    const PromoteChecks first = precheck_promotion(given, manifest, request);
+    if (!first.error.empty()) {
+        outcome.refused = true;
+        outcome.error = first.error;
+        return std::nullopt;
+    }
+    const std::string backend = first.existing_key.empty() ? request.backend : first.existing_key;
+    PromotionHold hold{.lock = training::lock_promotion(
+                           store.versions_dir(), backend,
+                           [&on_message, &backend]() {
+                               if (on_message) {
+                                   on_message("waiting for another promotion into " + backend);
+                               }
+                           },
+                           cancellation),
+                       .config = given,
+                       .checks = first};
+    if (hold.lock.cancelled) {
+        outcome.cancelled = true;
+        outcome.error = "cancelled";
+        return std::nullopt;
+    }
+    if (!hold.lock.held()) {
+        outcome.refused = true;
+        outcome.error = hold.lock.error;
+        return std::nullopt;
+    }
+    std::error_code code;
+    if (config_path.empty() || !std::filesystem::exists(config_path, code)) {
+        return hold;
+    }
+    try {
+        hold.config = harness::load_config(config_path);
+    } catch (const harness::ConfigError& e) {
+        outcome.refused = true;
+        outcome.error = std::string{"the config cannot be read: "} + e.what();
+        return std::nullopt;
+    }
+    hold.checks = precheck_promotion(hold.config, manifest, request);
+    if (!hold.checks.error.empty()) {
+        outcome.refused = true;
+        outcome.error = hold.checks.error;
+        return std::nullopt;
+    }
+    return hold;
+}
+
 [[nodiscard]] PromoteOutcome promote_run(
-    const harness::Config& config, const std::filesystem::path& config_path,
+    const harness::Config& given_config, const std::filesystem::path& config_path,
     const training::TrainingStore& store, const training::RunManifest& manifest,
     training::Trainer& trainer, const training::Converter& convert, const PromoteRequest& request,
     const training::MessageSink& on_message, const harness::CancellationToken& cancellation) {
     PromoteOutcome outcome;
-    const PromoteChecks checks = precheck_promotion(config, manifest, request);
-    if (!checks.error.empty()) {
-        outcome.refused = true;
-        outcome.error = checks.error;
+    const std::optional<PromotionHold> hold = hold_promotion(
+        given_config, config_path, store, manifest, request, on_message, cancellation, outcome);
+    if (!hold.has_value()) {
         return outcome;
     }
+    const harness::Config& config = hold->config;
+    const PromoteChecks& checks = hold->checks;
     std::string ledger_error;
     training::VersionLedger ledger =
         training::load_ledger(store.versions_dir(), request.backend, ledger_error)
@@ -984,7 +1051,7 @@ struct PromoteOutcome {
 /// adapter the entry will apply: a candidate under the gate's floor is
 /// removed, never registered.
 [[nodiscard]] PromoteOutcome promote_adapter_run(
-    const harness::Config& config, const std::filesystem::path& config_path,
+    const harness::Config& given_config, const std::filesystem::path& config_path,
     const training::TrainingStore& store, const training::RunManifest& manifest,
     const training::AdapterConverter& convert, const PromoteRequest& request,
     const ServingScorer& score, const training::MessageSink& on_message,
@@ -995,10 +1062,13 @@ struct PromoteOutcome {
         outcome.error = std::move(error);
         return outcome;
     };
-    const PromoteChecks checks = precheck_promotion(config, manifest, request);
-    if (!checks.error.empty()) {
-        return refuse(checks.error);
+    const std::optional<PromotionHold> hold = hold_promotion(
+        given_config, config_path, store, manifest, request, on_message, cancellation, outcome);
+    if (!hold.has_value()) {
+        return outcome;
     }
+    const harness::Config& config = hold->config;
+    const PromoteChecks& checks = hold->checks;
     std::string ledger_error;
     training::VersionLedger ledger =
         training::load_ledger(store.versions_dir(), request.backend, ledger_error)
@@ -1398,9 +1468,14 @@ void print_pipeline_summary(const training::PipelineRunManifest& manifest) {
     }
 }
 
-void print_pipeline_table(const training::PipelineRunManifest& manifest) {
+void print_pipeline_table(const training::PipelineRunManifest& manifest,
+                          const std::optional<platform::PidLock::Holder>& holder) {
+    // A `running` manifest no live process holds is a run that stopped
+    // without saying so (57g): a crash, a kill.
+    const bool stopped = manifest.status == training::kPipelineRunning && !holder.has_value();
     std::cout << "pipeline " << manifest.pipeline_run_id << "\n"
-              << "  status:  " << manifest.status << "\n";
+              << "  status:  " << manifest.status
+              << (stopped ? " -- stopped: no process holds it" : "") << "\n";
     if (!manifest.spec_name.empty()) {
         std::cout << "  spec:    " << manifest.spec_name << "\n";
     }
@@ -1426,6 +1501,13 @@ void print_pipeline_table(const training::PipelineRunManifest& manifest) {
     if (!promotable.empty()) {
         std::cout << "\nPromote the last passing stage:\n  apogee train promote " << promotable
                   << " --as <backend>\n";
+    }
+    // A live holder's run is its to finish: no resume is offered while it
+    // runs (57g).
+    if (holder.has_value()) {
+        std::cout << "This pipeline is " << training::pipeline_holder_text(*holder)
+                  << "; a resume is refused while it runs\n";
+        return;
     }
     if (!manifest.complete() && manifest.first_unpassed() < manifest.stages.size()) {
         std::cout << "Resume from stage " << (manifest.first_unpassed() + 1)
@@ -1552,14 +1634,21 @@ struct PipelineInputs {
     return harness::RegimeSpec{};
 }
 
-void print_cycle_history(const training::CycleHistory& history, bool active) {
+void print_cycle_history(const training::CycleHistory& history,
+                         const training::CycleLockState& lock) {
     std::cout << "cycle for backend " << (history.backend.empty() ? "-" : history.backend) << "\n"
               << "  state:             "
-              << (history.halted ? "HALTED -- " + history.halt_reason
-                  : active       ? std::string{"running now"}
-                                 : std::string{"idle"})
-              << "\n"
-              << "  runs:              " << history.total_runs << " (" << history.consecutive_fails
+              << (history.halted   ? "HALTED -- " + history.halt_reason
+                  : lock.running() ? std::string{"running now"}
+                  : lock.stale()   ? training::stale_lock_text(lock)
+                                   : std::string{"idle"})
+              << "\n";
+    // Halted with a dead pass's lock left: both are in the way of the next
+    // run, so both are said (57g).
+    if (history.halted && lock.stale()) {
+        std::cout << "  lock:              " << training::stale_lock_text(lock) << "\n";
+    }
+    std::cout << "  runs:              " << history.total_runs << " (" << history.consecutive_fails
               << " consecutive failure(s))\n"
               << "  anchor:            "
               << (history.anchor_version > 0
@@ -1827,6 +1916,10 @@ std::string train_status_text(const RootContext& context) {
     const harness::Config config = load_config_or_default(context);
     const training::TrainingStore store{harness::training_dir()};
     const std::filesystem::path cycle_dir = harness::training_cycle_dir();
+    // A lock a dead pass left (57g) is said once: as the cycle's state, or
+    // on its own line when the state is something else.
+    const training::CycleLockState lock = training::cycle_lock_state(cycle_dir);
+    bool lock_said = false;
     if (training::history_exists(cycle_dir)) {
         std::string error;
         const training::CycleHistory history =
@@ -1834,10 +1927,12 @@ std::string train_status_text(const RootContext& context) {
         if (!error.empty()) {
             out << "Cycle: history unreadable -- " << error << "\n";
         } else {
+            lock_said = !history.halted;
             out << "Cycle: "
-                << (history.halted                         ? "HALTED -- " + history.halt_reason
-                    : training::cycle_lock_held(cycle_dir) ? std::string{"running now"}
-                                                           : std::string{"idle"})
+                << (history.halted   ? "HALTED -- " + history.halt_reason
+                    : lock.running() ? std::string{"running now"}
+                    : lock.stale()   ? training::stale_lock_text(lock)
+                                     : std::string{"idle"})
                 << "; backend " << history.backend << "; " << history.total_runs << " run(s), "
                 << history.consecutive_fails << " consecutive failure(s)"
                 << (history.anchor_version > 0
@@ -1846,11 +1941,18 @@ std::string train_status_text(const RootContext& context) {
                         : std::string{})
                 << "\n";
         }
+    } else if (lock.stale()) {
+        // A first pass killed before it wrote any history.
+        out << "Cycle: " << training::stale_lock_text(lock) << "\n";
+        lock_said = true;
     } else if (config.training.cycle.configured()) {
         out << "Cycle: configured (pipeline '" << config.training.cycle.pipeline << "' -> "
             << config.training.cycle.backend << "), no runs yet ('apogee train cycle run')\n";
     } else {
         out << "Cycle: not configured (training.cycle)\n";
+    }
+    if (lock.stale() && !lock_said) {
+        out << "Cycle lock: " << training::stale_lock_text(lock) << "\n";
     }
     const std::vector<training::PipelineSummary> pipelines = store.list_pipelines();
     const std::optional<training::PipelineSummary> active = store.active_pipeline();
@@ -1860,9 +1962,14 @@ std::string train_status_text(const RootContext& context) {
     } else if (pipelines.empty()) {
         out << "Pipeline: none yet ('apogee train pipeline run --pipeline <spec>')\n";
     } else {
-        out << "Pipeline: none in progress; " << pipelines.size() << " run(s), latest "
-            << pipelines.front().id << " " << pipelines.front().status << " ("
-            << pipelines.front().passed << "/" << pipelines.front().stages << " passed)\n";
+        // Not the active one, so a `running` latest is a run no live process
+        // holds (57g): stopped without saying so.
+        const training::PipelineSummary& latest = pipelines.front();
+        out << "Pipeline: none in progress; " << pipelines.size() << " run(s), latest " << latest.id
+            << " "
+            << (latest.status == training::kPipelineRunning ? std::string{"stopped mid-run"}
+                                                            : latest.status)
+            << " (" << latest.passed << "/" << latest.stages << " passed)\n";
     }
     const std::vector<training::RunSummary> runs = store.list_runs();
     int running = 0;
@@ -2229,7 +2336,12 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         request.num_layers = *run_layers;
         request.grad_checkpoint = *run_grad;
         request.mask_prompt = *run_mask;
-        request.run_id = training::new_run_id(runs_dir);
+        std::string reserve_error;
+        request.run_id =
+            training::new_run_id(runs_dir, std::chrono::system_clock::now(), {}, reserve_error);
+        if (request.run_id.empty()) {
+            fail_user(reserve_error);
+        }
         request.output_dir = runs_dir / request.run_id;
 
         training::RunManifest manifest;
@@ -2892,11 +3004,19 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         }
         request.gate_mode = training::gate_mode_from_string(config.training.effective_gate_mode());
         request.continue_on_fail = continue_on_fail;
-        request.pipeline_run_id = existing.has_value()
-                                      ? existing->pipeline_run_id
-                                      : training::new_run_id(harness::training_pipelines_dir(),
-                                                             std::chrono::system_clock::now(),
-                                                             training::kPipelineIdPrefix);
+        if (existing.has_value()) {
+            request.pipeline_run_id = existing->pipeline_run_id;
+        } else {
+            // Reserved by its directory (57g): two runs started in one second
+            // get two.
+            std::string reserve_error;
+            request.pipeline_run_id = training::new_run_id(
+                harness::training_pipelines_dir(), std::chrono::system_clock::now(),
+                training::kPipelineIdPrefix, reserve_error);
+            if (request.pipeline_run_id.empty()) {
+                fail_user(reserve_error);
+            }
+        }
         // A stream's progress is the relay's (55h); a person's, the console's.
         JobStream* const job = JobStream::current();
         std::optional<PipelineRelay> relay;
@@ -2999,7 +3119,9 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
                           "resume " +
                           *resume_id);
             }
-            if (const std::string refusal = training::resume_check(*existing, spec);
+            // Refused while a live process runs it (57g), naming the process.
+            if (const std::string refusal =
+                    training::resume_check(*existing, spec, harness::training_dir());
                 !refusal.empty()) {
                 fail_user(refusal);
             }
@@ -3059,7 +3181,8 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         if (!manifest.has_value()) {
             fail_user("no pipeline run '" + *pipe_status_id + "'");
         }
-        print_pipeline_table(*manifest);
+        print_pipeline_table(*manifest,
+                             training::pipeline_holder(store.pipeline_dir(*pipe_status_id)));
     });
 
     // ---- pipeline list / show (M30) -------------------------------------------
@@ -3368,9 +3491,13 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         request.spec = spec;
         request.kits_dir = harness::training_kits_dir();
         request.training_dir = harness::training_dir();
+        std::string reserve_error;
         request.regime_run_id =
             training::new_run_id(harness::training_regime_dir(), std::chrono::system_clock::now(),
-                                 training::kRegimeIdPrefix);
+                                 training::kRegimeIdPrefix, reserve_error);
+        if (request.regime_run_id.empty()) {
+            fail_user(reserve_error);
+        }
         request.work_dir = harness::training_regime_dir() / request.regime_run_id;
         request.base_model = student.path;
         request.generate = make_teacher(providers.harness, teacher.key);
@@ -3696,9 +3823,15 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
                               ? " -- 'apogee train cycle run' performs one gated pass"
                               : " -- configure training.cycle first")
                       << "\n";
+            // A first pass killed before it wrote any history (57g).
+            if (const std::string stale =
+                    training::stale_lock_text(training::cycle_lock_state(cycle_dir));
+                !stale.empty()) {
+                std::cout << "  " << stale << "\n";
+            }
             return;
         }
-        print_cycle_history(history, training::cycle_lock_held(cycle_dir));
+        print_cycle_history(history, training::cycle_lock_state(cycle_dir));
     });
 
     CLI::App* cycle_halt = cycle->add_subcommand(
@@ -3729,8 +3862,13 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         }
         std::cout << "cycle halted -- 'apogee train cycle run' refuses until 'apogee train cycle "
                      "resume'\n";
-        if (training::cycle_lock_held(cycle_dir)) {
+        // A pass is said only when one is running (57g); a dead one's lock
+        // is said as what it is.
+        if (const training::CycleLockState lock = training::cycle_lock_state(cycle_dir);
+            lock.running()) {
             std::cout << "  the pass running now finishes, and keeps the halt\n";
+        } else if (lock.stale()) {
+            std::cout << "  " << training::stale_lock_text(lock) << "\n";
         }
     });
 

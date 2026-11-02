@@ -2849,6 +2849,7 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
         }
     }
     const std::filesystem::path cycle_dir = training / "cycle";
+    const training::CycleLockState lock = training::cycle_lock_state(cycle_dir);
     if (training::history_exists(cycle_dir)) {
         std::string error;
         const training::CycleHistory history =
@@ -2868,8 +2869,19 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
                     (history.anchor_version > 0
                          ? ", anchor v" + std::to_string(history.anchor_version)
                          : std::string{", no anchor yet"}) +
-                    (training::cycle_lock_held(cycle_dir) ? "; a cycle is running now" : ""));
+                    (lock.running() ? "; a cycle is running now" : ""));
         }
+    }
+    // A lock a dead pass left (57g): every `cycle run` refuses it, by the
+    // cycle's rule, until the person removes it -- said here with the way out,
+    // never as a running pass.
+    if (lock.stale()) {
+        add(report, Status::Warn, "Training", "cycle lock",
+            "stopped -- " + std::string{training::kLockFileName} + " is left by process " +
+                std::to_string(lock.pid) +
+                ", which is not running; every 'apogee train cycle run' refuses until it is "
+                "removed",
+            "remove " + lock.path.string() + " to run again");
     }
 }
 

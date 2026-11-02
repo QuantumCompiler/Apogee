@@ -12,6 +12,7 @@
 
 #include "contracts/cancellation.h"
 #include "contracts/config.h"
+#include "platform/pid_lock.h"
 #include "training/eval.h"
 #include "training/manifest.h"
 #include "training/trainer.h"
@@ -32,6 +33,13 @@
 /// directly. A run that stopped -- a failed gate, a crash, Ctrl-C -- resumes
 /// from the first stage that has not passed.
 ///
+/// **One process owns a run** (57g). `run_pipeline` and `resume_pipeline`
+/// hold the pipeline's PID lock, `pipelines/<id>/pipeline.lock`, for the
+/// whole run -- a cycle pass's pipeline included -- so a resume while
+/// another process runs it is refused naming that process, and a lock its
+/// dead holder left is taken over: a crashed run resumes with nothing to
+/// delete by hand.
+///
 /// Thin orchestration: this composes the trainer, `run_eval` and the
 /// trainer's fuse; nothing here is a second copy of any of them, and nothing
 /// here names a backend or a surface.
@@ -39,6 +47,8 @@ namespace apogee::training {
 
 inline constexpr std::string_view kPipelineIdPrefix = "pipe-";
 inline constexpr std::string_view kPipelinesDirName = "pipelines";
+/// The pipeline's PID lock, beside its manifest (57g).
+inline constexpr std::string_view kPipelineLockFileName = "pipeline.lock";
 
 inline constexpr std::string_view kStagePending = "pending";
 inline constexpr std::string_view kStageTraining = "training";
@@ -167,9 +177,21 @@ struct PipelineOutcome {
     PipelineRunManifest manifest;
 };
 
-/// Runs every stage from the snapshot. The manifest is written `running`
-/// before the first stage and on every transition after.
+/// Runs every stage from the snapshot, under the pipeline's lock. The
+/// manifest is written `running` before the first stage and on every
+/// transition after.
 [[nodiscard]] PipelineOutcome run_pipeline(const PipelineRequest& request);
+
+/// Who runs the pipeline in `pipeline_dir` now (57g): its lock's holder
+/// while that process is running -- or while the file names no process it
+/// can read, which is never taken over -- else nullopt: no lock, or one a
+/// dead process left, which the next run of the pipeline takes.
+[[nodiscard]] std::optional<platform::PidLock::Holder> pipeline_holder(
+    const std::filesystem::path& pipeline_dir);
+
+/// How a read and a refusal name a live holder: `running now (process
+/// <pid>)`.
+[[nodiscard]] std::string pipeline_holder_text(const platform::PidLock::Holder& holder);
 
 /// Whether `existing` may be resumed against `spec`: not already complete,
 /// and the spec's stage count unchanged (a drifted spec would train stage
@@ -178,8 +200,18 @@ struct PipelineOutcome {
 [[nodiscard]] std::string resume_check(const PipelineRunManifest& existing,
                                        const harness::PipelineSpec& spec);
 
+/// The same, and first whether a live process runs the pipeline now (57g),
+/// read from its lock under `training_dir`: a resume under its holder would
+/// train the same stage in the same directory and rewrite the record the
+/// holder is writing. The refusal names the process.
+[[nodiscard]] std::string resume_check(const PipelineRunManifest& existing,
+                                       const harness::PipelineSpec& spec,
+                                       const std::filesystem::path& training_dir);
+
 /// Continues from the first stage that has not passed, the passed ones
-/// untouched.
+/// untouched -- under the pipeline's lock, refused while a live process
+/// holds it, and from the manifest as it reads once the lock is held (a
+/// holder that finished while this one waited to begin has rewritten it).
 [[nodiscard]] PipelineOutcome resume_pipeline(const PipelineRequest& request,
                                               PipelineRunManifest existing);
 

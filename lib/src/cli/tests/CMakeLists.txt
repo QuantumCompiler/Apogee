@@ -346,6 +346,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/tui/progress_test.cpp
     presentation/tui/monitor_bar_test.cpp
     presentation/cli/helpers_test.cpp
+    presentation/cli/interrupt_test.cpp
     presentation/cli/tool_vectors_test.cpp
     presentation/views/thinking_view_test.cpp
     presentation/views/status_line_test.cpp

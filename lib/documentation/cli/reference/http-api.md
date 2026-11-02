@@ -1219,12 +1219,17 @@ The training track's state, read off the filesystem the CLI writes:
 `200 {"runs": N, "running": [run ids], "recent_runs": [run summaries],
 "versions": [{backend, active_version, kept, total}], "pipelines": N,
 "active_pipeline": <id> | null, "latest_pipeline": <pipeline summary> |
-null, "cycle_active": bool, "cycle": {backend, halted, halt_reason,
-consecutive_fails, anchor_version, anchor_score, total_runs} | null}`.
+null, "cycle_active": bool, "stale_lock": <path> | null, "cycle": {backend,
+halted, halt_reason, consecutive_fails, anchor_version, anchor_score,
+total_runs} | null}`.
 `recent_runs` is the newest five, each as `GET /v1/admin/training/runs`
 lists a run; `active_pipeline` is the newest pipeline run whose manifest
-says `running`, and `latest_pipeline` the newest whatever its status;
-`cycle_active` is whether a `train cycle run` holds the lock right now;
+says `running` and whose lock a live process holds -- since 57g a crashed
+run's `running` manifest is not one -- and `latest_pipeline` the newest
+whatever its status; `cycle_active` is whether a running `train cycle run`
+holds the lock right now -- since 57g false for a lock whose process is
+gone, which `stale_lock` (added then) names by its path, `null` otherwise:
+`cycle run` refuses such a lock until the person removes it;
 `cycle` is the history's headline, `null` until the first cycle has run.
 Since 37f `apogee train status --output-format json` prints this body byte
 for byte, and `recent_runs`, `latest_pipeline`, `halt_reason` and
@@ -1264,7 +1269,10 @@ pipeline_run_id]}}` -- a pipeline's stage run carries the last two -- or one
 pipeline run's: `200 {"kind": "pipeline", "pipeline": {pipeline_run_id,
 spec_name, student, base_model, status, started_at[, completed_at], stages:
 [{index, name, run_id, base_model, dataset, adapter_dir, fused_dir, status,
-cumulative_score, cumulative_passed[, eval_results]}]}}`; `404` when
+cumulative_score, cumulative_passed[, eval_results]}]}, "holder": {"pid": N}
+| null}` -- since 57g `holder` names the live process running that pipeline
+(its lock's holder; a resume is refused while there is one), `null` when
+none does; `404` when
 neither, `400` for an id that is not a plain name. Since 55h `apogee train
 pipeline status <id> --output-format json` prints a pipeline run's body byte for
 byte, from the same builder.
@@ -1292,7 +1300,10 @@ whether a pass holds the lock now: `200 {backend, anchor_version,
 anchor_score, consecutive_fails, total_runs, halted, halt_reason,
 sessions_until, runs: [{run_at, source, dataset_rows, pipeline_id, gate:
 "pass" | "fail" | "skipped", gate_reason, cycle_score, prev_score,
-anchor_score, promoted_version[, note]}], active: bool}`; `404` until the
+anchor_score, promoted_version[, note]}], active: bool, stale_lock: <path> |
+null}` -- `active` true only while a running process holds the lock, and
+since 57g `stale_lock` the path of a lock a dead pass left (`null`
+otherwise), which `cycle run` refuses until it is removed; `404` until the
 first `train cycle run` has written it. Since 55h `apogee train cycle status
 --output-format json` prints this body byte for byte, and refuses where this
 answers `404`. `cycle run`, `halt` and `resume` have no route.

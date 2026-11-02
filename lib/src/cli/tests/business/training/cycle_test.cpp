@@ -14,6 +14,7 @@
 
 #include "contracts/types.h"
 #include "platform/pid_lock.h"
+#include "platform/platform.h"
 #include "support/env_guard.h"
 #include "training/mock_trainer.h"
 
@@ -179,12 +180,12 @@ TEST_CASE("the lock is exclusive, released on destruction and by hand, and re-ac
           "[training][cycle][lock]") {
     const Fixture fixture;
     std::string error;
-    CHECK_FALSE(apogee::training::cycle_lock_held(fixture.cycle));
+    CHECK_FALSE(apogee::training::cycle_lock_state(fixture.cycle).running());
     {
         std::optional<CycleLock> first = CycleLock::acquire(fixture.cycle, error);
         REQUIRE(first.has_value());
         CHECK(error.empty());
-        CHECK(apogee::training::cycle_lock_held(fixture.cycle));
+        CHECK(apogee::training::cycle_lock_state(fixture.cycle).running());
         CHECK(first->path() == fixture.cycle / "cycle.lock");
         CHECK_FALSE(read(first->path()).empty());  // the pid
         const std::optional<CycleLock> second = CycleLock::acquire(fixture.cycle, error);
@@ -192,12 +193,13 @@ TEST_CASE("the lock is exclusive, released on destruction and by hand, and re-ac
         CHECK(error.find("another cycle is already running") != std::string::npos);
         CHECK(error.find((fixture.cycle / "cycle.lock").string()) != std::string::npos);
         first->release();
-        CHECK_FALSE(apogee::training::cycle_lock_held(fixture.cycle));
+        CHECK_FALSE(apogee::training::cycle_lock_state(fixture.cycle).running());
         first->release();  // twice is fine
         const std::optional<CycleLock> third = CycleLock::acquire(fixture.cycle, error);
         CHECK(third.has_value());
     }
-    CHECK_FALSE(apogee::training::cycle_lock_held(fixture.cycle));  // the destructor released
+    CHECK_FALSE(
+        apogee::training::cycle_lock_state(fixture.cycle).running());  // the destructor released
     // A moved-from lock does not release on destruction; the moved-to does.
     {
         std::optional<CycleLock> outer;
@@ -206,9 +208,86 @@ TEST_CASE("the lock is exclusive, released on destruction and by hand, and re-ac
             REQUIRE(inner.has_value());
             outer.emplace(std::move(*inner));
         }
-        CHECK(apogee::training::cycle_lock_held(fixture.cycle));
+        CHECK(apogee::training::cycle_lock_state(fixture.cycle).running());
     }
-    CHECK_FALSE(apogee::training::cycle_lock_held(fixture.cycle));
+    CHECK_FALSE(apogee::training::cycle_lock_state(fixture.cycle).running());
+}
+
+TEST_CASE(
+    "the lock reads idle, running or stale -- a dead holder's file named with its "
+    "process and the way out, never a running pass",
+    "[training][cycle][lock]") {
+    const Fixture fixture;
+    const std::filesystem::path path = fixture.cycle / "cycle.lock";
+    apogee::training::CycleLockState state = apogee::training::cycle_lock_state(fixture.cycle);
+    CHECK(state.kind == apogee::training::CycleLockState::Kind::Idle);
+    CHECK_FALSE(state.running());
+    CHECK_FALSE(state.stale());
+    CHECK(apogee::training::stale_lock_text(state).empty());
+    {
+        std::string error;
+        const std::optional<CycleLock> held = CycleLock::acquire(fixture.cycle, error);
+        REQUIRE(held.has_value());
+        state = apogee::training::cycle_lock_state(fixture.cycle);
+        CHECK(state.running());
+        CHECK(state.pid == apogee::platform::current_process_id());
+        CHECK(state.path == path);
+        CHECK(apogee::training::stale_lock_text(state).empty());
+    }
+    // A pass killed outright: its id on a file nobody removed.
+    write(path, "999999999\n");
+    state = apogee::training::cycle_lock_state(fixture.cycle);
+    CHECK(state.stale());
+    CHECK_FALSE(state.running());
+    CHECK(state.pid == 999999999);
+    CHECK(state.path == path);
+    CHECK(apogee::training::stale_lock_text(state) ==
+          "stopped -- cycle.lock is left by process 999999999, which is not running; remove " +
+              path.string() + " to run again");
+    // A file that names no process is never taken over, so it reads held.
+    write(path, "\n");
+    CHECK(apogee::training::cycle_lock_state(fixture.cycle).running());
+}
+
+TEST_CASE(
+    "a pass holds its pipeline's lock beside cycle.lock while it trains, and lets both "
+    "go; a stale cycle.lock is still refused by the next pass",
+    "[training][cycle][lock]") {
+    Fixture fixture;
+    write(fixture.queue / "day1.jsonl", kPlain);
+    apogee::training::CycleRequest request = fixture.request();
+    std::vector<long> holders;
+    std::vector<bool> cycle_held;
+    request.on_manifest = [&](const apogee::training::PipelineRunManifest& manifest) {
+        const auto holder = apogee::training::pipeline_holder(fixture.training / "pipelines" /
+                                                              manifest.pipeline_run_id);
+        holders.push_back(holder.has_value() ? holder->pid : 0);
+        cycle_held.push_back(apogee::training::cycle_lock_state(fixture.cycle).running());
+    };
+    const apogee::training::CycleOutcome outcome = apogee::training::run_cycle(request);
+    INFO(outcome.error);
+    REQUIRE(outcome.ok);
+    REQUIRE_FALSE(holders.empty());
+    for (std::size_t i = 0; i < holders.size(); ++i) {
+        CHECK(holders[i] == apogee::platform::current_process_id());
+        CHECK(cycle_held[i]);
+    }
+    CHECK_FALSE(apogee::training::pipeline_holder(fixture.training / "pipelines" /
+                                                  outcome.record->pipeline_id)
+                    .has_value());
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "pipelines" /
+                                        outcome.record->pipeline_id / "pipeline.lock"));
+    CHECK(apogee::training::cycle_lock_state(fixture.cycle).kind ==
+          apogee::training::CycleLockState::Kind::Idle);
+
+    // The recorded rule stands (27h): a dead pass's lock reads stale and the
+    // next pass refuses it, the file untouched.
+    write(fixture.cycle / "cycle.lock", "999999999\n");
+    REQUIRE(apogee::training::cycle_lock_state(fixture.cycle).stale());
+    const apogee::training::CycleOutcome refused = apogee::training::run_cycle(request);
+    CHECK_FALSE(refused.ok);
+    CHECK(refused.error.find("If none is, remove the file and run again") != std::string::npos);
+    CHECK(read(fixture.cycle / "cycle.lock") == "999999999\n");
 }
 
 TEST_CASE("a lock a crashed cycle left is refused naming the file, never taken over",
@@ -428,7 +507,7 @@ TEST_CASE(
     CHECK(fixture.history().total_runs == 1);
     CHECK(fixture.history().consecutive_fails == 0);
     CHECK(fixture.promoted.empty());
-    CHECK_FALSE(apogee::training::cycle_lock_held(fixture.cycle));  // released
+    CHECK_FALSE(apogee::training::cycle_lock_state(fixture.cycle).running());  // released
 
     // Data queued: the pipeline runs on the merged file, the gate passes,
     // promote is called with the final stage, the file is consumed, the
@@ -491,7 +570,7 @@ TEST_CASE(
     CHECK(outcome.error.find("halted") != std::string::npos);
     CHECK(outcome.error.find("apogee train cycle resume") != std::string::npos);
     CHECK(fixture.history().total_runs == 4);
-    CHECK_FALSE(apogee::training::cycle_lock_held(fixture.cycle));
+    CHECK_FALSE(apogee::training::cycle_lock_state(fixture.cycle).running());
 
     // Resumed, the bad file gone, a good one queued: the pass counts against
     // the previous score and the anchor, passes, resets the count.

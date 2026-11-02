@@ -240,6 +240,14 @@ bool TerminationWatch::supported() noexcept {
     return true;
 }
 
+bool termination_signal_free() noexcept {
+    struct ::sigaction current{};
+    if (::sigaction(SIGTERM, nullptr, &current) != 0) {
+        return false;
+    }
+    return (current.sa_flags & SA_SIGINFO) == 0 && current.sa_handler == SIG_DFL;
+}
+
 #else
 
 struct TerminationWatch::Impl {};
@@ -261,6 +269,10 @@ int TerminationWatch::caught() const noexcept {
 }
 
 bool TerminationWatch::supported() noexcept {
+    return false;
+}
+
+bool termination_signal_free() noexcept {
     return false;
 }
 
