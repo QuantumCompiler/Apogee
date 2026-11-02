@@ -3,13 +3,16 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -19,7 +22,10 @@
 #include "contracts/config_edit.h"
 #include "logger/session.h"
 #include "modelstore/mlx_info.h"
+#include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
+#include "modelstore/store.h"
+#include "operations/store_references.h"
 #include "platform/platform.h"
 #include "support/cli_home.h"
 #include "support/draft_head_configs.h"
@@ -533,14 +539,21 @@ TEST_CASE("models rename of a drafter's folder repoints the draft beside its bas
     CHECK_THAT(out, ContainsSubstring("repointed 1 backend: e4b-4bit"));
     // Named after the base it runs, never after the drafter beside it.
     CHECK(out.find("renamed backend") == std::string::npos);
-    CHECK(out.find("now names") == std::string::npos);  // no record names it as a base
+    CHECK(out.find("as its base") == std::string::npos);  // no record names it as a base
+    // The drafter's own source, a set of the folder it rode in, follows it
+    // (57i) -- said once, for the count.
+    CHECK_THAT(out, ContainsSubstring("1 record of what was made from it now names "
+                                      "'Gemma4-E4B-Drafter' as its source"));
 
-    // The draft: line alone, its one segment; the record rode inside, as it was.
+    // The draft: line alone, its one segment; the record rode inside, its
+    // source's handle the one thing in it to change.
     const fs::path moved = drafted.home.models() / "Gemma4-E4B-Drafter" / "mlx" / "aaaaaaaaaaaa";
     CHECK_FALSE(fs::exists(drafted.drafter));
     CHECK(slurp(drafted.home.config_path()) ==
           replaced(config, drafted.drafter.string(), apogee::harness::yaml_scalar(moved.string())));
-    CHECK(DraftedHome::record(moved) == record);
+    CHECK(DraftedHome::record(moved) ==
+          replaced(record, "\"Gemma4-E4B-Assistant/safetensors/eeeeeeeeeeee\"",
+                   "\"Gemma4-E4B-Drafter/safetensors/eeeeeeeeeeee\""));
 
     // Still paired, with no conversion: the ladder and models info as before.
     CHECK(drafted.entry("e4b-4bit").draft == moved.string());
@@ -837,5 +850,172 @@ TEST_CASE("a folder moved by a family or a backend's rename takes the video poin
         CHECK(config.models.default_video == "org--big");
         CHECK(config.find_backend("big-4bit")->model_path ==
               (home.models() / "org--big" / "mlx" / "666666666666").string());
+    }
+}
+
+// --- what was made from a folder follows it (57i) ----------------------------------------
+
+namespace {
+
+/// `org--text` as a chain leaves it: its SafeTensors set (pulled, `ref` the
+/// repository), the F16 converted from it, a Q4_K_M quantized from the F16
+/// and an MLX build converted from the set -- each record naming its source
+/// by handle -- run by `names`; and `org--other`, whose conversion names its
+/// own folder.
+struct ConvertedHome {
+    apogee::testing::CliHome home{std::string{}};
+    apogee::models::StoreRoots roots = apogee::models::StoreRoots::at(home.models());
+    fs::path folder = home.models() / "org--text";
+    fs::path other = home.models() / "org--other" / "gguf" / "333333333333" / "other-F16.gguf";
+
+    explicit ConvertedHome(const std::vector<std::string>& names) {
+        const fs::path set = folder / "safetensors" / "aaaaaaaaaaaa";
+        write_file(set / "config.json", R"({"architectures": ["Qwen3ForCausalLM"]})");
+        write_file(set / "model.safetensors", "weights");
+        apogee::models::Snapshot pulled;
+        pulled.ref = "org/text";
+        pulled.source = "huggingface";
+        pulled.pulled_at = "2026-10-21T09:00:00Z";
+        pulled.files = {{.path = "model.safetensors", .size = 7, .sha256 = std::string(64, 'a')}};
+        REQUIRE(apogee::models::write_snapshot(set, pulled));
+        gguf(folder / "gguf" / "111111111111" / "text-F16.gguf",
+             "org--text/safetensors/aaaaaaaaaaaa", "convert", "--outtype f16");
+        gguf(folder / "gguf" / "222222222222" / "text-Q4_K_M.gguf", "org--text/gguf/111111111111",
+             "quantize", "Q4_K_M");
+        const fs::path mlx = folder / "mlx" / "bbbbbbbbbbbb";
+        mlx_set(mlx, apogee::testing::kGemma4BaseE4BConfig, "chat");
+        apogee::models::Snapshot built = *apogee::models::load_snapshot(mlx);
+        built.ref = "org--text/safetensors/aaaaaaaaaaaa";
+        REQUIRE(apogee::models::write_snapshot(mlx, built));
+        gguf(other, "org--other/safetensors/aaaaaaaaaaaa", "convert", "--outtype f16");
+        std::string backends;
+        for (const std::string& name : names) {
+            backends +=
+                "  " + name + ":\n    type: llamacpp\n    model_path: " +
+                (folder / "gguf" / (name.ends_with("F16") ? "111111111111" : "222222222222") /
+                 (name.ends_with("F16") ? "text-F16.gguf" : "text-Q4_K_M.gguf"))
+                    .string() +
+                "\n";
+        }
+        std::ofstream{home.config_path(), std::ios::binary | std::ios::trunc} << "backends:\n"
+                                                                              << backends;
+    }
+
+    static void gguf(const fs::path& file, const std::string& ref, const std::string& source,
+                     const std::string& note) {
+        write_file(file, "GGUF");
+        apogee::models::Sidecar record;
+        record.ref = ref;
+        record.source = source;
+        record.transform = source;
+        record.transform_note = note;
+        REQUIRE(apogee::models::write_sidecar(file, record));
+    }
+
+    /// Every record in the store that names a source by handle, each with
+    /// whether that source is where the handle says.
+    [[nodiscard]] std::vector<std::string> sources() const {
+        std::vector<std::string> out;
+        const auto found = [this](const std::string& ref) {
+            const std::optional<apogee::models::WeightsHandle> handle =
+                apogee::models::parse_weights_handle(ref);
+            std::error_code code;
+            return handle.has_value() &&
+                   fs::is_directory(apogee::models::find_weights_dir(roots, handle->format,
+                                                                     handle->model, handle->id),
+                                    code);
+        };
+        for (const apogee::models::StoredGguf& stored : apogee::models::list_store_ggufs(roots)) {
+            const std::string ref = apogee::models::load_sidecar(stored.file)->ref;
+            out.push_back(ref + (found(ref) ? " (found)" : " (nowhere)"));
+        }
+        for (const apogee::models::StoredMlx& stored : apogee::models::list_store_mlx(roots)) {
+            const std::string ref = apogee::models::load_snapshot(stored.dir)->ref;
+            out.push_back(ref + (found(ref) ? " (found)" : " (nowhere)"));
+        }
+        std::ranges::sort(out);
+        return out;
+    }
+};
+
+}  // namespace
+
+TEST_CASE("every rename carries what was made from a folder to its sources' new handles",
+          "[renames][models][lineage]") {
+    // 57i, finding 5: the three rename paths rewrote a drafter's `bases`
+    // alone, so every conversion and quantization still named the old
+    // folder -- lineage lost the source, a repeat convert made it again, and
+    // an MLX Wan conversion lost its tokenizer.
+    std::string out;
+    std::string err;
+    const auto expect = [](const std::string& to) {
+        // The other folder's names a set it never pulled: found nowhere,
+        // before and after.
+        std::vector<std::string> listed{
+            "org--other/safetensors/aaaaaaaaaaaa (nowhere)", to + "/gguf/111111111111 (found)",
+            to + "/safetensors/aaaaaaaaaaaa (found)", to + "/safetensors/aaaaaaaaaaaa (found)"};
+        std::ranges::sort(listed);
+        return listed;
+    };
+    SECTION("models rename of the folder") {
+        const ConvertedHome store{{"text-Q4KM"}};
+        const std::string other = slurp(apogee::models::sidecar_path_for(store.other));
+        REQUIRE(run(store.home, {"models", "rename", "org--text", "org--words"}, &out, &err) == 0);
+        INFO(out);
+        CHECK_THAT(out, ContainsSubstring("3 records of what was made from it now name "
+                                          "'org--words' as its source"));
+        CHECK(store.sources() == expect("org--words"));
+        // Another folder's record, and the pull's own, untouched.
+        CHECK(slurp(apogee::models::sidecar_path_for(store.other)) == other);
+        CHECK(apogee::models::load_snapshot(store.home.models() / "org--words" / "safetensors" /
+                                            "aaaaaaaaaaaa")
+                  ->ref == "org/text");
+        // A repeat quantize finds its own earlier result rather than making it
+        // again; lineage names the source where it is.
+        REQUIRE(run(store.home, {"models", "info", "org--words/gguf/222222222222", "--quiet"}, &out,
+                    &err) == 0);
+        CHECK_THAT(out, ContainsSubstring("quantized to Q4_K_M from org--words/gguf/111111111111 "
+                                          "(recorded)"));
+        CHECK(out.find("no longer on disk") == std::string::npos);
+        REQUIRE(run(store.home, {"models", "quantize", "org--words/gguf/111111111111"}, &out,
+                    &err) == 0);
+        CHECK_THAT(out, ContainsSubstring("already quantized"));
+    }
+    SECTION("by the family's name") {
+        const ConvertedHome store{{"text-F16", "text-Q4KM"}};
+        REQUIRE(run(store.home, {"models", "rename", "text", "words"}, &out, &err) == 0);
+        INFO(out);
+        const apogee::harness::Config config =
+            apogee::harness::load_config(store.home.config_path());
+        REQUIRE(config.find_backend("words-F16") != nullptr);
+        const std::string moved = apogee::commands::stored_model_at(
+            store.roots, config.find_backend("words-F16")->model_path);
+        REQUIRE_FALSE(moved.empty());
+        CHECK(moved != "org--text");
+        CHECK(store.sources() == expect(moved));
+        CHECK_THAT(out, ContainsSubstring("3 records of what was made from it now name"));
+    }
+    SECTION("by the backend's own rename, its store following") {
+        const ConvertedHome store{{"text-Q4KM"}};
+        REQUIRE(run(store.home, {"config", "rename-backend", "text-Q4KM", "words-Q4KM"}, &out,
+                    &err) == 0);
+        INFO(out);
+        CHECK_THAT(out, ContainsSubstring("moved store 'org--text' to 'org--words'"));
+        CHECK(store.sources() == expect("org--words"));
+    }
+    SECTION("a record that would not round-trip is left as it was, and said") {
+        const ConvertedHome store{{"text-Q4KM"}};
+        const fs::path f16 = store.folder / "gguf" / "111111111111" / "text-F16.gguf";
+        const std::string foreign =
+            R"({"ref": "org--text/safetensors/aaaaaaaaaaaa", "source": "convert", "later": 1})";
+        std::ofstream{apogee::models::sidecar_path_for(f16), std::ios::binary | std::ios::trunc}
+            << foreign;
+        REQUIRE(run(store.home, {"models", "rename", "org--text", "org--words"}, &out, &err) == 0);
+        INFO(out);
+        CHECK_THAT(out, ContainsSubstring("2 records of what was made from it now name"));
+        CHECK_THAT(out, ContainsSubstring("the record of org--words/gguf/111111111111 could not be "
+                                          "rewritten -- it still names 'org--text' as its source"));
+        CHECK(slurp(apogee::models::sidecar_path_for(store.home.models() / "org--words" / "gguf" /
+                                                     "111111111111" / "text-F16.gguf")) == foreign);
     }
 }

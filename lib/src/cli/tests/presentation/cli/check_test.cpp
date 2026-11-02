@@ -3803,6 +3803,56 @@ TEST_CASE(
                               std::string{kUse});
 }
 
+TEST_CASE("check's off-pin remedy for mlx-video, followed, passes the row it named",
+          "[commands][check][mlx][mlx_video][m23]") {
+    // 57i, finding 4: the remedy is `train setup --with mlx-video`, whose
+    // install is `PythonEnv::install` -- here over a runner standing for pip
+    // as probe 2 measured it: the set's own pip keeps the commit there, and
+    // only a forced reinstall of the pinned requirement builds the pin.
+    if (apogee::platform::host_target().starts_with("windows")) {
+        SKIP("the scripted git is a POSIX file on a POSIX PATH");
+    }
+    const Install install;
+    install.seed();
+    (void)apogee::harness::seed_data_directory(install.root);
+    write_fake_mlx_runtime(install);
+    CheckInputs inputs = inputs_for(install);
+    inputs.host_target = "macos-arm64";
+    const auto video_row = [&inputs] {
+        const CheckReport report = run_checks(inputs);
+        const apogee::commands::CheckRow* row = row_in(report, "MLX", "video");
+        REQUIRE(row != nullptr);
+        return *row;
+    };
+    install_distribution(install, "mlx_video", "mlx-video", "0.1.0",
+                         "1111111111111111111111111111111111111111");
+    apogee::commands::CheckRow video = video_row();
+    REQUIRE(video.status == Status::Warn);
+    REQUIRE(video.remedy == "apogee train setup --with mlx-video");
+
+    const apogee::testing::TempDir bin{"check-git-" + std::to_string(std::random_device{}())};
+    std::ofstream{bin.path() / "git"} << "#!/bin/sh\n";
+    std::filesystem::permissions(bin.path() / "git", std::filesystem::perms::owner_all);
+    const apogee::testing::EnvGuard path{"PATH", bin.path().string()};
+    apogee::training::PythonEnv env{
+        venv_of(install), [&install](const apogee::platform::ChildCommand& command,
+                                     const apogee::harness::CancellationToken& /*token*/) {
+            if (std::ranges::find(command.arguments, "--force-reinstall") !=
+                command.arguments.end()) {
+                install_distribution(install, "mlx_video", "mlx-video", "0.1.0",
+                                     std::string{kPinnedCommit});
+            }
+            apogee::training::CommandResult result;
+            result.exit_code = 0;
+            return result;
+        }};
+    REQUIRE(env.install(apogee::training::RequirementSet::MlxVideo).empty());
+    video = video_row();
+    CHECK(video.status == Status::Ok);
+    CHECK(video.detail.find("at commit 87db56a51758") != std::string::npos);
+    CHECK(video.detail.find("the commit Apogee pins") != std::string::npos);
+}
+
 TEST_CASE(
     "mlx-audio's row holds it to its floor, and absent it is a skip that names the rebuild where "
     "the environment's Python cannot take it",

@@ -150,7 +150,13 @@ no Python is started and nothing is imported. A set below its floor -- an
 `mlx-vlm` 0.3.x installed before 53f raised its floor to `0.6.1` -- or
 `mlx-video` at another commit, or from none, is a warning naming `apogee train
 setup --with <set>`, never a failure: the older library still runs what it
-ran. A record that states no version, or none that is a release number, is
+ran. That remedy, followed, fixes what it named (57i): pip keeps an
+installed version it is asked for again whatever commit it was built from,
+so `train setup` installs an `mlx-video` it read off its pin again at the
+pin -- a second pip call, `--force-reinstall --no-deps` on the pinned
+requirement alone, `torch` left as it is -- and says `installed` only when
+the set then reads its pin; one still off it fails, naming the commit its
+`direct_url.json` says, and is not recorded. A record that states no version, or none that is a release number, is
 said as such and held to nothing. An opt-in set that is not installed reads
 `not installed (opt-in)` and is skipped, never warned about, since nobody
 asked for it -- `check --fix` never installs one -- so a fresh install still
@@ -517,7 +523,13 @@ numbers are `max + 1`, never the count. `retain_versions` (default 3) prunes
 the oldest inactive GGUFs, never the active one, and keeps the pruned
 entries as history. The fused checkpoint is removed after a successful
 conversion unless `--keep-fused`. **A failure at any step leaves the config
-and the ledger unchanged.** **One promotion into a backend at a time**
+and the ledger unchanged.** **An entry that applies adapters is refused a
+merged version** (57i): it would replace the base every adapter on the entry
+was pinned to -- those `config set-backend --adapters` added by hand as well
+as the ledger's own -- and no re-pin fits a fine-tune merged over their base,
+so `train promote <run> --as <entry>` is refused before anything is fused or
+stored, naming the adapters and the two ways out: `apogee config set-backend
+<entry> --adapters ""`, or promote under a new name. **One promotion into a backend at a time**
 (57g): a promotion holds `training/versions/<backend>.promote.lock` from
 reading the ledger to saving it -- a lock the system lets go of if its
 holder dies. A second promotion into the same backend (a cycle pass's, and

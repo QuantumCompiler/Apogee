@@ -265,6 +265,8 @@ apogee_add_module(cli
     cli/auth_cmd.cpp
     cli/machine_schema_cmd.h
     cli/machine_schema_cmd.cpp
+    cli/quantize_child_cmd.h
+    cli/quantize_child_cmd.cpp
     cli/provider_offer.h
     cli/provider_offer.cpp
     cli/providers_cmd.h

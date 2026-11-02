@@ -147,6 +147,15 @@ std::optional<WeightsHandle> parse_weights_handle(std::string_view text) {
     return handle;
 }
 
+std::optional<std::string> renamed_handle(std::string_view ref, std::string_view from,
+                                          std::string_view to) {
+    const std::optional<WeightsHandle> handle = parse_weights_handle(ref);
+    if (!handle.has_value() || handle->model != from || to.empty()) {
+        return std::nullopt;
+    }
+    return weights_handle(to, handle->format, handle->id);
+}
+
 bool is_weight_id(std::string_view text) noexcept {
     return text.size() == kWeightIdLength && std::ranges::all_of(text, [](char c) {
                return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');

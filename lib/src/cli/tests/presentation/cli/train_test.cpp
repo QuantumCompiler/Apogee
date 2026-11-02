@@ -284,6 +284,55 @@ struct RunFixture {
 
 }  // namespace
 
+TEST_CASE("a merged promote into an entry applying hand-pinned adapters is refused before a fuse",
+          "[commands][train][promote][adapters]") {
+    // 57i, finding 2: adapters added by hand (`config set-backend
+    // --adapters`) are beyond the ledger `target_conflict` reads, and the
+    // promote moved model_path under them -- every later load refused by
+    // `adapter_refusal`, nothing having warned. A merged version replaces the
+    // base they were trained over, so no re-pin fits: the doors are taking
+    // them off, or another name.
+    const std::string pin(64, 'a');
+    const RunFixture fixture{"A",
+                             "  foo:\n    type: llamacpp\n    model_path: /srv/base-F16.gguf\n"
+                             "    adapters:\n      - path: /srv/loras/tone.gguf\n"
+                             "        base_sha256: " +
+                                 pin +
+                                 "\n  bar:\n    type: mlx\n    model_path: /srv/base-mlx\n"
+                                 "    adapters:\n      - path: /srv/loras/tone-mlx\n"
+                                 "        base_sha256: " +
+                                 pin + "\n"};
+    const std::string id = fixture.trained();
+    (void)fixture.evaluated(id);
+    const std::string config = read_file(fixture.base.config_path);
+    std::string out;
+    std::string err;
+    CHECK(fixture.run({"train", "promote", id, "--as", "foo"}, &out, &err) == 1);
+    CHECK(err.find("'foo' applies adapters over its model_path (/srv/loras/tone.gguf), and a "
+                   "merged version would replace that base under them -- take them off first: "
+                   "apogee config set-backend foo --adapters \"\", or promote under a new "
+                   "name") != std::string::npos);
+    // An MLX entry's adapter directories the same.
+    CHECK(fixture.run({"train", "promote", id, "--as", "bar"}, &out, &err) == 1);
+    CHECK(err.find("'bar' applies adapters over its model_path (/srv/loras/tone-mlx), and a "
+                   "merged version would replace that base under them") != std::string::npos);
+    // Nothing fused, stored or recorded -- refused under the promotion's
+    // lock (57g), no ledger written -- and the config byte for byte.
+    CHECK(read_file(fixture.base.config_path) == config);
+    const apogee::training::TrainingStore store{fixture.training};
+    CHECK_FALSE(store.list_versions("foo").has_value());
+    CHECK_FALSE(store.list_versions("bar").has_value());
+    CHECK_FALSE(std::filesystem::exists(fixture.home / "models" / "tiny" / "gguf"));
+    CHECK_FALSE(std::filesystem::exists(fixture.training / "runs" / id / "fused"));
+
+    // The first door, then the same promote: it lands.
+    REQUIRE(fixture.run({"config", "set-backend", "foo", "--adapters", ""}, &out, &err) == 0);
+    REQUIRE(fixture.run({"train", "promote", id, "--as", "foo"}, &out, &err) == 0);
+    CHECK(out.find("updated backend foo -> v1") != std::string::npos);
+    CHECK(
+        apogee::harness::load_config(fixture.base.config_path).backends.at("foo").adapters.empty());
+}
+
 TEST_CASE(
     "train run on the mock writes a running manifest that ends complete, with the status "
     "line seen and the dataset hashed",
@@ -3439,6 +3488,25 @@ struct SetupMachine {
     std::map<std::string, std::string> versions{
         {"python3", "3.14.5"}, {"python3.13", "3.13.13"}, {"python3.12", "3.12.13"}};
     std::vector<apogee::platform::ChildCommand> commands;
+    /// The commit a pip install of mlx-video's pinned requirement records it
+    /// at (57i): the pin, as pip builds it -- or another, as a pip that kept
+    /// what was there leaves it. A `--force-reinstall` builds the pin unless
+    /// `reinstall_keeps` says it left it as it was.
+    std::string mlx_video_commit = "87db56a51758fefb748a359b90a5283bb8ba4837";
+    bool reinstall_keeps = false;
+
+    /// mlx-video's record in the environment at `venv`, at `commit`, as pip
+    /// writes it (PEP 610).
+    static void record_mlx_video(const std::filesystem::path& venv, const std::string& commit) {
+        const std::filesystem::path record =
+            venv / "lib" / "python3.12" / "site-packages" / "mlx_video-0.1.0.dist-info";
+        std::filesystem::remove_all(record);
+        std::filesystem::create_directories(record);
+        std::ofstream{record / "METADATA"} << "Name: mlx-video\nVersion: 0.1.0\n";
+        std::ofstream{record / "direct_url.json"}
+            << R"({"url": "https://github.com/Blaizzy/mlx-video.git", "vcs_info": {"vcs": "git", )"
+            << R"("commit_id": ")" << commit << R"("}})";
+    }
 
     SetupMachine() {
         for (const auto& [name, version] : versions) {
@@ -3465,6 +3533,18 @@ struct SetupMachine {
                 std::filesystem::create_directories(venv / "bin");
                 std::ofstream{venv / "bin" / "python"} << "#!fake";
                 std::ofstream{venv / "pyvenv.cfg"} << "version = " << versions.at(name) << "\n";
+            } else if (command.arguments.size() >= 2 && command.arguments[1] == "pip") {
+                const std::filesystem::path venv =
+                    std::filesystem::path{command.program}.parent_path().parent_path();
+                const auto& words = command.arguments;
+                const bool forced = std::ranges::find(words, "--force-reinstall") != words.end();
+                const bool video = std::ranges::any_of(
+                    words, [](const std::string& word) { return word.starts_with("mlx-video @"); });
+                if (forced && !reinstall_keeps) {
+                    record_mlx_video(venv, "87db56a51758fefb748a359b90a5283bb8ba4837");
+                } else if (video && !forced) {
+                    record_mlx_video(venv, mlx_video_commit);
+                }
             }
             return result;
         };
@@ -3568,6 +3648,49 @@ TEST_CASE("an environment on 3.14 refuses voice before pip; --rebuild asks, then
                                                      "mlx-vlm>=0.6.1", "torch>=2.6", "torch>=2.6"});
     CHECK(said.find("(Python 3.12.13); sets: prepare, mlx, convert, mlx-vlm, video, voice") !=
           std::string::npos);
+}
+
+TEST_CASE("train setup --with mlx-video off its pin installs it at the pin, or says it did not",
+          "[commands][train][setup][mlx_video]") {
+    // 57i, finding 4: `check`'s remedy for an off-pin mlx-video is this very
+    // command, and pip -- seeing the version it is asked for installed --
+    // used to leave the old commit while `train setup` said `installed`.
+    if (apogee::platform::host_target().starts_with("windows")) {
+        SKIP("the scripted interpreters are POSIX files on a POSIX PATH");
+    }
+    using apogee::training::RequirementSet;
+    SetupMachine machine;
+    std::ofstream{machine.bin.path() / "git"} << "#!/bin/sh\n";
+    std::filesystem::permissions(machine.bin.path() / "git", std::filesystem::perms::owner_all);
+    std::string said;
+    // Installed the README way, at main's head: off its pin.
+    machine.mlx_video_commit = "1111111111111111111111111111111111111111";
+    machine.reinstall_keeps = true;
+    REQUIRE(machine.run({}, machine.request({RequirementSet::Prepare}), &said) == 0);
+    const std::filesystem::path venv = apogee::harness::training_venv_dir();
+    SetupMachine::record_mlx_video(venv, machine.mlx_video_commit);
+    // A pip that leaves it there: no `installed`, and why.
+    CHECK(machine.run({}, machine.request({RequirementSet::MlxVideo}), &said) != 0);
+    INFO(said);
+    CHECK(said.find("installed\n") == std::string::npos);
+    CHECK(said.find("mlx-video is not at the commit this Apogee pins (87db56a51758): its "
+                    "direct_url.json") != std::string::npos);
+    CHECK(said.find("names commit 111111111111") != std::string::npos);
+    CHECK(apogee::training::read_installed_set(venv, RequirementSet::MlxVideo).standing ==
+          apogee::training::SetStanding::OffPin);
+    // The reinstall that builds the pin: installed, and current.
+    machine.reinstall_keeps = false;
+    machine.commands.clear();
+    REQUIRE(machine.run({}, machine.request({RequirementSet::MlxVideo}), &said) == 0);
+    CHECK(said.find("installed\n") != std::string::npos);
+    REQUIRE(machine.commands.size() >= 2);
+    CHECK(machine.commands.back().arguments ==
+          std::vector<std::string>{"-m", "pip", "install", "--disable-pip-version-check",
+                                   "--force-reinstall", "--no-deps",
+                                   "mlx-video @ git+https://github.com/Blaizzy/mlx-video.git@"
+                                   "87db56a51758fefb748a359b90a5283bb8ba4837"});
+    CHECK(apogee::training::read_installed_set(venv, RequirementSet::MlxVideo).standing ==
+          apogee::training::SetStanding::Current);
 }
 
 TEST_CASE("train setup --with mlx-video says the commit pip builds it from, and installs it",

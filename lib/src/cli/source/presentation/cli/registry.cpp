@@ -25,6 +25,7 @@
 #include "cli/mcp_cmd.h"
 #include "cli/models.h"
 #include "cli/providers_cmd.h"
+#include "cli/quantize_child_cmd.h"
 #include "cli/reset.h"
 #include "cli/review_cmd.h"
 #include "cli/serve_cmd.h"
@@ -115,6 +116,8 @@ CommandRegistry default_registry(ShellEntry shell) {
     registry.add(std::make_unique<CompleteProtocolCommand>());
     registry.add(std::make_unique<McpToolsServerCommand>());
     registry.add(std::make_unique<MachineSchemaCommand>());
+    // Hidden too: a quantization run as a child of models quantize (57i).
+    registry.add(std::make_unique<QuantizeChildCommand>());
     registry.add(std::make_unique<TrainCommand>());
     return registry;
 }

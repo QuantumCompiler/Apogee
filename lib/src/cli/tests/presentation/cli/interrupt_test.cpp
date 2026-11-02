@@ -97,6 +97,47 @@ TEST_CASE("Ctrl-C still exits 130, and a fresh scope forgets an earlier scope's 
     CHECK(InterruptScope::exit_code(kCancelled) == kCancelled);
 }
 
+TEST_CASE("a scope made inside a live one joins it: one token, a stop between stages kept",
+          "[commands][interrupt][chain]") {
+    // 57i: a register chain holds one scope across its stages while each
+    // stage's verb keeps its own. A nested scope re-arming the token lost a
+    // Ctrl-C made between two stages, and a copy of the outer token missed
+    // every signal after a stage's scope had come and gone.
+    const Standing free_term{SIGTERM, SIG_DFL};
+    void (*const before)(int) = std::signal(SIGINT, SIG_DFL);
+    (void)std::signal(SIGINT, before);
+    {
+        const InterruptScope chain;
+        const apogee::harness::CancellationToken outer = InterruptScope::token();
+        {
+            const InterruptScope stage;
+            CHECK_FALSE(InterruptScope::token().stop_requested());
+        }
+        // The stage's scope gone, the chain's handler still stands.
+        void (*const standing)(int) = std::signal(SIGINT, SIG_DFL);
+        (void)std::signal(SIGINT, standing);
+        CHECK(standing != before);
+        // A Ctrl-C between two stages: the next stage's scope starts stopped,
+        // and the chain's own copy of the token sees it.
+        (void)std::raise(SIGINT);
+        {
+            const InterruptScope next;
+            CHECK(InterruptScope::token().stop_requested());
+        }
+        CHECK(outer.stop_requested());
+    }
+    // The outermost scope put back what was there.
+    void (*const after)(int) = std::signal(SIGINT, SIG_DFL);
+    (void)std::signal(SIGINT, after);
+    CHECK(after == before);
+    CHECK(InterruptScope::exit_code(kCancelled) == kCancelled);
+    // A scope made afterwards arms afresh.
+    {
+        const InterruptScope fresh;
+        CHECK_FALSE(InterruptScope::token().stop_requested());
+    }
+}
+
 TEST_CASE("a SIGTERM someone else stands -- a session's watch, serve -- is left to them",
           "[commands][interrupt][sigterm]") {
     g_recorded = 0;

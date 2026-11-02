@@ -80,6 +80,17 @@ struct StoreReference {
 [[nodiscard]] bool points_inside(const models::StoreRoots& roots, const StoreReference& reference,
                                  const std::filesystem::path& dir);
 
+/// Whether removing every stored set in `removes` -- a delete's whole plan --
+/// leaves `reference` naming nothing (57i): a path when it lies in one of
+/// them; `default_video` when the set it names is one of them or lies in
+/// one, or when it names a model (or a format under it) whose video sets
+/// all go with at least one among `removes`. A model left holding one runs
+/// that one, and one left holding two was ambiguous before the delete --
+/// `video generate` says so itself -- so neither is stranded, warned about
+/// or cleared.
+[[nodiscard]] bool removal_strands(const models::StoreRoots& roots, const StoreReference& reference,
+                                   const std::vector<std::filesystem::path>& removes);
+
 /// `reference`'s value once stored model `model` is renamed `renamed`, or
 /// nullopt when it does not point into `model`: a path with its one store
 /// segment swapped, so a `~` or a `${VAR}` the user wrote stays theirs; the

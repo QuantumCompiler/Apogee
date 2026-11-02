@@ -302,6 +302,15 @@ public:
     /// not run on is refused before pip, naming the rebuild (M19); so is a
     /// set with a pinned source (53k) where git -- what pip fetches it with
     /// -- is not on PATH.
+    ///
+    /// A pinned set is installed only when it reads `Current` after pip
+    /// (57i): one read `OffPin` before is installed again at its pin by a
+    /// second pip call -- `--force-reinstall --no-deps` on the pinned
+    /// requirement alone, its other packages left as they are -- since pip
+    /// keeps an installed version it is asked for again whatever commit it
+    /// came from; and one still not `Current` after is a failure naming what
+    /// its `direct_url.json` says, never recorded. `check`'s off-pin remedy,
+    /// followed, fixes what it named.
     [[nodiscard]] std::string install(RequirementSet set,
                                       const harness::CancellationToken& cancellation = {});
 

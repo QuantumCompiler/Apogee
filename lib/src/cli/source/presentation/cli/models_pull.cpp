@@ -47,6 +47,7 @@
 #include "operations/backend_fields.h"
 #include "operations/renames.h"
 #include "operations/store_references.h"
+#include "platform/child_process.h"
 #include "platform/platform.h"
 #include "training/convert.h"
 #include "training/mlx_convert.h"
@@ -275,11 +276,10 @@ void print_backend_hint(const std::filesystem::path& model_file,
 }
 
 /// What a delete strands (M14, 55d): every reference the one walk lists
-/// (`store_references`) that points inside one of the weights directories it
-/// removes. A backend whose weights go is stranded whole -- its entry is what
-/// is removed -- and any other reference into what goes is one to clear: a
-/// `draft:`, an adapter, `models.default_video`. Best effort: a config that
-/// does not load strands nothing.
+/// (`store_references`) that the weights directories it removes leave naming
+/// nothing (`removal_strands`, 57i). A backend whose weights go is stranded whole -- its entry is
+/// what is removed -- and any other reference into what goes is one to clear: a `draft:`, an
+/// adapter, `models.default_video`. Best effort: a config that does not load strands nothing.
 struct Stranded {
     std::filesystem::path path{};
     harness::Config config{};
@@ -305,10 +305,9 @@ struct Stranded {
     }
     std::vector<StoreReference> others;
     for (StoreReference& reference : store_references(out.config)) {
-        const bool inside = std::ranges::any_of(dirs, [&](const std::filesystem::path& dir) {
-            return points_inside(roots, reference, dir);
-        });
-        if (!inside) {
+        // The whole plan at once (57i): a model's video pointer is stranded
+        // only when none of its video sets survives the delete.
+        if (!removal_strands(roots, reference, dirs)) {
             continue;
         }
         if (!reference.weights) {
@@ -2679,9 +2678,15 @@ ConvertedModel convert_model(const models::StoreRoots& roots, std::string_view g
 /// into the store. llama.cpp's own log stays off the terminal; the busy line
 /// counts its tensors instead (M3). Standalone it prints what to do next;
 /// `chained`, warnings come back in the result and nothing is suggested.
+///
+/// Under one `InterruptScope` (57i) -- in a chain, the chain's own, which it
+/// joins -- whose token the quantizer is handed: a stop terminates it,
+/// removes what it staged and says `cancelled -- nothing was written`, exit
+/// 130, as a stopped hash does.
 QuantizedModel quantize_model(const models::StoreRoots& roots, std::string_view given,
                               std::string_view from, const std::string& type,
                               const Quantizer& quantizer, bool chained) {
+    const InterruptScope interrupt;
     const GgufChoice input = choose_gguf(roots, given, from);
     if (!input.error.empty()) {
         fail(input.error);
@@ -2717,10 +2722,16 @@ QuantizedModel quantize_model(const models::StoreRoots& roots, std::string_view 
     models::QuantizeResult result;
     {
         BusyLine busy{std::cerr, "quantizing to " + level, busy_options(false)};
-        result = quantizer(input.file, output, level,
-                           [&busy, &level](std::size_t done, std::size_t total) {
-                               busy.report("quantizing to " + level, done, total);
-                           });
+        result = quantizer(
+            input.file, output, level,
+            [&busy, &level](std::size_t done, std::size_t total) {
+                busy.report("quantizing to " + level, done, total);
+            },
+            InterruptScope::token());
+    }
+    if (result.stopped) {
+        // Stopped mid-run (57i): the child is gone, and so is what it wrote.
+        cancelled_nothing_written(staging);
     }
     if (!result.ok) {
         // Reported BEFORE any "this will take a while" note: announcing
@@ -2877,7 +2888,14 @@ struct Registration {
 void register_backends(const std::filesystem::path& config_path,
                        const std::vector<Registration>& wanted, bool base_model, bool embedding,
                        ChainLog& log) {
+    std::vector<std::string> done;
     for (const Registration& entry : wanted) {
+        // A stop between two registrations (57i): what is registered stays,
+        // said, and the resume registers the rest.
+        if (InterruptScope::token().stop_requested()) {
+            say_cancelled(done.empty() ? std::string{"nothing was written"}
+                                       : "registered " + spoken_list(done) + ", nothing more");
+        }
         harness::Config config;
         try {
             config = harness::load_config(config_path);
@@ -2918,6 +2936,7 @@ void register_backends(const std::filesystem::path& config_path,
                 std::cout << default_set_words(entry.name) << "\n";
             }
         }
+        done.push_back(entry.name);
         log.ready.push_back(entry.name +
                             (base_model ? "  (a base model: it continues text rather than "
                                           "answering -- to chat, convert its instruction-tuned "
@@ -2986,11 +3005,38 @@ void check_base_name(const std::string& base_name, bool given, bool registers) {
 
 }  // namespace
 
-Quantizer default_quantizer() {
-    return [](const std::filesystem::path& input, const std::filesystem::path& output,
-              std::string_view level, const models::QuantizeProgress& progress) {
-        return models::quantize(input, output, level, progress);
+Quantizer child_quantizer(const std::filesystem::path& executable) {
+    return [executable](const std::filesystem::path& input, const std::filesystem::path& output,
+                        std::string_view level, const models::QuantizeProgress& progress,
+                        const harness::CancellationToken& cancellation) {
+        return models::quantize_in_child(
+            models::quantize_child_command(executable, input, output, level), progress,
+            cancellation);
     };
+}
+
+Quantizer default_quantizer() {
+    if (models::quantize_supported() && platform::supports_child_processes()) {
+        if (const std::filesystem::path self = platform::executable_path(); !self.empty()) {
+            return child_quantizer(self);
+        }
+    }
+    return [](const std::filesystem::path& input, const std::filesystem::path& output,
+              std::string_view level, const models::QuantizeProgress& progress,
+              const harness::CancellationToken& cancellation) {
+        models::QuantizeResult result = models::quantize(input, output, level, progress);
+        if (cancellation.stop_requested()) {
+            // No child to terminate here: the stop is acted on as it returns.
+            result = models::QuantizeResult{.ok = false, .error = "stopped", .stopped = true};
+        }
+        return result;
+    };
+}
+
+void run_quantize(const QuantizeRequest& request, const Quantizer& quantizer) {
+    const InterruptScope interrupt;
+    (void)quantize_model(request.roots, request.model, request.from, request.type, quantizer,
+                         /*chained=*/false);
 }
 
 TransportMaker curl_transport() {
@@ -3053,7 +3099,8 @@ void run_register_chain(const RegisterChainRequest& request, const ChainTools& t
     if (pulls) {
         stages.push_back({"pull " + request.pull_ref + "'s full weights", [&](ChainLog& chain) {
                               // Ctrl-C stops the download as it stops a
-                              // conversion (55c); each later stage has its own.
+                              // conversion (55c), under the chain's scope,
+                              // which every stage joins (57i).
                               const InterruptScope interrupt;
                               backends::HttpClient client{tools.transport()};
                               PulledSnapshot pulled;
@@ -3133,6 +3180,9 @@ namespace {
 /// it is: a resumed chain registers what is missing and nothing twice.
 void register_mlx_backend(const std::filesystem::path& config_path, const std::string& name,
                           const std::filesystem::path& dir, bool embedding, ChainLog& log) {
+    if (InterruptScope::token().stop_requested()) {
+        say_cancelled("nothing was written");  // stopped before it (57i)
+    }
     harness::Config config;
     try {
         config = harness::load_config(config_path);
@@ -4130,9 +4180,10 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
                 "  apogee models quantize Qwen/Qwen3-8B --type Q4_K_M\n"
                 "  apogee models quantize --types    (to see the choices)");
         }
-        const models::StoreRoots roots = store_roots(models_dir, context.config_path);
-        (void)quantize_model(roots, *quant_in, *quant_from, *quant_type, default_quantizer(),
-                             /*chained=*/false);
+        run_quantize({.roots = store_roots(models_dir, context.config_path),
+                      .model = *quant_in,
+                      .from = *quant_from,
+                      .type = *quant_type});
     });
 
     // ---- convert ------------------------------------------------------------

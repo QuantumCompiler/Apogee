@@ -280,6 +280,9 @@ const std::map<std::string, Classification>& table() {
         {"tui", read_only()},
         {"__complete", read_only()},
         {"__machine-schema", read_only()},
+        {"__quantize",
+         carve_out("a quantization run as a child of models quantize (57i), its progress a "
+                   "protocol on this process's own stdout for the apogee that started it")},
         {"config get", read_only()},
         {"config path", read_only()},
         {"mcp list", read_only()},

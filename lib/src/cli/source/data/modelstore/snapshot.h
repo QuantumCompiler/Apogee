@@ -56,15 +56,17 @@ struct Snapshot {
 [[nodiscard]] bool write_snapshot(const std::filesystem::path& dir, const Snapshot& snapshot);
 [[nodiscard]] std::optional<Snapshot> load_snapshot(const std::filesystem::path& dir);
 
-/// What `rename_snapshot_base` did with a record.
+/// What a rename did with a record: `rename_snapshot_base` with a
+/// drafter's `bases`, and (57i) `rename_snapshot_ref` and
+/// `rename_sidecar_ref` with the source a record names.
 enum class BaseRename : std::uint8_t {
-    /// No record, or one naming no such base: nothing written.
+    /// No record, or one naming no such base or source: nothing written.
     Unnamed,
-    /// The base renamed where it stood, the record written again.
+    /// The name changed where it stood, the record written again.
     Renamed,
-    /// It names the base, and could not be rewritten with only that change:
-    /// it holds what `write_snapshot` would not write back byte for byte, or
-    /// the write failed. Left as it was.
+    /// It names the model, and could not be rewritten with only that change:
+    /// it holds what its writer would not write back byte for byte, or the
+    /// write failed. Left as it was.
     Failed,
 };
 
@@ -76,6 +78,16 @@ enum class BaseRename : std::uint8_t {
 /// not name, and never empties one into pairing by family and width alone.
 [[nodiscard]] BaseRename rename_snapshot_base(const std::filesystem::path& dir,
                                               std::string_view from, std::string_view to);
+
+/// A stored set's record once the model its source lies in is stored under
+/// a new name (57i): a `ref` that is a handle naming a set of `from` -- what
+/// an MLX or a voice conversion records its source by -- names the same set
+/// under `to` (`renamed_handle`), written back through `write_snapshot`
+/// under `rename_snapshot_base`'s guard: a record that would not write back
+/// byte for byte is left, `Failed`. A `ref` that is a repository id or a
+/// path is never touched.
+[[nodiscard]] BaseRename rename_snapshot_ref(const std::filesystem::path& dir,
+                                             std::string_view from, std::string_view to);
 
 /// Whether `dir` looks like a snapshot: a `config.json` and at least one
 /// `*.safetensors` shard.

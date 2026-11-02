@@ -207,6 +207,48 @@ TEST_CASE("each reference points inside the set that holds it, and no other",
         store.pipeline));
 }
 
+TEST_CASE("a model's video pointer is stranded only when the delete takes its last video set",
+          "[store_references][walk][delete]") {
+    // 57i, finding 3 (the probe as a test): `models.default_video` names a
+    // model, which runs the one video set it holds. Holding two, it named
+    // none before the delete -- `video generate` says so -- and deleting one
+    // makes it name the other: nothing stranded, nothing to clear.
+    const Referenced store;
+    const fs::path clip = store.models / "org--clip" / "pipeline";
+    const fs::path first = clip / "aaaaaaaaaaaa";
+    const fs::path second = clip / "bbbbbbbbbbbb";
+    for (const fs::path& set : {first, second}) {
+        write_file(set / "model_index.json",
+                   R"({"_class_name": "WanPipeline", "_diffusers_version": "0.35.0"})");
+    }
+    // A staging directory beside them is no set.
+    write_file(clip / ".incoming-1" / "model_index.json", "{}");
+    const auto strands = [&store](const std::string& value, const std::vector<fs::path>& removes) {
+        return apogee::commands::removal_strands(
+            store.roots, {.backend = {}, .field = "default_video", .value = value}, removes);
+    };
+    // One of two goes: the other is what it names now.
+    CHECK_FALSE(strands("org--clip", {second}));
+    CHECK_FALSE(strands("org--clip/pipeline", {second}));
+    // Both in one plan, or the last one once the other is gone: stranded.
+    CHECK(strands("org--clip", {first, second}));
+    // A pointer naming the set itself goes with that set, whatever is left.
+    CHECK(strands("org--clip/pipeline/bbbbbbbbbbbb", {second}));
+    CHECK_FALSE(strands("org--clip/pipeline/aaaaaaaaaaaa", {second}));
+    // A set it could not run takes nothing from it.
+    CHECK_FALSE(strands("org--clip", {store.gguf}));
+    fs::remove_all(first);
+    CHECK(strands("org--clip", {second}));
+    // A backend's path is stranded by the set it lies in, as before.
+    const StoreReference local{.backend = "local",
+                               .field = "model_path",
+                               .value = (store.gguf / "gemma-Q4_K_M.gguf").string(),
+                               .index = 0,
+                               .weights = true};
+    CHECK(apogee::commands::removal_strands(store.roots, local, {store.lora, store.gguf}));
+    CHECK_FALSE(apogee::commands::removal_strands(store.roots, local, {store.lora}));
+}
+
 TEST_CASE("a rename repoints each reference through its own transform, every other byte kept",
           "[store_references][walk][renames]") {
     const Referenced store;

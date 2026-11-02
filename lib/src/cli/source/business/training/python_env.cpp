@@ -875,8 +875,8 @@ std::string PythonEnv::install(RequirementSet set, const harness::CancellationTo
     }
     // A package built from a commit is fetched with git (53k): without it,
     // said here with the way out, not in pip's words.
-    if (const std::optional<PinnedSource> source = pinned_source(set);
-        source.has_value() && platform::find_on_path("git").empty()) {
+    const std::optional<PinnedSource> source = pinned_source(set);
+    if (source.has_value() && platform::find_on_path("git").empty()) {
         return "the '" + std::string{to_string(set)} + "' set installs " +
                std::string{source->package} + " from " + std::string{source->repository} +
                " at commit " + std::string{source->commit.substr(0, 12)} +
@@ -884,6 +884,12 @@ std::string PythonEnv::install(RequirementSet set, const harness::CancellationTo
                "'xcode-select --install'), then: apogee train setup --with " +
                std::string{to_string(set)};
     }
+    // Off its pin before the install (57i): pip keeps an installed version
+    // it is asked for again -- a VCS requirement at another commit that
+    // declares the same version installs nothing -- so the pinned
+    // requirement is installed again over it, alone.
+    const bool off_pin =
+        source.has_value() && read_installed_set(dir_, set).standing == SetStanding::OffPin;
     platform::ChildCommand command;
     command.program = interpreter().string();
     command.arguments = {"-m", "pip", "install", "--disable-pip-version-check"};
@@ -894,6 +900,42 @@ std::string PythonEnv::install(RequirementSet set, const harness::CancellationTo
     if (!result.ok()) {
         return describe_failure(
             "pip install for the '" + std::string{to_string(set)} + "' set failed", result);
+    }
+    if (off_pin) {
+        platform::ChildCommand reinstall;
+        reinstall.program = interpreter().string();
+        reinstall.arguments = {"-m",
+                               "pip",
+                               "install",
+                               "--disable-pip-version-check",
+                               "--force-reinstall",
+                               "--no-deps",
+                               source->requirement()};
+        const CommandResult again = runner_(reinstall, cancellation);
+        if (!again.ok()) {
+            return describe_failure("pip could not reinstall " + std::string{source->package} +
+                                        " at its pinned commit " +
+                                        std::string{source->commit.substr(0, 12)},
+                                    again);
+        }
+    }
+    // Installed means current (57i): a pinned set is read again, and one
+    // still off its pin is no install -- never recorded, never `installed`.
+    if (source.has_value()) {
+        const InstalledSet after = read_installed_set(dir_, set);
+        if (after.standing != SetStanding::Current) {
+            const std::string names =
+                after.record.empty() ? "pip left no record of it in " + dir_.string()
+                : after.commit.empty()
+                    ? "its direct_url.json (in " + after.record.string() + ") names no commit"
+                    : "its direct_url.json (in " + after.record.string() + ") names commit " +
+                          after.commit.substr(0, 12);
+            return "pip finished, and " + std::string{source->package} +
+                   " is not at the commit this Apogee pins (" +
+                   std::string{source->commit.substr(0, 12)} + "): " + names + " -- the '" +
+                   std::string{to_string(set)} +
+                   "' set is not recorded as installed; 'apogee check' shows what is there";
+        }
     }
     PythonEnvStatus current = status();
     if (!current.has(set)) {

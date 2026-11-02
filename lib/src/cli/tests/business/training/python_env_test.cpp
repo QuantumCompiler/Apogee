@@ -2,8 +2,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <optional>
 #include <random>
@@ -44,6 +46,9 @@ struct Fixture {
     /// The pip install, counted from 1, that fails; 0 for none.
     int failing_pip = 0;
     int pips = 0;
+    /// What a pip that succeeds leaves in the environment, as pip would --
+    /// a set's record (57i); nothing when unset.
+    std::function<void(const apogee::platform::ChildCommand&)> on_pip{};
 
     [[nodiscard]] apogee::training::CommandRunner runner() {
         return
@@ -74,6 +79,9 @@ struct Fixture {
                 result.exit_code = 1;
                 result.err = "ERROR: a scripted failure\n";
                 return result;
+            }
+            if (exit_code == 0 && on_pip) {
+                on_pip(command);
             }
         }
         // The venv directory is the third argument; a
@@ -501,6 +509,16 @@ TEST_CASE("installing mlx-video runs pip with the pinned commit, and needs git t
         std::ofstream{bin.path() / "git"} << "#!/bin/sh\n";
         std::filesystem::permissions(bin.path() / "git", std::filesystem::perms::owner_all);
         const apogee::testing::EnvGuard path{"PATH", bin.path().string()};
+        // pip builds it from the pinned commit, and says so in its record.
+        fixture.on_pip = [&env](const apogee::platform::ChildCommand& /*pip*/) {
+            const std::filesystem::path record =
+                env.dir() / "lib" / "python3.12" / "site-packages" / "mlx_video-0.1.0.dist-info";
+            std::filesystem::create_directories(record);
+            std::ofstream{record / "METADATA"} << "Name: mlx-video\nVersion: 0.1.0\n";
+            std::ofstream{record / "direct_url.json"}
+                << R"({"url": "https://github.com/Blaizzy/mlx-video.git", "vcs_info": )"
+                   R"({"vcs": "git", "commit_id": "87db56a51758fefb748a359b90a5283bb8ba4837"}})";
+        };
         REQUIRE(env.install(RequirementSet::MlxVideo).empty());
         REQUIRE(fixture.commands.size() == 2);
         const std::vector<std::string>& arguments = fixture.commands[1].arguments;
@@ -736,4 +754,86 @@ TEST_CASE("mlx-video's installed commit is read from PEP 610's direct_url.json a
     write_record(site, "mlx_vlm-0.6.1.dist-info", "Name: mlx-vlm\nVersion: 0.6.1\n",
                  vcs_url("0123456789abcdef0123456789abcdef01234567"));
     CHECK(read_installed_set(venv, RequirementSet::MlxVlm).commit.empty());
+}
+
+TEST_CASE("an mlx-video off its pin is installed again at the pin, and one left off it fails",
+          "[training][python][mlx_video][m23]") {
+    // 57i, finding 4: pip keeps an installed version it is asked for again,
+    // so a VCS requirement at another commit declaring the same version
+    // installed nothing -- `train setup` said `installed`, and `check` said
+    // off its pin again. Probe 2 measured it on pip 26.1.1.
+    if (apogee::platform::host_target().starts_with("windows")) {
+        SKIP("the scripted git is a POSIX file on a POSIX PATH");
+    }
+    const apogee::testing::TempDir bin{"python-git-" + std::to_string(std::random_device{}())};
+    std::ofstream{bin.path() / "git"} << "#!/bin/sh\n";
+    std::filesystem::permissions(bin.path() / "git", std::filesystem::perms::owner_all);
+    const apogee::testing::EnvGuard path{"PATH", bin.path().string()};
+    const std::string pin = "87db56a51758fefb748a359b90a5283bb8ba4837";
+    const std::string other = "1111111111111111111111111111111111111111";
+    const std::string requirement =
+        "mlx-video @ git+https://github.com/Blaizzy/mlx-video.git@" + pin;
+    const std::string dist = "mlx_video-0.1.0.dist-info";
+    const auto site = [](const PythonEnv& env) {
+        return env.dir() / "lib" / "python3.12" / "site-packages";
+    };
+
+    SECTION("off its pin: the pinned requirement alone, again, and then current") {
+        Fixture fixture;
+        PythonEnv env = fixture.env();
+        REQUIRE(env.create("/usr/bin/python3").empty());
+        write_record(site(env), dist, "Name: mlx-video\nVersion: 0.1.0\n", vcs_url(other));
+        // The first pip sees 0.1.0 and installs nothing; the reinstall builds
+        // the pin.
+        fixture.on_pip = [&](const apogee::platform::ChildCommand& pip) {
+            if (std::ranges::find(pip.arguments, "--force-reinstall") != pip.arguments.end()) {
+                std::filesystem::remove_all(site(env) / dist);
+                write_record(site(env), dist, "Name: mlx-video\nVersion: 0.1.0\n", vcs_url(pin));
+            }
+        };
+        REQUIRE(env.install(RequirementSet::MlxVideo).empty());
+        REQUIRE(fixture.commands.size() == 3);
+        CHECK(fixture.commands[2].program == env.interpreter().string());
+        CHECK(fixture.commands[2].arguments ==
+              std::vector<std::string>{"-m", "pip", "install", "--disable-pip-version-check",
+                                       "--force-reinstall", "--no-deps", requirement});
+        CHECK(read_installed_set(env.dir(), RequirementSet::MlxVideo).standing ==
+              SetStanding::Current);
+        CHECK(env.status().has(RequirementSet::MlxVideo));
+    }
+    SECTION("a reinstall that leaves it off its pin: no install, nothing recorded") {
+        Fixture fixture;
+        PythonEnv env = fixture.env();
+        REQUIRE(env.create("/usr/bin/python3").empty());
+        write_record(site(env), dist, "Name: mlx-video\nVersion: 0.1.0\n", vcs_url(other));
+        const std::string error = env.install(RequirementSet::MlxVideo);
+        CHECK(fixture.commands.size() == 3);
+        CHECK(error ==
+              "pip finished, and mlx-video is not at the commit this Apogee pins "
+              "(87db56a51758): its direct_url.json (in " +
+                  (site(env) / dist).string() +
+                  ") names commit 111111111111 -- the 'mlx-video' set is not recorded "
+                  "as installed; 'apogee check' shows what is there");
+        CHECK_FALSE(env.status().has(RequirementSet::MlxVideo));
+    }
+    SECTION("a fresh install pip leaves no record of: no install either") {
+        Fixture fixture;
+        PythonEnv env = fixture.env();
+        REQUIRE(env.create("/usr/bin/python3").empty());
+        const std::string error = env.install(RequirementSet::MlxVideo);
+        CHECK(fixture.commands.size() == 2);  // nothing off its pin: no reinstall
+        CHECK(error.find("pip left no record of it in " + env.dir().string()) != std::string::npos);
+        CHECK_FALSE(env.status().has(RequirementSet::MlxVideo));
+    }
+    SECTION("a floor-based set: one pip, its argv as ever, whatever is installed") {
+        Fixture fixture;
+        PythonEnv env = fixture.env();
+        REQUIRE(env.create("/usr/bin/python3").empty());
+        write_record(site(env), "mlx_vlm-0.5.0.dist-info", "Name: mlx-vlm\nVersion: 0.5.0\n");
+        REQUIRE(env.install(RequirementSet::MlxVlm).empty());
+        REQUIRE(fixture.commands.size() == 2);
+        CHECK(fixture.commands[1].arguments ==
+              std::vector<std::string>{"-m", "pip", "install", "--disable-pip-version-check",
+                                       "mlx-vlm>=0.6.1"});
+    }
 }

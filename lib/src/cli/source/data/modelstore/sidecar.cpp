@@ -7,11 +7,14 @@
 #include <ctime>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <memory>
 #include <sstream>
+#include <string_view>
 #include <system_error>
 
 #include "contracts/sha256.h"
+#include "modelstore/store.h"
 
 namespace apogee::models {
 namespace {
@@ -182,6 +185,35 @@ bool write_sidecar(const std::filesystem::path& model, const Sidecar& sidecar) {
         return false;
     }
     return true;
+}
+
+BaseRename rename_sidecar_ref(const std::filesystem::path& model, std::string_view from,
+                              std::string_view to) {
+    // Read and closed before the write: Windows refuses to replace a file a
+    // stream holds.
+    std::string bytes;
+    {
+        std::ifstream in{sidecar_path_for(model), std::ios::binary};
+        if (!in) {
+            return BaseRename::Unnamed;
+        }
+        bytes.assign(std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{});
+    }
+    std::optional<Sidecar> record = parse_sidecar(bytes);
+    if (!record.has_value()) {
+        return BaseRename::Unnamed;
+    }
+    const std::optional<std::string> renamed = renamed_handle(record->ref, from, to);
+    if (!renamed.has_value()) {
+        return BaseRename::Unnamed;
+    }
+    // Only `ref` may change: a record this build would not write back as it
+    // reads is left, never trimmed to what it understands.
+    if (serialize(*record) != bytes) {
+        return BaseRename::Failed;
+    }
+    record->ref = *renamed;
+    return write_sidecar(model, *record) ? BaseRename::Renamed : BaseRename::Failed;
 }
 
 std::string file_sha256(const std::filesystem::path& path, const HashProgress& progress) {

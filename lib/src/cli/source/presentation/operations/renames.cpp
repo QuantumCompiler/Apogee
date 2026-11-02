@@ -5,14 +5,18 @@
 #include <exception>
 #include <regex>
 #include <set>
+#include <string>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/layout.h"
 #include "logger/session.h"
+#include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
+#include "modelstore/store.h"
 #include "operations/store_references.h"
 #include "training/mlx_convert.h"
 
@@ -116,11 +120,19 @@ void say_pointers(RenameOutcome& out,
     }
 }
 
-/// Every stored drafter whose record names `model` as its base, once that
-/// folder is `renamed` (M25): its `bases` rewritten in place, so the pairing
-/// that held still holds -- rather than falling back to family and width --
-/// and a record naming any other base is never touched. Said, a line each.
-void rename_drafter_bases(RenameOutcome& out, const models::StoreRoots& roots,
+/// Every record in the store that names `model`, once that folder is
+/// `renamed` -- the one record walk every rename path calls. A drafter's
+/// `bases` (M25): rewritten in place, so the pairing that held still holds
+/// -- rather than falling back to family and width -- said a line each. And
+/// since 57i every conversion's and quantization's source: a record's `ref`
+/// that is a handle into the folder -- an MLX or voice set's snapshot
+/// record, a GGUF's and its projector's sidecar -- names the set where it now
+/// lies, so an MLX Wan conversion still reads its tokenizer from the source,
+/// lineage still finds it, and a repeat `convert` or `quantize` finds its
+/// own earlier result; said in one line for the count. A record naming any
+/// other model is never touched, and one that would not round-trip is left
+/// as it was and said.
+void rename_store_records(RenameOutcome& out, const models::StoreRoots& roots,
                           std::string_view model, std::string_view renamed) {
     for (const models::StoredMlx& stored : models::list_store_mlx(roots)) {
         const std::string handle =
@@ -139,6 +151,46 @@ void rename_drafter_bases(RenameOutcome& out, const models::StoreRoots& roots,
                                    std::string{renamed} + "' once converted again");
                 break;
         }
+    }
+
+    std::size_t carried = 0;
+    std::vector<std::string> stuck;
+    const auto tally = [&carried, &stuck](models::BaseRename done, std::string what) {
+        if (done == models::BaseRename::Renamed) {
+            ++carried;
+        } else if (done == models::BaseRename::Failed) {
+            stuck.push_back(std::move(what));
+        }
+    };
+    const auto snapshots = [&](std::string_view format, const auto& sets) {
+        for (const auto& stored : sets) {
+            tally(models::rename_snapshot_ref(stored.dir, model, renamed),
+                  models::weights_handle(stored.model, format, stored.id));
+        }
+    };
+    snapshots(models::kMlxFormat, models::list_store_mlx(roots));
+    snapshots(models::kVoiceFormat, models::list_store_voices(roots));
+    snapshots(models::kPipelineFormat, models::list_store_pipelines(roots));
+    snapshots(models::kSafetensorsFormat, models::list_store_snapshots(roots));
+    for (const models::StoredGguf& stored : models::list_store_ggufs(roots)) {
+        const std::string handle =
+            models::weights_handle(stored.model, models::kGgufFormat, stored.id);
+        tally(models::rename_sidecar_ref(stored.file, model, renamed), handle);
+        if (!stored.projector.empty()) {
+            tally(models::rename_sidecar_ref(stored.projector, model, renamed),
+                  handle + "'s projector");
+        }
+    }
+    if (carried > 0) {
+        out.said.push_back(std::to_string(carried) +
+                           (carried == 1 ? " record of what was made from it now names '"
+                                         : " records of what was made from it now name '") +
+                           std::string{renamed} + "' as its source");
+    }
+    for (const std::string& what : stuck) {
+        out.said.push_back("the record of " + what + " could not be rewritten -- it still names '" +
+                           std::string{model} +
+                           "' as its source, which lineage and a repeat convert no longer find");
     }
 }
 
@@ -307,7 +359,7 @@ RenameOutcome rename_backend_everywhere(const std::filesystem::path& config_path
         out.said.push_back("moved store '" + model + "' to '" + renamed_model +
                            "', its records inside it");
         say_pointers(out, pointers);
-        rename_drafter_bases(out, roots, model, renamed_model);
+        rename_store_records(out, roots, model, renamed_model);
     } else if (!store_said.empty()) {
         out.said.push_back(store_said);
     }
@@ -447,7 +499,7 @@ namespace {
         out.said.push_back("moved store '" + dir + "' to '" + std::string{new_name} +
                            "', its records inside it");
         say_pointers(out, pointers);
-        rename_drafter_bases(out, roots, dir, new_name);
+        rename_store_records(out, roots, dir, new_name);
     } else if (!store_said.empty()) {
         out.said.push_back(store_said);
     }
@@ -659,7 +711,7 @@ RenameOutcome rename_stored_model(const std::filesystem::path& config_path,
     if (!video.empty()) {
         out.said.push_back("repointed models.default_video: " + video);
     }
-    rename_drafter_bases(out, roots, model, new_model);
+    rename_store_records(out, roots, model, new_model);
     for (const auto& [from, to] : renames) {
         out.said.push_back("renamed backend '" + from + "' to '" + to +
                            "', every reference to it with it");

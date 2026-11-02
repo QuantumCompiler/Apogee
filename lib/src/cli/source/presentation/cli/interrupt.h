@@ -20,13 +20,23 @@
 /// while it is at its default action (`platform::termination_signal_free`):
 /// a session's termination watch, `serve`, or an inherited ignore keeps it.
 /// SIGKILL stays the crashed case.
+///
+/// **Scopes nest, and the outermost one owns the token** (57i): a scope made
+/// while another lives on the same process folds into it -- no fresh token,
+/// no handler of its own, nothing restored when it goes. A register chain
+/// holds one scope across all its stages while each stage's verb keeps its
+/// own, so a Ctrl-C in the gap between two stages is the next stage's
+/// cancel, never lost to a re-armed token; a command's copy of the token sees
+/// every signal its run receives.
 namespace apogee::commands {
 
 class InterruptScope {
 public:
-    /// Arms a fresh token and installs the handler for the scope's lifetime.
+    /// Arms a fresh token and installs the handler for the scope's lifetime
+    /// -- or, inside a live scope, joins it, the token and handler its own.
     InterruptScope();
-    /// Restores whatever handlers were there before.
+    /// Restores whatever handlers were there before; a nested scope leaves
+    /// them to the one it joined.
     ~InterruptScope();
 
     InterruptScope(const InterruptScope&) = delete;
@@ -46,6 +56,8 @@ private:
     void (*previous_)(int) = nullptr;
     void (*previous_term_)(int) = nullptr;
     bool term_armed_ = false;
+    /// Made inside a live scope: it armed nothing, and restores nothing.
+    bool nested_ = false;
 };
 
 }  // namespace apogee::commands

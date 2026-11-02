@@ -545,12 +545,39 @@ void run_mlx_register_chain(const MlxRegisterRequest& request,
 /// Takes no `Config`: nothing here reads one. A Hugging Face token comes from
 /// the environment at the point of use (`HF_TOKEN`), and the models directory
 /// is passed explicitly so a test can point it at a temporary tree.
-/// What makes a quantization: `models::quantize`, or a test's stand-in.
+/// What makes a quantization: llama.cpp's, or a test's stand-in. A stop
+/// requested on `cancellation` ends it (57i): `stopped`, its output the
+/// caller's to remove.
 using Quantizer = std::function<models::QuantizeResult(
     const std::filesystem::path& input, const std::filesystem::path& output, std::string_view level,
-    const models::QuantizeProgress& progress)>;
+    const models::QuantizeProgress& progress, const harness::CancellationToken& cancellation)>;
 
+/// llama.cpp's quantizer in a child of `executable` -- `__quantize` (57i) --
+/// which a stop terminates at once.
+[[nodiscard]] Quantizer child_quantizer(const std::filesystem::path& executable);
+
+/// What every command line quantizes with: `child_quantizer` of this very
+/// binary, where this platform starts children and this build quantizes;
+/// else `models::quantize` in-process (Windows today, and the build without
+/// llama.cpp, whose refusal is instant), a stop then acted on when it
+/// returns.
 [[nodiscard]] Quantizer default_quantizer();
+
+/// What `models quantize` was asked for: its flags, as data (57i).
+struct QuantizeRequest {
+    models::StoreRoots roots{};
+    /// A model (its newest unquantized GGUF), `<model>/gguf/<id>`, or a file.
+    std::string model{};
+    /// `--from`: which of the model's GGUFs, by id.
+    std::string from{};
+    std::string type = "Q4_K_M";
+};
+
+/// `apogee models quantize`, whole (57i): the smaller copy made into the
+/// store with its projector, under one `InterruptScope` -- a Ctrl-C or the
+/// GUI's Stop terminates the quantizer, removes what it staged, says
+/// `cancelled -- nothing was written` and exits 130.
+void run_quantize(const QuantizeRequest& request, const Quantizer& quantizer = default_quantizer());
 
 /// The levels `--register-with` names, in the table's spelling and each once;
 /// F16 dropped, since it is always made and registered. Fails on an unknown
@@ -622,10 +649,11 @@ struct PullRequest {
 /// `apogee models pull`, whole: a copy from the Ollama store, a GGUF, a
 /// SafeTensors snapshot, an MLX model, a pipeline, a voice model, or the
 /// register chain. Every path stops on Ctrl-C (55c): one `InterruptScope`
-/// over the pull's work -- for the chain, over its download, each later
-/// stage under its own -- so what it staged is removed, the exit is 130, and
-/// a stream ends on its `error`. On a stream, each set stored is said last
-/// as `models info` says it.
+/// over the pull's work -- for the chain, one over every stage and the gaps
+/// between them (57i), which each stage's own scope joins, the quantizer a
+/// child a stop terminates -- so what it staged is removed, the exit is 130,
+/// and a stream ends on its `error`. On a stream, each set stored is said
+/// last as `models info` says it.
 void run_pull(const PullRequest& request, const ChainTools& tools = {});
 
 void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_dir,

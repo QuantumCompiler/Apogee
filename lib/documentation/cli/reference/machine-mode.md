@@ -454,9 +454,18 @@ pipe they are refused, the words on stderr and in the `error`. Ctrl-C
 exits `130` with the stream ending cleanly on its `error`, every line whole --
 `models pull` on every path too since 55c: a copy from the Ollama store, a
 GGUF, a SafeTensors snapshot, an MLX model, a pipeline, a voice model and the
-register chain's download, what it staged removed (`cancelled -- nothing was
-written`) -- and `datasets pull` since M30, the listing and the download
-alike, its staged folder removed (`cancelled -- nothing was written`).
+register chain, what it staged removed (`cancelled -- nothing was
+written`) -- and since 57i every stage of that chain and every gap between
+two: the download, the conversion to F16 and its hash, each quantization
+(llama.cpp's quantizer runs as a child of the binary's own, `apogee
+__quantize`, so a stop -- Ctrl-C, or the GUI's Stop -- ends it at once, well
+inside the ten seconds before SIGTERM) and the registrations (`cancelled --
+registered <names>, nothing more` once one has landed). Where the chain
+stopped and the command that resumes it -- `stopped at [n/m] <stage> -- what
+the stages before it made is kept.`, `resume with:` and the command, each a
+`notice` -- come before the stream's last line, its `error`. And
+`datasets pull` since M30, the listing and the download alike, its staged
+folder removed (`cancelled -- nothing was written`).
 `models pull` and `datasets pull` take `text` or `stream-json` only; the
 three media verbs take `text`, `json` or `stream-json`.
 

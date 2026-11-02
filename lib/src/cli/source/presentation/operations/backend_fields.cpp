@@ -95,19 +95,16 @@ namespace {
         std::ostringstream content;
         content << in.rdbuf();
         std::string trial = content.str();
-        std::string command = "apogee config set-backend " + std::string{name};
         for (const BackendFieldEdit& edit : edits) {
             trial = harness::set_backend_field(trial, name, edit.field, edit.value);
-            std::string flag = edit.field;
-            std::ranges::replace(flag, '_', '-');
-            command += " --" + flag + " " + shell_word(edit.value);
         }
+        const std::string command = set_backend_command(name, edits);
         const harness::Config edited = harness::parse_config(trial, "<edited config>");
         const harness::BackendConfig* entry = edited.find_backend(name);
         if (entry == nullptr || entry->adapters.empty()) {
             return {};
         }
-        const std::string take_off = command + " --adapters \"\"";
+        const std::string take_off = adapters_take_off(name, edits);
         if (entry->model_path.empty()) {
             return "'" + std::string{name} +
                    "' applies adapters over its model_path, and this edit leaves it none -- "
@@ -307,6 +304,34 @@ constexpr std::array<std::pair<std::string_view, std::string harness::ModelsConf
     }};
 
 }  // namespace
+
+std::string set_backend_command(std::string_view name, const std::vector<BackendFieldEdit>& edits) {
+    std::string command = "apogee config set-backend " + std::string{name};
+    for (const BackendFieldEdit& edit : edits) {
+        std::string flag = edit.field;
+        std::ranges::replace(flag, '_', '-');
+        command += " --" + flag + " " + shell_word(edit.value);
+    }
+    return command;
+}
+
+std::string adapters_take_off(std::string_view name, const std::vector<BackendFieldEdit>& edits) {
+    return set_backend_command(name, edits) + " --adapters \"\"";
+}
+
+std::string base_replaced_under_adapters(std::string_view name, const harness::BackendConfig& entry,
+                                         std::string_view why, std::string_view other) {
+    std::string paths;
+    for (const harness::AdapterConfig& adapter : entry.adapters) {
+        paths += (paths.empty() ? "" : ", ") + adapter.path;
+    }
+    if (paths.empty()) {
+        return {};
+    }
+    return "'" + std::string{name} + "' applies adapters over its model_path (" + paths +
+           "), and " + std::string{why} + " -- take them off first: " + adapters_take_off(name) +
+           (other.empty() ? std::string{} : ", or " + std::string{other});
+}
 
 std::string kind_refusal(std::string_view name, const harness::BackendConfig& backend) {
     if (backend.type != harness::BackendType::Mlx || backend.model_path.empty()) {

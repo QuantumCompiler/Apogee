@@ -44,6 +44,7 @@
 #include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
+#include "operations/backend_fields.h"
 #include "operations/training_reads.h"
 #include "platform/child_process.h"
 #include "platform/platform.h"
@@ -799,6 +800,25 @@ struct PromotionHold {
         outcome.refused = true;
         outcome.error = conflict;
         return outcome;
+    }
+    // 57i: a merged version replaces the base under every adapter the entry
+    // applies -- those added by hand with `config set-backend --adapters`
+    // too, beyond the ledger `target_conflict` reads -- each pinned to the
+    // weights it replaces. Refused here, under the lock and before anything
+    // is fused or stored, as 55e refuses a moved model_path; no re-pin fits a
+    // fine-tune merged over their base. A ledger holding adapter versions
+    // has already been refused above in its own words.
+    if (const harness::BackendConfig* entry =
+            checks.existing_key.empty() ? nullptr : config.find_backend(checks.existing_key);
+        entry != nullptr) {
+        if (std::string refused = base_replaced_under_adapters(
+                checks.existing_key, *entry, "a merged version would replace that base under them",
+                "promote under a new name");
+            !refused.empty()) {
+            outcome.refused = true;
+            outcome.error = std::move(refused);
+            return outcome;
+        }
     }
     const bool mlx = checks.target == training::PromoteTarget::Mlx;
     outcome.target = checks.target;

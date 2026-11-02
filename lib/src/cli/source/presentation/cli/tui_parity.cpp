@@ -87,6 +87,10 @@ constexpr std::array kSurfaces{
                  "protocol, not a page"},
     ShellSurface{"__machine-schema", RunnerCovered,
                  "the machine protocol's JSON Schema, for a driver to read"},
+    ShellSurface{"__quantize", RunnerCovered,
+                 "one quantization run as a child of models quantize and the register chain "
+                 "(57i), its progress a protocol the parent reads -- the Models view's command "
+                 "is models quantize"},
     // --- carved out: no surface, refused by the exec line ----------------------
     ShellSurface{"serve", CarvedOut, "a server deployment's daemon"},
     // `acp` (56a) is the agent an ACP host runs over its own stdio; its
