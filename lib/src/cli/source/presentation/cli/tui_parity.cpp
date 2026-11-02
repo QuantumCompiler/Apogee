@@ -89,9 +89,11 @@ constexpr std::array kSurfaces{
                  "the machine protocol's JSON Schema, for a driver to read"},
     // --- carved out: no surface, refused by the exec line ----------------------
     ShellSurface{"serve", CarvedOut, "a server deployment's daemon"},
-    // `acp` (56a) is the agent an ACP host runs over its own stdio.
+    // `acp` (56a) is the agent an ACP host runs over its own stdio; its
+    // registration (56d) is the fields pasted into that host, refused with it.
     ShellSurface{"acp", CarvedOut,
-                 "run by an agent host such as Xcode over its stdio, never from the shell"},
+                 "run by an agent host such as Xcode over its stdio, never from the shell -- "
+                 "acp registration prints the fields its Add an Agent takes, at a prompt"},
     ShellSurface{"uninstall", CarvedOut, "removes Apogee and its data directory"},
     ShellSurface{"reset", CarvedOut, "resets the data directory to a fresh install"},
 };
@@ -121,10 +123,13 @@ constexpr std::array kRefusals{
                  "a daemon the shell would orphan when it closes -- run it at a prompt, or "
                  "under a service manager"},
     // An agent host's own stdio protocol (56a): the exec line refuses by
-    // word prefix, so a verb added under it is refused with it.
+    // word prefix, so a verb added under it is refused with it -- `acp
+    // registration` (56d) among them: its fields are pasted into Xcode, never
+    // used inside the shell.
     ShellRefusal{"acp",
                  "speaks the Agent Client Protocol to the host that started it, such as Xcode "
-                 "-- add it there"},
+                 "-- add it there; the fields Xcode's Add an Agent takes print at a prompt "
+                 "(apogee acp registration) and show in the macOS app's Settings › Xcode"},
 };
 
 /// The words a command answers to: each subcommand, and each subcommand with

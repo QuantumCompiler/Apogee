@@ -1290,6 +1290,7 @@ apogee chats recall --output-format json    # {"object":"list","data":[{"chat","
 apogee agents list --output-format json     # byte for byte GET /v1/admin/agents
 apogee mcp list --output-format json        # GET /v1/admin/mcp-servers's entries, with what connecting found
 apogee mcp presets --output-format json     # {"object":"list","data":[{"name","description","provides","registers_into_apogee","command","args","runnable",…}]}
+apogee acp registration --output-format json  # {"object":"acp.registration","where","name","executable","interpreter":null,"arguments":[…],"environment":{…},"channel","xcode_minimum","approval"}
 apogee check --output-format json           # {"rows":[{"section","name","status","detail","remedy"?}],"ok":…,"failures":N,"warnings":N}
 apogee providers scan --output-format json  # {"object":"list","data":[{"provider","type","label","tier","backend","evidence":[…]}]}
 apogee providers register <id> --output-format json  # {"object":"provider.registration","provider",…,"registration":[…],"rosters":[…]}
@@ -1546,6 +1547,28 @@ command's stdout ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve))
   registrable preset carries `register` (`apogee mcp create code --from
   code-exec`), and `self` its `refusal` instead. Each carries `host_entry`,
   `{"name", "server": {"command", "args"}}`: the entry another MCP host takes.
+  Since 56d a third preset, `xcode` -- `xcrun mcpbridge`, `xcrun` by its
+  absolute path, `runnable` on macOS only (`missing`: `Xcode runs on macOS
+  only`) -- and a preset that needs something done outside Apogee carries
+  `note`, in the words the listing prints under it: for `xcode`, Xcode's
+  "Allow External Agents to Use Xcode Tools" switch, the open project, and
+  Xcode's approval of the binary, asked again after every install or update.
+- **`acp registration`** (since 56d): the fields an ACP host's "add an agent"
+  takes -- Xcode 26.6 and later's Settings › Intelligence › Agents › Add an
+  Agent -- as `acp registration` prints them: `where` (that menu path),
+  `name` (`Apogee`, `Apogee (dev)` or `Apogee (test)`, by the build's
+  `channel`), `executable` (the running binary's absolute path, symlinks
+  resolved -- never `~` or a bare name), `interpreter` (`null`: the
+  executable is a binary), `arguments` (one entry a line in the sheet: a root
+  flag -- `--dev`, `--test`, `--release`, `--custom <absolute config>` -- and a
+  typed `--config <absolute path>` ahead of `acp`, and the flags `acp` itself
+  was given after it), `environment` (an object: `APOGEE_HOME` and
+  `APOGEE_CONFIG`, absolute, exactly when set, and `PATH` when set -- an app
+  opened from the Dock hands its children launchd's `PATH`, on which no
+  subscription CLI is found), `xcode_minimum` (`26.6`) and `approval`, the
+  sentence a host shows about Xcode's approval of an ad-hoc-signed binary.
+  It reads nothing of Xcode's and writes nothing; a flag the protocol owns,
+  given to `acp` before `registration`, is refused in `acp`'s words.
 - **`check`**: every row the report shows, `status` one of `ok`, `warn`, `fail`
   and `skipped` — never folded into a pass — `ok` the verdict and the exit code
   the human run's (non-zero on a failure). With `--fix`, what it repaired is the
@@ -1570,7 +1593,21 @@ command's stdout ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve))
   --with <set>`; `skipped`, detail `not installed (opt-in) -- …`, for an
   opt-in set not installed. An `mlx` entry's `Config` row says whether it
   hears beside whether it sees, and `default_transcription` on an `mlx`
-  entry is held to the same rungs, its detail the one that refuses.
+  entry is held to the same rungs, its detail the one that refuses. Since
+  56d an `Xcode` section, after `MCP`: on macOS `xcode` (`ok`, `Xcode 27.1
+  (27A9275), <developer directory>`; `skipped` when none is installed, only
+  the Command Line Tools are selected -- `remedy` `sudo xcode-select -s
+  /Applications/Xcode.app` when that app is there -- a selected one is gone,
+  or Xcode's command-line tools would not answer within 5 seconds), then,
+  for an Xcode, `mcpbridge` (`ok` when `xcrun --find mcpbridge` finds it,
+  Xcode 26.3+, naming the server that runs it or `apogee mcp create xcode
+  --from xcode`; else `skipped`), `acp agents` (`ok` from Xcode 26.6, naming
+  `apogee acp registration`; else `skipped`) and `approval` (`ok`, shown
+  beside either: Xcode approves an agent by its signature and hash, and an
+  ad-hoc-signed binary is asked about again after every install). Off macOS
+  the section is one `skipped` row, `xcode`. Never `warn` or `fail`: Xcode is
+  optional. It asks Xcode's command-line tools only -- `xcode-select -p`,
+  then `xcrun` -- and reads none of Xcode's settings.
 - **`providers scan`** (since 37b): a row per provider in the knowledge table, as the human scan prints them -- `provider` (`claude`), `type` (`claude-cli`), `label` (`Claude CLI`), `tier` (`credentials found`, `verified 2026-10-06`, `not found`), `backend` (which configured backends reach it, `not registered` when it could be, else empty) and `evidence`, a line each. It is the explicit scan, so it may start a vendor's binary for its version as the human scan does. With `--register`, what registering did is the document's `registration` and the rosters it fetched its `rosters`, a line each; with `--refresh`, the rosters re-fetched are `rosters` too.
 - **`providers register <id>`** (since M33): one provider the last scan found, registered by the pass `scan --register` runs -- the core the shell's Providers view runs on `r` -- over the provider cache, never a scan of its own. Its document is `object` (`provider.registration`), `provider` (the id), and `scan --register`'s `registration` and `rosters`, a line each: `registered claude (claude-cli)`, `models.default set to 'claude' (none was set)` when the config set none, or `claude: already registered as 'claude' -- nothing written`; when it registers, the rosters of the configured types not yet fetched are fetched on this word, as M13 rules and `scan --register` does. An id the knowledge table does not hold, a machine never scanned, or no config file is refused on stderr, exit `1`, nothing written; no key passes through it -- keys stay `apogee auth add`'s.
 - **`knowledge list`** and **`knowledge info`** (since 37c): the records the

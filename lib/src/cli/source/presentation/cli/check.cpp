@@ -58,12 +58,15 @@
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
 #include "modelstore/voice_info.h"
+#include "operations/acp_registration.h"
 #include "operations/code_exec_server.h"
 #include "operations/graph_sources.h"
+#include "operations/mcp_presets.h"
 #include "operations/suites.h"
 #include "platform/child_process.h"
 #include "platform/ffmpeg.h"
 #include "platform/platform.h"
+#include "platform/xcode.h"
 #include "scaffold/agent.h"
 #include "secrets/resolve.h"
 #include "secrets/store.h"
@@ -1531,6 +1534,104 @@ void check_mcp(CheckReport& report, const CheckInputs& inputs) {
     check_code_exec(report, inputs);
 }
 
+/// The `Xcode` section (56d): the two routes joining Apogee and Xcode, read
+/// from Xcode's own command-line tools and said where a person sets them up.
+/// `xcode` is the Xcode selected; `mcpbridge` whether it serves its tools to
+/// Apogee's agents (Xcode 26.3+, `xcrun --find`) and under which server name
+/// when one is registered; `acp agents` whether it hosts Apogee as its agent
+/// (Xcode 26.6+, by version); `approval`, shown beside either, wall W3.
+///
+/// Every row is Ok or Skipped, never Warn or Fail: Xcode is optional, so a
+/// fresh install with none stays green (M11). Off macOS the section is one
+/// skipped row and nothing is asked. What `check` cannot see -- whether
+/// Xcode lets external agents use its tools -- it says in words; it reads
+/// none of Xcode's settings.
+void check_xcode(CheckReport& report, const CheckInputs& inputs) {
+    const auto row = [&report](Status status, std::string name, std::string detail,
+                               std::string remedy = {}) {
+        add(report, status, "Xcode", std::move(name), std::move(detail), std::move(remedy));
+    };
+    const std::string host =
+        inputs.host_target.empty() ? std::string{platform::host_target()} : inputs.host_target;
+    if (!host.starts_with("macos")) {
+        row(Status::Skipped, "xcode", "Xcode runs on macOS only (this build is " + host + ")");
+        return;
+    }
+    std::string error;
+    const std::optional<platform::XcodeFacts> facts =
+        inputs.xcode_probe ? inputs.xcode_probe(error)
+                           : platform::xcode_facts(
+                                 platform::CapturedLimits{.timeout = platform::kXcodeProbeTimeout,
+                                                          .max_output = std::uint64_t{64} * 1024},
+                                 error);
+    if (!facts.has_value()) {
+        row(Status::Skipped, "xcode", "could not ask Xcode's command-line tools -- " + error);
+        return;
+    }
+    constexpr std::string_view kOnlyNeeded =
+        " -- needed only to use Apogee from Xcode, or Xcode's tools from Apogee";
+    const std::string select = facts->xcode_app.empty()
+                                   ? std::string{}
+                                   : "sudo xcode-select -s " + facts->xcode_app.string();
+    switch (facts->install) {
+        case platform::XcodeInstall::None:
+            row(Status::Skipped, "xcode", "not installed" + std::string{kOnlyNeeded});
+            return;
+        case platform::XcodeInstall::Missing:
+            row(Status::Skipped, "xcode",
+                "the selected developer directory, " + facts->developer_dir.string() +
+                    ", is not there" + std::string{kOnlyNeeded},
+                select);
+            return;
+        case platform::XcodeInstall::CommandLineTools:
+            row(Status::Skipped, "xcode",
+                "only the Command Line Tools are selected (" + facts->developer_dir.string() +
+                    "), not Xcode" + std::string{kOnlyNeeded},
+                select);
+            return;
+        case platform::XcodeInstall::Xcode:
+            break;
+    }
+    const std::string xcode =
+        "Xcode " + facts->version + (facts->build.empty() ? "" : " (" + facts->build + ")");
+    row(Status::Ok, "xcode", xcode + ", " + facts->developer_dir.string());
+
+    const bool bridge = !facts->mcpbridge.empty();
+    if (bridge) {
+        const std::string registered = inputs.config_missing || !inputs.config_error.empty()
+                                           ? std::string{}
+                                           : operations::registered_xcode_server(inputs.config);
+        row(Status::Ok, "mcpbridge",
+            (registered.empty()
+                 ? std::string{"Xcode's tools for Apogee's agents: apogee mcp create xcode --from "
+                               "xcode"}
+                 : "Xcode's tools for Apogee's agents: registered as '" + registered + "'") +
+                " -- they answer while Xcode runs with the project open and its Settings › "
+                "Intelligence › Model Context Protocol › \"Allow External Agents to Use Xcode "
+                "Tools\" is on, which check cannot see");
+    } else {
+        row(Status::Skipped, "mcpbridge",
+            xcode +
+                " has no mcpbridge -- Xcode's tools for Apogee's agents need Xcode 26.3 or "
+                "later");
+    }
+
+    const bool agents = platform::xcode_at_least(facts->version, 26, 6);
+    if (agents) {
+        row(Status::Ok, "acp agents",
+            "Xcode " + facts->version + " hosts ACP agents -- add Apogee in " +
+                std::string{operations::kAcpRegistrationWhere} +
+                ": apogee acp registration prints the fields");
+    } else {
+        row(Status::Skipped, "acp agents",
+            xcode + " hosts no ACP agents -- Apogee as Xcode's agent needs Xcode " +
+                std::string{operations::kAcpXcodeMinimum} + " or later");
+    }
+    if (bridge || agents) {
+        row(Status::Ok, "approval", std::string{operations::kXcodeApproval});
+    }
+}
+
 /// The `Agents` section: the bundled assets present, and every configured
 /// agent runnable -- its files there, its schema a schema, its model and
 /// collection things the config knows.
@@ -2755,6 +2856,8 @@ CheckReport run_checks(const CheckInputs& inputs) {
     check_tools(report, inputs);
     say(inputs, "checking MCP servers");
     check_mcp(report, inputs);
+    say(inputs, "checking Xcode");
+    check_xcode(report, inputs);
     say(inputs, "checking agents");
     check_agents(report, inputs);
     say(inputs, "checking knowledge");

@@ -91,6 +91,8 @@ apogee_add_module(operations
     operations/graph_sources.cpp
     operations/knowledge_core.h
     operations/knowledge_core.cpp
+    operations/acp_registration.h
+    operations/acp_registration.cpp
     operations/code_exec_server.h
     operations/code_exec_server.cpp
     operations/mcp_presets.h

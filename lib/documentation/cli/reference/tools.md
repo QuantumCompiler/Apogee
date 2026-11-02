@@ -169,6 +169,7 @@ provides and whether this machine can run it.
 ```sh
 apogee mcp presets                         # what ships, and where each stands here
 apogee mcp create code --from code-exec    # register one by name
+apogee mcp create xcode --from xcode       # Xcode's own tools, on a Mac with Xcode 26.3+
 ```
 
 `--from` registers exactly the command and arguments the preset resolves to
@@ -182,6 +183,7 @@ json`, in [machine-mode.md](machine-mode.md)), and the admin plane's `POST
 | Preset | What it is |
 |---|---|
 | `code-exec` | The code-execution server below: `run_python` and `write_input`, registered as `code`. It needs the server seeded (`apogee check --fix`) and a Python: the training environment's, else `python3` on PATH. |
+| `xcode` | Xcode's own tools -- build, run, tests, previews, documentation search, the issue navigator, file reads and writes (`BuildProject`, `GetBuildLog`, `RunAllTests`, `XcodeRead`, `XcodeListWindows` and the rest, as Xcode lists them) -- served by Xcode 26.3 or later through `xcrun mcpbridge`, registered as `xcode` with `xcrun`'s absolute path. It lists everywhere and registers on macOS only (`Xcode runs on macOS only` elsewhere). Its note says what Apogee cannot see: Xcode must be running with the project open, its Settings › Intelligence › Model Context Protocol › "Allow External Agents to Use Xcode Tools" on, and the first connection asks you in Xcode to allow the binary -- asked again after every install or update, since Xcode approves an agent by its code signature and hash and Apogee's macOS builds are ad-hoc signed. What the bridge does with Xcode closed is not yet measured (the first live run records it); either way a server that does not answer is skipped at a run's start, never fatal. `apogee check`'s `Xcode` section says whether this Mac's Xcode has the bridge. `apogee bootstrap` never registers it: that is yours to do, once Xcode is set. |
 | `self` | Apogee's own read-only tools (files, git, notes, document search, graph navigation) and its status reads -- and `complete`, where you list it on a local backend -- served on stdio by [`apogee mcp serve`](#apogee-as-an-mcp-server-apogee-mcp-serve) **for another MCP host**: a desktop assistant or an editor takes the entry the listing prints. It is never registered into Apogee, which already has these tools natively, so `--from self` is refused with that reason. |
 
 Web search is not a preset. It stays yours: point Apogee at a SearXNG
@@ -237,11 +239,11 @@ Apogee does not sign, so expect it again after every install or update of
 `apogee` (or `apogee-dev`).
 
 **If Xcode names no server** in `session/new`, its tools can still reach every
-session from the config: register `xcrun mcpbridge` as an ordinary server. The
-`xcode` preset (56d) will do it by name; until then, `apogee mcp create xcode
---command xcrun --args mcpbridge`. It needs Xcode's own switch, "Allow external
-agents to use Xcode tools" (Settings › Intelligence › Model Context Protocol),
-turned on, and the project open in Xcode.
+session from the config: register `xcrun mcpbridge` as an ordinary server --
+by name, `apogee mcp create xcode --from xcode` (the [`xcode`
+preset](#mcp-presets-the-servers-apogee-ships), 56d). It needs Xcode's own
+switch, "Allow external agents to use Xcode tools" (Settings › Intelligence ›
+Model Context Protocol), turned on, and the project open in Xcode.
 
 ## Apogee as an MCP server: `apogee mcp serve`
 

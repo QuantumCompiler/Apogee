@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <iostream>
@@ -22,6 +23,7 @@
 #include "contracts/paths.h"
 #include "harness/roles.h"
 #include "modelstore/mlx_info.h"
+#include "operations/acp_registration.h"
 #include "platform/child_process.h"
 #include "platform/platform.h"
 
@@ -69,13 +71,54 @@ constexpr std::array<std::string_view, 7> kProtocolFlags{
     return models::read_mlx_kind(dir).backend();
 }
 
-void run_acp(const RootContext& context, const SessionFlags& flags, const CLI::App& command) {
+/// The flags the protocol owns, refused in the command's words when given.
+void refuse_protocol_flags(const CLI::App& command) {
     for (const std::string_view flag : kProtocolFlags) {
         if (const CLI::Option* option = command.get_option_no_throw(std::string{flag});
             option != nullptr && option->count() > 0) {
             fail(std::string{flag} + " is refused: " + protocol_reason(flag));
         }
     }
+}
+
+/// This variable's value, or empty when it is unset.
+[[nodiscard]] std::string environment_value(const char* name) {
+    const char* value = std::getenv(name);
+    return value == nullptr ? std::string{} : std::string{value};
+}
+
+/// `acp registration` (56d): the fields Xcode's Add an Agent sheet takes,
+/// for this binary and the root it was run under -- with the flags `acp`
+/// itself was given, which every session then has.
+void print_registration(const RootContext& context, const CLI::App& acp, ReadFormat format) {
+    refuse_protocol_flags(acp);
+    operations::AcpRegistrationInputs inputs;
+    inputs.executable = platform::executable_path();
+    inputs.channel = harness::baked_channel();
+    inputs.root_flag = harness::root_flag();
+    inputs.apogee_home = environment_value(harness::kHomeEnvVar);
+    inputs.apogee_config = environment_value("APOGEE_CONFIG");
+    // `--config` as typed: the variable's value is Environment's.
+    if (!context.config_path.empty() && context.config_path != inputs.apogee_config) {
+        inputs.config_flag = context.config_path;
+    }
+    inputs.path = environment_value("PATH");
+    inputs.acp_flags = forwarded_flags(acp);
+    operations::AcpRegistration registration;
+    try {
+        registration = operations::acp_registration(inputs);
+    } catch (const std::exception& e) {
+        fail(e.what());
+    }
+    if (format == ReadFormat::Json) {
+        write_document(std::cout, operations::acp_registration_document(registration));
+        return;
+    }
+    std::cout << operations::render_acp_registration(registration);
+}
+
+void run_acp(const RootContext& context, const SessionFlags& flags, const CLI::App& command) {
+    refuse_protocol_flags(command);
     if (!platform::supports_child_processes()) {
         fail(
             "each ACP session runs as a child of this binary, which this platform cannot start "
@@ -281,8 +324,31 @@ void AcpCommand::bind(CLI::App& root, const RootContext& context) {
         "host can list, reopen and resume it. The flags here reach every session, as execute's "
         "own, run in the project folder: a relative --attach or --image is found there. In "
         "Xcode 26.6 or later: Settings > Intelligence > Agents > Add an Agent, this "
-        "binary's absolute path, and the argument acp.");
-    cmd->callback([&context, flags, cmd]() { run_acp(context, *flags, *cmd); });
+        "binary's absolute path, and the argument acp -- apogee acp registration prints the "
+        "fields.");
+
+    // The fields Xcode's sheet takes (56d): a subcommand, so a read's
+    // `--output-format` stays off the protocol verb.
+    auto format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    CLI::App* registration = cmd->add_subcommand(
+        "registration",
+        "Print the fields an ACP host's Add an Agent takes -- Xcode 26.6 or later's Settings > "
+        "Intelligence > Agents -- for this binary and this install");
+    add_read_format(registration, format);
+    registration->footer(
+        "Reads nothing of Xcode's and writes nothing: you paste the fields into Xcode's own "
+        "sheet. The Executable is this binary's absolute path; a root flag or --config given "
+        "here goes into Arguments ahead of acp, and APOGEE_HOME, APOGEE_CONFIG and PATH, when "
+        "set, into Environment -- so the agent Xcode starts opens this install and finds the "
+        "subscription CLIs. Flags given to acp before registration follow acp in Arguments.");
+    registration->callback(
+        [&context, cmd, format]() { print_registration(context, *cmd, *format); });
+    cmd->callback([&context, flags, cmd, registration]() {
+        if (registration->parsed()) {
+            return;  // `acp registration` answered
+        }
+        run_acp(context, *flags, *cmd);
+    });
 }
 
 }  // namespace apogee::commands

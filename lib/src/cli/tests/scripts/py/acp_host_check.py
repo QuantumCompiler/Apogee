@@ -60,6 +60,12 @@ and checks what the Agent Client Protocol promises and what 56a decided:
     name and a path to its file (a chat opens by its id alone); and the
     same chat resumes in a terminal (`chat --resume`), numbered on, its
     origin kept;
+  - the registration (56d): `acp registration --output-format json`, run
+    through a symlink, is one document on stdout whose Executable is the
+    binary's real, absolute path, its Arguments `acp`, its Environment this
+    run's APOGEE_HOME and PATH; and the agent started exactly as registered
+    -- that path, those arguments, that environment -- answers initialize
+    and opens a session;
   - the protocol's own examples (tests/fixtures/acp/schema_examples.jsonl)
     replayed, standing in for a captured Xcode transcript -- and that
     transcript replayed too, once it is captured (xcode-27.1.jsonl).
@@ -360,6 +366,7 @@ def run(apogee, work, fixtures):
         delegated_calls(start, project, check)
         dying_child(start, project, check)
         notices(start, project, check)
+        registration(apogee, work, env, hosts, project, check)
         host_servers(apogee, work, env, start, project, check)
         saved_sessions(apogee, work, env, start, project, fixtures, check)
         replay(start, project, fixtures, check)
@@ -381,8 +388,8 @@ def run(apogee, work, fixtures):
         return 1
     print("acp conformance: initialize, sessions, prompts, cancel, permission, a cancel at the "
           "sheet, repeated call ids, a mode chosen mid-sheet, switching, a backend that did not "
-          "start, a delegated call, bad input, a dying child, notices, the host's MCP servers, "
-          "saved sessions and the protocol's examples -- OK")
+          "start, a delegated call, bad input, a dying child, notices, the registration, the "
+          "host's MCP servers, saved sessions and the protocol's examples -- OK")
     return 0
 
 
@@ -887,6 +894,53 @@ def notices(start, project, check):
     check("persona: coder" not in texts(updates, "agent_thought_chunk"),
           "a notice reached a host that shows them as a thought too")
     check(host.close() == 0, "the notices host's acp did not exit 0")
+
+
+def registration(apogee, work, env, hosts, project, check):
+    """56d: the fields `acp registration` prints start the agent they name."""
+    links = os.path.join(work, "links")
+    os.makedirs(links)
+    link = os.path.join(links, "apogee-link")
+    os.symlink(apogee, link)
+    printed = subprocess.run([link, "acp", "registration", "--output-format", "json"], env=env,
+                             capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                             timeout=TIMEOUT)
+    if not check(printed.returncode == 0,
+                 f"acp registration failed: {printed.stderr.strip()!r}"):
+        return
+    try:
+        document = json.loads(printed.stdout)  # the whole of stdout: one document
+    except ValueError:
+        check(False, f"acp registration's stdout is not one document: {printed.stdout!r}")
+        return
+    real = os.path.realpath(apogee)
+    check(document.get("object") == "acp.registration",
+          f"the registration's object: {document.get('object')!r}")
+    check(document.get("executable") == real,
+          f"run through a symlink, the Executable is {document.get('executable')!r}, not the "
+          f"binary's own {real!r}")
+    check(os.path.isabs(document.get("executable", "")),
+          "the Executable is not an absolute path")
+    check(document.get("arguments") == ["acp"],
+          f"the Arguments: {document.get('arguments')!r}")
+    check(document.get("interpreter") is None, "the Interpreter is not empty")
+    registered = document.get("environment", {})
+    check(registered.get("APOGEE_HOME") == os.path.abspath(env["APOGEE_HOME"]),
+          f"the Environment's APOGEE_HOME: {registered.get('APOGEE_HOME')!r}")
+    check(registered.get("PATH") == env["PATH"], "the Environment's PATH is not this run's")
+
+    # Started as Xcode would: that path, those arguments, that environment
+    # (and HOME, which an app's children always have) -- nothing of this run's.
+    started = dict(registered, HOME=os.environ.get("HOME", ""))
+    host = Host(document["executable"], started)
+    hosts.append(host)
+    response = initialize(host)
+    check(response.get("result", {}).get("protocolVersion") == 1,
+          f"the registered agent's initialize: {response!r}")
+    opened, _ = host.call("session/new", {"cwd": project, "mcpServers": []})
+    check(bool(opened.get("result", {}).get("sessionId")),
+          f"the registered agent opened no session: {opened!r}")
+    check(host.close() == 0, "the registered agent did not exit cleanly")
 
 
 def descendants(pid):

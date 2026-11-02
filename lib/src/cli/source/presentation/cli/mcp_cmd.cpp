@@ -124,6 +124,9 @@ void bind_create(CLI::App& parent, const RootContext& context) {
         if (preset != nullptr) {
             std::cout << "Test it:  apogee mcp test " << result.name << " " << preset->try_tool
                       << " '" << preset->try_arguments << "'\n";
+            if (!preset->note.empty()) {
+                std::cout << preset->note << "\n";
+            }
         } else {
             std::cout << "Test it:  apogee mcp test " << result.name
                       << " echo '{\"text\":\"hi\"}'\n";
@@ -242,6 +245,9 @@ void bind_presets(CLI::App& parent, const RootContext& context) {
             if (!resolution.runnable()) {
                 std::cout << indent << "not runnable here: " << resolution.missing
                           << (resolution.remedy.empty() ? "" : " -- " + resolution.remedy) << "\n";
+            }
+            if (!preset.note.empty()) {
+                std::cout << indent << "note:     " << preset.note << "\n";
             }
         }
     });

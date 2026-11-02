@@ -9,6 +9,8 @@
 #include <string_view>
 #include <vector>
 
+#include "contracts/config.h"
+
 /// MCP presets (47c): the servers this box ships, ready to register by name.
 ///
 /// **Data, compiled in, over the one create path.** A preset is a name, what
@@ -21,6 +23,13 @@
 /// **Honest about this machine.** A preset whose command cannot run here
 /// still lists, saying what is missing and the command that provides it;
 /// `--from` refuses it with the same words.
+///
+/// **`xcode` is Xcode's own tools** (56d): `xcrun mcpbridge`, the stdio
+/// bridge Xcode 26.3 and later ship, registered by `xcrun`'s absolute path.
+/// It lists everywhere and runs on macOS only; whether this Mac's Xcode has
+/// the bridge is `check`'s Xcode section's to say. What Apogee cannot see --
+/// Xcode's own switch, the open project, Xcode's approval of this binary --
+/// is the preset's `note`.
 ///
 /// **`self` is informational.** It is Apogee's own read-only tools and
 /// status reads served over stdio (`apogee mcp serve`, 54a), listed with the
@@ -48,6 +57,10 @@ struct McpPreset {
     std::string_view try_arguments;
     /// Empty when it registers into Apogee; else why it never does.
     std::string_view refusal;
+    /// What a person must do outside Apogee for it to answer, said under the
+    /// preset in `mcp presets`, after `create --from`'s "Test it" line and as
+    /// the document's `note` (56d) -- empty for most.
+    std::string_view note{};
 };
 
 /// The presets, in the order `mcp presets` lists them.
@@ -59,12 +72,14 @@ struct McpPreset {
 /// Every preset's name, for `--from`'s completion and its refusal.
 [[nodiscard]] std::vector<std::string_view> mcp_preset_names();
 
-/// What a preset resolves against: the data directory, this binary, and
-/// the PATH lookup (null: the platform's).
+/// What a preset resolves against: the data directory, this binary, the
+/// PATH lookup (null: the platform's), and the release target it judges
+/// (empty: this build's -- a test names another).
 struct McpPresetHost {
     std::filesystem::path home;
     std::filesystem::path executable;
     std::function<std::string(std::string_view)> find_on_path;
+    std::string host_target{};
 };
 
 /// The host a preset resolves against for the config at `config_path`: its
@@ -99,10 +114,15 @@ struct McpPresetResolution {
 /// The server entry another MCP host takes: `{"command": ..., "args": [...]}`.
 [[nodiscard]] nlohmann::json mcp_host_entry(const McpPresetResolution& resolution);
 
+/// The configured server that runs Xcode's bridge -- `xcrun mcpbridge`, or
+/// `mcpbridge` by its path -- or empty: what `check`'s `mcpbridge` row names
+/// as registered (56d).
+[[nodiscard]] std::string registered_xcode_server(const harness::Config& config);
+
 /// `mcp presets --output-format json`: `{"object": "list", "data": [...]}`,
 /// one row per preset -- its facts, what it registers here, whether it can
-/// run and why not, the `--from` line or the refusal, and another host's
-/// entry.
+/// run and why not, the `--from` line or the refusal, its `note` when it has
+/// one, and another host's entry.
 [[nodiscard]] nlohmann::json mcp_presets_document(const McpPresetHost& host);
 
 }  // namespace apogee::operations

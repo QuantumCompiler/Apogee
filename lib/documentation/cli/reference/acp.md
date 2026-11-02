@@ -14,17 +14,72 @@ as an Apogee chat the host can list, reopen and continue (56c).
 
 ## Adding it to Xcode
 
-In Xcode 26.6 or later: Settings › Intelligence › Agents › Add an Agent.
+In Xcode 26.6 or later: Settings › Intelligence › Agents › Add an Agent. Three
+commands set it up from Apogee's side (56d); none of them reads or writes
+anything of Xcode's -- Apogee prints, you type.
+
+**1. `apogee check`** says what this Mac's Xcode can do, in its `Xcode` section
+(after `MCP`), asking Xcode's own command-line tools (`xcode-select -p`, then
+`xcrun`, each bounded at 5 seconds):
+
+| Row | `ok` | `skipped` |
+|---|---|---|
+| `xcode` | `Xcode 27.1 (27A9275), /Applications/Xcode.app/Contents/Developer` | none installed (needed only for Xcode); only the Command Line Tools selected, with `sudo xcode-select -s /Applications/Xcode.app` when that app is there; a selected Xcode gone; the tools did not answer; off macOS, the section's one row |
+| `mcpbridge` | Xcode's tools for Apogee's agents: `apogee mcp create xcode --from xcode`, or the server already running it -- and the "Allow External Agents to Use Xcode Tools" switch, which `check` cannot see | below Xcode 26.3, which has no bridge |
+| `acp agents` | this Xcode hosts ACP agents: `apogee acp registration` prints the fields | below Xcode 26.6 |
+| `approval` | shown beside either: Xcode approves an agent by its code signature and its binary's hash, and Apogee's macOS builds are ad-hoc signed, so Xcode asks again after every install or update (W3, below) | -- |
+
+None is ever a warning or a failure: Xcode is optional, so a Mac without it
+still checks green.
+
+**2. `apogee acp registration`** prints the sheet's fields for the binary you
+run it with and the install it runs under:
+
+```
+Add Apogee (dev) to Xcode 26.6 or later: Settings › Intelligence › Agents › Add an Agent
+  Name:         Apogee (dev)
+  Executable:   /Users/you/.local/bin/apogee-dev
+  Interpreter:  (leave empty)
+  Arguments:    acp
+  Environment:  PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+Arguments and Environment Variables take one entry a line. PATH is the one this apogee runs with, so the agent finds the subscription CLIs on it: print these fields again after it changes.
+Xcode approves an agent by its code signature and its binary's hash. Apogee's macOS builds are ad-hoc signed, so Xcode asks again after every install or update.
+```
+
+- **Name** follows the build's channel: `Apogee`, `Apogee (dev)`, `Apogee (test)`.
+- **Executable** is the running binary's absolute path, symlinks resolved --
+  Xcode does no `~` or `PATH` lookup.
+- **Arguments** are `acp`, after the root you printed it from -- a root flag
+  (`--dev`, `--test`, `--release`, `--custom <config>`) or `--config`, any
+  path made absolute -- and followed by any of `execute`'s flags given to `acp`
+  before `registration` (`apogee acp --permission-mode accept-edits
+  registration`), which every session then has.
+- **Environment** carries `APOGEE_HOME` and `APOGEE_CONFIG` when they are set
+  -- the agent Xcode starts opens the install you set it up from, whatever
+  environment Xcode hands it -- and `PATH`, so a subscription CLI is found:
+  an app opened from the Dock hands its children launchd's `PATH`. Print the
+  fields again after your shell's `PATH` changes; a stale one costs a backend
+  refused in M26's words, never a wrong one.
+
+`--output-format json` gives the same as one document, `acp.registration`
+([machine-mode.md](machine-mode.md)) -- what the macOS app's Settings › Xcode
+reads. The shell's exec line refuses it with `acp` itself: the fields are
+pasted into Xcode, never used inside the shell.
+
+**3. `apogee mcp create xcode --from xcode`** (optional) gives every session
+Xcode's own tools from the config, whether or not Xcode names its server in
+`session/new` ([tools.md](tools.md#mcp-presets-the-servers-apogee-ships)).
+
+The fields, one by one:
 
 | Field | What to give it |
 |---|---|
-| Path | The binary's **absolute path**, written out in full -- Xcode does no `~` or `PATH` lookup. For development, `apogee-dev` (`make -C lib/src/cli install MODE=dev`); a release install's `apogee` otherwise. |
+| Executable | The binary's **absolute path**, written out in full -- Xcode does no `~` or `PATH` lookup. For development, `apogee-dev` (`make -C lib/src/cli install MODE=dev`); a release install's `apogee` otherwise. |
 | Arguments | `acp`, then any of `execute`'s flags every session should have (below) -- `-m <backend>`, `--suite <suite>`, `--permission-mode accept-edits`, `--allow-bypass`. |
 | Environment Variables | `PATH`, as your shell has it, when a subscription CLI (`claude`, `codex`, `gemini`, `ollama`) answers: an app started from the Dock hands its children launchd's `PATH`, on which none of them is found. Apogee resolves nothing itself; a backend whose CLI is missing is refused in M26's words when chosen -- named by the `acp` line's `-m`, as `session/new`'s error; from the model menu, as a notice (`set model: backend 'claude' is configured but could not be started: …`), the menu set back and the session left on the backend it was on. |
 
-`apogee acp --help` prints the same. Setting Xcode up from Apogee --
-`check`'s Xcode rows and `acp registration`, which prints these fields -- is
-56d's.
+`apogee acp --help` prints the same; `apogee acp registration` prints the
+values for this binary.
 
 ## One session
 
@@ -369,7 +424,9 @@ cancelled turn, loaded with every replayed id distinct.
   unsigned agent's approval is time-limited ("Unsigned agent attached",
   `unsignedTTL`) -- strings, not observed behaviour. The likely cost: approving
   again after every `make install`, and approving `apogee-dev` apart from
-  `apogee`. The user's live pass records the prompts seen.
+  `apogee`. `check`'s `approval` row, the registration's last line and the
+  `xcode` preset's note say so where Xcode is set up (56d); the user's live
+  pass records the prompts seen.
 - **Xcode 27's filesystem security layer (W4).** Opt-in; it "monitors and
   controls filesystem access by coding agents and any processes they spawn".
   What it does to an agent that reads its data directory, loads models from its
@@ -380,12 +437,12 @@ cancelled turn, loaded with every replayed id distinct.
 - **Xcode's own tools** reach a session only if Xcode names its server in
   `session/new`: the strings in Xcode 27.1 suggest it does (`mcpServers`,
   `xcode-tools`, `MCP_XCODE_SESSION_ID`), and the user's live pass records what
-  it sent. If it sends none, the `xcode` preset (56d) registers `xcrun mcpbridge`
-  for every session, from the config.
+  it sent. If it sends none, the `xcode` preset (`apogee mcp create xcode
+  --from xcode`, 56d) registers `xcrun mcpbridge` for every session, from the
+  config.
 - **Saved sessions** (56c): no `session/delete` (`chats delete` is the door)
   and no `session/fork`, neither of which Xcode 27.1's client sends; no
   private mode; a `compaction_update` is never sent, a compaction replayed as
   words; and no lock across processes (above).
-- **Not this item's:** `check`'s Xcode rows and `acp registration` (56d);
-  `fs/*` and `terminal/*`; image, audio and embedded prompt content; slash
+- **Not here:** `fs/*` and `terminal/*`; image, audio and embedded prompt content; slash
   commands and `available_commands_update`.

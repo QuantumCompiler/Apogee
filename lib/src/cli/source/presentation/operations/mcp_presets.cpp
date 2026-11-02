@@ -7,6 +7,7 @@
 #include <system_error>
 
 #include "operations/code_exec_server.h"
+#include "platform/child_process.h"
 #include "platform/platform.h"
 
 namespace apogee::operations {
@@ -14,8 +15,9 @@ namespace {
 
 constexpr std::string_view kCodeExec = "code-exec";
 constexpr std::string_view kSelf = "self";
+constexpr std::string_view kXcode = "xcode";
 
-constexpr std::array<McpPreset, 2> kPresets{{
+constexpr std::array<McpPreset, 3> kPresets{{
     McpPreset{
         .name = kCodeExec,
         .description = "Runs Python for any model, local or cloud: a working directory kept for "
@@ -26,6 +28,7 @@ constexpr std::array<McpPreset, 2> kPresets{{
         .try_tool = "run_python",
         .try_arguments = R"j({"code": "print(6 * 7)"})j",
         .refusal = "",
+        .note = "",
     },
     McpPreset{
         .name = kSelf,
@@ -41,6 +44,30 @@ constexpr std::array<McpPreset, 2> kPresets{{
         .refusal = "'self' is Apogee's own tools, served for another MCP host: registered into "
                    "Apogee it would serve Apogee the tools it already has natively. Give "
                    "another host its entry instead (apogee mcp presets)",
+        .note = "",
+    },
+    // 56d: Xcode's own tools, through the stdio bridge Xcode 26.3 and later
+    // ship -- Apple's documented registration, `xcrun mcpbridge`.
+    McpPreset{
+        .name = kXcode,
+        .description =
+            "Xcode's own tools for any model: build, run, tests, previews, documentation "
+            "search, the issue navigator, file reads and writes -- served by Xcode 26.3 "
+            "or later through xcrun mcpbridge",
+        .provides = "Xcode's tools as Xcode lists them: BuildProject, GetBuildLog, RunAllTests, "
+                    "XcodeRead, XcodeListWindows and the rest",
+        .server_name = kXcode,
+        // Its argument schema is unread: listing Xcode's tools raises Xcode's
+        // consent prompt, so the research did not. The user's run confirms it.
+        .try_tool = "XcodeListWindows",
+        .try_arguments = "{}",
+        .refusal = "",
+        .note = "Xcode answers only while it runs with your project open, and with its Settings "
+                "› Intelligence › Model Context Protocol › \"Allow External Agents to "
+                "Use Xcode Tools\" on. The first connection asks you in Xcode to allow this "
+                "apogee: Xcode approves an agent by its code signature and its binary's hash, and "
+                "Apogee's macOS builds are ad-hoc signed, so Xcode asks again after every install "
+                "or update.",
     },
 }};
 
@@ -84,6 +111,23 @@ McpPresetHost mcp_preset_host(const std::filesystem::path& config_path) {
 
 McpPresetResolution resolve_mcp_preset(const McpPreset& preset, const McpPresetHost& host) {
     McpPresetResolution out;
+    if (preset.name == kXcode) {
+        // Apple's registration, `xcrun mcpbridge`, by xcrun's absolute path
+        // as code-exec's interpreter is resolved: the bridge needs Xcode
+        // itself, which runs on macOS alone.
+        out.args = {"mcpbridge"};
+        const std::string target =
+            host.host_target.empty() ? std::string{platform::host_target()} : host.host_target;
+        const std::string xcrun =
+            host.find_on_path ? host.find_on_path("xcrun") : platform::find_on_path("xcrun");
+        out.command = xcrun.empty() ? std::string{"xcrun"} : xcrun;
+        if (!target.starts_with("macos")) {
+            out.missing = "Xcode runs on macOS only";
+        } else if (xcrun.empty()) {
+            out.missing = "xcrun, which comes with macOS's developer tools, is not on PATH";
+        }
+        return out;
+    }
     if (preset.name == kSelf) {
         if (host.executable.empty()) {
             out.missing = "this binary's own path is not known";
@@ -136,6 +180,19 @@ nlohmann::json mcp_host_entry(const McpPresetResolution& resolution) {
     return nlohmann::json{{"command", resolution.command}, {"args", resolution.args}};
 }
 
+std::string registered_xcode_server(const harness::Config& config) {
+    for (const auto& [name, server] : config.mcp_servers) {
+        const std::filesystem::path command{server.command};
+        const std::filesystem::path program = command.filename();
+        const bool through_xcrun = (program == "xcrun" || program == "xcrun.exe") &&
+                                   !server.args.empty() && server.args.front() == "mcpbridge";
+        if (through_xcrun || program == "mcpbridge") {
+            return name;
+        }
+    }
+    return {};
+}
+
 nlohmann::json mcp_presets_document(const McpPresetHost& host) {
     nlohmann::json data = nlohmann::json::array();
     for (const McpPreset& preset : kPresets) {
@@ -160,6 +217,9 @@ nlohmann::json mcp_presets_document(const McpPresetHost& host) {
                               std::string{preset.name};
         } else {
             row["refusal"] = preset.refusal;
+        }
+        if (!preset.note.empty()) {
+            row["note"] = preset.note;
         }
         row["host_entry"] =
             nlohmann::json{{"name", preset.server_name}, {"server", mcp_host_entry(resolution)}};

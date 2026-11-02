@@ -41,6 +41,13 @@ class App;
 /// **Every session is a saved chat (56c)**, in the one store: what the host
 /// lists and reopens is read here, the composition root, with the reads
 /// `chats list` and `chats show` use -- `acp/` holds no store of its own.
+///
+/// **`acp registration` (56d)** prints the fields Xcode's Add an Agent sheet
+/// takes, built once by `operations/acp_registration` from this process's
+/// facts -- this binary's path, its channel, the root it runs under, `PATH`
+/// -- as text or the `acp.registration` document. A subcommand, so a read's
+/// `--output-format` never sits on the protocol verb; bare `acp` takes no
+/// positional.
 namespace apogee::commands {
 
 /// The flags the protocol owns, as the session table spells them.

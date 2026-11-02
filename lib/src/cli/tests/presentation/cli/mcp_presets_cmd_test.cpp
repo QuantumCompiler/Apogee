@@ -9,7 +9,9 @@
 
 #include "contracts/assets.h"
 #include "operations/mcp_presets.h"
+#include "platform/platform.h"
 #include "support/cli_home.h"
+#include "support/fake_xcode.h"
 #include "training/python_env.h"
 
 /// `mcp presets` and `mcp create --from` (47c) through the real command
@@ -61,9 +63,16 @@ TEST_CASE("mcp presets lists what the box ships, with its document", "[cli][mcp]
     CHECK_THAT(out, ContainsSubstring(R"("args":["mcp","serve"])"));
     CHECK_THAT(out, ContainsSubstring("not registered into Apogee"));
 
+    // 56d: Xcode's bridge, with what Apogee cannot see under it.
+    CHECK_THAT(out, ContainsSubstring("xcode      Xcode's own tools for any model"));
+    CHECK_THAT(out, ContainsSubstring("register: apogee mcp create xcode --from xcode"));
+    CHECK_THAT(out, ContainsSubstring("note:     Xcode answers only while it runs"));
+
     REQUIRE(ready.home.run({"mcp", "presets", "--output-format", "json"}, &out, &err) == 0);
     const nlohmann::json document = nlohmann::json::parse(out);
-    REQUIRE(document["data"].size() == 2);
+    REQUIRE(document["data"].size() == 3);
+    CHECK(document["data"][2]["name"] == "xcode");
+    CHECK(document["data"][2].contains("note"));
     CHECK(document["data"][0]["command"] == ready.python.string());
     CHECK(document["data"][0]["args"] == nlohmann::json::array({ready.script.string()}));
     CHECK(document["data"][1]["args"] == nlohmann::json::array({"mcp", "serve"}));
@@ -99,7 +108,8 @@ TEST_CASE("create --from refuses self, an unknown name and a typed command, the 
     CHECK(ready.home.run({"mcp", "create", "me", "--from", "self"}, &out, &err) != 0);
     CHECK_THAT(err, ContainsSubstring("it would serve Apogee the tools it already has natively"));
     CHECK(ready.home.run({"mcp", "create", "x", "--from", "nope"}, &out, &err) != 0);
-    CHECK_THAT(err, ContainsSubstring("no preset named 'nope' (the presets: code-exec, self"));
+    CHECK_THAT(err,
+               ContainsSubstring("no preset named 'nope' (the presets: code-exec, self, xcode"));
     CHECK(ready.home.run({"mcp", "create", "x", "--from", "code-exec", "--command", "/bin/true"},
                          &out, &err) != 0);
     CHECK(slurp(ready.home.config_path()) == before);
@@ -120,7 +130,43 @@ TEST_CASE("mcp list's empty state names the presets, and --from completes their 
     REQUIRE(home.run({"mcp", "list"}, &out, &err) == 0);
     CHECK(out == std::string{apogee::operations::kNoMcpServers} + "\n");
     REQUIRE(home.run({"__complete", "mcp", "create", "code", "--from", ""}, &out, &err) == 0);
-    CHECK(out == "code-exec\nself\n");
+    CHECK(out == "code-exec\nself\nxcode\n");
     REQUIRE(home.run({"__complete", "mcp", ""}, &out, &err) == 0);
     CHECK_THAT(out, ContainsSubstring("presets"));
+}
+
+TEST_CASE("create --from xcode writes what the typed xcrun mcpbridge writes, and says the note",
+          "[cli][mcp][presets][xcode]") {
+    // 56d, the 47c pin: one create core. A stub xcrun on PATH, so the preset
+    // resolves the same xcrun the typed registration names.
+    const Ready ready;
+    const std::string before = slurp(ready.home.config_path());
+    std::string out;
+    std::string err;
+    if (!apogee::platform::host_target().starts_with("macos")) {
+        // Off macOS: refused in the listing's words, the file untouched.
+        CHECK(ready.home.run({"mcp", "create", "xcode", "--from", "xcode"}, &out, &err) != 0);
+        CHECK_THAT(err, ContainsSubstring("the 'xcode' preset cannot run here: Xcode runs on "
+                                          "macOS only"));
+        CHECK(slurp(ready.home.config_path()) == before);
+        return;
+    }
+    const apogee::testing::FakeXcode fake;
+    REQUIRE(ready.home.run({"mcp", "create", "xcode", "--from", "xcode"}, &out, &err) == 0);
+    CHECK_THAT(out, ContainsSubstring("registered MCP server 'xcode'"));
+    CHECK_THAT(out, ContainsSubstring("Test it:  apogee mcp test xcode XcodeListWindows '{}'"));
+    // The note, after the Test it line: the switch, the project, the approval.
+    CHECK_THAT(out, ContainsSubstring("'{}'\nXcode answers only while it runs with your project "
+                                      "open"));
+    CHECK_THAT(out, ContainsSubstring("asks again after every install or update"));
+    const std::string from = slurp(ready.home.config_path());
+    CHECK(from != before);
+    // Nothing of Xcode's was run to register it.
+    CHECK(fake.logged().empty());
+
+    std::ofstream{ready.home.config_path(), std::ios::binary | std::ios::trunc} << before;
+    REQUIRE(ready.home.run({"mcp", "create", "xcode", "--command", (fake.bin() / "xcrun").string(),
+                            "--args", "mcpbridge"},
+                           &out, &err) == 0);
+    CHECK(slurp(ready.home.config_path()) == from);
 }

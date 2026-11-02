@@ -311,6 +311,7 @@ endif()
 file(WRITE "${CONFIG_FILE}" "${BEFORE_RENAME}")
 
 # --- MCP presets (47c): listed, registered byte for byte as typed, self refused
+# (56d: a third, xcode, listed with its note on every target)
 # The code-exec preset resolves by path: a planted script and a training
 # environment's interpreter are enough for it to list as runnable. The typed
 # twin spells exactly what the listing says it runs, so the pin holds on every
@@ -324,7 +325,13 @@ endif()
 file(WRITE "${FAKE_PYTHON}" "fake\n")
 apogee_run(0 mcp presets --output-format json)
 string(JSON PRESET_COUNT LENGTH "${APOGEE_OUT}" data)
-expect_equal("${PRESET_COUNT}" "2" "mcp presets lists two presets")
+expect_equal("${PRESET_COUNT}" "3" "mcp presets lists three presets")
+string(JSON XCODE_PRESET GET "${APOGEE_OUT}" data 2 name)
+expect_equal("${XCODE_PRESET}" "xcode" "the third preset is xcode")
+string(JSON XCODE_NOTE ERROR_VARIABLE XCODE_NOTE_ERROR GET "${APOGEE_OUT}" data 2 note)
+if(XCODE_NOTE_ERROR OR NOT XCODE_NOTE MATCHES "Allow External Agents to Use Xcode Tools")
+    message(FATAL_ERROR "the xcode preset carries no note naming Xcode's switch:\n${APOGEE_OUT}")
+endif()
 string(JSON PRESET_RUNNABLE GET "${APOGEE_OUT}" data 0 runnable)
 expect_equal("${PRESET_RUNNABLE}" "ON" "the code-exec preset is runnable here")
 string(JSON PRESET_COMMAND GET "${APOGEE_OUT}" data 0 command)

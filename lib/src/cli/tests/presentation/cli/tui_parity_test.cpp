@@ -94,7 +94,15 @@ TEST_CASE("the table is today's truth: the views, no backfill left, the exec lin
     // so a verb under it is refused with it.
     CHECK(apogee::commands::exec_refusal({"acp"}).starts_with(
         "refused: 'acp' -- speaks the Agent Client Protocol to the host that started it"));
-    CHECK_FALSE(apogee::commands::exec_refusal({"acp", "registration"}).empty());
+    // Its registration (56d) is refused with it -- the fields are pasted into
+    // Xcode, never used inside the shell -- and the refusal says where they
+    // print instead.
+    const std::string registration = apogee::commands::exec_refusal({"acp", "registration"});
+    CHECK(registration.starts_with("refused: 'acp' -- "));
+    CHECK(registration.find("apogee acp registration") != std::string::npos);
+    CHECK(registration.find("Settings › Xcode") != std::string::npos);
+    CHECK(std::string_view{apogee::commands::find_shell_surface("acp")->detail}.find(
+              "acp registration") != std::string_view::npos);
     CHECK(apogee::commands::find_shell_surface("nonsense") == nullptr);
 
     // The exec line's refusals: the doors, the `$EDITOR` verbs, the three.

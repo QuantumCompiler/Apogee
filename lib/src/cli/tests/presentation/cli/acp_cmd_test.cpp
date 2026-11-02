@@ -3,20 +3,26 @@
 #include <CLI/CLI.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "cli/chat_session.h"
 #include "cli/tui_child.h"
 #include "contracts/types.h"
 #include "logger/session.h"
+#include "operations/acp_registration.h"
 #include "platform/child_process.h"
+#include "platform/platform.h"
+#include "support/channel_guard.h"
 #include "support/cli_home.h"
+#include "support/env_guard.h"
 
 /// `apogee acp` (56a) as a verb: its help, its completion -- execute's own
 /// flags, by reference -- the protocol's flags refused in its words, the
@@ -264,4 +270,164 @@ TEST_CASE("the store acp reads is the one chats list and chats show read", "[cli
     CHECK_THAT(err, ContainsSubstring("saved as a chat"));
     CHECK(home.run({"acp", "--resume", "x"}, &out, &err) == 1);
     CHECK_THAT(err, ContainsSubstring("session/load or session/resume"));
+}
+
+// ---------------------------------------------------------------------------
+// `acp registration` (56d): the fields Xcode's Add an Agent sheet takes.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("acp registration prints this binary's fields, as text and as one document",
+          "[cli][acp][registration]") {
+    const CliHome home{std::string{kConfig}};
+    const apogee::testing::EnvUnsetGuard no_config{"APOGEE_CONFIG"};
+    const apogee::testing::EnvGuard path{"PATH", "/opt/test/bin:/usr/bin:/bin"};
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"acp", "registration", "--output-format", "json"}, &out, &err) == 0);
+    CHECK(err.empty());
+    // stdout is the one document and nothing else.
+    const nlohmann::json document = nlohmann::json::parse(out);
+    CHECK(document["object"] == "acp.registration");
+    CHECK(document["where"] == "Settings › Intelligence › Agents › Add an Agent");
+    CHECK(document["name"] == "Apogee");
+    CHECK(document["channel"] == "release");
+    CHECK(document["interpreter"].is_null());
+    CHECK(document["xcode_minimum"] == "26.6");
+    CHECK(document["approval"] == std::string{apogee::operations::kXcodeApproval});
+    // The running binary, absolute and there.
+    const std::filesystem::path executable{document["executable"].get<std::string>()};
+    CHECK(executable == apogee::platform::executable_path());
+    CHECK(executable.is_absolute());
+    CHECK(std::filesystem::exists(executable));
+    // The --config this run was given, absolute, ahead of acp; the root's
+    // variable and PATH in Environment, as this process has them.
+    CHECK(document["arguments"] ==
+          nlohmann::json::array({"--config", home.config_path().string(), "acp"}));
+    CHECK(document["environment"] == nlohmann::json{{"APOGEE_HOME", home.home().string()},
+                                                    {"PATH", "/opt/test/bin:/usr/bin:/bin"}});
+
+    REQUIRE(home.run({"acp", "registration"}, &out, &err) == 0);
+    CHECK_THAT(out, StartsWith("Add Apogee to Xcode 26.6 or later: Settings › Intelligence › "
+                               "Agents › Add an Agent\n  Name:         Apogee\n  Executable:   " +
+                               executable.string() + "\n  Interpreter:  (leave empty)\n"));
+    CHECK_THAT(out, ContainsSubstring("  Arguments:    --config\n                " +
+                                      home.config_path().string() + "\n                acp\n"));
+    CHECK_THAT(out, ContainsSubstring("  Environment:  APOGEE_HOME=" + home.home().string() +
+                                      "\n                PATH=/opt/test/bin:/usr/bin:/bin\n"));
+    CHECK_THAT(out, ContainsSubstring("print these fields again after it changes"));
+    CHECK_THAT(out, ContainsSubstring(std::string{apogee::operations::kXcodeApproval} + "\n"));
+}
+
+TEST_CASE("the registration's Name follows the build's channel", "[cli][acp][registration]") {
+    const CliHome home{std::string{kConfig}};
+    std::string out;
+    std::string err;
+    for (const auto& [channel, name] :
+         std::vector<std::pair<apogee::harness::Channel, std::string>>{
+             {apogee::harness::Channel::Dev, "Apogee (dev)"},
+             {apogee::harness::Channel::Test, "Apogee (test)"},
+             {apogee::harness::Channel::Release, "Apogee"}}) {
+        const apogee::testing::BakedChannelGuard baked{channel};
+        INFO(name);
+        REQUIRE(home.run({"acp", "registration", "--output-format", "json"}, &out, &err) == 0);
+        const nlohmann::json document = nlohmann::json::parse(out);
+        CHECK(document["name"] == name);
+        CHECK(document["channel"] == std::string{apogee::harness::channel_name(channel)});
+    }
+}
+
+TEST_CASE("a root flag lands ahead of acp, absolute; acp's own flags follow it",
+          "[cli][acp][registration]") {
+    const CliHome home{std::string{kConfig}};
+    std::string out;
+    std::string err;
+    // --custom names the install and its config: no second --config.
+    REQUIRE(home.run_default({"--custom", home.config_path().string(), "acp", "--allow-bypass",
+                              "-m", "local", "registration", "--output-format", "json"},
+                             &out, &err) == 0);
+    const nlohmann::json document = nlohmann::json::parse(out);
+    CHECK(document["arguments"] ==
+          nlohmann::json::array({"--custom", home.config_path().string(), "acp", "--model", "local",
+                                 "--allow-bypass"}));
+    // The protocol's flags are refused here as at launch.
+    CHECK(home.run({"acp", "--resume", "x", "registration"}, &out, &err) == 1);
+    CHECK_THAT(err, ContainsSubstring("--resume is refused"));
+    CHECK(out.empty());
+}
+
+TEST_CASE("acp registration completes, and is no protocol verb",
+          "[cli][acp][registration][completion]") {
+    const CliHome home{std::string{kConfig}};
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"__complete", "acp", ""}, &out, &err) == 0);
+    CHECK_THAT(out, ContainsSubstring("registration\n"));
+    REQUIRE(home.run({"__complete", "acp", "registration", "--output-format", ""}, &out, &err) ==
+            0);
+    CHECK_THAT(out, ContainsSubstring("json\n"));
+    REQUIRE(home.run({"acp", "registration", "--help"}, &out, &err) == 0);
+    CHECK_THAT(out, ContainsSubstring("Add an Agent"));
+    CHECK_THAT(out, ContainsSubstring("--output-format"));
+}
+
+TEST_CASE("the registration's root and environment follow exactly what is set",
+          "[cli][acp][registration]") {
+    using apogee::operations::AcpRegistration;
+    using apogee::operations::AcpRegistrationInputs;
+    AcpRegistrationInputs inputs;
+    inputs.executable = "/Users/you/.local/bin/apogee-dev";
+    inputs.channel = apogee::harness::Channel::Dev;
+    // A baked root: nothing but acp, nothing in Environment.
+    AcpRegistration bare = apogee::operations::acp_registration(inputs);
+    CHECK(bare.name == "Apogee (dev)");
+    CHECK(bare.arguments == std::vector<std::string>{"acp"});
+    CHECK(bare.environment.empty());
+    CHECK(apogee::operations::render_acp_registration(bare) ==
+          "Add Apogee (dev) to Xcode 26.6 or later: Settings › Intelligence › Agents › Add an "
+          "Agent\n"
+          "  Name:         Apogee (dev)\n"
+          "  Executable:   /Users/you/.local/bin/apogee-dev\n"
+          "  Interpreter:  (leave empty)\n"
+          "  Arguments:    acp\n"
+          "  Environment:  (none)\n"
+          "Arguments and Environment Variables take one entry a line.\n" +
+              std::string{apogee::operations::kXcodeApproval} + "\n");
+    const nlohmann::json document = apogee::operations::acp_registration_document(bare);
+    CHECK(document["environment"] == nlohmann::json::object());
+    CHECK(document["arguments"] == nlohmann::json::array({"acp"}));
+
+    // Each variable exactly when set, made absolute; PATH as given.
+    inputs.apogee_home = "relative/home";
+    AcpRegistration set = apogee::operations::acp_registration(inputs);
+    REQUIRE(set.environment.size() == 1);
+    CHECK(set.environment[0].first == "APOGEE_HOME");
+    CHECK(std::filesystem::path{set.environment[0].second}.is_absolute());
+    CHECK(set.environment[0].second ==
+          (std::filesystem::current_path() / "relative/home").lexically_normal().string());
+    // A rooted path is made absolute as the registration makes it: as given
+    // on POSIX, with the current drive on Windows, where `/srv/...` is not.
+    const auto made_absolute = [](const std::string& path) {
+        return std::filesystem::absolute(path).lexically_normal().string();
+    };
+    inputs.apogee_config = "/srv/apogee/config/config.json";
+    inputs.path = "/opt/homebrew/bin:/usr/bin";
+    set = apogee::operations::acp_registration(inputs);
+    CHECK(set.environment == std::vector<std::pair<std::string, std::string>>{
+                                 {"APOGEE_HOME", set.environment[0].second},
+                                 {"APOGEE_CONFIG", made_absolute("/srv/apogee/config/config.json")},
+                                 {"PATH", "/opt/homebrew/bin:/usr/bin"}});
+
+    // A channel flag, and --config beside it, ahead of acp.
+    inputs = AcpRegistrationInputs{};
+    inputs.executable = "/usr/local/bin/apogee";
+    inputs.root_flag =
+        apogee::harness::RootFlag{.channel = apogee::harness::Channel::Test, .custom_config = {}};
+    inputs.config_flag = "/etc/apogee.json";
+    CHECK(apogee::operations::acp_registration(inputs).arguments ==
+          std::vector<std::string>{"--test", "--config", made_absolute("/etc/apogee.json"), "acp"});
+
+    // No path to name: no registration.
+    inputs.executable.clear();
+    CHECK_THROWS_WITH(apogee::operations::acp_registration(inputs),
+                      ContainsSubstring("no Executable to register"));
 }

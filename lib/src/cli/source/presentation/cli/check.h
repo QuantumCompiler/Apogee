@@ -16,6 +16,7 @@
 #include "contracts/config.h"
 #include "contracts/paths.h"
 #include "operations/suites.h"
+#include "platform/xcode.h"
 #include "views/status_line.h"
 
 /// `apogee check` — the install doctor.
@@ -126,6 +127,12 @@ struct CheckInputs {
     /// and a missing one is said as such; a test scripts its own.
     std::function<std::optional<std::string>(std::string_view flag, std::string& error)>
         ffmpeg_listing;
+
+    /// What Xcode's command-line tools say of the Xcode on this Mac (56d):
+    /// `platform::xcode_facts`' answer -- nullopt with the reason when Xcode
+    /// could not be asked. Null asks the real one, bounded; a test scripts
+    /// its own. Asked on macOS only (`host_target`).
+    std::function<std::optional<platform::XcodeFacts>(std::string& error)> xcode_probe;
 
     /// What the Providers section sees of the filesystem (28c): whether a
     /// vendor CLI is on PATH and its evidence files exist -- never a read,

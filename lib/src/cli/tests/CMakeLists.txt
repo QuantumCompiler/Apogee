@@ -27,6 +27,7 @@ add_library(apogee_tests_infrastructure OBJECT
     infrastructure/platform/ffmpeg_test.cpp
     infrastructure/platform/ffmpeg_assembly_test.cpp
     infrastructure/platform/system_info_test.cpp
+    infrastructure/platform/xcode_test.cpp
     infrastructure/ansi/ansi_test.cpp
     infrastructure/events/bus_test.cpp
     support/env_guard.h
@@ -36,12 +37,15 @@ add_library(apogee_tests_infrastructure OBJECT
     support/fake_child.h
     support/fake_mlx_driver.h
     support/fake_ffmpeg.h
+    support/fake_xcode.h
     support/gguf_builder.h
     support/mlx_model.h
     support/pipeline_model.h
     support/voice_model.h
     support/terminal_model.h
     support/terminal_model.cpp
+    support/terminal_output.h
+    support/terminal_output.cpp
     support/embedding_fixtures.h
     support/towered_configs.h
     support/draft_head_configs.h

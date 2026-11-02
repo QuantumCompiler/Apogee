@@ -54,6 +54,13 @@ set(forbidden
     "keychain"
     "Keychain"
     "security find-generic-password"
+    # Xcode (56d): `check` asks Xcode's command-line tools for their version
+    # and paths and never reads Xcode's settings -- not its defaults domain,
+    # and nothing under ~/Library/Developer/Xcode, where its coding assistant
+    # keeps its MCP servers and its agents' configuration. What it cannot see
+    # it says in words.
+    "com[.]apple[.]dt[.]Xcode"
+    "Library/Developer/Xcode"
 )
 
 # The one file that may NAME a vendor's login files (28a): the providers'
