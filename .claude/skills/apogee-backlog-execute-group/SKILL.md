@@ -30,6 +30,12 @@ For each item, in order:
 
 1. Mark its row 🚧, build **per its document** — constraints, seam, guardrails, acceptance criteria, real-weights rules where they apply — and verify (`lib/scripts/cicd.sh --test` before anything is called done).
 2. Ship it through the Documentation and Status flow: MILESTONES entry; the document deleted with its index row (and any other item's gate this satisfied, updated); ROADMAP line checked/moved; codebase maps updated; SPEC only on a real shape change.
+   Superpowers works inside each item exactly as `/apogee-backlog-execute-item` step 5 says ([Superpowers fits the docs-first lifecycle](../../../lib/documentation/cli/assistant/CLAUDE.md#superpowers-fits-the-docs-first-lifecycle)). The group command answers its waits in advance:
+   - The plan is self-reviewed, and the method is `subagent-driven-development` (or `executing-plans` without a subagent tool).
+   - The worktree is consented to and based on the release branch.
+   - Finishing's answer is the squash landing: `git merge --squash <item-branch>` onto the release branch, which becomes the one commit below. Then the worktree is removed and its branch deleted with `git branch -D`, both sanctioned here.
+   - A failing baseline, `systematic-debugging`'s third failed fix, or a ruling that would reverse a `[user]` decision takes the stuck-item path (§4).
+   - Superpowers' `.superpowers/` workspace is git-ignored and goes with its worktree. The run never `rm -rf`s it.
 3. **Commit — this skill's own authorization, and only here.** Exactly one commit per shipped item, at its boundary, never a push:
 
    ```

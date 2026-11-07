@@ -19,6 +19,8 @@ Apogee's documentation is per application ([the router](../../../lib/documentati
 
 Everything below reads from the chosen home, written `<home>`: its backlog README is the authority on that queue's tables, numbering, document format and link depths, and its assistant docs (`<home>/assistant/CLAUDE.md` first) carry the invariants. Where this skill says `<home>`, substitute the chosen application's directory.
 
+**From a brainstorm.** When the idea came out of `superpowers:brainstorming`, this document **is** its written design ([Superpowers fits the docs-first lifecycle](../../../lib/documentation/cli/assistant/CLAUDE.md#superpowers-fits-the-docs-first-lifecycle)): its approaches, its goals and non-goals and the user's decisions land in this format's sections, never in `docs/superpowers/specs/`. Brainstorming's builder check may read the draft before it is placed. **The brainstorm ends when the user approves the placed document**: its hard gate's hand-off to `superpowers:writing-plans` gives way, and planning and building wait for a later `/apogee-backlog-execute-item`.
+
 ## 1. Read before writing
 
 1. `<home>/backlog/README.md` (`<home>/backlog/README.md`) — the **document format** (section order), the **open-call tag semantics** (`[user]` / `[default: …]` / `(consumed decision)`), the **gate convention**, the **index-table format and numbering rules**, and the current index.

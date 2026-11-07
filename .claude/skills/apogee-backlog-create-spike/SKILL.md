@@ -17,6 +17,8 @@ Apogee's documentation is per application ([the router](../../../lib/documentati
 
 Everything below reads from the chosen home, written `<home>`: its backlog README is the authority on that queue's tables, numbering, document format and link depths, and its assistant docs (`<home>/assistant/CLAUDE.md` first) carry the invariants. Where this skill says `<home>`, substitute the chosen application's directory.
 
+**Superpowers** ([Superpowers fits the docs-first lifecycle](../../../lib/documentation/cli/assistant/CLAUDE.md#superpowers-fits-the-docs-first-lifecycle)): a spike's conversation may have run through `superpowers:brainstorming`. Its decisions are the user's answers here, and these documents are its written design: nothing goes to `docs/superpowers/specs/`. The brainstorm ends when the documents are placed. Planning and building wait for `/apogee-backlog-execute-item`.
+
 ## 1. Gather the findings
 
 The input is wherever the spike's findings live:

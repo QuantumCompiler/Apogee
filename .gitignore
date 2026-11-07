@@ -27,3 +27,10 @@ buildServer.json
 # Python bytecode from running the shipped drivers, the asset generator, or the tests.
 __pycache__/
 *.pyc
+
+# Superpowers (the repository enables it; see CLI CLAUDE.md -> Superpowers fits the
+# docs-first lifecycle): its plan workspaces and brainstorm mockups, the item
+# worktrees under .claude/worktrees/, and each machine's own settings.
+.superpowers/
+.claude/worktrees/
+.claude/settings.local.json

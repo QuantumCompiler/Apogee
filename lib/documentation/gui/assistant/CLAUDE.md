@@ -71,6 +71,10 @@ The GUI is built docs-first, the same lifecycle as the CLI's. Where new work is 
 - GUI work lands in **this** tree's ROADMAP/backlog/MILESTONES, never the CLI's; an item that needs a CLI change (a new protocol event, a new read) gets a sibling item in the CLI's backlog, gated both ways.
 - **Versioning is repo-wide** (the release, `lib/release/VERSION`, the merge-is-the-release law — the CLI docs record it). The GUI ships inside those releases once it exists; its pipeline joins CI beside the CLI's.
 
+### Superpowers
+
+The Superpowers skills work inside the lifecycle exactly as the CLI docs map them ([Superpowers fits the docs-first lifecycle](../../cli/assistant/CLAUDE.md#superpowers-fits-the-docs-first-lifecycle), 2026-11-07). The app's delta: `test-driven-development`'s tests are the hermetic suite (`lib/scripts/cicd.sh --app darwin --test`), over view-models and scripted fakes, never UI automation or a live binary. A look settled in brainstorming's visual companion (run from the scratchpad) lands in `lib/design/spec` and the design canvas, per the design's own law, before an item cites it.
+
 ### Development runs on the dev channel
 
 *(The user's call, 2026-10-31; the law is the CLI docs' [Development runs on the dev channel](../../cli/assistant/CLAUDE.md#development-runs-on-the-dev-channel).)* The installed `Apogee.app`, the release `apogee` and `~/.apogee` are the user's production install, changed only by what a release ships, so its updaters are tested for real. A development build of the app drives **`apogee-dev`** over `~/.apogee-dev` and keeps **its own settings**, never the installed app's.
