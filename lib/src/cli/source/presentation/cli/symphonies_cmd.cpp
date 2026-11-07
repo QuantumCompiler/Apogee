@@ -33,6 +33,7 @@
 #include "machine/json_reporter.h"
 #include "operations/suites.h"
 #include "platform/child_process.h"
+#include "platform/platform.h"
 #include "scaffold/symphony.h"
 #include "symphony/definition.h"
 #include "symphony/runner.h"
@@ -644,8 +645,9 @@ void play(const RootContext& context, const PlayFlags& flags, ReadFormat format)
     // nothing (the document carries every stage).
     const bool json = format == ReadFormat::Json;
     BusyLine busy{std::cerr, "playing " + definition.spec.name, busy_options(flags.quiet || json)};
-    const ansi::Style style{ansi::resolve_color(ansi::ColorMode::Auto, busy.active(),
-                                                std::getenv("NO_COLOR") != nullptr)};
+    const ansi::Style style{ansi::resolve_color(
+        ansi::ColorMode::Auto, busy.active(), std::getenv("NO_COLOR") != nullptr,
+        platform::renders_escape_sequences(platform::StandardStream::Err))};
     const bool say = !flags.quiet && !json;
     agentloop::SideCallSink narrate = [&busy, &style, say](const agentloop::SideCall& call) {
         const std::string label = call.role + " — " + call.detail;

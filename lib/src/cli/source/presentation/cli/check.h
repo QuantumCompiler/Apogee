@@ -128,6 +128,13 @@ struct CheckInputs {
     std::function<std::optional<std::string>(std::string_view flag, std::string& error)>
         ffmpeg_listing;
 
+    /// Why this process may read a non-ASCII argument, path or environment
+    /// value wrongly (57j): `platform::text_encoding_gap`'s answer, empty when
+    /// Windows reads its text as UTF-8. Null asks this process; a test hands
+    /// its own. Asked on Windows only (`host_target`) -- the one platform with
+    /// a code page to get wrong -- so macOS and Linux show no row for it.
+    std::function<std::string()> encoding_probe;
+
     /// What Xcode's command-line tools say of the Xcode on this Mac (56d):
     /// `platform::xcode_facts`' answer -- nullopt with the reason when Xcode
     /// could not be asked. Null asks the real one, bounded; a test scripts

@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "embedstore/fts.h"
+#include "platform/platform.h"
 
 /// The chunk store, its FTS index, and the query builder that stands between a
 /// user's words and FTS5's syntax.
@@ -243,4 +244,33 @@ TEST_CASE("an open waits out another connection's lock on the file rather than f
     INFO(error);
     REQUIRE(opened.has_value());
     CHECK(opened->chunk_count() == 1);
+}
+
+TEST_CASE("a store opens, writes and reopens under a folder with a non-ASCII name",
+          "[embedstore][store][utf8][57j]") {
+    // SQLite reads the file name it is given as UTF-8 on every platform. The
+    // store handed it `path.string()` -- the ANSI code page's bytes under
+    // libc++ on Windows (CI's arm64 build), which named another file or none.
+    Scratch scratch;
+    // "café résumé", written as its bytes.
+    const std::filesystem::path folder =
+        scratch.dir / apogee::platform::path_from_utf8("caf\xC3\xA9 r\xC3\xA9sum\xC3\xA9");
+    const std::filesystem::path db = folder / "collection.db";
+    {
+        Store store{db};
+        store.replace_source("notes.md", {"the capital of France is Paris"});
+    }
+    CHECK(std::filesystem::is_regular_file(db));
+    // Under that name and no other: the scratch folder holds that one folder.
+    std::vector<std::filesystem::path> entries;
+    for (const auto& entry : std::filesystem::directory_iterator{scratch.dir}) {
+        entries.push_back(entry.path().filename());
+    }
+    REQUIRE(entries.size() == 1);
+    CHECK(entries.front() == folder.filename());
+
+    Store reopened{db};
+    const std::vector<SearchHit> hits = reopened.search("capital of France", 5);
+    REQUIRE_FALSE(hits.empty());
+    CHECK(hits.front().chunk.text.find("Paris") != std::string::npos);
 }

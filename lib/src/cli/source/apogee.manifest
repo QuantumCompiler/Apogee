@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  The Windows application manifest every Apogee executable carries (57j),
+  built in through apogee.rc on Windows alone.
+
+  activeCodePage UTF-8 makes UTF-8 this process's ANSI code page (Windows 10
+  version 1903 and later): argv, getenv, CLI11 and every narrow CRT and Win32
+  call, third-party ones included, read and name text as UTF-8, as on macOS
+  and Linux. Without it a profile folder with an accented name made every
+  command fail to resolve its root, and typed accented text reached the model
+  replaced. An older Windows ignores the element, and apogee check says so.
+
+  The rest is what MinGW's own default manifest carries, which this one
+  replaces (the linker keeps ours and drops that one): run as the invoker,
+  and the Windows versions this executable knows, so Windows reports itself
+  truthfully.
+
+  No two hyphens in a row anywhere in this comment: XML forbids them in one,
+  and Windows refuses to start a process whose manifest does not parse.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows Vista -->
+      <supportedOS Id="{e2011457-1546-43c5-a5fe-008deee3d3f0}"/>
+      <!-- Windows 7 -->
+      <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"/>
+      <!-- Windows 8 -->
+      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/>
+      <!-- Windows 8.1 -->
+      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>
+      <!-- Windows 10 and 11 -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>

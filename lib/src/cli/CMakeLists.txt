@@ -40,6 +40,14 @@ project(Apogee
     LANGUAGES CXX C
 )
 
+# Windows builds a resource into every executable: its manifest, which names
+# UTF-8 the process's code page (57j, source/apogee.rc). MinGW's platform
+# module enables the resource compiler already; said here, where the languages
+# are, so the dependency is seen.
+if(WIN32)
+    enable_language(RC)
+endif()
+
 # C++20 baseline, decided 2026-08-24: the only standard uniformly supported
 # across all six release targets. Promotion to C++23 is a deliberate event,
 # not a drift -- change it here and nowhere else.

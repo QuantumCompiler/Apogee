@@ -95,7 +95,6 @@ Every call is a recorded default; no **[user]** call blocks any of them. `graph 
 
 | # | Item | Version | File | Status |
 |---|---|---|---|---|
-| 57j | Windows text and console — a non-ASCII profile, APOGEE_HOME or argument works (a UTF-8 code-page manifest, wide or UTF-8 paths at CreateFile and SQLite), Ctrl-C takes three presses as on POSIX, and classic conhost gets VT and UTF-8 output | v0.2.1 | [`windows-text-and-console.md`](v0.2.1/windows-text-and-console.md) | 🟢 |
 | 57k | Windows filesystem safety — reset/uninstall remove a junctioned row as a link, the file sandbox resolves links, uninstall finishes past its own running .exe, the PowerShell completion found where install.ps1 put it, shell and git not offered where they cannot run | v0.2.1 | [`windows-filesystem-safety.md`](v0.2.1/windows-filesystem-safety.md) | 🟢 |
 | 57l | The install scripts finish clean — a successful install.sh exits 0 and leaves no temp directory; the zsh completion goes where zsh looks, and a shell that is absent gets no completion; a version without the v is accepted; install.ps1's PATH advice and irm\|iex session are clean; uninstall removes every completion the installers wrote | v0.2.1 | [`install-scripts-finish-clean.md`](v0.2.1/install-scripts-finish-clean.md) | 🟢 |
 | 57m | The merge gates hold — the "Stable: CI must pass" ruleset created and verified, `version bump` counting the macOS app, a failed release lookup never read as not released | v0.2.1 | [`merge-gates-hold.md`](v0.2.1/merge-gates-hold.md) | 🟢 |

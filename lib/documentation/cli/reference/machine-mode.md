@@ -1677,7 +1677,14 @@ command's stdout ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve))
   ad-hoc-signed binary is asked about again after every install). Off macOS
   the section is one `skipped` row, `xcode`. Never `warn` or `fail`: Xcode is
   optional. It asks Xcode's command-line tools only -- `xcode-select -p`,
-  then `xcrun` -- and reads none of Xcode's settings.
+  then `xcrun` -- and reads none of Xcode's settings. Since 57j the
+  `Version` section on Windows has a `code page` row after `root`: `ok`
+  (`UTF-8 -- arguments, paths and environment values are read as typed`)
+  when the process reads its text as UTF-8, as every Apogee executable's
+  manifest asks; `warn` on a Windows older than 10 version 1903, which
+  ignores the manifest, its detail naming the code page in use -- with no
+  `remedy`, the fix being a newer Windows rather than a command. Never
+  `fail`. macOS and Linux have no such row.
 - **`providers scan`** (since 37b): a row per provider in the knowledge table, as the human scan prints them -- `provider` (`claude`), `type` (`claude-cli`), `label` (`Claude CLI`), `tier` (`credentials found`, `verified 2026-10-06`, `not found`), `backend` (which configured backends reach it, `not registered` when it could be, else empty) and `evidence`, a line each. It is the explicit scan, so it may start a vendor's binary for its version as the human scan does. With `--register`, what registering did is the document's `registration` and the rosters it fetched its `rosters`, a line each; with `--refresh`, the rosters re-fetched are `rosters` too.
 - **`providers register <id>`** (since M33): one provider the last scan found, registered by the pass `scan --register` runs -- the core the shell's Providers view runs on `r` -- over the provider cache, never a scan of its own. Its document is `object` (`provider.registration`), `provider` (the id), and `scan --register`'s `registration` and `rosters`, a line each: `registered claude (claude-cli)`, `models.default set to 'claude' (none was set)` when the config set none, or `claude: already registered as 'claude' -- nothing written`; when it registers, the rosters of the configured types not yet fetched are fetched on this word, as M13 rules and `scan --register` does. An id the knowledge table does not hold, a machine never scanned, or no config file is refused on stderr, exit `1`, nothing written; no key passes through it -- keys stay `apogee auth add`'s.
 - **`knowledge list`** and **`knowledge info`** (since 37c): the records the

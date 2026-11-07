@@ -4582,3 +4582,38 @@ TEST_CASE("check's Xcode rows reach its document, and a stub's stderr reaches ne
         CHECK(fake.logged().empty());
     }
 }
+
+TEST_CASE("check says Windows' code page on Windows alone, warning when it is not UTF-8",
+          "[commands][check][utf8][57j]") {
+    // 57j: the manifest names UTF-8 the process's code page; a Windows older
+    // than 10 version 1903 ignores it, and a non-ASCII argument may not
+    // survive there. Said as a warning, never refused -- and on macOS and
+    // Linux, with no code page to get wrong, no row at all.
+    const Install install;
+    install.seed();
+    const auto code_page = [&install](std::string target, std::string gap) {
+        CheckInputs inputs = inputs_for(install);
+        inputs.host_target = std::move(target);
+        inputs.encoding_probe = [gap] { return gap; };
+        const CheckReport report = run_checks(inputs);
+        const apogee::commands::CheckRow* row = row_with(report, "code page");
+        return row == nullptr ? std::optional<apogee::commands::CheckRow>{}
+                              : std::optional<apogee::commands::CheckRow>{*row};
+    };
+
+    const std::optional<apogee::commands::CheckRow> utf8 = code_page("windows-x64", "");
+    REQUIRE(utf8.has_value());
+    CHECK(utf8->section == "Version");
+    CHECK(utf8->status == Status::Ok);
+    CHECK(utf8->detail.starts_with("UTF-8"));
+
+    const std::string why = "Windows reads this process's text in code page 1252, not UTF-8";
+    const std::optional<apogee::commands::CheckRow> old = code_page("windows-arm64", why);
+    REQUIRE(old.has_value());
+    CHECK(old->status == Status::Warn);
+    CHECK(old->detail == why);
+    CHECK(old->remedy.empty());
+
+    CHECK_FALSE(code_page("macos-arm64", why).has_value());
+    CHECK_FALSE(code_page("linux-x64", why).has_value());
+}

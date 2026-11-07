@@ -470,6 +470,9 @@ endforeach()
 target_link_libraries(apogee_tests PRIVATE
     apogee_tests_infrastructure apogee_tests_data apogee_tests_business apogee_tests_presentation
     apogee_core Catch2::Catch2WithMain)
+# The executable's Windows manifest (57j): the test runs read text in the
+# UTF-8 code page users get, and `platform_test` checks they do.
+apogee_windows_manifest(apogee_tests)
 
 # The shell runs a command as a child of its own binary (37f): a test of
 # that runs the built `apogee`, found here -- and skips where this build made
@@ -540,6 +543,17 @@ add_test(NAME cli.complete_lifecycle
         -DAPOGEE_BIN=$<TARGET_FILE:apogee>
         -DAPOGEE_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/complete-e2e-home
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/complete_e2e.cmake"
+)
+
+# Non-ASCII homes, prompts and paths on the real binary (57j): a root under an
+# accented folder, an accented --system prompt saved byte for byte, an
+# attachment named with accents. cmake -P like the case above, so it runs on
+# Windows too -- where the executable's UTF-8 manifest is what makes it pass.
+add_test(NAME cli.non_ascii
+    COMMAND "${CMAKE_COMMAND}"
+        -DAPOGEE_BIN=$<TARGET_FILE:apogee>
+        -DAPOGEE_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/non-ascii-e2e-home
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/non_ascii_e2e.cmake"
 )
 
 # The interactive-never-listens invariant (SPEC.md -> Principles), test-locked

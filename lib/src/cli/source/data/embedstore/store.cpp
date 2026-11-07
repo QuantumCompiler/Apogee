@@ -69,8 +69,13 @@ Store::Store(const std::filesystem::path& path) : impl_{std::make_unique<Impl>()
     std::error_code code;
     std::filesystem::create_directories(path.parent_path(), code);
 
+    // SQLite reads the name it is given as UTF-8 on every platform (57j):
+    // `path.string()` is the ANSI code page's bytes under libc++ on Windows
+    // (CI's arm64 build), which named another file -- or none.
+    const std::u8string utf8_name = path.u8string();
+    const std::string name(utf8_name.begin(), utf8_name.end());
     sqlite3* raw = nullptr;
-    if (sqlite3_open(path.string().c_str(), &raw) != SQLITE_OK) {
+    if (sqlite3_open(name.c_str(), &raw) != SQLITE_OK) {
         detail::ConnectionPtr owned{raw};
         throw std::runtime_error("could not open the chunk store at " + path.string() + ": " +
                                  (raw == nullptr ? "out of memory" : sqlite3_errmsg(raw)));

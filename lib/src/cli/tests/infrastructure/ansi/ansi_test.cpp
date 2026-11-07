@@ -35,14 +35,26 @@ TEST_CASE("each of the three inputs disables colour independently", "[ux][ansi]"
 
     for (const Case& c : cases) {
         INFO(c.why);
-        CHECK(resolve_color(c.mode, c.is_terminal, c.no_color_set) == c.expected);
+        CHECK(resolve_color(c.mode, c.is_terminal, c.no_color_set, true) == c.expected);
     }
 }
 
 TEST_CASE("NO_COLOR disables colour by its presence, whatever the value", "[ux][ansi]") {
     // Per the convention: NO_COLOR=0 still means no colour. Reading the value
     // is the mistake this pins.
-    CHECK_FALSE(resolve_color(ColorMode::Auto, true, true));
+    CHECK_FALSE(resolve_color(ColorMode::Auto, true, true, true));
+}
+
+TEST_CASE("a console that would print the codes as text gets no colour in Auto",
+          "[ux][ansi][57j]") {
+    // A classic Windows console without virtual-terminal processing prints
+    // `\033[32m` as `←[32m`: Auto resolves off there, while an explicit ask
+    // keeps its meaning and NO_COLOR still wins.
+    CHECK_FALSE(resolve_color(ColorMode::Auto, true, false, false));
+    CHECK(resolve_color(ColorMode::Auto, true, false, true));
+    CHECK(resolve_color(ColorMode::Always, true, false, false));
+    CHECK_FALSE(resolve_color(ColorMode::Auto, true, true, false));
+    CHECK_FALSE(resolve_color(ColorMode::Never, true, false, false));
 }
 
 TEST_CASE("a disabled style returns its input unchanged", "[ux][ansi]") {

@@ -154,3 +154,33 @@ TEST_CASE("a SIGTERM someone else stands -- a session's watch, serve -- is left 
     CHECK(InterruptScope::exit_code(kCancelled) == kCancelled);
 }
 #endif
+
+/// 57j: the Microsoft C runtime puts SIGINT back to its default action before
+/// it calls the handler, so until the handler stood itself again a second
+/// Ctrl-C ended a Windows process -- a pull's staging left behind -- where
+/// POSIX counts it. Every platform, so CI's Windows rows run it: before the
+/// fix, the second raise ended the test binary there.
+TEST_CASE("two Ctrl-Cs inside a scope leave the process running with both counted",
+          "[commands][interrupt][windows][57j]") {
+    using apogee::commands::InterruptScope;
+    void (*const before)(int) = std::signal(SIGINT, SIG_DFL);
+    (void)std::signal(SIGINT, before);
+    {
+        const InterruptScope scope;
+        CHECK(InterruptScope::signals_caught() == 0);
+        (void)std::raise(SIGINT);
+        (void)std::raise(SIGINT);
+        CHECK(InterruptScope::token().stop_requested());
+        CHECK(InterruptScope::signals_caught() == 2);
+        // Still standing for the third, which exits.
+        void (*const standing)(int) = std::signal(SIGINT, SIG_DFL);
+        (void)std::signal(SIGINT, standing);
+        CHECK(standing != SIG_DFL);
+        CHECK(standing != before);
+    }
+    // What was there before is back.
+    void (*const after)(int) = std::signal(SIGINT, SIG_DFL);
+    (void)std::signal(SIGINT, after);
+    CHECK(after == before);
+    CHECK(InterruptScope::exit_code(apogee::commands::kCancelled) == apogee::commands::kCancelled);
+}

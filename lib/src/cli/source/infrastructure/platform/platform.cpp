@@ -1,6 +1,7 @@
 #include "platform/platform.h"
 
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <csignal>
 #include <cstdlib>
@@ -38,6 +39,69 @@
 // five-target matrix exists to prevent.
 
 namespace apogee::platform {
+
+#if defined(_WIN32)
+namespace {
+
+#if !defined(ENABLE_VIRTUAL_TERMINAL_PROCESSING)
+constexpr DWORD ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004;
+#endif
+
+/// `text` (UTF-16, as Windows answers) in UTF-8, as everything above the
+/// seam reads it (57j). An unpaired surrogate becomes U+FFFD.
+[[nodiscard]] std::string utf8_from_wide(std::wstring_view text) {
+    if (text.empty()) {
+        return {};
+    }
+    const int length = static_cast<int>(text.size());
+    const int size =
+        WideCharToMultiByte(CP_UTF8, 0, text.data(), length, nullptr, 0, nullptr, nullptr);
+    if (size <= 0) {
+        return {};
+    }
+    std::string out(static_cast<std::size_t>(size), '\0');
+    (void)WideCharToMultiByte(CP_UTF8, 0, text.data(), length, out.data(), size, nullptr, nullptr);
+    return out;
+}
+
+/// `text` (UTF-8) in the wide form Windows takes. A byte that is no UTF-8
+/// becomes U+FFFD, never an error.
+[[nodiscard]] std::wstring wide_from_utf8(std::string_view text) {
+    if (text.empty()) {
+        return {};
+    }
+    const int length = static_cast<int>(text.size());
+    const int size = MultiByteToWideChar(CP_UTF8, 0, text.data(), length, nullptr, 0);
+    if (size <= 0) {
+        return {};
+    }
+    std::wstring out(static_cast<std::size_t>(size), L'\0');
+    (void)MultiByteToWideChar(CP_UTF8, 0, text.data(), length, out.data(), size);
+    return out;
+}
+
+/// The Win32 handle of a standard stream.
+[[nodiscard]] DWORD standard_handle(StandardStream stream) noexcept {
+    switch (stream) {
+        case StandardStream::In:
+            return STD_INPUT_HANDLE;
+        case StandardStream::Out:
+            return STD_OUTPUT_HANDLE;
+        case StandardStream::Err:
+            return STD_ERROR_HANDLE;
+    }
+    return STD_OUTPUT_HANDLE;
+}
+
+/// Whether `handle` is a console (input or screen buffer).
+[[nodiscard]] bool is_console(HANDLE handle) noexcept {
+    DWORD mode = 0;
+    return handle != nullptr && handle != INVALID_HANDLE_VALUE &&
+           GetConsoleMode(handle, &mode) != 0;
+}
+
+}  // namespace
+#endif
 
 OperatingSystem host_os() noexcept {
 #if defined(__linux__)
@@ -197,7 +261,10 @@ bool create_exclusive_file(const std::filesystem::path& path, std::string_view c
                            bool& exists) {
     exists = false;
 #if defined(_WIN32)
-    const HANDLE handle = CreateFileA(path.string().c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+    // Wide, as `file_lock.cpp` names its file: `CreateFileA` read the
+    // narrow name in the ANSI code page, so a non-ASCII path named another
+    // file (57j).
+    const HANDLE handle = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
                                       FILE_ATTRIBUTE_NORMAL, nullptr);
     if (handle == INVALID_HANDLE_VALUE) {
         exists = GetLastError() == ERROR_FILE_EXISTS;
@@ -313,13 +380,17 @@ bool owned_by_this_user(const std::filesystem::path& path) noexcept {
 
 std::optional<std::string> home_directory() {
 #if defined(_WIN32)
-    if (const char* profile = std::getenv("USERPROFILE"); profile != nullptr && *profile != '\0') {
-        return std::string{profile};
+    // Wide, then UTF-8 (57j): the narrow `getenv` handed back the ANSI code
+    // page's bytes, which libstdc++ then failed to read as UTF-8 -- every
+    // command under `C:\Users\José` exited 1 before it began.
+    if (std::optional<std::string> profile = utf8_environment("USERPROFILE");
+        profile.has_value() && !profile->empty()) {
+        return profile;
     }
-    const char* drive = std::getenv("HOMEDRIVE");
-    const char* path = std::getenv("HOMEPATH");
-    if (drive != nullptr && *drive != '\0' && path != nullptr && *path != '\0') {
-        return std::string{drive} + path;
+    const std::optional<std::string> drive = utf8_environment("HOMEDRIVE");
+    const std::optional<std::string> path = utf8_environment("HOMEPATH");
+    if (drive.has_value() && !drive->empty() && path.has_value() && !path->empty()) {
+        return *drive + *path;
     }
     return std::nullopt;
 #else
@@ -327,6 +398,62 @@ std::optional<std::string> home_directory() {
         return std::string{home};
     }
     return std::nullopt;
+#endif
+}
+
+std::optional<std::string> utf8_environment(std::string_view name) {
+#if defined(_WIN32)
+    const std::wstring wide_name = wide_from_utf8(name);
+    std::wstring value(64, L'\0');
+    for (;;) {
+        SetLastError(ERROR_SUCCESS);
+        const DWORD got = GetEnvironmentVariableW(wide_name.c_str(), value.data(),
+                                                  static_cast<DWORD>(value.size()));
+        if (got == 0) {
+            // Not there, or there and empty.
+            if (GetLastError() == ERROR_ENVVAR_NOT_FOUND) {
+                return std::nullopt;
+            }
+            return std::string{};
+        }
+        if (got < value.size()) {
+            value.resize(got);
+            return utf8_from_wide(value);
+        }
+        // Too small: `got` is the size it needs, the terminator included --
+        // asked again, since another thread may have changed it meanwhile.
+        value.assign(got, L'\0');
+    }
+#else
+    const std::string key{name};
+    const char* value = std::getenv(key.c_str());  // NOLINT(concurrency-mt-unsafe): read once
+    if (value == nullptr) {
+        return std::nullopt;
+    }
+    return std::string{value};
+#endif
+}
+
+std::filesystem::path path_from_utf8(std::string_view utf8) {
+#if defined(_WIN32)
+    return std::filesystem::path{wide_from_utf8(utf8)};
+#else
+    return std::filesystem::path{std::string{utf8}};
+#endif
+}
+
+std::string text_encoding_gap() {
+#if defined(_WIN32)
+    const UINT page = GetACP();
+    if (page == CP_UTF8) {
+        return {};
+    }
+    return "Windows reads this process's text in code page " + std::to_string(page) +
+           ", not UTF-8: this Windows predates 10 version 1903 and ignores the UTF-8 code page "
+           "Apogee's manifest names, so a non-ASCII argument, path or environment value may not "
+           "arrive as typed";
+#else
+    return {};
 #endif
 }
 
@@ -458,9 +585,6 @@ std::optional<int> terminal_height() noexcept {
 
 std::string full_screen_refusal() {
 #if defined(_WIN32)
-#if !defined(ENABLE_VIRTUAL_TERMINAL_PROCESSING)
-    constexpr DWORD ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004;
-#endif
     const HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
     DWORD mode = 0;
     if (out == INVALID_HANDLE_VALUE || GetConsoleMode(out, &mode) == 0) {
@@ -484,6 +608,144 @@ std::string full_screen_refusal() {
         return "this terminal (TERM=dumb) cannot place the cursor";
     }
     return {};
+#endif
+}
+
+bool renders_escape_sequences(StandardStream stream) noexcept {
+#if defined(_WIN32)
+    if (stream == StandardStream::In) {
+        return true;
+    }
+    const HANDLE handle = GetStdHandle(standard_handle(stream));
+    DWORD mode = 0;
+    if (handle == nullptr || handle == INVALID_HANDLE_VALUE || GetConsoleMode(handle, &mode) == 0) {
+        // No console -- a pipe, a file, a terminal emulator's own pipe:
+        // decoration is `is_terminal`'s call, as it always was.
+        return true;
+    }
+    return (mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0;
+#else
+    (void)stream;
+    return true;
+#endif
+}
+
+#if defined(_WIN32)
+namespace {
+
+/// What the outermost `ConsoleScope` found, to put back. Written before
+/// `console_changed` is set and read after it is taken, so the interrupt
+/// handler's thread sees it whole.
+struct SavedConsole {
+    UINT input_page = 0;
+    UINT output_page = 0;
+    /// Standard output's and standard error's handles, and the mode each had
+    /// -- `has_mode` false where the stream is no console.
+    std::array<HANDLE, 2> outputs{};
+    std::array<DWORD, 2> modes{};
+    std::array<bool, 2> has_mode{};
+};
+
+SavedConsole saved_console;
+std::atomic<bool> console_changed{false};
+std::atomic<int> console_depth{0};
+/// Whether `restore_on_unhandled_event` is in the process's handler list.
+std::atomic<bool> event_routine_added{false};
+
+/// The console put back on the exit Windows takes for an event nothing
+/// handled (57j). Windows asks a process's console routines newest first and
+/// ends it through `ExitProcess` -- no destructor, no `_Exit` path -- when
+/// every one declines. Added before any `signal()` adds the C runtime's own
+/// routine, this one is asked only after the runtime declined: a Ctrl-C or
+/// Ctrl-Break to a command that stands no handler (`check`, `config`), or one
+/// in the instant between the runtime's reset and the handler's re-arm. It
+/// declines too, so the process ends as it would have.
+BOOL WINAPI restore_on_unhandled_event(DWORD /*event*/) {
+    restore_console();
+    return FALSE;
+}
+
+}  // namespace
+#endif
+
+ConsoleScope::ConsoleScope() noexcept {
+#if defined(_WIN32)
+    if (console_depth.fetch_add(1) > 0) {
+        return;  // inside a live scope: the outermost one owns the console
+    }
+    const HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
+    const std::array<HANDLE, 2> outputs{GetStdHandle(STD_OUTPUT_HANDLE),
+                                        GetStdHandle(STD_ERROR_HANDLE)};
+    if (!is_console(input) && !is_console(outputs[0]) && !is_console(outputs[1])) {
+        return;
+    }
+    SavedConsole saved;
+    saved.input_page = GetConsoleCP();
+    saved.output_page = GetConsoleOutputCP();
+    // Both modes read before either changes: two handles on one screen
+    // buffer share its mode, and the second read would see the first change.
+    for (std::size_t i = 0; i < outputs.size(); ++i) {
+        saved.outputs[i] = outputs[i];
+        saved.has_mode[i] = outputs[i] != nullptr && outputs[i] != INVALID_HANDLE_VALUE &&
+                            GetConsoleMode(outputs[i], &saved.modes[i]) != 0;
+    }
+    saved_console = saved;
+    // Once per process, and first: `RootCommand::run` makes this scope before
+    // any command arms a signal, so the routine sits beneath the runtime's.
+    if (!event_routine_added.exchange(true)) {
+        (void)SetConsoleCtrlHandler(restore_on_unhandled_event, TRUE);
+    }
+    // Set before anything changes, so a Ctrl-C from here on puts back what
+    // was there.
+    console_changed.store(true);
+    changed_ = true;
+    for (std::size_t i = 0; i < outputs.size(); ++i) {
+        if (saved.has_mode[i]) {
+            // Refused by a console older than virtual-terminal sequences:
+            // the mode stays as it was, and `renders_escape_sequences` says so.
+            (void)SetConsoleMode(outputs[i], saved.modes[i] | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+        }
+    }
+    (void)SetConsoleCP(CP_UTF8);
+    (void)SetConsoleOutputCP(CP_UTF8);
+#endif
+}
+
+ConsoleScope::~ConsoleScope() {
+#if defined(_WIN32)
+    console_depth.fetch_sub(1);
+    if (!changed_) {
+        return;
+    }
+    // What the run wrote in UTF-8 reaches the console while it reads UTF-8.
+    std::cout.flush();
+    std::cerr.flush();
+    restore_console();
+#endif
+}
+
+void restore_console() noexcept {
+#if defined(_WIN32)
+    if (!console_changed.exchange(false)) {
+        return;
+    }
+    const SavedConsole& saved = saved_console;
+    for (std::size_t i = saved.outputs.size(); i-- > 0;) {
+        if (saved.has_mode[i]) {
+            (void)SetConsoleMode(saved.outputs[i], saved.modes[i]);
+        }
+    }
+    (void)SetConsoleCP(saved.input_page);
+    (void)SetConsoleOutputCP(saved.output_page);
+#endif
+}
+
+void rearm_signal(int signal, void (*handler)(int)) noexcept {
+#if defined(_WIN32)
+    (void)std::signal(signal, handler);
+#else
+    (void)signal;
+    (void)handler;
 #endif
 }
 

@@ -164,10 +164,13 @@ struct RootInputs {
     std::optional<RootFlag> flag;
     /// `APOGEE_HOME`'s value. Empty -- unset, or set to "" -- is no override:
     /// treating "" as a root would put the config at /config/config.json.
+    /// UTF-8, as the home directory is: a root is built from both with
+    /// `platform::path_from_utf8` (57j).
     std::string environment;
     /// The build's channel.
     Channel channel = Channel::Release;
-    /// The user's home directory, when the platform reports one.
+    /// The user's home directory, when the platform reports one -- UTF-8
+    /// (`platform::home_directory`).
     std::optional<std::string> home_directory;
 };
 

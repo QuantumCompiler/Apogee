@@ -18,6 +18,7 @@
 #include "cli/interrupt.h"
 #include "cli/version_command.h"
 #include "contracts/paths.h"
+#include "platform/platform.h"
 
 namespace apogee::commands {
 
@@ -286,6 +287,10 @@ std::string json_readers(const CLI::App& app) {
 }
 
 int RootCommand::run(int argc, const char* const* argv) {
+    // A Windows console reads and writes UTF-8 with escape sequences on for
+    // the run, and is put back as it was found when the run ends (57j); a
+    // no-op elsewhere. Held here, around the shell too, not in `main`.
+    const platform::ConsoleScope console;
     if (argc <= 1) {
         // The shell at an interactive terminal (32b); the help, unchanged,
         // everywhere else.

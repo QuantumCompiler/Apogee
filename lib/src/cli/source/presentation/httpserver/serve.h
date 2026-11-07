@@ -60,4 +60,29 @@ void run_server(Mux& mux, Handler& handler, const ServeOptions& options);
 /// Stops the running server, from any thread. Safe when none is running.
 void stop_serving() noexcept;
 
+/// Ctrl-C and SIGTERM stop the server while one of these lives --
+/// `run_server` holds one for as long as it serves -- and what was there
+/// before is put back when it goes.
+///
+/// Every signal is a stop, however many arrive: a second Ctrl-C is a second
+/// (harmless) stop, and an in-flight turn still finishes before the pool
+/// joins. On Windows, whose C runtime puts a signal back to its default
+/// action before calling the handler, the handler stands itself again
+/// (`platform::rearm_signal`), so the second Ctrl-C no longer kills the
+/// server mid-turn (57j).
+class StopOnSignals {
+public:
+    StopOnSignals();
+    ~StopOnSignals();
+
+    StopOnSignals(const StopOnSignals&) = delete;
+    StopOnSignals& operator=(const StopOnSignals&) = delete;
+    StopOnSignals(StopOnSignals&&) = delete;
+    StopOnSignals& operator=(StopOnSignals&&) = delete;
+
+private:
+    void (*previous_int_)(int) = nullptr;
+    void (*previous_term_)(int) = nullptr;
+};
+
 }  // namespace apogee::httpserver

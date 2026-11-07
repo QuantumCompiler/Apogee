@@ -5,6 +5,7 @@
 #include <cstdlib>
 
 #include "cli/helpers.h"
+#include "platform/platform.h"
 #include "platform/termination.h"
 
 namespace apogee::commands {
@@ -22,10 +23,19 @@ std::atomic<int> g_depth{0};
 }
 
 void on_interrupt(int signal) {
+    // Stood again first, while a scope lives: Windows took the handler down
+    // to call it, and the next Ctrl-C must be counted here, not end the
+    // process (57j). A no-op on POSIX, whose `signal` keeps it.
+    if (g_depth.load() > 0) {
+        platform::rearm_signal(signal, on_interrupt);
+    }
     int none = 0;
     (void)g_first_signal.compare_exchange_strong(none, signal);
     g_interrupt_token.cancel();
     if (g_interrupt_count.fetch_add(1) >= 2) {
+        // No destructor runs past `_Exit`: the console goes back as it was
+        // found here, or cmd.exe keeps this run's code page.
+        platform::restore_console();
         std::_Exit(exit_code_of(g_first_signal.load()));
     }
 }
@@ -62,6 +72,10 @@ InterruptScope::~InterruptScope() {
 
 const harness::CancellationToken& InterruptScope::token() noexcept {
     return g_interrupt_token;
+}
+
+int InterruptScope::signals_caught() noexcept {
+    return g_interrupt_count.load();
 }
 
 int InterruptScope::exit_code(int code) noexcept {

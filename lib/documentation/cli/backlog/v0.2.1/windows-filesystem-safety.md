@@ -43,7 +43,7 @@ What already works: POSIX `reset`/`uninstall` remove a linked row as itself (lib
 - Siblings:
   - [`install-scripts-finish-clean.md`](install-scripts-finish-clean.md) (57l) edits the same `completion_candidates` list for its zsh paths.
   - [`tool-gate-enforces-what-it-shows.md`](tool-gate-enforces-what-it-shows.md) (57o) closes `write_file`'s dangling-link escape and gates the git tools in the same `fs.cpp` / `git.cpp`.
-  - [`windows-text-and-console.md`](windows-text-and-console.md) (57j) owns `home_directory()`'s UTF-8 decoding at `platform.cpp:222`.
+  - 57j (shipped 2026-11-01, [Milestone AT](../../assistant/MILESTONES.md#milestone-at--the-second-sweeps-cli-findings)) owned `home_directory()`'s UTF-8 decoding: it now reads `USERPROFILE` wide through `platform::utf8_environment`.
 
 **Decisions made** (dated):
 - 2026-10-31: Specced from the second CLI/GUI bug sweep (the user's call: every finding becomes a v0.2.1 item in its queue, CLI track 57, GUI track 6).
@@ -78,5 +78,5 @@ What already works: POSIX `reset`/`uninstall` remove a linked row as itself (lib
 - A Windows `CreateProcess` implementation. The child-process gap is reported honestly, not filled.
 - `write_file`'s dangling-link escape and the git tools' gate: [`tool-gate-enforces-what-it-shows.md`](tool-gate-enforces-what-it-shows.md).
 - The zsh completion paths: [`install-scripts-finish-clean.md`](install-scripts-finish-clean.md).
-- Non-ASCII `USERPROFILE` decoding: [`windows-text-and-console.md`](windows-text-and-console.md).
+- Non-ASCII `USERPROFILE` decoding: 57j, shipped 2026-11-01 ([Milestone AT](../../assistant/MILESTONES.md#milestone-at--the-second-sweeps-cli-findings)).
 - Removing a PATH entry, which no installer writes.

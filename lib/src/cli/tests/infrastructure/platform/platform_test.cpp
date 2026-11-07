@@ -8,12 +8,18 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "support/env_guard.h"
+
+#if defined(_WIN32)
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -187,4 +193,186 @@ TEST_CASE("a private directory is made where nothing was, its owner's alone, nev
     CHECK_FALSE(apogee::platform::create_private_directory(root.path() / "no" / "such", exists));
     CHECK_FALSE(exists);
     CHECK_FALSE(apogee::platform::owned_by_this_user(root.path() / "no" / "such"));
+}
+
+namespace {
+
+/// `path`'s UTF-8 bytes, as `std::string`.
+[[nodiscard]] std::string utf8_of(const std::filesystem::path& path) {
+    const std::u8string bytes = path.u8string();
+    return {bytes.begin(), bytes.end()};
+}
+
+/// The whole of `path`'s text, or empty.
+[[nodiscard]] std::string slurp(const std::filesystem::path& path) {
+    std::ifstream in{path, std::ios::binary};
+    std::ostringstream text;
+    text << in.rdbuf();
+    return text.str();
+}
+
+#if defined(_WIN32)
+/// A variable set through the Win32 call alone -- never the C runtime's copy
+/// -- for the life of the object, put back after (57j's guardrail).
+class Win32EnvGuard {
+public:
+    Win32EnvGuard(const wchar_t* name, const std::wstring& value) : name_{name} {
+        std::wstring previous(32767, L'\0');
+        const DWORD got =
+            GetEnvironmentVariableW(name_, previous.data(), static_cast<DWORD>(previous.size()));
+        if (got > 0 && got < previous.size()) {
+            previous.resize(got);
+            previous_ = previous;
+            had_ = true;
+        }
+        (void)SetEnvironmentVariableW(name_, value.c_str());
+    }
+
+    ~Win32EnvGuard() {
+        (void)SetEnvironmentVariableW(name_, had_ ? previous_.c_str() : nullptr);
+    }
+
+    Win32EnvGuard(const Win32EnvGuard&) = delete;
+    Win32EnvGuard& operator=(const Win32EnvGuard&) = delete;
+    Win32EnvGuard(Win32EnvGuard&&) = delete;
+    Win32EnvGuard& operator=(Win32EnvGuard&&) = delete;
+
+private:
+    const wchar_t* name_;
+    std::wstring previous_;
+    bool had_ = false;
+};
+#endif
+
+}  // namespace
+
+// 57j: Windows read the environment and argv in the ANSI code page, and named
+// files through ANSI calls -- a profile folder named `C:\Users\José` made
+// every command exit 1. These hold the seam to UTF-8 on every platform; on
+// CI's Windows rows they are the proof, since no Windows host runs here.
+
+TEST_CASE("this process reads its text as UTF-8", "[platform][utf8][57j]") {
+    // The manifest every executable carries -- the test binary's too --
+    // names UTF-8 the code page, so the Windows test runs read text as users'
+    // runs do. Elsewhere there is no code page to get wrong.
+    CHECK(apogee::platform::text_encoding_gap().empty());
+#if defined(_WIN32)
+    CHECK(GetACP() == CP_UTF8);
+#endif
+}
+
+TEST_CASE("the manifest names UTF-8 and parses", "[platform][utf8][57j]") {
+    // Windows refuses to start a process whose manifest does not parse, and
+    // XML forbids two hyphens inside a comment -- a typo here would stop
+    // every Windows run, and only a Windows run would say so.
+    const std::filesystem::path source{APOGEE_SOURCE_DIR};
+    const std::string manifest = slurp(source / "apogee.manifest");
+    REQUIRE_FALSE(manifest.empty());
+    CHECK(manifest.find("<activeCodePage xmlns=\"http://schemas.microsoft.com/SMI/2019/"
+                        "WindowsSettings\">UTF-8</activeCodePage>") != std::string::npos);
+    std::size_t comments = 0;
+    for (std::size_t open = manifest.find("<!--"); open != std::string::npos;
+         open = manifest.find("<!--", open + 4)) {
+        const std::size_t close = manifest.find("-->", open + 4);
+        REQUIRE(close != std::string::npos);
+        const std::string body = manifest.substr(open + 4, close - open - 4);
+        INFO("comment: " << body);
+        CHECK(body.find("--") == std::string::npos);
+        CHECK((body.empty() || body.back() != '-'));
+        ++comments;
+    }
+    CHECK(comments > 0);
+    // The resource script builds that file in, as the manifest resource.
+    CHECK(slurp(source / "apogee.rc").find("1 24 \"apogee.manifest\"") != std::string::npos);
+}
+
+TEST_CASE("an environment value comes back as UTF-8", "[platform][utf8][57j]") {
+    // "¿Qué tal el café?", written as its bytes.
+    const std::string value = "\xC2\xBFQu\xC3\xA9 tal el caf\xC3\xA9?";
+    {
+        const apogee::testing::EnvGuard set{"APOGEE_TEST_UTF8", value};
+        CHECK(apogee::platform::utf8_environment("APOGEE_TEST_UTF8") == value);
+    }
+    CHECK_FALSE(apogee::platform::utf8_environment("APOGEE_TEST_UTF8").has_value());
+}
+
+TEST_CASE("a path built from UTF-8 names those characters", "[platform][utf8][57j]") {
+    const std::filesystem::path name = apogee::platform::path_from_utf8("Jos\xC3\xA9");
+#if defined(_WIN32)
+    CHECK(name.wstring() == L"Jos\u00e9");
+#else
+    CHECK(name.string() == "Jos\xC3\xA9");
+#endif
+    CHECK(utf8_of(name) == "Jos\xC3\xA9");
+}
+
+TEST_CASE("an exclusive file is created under its non-ASCII name", "[platform][utf8][57j]") {
+    // The owner marker beside a staging folder: `CreateFileA` named it in the
+    // ANSI code page, so on Windows it landed under a mis-decoded name.
+    const apogee::testing::TempDir root{"platform-exclusive-" +
+                                        std::to_string(std::random_device{}())};
+    const std::filesystem::path owner =
+        root.path() / apogee::platform::path_from_utf8("na\xC3\xAFve-owner");
+    bool exists = true;
+    REQUIRE(apogee::platform::create_exclusive_file(owner, "1234\n", exists));
+    CHECK_FALSE(exists);
+    CHECK(std::filesystem::exists(owner));
+    CHECK(slurp(owner) == "1234\n");
+    // That name and no other: the folder holds exactly it.
+    std::vector<std::filesystem::path> entries;
+    for (const auto& entry : std::filesystem::directory_iterator{root.path()}) {
+        entries.push_back(entry.path().filename());
+    }
+    REQUIRE(entries.size() == 1);
+    CHECK(utf8_of(entries.front()) == "na\xC3\xAFve-owner");
+    // A second claim finds it there.
+    CHECK_FALSE(apogee::platform::create_exclusive_file(owner, "5678\n", exists));
+    CHECK(exists);
+    CHECK(slurp(owner) == "1234\n");
+}
+
+#if defined(_WIN32)
+TEST_CASE("a non-ASCII profile folder comes back as its UTF-8 bytes", "[platform][utf8][57j]") {
+    // Set through the Win32 call, never the C runtime's copy: the home
+    // directory is read from the process's environment itself, wide.
+    const std::wstring profile = std::filesystem::temp_directory_path().wstring() + L"\\Jos\u00e9";
+    const Win32EnvGuard guard{L"USERPROFILE", profile};
+    const std::optional<std::string> home = apogee::platform::home_directory();
+    REQUIRE(home.has_value());
+    CHECK(home->ends_with("\\Jos\xC3\xA9"));
+    CHECK(apogee::platform::path_from_utf8(*home).wstring() == profile);
+}
+#endif
+
+TEST_CASE("the console is left alone where no standard stream is one", "[platform][console][57j]") {
+    // Under ctest every standard stream is a pipe: nothing to set up, and
+    // nothing put back. A scope inside a live one never changes anything --
+    // the outermost owns the console -- and a restore with nothing changed
+    // is safe, from anywhere.
+    std::istringstream in;
+    std::streambuf* const old_in = std::cin.rdbuf(in.rdbuf());
+    bool outer_changed = true;
+    bool inner_changed = true;
+    {
+        const apogee::platform::ConsoleScope outer;
+        outer_changed = outer.changed();
+        {
+            const apogee::platform::ConsoleScope inner;
+            inner_changed = inner.changed();
+        }
+    }
+    std::cin.rdbuf(old_in);
+    CHECK_FALSE(inner_changed);
+    if (apogee::platform::host_os() != apogee::platform::OperatingSystem::Windows) {
+        CHECK_FALSE(outer_changed);
+    }
+    apogee::platform::restore_console();
+    // Escape sequences render wherever no Windows console says otherwise.
+    using apogee::platform::renders_escape_sequences;
+    using apogee::platform::StandardStream;
+    CHECK(renders_escape_sequences(StandardStream::In));
+    if (apogee::platform::host_os() != apogee::platform::OperatingSystem::Windows) {
+        CHECK(renders_escape_sequences(StandardStream::Out));
+        CHECK(renders_escape_sequences(StandardStream::Err));
+    }
 }

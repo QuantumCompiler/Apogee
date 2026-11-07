@@ -54,10 +54,38 @@ enum class Architecture : std::uint8_t { X64, Arm64 };
 /// every caller here resolves a path it is about to WRITE to, and writing to a
 /// wrong-but-plausible directory is worse than a clear error.
 ///
+/// **UTF-8 on every platform** (57j): Windows reads the variables wide
+/// (`utf8_environment`), so a profile folder named `C:\Users\José` comes back
+/// as the bytes `…Jos\xC3\xA9` whatever the process's code page -- the root
+/// a path is built on with `path_from_utf8`. POSIX hands back $HOME's bytes as
+/// they are.
+///
 /// Callers wanting Apogee's data directory should ask
 /// `apogee::harness::apogee_home()` instead -- it layers the APOGEE_HOME
 /// override on top of this.
 [[nodiscard]] std::optional<std::string> home_directory();
+
+/// One environment variable's value as UTF-8, or nullopt when it is not set
+/// (57j). Windows reads the process's environment wide
+/// (`GetEnvironmentVariableW`) and converts: never the narrow copy, which
+/// holds only what the ANSI code page can spell and misses a change made
+/// through the Win32 call. POSIX is `getenv`, the bytes as they are.
+[[nodiscard]] std::optional<std::string> utf8_environment(std::string_view name);
+
+/// The path `utf8` names (57j): on Windows decoded from UTF-8 to the wide form
+/// the filesystem takes, so libstdc++ (which reads a narrow path as UTF-8) and
+/// libc++ (which reads it in the ANSI code page) build the same path, and a
+/// byte that is no UTF-8 is U+FFFD rather than a thrown "Cannot convert
+/// character sequence". POSIX takes the bytes as they are.
+[[nodiscard]] std::filesystem::path path_from_utf8(std::string_view utf8);
+
+/// Why this process may read a non-ASCII argument, path or environment value
+/// wrongly, or empty when it reads them as UTF-8 (57j). On Windows, whether
+/// the process's ANSI code page is UTF-8: the manifest every Apogee
+/// executable carries names it (`source/apogee.manifest`), and a Windows
+/// older than 10 version 1903 ignores that -- `apogee check` warns, and
+/// nothing refuses to run. Always empty elsewhere.
+[[nodiscard]] std::string text_encoding_gap();
 
 /// Absolute path of the running executable, or empty when the platform will
 /// not say.
@@ -106,7 +134,8 @@ struct LocalDate {
 /// Creates `path` holding `content` only if it does not exist yet -- one
 /// atomic create-or-fail (`O_CREAT|O_EXCL`; `CREATE_NEW` on Windows), so two
 /// processes racing for a lock cannot both win. False when the file exists
-/// or cannot be made; `exists` says which.
+/// or cannot be made; `exists` says which. Windows names the file wide
+/// (`CreateFileW`), so a non-ASCII path is the path asked for (57j).
 [[nodiscard]] bool create_exclusive_file(const std::filesystem::path& path,
                                          std::string_view content, bool& exists);
 
@@ -187,6 +216,72 @@ enum class StandardStream : std::uint8_t { In, Out, Err };
 /// is no console, cannot host it. A refusal is said and the caller falls back
 /// to plain output: never a garbled screen.
 [[nodiscard]] std::string full_screen_refusal();
+
+/// Whether the output `stream` writes to shows an escape sequence as what it
+/// means -- a colour, a cursor move -- rather than as the bytes (57j). Asked of
+/// a Windows console alone: one whose virtual-terminal processing is off (a
+/// classic console where `ConsoleScope` could not turn it on) prints
+/// `←[32m`, so colour resolves off there. Everything else -- a POSIX
+/// terminal, a pipe, a file, a Windows console with it on -- answers true, and
+/// `is_terminal` stays the gate for decoration. `In` answers true.
+[[nodiscard]] bool renders_escape_sequences(StandardStream stream) noexcept;
+
+/// The Windows console set up for the run to read and write as a POSIX
+/// terminal does (57j), and put back as it was found when the run ends.
+///
+/// When any standard stream is a console, the outermost scope saves its
+/// input and output code pages and each output's mode, then sets both code
+/// pages to UTF-8 -- what the CLI writes, `·`, `…`, `—` and the markdown
+/// renderer's rules -- and turns virtual-terminal processing on, so colour
+/// and the status line's cursor moves render in a classic console rather than
+/// printing as `←[32m`. A console's code page outlives the process in
+/// cmd.exe, so all three are put back: by the destructor (after flushing the
+/// standard streams, so the last line is read in the page it was written in),
+/// and by `restore_console()` on an exit no destructor sees -- the third
+/// Ctrl-C's `_Exit`, and the `ExitProcess` Windows takes for a Ctrl-C or
+/// Ctrl-Break that nothing handled (a command with no `InterruptScope`). For
+/// that last one the first scope that changes the console adds a console
+/// routine, once per process, which puts it back and declines the event; it
+/// must come before any `signal()` call adds the C runtime's routine, so that
+/// it is asked only after the runtime declined -- `RootCommand::run` makes the
+/// scope before any command arms a handler. A console that refuses the mode
+/// keeps it off, and `renders_escape_sequences` says so. replxx and FTXUI
+/// save and restore their own console state inside it, unchanged. Scopes
+/// nest: one made while another lives does nothing. A no-op on macOS and
+/// Linux, and wherever no standard stream is a console.
+class ConsoleScope {
+public:
+    ConsoleScope() noexcept;
+    ~ConsoleScope();
+
+    ConsoleScope(const ConsoleScope&) = delete;
+    ConsoleScope& operator=(const ConsoleScope&) = delete;
+    ConsoleScope(ConsoleScope&&) = delete;
+    ConsoleScope& operator=(ConsoleScope&&) = delete;
+
+    /// Whether this scope changed the console (and will put it back).
+    [[nodiscard]] bool changed() const noexcept {
+        return changed_;
+    }
+
+private:
+    bool changed_ = false;
+};
+
+/// Puts back the console a live `ConsoleScope` changed, once, from any thread
+/// -- for an exit that skips the scope's destructor: the interrupt handler's
+/// `_Exit` on the third Ctrl-C, and the scope's console routine before an
+/// unhandled event's `ExitProcess`. A no-op when nothing is changed, and
+/// outside Windows.
+void restore_console() noexcept;
+
+/// Stands `handler` again for `signal` from inside that handler (57j). The
+/// Microsoft C runtime puts a signal back to its default action before it
+/// calls the handler, so without this a second Ctrl-C ends a Windows process
+/// with `STATUS_CONTROL_C_EXIT` where POSIX, whose `signal` keeps the handler,
+/// lets it count. A no-op elsewhere. The gap between the runtime's reset and
+/// this call is a few instructions.
+void rearm_signal(int signal, void (*handler)(int)) noexcept;
 
 /// Discards anything already typed at the terminal but not yet read.
 ///

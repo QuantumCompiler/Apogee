@@ -122,6 +122,23 @@ void check_version(CheckReport& report, const CheckInputs& inputs) {
     add(report, Status::Ok, "Version", "root",
         inputs.home.string() + " -- " + harness::root_reason(inputs.root));
 
+    // The code page Windows reads this process's text in (57j): the manifest
+    // names UTF-8, and a Windows older than 10 version 1903 ignores it. Said,
+    // never refused -- ASCII still works there -- and with no remedy line, the
+    // fix being a newer Windows rather than a command.
+    const std::string host =
+        inputs.host_target.empty() ? std::string{platform::host_target()} : inputs.host_target;
+    if (host.starts_with("windows")) {
+        const std::string gap =
+            inputs.encoding_probe ? inputs.encoding_probe() : platform::text_encoding_gap();
+        if (gap.empty()) {
+            add(report, Status::Ok, "Version", "code page",
+                "UTF-8 -- arguments, paths and environment values are read as typed");
+        } else {
+            add(report, Status::Warn, "Version", "code page", gap);
+        }
+    }
+
     if (inputs.executable.empty()) {
         return;
     }

@@ -80,8 +80,12 @@ enum class Role : std::uint8_t { Apogee, Tool, Rag, Permission, Warning, Error, 
 ///
 /// `no_color_set` is whether the `NO_COLOR` environment variable is present --
 /// per the convention, its *presence* disables colour regardless of value.
-[[nodiscard]] bool resolve_color(ColorMode mode, bool stdout_is_terminal,
-                                 bool no_color_set) noexcept;
+/// `renders_escapes` is whether the output shows an escape sequence as what
+/// it means (`platform::renders_escape_sequences`, 57j): a classic Windows
+/// console without virtual-terminal processing prints `←[32m`, so Auto is off
+/// there. `Always` keeps its meaning -- the caller asked for the codes.
+[[nodiscard]] bool resolve_color(ColorMode mode, bool stdout_is_terminal, bool no_color_set,
+                                 bool renders_escapes) noexcept;
 
 /// Styling with the decision already made.
 ///
@@ -95,7 +99,7 @@ public:
     explicit Style(bool color_enabled) : enabled_{color_enabled} {}
 
     /// Builds from the environment: reads NO_COLOR and asks the platform
-    /// whether stdout is a terminal.
+    /// whether stdout is a terminal, and whether it renders escape sequences.
     [[nodiscard]] static Style detect(ColorMode mode);
 
     [[nodiscard]] bool color_enabled() const noexcept {

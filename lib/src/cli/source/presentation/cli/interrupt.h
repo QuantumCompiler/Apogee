@@ -10,7 +10,14 @@
 /// file, let go of its locks -- never leave a driver running behind a dead
 /// parent. The handler only flips the token; the read loop notices between
 /// chunks and terminates the child. A third signal while the child is still
-/// winding down exits at once: the user means it.
+/// winding down exits at once: the user means it -- the console the run set
+/// up put back first (`platform::restore_console`).
+///
+/// **The same count on Windows** (57j): its C runtime puts SIGINT back to the
+/// default action before it calls the handler, so until the handler stood
+/// itself again (`platform::rearm_signal`) the second Ctrl-C killed a
+/// Windows process mid-cleanup -- a pull's `.incoming-*` staging left behind
+/// -- where POSIX counts it.
 ///
 /// **SIGTERM is the same cancel** (57g): launchd sends it when a job is
 /// unloaded or the user logs out, and a pass stopped that way must unwind as
@@ -46,6 +53,9 @@ public:
 
     /// The token the innermost live scope cancels on Ctrl-C or SIGTERM.
     [[nodiscard]] static const harness::CancellationToken& token() noexcept;
+
+    /// How many signals the live scope has caught -- the third exits.
+    [[nodiscard]] static int signals_caught() noexcept;
 
     /// The exit code a command that ended with `code` reports: a cancel
     /// (`kCancelled`) that SIGTERM caused is `kTerminated`; anything else is
