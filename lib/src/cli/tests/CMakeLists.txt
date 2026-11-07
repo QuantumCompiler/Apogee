@@ -740,6 +740,17 @@ if(UNIX)
     set_tests_properties(cli.install_parity PROPERTIES
         TIMEOUT 60 FIXTURES_REQUIRED channel_probe)
 
+    # install.sh run end to end in a sandbox, and its installs uninstalled
+    # (57l): stub curl, zsh and fish on a PATH of the test's own, so the
+    # shells "on the machine" are the case's call. The Makefile's
+    # install-completions runs under the same stubs; install.ps1 is read.
+    add_test(NAME cli.install_script
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/install_script_check.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/install-script
+    )
+    set_tests_properties(cli.install_script PROPERTIES TIMEOUT 180)
+
     # The completion stubs in the real shells (bash always; zsh and fish when
     # present) against the real binary -- what a stub SENDS `__complete`, which
     # the protocol's own tests cannot see. See the script for the two zsh bugs

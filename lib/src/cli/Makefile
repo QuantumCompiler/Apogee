@@ -225,14 +225,26 @@ uninstall:
 
 # Completions go where each shell already looks. A shell the user does not run
 # gets nothing -- creating its config directory would be litter that `apogee
-# uninstall` then has to guess the ownership of.
+# uninstall` then has to guess the ownership of -- so each shell's stub is
+# installed only when that shell is on PATH (57l: the bash and fish folders
+# were made whatever the machine had), as install.sh does.
 install-completions:
-	@mkdir -p "$(HOME)/.local/share/bash-completion/completions"
-	@install -m 0644 completions/apogee.bash "$(HOME)/.local/share/bash-completion/completions/apogee"
-	@mkdir -p "$(HOME)/.config/fish/completions"
-	@install -m 0644 completions/apogee.fish "$(HOME)/.config/fish/completions/apogee.fish"
-	@$(MAKE) --no-print-directory install-zsh-completion
-	@echo "installed shell completions (bash, zsh, fish)"
+	@set -e; installed=""; \
+	if command -v bash >/dev/null 2>&1; then \
+	    mkdir -p "$(HOME)/.local/share/bash-completion/completions"; \
+	    install -m 0644 completions/apogee.bash "$(HOME)/.local/share/bash-completion/completions/apogee"; \
+	    installed="bash"; \
+	fi; \
+	if command -v fish >/dev/null 2>&1; then \
+	    mkdir -p "$(HOME)/.config/fish/completions"; \
+	    install -m 0644 completions/apogee.fish "$(HOME)/.config/fish/completions/apogee.fish"; \
+	    installed="$${installed:+$$installed, }fish"; \
+	fi; \
+	if command -v zsh >/dev/null 2>&1; then \
+	    $(MAKE) --no-print-directory install-zsh-completion; \
+	    installed="$${installed:+$$installed, }zsh"; \
+	fi; \
+	echo "installed shell completions ($${installed:-none: no bash, zsh or fish on PATH})"
 
 # zsh only loads completions from a directory on its `fpath`, which is a
 # per-user setting -- so ask zsh where it looks, and cross that against
@@ -244,11 +256,17 @@ install-completions:
 # first writable fpath entry under $HOME put our file inside
 # ~/.oh-my-zsh/plugins/vscode -- a directory a framework owns and rewrites.
 # A completion file belongs in a user completion directory or nowhere.
+#
+# install.sh carries the same selection and note (57l: it had kept the fixed
+# directory), and `apogee uninstall` looks for the stub in the same three
+# directories; cli.install_script holds the three lists to one set. zsh is
+# asked with no terminal on its stdin, so a startup file that prompts cannot
+# wait on one, and each directory is matched as text, never a pattern.
 install-zsh-completion:
-	@fpath_dirs="$$(command -v zsh >/dev/null 2>&1 && zsh -i -c 'print -l $$fpath' 2>/dev/null)"; \
+	@fpath_dirs="$$(command -v zsh >/dev/null 2>&1 && zsh -i -c 'print -l $$fpath' </dev/null 2>/dev/null)"; \
 	target=""; \
 	for dir in "$(HOME)/.zfunc" "$(HOME)/.oh-my-zsh/completions" "$(HOME)/.local/share/zsh/site-functions"; do \
-	    if printf '%s\n' "$$fpath_dirs" | grep -qx "$$dir" && [ -d "$$dir" ] && [ -w "$$dir" ]; then \
+	    if printf '%s\n' "$$fpath_dirs" | grep -qxF "$$dir" && [ -d "$$dir" ] && [ -w "$$dir" ]; then \
 	        target="$$dir"; break; \
 	    fi; \
 	done; \

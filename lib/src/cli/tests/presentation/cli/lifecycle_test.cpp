@@ -447,11 +447,13 @@ TEST_CASE("uninstall finds the completions under the home directory, and only th
 }
 
 TEST_CASE("the PowerShell stub is looked for where install.ps1 put it, a redirected Documents",
-          "[commands][uninstall][57k]") {
+          "[commands][uninstall][57k][57l]") {
     // install.ps1 writes under [Environment]::GetFolderPath('MyDocuments'),
     // which OneDrive's backup or a folder-redirection policy moves away from
     // USERPROFILE\Documents: uninstall looked only there and left the stub
-    // behind, dot-sourced by the profile, after the binary was gone.
+    // behind, dot-sourced by the profile, after the binary was gone (57k).
+    // A stub written before the redirect is still at <home>/Documents, so
+    // both are looked for (57l).
     const UserHome user_home;
     const std::filesystem::path redirected = user_home.dir.path() / "OneDrive" / "Documents";
     const apogee::commands::CompletionRoots roots{.home = user_home.dir.path(),
@@ -459,37 +461,137 @@ TEST_CASE("the PowerShell stub is looked for where install.ps1 put it, a redirec
     const std::filesystem::path stub = redirected / "PowerShell" / "Completions" / "apogee.ps1";
     const std::filesystem::path unredirected =
         user_home.dir.path() / "Documents" / "PowerShell" / "Completions" / "apogee.ps1";
+    // Windows PowerShell 5.1's folder: install.ps1 never writes there.
+    const std::filesystem::path elsewhere =
+        redirected / "WindowsPowerShell" / "Completions" / "apogee.ps1";
 
     const std::vector<std::filesystem::path> candidates =
         apogee::commands::completion_stub_paths(roots);
     CHECK(contains_path(candidates, stub));
-    CHECK_FALSE(contains_path(candidates, unredirected));
+    CHECK(contains_path(candidates, unredirected));
+    CHECK_FALSE(contains_path(candidates, elsewhere));
 
-    std::filesystem::create_directories(stub.parent_path());
-    std::ofstream{stub} << "# apogee completion\n";
-    std::filesystem::create_directories(unredirected.parent_path());
-    std::ofstream{unredirected} << "# not where install.ps1 wrote\n";
+    for (const std::filesystem::path& path : {stub, unredirected, elsewhere}) {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream{path} << "# apogee completion\n";
+    }
     const apogee::commands::UninstallPlan plan =
         apogee::commands::plan_uninstall("/nonexistent/apogee-home", {}, roots);
-    REQUIRE(plan.completions.size() == 1);
-    CHECK(plan.completions.front() == stub);
+    REQUIRE(plan.completions.size() == 2);
+    CHECK(contains_path(plan.completions, stub));
+    CHECK(contains_path(plan.completions, unredirected));
     std::vector<std::string> errors;
     std::vector<std::string> notes;
     const std::vector<std::string> removed =
         apogee::commands::execute_uninstall(plan, errors, notes);
     CHECK(errors.empty());
     CHECK(contains(removed, stub.string()));
+    CHECK(contains(removed, unredirected.string()));
     CHECK_FALSE(std::filesystem::exists(stub));
-    CHECK(std::filesystem::exists(unredirected));
+    CHECK_FALSE(std::filesystem::exists(unredirected));
+    CHECK(std::filesystem::exists(elsewhere));
 
-    // No Documents folder to ask: no PowerShell stub, the others still.
+    // No Documents folder to ask: the stub under the home's Documents is
+    // still looked for, and the others.
     const std::vector<std::filesystem::path> homeless =
         apogee::commands::completion_stub_paths({.home = user_home.dir.path(), .documents = {}});
-    CHECK(homeless.size() == 3);
+    CHECK(homeless.size() == 6);
+    CHECK(contains_path(homeless, unredirected));
     // The command asks the platform for the folder: the known folder on
     // Windows, `<home>/Documents` elsewhere.
     CHECK(apogee::commands::completion_roots().documents ==
           apogee::platform::documents_directory());
+}
+
+TEST_CASE("an unredirected Documents folder is one candidate, and one file is planned once",
+          "[commands][uninstall][57l]") {
+    // Off Windows, and on Windows with no redirect, the Documents folder IS
+    // <home>/Documents: one candidate, never the same stub twice.
+    const UserHome user_home;
+    const std::filesystem::path stub =
+        user_home.dir.path() / "Documents" / "PowerShell" / "Completions" / "apogee.ps1";
+    const std::vector<std::filesystem::path> candidates =
+        apogee::commands::completion_stub_paths(user_home.roots());
+    CHECK(std::count(candidates.begin(), candidates.end(), stub) == 1);
+    CHECK(candidates.size() == 6);
+
+    // Two candidates that reach one file -- here a ~/.zfunc linked to
+    // oh-my-zsh's completions folder -- plan it once, so the second removal
+    // never fails on the file the first removed.
+    const std::filesystem::path omz = user_home.dir.path() / ".oh-my-zsh" / "completions";
+    std::filesystem::create_directories(omz);
+    std::ofstream{omz / "_apogee"} << "#compdef apogee\n";
+    const apogee::testing::LinkMade made =
+        apogee::testing::make_directory_link(omz, user_home.dir.path() / ".zfunc");
+    INFO(made.why);
+    REQUIRE(made.made);
+    const apogee::commands::UninstallPlan plan =
+        apogee::commands::plan_uninstall("/nonexistent/apogee-home", {}, user_home.roots());
+    REQUIRE(plan.completions.size() == 1);
+    std::vector<std::string> errors;
+    std::vector<std::string> notes;
+    (void)apogee::commands::execute_uninstall(plan, errors, notes);
+    CHECK(errors.empty());
+    CHECK_FALSE(std::filesystem::exists(omz / "_apogee"));
+}
+
+TEST_CASE("uninstall finds zsh's stub in every directory an installer chooses, and nowhere else",
+          "[commands][uninstall][57l]") {
+    // `make install` puts _apogee in the first of ~/.zfunc,
+    // ~/.oh-my-zsh/completions and ~/.local/share/zsh/site-functions on the
+    // user's fpath, and install.sh now does too: uninstall planned only the
+    // last, and zsh kept loading a stub that calls a binary that is gone.
+    const UserHome user_home;
+    const std::filesystem::path home = user_home.dir.path();
+    const std::vector<std::filesystem::path> chosen{
+        home / ".zfunc" / "_apogee",
+        home / ".oh-my-zsh" / "completions" / "_apogee",
+        home / ".local" / "share" / "zsh" / "site-functions" / "_apogee",
+    };
+    // A framework's plugin folder on the fpath -- the 2026-09-06 lesson --
+    // and a system one: no installer writes either, so neither is planned.
+    const std::vector<std::filesystem::path> foreign{
+        home / ".oh-my-zsh" / "plugins" / "vscode" / "_apogee",
+        home / ".oh-my-zsh" / "custom" / "_apogee",
+        home / ".local" / "share" / "zsh" / "functions" / "_apogee",
+    };
+    for (const std::vector<std::filesystem::path>& set : {chosen, foreign}) {
+        for (const std::filesystem::path& path : set) {
+            std::filesystem::create_directories(path.parent_path());
+            std::ofstream{path} << "#compdef apogee\n";
+        }
+    }
+
+    const apogee::commands::UninstallPlan plan =
+        apogee::commands::plan_uninstall("/nonexistent/apogee-home", {}, user_home.roots());
+    REQUIRE(plan.completions.size() == chosen.size());
+    for (const std::filesystem::path& path : chosen) {
+        INFO(path.string());
+        CHECK(contains_path(plan.completions, path));
+        CHECK(apogee::commands::describe_plan(plan).find("completion    " + path.string()) !=
+              std::string::npos);
+    }
+    std::vector<std::string> errors;
+    std::vector<std::string> notes;
+    (void)apogee::commands::execute_uninstall(plan, errors, notes);
+    CHECK(errors.empty());
+    for (const std::filesystem::path& path : chosen) {
+        CHECK_FALSE(std::filesystem::exists(path));
+    }
+    for (const std::filesystem::path& path : foreign) {
+        INFO(path.string());
+        CHECK(std::filesystem::exists(path));
+    }
+
+    // The dev channel's install writes no stubs, so its uninstall plans none
+    // of them either.
+    for (const std::filesystem::path& path : chosen) {
+        std::ofstream{path} << "#compdef apogee\n";
+    }
+    const apogee::testing::BakedChannelGuard dev{apogee::harness::Channel::Dev};
+    CHECK(apogee::commands::completion_stub_paths(user_home.roots()).empty());
+    CHECK(apogee::commands::plan_uninstall("/nonexistent/apogee-home", {}, user_home.roots())
+              .completions.empty());
 }
 
 TEST_CASE("uninstall removes a linked data row as the link, and what it points at survives",

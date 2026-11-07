@@ -105,10 +105,14 @@ struct CompletionRoots {
 /// say.
 [[nodiscard]] CompletionRoots completion_roots();
 
-/// Every completion stub Apogee's installers write, under `roots`. Only those
-/// paths: removing a file a package manager owns would be worse than leaving
-/// one behind. None on a dev or test channel's build, whose installs write no
-/// stubs (M10), and none under a root that is empty.
+/// Every completion stub Apogee's installers write, under `roots`: bash's;
+/// zsh's in each directory an installer may choose -- `~/.zfunc`,
+/// `~/.oh-my-zsh/completions`, `~/.local/share/zsh/site-functions` (57l);
+/// fish's; and PowerShell's under the Documents folder and, where that is
+/// another folder, under `<home>/Documents` (57l). Only those paths: removing
+/// a file a package manager owns would be worse than leaving one behind. None
+/// on a dev or test channel's build, whose installs write no stubs (M10), and
+/// none under a root that is empty.
 [[nodiscard]] std::vector<std::filesystem::path> completion_stub_paths(
     const CompletionRoots& roots);
 
@@ -135,7 +139,7 @@ struct UninstallPlan {
 
 /// Builds the plan for `home`, inspecting what actually exists, with the
 /// completion stubs looked for under `roots` (`completion_roots()` for the
-/// command).
+/// command) -- each file once, however many candidates reach it.
 ///
 /// `binary` may be empty when the platform will not report it; the plan then
 /// simply has nothing to remove there, rather than guessing a path — deleting

@@ -2,6 +2,7 @@
 
 #include <CLI/CLI.hpp>
 
+#include <algorithm>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -133,14 +134,33 @@ std::vector<std::filesystem::path> completion_stub_paths(const CompletionRoots& 
     if (!roots.home.empty()) {
         paths.push_back(roots.home / ".local" / "share" / "bash-completion" / "completions" /
                         "apogee");
+        // zsh's, in each directory an installer may have chosen (57l): the
+        // first of these on the user's `fpath`, or the last as the fallback.
+        // The same three, in the same order, as `install.sh` and the
+        // Makefile's install-zsh-completion -- `cli.install_script` holds the
+        // three lists to one set. Before 57l only the fallback was looked
+        // for, and a stub in ~/.zfunc outlived the binary it calls.
+        paths.push_back(roots.home / ".zfunc" / "_apogee");
+        paths.push_back(roots.home / ".oh-my-zsh" / "completions" / "_apogee");
         paths.push_back(roots.home / ".local" / "share" / "zsh" / "site-functions" / "_apogee");
         paths.push_back(roots.home / ".config" / "fish" / "completions" / "apogee.fish");
     }
-    // PowerShell's, where install.ps1 put it (57k): under the Documents folder
-    // it asked Windows for, never `USERPROFILE\Documents`, which a OneDrive or
-    // policy redirect leaves behind.
+    // PowerShell's, where install.ps1 put it: under the Documents folder it
+    // asked Windows for (57k), a OneDrive or policy redirect included -- and
+    // under `<home>/Documents`, where that folder was when a stub was written
+    // before the redirect moved it (57l). The same folder off Windows, so
+    // one path there.
+    const std::filesystem::path stub =
+        std::filesystem::path{"PowerShell"} / "Completions" / "apogee.ps1";
     if (!roots.documents.empty()) {
-        paths.push_back(roots.documents / "PowerShell" / "Completions" / "apogee.ps1");
+        paths.push_back(roots.documents / stub);
+    }
+    if (!roots.home.empty()) {
+        const std::filesystem::path unredirected = roots.home / "Documents" / stub;
+        if (roots.documents.empty() ||
+            unredirected.lexically_normal() != (roots.documents / stub).lexically_normal()) {
+            paths.push_back(unredirected);
+        }
     }
     return paths;
 }
@@ -167,7 +187,19 @@ UninstallPlan plan_uninstall(const std::filesystem::path& home, const std::files
     }
 
     for (const std::filesystem::path& candidate : completion_stub_paths(roots)) {
-        if (std::filesystem::exists(candidate, code)) {
+        if (!std::filesystem::exists(candidate, code)) {
+            continue;
+        }
+        // One file reached by two candidates -- a Documents folder spelled
+        // in another case, a `~/.zfunc` linked to another completion
+        // directory -- is planned once: a second removal would fail on the
+        // file the first just removed (57l).
+        const bool planned = std::ranges::any_of(
+            plan.completions, [&candidate](const std::filesystem::path& listed) {
+                std::error_code same;
+                return std::filesystem::equivalent(listed, candidate, same);
+            });
+        if (!planned) {
             plan.completions.push_back(candidate);
         }
     }
