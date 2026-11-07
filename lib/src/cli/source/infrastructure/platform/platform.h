@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 /// The portability seam.
 ///
@@ -96,6 +97,93 @@ enum class Architecture : std::uint8_t { X64, Arm64 };
 /// attribute), and `apogee uninstall` has to delete it -- both need the real
 /// path, and a wrong one there means uninstall removes the wrong file.
 [[nodiscard]] std::filesystem::path executable_path();
+
+// --- Links, removal and the folders a user's tools write to (57k) ----------
+//
+// The Windows x64 build's libstdc++ cannot see a link: `symlink_status`
+// follows it, `read_symlink` is a stub, so `remove_all`, the directory walks,
+// `weakly_canonical` and `is_symlink` all take a junction or a symbolic link
+// for the folder or file it points at. These calls see one, on every
+// platform, and are a plain `std::filesystem` call wherever the library
+// already does.
+
+/// Whether `path` itself -- never what it points at -- is a link: a symbolic
+/// link, or on Windows a reparse point tagged `IO_REPARSE_TAG_SYMLINK` or
+/// `IO_REPARSE_TAG_MOUNT_POINT` (a junction). Another reparse point -- a
+/// OneDrive placeholder, a deduplicated file -- is the file or folder it is,
+/// never a link. False with `code` clear when nothing is there; `code` set
+/// when it cannot be read. POSIX asks `symlink_status`.
+[[nodiscard]] bool is_link(const std::filesystem::path& path, std::error_code& code) noexcept;
+
+/// Removes `path` and everything under it, a link removed as itself and never
+/// followed: what it points at is left whole. Nothing there is no error. On
+/// Windows a directory link (a junction or a directory symbolic link) goes
+/// with `RemoveDirectoryW` and a file link with `DeleteFileW`, and only a real
+/// folder is emptied first; a read-only file is removed too. Stops at the
+/// first failure, `code` saying why, as `remove_all` does -- which POSIX calls.
+void remove_tree(const std::filesystem::path& path, std::error_code& code);
+
+/// `path` absolute, with every link on the part of it that exists resolved
+/// and the rest normalised -- `weakly_canonical`, which POSIX calls. On
+/// Windows, the longest prefix that opens (following links) named by
+/// `GetFinalPathNameByHandleW`, its `\\?\` taken off, the rest appended:
+/// so two paths resolved here agree in case and drive spelling wherever they
+/// share a folder, and a junction is judged where it points. Empty, with
+/// `code` set, when it cannot be resolved.
+[[nodiscard]] std::filesystem::path resolve_path(const std::filesystem::path& path,
+                                                 std::error_code& code);
+
+/// The folder a user's Documents live in: on Windows the Documents known
+/// folder (`SHGetKnownFolderPath(FOLDERID_Documents)`), the very folder
+/// PowerShell's `[Environment]::GetFolderPath('MyDocuments')` names -- a
+/// OneDrive or policy redirect included -- and so the one `install.ps1`
+/// writes its completion stub under. Elsewhere `<home>/Documents`. Empty when
+/// it cannot be determined.
+[[nodiscard]] std::filesystem::path documents_directory();
+
+/// Whether this process may delete the executable it runs from while it runs:
+/// true on POSIX, false on Windows, which refuses to delete a running image --
+/// what an uninstall's plan says up front.
+[[nodiscard]] bool running_binary_deletable() noexcept;
+
+/// How `remove_own_binary` dealt with the running executable.
+enum class OwnBinaryOutcome : std::uint8_t {
+    /// Gone: deleted (POSIX; on Windows, an image no process runs), or
+    /// nothing was there.
+    Removed,
+    /// Windows: renamed aside in its own folder, so its name no longer runs,
+    /// and Windows deletes the renamed file at the next restart.
+    DeletedAtRestart,
+    /// Windows: renamed aside, but Windows would not schedule the deletion
+    /// (an unelevated process may not) -- or, from
+    /// `delete_or_rename_own_binary`, it was never asked: the renamed file is
+    /// the user's to delete once this process has ended.
+    RenamedAside,
+    /// Nothing changed; `error` says why.
+    Failed,
+};
+
+struct OwnBinaryRemoval {
+    OwnBinaryOutcome outcome = OwnBinaryOutcome::Failed;
+    /// Where the binary was renamed to, for the two Windows outcomes.
+    std::filesystem::path aside{};
+    std::string error{};
+};
+
+/// Removes the executable at `path` -- `apogee uninstall`'s last step:
+/// `delete_or_rename_own_binary`, then, for a binary it renamed aside,
+/// `MoveFileExW(…, MOVEFILE_DELAY_UNTIL_REBOOT)`, which only an elevated
+/// process may ask; the outcome says which held.
+[[nodiscard]] OwnBinaryRemoval remove_own_binary(const std::filesystem::path& path);
+
+/// `remove_own_binary`'s first step alone, which asks Windows for nothing
+/// that outlives this process: POSIX deletes the file. Windows will not
+/// delete a running image, so a delete it refuses becomes a rename aside in
+/// the same folder (allowed for a running image) to
+/// `<name>.uninstalled-<pid>`: `RenamedAside`, its name no longer running.
+/// Never `DeletedAtRestart` -- so a test proves the rename without leaving a
+/// pending delete on the machine (57k).
+[[nodiscard]] OwnBinaryRemoval delete_or_rename_own_binary(const std::filesystem::path& path);
 
 /// A day on the local calendar, and the time zone it is in.
 struct LocalDate {

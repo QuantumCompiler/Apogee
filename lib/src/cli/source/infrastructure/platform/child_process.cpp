@@ -472,12 +472,12 @@ CapturedRun run_captured(const ChildCommand& command, const CapturedLimits& limi
 
 std::unique_ptr<ChildProcess> start_child(const ChildCommand& command, std::string& error) {
     (void)command;
-    // A recorded per-item skip, said out loud. The vendor-CLI backends need a
-    // CreateProcess implementation with overlapped I/O on the pipes; until it
-    // exists, refusing with a message beats a silent gap.
-    error =
-        "this build cannot spawn child processes: the vendor-CLI backends have no Windows "
-        "implementation yet. Use a direct-API backend on this platform";
+    // A recorded per-item skip, said out loud. A CreateProcess implementation
+    // with overlapped I/O on the pipes is not written yet; until it exists,
+    // refusing with a message beats a silent gap. Platform-neutral (57k): it
+    // reaches a model's tool and a direct-API turn as well as a vendor CLI,
+    // and the vendor backends say their own advice before they get here.
+    error = "this build cannot start other programs on Windows yet";
     return nullptr;
 }
 

@@ -55,8 +55,11 @@ TEST_CASE("every native tool has a kind, and no kind names a tool that is gone",
           "[acp][translate][tools]") {
     // Held to the native registry, as the doc says: a new native tool is
     // classified here, or this fails.
-    std::vector<std::string> native =
-        apogee::tools::native_tool_names(apogee::tools::ToolsetOptions{});
+    // Every native tool, the shell and git ones included wherever this host
+    // can run them or not (57k).
+    apogee::tools::ToolsetOptions every;
+    every.child_processes = true;
+    std::vector<std::string> native = apogee::tools::native_tool_names(every);
     for (const std::string_view also :
          {apogee::agent::kFetchUrlToolName, apogee::agent::kWebSearchToolName,
           apogee::harness::kTodoToolName, apogee::agentloop::kConsultToolName,

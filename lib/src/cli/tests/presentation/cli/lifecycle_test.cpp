@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <optional>
 #include <random>
 #include <set>
@@ -23,8 +24,10 @@
 #include "contracts/layout.h"
 #include "contracts/paths.h"
 #include "operations/backend_names.h"
+#include "platform/platform.h"
 #include "support/channel_guard.h"
 #include "support/env_guard.h"
+#include "support/file_link.h"
 
 /// The lifecycle surfaces: shell completion, and what uninstall plans to remove.
 namespace {
@@ -163,6 +166,13 @@ struct UserHome {
     apogee::testing::TempDir dir{"lifecycle-user-home-" + std::to_string(std::random_device{}())};
     apogee::testing::EnvGuard home{"HOME", dir.path().string()};
     apogee::testing::EnvGuard profile{"USERPROFILE", dir.path().string()};
+
+    /// The folders a plan looks for completion stubs under: this home, and a
+    /// Documents folder inside it -- never the developer's own, which on
+    /// Windows is a known folder no variable redirects (57k).
+    [[nodiscard]] apogee::commands::CompletionRoots roots() const {
+        return {.home = dir.path(), .documents = dir.path() / "Documents"};
+    }
 };
 
 }  // namespace
@@ -338,7 +348,8 @@ TEST_CASE("uninstall names the user data it would destroy", "[commands][uninstal
 
     std::ofstream{home.path / "sessions" / "chat.json"} << "{}";
 
-    const apogee::commands::UninstallPlan plan = apogee::commands::plan_uninstall(home.path, {});
+    const apogee::commands::UninstallPlan plan =
+        apogee::commands::plan_uninstall(home.path, {}, user_home.roots());
 
     CHECK(plan.touches_user_data());
     CHECK(contains(plan.user_data, "sessions"));
@@ -357,7 +368,8 @@ TEST_CASE("an empty install raises no user-data warning", "[commands][uninstall]
     TempDir home;
     REQUIRE(apogee::harness::seed_data_directory(home.path).ok());
 
-    const apogee::commands::UninstallPlan plan = apogee::commands::plan_uninstall(home.path, {});
+    const apogee::commands::UninstallPlan plan =
+        apogee::commands::plan_uninstall(home.path, {}, user_home.roots());
 
     CHECK_FALSE(plan.touches_user_data());
     CHECK(apogee::commands::describe_plan(plan).find("YOUR OWN DATA") == std::string::npos);
@@ -369,10 +381,13 @@ TEST_CASE("uninstall removes the tree and reports what it removed", "[commands][
     REQUIRE(apogee::harness::seed_data_directory(home.path).ok());
     std::ofstream{home.path / "sessions" / "chat.json"} << "{}";
 
-    apogee::commands::UninstallPlan plan = apogee::commands::plan_uninstall(home.path, {});
+    apogee::commands::UninstallPlan plan =
+        apogee::commands::plan_uninstall(home.path, {}, user_home.roots());
 
     std::vector<std::string> errors;
-    const std::vector<std::string> removed = apogee::commands::execute_uninstall(plan, errors);
+    std::vector<std::string> notes;
+    const std::vector<std::string> removed =
+        apogee::commands::execute_uninstall(plan, errors, notes);
 
     CHECK(errors.empty());
     CHECK(contains(removed, home.path.string()));
@@ -386,12 +401,14 @@ TEST_CASE("uninstall --keep-data leaves the data directory alone", "[commands][u
     TempDir home;
     REQUIRE(apogee::harness::seed_data_directory(home.path).ok());
 
-    apogee::commands::UninstallPlan plan = apogee::commands::plan_uninstall(home.path, {});
+    apogee::commands::UninstallPlan plan =
+        apogee::commands::plan_uninstall(home.path, {}, user_home.roots());
     plan.data_directory.clear();  // what the --keep-data flag does
     plan.user_data.clear();
 
     std::vector<std::string> errors;
-    (void)apogee::commands::execute_uninstall(plan, errors);
+    std::vector<std::string> notes;
+    (void)apogee::commands::execute_uninstall(plan, errors, notes);
 
     CHECK(std::filesystem::exists(home.path));
     CHECK(std::filesystem::exists(home.path / "sessions"));
@@ -400,7 +417,7 @@ TEST_CASE("uninstall --keep-data leaves the data directory alone", "[commands][u
 TEST_CASE("an already-removed install plans nothing and says so", "[commands][uninstall]") {
     const UserHome user_home;
     const apogee::commands::UninstallPlan plan =
-        apogee::commands::plan_uninstall("/nonexistent/apogee-home", {});
+        apogee::commands::plan_uninstall("/nonexistent/apogee-home", {}, user_home.roots());
 
     CHECK(plan.data_directory.empty());
     CHECK(plan.binary.empty());
@@ -418,12 +435,192 @@ TEST_CASE("uninstall finds the completions under the home directory, and only th
     std::filesystem::create_directories(zsh.parent_path());
     std::ofstream{zsh} << "#compdef apogee\n";
 
+    // The command's roots are the home directory's -- the variable the guard
+    // sets -- so it is the guard's home a plan searches.
+    CHECK(apogee::commands::completion_roots().home == user_home.dir.path());
     const apogee::commands::UninstallPlan plan =
-        apogee::commands::plan_uninstall("/nonexistent/apogee-home", {});
+        apogee::commands::plan_uninstall("/nonexistent/apogee-home", {}, user_home.roots());
 
     REQUIRE(plan.completions.size() == 1);
     CHECK(plan.completions.front() == zsh);
     CHECK(apogee::commands::describe_plan(plan).find("already removed") == std::string::npos);
+}
+
+TEST_CASE("the PowerShell stub is looked for where install.ps1 put it, a redirected Documents",
+          "[commands][uninstall][57k]") {
+    // install.ps1 writes under [Environment]::GetFolderPath('MyDocuments'),
+    // which OneDrive's backup or a folder-redirection policy moves away from
+    // USERPROFILE\Documents: uninstall looked only there and left the stub
+    // behind, dot-sourced by the profile, after the binary was gone.
+    const UserHome user_home;
+    const std::filesystem::path redirected = user_home.dir.path() / "OneDrive" / "Documents";
+    const apogee::commands::CompletionRoots roots{.home = user_home.dir.path(),
+                                                  .documents = redirected};
+    const std::filesystem::path stub = redirected / "PowerShell" / "Completions" / "apogee.ps1";
+    const std::filesystem::path unredirected =
+        user_home.dir.path() / "Documents" / "PowerShell" / "Completions" / "apogee.ps1";
+
+    const std::vector<std::filesystem::path> candidates =
+        apogee::commands::completion_stub_paths(roots);
+    CHECK(contains_path(candidates, stub));
+    CHECK_FALSE(contains_path(candidates, unredirected));
+
+    std::filesystem::create_directories(stub.parent_path());
+    std::ofstream{stub} << "# apogee completion\n";
+    std::filesystem::create_directories(unredirected.parent_path());
+    std::ofstream{unredirected} << "# not where install.ps1 wrote\n";
+    const apogee::commands::UninstallPlan plan =
+        apogee::commands::plan_uninstall("/nonexistent/apogee-home", {}, roots);
+    REQUIRE(plan.completions.size() == 1);
+    CHECK(plan.completions.front() == stub);
+    std::vector<std::string> errors;
+    std::vector<std::string> notes;
+    const std::vector<std::string> removed =
+        apogee::commands::execute_uninstall(plan, errors, notes);
+    CHECK(errors.empty());
+    CHECK(contains(removed, stub.string()));
+    CHECK_FALSE(std::filesystem::exists(stub));
+    CHECK(std::filesystem::exists(unredirected));
+
+    // No Documents folder to ask: no PowerShell stub, the others still.
+    const std::vector<std::filesystem::path> homeless =
+        apogee::commands::completion_stub_paths({.home = user_home.dir.path(), .documents = {}});
+    CHECK(homeless.size() == 3);
+    // The command asks the platform for the folder: the known folder on
+    // Windows, `<home>/Documents` elsewhere.
+    CHECK(apogee::commands::completion_roots().documents ==
+          apogee::platform::documents_directory());
+}
+
+TEST_CASE("uninstall removes a linked data row as the link, and what it points at survives",
+          "[commands][uninstall][links][57k]") {
+    // The data directory's `models` row moved to another drive and linked
+    // back: Windows x64's uninstall emptied the store through the junction
+    // while removing the data directory. Only the link goes.
+    const UserHome user_home;
+    TempDir home;
+    REQUIRE(apogee::harness::seed_data_directory(home.path).ok());
+    TempDir drive;
+    const std::filesystem::path store = drive.path / "models";
+    std::filesystem::create_directories(store / "org--m" / "gguf" / "0123");
+    std::ofstream{store / "org--m" / "gguf" / "0123" / "m.gguf"} << "weights";
+    std::filesystem::remove(home.path / "models");
+    const apogee::testing::LinkMade made =
+        apogee::testing::make_directory_link(store, home.path / "models");
+    INFO(made.why);
+    REQUIRE(made.made);
+
+    apogee::commands::UninstallPlan plan =
+        apogee::commands::plan_uninstall(home.path, {}, user_home.roots());
+    std::vector<std::string> errors;
+    std::vector<std::string> notes;
+    (void)apogee::commands::execute_uninstall(plan, errors, notes);
+
+    CHECK(errors.empty());
+    CHECK_FALSE(std::filesystem::exists(std::filesystem::symlink_status(home.path)));
+    std::ifstream weights{store / "org--m" / "gguf" / "0123" / "m.gguf"};
+    CHECK(std::string{std::istreambuf_iterator<char>{weights}, {}} == "weights");
+}
+
+TEST_CASE("a running binary Windows renames aside ends the uninstall at exit 0, saying so",
+          "[commands][uninstall][binary][57k]") {
+    // Windows will not delete a running image, so every Windows uninstall
+    // removed the data as confirmed and then ended `could not remove
+    // …apogee.exe: Access is denied.` and exit 1. The binary is renamed aside
+    // and the run says when it goes; only a removal that truly failed is one.
+    const UserHome user_home;
+    TempDir dir;
+    const std::filesystem::path binary = dir.path / "apogee.exe";
+    std::ofstream{binary} << "a program";
+    const std::filesystem::path aside = dir.path / "apogee.exe.uninstalled-42";
+
+    // The plan says it up front, where the platform renames rather than
+    // deletes -- and a stand-in plan says it on any host.
+    const apogee::commands::UninstallPlan planned =
+        apogee::commands::plan_uninstall("/nonexistent/apogee-home", binary, user_home.roots());
+    CHECK(planned.binary == binary);
+    CHECK(planned.binary_renamed_aside == !apogee::platform::running_binary_deletable());
+    apogee::commands::UninstallPlan windows;
+    windows.binary = binary;
+    windows.binary_renamed_aside = true;
+    CHECK(apogee::commands::describe_plan(windows).find(
+              "(Windows cannot delete a running program: it is renamed aside, and the last line "
+              "says when it goes)") != std::string::npos);
+    CHECK((apogee::commands::describe_plan(planned).find("Windows cannot delete") !=
+           std::string::npos) == planned.binary_renamed_aside);
+
+    struct Run {
+        int code = -1;
+        std::string out;
+        std::string err;
+        std::vector<std::string> removed;
+    };
+
+    const auto uninstall = [&](const apogee::platform::OwnBinaryRemoval& outcome) {
+        TempDir home;
+        REQUIRE(apogee::harness::seed_data_directory(home.path).ok());
+        apogee::commands::UninstallPlan plan =
+            apogee::commands::plan_uninstall(home.path, binary, user_home.roots());
+        std::vector<std::string> errors;
+        std::vector<std::string> notes;
+        std::vector<std::filesystem::path> asked;
+        Run run;
+        run.removed = apogee::commands::execute_uninstall(
+            plan, errors, notes, [&](const std::filesystem::path& path) {
+                // The binary last: the data is already gone when it is asked.
+                CHECK_FALSE(std::filesystem::exists(home.path));
+                asked.push_back(path);
+                return outcome;
+            });
+        CHECK(asked == std::vector<std::filesystem::path>{binary});
+        std::ostringstream out;
+        std::ostringstream err;
+        run.code = apogee::commands::report_uninstall(run.removed, notes, errors, out, err);
+        run.out = out.str();
+        run.err = err.str();
+        CHECK(contains(run.removed, home.path.string()));
+        return run;
+    };
+
+    const Run restart = uninstall({.outcome = apogee::platform::OwnBinaryOutcome::DeletedAtRestart,
+                                   .aside = aside,
+                                   .error = {}});
+    CHECK(restart.code == 0);
+    CHECK(restart.err.empty());
+    CHECK(restart.out.ends_with("renamed " + binary.string() + " to " + aside.string() +
+                                ": Windows cannot delete a running program, and deletes it at "
+                                "the next restart\n"));
+    CHECK_FALSE(contains(restart.removed, binary.string()));
+
+    const Run yours = uninstall(
+        {.outcome = apogee::platform::OwnBinaryOutcome::RenamedAside, .aside = aside, .error = {}});
+    CHECK(yours.code == 0);
+    CHECK(yours.err.empty());
+    CHECK(yours.out.ends_with("renamed " + binary.string() + " to " + aside.string() +
+                              ": Windows cannot delete a running program -- delete " +
+                              aside.string() + " after this command exits\n"));
+    CHECK(yours.out.find("Access is denied") == std::string::npos);
+
+    const Run failed = uninstall({.outcome = apogee::platform::OwnBinaryOutcome::Failed,
+                                  .aside = {},
+                                  .error = "it could not be renamed aside: Access is denied."});
+    CHECK(failed.code == 1);
+    CHECK(failed.err == "could not remove " + binary.string() +
+                            ": it could not be renamed aside: Access is denied.\n");
+
+    // The platform's own remover on a binary no process runs: deleted.
+    TempDir home;
+    REQUIRE(apogee::harness::seed_data_directory(home.path).ok());
+    apogee::commands::UninstallPlan plan =
+        apogee::commands::plan_uninstall(home.path, binary, user_home.roots());
+    std::vector<std::string> errors;
+    std::vector<std::string> notes;
+    const std::vector<std::string> removed =
+        apogee::commands::execute_uninstall(plan, errors, notes);
+    CHECK(errors.empty());
+    CHECK(notes.empty());
+    CHECK(contains(removed, binary.string()));
+    CHECK_FALSE(std::filesystem::exists(binary));
 }
 
 TEST_CASE("every user-data directory in the contract is one uninstall warns about",
@@ -442,7 +639,8 @@ TEST_CASE("every user-data directory in the contract is one uninstall warns abou
         std::ofstream{home.path / entry.relative_path / "something"} << "x";
     }
 
-    const apogee::commands::UninstallPlan plan = apogee::commands::plan_uninstall(home.path, {});
+    const apogee::commands::UninstallPlan plan =
+        apogee::commands::plan_uninstall(home.path, {}, user_home.roots());
 
     for (const apogee::harness::LayoutEntry& entry : apogee::harness::data_directories()) {
         if (!entry.user_data) {
@@ -1142,13 +1340,13 @@ TEST_CASE("a channel build's uninstall plans its own root, never another, flags 
         const apogee::harness::RootFlagScope scope{flag};
         {
             const apogee::testing::BakedChannelGuard dev{apogee::harness::Channel::Dev};
-            const apogee::commands::UninstallPlan plan =
-                apogee::commands::plan_uninstall(apogee::harness::install_home(), {});
+            const apogee::commands::UninstallPlan plan = apogee::commands::plan_uninstall(
+                apogee::harness::install_home(), {}, user_home.roots());
             CHECK(plan.data_directory == home / ".apogee-dev");
             CHECK(plan.completions.empty());
         }
-        const apogee::commands::UninstallPlan release =
-            apogee::commands::plan_uninstall(apogee::harness::install_home(), {});
+        const apogee::commands::UninstallPlan release = apogee::commands::plan_uninstall(
+            apogee::harness::install_home(), {}, user_home.roots());
         CHECK(release.data_directory == home / ".apogee");
         CHECK(contains_path(release.completions, stub));
     }

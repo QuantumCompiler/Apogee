@@ -174,6 +174,16 @@ std::int64_t line_of(std::string_view text, std::size_t offset) {
                    text.begin(), text.begin() + static_cast<std::ptrdiff_t>(offset), '\n'));
 }
 
+/// Whether `path` itself is a link -- a symlink, or on Windows a junction,
+/// which the x64 build's library cannot see (57k). A linked folder is never
+/// walked into: POSIX's directory walk does not follow one, and Windows' is
+/// told not to, so a junction out of the root -- or back into its own folder
+/// -- is never entered. Unreadable counts as a link, the safe side.
+bool linked(const std::filesystem::path& path) {
+    std::error_code code;
+    return platform::is_link(path, code) || static_cast<bool>(code);
+}
+
 /// A file that holds a NUL in its first 8 KiB is data, not text -- grep's
 /// own rule, and what keeps a search out of object files and images.
 bool looks_binary(const std::filesystem::path& path) {
@@ -189,7 +199,9 @@ std::optional<std::filesystem::path> resolve_in_root(const std::filesystem::path
         return std::nullopt;
     }
     std::error_code code;
-    const std::filesystem::path canonical_root = std::filesystem::weakly_canonical(root, code);
+    // The root and the path resolved by one call, so on Windows both are the
+    // names the filesystem gives and agree in case and drive form (57k).
+    const std::filesystem::path canonical_root = platform::resolve_path(root, code);
     if (code) {
         error = "the sandbox root " + root.string() + " cannot be resolved: " + code.message();
         return std::nullopt;
@@ -198,10 +210,12 @@ std::optional<std::filesystem::path> resolve_in_root(const std::filesystem::path
     if (candidate.is_relative()) {
         candidate = canonical_root / candidate;
     }
-    // weakly_canonical follows symlinks on the part that exists and
-    // normalises the rest, so a symlink pointing out of the root is judged by
-    // where it points, and a file about to be created by where it will land.
-    const std::filesystem::path resolved = std::filesystem::weakly_canonical(candidate, code);
+    // Links followed on the part that exists and the rest normalised, so a
+    // link pointing out of the root is judged by where it points, and a file
+    // about to be created by where it will land. `weakly_canonical` on POSIX;
+    // on Windows the seam's own resolution, since the x64 build's library
+    // follows no junction or symlink (57k).
+    const std::filesystem::path resolved = platform::resolve_path(candidate, code);
     if (code) {
         error = "'" + std::string{path} + "' cannot be resolved: " + code.message();
         return std::nullopt;
@@ -455,7 +469,7 @@ constexpr std::uintmax_t kDiffReadLimit = 16 * 1024 * 1024;
 /// `path` as a diff names it: relative to the root it lies in.
 std::string diff_label(const std::filesystem::path& root, const std::filesystem::path& path) {
     std::error_code code;
-    const std::filesystem::path canonical_root = std::filesystem::weakly_canonical(root, code);
+    const std::filesystem::path canonical_root = platform::resolve_path(root, code);
     const std::filesystem::path relative = path.lexically_relative(code ? root : canonical_root);
     const std::string text = relative.generic_string();
     return text.empty() || text.starts_with("..") ? path.generic_string() : text;
@@ -779,7 +793,7 @@ void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::pat
             }
             const std::string name = it->path().filename().string();
             if (it->is_directory(code)) {
-                if (name.starts_with(".")) {
+                if (name.starts_with(".") || linked(it->path())) {
                     it.disable_recursion_pending();
                 }
                 continue;
@@ -848,7 +862,7 @@ void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::pat
 
         std::string problem;
         std::error_code code;
-        const std::filesystem::path canonical_root = std::filesystem::weakly_canonical(root, code);
+        const std::filesystem::path canonical_root = platform::resolve_path(root, code);
         const std::string start = args->string("path");
         const std::optional<std::filesystem::path> base =
             resolve_in_root(root, start.empty() ? "." : start, problem);
@@ -870,7 +884,7 @@ void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::pat
                 }
                 const std::string name = it->path().filename().string();
                 if (it->is_directory(code)) {
-                    if (name.starts_with(".")) {
+                    if (name.starts_with(".") || linked(it->path())) {
                         it.disable_recursion_pending();
                     }
                     continue;
@@ -878,11 +892,10 @@ void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::pat
                 if (!it->is_regular_file(code) || (!glob.empty() && !wildcard_match(glob, name))) {
                     continue;
                 }
-                if (it->is_symlink(code)) {
+                if (linked(it->path())) {
                     // A link is read where it points, and it may point out
                     // of the root: judged there, like any other path.
-                    const std::filesystem::path target =
-                        std::filesystem::weakly_canonical(it->path(), code);
+                    const std::filesystem::path target = platform::resolve_path(it->path(), code);
                     if (code || !is_within(canonical_root, target)) {
                         continue;
                     }

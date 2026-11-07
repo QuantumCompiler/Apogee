@@ -4,6 +4,7 @@
 
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <system_error>
 
@@ -15,31 +16,6 @@
 
 namespace apogee::commands {
 namespace {
-
-/// Where each shell keeps a completion file, relative to the user's home.
-///
-/// Only paths Apogee's own installers write are listed. Removing a file a
-/// package manager owns would be worse than leaving one behind, so this is
-/// deliberately narrow.
-[[nodiscard]] std::vector<std::filesystem::path> completion_candidates() {
-    // The stubs are the release channel's (M10): they call `apogee` by name,
-    // and a dev or test install never writes any -- so its uninstall must not
-    // take the release install's.
-    if (harness::baked_channel() != harness::Channel::Release) {
-        return {};
-    }
-    const std::optional<std::string> home = platform::home_directory();
-    if (!home.has_value()) {
-        return {};
-    }
-    const std::filesystem::path root{*home};
-    return {
-        root / ".local" / "share" / "bash-completion" / "completions" / "apogee",
-        root / ".local" / "share" / "zsh" / "site-functions" / "_apogee",
-        root / ".config" / "fish" / "completions" / "apogee.fish",
-        root / "Documents" / "PowerShell" / "Completions" / "apogee.ps1",
-    };
-}
 
 /// Whether the directory at `path` holds anything that is not Apogee's own.
 [[nodiscard]] bool holds_user_data(const std::filesystem::path& home,
@@ -70,8 +46,11 @@ std::vector<PlannedRow> plan_rows(const std::filesystem::path& home,
         row.name = std::string{entry.relative_path};
         const std::filesystem::path path = home / entry.relative_path;
         std::error_code code;
-        // symlink_status: a row that is a symlink is present as itself.
-        row.present = std::filesystem::exists(std::filesystem::symlink_status(path, code));
+        // symlink_status: a row that is a symlink is present as itself -- and
+        // so is a link the library cannot see (a junction on Windows, 57k),
+        // even one whose target is gone.
+        row.present = std::filesystem::exists(std::filesystem::symlink_status(path, code)) ||
+                      platform::is_link(path, code);
         row.user_data = row.present && entry.user_data && holds_user_data(home, path);
         planned.push_back(std::move(row));
     }
@@ -123,7 +102,7 @@ void remove_planned(const std::filesystem::path& path, bool recursive,
     }
     std::error_code code;
     if (recursive) {
-        std::filesystem::remove_all(path, code);
+        platform::remove_tree(path, code);
     } else {
         std::filesystem::remove(path, code);
     }
@@ -134,13 +113,46 @@ void remove_planned(const std::filesystem::path& path, bool recursive,
     }
 }
 
-UninstallPlan plan_uninstall(const std::filesystem::path& home,
-                             const std::filesystem::path& binary) {
+CompletionRoots completion_roots() {
+    CompletionRoots roots;
+    if (const std::optional<std::string> home = platform::home_directory(); home.has_value()) {
+        roots.home = platform::path_from_utf8(*home);
+    }
+    roots.documents = platform::documents_directory();
+    return roots;
+}
+
+std::vector<std::filesystem::path> completion_stub_paths(const CompletionRoots& roots) {
+    // The stubs are the release channel's (M10): they call `apogee` by name,
+    // and a dev or test install never writes any -- so its uninstall must not
+    // take the release install's.
+    if (harness::baked_channel() != harness::Channel::Release) {
+        return {};
+    }
+    std::vector<std::filesystem::path> paths;
+    if (!roots.home.empty()) {
+        paths.push_back(roots.home / ".local" / "share" / "bash-completion" / "completions" /
+                        "apogee");
+        paths.push_back(roots.home / ".local" / "share" / "zsh" / "site-functions" / "_apogee");
+        paths.push_back(roots.home / ".config" / "fish" / "completions" / "apogee.fish");
+    }
+    // PowerShell's, where install.ps1 put it (57k): under the Documents folder
+    // it asked Windows for, never `USERPROFILE\Documents`, which a OneDrive or
+    // policy redirect leaves behind.
+    if (!roots.documents.empty()) {
+        paths.push_back(roots.documents / "PowerShell" / "Completions" / "apogee.ps1");
+    }
+    return paths;
+}
+
+UninstallPlan plan_uninstall(const std::filesystem::path& home, const std::filesystem::path& binary,
+                             const CompletionRoots& roots) {
     UninstallPlan plan;
     std::error_code code;
 
     if (!binary.empty() && std::filesystem::exists(binary, code)) {
         plan.binary = binary;
+        plan.binary_renamed_aside = !platform::running_binary_deletable();
     }
 
     if (std::filesystem::exists(home, code)) {
@@ -154,7 +166,7 @@ UninstallPlan plan_uninstall(const std::filesystem::path& home,
         }
     }
 
-    for (const std::filesystem::path& candidate : completion_candidates()) {
+    for (const std::filesystem::path& candidate : completion_stub_paths(roots)) {
         if (std::filesystem::exists(candidate, code)) {
             plan.completions.push_back(candidate);
         }
@@ -169,6 +181,11 @@ std::string describe_plan(const UninstallPlan& plan) {
 
     if (!plan.binary.empty()) {
         out << "  binary        " << plan.binary.string() << "\n";
+        if (plan.binary_renamed_aside) {
+            // Said before the answer, not discovered after it (57k).
+            out << "                (Windows cannot delete a running program: it is renamed "
+                   "aside, and the last line says when it goes)\n";
+        }
     }
     if (!plan.data_directory.empty()) {
         out << "  data          " << plan.data_directory.string() << "\n";
@@ -190,7 +207,9 @@ std::string describe_plan(const UninstallPlan& plan) {
 }
 
 std::vector<std::string> execute_uninstall(const UninstallPlan& plan,
-                                           std::vector<std::string>& errors) {
+                                           std::vector<std::string>& errors,
+                                           std::vector<std::string>& notes,
+                                           const BinaryRemover& remove_binary) {
     std::vector<std::string> removed;
     for (const std::filesystem::path& path : plan.completions) {
         remove_planned(path, false, removed, errors);
@@ -199,8 +218,45 @@ std::vector<std::string> execute_uninstall(const UninstallPlan& plan,
     // The binary last: if removing it fails, everything else is still gone and
     // the user can delete one file. Doing it first risks a half-removal with no
     // command left to finish the job.
-    remove_planned(plan.binary, false, removed, errors);
+    if (plan.binary.empty()) {
+        return removed;
+    }
+    const platform::OwnBinaryRemoval binary =
+        remove_binary ? remove_binary(plan.binary) : platform::remove_own_binary(plan.binary);
+    const std::string path = plan.binary.string();
+    switch (binary.outcome) {
+        case platform::OwnBinaryOutcome::Removed:
+            removed.push_back(path);
+            break;
+        case platform::OwnBinaryOutcome::DeletedAtRestart:
+            notes.push_back("renamed " + path + " to " + binary.aside.string() +
+                            ": Windows cannot delete a running program, and deletes it at the "
+                            "next restart");
+            break;
+        case platform::OwnBinaryOutcome::RenamedAside:
+            notes.push_back("renamed " + path + " to " + binary.aside.string() +
+                            ": Windows cannot delete a running program -- delete " +
+                            binary.aside.string() + " after this command exits");
+            break;
+        case platform::OwnBinaryOutcome::Failed:
+            errors.push_back(path + ": " + binary.error);
+            break;
+    }
     return removed;
+}
+
+int report_uninstall(const std::vector<std::string>& removed, const std::vector<std::string>& notes,
+                     const std::vector<std::string>& errors, std::ostream& out, std::ostream& err) {
+    for (const std::string& path : removed) {
+        out << "removed " << path << "\n";
+    }
+    for (const std::string& note : notes) {
+        out << note << "\n";
+    }
+    for (const std::string& error : errors) {
+        err << "could not remove " << error << "\n";
+    }
+    return errors.empty() ? 0 : 1;
 }
 
 std::string_view UninstallCommand::name() const noexcept {
@@ -235,7 +291,7 @@ void UninstallCommand::bind(CLI::App& root, const RootContext& context) {
             throw CLI::RuntimeError(1);
         }
 
-        UninstallPlan plan = plan_uninstall(home, platform::executable_path());
+        UninstallPlan plan = plan_uninstall(home, platform::executable_path(), completion_roots());
         if (flags->keep_data) {
             plan.data_directory.clear();
             plan.user_data.clear();
@@ -256,15 +312,11 @@ void UninstallCommand::bind(CLI::App& root, const RootContext& context) {
         }
 
         std::vector<std::string> errors;
-        const std::vector<std::string> removed = execute_uninstall(plan, errors);
-        for (const std::string& path : removed) {
-            std::cout << "removed " << path << "\n";
-        }
-        for (const std::string& error : errors) {
-            std::cerr << "could not remove " << error << "\n";
-        }
-        if (!errors.empty()) {
-            throw CLI::RuntimeError(1);
+        std::vector<std::string> notes;
+        const std::vector<std::string> removed = execute_uninstall(plan, errors, notes);
+        if (const int status = report_uninstall(removed, notes, errors, std::cout, std::cerr);
+            status != 0) {
+            throw CLI::RuntimeError(status);
         }
     });
 }

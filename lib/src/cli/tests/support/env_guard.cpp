@@ -6,6 +6,8 @@
 #include <system_error>
 #include <utility>
 
+#include "platform/platform.h"
+
 namespace apogee::testing {
 namespace {
 
@@ -74,8 +76,11 @@ TempDir::TempDir(const std::string& label) {
 }
 
 TempDir::~TempDir() {
+    // A link inside goes as itself (57k): the Windows x64 library's
+    // `remove_all` walks into a junction -- one back into this folder would
+    // recurse until the path is too long. `remove_all` on POSIX.
     std::error_code ec;
-    std::filesystem::remove_all(path_, ec);
+    platform::remove_tree(path_, ec);
 }
 
 }  // namespace apogee::testing

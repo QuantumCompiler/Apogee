@@ -15,6 +15,7 @@
 #include "contracts/text_diff.h"
 #include "machine/driver_input.h"
 #include "platform/platform.h"
+#include "tools/toolsets.h"
 
 namespace apogee::commands {
 namespace {
@@ -409,10 +410,18 @@ std::vector<std::string> edit_tools(const agent::ToolRegistry& registry) {
     return out;
 }
 
-GatedName name_gated(std::string_view name, const std::vector<std::string>& gated, bool websites) {
+GatedName name_gated(std::string_view name, const std::vector<std::string>& gated, bool websites,
+                     bool child_processes) {
     GatedName out;
     if (std::ranges::find(gated, name) != gated.end()) {
         out.key = std::string{name};
+        return out;
+    }
+    // A native tool this build never offers is no typo: say why it is not
+    // here (57k), not that the name is no tool.
+    if (std::string why = tools::why_not_offered(name, child_processes); !why.empty()) {
+        out.error = std::move(why);
+        out.unoffered = true;
         return out;
     }
     // A website, by the host it names -- as a session's own answer keeps it.
@@ -468,7 +477,8 @@ std::string seed_approvals(SessionApprovals& approvals, const PermissionPresets&
         // `--allow` is for tools; a website has `--allow-host`.
         const GatedName name = name_gated(tool, gated, false);
         if (!name.error.empty()) {
-            return "--allow: " + name.error + " (a website takes --allow-host)";
+            return "--allow: " + name.error +
+                   (name.unoffered ? "" : " (a website takes --allow-host)");
         }
         allow_for_session(approvals, name);
     }

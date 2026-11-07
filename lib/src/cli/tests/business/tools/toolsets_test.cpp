@@ -31,6 +31,7 @@ TEST_CASE("each registered tool files under its toolset", "[tools][toolsets][sui
     const auto words = apogee::harness::suite_toolset_names();
     for (const std::string_view toolset : apogee::tools::toolset_names()) {
         apogee::tools::ToolsetOptions options;
+        options.child_processes = true;  // every set, on any host (57k)
         for (const std::string_view other : apogee::tools::toolset_names()) {
             if (other != toolset) {
                 options.disabled.emplace_back(other);

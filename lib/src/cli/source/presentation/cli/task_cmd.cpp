@@ -49,6 +49,7 @@
 #include "tasks/unattended.h"
 #include "tasks/view.h"
 #include "tools/consult.h"
+#include "tools/toolsets.h"
 #include "views/ask_prompt.h"
 #include "views/cli_reporter.h"
 #include "views/terminal.h"
@@ -1475,6 +1476,15 @@ TaskGate compose_task_gate(const harness::Config& config, const agent::ToolRegis
     // The agent's policy is the one filter over the registry (Milestone X):
     // what it leaves out is not offered, so it cannot be granted either.
     out.tools = agent != nullptr ? apply_tool_policy(available, agent->tools) : available;
+    // A grant of a native tool this build never offers is refused saying why
+    // (57k: a shell or git tool where no program can be started), before the
+    // ceiling would call it no tool of the task's.
+    for (const std::string& grant : policy.grants) {
+        if (const std::string why = tools::why_not_offered(grant); !why.empty()) {
+            out.refusal = "--allow " + grant + ": " + why;
+            return out;
+        }
+    }
     out.refusal = tasks::grant_refusal(
         policy.grants,
         tasks::GrantScope{.available = &available,

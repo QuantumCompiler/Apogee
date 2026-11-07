@@ -16,6 +16,7 @@
 #include "contracts/config.h"
 #include "contracts/paths.h"
 #include "operations/suites.h"
+#include "platform/child_process.h"
 #include "platform/xcode.h"
 #include "views/status_line.h"
 
@@ -111,6 +112,12 @@ struct CheckInputs {
     /// The release target the MLX rows judge (27a); empty is this build's
     /// own. Set by a test, so the off-platform answer is checked on any host.
     std::string host_target;
+
+    /// Whether this build can start other programs (57k). Without it the git
+    /// and shell tools are not offered, and the Tools section's `git` row is
+    /// skipped, saying why, rather than "found on PATH" or a remedy that
+    /// cannot help. This build's answer, unless a test names its own.
+    bool child_processes = platform::supports_child_processes();
 
     /// The drivers' earlier versions the script rows know (27c): this
     /// build's list, unless a test names its own, so a stale copy is

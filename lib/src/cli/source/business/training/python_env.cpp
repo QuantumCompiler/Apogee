@@ -14,6 +14,7 @@
 
 #include "contracts/config.h"
 #include "platform/child_process.h"
+#include "platform/platform.h"
 
 namespace apogee::training {
 namespace {
@@ -963,7 +964,10 @@ std::string PythonEnv::rebuild(const std::filesystem::path& base_python,
     const std::vector<std::string> sets = status().sets;
     std::error_code code;
     const std::filesystem::path aside = dir_.string() + ".previous";
-    std::filesystem::remove_all(aside, code);
+    // The environment is several gigabytes, a folder a user may move to
+    // another drive and link back: a link set aside goes as itself, never
+    // what it points at (57k).
+    platform::remove_tree(aside, code);
     if (exists()) {
         std::filesystem::rename(dir_, aside, code);
         if (code) {
@@ -991,7 +995,7 @@ std::string PythonEnv::rebuild(const std::filesystem::path& base_python,
             return restore(std::move(failure));
         }
     }
-    std::filesystem::remove_all(aside, code);
+    platform::remove_tree(aside, code);
     return {};
 }
 

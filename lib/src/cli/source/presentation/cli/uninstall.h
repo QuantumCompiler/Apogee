@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <iosfwd>
 #include <span>
 #include <string>
@@ -10,6 +11,7 @@
 
 #include "cli/command.h"
 #include "contracts/layout.h"
+#include "platform/platform.h"
 
 /// `apogee uninstall` — remove the binary, the data directory, and completions.
 ///
@@ -80,15 +82,44 @@ enum class Confirmation : std::uint8_t {
 
 /// Removes one planned path -- a tree when `recursive` -- and records it in
 /// `removed`, or the path and the reason in `errors`: a partial failure is
-/// reported, never hidden, and the removals after it still run. A symlink is
-/// removed as itself, never followed. An empty path is nothing to remove.
+/// reported, never hidden, and the removals after it still run. A link -- a
+/// symlink, or on Windows a junction -- is removed as itself, never followed,
+/// whatever links the standard library can see (`platform::remove_tree`,
+/// 57k). An empty path is nothing to remove.
 void remove_planned(const std::filesystem::path& path, bool recursive,
                     std::vector<std::string>& removed, std::vector<std::string>& errors);
+
+/// The folders Apogee's installers write completion stubs under (57k): the
+/// user's home -- bash's, zsh's and fish's stubs below it -- and the Documents
+/// folder PowerShell's sits in. On Windows that is the Documents known folder,
+/// the one `install.ps1` asks for (`GetFolderPath('MyDocuments')`), a OneDrive
+/// or policy redirect included -- never a second guess at it. Parameters, so
+/// a test names folders of its own.
+struct CompletionRoots {
+    std::filesystem::path home{};
+    std::filesystem::path documents{};
+};
+
+/// This user's: `platform::home_directory()` and
+/// `platform::documents_directory()`, either empty when the platform cannot
+/// say.
+[[nodiscard]] CompletionRoots completion_roots();
+
+/// Every completion stub Apogee's installers write, under `roots`. Only those
+/// paths: removing a file a package manager owns would be worse than leaving
+/// one behind. None on a dev or test channel's build, whose installs write no
+/// stubs (M10), and none under a root that is empty.
+[[nodiscard]] std::vector<std::filesystem::path> completion_stub_paths(
+    const CompletionRoots& roots);
 
 /// What an uninstall would remove, gathered before anything is deleted so the
 /// user can be shown the whole list and answer once.
 struct UninstallPlan {
     std::filesystem::path binary;
+    /// The binary is a running program Windows will not delete (57k): it is
+    /// renamed aside, and the run's last line says when it goes. The plan
+    /// says so up front.
+    bool binary_renamed_aside = false;
     std::filesystem::path data_directory;
     std::vector<std::filesystem::path> completions;
 
@@ -102,21 +133,45 @@ struct UninstallPlan {
     }
 };
 
-/// Builds the plan for `home`, inspecting what actually exists.
+/// Builds the plan for `home`, inspecting what actually exists, with the
+/// completion stubs looked for under `roots` (`completion_roots()` for the
+/// command).
 ///
 /// `binary` may be empty when the platform will not report it; the plan then
 /// simply has nothing to remove there, rather than guessing a path — deleting
 /// the wrong file is the one outcome worse than leaving one behind.
 [[nodiscard]] UninstallPlan plan_uninstall(const std::filesystem::path& home,
-                                           const std::filesystem::path& binary);
+                                           const std::filesystem::path& binary,
+                                           const CompletionRoots& roots);
 
 /// Renders the plan as the confirmation prompt's body.
 [[nodiscard]] std::string describe_plan(const UninstallPlan& plan);
 
-/// Executes `plan`. Returns what was removed; `errors` collects paths that
-/// could not be removed, so a partial failure is reported rather than hidden.
+/// How the running binary is removed: `platform::remove_own_binary`, or a
+/// test's stand-in.
+using BinaryRemover =
+    std::function<platform::OwnBinaryRemoval(const std::filesystem::path& binary)>;
+
+/// Executes `plan`, the binary last. Returns what was removed; `errors`
+/// collects paths that could not be removed, so a partial failure is reported
+/// rather than hidden; `notes` collects what was done instead of a removal --
+/// on Windows, the running binary renamed aside, and when Windows deletes it
+/// or which file the user deletes (57k) -- one line each, never a failure. An
+/// empty `remove_binary` is `platform::remove_own_binary`.
 [[nodiscard]] std::vector<std::string> execute_uninstall(const UninstallPlan& plan,
-                                                         std::vector<std::string>& errors);
+                                                         std::vector<std::string>& errors,
+                                                         std::vector<std::string>& notes,
+                                                         const BinaryRemover& remove_binary = {});
+
+/// Prints what an uninstall did -- `removed <path>` each, then the notes, then
+/// `could not remove <error>` each on `err` -- and returns its exit status: 1
+/// when anything could not be removed, else 0. A binary renamed aside is not
+/// a failure (57k): before it, every Windows uninstall that otherwise
+/// finished ended `Access is denied.` and exit 1.
+[[nodiscard]] int report_uninstall(const std::vector<std::string>& removed,
+                                   const std::vector<std::string>& notes,
+                                   const std::vector<std::string>& errors, std::ostream& out,
+                                   std::ostream& err);
 
 class UninstallCommand final : public Command {
 public:

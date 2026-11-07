@@ -18,7 +18,11 @@ navigation) and `fetch_url` need no setup beyond that, and nor do the
 session's own two: `todo_write`, the plan the model keeps where you can see
 it (`/todo` prints it), and **`delegate`**, below. `apogee check` lists each one's permission level
 and the folder the file tools start in; `permissions:` and `tools:` in the
-config are where both are changed.
+config are where both are changed. The shell and git start other programs,
+which the Windows build cannot do yet (`platform::start_child`): there
+neither `run_command` nor any git tool is offered or served, `check`'s `git`
+row is skipped saying why, and `--allow`, `--deny`, `/allow` or a task's
+grant naming one is refused with that reason (57k).
 
 ## Web search through SearXNG
 
@@ -269,7 +273,8 @@ call is `search_documents` embedding a query (next):
 
 - **The native read-only tools**: `read_file`, `list_directory`,
   `search_files`, `grep_files`, the git reads (`git_status`, `git_log`,
-  `git_diff`, `git_show`), the notes reads (`list_notes`, `read_note`),
+  `git_diff`, `git_show`; not served by the Windows build, which cannot start
+  git yet), the notes reads (`list_notes`, `read_note`),
   `search_documents` and the collection reads (`list_collections`,
   `collection_info`), and the four [graph tools](#navigating-a-knowledge-graph).
   These are the same tools a tool-using run offers a model, with the same

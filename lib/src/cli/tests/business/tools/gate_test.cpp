@@ -70,6 +70,9 @@ struct World {
         options.working_directory = root;
         options.notes_dir = temp.path() / "notes";
         options.disabled = {"rag"};
+        // Every native tool, the shell and git ones included, on any host:
+        // the gate is what is under test (57k).
+        options.child_processes = true;
         apogee::tools::register_native_toolsets(registry, options);
 
         MockProvider::Options mock;
@@ -313,6 +316,7 @@ TEST_CASE("every built-in tool's parameters are a JSON Schema a template can rea
     options.fs_root = temp.path();
     options.working_directory = temp.path();
     options.notes_dir = temp.path() / "notes";
+    options.child_processes = true;  // every built-in tool, on any host (57k)
     ToolRegistry registry;
     apogee::tools::register_native_toolsets(registry, options);
     registry.add(apogee::agent::make_fetch_url_tool(

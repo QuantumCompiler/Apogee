@@ -73,10 +73,12 @@ void register_native_toolsets(agent::ToolRegistry& registry, const ToolsetOption
     if (!disabled(options, "fs")) {
         register_fs_tools(registry, effective_fs_root(options.fs_root).path, options.read_limit);
     }
-    if (!disabled(options, "shell")) {
+    // Shell and git start programs: where this build cannot, they are not
+    // offered at all (57k), as web_search is not without an instance.
+    if (options.child_processes && !disabled(options, "shell")) {
         register_shell_tool(registry, effective_cwd(options), options.shell_timeout);
     }
-    if (!disabled(options, "git")) {
+    if (options.child_processes && !disabled(options, "git")) {
         GitOptions git;
         git.timeout = options.git_timeout;
         git.working_directory = effective_cwd(options);
@@ -101,7 +103,7 @@ void register_native_toolsets(agent::ToolRegistry& registry, const ToolsetOption
     // with all of them.
     Environment environment;
     environment.working_directory = effective_cwd(options);
-    if (!disabled(options, "shell")) {
+    if (options.child_processes && !disabled(options, "shell")) {
         environment.shell = std::string{shell_program()};
     }
     if (!disabled(options, "fs")) {
@@ -139,6 +141,9 @@ std::string toolset_of(std::string_view tool) {
         std::map<std::string, std::string, std::less<>> out;
         for (const std::string_view toolset : kToolsetNames) {
             ToolsetOptions options;
+            // Every set's names, whether or not this build can run them: a
+            // tool's toolset is a fact about the tool, not the host (57k).
+            options.child_processes = true;
             for (const std::string_view other : kToolsetNames) {
                 if (other != toolset) {
                     options.disabled.emplace_back(other);
@@ -152,6 +157,20 @@ std::string toolset_of(std::string_view tool) {
     }();
     const auto it = by_tool.find(tool);
     return it == by_tool.end() ? std::string{} : it->second;
+}
+
+std::string why_not_offered(std::string_view tool, bool child_processes) {
+    if (child_processes) {
+        return {};
+    }
+    const std::string toolset = toolset_of(tool);
+    if (toolset != "shell" && toolset != "git") {
+        return {};
+    }
+    // The words `check`'s Tools section and `start_child` use (57k).
+    return "'" + std::string{tool} + "' is a " + toolset +
+           " tool, and this build cannot start other programs on Windows yet, so it offers no "
+           "shell or git tools";
 }
 
 std::vector<std::string> native_tool_names(const ToolsetOptions& options) {

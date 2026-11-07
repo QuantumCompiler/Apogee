@@ -14,6 +14,7 @@
 #include "agent/tool.h"
 #include "contracts/text_diff.h"
 #include "support/env_guard.h"
+#include "support/file_link.h"
 
 /// The filesystem toolset: the sandbox above all, then each tool's contract.
 namespace {
@@ -62,27 +63,8 @@ TEST_CASE("the sandbox refuses every spelling of a path outside the root", "[too
     CHECK_FALSE(resolve_in_root(box.root, (box.outside / "secret.md").string(), error).has_value());
     CHECK_FALSE(resolve_in_root(box.root, box.outside.string(), error).has_value());
 
-    // A symlink inside that points outside is judged by where it points.
-    std::error_code code;
-    std::filesystem::create_symlink(box.outside / "secret.md", box.root / "link.md", code);
-    if (!code) {
-        CHECK_FALSE(resolve_in_root(box.root, "link.md", error).has_value());
-        CHECK(box.run("read_file", R"({"path":"link.md"})").is_error);
-        CHECK(box.run("edit_file", R"({"path":"link.md","old_string":"not","new_string":"now"})")
-                  .is_error);
-        CHECK(box.run("grep_files", R"({"pattern":"yours","path":"link.md"})").is_error);
-        // Found by a search of the root, it is still judged where it points:
-        // the secret's text never comes back.
-        const ToolOutcome searched = box.run("grep_files", R"({"pattern":"yours"})");
-        CHECK(searched.content.find("not yours") == std::string::npos);
-        CHECK(searched.content.starts_with("No matches"));
-    }
-    // A directory link out of the root is not walked either.
-    std::filesystem::create_directory_symlink(box.outside, box.root / "linked", code);
-    if (!code) {
-        CHECK(box.run("grep_files", R"({"pattern":"yours"})").content.starts_with("No matches"));
-        CHECK(box.run("grep_files", R"({"pattern":"yours","path":"linked"})").is_error);
-    }
+    // Links pointing out are the next two cases: made by `file_link`, never
+    // skipped silently where a link cannot be made (57k).
 
     // The tools themselves refuse, naming the root, and touch nothing.
     for (const char* tool : {"read_file", "delete_file", "list_directory"}) {
@@ -111,6 +93,96 @@ TEST_CASE("the sandbox refuses every spelling of a path outside the root", "[too
         CHECK(grepped.is_error);
         CHECK(grepped.content.find("outside the allowed root") != std::string::npos);
     }
+    std::ifstream secret{box.outside / "secret.md"};
+    CHECK(std::string{std::istreambuf_iterator<char>{secret}, {}} == "not yours");
+}
+
+TEST_CASE("a directory link out of the root is refused by every file tool, and never walked",
+          "[tools][fs][sandbox][links][57k]") {
+    // A junction on Windows -- the link the x64 build's library cannot see,
+    // which let `linked/.ssh/id_ed25519` be read and `linked/...` written --
+    // and a directory symlink elsewhere. Made, never skipped.
+    const Sandbox box;
+    const apogee::testing::LinkMade made =
+        apogee::testing::make_directory_link(box.outside, box.root / "linked");
+    INFO(made.why);
+    REQUIRE(made.made);
+
+    std::string error;
+    for (const char* path : {"linked/secret.md", "linked", "linked/new.md", "linked/sub/new.md"}) {
+        INFO(path);
+        CHECK_FALSE(resolve_in_root(box.root, path, error).has_value());
+        CHECK(error.find("outside the allowed root") != std::string::npos);
+    }
+    const auto refused = [&box](std::string_view tool, const std::string& arguments) {
+        INFO(tool << " " << arguments);
+        const ToolOutcome outcome = box.run(tool, arguments);
+        CHECK(outcome.is_error);
+        CHECK(outcome.content.find("outside the allowed root") != std::string::npos);
+    };
+    refused("read_file", R"({"path":"linked/secret.md"})");
+    refused("write_file", R"({"path":"linked/new.md","content":"x"})");
+    refused("write_file", R"({"path":"linked/secret.md","content":"overwritten"})");
+    refused("edit_file",
+            R"({"path":"linked/secret.md","old_string":"not yours","new_string":"mine"})");
+    refused("delete_file", R"({"path":"linked/secret.md"})");
+    refused("list_directory", R"({"path":"linked"})");
+    refused("search_files", R"({"pattern":"*.md","root":"linked"})");
+    refused("grep_files", R"({"pattern":"yours","path":"linked"})");
+    refused("grep_files", R"({"pattern":"yours","path":"linked/secret.md"})");
+
+    // A search of the root never walks into it: the secret's text never
+    // comes back, and its name is never listed.
+    const ToolOutcome searched = box.run("grep_files", R"({"pattern":"yours"})");
+    CHECK(searched.content.starts_with("No matches"));
+    CHECK(searched.content.find("not yours") == std::string::npos);
+    const ToolOutcome found = box.run("search_files", R"({"pattern":"*.md"})");
+    CHECK(found.content.find("secret.md") == std::string::npos);
+
+    // And the outside is exactly as it was.
+    CHECK_FALSE(std::filesystem::exists(box.outside / "new.md"));
+    std::ifstream secret{box.outside / "secret.md"};
+    CHECK(std::string{std::istreambuf_iterator<char>{secret}, {}} == "not yours");
+}
+
+TEST_CASE("a directory link back into the root resolves inside it and is never walked twice",
+          "[tools][fs][sandbox][links][57k]") {
+    // A link inside the root to a folder inside it is the root's own: read
+    // through it. A walk never enters it, so a link to its own parent -- a
+    // loop -- cannot spin a search (Windows' walk followed every junction).
+    const Sandbox box;
+    REQUIRE(apogee::testing::make_directory_link(box.root / "sub", box.root / "alias").made);
+    REQUIRE(apogee::testing::make_directory_link(box.root, box.root / "sub" / "loop").made);
+
+    std::string error;
+    CHECK(resolve_in_root(box.root, "alias/b.md", error).has_value());
+    CHECK(box.run("read_file", R"({"path":"alias/b.md"})").content == "beta");
+    CHECK(box.run("grep_files", R"({"pattern":"alpha|beta"})").content ==
+          "a.md:1: alpha\nsub/b.md:1: beta");
+    const ToolOutcome found = box.run("search_files", R"({"pattern":"*.md"})");
+    CHECK(found.content == "a.md\nsub/b.md");
+}
+
+TEST_CASE("a file link out of the root is judged where it points",
+          "[tools][fs][sandbox][links][57k]") {
+    const Sandbox box;
+    const apogee::testing::LinkMade made =
+        apogee::testing::make_file_link(box.outside / "secret.md", box.root / "link.md");
+    if (!made.made) {
+        SKIP(made.why);
+    }
+    std::string error;
+    CHECK_FALSE(resolve_in_root(box.root, "link.md", error).has_value());
+    CHECK(box.run("read_file", R"({"path":"link.md"})").is_error);
+    CHECK(box.run("edit_file", R"({"path":"link.md","old_string":"not","new_string":"now"})")
+              .is_error);
+    CHECK(box.run("write_file", R"({"path":"link.md","content":"overwritten"})").is_error);
+    CHECK(box.run("grep_files", R"({"pattern":"yours","path":"link.md"})").is_error);
+    // Found by a search of the root, it is still judged where it points: the
+    // secret's text never comes back.
+    const ToolOutcome searched = box.run("grep_files", R"({"pattern":"yours"})");
+    CHECK(searched.content.find("not yours") == std::string::npos);
+    CHECK(searched.content.starts_with("No matches"));
     std::ifstream secret{box.outside / "secret.md"};
     CHECK(std::string{std::istreambuf_iterator<char>{secret}, {}} == "not yours");
 }

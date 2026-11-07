@@ -30,6 +30,7 @@
 #include "tasks/recipe.h"
 #include "tasks/unattended.h"
 #include "tasks/view.h"
+#include "tools/toolsets.h"
 
 /// `apogee task` on the real command tree against a scripted mock: a run to
 /// done with no input, its status and its place in the list; refusals before
@@ -866,6 +867,28 @@ TEST_CASE("the composition, exhaustively: config x agent x grants x the person p
     // Allowed by the config (2 agents x 2 grant states) or granted at ask or
     // unset (2 agents x 2 levels): nothing else ran with nobody present.
     CHECK(ran_unattended == 8);
+}
+
+TEST_CASE("a grant of a shell tool this build never offers is refused saying why",
+          "[commands][task][policy][ceiling][57k]") {
+    // capture-decisions suggests run_command; on a build that cannot start a
+    // program (Windows, today) the task has no such tool, and its refusal
+    // says why rather than that the task has no tool by that name.
+    const TableTools table;  // no run_command, as such a build registers
+    t::AutonomyPolicy autonomy;
+    autonomy.grants = {"run_command"};
+    const apogee::commands::TaskGate composed =
+        apogee::commands::compose_task_gate({}, table.registry, autonomy, nullptr, {});
+    INFO(composed.refusal);
+    if (apogee::tools::ToolsetOptions{}.child_processes) {
+        // Here programs start: a registry without it lacks it for another
+        // reason, and the ceiling says so.
+        CHECK(composed.refusal.find("no tool named 'run_command' in this task") !=
+              std::string::npos);
+    } else {
+        CHECK(composed.refusal.starts_with("--allow run_command: 'run_command' is a shell tool"));
+        CHECK(composed.refusal.find("cannot start other programs") != std::string::npos);
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@
 #include "ansi/ansi.h"
 #include "contracts/config.h"
 #include "machine/json_reporter.h"
+#include "platform/child_process.h"
 #include "views/status_line.h"
 
 /// The permission gate's two halves, as every surface wires them.
@@ -120,10 +121,16 @@ struct GatedName {
     std::string key;
     bool host = false;
     std::string error{};
+    /// A native tool this build never offers (57k: a shell or git tool where
+    /// no program can be started); `error` says so rather than naming the set.
+    bool unoffered = false;
 };
 
+/// `child_processes` is the platform's answer by default; a test sets it to
+/// see either side on any host.
 [[nodiscard]] GatedName name_gated(std::string_view name, const std::vector<std::string>& gated,
-                                   bool websites = true);
+                                   bool websites = true,
+                                   bool child_processes = platform::supports_child_processes());
 
 /// `--allow`, `--allow-host` and `/allow`: allowed for the session, a
 /// denial of it lifted. `--deny` and `/deny`: denied, an allowance lifted.

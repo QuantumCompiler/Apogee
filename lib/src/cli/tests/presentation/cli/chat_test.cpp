@@ -39,6 +39,7 @@
 #include "platform/child_process.h"
 #include "platform/platform.h"
 #include "support/env_guard.h"
+#include "tools/toolsets.h"
 
 using apogee::commands::ChatAttachments;
 using apogee::commands::format_session_info;
@@ -547,8 +548,10 @@ TEST_CASE("a follow-up's tools are ranked for it restated by the utility model",
     INFO(chat.err);
     CHECK(chat.err.find("tools ranked for, by helper: show the commit history") !=
           std::string::npos);
-    // And the turn's tools are ranked for that restatement.
-    CHECK(chat.err.find("for this question: git_") != std::string::npos);
+    // And the turn's tools are ranked for that restatement -- the git ones,
+    // where this build can start git at all (57k: elsewhere none is offered).
+    CHECK((chat.err.find("for this question: git_") != std::string::npos) ==
+          apogee::tools::ToolsetOptions{}.child_processes);
 }
 
 TEST_CASE("complete with many tools offers the ones its question needs",
@@ -1414,19 +1417,31 @@ TEST_CASE("complete --allow is the user answering at invocation; without it, den
     CHECK(chat.run({"complete", "--allow", "write_file", "write it"}) != 0);
 }
 
+namespace {
+
+/// A gated tool every chat holds, eleven letters wide as the permission
+/// table's longest names are: `run_command` where this build can start a
+/// program, `delete_note` where it cannot and the shell is not offered (57k).
+[[nodiscard]] std::string_view denied_tool() {
+    return apogee::tools::ToolsetOptions{}.child_processes ? "run_command" : "delete_note";
+}
+
+}  // namespace
+
 TEST_CASE("a repeated --allow, --deny or --allow-host is taken whole, on chat and complete",
           "[chat][cli][permissions][presets]") {
     // Each flag is repeatable for real: a second use was refused by the
     // parser ("At Most 1 required but received 2") until 27i.
     HelperChat chat{texts({"fine"}), {"Title"}};
+    const std::string denied{denied_tool()};
     REQUIRE(chat.run({"chat", "--tools", "--allow", "write_file", "--allow", "edit_file", "--deny",
-                      "run_command", "--deny", "example.org", "--allow-host", "docs.python.org",
+                      denied, "--deny", "example.org", "--allow-host", "docs.python.org",
                       "--allow-host", "en.wikipedia.org"},
                      "/permissions\n") == 0);
     const std::string said = chat.out + chat.err;
     CHECK(said.find("write_file   allow  (this session)") != std::string::npos);
     CHECK(said.find("edit_file    allow  (this session)") != std::string::npos);
-    CHECK(said.find("run_command  deny   (this session)") != std::string::npos);
+    CHECK(said.find(denied + "  deny   (this session)") != std::string::npos);
     CHECK(said.find("website example.org: deny (this session)") != std::string::npos);
     CHECK(said.find("website docs.python.org: allow (this session)") != std::string::npos);
     CHECK(said.find("website en.wikipedia.org: allow (this session)") != std::string::npos);
@@ -1434,8 +1449,8 @@ TEST_CASE("a repeated --allow, --deny or --allow-host is taken whole, on chat an
     HelperChat once{writes_a_file(), {"unused"}};
     sandboxed(once);
     REQUIRE(once.run({"complete", "--tools", "--allow", "edit_file", "--allow", "write_file",
-                      "--deny", "run_command", "--deny", "delete_file", "--allow-host",
-                      "docs.python.org", "--allow-host", "en.wikipedia.org", "write it"}) == 0);
+                      "--deny", denied, "--deny", "delete_file", "--allow-host", "docs.python.org",
+                      "--allow-host", "en.wikipedia.org", "write it"}) == 0);
     CHECK(std::filesystem::exists(once.home.path() / "work" / "out.txt"));
 }
 
@@ -1548,20 +1563,21 @@ TEST_CASE("machine mode takes the permission mode at launch, asking nothing it c
 TEST_CASE("the slash verbs answer for the chat, and /permissions says from where",
           "[chat][cli][permissions][presets]") {
     HelperChat chat{texts({"fine"}), {"Title"}, "", "permissions:\n  delete_file: allow\n"};
+    const std::string denied{denied_tool()};
     // A turn last, so the chat is written to be resumed (M28).
     REQUIRE(chat.run({"chat", "--tools", "--deny", "example.org"},
-                     "/allow write_file\n/deny run_command\n/permissions\n/revoke run_command\n"
-                     "/revoke delete_file\n/allow wrte_file\n/permissions\nhello\n") == 0);
+                     "/allow write_file\n/deny " + denied + "\n/permissions\n/revoke " + denied +
+                         "\n/revoke delete_file\n/allow wrte_file\n/permissions\nhello\n") == 0);
     const std::string said = chat.out + chat.err;
     CHECK(said.find("write_file allowed for this chat") != std::string::npos);
-    CHECK(said.find("run_command denied for this chat") != std::string::npos);
-    CHECK(said.find("run_command  deny   (this session)") != std::string::npos);
+    CHECK(said.find(denied + " denied for this chat") != std::string::npos);
+    CHECK(said.find(denied + "  deny   (this session)") != std::string::npos);
     CHECK(said.find("delete_file  allow  (config)") != std::string::npos);
     CHECK(said.find("website example.org: deny (this session)") != std::string::npos);
-    CHECK(said.find("run_command: asked again from now on") != std::string::npos);
+    CHECK(said.find(denied + ": asked again from now on") != std::string::npos);
     CHECK(said.find("delete_file is the config's answer") != std::string::npos);
     CHECK(said.find("'wrte_file' is not a tool this chat asks about") != std::string::npos);
-    CHECK(said.find("run_command  ask    (default)") != std::string::npos);
+    CHECK(said.find(denied + "  ask    (default)") != std::string::npos);
 
     // Resumed, it starts clean: nothing a session answered survives it.
     const std::string id = HelperChat::only_session().chat_id;

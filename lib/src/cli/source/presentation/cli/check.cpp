@@ -1466,7 +1466,12 @@ void check_tools(CheckReport& report, const CheckInputs& inputs) {
     }
 
     if (!config.tools.is_disabled("git")) {
-        if (platform::find_on_path("git").empty()) {
+        if (!inputs.child_processes) {
+            // Not offered at all (57k): installing git would change nothing.
+            add(report, Status::Skipped, "Tools", "git",
+                "not offered -- this build cannot start other programs on Windows yet, so there "
+                "are no git or shell tools");
+        } else if (platform::find_on_path("git").empty()) {
             add(report, Status::Warn, "Tools", "git",
                 "not found on PATH -- the git tools will fail",
                 "install git, or add git to tools.disabled");

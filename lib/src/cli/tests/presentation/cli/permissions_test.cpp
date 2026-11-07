@@ -24,6 +24,7 @@
 #include "support/fake_mcp_server.h"
 #include "support/fake_transport.h"
 #include "tools/environment.h"
+#include "tools/toolsets.h"
 #include "views/status_line.h"
 #include "views/terminal.h"
 
@@ -414,15 +415,18 @@ TEST_CASE("the built-in registry honours tools.disabled and tools.fs_root",
     config.tools.fs_root = "/srv/sandbox";
     const apogee::agent::ToolRegistry registry = apogee::commands::make_built_in_tools(
         apogee::commands::BuiltInToolOptions{.config = &config});
+    // Where no program can be started (Windows, today) the git and shell
+    // tools are never registered at all (57k).
+    const bool programs = apogee::tools::ToolsetOptions{}.child_processes;
     CHECK(registry.find("fetch_url") != nullptr);
     CHECK(registry.find("read_file") != nullptr);
-    CHECK(registry.find("git_diff") != nullptr);
+    CHECK((registry.find("git_diff") != nullptr) == programs);
     CHECK(registry.find("write_note") != nullptr);
     CHECK(registry.find("run_command") == nullptr);
     CHECK(registry.find("search_documents") == nullptr);
     CHECK(registry.find("read_file")->description.find("/srv/sandbox") != std::string::npos);
     // Every toolset on, with nothing configured.
-    CHECK(apogee::commands::make_built_in_tools({}).find("run_command") != nullptr);
+    CHECK((apogee::commands::make_built_in_tools({}).find("run_command") != nullptr) == programs);
 }
 
 TEST_CASE("the built-in registry connects the configured MCP servers and registers their tools",
@@ -485,7 +489,8 @@ TEST_CASE("a read-only policy keeps only tools that never write, MCP included; n
     REQUIRE(read_only.find("fetch_url") != nullptr);
     CHECK(read_only.find("fetch_url")->outbound);
     CHECK(read_only.find("read_file") != nullptr);
-    CHECK(read_only.find("git_diff") != nullptr);
+    CHECK((read_only.find("git_diff") != nullptr) ==
+          apogee::tools::ToolsetOptions{}.child_processes);  // 57k
     CHECK(read_only.find("write_file") == nullptr);
     CHECK(read_only.find("edit_file") == nullptr);
     CHECK(read_only.find("run_command") == nullptr);
@@ -681,6 +686,43 @@ TEST_CASE("a name that is neither a gated tool nor a website is refused, naming 
     CHECK(approvals.tools.empty());
     CHECK(apogee::commands::name_gated("example.org", gated()).host);
     CHECK_FALSE(apogee::commands::name_gated("example.org", gated(), false).error.empty());
+}
+
+TEST_CASE("a shell or git tool this build never offers is refused saying why, not as a typo",
+          "[commands][permissions][presets][57k]") {
+    // On a build that cannot start a program (Windows, today) run_command and
+    // the git tools are never registered, so `--allow run_command`, `--deny
+    // git_log` and `/allow run_command` name a tool the chat lacks: the
+    // refusal says why it is not here, and never sends the user to
+    // --allow-host.
+    const std::vector<std::string> without = {"delete_file", "write_file"};
+    const GatedName shell = apogee::commands::name_gated("run_command", without, true, false);
+    CHECK(shell.unoffered);
+    CHECK(shell.key.empty());
+    CHECK(shell.error.find("'run_command' is a shell tool") != std::string::npos);
+    CHECK(shell.error.find("cannot start other programs") != std::string::npos);
+    CHECK(apogee::commands::name_gated("git_log", without, false, false).unoffered);
+    // A typo is still a typo there, and run_command where programs start is
+    // the plain refusal naming the set.
+    const GatedName typo = apogee::commands::name_gated("wrte_file", without, true, false);
+    CHECK_FALSE(typo.unoffered);
+    CHECK(typo.error.find("is not a tool this chat asks about") != std::string::npos);
+    const GatedName elsewhere = apogee::commands::name_gated("run_command", without, true, true);
+    CHECK_FALSE(elsewhere.unoffered);
+    CHECK(elsewhere.error.find("delete_file, write_file") != std::string::npos);
+
+    // The launch flags, on this build: where run_command is not offered for
+    // the reason above, the refusal says it, with no website hint.
+    if (!apogee::tools::ToolsetOptions{}.child_processes) {
+        SessionApprovals approvals;
+        const std::string allowed = apogee::commands::seed_approvals(
+            approvals, PermissionPresets{.allow = {"run_command"}}, without);
+        CHECK(allowed.starts_with("--allow: 'run_command' is a shell tool"));
+        CHECK(allowed.find("--allow-host") == std::string::npos);
+        CHECK(apogee::commands::seed_approvals(approvals, PermissionPresets{.deny = {"git_log"}},
+                                               without)
+                  .starts_with("--deny: 'git_log' is a git tool"));
+    }
 }
 
 TEST_CASE("revoke forgets the session's own answer, never the config's",

@@ -450,7 +450,10 @@ TEST_CASE("a suite's toolset pin narrows the offer to its toolsets, and nothing 
     const apogee::agent::ToolRegistry registry = apogee::commands::make_built_in_tools(
         apogee::commands::BuiltInToolOptions{.config = &active});
     REQUIRE(registry.find("fetch_url") != nullptr);
-    REQUIRE(registry.find("run_command") != nullptr);
+    // Where no program can be started (Windows, today) the shell and git
+    // tools are not registered, so the pin keeps the file tools alone (57k).
+    const bool programs = apogee::tools::ToolsetOptions{}.child_processes;
+    REQUIRE((registry.find("run_command") != nullptr) == programs);
 
     const apogee::agent::ToolRegistry pinned = pin_toolset(registry, active, "helper");
     REQUIRE_FALSE(pinned.empty());
@@ -460,7 +463,7 @@ TEST_CASE("a suite's toolset pin narrows the offer to its toolsets, and nothing 
         CHECK((toolset == "fs" || toolset == "git"));
     }
     CHECK(pinned.find("read_file") != nullptr);
-    CHECK(pinned.find("git_diff") != nullptr);
+    CHECK((pinned.find("git_diff") != nullptr) == programs);
     CHECK(pinned.find("run_command") == nullptr);
     CHECK(pinned.find("fetch_url") == nullptr);
     // The environment note rides along: a narrowed offer still knows the date.

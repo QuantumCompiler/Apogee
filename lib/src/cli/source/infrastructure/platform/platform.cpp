@@ -11,10 +11,15 @@
 #include <iostream>
 #include <string>
 #include <system_error>
+#include <vector>
 
 #if defined(_WIN32)
 #include <io.h>
 #include <windows.h>
+// After windows.h: the Documents known folder (57k), and the allocator that
+// frees the path the shell hands back.
+#include <objbase.h>
+#include <shlobj.h>
 #elif defined(__APPLE__)
 #include <fcntl.h>
 #include <mach-o/dyld.h>
@@ -184,6 +189,306 @@ std::filesystem::path executable_path() {
         return {};
     }
     return resolved;
+#endif
+}
+
+#if defined(_WIN32)
+namespace {
+
+/// `error` (a Win32 error code) as a `std::error_code`.
+[[nodiscard]] std::error_code windows_error(DWORD error) noexcept {
+    return {static_cast<int>(error), std::system_category()};
+}
+
+/// Whether `error` says only that nothing is at a path.
+[[nodiscard]] bool nothing_there(DWORD error) noexcept {
+    return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+}
+
+/// What is at `path` itself, never what it points at (57k).
+struct OwnAttributes {
+    /// INVALID_FILE_ATTRIBUTES when nothing is there.
+    DWORD attributes = INVALID_FILE_ATTRIBUTES;
+    /// Its reparse tag, or 0 when it is no reparse point.
+    DWORD tag = 0;
+
+    [[nodiscard]] bool present() const noexcept {
+        return attributes != INVALID_FILE_ATTRIBUTES;
+    }
+
+    [[nodiscard]] bool directory() const noexcept {
+        return present() && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    }
+
+    /// A symbolic link or a junction. Every other reparse point -- a cloud
+    /// placeholder, a deduplicated file -- is the file or folder it is.
+    [[nodiscard]] bool link() const noexcept {
+        return present() && (tag == IO_REPARSE_TAG_SYMLINK || tag == IO_REPARSE_TAG_MOUNT_POINT);
+    }
+};
+
+/// `path`'s own attributes and reparse tag: `GetFileAttributesW` follows no
+/// link, and the tag is read through a handle opened on the reparse point
+/// itself. `code` is left clear when nothing is there.
+[[nodiscard]] OwnAttributes own_attributes(const std::filesystem::path& path,
+                                           std::error_code& code) noexcept {
+    OwnAttributes own;
+    own.attributes = GetFileAttributesW(path.c_str());
+    if (own.attributes == INVALID_FILE_ATTRIBUTES) {
+        if (const DWORD error = GetLastError(); !nothing_there(error)) {
+            code = windows_error(error);
+        }
+        return own;
+    }
+    if ((own.attributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0) {
+        return own;
+    }
+    const HANDLE handle = CreateFileW(
+        path.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        code = windows_error(GetLastError());
+        return own;
+    }
+    FILE_ATTRIBUTE_TAG_INFO info{};
+    if (GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &info, sizeof info) != 0) {
+        own.tag = info.ReparseTag;
+    } else {
+        code = windows_error(GetLastError());
+    }
+    CloseHandle(handle);
+    return own;
+}
+
+/// Removes one path with what it is: a folder -- a real one, or the link a
+/// junction or a directory symbolic link is -- with `RemoveDirectoryW`,
+/// anything else with `DeleteFileW`, a read-only file made writable first.
+void remove_one(const std::filesystem::path& path, const OwnAttributes& own,
+                std::error_code& code) noexcept {
+    if (own.directory()) {
+        if (RemoveDirectoryW(path.c_str()) == 0) {
+            code = windows_error(GetLastError());
+        }
+        return;
+    }
+    if (DeleteFileW(path.c_str()) != 0) {
+        return;
+    }
+    const DWORD error = GetLastError();
+    if (error == ERROR_ACCESS_DENIED && (own.attributes & FILE_ATTRIBUTE_READONLY) != 0 &&
+        SetFileAttributesW(path.c_str(), own.attributes & ~DWORD{FILE_ATTRIBUTE_READONLY}) != 0 &&
+        DeleteFileW(path.c_str()) != 0) {
+        return;
+    }
+    code = windows_error(error);
+}
+
+/// `remove_tree` on Windows: a link removed as itself, a real folder emptied
+/// and then removed, depth first, stopping at the first failure.
+void remove_tree_windows(const std::filesystem::path& path, std::error_code& code) {
+    const OwnAttributes own = own_attributes(path, code);
+    if (code || !own.present()) {
+        return;
+    }
+    if (own.directory() && !own.link()) {
+        // Listed whole before anything is removed, so the listing never
+        // reads a folder it is changing.
+        std::vector<std::filesystem::path> children;
+        std::error_code walk;
+        for (std::filesystem::directory_iterator it{path, walk};
+             !walk && it != std::filesystem::directory_iterator{}; it.increment(walk)) {
+            children.push_back(it->path());
+        }
+        if (walk) {
+            code = walk;
+            return;
+        }
+        for (const std::filesystem::path& child : children) {
+            remove_tree_windows(child, code);
+            if (code) {
+                return;
+            }
+        }
+    }
+    remove_one(path, own, code);
+}
+
+/// The path an open handle names, `\\?\` taken off (`\\?\UNC\` back to
+/// `\\`), or empty with `code` set.
+[[nodiscard]] std::filesystem::path final_path(HANDLE handle, std::error_code& code) {
+    std::wstring buffer(MAX_PATH, L'\0');
+    for (;;) {
+        const DWORD got =
+            GetFinalPathNameByHandleW(handle, buffer.data(), static_cast<DWORD>(buffer.size()),
+                                      FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+        if (got == 0) {
+            code = windows_error(GetLastError());
+            return {};
+        }
+        if (got < buffer.size()) {
+            buffer.resize(got);
+            break;
+        }
+        buffer.assign(got, L'\0');  // too small: `got` is the size it needs
+    }
+    constexpr std::wstring_view kUnc = L"\\\\?\\UNC\\";
+    constexpr std::wstring_view kLocal = L"\\\\?\\";
+    if (buffer.starts_with(kUnc)) {
+        return std::filesystem::path{L"\\\\" + buffer.substr(kUnc.size())};
+    }
+    if (buffer.starts_with(kLocal)) {
+        return std::filesystem::path{buffer.substr(kLocal.size())};
+    }
+    return std::filesystem::path{buffer};
+}
+
+}  // namespace
+#endif
+
+bool is_link(const std::filesystem::path& path, std::error_code& code) noexcept {
+    code.clear();
+#if defined(_WIN32)
+    return own_attributes(path, code).link();
+#else
+    const std::filesystem::file_status status = std::filesystem::symlink_status(path, code);
+    if (status.type() == std::filesystem::file_type::not_found) {
+        code.clear();
+        return false;
+    }
+    return !code && std::filesystem::is_symlink(status);
+#endif
+}
+
+void remove_tree(const std::filesystem::path& path, std::error_code& code) {
+    code.clear();
+#if defined(_WIN32)
+    remove_tree_windows(path, code);
+#else
+    (void)std::filesystem::remove_all(path, code);
+#endif
+}
+
+std::filesystem::path resolve_path(const std::filesystem::path& path, std::error_code& code) {
+    code.clear();
+#if defined(_WIN32)
+    // Lexically first, as Windows itself reads a path: `link\..\x` is `x`.
+    const std::filesystem::path full = std::filesystem::absolute(path, code).lexically_normal();
+    if (code) {
+        return {};
+    }
+    std::filesystem::path existing = full;
+    std::filesystem::path rest;
+    for (;;) {
+        // Followed through every link, as `weakly_canonical` follows them;
+        // a link whose target is gone does not open, and is judged as a name.
+        const HANDLE handle =
+            CreateFileW(existing.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                        nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        if (handle != INVALID_HANDLE_VALUE) {
+            const std::filesystem::path resolved = final_path(handle, code);
+            CloseHandle(handle);
+            if (code) {
+                return {};
+            }
+            return rest.empty() ? resolved : (resolved / rest).lexically_normal();
+        }
+        if (const DWORD error = GetLastError(); !nothing_there(error)) {
+            code = windows_error(error);
+            return {};
+        }
+        if (!existing.has_relative_path()) {
+            return full;  // not even the drive is there: the name as written
+        }
+        if (const std::filesystem::path name = existing.filename(); !name.empty()) {
+            rest = rest.empty() ? name : name / rest;
+        }
+        existing = existing.parent_path();
+    }
+#else
+    return std::filesystem::weakly_canonical(path, code);
+#endif
+}
+
+std::filesystem::path documents_directory() {
+#if defined(_WIN32)
+    // FOLDERID_Documents, spelled here so no GUID library is linked.
+    static constexpr GUID kDocuments{
+        0xfdd39ad0, 0x238f, 0x46af, {0xad, 0xb4, 0x6c, 0x85, 0x48, 0x03, 0x69, 0xc7}};
+    PWSTR found = nullptr;
+    const HRESULT result = SHGetKnownFolderPath(kDocuments, 0, nullptr, &found);
+    std::filesystem::path out;
+    if (SUCCEEDED(result) && found != nullptr) {
+        out = std::filesystem::path{std::wstring{found}};
+    }
+    CoTaskMemFree(found);  // freed whatever the answer, as the shell asks
+    return out;
+#else
+    const std::optional<std::string> home = home_directory();
+    if (!home.has_value()) {
+        return {};
+    }
+    return path_from_utf8(*home) / "Documents";
+#endif
+}
+
+bool running_binary_deletable() noexcept {
+#if defined(_WIN32)
+    return false;
+#else
+    return true;
+#endif
+}
+
+OwnBinaryRemoval remove_own_binary(const std::filesystem::path& path) {
+    OwnBinaryRemoval out = delete_or_rename_own_binary(path);
+#if defined(_WIN32)
+    // Renamed aside: Windows deletes it at the next restart, where this
+    // process may ask; otherwise the renamed file is the user's to delete.
+    if (out.outcome == OwnBinaryOutcome::RenamedAside &&
+        MoveFileExW(out.aside.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT) != 0) {
+        out.outcome = OwnBinaryOutcome::DeletedAtRestart;
+    }
+#endif
+    return out;
+}
+
+OwnBinaryRemoval delete_or_rename_own_binary(const std::filesystem::path& path) {
+    OwnBinaryRemoval out;
+#if defined(_WIN32)
+    if (DeleteFileW(path.c_str()) != 0) {
+        out.outcome = OwnBinaryOutcome::Removed;
+        return out;
+    }
+    const DWORD refused = GetLastError();
+    if (nothing_there(refused)) {
+        out.outcome = OwnBinaryOutcome::Removed;
+        return out;
+    }
+    if (refused != ERROR_ACCESS_DENIED && refused != ERROR_SHARING_VIOLATION) {
+        out.error = windows_error(refused).message();
+        return out;
+    }
+    // A running image: Windows lets it be renamed, in its own folder, so its
+    // name stops running at once.
+    std::filesystem::path aside = path;
+    aside += L".uninstalled-" + std::to_wstring(GetCurrentProcessId());
+    if (MoveFileExW(path.c_str(), aside.c_str(), 0) == 0) {
+        out.error = "Windows cannot delete a running program, and it could not be renamed aside: " +
+                    windows_error(GetLastError()).message();
+        return out;
+    }
+    out.aside = aside;
+    out.outcome = OwnBinaryOutcome::RenamedAside;
+    return out;
+#else
+    std::error_code code;
+    (void)std::filesystem::remove(path, code);
+    if (code) {
+        out.error = code.message();
+        return out;
+    }
+    out.outcome = OwnBinaryOutcome::Removed;
+    return out;
 #endif
 }
 

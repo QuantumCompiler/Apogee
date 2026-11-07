@@ -14,6 +14,7 @@
 
 #include "platform/child_process.h"
 #include "support/cli_home.h"
+#include "tools/toolsets.h"
 
 /// Chat's session core, pinned from outside (27s).
 ///
@@ -189,9 +190,17 @@ TEST_CASE("chat's whole surface is byte for byte the one from before the session
         std::ofstream{std::filesystem::path{dir} / "chat_session.golden", std::ios::binary}
             << actual;
     }
-    const std::optional<std::string> golden =
+    std::optional<std::string> golden =
         slurp(std::filesystem::path{APOGEE_TEST_FIXTURES} / "cli" / "chat_session.golden");
     REQUIRE(golden.has_value());
+    if (!apogee::tools::ToolsetOptions{}.child_processes) {
+        // Where no program can be started (Windows, today) run_command is
+        // never offered, so the chat asks about one tool fewer (57k).
+        const std::string_view shell = "edit_file, run_command, write_file";
+        const std::size_t at = golden->find(shell);
+        REQUIRE(at != std::string::npos);
+        golden->replace(at, shell.size(), "edit_file, write_file");
+    }
     CHECK(actual == *golden);
 }
 

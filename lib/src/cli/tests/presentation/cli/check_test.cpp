@@ -34,6 +34,7 @@
 #include "modelstore/store.h"
 #include "operations/acp_registration.h"
 #include "operations/code_exec_server.h"
+#include "platform/child_process.h"
 #include "platform/ffmpeg.h"
 #include "platform/platform.h"
 #include "platform/xcode.h"
@@ -4616,4 +4617,36 @@ TEST_CASE("check says Windows' code page on Windows alone, warning when it is no
 
     CHECK_FALSE(code_page("macos-arm64", why).has_value());
     CHECK_FALSE(code_page("linux-x64", why).has_value());
+}
+
+TEST_CASE("the doctor's git row is skipped, saying why, where no program can be started",
+          "[commands][check][tools][57k]") {
+    // Where this build cannot start a program (Windows, today) the git tools
+    // are not offered: "found on PATH" would read as working tools, and
+    // "install git" would change nothing. A check that cannot run is skipped.
+    Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", apogee::harness::config_template());
+    load_into(inputs);
+
+    inputs.child_processes = false;
+    const CheckReport without = run_checks(inputs);
+    const apogee::commands::CheckRow* skipped = row_in(without, "Tools", "git");
+    REQUIRE(skipped != nullptr);
+    CHECK(skipped->status == Status::Skipped);
+    CHECK(skipped->detail ==
+          "not offered -- this build cannot start other programs on Windows yet, so there are no "
+          "git or shell tools");
+    CHECK(skipped->remedy.empty());
+
+    inputs.child_processes = true;
+    const CheckReport with = run_checks(inputs);
+    const apogee::commands::CheckRow* asked = row_in(with, "Tools", "git");
+    REQUIRE(asked != nullptr);
+    CHECK(asked->status != Status::Skipped);
+    CHECK(asked->detail.find("PATH") != std::string::npos);
+
+    // The default is this build's own answer.
+    CHECK(CheckInputs{}.child_processes == apogee::platform::supports_child_processes());
 }

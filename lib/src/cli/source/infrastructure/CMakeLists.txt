@@ -24,6 +24,11 @@ apogee_add_module(platform
     platform/xcode.h
     platform/xcode.cpp
 )
+if(WIN32)
+    # The Documents known folder (57k): SHGetKnownFolderPath, and
+    # CoTaskMemFree for the path it hands back.
+    target_link_libraries(apogee_infrastructure_platform PRIVATE shell32 ole32)
+endif()
 
 # A leaf: includes nothing else from the project, so anything may publish.
 apogee_add_module(events

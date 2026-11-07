@@ -24,6 +24,7 @@
 #include "support/cli_home.h"
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
+#include "tools/toolsets.h"
 #include "training/store.h"
 
 /// `apogee mcp serve` (54a) through the real command tree in a throwaway
@@ -215,15 +216,23 @@ TEST_CASE("mcp serve answers the handshake with the native read tools, then the 
         CHECK_FALSE(tool["description"].get<std::string>().empty());
     }
     // The native read tools first (the spike's seventeen among them), the
-    // five status reads last, in their order: added, never renamed.
-    REQUIRE(names.size() >= 5 + 17);
+    // five status reads last, in their order: added, never renamed. Where
+    // this build cannot start a program (Windows, today) the four git reads
+    // are not served, as they are not offered to a model: each could only
+    // fail (57k).
+    const bool git = apogee::tools::ToolsetOptions{}.child_processes;
+    REQUIRE(names.size() >= 5 + (git ? 17U : 13U));
     const std::vector<std::string> tail(names.end() - 5, names.end());
     CHECK(tail == std::vector<std::string>{"models_list", "models_status", "train_status",
                                            "train_versions", "check"});
-    for (const char* native : {"read_file", "list_directory", "grep_files", "git_status",
-                               "list_notes", "search_documents", "graph_query"}) {
+    for (const char* native : {"read_file", "list_directory", "grep_files", "list_notes",
+                               "search_documents", "graph_query"}) {
         INFO(native);
         CHECK(std::ranges::find(names, native) != names.end());
+    }
+    for (const char* reads : {"git_status", "git_log", "git_diff", "git_show"}) {
+        INFO(reads);
+        CHECK((std::ranges::find(names, reads) != names.end()) == git);
     }
     for (const char* writer : {"write_file", "edit_file", "write_note", "run_command"}) {
         INFO(writer);
