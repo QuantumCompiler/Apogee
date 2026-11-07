@@ -16,3 +16,12 @@ Priority-ordered: the topmost item whose gate is satisfied is the next one to bu
 | 1b | Tools, slash commands, the status line — the MCP server's reads registered, `apogee_complete` (the CLI now, 54b's served tool -- shipped 2026-11-01 -- where the person lists it), the `/apogee` set, the async long-run pattern | v0.2.1 | [`mod-tools-and-commands.md`](mod-tools-and-commands.md) | 🔒 1a |
 | 1c | The pane — backends, models, training and the ledger over the documents; promote/rollback confirmed; adapters the follow-on (the CLI's track 53 shipped in v0.2.0) | v0.2.1 | [`mod-pane.md`](mod-pane.md) | 🔒 1b |
 | 1d | The mod pipeline — its own `changed.sh`-gated workflow: `tsc` the runner gate, validate/test the dev-host gates, the plugin folder the artifact | v0.2.1 | [`mod-pipeline.md`](mod-pipeline.md) | 🔒 1a |
+
+### v0.2.2
+
+**Track 2, Claude aware of Apogee**, opened 2026-11-07 from that day's spike (the user's idea and calls; the walls, the measurements and the CLI's half are the CLI's [track 58 preamble](../../cli/backlog/README.md#v022)). The user's call **both hosts** puts Claude Code beside the desktop mod: **2a** packages the server and a when-to-use skill as a Claude Code plugin, waiting on CLI 58a (the server's own inventory) and 58c (the coding-host profile); **2b** carries CLI 58b's graph and knowledge reads into the desktop mod's commands and pane, waiting on 1c and CLI 58b. Every call is a recorded default.
+
+| # | Item | Version | File | Status |
+|---|---|---|---|---|
+| 2a | Apogee as a Claude Code plugin — the server registered with the coding-host profile and a skill saying when to use Apogee, installable from this repository's marketplace | v0.2.2 | [`claude-code-plugin.md`](v0.2.2/claude-code-plugin.md) | 🔒 CLI 58a, CLI 58c |
+| 2b | The desktop mod shows graphs and knowledge records — `/apogee graphs`, `/apogee knowledge <question>` and the pane's Knowledge section over CLI 58b's reads | v0.2.2 | [`mod-graphs-and-knowledge.md`](v0.2.2/mod-graphs-and-knowledge.md) | 🔒 1c, CLI 58b |

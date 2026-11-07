@@ -25,6 +25,13 @@ Opened 2026-10-21 (the user's call, from that day's mod spike; home, layers and 
 - [ ] **The pane** *([1c](../backlog/mod-pane.md))* — backends, models, training and the ledger over the documents; promote/rollback with confirmation; the adapters column the follow-on (the CLI's track 53 shipped in v0.2.0).
 - [ ] **The mod pipeline** *([1d](../backlog/mod-pipeline.md))* — its own workflow: `changed.sh`-gated, `tsc` the runner gate (validate where the CLI installs headlessly), validate/test the dev-host gates, the plugin folder the artifact.
 
+### v0.2.2 — Track 2, Claude aware of Apogee
+
+Opened 2026-11-07 from that day's spike (the CLI's track 58 carries the walls and the server's half). The user's call **both hosts**: Claude Code gets a plugin, and the desktop mod picks up the new reads.
+
+- [ ] **Apogee as a Claude Code plugin** *([2a](../backlog/v0.2.2/claude-code-plugin.md), gated on CLI 58a and 58c)* — the server registered with the coding-host profile and a skill saying when to use Apogee, installed from this repository's marketplace.
+- [ ] **The desktop mod shows graphs and knowledge records** *([2b](../backlog/v0.2.2/mod-graphs-and-knowledge.md), gated on 1c and CLI 58b)* — `/apogee graphs`, `/apogee knowledge` and the pane's Knowledge section.
+
 ## Fast follow
 
 *(empty)*

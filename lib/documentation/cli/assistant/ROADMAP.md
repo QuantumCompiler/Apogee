@@ -379,7 +379,16 @@ The release's second-sweep track *(track 57, opened 2026-10-31, the user's call:
 - [ ] **Web content parsers bounded and correct** *(57v — [backlog](../backlog/v0.2.1/web-content-parsers-bounded.md))* — the reader behind fetch_url and HTML attachments stops going super-linear on hostile pages: a 431-byte page of 25 nested tables currently holds a turn for 16 s (the cost doubles with each level), a 1.5 MB page of bare `&` takes 21 s, and 250 nested empty links take 22.6 s at the 5 MiB cap, every read-on call included. An HTML attachment now uses its `<meta charset>` (Latin-1 currently arrives as U+FFFD), and a `Location: #x` redirect resolves to the page itself, not its parent directory.
 - [ ] **A dry-run review sweep moves no watermark** *(57w — [backlog](../backlog/v0.2.1/review-dry-run-moves-nothing.md))* : `run_sweep` saves the marks with no dry-run check (`sweep.cpp:138/141/162/184`). `options.dry_run` is read only to build the output document (`:194`), and dry and real runs share one `watermarks.json` (`review_cmd.cpp:520`). So the app's default "Sweep (dry run)" moves the mark past the merge requests it previews, and the "Sweep and post…" or cron run after it reports 0 reviewed and never posts them. The fix runs a dry sweep on an in-memory copy of the store, so the file is unchanged byte for byte.
 
-*Nothing is queued past v0.2.1 yet.*
+### v0.2.2 — Claude aware of Apogee (track 58)
+
+Opened 2026-11-07 from that day's spike (the user's idea: a Claude mod or MCP server that makes Claude aware of Apogee's local models, retrieval and knowledge graph). The spike drove the shipped `apogee mcp serve` as a host would: 22 read-only tools and an opt-in local `complete` already answer, search and the graph tools with no model; what is missing is awareness. The user's calls: both hosts (the mod's track 2 packages it for Claude Code and the desktop mod), opt-in writes per graph and collection, the next release.
+
+- [ ] **The server introduces itself** *(58a — [backlog](../backlog/v0.2.2/mcp-serve-introduces-itself.md), gated on 58b)* — `initialize` gains instructions from the person's setup (collections, graphs, offered local models, which tool answers what); today the field is empty and a host sees 22 bare names.
+- [ ] **Graphs and knowledge records served** *(58b — [backlog](../backlog/v0.2.2/mcp-serve-graphs-and-knowledge.md))* — `apogee graph list` and six reads: Claude could not find a named graph (`list_collections` lists collections only) and could not reach the decision records at all.
+- [ ] **A lighter tool set for coding hosts** *(58c — [backlog](../backlog/v0.2.2/mcp-serve-coding-host-profile.md))* — `--profile knowledge` drops the 8 file and git tools Claude Code already has.
+- [ ] **Claude can refresh what you list** *(58d — [backlog](../backlog/v0.2.2/mcp-serve-opt-in-refresh.md))* — a listed code graph's model-free update and a listed collection's re-ingest (local embedder only), recorded sources only.
+
+*Nothing is queued past v0.2.2 yet.*
 
 ## Unspecced ideas
 
