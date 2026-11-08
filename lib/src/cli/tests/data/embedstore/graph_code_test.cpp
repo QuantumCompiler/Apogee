@@ -139,7 +139,7 @@ TEST_CASE("an older store gains origin and confidence on open, every earlier edg
              "DROP TABLE kg_edge_sites;"
              "UPDATE store_meta SET value = '5' WHERE key = 'schema_version';");
     const Store store{scratch.db()};
-    CHECK(store.schema_version() == 6);
+    CHECK(store.schema_version() == apogee::embedstore::kSchemaVersion);
     const GraphNode atlas = store.find_nodes("Atlas").front();
     const std::optional<Neighbor> edge = neighbor(store, atlas.id, "stores in", "Vault");
     REQUIRE(edge.has_value());

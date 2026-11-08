@@ -1730,8 +1730,12 @@ command's stdout ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve))
 - **`embed list`** and **`embed info`** (since 37c): each collection's `name`,
   `chunks` and `sources` count, or the `error` that kept it from being read;
   one collection's `path`, `schema`, `chunks`, `vectors` (`chunks`,
-  `dimension`, `model` when one is pinned, `widths`) or `null` when it has
-  none, its lexical `index`, and its `sources`.
+  `dimension`, `model` when one is pinned, `widths`, and since 57s `mixed`
+  -- each model the vectors are from, `null` for an unrecorded one, with no
+  `model` beside it -- when a partial re-ingest under another model left
+  more than one) or `null` when it has none, its lexical `index` (`ok`,
+  `FAILED -- <reason>`, or since 57s `not checked -- the collection is being
+  written` while an ingest holds its write lock), and its `sources`.
 - **`graph stats`** (since 37c): the counts the text prints, whole --
   `kind` (`named` or `collection`), `built`, `nodes` with `nodes_by_type`,
   `edges` with their `edges_extracted`/`edges_inferred` origin, `mentions`,

@@ -57,24 +57,28 @@ TEST_CASE("normalize_entity_name folds case and whitespace", "[embedstore][graph
     CHECK(apogee::embedstore::normalize_entity_name("").empty());
 }
 
-TEST_CASE("the graph schema is current (v6), idempotent on reopen, and heals a dropped trigger",
+TEST_CASE("the graph schema is current (v7), idempotent on reopen, and heals a dropped trigger",
           "[embedstore][graph][schema]") {
     const Scratch scratch;
     {
         Store store{scratch.db()};
-        CHECK(store.schema_version() == 6);
+        CHECK(store.schema_version() == 7);
         CHECK(store.graph_stats().nodes == 0);
         (void)store.upsert_node("Atlas", "system", "");
     }
     // A second open changes nothing and loses nothing.
     {
         const Store again{scratch.db()};
-        CHECK(again.schema_version() == 6);
+        CHECK(again.schema_version() == 7);
         CHECK(again.graph_stats().nodes == 1);
     }
-    // A dropped trigger comes back on open: an update after the reopen is
-    // indexed, so the description is searchable.
-    raw_exec(scratch.db(), "DROP TRIGGER kg_nodes_fts_au");
+    // A dropped trigger comes back at a migration -- the one time a store an
+    // older build made can lack one (57s: a current store's open writes
+    // nothing): an update after the reopen is indexed, so the description
+    // is searchable.
+    raw_exec(scratch.db(),
+             "DROP TRIGGER kg_nodes_fts_au;"
+             "UPDATE store_meta SET value = '6' WHERE key = 'schema_version';");
     {
         Store healed{scratch.db()};
         const UpsertResult merged = healed.upsert_node("atlas", "system", "the ingestion pipeline");

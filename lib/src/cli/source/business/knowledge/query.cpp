@@ -29,7 +29,9 @@ namespace {
     facts.dimension = stats.dimension;
     facts.lexical_only = stats.lexical_only;
     facts.vector_dims = stats.vector_dims;
-    facts.recorded_model = store.embedding_model().model;
+    const embedstore::Store::EmbeddingBinding binding = store.embedding_model();
+    facts.recorded_model = binding.model;
+    facts.mixed_models = binding.mixed;
     return facts;
 }
 

@@ -9,18 +9,13 @@
 #include <utility>
 
 #include "contracts/sha256.h"
+#include "embedstore/folder_listing.h"
 #include "graph/code_extract.h"
 #include "graph/code_languages.h"
 #include "graph/code_parser.h"
 
 namespace apogee::graph {
 namespace {
-
-/// Directory names whose contents are vendored or built, never the tree's
-/// own code. A conservative list: each is a near-universal convention.
-constexpr std::array<std::string_view, 12> kVendoredDirectories{
-    "third_party", "third-party",   "thirdparty", "vendor",     "node_modules", "bower_components",
-    "__pycache__", "site-packages", "_deps",      "CMakeFiles", "venv",         "target"};
 
 [[nodiscard]] std::string extension_label(std::string_view path) {
     const std::size_t slash = path.find_last_of('/');
@@ -182,20 +177,8 @@ void check_members(const std::vector<SourceMember>& members) {
 }  // namespace
 
 std::string vendored_directory(std::string_view path) {
-    std::size_t start = 0;
-    while (start < path.size()) {
-        const std::size_t slash = path.find('/', start);
-        if (slash == std::string_view::npos) {
-            break;  // the last component is the file itself
-        }
-        const std::string_view part = path.substr(start, slash - start);
-        if (std::ranges::find(kVendoredDirectories, part) != kVendoredDirectories.end() ||
-            part.starts_with("cmake-build-")) {
-            return std::string{path.substr(0, slash)};
-        }
-        start = slash + 1;
-    }
-    return {};
+    // The one list, shared with a directory ingest's walk (57s).
+    return embedstore::vendored_directory(path);
 }
 
 SourceBuildResult build_source(embedstore::Store& store, const std::vector<SourceMember>& members,

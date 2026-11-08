@@ -134,6 +134,32 @@ TEST_CASE("auto: vector only when everything qualifies, else lexical with the re
     }
 }
 
+TEST_CASE("a store whose vectors are from more than one model is demoted wholesale, every way",
+          "[agentloop][retrieval][binding][57s]") {
+    // A partial re-ingest under another model: the recorded model is the
+    // ask's own, one width, no lexical-only chunk -- everything the old check
+    // read says vector -- and still the store is two spaces.
+    StoreFacts store = vector_store("");
+    store.mixed_models = {"someone-else", "local-embed"};
+
+    const TurnRetrieval automatic = resolve_turn_retriever("", "", local(), store);
+    CHECK(automatic.retriever == Retriever::Lexical);
+    CHECK(automatic.note.find("more than one model ('someone-else' and 'local-embed')") !=
+          std::string::npos);
+    CHECK(automatic.note.find("over every source with 'local-embed'") != std::string::npos);
+
+    const TurnRetrieval asked = resolve_turn_retriever("vector", "", local(), store);
+    CHECK_FALSE(asked.error.empty());
+    CHECK(asked.error.find("--retriever lexical") != std::string::npos);
+    CHECK(resolve_turn_retriever("hybrid", "", local(), store).retriever == Retriever::Lexical);
+    CHECK(resolve_turn_retriever("", "vector", local(), store).excluded);
+
+    // The other model's demotion says the same: every source, never "the
+    // current model" alone, which invited the partial re-ingest.
+    const TurnRetrieval other = resolve_turn_retriever("", "", local(), vector_store("old"));
+    CHECK(other.note.find("over every source with 'local-embed'") != std::string::npos);
+}
+
 TEST_CASE("auto never resolves to hybrid", "[agentloop][retrieval][auto]") {
     for (const StoreFacts& store :
          {lexical_store(), vector_store("local-embed"), partial_store("local-embed")}) {
@@ -539,4 +565,120 @@ TEST_CASE("the question's words are its content words, matched word for word",
           std::pair<std::size_t, std::size_t>{0, 3});
     CHECK(covered("cat", "category") == std::pair<std::size_t, std::size_t>{0, 1});
     CHECK(covered("what is it?", "anything") == std::pair<std::size_t, std::size_t>{0, 0});
+}
+
+// ---------------------------------------------------------------------------
+// What an ingest leaves the store bound to (57s)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("an ingest binds a store to one model only when every vectored source is that model's",
+          "[agentloop][retrieval][binding][57s]") {
+    using apogee::agentloop::BindingAction;
+    using apogee::agentloop::IngestBinding;
+    using apogee::agentloop::IngestBindingFacts;
+    using apogee::agentloop::resolve_ingest_binding;
+
+    struct Row {
+        const char* name;
+        IngestBindingFacts facts;
+        BindingAction action;
+        std::string model;
+        std::vector<std::string> models;
+        std::string warning;
+    };
+
+    const std::vector<Row> rows{
+        {"a store with no vectors left is unbound",
+         {.source_models = {}, .run_model = "b", .vectors_written = 0},
+         BindingAction::Clear,
+         "",
+         {},
+         ""},
+        {"same model, part of it re-ingested",
+         {.source_models = {"a", "a", "a"}, .run_model = "a", .vectors_written = 1},
+         BindingAction::Bind,
+         "a",
+         {},
+         ""},
+        {"another model, with untouched vectored sources",
+         {.source_models = {"a", "a", "b"}, .run_model = "b", .vectors_written = 1},
+         BindingAction::Mixed,
+         "",
+         {"a", "b"},
+         "warning: 2 source(s) keep vectors from 'a' -- the collection searches lexically until "
+         "every source is re-ingested with 'b'"},
+        {"another model, rewriting every vectored source",
+         {.source_models = {"b", "b"}, .run_model = "b", .vectors_written = 2},
+         BindingAction::Bind,
+         "b",
+         {},
+         ""},
+        {"an unrecorded model's vectors survive",
+         {.source_models = {"", "b"}, .run_model = "b", .vectors_written = 1},
+         BindingAction::Mixed,
+         "",
+         {"", "b"},
+         "warning: 1 source(s) keep vectors from an unrecorded model -- the collection searches "
+         "lexically until every source is re-ingested with 'b'"},
+        {"nothing known of any source's model is left as it was",
+         {.source_models = {"", ""}, .run_model = "", .vectors_written = 0},
+         BindingAction::Keep,
+         "",
+         {},
+         ""},
+        {"a lexical run over a bound store keeps its model",
+         {.source_models = {"a"}, .run_model = "", .vectors_written = 0},
+         BindingAction::Bind,
+         "a",
+         {},
+         ""},
+        {"an embedder that failed every file leaves the old space",
+         {.source_models = {"a", "a"}, .run_model = "b", .vectors_written = 0},
+         BindingAction::Bind,
+         "a",
+         {},
+         ""},
+        {"a lexical run over a mixed store keeps it mixed, unwarned",
+         {.source_models = {"b", "a"}, .run_model = "", .vectors_written = 0},
+         BindingAction::Mixed,
+         "",
+         {"b", "a"},
+         ""},
+        {"an embedder that failed every file over a mixed store warns of nothing",
+         {.source_models = {"a", "b"}, .run_model = "c", .vectors_written = 0},
+         BindingAction::Mixed,
+         "",
+         {"a", "b"},
+         ""},
+        {"a mixed store made one space again by its last sources",
+         {.source_models = {"b", "b", "b"}, .run_model = "b", .vectors_written = 1},
+         BindingAction::Bind,
+         "b",
+         {},
+         ""},
+        {"this run's model is named last, whatever order the sources give",
+         {.source_models = {"b", "a", "c"}, .run_model = "b", .vectors_written = 1},
+         BindingAction::Mixed,
+         "",
+         {"a", "c", "b"},
+         "warning: 2 source(s) keep vectors from 'a' and 'c' -- the collection searches lexically "
+         "until every source is re-ingested with 'b'"},
+    };
+    for (const Row& row : rows) {
+        INFO(row.name);
+        const IngestBinding got = resolve_ingest_binding(row.facts);
+        CHECK(got.action == row.action);
+        CHECK(got.model == row.model);
+        CHECK(got.models == row.models);
+        CHECK(got.warning == row.warning);
+    }
+}
+
+TEST_CASE("models are spoken quoted, an unrecorded one said so, joined with and",
+          "[agentloop][retrieval][binding][57s]") {
+    using apogee::agentloop::spoken_models;
+    CHECK(spoken_models({"a"}) == "'a'");
+    CHECK(spoken_models({"a", "b"}) == "'a' and 'b'");
+    CHECK(spoken_models({"a", "b", "c"}) == "'a', 'b' and 'c'");
+    CHECK(spoken_models({""}) == "an unrecorded model");
 }

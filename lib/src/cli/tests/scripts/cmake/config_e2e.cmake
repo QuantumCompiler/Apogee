@@ -487,7 +487,65 @@ apogee_run(1 embed query vecs "zarquon widgets" --retriever vector)
 if(NOT APOGEE_ERR MATCHES "--retriever lexical")
     message(FATAL_ERROR "the hard error did not name lexical as the way out: ${APOGEE_ERR}")
 endif()
+if(NOT "${APOGEE_ERR}" MATCHES "over every source with 'mock-embed-b'")
+    message(FATAL_ERROR "the mismatch hint did not say every source: ${APOGEE_ERR}")
+endif()
+
+# 57s: re-ingesting PART of the collection under mock-embed-b never relabels
+# mock-embed-a's vectors as b's. The store is two spaces: the ingest warns
+# naming both models, info never claims one model over both, and a query runs
+# lexical with the every-source hint -- never a [vector] ranking of a's
+# vectors against b's question.
+set(EXTRA_DIR "${APOGEE_WORK_DIR}/extra")
+file(MAKE_DIRECTORY "${EXTRA_DIR}")
+file(WRITE "${EXTRA_DIR}/added.md" "the zarquon widgets are also logged weekly.\n")
+apogee_run(0 embed ingest vecs "${EXTRA_DIR}/added.md" --retriever vector)
+if(NOT APOGEE_OUT MATCHES "1 vector\\(s\\) \\[mock-embed-b\\]")
+    message(FATAL_ERROR "the partial re-ingest did not embed under mock-embed-b: ${APOGEE_OUT}")
+endif()
+if(NOT APOGEE_OUT MATCHES
+        "warning: 1 source\\(s\\) keep vectors from 'mock-embed-a' -- [^\n]* with 'mock-embed-b'")
+    message(FATAL_ERROR "the partial re-ingest did not warn naming both models: ${APOGEE_OUT}")
+endif()
+apogee_run(0 embed info vecs)
+if(APOGEE_OUT MATCHES "\\[mock-embed-b\\]" OR APOGEE_OUT MATCHES "\\[mock-embed-a\\]")
+    message(FATAL_ERROR "info claimed one model over vectors from two: ${APOGEE_OUT}")
+endif()
+if(NOT APOGEE_OUT MATCHES "mixed: 'mock-embed-a' and 'mock-embed-b'")
+    message(FATAL_ERROR "info did not name both models: ${APOGEE_OUT}")
+endif()
+apogee_run(0 embed query vecs "zarquon widgets")
+if(NOT APOGEE_OUT MATCHES "\\[lexical\\]" OR APOGEE_OUT MATCHES "\\[vector\\]")
+    message(FATAL_ERROR "a two-space store was not demoted wholesale: ${APOGEE_OUT}")
+endif()
+if(NOT APOGEE_OUT MATCHES "over every source with 'mock-embed-b'")
+    message(FATAL_ERROR "the demotion did not say to re-ingest every source: ${APOGEE_OUT}")
+endif()
+if(NOT APOGEE_OUT MATCHES "more than one model \\('mock-embed-a' and 'mock-embed-b'\\)")
+    message(FATAL_ERROR "the demotion did not name the store's two models: ${APOGEE_OUT}")
+endif()
+# Every source under mock-embed-b -- the rest in a second run -- and the
+# store is one space again, queried as a vector.
+apogee_run(0 embed ingest vecs "${CORPUS_DIR}" --retriever vector)
+if(APOGEE_OUT MATCHES "warning:")
+    message(FATAL_ERROR "re-ingesting the last sources still warned: ${APOGEE_OUT}")
+endif()
+apogee_run(0 embed info vecs)
+if(NOT APOGEE_OUT MATCHES "\\[mock-embed-b\\]")
+    message(FATAL_ERROR "every source under one model did not bind it: ${APOGEE_OUT}")
+endif()
+apogee_run(0 embed query vecs "zarquon widgets")
+if(NOT APOGEE_OUT MATCHES "\\[vector\\]")
+    message(FATAL_ERROR "one space again did not query as a vector: ${APOGEE_OUT}")
+endif()
+# Back to mock-embed-a's space for what follows: the added source out, every
+# source under a.
+apogee_run(0 embed delete vecs --source added.md)
 apogee_run(0 config set-default-embedding embedder)
+apogee_run(0 embed ingest vecs "${CORPUS_DIR}")
+if(NOT APOGEE_OUT MATCHES "vector\\(s\\) \\[mock-embed-a\\]" OR APOGEE_OUT MATCHES "warning:")
+    message(FATAL_ERROR "re-ingesting under mock-embed-a did not bind it again: ${APOGEE_OUT}")
+endif()
 
 # The same decision on a conversational surface, and the status line names it.
 apogee_run(0 complete -m mock -v --rag vecs --retriever vector "what does zarquon require?")

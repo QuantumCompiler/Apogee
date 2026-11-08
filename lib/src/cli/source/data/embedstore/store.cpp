@@ -24,6 +24,9 @@ using detail::StatementPtr;
 
 namespace {
 
+/// How long a statement waits for another connection's lock before failing.
+constexpr int kBusyTimeoutMs = 5000;
+
 /// Whether `chunks` was created without AUTOINCREMENT -- the shape every
 /// store before schema v4 has.
 [[nodiscard]] bool chunk_ids_reusable(sqlite3* handle) {
@@ -63,6 +66,100 @@ void ensure_chunk_ids_never_reused(sqlite3* handle) {
     }
 }
 
+/// The schema version `handle`'s store records, read with a plain read --
+/// no write lock -- or 0 when it records none: a new file, which has no
+/// `store_meta` yet. Anything but a missing table (a lock held past the
+/// busy timeout) fails the open.
+[[nodiscard]] int recorded_schema_version(sqlite3* handle) {
+    sqlite3_stmt* raw = nullptr;
+    if (sqlite3_prepare_v2(handle, "SELECT value FROM store_meta WHERE key = 'schema_version'", -1,
+                           &raw, nullptr) != SQLITE_OK) {
+        const StatementPtr owned{raw};
+        if (sqlite3_errcode(handle) == SQLITE_ERROR) {
+            return 0;  // no such table: nothing has been made here yet
+        }
+        fail(handle, "could not read the schema version");
+    }
+    const StatementPtr select{raw};
+    const int step = sqlite3_step(select.get());
+    if (step == SQLITE_DONE) {
+        return 0;
+    }
+    if (step != SQLITE_ROW) {
+        fail(handle, "could not read the schema version");
+    }
+    try {
+        return std::stoi(column_text(select.get(), 0));
+    } catch (const std::exception&) {
+        return 0;  // a malformed record migrates, and the migration rewrites it
+    }
+}
+
+/// Deletes `source`'s chunks and writes `chunks` in their place, inside the
+/// caller's transaction.
+void write_source_rows(sqlite3* handle, std::string_view source,
+                       const std::vector<std::string>& chunks,
+                       const std::vector<std::vector<float>>& vectors,
+                       const std::vector<std::string>& metadata) {
+    StatementPtr remove = prepare(handle, "DELETE FROM chunks WHERE source = ?");
+    bind_text(remove.get(), 1, source);
+    if (sqlite3_step(remove.get()) != SQLITE_DONE) {
+        fail(handle, "could not clear the previous chunks");
+    }
+
+    StatementPtr insert =
+        prepare(handle,
+                "INSERT INTO chunks(source, ordinal, text, embedding, dim, metadata)"
+                " VALUES(?, ?, ?, ?, ?, ?)");
+    for (std::size_t index = 0; index < chunks.size(); ++index) {
+        sqlite3_reset(insert.get());
+        bind_text(insert.get(), 1, source);
+        sqlite3_bind_int64(insert.get(), 2, static_cast<sqlite3_int64>(index));
+        bind_text(insert.get(), 3, chunks[index]);
+        const std::string blob = vectors.empty() ? std::string{} : to_blob(vectors[index]);
+        if (blob.empty()) {
+            sqlite3_bind_null(insert.get(), 4);
+            sqlite3_bind_int64(insert.get(), 5, 0);
+        } else {
+            sqlite3_bind_blob(insert.get(), 4, blob.data(), static_cast<int>(blob.size()),
+                              SQLITE_TRANSIENT);
+            sqlite3_bind_int64(insert.get(), 5, static_cast<sqlite3_int64>(vectors[index].size()));
+        }
+        if (metadata.empty() || metadata[index].empty()) {
+            sqlite3_bind_null(insert.get(), 6);
+        } else {
+            bind_text(insert.get(), 6, metadata[index]);
+        }
+        if (sqlite3_step(insert.get()) != SQLITE_DONE) {
+            fail(handle, "could not store a chunk");
+        }
+    }
+}
+
+/// Removes what `source`'s ingest recorded, inside the caller's transaction.
+void forget_source_ingest(sqlite3* handle, std::string_view source) {
+    StatementPtr remove = prepare(handle, "DELETE FROM source_ingests WHERE source = ?");
+    bind_text(remove.get(), 1, source);
+    if (sqlite3_step(remove.get()) != SQLITE_DONE) {
+        fail(handle, "could not clear the source's ingest record");
+    }
+}
+
+/// Checks the shape of a replacement before anything is written.
+void check_replacement(const std::vector<std::string>& chunks,
+                       const std::vector<std::vector<float>>& vectors,
+                       const std::vector<std::string>& metadata) {
+    if (!vectors.empty() && vectors.size() != chunks.size()) {
+        throw std::runtime_error("replace_source: " + std::to_string(vectors.size()) +
+                                 " vector(s) for " + std::to_string(chunks.size()) + " chunk(s)");
+    }
+    if (!metadata.empty() && metadata.size() < chunks.size()) {
+        throw std::runtime_error("replace_source: " + std::to_string(metadata.size()) +
+                                 " metadata string(s) for " + std::to_string(chunks.size()) +
+                                 " chunk(s)");
+    }
+}
+
 }  // namespace
 
 Store::Store(const std::filesystem::path& path) : impl_{std::make_unique<Impl>()} {
@@ -89,12 +186,25 @@ Store::Store(const std::filesystem::path& path) : impl_{std::make_unique<Impl>()
     // exclusive lock, so an open landing in that window (the plane listing a
     // graph a job's store was just closing) failed "database is locked" at
     // once. WAL so a reader during an ingest is not blocked.
-    sqlite3_busy_timeout(handle, 5000);
+    sqlite3_busy_timeout(handle, kBusyTimeoutMs);
     exec(handle, "PRAGMA journal_mode=WAL");
     exec(handle, "PRAGMA foreign_keys=ON");
 
-    // --- migrations, in ONE transaction ------------------------------------
+    // --- migrations, in ONE transaction, and only when there are some ------
     //
+    // A store this build already made current is opened with the plain read
+    // above and nothing else (57s): `BEGIN IMMEDIATE` is SQLite's one writer
+    // lock, and taking it on every open put each listing -- `embed list`,
+    // RAG's collection list, the app's poll -- behind an ingest's
+    // per-source transaction, until the busy timeout failed it as "database
+    // is locked" and the collection read as empty. A store a newer build
+    // made is read as it is: rewriting its version down would only make
+    // that build migrate again. So a step added below without a bump of
+    // `kSchemaVersion` never reaches a current store.
+    if (recorded_schema_version(handle) >= kSchemaVersion) {
+        return;
+    }
+
     // The acceptance criterion is that an interrupted first open rolls back
     // whole. SQLite's DDL is transactional, so wrapping every step means a
     // process killed midway leaves a database with the entire schema or none
@@ -158,7 +268,8 @@ Store::Store(const std::filesystem::path& path) : impl_{std::make_unique<Impl>()
 
         // Triggers, so the index is maintained on EVERY write rather than
         // rebuilt on demand. `IF NOT EXISTS` makes them self-healing: a store
-        // opened by an older build that lacked one gets it here.
+        // an older build made that lacked one gets it at its migration --
+        // the only time a store can lack one.
         exec(handle,
              "CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN"
              "  INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);"
@@ -178,6 +289,18 @@ Store::Store(const std::filesystem::path& path) : impl_{std::make_unique<Impl>()
         // v3 -> v4: the knowledge-graph tables beside the chunks, and the
         // entity full-text index. Empty until `apogee graph build` fills them.
         detail::ensure_graph_schema(handle);
+
+        // v6 -> v7 (57s): the folder each source was ingested from, so a
+        // same-named document from another folder is told from a re-ingest
+        // of the same one, and the model its vectors are from, so a store
+        // partly re-embedded under another model knows which spaces it
+        // holds. Empty on a migrated store: what an earlier build stored has
+        // no folder recorded, and replaces as it always did.
+        exec(handle,
+             "CREATE TABLE IF NOT EXISTS source_ingests ("
+             "  source TEXT PRIMARY KEY,"
+             "  root   TEXT NOT NULL,"
+             "  model  TEXT)");
 
         StatementPtr set = prepare(handle,
                                    "INSERT INTO store_meta(key, value) VALUES('schema_version', ?)"
@@ -205,66 +328,80 @@ void Store::replace_source(std::string_view source, const std::vector<std::strin
 void Store::replace_source(std::string_view source, const std::vector<std::string>& chunks,
                            const std::vector<std::vector<float>>& vectors,
                            const std::vector<std::string>& metadata) {
-    if (!vectors.empty() && vectors.size() != chunks.size()) {
-        throw std::runtime_error("replace_source: " + std::to_string(vectors.size()) +
-                                 " vector(s) for " + std::to_string(chunks.size()) + " chunk(s)");
-    }
-    if (!metadata.empty() && metadata.size() < chunks.size()) {
-        throw std::runtime_error("replace_source: " + std::to_string(metadata.size()) +
-                                 " metadata string(s) for " + std::to_string(chunks.size()) +
-                                 " chunk(s)");
-    }
+    check_replacement(chunks, vectors, metadata);
     sqlite3* handle = impl_->connection.get();
 
     // One transaction for the delete AND the insert. Replacing a source in two
     // steps leaves a window where the corpus answers from neither version, and
-    // a crash inside that window leaves it answering from half of each.
+    // a crash inside that window leaves it answering from half of each. A
+    // source written without a folder keeps none: an old one would name the
+    // folder of text that is no longer there.
     in_transaction(handle, [&] {
-        StatementPtr remove = prepare(handle, "DELETE FROM chunks WHERE source = ?");
-        bind_text(remove.get(), 1, source);
-        if (sqlite3_step(remove.get()) != SQLITE_DONE) {
-            fail(handle, "could not clear the previous chunks");
-        }
+        write_source_rows(handle, source, chunks, vectors, metadata);
+        forget_source_ingest(handle, source);
+    });
+}
 
-        StatementPtr insert =
-            prepare(handle,
-                    "INSERT INTO chunks(source, ordinal, text, embedding, dim, metadata)"
-                    " VALUES(?, ?, ?, ?, ?, ?)");
-        for (std::size_t index = 0; index < chunks.size(); ++index) {
-            sqlite3_reset(insert.get());
-            bind_text(insert.get(), 1, source);
-            sqlite3_bind_int64(insert.get(), 2, static_cast<sqlite3_int64>(index));
-            bind_text(insert.get(), 3, chunks[index]);
-            const std::string blob = vectors.empty() ? std::string{} : to_blob(vectors[index]);
-            if (blob.empty()) {
-                sqlite3_bind_null(insert.get(), 4);
-                sqlite3_bind_int64(insert.get(), 5, 0);
-            } else {
-                sqlite3_bind_blob(insert.get(), 4, blob.data(), static_cast<int>(blob.size()),
-                                  SQLITE_TRANSIENT);
-                sqlite3_bind_int64(insert.get(), 5,
-                                   static_cast<sqlite3_int64>(vectors[index].size()));
-            }
-            if (metadata.empty() || metadata[index].empty()) {
-                sqlite3_bind_null(insert.get(), 6);
-            } else {
-                bind_text(insert.get(), 6, metadata[index]);
-            }
-            if (sqlite3_step(insert.get()) != SQLITE_DONE) {
-                fail(handle, "could not store a chunk");
-            }
+void Store::ingest_source(std::string_view source, std::string_view root, std::string_view model,
+                          const std::vector<std::string>& chunks,
+                          const std::vector<std::vector<float>>& vectors) {
+    check_replacement(chunks, vectors, {});
+    sqlite3* handle = impl_->connection.get();
+    in_transaction(handle, [&] {
+        write_source_rows(handle, source, chunks, vectors, {});
+        StatementPtr record = prepare(
+            handle,
+            "INSERT INTO source_ingests(source, root, model) VALUES(?, ?, ?)"
+            " ON CONFLICT(source) DO UPDATE SET root = excluded.root, model = excluded.model");
+        bind_text(record.get(), 1, source);
+        bind_text(record.get(), 2, root);
+        if (vectors.empty() || model.empty()) {
+            sqlite3_bind_null(record.get(), 3);
+        } else {
+            bind_text(record.get(), 3, model);
+        }
+        if (sqlite3_step(record.get()) != SQLITE_DONE) {
+            fail(handle, "could not record the source's ingest");
         }
     });
 }
 
+std::map<std::string, Store::SourceIngest> Store::source_ingests() const {
+    StatementPtr select =
+        prepare(impl_->connection.get(), "SELECT source, root, model FROM source_ingests");
+    std::map<std::string, SourceIngest> out;
+    while (sqlite3_step(select.get()) == SQLITE_ROW) {
+        out.emplace(column_text(select.get(), 0),
+                    SourceIngest{.root = column_text(select.get(), 1),
+                                 .model = column_text(select.get(), 2)});
+    }
+    return out;
+}
+
+std::vector<std::string> Store::vectored_sources() const {
+    StatementPtr select =
+        prepare(impl_->connection.get(),
+                "SELECT DISTINCT source FROM chunks WHERE dim > 0 ORDER BY source");
+    std::vector<std::string> out;
+    while (sqlite3_step(select.get()) == SQLITE_ROW) {
+        out.push_back(column_text(select.get(), 0));
+    }
+    return out;
+}
+
 std::int64_t Store::delete_source(std::string_view source) {
     sqlite3* handle = impl_->connection.get();
-    StatementPtr remove = prepare(handle, "DELETE FROM chunks WHERE source = ?");
-    bind_text(remove.get(), 1, source);
-    if (sqlite3_step(remove.get()) != SQLITE_DONE) {
-        fail(handle, "could not delete the source");
-    }
-    return sqlite3_changes(handle);
+    std::int64_t gone = 0;
+    in_transaction(handle, [&] {
+        StatementPtr remove = prepare(handle, "DELETE FROM chunks WHERE source = ?");
+        bind_text(remove.get(), 1, source);
+        if (sqlite3_step(remove.get()) != SQLITE_DONE) {
+            fail(handle, "could not delete the source");
+        }
+        gone = sqlite3_changes(handle);
+        forget_source_ingest(handle, source);
+    });
+    return gone;
 }
 
 std::int64_t Store::update_metadata(std::string_view source, std::string_view metadata) {
@@ -446,28 +583,137 @@ Store::Stats Store::stats() const {
     return out;
 }
 
+namespace {
+
+/// Writes `entries` into `store_meta` and deletes `cleared`, inside the
+/// caller's transaction.
+void write_meta(sqlite3* handle,
+                std::initializer_list<std::pair<std::string_view, std::string>> entries,
+                std::string_view cleared) {
+    StatementPtr set = prepare(handle,
+                               "INSERT INTO store_meta(key, value) VALUES(?, ?)"
+                               " ON CONFLICT(key) DO UPDATE SET value=excluded.value");
+    for (const auto& [key, value] : entries) {
+        sqlite3_reset(set.get());
+        bind_text(set.get(), 1, key);
+        bind_text(set.get(), 2, value);
+        if (sqlite3_step(set.get()) != SQLITE_DONE) {
+            fail(handle, "could not record the embedding model");
+        }
+    }
+    StatementPtr remove = prepare(handle, "DELETE FROM store_meta WHERE key = ?");
+    bind_text(remove.get(), 1, cleared);
+    if (sqlite3_step(remove.get()) != SQLITE_DONE) {
+        fail(handle, "could not record the embedding model");
+    }
+}
+
+/// The mixed models as `store_meta` keeps them: one name per line, an empty
+/// line for an unrecorded model.
+[[nodiscard]] std::string joined_lines(const std::vector<std::string>& names) {
+    std::string out;
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        out += (index == 0 ? "" : "\n") + names[index];
+    }
+    return out;
+}
+
+[[nodiscard]] std::vector<std::string> split_lines(std::string_view text) {
+    std::vector<std::string> out;
+    std::size_t start = 0;
+    for (;;) {
+        const std::size_t end = text.find('\n', start);
+        out.emplace_back(text.substr(start, end == std::string_view::npos ? end : end - start));
+        if (end == std::string_view::npos) {
+            return out;
+        }
+        start = end + 1;
+    }
+}
+
+}  // namespace
+
 void Store::set_embedding_model(std::string_view model, std::int64_t dimension) {
     sqlite3* handle = impl_->connection.get();
     in_transaction(handle, [&] {
-        StatementPtr set = prepare(handle,
-                                   "INSERT INTO store_meta(key, value) VALUES(?, ?)"
-                                   " ON CONFLICT(key) DO UPDATE SET value=excluded.value");
-        for (const auto& [key, value] :
-             {std::pair<std::string_view, std::string>{"embed_model", std::string{model}},
-              std::pair<std::string_view, std::string>{"embed_dim", std::to_string(dimension)}}) {
-            sqlite3_reset(set.get());
-            bind_text(set.get(), 1, key);
-            bind_text(set.get(), 2, value);
-            if (sqlite3_step(set.get()) != SQLITE_DONE) {
-                fail(handle, "could not record the embedding model");
+        write_meta(handle,
+                   {{"embed_model", std::string{model}}, {"embed_dim", std::to_string(dimension)}},
+                   "embed_mixed");
+    });
+}
+
+void Store::mark_embedding_mixed(const std::vector<std::string>& models, std::int64_t dimension) {
+    sqlite3* handle = impl_->connection.get();
+    // No `embed_model` beside the mark: a build before 57s, reading the
+    // store, then finds no model recorded and demotes it wholesale too.
+    in_transaction(handle, [&] {
+        write_meta(
+            handle,
+            {{"embed_mixed", joined_lines(models)}, {"embed_dim", std::to_string(dimension)}},
+            "embed_model");
+    });
+}
+
+bool Store::rename_embedding_model(std::string_view from, std::string_view to) {
+    if (from.empty() || to.empty() || from == to) {
+        return false;
+    }
+    sqlite3* handle = impl_->connection.get();
+    bool renamed = false;
+    const auto rename = [&](const char* sql) {
+        StatementPtr update = prepare(handle, sql);
+        bind_text(update.get(), 1, to);
+        bind_text(update.get(), 2, from);
+        if (sqlite3_step(update.get()) != SQLITE_DONE) {
+            fail(handle, "could not rename the embedding model");
+        }
+        renamed = sqlite3_changes(handle) > 0 || renamed;
+    };
+    in_transaction(handle, [&] {
+        rename("UPDATE store_meta SET value = ? WHERE key = 'embed_model' AND value = ?");
+        rename("UPDATE source_ingests SET model = ? WHERE model = ?");
+
+        std::optional<std::string> mixed;
+        {
+            StatementPtr select =
+                prepare(handle, "SELECT value FROM store_meta WHERE key = 'embed_mixed'");
+            if (sqlite3_step(select.get()) == SQLITE_ROW) {
+                mixed = column_text(select.get(), 0);
             }
         }
+        if (!mixed.has_value()) {
+            return;
+        }
+        // Each name once, in the order the mark keeps them: the old name
+        // may stand beside the new one already.
+        std::vector<std::string> names;
+        bool named = false;
+        for (std::string& name : split_lines(*mixed)) {
+            if (name == from) {
+                name = std::string{to};
+                named = true;
+            }
+            if (std::ranges::find(names, name) == names.end()) {
+                names.push_back(std::move(name));
+            }
+        }
+        if (!named) {
+            return;
+        }
+        renamed = true;
+        if (names.size() == 1 && !names.front().empty()) {
+            // Every vector is from one model after all: the store is bound.
+            write_meta(handle, {{"embed_model", names.front()}}, "embed_mixed");
+        } else {
+            write_meta(handle, {{"embed_mixed", joined_lines(names)}}, "embed_model");
+        }
     });
+    return renamed;
 }
 
 void Store::clear_embedding_model() {
     exec(impl_->connection.get(),
-         "DELETE FROM store_meta WHERE key IN ('embed_model', 'embed_dim')");
+         "DELETE FROM store_meta WHERE key IN ('embed_model', 'embed_dim', 'embed_mixed')");
 }
 
 Store::EmbeddingBinding Store::embedding_model() const {
@@ -484,6 +730,11 @@ Store::EmbeddingBinding Store::embedding_model() const {
         } catch (const std::exception&) {
             binding.dimension = 0;  // a malformed record reads as unknown width
         }
+    }
+    StatementPtr mixed = prepare(handle, "SELECT value FROM store_meta WHERE key='embed_mixed'");
+    if (sqlite3_step(mixed.get()) == SQLITE_ROW) {
+        binding.mixed = split_lines(column_text(mixed.get(), 0));
+        binding.model.clear();  // never one model over vectors from several
     }
     return binding;
 }
@@ -512,12 +763,22 @@ std::string Store::verify_index() const {
     // is internally well-formed. An external-content index can be perfectly
     // well-formed and still disagree with the table it mirrors, which is the
     // failure that actually matters here.
+    //
+    // Without waiting for the write lock it needs: a writer elsewhere -- an
+    // ingest between sources -- answers "not checked" at once, never a
+    // stalled read that then claims the index failed.
+    sqlite3_busy_timeout(handle, 0);
     char* message = nullptr;
-    if (sqlite3_exec(handle,
-                     "INSERT INTO chunks_fts(chunks_fts, rank) VALUES('integrity-check', 1)",
-                     nullptr, nullptr, &message) != SQLITE_OK) {
+    const int result = sqlite3_exec(
+        handle, "INSERT INTO chunks_fts(chunks_fts, rank) VALUES('integrity-check', 1)", nullptr,
+        nullptr, &message);
+    sqlite3_busy_timeout(handle, kBusyTimeoutMs);
+    if (result != SQLITE_OK) {
         const std::string detail = message == nullptr ? "unknown error" : message;
         sqlite3_free(message);
+        if ((result & 0xFF) == SQLITE_BUSY) {
+            return std::string{kIndexBeingWritten};
+        }
         return detail;
     }
     return {};

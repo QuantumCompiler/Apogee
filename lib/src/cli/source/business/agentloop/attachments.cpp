@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <chrono>
 #include <fstream>
 #include <iterator>
 #include <map>
@@ -19,8 +18,8 @@
 #include "contracts/errors.h"
 #include "contracts/sha256.h"
 #include "embedstore/chunk.h"
+#include "embedstore/folder_listing.h"
 #include "embedstore/ingest.h"
-#include "platform/child_process.h"
 
 namespace apogee::agentloop {
 namespace {
@@ -47,48 +46,6 @@ constexpr std::string_view kLocalHost = "file.invalid";
     return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
 }
 
-/// Runs `program` with `arguments` to its end and returns its stdout, or
-/// nullopt when it could not run or failed.
-[[nodiscard]] std::optional<std::string> run_capture(const std::string& program,
-                                                     std::vector<std::string> arguments) {
-    if (!platform::supports_child_processes() || platform::find_on_path(program).empty()) {
-        return std::nullopt;
-    }
-    platform::ChildCommand command;
-    command.program = program;
-    command.arguments = std::move(arguments);
-    std::string error;
-    const std::unique_ptr<platform::ChildProcess> child = platform::start_child(command, error);
-    if (child == nullptr) {
-        return std::nullopt;
-    }
-    child->close_stdin();
-    std::string out;
-    std::string piece;
-    for (;;) {
-        const platform::ReadStatus status =
-            child->read_stdout(piece, std::chrono::milliseconds{200});
-        if (status == platform::ReadStatus::Data) {
-            out += piece;
-        } else if (status != platform::ReadStatus::Timeout) {
-            break;
-        }
-    }
-    const std::optional<int> status = child->wait_for_exit(std::chrono::seconds{10});
-    if (!status.has_value() || *status != 0) {
-        return std::nullopt;
-    }
-    return out;
-}
-
-/// Whether any component of `relative` is hidden.
-[[nodiscard]] bool hidden(const std::filesystem::path& relative) {
-    return std::ranges::any_of(relative, [](const std::filesystem::path& part) {
-        const std::string name = part.string();
-        return name.size() > 1 && name.front() == '.' && name != "..";
-    });
-}
-
 /// `name` as the model cites it: relative to `working_directory` when inside
 /// it, else absolute.
 [[nodiscard]] std::string cited_name(const std::filesystem::path& path,
@@ -98,72 +55,6 @@ constexpr std::string_view kLocalHost = "file.invalid";
         return relative.generic_string();
     }
     return path.generic_string();
-}
-
-/// The NUL-separated entries of `listing`.
-[[nodiscard]] std::vector<std::filesystem::path> nul_separated(std::string_view listing) {
-    std::vector<std::filesystem::path> out;
-    std::size_t start = 0;
-    while (start < listing.size()) {
-        const std::size_t end = std::min(listing.find('\0', start), listing.size());
-        if (end > start) {
-            out.emplace_back(std::string{listing.substr(start, end - start)});
-        }
-        start = end + 1;
-    }
-    return out;
-}
-
-/// What git lists under `folder` -- tracked, and untracked but not ignored --
-/// or nullopt when `folder` is not in a repository or git is not there.
-[[nodiscard]] std::optional<std::vector<std::filesystem::path>> git_files(
-    const std::filesystem::path& folder) {
-    const std::optional<std::string> inside =
-        run_capture("git", {"-C", folder.string(), "rev-parse", "--is-inside-work-tree"});
-    if (!inside.has_value() || !inside->starts_with("true")) {
-        return std::nullopt;
-    }
-    const std::optional<std::string> listed = run_capture(
-        "git",
-        {"-C", folder.string(), "ls-files", "-z", "--cached", "--others", "--exclude-standard"});
-    if (!listed.has_value()) {
-        return std::nullopt;
-    }
-    return nul_separated(*listed);
-}
-
-/// Every file under `folder` by walking it, hidden entries left out.
-[[nodiscard]] std::vector<std::filesystem::path> walked_files(const std::filesystem::path& folder) {
-    std::vector<std::filesystem::path> out;
-    std::error_code code;
-    std::filesystem::recursive_directory_iterator walk{
-        folder, std::filesystem::directory_options::skip_permission_denied, code};
-    for (; !code && walk != std::filesystem::recursive_directory_iterator{}; walk.increment(code)) {
-        const std::filesystem::path relative = walk->path().lexically_relative(folder);
-        if (!hidden(relative)) {
-            if (walk->is_regular_file(code)) {
-                out.push_back(relative);
-            }
-        } else if (walk->is_directory(code)) {
-            walk.disable_recursion_pending();
-        }
-    }
-    return out;
-}
-
-/// Every file under `folder`, relative to it: what `git ls-files` lists inside
-/// a repository, else a walk -- hidden entries left out either way.
-[[nodiscard]] std::vector<std::filesystem::path> files_under(const std::filesystem::path& folder) {
-    // Not `value_or`: that would walk the whole folder -- a repository's
-    // build output and all -- even when git has answered.
-    std::optional<std::vector<std::filesystem::path>> listed = git_files(folder);
-    std::vector<std::filesystem::path> out =
-        listed.has_value() ? std::move(*listed) : walked_files(folder);
-    std::erase_if(out, [](const std::filesystem::path& relative) { return hidden(relative); });
-    std::ranges::sort(out);
-    const auto [first, last] = std::ranges::unique(out);
-    out.erase(first, last);
-    return out;
 }
 
 [[nodiscard]] bool glob_match(std::string_view pattern, std::string_view text);
@@ -411,7 +302,7 @@ FoundFiles find_attachment_files(std::string_view spec,
             out.error = "no folder at " + folder_part;
             return out;
         }
-        for (const std::filesystem::path& relative : files_under(folder)) {
+        for (const std::filesystem::path& relative : embedstore::files_under(folder)) {
             if (glob_match(pattern, relative.generic_string())) {
                 add(folder / relative);
             }
@@ -432,7 +323,7 @@ FoundFiles find_attachment_files(std::string_view spec,
         return out;
     }
     if (std::filesystem::is_directory(path, code)) {
-        for (const std::filesystem::path& relative : files_under(path)) {
+        for (const std::filesystem::path& relative : embedstore::files_under(path)) {
             add(path / relative);
         }
         if (out.files.empty()) {

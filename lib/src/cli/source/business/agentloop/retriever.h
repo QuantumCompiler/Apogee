@@ -6,6 +6,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 /// Which retriever a turn runs, decided ONCE, by one function, for every
 /// surface.
@@ -91,6 +92,9 @@ struct StoreFacts {
     std::int64_t lexical_only = 0;
     /// Distinct vector widths; more than one means mixed spaces.
     std::int64_t vector_dims = 0;
+    /// The models a store marked mixed holds vectors from (57s), an empty
+    /// name for an unrecorded one; empty when it is not mixed.
+    std::vector<std::string> mixed_models{};
 };
 
 /// The decision for one turn.
@@ -125,6 +129,61 @@ struct IngestRetrieval {
 
 [[nodiscard]] IngestRetrieval resolve_ingest_retriever(std::string_view flag, std::string_view pin,
                                                        const EmbedderFacts& embedder);
+
+/// What a store holds after an ingest wrote to it, and what the ingest did:
+/// the facts its binding afterwards is decided from (57s).
+struct IngestBindingFacts {
+    /// The model each source holding vectors after the ingest has them from,
+    /// one entry per source: the model its own ingest recorded (since 57s),
+    /// else the model the store was bound to before the ingest -- every
+    /// vector of a bound store is that model's -- else empty, unknown.
+    std::vector<std::string> source_models{};
+    /// The model this run embedded with; empty for a lexical run.
+    std::string run_model{};
+    /// The vectors this run wrote.
+    std::int64_t vectors_written = 0;
+};
+
+/// What an ingest leaves the store's binding saying.
+enum class BindingAction : std::uint8_t {
+    /// As it was: no source's model is known, so nothing can be said of it.
+    Keep,
+    /// Bound to `model`: every vector the store holds is from it.
+    Bind,
+    /// Unrecorded: the store holds no vectors at all.
+    Clear,
+    /// Marked mixed over `models`: its sources' vectors are from more than
+    /// one model, so every query demotes the store wholesale.
+    Mixed,
+};
+
+struct IngestBinding {
+    BindingAction action = BindingAction::Keep;
+    /// `Bind`'s model.
+    std::string model{};
+    /// `Mixed`'s models in the order its sources first name them, this
+    /// run's last; an empty name stands for an unrecorded model.
+    std::vector<std::string> models{};
+    /// Said when a run that wrote vectors leaves the store mixed: how many
+    /// sources keep which other model's vectors, and what makes the
+    /// collection one space again.
+    std::string warning{};
+};
+
+/// **The one decision of what a store is bound to after an ingest** (57s),
+/// beside the one that decides how it is built. A store is bound to a model
+/// only when every source holding vectors has them from it -- it was bound
+/// to this run's model already, or no vector from another survives the run;
+/// otherwise it is marked mixed, and a run that made it so warns, so no query
+/// ranks one model's vectors against another's question: the wholesale
+/// demotion, never a fraction searched under a `[vector]` label. A store left
+/// with no vectors is unbound; one whose every source's model is unknown is
+/// left as it was.
+[[nodiscard]] IngestBinding resolve_ingest_binding(const IngestBindingFacts& facts);
+
+/// `models` as a person reads them: each quoted, an unrecorded one said so,
+/// joined with "and".
+[[nodiscard]] std::string spoken_models(const std::vector<std::string>& models);
 
 /// How strongly a turn's best hit matched, as a person reads it (26s).
 ///

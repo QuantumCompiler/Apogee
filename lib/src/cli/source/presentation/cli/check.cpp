@@ -46,6 +46,7 @@
 #include "contracts/layout.h"
 #include "contracts/paths.h"
 #include "embedstore/ingest.h"
+#include "embedstore/store.h"
 #include "graph/code_languages.h"
 #include "harness/roles.h"
 #include "httpserver/admin_auth.h"
@@ -1804,6 +1805,10 @@ void check_knowledge(CheckReport& report, const CheckInputs& inputs) {
             if (trouble.empty()) {
                 add(report, Status::Ok, "Knowledge", label,
                     std::to_string(records) + " record(s), text index ok");
+            } else if (trouble == embedstore::kIndexBeingWritten) {
+                // A check that cannot run is skipped, never passed (57s).
+                add(report, Status::Skipped, "Knowledge", label,
+                    std::to_string(records) + " record(s), text index " + trouble);
             } else {
                 add(report, Status::Fail, "Knowledge", label,
                     std::to_string(records) + " record(s), text index FAILED -- " + trouble);

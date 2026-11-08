@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -16,8 +17,8 @@
 #include "agentloop/rerank.h"
 #include "agentloop/retriever.h"
 #include "backends/factory.h"
-#include "cli/helpers.h"
 #include "cli/graph.h"
+#include "cli/helpers.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/layout.h"
@@ -116,7 +117,9 @@ void print_or_fail(Read read) {
     facts.dimension = stats.dimension;
     facts.lexical_only = stats.lexical_only;
     facts.vector_dims = stats.vector_dims;
-    facts.recorded_model = store.embedding_model().model;
+    const embedstore::Store::EmbeddingBinding binding = store.embedding_model();
+    facts.recorded_model = binding.model;
+    facts.mixed_models = binding.mixed;
     return facts;
 }
 
@@ -128,6 +131,61 @@ void print_or_fail(Read read) {
         facts.metered = e->metered;
     }
     return facts;
+}
+
+/// The index line's word for `verify_index`'s answer: ok, FAILED with the
+/// reason, or -- while an ingest writes the collection -- not checked (57s).
+[[nodiscard]] std::string index_health(const std::string& trouble) {
+    if (trouble.empty()) {
+        return "ok";
+    }
+    if (trouble == embedstore::kIndexBeingWritten) {
+        return trouble;
+    }
+    return "FAILED -- " + trouble;
+}
+
+/// What an ingest left out, replaced, refused and still holds (57s): each
+/// part named, so nothing a person put in a collection leaves it, or stays
+/// out of it, without a line saying so. Same-folder replacements are counted
+/// on the first line and named under `verbose`; so are the leave-outs, which
+/// for a repository would otherwise print its whole `.git`.
+void print_ingest_details(std::ostream& out, const std::string& collection,
+                          const embedstore::IngestReport& report, bool verbose) {
+    if (!report.left_out.empty()) {
+        out << "left out " << report.left_out.size() << " hidden, git-ignored or vendored path(s)"
+            << (verbose ? ":" : " (--verbose names them)") << "\n";
+        if (verbose) {
+            for (const std::string& entry : report.left_out) {
+                out << "  " << entry << "\n";
+            }
+        }
+    }
+    for (const embedstore::Replacement& replaced : report.replaced) {
+        if (!replaced.moved_from.empty()) {
+            out << "replaced " << replaced.source << " (moved from " << replaced.moved_from
+                << ")\n";
+        } else if (replaced.unrecorded) {
+            out << "replaced " << replaced.source
+                << " (stored before ingests recorded their folder)\n";
+        } else if (verbose) {
+            out << "replaced " << replaced.source << "\n";
+        }
+    }
+    for (const embedstore::Collision& collision : report.collisions) {
+        out << "refused " << collision.source << ": it is already in '" << collection << "' from "
+            << collision.root << ", not " << report.root
+            << " -- delete it with 'apogee embed delete " << collection << " --source "
+            << collision.source << "' to replace it\n";
+    }
+    if (!report.still_held.empty()) {
+        out << "\nstill in '" << collection << "' from an earlier ingest, though a walk now "
+            << "leaves them out -- 'apogee embed delete " << collection
+            << " --source <name>' removes one:\n";
+        for (const std::string& source : report.still_held) {
+            out << "  " << source << "\n";
+        }
+    }
 }
 
 /// Builds every configured provider so the embedding capability can be asked
@@ -163,11 +221,16 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
     auto in_size = std::make_shared<std::size_t>(512);
     auto in_overlap = std::make_shared<std::size_t>(64);
 
-    CLI::App* ingest = cmd->add_subcommand("ingest", "Add a file or directory to a collection");
+    CLI::App* ingest = cmd->add_subcommand(
+        "ingest",
+        "Add a file or directory to a collection -- a directory without its hidden entries, "
+        "vendored folders (node_modules, vendor, ...) or what git ignores");
     ingest->add_option("collection", *in_collection, "Collection name")
         ->type_name(kCollectionValue)
         ->required();
-    ingest->add_option("path", *in_path, "File or directory to read")
+    ingest
+        ->add_option("path", *in_path,
+                     "File or directory to read (a file named here is taken whatever its name)")
         ->type_name(kPathValue)
         ->required();
     CLI::Option* size_option = ingest->add_option(
@@ -194,8 +257,11 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
 
     ingest->add_flag("-q,--quiet", *in_quiet,
                      "No progress line while it reads and embeds (nor in --graph's build)");
+    auto in_verbose = std::make_shared<bool>(false);
+    ingest->add_flag("-v,--verbose", *in_verbose,
+                     "Name every path the walk left out and every source replaced");
     ingest->callback([&context, in_collection, in_path, in_size, in_overlap, in_retriever, in_graph,
-                      in_quiet, size_option, overlap_option]() {
+                      in_quiet, in_verbose, size_option, overlap_option]() {
         require_plain_name(*in_collection);
 
         const std::filesystem::path target{*in_path};
@@ -264,7 +330,16 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
         }
 
         embedstore::IngestReport report;
+        agentloop::IngestBinding binding;
         try {
+            // The binding before this run writes: what an untouched source
+            // with no model of its own recorded has its vectors from (57s).
+            std::string bound_before;
+            {
+                const embedstore::Store store{collection_path(*in_collection)};
+                const embedstore::Store::EmbeddingBinding recorded = store.embedding_model();
+                bound_before = recorded.mixed.empty() ? recorded.model : std::string{};
+            }
             // Each file is read, chunked and -- with an embedder -- embedded
             // in turn: said on one line, numbered against the walk (M1).
             BusyLine busy{
@@ -273,36 +348,80 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
                 busy_options(*in_quiet)};
             const std::string verb =
                 decision.retriever == agentloop::Retriever::Vector ? "embedding " : "reading ";
+            const std::string run_model =
+                decision.retriever == agentloop::Retriever::Vector ? embedder->model : "";
             report = embedstore::ingest_path(
                 collection_path(*in_collection), target, chunking, embed,
                 [&busy, &verb](std::size_t done, std::size_t total,
                                const std::filesystem::path& file) {
                     busy.report(verb + file.filename().string(), done, total);
-                });
+                },
+                run_model);
             embedstore::Store store{collection_path(*in_collection)};
             const embedstore::Store::Stats stats = store.stats();
-            if (decision.retriever == agentloop::Retriever::Vector && stats.dimension > 0) {
-                // Record the space the vectors live in, so a later query under
-                // another model falls to lexical instead of scoring across
-                // spaces.
-                store.set_embedding_model(embedder->model, stats.dimension);
-            } else if (stats.dimension == 0) {
-                // No vectors left at all: a stale record must not make auto
-                // pick vector search over a store that holds none.
-                store.clear_embedding_model();
+
+            // Record the space the vectors live in -- one model's, or that
+            // there is more than one -- so a later query under another model
+            // falls to lexical instead of scoring across spaces. Decided from
+            // every vectored source's model, never from this run's alone
+            // (57s): a partial re-ingest under B leaves A's vectors in A's
+            // space.
+            agentloop::IngestBindingFacts facts;
+            facts.run_model = run_model;
+            facts.vectors_written = report.vectors_written;
+            const std::map<std::string, embedstore::Store::SourceIngest> ingests =
+                store.source_ingests();
+            for (const std::string& source : store.vectored_sources()) {
+                const auto found = ingests.find(source);
+                facts.source_models.push_back(found != ingests.end() && !found->second.model.empty()
+                                                  ? found->second.model
+                                                  : bound_before);
+            }
+            binding = agentloop::resolve_ingest_binding(facts);
+            switch (binding.action) {
+                case agentloop::BindingAction::Bind:
+                    store.set_embedding_model(binding.model, stats.dimension);
+                    break;
+                case agentloop::BindingAction::Mixed:
+                    store.mark_embedding_mixed(binding.models, stats.dimension);
+                    break;
+                case agentloop::BindingAction::Clear:
+                    store.clear_embedding_model();
+                    break;
+                case agentloop::BindingAction::Keep:
+                    break;
             }
         } catch (const std::exception& e) {
             fail(e.what());
         }
 
+        // The first line is the whole story in brief -- the app shows it as
+        // the ingest's outcome -- and every line after it names its part.
         std::cout << report.files_read << " file(s), " << report.chunks_written << " chunk(s)";
         if (decision.retriever == agentloop::Retriever::Vector) {
             std::cout << ", " << report.vectors_written << " vector(s) [" << embedder->model << "]";
         }
-        std::cout << "\n";
+        std::vector<std::string> brief;
+        if (!report.replaced.empty()) {
+            brief.push_back(std::to_string(report.replaced.size()) + " replaced");
+        }
+        if (!report.collisions.empty()) {
+            brief.push_back(std::to_string(report.collisions.size()) + " refused");
+        }
+        if (!report.left_out.empty()) {
+            brief.push_back(std::to_string(report.left_out.size()) + " left out");
+        }
+        for (std::size_t index = 0; index < brief.size(); ++index) {
+            std::cout << (index == 0 ? " (" : ", ") << brief[index];
+        }
+        std::cout << (brief.empty() ? "" : ")") << "\n";
         if (!decision.note.empty()) {
             std::cout << decision.note << "\n";
         }
+        if (!binding.warning.empty()) {
+            std::cout << binding.warning << "\n";
+        }
+        print_ingest_details(std::cout, *in_collection, report, *in_verbose);
         if (!report.unvectorised.empty()) {
             // Named, like every skip: these chunks are searchable by text but
             // invisible to vector search, and the resolver will say so until
@@ -552,7 +671,11 @@ std::string collection_info_text(const std::string& name) {
     } else {
         out << "vectors:     " << (stats.chunk_count - stats.lexical_only) << " of "
             << stats.chunk_count << " chunk(s), " << stats.dimension << "-d";
-        if (binding.recorded()) {
+        if (!binding.mixed.empty()) {
+            // Never one model over vectors from several (57s).
+            out << " [mixed: " << agentloop::spoken_models(binding.mixed)
+                << " -- re-ingest every source with one model]";
+        } else if (binding.recorded()) {
             out << " [" << binding.model << "]";
         } else {
             out << " [model not recorded -- re-ingest to bind]";
@@ -562,8 +685,7 @@ std::string collection_info_text(const std::string& name) {
         }
         out << "\n";
     }
-    const std::string trouble = store.verify_index();
-    out << "index:       " << (trouble.empty() ? "ok" : "FAILED -- " + trouble) << "\n";
+    out << "index:       " << index_health(store.verify_index()) << "\n";
     out << "\nsources:\n";
     for (const std::string& source : store.sources()) {
         out << "  " << source << "\n";
@@ -584,14 +706,23 @@ nlohmann::json collection_info_document(const std::string& name) {
         if (binding.recorded()) {
             vectors["model"] = binding.model;
         }
+        if (!binding.mixed.empty()) {
+            // Each model the vectors came from, null for an unrecorded one;
+            // `model` is absent then, never one name over several spaces.
+            nlohmann::json mixed = nlohmann::json::array();
+            for (const std::string& model : binding.mixed) {
+                mixed.push_back(model.empty() ? nlohmann::json(nullptr) : nlohmann::json(model));
+            }
+            vectors["mixed"] = std::move(mixed);
+        }
     }
-    const std::string trouble = store.verify_index();
+    const std::string index = index_health(store.verify_index());
     return nlohmann::json{{"collection", name},
                           {"path", path.string()},
                           {"schema", store.schema_version()},
                           {"chunks", stats.chunk_count},
                           {"vectors", std::move(vectors)},
-                          {"index", trouble.empty() ? std::string{"ok"} : "FAILED -- " + trouble},
+                          {"index", index},
                           {"sources", store.sources()}};
 }
 

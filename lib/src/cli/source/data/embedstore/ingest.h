@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "embedstore/chunk.h"
@@ -24,6 +25,28 @@ using EmbedChunks = std::function<std::vector<std::vector<float>>(const std::vec
 using IngestProgress =
     std::function<void(std::size_t done, std::size_t total, const std::filesystem::path& file)>;
 
+/// A source an ingest wrote over (57s). Named, never silent: replacing a
+/// document is changing what the collection answers from.
+struct Replacement {
+    std::string source;
+    /// The folder the replaced copy came from, when that folder is gone: a
+    /// moved corpus. Empty for a re-ingest from the same folder.
+    std::string moved_from{};
+    /// The replaced copy was stored before folders were recorded, so where it
+    /// came from is unknown.
+    bool unrecorded = false;
+};
+
+/// A file refused because a document of the same name, from another folder
+/// that still exists, is already in the collection (57s). Nothing of it was
+/// read into the store; `apogee embed delete <c> --source <name>` is the way
+/// to let it in.
+struct Collision {
+    std::string source;
+    /// The folder the copy in the collection came from.
+    std::string root;
+};
+
 struct IngestReport {
     std::int64_t files_read = 0;
     std::int64_t files_skipped = 0;
@@ -40,6 +63,26 @@ struct IngestReport {
     /// which the resolver reports rather than hides.
     std::vector<std::string> unvectorised;
     std::int64_t vectors_written = 0;
+
+    /// The folder this run's sources are named relative to and recorded
+    /// under: absolute, symbolic links resolved, the generic form.
+    std::string root{};
+    /// What a directory walk left out (57s), relative to the folder, as
+    /// `FolderListing::left_out` names it: hidden entries, what git ignores,
+    /// vendored folders, each folder once. Counted always, named on asking.
+    std::vector<std::string> left_out{};
+    /// Every source this run wrote, in walk order: what the binding after a
+    /// vector ingest reads as rewritten.
+    std::vector<std::string> written{};
+    /// The sources this run wrote over.
+    std::vector<Replacement> replaced{};
+    /// The files refused because their name is taken from another folder.
+    std::vector<Collision> collisions{};
+    /// Sources already in the collection that a directory walk now leaves
+    /// out -- hidden or vendored by name, or what this walk left out -- from
+    /// an earlier ingest. Never removed on Apogee's initiative: named, with
+    /// the way to remove each.
+    std::vector<std::string> still_held{};
 };
 
 /// Whether `bytes` look like a binary file rather than text.
@@ -71,15 +114,33 @@ struct IngestReport {
 [[nodiscard]] bool read_as_text(const std::filesystem::path& path, std::string& text,
                                 std::string& reason);
 
+/// The folder `root` as an ingest records it: absolute, symbolic links
+/// resolved where it exists (so macOS's `/tmp` and `/private/tmp` are one
+/// folder), the generic form, no trailing separator.
+[[nodiscard]] std::string folder_identity(const std::filesystem::path& root);
+
 /// Ingests one file or every file under a directory into `store_path`.
 ///
 /// Sources are recorded as paths **relative to the ingest root** when a
 /// directory is given, so a corpus stays meaningful after it moves and two
 /// machines produce the same source names.
+///
+/// **What a directory gives** (57s) is `list_folder`'s answer under the
+/// ingest's rules: inside a git work tree, git's tracked and untracked but
+/// not ignored files, else a walk; hidden entries and vendored folders left
+/// out either way, and a folder git ignores whole walked, since it was named.
+/// A file named on its own is always taken. Each source's folder is recorded
+/// beside it, and a same-named document already in the store from another
+/// folder that still exists is refused, never replaced.
+///
+/// `embed_model` names the model `embed` embeds with, recorded beside each
+/// source it vectorises, so a store partly re-embedded under another model
+/// can say which spaces it holds.
 [[nodiscard]] IngestReport ingest_path(const std::filesystem::path& store_path,
                                        const std::filesystem::path& target,
                                        const ChunkOptions& options = {},
                                        const EmbedChunks& embed = {},
-                                       const IngestProgress& progress = {});
+                                       const IngestProgress& progress = {},
+                                       std::string_view embed_model = {});
 
 }  // namespace apogee::embedstore

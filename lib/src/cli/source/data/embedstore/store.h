@@ -30,6 +30,11 @@
 /// - **Open is idempotent and migrations are atomic.** Every schema step runs
 ///   inside one transaction, so an interrupted first open leaves a database
 ///   that either has the whole schema or none of it — never half.
+/// - **Opening a current store writes nothing** (57s). The schema version is
+///   read with a plain read, and the migration's `IMMEDIATE` transaction --
+///   SQLite's one writer lock -- is taken only for a store that is older or
+///   new. A listing opened while an ingest holds that lock reads the last
+///   committed state at once, rather than waiting it out and failing.
 /// - **The FTS index is maintained on every ingest**, regardless of which
 ///   retriever a query later uses. An index built lazily is an index that is
 ///   missing exactly when someone first needs it.
@@ -113,7 +118,37 @@ public:
                         const std::vector<std::vector<float>>& vectors,
                         const std::vector<std::string>& metadata);
 
-    /// Removes every chunk belonging to `source`. Returns how many went.
+    /// What an ingest recorded beside a source (57s, schema v7).
+    struct SourceIngest {
+        /// The folder it was ingested from: absolute, the generic form.
+        std::string root;
+        /// The model its vectors are from; empty when it was stored without
+        /// vectors.
+        std::string model{};
+    };
+
+    /// Replaces a source as `replace_source` does AND records `root`, the
+    /// folder it was ingested from, and -- when `vectors` is not empty --
+    /// `model`, the model they are from, in the same transaction (57s). A
+    /// source is named relative to its root, so two folders can each hold a
+    /// `README.md`: the root is what tells a re-ingest of the same document
+    /// from a different one. The model is what lets a store partly
+    /// re-embedded under another model say which spaces it holds.
+    void ingest_source(std::string_view source, std::string_view root, std::string_view model,
+                       const std::vector<std::string>& chunks,
+                       const std::vector<std::vector<float>>& vectors);
+
+    /// What each ingest recorded, by source. A source an earlier build
+    /// stored, or one written without a folder (a knowledge record), has
+    /// none.
+    [[nodiscard]] std::map<std::string, SourceIngest> source_ingests() const;
+
+    /// The sources holding at least one vector, sorted: what the binding
+    /// after a vector ingest is decided over (57s).
+    [[nodiscard]] std::vector<std::string> vectored_sources() const;
+
+    /// Removes every chunk belonging to `source`, and what its ingest
+    /// recorded. Returns how many chunks went.
     [[nodiscard]] std::int64_t delete_source(std::string_view source);
 
     /// Rewrites the metadata of every chunk under `source`, touching nothing
@@ -180,13 +215,35 @@ public:
     struct EmbeddingBinding {
         std::string model;
         std::int64_t dimension = 0;
+        /// Set when the store holds vectors from more than one model (57s):
+        /// a partial re-ingest under another model left both. Each name, an
+        /// empty one standing for vectors whose model was never recorded.
+        /// `model` is empty then, so nothing reads the store as bound and
+        /// every query demotes it wholesale until one model covers it.
+        std::vector<std::string> mixed{};
 
         [[nodiscard]] bool recorded() const noexcept {
             return !model.empty();
         }
     };
 
+    /// Binds the store to `model`: every vector it holds is from it. Clears
+    /// a mixed mark.
     void set_embedding_model(std::string_view model, std::int64_t dimension);
+    /// Marks the store's vectors as from every one of `models` (57s), so no
+    /// query reads it as one vector space. An empty name stands for an
+    /// unrecorded model.
+    void mark_embedding_mixed(const std::vector<std::string>& models, std::int64_t dimension);
+    /// Renames the model `from` to `to` everywhere the store records it as
+    /// the model of its vectors -- the binding, a mixed mark's names and
+    /// each source's own record -- in one transaction (57s). `models
+    /// migrate` calls it when it moves a GGUF that a backend names by path:
+    /// the same weights under a new name. Renaming only the binding left
+    /// each source naming the old path, so the next partial ingest read two
+    /// models and marked the store mixed. A mixed mark whose names all
+    /// become one known model binds the store to it. Returns whether
+    /// anything was renamed.
+    [[nodiscard]] bool rename_embedding_model(std::string_view from, std::string_view to);
     /// Returns the store to the unrecorded state, so a stale record cannot
     /// make auto pick vector over a store that no longer holds any.
     void clear_embedding_model();
@@ -203,7 +260,11 @@ public:
     /// The `integrity-check 1` form specifically: the cheaper form validates
     /// only the index's internal structure, and an external-content index can
     /// be perfectly well-formed while disagreeing with the table it mirrors.
-    /// Returns empty on success, or the reason.
+    /// Returns empty on success, or the reason -- `kIndexBeingWritten`, at
+    /// once, when another connection holds the store's write lock (57s): the
+    /// check is an FTS5 command written as an `INSERT`, so it needs that
+    /// lock, and waiting for an ingest to let go of it stalled `embed info`
+    /// five seconds and then reported the index FAILED.
     [[nodiscard]] std::string verify_index() const;
 
     /// The schema version the file carries.
@@ -590,7 +651,16 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-/// The current schema version. Bumped when a migration is added.
+/// What `verify_index` answers while another connection is writing the
+/// store: not a failure, and not a pass -- the check did not run.
+inline constexpr std::string_view kIndexBeingWritten =
+    "not checked -- the collection is being written";
+
+/// The current schema version. Bumped when a migration is added -- and a
+/// step added without the bump never reaches a current store: since 57s an
+/// open runs no migration on a store already at this version, so the new
+/// step reaches only new and older stores, and a test over a fresh store
+/// passes while every existing one goes without it.
 /// v2 added `chunks.embedding` and `chunks.dim`, and the `embed_model` /
 /// `embed_dim` keys in `store_meta`. v3 added the nullable `chunks.metadata`
 /// column (knowledge records). v4 added the knowledge-graph tables (`kg_*`,
@@ -598,8 +668,11 @@ private:
 /// added the community tables (`kg_communities`, `kg_community_members`). v6
 /// (27k) added an edge's `origin` and `confidence`, a code file's
 /// `content_hash` and cached `facts` on `kg_state`, and the code layer's
-/// provenance tables (`kg_code_mentions`, `kg_edge_sites`). An older store
-/// gains them on open.
-inline constexpr int kSchemaVersion = 6;
+/// provenance tables (`kg_code_mentions`, `kg_edge_sites`). v7 (57s) added
+/// `source_ingests` -- the folder each ingested source came from and the
+/// model its vectors are from -- and the `embed_mixed` key beside the
+/// binding. An older store gains them on open;
+/// a current one is opened with a plain read and takes no write lock.
+inline constexpr int kSchemaVersion = 7;
 
 }  // namespace apogee::embedstore

@@ -323,7 +323,11 @@ void apply_plan(const Plan& plan, const std::filesystem::path& config_path) {
         std::cout << "updated  " << config_path.string() << "\n";
     }
 
-    // Collections that recorded an old path as their embedding model.
+    // Collections that recorded an old path as an embedding model: the
+    // binding, a mixed mark's names, and each source's own record (57s).
+    // Every collection is asked, not only one bound to the old path -- a
+    // mixed store binds none, and a source's record outlives a rebinding --
+    // or the next partial ingest reads one model's vectors as two.
     std::map<std::string, std::string> renamed;
     for (const ConfigEdit& edit : plan.edits) {
         if (edit.identity_changes) {
@@ -339,9 +343,11 @@ void apply_plan(const Plan& plan, const std::filesystem::path& config_path) {
             }
             try {
                 embedstore::Store collection{entry.path()};
-                const embedstore::Store::EmbeddingBinding binding = collection.embedding_model();
-                if (const auto found = renamed.find(binding.model); found != renamed.end()) {
-                    collection.set_embedding_model(found->second, binding.dimension);
+                bool rebound = false;
+                for (const auto& [from, to] : renamed) {
+                    rebound = collection.rename_embedding_model(from, to) || rebound;
+                }
+                if (rebound) {
                     std::cout << "rebound  " << entry.path().filename().string() << "\n";
                 }
             } catch (const std::exception& e) {
