@@ -3773,3 +3773,246 @@ TEST_CASE("chats compact refuses a chat deleted while it was compacted, attachme
     }
 }
 #endif
+
+// ---------------------------------------------------------------------------
+// Retrieval and the calls a turn makes before its loop (57r)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// `lines`, one file each, ingested lexical as the collection `notes`.
+void ingest_notes(HelperChat& chat, const std::vector<std::string>& lines) {
+    const std::filesystem::path docs = chat.home.path() / "docs";
+    std::filesystem::create_directories(docs);
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        std::ofstream{docs / ("note-" + std::to_string(i + 1) + ".md"), std::ios::binary}
+            << lines[i] << "\n";
+    }
+    REQUIRE(chat.run({"embed", "ingest", "notes", docs.string()}) == 0);
+}
+
+/// Each driven turn's `finish_reason`, in order.
+[[nodiscard]] std::vector<std::string> finishes_of(const std::vector<nlohmann::json>& events) {
+    std::vector<std::string> out;
+    for (const nlohmann::json& event : events) {
+        if (event.at("type") == "result") {
+            out.push_back(event.at("finish_reason").get<std::string>());
+        }
+    }
+    return out;
+}
+
+/// The saved chat, one line per message.
+[[nodiscard]] std::vector<std::string> saved_lines(const apogee::logger::Session& session) {
+    std::vector<std::string> lines;
+    for (const ChatMessage& message : session.messages) {
+        lines.push_back(std::string{apogee::harness::to_string(message.role)} + ": " +
+                        message.content.plain_text());
+    }
+    return lines;
+}
+
+/// Waits, at most ten seconds, for `ready`.
+[[nodiscard]] bool within_ten_seconds(const std::function<bool()>& ready) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+    while (!ready() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+    }
+    return ready();
+}
+
+}  // namespace
+
+TEST_CASE("complete keeps the chunks when the judge's reply is not a ranking, and says why",
+          "[chat][rag][rerank][cli][57r]") {
+    // The second sweep's probe (57r): `["2", "1"]` and a reply naming a
+    // passage before its ranking each ended in `no matching context` with
+    // nothing injected -- the judge's misread reply taken as "none help".
+    struct Case {
+        std::string reply{};
+        bool reranked = false;
+        std::string why{};
+    };
+
+    const std::vector<Case> cases{
+        {.reply = "[2, 1]", .reranked = true, .why = {}},
+        // A whole number in quotes is that id (the recorded default).
+        {.reply = R"(["2", "1"])", .reranked = true, .why = {}},
+        {.reply = R"(["two", "one"])",
+         .reranked = false,
+         .why = "returned a ranking with no usable passage number"},
+        {.reply = "Passage [3] is off-topic; the ranking is [2, 1]",
+         .reranked = false,
+         .why = "returned 2 bracketed lists, so which one ranks is a guess"},
+    };
+    for (const Case& c : cases) {
+        INFO(c.reply);
+        HelperChat chat{texts({"ANSWER sys=[{{system}}]"}), {c.reply}};
+        ingest_notes(chat, {"Pelicans nest on the coast of Peru.",
+                            "Brown pelicans nest in colonies on islands."});
+        REQUIRE(chat.run({"complete", "--rag", "notes", "--rerank", "helper", "--rag-limit", "2",
+                          "where do pelicans nest"}) == 0);
+        const std::string said = chat.out + chat.err;
+        INFO(said);
+        CHECK(said.find("no matching context") == std::string::npos);
+        CHECK(said.find("2 chunk(s) from 'notes'") != std::string::npos);
+        CHECK((said.find(", reranked]") != std::string::npos) == c.reranked);
+        if (!c.why.empty()) {
+            CHECK(said.find("rerank via 'helper' " + c.why) != std::string::npos);
+            CHECK(said.find("using raw retrieval order") != std::string::npos);
+        }
+        // Both excerpts reached the model.
+        CHECK(chat.out.find("Pelicans nest on the coast of Peru.") != std::string::npos);
+        CHECK(chat.out.find("Brown pelicans nest in colonies on islands.") != std::string::npos);
+    }
+}
+
+TEST_CASE("a follow-up's rewrite that opens with a lead-in searches with the query after it",
+          "[chat][rag][cli][helpers][machine][57r]") {
+    // The second sweep's probe (57r): the lead-in was searched, the floor
+    // rejected the one chunk, and turn 2 got no excerpt.
+    HelperChat chat{
+        texts({"ANSWER sys=[{{system}}]"}),
+        {"Pelican Notes",
+         "Sure! Here is the standalone search query:\n\nwhere do pelicans nest in Peru"}};
+    ingest_notes(chat, {"Pelicans nest on the coast of Peru, on rocky islands."});
+    REQUIRE(chat.run(driven_args({"--no-recall", "--rag", "notes"}),
+                     line_of({{"type", "user"}, {"text", "tell me about pelicans"}}) +
+                         line_of({{"type", "user"}, {"text", "and where do they do that?"}})) == 0);
+    INFO(chat.err);
+    const std::vector<nlohmann::json> events = driven_events(chat.out);
+    std::vector<std::string> answers;
+    for (const nlohmann::json& event : events) {
+        if (event.at("type") == "result") {
+            answers.push_back(event.at("text").get<std::string>());
+        }
+    }
+    REQUIRE(answers.size() == 2);
+    CHECK(answers[1].find("Pelicans nest on the coast of Peru") != std::string::npos);
+    CHECK(chat.err.find("nothing relevant in 'notes'") == std::string::npos);
+    CHECK(chat.err.find("the rewrite was not a query") == std::string::npos);
+}
+
+TEST_CASE("a driven cancel while a side call runs ends the turn in a cancelled result at once",
+          "[chat][cli][machine][cancel][57r]") {
+    // The second sweep (57r): every call a chat turn made before its loop
+    // was handed an empty token, so Stop waited for a whole compaction, a
+    // rewrite or a judge -- and a cancel the judge did see was said as
+    // "using raw retrieval order". Each is held here until the cancel comes;
+    // a cancel that never reached it would hold it ten seconds and then let
+    // the turn answer.
+    const nlohmann::json held = {{"text", "never said"}, {"until_cancelled", true}};
+    const std::string user = R"({"type":"user","text":")";
+
+    struct Case {
+        std::string name{};
+        nlohmann::json chatty{};
+        nlohmann::json helper{};
+        std::string chatty_extra{};
+        std::vector<std::string> args{};
+        std::vector<std::string> lines{};
+        std::vector<std::string> finishes{};
+        std::vector<std::string> kept{};
+        bool attach = false;
+    };
+
+    const std::string long_answer(1200, 'a');
+    const std::vector<Case> cases{
+        {.name = "compaction",
+         .chatty = texts({long_answer, "never"}),
+         .helper = nlohmann::json::array({{{"text", "Bird Talk"}}, held}),
+         .chatty_extra = "    context_size: 300\n",
+         .args = {},
+         .lines = {"first question", "second question"},
+         .finishes = {"stop", "cancelled"},
+         .kept = {"user: first question", "assistant: " + long_answer}},
+        {.name = "the follow-up's rewrite",
+         .chatty = texts({"Pelicans are birds.", "never"}),
+         .helper = nlohmann::json::array({{{"text", "Bird Talk"}}, held}),
+         .chatty_extra = {},
+         .args = {"--rag", "notes"},
+         .lines = {"tell me about pelicans", "where do they nest?"},
+         .finishes = {"stop", "cancelled"},
+         .kept = {"user: tell me about pelicans", "assistant: Pelicans are birds."}},
+        {.name = "the rerank judge",
+         .chatty = texts({"They nest in Peru."}),
+         .helper = nlohmann::json::array({held, {{"text", "[2, 1]"}}, {{"text", "Bird Talk"}}}),
+         .chatty_extra = {},
+         .args = {"--rag", "notes", "--rerank", "helper"},
+         .lines = {"where do pelicans nest"},
+         // The next line is served, judged and answered.
+         .finishes = {"cancelled", "stop"},
+         .kept = {"user: where do pelicans nest", "assistant: They nest in Peru."}},
+        // An attachment too large to inline is searched, and judged, the
+        // same way.
+        {.name = "the attachments' judge",
+         .chatty = texts({"They nest in Peru."}),
+         .helper = nlohmann::json::array({held, {{"text", "[2, 1]"}}, {{"text", "Bird Talk"}}}),
+         .chatty_extra = "    context_size: 7000\n",
+         .args = {"--rerank", "helper"},
+         .lines = {"where do pelicans nest"},
+         .finishes = {"cancelled", "stop"},
+         .kept = {"user: where do pelicans nest", "assistant: They nest in Peru."},
+         .attach = true},
+    };
+    // Twelve chunks' worth, every third naming the pelicans' nests.
+    std::string manual;
+    for (int chunk = 0; chunk < 12; ++chunk) {
+        std::string piece(448, 'x');
+        for (std::size_t at = 63; at < piece.size(); at += 64) {
+            piece[at] = ' ';
+        }
+        if (chunk % 3 == 0) {
+            piece.replace(200, 21, " where pelicans nest ");
+        }
+        manual += piece;
+    }
+    for (const Case& c : cases) {
+        INFO(c.name);
+        HelperChat chat{c.chatty, {"unused"}, c.chatty_extra};
+        (void)chat.script("helper", c.helper);
+        ingest_notes(chat, {"Pelicans nest on the coast of Peru.",
+                            "Brown pelicans nest in colonies on islands."});
+        const std::size_t cancelled_before = apogee::backends::MockProvider::holds_cancelled();
+        std::vector<std::string> args{"--no-recall"};
+        args.insert(args.end(), c.args.begin(), c.args.end());
+        const std::filesystem::path attached = chat.home.path() / "manual.txt";
+        std::ofstream{attached, std::ios::binary} << manual;
+        REQUIRE(run_fed(chat, driven_args(args), [&](FeedBuffer& feed) {
+                    if (c.attach) {
+                        feed.push(
+                            line_of({{"type", "attach"}, {"path", attached.generic_string()}}));
+                    }
+                    for (const std::string& line : c.lines) {
+                        feed.push(user + line + "\"}\n");
+                    }
+                    REQUIRE(within_ten_seconds(
+                        [] { return apogee::backends::MockProvider::calls_held() > 0; }));
+                    feed.push(R"({"type":"cancel"})"
+                              "\n");
+                    // Well inside the hold's own ten seconds.
+                    const auto sent = std::chrono::steady_clock::now();
+                    REQUIRE(within_ten_seconds([cancelled_before] {
+                        return apogee::backends::MockProvider::holds_cancelled() > cancelled_before;
+                    }));
+                    CHECK(std::chrono::steady_clock::now() - sent < std::chrono::seconds{3});
+                    if (c.finishes.back() == "stop") {
+                        feed.push(user + c.lines.back() + "\"}\n");
+                    }
+                }) == 0);
+        INFO(chat.err);
+        CHECK(finishes_of(driven_events(chat.out)) == c.finishes);
+        CHECK(apogee::backends::MockProvider::holds_cancelled() == cancelled_before + 1);
+        // Said as a cancel, never as the side call failing.
+        CHECK(chat.err.find("apogee: cancelled") != std::string::npos);
+        for (const std::string_view degraded :
+             {"failed", "could not be rewritten", "raw retrieval order", "lexical only"}) {
+            CHECK(chat.err.find(degraded) == std::string::npos);
+        }
+        // The session as the last finished turn left it.
+        const apogee::logger::Session session = HelperChat::only_session();
+        CHECK(saved_lines(session) == c.kept);
+        CHECK(session.turns == 1);
+        CHECK(session.compactions == 0);
+    }
+}

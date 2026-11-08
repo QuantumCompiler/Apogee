@@ -124,7 +124,8 @@ struct Compaction {
 /// **On any failure the original history is kept unchanged**, and the result
 /// says it failed and why. A failed compaction must degrade to a longer
 /// prompt, never to a lost conversation -- nor to a claim that it compacted.
-/// A history with no exchange to fold asks no model and says so.
+/// A history with no exchange to fold asks no model and says so. A cancel is
+/// not a failure (57r): `CancelledError` goes on up to the turn it stops.
 ///
 /// Tool results are shown to the summariser as their stubs (26c): tool
 /// output is condensed before conversation. Its calls are paired with their

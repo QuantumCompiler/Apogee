@@ -996,7 +996,35 @@ ChatAttachments::Turn ChatAttachments::for_turn(std::size_t user_message, const 
     return turn;
 }
 
+void ChatAttachments::begin_turn() {
+    turn_start_ =
+        Waiting{.inlines = pending_inline_, .maps = pending_map_, .native = pending_native_};
+    compaction_said_ = false;
+}
+
+void ChatAttachments::abandon_turn() {
+    if (!turn_start_.has_value()) {
+        return;
+    }
+    // The session is back as it was before the turn, its anchors with it;
+    // what the turn anchored to the message it dropped -- or a compaction it
+    // discarded re-marked -- waits for the next message again.
+    pending_inline_ = std::move(turn_start_->inlines);
+    pending_map_ = std::move(turn_start_->maps);
+    pending_native_ = std::move(turn_start_->native);
+    turn_start_.reset();
+    if (compaction_said_) {
+        compaction_said_ = false;
+        hooks_.say(
+            "the turn's compaction is undone with it -- the attachments are as they were before "
+            "the turn",
+            false);
+    }
+}
+
 void ChatAttachments::after_turn(const std::vector<std::string>& inline_dropped) {
+    // The turn ran its loop: nothing is left to put back.
+    turn_start_.reset();
     bool changed = false;
     for (const std::string& name : inline_dropped) {
         if (name.ends_with(kMapCard)) {
@@ -1061,6 +1089,8 @@ void ChatAttachments::after_compaction() {
         hooks_.say("the attachments' maps ride your next message again", false);
     }
     if (changed || remapped) {
+        // Taken back if the turn is cancelled before its loop (57r).
+        compaction_said_ = true;
         save();
     }
 }

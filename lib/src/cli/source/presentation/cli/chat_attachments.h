@@ -222,6 +222,20 @@ public:
                                 const harness::CancellationToken& cancellation,
                                 const agentloop::SideCallSink& on_side_call = {});
 
+    /// The turn about to run (57r): what waits for the next user message --
+    /// the inlines, maps and media read as they are, which `after_compaction`
+    /// and `for_turn` anchor or use up -- kept as it stands, for
+    /// `abandon_turn`.
+    void begin_turn();
+
+    /// The turn begun was cancelled before its loop, and the session put
+    /// back as it was before it (57r): what waited for the next message waits
+    /// again, so an attachment said to be inlined whole is inlined -- its map
+    /// and its media too -- on the turn that is sent, never only searched.
+    /// When this turn's compaction said the attachments moved, that is taken
+    /// back in a line. Nothing without a `begin_turn`.
+    void abandon_turn();
+
     /// After the run: an inlined attachment the budget could not send is
     /// retrieved from then on, and said; so is media it could not send as it
     /// is.
@@ -351,6 +365,18 @@ private:
     std::set<std::string> pending_map_;
     std::map<std::string, std::string> map_texts_;
     std::map<std::string, std::int64_t> map_costs_;
+
+    /// What waited for the next user message when a turn began (57r).
+    struct Waiting {
+        std::set<std::string> inlines{};
+        std::set<std::string> maps{};
+        std::map<std::string, std::vector<harness::ContentPart>> native{};
+    };
+
+    /// Kept by `begin_turn` until the turn is abandoned, run or followed.
+    std::optional<Waiting> turn_start_;
+    /// Whether `after_compaction` has said a line since the turn began.
+    bool compaction_said_ = false;
 };
 
 /// The paths `message` mentions: each word that starts with `@`, as

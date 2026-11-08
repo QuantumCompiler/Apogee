@@ -64,7 +64,19 @@ struct MockTurn {
     /// on the thinking channel, in the same chunks and with the same pause,
     /// never in the answer.
     std::string reasoning{};
+
+    /// Held until its call is cancelled (`"until_cancelled": true` in a
+    /// script, 57r): the call -- `chat` or `stream_chat` -- waits for its
+    /// token and then throws `CancelledError`, as a long compaction or a hung
+    /// judge does once Stop reaches it. Bounded (`kMockHoldBound`): a call
+    /// whose token never comes answers after it, so a test whose cancel does
+    /// not arrive fails rather than hangs.
+    bool until_cancelled = false;
 };
+
+/// How long a turn held `until_cancelled` waits for its cancel before it
+/// answers anyway.
+inline constexpr std::chrono::seconds kMockHoldBound{10};
 
 /// Turns from a JSON script: `{"turns": [{"text": "...", "tool_calls":
 /// [{"name": "git_diff", "arguments": "{}"}]}, ...]}`. A call's `id` is
@@ -164,6 +176,16 @@ public:
     /// machine mode's -- is seen to save none (57a: a chat deleted while its
     /// session ran).
     [[nodiscard]] static std::size_t conversations_saved() noexcept;
+
+    /// How many calls any mock in this process holds `until_cancelled` right
+    /// now (57r): how a test knows a side call is under way before it sends
+    /// the cancel -- through the real binary's own provider, which it cannot
+    /// reach otherwise.
+    [[nodiscard]] static std::size_t calls_held() noexcept;
+
+    /// How many held calls, in this process, ended because their token was
+    /// cancelled -- never by the bound: the proof the call saw the cancel.
+    [[nodiscard]] static std::size_t holds_cancelled() noexcept;
 
     /// How many turns have been served.
     [[nodiscard]] std::size_t turn_count() const noexcept {

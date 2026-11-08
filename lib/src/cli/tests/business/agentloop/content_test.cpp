@@ -8,7 +8,9 @@
 #include <vector>
 
 #include "backends/mock.h"
+#include "contracts/cancellation.h"
 #include "contracts/config.h"
+#include "contracts/errors.h"
 
 using apogee::agentloop::compact_history;
 using apogee::agentloop::Compaction;
@@ -126,6 +128,23 @@ TEST_CASE("a failed compaction returns the history unchanged, and says why",
     REQUIRE(done.history.size() == history.size());
     CHECK(done.history[0].content.plain_text() == "one");
     CHECK(done.history[1].content.plain_text() == "two");
+}
+
+TEST_CASE("a cancelled compaction is the turn's cancel, never a failed compaction",
+          "[agentloop][content][compaction][cancel][57r]") {
+    // The degrade catch took every HarnessError, CancelledError among them:
+    // a stopped turn went on over the history, said as "compaction failed".
+    MockProvider::Options options;
+    options.backend_name = "mock";
+    options.turns = {MockTurn{.text = "a summary"}};
+    Harness harness{Config{}};
+    harness.register_provider("mock", std::make_shared<MockProvider>(std::move(options)));
+    harness.use_default_router();
+    const apogee::harness::CancellationToken stop = apogee::harness::CancellationToken::create();
+    stop.cancel();
+    const std::vector<ChatMessage> history{ChatMessage::user("one"), ChatMessage::assistant("two")};
+    CHECK_THROWS_AS(compact_history(harness, history, "mock", stop),
+                    apogee::harness::CancelledError);
 }
 
 TEST_CASE("compaction with nothing to fold asks no model and says so",

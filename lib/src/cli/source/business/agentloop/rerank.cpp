@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <exception>
 
+#include "contracts/errors.h"
 #include "contracts/types.h"
 #include "embedstore/chunk.h"
 #include "harness/roles.h"
@@ -29,6 +30,56 @@ namespace {
     const std::vector<std::string> pieces =
         embedstore::chunk_text(text, {.size = count, .overlap = 0});
     return (pieces.empty() ? std::string{} : pieces.front()) + "…";
+}
+
+/// A whole number written as a string -- `"2"`, `" 3 "` -- as that number;
+/// nothing for anything else (57r).
+[[nodiscard]] std::optional<long long> whole_number(std::string_view text) {
+    const std::size_t first = text.find_first_not_of(' ');
+    if (first == std::string_view::npos) {
+        return std::nullopt;
+    }
+    text = text.substr(first, text.find_last_not_of(' ') - first + 1);
+    // Nine digits is far past any candidate count, and never overflows.
+    if (text.size() > 9 ||
+        !std::ranges::all_of(text, [](char digit) { return digit >= '0' && digit <= '9'; })) {
+        return std::nullopt;
+    }
+    long long value = 0;
+    for (const char digit : text) {
+        value = (value * 10) + (digit - '0');
+    }
+    return value;
+}
+
+/// Every bracketed span of `reply` that parses as a JSON array, in order --
+/// a bracket's span closing where its nesting does. Bracketed prose (`[see
+/// below]`) is not one; an unclosed bracket ends the reading.
+[[nodiscard]] std::vector<nlohmann::json> arrays_in(std::string_view reply) {
+    std::vector<nlohmann::json> arrays;
+    std::size_t start = reply.find('[');
+    while (start != std::string_view::npos) {
+        std::size_t depth = 0;
+        std::size_t end = std::string_view::npos;
+        for (std::size_t at = start; at < reply.size(); ++at) {
+            if (reply[at] == '[') {
+                ++depth;
+            } else if (reply[at] == ']' && --depth == 0) {
+                end = at;
+                break;
+            }
+        }
+        if (end == std::string_view::npos) {
+            break;
+        }
+        nlohmann::json parsed =
+            nlohmann::json::parse(reply.substr(start, end - start + 1), nullptr, false);
+        if (!parsed.is_discarded() && parsed.is_array()) {
+            arrays.push_back(std::move(parsed));
+        }
+        start = reply.find('[', end + 1);
+    }
+    return arrays;
 }
 
 }  // namespace
@@ -97,36 +148,49 @@ std::string build_rerank_prompt(std::string_view question,
     return out;
 }
 
-std::optional<std::vector<int>> parse_rerank_ids(std::string_view reply, std::size_t candidates) {
-    const std::size_t start = reply.find('[');
-    if (start == std::string_view::npos) {
-        return std::nullopt;
+RerankReading read_rerank_reply(std::string_view reply, std::size_t candidates) {
+    const std::vector<nlohmann::json> arrays = arrays_in(reply);
+    if (arrays.empty()) {
+        return RerankReading{.ids = std::nullopt,
+                             .problem = "returned something that was not a ranking"};
     }
-    const std::size_t end = reply.find(']', start);
-    if (end == std::string_view::npos) {
-        return std::nullopt;
+    if (arrays.size() > 1) {
+        // `Passage [3] is off-topic; the ranking is [2, 1]`: taking either
+        // one is a guess, and the first was once taken as the ranking (57r).
+        return RerankReading{.ids = std::nullopt,
+                             .problem = "returned " + std::to_string(arrays.size()) +
+                                        " bracketed lists, so which one ranks is a guess"};
     }
-    const nlohmann::json parsed =
-        nlohmann::json::parse(reply.substr(start, end - start + 1), nullptr, false);
-    if (parsed.is_discarded() || !parsed.is_array()) {
-        return std::nullopt;
-    }
+    const nlohmann::json& parsed = arrays.front();
     std::vector<int> ids;
     std::vector<bool> seen(candidates + 1, false);
     for (const nlohmann::json& item : parsed) {
-        if (!item.is_number_integer()) {
-            continue;
+        std::optional<long long> id;
+        if (item.is_number_integer()) {
+            id = item.get<long long>();
+        } else if (item.is_string()) {
+            // The prompt asks for numbers, but a quoted id is plainly an id.
+            id = whole_number(item.get_ref<const std::string&>());
         }
-        const auto id = item.get<long long>();
-        if (id < 1 || id > static_cast<long long>(candidates) ||
-            seen[static_cast<std::size_t>(id)]) {
+        if (!id.has_value() || *id < 1 || *id > static_cast<long long>(candidates) ||
+            seen[static_cast<std::size_t>(*id)]) {
             // A mostly good ranking is still better than raw order.
             continue;
         }
-        seen[static_cast<std::size_t>(id)] = true;
-        ids.push_back(static_cast<int>(id));
+        seen[static_cast<std::size_t>(*id)] = true;
+        ids.push_back(static_cast<int>(*id));
     }
-    return ids;
+    if (ids.empty() && !parsed.empty()) {
+        // Entries, none of them a passage: not the judge's "none help",
+        // which is `[]` and nothing else (57r).
+        return RerankReading{.ids = std::nullopt,
+                             .problem = "returned a ranking with no usable passage number"};
+    }
+    return RerankReading{.ids = std::move(ids), .problem = {}};
+}
+
+std::optional<std::vector<int>> parse_rerank_ids(std::string_view reply, std::size_t candidates) {
+    return read_rerank_reply(reply, candidates).ids;
 }
 
 RerankOutcome rerank(const harness::Harness& harness, std::string_view backend,
@@ -162,6 +226,9 @@ RerankOutcome rerank(const harness::Harness& harness, std::string_view backend,
     std::string reply;
     try {
         reply = harness.chat(request, cancellation).message.content.plain_text();
+    } catch (const harness::CancelledError&) {
+        // A stopped turn, not a broken judge (57r): never "raw order".
+        throw;
     } catch (const std::exception& e) {
         // A broken judge degrades to raw order. It never costs context.
         out.hits = truncated(hits, limit);
@@ -170,18 +237,19 @@ RerankOutcome rerank(const harness::Harness& harness, std::string_view backend,
         return out;
     }
 
-    const std::optional<std::vector<int>> ids = parse_rerank_ids(reply, candidates.size());
-    if (!ids.has_value()) {
+    const RerankReading reading = read_rerank_reply(reply, candidates.size());
+    if (!reading.ids.has_value()) {
         out.hits = truncated(hits, limit);
-        out.note = "rerank via '" + std::string{backend} +
-                   "' returned something that was not a ranking -- using raw retrieval order";
+        out.note = "rerank via '" + std::string{backend} + "' " + reading.problem +
+                   " -- using raw retrieval order";
         return out;
     }
+    const std::vector<int>& ids = *reading.ids;
 
     // A verdict, applied. An empty one means nothing retrieved bears on the
     // question: the relevance floor a lexical match cannot provide.
     out.applied = true;
-    for (const int id : *ids) {
+    for (const int id : ids) {
         out.hits.push_back(candidates[static_cast<std::size_t>(id - 1)]);
     }
     out.hits = truncated(out.hits, limit);

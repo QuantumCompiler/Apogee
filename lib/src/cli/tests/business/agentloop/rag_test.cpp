@@ -11,6 +11,7 @@
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
@@ -19,7 +20,9 @@
 #include "agentloop/loop.h"
 #include "agentloop/retriever.h"
 #include "backends/mock.h"
+#include "contracts/cancellation.h"
 #include "contracts/config.h"
+#include "contracts/errors.h"
 #include "embedstore/store.h"
 #include "harness/harness.h"
 
@@ -356,6 +359,35 @@ TEST_CASE("a transient embedding failure degrades the turn to lexical and says s
     CHECK(result.chunks > 0);
 }
 
+TEST_CASE("a cancelled embedding is the turn's cancel, never a lexical fallback",
+          "[agentloop][rag][vector][cancel][57r]") {
+    // The embedding's degrade catch took the cancel as a transient failure:
+    // a stopped turn went on, searched lexical only, and said so.
+    const Scratch scratch;
+    seed_vectors(scratch, toy_embedder("toy-v1"));
+    for (const std::string_view retriever : {"vector", "hybrid"}) {
+        INFO(retriever);
+        apogee::agentloop::RagTurn turn = turn_for(scratch, "zarquon protocol");
+        turn.retriever_flag = std::string{retriever};
+        turn.embedder = toy_embedder("toy-v1");
+        turn.cancellation = apogee::harness::CancellationToken::create();
+        bool saw_cancel = false;
+        turn.embedder->embed = [&saw_cancel](const std::vector<std::string>&,
+                                             const apogee::harness::CancellationToken& token)
+            -> std::vector<std::vector<float>> {
+            // The turn's own token reached the embedder: cancelled while it
+            // runs, it throws as a provider does.
+            token.cancel();
+            saw_cancel = token.stop_requested();
+            token.throw_if_cancelled();
+            return {};
+        };
+        CHECK_THROWS_AS(apogee::agentloop::retrieve_for_turn(turn),
+                        apogee::harness::CancelledError);
+        CHECK(saw_cancel);
+    }
+}
+
 TEST_CASE("context from a vector turn never reaches persisted history either",
           "[agentloop][rag][vector][transient]") {
     // The grep, on the new path: the secret reaches the provider and not the
@@ -631,6 +663,32 @@ TEST_CASE("a judge on the turn is reported as applied only when its ranking was 
     CHECK(raw.chunks > 0);
     REQUIRE_FALSE(raw.notes.empty());
     CHECK(raw.notes.back().find("not a ranking") != std::string::npos);
+}
+
+TEST_CASE("a cancelled judge on the turn is the turn's cancel, never raw order",
+          "[agentloop][rag][rerank][cancel][57r]") {
+    const Scratch scratch;
+    seed(scratch);
+    apogee::harness::Config config;
+    apogee::harness::BackendConfig mock;
+    mock.type = apogee::harness::BackendType::Mock;
+    config.backends.emplace("judge", mock);
+    apogee::backends::MockProvider::Options options;
+    options.backend_name = "judge";
+    options.turns = {apogee::backends::MockTurn{.text = "[2]"}};
+    const auto judge = std::make_shared<apogee::backends::MockProvider>(std::move(options));
+    apogee::harness::Harness harness{config};
+    harness.register_provider("judge", judge);
+    harness.use_default_router();
+
+    apogee::agentloop::RagTurn turn = turn_for(scratch, "zarquon widgets chunk");
+    turn.rerank_flag = "judge";
+    turn.harness = &harness;
+    turn.config = &config;
+    turn.cancellation = apogee::harness::CancellationToken::create();
+    turn.cancellation.cancel();
+    CHECK_THROWS_AS(apogee::agentloop::retrieve_for_turn(turn), apogee::harness::CancelledError);
+    CHECK(judge->requests().empty());  // the judge's own entry check, on the turn's token
 }
 
 // ---------------------------------------------------------------------------

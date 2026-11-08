@@ -78,11 +78,17 @@ struct ChatTurnResult {
 /// A cancelled or failed turn is said through `notice` and the session saved
 /// as it stands, as before; a question `ask` throws on goes on up, unsaved.
 /// `cancellation` ends the turn through the loop's own cancellation; the
-/// default never does. `summarize_reasoning` asks for the reasoning as its
-/// one-line summary, written by the utility model (43) -- for a surface that
-/// draws it; machine mode and a task's rounds never ask. `standing` is the
-/// session's standing context (41b), each a system message ridden ahead of
-/// everything else the turn injects -- never history, so never saved.
+/// default never does. It reaches every model call the turn makes before its
+/// loop too (57r) -- compaction, the follow-up's rewrite, the attachments'
+/// and the collection's retrieval (the embedding and the rerank judge), and
+/// recall -- and a cancel there ends the turn `cancelled` with the session
+/// put back as it was before the turn, a finished compaction included, and
+/// `attached`'s inlines, maps and media waiting for the next message again.
+/// `summarize_reasoning` asks for the reasoning as its one-line summary,
+/// written by the utility model (43) -- for a surface that draws it; machine
+/// mode and a task's rounds never ask. `standing` is the session's standing
+/// context (41b), each a system message ridden ahead of everything else the
+/// turn injects -- never history, so never saved.
 ChatTurnResult run_chat_turn(
     const harness::Harness& harness, logger::Session& session, const std::string& input,
     const agent::ToolRegistry* tools, agentloop::ToolSelection* selection,

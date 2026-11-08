@@ -48,249 +48,278 @@ ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& s
         reporter.on_side_call(call);
     };
 
-    // Context is measured against what is ABOUT TO BE SENT -- the saved history
-    // plus this turn -- not the history alone. Measuring before appending means
-    // the first turn always reads as empty, and a single large prompt never
-    // trips the threshold it should.
-    std::vector<harness::ChatMessage> prospective = session.messages;
-    prospective.insert(prospective.end(), incoming.begin(), incoming.end());
-    const agentloop::ContextUsage usage =
-        agentloop::measure_context(harness, prospective, session.backend);
-
-    if (usage.should_compact()) {
-        // The utility model summarises when one is set, else the chat's own
-        // backend, as before (26b).
-        const std::string compactor =
-            helper_backend(harness.config(), harness::ModelRole::Utility, session.backend);
-        notice("context " + std::to_string(static_cast<int>(usage.fraction() * 100)) +
-               "% full -- compacting" + (compactor == session.backend ? "" : " with " + compactor));
-        // Compacts the PRIOR history only: folding the message the user just
-        // typed into a summary of the conversation so far would summarise away
-        // the question being asked.
-        CompactionDone done{.compactor = compactor,
-                            .outcome = agentloop::Compaction::Outcome::Nothing,
-                            .failure = {}};
-        {
-            const agentloop::SideCallScope said{side, "utility",
-                                                "compacting the conversation with " + compactor};
-            agentloop::Compaction compaction =
-                agentloop::compact_history(harness, session.messages, compactor);
-            done.outcome = compaction.outcome;
-            done.failure = std::move(compaction.failure);
-            if (done.compacted()) {
-                session.messages = std::move(compaction.history);
-            }
-        }
-        // Counted and told only when it folded something (55b); otherwise
-        // said as it was, the turn going on over the history as it stands.
-        if (done.compacted()) {
-            ++session.compactions;
-            if (attached != nullptr) {
-                attached->after_compaction();
-            }
-        } else {
-            notice(compaction_line(done, session.backend));
-        }
-    } else if (usage.should_warn()) {
-        notice("context " + std::to_string(static_cast<int>(usage.fraction() * 100)) + "% full" +
-               (usage.exact ? "" : " (estimated)"));
+    // What the session was before the turn (57r): a cancel during the calls
+    // the turn makes before its loop puts it back, so a stopped turn leaves the
+    // session as the last finished turn left it -- the whole turn discarded, a
+    // compaction that finished before the cancel included. And what of the
+    // attachments waits for the next message, which compaction and
+    // `for_turn` use up, kept with it.
+    const logger::Session before = session;
+    if (attached != nullptr) {
+        attached->begin_turn();
     }
-
-    for (const harness::ChatMessage& message : incoming) {
-        session.messages.push_back(message);
-    }
-
     agentloop::Options loop_options;
-    loop_options.model = session.backend;
-    loop_options.cancellation = cancellation;
-    loop_options.temperature = session.params.temperature;
-    loop_options.max_tokens = session.params.max_tokens;
-    // Whether the model thinks first (26i): `/think` or the flag, else the
-    // backend's; `auto` asks the utility model, when one is set.
-    loop_options.thinking =
-        resolve_thinking(session.params.thinking, session.params.thinking_budget, harness.config(),
-                         session.backend, session.params.effort);
-    loop_options.thinking_judge = named_utility(harness.config());
-    // The reasoning as one line, by the utility model, for a surface that
-    // draws it (43); the loop decides whether it can.
-    loop_options.summarize_reasoning = summarize_reasoning;
-    loop_options.reasoning_summary_model = named_utility(harness.config());
-    loop_options.stream_answer = true;
-    // A large tool result is summarised by the utility model, when one is
-    // set, before the chat model reads it (26b).
-    loop_options.summary_model = named_utility(harness.config());
-    // The member calls a turn may make (27f), counted from zero each turn --
-    // with tools or without, since the suite's validation (27g) spends from
-    // the same count: a standing answer check needs no tool.
-    loop_options.member_calls = member_calls;
-    if (tools != nullptr) {
-        loop_options.tools = tools;
-        // The tools each step offers, when there are many (26g): one
-        // selection for the conversation, so a turn can keep the last one's.
-        loop_options.tool_selection = selection;
-        loop_options.ask = ask;
-        loop_options.permission = gate.permission;
-        loop_options.confirm = gate.confirm;
-        // A mode's refusal is said as the mode's (39b): plan and dont-ask.
-        loop_options.refusal = mode_refusal(gate.approvals);
-    }
-
-    // Retrieval runs PER TURN, against what the user just asked -- which is the
-    // reason the injected chunks must stay out of history. Turn one's context
-    // left lying in the transcript would still be competing for attention on
-    // turn five, against the chunks that actually answer the new question.
-    //
-    // Which collection: the flag for the whole session, else whatever
-    // `auto_rag` says RIGHT NOW. The config is re-read here rather than at
-    // startup on purpose, and a config that has become unreadable mid-session
-    // costs this turn its auto_rag and says so -- never the turn itself.
-    RagChoice rag_choice;
-    std::optional<harness::Config> turn_config;
     try {
-        turn_config = harness::load_config(rag.config_path);
-        // The chat's suite, not the file's default: retrieval's embedder and
-        // judge resolve under the suite the chat is running (27d).
-        turn_config->models.default_suite = harness.config().models.default_suite;
-    } catch (const harness::ConfigError& e) {
-        if (!rag.flag_given) {
-            notice(std::string{"auto_rag skipped -- config unreadable: "} + e.what());
+        // Context is measured against what is ABOUT TO BE SENT -- the saved history
+        // plus this turn -- not the history alone. Measuring before appending means
+        // the first turn always reads as empty, and a single large prompt never
+        // trips the threshold it should.
+        std::vector<harness::ChatMessage> prospective = session.messages;
+        prospective.insert(prospective.end(), incoming.begin(), incoming.end());
+        const agentloop::ContextUsage usage =
+            agentloop::measure_context(harness, prospective, session.backend);
+
+        if (usage.should_compact()) {
+            // The utility model summarises when one is set, else the chat's own
+            // backend, as before (26b).
+            const std::string compactor =
+                helper_backend(harness.config(), harness::ModelRole::Utility, session.backend);
+            notice("context " + std::to_string(static_cast<int>(usage.fraction() * 100)) +
+                   "% full -- compacting" +
+                   (compactor == session.backend ? "" : " with " + compactor));
+            // Compacts the PRIOR history only: folding the message the user just
+            // typed into a summary of the conversation so far would summarise away
+            // the question being asked.
+            CompactionDone done{.compactor = compactor,
+                                .outcome = agentloop::Compaction::Outcome::Nothing,
+                                .failure = {}};
+            {
+                const agentloop::SideCallScope said{
+                    side, "utility", "compacting the conversation with " + compactor};
+                agentloop::Compaction compaction =
+                    agentloop::compact_history(harness, session.messages, compactor, cancellation);
+                done.outcome = compaction.outcome;
+                done.failure = std::move(compaction.failure);
+                if (done.compacted()) {
+                    session.messages = std::move(compaction.history);
+                }
+            }
+            // Counted and told only when it folded something (55b); otherwise
+            // said as it was, the turn going on over the history as it stands.
+            if (done.compacted()) {
+                ++session.compactions;
+                if (attached != nullptr) {
+                    attached->after_compaction();
+                }
+            } else {
+                notice(compaction_line(done, session.backend));
+            }
+        } else if (usage.should_warn()) {
+            notice("context " + std::to_string(static_cast<int>(usage.fraction() * 100)) +
+                   "% full" + (usage.exact ? "" : " (estimated)"));
         }
-    }
-    if (rag.flag_given) {
-        rag_choice = choose_rag_collection(true, rag.flag_value, {});
-    } else if (turn_config.has_value()) {
-        rag_choice = choose_rag_collection(false, {}, turn_config->auto_rag);
-    }
-    // A follow-up is searched as a standalone question, restated by the
-    // utility model when one is set, else the chat's own (26b) -- once, for
-    // the attachments and the collection alike. The chat model is still
-    // asked the question as the user wrote it.
-    std::string query = input;
-    if (rag_choice.active() || (attached != nullptr && attached->retrieves())) {
-        const std::string rewriter =
-            helper_backend(harness.config(), harness::ModelRole::Utility, session.backend);
-        std::optional<agentloop::SideCallScope> said;
-        if (agentloop::has_earlier_turn(session.messages)) {
-            said.emplace(side, "utility",
-                         "rewriting the follow-up into a search query with " + rewriter);
+
+        for (const harness::ChatMessage& message : incoming) {
+            session.messages.push_back(message);
         }
-        const agentloop::QueryRewrite rewrite =
-            agentloop::rewrite_query(harness, rewriter, session.messages, input, {});
-        said.reset();
-        if (rewrite.rewritten) {
-            reporter.on_progress("search query by " + rewriter + ": " + rewrite.query);
-        } else if (!rewrite.note.empty()) {
-            notice(rewrite.note);
+
+        loop_options.model = session.backend;
+        loop_options.cancellation = cancellation;
+        loop_options.temperature = session.params.temperature;
+        loop_options.max_tokens = session.params.max_tokens;
+        // Whether the model thinks first (26i): `/think` or the flag, else the
+        // backend's; `auto` asks the utility model, when one is set.
+        loop_options.thinking =
+            resolve_thinking(session.params.thinking, session.params.thinking_budget,
+                             harness.config(), session.backend, session.params.effort);
+        loop_options.thinking_judge = named_utility(harness.config());
+        // The reasoning as one line, by the utility model, for a surface that
+        // draws it (43); the loop decides whether it can.
+        loop_options.summarize_reasoning = summarize_reasoning;
+        loop_options.reasoning_summary_model = named_utility(harness.config());
+        loop_options.stream_answer = true;
+        // A large tool result is summarised by the utility model, when one is
+        // set, before the chat model reads it (26b).
+        loop_options.summary_model = named_utility(harness.config());
+        // The member calls a turn may make (27f), counted from zero each turn --
+        // with tools or without, since the suite's validation (27g) spends from
+        // the same count: a standing answer check needs no tool.
+        loop_options.member_calls = member_calls;
+        if (tools != nullptr) {
+            loop_options.tools = tools;
+            // The tools each step offers, when there are many (26g): one
+            // selection for the conversation, so a turn can keep the last one's.
+            loop_options.tool_selection = selection;
+            loop_options.ask = ask;
+            loop_options.permission = gate.permission;
+            loop_options.confirm = gate.confirm;
+            // A mode's refusal is said as the mode's (39b): plan and dont-ask.
+            loop_options.refusal = mode_refusal(gate.approvals);
         }
-        query = rewrite.query;
-        loop_options.selection_query = query;
-    } else if (selection != nullptr && selection->active()) {
-        // The tools are ranked for a follow-up restated to stand alone --
-        // by the utility model only when one is set: a request to the chat
-        // model itself every turn would cost more than the ranking saves.
-        if (const std::string utility = named_utility(harness.config());
-            !utility.empty() && agentloop::has_earlier_turn(session.messages)) {
+
+        // Retrieval runs PER TURN, against what the user just asked -- which is the
+        // reason the injected chunks must stay out of history. Turn one's context
+        // left lying in the transcript would still be competing for attention on
+        // turn five, against the chunks that actually answer the new question.
+        //
+        // Which collection: the flag for the whole session, else whatever
+        // `auto_rag` says RIGHT NOW. The config is re-read here rather than at
+        // startup on purpose, and a config that has become unreadable mid-session
+        // costs this turn its auto_rag and says so -- never the turn itself.
+        RagChoice rag_choice;
+        std::optional<harness::Config> turn_config;
+        try {
+            turn_config = harness::load_config(rag.config_path);
+            // The chat's suite, not the file's default: retrieval's embedder and
+            // judge resolve under the suite the chat is running (27d).
+            turn_config->models.default_suite = harness.config().models.default_suite;
+        } catch (const harness::ConfigError& e) {
+            if (!rag.flag_given) {
+                notice(std::string{"auto_rag skipped -- config unreadable: "} + e.what());
+            }
+        }
+        if (rag.flag_given) {
+            rag_choice = choose_rag_collection(true, rag.flag_value, {});
+        } else if (turn_config.has_value()) {
+            rag_choice = choose_rag_collection(false, {}, turn_config->auto_rag);
+        }
+        // A follow-up is searched as a standalone question, restated by the
+        // utility model when one is set, else the chat's own (26b) -- once, for
+        // the attachments and the collection alike. The chat model is still
+        // asked the question as the user wrote it.
+        std::string query = input;
+        if (rag_choice.active() || (attached != nullptr && attached->retrieves())) {
+            const std::string rewriter =
+                helper_backend(harness.config(), harness::ModelRole::Utility, session.backend);
             std::optional<agentloop::SideCallScope> said;
-            said.emplace(side, "utility",
-                         "restating the follow-up to rank the tools, with " + utility);
+            if (agentloop::has_earlier_turn(session.messages)) {
+                said.emplace(side, "utility",
+                             "rewriting the follow-up into a search query with " + rewriter);
+            }
             const agentloop::QueryRewrite rewrite =
-                agentloop::rewrite_query(harness, utility, session.messages, input, {});
+                agentloop::rewrite_query(harness, rewriter, session.messages, input, cancellation);
             said.reset();
             if (rewrite.rewritten) {
-                reporter.on_progress("tools ranked for, by " + utility + ": " + rewrite.query);
-                loop_options.selection_query = rewrite.query;
+                reporter.on_progress("search query by " + rewriter + ": " + rewrite.query);
+            } else if (!rewrite.note.empty()) {
+                notice(rewrite.note);
+            }
+            query = rewrite.query;
+            loop_options.selection_query = query;
+        } else if (selection != nullptr && selection->active()) {
+            // The tools are ranked for a follow-up restated to stand alone --
+            // by the utility model only when one is set: a request to the chat
+            // model itself every turn would cost more than the ranking saves.
+            if (const std::string utility = named_utility(harness.config());
+                !utility.empty() && agentloop::has_earlier_turn(session.messages)) {
+                std::optional<agentloop::SideCallScope> said;
+                said.emplace(side, "utility",
+                             "restating the follow-up to rank the tools, with " + utility);
+                const agentloop::QueryRewrite rewrite = agentloop::rewrite_query(
+                    harness, utility, session.messages, input, cancellation);
+                said.reset();
+                if (rewrite.rewritten) {
+                    reporter.on_progress("tools ranked for, by " + utility + ": " + rewrite.query);
+                    loop_options.selection_query = rewrite.query;
+                }
             }
         }
-    }
-    const agentloop::TurnBudget budget =
-        agentloop::turn_budget(harness, session.backend, session.params.max_tokens);
+        const agentloop::TurnBudget budget =
+            agentloop::turn_budget(harness, session.backend, session.params.max_tokens);
 
-    // The chat's attachments first (26d): an inlined one rides the message
-    // just sent, and the others' excerpts are retrieved -- ahead of a
-    // collection's, which gets what they leave of the share.
-    std::int64_t share_used = 0;
-    // What the turn's retrievals send, in the order sent (52a).
-    std::vector<harness::ExcerptSource> sent;
-    if (attached != nullptr) {
-        ChatAttachments::Turn turn =
-            attached->for_turn(session.messages.size() - 1, query, budget, rag.limit, {}, side);
-        loop_options.inline_attachments = std::move(turn.inlined);
-        if (turn.retrieved.has_value()) {
-            if (turn.retrieved->error.empty() && !turn.retrieved->prefix.empty()) {
-                loop_options.transient_prefix = agentloop::injected_as(
-                    turn.retrieved->prefix, agentloop::InjectedSource::Retrieval);
-                share_used = turn.retrieved->tokens;
-                sent = turn.retrieved->sources;
+        // The chat's attachments first (26d): an inlined one rides the message
+        // just sent, and the others' excerpts are retrieved -- ahead of a
+        // collection's, which gets what they leave of the share.
+        std::int64_t share_used = 0;
+        // What the turn's retrievals send, in the order sent (52a).
+        std::vector<harness::ExcerptSource> sent;
+        if (attached != nullptr) {
+            ChatAttachments::Turn turn = attached->for_turn(session.messages.size() - 1, query,
+                                                            budget, rag.limit, cancellation, side);
+            loop_options.inline_attachments = std::move(turn.inlined);
+            if (turn.retrieved.has_value()) {
+                if (turn.retrieved->error.empty() && !turn.retrieved->prefix.empty()) {
+                    loop_options.transient_prefix = agentloop::injected_as(
+                        turn.retrieved->prefix, agentloop::InjectedSource::Retrieval);
+                    share_used = turn.retrieved->tokens;
+                    sent = turn.retrieved->sources;
+                }
+                notice(describe_attachment_retrieval(*turn.retrieved));
             }
-            notice(describe_attachment_retrieval(*turn.retrieved));
         }
-    }
-    if (rag_choice.active()) {
-        // The session's retriever and rerank SETTINGS, read each turn so
-        // /retriever and /rerank take effect on the next question and a
-        // resumed session continues as it was last set.
-        const harness::Config fallback;
-        const harness::Config& config = turn_config.has_value() ? *turn_config : fallback;
-        const agentloop::RagResult retrieved = retrieve_for_collection(
-            harness, config, rag_choice.collection, query, rag.limit, session.retriever,
-            session.rerank, {}, session.backend, budget, share_used, side);
-        if (retrieved.error.empty() && !retrieved.prefix.empty()) {
-            const std::vector<agentloop::Injected> excerpts =
-                agentloop::injected_as(retrieved.prefix, agentloop::InjectedSource::Retrieval);
-            loop_options.transient_prefix.insert(loop_options.transient_prefix.end(),
-                                                 excerpts.begin(), excerpts.end());
-            share_used += retrieved.tokens;
-            sent.insert(sent.end(), retrieved.sources.begin(), retrieved.sources.end());
+        if (rag_choice.active()) {
+            // The session's retriever and rerank SETTINGS, read each turn so
+            // /retriever and /rerank take effect on the next question and a
+            // resumed session continues as it was last set.
+            const harness::Config fallback;
+            const harness::Config& config = turn_config.has_value() ? *turn_config : fallback;
+            const agentloop::RagResult retrieved = retrieve_for_collection(
+                harness, config, rag_choice.collection, query, rag.limit, session.retriever,
+                session.rerank, cancellation, session.backend, budget, share_used, side);
+            if (retrieved.error.empty() && !retrieved.prefix.empty()) {
+                const std::vector<agentloop::Injected> excerpts =
+                    agentloop::injected_as(retrieved.prefix, agentloop::InjectedSource::Retrieval);
+                loop_options.transient_prefix.insert(loop_options.transient_prefix.end(),
+                                                     excerpts.begin(), excerpts.end());
+                share_used += retrieved.tokens;
+                sent.insert(sent.end(), retrieved.sources.begin(), retrieved.sources.end());
+            }
+            notice(describe_retrieval(rag_choice, retrieved));
         }
-        notice(describe_retrieval(rag_choice, retrieved));
-    }
-    if (!sent.empty()) {
-        reporter.on_sources(sent);
-    }
-    // What earlier chats established, within what the share has left (26l):
-    // transient like the rest, and said, so the user can see why the model
-    // knows it.
-    if (recall != nullptr && recall->active()) {
-        const Recalled recalled =
-            recall->for_turn(query, budget, share_used,
-                             rag_choice.active() ? rag_choice.collection : std::string{}, side);
-        if (!recalled.prefix.empty()) {
-            const std::vector<agentloop::Injected> earlier =
-                agentloop::injected_as(recalled.prefix, agentloop::InjectedSource::Recall);
-            loop_options.transient_prefix.insert(loop_options.transient_prefix.end(),
-                                                 earlier.begin(), earlier.end());
-            reporter.on_recall(recalled.sessions, recalled.decisions);
+        if (!sent.empty()) {
+            reporter.on_sources(sent);
         }
-    }
-    if (tools != nullptr && gate.approvals != nullptr) {
-        // Plan mode's note (39b) rides the turn as the review note does:
-        // Shift+Tab can leave plan mode between turns, and the transcript
-        // must not keep telling the model it is in it.
-        if (const std::string note = plan_note(*gate.approvals); !note.empty()) {
+        // What earlier chats established, within what the share has left (26l):
+        // transient like the rest, and said, so the user can see why the model
+        // knows it.
+        if (recall != nullptr && recall->active()) {
+            const Recalled recalled = recall->for_turn(
+                query, budget, share_used,
+                rag_choice.active() ? rag_choice.collection : std::string{}, cancellation, side);
+            if (!recalled.prefix.empty()) {
+                const std::vector<agentloop::Injected> earlier =
+                    agentloop::injected_as(recalled.prefix, agentloop::InjectedSource::Recall);
+                loop_options.transient_prefix.insert(loop_options.transient_prefix.end(),
+                                                     earlier.begin(), earlier.end());
+                reporter.on_recall(recalled.sessions, recalled.decisions);
+            }
+        }
+        if (tools != nullptr && gate.approvals != nullptr) {
+            // Plan mode's note (39b) rides the turn as the review note does:
+            // Shift+Tab can leave plan mode between turns, and the transcript
+            // must not keep telling the model it is in it.
+            if (const std::string note = plan_note(*gate.approvals); !note.empty()) {
+                loop_options.transient_prefix.insert(
+                    loop_options.transient_prefix.begin(),
+                    agentloop::Injected{.message = harness::ChatMessage::system(note),
+                                        .source = agentloop::InjectedSource::Plan});
+            }
+        }
+        if (!review_note.empty()) {
+            // The review note rides the transient prefix, never the transcript:
+            // `/branch` can change it between turns, and a resumed session gets
+            // whatever ITS flags say rather than a stale note from last time.
             loop_options.transient_prefix.insert(
                 loop_options.transient_prefix.begin(),
-                agentloop::Injected{.message = harness::ChatMessage::system(note),
-                                    .source = agentloop::InjectedSource::Plan});
+                agentloop::Injected{.message = harness::ChatMessage::system(review_note),
+                                    .source = agentloop::InjectedSource::Review});
         }
+        // The session's standing context (41b) heads what the turn injects: the
+        // last the budget would trim, and never in the transcript.
+        std::vector<agentloop::Injected> head;
+        for (const std::string& note : standing) {
+            head.push_back(agentloop::Injected{.message = harness::ChatMessage::system(note),
+                                               .source = agentloop::InjectedSource::Standing});
+        }
+        loop_options.transient_prefix.insert(loop_options.transient_prefix.begin(), head.begin(),
+                                             head.end());
+    } catch (const harness::CancelledError&) {
+        // Stop or Ctrl-C while compaction, a rewrite, an embedding, the
+        // rerank judge or recall runs (57r): each call is abandoned with the
+        // turn's own token, and the turn ends as a cancel in the loop ends
+        // one -- said as a cancel, never as the side call failing.
+        session = before;
+        // The attachments the turn anchored to the message it drops wait for
+        // the next one again: inlined, mapped and seen there, never only
+        // searched from now on.
+        if (attached != nullptr) {
+            attached->abandon_turn();
+        }
+        notice("cancelled");
+        outcome.cancelled = true;
+        logger::save(session);
+        return outcome;
     }
-    if (!review_note.empty()) {
-        // The review note rides the transient prefix, never the transcript:
-        // `/branch` can change it between turns, and a resumed session gets
-        // whatever ITS flags say rather than a stale note from last time.
-        loop_options.transient_prefix.insert(
-            loop_options.transient_prefix.begin(),
-            agentloop::Injected{.message = harness::ChatMessage::system(review_note),
-                                .source = agentloop::InjectedSource::Review});
-    }
-    // The session's standing context (41b) heads what the turn injects: the
-    // last the budget would trim, and never in the transcript.
-    std::vector<agentloop::Injected> head;
-    for (const std::string& note : standing) {
-        head.push_back(agentloop::Injected{.message = harness::ChatMessage::system(note),
-                                           .source = agentloop::InjectedSource::Standing});
-    }
-    loop_options.transient_prefix.insert(loop_options.transient_prefix.begin(), head.begin(),
-                                         head.end());
 
     // The delegate (41e): what a `delegate` call re-enters the loop with --
     // this turn's model, gate, mode and cancellation, its standing context

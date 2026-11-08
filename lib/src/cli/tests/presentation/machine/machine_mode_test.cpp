@@ -3,12 +3,15 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <future>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -23,18 +26,26 @@
 #include <utility>
 #include <vector>
 
+#include "agentloop/embed_func.h"
 #include "agentloop/loop.h"
+#include "agentloop/recall.h"
+#include "agentloop/tool_selection.h"
 #include "backends/llamacpp.h"
 #include "backends/mock.h"
+#include "cli/chat_attachments.h"
+#include "cli/chat_recall.h"
 #include "cli/chat_turn.h"
 #include "contracts/config.h"
 #include "contracts/errors.h"
+#include "contracts/layout.h"
 #include "contracts/provider.h"
+#include "embedstore/store.h"
 #include "harness/harness.h"
 #include "logger/session.h"
 #include "machine/driver_input.h"
 #include "machine/json_reporter.h"
 #include "machine/protocol.h"
+#include "operations/collections.h"
 #include "support/env_guard.h"
 #include "support/fake_llama.h"
 #include "tasks/ledger.h"
@@ -902,6 +913,522 @@ TEST_CASE("a llama.cpp context or decode failure fails its turn, and the session
     CHECK(after.completed);
     REQUIRE(context->decodes.size() > before);
     CHECK(context->decodes[before].position == 0);
+}
+
+namespace {
+
+/// An embedder that answers -- or, while `hold` is set, waits for its call's
+/// token as a hung endpoint does, and throws once it is cancelled (57r).
+class HoldingEmbedder final : public apogee::harness::LLMProvider,
+                              public apogee::harness::EmbeddingCapable {
+public:
+    std::atomic<bool> hold{false};
+    std::atomic<bool> entered{false};
+    std::atomic<bool> saw_cancel{false};
+
+    [[nodiscard]] std::string_view backend_name() const noexcept override {
+        return "embedder";
+    }
+
+    [[nodiscard]] apogee::harness::ChatResponse chat(
+        const apogee::harness::ChatRequest& /*request*/,
+        const apogee::harness::CancellationToken& /*cancellation*/) override {
+        throw apogee::harness::ProviderError("embedder", "an embedder does not chat");
+    }
+
+    [[nodiscard]] apogee::harness::ChatResponse stream_chat(
+        const apogee::harness::ChatRequest& request,
+        const apogee::harness::StreamOptions& options) override {
+        return chat(request, options.cancellation);
+    }
+
+    [[nodiscard]] std::vector<apogee::harness::ModelInfo> list_models(
+        const apogee::harness::CancellationToken& /*cancellation*/) override {
+        return {};
+    }
+
+    [[nodiscard]] std::vector<std::vector<float>> embed(
+        const std::vector<std::string>& inputs,
+        const apogee::harness::CancellationToken& cancellation) override {
+        if (hold) {
+            entered = true;
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+            while (!cancellation.stop_requested() && std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::sleep_for(std::chrono::milliseconds{5});
+            }
+            saw_cancel = cancellation.stop_requested();
+            cancellation.throw_if_cancelled();
+        }
+        return inner_.embed(inputs, cancellation);
+    }
+
+    [[nodiscard]] std::size_t embedding_dimensions() const noexcept override {
+        return inner_.embedding_dimensions();
+    }
+
+    [[nodiscard]] std::string embedding_model_name() const override {
+        return "held-embed";
+    }
+
+    [[nodiscard]] bool embedding_is_metered() const noexcept override {
+        return false;
+    }
+
+private:
+    apogee::backends::MockEmbeddingProvider inner_{"embedder"};
+};
+
+/// A chat turn whose calls before its loop -- compaction, the rewrite, the
+/// embedding, the rerank judge, recall -- can each be held, cancelled while
+/// held, the way a driver's `cancel` reaches it (57r).
+struct HeldTurn {
+    apogee::testing::TempDir home{"machine-held-turn-" + std::to_string(std::random_device{}())};
+    apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
+    std::filesystem::path config_path = home.path() / "config" / "config.yaml";
+    std::unique_ptr<apogee::harness::Harness> harness;
+    std::shared_ptr<apogee::backends::MockProvider> chatty;
+    std::shared_ptr<apogee::backends::MockProvider> util;
+    std::shared_ptr<HoldingEmbedder> embedder = std::make_shared<HoldingEmbedder>();
+    apogee::logger::Session session;
+    apogee::commands::RagSettings rag{.config_path = config_path};
+    std::ostringstream out;
+    JsonReporter reporter{out};
+    std::vector<std::string> notices;
+    /// What the attachments said, when the turn has them.
+    std::vector<std::string> said;
+
+    /// `chatty_extra` is YAML under the chat backend's entry; `util_turns`
+    /// what the utility model -- the compactor, rewriter and judge -- says;
+    /// `chatty_turns` what the chat model answers.
+    HeldTurn(const std::string& chatty_extra, std::vector<apogee::backends::MockTurn> util_turns,
+             std::vector<apogee::backends::MockTurn> chatty_turns = {
+                 apogee::backends::MockTurn{.text = "the answer"}}) {
+        const std::string text =
+            "models:\n  default: chatty\n  default_utility: util\n  default_embedding: "
+            "embedder\nbackends:\n  chatty:\n    type: mock\n" +
+            chatty_extra +
+            "  util:\n    type: mock\n  embedder:\n    type: mock\n    embedding_model: "
+            "held-embed\n";
+        std::filesystem::create_directories(config_path.parent_path());
+        std::ofstream{config_path, std::ios::binary} << text;
+        harness = std::make_unique<apogee::harness::Harness>(
+            apogee::harness::parse_config(text, config_path.string()));
+        apogee::backends::MockProvider::Options answers;
+        answers.backend_name = "chatty";
+        answers.turns = std::move(chatty_turns);
+        chatty = std::make_shared<apogee::backends::MockProvider>(std::move(answers));
+        harness->register_provider("chatty", chatty);
+        apogee::backends::MockProvider::Options helper;
+        helper.backend_name = "util";
+        helper.turns = std::move(util_turns);
+        util = std::make_shared<apogee::backends::MockProvider>(std::move(helper));
+        harness->register_provider("util", util);
+        harness->register_provider("embedder", embedder);
+        harness->use_default_router();
+        session.chat_id = "held-turn";
+        session.backend = "chatty";
+    }
+
+    /// Ingests `chunks` as the collection `name`, its vectors the embedder's.
+    void collection(const std::string& name, const std::vector<std::string>& chunks) const {
+        apogee::embedstore::Store store{apogee::commands::collection_path(name)};
+        store.replace_source("notes.md", chunks, embedder->embed(chunks, {}));
+        store.set_embedding_model(embedder->embedding_model_name(),
+                                  static_cast<std::int64_t>(embedder->embedding_dimensions()));
+    }
+
+    /// The saved conversation, one line per message, and its counts.
+    [[nodiscard]] std::vector<std::string> saved() const {
+        const apogee::logger::Session filed =
+            apogee::logger::load(session.chat_id, apogee::logger::KnownDependencies{}).session;
+        std::vector<std::string> lines;
+        for (const apogee::harness::ChatMessage& message : filed.messages) {
+            lines.push_back(std::string{apogee::harness::to_string(message.role)} + ": " +
+                            message.content.plain_text());
+        }
+        lines.push_back("turns " + std::to_string(filed.turns) + ", compactions " +
+                        std::to_string(filed.compactions));
+        return lines;
+    }
+
+    struct Ended {
+        apogee::commands::ChatTurnResult result;
+        bool reached = false;  // the held call was under way when Stop came
+        bool in_time = false;  // the turn ended within the wait after it
+    };
+
+    /// Runs one turn of `text` on a thread, with a live token cancelled once
+    /// `held` says the side call is under way.
+    Ended cancel_while(const std::string& text, const std::function<bool()>& held,
+                       apogee::commands::ChatRecall* recall = nullptr,
+                       apogee::agentloop::ToolSelection* selection = nullptr,
+                       apogee::commands::ChatAttachments* attached = nullptr) {
+        const apogee::harness::CancellationToken stop =
+            apogee::harness::CancellationToken::create();
+        std::promise<apogee::commands::ChatTurnResult> done;
+        std::future<apogee::commands::ChatTurnResult> ended = done.get_future();
+        std::thread turn{[&]() {
+            try {
+                done.set_value(apogee::commands::run_chat_turn(
+                    *harness, session, text, nullptr, selection, nullptr, {},
+                    apogee::commands::ToolGate{}, reporter,
+                    [this](const std::string& line) { notices.push_back(line); }, rag, {}, attached,
+                    recall, stop));
+            } catch (...) {
+                done.set_exception(std::current_exception());
+            }
+        }};
+        Ended ended_as;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+        while (!held() && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        }
+        ended_as.reached = held();
+        stop.cancel();
+        // Well inside the held call's own bound: a cancel that did not reach
+        // it would leave it holding for seconds more, then answering.
+        ended_as.in_time = ended.wait_for(std::chrono::seconds{3}) == std::future_status::ready;
+        turn.join();
+        ended_as.result = ended.get();
+        return ended_as;
+    }
+
+    /// One turn of `text`, run to its end on this thread.
+    apogee::commands::ChatTurnResult run(const std::string& text,
+                                         apogee::commands::ChatAttachments* attached = nullptr) {
+        return apogee::commands::run_chat_turn(
+            *harness, session, text, nullptr, nullptr, nullptr, {}, apogee::commands::ToolGate{},
+            reporter, [this](const std::string& line) { notices.push_back(line); }, rag, {},
+            attached, nullptr);
+    }
+
+    /// The chat's attachments, as a chat at a terminal keeps them: saved
+    /// with the session, every line they say kept in `said`.
+    [[nodiscard]] std::unique_ptr<apogee::commands::ChatAttachments> attachments() {
+        return std::make_unique<apogee::commands::ChatAttachments>(
+            *harness, session, apogee::commands::ChatAttachments::index_for(session.chat_id),
+            apogee::commands::ChatAttachments::Hooks{
+                .say = [this](const std::string& line, bool) { said.push_back(line); },
+                .progress = {},
+                .confirm_large = {},
+                .save = true,
+                .built_in_graph = apogee::harness::AttachmentGraphMethod::Code});
+    }
+
+    /// Writes `text` to `name` under the home's `work/`.
+    void work_file(const std::string& name, const std::string& text) const {
+        const std::filesystem::path path = home.path() / "work" / name;
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream{path, std::ios::binary} << text;
+    }
+
+    /// The saved session's attachments.
+    [[nodiscard]] std::vector<apogee::logger::Attachment> saved_attachments() const {
+        return apogee::logger::load(session.chat_id, apogee::logger::KnownDependencies{})
+            .session.attachments;
+    }
+
+    /// Whether any message of the chat model's last request holds `needle`.
+    [[nodiscard]] bool asked_with(std::string_view needle) const {
+        const std::vector<apogee::harness::ChatRequest>& asked = chatty->requests();
+        return !asked.empty() &&
+               std::ranges::any_of(
+                   asked.back().messages, [needle](const apogee::harness::ChatMessage& message) {
+                       return message.content.plain_text().find(needle) != std::string::npos;
+                   });
+    }
+
+    /// No notice says a side call failed or degraded: a cancel is a cancel.
+    [[nodiscard]] bool said_only_cancelled() const {
+        if (notices.empty() || notices.back() != "cancelled") {
+            return false;
+        }
+        return std::ranges::none_of(notices, [](const std::string& line) {
+            for (const std::string_view degraded :
+                 {"compaction", "failed", "could not be rewritten", "not a query",
+                  "raw retrieval order", "lexical only", "retrieval unavailable"}) {
+                if (line.find(degraded) != std::string::npos &&
+                    line.find("compacting") == std::string::npos) {
+                    return true;
+                }
+            }
+            return false;
+        });
+    }
+};
+
+}  // namespace
+
+TEST_CASE("a cancel during compaction ends the turn at once, and the session is as it was",
+          "[commands][machine][turns][cancel][57r]") {
+    // The second sweep (57r): compaction was handed no token, so Stop waited
+    // for the whole summary -- minutes on a local model near a full window.
+    HeldTurn turn{"    context_size: 300\n",
+                  {apogee::backends::MockTurn{.text = "never said", .until_cancelled = true}}};
+    turn.session.messages = {apogee::harness::ChatMessage::user("first question"),
+                             apogee::harness::ChatMessage::assistant(std::string(1200, 'a'))};
+    turn.session.turns = 1;
+    apogee::logger::save(turn.session);
+    const std::vector<std::string> before = turn.saved();
+    const apogee::logger::Session in_memory = turn.session;
+    const std::size_t cancelled_before = apogee::backends::MockProvider::holds_cancelled();
+
+    const HeldTurn::Ended ended = turn.cancel_while(
+        "second question", []() { return apogee::backends::MockProvider::calls_held() > 0; });
+    CHECK(ended.reached);
+    CHECK(ended.in_time);
+    CHECK(ended.result.cancelled);
+    CHECK_FALSE(ended.result.completed);
+    CHECK(apogee::backends::MockProvider::holds_cancelled() == cancelled_before + 1);
+    REQUIRE(turn.util->requests().size() == 1);  // the compactor was the call held
+    INFO(turn.notices.front());
+    CHECK(turn.notices.front().find("compacting with util") != std::string::npos);
+    CHECK(turn.said_only_cancelled());
+    CHECK(turn.saved() == before);
+    CHECK(turn.session.messages.size() == in_memory.messages.size());
+    CHECK(turn.session.compactions == in_memory.compactions);
+}
+
+TEST_CASE("a cancel during the follow-up's rewrite ends the turn at once, as it was",
+          "[commands][machine][turns][cancel][rag][57r]") {
+    HeldTurn turn{"", {apogee::backends::MockTurn{.text = "never said", .until_cancelled = true}}};
+    turn.collection("notes", {"Pelicans nest on the coast of Peru."});
+    turn.rag.flag_given = true;
+    turn.rag.flag_value = "notes";
+    turn.session.retriever = "lexical";
+    turn.session.messages = {apogee::harness::ChatMessage::user("tell me about pelicans"),
+                             apogee::harness::ChatMessage::assistant("They are large birds.")};
+    turn.session.turns = 1;
+    apogee::logger::save(turn.session);
+    const std::vector<std::string> before = turn.saved();
+
+    const HeldTurn::Ended ended = turn.cancel_while(
+        "where do they nest?", []() { return apogee::backends::MockProvider::calls_held() > 0; });
+    CHECK(ended.reached);
+    CHECK(ended.in_time);
+    CHECK(ended.result.cancelled);
+    REQUIRE(turn.util->requests().size() == 1);
+    CHECK(turn.util->requests().front().messages.front().content.plain_text().find(
+              "standalone search query") != std::string::npos);
+    CHECK(turn.said_only_cancelled());
+    CHECK(turn.saved() == before);
+}
+
+TEST_CASE("a cancel during the rewrite that ranks the tools ends the turn at once",
+          "[commands][machine][turns][cancel][tool_selection][57r]") {
+    // The turn's other rewrite: no collection, but tools enough to select
+    // from, restated by the utility model for the ranking.
+    HeldTurn turn{"", {apogee::backends::MockTurn{.text = "never said", .until_cancelled = true}}};
+    apogee::agentloop::ToolSelection selection{
+        std::make_shared<apogee::agentloop::ToolRanker>(
+            std::vector<apogee::harness::Tool>{}, std::map<std::string, std::string, std::less<>>{},
+            std::nullopt),
+        apogee::agentloop::kToolSelectionThreshold + 1};
+    REQUIRE(selection.active());
+    turn.session.messages = {apogee::harness::ChatMessage::user("open the report"),
+                             apogee::harness::ChatMessage::assistant("Opened.")};
+    turn.session.turns = 1;
+    apogee::logger::save(turn.session);
+    const std::vector<std::string> before = turn.saved();
+
+    const HeldTurn::Ended ended = turn.cancel_while(
+        "and the second one?", []() { return apogee::backends::MockProvider::calls_held() > 0; },
+        nullptr, &selection);
+    CHECK(ended.reached);
+    CHECK(ended.in_time);
+    CHECK(ended.result.cancelled);
+    REQUIRE(turn.util->requests().size() == 1);
+    CHECK(turn.said_only_cancelled());
+    CHECK(turn.saved() == before);
+}
+
+TEST_CASE("a cancel during the rerank judge ends the turn at once, never in raw order",
+          "[commands][machine][turns][cancel][rag][rerank][57r]") {
+    HeldTurn turn{"", {apogee::backends::MockTurn{.text = "never said", .until_cancelled = true}}};
+    turn.collection(
+        "notes", {"Pelicans nest on the coast of Peru.", "Pelicans nest in colonies on islands."});
+    turn.rag.flag_given = true;
+    turn.rag.flag_value = "notes";
+    turn.session.retriever = "lexical";
+    turn.session.rerank = "util";
+    apogee::logger::save(turn.session);
+    const std::vector<std::string> before = turn.saved();
+
+    const HeldTurn::Ended ended = turn.cancel_while("where do pelicans nest", []() {
+        return apogee::backends::MockProvider::calls_held() > 0;
+    });
+    CHECK(ended.reached);
+    CHECK(ended.in_time);
+    CHECK(ended.result.cancelled);
+    REQUIRE(turn.util->requests().size() == 1);
+    CHECK(turn.util->requests().front().messages.front().content.plain_text().find(
+              "ranking retrieved passages") != std::string::npos);
+    CHECK(turn.said_only_cancelled());
+    CHECK(turn.saved() == before);
+}
+
+TEST_CASE("a cancel during the question's embedding ends the turn at once, never lexical",
+          "[commands][machine][turns][cancel][rag][vector][57r]") {
+    HeldTurn turn{"", {apogee::backends::MockTurn{.text = "unused"}}};
+    turn.collection("notes", {"Pelicans nest on the coast of Peru."});
+    turn.rag.flag_given = true;
+    turn.rag.flag_value = "notes";
+    turn.session.retriever = "vector";
+    apogee::logger::save(turn.session);
+    const std::vector<std::string> before = turn.saved();
+    turn.embedder->hold = true;
+
+    HoldingEmbedder& embedder = *turn.embedder;
+    const HeldTurn::Ended ended = turn.cancel_while(
+        "where do pelicans nest", [&embedder]() { return embedder.entered.load(); });
+    CHECK(ended.reached);
+    CHECK(ended.in_time);
+    CHECK(ended.result.cancelled);
+    CHECK(embedder.saw_cancel);
+    CHECK(turn.said_only_cancelled());
+    CHECK(turn.saved() == before);
+}
+
+TEST_CASE("a cancel during recall ends the turn at once, from either of its searches",
+          "[commands][machine][turns][cancel][recall][57r]") {
+    // Recall's search was handed no token at all, and its knowledge search
+    // an empty one.
+    HeldTurn turn{"", {apogee::backends::MockTurn{.text = "unused"}}};
+    std::string reason;
+    const std::optional<apogee::agentloop::Embedder> embed =
+        apogee::agentloop::resolve_embedder(*turn.harness, turn.harness->config(), {}, reason);
+    REQUIRE(embed.has_value());
+
+    SECTION("an earlier chat's summary") {
+        apogee::agentloop::RecallIndex index{apogee::harness::recall_index_path(), embed};
+        std::string note;
+        REQUIRE(index.put(apogee::agentloop::RecallEntry{.chat_id = "earlier",
+                                                         .title = "Pelicans",
+                                                         .updated_at = "2026-11-01T10:00:00Z",
+                                                         .summary = "Pelicans nest in Peru."},
+                          {}, note));
+    }
+    SECTION("a recorded decision") {
+        turn.collection(turn.harness->config().knowledge.collection(),
+                        {"Decided: pelicans nest in Peru."});
+    }
+    apogee::logger::save(turn.session);
+    const std::vector<std::string> before = turn.saved();
+    turn.embedder->hold = true;
+    apogee::commands::ChatRecall recall{*turn.harness, turn.harness->config(), turn.session, true};
+
+    HoldingEmbedder& embedder = *turn.embedder;
+    const HeldTurn::Ended ended = turn.cancel_while(
+        "where do pelicans nest", [&embedder]() { return embedder.entered.load(); }, &recall);
+    CHECK(ended.reached);
+    CHECK(ended.in_time);
+    CHECK(ended.result.cancelled);
+    CHECK(embedder.saw_cancel);
+    CHECK(turn.said_only_cancelled());
+    CHECK(turn.saved() == before);
+}
+
+TEST_CASE("a cancel after the attachments were anchored leaves them inlined on the next turn",
+          "[commands][machine][turns][cancel][attachments][57r]") {
+    // Found reviewing 57r: the turn anchored the attachment to the message
+    // the cancel then dropped, the session went back without the anchor, and
+    // what waited for the next message stayed used up -- so the file said to
+    // be inlined whole was only searched from then on, and its map never
+    // sent. Here the collection's judge, after the attachments, is held.
+    HeldTurn turn{"    context_size: 7000\n",
+                  {apogee::backends::MockTurn{.text = "never said", .until_cancelled = true}}};
+    turn.collection(
+        "notes", {"Pelicans nest on the coast of Peru.", "Pelicans nest in colonies on islands."});
+    turn.rag.flag_given = true;
+    turn.rag.flag_value = "notes";
+    turn.session.retriever = "lexical";
+    turn.session.rerank = "util";
+    turn.work_file("proj/small.md", "Pelican eggs hatch after a month.\n");
+    turn.work_file("proj/other.md", "Brown pelicans dive for fish.\n");
+    const std::unique_ptr<apogee::commands::ChatAttachments> attached = turn.attachments();
+    REQUIRE(attached->attach("proj", turn.home.path() / "work"));
+    attached->settle();
+    REQUIRE(std::ranges::any_of(turn.said, [](const std::string& line) {
+        return line.find("attached proj: 2 files") != std::string::npos &&
+               line.find("with a map of its folders") != std::string::npos &&
+               line.ends_with("-- inlined whole");
+    }));
+
+    const HeldTurn::Ended ended = turn.cancel_while(
+        "where do pelicans nest", []() { return apogee::backends::MockProvider::calls_held() > 0; },
+        nullptr, nullptr, attached.get());
+    CHECK(ended.reached);
+    CHECK(ended.in_time);
+    CHECK(ended.result.cancelled);
+    REQUIRE(turn.util->requests().size() == 1);  // the judge, after the attachments
+    CHECK(turn.said_only_cancelled());
+    CHECK(turn.session.messages.empty());
+    // Still waiting for the next message, in memory and on disk.
+    CHECK_FALSE(attached->retrieves());
+    REQUIRE(attached->describe().size() == 1);
+    CHECK(attached->describe().front().find(
+              "inlined with your next message, with a map of its folders") != std::string::npos);
+    REQUIRE(turn.saved_attachments().size() == 1);
+    CHECK_FALSE(turn.saved_attachments().front().inline_at.has_value());
+
+    // The next turn, the collection off: the file rides it whole, its map
+    // with it, and nothing of the attachments is searched.
+    turn.rag.flag_given = false;
+    const apogee::commands::ChatTurnResult next =
+        turn.run("and where do they nest?", attached.get());
+    CHECK(next.completed);
+    CHECK(turn.session.attachments.front().inline_at == std::optional<std::size_t>{0});
+    CHECK(turn.session.attachments.front().map_at == std::optional<std::size_t>{0});
+    CHECK(turn.asked_with("Pelican eggs hatch after a month."));
+    CHECK(turn.asked_with("--- map of attachment: proj ---"));
+    REQUIRE(turn.saved_attachments().size() == 1);
+    CHECK(turn.saved_attachments().front().inline_at == std::optional<std::size_t>{0});
+}
+
+TEST_CASE("a compaction a cancel discards is taken back for the attachments, and said",
+          "[commands][machine][turns][cancel][attachments][compaction][57r]") {
+    // The compaction finished and said the attachment was retrieved from now
+    // on; the cancel after it put the session back with the attachment's
+    // inline anchor, so that line is taken back -- once.
+    HeldTurn turn{"    context_size: 300\n",
+                  {apogee::backends::MockTurn{.text = "Pelicans were discussed."}},
+                  {apogee::backends::MockTurn{.text = std::string(1200, 'a')}}};
+    turn.session.params.max_tokens = 40;  // a share of the small window to inline into
+    turn.work_file("small.md", "Pelicans nest in Peru.\n");
+    const std::unique_ptr<apogee::commands::ChatAttachments> attached = turn.attachments();
+    REQUIRE(attached->attach("small.md", turn.home.path() / "work"));
+    attached->settle();
+    REQUIRE(turn.run("first question", attached.get()).completed);
+    REQUIRE(turn.session.attachments.front().inline_at == std::optional<std::size_t>{0});
+    const std::vector<std::string> before = turn.saved();
+
+    // The second turn compacts, then the attachments' search -- the folded
+    // file is retrieved now -- holds on the question's embedding.
+    turn.embedder->hold = true;
+    HoldingEmbedder& embedder = *turn.embedder;
+    const HeldTurn::Ended ended = turn.cancel_while(
+        "second question",
+        [&embedder]() {
+            return embedder.entered.load() || apogee::backends::MockProvider::calls_held() > 0;
+        },
+        nullptr, nullptr, attached.get());
+    CHECK(ended.reached);
+    CHECK(ended.in_time);
+    CHECK(ended.result.cancelled);
+    CHECK(embedder.saw_cancel);
+    INFO(turn.said.back());
+    CHECK(std::ranges::any_of(turn.said, [](const std::string& line) {
+        return line.starts_with("compaction folded the messages the attachments rode");
+    }));
+    CHECK(turn.said.back() ==
+          "the turn's compaction is undone with it -- the attachments are as they were before the "
+          "turn");
+    CHECK(turn.notices.back() == "cancelled");
+    // As the first turn left it: whole, inlined on its message.
+    CHECK(turn.saved() == before);
+    CHECK(turn.session.attachments.front().inline_at == std::optional<std::size_t>{0});
+    CHECK_FALSE(attached->retrieves());
+    CHECK(attached->describe().front().ends_with(", inlined"));
 }
 
 TEST_CASE("the input format parses independently of the output one", "[commands][machine]") {

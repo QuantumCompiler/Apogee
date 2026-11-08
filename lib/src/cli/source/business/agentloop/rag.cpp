@@ -10,6 +10,7 @@
 #include "agentloop/attachments.h"
 #include "agentloop/graph_context.h"
 #include "agentloop/rerank.h"
+#include "contracts/errors.h"
 #include "embedstore/store.h"
 #include "embedstore/vector.h"
 
@@ -182,6 +183,8 @@ RagResult build_rag_prefix(const std::filesystem::path& store_path, const std::s
             result.metadata.push_back(hit.chunk.metadata);
         }
         result.prefix.push_back(harness::ChatMessage::system(render_rag_context(texts)));
+    } catch (const harness::CancelledError&) {
+        throw;  // a stopped turn, never a failed search (57r)
     } catch (const std::exception& e) {
         result.prefix.clear();
         result.chunks = 0;
@@ -217,6 +220,8 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
             facts.lexical_only = stats.lexical_only;
             facts.vector_dims = stats.vector_dims;
             facts.recorded_model = store->embedding_model().model;
+        } catch (const harness::CancelledError&) {
+            throw;  // a stopped turn, never a failed search (57r)
         } catch (const std::exception& e) {
             result.error = e.what();
             return result;
@@ -289,6 +294,10 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
                     fetch);
             }
         }
+    } catch (const harness::CancelledError&) {
+        // A stopped turn is said as a cancel, never as "searched lexical
+        // only" (57r): the embedding was abandoned, not failed.
+        throw;
     } catch (const std::exception& e) {
         if (decision.retriever == Retriever::Lexical) {
             result.error = e.what();
@@ -301,6 +310,8 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
                                ") -- searched lexical only");
         try {
             hits = store->search(turn.question, fetch);
+        } catch (const harness::CancelledError&) {
+            throw;  // a stopped turn, never a failed search (57r)
         } catch (const std::exception& inner) {
             result.error = inner.what();
             return result;
@@ -385,6 +396,8 @@ RagResult retrieve_for_turn(const RagTurn& turn) {
             }
             graph_section = section.text;
             result.graph_entities = section.entities;
+        } catch (const harness::CancelledError&) {
+            throw;  // a stopped turn, never a failed expansion (57r)
         } catch (const std::exception& e) {
             result.notes.push_back(std::string{"graph expansion failed ("} + e.what() +
                                    ") -- the chunks stand alone");

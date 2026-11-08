@@ -145,6 +145,10 @@ Compaction compact_history(const harness::Harness& harness,
     std::string summary;
     try {
         summary = harness.chat(request, cancellation).message.content.plain_text();
+    } catch (const harness::CancelledError&) {
+        // A stopped turn, not a failed compaction (57r): it goes on up, and
+        // the turn ends cancelled rather than "compaction failed".
+        throw;
     } catch (const harness::HarnessError& e) {
         // A failed compaction degrades to a longer prompt, never to a lost
         // conversation: the history is intact, and the caller says why.

@@ -207,6 +207,7 @@ ChatRecall::ChatRecall(const harness::Harness& harness, const harness::Config& c
 
 Recalled ChatRecall::for_turn(const std::string& query, const agentloop::TurnBudget& budget,
                               std::int64_t share_used, std::string_view rag_collection,
+                              const harness::CancellationToken& cancellation,
                               const agentloop::SideCallSink& on_side_call) {
     Recalled out;
     if (!active()) {
@@ -228,6 +229,7 @@ Recalled ChatRecall::for_turn(const std::string& query, const agentloop::TurnBud
         turn.header = std::string{agentloop::kRecallHeader};
         turn.harness = &harness_;
         turn.config = &config_;
+        turn.cancellation = cancellation;
         turn.on_side_call = on_side_call;
         const agentloop::RagResult result = agentloop::retrieve_for_turn(turn);
         if (result.error.empty() && !result.prefix.empty()) {
@@ -257,8 +259,8 @@ Recalled ChatRecall::for_turn(const std::string& query, const agentloop::TurnBud
     if (const std::string knowledge = config_.knowledge.collection();
         left > 0 && knowledge != rag_collection) {
         const agentloop::RagResult records = retrieve_for_collection(
-            harness_, config_, knowledge, query, left, {}, "off", {}, session_.backend, budget,
-            share_used + out.tokens, on_side_call);
+            harness_, config_, knowledge, query, left, {}, "off", cancellation, session_.backend,
+            budget, share_used + out.tokens, on_side_call);
         if (records.error.empty() && !records.prefix.empty()) {
             out.prefix.insert(out.prefix.end(), records.prefix.begin(), records.prefix.end());
             out.decisions = static_cast<int>(records.chunks);

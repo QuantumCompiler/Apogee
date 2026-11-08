@@ -19,6 +19,7 @@
 #include <thread>
 #include <vector>
 
+#include "backends/mock.h"
 #include "backends/model_roster.h"
 #include "cli/chat_history.h"
 #include "cli/chat_session.h"
@@ -508,6 +509,51 @@ TEST_CASE("Ctrl-C stops the turn running and the session goes on", "[cli][tui][s
     chat.until([&chat]() { return has(chat.frame(), "the second answer"); }, "the next turn");
     chat.finish();
     CHECK(chat.failure.empty());
+}
+
+TEST_CASE("Ctrl-C stops a turn while it is still compacting, and the chat is as it was",
+          "[cli][tui][session][cancel][57r]") {
+    // The second sweep (57r): compaction ran on an empty token, so Ctrl-C
+    // waited for the whole summary. Here the summariser holds until its call
+    // is cancelled -- ten seconds, then an answer, if Ctrl-C never reaches
+    // it.
+    const nlohmann::json chatty = {
+        {"turns", {{{"text", std::string(1200, 'a')}}, {{"text", "never said"}}}}};
+    Conversation chat{chatty};
+    std::ofstream{chat.home.home() / "util.json", std::ios::binary} << nlohmann::json{
+        {"turns",
+         {{{"text", "Bird Talk"}},
+          {{"text", "never said"}, {"until_cancelled", true}}}}}.dump();
+    std::ofstream{chat.home.config_path(), std::ios::binary | std::ios::trunc} << nlohmann::json{
+        {"backends",
+         {{"local",
+           {{"type", "mock"},
+            {"model_path", (chat.home.home() / "script.json").generic_string()},
+            {"context_size", 300}}},
+          {"util",
+           {{"type", "mock"}, {"model_path", (chat.home.home() / "util.json").generic_string()}}}}},
+        {"models", {{"default", "local"}, {"default_utility", "util"}}}}.dump();
+    chat.open();
+    chat.send("first question");
+    chat.until([&chat]() { return has(chat.frame(), "aaaaaaaaaa"); }, "the first answer");
+    const std::size_t cancelled_before = apogee::backends::MockProvider::holds_cancelled();
+    chat.send("second question");
+    chat.until([]() { return apogee::backends::MockProvider::calls_held() > 0; },
+               "the compaction held");
+    const auto pressed = std::chrono::steady_clock::now();
+    CHECK(chat.shell.press(Key::named(Key::Name::CtrlC)));
+    CHECK_FALSE(chat.shell.quit_requested());
+    chat.until([&chat]() { return has(chat.frame(), "cancelled"); }, "the turn cancelled");
+    CHECK(std::chrono::steady_clock::now() - pressed < std::chrono::seconds{3});
+    CHECK(apogee::backends::MockProvider::holds_cancelled() == cancelled_before + 1);
+    chat.finish();
+    CHECK(chat.failure.empty());
+    const std::vector<apogee::logger::Session> saved = apogee::logger::list_sessions();
+    REQUIRE(saved.size() == 1);
+    REQUIRE(saved.front().messages.size() == 2);
+    CHECK(saved.front().messages[0].content.plain_text() == "first question");
+    CHECK(saved.front().turns == 1);
+    CHECK(saved.front().compactions == 0);
 }
 
 TEST_CASE("a conversation crosses between the shell and apogee chat with nothing lost",

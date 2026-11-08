@@ -616,7 +616,14 @@ asks of drivers, honoured in the other direction.
 terminal — a host's Stop button. The model call is abandoned, the half-turn is
 rolled back, and the session is left as the last finished turn left it: the
 cancelled line and anything said for it never reach the saved conversation or
-a later request. The turn still ends in one `result` — `finish_reason:
+a later request. Since 57r that holds for every model call the turn makes, not
+only the chat model's: a cancel that arrives while the turn is still
+compacting the conversation, restating a follow-up as a search query,
+embedding the question, waiting on the rerank judge or recalling earlier
+chats stops that call where it is -- never waited for, and never said as the
+call failing (no `compaction failed`, no `using raw retrieval order`, no
+`searched lexical only`) -- and a compaction that finished before the cancel
+is discarded with the rest of the turn. The turn still ends in one `result` — `finish_reason:
 "cancelled"`, the text streamed before the cancel — and the same child answers
 the next `user` line. A `cancel` reaches the turn of the last `user` line sent
 that has not ended, even one sent a moment before that has not started; with

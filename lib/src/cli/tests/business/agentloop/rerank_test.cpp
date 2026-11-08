@@ -2,12 +2,16 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstddef>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "backends/mock.h"
+#include "contracts/cancellation.h"
 #include "contracts/config.h"
+#include "contracts/errors.h"
 #include "harness/harness.h"
 
 /// The reranker's never-fail contract: every failure path returns raw order
@@ -82,6 +86,49 @@ TEST_CASE("the ranking is read out of prose and fences, dropping junk ids",
     CHECK_FALSE(parse_rerank_ids("I think passage 3 is best.", 5).has_value());
     CHECK_FALSE(parse_rerank_ids("[not json", 5).has_value());
     CHECK_FALSE(parse_rerank_ids(R"({"ranking": 1})", 5).has_value());
+}
+
+TEST_CASE("a reply that is not one usable ranking is no verdict, and only [] drops everything",
+          "[agentloop][rerank][parse][57r]") {
+    // The second sweep's probe (57r): `["2", "1"]` and a prose mention of a
+    // passage the judge did not see were read as "none help", and every
+    // chunk was dropped; a reply naming a passage before its ranking was
+    // applied as the one-item ranking it named.
+    using apogee::agentloop::read_rerank_reply;
+
+    // A whole number written as a string is that id.
+    CHECK(parse_rerank_ids(R"(["2","1"])", 2) == std::vector<int>{2, 1});
+    CHECK(parse_rerank_ids(R"([" 2 ", 1])", 2) == std::vector<int>{2, 1});
+
+    // Entries, none of them usable: not a ranking.
+    for (const std::string_view reply :
+         {"[3]", R"(["x"])", "[0, -1]", "[1.5]", R"(["-1", "2x", ""])",
+          R"(["99999999999999999999"])", "[[1, 2]]"}) {
+        INFO(reply);
+        CHECK_FALSE(parse_rerank_ids(reply, 2).has_value());
+        CHECK(read_rerank_reply(reply, 2).problem.find("no usable passage number") !=
+              std::string::npos);
+    }
+
+    // More than one array: which one ranks is a guess, whatever the count.
+    for (const std::size_t candidates : {std::size_t{2}, std::size_t{5}}) {
+        INFO(candidates);
+        const auto reading =
+            read_rerank_reply("Passage [3] is off-topic; the ranking is [2, 1]", candidates);
+        CHECK_FALSE(reading.ids.has_value());
+        CHECK(reading.problem == "returned 2 bracketed lists, so which one ranks is a guess");
+    }
+
+    // The verdict is still a verdict, and a fence holds one array.
+    const auto none = parse_rerank_ids("[]", 2);
+    REQUIRE(none.has_value());
+    CHECK(none->empty());
+    CHECK(parse_rerank_ids("```json\n[2, 1]\n```", 2) == std::vector<int>{2, 1});
+    // Bracketed prose is not an array: the one array after it ranks.
+    CHECK(parse_rerank_ids("[see below] -- my ranking: [2, 1]", 2) == std::vector<int>{2, 1});
+    // No array at all is said as before.
+    CHECK(read_rerank_reply("passage two", 2).problem ==
+          "returned something that was not a ranking");
 }
 
 // --- which judge ------------------------------------------------------------------
@@ -222,4 +269,57 @@ TEST_CASE("the judge never sees more than the cap", "[agentloop][rerank]") {
     const std::string prompt = judge.provider->requests()[0].messages.front().content.plain_text();
     CHECK(prompt.find("[50] p50") != std::string::npos);
     CHECK(prompt.find("[51] p51") == std::string::npos);
+}
+
+TEST_CASE("a reply that is not one usable ranking keeps the chunks in raw order, and says why",
+          "[agentloop][rerank][degrade][57r]") {
+    struct Case {
+        std::string reply{};
+        std::size_t candidates = 0;
+        std::string said{};
+    };
+
+    const std::vector<Case> cases{
+        {R"(["x"])", 2, "no usable passage number"},
+        {"[3]", 2, "no usable passage number"},
+        {"[0, -1]", 2, "no usable passage number"},
+        {"[1.5]", 2, "no usable passage number"},
+        {"Passage [3] is off-topic; the ranking is [2, 1]", 2, "2 bracketed lists"},
+        {"Passage [3] is off-topic; the ranking is [2, 1]", 5, "2 bracketed lists"},
+    };
+    for (const Case& c : cases) {
+        INFO(c.reply << " over " << c.candidates);
+        Judge judge{c.reply};
+        std::vector<SearchHit> hits = five_hits();
+        hits.resize(c.candidates);
+        const RerankOutcome out = rerank(judge.harness, "judge", "q", hits, 2, {});
+        CHECK_FALSE(out.applied);
+        REQUIRE(out.hits.size() == 2);
+        CHECK(out.hits[0].chunk.id == 1);  // raw order, cut to the limit
+        CHECK(out.hits[1].chunk.id == 2);
+        CHECK(out.note.find("rerank via 'judge' ") == 0);
+        CHECK(out.note.find(c.said) != std::string::npos);
+        CHECK(out.note.find("using raw retrieval order") != std::string::npos);
+    }
+
+    // A quoted ranking reorders, and is applied.
+    Judge quoted{R"(["2", "1"])"};
+    std::vector<SearchHit> two = five_hits();
+    two.resize(2);
+    const RerankOutcome reordered = rerank(quoted.harness, "judge", "q", two, 2, {});
+    CHECK(reordered.applied);
+    REQUIRE(reordered.hits.size() == 2);
+    CHECK(reordered.hits[0].chunk.id == 2);
+    CHECK(reordered.note.empty());
+}
+
+TEST_CASE("a cancelled judge is the turn's cancel, never raw order",
+          "[agentloop][rerank][cancel][57r]") {
+    // `rerank` caught every exception as a broken judge, the cancel too: a
+    // stopped turn went on, said as "using raw retrieval order".
+    Judge judge{"[2, 1]"};
+    const apogee::harness::CancellationToken stop = apogee::harness::CancellationToken::create();
+    stop.cancel();
+    CHECK_THROWS_AS(rerank(judge.harness, "judge", "q", five_hits(), 3, stop),
+                    apogee::harness::CancelledError);
 }

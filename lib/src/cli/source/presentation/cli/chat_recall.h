@@ -132,8 +132,11 @@ public:
     /// (`share_used`): past chats first, then recorded decisions from the
     /// knowledge collection -- unless that is the collection `auto_rag`
     /// already searched -- at most `agentloop::kRecallItems` in all.
+    /// `cancellation` is the turn's (57r): it reaches both searches'
+    /// embedding, and a cancel goes on up as `CancelledError`.
     [[nodiscard]] Recalled for_turn(const std::string& query, const agentloop::TurnBudget& budget,
                                     std::int64_t share_used, std::string_view rag_collection,
+                                    const harness::CancellationToken& cancellation,
                                     const agentloop::SideCallSink& on_side_call = {});
 
     /// After each turn: a chat that has become due is marked as this
