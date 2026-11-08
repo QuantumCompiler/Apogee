@@ -59,6 +59,33 @@ public struct InstallConsent: Sendable, Equatable {
     /// It replaces the environment rather than adding to it (the CLI's M19).
     public var rebuilds: Bool { MediaLibrary.rebuilds(arguments) }
 
+    /// Why this install cannot start now, as the place's toast says it, or
+    /// `nil` when it can (GUI 6c): one install into the one environment at
+    /// a time, asked when it starts. `installing` names an install another
+    /// place runs, which every install waits for; `usingEnvironment` a run
+    /// on the environment's Python -- a clip, a composition, a speech,
+    /// training -- which only a rebuild waits for, since it moves the
+    /// environment aside where an install adds to it. Each is the command as
+    /// the children registry labels it. The consent stands, so the sheet's
+    /// button works again once the run has finished.
+    public func waits(installing: String?, usingEnvironment: String?) -> String? {
+        let button = rebuilds ? "Rebuild" : "Install"
+        if let installing {
+            return "\(installing) is already running: press \(button) again once it has finished"
+        }
+        if rebuilds, let usingEnvironment {
+            return "\(usingEnvironment) is using Apogee's Python environment: press Rebuild again once it has finished"
+        }
+        return nil
+    }
+
+    /// What a failed install says in place of asking for this one next --
+    /// the rebuild its failure named -- while `installing`, another place's
+    /// install, runs (GUI 6c): the command, said, and nothing asked.
+    public func heldBack(by installing: String) -> String {
+        "\(installing) is already running: once it has finished, \(command) \(rebuilds ? "rebuilds the environment" : "installs it")"
+    }
+
     /// The line of `text` that names the install, trimmed.
     private static func naming(in text: String) -> String? {
         text.split(whereSeparator: \.isNewline).last { $0.contains("apogee train setup") }

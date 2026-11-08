@@ -76,10 +76,17 @@ public final class ComposeViewModel {
     /// The install the person said yes to, as it runs and, ended, until
     /// dismissed: what the list draws as its card.
     public private(set) var installing: RuntimeInstall?
-    /// Whether an install another place started runs now (the composition
-    /// reads the children registry): a second `train setup` into the one
-    /// environment is never offered beside it.
-    public var installElsewhere: @MainActor () -> Bool = { false }
+    /// The install another place runs now, as the children registry labels
+    /// it (`apogee train setup`, `apogee bootstrap`), or `nil`: a second
+    /// `train setup` into the one environment is never offered beside it
+    /// (4f), nor started -- from a consent raised earlier, or a rebuild
+    /// offer -- while it runs (6c).
+    public var installElsewhere: @MainActor () -> String? = { nil }
+    /// A run on the environment's Python another place runs now -- a clip,
+    /// a composition, a speech, training -- as the registry labels it, or
+    /// `nil`: a rebuild, which moves the environment aside, waits for it
+    /// (GUI 6c).
+    public var usingEnvironment: @MainActor () -> String? = { nil }
 
     private let starter: any JobStarting
     private let pollInterval: Duration
@@ -319,8 +326,8 @@ public final class ComposeViewModel {
             failure = message
             return
         }
-        if installElsewhere() {
-            say?("\(asked.command) is already running: compose again once it has finished")
+        if let running = installElsewhere() {
+            say?("\(running) is already running: compose again once it has finished")
         } else {
             consent = asked
             retryAfterInstall = retry
@@ -345,9 +352,16 @@ public final class ComposeViewModel {
     /// The person said yes: the install, supervised -- its card, Stop -- and
     /// once it is in, the refused composition run again; refused then for
     /// the other runtime, it is asked about in turn. A failed or stopped
-    /// install is said, and runs nothing again.
+    /// install is said, and runs nothing again. While another place installs
+    /// -- or, for a rebuild, runs on the environment's Python -- it starts
+    /// nothing: what runs is said and the consent kept, so Install works
+    /// once it has finished (GUI 6c).
     public func install() {
         guard let consent, let binary, !isRunning else { return }
+        if let waits = consent.waits(installing: installElsewhere(), usingEnvironment: usingEnvironment()) {
+            say?(waits)
+            return
+        }
         self.consent = nil
         let retry = retryAfterInstall
         retryAfterInstall = nil
@@ -370,11 +384,17 @@ public final class ComposeViewModel {
             case .failed:
                 // An install its environment's Python cannot take names the
                 // rebuild that can (the CLI's M19): asked next, the refused
-                // composition kept to follow it.
+                // composition kept to follow it -- only while nothing else
+                // installs; otherwise its command is said, and the failure
+                // stays on the card (GUI 6c).
                 if let next = InstallConsent(afterFailed: consent.arguments, failure: installing.failure, stderr: installing.progress.stderr) {
-                    self.installing = nil
-                    self.consent = next
-                    retryAfterInstall = retry
+                    if let running = installElsewhere() {
+                        say?(next.heldBack(by: running))
+                    } else {
+                        self.installing = nil
+                        self.consent = next
+                        retryAfterInstall = retry
+                    }
                 } else {
                     say?("Not installed: \(installing.failure ?? installing.command)")
                 }

@@ -210,12 +210,60 @@ struct ComposeConsentTests {
         model.dismissInstall()
         #expect(model.installing == nil)
         // Refused again, for the voice set, while another place installs.
-        model.installElsewhere = { true }
+        model.installElsewhere = { "apogee train setup" }
         again.replay(
             stdout: Recorded.media("compose-refused-runtime.jsonl"), stderr: Recorded.media("compose-refused-voice-runtime.err"),
             status: 1, streaming: true)
-        #expect(await eventually { toasts.contain("apogee train setup --with voice is already running") })
+        #expect(await eventually { toasts.contain("apogee train setup is already running: compose again once it has finished") })
         #expect(model.consent == nil)
+    }
+
+    /// GUI 6c: the one-install rule asked when the install starts -- a
+    /// consent raised earlier, the rebuild a failure names, the rebuild
+    /// itself beside a run on the environment.
+    @Test("a consent, a rebuild offer and a rebuild each wait while another install -- or, for the rebuild, a run on the environment -- runs")
+    func installsWaitWhenTheyStart() async throws {
+        let folder = try Recorded.folder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let unfit = "apogee train: the Python environment at /h/venv is on Python 3.14.5, and the 'video' set runs on >=3.10 -- rebuild it on a Python that fits: apogee train setup --rebuild --with video\n"
+        let rebuild = ["train", "setup", "--rebuild", "--yes", "--with", "video"]
+        let first = ScriptedJob()
+        let install = ScriptedJob()
+        let again = ScriptedJob()
+        let installAgain = ScriptedJob()
+        let jobs = ScriptedJobs([first, install, again, installAgain])
+        let toasts = Toasts()
+        let model = await refused(folder, jobs, first, toasts: toasts)
+        // A consent raised while nothing installed; another install started since.
+        model.installElsewhere = { "apogee train setup" }
+        model.install()
+        #expect(jobs.starts.count == 1, "no second train setup beside the first")
+        #expect(model.consent?.arguments == ["train", "setup", "--with", "video"], "kept for later")
+        #expect(toasts.said.last == "apogee train setup is already running: press Install again once it has finished")
+        // It has finished: Install runs; and fails naming the rebuild while the bootstrap runs.
+        model.installElsewhere = { nil }
+        model.install()
+        #expect(jobs.starts.count == 2)
+        model.installElsewhere = { "apogee bootstrap" }
+        install.replay(stdout: "", stderr: unfit, status: 1, streaming: false)
+        #expect(await eventually { !model.isInstalling && toasts.said.last?.hasPrefix("apogee bootstrap is already running") == true })
+        #expect(model.consent == nil, "no rebuild offered beside it")
+        #expect(toasts.said.last == "apogee bootstrap is already running: once it has finished, apogee train setup --rebuild --yes --with video rebuilds the environment")
+        // Later, nothing else installing: the rebuild is asked -- and waits for a speech.
+        model.installElsewhere = { nil }
+        model.compose()
+        again.replay(
+            stdout: Recorded.media("compose-refused-runtime.jsonl"), stderr: Recorded.media("compose-refused-runtime.err"),
+            status: 1, streaming: true)
+        #expect(await eventually { model.consent != nil })
+        model.install()
+        installAgain.replay(stdout: "", stderr: unfit, status: 1, streaming: false)
+        #expect(await eventually { model.consent?.arguments == rebuild })
+        model.usingEnvironment = { "apogee voice say" }
+        model.install()
+        #expect(jobs.starts.count == 4, "nothing moves the environment from under the speech")
+        #expect(model.consent?.arguments == rebuild)
+        #expect(toasts.said.last == "apogee voice say is using Apogee's Python environment: press Rebuild again once it has finished")
     }
 
     @Test("a refusal naming no set to install -- no Python environment at all -- stays the alert, in the CLI's words")

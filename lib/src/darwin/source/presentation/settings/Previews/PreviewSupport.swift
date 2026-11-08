@@ -124,6 +124,29 @@ struct PreviewJobs: JobStarting {
     }
 }
 
+/// A job that has failed as `check --fix` fails while a row still does
+/// (`check.cpp`: it exits as the report passes): exit 1, nothing on stderr
+/// -- the report is its stdout -- so the fold says it in its own words.
+final class PreviewFailedJob: JobRunning {
+    let updates: AsyncStream<JobUpdate>
+
+    init() {
+        let (updates, continuation) = AsyncStream.makeStream(of: JobUpdate.self)
+        self.updates = updates
+        continuation.yield(.ended(JobEnd(exit: ChildExit(reason: .exited, status: 1), stderrTail: BoundedTail(), interrupted: false)))
+        continuation.finish()
+    }
+
+    func stop(grace: Duration) async {}
+}
+
+/// Starts preview jobs, each already failed (GUI 6c's failed fix).
+struct PreviewFailingJobs: JobStarting {
+    func startJob(binary: URL, arguments: [String], streaming: Bool, folder: URL?) -> any JobRunning {
+        PreviewFailedJob()
+    }
+}
+
 /// Where a preview says the binary is; never run.
 let previewBinary = URL(fileURLWithPath: "/Users/someone/.local/bin/apogee")
 #endif

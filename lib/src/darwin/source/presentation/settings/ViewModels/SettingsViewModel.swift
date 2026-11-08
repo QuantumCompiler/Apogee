@@ -172,11 +172,18 @@ public final class SettingsViewModel {
     /// Config values read through `config get`: absent is the default.
     public private(set) var webSearch: String?
     public private(set) var recall: String?
+    /// The change running now, in a few words; a change made meanwhile
+    /// waits its turn (GUI 6c).
     public private(set) var working: String?
     /// A long fix running now: `check --fix`, `bootstrap`.
     public private(set) var fixing: JobProgress?
     public private(set) var failure: String?
     public var say: (@MainActor (String) -> Void)?
+    /// The install another place runs now, as the children registry labels
+    /// it, or `nil`: `bootstrap` runs `train setup`, so it starts only when
+    /// none does -- one install into the one environment at a time (4f,
+    /// 6c). `check --fix` installs nothing and never asks.
+    public var installElsewhere: @MainActor () -> String? = { nil }
     /// Whether the build has the CLI's 52e: `config set` and `chats recall --forget`.
     public var hasTrack52: @MainActor () -> Bool = { false }
     /// Whether the binary has said what it can do -- its vocabulary read at
@@ -210,6 +217,10 @@ public final class SettingsViewModel {
     private let starter: any JobStarting
     private let preferences: Preferences
     private var binaryURL: URL?
+    /// The running fix, for Stop (GUI 6c).
+    private var fixJob: (any JobRunning)?
+    /// The change made last: the next one waits for it (GUI 6c).
+    private var lastChange: Task<Void, Never>?
 
     public static let keyProviders = ["anthropic", "openai", "google"]
 
@@ -469,10 +480,13 @@ public final class SettingsViewModel {
         await readCheck(binary)
     }
 
-    /// A config value, or `nil` when the config does not set it (the default).
+    /// A config value, or `nil` when the config does not set it (the
+    /// default): `config get` of an unset key prints an empty line and exits
+    /// 0, so an empty answer is unset (GUI 6c), as a refusal is.
     private func value(_ binary: URL, _ key: String) async -> String? {
         if case .done(let text) = await runner.command(binary: binary, ["config", "get", key]) {
-            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return value.isEmpty ? nil : value
         }
         return nil
     }
@@ -530,10 +544,19 @@ public final class SettingsViewModel {
         await change(binary, ["config", "set-default-video", pipeline ?? "off"], done: nil)
     }
 
-    /// A plain config key (52e's `config set`): the web search address, recall.
+    /// A plain config key (52e's `config set`): the web search address,
+    /// recall. An empty value sets nothing (GUI 6c): `config set <key> ''`
+    /// would clear the key with no word, and clearing stays a console
+    /// command.
     public func setConfig(_ key: String, _ value: String) async {
-        guard let binary = binaryURL, hasTrack52() else { return }
+        guard let binary = binaryURL, hasTrack52(), Self.canSet(value) else { return }
         await change(binary, ["config", "set", key, value], done: "\(key) is \(value)")
+    }
+
+    /// Whether `value` can be set: anything but empty or blank -- what the
+    /// web search address's Set is offered for (GUI 6c).
+    public static func canSet(_ value: String) -> Bool {
+        !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// Forget's question: how many summaries go and which, named, where the
@@ -599,9 +622,11 @@ public final class SettingsViewModel {
     /// and every line kept where it said more (`registered`); `config
     /// add-backend`'s output, its last line the toast and every line kept
     /// where it says a role the CLI moved (the CLI's M33).
+    /// A registration made while a change runs waits its turn, as a change
+    /// does (GUI 6c).
     public func register(_ provider: Provider, model: String = "") async {
         registering = nil
-        guard let binary = binaryURL, provider.registers, canRegister(provider, model: model), working == nil else { return }
+        guard let binary = binaryURL, provider.registers, canRegister(provider, model: model) else { return }
         registered = nil
         let arguments = registration(for: provider, model: model)
         let title = "Registered \(provider.provider)"
@@ -611,6 +636,11 @@ public final class SettingsViewModel {
             }
             return
         }
+        await inTurn { [weak self] in await self?.registerOne(binary, arguments, title: title) }
+    }
+
+    /// `providers register <id>`, read as its document, the pane read back.
+    private func registerOne(_ binary: URL, _ arguments: [String], title: String) async {
         working = arguments.prefix(3).joined(separator: " ")
         let outcome = await runner.read(binary: binary, arguments)
         working = nil
@@ -632,10 +662,29 @@ public final class SettingsViewModel {
     }
 
     /// Runs a change and reads every pane back, its result said; what it
-    /// printed, when it succeeded.
+    /// printed, when it succeeded. A change made while another runs is
+    /// queued and made once the one before it has ended, with its own toast
+    /// and read-back -- never dropped (GUI 6c): a permission set straight
+    /// after another is set too.
     @discardableResult
     private func change(_ binary: URL, _ arguments: [String], input: Data? = nil, done: String?) async -> String? {
-        guard working == nil else { return nil }
+        await inTurn { [weak self] in await self?.made(binary, arguments, input: input, done: done) ?? nil }
+    }
+
+    /// Runs `body` once every change made before it has ended: the changes,
+    /// one after another, in the order they were made (GUI 6c).
+    private func inTurn<Result: Sendable>(_ body: @escaping @MainActor () async -> Result) async -> Result {
+        let before = lastChange
+        let turn = Task { @MainActor in
+            await before?.value
+            return await body()
+        }
+        lastChange = Task { _ = await turn.value }
+        return await turn.value
+    }
+
+    /// One change, made: `change`'s, in its turn.
+    private func made(_ binary: URL, _ arguments: [String], input: Data?, done: String?) async -> String? {
         working = arguments.prefix(3).joined(separator: " ")
         let outcome = await runner.command(binary: binary, arguments, input: input)
         working = nil
@@ -653,18 +702,50 @@ public final class SettingsViewModel {
         return nil
     }
 
-    /// `check --fix` or `bootstrap`: what a remedy says to run, supervised.
+    /// `check --fix` or `bootstrap`: what a remedy says to run, supervised
+    /// -- its job kept for Stop -- and Health read again. Every end gives
+    /// both buttons back (GUI 6c): done is said finished, a stop stopped,
+    /// and a failure failed, in the CLI's words, which stay as the red line
+    /// until the next read. `bootstrap` runs `train setup`, so while another
+    /// place installs it starts nothing and says what runs.
     public func fix(_ arguments: [String]) {
         guard let binary = binaryURL, fixing == nil else { return }
+        let command = arguments.joined(separator: " ")
+        if arguments.first == "bootstrap", let running = installElsewhere() {
+            say?("\(running) is already running: run \(command) again once it has finished")
+            return
+        }
         fixing = JobProgress()
         let job = starter.startJob(binary: binary, arguments: arguments, streaming: false)
+        fixJob = job
         Task {
             for await update in job.updates { fixing?.apply(update) }
             let status = fixing?.status
+            fixJob = nil
             await refresh()
-            if case .failed(let message)? = status { failure = message } else { fixing = nil }
-            say?(status == .done ? "\(arguments.joined(separator: " ")) finished" : "\(arguments.joined(separator: " ")) stopped")
+            fixing = nil
+            switch status {
+            case .done?:
+                say?("\(command) finished")
+            case .failed(let message)?:
+                failure = message
+                say?("\(command) failed: \(message)")
+            case .stopped?:
+                say?("\(command) stopped")
+            case .running?, nil:
+                say?("\(command) ended without saying how")
+            }
         }
+    }
+
+    /// Whether the running fix can be stopped: it has not ended yet.
+    public var canStopFix: Bool { fixJob != nil }
+
+    /// Stops the running fix as Ctrl-C does, given the media install cards'
+    /// grace before it is terminated (GUI 6c); its end gives the buttons
+    /// back.
+    public func stopFix() async {
+        await fixJob?.stop(grace: .seconds(10))
     }
 
     public func dismissFailure() {

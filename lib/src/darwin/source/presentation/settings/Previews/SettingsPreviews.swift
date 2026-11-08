@@ -1,4 +1,5 @@
 #if DEBUG
+import BusinessJobs
 import BusinessReads
 import DataPreferences
 import Foundation
@@ -24,6 +25,24 @@ enum SettingsPreview {
             commands: [(["config", "get", "permissions"], permissions), (["chats", "recall"], SettingsDocuments.chatsRecall)],
             refused: [["config", "get"]])
     }
+
+    /// The panes' reads on a fresh config, as the binary answers an unset
+    /// key (GUI 6c; the build tree's `apogee` 0.2.0, 07e26c6d, over a
+    /// sandbox `APOGEE_HOME` after `config init`, 2026-11-08): `config get
+    /// tools.search.url` prints an empty line and exits 0.
+    static let unsetAddressRunner = PreviewRunner(
+        reads: [
+            (["models", "list"], SettingsDocuments.modelsList),
+            (["auth", "list"], authList),
+            (["providers", "scan"], providersScan),
+            (["check"], check),
+        ],
+        commands: [
+            (["config", "get", "permissions"], permissions),
+            (["config", "get", "tools.search.url"], "\n"),
+            (["chats", "recall"], SettingsDocuments.chatsRecall),
+        ],
+        refused: [["config", "get"]])
 
     /// The branch's binary over GUI 4k's sandbox: a claude-cli, an anthropic
     /// and an openai entry -- the anthropic one consenting to both of its
@@ -183,15 +202,16 @@ enum SettingsPreview {
     /// `known` when the binary has said what it can do (its vocabulary read
     /// at launch, GUI 4k), `childPath` what the app's resolver answers,
     /// `override` the binary the person pointed the app at, `check` the
-    /// document `check` answers with, and `runner` the binary's answers.
+    /// document `check` answers with, `runner` the binary's answers, and
+    /// `jobs` how a fix runs -- still running, unless given another.
     static func settings(
         _ pane: SettingsViewModel.Pane = .general, track52: Bool = false, known: Bool = true,
         childPath: ShellPath.Resolution = shellPath, override: String? = nil, check: String = check,
-        runner: (any CommandRunning)? = nil, vocabulary: String? = nil
+        runner: (any CommandRunning)? = nil, vocabulary: String? = nil, jobs: any JobStarting = PreviewJobs()
     ) -> SettingsViewModel {
         let preferences = Preferences(store: MemoryStore())
         preferences.binaryOverride = override.map { URL(fileURLWithPath: $0) }
-        let model = SettingsViewModel(runner: runner ?? Self.runner(check: check) as any CommandRunning, starter: PreviewJobs(), preferences: preferences)
+        let model = SettingsViewModel(runner: runner ?? Self.runner(check: check) as any CommandRunning, starter: jobs, preferences: preferences)
         model.pane = pane
         model.hasTrack52 = { track52 }
         model.capabilitiesKnown = { known }

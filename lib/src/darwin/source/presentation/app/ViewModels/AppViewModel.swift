@@ -170,13 +170,21 @@ final class AppViewModel {
         voice.say = { [weak shell] text in shell?.say(text) }
         voice.streams = { [weak sessions] in sessions?.streamsJobs ?? false }
         // One install into the one environment at a time: the registry says
-        // whether any place -- or Settings' bootstrap -- runs one now (4f).
-        let installElsewhere: @MainActor () -> Bool = { AppViewModel.installing(in: children) }
+        // whether any place -- or Settings' bootstrap -- runs one now (4f),
+        // asked when an install, a rebuild or the bootstrap starts (6c); and
+        // whether a run uses the environment's Python, which a rebuild waits
+        // for (6c).
+        let installElsewhere: @MainActor () -> String? = { AppViewModel.installing(in: children) }
+        let usingEnvironment: @MainActor () -> String? = { AppViewModel.usingEnvironment(in: children) }
         video.installElsewhere = installElsewhere
         compose.installElsewhere = installElsewhere
         voice.installElsewhere = installElsewhere
+        video.usingEnvironment = usingEnvironment
+        compose.usingEnvironment = usingEnvironment
+        voice.usingEnvironment = usingEnvironment
         let settings = SettingsViewModel(runner: runner ?? ReadRunner(), starter: jobs, preferences: preferences)
         settings.say = { [weak shell] text in shell?.say(text) }
+        settings.installElsewhere = installElsewhere
         settings.hasTrack52 = { [weak sessions] in sessions?.hasTrack52 ?? false }
         // Whether what recall holds is asked as its listing (the CLI's M31):
         // the vocabulary read at launch says (GUI M15).
@@ -280,11 +288,38 @@ final class AppViewModel {
         sessions.binaryAdopted = { [weak self] _ in await self?.connectPlaces() }
     }
 
-    /// Whether `registry` holds a run that installs into Apogee's Python
-    /// environment: a `train setup` -- a media place's consented install,
-    /// one typed in the console -- or the bootstrap, which runs them.
-    static func installing(in registry: ChildRegistry) -> Bool {
-        registry.children(.job).contains { $0.label.hasPrefix("apogee train setup") || $0.label.hasPrefix("apogee bootstrap") }
+    /// The run in `registry` that installs into Apogee's Python environment,
+    /// as the registry labels it (`apogee train setup`), or `nil` when none
+    /// does: a `train setup` -- a media place's consented install or
+    /// rebuild, one typed in the console -- or the bootstrap, which runs
+    /// them. What an install, a rebuild and Settings' bootstrap ask when
+    /// they start (4f, 6c).
+    static func installing(in registry: ChildRegistry) -> String? {
+        first(of: installs, in: registry)
+    }
+
+    /// The run in `registry` that uses the environment's Python, as the
+    /// registry labels it, or `nil` when none does: a clip, a composition, a
+    /// speech or anything of training -- what a rebuild, which moves the
+    /// environment aside, waits for (GUI 6c). A plain install adds to the
+    /// environment and does not wait for them.
+    static func usingEnvironment(in registry: ChildRegistry) -> String? {
+        first(of: environmentRuns, in: registry)
+    }
+
+    /// The commands that install into the environment.
+    static let installs = ["apogee train setup", "apogee bootstrap"]
+
+    /// The commands that run on the environment's Python.
+    static let environmentRuns = ["apogee video generate", "apogee video compose", "apogee voice say", "apogee train"]
+
+    /// The label of the first job in `registry` running one of `commands`
+    /// -- the command itself, or it and more words -- in the order they
+    /// started.
+    private static func first(of commands: [String], in registry: ChildRegistry) -> String? {
+        registry.children(.job).first { child in
+            commands.contains { child.label == $0 || child.label.hasPrefix($0 + " ") }
+        }?.label
     }
 
     /// The application's own composition. The person's login shell is asked

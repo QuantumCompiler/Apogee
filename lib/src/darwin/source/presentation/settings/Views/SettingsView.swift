@@ -269,8 +269,15 @@ struct BackendsPane: View {
                 Button("Install runtimes and register providers (bootstrap)") { model.fix(["bootstrap"]) }
             }
             .disabled(model.fixing != nil)
+            // The running fix's busy line, and Stop as the media install
+            // cards stop theirs (GUI 6c); every end gives both buttons back.
             if let fixing = model.fixing {
-                Text(fixing.busy ?? fixing.notices.last ?? "working").font(.apogeeMeta).foregroundStyle(Palette.textSecondary)
+                HStack(spacing: Spacing.s) {
+                    Text(fixing.busy ?? fixing.notices.last ?? "working").font(.apogeeMeta).foregroundStyle(Palette.textSecondary)
+                    Button("Stop") { Task { await model.stopFix() } }
+                        .controlSize(.small)
+                        .disabled(!model.canStopFix)
+                }
             }
         }
     }
@@ -477,7 +484,10 @@ struct PermissionsPane: View {
             } else {
                 HStack {
                     TextField("http://localhost:8888", text: $webSearch).textFieldStyle(.roundedBorder)
+                    // Never an empty address (GUI 6c): clearing it stays a
+                    // console command.
                     Button("Set") { Task { await model.setConfig("tools.search.url", webSearch) } }
+                        .disabled(!SettingsViewModel.canSet(webSearch))
                 }
             }
         }
@@ -632,11 +642,21 @@ struct RecalledList: View {
     .task { await SettingsPreview.read(model) }
 }
 
-#Preview("Backends: check --fix running") {
+#Preview("Backends: check --fix running, with Stop") {
     let model = SettingsPreview.settings(.backends)
     VStack(alignment: .leading, spacing: Spacing.xl) { BackendsPane(model: model) }
         .padding(Spacing.xl)
         .frame(width: 680)
+        .task {
+            await SettingsPreview.read(model)
+            model.fix(["check", "--fix"])
+        }
+}
+
+#Preview("Backends after a failed check --fix: both buttons back, the CLI's words in red") {
+    let model = SettingsPreview.settings(.backends, jobs: PreviewFailingJobs())
+    SettingsView(model: model)
+        .frame(width: 900, height: 900)
         .task {
             await SettingsPreview.read(model)
             model.fix(["check", "--fix"])
@@ -807,6 +827,14 @@ struct RecalledList: View {
 
 #Preview("Permissions, before 52e: set in the config file") {
     let model = SettingsPreview.settings(.permissions)
+    VStack(alignment: .leading, spacing: Spacing.xl) { PermissionsPane(model: model) }
+        .padding(Spacing.xl)
+        .frame(width: 680)
+        .task { await SettingsPreview.read(model) }
+}
+
+#Preview("Permissions: no web search address yet, said not set, Set off while the field is empty") {
+    let model = SettingsPreview.settings(.permissions, track52: true, runner: SettingsPreview.unsetAddressRunner)
     VStack(alignment: .leading, spacing: Spacing.xl) { PermissionsPane(model: model) }
         .padding(Spacing.xl)
         .frame(width: 680)

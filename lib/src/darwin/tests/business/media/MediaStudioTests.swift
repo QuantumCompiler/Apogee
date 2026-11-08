@@ -98,6 +98,28 @@ struct InstallConsentErrorTests {
         #expect(InstallConsent(afterFailed: install, failure: pip, stderr: pip) == nil)
         #expect(InstallConsent(afterFailed: install, failure: nil, stderr: "") == nil)
     }
+
+    /// GUI 6c: one install into the one environment at a time, asked when
+    /// it starts -- every install waits for another place's install, and a
+    /// rebuild also for a run on the environment's Python.
+    @Test("an install waits for another install; a rebuild for that and for a run on the environment; each said by the command running")
+    func waitsWhenItStarts() {
+        let install = InstallConsent(arguments: ["train", "setup", "--with", "voice"], said: "")
+        let rebuild = InstallConsent(arguments: ["train", "setup", "--rebuild", "--yes", "--with", "voice"], said: "")
+        #expect(install.waits(installing: nil, usingEnvironment: nil) == nil)
+        #expect(rebuild.waits(installing: nil, usingEnvironment: nil) == nil)
+        #expect(install.waits(installing: "apogee train setup", usingEnvironment: nil)
+            == "apogee train setup is already running: press Install again once it has finished")
+        #expect(rebuild.waits(installing: "apogee bootstrap", usingEnvironment: "apogee video generate")
+            == "apogee bootstrap is already running: press Rebuild again once it has finished", "the install is named first")
+        #expect(install.waits(installing: nil, usingEnvironment: "apogee video generate") == nil, "an install adds to the environment; it does not move it")
+        #expect(rebuild.waits(installing: nil, usingEnvironment: "apogee video generate")
+            == "apogee video generate is using Apogee's Python environment: press Rebuild again once it has finished")
+        #expect(rebuild.heldBack(by: "apogee train setup")
+            == "apogee train setup is already running: once it has finished, apogee train setup --rebuild --yes --with voice rebuilds the environment")
+        #expect(install.heldBack(by: "apogee bootstrap")
+            == "apogee bootstrap is already running: once it has finished, apogee train setup --with voice installs it")
+    }
 }
 
 @Suite("CaptionsAbility")

@@ -239,4 +239,109 @@ struct SettingsViewModelTests {
             model.childPathOrigin
                 == "Your login shell, /bin/zsh, didn't answer within 5 seconds, so this is ~/.local/bin, /opt/homebrew/bin and /usr/local/bin, then the PATH the app started with.")
     }
+
+    // MARK: - GUI 6c: every change made or said; an unset key read as unset
+
+    /// The second sweep's finding (2026-10-31): a change made while another
+    /// ran returned at `guard working == nil`, with no word -- a
+    /// `write_file: deny` lost after another tool's deny.
+    @Test("a change made while another runs is queued: both reach the binary in order, and both are said")
+    func changesQueue() async {
+        let runner = HoldingRunner(holding: ["config", "set-permission", "run_command", "deny"])
+        let model = SettingsViewModel(runner: runner, starter: NoJobs(), preferences: Preferences(store: MemoryStore()))
+        let toasts = SettingsToasts()
+        model.say = { toasts.say($0) }
+        await model.connect(binary: Self.binary, version: nil)
+        let first = Task { await model.setPermission("run_command", "deny") }
+        #expect(await settingsEventually { runner.held })
+        #expect(model.working == "config set-permission run_command")
+        let second = Task { await model.setPermission("write_file", "deny") }
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(!runner.changes.contains("config set-permission write_file deny"), "it waits its turn")
+        runner.release()
+        await first.value
+        await second.value
+        #expect(runner.changes == ["config set-permission run_command deny", "config set-permission write_file deny"])
+        #expect(toasts.said == ["run_command: deny", "write_file: deny"])
+        #expect(model.working == nil)
+    }
+
+    @Test("an unset key, which config get prints as an empty line and exit 0, reads as not set; a set one as its value")
+    func unsetReadsAsUnset() async {
+        let runner = HoldingRunner(holding: nil)
+        runner.answers["config get tools.search.url"] = "\n"
+        let model = SettingsViewModel(runner: runner, starter: NoJobs(), preferences: Preferences(store: MemoryStore()))
+        await model.connect(binary: Self.binary, version: nil)
+        #expect(model.webSearch == nil)
+        runner.answers["config get tools.search.url"] = "http://localhost:8888\n"
+        await model.refresh()
+        #expect(model.webSearch == "http://localhost:8888")
+    }
+
+    @Test("Set runs nothing for an empty or blank value; anything else is set")
+    func emptySetRunsNothing() async {
+        let runner = runner()
+        let model = SettingsViewModel(runner: runner, starter: NoJobs(), preferences: Preferences(store: MemoryStore()))
+        model.hasTrack52 = { true }
+        await model.connect(binary: Self.binary, version: nil)
+        await model.setConfig("tools.search.url", "")
+        await model.setConfig("tools.search.url", "  \n")
+        #expect(!runner.calls.contains { $0.hasPrefix("run config set ") })
+        #expect(!SettingsViewModel.canSet("") && !SettingsViewModel.canSet(" \t"))
+        #expect(SettingsViewModel.canSet("http://localhost:8888"))
+        await model.setConfig("tools.search.url", "http://localhost:8888")
+        #expect(runner.calls.contains("run config set tools.search.url http://localhost:8888"))
+    }
+}
+
+/// A runner that holds one command until released -- a change slow to
+/// exit -- answering `config get` keys from `answers`, an unknown key as
+/// refused; every change it ran recorded in order.
+final class HoldingRunner: CommandRunning, @unchecked Sendable {
+    private let holding: [String]?
+    private let state = Mutex<(held: Bool, waiter: CheckedContinuation<Void, Never>?, changes: [String])>((false, nil, []))
+    private let answered = Mutex<[String: String]>(["config get permissions": "run_command: ask\nwrite_file: allow\n"])
+
+    init(holding: [String]?) {
+        self.holding = holding
+    }
+
+    var answers: [String: String] {
+        get { answered.withLock { $0 } }
+        set { answered.withLock { $0 = newValue } }
+    }
+
+    /// Whether the held command has started and waits.
+    var held: Bool { state.withLock { $0.held } }
+    var changes: [String] { state.withLock { $0.changes } }
+
+    func release() {
+        let waiter = state.withLock { state in
+            defer { state.waiter = nil }
+            return state.waiter
+        }
+        waiter?.resume()
+    }
+
+    func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
+        .couldNotStart("no scripted read")
+    }
+
+    func command(binary: URL, _ arguments: [String]) async -> CommandOutcome {
+        let line = arguments.joined(separator: " ")
+        if arguments.starts(with: ["config", "get"]) {
+            if let answer = answers[line] { return .done(stdout: answer) }
+            return .failed(exit: ChildExit(reason: .exited, status: 1), stderrTail: BoundedTail())
+        }
+        state.withLock { $0.changes.append(line) }
+        if arguments == holding {
+            await withCheckedContinuation { continuation in
+                state.withLock { state in
+                    state.held = true
+                    state.waiter = continuation
+                }
+            }
+        }
+        return .done(stdout: "\(line)\n")
+    }
 }
