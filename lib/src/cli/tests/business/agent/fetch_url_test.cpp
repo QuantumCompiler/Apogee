@@ -193,6 +193,19 @@ TEST_CASE("redirects that go nowhere fetch_url can follow are refused", "[agent]
     CHECK(web.requested.size() == 2 + 11);
 }
 
+TEST_CASE("a redirect to a fragment points back at its page, never its directory (57v)",
+          "[agent][fetch]") {
+    Web web;
+    Gate gate{{"a.example"}, true, {}};
+    web.pages["https://a.example/a/b.html"] = redirect("#top");
+    web.pages["https://a.example/a/"] = page("<p>the directory's page</p>");
+    const ToolOutcome outcome = fetch(web, gate, "https://a.example/a/b.html");
+    CHECK(outcome.is_error);
+    CHECK(contains(outcome.content, "redirected more than 10 times"));
+    CHECK_FALSE(contains(outcome.content, "the directory's page"));
+    CHECK(web.requested == std::vector<std::string>(11, "https://a.example/a/b.html"));
+}
+
 TEST_CASE("a URL the gate cannot read is refused before anything is sent", "[agent][fetch][gate]") {
     Web web;
     Gate gate;
@@ -245,6 +258,10 @@ TEST_CASE("redirect locations resolve against the page they came from", "[agent]
     CHECK(to("/root") == "https://example.com:8443/root");
     CHECK(to("sibling") == "https://example.com:8443/docs/sibling");
     CHECK(to("?y=2") == "https://example.com:8443/docs/page?y=2");
+    // A fragment alone is the page itself, its path and query kept (RFC 3986
+    // 5.2.2; 57v), never its directory.
+    CHECK(to("#frag") == "https://example.com:8443/docs/page?x=1");
+    CHECK(to("#a:b") == "https://example.com:8443/docs/page?x=1");
     CHECK(to("javascript:alert(1)") == "(refused)");
     CHECK(to("mailto:a@b.example") == "(refused)");
     CHECK(to("") == "(refused)");
@@ -312,6 +329,18 @@ TEST_CASE("a page reads as its content under a header naming where it came from"
     const ToolOutcome moved = fetch(web, gate, "https://old.test/");
     CHECK(moved.content.starts_with(
         "URL: https://old.test/moved (redirected from https://old.test/)\n\nmoved text"));
+}
+
+TEST_CASE("a page whose <base href> is a fragment keeps its links where they were (57v)",
+          "[agent][fetch][readable]") {
+    const ToolOutcome outcome =
+        read_page(typed("<html><head><base href=\"#x\"></head><body><p><a href=\"c.html\">c</a> "
+                        "<a href=\"?page=2\">next</a></p></body></html>",
+                        "text/html"),
+                  R"({"url":"https://site.test/dir/page.html"})");
+    REQUIRE_FALSE(outcome.is_error);
+    CHECK(contains(outcome.content, "[c](https://site.test/dir/c.html)"));
+    CHECK(contains(outcome.content, "[next](https://site.test/dir/page.html?page=2)"));
 }
 
 TEST_CASE("text passes through, and anything that is not a page is refused by name",

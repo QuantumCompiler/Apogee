@@ -97,6 +97,10 @@ constexpr std::array<std::string_view, 96> kLatin1Entities{
     "ntilde", "ograve", "oacute", "ocirc",  "otilde", "ouml",   "divide", "oslash", "ugrave",
     "uacute", "ucirc",  "uuml",   "yacute", "thorn",  "yuml"};
 
+/// How far after its `&` a reference's `;` may be: no name above, and no
+/// numeric reference worth reading, is longer.
+constexpr std::size_t kMaxReference = 12;
+
 /// `text` with its character references decoded: the named ones above,
 /// and every numeric one. An unknown name stays as written; soft hyphens
 /// and zero-width joiners go, since they are layout, not text.
@@ -108,11 +112,14 @@ std::string decode_entities(std::string_view text) {
             out += text[i++];
             continue;
         }
-        const std::size_t semicolon = text.find(';', i + 1);
-        if (semicolon == std::string_view::npos || semicolon - i > 12) {
+        // The `;` is looked for only where it may be (57v): a search to the
+        // end for every `&` made a run of bare ones quadratic.
+        const std::size_t after = text.substr(i + 1, kMaxReference).find(';');
+        if (after == std::string_view::npos) {
             out += text[i++];
             continue;
         }
+        const std::size_t semicolon = i + 1 + after;
         const std::string_view name = text.substr(i + 1, semicolon - i - 1);
         if (name.size() > 1 && name[0] == '#') {
             std::uint32_t code = 0;
@@ -215,6 +222,25 @@ constexpr std::array<std::string_view, 30> kClosesParagraph{
     "h5",         "h6",      "header",  "hr",         "main",    "menu", "nav", "ol",
     "p",          "pre",     "section", "table",      "ul",      "li"};
 
+/// What a link start tag looks back no further than for an open link (57v):
+/// every element the HTML parser counts as special that can be open here --
+/// a block, a list and its items, a heading, a table and its parts, a form
+/// control, an embedded object -- and the foreign `svg` and `math`. Between
+/// a link and a later one there is then nothing but phrasing (`span`, `b`,
+/// `code`...), where a browser's parser closes the first link; across one of
+/// these it restructures the tree around the block instead, and the links
+/// here nest as they always did.
+constexpr std::array<std::string_view, 60> kLinkScope{
+    "address", "applet",   "article",  "aside",     "blockquote", "body",    "button",
+    "caption", "center",   "colgroup", "dd",        "details",    "dialog",  "dir",
+    "div",     "dl",       "dt",       "fieldset",  "figcaption", "figure",  "footer",
+    "form",    "frameset", "h1",       "h2",        "h3",         "h4",      "h5",
+    "h6",      "head",     "header",   "hgroup",    "html",       "li",      "listing",
+    "main",    "marquee",  "math",     "menu",      "nav",        "noembed", "noframes",
+    "object",  "ol",       "p",        "plaintext", "pre",        "search",  "section",
+    "select",  "summary",  "svg",      "table",     "tbody",      "td",      "tfoot",
+    "th",      "thead",    "tr",       "ul"};
+
 /// Deeper than this, a page is pathological (or hostile): further elements
 /// are flattened into the one at the limit.
 constexpr std::size_t kMaxDepth = 256;
@@ -229,6 +255,8 @@ public:
     explicit Tree(std::string_view html) {
         nodes_.push_back(Node{"#document", {}, {}, {}, 0});
         stack_.push_back(0);
+        link_reach_.push_back(0);
+        open_link_.push_back(0);
         parse(html);
     }
 
@@ -424,7 +452,7 @@ private:
         for (std::size_t k = stack_.size(); k-- > 1;) {
             const std::string& tag = nodes_.at(stack_[k]).tag;
             if (one_of(tag, names)) {
-                stack_.resize(k);
+                pop_to(k);
                 return true;
             }
             if (one_of(tag, boundaries)) {
@@ -437,7 +465,7 @@ private:
     /// The end tags HTML leaves implied: a new item closes the last one.
     void imply_ends(std::string_view name) {
         if (one_of(name, kClosesParagraph) && nodes_.at(stack_.back()).tag == "p") {
-            stack_.pop_back();
+            pop_to(stack_.size() - 1);
         }
         if (name == "li") {
             (void)pop_through(std::array<std::string_view, 1>{"li"},
@@ -457,6 +485,34 @@ private:
         } else if (name == "option") {
             (void)pop_through(std::array<std::string_view, 1>{"option"},
                               std::array<std::string_view, 2>{"select", "datalist"});
+        } else if (name == "a") {
+            close_open_link();
+        }
+    }
+
+    /// Links do not nest (57v): a link starts by closing the open one in
+    /// reach -- across phrasing alone (`kLinkScope`), as a browser's parser
+    /// does. The phrasing it closes on the way is opened again, as that parser
+    /// reopens its formatting elements, so each one's end tag still closes it
+    /// and no element further up. The closed link's own end tag is then owed
+    /// (`close_link`).
+    void close_open_link() {
+        const std::size_t at = link_reach_.back();
+        if (at == 0) {
+            return;
+        }
+        const std::vector<std::size_t> crossed(stack_.begin() + static_cast<std::ptrdiff_t>(at) + 1,
+                                               stack_.end());
+        owed_link_ends_.push_back(OwedEnd{.link = stack_.at(at), .depth = at});
+        pop_to(at);
+        for (const std::size_t open_one : crossed) {
+            Node again;
+            again.tag = nodes_.at(open_one).tag;
+            again.attributes = nodes_.at(open_one).attributes;
+            again.parent = stack_.back();
+            nodes_.push_back(std::move(again));
+            nodes_.at(stack_.back()).children.push_back(nodes_.size() - 1);
+            push_open(nodes_.size() - 1);  // they were open: within the cap
         }
     }
 
@@ -467,22 +523,102 @@ private:
         const std::size_t index = nodes_.size() - 1;
         nodes_.at(stack_.back()).children.push_back(index);
         if (push && stack_.size() < kMaxDepth) {
-            stack_.push_back(index);
+            push_open(index);
         }
     }
 
     void close(std::string_view name) {
+        if (name == "a") {
+            close_link();
+            return;
+        }
         for (std::size_t k = stack_.size(); k-- > 1;) {
             if (nodes_.at(stack_[k]).tag == name) {
-                stack_.resize(k);
+                pop_to(k);
                 return;
             }
         }
         // A stray end tag closes nothing.
     }
 
+    /// `</a>` closes the nearest open link -- unless it is taken as a closed
+    /// link's own (57v). It is when no link is in reach, the closed link's
+    /// end tag is still owed, and no link opened after that one is open: none
+    /// is open at all, or only one opened before it (an ancestor, as in a
+    /// card link whose paragraph nests two links). It then closes nothing,
+    /// rather than a link further up and every block in it. A link opened
+    /// after the closed one is closed as ever, so an end tag owed in a site's
+    /// nav never keeps a later link open over the story.
+    void close_link() {
+        const std::size_t nearest = open_link_.back();
+        if (link_reach_.back() == 0 && owed_end_due() &&
+            (nearest == 0 || stack_[nearest] < owed_link_ends_.back().link)) {
+            owed_link_ends_.pop_back();
+            return;
+        }
+        if (nearest != 0) {
+            pop_to(nearest);
+        }
+        // With no link open, a stray end tag closes nothing.
+    }
+
+    /// Whether the last closed link's end tag is still owed: only while the
+    /// element it was open in is open (57v). Once that closes, the end tag
+    /// can no longer be the link's own, so it is dropped, and those before
+    /// it as they come last.
+    bool owed_end_due() {
+        while (!owed_link_ends_.empty()) {
+            const OwedEnd& owed = owed_link_ends_.back();
+            if (owed.depth - 1 < stack_.size() &&
+                stack_[owed.depth - 1] == nodes_.at(owed.link).parent) {
+                return true;
+            }
+            owed_link_ends_.pop_back();
+        }
+        return false;
+    }
+
+    /// Opens `index`, recording the link in reach from it and the nearest
+    /// open link.
+    void push_open(std::size_t index) {
+        const std::string& tag = nodes_.at(index).tag;
+        std::size_t reach = link_reach_.back();
+        if (tag == "a") {
+            reach = stack_.size();
+        } else if (one_of(tag, kLinkScope)) {
+            reach = 0;
+        }
+        link_reach_.push_back(reach);
+        open_link_.push_back(tag == "a" ? stack_.size() : open_link_.back());
+        stack_.push_back(index);
+    }
+
+    /// Closes every open element from `depth` up.
+    void pop_to(std::size_t depth) {
+        stack_.resize(depth);
+        link_reach_.resize(depth);
+        open_link_.resize(depth);
+    }
+
     std::vector<Node> nodes_;
+    /// The open elements, outermost first.
     std::vector<std::size_t> stack_;
+    /// For each open element, where on `stack_` the link in reach from it is
+    /// -- open below it with nothing but phrasing between -- or 0 for none
+    /// (57v): kept as elements open, so no start or end tag looks back.
+    std::vector<std::size_t> link_reach_;
+    /// For each open element, where on `stack_` the nearest open link is,
+    /// across anything, or 0 for none (57v): an end tag finds it at once.
+    std::vector<std::size_t> open_link_;
+
+    /// A link a later link start closed, and where it was on `stack_`.
+    struct OwedEnd {
+        std::size_t link;
+        std::size_t depth;
+    };
+
+    /// The end tags owed by those links, the last closed last (57v).
+    std::vector<OwedEnd> owed_link_ends_;
 };
 
 // ---------------------------------------------------------------------------
@@ -589,15 +725,31 @@ public:
 private:
     // --- Measuring and choosing ------------------------------------------
 
-    /// Non-space characters under each node, furniture left out.
+    /// Non-space characters under each node, furniture left out; and, for
+    /// every node, whether a table is below it and the first image below it
+    /// (57v) -- one bottom-up pass, so no render walks a subtree to ask.
     void measure() {
         length_.assign(tree_.size(), 0);
+        holds_table_.assign(tree_.size(), false);
+        first_image_.assign(tree_.size(), 0);
         for (std::size_t k = tree_.size(); k-- > 0;) {
             const Node& node = tree_.node(k);
             if (node.tag.empty()) {
                 length_[k] = static_cast<std::size_t>(std::count_if(
                     node.text.begin(), node.text.end(), [](char c) { return !is_space(c); }));
                 continue;
+            }
+            // A node's descendants follow it in document order, a child's
+            // before the next child's, so the first child that is or holds
+            // an image holds the first one.
+            for (const std::size_t child : node.children) {
+                const std::string& tag = tree_.node(child).tag;
+                if (tag == "table" || holds_table_[child]) {
+                    holds_table_[k] = true;
+                }
+                if (first_image_[k] == 0) {
+                    first_image_[k] = tag == "img" ? child : first_image_[child];
+                }
             }
             if (always_furniture(node)) {
                 continue;
@@ -854,14 +1006,9 @@ private:
     void render_link(std::size_t index) {
         const Node& node = tree_.node(index);
         std::string text = inline_text(index);
-        if (text.empty()) {
-            // An image link reads as its alt text.
-            for (std::size_t k = index + 1; k < tree_.size() && tree_.within(k, index); ++k) {
-                if (tree_.node(k).tag == "img") {
-                    text = collapsed(tree_.node(k).attribute("alt"));
-                    break;
-                }
-            }
+        if (text.empty() && first_image_[index] != 0) {
+            // An image link reads as its (first) image's alt text.
+            text = collapsed(tree_.node(first_image_[index]).attribute("alt"));
         }
         if (text.empty()) {
             return;
@@ -891,22 +1038,55 @@ private:
         out_ += "[" + escaped + "](" + target + ")";
     }
 
+    /// `fn` for each `<tr>` of the table at `index`, in its sections or not.
+    template <typename Fn>
+    void for_each_row(std::size_t index, Fn&& fn) const {
+        for (const std::size_t child : tree_.node(index).children) {
+            const std::string& tag = tree_.node(child).tag;
+            if (tag == "tr") {
+                fn(child);
+            } else if (tag == "thead" || tag == "tbody" || tag == "tfoot") {
+                for (const std::size_t tr : tree_.node(child).children) {
+                    if (tree_.node(tr).tag == "tr") {
+                        fn(tr);
+                    }
+                }
+            }
+        }
+    }
+
+    [[nodiscard]] static bool is_cell(std::string_view tag) {
+        return tag == "td" || tag == "th";
+    }
+
     void render_table(std::size_t index, bool in_section) {
         std::vector<std::vector<std::string>> rows;
         std::vector<bool> heading;
+        // A cell that holds a table makes this a layout table, decided before
+        // any cell is read (57v): a cell's line built only to be rendered
+        // again as paragraphs did that twice at every level of nesting.
         bool layout = false;
+        for_each_row(index, [&](std::size_t tr) {
+            for (const std::size_t cell : tree_.node(tr).children) {
+                layout = layout || (is_cell(tree_.node(cell).tag) && holds_table_[cell]);
+            }
+        });
         std::size_t widest = 0;
         const auto row = [&](std::size_t tr) {
+            if (layout) {
+                return;  // read as paragraphs below, not as rows
+            }
             std::vector<std::string> cells;
             bool all_heading = true;
             for (const std::size_t cell : tree_.node(tr).children) {
                 const std::string& tag = tree_.node(cell).tag;
-                if (tag != "td" && tag != "th") {
+                if (!is_cell(tag)) {
                     continue;
                 }
                 std::string text = inline_text(cell);
-                if (text.size() > 300 || tree_.find("table", cell).has_value()) {
+                if (text.size() > 300) {
                     layout = true;
+                    return;
                 }
                 std::string escaped;
                 for (const char c : text) {
@@ -921,17 +1101,9 @@ private:
                 heading.push_back(all_heading);
             }
         };
+        for_each_row(index, row);
         for (const std::size_t child : tree_.node(index).children) {
-            const std::string& tag = tree_.node(child).tag;
-            if (tag == "tr") {
-                row(child);
-            } else if (tag == "thead" || tag == "tbody" || tag == "tfoot") {
-                for (const std::size_t tr : tree_.node(child).children) {
-                    if (tree_.node(tr).tag == "tr") {
-                        row(tr);
-                    }
-                }
-            } else if (tag == "caption") {
+            if (tree_.node(child).tag == "caption") {
                 block(out_);
                 out_ += inline_text(child);
             }
@@ -1139,6 +1311,11 @@ private:
     const Tree& tree_;
     HttpUrl base_;
     std::vector<std::size_t> length_;
+    /// Whether a `<table>` is anywhere below each node.
+    std::vector<bool> holds_table_;
+    /// The first `<img>` below each node, in document order; 0 when none
+    /// (0 is the document, never an image).
+    std::vector<std::size_t> first_image_;
     std::size_t root_ = 0;
     std::string out_;
     std::size_t list_depth_ = 0;

@@ -153,7 +153,11 @@ constexpr std::string_view kLocalHost = "file.invalid";
     if (!base.target.starts_with('/')) {
         base.target.insert(0, "/");
     }
-    const agent::ReadablePage page = agent::extract_readable(agent::as_utf8(bytes, {}), base);
+    // Read in the charset the page declares, as `fetch_url` reads one (57v);
+    // a UTF-8 byte order mark outranks the declaration, as in a browser.
+    const bool utf8_marked = bytes.starts_with("\xEF\xBB\xBF");
+    const std::string charset = utf8_marked ? std::string{} : agent::meta_charset(bytes);
+    const agent::ReadablePage page = agent::extract_readable(agent::as_utf8(bytes, charset), base);
     std::string text = page.text;
     const std::string prefix = "https://" + std::string{kLocalHost} + "/";
     for (std::size_t at = text.find(prefix); at != std::string::npos; at = text.find(prefix, at)) {

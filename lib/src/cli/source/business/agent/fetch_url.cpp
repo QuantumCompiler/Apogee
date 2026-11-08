@@ -257,6 +257,12 @@ std::optional<HttpUrl> resolve_redirect(const HttpUrl& base, std::string_view lo
     if (location.front() == '/') {
         return parse_http_url(origin + std::string{location});
     }
+    if (location.front() == '#') {
+        // A fragment alone is the page itself, path and query kept (RFC 3986
+        // 5.2.2; 57v) -- never its directory. The fragment never reaches a
+        // server.
+        return parse_http_url(origin + base.target);
+    }
     const std::string_view base_path =
         std::string_view{base.target}.substr(0, base.target.find('?'));
     if (location.front() == '?') {

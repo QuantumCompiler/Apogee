@@ -95,7 +95,6 @@ Every call is a recorded default; no **[user]** call blocks any of them. `graph 
 
 | # | Item | Version | File | Status |
 |---|---|---|---|---|
-| 57v | Web content parsers bounded and correct — nested tables, bare ampersands and nested empty links extract in linear time, an HTML attachment honours its meta charset, a fragment-only redirect stays on its page | v0.2.1 | [`web-content-parsers-bounded.md`](v0.2.1/web-content-parsers-bounded.md) | 🟢 |
 | 57w | A dry-run review sweep moves no watermark — `review sweep --dry-run` (the app's default sweep) leaves watermarks.json untouched, so the posting sweep or cron run after it still reviews and posts what it previewed | v0.2.1 | [`review-dry-run-moves-nothing.md`](v0.2.1/review-dry-run-moves-nothing.md) | 🟢 |
 
 ### v0.2.2
