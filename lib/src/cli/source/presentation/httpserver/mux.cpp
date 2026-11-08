@@ -1,9 +1,12 @@
 #include "httpserver/mux.h"
 
 #include <array>
+#include <cctype>
+#include <cstddef>
 #include <string>
 #include <utility>
 
+#include "contracts/utf8.h"
 #include "httpserver/admin_auth.h"
 
 namespace apogee::httpserver {
@@ -438,7 +441,141 @@ constexpr std::array<Route, 97> kRoutes{{
      }},
 }};
 
+constexpr std::string_view kForbidden = "forbidden";
+
+/// The most of a refused value a refusal echoes back.
+constexpr std::size_t kEchoLimit = 200;
+
+std::string lower(std::string_view text) {
+    std::string out{text};
+    for (char& c : out) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return out;
+}
+
+bool all_digits(std::string_view text) noexcept {
+    for (const char c : text) {
+        if (c < '0' || c > '9') {
+            return false;
+        }
+    }
+    return !text.empty();
+}
+
+/// The host of an authority -- `name`, `name:port`, `[v6]`, `[v6]:port` --
+/// lower-cased, brackets kept; empty when it is not one.
+std::string host_of_authority(std::string_view authority) {
+    std::string_view host;
+    std::string_view rest;
+    if (authority.starts_with('[')) {
+        const std::size_t close = authority.find(']');
+        if (close == std::string_view::npos) {
+            return {};
+        }
+        host = authority.substr(0, close + 1);
+        rest = authority.substr(close + 1);
+    } else {
+        const std::size_t colon = authority.find(':');
+        host = authority.substr(0, colon);
+        rest = colon == std::string_view::npos ? std::string_view{} : authority.substr(colon);
+    }
+    if (!rest.empty()) {
+        // One port, of digits only: `127.0.0.1:8080:9` is no address.
+        if (rest.front() != ':') {
+            return {};
+        }
+        rest.remove_prefix(1);
+        if (!all_digits(rest) || rest.size() > 5) {
+            return {};
+        }
+    }
+    if (host.empty() || host == "[]") {
+        return {};
+    }
+    return lower(host);
+}
+
+/// The host of a serialized origin -- `scheme://authority` and nothing after
+/// it -- or empty: `null` names no host.
+std::string host_of_origin(std::string_view origin) {
+    const std::size_t separator = origin.find("://");
+    if (separator == std::string_view::npos || separator == 0) {
+        return {};
+    }
+    const std::string_view authority = origin.substr(separator + 3);
+    if (authority.find_first_of("/?#@") != std::string_view::npos) {
+        return {};
+    }
+    return host_of_authority(authority);
+}
+
+/// `127.a.b.c`, written as four decimal numbers each at most 255.
+bool is_dotted_loopback(std::string_view host) noexcept {
+    int octets = 0;
+    bool first_is_127 = false;
+    while (true) {
+        const std::size_t dot = host.find('.');
+        const std::string_view octet = host.substr(0, dot);
+        if (!all_digits(octet) || octet.size() > 3) {
+            return false;
+        }
+        int value = 0;
+        for (const char c : octet) {
+            value = (value * 10) + (c - '0');
+        }
+        if (value > 255) {
+            return false;
+        }
+        if (octets == 0) {
+            first_is_127 = value == 127;
+        }
+        ++octets;
+        if (dot == std::string_view::npos) {
+            break;
+        }
+        host.remove_prefix(dot + 1);
+    }
+    return octets == 4 && first_is_127;
+}
+
+/// A name only this machine answers to, as a `Host` or an `Origin` writes
+/// it -- strictly: no prefix or suffix of one is one.
+bool is_loopback_name(std::string_view host) noexcept {
+    return host == "localhost" || host == "[::1]" || is_dotted_loopback(host);
+}
+
+/// A value the client set, safe to put back in a JSON body.
+std::string echo(std::string_view value) {
+    return harness::valid_utf8(value.substr(0, kEchoLimit));
+}
+
 }  // namespace
+
+std::string request_refusal(const HttpRequest& request, bool check_host) {
+    std::string host;
+    const auto host_header = request.headers.find("host");
+    if (host_header != request.headers.end()) {
+        host = host_of_authority(host_header->second);
+        if (check_host && !is_loopback_name(host)) {
+            return "request refused: this server answers only requests addressed to it on "
+                   "loopback (Host " +
+                   echo(host_header->second) + ")";
+        }
+    }
+    const auto origin_header = request.headers.find("origin");
+    if (origin_header != request.headers.end()) {
+        const std::string origin = host_of_origin(origin_header->second);
+        const bool trusted =
+            !origin.empty() && (is_loopback_name(origin) || (!host.empty() && origin == host));
+        if (!trusted) {
+            return "request refused: this server answers no request from a page on another "
+                   "site (Origin " +
+                   echo(origin_header->second) + ")";
+        }
+    }
+    return {};
+}
 
 bool is_admin_path(std::string_view path) noexcept {
     return path == kAdminPrefix || path.starts_with("/v1/admin/");
@@ -486,6 +623,11 @@ std::vector<RouteSpec> Mux::routes() {
 }
 
 HttpResponse Mux::dispatch(const HttpRequest& request) const {
+    // Who may reach the server at all, ahead of every route and the admin
+    // gate (57n): a page's forged request learns nothing about either.
+    if (const std::string refusal = request_refusal(request, host_check_); !refusal.empty()) {
+        return error_response(403, refusal, kForbidden);
+    }
     if (is_admin_path(request.path)) {
         if (admin_ == nullptr) {
             return error_response(404, "the admin plane is not mounted on this server",

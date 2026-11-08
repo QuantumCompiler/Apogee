@@ -4,13 +4,16 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <condition_variable>
 #include <cstdint>
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <random>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -1160,6 +1163,166 @@ TEST_CASE("the session routes list, show, and end a session", "[httpserver][sess
     CHECK(parsed(fixture.send(get("/v1/sessions")))["data"].empty());
     // Ending the live session does not delete the user's transcript.
     CHECK(std::filesystem::exists(apogee::logger::session_path(id)));
+}
+
+/// Holds the provider inside one turn until released (57n): the turn on the
+/// other side of `turn_mutex_` from the request a test sends next.
+struct TurnGate {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool entered = false;
+    bool released = false;
+
+    /// Called on the provider's thread, before the turn answers.
+    void hold() {
+        std::unique_lock<std::mutex> lock{mutex};
+        entered = true;
+        changed.notify_all();
+        changed.wait(lock, [this] { return released; });
+    }
+
+    void wait_entered() {
+        std::unique_lock<std::mutex> lock{mutex};
+        changed.wait(lock, [this] { return entered; });
+    }
+
+    void release() {
+        const std::lock_guard<std::mutex> lock{mutex};
+        released = true;
+        changed.notify_all();
+    }
+};
+
+/// A mock that answers `A<question>`, and holds the turn whose last user
+/// message is `held` at `gate`.
+std::shared_ptr<MockProvider> gated_mock(TurnGate& gate, std::string held) {
+    MockProvider::Options options;
+    options.backend_name = "mock";
+    options.turns = {text_turn("A<{{last_user}}>")};
+    options.on_request = [&gate,
+                          held = std::move(held)](const apogee::harness::ChatRequest& request) {
+        if (!request.messages.empty() && request.messages.back().content.plain_text() == held) {
+            gate.hold();
+        }
+    };
+    return std::make_shared<MockProvider>(std::move(options));
+}
+
+std::vector<std::string> texts_of(const std::vector<ChatMessage>& messages) {
+    std::vector<std::string> out;
+    out.reserve(messages.size());
+    for (const ChatMessage& message : messages) {
+        out.push_back(message.content.plain_text());
+    }
+    return out;
+}
+
+TEST_CASE("two requests on one session build on each other, in arrival order",
+          "[httpserver][session][concurrency]") {
+    // 57n: the session was copied when the request was planned, before the
+    // turn lock, so a request that waited behind another ran on the history
+    // from before that turn and its commit overwrote it -- the sweep's probe
+    // ended at turn_count 2 with the second exchange gone.
+    TurnGate gate;
+    const std::shared_ptr<MockProvider> mock = gated_mock(gate, "second");
+    const Fixture fixture{{text_turn("unused")}, served_default(), false, mock};
+
+    nlohmann::json create = chat_body("first");
+    create["session_id"] = "new";
+    const HttpResponse made = fixture.send(post("/v1/chat/completions", create));
+    REQUIRE(made.status == 200);
+    const std::string id = made.headers.at("X-Apogee-Session-Id");
+
+    // The second request holds the turn lock, inside its model call.
+    HttpResponse second_reply;
+    std::thread second{[&] {
+        nlohmann::json body = chat_body("second");
+        body["session_id"] = id;
+        second_reply = fixture.send(post("/v1/chat/completions", body));
+    }};
+    gate.wait_entered();
+
+    // The third is planned now, while the second's turn is still open --
+    // a streamed request's plan is made before its body runs, which is what
+    // makes the wait deterministic -- and its body waits behind the lock.
+    nlohmann::json third_body = chat_body("third");
+    third_body["session_id"] = id;
+    third_body["stream"] = true;
+    const HttpResponse third_reply = fixture.send(post("/v1/chat/completions", third_body));
+    REQUIRE(third_reply.status == 200);
+    std::string third_sse;
+    std::thread third{[&] { third_sse = collect(third_reply); }};
+
+    gate.release();
+    second.join();
+    third.join();
+
+    REQUIRE(second_reply.status == 200);
+    CHECK(parsed(second_reply)["choices"][0]["message"]["content"] == "A<second>");
+    CHECK(content_of(frames(third_sse)) == "A<third>");
+
+    // The third was answered with the second exchange in context.
+    REQUIRE(mock->requests().size() == 3);
+    CHECK(texts_of(mock->requests().back().messages) ==
+          std::vector<std::string>{"first", "A<first>", "second", "A<second>", "third"});
+
+    // Every exchange kept, in arrival order, in memory and on disk.
+    const std::vector<std::string> kept{"first",     "A<first>", "second",
+                                        "A<second>", "third",    "A<third>"};
+    const nlohmann::json detail = parsed(fixture.send(get("/v1/sessions/" + id)));
+    CHECK(detail["turn_count"] == 3);
+    std::vector<std::string> served_texts;
+    for (const nlohmann::json& message : detail["messages"]) {
+        served_texts.push_back(message["content"].get<std::string>());
+    }
+    CHECK(served_texts == kept);
+    const apogee::logger::LoadedSession loaded = apogee::logger::load(id, {});
+    CHECK(loaded.session.turns == 3);
+    CHECK(texts_of(loaded.session.messages) == kept);
+}
+
+TEST_CASE("a session ended while a request waits on it is a typed 404, and nothing runs",
+          "[httpserver][session][concurrency]") {
+    TurnGate gate;
+    const std::shared_ptr<MockProvider> mock = gated_mock(gate, "hold");
+    const Fixture fixture{{text_turn("unused")}, served_default(), false, mock};
+
+    nlohmann::json create = chat_body("first");
+    create["session_id"] = "new";
+    const std::string id =
+        fixture.send(post("/v1/chat/completions", create)).headers.at("X-Apogee-Session-Id");
+
+    // Another conversation holds the one turn lock.
+    std::thread holder{
+        [&] { (void)fixture.send(post("/v1/chat/completions", chat_body("hold"))); }};
+    gate.wait_entered();
+
+    nlohmann::json waiting = chat_body("next");
+    waiting["session_id"] = id;
+    waiting["stream"] = true;
+    const HttpResponse reply = fixture.send(post("/v1/chat/completions", waiting));
+    REQUIRE(reply.status == 200);
+    CHECK(fixture.send(del("/v1/sessions/" + id)).status == 204);
+
+    std::string sse;
+    std::thread waiter{[&] { sse = collect(reply); }};
+    gate.release();
+    holder.join();
+    waiter.join();
+
+    const Frames parsed_frames = frames(sse);
+    bool typed = false;
+    for (const nlohmann::json& frame : parsed_frames.data) {
+        if (frame.contains("error")) {
+            typed =
+                frame["error"]["type"] == "session_not_found" && frame["error"]["session_id"] == id;
+        }
+    }
+    CHECK(typed);
+    // Only the create and the holder's turn reached the model, and the ended
+    // session was not brought back by a commit.
+    CHECK(mock->turn_count() == 2);
+    CHECK(fixture.send(get("/v1/sessions/" + id)).status == 404);
 }
 
 TEST_CASE("a session near its window is compacted before the turn, a stateless request only warned",

@@ -15,16 +15,16 @@ step in both directions.
 ```bash
 apogee serve                                   # 127.0.0.1:8080, models.default only
 apogee serve --bind 0.0.0.0 --allow-remote     # a server deployment
-apogee serve -m local --preload --tools        # one backend, loaded now, with fetch_url
+apogee serve -m local --preload --tools        # one backend, loaded now, with the built-in tools
 apogee serve --all-backends --rag notes        # every servable backend, retrieval on
 ```
 
 | Flag | Meaning |
 |---|---|
 | `--bind HOST` / `--port N` | Where to listen. Loopback by default; `--port 0` picks a free port and prints it. |
-| `--allow-remote` | Permits a non-loopback `--bind`. **Without it the server refuses to start** — the inference plane is unauthenticated (for OpenAI-client compatibility), so exposing it is a decision the operator makes explicitly. Put it behind your own access control. |
+| `--allow-remote` | Permits a non-loopback `--bind`. **Without it the server refuses to start** — the inference plane is unauthenticated (for OpenAI-client compatibility), so exposing it is a decision the operator makes explicitly. Put it behind your own access control. It is also the switch for **a reverse proxy in front**: under it the server answers whatever `Host` the proxy forwards, on any bind, so a proxy on the same host keeps `--bind 127.0.0.1` ([Browsers and DNS rebinding](#browsers-and-dns-rebinding); since 57n, 2026-11-01). |
 | `-m BACKEND` / `--all-backends` | Which backends a request may name. The default (or `-m`) alone unless `--all-backends`: adding an entry to the config never silently exposes it. Vendor-CLI backends (`claude-cli`, `codex-cli`, `gemini-cli`, `ollama-cli`) are **never served** — they run on a personal subscription. |
-| `--tools` | Run the tool loop server-side (`fetch_url`, and `web_search` when `tools.search` names a SearXNG — see [tools.md](tools.md)). Clients see only the final answer. Nobody can answer a permission prompt on a served request, so `fetch_url` reaches **only the hosts in `tools.allowed_hosts`** — anything else, including a redirect to an unlisted host, comes back to the model as a refusal (since 2026-09-25; before that a served fetch reached any website). |
+| `--tools` | Run the tool loop server-side with **the built-in tools, as `chat` has them** ([tools.md](tools.md)): files under `tools.fs_root` (the launch folder when unset — `read_file` there reads a `.env` as readily as source), `notes`, `rag`, `graph`, `shell` and `git` where the build can start programs, `fetch_url` (and `web_search` when `tools.search` names a SearXNG), the session todo, and every enabled MCP server. Clients see only the final answer, and **any client of the port can ask for any of them**. The startup line counts them and names each set — `-- tools: 25 (files under /srv/app, shell, git, notes, rag, graph, fetch_url to listed hosts, todo_write)` — and `-- runs unasked:` names every destructive tool the config sets to `allow` (or `none`): nobody can answer a permission prompt on a served request, so `ask` is deny and [`allow` is the only way one runs](#put-v1adminpermissionsid). For the same reason `fetch_url` reaches **only the hosts in `tools.allowed_hosts`** — anything else, including a redirect to an unlisted host, comes back to the model as a refusal (since 2026-09-25; before that a served fetch reached any website). Until 57n (2026-11-01) the flag's help and the startup line said `fetch_url` alone. |
 | `--rag NAME`, `--rag-limit N`, `--retriever`, `--rerank` | Retrieval, fixed for the server's lifetime (`--rag ""` switches off the config's `auto_rag`). `?retriever=` and `?rerank=` override per request. |
 | `--preload` | Load every served local model now rather than on the first request. |
 | `--ignore-timeout` | Keep local models resident: ignore `idle_unload_seconds`. |
@@ -32,6 +32,62 @@ apogee serve --all-backends --rag notes        # every servable backend, retriev
 
 The server serves **one inference at a time**. A second chat request waits for
 the first; `/health`, `/v1/models` and the session routes answer meanwhile.
+**Turns on one session run in arrival order, each on the last one's history**:
+a request that waited behind another turn on its session reads the session
+when its own turn starts, so it answers with that exchange in context and
+neither is lost (57n; before it, the waiting request ran on the history from
+before the turn it waited behind, and its save dropped that turn). A session
+ended while a request waited is the typed `404`.
+
+### Browsers and DNS rebinding
+
+A web page the user opens can send requests to `127.0.0.1`: a cross-site
+`fetch` with a `text/plain` body needs no CORS preflight, so it would run a
+whole turn, tools included. A page on a name the attacker re-points at
+`127.0.0.1` (DNS rebinding) can read the replies too. The socket's peer is
+loopback either way, so **before any route runs** — `/health` and the admin
+plane included — the server reads the two headers a browser always sends and a
+page cannot change:
+
+- **`Host`, when bound to loopback without `--allow-remote`**: only a
+  loopback name passes — `localhost`, `127.x.x.x` written as four numbers,
+  `[::1]` — at any port. A request with no `Host` passes; no browser sends
+  one. Under `--allow-remote`, on any bind and loopback included, the name the
+  server is reached by is your proxy's to decide, so any `Host` passes.
+- **`Origin`, on every bind**: a request that carries one passes when its host
+  is a loopback name or the request's own `Host` (ports aside). Another site,
+  or `null` (a sandboxed frame, a file), is refused. curl, the OpenAI SDKs and
+  every other non-browser client send no `Origin` and are unaffected.
+
+Names are matched exactly: `127.attacker.example` and
+`localhost.attacker.example` are the attacker's names, not loopback. A refusal
+is a `403` with `type: forbidden` that names only the value it refused:
+
+```json
+{"error": {"message": "request refused: this server answers only requests addressed to it on loopback (Host attacker.example:8080)", "type": "forbidden"}}
+```
+
+**Behind a reverse proxy**, start the server with `--allow-remote` (it may
+keep the loopback bind) and have the proxy forward the client's `Host`. Caddy,
+Traefik and HAProxy do by default. nginx sends the upstream's own name
+(`127.0.0.1:8080`) unless told `proxy_set_header Host $host;`: that `Host`
+passes, but a browser page on your own site (`Origin: https://api.example.com`)
+is then refused, since its `Origin` is neither loopback nor the `Host` the
+server sees. Without `--allow-remote`, a loopback server refuses the
+forwarded `api.example.com` with the `Host` refusal above.
+
+**Rebinding protection is the `Host` check, so it holds only on a loopback
+bind without `--allow-remote`.** Under `--allow-remote` there is none: a
+rebinding page's `Origin` and `Host` are the same name, which the `Origin`
+check lets through, and a page in a browser on the server's own machine that
+re-points a name at `127.0.0.1` reaches the port directly, past the proxy. That
+holds on a loopback bind and on `--bind 0.0.0.0`, which listens on loopback
+too. Run `--allow-remote` on a machine nobody browses the web from.
+
+There are no CORS headers and no allow-list flag: a browser page served from
+another origin could not use the server before either (its preflight
+`OPTIONS` gets a `404`), and opening that is a later decision. There is no
+`Content-Type` requirement, so `curl -d '{…}'` (form-encoded) keeps working.
 
 ## Errors
 
@@ -45,8 +101,9 @@ into its usual typed exception:
 | Status | `type` | When |
 |---|---|---|
 | 400 | `invalid_request_error` | A malformed body, an unknown or unserved model, a vendor-CLI backend, client-side `tools`, a bad `tool_mode` or `?retriever=`, an explicit retriever that cannot run |
+| 403 | `forbidden` | A request from a page on another site, or one addressed to a loopback-bound server without `--allow-remote` by a name that is not loopback ([Browsers and DNS rebinding](#browsers-and-dns-rebinding)), refused before any route runs; on the admin plane, a literal secret from a non-loopback peer |
 | 404 | `not_found_error` | No such route, or a backend that reports no load state |
-| 404 | `session_not_found` | An unknown or evicted `session_id`; the body also carries `session_id` |
+| 404 | `session_not_found` | An unknown or evicted `session_id`, or one ended while the request waited its turn; the body also carries `session_id` |
 | 405 | `invalid_request_error` | Wrong method; the `Allow` header names the right one |
 | 501 | `backend_unavailable` | An admin route that needs a generation backend on a server that serves none (`/v1/admin/knowledge/capture`) |
 | 502 | `backend_error` | The provider failed -- since 57c a connection that could not be made or was dropped, a stream cut before its end, a Gemini prompt blocked, and a llama.cpp context or decode refused among them, never a 500 or an answer finished with `stop`; the knowledge clerk returned no record |
@@ -203,7 +260,9 @@ curl localhost:8080/v1/chat/completions -d '{
 
 - **`"session_id": "new"`** mints a session bound to the request's backend.
 - **A known id** appends the request's messages to the stored history and
-  dispatches the whole conversation.
+  dispatches the whole conversation — the history as it stands when the
+  request's turn starts, so two requests on one session build on each other
+  in arrival order.
 - **An unknown id** is a `404` with `type: session_not_found` — an evicted
   session is a signal to start again, never a silent fresh context.
 
@@ -1388,7 +1447,8 @@ tools have no level: they never prompt, and `permissions.read_file` is not a
 key.
 
 On a served request nobody can answer a prompt, so `ask` means deny there:
-`allow` in the config is the only way a destructive tool runs under `serve`.
+`allow` in the config is the only way a destructive tool runs under `serve`,
+and `serve --tools` names each such tool on startup (`-- runs unasked:`).
 
 ### `PUT /v1/admin/config/{id}`
 
@@ -1515,7 +1575,12 @@ after a successful ingest, the twin of `apogee embed ingest --graph`.
 - **The inference plane does not authenticate.** It stays open for
   OpenAI-client compatibility; the bind policy is the guard, and a deployment
   puts its own access control in front. Only the admin plane takes a bearer.
-- **It does not terminate TLS.** Plain HTTP, behind a reverse proxy that does.
+- **It does not answer a page from another site.** No CORS headers, no origin
+  allow-list; a loopback server without `--allow-remote` answers only
+  requests addressed to it by a loopback name
+  ([Browsers and DNS rebinding](#browsers-and-dns-rebinding)).
+- **It does not terminate TLS.** Plain HTTP, behind a reverse proxy that does
+  (started with `--allow-remote`: [Browsers and DNS rebinding](#browsers-and-dns-rebinding)).
 - **It does not serve subscription backends.** A vendor-CLI entry is refused by
   type, with a 400 that says why. The refusal is about credentials, not
   runtimes: a local `mlx` entry is served like a `llamacpp` one, its driver a

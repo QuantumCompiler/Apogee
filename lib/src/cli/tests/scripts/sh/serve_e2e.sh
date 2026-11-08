@@ -29,9 +29,13 @@ export APOGEE_HOME="$WORK_DIR"
 # A developer's own keys stay out of the suite (the resolver reads the environment).
 unset ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GOOGLE_API_KEY
 SERVER=""
+PROXIED=""
 cleanup() {
     if [ -n "$SERVER" ] && kill -0 "$SERVER" 2>/dev/null; then
         kill -KILL "$SERVER" 2>/dev/null
+    fi
+    if [ -n "$PROXIED" ] && kill -0 "$PROXIED" 2>/dev/null; then
+        kill -KILL "$PROXIED" 2>/dev/null
     fi
     rm -rf "$WORK_DIR"
 }
@@ -74,6 +78,7 @@ done
 BASE="http://127.0.0.1:$PORT"
 
 grep -q "skipping claude-sub" "$WORK_DIR/serve.err" || fail "the vendor-CLI entry was not announced as skipped"
+grep -q -- "-- tools: none" "$WORK_DIR/serve.err" || fail "serve without --tools did not say it offers none: $(cat "$WORK_DIR/serve.err")"
 
 # --- the positive half of the listening-socket boundary ---------------------
 if command -v lsof >/dev/null 2>&1; then
@@ -86,12 +91,48 @@ fi
 # --- health ------------------------------------------------------------------
 curl -s "$BASE/health" | grep '"status":"ok"' >/dev/null || fail "/health did not answer ok"
 
+# --- the request gate (57n): a forged request from a page runs nothing ------
+# The sweep's probes: a cross-site text/plain POST (a page's `no-cors` fetch),
+# the same after a DNS rebinding (the attacker's own name in Host), and a
+# rebinding page reading the session list. Each POST asks for a new session,
+# so a turn that ran would leave one behind -- and a served turn writes one
+# `chat mock` line to the operational log.
+served_turns() {
+    cat "$WORK_DIR"/logs/apogee-*.log 2>/dev/null | grep -c 'chat mock' || true
+}
+TURNS_BEFORE="$(served_turns)"
+SESSIONS_BEFORE="$(curl -s "$BASE/v1/sessions")"
+FORGED='{"messages":[{"role":"user","content":"forged"}],"session_id":"new"}'
+CODE="$(curl -s -o "$WORK_DIR/forged-host.json" -w '%{http_code}' -H "Host: attacker.example:$PORT" \
+    -H 'Content-Type: application/json' -d "$FORGED" "$BASE/v1/chat/completions")"
+[ "$CODE" = "403" ] || fail "a foreign Host was not refused (got $CODE): $(cat "$WORK_DIR/forged-host.json")"
+grep -q '"type":"forbidden"' "$WORK_DIR/forged-host.json" || fail "the 403 was not in the error shape: $(cat "$WORK_DIR/forged-host.json")"
+grep -q "Host attacker.example:$PORT" "$WORK_DIR/forged-host.json" || fail "the 403 did not name the Host it refused"
+CODE="$(curl -s -o "$WORK_DIR/forged-origin.json" -w '%{http_code}' -H 'Origin: http://attacker.example' \
+    -H 'Content-Type: text/plain;charset=UTF-8' -d "$FORGED" "$BASE/v1/chat/completions")"
+[ "$CODE" = "403" ] || fail "a cross-site text/plain POST was not refused (got $CODE): $(cat "$WORK_DIR/forged-origin.json")"
+grep -q 'Origin http://attacker.example' "$WORK_DIR/forged-origin.json" || fail "the 403 did not name the Origin it refused"
+CODE="$(curl -s -o /dev/null -w '%{http_code}' -H 'Origin: http://attacker.example' \
+    -H "Host: attacker.example:$PORT" -H 'Content-Type: text/plain;charset=UTF-8' -d "$FORGED" \
+    "$BASE/v1/chat/completions")"
+[ "$CODE" = "403" ] || fail "the rebinding POST was not refused (got $CODE)"
+CODE="$(curl -s -o /dev/null -w '%{http_code}' -H "Host: attacker.example:$PORT" "$BASE/v1/sessions")"
+[ "$CODE" = "403" ] || fail "a foreign Host read the session list (got $CODE)"
+[ "$(curl -s "$BASE/v1/sessions")" = "$SESSIONS_BEFORE" ] || fail "a refused request left a session behind"
+[ "$(served_turns)" = "$TURNS_BEFORE" ] || fail "a refused request reached the backend"
+# A page served from this machine passes, at any port.
+CODE="$(curl -s -o /dev/null -w '%{http_code}' -H 'Origin: http://localhost:3000' "$BASE/health")"
+[ "$CODE" = "200" ] || fail "a loopback Origin was refused (got $CODE)"
+
 # --- a session over HTTP, continued, then resumed from the terminal ----------
 curl -s -D "$WORK_DIR/headers.txt" -o "$WORK_DIR/turn1.json" \
     -H 'Content-Type: application/json' \
     -d '{"messages":[{"role":"user","content":"one"}],"session_id":"new"}' \
     "$BASE/v1/chat/completions" || fail "turn 1 failed"
 grep -q '"content":"mock response"' "$WORK_DIR/turn1.json" || fail "turn 1 carried no answer: $(cat "$WORK_DIR/turn1.json")"
+# The gate's "reached the backend" check above reads a line a served turn
+# does write: it cannot pass by reading nothing.
+[ "$(served_turns)" -gt "$TURNS_BEFORE" ] || fail "a served turn wrote no 'chat mock' line to the operational log"
 SID="$(grep -i '^X-Apogee-Session-Id:' "$WORK_DIR/headers.txt" | tr -d '\r' | awk '{print $2}')"
 [ -n "$SID" ] || fail "no X-Apogee-Session-Id header: $(cat "$WORK_DIR/headers.txt")"
 
@@ -260,6 +301,54 @@ for path in "/v1/admin/tasks" "/v1/admin/tasks/$TASK_ID" "/v1/admin/tasks/$TASK_
         case "$CODE" in 2*) fail "task control answered over HTTP: $method $path ($CODE)" ;; esac
     done
 done
+
+# --- what --tools offers is what the startup line says (57n) ----------------
+# A second server, briefly: the registry chat builds, counted and named, with
+# what runs unasked -- never `fetch_url` alone.
+mkdir -p "$WORK_DIR/tools-root"
+( cd "$WORK_DIR/tools-root" && exec "$APOGEE_BIN" serve --tools --port 0 \
+    >"$WORK_DIR/tools.out" 2>"$WORK_DIR/tools.err" </dev/null ) &
+TOOLS_SERVER=$!
+for _ in $(seq 1 100); do
+    grep -q 'listening on' "$WORK_DIR/tools.err" 2>/dev/null && break
+    kill -0 "$TOOLS_SERVER" 2>/dev/null || break
+    sleep 0.1
+done
+kill -TERM "$TOOLS_SERVER" 2>/dev/null
+wait "$TOOLS_SERVER" 2>/dev/null
+TOOLS_LINE="$(grep 'apogee serve: serving' "$WORK_DIR/tools.err")"
+echo "$TOOLS_LINE" | grep -Eq -- '-- tools: [0-9]+ \(files under .*tools-root' \
+    || fail "the --tools startup line did not count and name the tools: $(cat "$WORK_DIR/tools.err")"
+echo "$TOOLS_LINE" | grep -q 'fetch_url to listed hosts' || fail "the --tools startup line did not name fetch_url's reach: $TOOLS_LINE"
+echo "$TOOLS_LINE" | grep -q -- '-- runs unasked: none' || fail "the --tools startup line did not say what runs unasked: $TOOLS_LINE"
+echo "$TOOLS_LINE" | grep -q -- '-- tools: fetch_url' && fail "the --tools startup line still says fetch_url alone: $TOOLS_LINE"
+
+# --- behind a reverse proxy (57n): --allow-remote hands it the Host ---------
+# A proxy on this host forwards the client's Host (Caddy, Traefik and HAProxy
+# by default; nginx with `proxy_set_header Host $host`). Under --allow-remote a
+# loopback-bound server answers it, and a page on that same site, but still
+# no page from another site. The loopback server above refused that Host.
+"$APOGEE_BIN" serve --allow-remote --port 0 \
+    >"$WORK_DIR/proxied.out" 2>"$WORK_DIR/proxied.err" </dev/null &
+PROXIED=$!
+PROXIED_PORT=""
+for _ in $(seq 1 100); do
+    PROXIED_PORT="$(grep -o 'listening on http://127.0.0.1:[0-9]*' "$WORK_DIR/proxied.err" 2>/dev/null | grep -o '[0-9]*$' || true)"
+    [ -n "$PROXIED_PORT" ] && break
+    kill -0 "$PROXIED" 2>/dev/null || fail "serve --allow-remote exited before listening: $(cat "$WORK_DIR/proxied.err")"
+    sleep 0.1
+done
+[ -n "$PROXIED_PORT" ] || fail "serve --allow-remote never reported a port: $(cat "$WORK_DIR/proxied.err")"
+PROXIED_BASE="http://127.0.0.1:$PROXIED_PORT"
+CODE="$(curl -s -o "$WORK_DIR/proxied-host.json" -w '%{http_code}' -H 'Host: api.example.com' "$PROXIED_BASE/health")"
+[ "$CODE" = "200" ] || fail "--allow-remote on loopback refused a proxy's Host (got $CODE): $(cat "$WORK_DIR/proxied-host.json")"
+CODE="$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: api.example.com' -H 'Origin: https://api.example.com' "$PROXIED_BASE/health")"
+[ "$CODE" = "200" ] || fail "--allow-remote refused a page on the proxy's own site (got $CODE)"
+CODE="$(curl -s -o "$WORK_DIR/proxied-origin.json" -w '%{http_code}' -H 'Host: api.example.com' -H 'Origin: http://attacker.example' "$PROXIED_BASE/health")"
+[ "$CODE" = "403" ] || fail "--allow-remote answered a page on another site (got $CODE): $(cat "$WORK_DIR/proxied-origin.json")"
+kill -TERM "$PROXIED" 2>/dev/null
+wait "$PROXIED" 2>/dev/null
+PROXIED=""
 
 # --- SIGTERM stops it cleanly ------------------------------------------------
 kill -TERM "$SERVER"

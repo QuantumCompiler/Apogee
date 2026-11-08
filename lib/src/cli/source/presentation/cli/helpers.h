@@ -66,12 +66,16 @@ enum ExitCode : int {
 
 /// The built-in tool set behind `--tools` on every surface.
 ///
-/// `fetch_url` only, for now. Web search comes from the provider's own
-/// server-side tool (`--search`), not a local one -- see the decision recorded
-/// on the complete item. Native filesystem toolsets and MCP register here
-/// later. **One function, three callers**: `complete`, `chat`, and `serve`
-/// build the same registry, so a tool added here reaches every surface at
-/// once rather than the one someone remembered to edit.
+/// `fetch_url`; `web_search` where `tools.search` names an instance (25e);
+/// every native toolset `tools.disabled` leaves on (files under
+/// `tools.fs_root`, shell, git, notes, rag, graph -- shell and git only where
+/// this build can start programs, 57k); then every enabled MCP server,
+/// dialled and namespaced; all under the agent's tool policy. A surface adds
+/// its own beside them (the session todo, `delegate`). **One function, three
+/// callers**: `complete`, `chat`, and `serve` build the same registry, so a
+/// tool added here reaches every surface at once rather than the one someone
+/// remembered to edit -- and `serve` says the registry it built on startup
+/// (57n), never a narrower set.
 /// What the built-in registry is built from.
 struct BuiltInToolOptions {
     /// `permissions:` and `tools:`; null means every default.

@@ -37,6 +37,16 @@ struct BindOptions {
 /// unrecognisable host is not loopback, and so needs `allow_remote`.
 [[nodiscard]] std::string bind_refusal(const BindOptions& bind);
 
+/// Whether the mux's request gate checks `Host` under `bind` (57n): on a
+/// loopback bind, unless `allow_remote` says the operator's reverse proxy
+/// and access control own the name the server is reached by. A same-host
+/// proxy forwards the client's `Host` (`api.example.com`), which only that
+/// switch lets through; a non-loopback bind needs the switch anyway. Without the
+/// check there is no rebinding protection -- a rebinding page's `Origin` is
+/// its own `Host` -- and the `Origin` check alone refuses a page from
+/// another site.
+[[nodiscard]] bool host_check_applies(const BindOptions& bind);
+
 /// The largest request body accepted: images arrive as data URIs.
 inline constexpr std::size_t kMaxPayloadBytes = std::size_t{64} * 1024 * 1024;
 
@@ -54,7 +64,9 @@ struct ServeOptions {
 ///
 /// Refuses the bind (throws std::runtime_error) when the policy says no or
 /// the address cannot be bound; returns normally on a clean stop. Idle
-/// sessions are swept on a background thread for as long as it runs.
+/// sessions are swept on a background thread for as long as it runs. The
+/// bind reaches the mux as one fact, `host_check_applies`, which turns its
+/// request gate's `Host` check on (57n).
 void run_server(Mux& mux, Handler& handler, const ServeOptions& options);
 
 /// Stops the running server, from any thread. Safe when none is running.

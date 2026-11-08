@@ -296,6 +296,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/mcp_presets_cmd_test.cpp
     presentation/cli/mcp_serve_test.cpp
     presentation/cli/acp_cmd_test.cpp
+    presentation/cli/serve_cmd_test.cpp
     presentation/cli/host_mcp_servers_test.cpp
     presentation/acp/jsonrpc_test.cpp
     presentation/acp/server_test.cpp
@@ -384,6 +385,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/httpserver/sse_test.cpp
     presentation/httpserver/session_test.cpp
     presentation/httpserver/serve_test.cpp
+    presentation/httpserver/mux_test.cpp
     presentation/httpserver/admin_auth_test.cpp
     presentation/httpserver/admin_config_test.cpp
     presentation/httpserver/admin_events_test.cpp

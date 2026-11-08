@@ -346,6 +346,8 @@ Handler::TurnPlan Handler::plan_turn(const ChatCall& call) {
         params.system_prompt = call.system;
         plan.session = sessions_.get(sessions_.create(plan.backend, params));
     } else if (!call.session_id.empty()) {
+        // Read here so an unknown id is a 404 before a stream's first byte;
+        // the turn reads it again under the lock, and builds on that.
         plan.session = sessions_.get(call.session_id);
         if (!plan.session.has_value()) {
             throw HttpError{.status = kNotFound,
@@ -374,6 +376,21 @@ Handler::TurnOutcome Handler::run_turn(TurnPlan& plan, agentloop::Reporter& repo
                                        const harness::CancellationToken& cancellation) {
     // One turn at a time, from the first model call to the persisted result.
     const std::lock_guard<std::mutex> lock{turn_mutex_};
+    // The session as it stands NOW, under the lock (57n): the copy the plan
+    // took predates any turn this request waited behind, and building on it
+    // dropped that turn's exchange from context and from the commit. Turns
+    // on one session build on each other in arrival order; one ended while
+    // this request waited is the typed 404 a vanished session always is.
+    if (plan.session.has_value()) {
+        const std::string id = plan.session->chat_id;
+        plan.session = sessions_.get(id);
+        if (!plan.session.has_value()) {
+            throw HttpError{.status = kNotFound,
+                            .message = "session not found",
+                            .type = std::string{kSessionNotFound},
+                            .extra = nlohmann::json{{"session_id", id}}};
+        }
+    }
     const auto started = std::chrono::steady_clock::now();
     const harness::Config& config = harness_->config();
 

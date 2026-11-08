@@ -24,6 +24,17 @@ neither `run_command` nor any git tool is offered or served, `check`'s `git`
 row is skipped saying why, and `--allow`, `--deny`, `/allow` or a task's
 grant naming one is refused with that reason (57k).
 
+**`apogee serve --tools` offers this same set, whole** (57n): every native
+toolset, `fetch_url` (and `web_search` where configured), `todo_write` and
+every enabled MCP server -- the registry `chat` builds, so files under
+`tools.fs_root` (the launch folder when unset), notes and git history are
+readable by any client of the port. Nobody is there to answer a prompt, so a
+tool that writes runs only where `permissions:` says `allow` -- an `[a]lways`
+given in chat counts -- and a website only when `tools.allowed_hosts` lists
+it. The startup line says both: `-- tools: <n> (files under <root>, shell, git,
+…)` and `-- runs unasked: <tools>` or `none`
+([http-api.md](http-api.md#starting-the-server)).
+
 ## Web search through SearXNG
 
 `web_search` finds pages; `fetch_url` reads them. SearXNG is a self-hosted

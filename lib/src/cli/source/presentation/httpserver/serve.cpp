@@ -103,6 +103,10 @@ std::string bind_refusal(const BindOptions& bind) {
            "confirm this is a server deployment, or keep the default --bind 127.0.0.1";
 }
 
+bool host_check_applies(const BindOptions& bind) {
+    return is_loopback_host(bind.host) && !bind.allow_remote;
+}
+
 void stop_serving() noexcept {
     // The flag first, so a stream blocked waiting for its next event sees it
     // on its next poll; then the socket, which ends the accept loop.
@@ -128,6 +132,10 @@ void run_server(Mux& mux, Handler& handler, const ServeOptions& options) {
     if (const std::string refusal = bind_refusal(options.bind); !refusal.empty()) {
         throw std::runtime_error(refusal);
     }
+    // The request gate's Host check is for a loopback bind (57n): under
+    // --allow-remote, loopback included, the operator's proxy owns the name
+    // the server is reached by. Set before the first request, never after.
+    mux.set_host_check(host_check_applies(options.bind));
 
     clear_shutdown();
     httplib::Server server;
