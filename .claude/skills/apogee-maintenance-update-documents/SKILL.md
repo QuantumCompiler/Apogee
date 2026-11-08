@@ -9,7 +9,7 @@ Apogee's docs are the source of truth — a merge request whose docs lag its cod
 
 ## 0. Which applications?
 
-Apogee's documentation is per application ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/cli/`, `lib/documentation/gui/` and `lib/documentation/mod/`, written `<home>` below. **The branch decides the scope**: this pass covers every application the diff touched — both homes when both moved, each walked against its own docs. Repo-wide machinery (the pipeline, the release law) is recorded in the CLI's docs and audited once. If the user names a scope the diff disagrees with, ask with AskUserQuestion rather than guessing.
+Apogee's documentation is split by kind, then by platform ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/{assistant,backlog,adrs,reference}/<app>/`, where `<app>` is **`cli`** (the harness), **`darwin`** (the Apple apps, macOS, iPadOS and iOS, with an item for one OS under `darwin/macos/`, `darwin/ipados/` or `darwin/ios/`, and what binds every GUI app under `gui/`), or **`mod`** (the Claude plugin). `unix/` and `windows/` hold the apps not yet built. Written `<app>` below. **The branch decides the scope**: this pass covers every application the diff touched — both homes when both moved, each walked against its own docs. Repo-wide machinery (the pipeline, the release law) is recorded in the CLI's docs and audited once. If the user names a scope the diff disagrees with, ask with AskUserQuestion rather than guessing.
 
 ## 1. Establish what this branch changed
 
@@ -23,27 +23,27 @@ Where the branch touched the **CLI**, the audit includes the completion surface 
 
 ## 2. Walk the documents against the diff
 
-Work through the system in this order (read `CLAUDE.md` (`<home>/assistant/CLAUDE.md`) → Documentation and Status first — it defines the flow this skill enforces):
+Work through the system in this order (read `CLAUDE.md` (`lib/documentation/assistant/<app>/CLAUDE.md`) → Documentation and Status first — it defines the flow this skill enforces):
 
-1. **Backlog** (`<home>/backlog/` (`<home>/backlog/README.md`)):
+1. **Backlog** (`lib/documentation/backlog/<app>/` (`lib/documentation/backlog/<app>/README.md`)):
    - Any item this branch **completed** → its work is recorded in MILESTONES.md, its document is **deleted**, its index row removed, and the track preamble above the index tables updated. A completed item still sitting in the backlog is the system's cardinal violation.
    - Any item this branch **started** → index row marked in progress.
    - Any **gate the branch satisfied** → downstream items' status lines updated.
    - Any decision made while building → a dated entry in the affected item's **Decisions made** (and `[default:]` calls that were exercised recorded as decisions).
-   - **The in-development version's table, once empty, is retired here** — every item it held shipped or moved (the version is `lib/release/VERSION`, the branch's name). The merge *is* the release (CLAUDE.md (`<home>/assistant/CLAUDE.md`) → Versioning), so a release's table never outlives its pull request (the user's call, 2026-10-16).
+   - **The in-development version's table, once empty, is retired here** — every item it held shipped or moved (the version is `lib/release/VERSION`, the branch's name). The merge *is* the release (CLAUDE.md (`lib/documentation/assistant/<app>/CLAUDE.md`) → Versioning), so a release's table never outlives its pull request (the user's call, 2026-10-16).
      - Remove its `### v<x.y.z>` heading, its track preambles and the empty table from the index; its directory is gone with its last document.
      - The shipped-tracks paragraph above the tables then names its tracks as complete in that version — in development on its branch, released when the branch merges into `stable` — and names the earliest table still open. The release roll later adds the release's link and date (`/apogee-maintenance-update-release`).
      - A table with rows still standing is never retired: report the rows; moving them is `/apogee-backlog-swap-item`'s, on the user's word. The standing **Architecture** and **Maintenance** tables are never retired, however empty.
-2. **MILESTONES.md (`<home>/assistant/MILESTONES.md`)** — shipped work folded into the right lettered milestone (goal, what was built, trade-offs), or a new milestone for a genuinely new area.
-3. **ROADMAP.md (`<home>/assistant/ROADMAP.md`)** — checkboxes for shipped themes; the "decisions needed" list still accurate; nothing shipped still listed as pending.
-4. **CLAUDE.md (`<home>/assistant/CLAUDE.md`)** — the Codebase Map covers every file/package the branch added, moved, or deleted; Stack & environment still true; new hard rules earned on this branch promoted into Invariants (`## ⚠` once test-locked); Code Style additions recorded.
-5. **DEVELOPER.md (`<home>/assistant/DEVELOPER.md`)** — directory tree current; package sections exist for new packages; build/test command sections match reality (including `lib/scripts/cicd.sh` behavior); "Adding a new X" recipes added when the branch created an extension point.
-6. **SPEC.md (`<home>/assistant/SPEC.md`)** — only if scope, non-goals, principles, or surfaces actually changed; revisions carry a date, per house style.
-7. **Root `README.md`** — if one exists and the branch changed how the project builds or installs, it says so. (There is deliberately **no** repo-root `CLAUDE.md` pointer — `<home>/assistant/CLAUDE.md` is the entry point.)
+2. **MILESTONES.md (`lib/documentation/assistant/<app>/MILESTONES.md`)** — shipped work folded into the right lettered milestone (goal, what was built, trade-offs), or a new milestone for a genuinely new area.
+3. **ROADMAP.md (`lib/documentation/assistant/<app>/ROADMAP.md`)** — checkboxes for shipped themes; the "decisions needed" list still accurate; nothing shipped still listed as pending.
+4. **CLAUDE.md (`lib/documentation/assistant/<app>/CLAUDE.md`)** — the Codebase Map covers every file/package the branch added, moved, or deleted; Stack & environment still true; new hard rules earned on this branch promoted into Invariants (`## ⚠` once test-locked); Code Style additions recorded.
+5. **DEVELOPER.md (`lib/documentation/assistant/<app>/DEVELOPER.md`)** — directory tree current; package sections exist for new packages; build/test command sections match reality (including `lib/scripts/cicd.sh` behavior); "Adding a new X" recipes added when the branch created an extension point.
+6. **SPEC.md (`lib/documentation/assistant/<app>/SPEC.md`)** — only if scope, non-goals, principles, or surfaces actually changed; revisions carry a date, per house style.
+7. **Root `README.md`** — if one exists and the branch changed how the project builds or installs, it says so. (There is deliberately **no** repo-root `CLAUDE.md` pointer — `lib/documentation/assistant/<app>/CLAUDE.md` is the entry point.)
 8. **Skills** (`.claude/skills/*/SKILL.md`) — any paths or process steps they reference that this branch moved or renamed.
-9. **The pipeline** — if the diff touches `.github/` or `lib/scripts/`, walk DEVELOPER.md → Changing the pipeline (`lib/documentation/cli/assistant/DEVELOPER.md#changing-the-pipeline`) against it: `pr-ci.sh` mirrors any changed pull-request job, `changed.sh` covers anything new the CLI build reads, and `required-checks.py`'s stated assumptions still hold. If a CI job's name, matrix or set changed, the required checks must be re-applied before the merge. Run `lib/scripts/required-checks.py --pr <N>` (the dry run; it reads, never writes) if the pull request exists, and carry its output into the report.
-10. **The carried model lists** (ADR 0009 (`<home>/adrs/built-in-model-lists.md`)) — check them whenever the diff touches a backend (`source/data/backends/`), the rosters, completion or model selection, or whenever a vendor has shipped, renamed or retired a model since a list's `…Reviewed` date.
-    - Read `built_in_rosters()`'s tables in `model_roster.cpp` against their sources, as the DEVELOPER.md recipe (`<home>/assistant/DEVELOPER.md#updating-a-carried-model-list`) names them.
+9. **The pipeline** — if the diff touches `.github/` or `lib/scripts/`, walk DEVELOPER.md → Changing the pipeline (`lib/documentation/assistant/cli/DEVELOPER.md#changing-the-pipeline`) against it: `pr-ci.sh` mirrors any changed pull-request job, `changed.sh` covers anything new the CLI build reads, and `required-checks.py`'s stated assumptions still hold. If a CI job's name, matrix or set changed, the required checks must be re-applied before the merge. Run `lib/scripts/required-checks.py --pr <N>` (the dry run; it reads, never writes) if the pull request exists, and carry its output into the report.
+10. **The carried model lists** (ADR 0009 (`lib/documentation/adrs/<app>/built-in-model-lists.md`)) — check them whenever the diff touches a backend (`source/data/backends/`), the rosters, completion or model selection, or whenever a vendor has shipped, renamed or retired a model since a list's `…Reviewed` date.
+    - Read `built_in_rosters()`'s tables in `model_roster.cpp` against their sources, as the DEVELOPER.md recipe (`lib/documentation/assistant/<app>/DEVELOPER.md#updating-a-carried-model-list`) names them.
     - A stale list is a finding, fixed in this branch by that recipe: rows, reviewed date, the roster test, a MILESTONES line.
     - A CLI that has gained a list command means its carried list goes and `CatalogListing` comes, in this branch.
     - Carry each list's reviewed date into the report.

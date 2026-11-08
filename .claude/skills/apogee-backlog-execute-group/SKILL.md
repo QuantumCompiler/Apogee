@@ -9,17 +9,17 @@ The group is one home's index table: a version, `maintenance`, `architecture`, t
 
 ## 0. Which application?
 
-Apogee's documentation is per application ([the router](../../../lib/documentation/CLAUDE.md)): the CLI's home is [`lib/documentation/cli/`](../../../lib/documentation/cli/README.md), the GUI's [`lib/documentation/gui/`](../../../lib/documentation/gui/README.md), and the mod's (the Claude plugin) [`lib/documentation/mod/`](../../../lib/documentation/mod/README.md). Resolve which queue this invocation means before touching anything, in order:
+Apogee's documentation is split by kind, then by platform ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/{assistant,backlog,adrs,reference}/<app>/`, where `<app>` is **`cli`** (the harness), **`darwin`** (the Apple apps, macOS, iPadOS and iOS, with an item for one OS under `darwin/macos/`, `darwin/ipados/` or `darwin/ios/`, and what binds every GUI app under `gui/`), or **`mod`** (the Claude plugin). `unix/` and `windows/` hold the apps not yet built. Resolve which application this invocation means before touching anything, in order:
 
 1. **The arguments.** An id or table names its queue — the CLI's version tables (`v0.1.<x>`, `v0.2.0`) with their numeric tracks (`52a`) and the standing `M<n>`/`A<n>` queues; the GUI's and the mod's indexes with their lettered tracks. A named document resolves by which backlog holds it. A bare version can mean any queue — they all carry work per release.
 2. **The conversation.** What the work touches: the harness's commands, backends and seams are the CLI's; screens, windows and the design are the GUI's; the Claude plugin (panes, slash commands, `$`-API work, `lib/src/mod/`) is the mod's. Work that spans queues gets cross-queue siblings, gated both ways.
 3. **Still ambiguous? Ask.** One AskUserQuestion — which application's queue (the CLI, the GUI, or the mod) — before anything is treated as decided. Never guess between them.
 
-Everything below reads from the chosen home, written `<home>`: its backlog README is the authority on that queue's tables, numbering, document format and link depths, and its assistant docs (`<home>/assistant/CLAUDE.md` first) carry the invariants. Where this skill says `<home>`, substitute the chosen application's directory.
+Everything below reads from the chosen application's folders, written `<app>`: its backlog index (`lib/documentation/backlog/<app>/README.md`) is the authority on that queue's tables, numbering, document format and link depths, and its contributor docs (`lib/documentation/assistant/<app>/CLAUDE.md` first) carry the invariants. Where this skill says `<app>`, substitute the chosen application's folder name.
 
 ## 1. Read everything first, ask everything first
 
-1. Load the working process per `/apogee-backlog-execute-item` step 1 (CLAUDE.md fully, SPEC, ROADMAP, DEVELOPER as needed) and the backlog README (`<home>/backlog/README.md`).
+1. Load the working process per `/apogee-backlog-execute-item` step 1 (CLAUDE.md fully, SPEC, ROADMAP, DEVELOPER as needed) and the backlog README (`lib/documentation/backlog/<app>/README.md`).
 2. **Read every document in the group's table before building anything.** The run's order is the table's build order with gates honored; an item whose gate chain leaves the group and is not shipped is marked out of the run at the start, and said.
 3. **Resolve every blocking call now.** Collect the `[user]` open calls across *all* the group's documents and ask them together (AskUserQuestion), before the first line of code — mid-run there is no user. `[default: …]` calls are taken as stated and recorded as dated decisions in their documents. An unanswered `[user]` call drops only its own item (and its dependents) from the run, and the drop is announced in the plan, not discovered at item seven.
 4. Check `git status` and the index's 🚧 marks: this skill assumes it owns the checkout — commits punctuate the run — so another session mid-item on the same checkout means stop and tell the user before starting.
@@ -30,7 +30,7 @@ For each item, in order:
 
 1. Mark its row 🚧, build **per its document** — constraints, seam, guardrails, acceptance criteria, real-weights rules where they apply — and verify (`lib/scripts/cicd.sh --test` before anything is called done).
 2. Ship it through the Documentation and Status flow: MILESTONES entry; the document deleted with its index row (and any other item's gate this satisfied, updated); ROADMAP line checked/moved; codebase maps updated; SPEC only on a real shape change.
-   Superpowers works inside each item exactly as `/apogee-backlog-execute-item` step 5 says ([Superpowers fits the docs-first lifecycle](../../../lib/documentation/cli/assistant/CLAUDE.md#superpowers-fits-the-docs-first-lifecycle)). The group command answers its waits in advance:
+   Superpowers works inside each item exactly as `/apogee-backlog-execute-item` step 5 says ([Superpowers fits the docs-first lifecycle](../../../lib/documentation/assistant/cli/CLAUDE.md#superpowers-fits-the-docs-first-lifecycle)). The group command answers its waits in advance:
    - The plan is self-reviewed, and the method is `subagent-driven-development` (or `executing-plans` without a subagent tool).
    - The worktree is consented to and based on the release branch.
    - Finishing's answer is the squash landing: `git merge --squash <item-branch>` onto the release branch, which becomes the one commit below. Then the worktree is removed and its branch deleted with `git branch -D`, both sanctioned here.
@@ -53,7 +53,7 @@ The classes that trigger the rethink, concretely:
 
 - **Destructive filesystem operations** outside the build tree and the session scratchpad — any `rm -rf` of source, documents, or anything untracked; deleting is the Documentation flow's scoped per-file act, never a sweep.
 - **Destructive git** beyond this skill's two sanctioned acts (below): no `reset --hard`, no `clean -fd`, no history rewriting, and **never any push** — force or otherwise.
-- **Real user state**: `~/.apogee` (any channel's root), the model store, credentials, keychains — probes run against a temp `APOGEE_HOME` under the scratchpad, always. A build installed for the user to try goes on [the dev channel](../../../lib/documentation/cli/assistant/CLAUDE.md#development-runs-on-the-dev-channel) (`make -C lib/src/cli install MODE=dev`), never the release `apogee`, the user's production install.
+- **Real user state**: `~/.apogee` (any channel's root), the model store, credentials, keychains — probes run against a temp `APOGEE_HOME` under the scratchpad, always. A build installed for the user to try goes on [the dev channel](../../../lib/documentation/assistant/cli/CLAUDE.md#development-runs-on-the-dev-channel) (`make -C lib/src/cli install MODE=dev`), never the release `apogee`, the user's production install.
 - **The machine outside the repo**: installs, system or shell config edits, launch agents, network side effects beyond what a documented test already does.
 - **Repository settings**: `required-checks.py --apply` and anything like it stays the user's move, whatever the pipeline docs say about when it is needed — note it in the report instead.
 

@@ -2,7 +2,7 @@
 """The naive host: a third-party application embedding `apogee chat`.
 
 Spike evidence for backlog item 27 (the machine-mode integration contract).
-This driver deliberately knows ONLY what lib/documentation/cli/reference/
+This driver deliberately knows ONLY what lib/documentation/reference/cli/
 machine-mode.md says -- it is NOT reference_driver.py, and it must not learn
 from Apogee's source. Where the documented contract leaves it blind, it records
 a WALL with the evidence instead of peeking.

@@ -1,6 +1,6 @@
 # CLAUDE.md — the Apogee Desktop design
 
-Context for agents working on **the design** of Apogee's desktop applications. The design is the reference the apps under `lib/src/darwin/`, `linux/` and `windows/` are built from; the apps' own docs are [`lib/documentation/gui/`](../../documentation/gui/README.md). [README.md](README.md) has the file layout and how to open the design; this file says how to work on it.
+Context for agents working on **the design** of Apogee's desktop applications. The design is the reference the apps under `lib/src/darwin/`, `linux/` and `windows/` are built from; the apps' own docs are [`lib/documentation/gui/`](../../documentation/CLAUDE.md). [README.md](README.md) has the file layout and how to open the design; this file says how to work on it.
 
 ## ⚠ The repo and the canvas move together
 
@@ -34,7 +34,7 @@ These files are also the **Apogee Desktop** design canvas, <https://claude.ai/ar
 
 ## The design's rules
 
-- **Every part maps to the CLI.** The app drives `apogee` over the machine-mode pipes and through the same commands a person types ([machine-mode.md](../../documentation/cli/reference/machine-mode.md)). Before drawing something, find the event or command it comes from in that document or the binary's `--help`. If none exists, draw it with its fallback and add the gap to the contract board; never design as if it existed.
+- **Every part maps to the CLI.** The app drives `apogee` over the machine-mode pipes and through the same commands a person types ([machine-mode.md](../../documentation/reference/cli/machine-mode.md)). Before drawing something, find the event or command it comes from in that document or the binary's `--help`. If none exists, draw it with its fallback and add the gap to the contract board; never design as if it existed.
 - **Honest by default.** Say what the CLI says, in its words where it has them. Never invent a time estimate, a size or a count the CLI doesn't report; mark anything billed or sent off the machine.
 - **Every color is a token.** Use `var(--surface-window)` and its 24 siblings, never a hex. The only fixed values are the modal scrim, the shadows and the window controls. Type sizes are `var(--t-…)` and fonts `var(--font-ui)` and `var(--font-mono)`, so Settings › Appearance changes everything.
 - **Keyboard first, accessible as drawn.** Real `<button>`, `<input>` and `<label>` elements, an `aria-label` on icon-only buttons, a key for every destination, and text at 4.5:1 against what it sits on.

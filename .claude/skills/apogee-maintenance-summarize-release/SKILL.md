@@ -12,7 +12,7 @@ The optional argument is the version (`v0.1.2` or `0.1.2`). With none, it is the
 
 ## 0. Which applications?
 
-A release is repo-wide: the version pointer, the pipeline and the publishing law live in the CLI's docs (`lib/documentation/cli/`), and every application contributes its own story from its own home (`lib/documentation/gui/`, `lib/documentation/mod/`), written `<home>` where a step applies per application. Walk the repo-wide machinery once, then each application's boards that the release touched. If the user's asked-for scope is unclear, ask with AskUserQuestion rather than guessing.
+A release is repo-wide: the version pointer, the pipeline and the publishing law live in the CLI's docs (`lib/documentation/cli/`), and every application contributes its own story from its own home (`lib/documentation/gui/`, `lib/documentation/mod/`), written `<app>` where a step applies per application. Walk the repo-wide machinery once, then each application's boards that the release touched. If the user's asked-for scope is unclear, ask with AskUserQuestion rather than guessing.
 
 ## 1. Pin the release and its range
 
@@ -55,23 +55,23 @@ curl -s "https://api.github.com/repos/QuantumCompiler/Apogee/releases/tags/<tag>
 
 ## 3. Gather the evidence
 
-- **Each application's story** — the GUI's section of the notes comes from its own boards (`lib/documentation/gui/assistant/ROADMAP.md` and MILESTONES for the version); `lib/scripts/changed.sh gui-darwin <base> <end>` answers whether the release carries GUI work at all — `false` means one honest line, never padding.
-- **The theme** — `ROADMAP.md` (`<home>/assistant/ROADMAP.md`)'s heading for the version (`### v0.1.2 — The terminal and the model directory`), and that section's checked lines: each is a candidate highlight.
-- **The detail** — every `MILESTONES.md` (`<home>/assistant/MILESTONES.md`) entry the range added, found by the git range rather than by date (a tag's commit date is not its release date):
+- **Each application's story** — the GUI's section of the notes comes from its own boards (`lib/documentation/assistant/darwin/ROADMAP.md` and MILESTONES for the version); `lib/scripts/changed.sh gui-darwin <base> <end>` answers whether the release carries GUI work at all — `false` means one honest line, never padding.
+- **The theme** — `ROADMAP.md` (`lib/documentation/assistant/<app>/ROADMAP.md`)'s heading for the version (`### v0.1.2 — The terminal and the model directory`), and that section's checked lines: each is a candidate highlight.
+- **The detail** — every `MILESTONES.md` (`lib/documentation/assistant/<app>/MILESTONES.md`) entry the range added, found by the git range rather than by date (a tag's commit date is not its release date):
 
   ```bash
-  git diff <base>..<end> -- <home>/assistant/MILESTONES.md | grep -E '^\+#{2,3} '
+  git diff <base>..<end> -- lib/documentation/assistant/<app>/MILESTONES.md | grep -E '^\+#{2,3} '
   ```
 
   Read each one whole: what was built, the decisions, and the **recorded costs** — "Not verified", "The cost, named", "Recorded consequence" — which feed Known limitations. Include the working tree (`git diff <base> -- …`) when drafting ahead of the merge.
 - **Items shipped** — backlog documents deleted anywhere in the range (an item created and deleted inside it leaves no net diff, so ask the log):
 
   ```bash
-  git log --diff-filter=D --name-only --format= <base>..<end> -- <home>/backlog | sort -u
+  git log --diff-filter=D --name-only --format= <base>..<end> -- lib/documentation/backlog/<app> | sort -u
   ```
 - **Did the CLI change at all?** `lib/scripts/changed.sh cli <base> <end>` — `cli=false` means the release **carries the previous release's CLI archives, copied** (the CLI pipeline builds nothing then), so its binaries are byte for byte the previous release's and report the older CLI version: say so up front, as v0.1.1's notes did for a binary that had not changed. With `cli=true`, `git diff --stat <base>..<end> -- lib/src/cli/source` still tells a pipeline-only change (v0.1.1: the binary functionally identical) from one the binary's user feels.
 - **The history** — `git log --oneline <base>..<end>` for anything the docs missed.
-- **What moves the fixed sections** — `git diff --stat <base>..<end> -- lib/scripts/install.sh lib/scripts/install.ps1 README.md` (Install), `ALL_TARGETS` in `lib/scripts/cicd.sh` (Platforms), `git diff --name-status <base>..<end> -- <home>/reference` (Reference), and any work that closes a listed limitation (signing, self-update, Windows child processes, TLS on `serve`).
+- **What moves the fixed sections** — `git diff --stat <base>..<end> -- lib/scripts/install.sh lib/scripts/install.ps1 README.md` (Install), `ALL_TARGETS` in `lib/scripts/cicd.sh` (Platforms), `git diff --name-status <base>..<end> -- lib/documentation/reference/<app>` (Reference), and any work that closes a listed limitation (signing, self-update, Windows child processes, TLS on `serve`).
 
 ## 4. Write it
 
@@ -124,7 +124,7 @@ Section by section:
 - **Highlights** — four to eight, the most user-felt first, the process ones last unless the release is about process (v0.1.1 was). Each is a **bold claim that is one full sentence, period inside the bold**, then one paragraph: what changed for the user first, then the mechanism, naming real commands, flags, config keys and paths in backticks, and real counts. A fix names what used to happen ("where previously…") and why it matters. Group ROADMAP lines into one highlight when they are one story; never split one line into two highlights. Every sentence traces to a MILESTONES entry, a ROADMAP line, or the diff; every number is quoted from those or measured, never estimated.
 - **Install** and **Platforms** — verbatim from the previous release. Change them only where step 3 found a change (a script URL, an archive name, a target), and then change only that.
 - **Known limitations** — start from the previous release's list. Remove a bullet only when this release closed it (that is usually a highlight too); reword one that changed; keep the rest word for word. When the binary did not change, lead with "Unchanged from vPREV, since the binary is:". New limitations this release introduces — the recorded costs from step 3 — go after the list: one as "One new one, recorded because it is real: …", several as their own bullets under a line saying they are new.
-- **Reference** — the previous list, plus any user-facing reference document the range added, plus the contributor document a process release is about (v0.1.1 added "Cutting a release: `<home>/assistant/DEVELOPER.md` → **Cutting a release**"). Paths as inline code, not links.
+- **Reference** — the previous list, plus any user-facing reference document the range added, plus the contributor document a process release is about (v0.1.1 added "Cutting a release: `lib/documentation/assistant/<app>/DEVELOPER.md` → **Cutting a release**"). Paths as inline code, not links.
 
 House style — the published notes' own:
 

@@ -94,7 +94,7 @@ struct ParityTests {
     @Test("a gap names an item the backlog still holds: shipping it flips the row to its screen")
     func gapsAreQueued() throws {
         let index = try String(
-            contentsOf: repoRoot.appendingPathComponent("lib/documentation/gui/backlog/README.md"), encoding: .utf8)
+            contentsOf: repoRoot.appendingPathComponent("lib/documentation/backlog/darwin/README.md"), encoding: .utf8)
         for place in ParityTable.places {
             guard case .queued(let item) = place.kind else { continue }
             #expect(index.contains("| \(item) |"), "\(place.command): \(item) is no row of the backlog -- flip it to its screen")

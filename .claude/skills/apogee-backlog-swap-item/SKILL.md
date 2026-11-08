@@ -9,19 +9,19 @@ The backlog index gives every item an identity shaped by its table: release item
 
 ## 0. Which application?
 
-Apogee's documentation is per application ([the router](../../../lib/documentation/CLAUDE.md)): the CLI's home is [`lib/documentation/cli/`](../../../lib/documentation/cli/README.md), the GUI's [`lib/documentation/gui/`](../../../lib/documentation/gui/README.md), and the mod's (the Claude plugin) [`lib/documentation/mod/`](../../../lib/documentation/mod/README.md). Resolve which queue this invocation means before touching anything, in order:
+Apogee's documentation is split by kind, then by platform ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/{assistant,backlog,adrs,reference}/<app>/`, where `<app>` is **`cli`** (the harness), **`darwin`** (the Apple apps, macOS, iPadOS and iOS, with an item for one OS under `darwin/macos/`, `darwin/ipados/` or `darwin/ios/`, and what binds every GUI app under `gui/`), or **`mod`** (the Claude plugin). `unix/` and `windows/` hold the apps not yet built. Resolve which application this invocation means before touching anything, in order:
 
 1. **The arguments.** An id or table names its queue — the CLI's version tables (`v0.1.<x>`, `v0.2.0`) with their numeric tracks (`52a`) and the standing `M<n>`/`A<n>` queues; the GUI's and the mod's indexes with their lettered tracks. A named document resolves by which backlog holds it. A bare version can mean any queue — they all carry work per release.
 2. **The conversation.** What the work touches: the harness's commands, backends and seams are the CLI's; screens, windows and the design are the GUI's; the Claude plugin (panes, slash commands, `$`-API work, `lib/src/mod/`) is the mod's. Work that spans queues gets cross-queue siblings, gated both ways.
 3. **Still ambiguous? Ask.** One AskUserQuestion — which application's queue (the CLI, the GUI, or the mod) — before anything is treated as decided. Never guess between them.
 
-Everything below reads from the chosen home, written `<home>`: its backlog README is the authority on that queue's tables, numbering, document format and link depths, and its assistant docs (`<home>/assistant/CLAUDE.md` first) carry the invariants. Where this skill says `<home>`, substitute the chosen application's directory.
+Everything below reads from the chosen application's folders, written `<app>`: its backlog index (`lib/documentation/backlog/<app>/README.md`) is the authority on that queue's tables, numbering, document format and link depths, and its contributor docs (`lib/documentation/assistant/<app>/CLAUDE.md` first) carry the invariants. Where this skill says `<app>`, substitute the chosen application's folder name.
 
 ## 1. Ground in the live state first
 
 Parallel sessions build and ship while you work:
 
-1. Re-read `<home>/backlog/README.md` (`<home>/backlog/README.md`) and check `git status` — know which items are 🚧 (an in-flight document gets id-reference edits only, nothing else; moving a 🚧 item itself is worth flagging to the user first), and whether recent ships changed the tables since you last looked.
+1. Re-read `lib/documentation/backlog/<app>/README.md` (`lib/documentation/backlog/<app>/README.md`) and check `git status` — know which items are 🚧 (an in-flight document gets id-reference edits only, nothing else; moving a 🚧 item itself is worth flagging to the user first), and whether recent ships changed the tables since you last looked.
 2. **Survey every reference before editing**: grep the moving item's id and its filename across `lib/documentation/`, and the ids of every trailing item in the source table (they will slide). List the hits; you will edit each as a targeted string.
 3. **Bare ids are landmines.** `M3`/`M4` match the **M3 Max chip** in MILESTONES' performance records; bare numbers match dates (`\b28\b` hits `2026-09-28`) and model names (`27B`). Never blind-replace an id — every occurrence is replaced as part of a longer exact string, or hand-verified first.
 

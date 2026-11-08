@@ -533,7 +533,7 @@ add_test(NAME harness.layering
 add_test(NAME harness.layer_context
     COMMAND "${CMAKE_COMMAND}"
         -DAPOGEE_CLI_DIR=${CMAKE_SOURCE_DIR}
-        -DAPOGEE_ADR_DIR=${CMAKE_SOURCE_DIR}/../../documentation/cli/adrs
+        -DAPOGEE_ADR_DIR=${CMAKE_SOURCE_DIR}/../../documentation/adrs/cli
         -DAPOGEE_MODULE_MAP=${CMAKE_SOURCE_DIR}/cmake/modules.cmake
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/layer_context.cmake"
 )
@@ -663,7 +663,7 @@ set_tests_properties(cli.serve_help PROPERTIES PASS_REGULAR_EXPRESSION "allow-re
 add_test(NAME cli.http_api_conformance
     COMMAND "${CMAKE_COMMAND}"
         -DMUX_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/../source/presentation/httpserver/mux.cpp
-        -DAPI_DOC=${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/cli/reference/http-api.md
+        -DAPI_DOC=${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/reference/cli/http-api.md
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/http_api_conformance.cmake"
 )
 
@@ -1262,7 +1262,7 @@ if(UNIX)
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/schema_conformance.py"
                 "${CMAKE_CURRENT_SOURCE_DIR}/../source/presentation/machine/json_reporter.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/cli/reference/machine-mode.md"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/reference/cli/machine-mode.md"
                 # The schema this build prints (28g), held to both.
                 $<TARGET_FILE:apogee>
         )

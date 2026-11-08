@@ -13,7 +13,7 @@ The docs should already be reconciled — if `apogee-maintenance-update-document
 
 ## 0. Which applications?
 
-Apogee's documentation is per application ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/cli/`, `lib/documentation/gui/` and `lib/documentation/mod/`, written `<home>` below. **The branch decides the scope**: this pass covers every application the diff touched — both homes when both moved, each walked against its own docs. Repo-wide machinery (the pipeline, the release law) is recorded in the CLI's docs and audited once. If the user names a scope the diff disagrees with, ask with AskUserQuestion rather than guessing.
+Apogee's documentation is split by kind, then by platform ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/{assistant,backlog,adrs,reference}/<app>/`, where `<app>` is **`cli`** (the harness), **`darwin`** (the Apple apps, macOS, iPadOS and iOS, with an item for one OS under `darwin/macos/`, `darwin/ipados/` or `darwin/ios/`, and what binds every GUI app under `gui/`), or **`mod`** (the Claude plugin). `unix/` and `windows/` hold the apps not yet built. Written `<app>` below. **The branch decides the scope**: this pass covers every application the diff touched — both homes when both moved, each walked against its own docs. Repo-wide machinery (the pipeline, the release law) is recorded in the CLI's docs and audited once. If the user names a scope the diff disagrees with, ask with AskUserQuestion rather than guessing.
 
 ## 1. Gather the evidence
 
@@ -27,12 +27,12 @@ git diff --stat stable...HEAD
 
 Plus `git status` — warn if uncommitted work would be missing from the MR. Then read the branch's documentation deltas, which carry the narrative:
 
-- **Backlog documents deleted** on this branch + their new `MILESTONES.md` (`<home>/assistant/MILESTONES.md`) entries → the items this MR **ships** (pull each item's goal and acceptance criteria from the milestone entry).
+- **Backlog documents deleted** on this branch + their new `MILESTONES.md` (`lib/documentation/assistant/<app>/MILESTONES.md`) entries → the items this MR **ships** (pull each item's goal and acceptance criteria from the milestone entry).
 - **Index rows marked in progress** → items **advanced but not finished**; say what state they're left in.
 - **New dated entries** in item documents' Decisions made → the decisions this branch settled (including exercised `[default:]` calls).
-- `ROADMAP.md` (`<home>/assistant/ROADMAP.md`) checkbox/section changes → release-level framing.
+- `ROADMAP.md` (`lib/documentation/assistant/<app>/ROADMAP.md`) checkbox/section changes → release-level framing.
 - New/changed files under `lib/src/`, `lib/scripts/`, `.claude/skills/` → the implementation surface.
-- Changes under `.github/workflows/` that add, remove or rename a job or change a matrix → the merge needs the required checks re-applied first (DEVELOPER.md → Changing the pipeline (`lib/documentation/cli/assistant/DEVELOPER.md#changing-the-pipeline`)); it goes under **Before merging**.
+- Changes under `.github/workflows/` that add, remove or rename a job or change a matrix → the merge needs the required checks re-applied first (DEVELOPER.md → Changing the pipeline (`lib/documentation/assistant/cli/DEVELOPER.md#changing-the-pipeline`)); it goes under **Before merging**.
 
 ## 2. Write the description
 

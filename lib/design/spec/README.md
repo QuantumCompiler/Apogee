@@ -2,7 +2,7 @@
 
 The design of the desktop applications: an interactive prototype of the whole app, a board for every screen and state, the foundations (color tokens, type, components), and the build spec that maps the design to the CLI's machine-mode contract.
 
-It is a reference for building the apps under `lib/src/darwin/`, `linux/` and `windows/` ([GUI docs](../../documentation/gui/README.md)), not an input to any build, and CI never reads it. The same files also live in the **Apogee Desktop** design canvas, <https://claude.ai/artifact/HRGyHM1ZkRL3D1bWGXQGk7>, where they are laid out side by side.
+It is a reference for building the apps under `lib/src/darwin/`, `linux/` and `windows/` ([GUI docs](../../documentation/CLAUDE.md)), not an input to any build, and CI never reads it. The same files also live in the **Apogee Desktop** design canvas, <https://claude.ai/artifact/HRGyHM1ZkRL3D1bWGXQGk7>, where they are laid out side by side.
 
 ## Layout
 
