@@ -1,0 +1,121 @@
+# The iPad app
+
+**What / why.** The user's vision, 2026-11-07: Apogee as a private, self-hosted harness that feels like Claude on every device the person owns, with one strong machine of theirs serving their desktops, tablets and phones. On the iPad that means opening Apogee and finding the Mac app's places, sessions and keys, at every size the iPad gives a window. The iPad is a client of the person's own Apogee server only (the GUI SPEC's [mobile applications](../../assistant/SPEC.md#core-surfaces)). By this item, the code builds for iPadOS ([8a](app-builds-for-ios-and-ipados.md)), the app reaches a server ([7a](../v0.2.4/app-connection-local-or-server.md)) and every place works against one ([7c](../v0.2.4/every-place-against-a-server.md)). What remains is the iPad's own shape, and a first launch that has no local CLI to find. Measured at HEAD (`4f92316d`) on 2026-11-07. Paths are under `lib/src/darwin/`; a path that starts at a module (`shell/…`, `settings/…`) is under its `source/presentation/`.
+
+**W10: no iPad layouts.** The app has one shape, a Mac window, and nothing in it knows an iPad.
+1. **The window asks for more than most iPads have.** The window's minimum is 960 × 640 points (`source/presentation/styles/Metrics.swift:26-27`, applied at `source/presentation/app/Views/ApogeeApp.swift:83`). Settings asks for 860 × 600 (`settings/Views/SettingsView.swift:58`) and the console for 720 × 480 (`console/Views/ConsoleView.swift:127`). The iPad sizes come from the Simulator's own device profiles (`/Library/Developer/CoreSimulator/Profiles/DeviceTypes/<device>.simdevicetype/Contents/Resources/capabilities.plist`, `main-screen-width`/`-height` over `main-screen-scale`). In points they are: iPad mini (A17 Pro) 744 × 1133, iPad (A16) and iPad Air 11-inch (M4) 820 × 1180, iPad Pro 11-inch (M5) 834 × 1210, and iPad Pro 13-inch (M5) 1032 × 1376. In portrait, every one of them except the 13-inch is narrower than 960. Split View, Slide Over and Stage Manager make the window narrower still, at whatever width the person drags it to.
+2. **The shell's width law sends every portrait iPad to its narrow layout, where side panes vanish.** `ShellLayout` (`shell/ViewModels/ShellViewModel.swift:114-135`) collapses below 900 points (`collapseBelow`, `:116`, from `lib/design/spec/json/tokens.json:368`). Below that the sidebar becomes a 56-point column of icons and `sidePanes` turns false (`:131-133`). Then the Sessions inspector's button is disabled (`sessions/Views/SessionsScreen.swift:30`, `:113`, and its ⌥⌘I at `:374`). A backend's details are not drawn (`models/Views/ModelsScreen.swift:56`), nor a stored set's details (`models/Views/StoreView.swift:18`), nor a graph node's explanation (`graph/Views/GraphScreen.swift:88`). So on an 834-point iPad Pro in portrait, those four have no way in. That is a parity loss under [ADR 0003](../../adrs/parity.md).
+3. **The Mac's scene, Settings and Esc do not exist on iPadOS.** The iPhoneOS 27.1 SDK's SwiftUI interface (`SwiftUI.swiftmodule/arm64e-apple-ios.swiftinterface`) marks four of the app's pieces `@available(iOS, unavailable)`:
+   - the one `Window` scene (`ApogeeApp.swift:54`);
+   - the `Settings` scene (`:99`);
+   - `openSettings`, which the sidebar's Settings row calls (`shell/Views/Sidebar.swift:10`, `:41`);
+   - `onExitCommand`, Esc stopping a turn (`session/Views/SessionWindow.swift:29`).
+
+   Two more are absent from that interface altogether: the sidebar divider's `pointerStyle(.frameResize…)` (`shell/Views/ShellView.swift:40`) and `NSApplicationDelegateAdaptor` (`ApogeeApp.swift:45`), which owns ⌘Q's wait for the sessions (`app/Views/AppDelegate.swift:21`). 8a makes the code compile. What the iPad shows in their place is this item's.
+4. **Keys and the pointer are the Mac's.** Under `source/` there are 77 `.keyboardShortcut` call sites, 58 `.help(` tooltips in 20 files, and 2 `.contextMenu`s (`tasks/Views/TasksScreen.swift:83`, `sessions/Views/SessionList.swift:168`). The console's Tab, ↑, ↓ and Esc are `onKeyPress` (`console/Views/ConsoleView.swift:97-113`). A search for `horizontalSizeClass`, `hoverEffect`, `UIDevice`, `NavigationStack` and `TabView` finds none. Nothing in the app distinguishes a finger from a pointer, or a hardware keyboard from none.
+5. **First launch looks for a local binary.** With none found, the session shows `DiscoveryOutcome.installHint`, which is a `curl … install.sh | bash` line (`source/data/discovery/BinaryDiscovery.swift:146-147`, drawn at `source/presentation/session/ViewModels/SessionViewModel.swift:405-408`). An iPad can neither run that line nor spawn the binary it installs. There is nothing to pair with yet. On the branch binary (`apogee 0.2.0 (4f92316d)`, a scratch `APOGEE_HOME`), `apogee serve --help` names `--bind`, `--allow-remote` and `--print-admin-token`, and no pairing or device flag (a search for `pair` returns 0). A non-loopback bind needs `--allow-remote` because "the inference plane is unauthenticated" ([http-api.md:25](../../../cli/reference/http-api.md)). Pairing is CLI [59a](../../../cli/backlog/v0.2.3/paired-devices.md)'s.
+6. **The design draws no iPad.** No file in `lib/design/spec` matches `ipad|iphone|tablet` (case-insensitive).
+
+**Context, owned elsewhere (not this item's walls).** The project builds macOS only: `SDKROOT = macosx` in both configurations (`Apogee.xcodeproj/project.pbxproj:7889`, `:8744`). That is 8a's, as is `MediaPlayer`, an `NSViewRepresentable` over `AVPlayerView` (`styles/Components/MediaPlayer.swift:11`). What each place reads and runs against a server, such as media folders, the monitor's `system` and the store's verbs, is 7c's.
+
+This item delivers:
+- **The iPad app**: every place in iPad layouts. A sidebar beside the place where the window is wide enough, and drawn over it where it is not. Side panes beside the place or presented as sheets, and never disabled. The layouts hold at every Split View, Slide Over and Stage Manager size.
+- **Keys and pointer**: the Mac's keys with a hardware keyboard, listed by iPadOS, and the pointer's hover and secondary click. Every key-bound act also has a control a finger reaches.
+- **Remote only**: on first launch the app pairs with the person's server. With no server, it says how to set one up. A paired iPad opens on Sessions.
+- **The same parity table**: one `ParityTable` for the Mac and the iPad, every screen row's place mounted, no carve-out of the iPad's own.
+
+**Core constraint(s).**
+- **Anti-goal: nothing here may make standalone use need a server** (GUI SPEC → [No server requirement](../../assistant/SPEC.md#non-goals)). The CLI alone, and the Mac app over pipes to its local CLI, stay complete and the default. The iPad's shell, Settings place, pairing and Keychain store are compiled for iPadOS, or chosen at runtime by width there. The Mac's `ShellLayout` cases, its `Window` and `Settings` scenes, its discovery, its ⌘Q wait and its settings are byte-identical. A Mac that never pairs never sees any of this.
+- **The machine-mode client rule, as amended 2026-11-07** ([GUI CLAUDE.md](../../assistant/CLAUDE.md)): on the iPad the machine mode arrives only over 7a's authenticated connection to the person's own `apogee serve`. It is the same protocol with the same tolerant decoding and no capability of the app's own. The iPad runs no model and holds no CLI (no on-device core, the user's call).
+- **Never listens; serving is the server** (the CLI's [Interactive turns never open a listening socket](../../../cli/assistant/CLAUDE.md)): the iPad's connection is outbound. Only `apogee serve` owns a port. Pairing never makes the iPad a listener, and needs no discovery service on the iPad.
+- **Secrets are unleakable** (the CLI's [Secrets are unleakable by construction](../../../cli/assistant/CLAUDE.md); the GUI rule's last line): the credential 59a issues lives in the iPad's Keychain only. It has no type that a view, `Preferences`, a log, a preview or a recorded fixture serializes. Provider keys are still entered through the CLI's own flows, never on the iPad.
+- **Additive protocol** (the CLI's [ADR 0006](../../../cli/adrs/backwards-compatibility.md)): the iPad tolerates every event and field it does not know, and needs no protocol change that breaks an older front end. A server that predates a field still pairs and drives sessions.
+- **Parity** (the GUI's [ADR 0003](../../adrs/parity.md); the CLI's [ADR 0002](../../../cli/adrs/mode-parity.md) on the far side): one `ParityTable`. Layout is never a reason for a row to change. A pane too wide to sit beside becomes a sheet, never a gap.
+- **The layers and MVVM** ([ADR 0001](../../adrs/layer-enforcement.md), [ADR 0002](../../adrs/presentation-mvvm.md), [ADR 0004](../../adrs/module-schemes-and-previews.md)): the layout law stays in `ShellLayout`, which is pure, SwiftUI-free and handed the width as a value. iPad views live in their modules' `Views/` and shared pieces in `styles`. The Keychain sits in Infrastructure, below everything that asks it. Every iPad state has a named `#Preview` over `Previews/` fakes.
+- **The dev channel** (the CLI docs' [Development runs on the dev channel](../../../cli/assistant/CLAUDE.md#development-runs-on-the-dev-channel); [M18](../maintenance/app-dev-channel.md) for the app): a development build of the iPad app is the dev identity (8a's and M18's identifier, "Apogee Dev"). It pairs only with an `apogee-dev serve`, never the person's production server.
+
+**Seam + files.** All under `lib/src/darwin/`.
+- `source/presentation/shell/ViewModels/ShellViewModel.swift`: `ShellLayout` gains the iPad's form, keyed by a platform value the composition hands in (the Mac's is unchanged). On the iPad, the sidebar is `.beside` or `.over` (drawn over the place, closed on a pick), and `sidePanes` becomes a presentation, `.beside` or `.sheet`, never off. The iPad's breakpoints are its own tokens, and the Mac's `collapseBelow` stays 900.
+- `source/presentation/shell/Views/ShellView.swift` and `Sidebar.swift`: the over-the-place sidebar with its toolbar button and a leading-edge swipe. On the iPad, no drag-resize divider and a fixed 256-point width. Settings opens the iPad's Settings place in place of `openSettings`.
+- `source/presentation/styles/` (`Metrics.swift`, `Components/`): the iPad's minimums and breakpoints, and a shared `PaneSheet` that presents a side pane as a sheet. 9a reuses `PaneSheet`. The design's sizes come from `json/tokens.json` as today.
+- Each place with a side pane: `sessions/Views/SessionsScreen.swift` (the inspector, its ⌥⌘I enabled at every width), `models/Views/ModelsScreen.swift` and `StoreView.swift` (details), and `graph/Views/GraphScreen.swift` (explain). Each asks `layout.sidePanes` how to present, not whether to.
+- `source/presentation/settings/`: Settings as a sheet over the window on the iPad, its panes listed beside their content, reached from the sidebar's row and ⌘,. On iPadOS it adds Settings › Server: the paired server, its state, Forget, and Pair another. The Mac's `Settings` scene is untouched.
+- `source/presentation/app/`: the iPad's scene, one `WindowGroup` with multiple scenes off, composed as the Mac's `Window` is. Also the first launch: `ViewModels/FirstLaunch.swift` (new), a pure state that goes from nothing paired, to pairing, to refused or unreachable, to paired, and holds the no-server guidance. Its views are `Views/PairingView.swift` and `Views/ServerSetupView.swift` (new), drawing 7a's connection form with no local choice. There is no ⌘Q wait on the iPad.
+- `source/infrastructure/keychain/` (new, compiled on both platforms): `KeychainStore`, the one place the pairing credential is written, read and deleted (Security framework). The Mac touches it only when the person opts into 7a's server connection; a Mac that never pairs never reads or writes it. If 7a has already landed a credential store for the Mac, the iPad uses that one and this module is not added.
+- `source/presentation/session/Views/SessionWindow.swift` and `console/Views/ConsoleView.swift`: Esc as a key press that works on both platforms, and the console's keys unchanged with a hardware keyboard. With none, the console offers Tab and history as controls.
+- Hover and secondary click: the system hover effect on the shell's and screens' buttons and rows, `.help` kept, and the two context menus reachable by long-press and secondary click.
+- `lib/design/spec/` (read `spec/CLAUDE.md` first; every design update lands there and on the canvas): iPad boards. Landscape with the sidebar and inspector beside, portrait with the sidebar over and the inspector as a sheet, a narrow Split View, Settings as a sheet, pairing, and no server yet. Also the iPad values in `json/tokens.json`'s `layoutPx`, `html/BuildLayout.dc.html`, and pairing's row on `html/BuildContract.dc.html`.
+- Tests. They are hermetic: scripted fakes, recorded documents, no binary, no network, no window.
+  - `tests/presentation/shell/ShellViewModelTests.swift`: the iPad form at the five measured widths in both orientations, and at Split View and Slide Over widths. A side pane is never off. The Mac's cases are pinned unchanged.
+  - `tests/presentation/shell/ParityTests.swift`: the same table and fixture, run in 8a's iOS test bundle as well.
+  - `tests/presentation/shell/KeyMapTests.swift`: every shell binding has a control on the iPad.
+  - `tests/presentation/app/FirstLaunchTests.swift` (new), over a scripted fake of 7a's connection and 59a's recorded pairing replies: nothing paired leads to pairing; a refusal is shown in the server's words; an unreachable host is named, with Try again; no server leads to the setup guidance; paired leads to Sessions; Forget returns to pairing.
+  - `tests/infrastructure/keychain/`: the store over a fake keychain, with a planted credential never reaching the fake `KeyValueStore`, a preview or a log line.
+  - `tests/architecture/layering`: the Security framework only in Infrastructure, and UIKit, where used, only in Presentation.
+  - `#Preview`s at the measured iPad sizes for each iPad state.
+
+**Reference.**
+- In this table: [8a](app-builds-for-ios-and-ipados.md) (the iPadOS build, its dev identity and the iOS test bundle) and [8c](iphone-and-ipad-distribution.md) (getting the app onto a real iPad).
+- Before it: [7a](../v0.2.4/app-connection-local-or-server.md) (the connection and its server form, which the iPad uses without its local choice), [7c](../v0.2.4/every-place-against-a-server.md) (every place against a server) and [7b](../v0.2.4/mac-offers-its-files-and-shell.md) (the Mac's device tools, which the iPad does not offer).
+- After it: [9a](../v0.3.0/iphone-app.md) (the compact shell, which takes over the iPad's narrowest windows too and reuses `PaneSheet`, Settings as a place and this pairing), [9b](../v0.3.0/foldable-iphone.md) (the unfolded screen, which uses this item's layout) and [9c](../v0.3.0/three-apple-platforms-whole.md) (v0.3.0 whole).
+- On the CLI side: [59a](../../../cli/backlog/v0.2.3/paired-devices.md) (pairing: what is exchanged, and the words), [59b](../../../cli/backlog/v0.2.3/machine-mode-over-the-network.md) (the transport), [59c](../../../cli/backlog/v0.2.3/many-sessions-at-once.md) (many sessions), [59d](../../../cli/backlog/v0.2.3/reads-and-commands-over-the-network.md) (reads and commands), [59e](../../../cli/backlog/v0.2.3/tasks-outlive-the-connection.md) (tasks outliving a dropped connection).
+- Precedents: the shell's window law (`ShellLayout`, the design's `layoutPx`), M18's dev identity, and the not-found screen's honest install line (1b).
+
+**Decisions made** (dated):
+- 2026-11-07: Specced from the Apple-platforms spike and brainstorm. The user's calls that shape this item:
+  - the vision: Apogee feeling like Claude on every device the person owns, served by their own strong machine, mimicking frontier harnesses with local models;
+  - iPhone and iPad are clients of the person's Apogee server only, with no on-device core, while the Mac and the CLI stay standalone;
+  - the server is an add-on, never the only way the app runs, so nothing may make the CLI or the Mac app need a server, a network or an account;
+  - the SPEC amendment: the GUI reaches the CLI over stdio locally, or over an authenticated connection to the person's own `apogee serve`;
+  - no customer accounts, billing or metering: the server admits the person and their devices only, so "no server yet" never offers a hosted one or a sign-up;
+  - v0.3.0 is the target where macOS, iPadOS and iOS fully work.
+- 2026-11-07: Placed in v0.2.5 (track 8), gated on 8a. The iPad is regular width, so most of the Mac's layout reflows onto it and the new work is the narrow and overlay forms, Settings, keys and pairing. That makes it the step before the iPhone. 9a builds its compact shell on this item's `ShellLayout`, `PaneSheet`, Settings place and pairing, so it follows.
+- 2026-11-07: Where the work happens (the user's call C): server tools by default, plus a connected desktop's own files and shell. The iPad offers no device tools of its own (iPadOS starts no shell), so a session driven from the iPad runs on the server's tools, plus what a connected Mac offers through [60b](../../../cli/backlog/v0.2.4/device-tools.md) and 7b.
+
+**Open calls:**
+- [default: the iPad's width law. At 1100 points or more, the sidebar and side panes sit beside the place. This covers every iPad in landscape: 1133 is the narrowest measured. Below 1100, the sidebar is drawn over the place and side panes are sheets. This covers every portrait iPad and Split View halves. The same form holds down to the narrowest Slide Over and Stage Manager window until 9a's compact shell takes compact widths. Both numbers go in `tokens.json` as `layoutPx.ipadBesideFrom`, and the Mac's `collapseBelow` is unchanged.]
+- [default: the shell stays the app's own `HStack` shell, as on the Mac, not `NavigationSplitView`. The design's sidebar (places, sessions, the system strip, Settings) is the shell's own, and one `ShellLayout` keeps both platforms' law in one tested value.]
+- [default: one window. There is a single scene with multiple scenes off, as the Mac holds one `Window` because a second would mean a second live session. More windows under Stage Manager wait on 59c's many sessions and are not queued.]
+- [default: Settings on the iPad is a sheet over the window, opened from the sidebar's Settings row and ⌘,. It holds the Mac's panes plus Server (the paired server, Forget, Pair another).]
+- [default: keys. Every `KeyMap.shell` binding and every screen's `.keyboardShortcut` works with a hardware keyboard, through the same `.commands`, so iPadOS lists them. Esc stops a turn on both platforms. No act is reachable only by a key.]
+- [default: pointer. Buttons and rows take the system hover effect, and `.help` tooltips stay. The two context menus open by secondary click or long-press. The sidebar is a fixed 256 points on the iPad, so the Mac's resize pointer and drag have no counterpart.]
+- [default: first launch with nothing paired opens on pairing, which is 7a's server form with no local choice. Success leads to Sessions. A refusal is drawn in the server's words, an unreachable host is named, and both offer Try again.]
+- [default: "No server yet" says, in a few lines: a server is your own Mac or Linux machine running Apogee; install it with the install line the Mac's not-found screen shows (`DiscoveryOutcome.installHint`); then start serving and pair with 59a's commands, written as the CLI's `--help` writes them. A recorded fixture of that help holds the text, refreshed by script as the parity fixture is. It offers no hosted server, no account and no link to sign up.]
+- [default: one paired server at a time. Pair another replaces it, and Forget deletes the credential from the Keychain.]
+- [default: the credential is a Keychain item that is this-device-only and readable after first unlock. It never syncs through iCloud Keychain, so a lost or replaced iPad is re-paired, and the server can revoke it under 59a.]
+- [default: the dev build shows "Apogee Dev", and its pairing and setup text name `apogee-dev`. Where 59a's handshake reports the server's channel, the dev build refuses a release server in those words. Where it does not, Settings › Server shows the version line the server reports, and the live pass checks the channel by hand.]
+- [default: there is no ⌘Q wait on the iPad, because the session lives on the server. Going to the background drops the connection. On return the app reconnects and redraws the open conversation from the server's record.]
+- (consumed decision: 59a owns what pairing exchanges, such as a code, a QR or approval at the server, and the words its refusals use. The iPad draws them.)
+- (consumed decision: 7a owns the connection's form, its states and the Mac's credential home. The iPad uses them without the local choice.)
+- (consumed decision: 7c owns each place's behavior against a server, including the carve-out reasons that say "run it at a prompt", which are written for a server there.)
+- (consumed decision: 59b owns what happens to a chat turn left running when the connection drops, and 59e owns a task's. The iPad draws what they say.)
+- (consumed decision: 8a owns the iPadOS target, universal for iPhone and iPad, with its identifier and its test bundle. 8c owns distribution, including the Apple Developer Program, which is a [user] call there.)
+
+**Guardrail(s).**
+- `ShellViewModelTests` pins the iPad form at every measured width and orientation, side panes never off, and the Mac's cases unchanged.
+- `ParityTests` runs in the iOS test bundle over the same table and fixture, so no iPad-only carve-out can appear.
+- `KeyMapTests` pins a control for every key-bound act on the iPad.
+- `FirstLaunchTests` pins pairing, refusal, unreachable, no-server and Forget over recorded server replies.
+- The setup text's fixture fails when the CLI's pairing help changes.
+- A planted credential never reaches `Preferences`, a preview, a fixture or a log line.
+- The layering check holds Security in Infrastructure and UIKit in Presentation.
+- The Mac suite stays green with its scene, discovery and termination untouched.
+
+**Acceptance criteria:**
+- [ ] In the iOS Simulator, on the iPad mini (A17 Pro) and the iPad Pro 13-inch (M5), in both orientations, in a Split View half and third, in Slide Over and in a small Stage Manager window: every place, the console, the monitor and Settings are reached, and the Sessions inspector, a backend's and a stored set's details, and a graph node's explanation all open.
+- [ ] With a hardware keyboard (the Simulator's), ⌘1–⌘9, ⌘0, ⇧⌘K, ⌥⌘M, ⌥⌘I, ⌘, and Esc do what they do on the Mac, and iPadOS lists them. With none, every one of those acts has a control.
+- [ ] The pointer shows hover on buttons and rows, and a secondary click opens the Tasks and Sessions menus.
+- [ ] First launch with nothing paired leads through pairing to Sessions. A refused pairing says why in the server's words. With no server, the app says how to set one up and names no hosted service.
+- [ ] Forget removes the credential, and the next launch opens on pairing.
+- [ ] The Mac app in local mode behaves exactly as before, and the Mac's suite is unchanged.
+- [ ] Every iPad view has its named `#Preview`. The design canvas carries the iPad boards. The full suite is green.
+- [ ] A live pass: the dev build in the iPad Simulator, paired with an `apogee-dev serve` over a scratch `APOGEE_HOME` and a mock backend, drives a session with its thinking, tool narration, question and permission cards. The user's pass on their own iPad is optional and said, and needs 8c.
+
+**Scope note.** Earmarked for v0.2.5 (track 8); gated on 8a, and through it on 7a and CLI 59a, 59b and 59d. Each place's behavior against a server is 7c's (v0.2.4), which lands first in version order. Out of scope:
+- the compact (iPhone) shell, which also takes the iPad's compact widths once it lands (9a);
+- the foldable iPhone (9b);
+- installing on a real iPad, TestFlight and the App Store (8c);
+- more than one window or more than one paired server;
+- push notifications;
+- any on-device model or core, and device tools offered by the iPad;
+- Android, which follows v0.3.0 (a recorded default).

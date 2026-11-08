@@ -388,7 +388,31 @@ Opened 2026-11-07 from that day's spike (the user's idea: a Claude mod or MCP se
 - [ ] **A lighter tool set for coding hosts** *(58c — [backlog](../backlog/v0.2.2/mcp-serve-coding-host-profile.md))* — `--profile knowledge` drops the 8 file and git tools Claude Code already has.
 - [ ] **Claude can refresh what you list** *(58d — [backlog](../backlog/v0.2.2/mcp-serve-opt-in-refresh.md))* — a listed code graph's model-free update and a listed collection's re-ingest (local embedder only), recorded sources only.
 
-*Nothing is queued past v0.2.2 yet.*
+### v0.2.3 — The harness server (track 59)
+
+Opened 2026-11-07 from the Apple-platforms brainstorm (the user's vision: a private, self-hosted Claude on every device the person owns, local models as the brains; the server an add-on, never required). `serve` grows from a model server into the harness server for paired devices; the SPEC was amended the same day.
+
+- [ ] **Paired devices** *(59a — [backlog](../backlog/v0.2.3/paired-devices.md))* — `apogee devices pair|list|revoke` and a device-gated harness plane (`/v1/harness/`) on `apogee serve`: a short code or QR traded once for a per-device token stored hashed, TLS on every non-loopback bind (a self-signed certificate pinned at pairing, or the person's own), with the OpenAI-compatible inference plane unchanged for stock clients and standalone use needing none of it.
+- [ ] **The machine mode over the network: one protocol, two transports** *(59b — [backlog](../backlog/v0.2.3/machine-mode-over-the-network.md), gated on 59a)* — A paired device drives a served `chat`/`execute` session (a child owned by `serve`, as in ACP) over `GET /v1/machine`, gets the stdio stream's own events with a replay cursor (`seq`) so a dropped connection loses no turn, and answers permission and question cards. A session with no device attached waits, and its question is listed. The schema and conformance suite cover both transports, and stdio stays byte for byte unchanged.
+- [ ] **The server runs many sessions at once** *(59c — [backlog](../backlog/v0.2.3/many-sessions-at-once.md))* — serve's one-inference lock gives way to a lane per loaded model: a local model shared by its sessions in round-robin turns, cloud backends concurrent, a bounded queue answered with 503 server_busy, and each waiting turn told its place (a queued status). Before another model loads it is priced against the machine with the footprint arithmetic, and a model channel lets 59b's session children use the server's resident models instead of loading their own; the HTTP plane benefits the day it ships, and standalone use is untouched.
+- [ ] **Reads and commands over the network** *(59d — [backlog](../backlog/v0.2.3/reads-and-commands-over-the-network.md), gated on 59a)* — a paired device sends the words a person types after `apogee`, and the server runs that exact command and returns its stdout, exit code and stderr tail byte for byte. Long commands (pulls, conversions, ingests, graph builds) run as cancellable, resumable jobs that relay their stream-json events, and a network-door classification gives every leaf command its door: a command, a job, 59b's session, 59e's task, or refused with its reason (ADR 0002 parity).
+- [ ] **Tasks outlive the connection** *(59e — [backlog](../backlog/v0.2.3/tasks-outlive-the-connection.md), gated on 59b)* — A task started from a phone or a Mac runs on the person's server even after the device disconnects. Every task keeps a numbered log of its events, so any paired device can attach later and catch up from where it left off (`task attach --after N`), and can halt, cancel or resume the task. The task's permissions are set when it starts; there are no push notifications in v0.3.0, and tasks on the CLI alone work exactly as they do today.
+
+### v0.2.4 — One tool definition and device tools (track 60)
+
+Beside the GUI's track 7, the Mac as a client.
+
+- [ ] **One tool definition** *(60a — [backlog](../backlog/v0.2.4/one-tool-definition.md))* — `agent::ToolDefinition` replaces today's four tool shapes: `agent::Tool`'s flags, MCP's `ToolInfo` with only `readOnlyHint` kept, `ServedTool`/`ServedRead`/`ServedCall`, and ACP's `KindRow` name table. It has one JSON form, declared in the machine schema, which 60b's device tools carry over the network. Every existing tool runs in the harness, so standalone use is untouched, and what a model is shown does not change byte for byte.
+- [ ] **Device tools** *(60b — [backlog](../backlog/v0.2.4/device-tools.md), gated on 60a, 59b)* — a desktop connected to the person's server offers its own files, shell and git (under a granted folder) as tools the server's agent calls by name. Each call is decided and run on the device by the CLI's own tools and the device's own permission gate, so a Mac pointed at a server changes the Mac's project, never the server's disk.
+
+### v0.3.1 — Apogee-tuned training (track 61)
+
+After v0.3.0 (the user's call): Apogee's own sessions, opt-in, train a local model to work better inside Apogee.
+
+- [ ] **Apogee's own sessions as training data** *(61a — [backlog](../backlog/v0.3.1/sessions-as-training-data.md))* — each turn keeps a record (the tool definitions offered, each call's permission outcome and error), and `datasets export` turns named sessions or a collection into scrubbed step records and preference pairs, staged until `datasets review --accept`; the shared miner stops taking `/private` chats, so `datasets create --from sessions` and the cycle stop too.
+- [ ] **An Apogee-tuning regime and its eval** *(61b — [backlog](../backlog/v0.3.1/apogee-tuning-regime.md), gated on 61a)* — a local model tuned on the person's own sessions to work inside Apogee, measured by a deterministic protocol eval: calls the provider actually parsed, checked against the offered definitions, with denials respected and ask_user used. Only a candidate that beats its untuned base, without regressing the guard suites or the served version, is promoted.
+
+*Nothing is queued past v0.3.1 yet.*
 
 ## Unspecced ideas
 

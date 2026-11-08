@@ -38,6 +38,12 @@ The Apogee GUI: one native desktop application per platform (`lib/src/darwin/`, 
 
 **The rule.** Every capability reaches the GUI by driving the `apogee` binary as a child process over the stdio machine mode. The GUI never links the CLI's libraries, never calls a provider itself, never reimplements a capability the CLI owns, and never opens a listening socket for local work.
 
+*Amended 2026-11-07 (the user's call, the Apple-platforms spike; SPEC → One-liner):* the machine mode reaches the GUI one of two ways:
+- **Locally**, over stdio, as above. This is the default and complete on its own.
+- **Remotely**, over an authenticated connection to the person's own `apogee serve`: the only way on iPhone and iPad, and an opt-in way on the Mac.
+
+It is the same protocol, with the same tolerant decoding and the same honesty, so nothing else in this rule changes. The remote transport lands with GUI 7a. Until then the Mac's only transport is the child process.
+
 Why this is non-negotiable: "parity is the product" is the repo's founding law — every capability reaches every surface through one shared core. The moment a GUI grows its own path to a provider or its own copy of a capability, the surfaces drift apart and the CLI's test suite stops vouching for what the GUI does. The stdio contract is also the recorded product shape: local front-ends are pipes; `apogee serve` exists solely for remote deployments.
 
 - Build against the protocol as the schema states it: `machine-schema.json` rides in every CLI archive, and the session's `capabilities` line announces what the binary speaks.

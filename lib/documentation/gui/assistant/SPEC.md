@@ -6,7 +6,9 @@ The product spec: what the Apogee GUI is, what it is for, and the principles tha
 
 ## One-liner
 
-**The Apogee GUI** is the desktop face of the harness: one native application per platform (macOS, Linux, Windows) that drives the `apogee` CLI over its stdio machine mode — the harness's capabilities rendered graphically, owned by the CLI, reimplemented nowhere.
+**The Apogee GUI** is the graphical face of the harness: one native application per platform that drives the `apogee` CLI — over its stdio machine mode on the same machine, or, as an opt-in add-on, over an authenticated connection to the person's own Apogee server — the harness's capabilities rendered graphically, owned by the CLI, reimplemented nowhere.
+
+*Revised 2026-11-07 (the user's call, from that day's Apple-platforms spike):* the GUI reaches the CLI one of two ways. **Locally**, as a child process over stdio, which is unchanged, still the default on the Mac, and complete on its own. **Remotely**, over an authenticated network connection to `apogee serve` on the person's own hardware. The second is an add-on, never the only way the application runs. On the Mac it is opt-in. On iPhone and iPad, which cannot start another program, it is the only way: those apps are clients of the person's Apogee server. The goal is **v0.3.0: macOS, iPadOS and iOS (the iPhone, the foldable iPhone included) fully working**. Linux, Windows and Android follow it.
 
 ## Background
 
@@ -14,7 +16,8 @@ Apogee was built CLI-first and docs-first, with the GUI designed in from the sta
 
 ## Core surfaces
 
-1. **The desktop application** — one per platform (`darwin`, `linux`, `windows`), each the same product: Apogee's sessions and operations in a graphical shell, over the machine-mode child.
+1. **The desktop application** — one per platform (`darwin`, `linux`, `windows`), each the same product: Apogee's sessions and operations in a graphical shell, over the machine-mode child, or, pointed at a server, over its connection (the Mac's own files and shell then offered to the server's agent as device tools, as Claude Code's are; the user's call, 2026-11-07).
+2. **The mobile applications** *(added 2026-11-07, the user's call)* — iPhone, the foldable iPhone included, and iPad. They are clients of the person's own Apogee server only, the same product in layouts for each size. They are built from the macOS app's Swift code (`lib/src/darwin`), whose layers below Presentation are already free of AppKit.
 
 ## Scope (in)
 
@@ -27,7 +30,8 @@ Apogee was built CLI-first and docs-first, with the GUI designed in from the sta
 ## Non-goals
 
 - **No capability of its own.** The GUI never calls a provider, stores a model, edits config outside the CLI's one path, or grows a feature the CLI lacks — a wanted capability is built in the CLI first, then rendered. (The repo's parity law.)
-- **No HTTP path for local work.** Local front-ends are pipes; `apogee serve` is for remote deployments. The GUI spawns the binary; it does not connect to a local server. (The never-listens law.)
+- **No HTTP path for local work.** Local front-ends are pipes; `apogee serve` is for remote deployments. The GUI spawns the binary; it does not connect to a local server. (The never-listens law.) *Clarified 2026-11-07:* a connection to the person's server is remote work, the add-on above. A Mac with Apogee installed keeps its pipes, and the app never connects to a server on its own machine.
+- **No server requirement** *(added 2026-11-07, the user's call)*: the server is an add-on. A failure is anything that makes the CLI or the Mac app need a server, a network or an account to do what they do today, even if the rest technically works.
 
 ## Principles
 

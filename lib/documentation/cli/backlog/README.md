@@ -117,3 +117,38 @@ Every call is a recorded default; no **[user]** call blocks any of them. `graph 
 | 58b | Graphs and knowledge records served — `apogee graph list` (new) and the reads `list_graphs`, `graph_stats`, `graph_report`, `knowledge_list`, `knowledge_info`, `knowledge_query`, each its command's document | v0.2.2 | [`mcp-serve-graphs-and-knowledge.md`](v0.2.2/mcp-serve-graphs-and-knowledge.md) | 🟢 |
 | 58c | A lighter tool set for coding hosts — `mcp serve --profile knowledge` drops the 8 file and git tools a coding host already has; the full set stays the default; `mcp presets` prints both entries | v0.2.2 | [`mcp-serve-coding-host-profile.md`](v0.2.2/mcp-serve-coding-host-profile.md) | 🟢 |
 | 58d | Claude can refresh what you list — `graph_update` (model-free) and `collection_refresh` (local embedder only) served where a graph or collection lists `mcp_serve`, refreshing recorded sources only | v0.2.2 | [`mcp-serve-opt-in-refresh.md`](v0.2.2/mcp-serve-opt-in-refresh.md) | 🟢 |
+
+### v0.2.3
+
+**The Apple-platforms plan: tracks 59, 60 and 61**, opened 2026-11-07. It came from a brainstorm run with Superpowers, on the user's vision: Apogee as a private, self-hosted harness that feels like Claude on every device the person owns. One strong machine (512 GB of RAM, a finely tuned large model, say) serves the person's own desktops and phones. The user's calls: server tools by default, with a connected desktop offering **its own files and shell**, as Claude Code does; the server **an add-on, never the only way Apogee runs**; iPhone and iPad clients of the person's server only; and **v0.3.0 the target** for macOS, iPadOS and iOS (the foldable iPhone included). A common tool definition comes before it, and Apogee-tuned training after it. The CLI's and the GUI's SPECs were amended the same day: the GUI reaches the CLI over stdio locally, or over an authenticated connection to the person's `apogee serve`. Measured the same day, `serve` is a model server. Its inference plane is unauthenticated (`--allow-remote` and "your own access control"), it has one admin token per install, and it serves one inference at a time. None of machine mode's events, questions or task progress go over the network. The split, release by release:
+- **v0.2.3, the harness server** (59a–59e): paired devices, machine mode over the network, many sessions at once, reads and commands, and tasks that outlive the connection.
+- **v0.2.4, one tool definition and device tools** (60a, 60b), beside the GUI's track 7.
+- **v0.3.1, Apogee-tuned training** (61a, 61b).
+
+One [user] call blocks only part of an item. In **59d**, training and the other long verbs, run from a paired device, would revise the SPEC's "Training control is CLI-only over HTTP"; those rows stay refused until it is answered. The GUI's half is [its tracks 7–9](../../gui/backlog/README.md).
+
+| # | Item | Version | File | Status |
+|---|---|---|---|---|
+| 59a | Paired devices: the harness server admits only the person's devices — a code or QR from the server's terminal traded once for a per-device token, devices listed and revoked by name, TLS with a pinned self-signed or supplied certificate on every non-loopback bind, secrets 0600 and never logged; the inference plane unchanged for stock clients | v0.2.3 | [`paired-devices.md`](v0.2.3/paired-devices.md) | 🟢 |
+| 59b | The machine mode over the network — the stdio machine mode's events and driver lines, under the same machine-schema, carried over an authenticated WebSocket to the person's apogee serve: start, attach, leave and resume a session, replay from a cursor after a drop, cards answered by the attached device, and unattended questions that wait and are listed | v0.2.3 | [`machine-mode-over-the-network.md`](v0.2.3/machine-mode-over-the-network.md) | 🔒 59a |
+| 59c | The server runs many sessions at once — lanes per loaded model with a bounded, fair queue, cloud backends side by side, a footprint check before another model loads, every waiting turn told its place, and a model channel so session children share the server's resident models | v0.2.3 | [`many-sessions-at-once.md`](v0.2.3/many-sessions-at-once.md) | 🟢 |
+| 59d | Reads and commands over the network — a paired device runs any command the person may run, as a captured child of serve's own binary, getting back the same document and the same refusals; long commands run as jobs with their stream-json events, and every command is classified for the network door | v0.2.3 | [`reads-and-commands-over-the-network.md`](v0.2.3/reads-and-commands-over-the-network.md) | 🔒 59a |
+| 59e | Autonomous tasks on the server outlive the connection — a task started from a paired device runs on the server with or without the device, logs its numbered event stream beside its ledger, and any of the person's devices attaches from a cursor or halts, cancels and resumes it; its grants are set when it starts, and standalone tasks are unchanged | v0.2.3 | [`tasks-outlive-the-connection.md`](v0.2.3/tasks-outlive-the-connection.md) | 🔒 59b |
+
+### v0.2.4
+
+The tool definition and device tools ([preamble](#v023)).
+
+| # | Item | Version | File | Status |
+|---|---|---|---|---|
+| 60a | One tool definition — one description of every tool (name, description, input schema, hints, permission class, ACP kind, where it runs) that the native registry, MCP import and serve, ACP and the device tools all speak, additive and with nothing renamed | v0.2.4 | [`one-tool-definition.md`](v0.2.4/one-tool-definition.md) | 🟢 |
+| 60b | Device tools: a connected desktop offers its own files and shell — over the 59b connection a device declares its grant's file, shell and git tools in 60a's definition; the server's loop calls them as device__<device>__<tool>, the device's own gate decides each call, results stream back, and a mid-call disconnect fails the call cleanly | v0.2.4 | [`device-tools.md`](v0.2.4/device-tools.md) | 🔒 60a, 59b |
+
+### v0.3.1
+
+Apogee-tuned training, after v0.3.0 (the user's call; [preamble](#v023)).
+
+| # | Item | Version | File | Status |
+|---|---|---|---|---|
+| 61a | Apogee's own sessions as training data — named sessions or a collection of them, exported opt-in as step records (SFT) and preference pairs with tool calls, results, permission outcomes and the person's corrections; private chats never, secrets and paths scrubbed, staged and reviewed before any trainer sees them | v0.3.1 | [`sessions-as-training-data.md`](v0.3.1/sessions-as-training-data.md) | 🟢 |
+| 61b | An Apogee-tuning regime and its eval — a step-level protocol eval (tool-call correctness, no retry after a denial, ask_user, no call written as text) scored on the parsed call, a bundled apogee-protocol suite, held-out sessions, and a shipped apogee regime whose promotion the protocol gate holds | v0.3.1 | [`apogee-tuning-regime.md`](v0.3.1/apogee-tuning-regime.md) | 🔒 61a |

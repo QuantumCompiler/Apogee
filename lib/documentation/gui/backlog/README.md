@@ -79,3 +79,38 @@ Upkeep and fixes, claimable at any time by name: opened 2026-10-20 with its firs
 | 6h | Knowledge, Graph and Review show what they were asked about — a node gone after Rebuild no longer takes the canvas, an ingest and a Branch change drop stale results, a slow skill reply is dropped, a vectorised collection says its vectors | v0.2.1 | [`knowledge-graph-review-screens-current.md`](v0.2.1/knowledge-graph-review-screens-current.md) | 🟢 |
 | 6i | Training screens follow the CLI — a cycle pass's pipeline never offered Resume, the running list read as the ids the CLI writes, a stale cycle lock named with its remedy, Resume passing the spec and naming the CLI's stage, an unreadable cycle history shown as unreadable | v0.2.1 | [`training-screens-follow-the-cli.md`](v0.2.1/training-screens-follow-the-cli.md) | 🟢 |
 | 6j | An edit's Render says it plans again — the sheet names the second planning call and its planner, a diff for earlier arguments never stays beside Render, and the page says when the render's changes differ from the preview | v0.2.1 | [`compose-edit-render-honest.md`](v0.2.1/compose-edit-render-honest.md) | 🟢 |
+
+### v0.2.4
+
+**The Apple-platforms plan: tracks 7, 8 and 9**, opened 2026-11-07. The vision, the user's calls and the measurements are in the CLI's [track 59–61 preamble](../../cli/backlog/README.md#v023); the GUI SPEC and the machine-mode-client rule were amended the same day. The app is close to portable. It has 184 Swift files: 7 import AppKit, none import UIKit, and one file, `ProcessSpawner.swift`, starts the CLI. That one seam can take a network transport beside the child process. The release order:
+- **v0.2.4, the Mac as a client** (7a–7c), on the CLI's v0.2.3 server: the connection, local or your server; the Mac offering its own files and shell; every place working against a server.
+- **v0.2.5, iPad** (8a–8c): the code built for iOS and iPadOS, the iPad app, and getting the app onto iPhone and iPad. **8c carries the [user] call** (the Apple Developer Program, or personal sideloading).
+- **v0.3.0, iPhone, the foldable and the three platforms whole** (9a–9c).
+
+The Mac stays complete with no server, and 9c checks it.
+
+| # | Item | Version | File | Status |
+|---|---|---|---|---|
+| 7a | The app's connection: local or your server — a transport seam under ChildSpawner (the child process by default and unchanged, or a paired server's connection), Settings → Connections to pair, pick and forget servers, and an indicator showing the active connection everywhere; with no server paired, the app is exactly today's | v0.2.4 | [`app-connection-local-or-server.md`](v0.2.4/app-connection-local-or-server.md) | 🔒 CLI 59b, CLI 59d |
+| 7b | The Mac offers its own files and shell to a server session — a folder granted per project and server, each device call run by the Mac's own local apogee and asked on the session window's permission card marked On this Mac, grants revocable in Settings, never offered while connected locally | v0.2.4 | [`mac-offers-its-files-and-shell.md`](v0.2.4/mac-offers-its-files-and-shell.md) | 🔒 7a, CLI 60b |
+| 7c | Every place works against a server — each place's reads, commands and jobs run through the active connection, the media places show and play the server's records, the parity table classifies each command's remote meaning, and an act a server cannot do says why | v0.2.4 | [`every-place-against-a-server.md`](v0.2.4/every-place-against-a-server.md) | 🔒 7a, CLI 59e |
+
+### v0.2.5
+
+The iPad, and getting the app onto iPhone and iPad ([preamble](#v024)).
+
+| # | Item | Version | File | Status |
+|---|---|---|---|---|
+| 8a | The app's code builds for iPhone and iPad — one codebase for macOS, iOS and iPadOS, the Mac's code isolated in platform files, the layering check per platform, every scheme and the hermetic suite on the iOS simulator, the Mac app unchanged | v0.2.5 | [`app-builds-for-ios-and-ipados.md`](v0.2.5/app-builds-for-ios-and-ipados.md) | 🔒 7a |
+| 8b | The iPad app — every place in iPad layouts (sidebar beside or over the place, side panes beside or as sheets at every Split View, Slide Over and Stage Manager size), the Mac's keys with a hardware keyboard and the pointer, Settings as a sheet, first launch pairing with the person's server or saying how to set one up, one ParityTable | v0.2.5 | [`ipad-app.md`](v0.2.5/ipad-app.md) | 🔒 8a |
+| 8c | Getting the app onto iPhone and iPad — the iOS app built and tested on every pull request with no secret, a way onto the person's devices by the path the user picks, and the Mac's ad-hoc app and release unchanged | v0.2.5 | [`iphone-and-ipad-distribution.md`](v0.2.5/iphone-and-ipad-distribution.md) | 🔒 8a |
+
+### v0.3.0
+
+iPhone, the foldable iPhone, and the three Apple platforms whole: the plan's target ([preamble](#v024)).
+
+| # | Item | Version | File | Status |
+|---|---|---|---|---|
+| 9a | The iPhone app — every place in compact layouts (tabs and stacks, chat first), remote-only over the person's own server, pairing on first launch, one parity table, and a conversation started on the Mac continued on the iPhone through the server | v0.3.0 | [`iphone-app.md`](v0.3.0/iphone-app.md) | 🔒 8b |
+| 9b | The foldable iPhone — folding and unfolding moves between the compact and regular shells on one route, keeping the open session, the draft, a half-answered question, a running job's view and the transcript's place, with no connection change | v0.3.0 | [`foldable-iphone.md`](v0.3.0/foldable-iphone.md) | 🔒 9a |
+| 9c | v0.3.0: macOS, iPadOS and iOS whole — every command classified per platform, a hermetic whole pass per platform against a scripted server, the Mac proven complete with no server, and the release shipped with pairing documented | v0.3.0 | [`three-apple-platforms-whole.md`](v0.3.0/three-apple-platforms-whole.md) | 🔒 9b, 8c |
