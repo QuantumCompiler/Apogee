@@ -142,6 +142,22 @@ void ensure_graph_schema(sqlite3* handle) {
          "  line       INTEGER NOT NULL,"
          "  PRIMARY KEY (edge_id, collection, file, line))");
 
+    // v8 (57t): the chunks that state an inferred relation -- the prose
+    // counterpart of `kg_edge_sites` -- so its weight is how many distinct
+    // chunks say it, and a chunk extracted again cannot move it. Empty on a
+    // migrated store: an edge an earlier build wrote keeps its stored weight
+    // until a chunk states it again. `chunk_id` is not a foreign key, as in
+    // `kg_mentions`: reconcile prunes the rows of chunks that are gone.
+    exec(handle,
+         "CREATE TABLE IF NOT EXISTS kg_edge_chunks ("
+         "  edge_id    INTEGER NOT NULL REFERENCES kg_edges(id) ON DELETE CASCADE,"
+         "  collection TEXT    NOT NULL DEFAULT '',"
+         "  chunk_id   INTEGER NOT NULL,"
+         "  PRIMARY KEY (edge_id, collection, chunk_id))");
+    exec(handle,
+         "CREATE INDEX IF NOT EXISTS kg_edge_chunks_chunk ON kg_edge_chunks(collection, "
+         "chunk_id)");
+
     // The entity index: external-content FTS5 over name and description, the
     // same tokenizer as the chunk index so `fts_match_query` serves both.
     StatementPtr probe = prepare(handle,
@@ -207,6 +223,96 @@ namespace {
 
 [[nodiscard]] std::int64_t changes_of(sqlite3* handle) {
     return sqlite3_changes(handle);
+}
+
+/// Inserts or finds an inferred relation and records `chunk` as stating it;
+/// the edge's id. Inside the caller's transaction; the weight is the
+/// caller's to recount.
+std::int64_t upsert_supported_edge(sqlite3* handle, std::int64_t source_id, std::int64_t target_id,
+                                   std::string_view relation, std::string_view description,
+                                   const ChunkRef& chunk) {
+    StatementPtr upsert =
+        prepare(handle,
+                "INSERT INTO kg_edges (source_id, target_id, relation, description,"
+                " weight, origin) VALUES (?, ?, ?, ?, 1, 'inferred')"
+                " ON CONFLICT(source_id, target_id, relation) DO UPDATE SET"
+                "   description = CASE"
+                "     WHEN kg_edges.description = '' AND excluded.description != ''"
+                "     THEN excluded.description ELSE kg_edges.description END");
+    sqlite3_bind_int64(upsert.get(), 1, source_id);
+    sqlite3_bind_int64(upsert.get(), 2, target_id);
+    bind_text(upsert.get(), 3, relation);
+    bind_text(upsert.get(), 4, description);
+    if (sqlite3_step(upsert.get()) != SQLITE_DONE) {
+        fail(handle, "could not upsert a graph edge");
+    }
+    StatementPtr find = prepare(handle,
+                                "SELECT id FROM kg_edges"
+                                " WHERE source_id = ? AND target_id = ? AND relation = ?");
+    sqlite3_bind_int64(find.get(), 1, source_id);
+    sqlite3_bind_int64(find.get(), 2, target_id);
+    bind_text(find.get(), 3, relation);
+    if (sqlite3_step(find.get()) != SQLITE_ROW) {
+        fail(handle, "could not find a graph edge it just wrote");
+    }
+    const std::int64_t id = sqlite3_column_int64(find.get(), 0);
+    StatementPtr support = prepare(handle,
+                                   "INSERT OR IGNORE INTO kg_edge_chunks (edge_id, collection,"
+                                   " chunk_id) VALUES (?, ?, ?)");
+    sqlite3_bind_int64(support.get(), 1, id);
+    bind_text(support.get(), 2, chunk.collection);
+    sqlite3_bind_int64(support.get(), 3, chunk.chunk_id);
+    if (sqlite3_step(support.get()) != SQLITE_DONE) {
+        fail(handle, "could not record the chunk that states a graph edge");
+    }
+    return id;
+}
+
+/// Each of `edges` weighed again by the chunks that state it -- and removed
+/// when none does any longer. Inside the caller's transaction, and only for
+/// edges that just lost or gained a support row: an edge no chunk was ever
+/// recorded for (an earlier build's) is never handed here. Only an inferred
+/// edge is touched: a parsed one is weighed by its sites (`kg_edge_sites`),
+/// and the code build owns it. Returns how many were removed.
+std::int64_t recount_edges(sqlite3* handle, const std::set<std::int64_t>& edges) {
+    std::int64_t removed = 0;
+    for (const std::int64_t id : edges) {
+        StatementPtr count =
+            prepare(handle, "SELECT COUNT(*) FROM kg_edge_chunks WHERE edge_id = ?");
+        sqlite3_bind_int64(count.get(), 1, id);
+        if (sqlite3_step(count.get()) != SQLITE_ROW) {
+            fail(handle, "could not count an edge's chunks");
+        }
+        const std::int64_t chunks = sqlite3_column_int64(count.get(), 0);
+        if (chunks == 0) {
+            StatementPtr drop =
+                prepare(handle, "DELETE FROM kg_edges WHERE id = ? AND origin = 'inferred'");
+            sqlite3_bind_int64(drop.get(), 1, id);
+            if (sqlite3_step(drop.get()) != SQLITE_DONE) {
+                fail(handle, "could not remove an edge no chunk states");
+            }
+            removed += changes_of(handle);
+            continue;
+        }
+        StatementPtr weigh =
+            prepare(handle, "UPDATE kg_edges SET weight = ? WHERE id = ? AND origin = 'inferred'");
+        sqlite3_bind_int64(weigh.get(), 1, chunks);
+        sqlite3_bind_int64(weigh.get(), 2, id);
+        if (sqlite3_step(weigh.get()) != SQLITE_DONE) {
+            fail(handle, "could not weigh an edge by its chunks");
+        }
+    }
+    return removed;
+}
+
+/// The edges `select` names (one column of edge ids), read before the rows
+/// it reads from are deleted.
+[[nodiscard]] std::set<std::int64_t> edge_ids(sqlite3_stmt* select) {
+    std::set<std::int64_t> out;
+    while (sqlite3_step(select) == SQLITE_ROW) {
+        out.insert(sqlite3_column_int64(select, 0));
+    }
+    return out;
 }
 
 }  // namespace
@@ -356,6 +462,59 @@ void Store::upsert_edge(std::int64_t source_id, std::int64_t target_id, std::str
     if (sqlite3_step(upsert.get()) != SQLITE_DONE) {
         fail(handle, "could not upsert a graph edge");
     }
+}
+
+void Store::upsert_edge(std::int64_t source_id, std::int64_t target_id, std::string_view relation,
+                        std::string_view description, const ChunkRef& chunk) {
+    sqlite3* handle = impl_->connection.get();
+    in_transaction(handle, [&] {
+        const std::int64_t id =
+            upsert_supported_edge(handle, source_id, target_id, relation, description, chunk);
+        (void)recount_edges(handle, {id});
+    });
+}
+
+void Store::state_chunk_relations(const ChunkRef& chunk,
+                                  const std::vector<StatedRelation>& relations) {
+    sqlite3* handle = impl_->connection.get();
+    in_transaction(handle, [&] {
+        // What the chunk stated before: cleared, and weighed again below with
+        // whatever it states now.
+        std::set<std::int64_t> touched;
+        {
+            StatementPtr select = prepare(handle,
+                                          "SELECT edge_id FROM kg_edge_chunks"
+                                          " WHERE collection = ? AND chunk_id = ?");
+            bind_text(select.get(), 1, chunk.collection);
+            sqlite3_bind_int64(select.get(), 2, chunk.chunk_id);
+            touched = edge_ids(select.get());
+        }
+        StatementPtr clear = prepare(handle,
+                                     "DELETE FROM kg_edge_chunks WHERE collection = ? AND"
+                                     " chunk_id = ?");
+        bind_text(clear.get(), 1, chunk.collection);
+        sqlite3_bind_int64(clear.get(), 2, chunk.chunk_id);
+        if (sqlite3_step(clear.get()) != SQLITE_DONE) {
+            fail(handle, "could not clear what a chunk stated");
+        }
+        for (const StatedRelation& stated : relations) {
+            touched.insert(upsert_supported_edge(handle, stated.source_id, stated.target_id,
+                                                 stated.relation, stated.description, chunk));
+        }
+        (void)recount_edges(handle, touched);
+    });
+}
+
+std::vector<std::int64_t> Store::nodes_without_vectors() const {
+    StatementPtr select = prepare(impl_->connection.get(),
+                                  "SELECT id FROM kg_nodes WHERE dim = 0"
+                                  " AND type NOT IN ('file', 'module', 'class', 'function', 'name')"
+                                  " AND (name != '' OR description != '') ORDER BY id");
+    std::vector<std::int64_t> out;
+    while (sqlite3_step(select.get()) == SQLITE_ROW) {
+        out.push_back(sqlite3_column_int64(select.get(), 0));
+    }
+    return out;
 }
 
 UpsertResult Store::upsert_decision_node(std::string_view record_id, std::string_view description,
@@ -645,6 +804,50 @@ ReconcileResult Store::reconcile_graph_multi(const MemberStores& members) {
             }
             counter += changes_of(handle);
         };
+        // The chunks that stated a relation and are gone -- an ex-member's,
+        // or a dead chunk's within a surviving member -- stop counting it
+        // (57t): their support rows go, and the edges they supported are
+        // weighed again below.
+        std::set<std::int64_t> reweigh;
+        {
+            const std::string not_member =
+                "collection NOT IN (" + placeholders(members.size()) + ")";
+            StatementPtr select =
+                prepare(handle, "SELECT DISTINCT edge_id FROM kg_edge_chunks WHERE " + not_member);
+            StatementPtr remove = prepare(handle, "DELETE FROM kg_edge_chunks WHERE " + not_member);
+            int index = 1;
+            for (const auto& [collection, unused] : members) {
+                bind_text(select.get(), index, collection);
+                bind_text(remove.get(), index, collection);
+                ++index;
+            }
+            reweigh.merge(edge_ids(select.get()));
+            if (sqlite3_step(remove.get()) != SQLITE_DONE) {
+                fail(handle, "could not prune an ex-member's relation support");
+            }
+        }
+        constexpr std::size_t kSupportBatch = 500;
+        for (const auto& [collection, ids] : dead_chunks) {
+            for (std::size_t start = 0; start < ids.size(); start += kSupportBatch) {
+                const std::size_t end = std::min(start + kSupportBatch, ids.size());
+                const std::string where =
+                    " FROM kg_edge_chunks WHERE collection = ? AND chunk_id IN (" +
+                    placeholders(end - start) + ")";
+                StatementPtr select = prepare(handle, "SELECT DISTINCT edge_id" + where);
+                StatementPtr remove = prepare(handle, "DELETE" + where);
+                bind_text(select.get(), 1, collection);
+                bind_text(remove.get(), 1, collection);
+                for (std::size_t i = start; i < end; ++i) {
+                    sqlite3_bind_int64(select.get(), static_cast<int>(i - start) + 2, ids[i]);
+                    sqlite3_bind_int64(remove.get(), static_cast<int>(i - start) + 2, ids[i]);
+                }
+                reweigh.merge(edge_ids(select.get()));
+                if (sqlite3_step(remove.get()) != SQLITE_DONE) {
+                    fail(handle, "could not prune a dead chunk's relation support");
+                }
+            }
+        }
+        out.edges_pruned += recount_edges(handle, reweigh);
         // Rows from collections that are no longer members.
         {
             StatementPtr mentions =

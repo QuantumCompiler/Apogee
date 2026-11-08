@@ -1346,12 +1346,16 @@ apogee graph dedupe <name> [--dry-run] [--threshold T] --output-format json   # 
 
 It is byte for byte the body `POST /v1/admin/graph/{id}/dedupe` serves, from
 the one pass both run: `groups` (each `kept`, `kept_type` and the `merged`
-names), `merged_nodes`, `threshold`, `dry_run`, `code_entities` and
-`code_identity_merges`, and `prose_skipped` when the vector pass had nothing
-to compare; the shape is in
-[http-api.md](http-api.md#post-v1admingraphiddedupe). A threshold outside
-`(0, 1]`, or a graph not built, exits `1` with the message on stderr and
-nothing on stdout. The text says the same groups as before.
+names), `merged_nodes`, `threshold`, `dry_run`, `code_entities`,
+`code_identity_merges` and, since 57t, `vectors_cleared` (the survivors a
+merged description cost their vector, which the next `graph build` embeds
+again; `0` in a dry run), and `prose_skipped` when the vector pass had
+nothing to compare; the shape is in
+[http-api.md](http-api.md#post-v1admingraphiddedupe). A threshold that is not
+a finite number in `(0, 1]` -- `nan`, `inf` and `-nan` included, since 57t --
+or a graph not built, exits `1` with the message on stderr (`--threshold must
+be in (0, 1]`) and nothing on stdout. The text says the same groups as
+before, and since 57t how many survivors lost their vector.
 
 Since 27q the symphonies — named, staged prompt processes over a suite's
 members — read the same way, and a play prints one document too:

@@ -1,6 +1,9 @@
 #pragma once
 
+#include <chrono>
+#include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -9,6 +12,7 @@
 #include "contracts/config.h"
 #include "embedstore/store.h"
 #include "graph/code_build.h"
+#include "platform/file_lock.h"
 
 /// A named graph's source trees (27k), opened the same way by every surface
 /// that builds them: each tree walked with the one walk 26d set
@@ -77,5 +81,57 @@ struct GraphSourceBuild {
 [[nodiscard]] GraphSourceBuild build_graph_sources(embedstore::Store& store,
                                                    const harness::NamedGraphConfig& named,
                                                    graph::SourceBuildOptions options);
+
+// ---- The graph build lock (57t) ---------------------------------------------
+//
+// A named graph's database is one file, which `graph delete` removes. A build
+// in another process -- a terminal `graph build`, `embed ingest --graph`, the
+// app's build job, `serve`'s -- kept writing to the unlinked file and then
+// said it had built the graph, which no read could find. So every build of a
+// named graph holds one lock for its whole run, and every delete of one takes
+// it before it unlinks the file: a `FileLock` (55f) on `<graph db>.build.lock`,
+// which the system lets go of when its holder dies, so a crashed build never
+// blocks a delete. Both surfaces take it here, so they share one guard.
+// Collection-backed graphs delete their rows through SQLite, which already
+// orders a delete with a writer: they take no lock.
+
+/// The lock file beside a named graph's database: `<db>.build.lock`. Never
+/// removed (a `FileLock`'s rule), so it outlives a deleted graph harmlessly.
+[[nodiscard]] std::filesystem::path graph_build_lock_path(const std::filesystem::path& db_path);
+
+/// How long a build waits for a lock another run holds before it refuses: a
+/// delete holds it for the instant it takes to count and unlink, and a
+/// second build of the same graph is refused rather than queued.
+inline constexpr std::chrono::milliseconds kGraphBuildLockWait{2000};
+
+/// The lock a build of the named graph `name` holds for its whole run --
+/// its database's folder made first -- or nullopt with `refusal` in the
+/// words every surface says: another build or a delete held it past `wait`,
+/// or the lock file could not be opened.
+[[nodiscard]] std::optional<platform::FileLock> lock_graph_build(
+    const std::filesystem::path& db_path, std::string_view name, std::string& refusal,
+    std::chrono::milliseconds wait = kGraphBuildLockWait);
+
+/// `graph delete <named>` and `DELETE /v1/admin/graph/{id}`: one delete,
+/// under the build lock, refused at once while a build holds it.
+struct NamedGraphDeletion {
+    enum class Outcome : std::uint8_t {
+        /// The database and its `-wal`/`-shm` files are gone.
+        Deleted,
+        /// There was no database to delete.
+        Absent,
+        /// A build holds the lock: nothing was touched. `message` says so.
+        Building,
+        /// The lock or the file could not be had: `message` says why.
+        Failed,
+    };
+    Outcome outcome = Outcome::Absent;
+    /// What the database held, read under the lock before it went.
+    embedstore::GraphStats stats{};
+    std::string message{};
+};
+
+[[nodiscard]] NamedGraphDeletion delete_named_graph(const std::filesystem::path& db_path,
+                                                    std::string_view name);
 
 }  // namespace apogee::commands

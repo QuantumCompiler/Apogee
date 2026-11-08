@@ -312,77 +312,84 @@ struct Scope {
     return -1;
 }
 
-/// The text between the first `{` at depth 0 and its match, split at depth-0
-/// commas, each item trimmed.
-[[nodiscard]] std::vector<std::string> use_list_items(std::string_view inner) {
-    std::vector<std::string> out;
-    int depth = 0;
-    std::string item;
-    const auto flush = [&] {
-        std::string trimmed = collapse(item);
-        if (!trimmed.empty()) {
-            out.push_back(std::move(trimmed));
-        }
-        item.clear();
-    };
-    for (const char c : inner) {
-        if (c == '{') {
-            ++depth;
-        } else if (c == '}') {
-            --depth;
-        }
-        if (c == ',' && depth == 0) {
-            flush();
-            continue;
-        }
-        item.push_back(c);
+/// A use path's head as written before a `{` or as a leaf: spaces dropped,
+/// any trailing `::` cut.
+[[nodiscard]] std::string use_head(std::string_view tail) {
+    std::string head{tail};
+    std::erase(head, ' ');
+    while (head.ends_with("::")) {
+        head.erase(head.size() - 2);
     }
-    flush();
-    return out;
+    return head;
 }
 
 /// A Rust use tree's leaves: `a::{b, c::d as e}` -> (`a::b`, ""), (`a::c::d`, "e").
-// NOLINTNEXTLINE(misc-no-recursion): bounded by the use tree's nesting.
-void expand_use_tree(std::string_view tree, const std::string& prefix,
-                     std::vector<std::pair<std::string, std::string>>& out) {
+///
+/// One pass over the tree, collapsed once, in time linear in its length and
+/// with no recursion (57t): the enclosing groups' path is one buffer, grown
+/// at a group's `{` and cut back at its `}` to a length kept on a heap
+/// stack. Until 57t each level collapsed and split the rest of the text
+/// again and recursed, so a tree nested 20000 deep took 9 s and 40000 deep
+/// ran out of stack. Per item the rules are 27k's: an alias after ` as `,
+/// `self` standing for its group, nothing after a group's `}` before the
+/// next item.
+void expand_use_tree(std::string_view tree, std::vector<std::pair<std::string, std::string>>& out) {
     const std::string text = collapse(tree);
-    const std::size_t brace = text.find('{');
-    const auto joined = [&](std::string_view tail) {
-        std::string head{tail};
-        std::erase(head, ' ');
-        while (head.ends_with("::")) {
-            head.erase(head.size() - 2);
+    std::string prefix;            // the open groups' path: `a::b`
+    std::vector<std::size_t> cut;  // per open group, the prefix's length before it
+    std::string item;              // the current item's text since its delimiter
+    bool closed = false;           // a group just closed: the rest of its item is spent
+    const auto emit_leaf = [&] {
+        const std::string written = collapse(item);
+        if (written.empty()) {
+            return;
         }
-        if (prefix.empty()) {
-            return head;
-        }
-        return head.empty() ? prefix : prefix + "::" + head;
-    };
-    if (brace == std::string::npos) {
         std::string alias;
-        std::string path = text;
-        if (const std::size_t as = text.find(" as "); as != std::string::npos) {
-            alias = collapse(text.substr(as + 4));
-            path = text.substr(0, as);
+        std::string_view path = written;
+        if (const std::size_t as = written.find(" as "); as != std::string::npos) {
+            alias = collapse(std::string_view{written}.substr(as + 4));
+            path = std::string_view{written}.substr(0, as);
         }
-        std::string full = joined(path);
+        const std::string head = use_head(path);
+        std::string full = prefix.empty() ? head : head.empty() ? prefix : prefix + "::" + head;
         if (full == "self") {
             full = prefix;
         } else if (full.ends_with("::self")) {
             full.erase(full.size() - 6);
         }
         if (!full.empty()) {
-            out.emplace_back(full, alias);
+            out.emplace_back(std::move(full), std::move(alias));
         }
-        return;
+    };
+    for (const char c : text) {
+        if (c == '{') {
+            cut.push_back(prefix.size());
+            if (const std::string head = closed ? std::string{} : use_head(item); !head.empty()) {
+                prefix += prefix.empty() ? head : "::" + head;
+            }
+            item.clear();
+            closed = false;
+            continue;
+        }
+        if (c == ',' || c == '}') {
+            if (!closed) {
+                emit_leaf();
+            }
+            item.clear();
+            closed = false;
+            if (c == '}' && !cut.empty()) {
+                prefix.resize(cut.back());
+                cut.pop_back();
+                closed = true;
+            }
+            continue;
+        }
+        if (!closed) {
+            item.push_back(c);
+        }
     }
-    const std::string next = joined(text.substr(0, brace));
-    const std::size_t close = text.rfind('}');
-    const std::string_view inner = std::string_view{text}.substr(
-        brace + 1,
-        close == std::string::npos || close < brace ? std::string_view::npos : close - brace - 1);
-    for (const std::string& item : use_list_items(inner)) {
-        expand_use_tree(item, next, out);
+    if (!closed) {
+        emit_leaf();
     }
 }
 
@@ -716,6 +723,10 @@ FileFacts extract_code_facts(const CodeLanguage& language, std::string_view path
             scope.name.empty()) {
             continue;
         }
+        // The enclosing names, innermost first as the walk out meets them,
+        // then turned outermost first: each prepended in turn cost the
+        // square of the depth per scope (57t), the cube over a deeply nested
+        // file -- 5000 nested functions took 16 s.
         std::vector<std::string> enclosing;
         bool internal = false;
         bool in_class = false;
@@ -732,8 +743,9 @@ FileFacts extract_code_facts(const CodeLanguage& language, std::string_view path
                 in_class = true;
             }
             std::vector<std::string> parts = split(outer.name, sep);
-            enclosing.insert(enclosing.begin(), parts.begin(), parts.end());
+            enclosing.insert(enclosing.end(), parts.rbegin(), parts.rend());
         }
+        std::ranges::reverse(enclosing);
         if (scope.is_static && !in_class &&
             (language.id == CodeLanguageId::C || language.id == CodeLanguageId::Cpp)) {
             internal = true;
@@ -878,7 +890,7 @@ FileFacts extract_code_facts(const CodeLanguage& language, std::string_view path
         }
         if (language.id == CodeLanguageId::Rust) {
             std::vector<std::pair<std::string, std::string>> leaves;
-            expand_use_tree(item.path, "", leaves);
+            expand_use_tree(item.path, leaves);
             for (auto& [leaf, alias] : leaves) {
                 const bool glob = leaf.ends_with("::*");
                 std::string target = glob ? leaf.substr(0, leaf.size() - 3) : leaf;

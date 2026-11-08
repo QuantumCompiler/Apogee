@@ -589,6 +589,10 @@ ChatAttachments::GraphSaid ChatAttachments::take_graph(const Indexed& indexed) {
         case AttachmentGraphOutcome::State::Built:
             out.record = outcome.record;
             out.line = attachment_graph_line(outcome.record, outcome.nodes, outcome.edges);
+            // A file used with bytes that were not UTF-8 is named (57t).
+            for (const std::string& mended : outcome.mended) {
+                out.line += "; " + mended;
+            }
             break;
         case AttachmentGraphOutcome::State::Cancelled:
         case AttachmentGraphOutcome::State::Failed:

@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <string>
@@ -25,6 +26,8 @@
 #include "httpserver/jobs.h"
 #include "httpserver/mux.h"
 #include "operations/graph_dedupe_pass.h"
+#include "operations/graph_sources.h"
+#include "platform/file_lock.h"
 #include "support/env_guard.h"
 
 /// The graph slice of the control plane: the build as an async job on the
@@ -831,4 +834,59 @@ TEST_CASE(
     CHECK(dedupe.at("merged_nodes") == 0);
     CHECK(dedupe.at("code_entities").get<int>() > 0);
     CHECK(dedupe.at("prose_skipped") == "no prose entities -- nothing to compare by vector");
+}
+
+TEST_CASE("DELETE /graph/{id} of a named graph is a 409 while a build holds its lock",
+          "[httpserver][admin][graph][delete][lock][57t]") {
+    const SourceTree tree;
+    Fixture fixture{{}, /*serve=*/false, false, tree.entry()};
+    HttpResponse response = fixture.build("code");
+    REQUIRE(response.status == 202);
+    REQUIRE(fixture.wait(parsed(response).at("job_id")).status == JobStatus::Succeeded);
+    const std::filesystem::path db = apogee::agentloop::graph_db_path("code");
+    REQUIRE(std::filesystem::exists(db));
+    {
+        apogee::platform::FileLock::Refusal refusal;
+        const std::optional<apogee::platform::FileLock> building =
+            apogee::platform::FileLock::acquire(apogee::commands::graph_build_lock_path(db),
+                                                std::chrono::milliseconds{0}, refusal);
+        REQUIRE(building.has_value());
+        const HttpResponse refused = fixture.remove("code");
+        CHECK(refused.status == 409);
+        CHECK(parsed(refused)["error"]["message"] ==
+              "a build of \"code\" is running -- stop it, or wait for it, then delete");
+        CHECK(parsed(refused)["error"]["type"] == "conflict");
+        CHECK(std::filesystem::exists(db));
+        // A build job that finds the lock held fails, saying why -- it never
+        // builds into a file a delete is removing.
+        response = fixture.build("code", nlohmann::json{{"update", true}});
+        REQUIRE(response.status == 202);
+        const apogee::httpserver::JobRecord blocked = fixture.wait(parsed(response).at("job_id"));
+        CHECK(blocked.status == JobStatus::Failed);
+        CHECK(blocked.error.find("another build or a delete of \"code\" is running") !=
+              std::string::npos);
+    }
+    const HttpResponse deleted = fixture.remove("code");
+    CHECK(deleted.status == 200);
+    CHECK_FALSE(std::filesystem::exists(db));
+    CHECK(fixture.remove("code").status == 404);
+}
+
+TEST_CASE("a code build's job names a file that is not UTF-8 under mended, and uses it",
+          "[httpserver][admin][graph][code][utf8][57t]") {
+    const SourceTree tree;
+    std::ofstream{tree.dir.path() / "pkg" / "m.py", std::ios::binary}
+        << "def caf\xe9_atlas():\n    return 1\n";
+    Fixture fixture{{}, /*serve=*/false, false, tree.entry()};
+    const HttpResponse response = fixture.build("code");
+    REQUIRE(response.status == 202);
+    const apogee::httpserver::JobRecord built = fixture.wait(parsed(response).at("job_id"));
+    INFO(built.error);
+    REQUIRE(built.status == JobStatus::Succeeded);
+    const nlohmann::json code = built.result.at("code");
+    CHECK(code.at("files_parsed") == 3);
+    CHECK(code.at("skipped").empty());
+    REQUIRE(code.at("mended").size() == 1);
+    CHECK(code.at("mended")[0].at("file") == "pkg/m.py");
+    CHECK(code.at("mended")[0].at("bytes") == 1);
 }

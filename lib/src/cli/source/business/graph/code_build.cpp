@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "contracts/sha256.h"
+#include "contracts/utf8.h"
 #include "embedstore/folder_listing.h"
 #include "graph/code_extract.h"
 #include "graph/code_languages.h"
@@ -176,6 +177,10 @@ void check_members(const std::vector<SourceMember>& members) {
 
 }  // namespace
 
+std::string mended_reason(const MendedFile& file) {
+    return "not UTF-8 -- " + std::to_string(file.bytes) + " byte(s) shown as U+FFFD";
+}
+
 std::string vendored_directory(std::string_view path) {
     // The one list, shared with a directory ingest's walk (57s).
     return embedstore::vendored_directory(path);
@@ -220,7 +225,20 @@ SourceBuildResult build_source(embedstore::Store& store, const std::vector<Sourc
                     SkippedFile{.member = member.label, .file = file.path, .reason = "binary"});
                 continue;
             }
+            // The fingerprint is the bytes as read, so an unchanged file --
+            // mended or not -- is not parsed again.
             const std::string hash = hash_of(*content);
+            // Text where it enters (57t): a byte that is not UTF-8 would end
+            // the build at the facts' dump, so the file is mended here, once,
+            // and everything read from it is text. Valid files pass as read.
+            std::size_t mended_bytes = 0;
+            std::string mended;
+            if (!harness::is_valid_utf8(*content)) {
+                mended_bytes = harness::ill_formed_bytes(*content);
+                mended = harness::valid_utf8(*content);
+            }
+            const std::string_view text =
+                mended_bytes > 0 ? std::string_view{mended} : std::string_view{*content};
             const std::string extractor = code_extractor_id(*file.language);
             std::optional<FileFacts> facts;
             const auto state = states.find(file.path);
@@ -244,7 +262,7 @@ SourceBuildResult build_source(embedstore::Store& store, const std::vector<Sourc
             if (parsing) {
                 std::string reason;
                 bool partial = false;
-                facts = parse_file(parsers, *file.language, file.path, *content, reason, partial);
+                facts = parse_file(parsers, *file.language, file.path, text, reason, partial);
                 if (!facts.has_value()) {
                     out.skipped.push_back(
                         SkippedFile{.member = member.label, .file = file.path, .reason = reason});
@@ -266,6 +284,10 @@ SourceBuildResult build_source(embedstore::Store& store, const std::vector<Sourc
             }
             if (facts->has_errors) {
                 out.partial.push_back(member.label + "/" + file.path);
+            }
+            if (mended_bytes > 0) {
+                out.mended.push_back(
+                    MendedFile{.member = member.label, .file = file.path, .bytes = mended_bytes});
             }
             used.insert(file.path);
             ++out.files_used;
@@ -319,6 +341,9 @@ SourceBuildResult build_source(embedstore::Store& store, const std::vector<Sourc
     std::ranges::sort(out.skipped, [](const SkippedFile& a, const SkippedFile& b) {
         return std::tie(a.member, a.file) < std::tie(b.member, b.file);
     });
+    std::ranges::sort(out.mended, [](const MendedFile& a, const MendedFile& b) {
+        return std::tie(a.member, a.file) < std::tie(b.member, b.file);
+    });
     return out;
 }
 
@@ -336,10 +361,14 @@ CodeGraph parse_and_resolve(const std::vector<SourceMember>& members,
                 looks_binary(*content)) {
                 continue;
             }
+            const std::string mended =
+                harness::is_valid_utf8(*content) ? std::string{} : harness::valid_utf8(*content);
             std::string reason;
             bool partial = false;
             std::optional<FileFacts> facts =
-                parse_file(parsers, *file.language, file.path, *content, reason, partial);
+                parse_file(parsers, *file.language, file.path,
+                           mended.empty() ? std::string_view{*content} : std::string_view{mended},
+                           reason, partial);
             if (facts.has_value()) {
                 all.push_back(SourceFacts{.member = member.label, .facts = std::move(*facts)});
             }

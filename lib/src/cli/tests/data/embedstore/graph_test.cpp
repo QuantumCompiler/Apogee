@@ -18,8 +18,10 @@
 /// corroboration versus facts, mention dedup, and the reconcile pass.
 namespace {
 
+using apogee::embedstore::ChunkRef;
 using apogee::embedstore::GraphNode;
 using apogee::embedstore::ReconcileResult;
+using apogee::embedstore::StatedRelation;
 using apogee::embedstore::Store;
 using apogee::embedstore::UpsertResult;
 
@@ -42,6 +44,20 @@ void raw_exec(const std::filesystem::path& path, const char* sql) {
     REQUIRE(rc == SQLITE_OK);
 }
 
+[[nodiscard]] std::int64_t raw_count(const std::filesystem::path& path, const char* sql) {
+    sqlite3* raw = nullptr;
+    REQUIRE(sqlite3_open(path.string().c_str(), &raw) == SQLITE_OK);
+    sqlite3_stmt* statement = nullptr;
+    REQUIRE(sqlite3_prepare_v2(raw, sql, -1, &statement, nullptr) == SQLITE_OK);
+    std::int64_t out = -1;
+    if (sqlite3_step(statement) == SQLITE_ROW) {
+        out = sqlite3_column_int64(statement, 0);
+    }
+    sqlite3_finalize(statement);
+    sqlite3_close(raw);
+    return out;
+}
+
 [[nodiscard]] std::int64_t first_chunk_id(const Store& store, std::string_view source) {
     const std::vector<apogee::embedstore::Chunk> chunks = store.chunks_by_source(source);
     REQUIRE_FALSE(chunks.empty());
@@ -57,19 +73,19 @@ TEST_CASE("normalize_entity_name folds case and whitespace", "[embedstore][graph
     CHECK(apogee::embedstore::normalize_entity_name("").empty());
 }
 
-TEST_CASE("the graph schema is current (v7), idempotent on reopen, and heals a dropped trigger",
+TEST_CASE("the graph schema is current (v8), idempotent on reopen, and heals a dropped trigger",
           "[embedstore][graph][schema]") {
     const Scratch scratch;
     {
         Store store{scratch.db()};
-        CHECK(store.schema_version() == 7);
+        CHECK(store.schema_version() == 8);
         CHECK(store.graph_stats().nodes == 0);
         (void)store.upsert_node("Atlas", "system", "");
     }
     // A second open changes nothing and loses nothing.
     {
         const Store again{scratch.db()};
-        CHECK(again.schema_version() == 7);
+        CHECK(again.schema_version() == 8);
         CHECK(again.graph_stats().nodes == 1);
     }
     // A dropped trigger comes back at a migration -- the one time a store an
@@ -152,6 +168,110 @@ TEST_CASE("upsert_edge corroborates while ensure_edge stays a fact at weight 1",
         }
     }
     CHECK(store.graph_stats().edges == 2);
+}
+
+TEST_CASE("an inferred edge's weight is the distinct chunks that state it",
+          "[embedstore][graph][edges][57t]") {
+    const Scratch scratch;
+    Store store{scratch.db()};
+    const std::int64_t a = store.upsert_node("Atlas", "system", "").id;
+    const std::int64_t b = store.upsert_node("Vault", "system", "").id;
+    const ChunkRef one{.collection = "", .chunk_id = 1};
+    const ChunkRef two{.collection = "", .chunk_id = 2};
+    const auto weight = [&] {
+        const std::vector<apogee::embedstore::Neighbor> neighbors = store.node_neighbors(a);
+        return neighbors.empty() ? std::int64_t{0} : neighbors.front().weight;
+    };
+    store.upsert_edge(a, b, "stores readings in", "", one);
+    CHECK(weight() == 1);
+    // The same chunk again -- a forced rebuild, a retried file -- moves nothing.
+    store.upsert_edge(a, b, "stores readings in", "Atlas writes to Vault", one);
+    store.upsert_edge(a, b, "stores readings in", "", one);
+    CHECK(weight() == 1);
+    CHECK(store.node_neighbors(a).front().description == "Atlas writes to Vault");
+    store.upsert_edge(a, b, "stores readings in", "", two);
+    CHECK(weight() == 2);
+
+    // What a chunk states replaces what it stated: three passes over both
+    // chunks keep the count at two.
+    const std::vector<StatedRelation> says{
+        StatedRelation{.source_id = a, .target_id = b, .relation = "stores readings in"}};
+    for (int pass = 0; pass < 3; ++pass) {
+        store.state_chunk_relations(one, says);
+        store.state_chunk_relations(two, says);
+    }
+    CHECK(weight() == 2);
+    // A chunk that no longer states it stops counting it ...
+    store.state_chunk_relations(two, {});
+    CHECK(weight() == 1);
+    // ... and a relation no chunk states any longer is gone.
+    store.state_chunk_relations(one, {});
+    CHECK(store.node_neighbors(a).empty());
+    CHECK(store.graph_stats().edges == 0);
+
+    // An edge no chunk was recorded for -- an earlier build's -- keeps its
+    // weight until a chunk states it, and from then on counts chunks.
+    store.upsert_edge(a, b, "depends on", "");
+    store.upsert_edge(a, b, "depends on", "");
+    store.upsert_edge(a, b, "depends on", "");
+    CHECK(weight() == 3);
+    store.state_chunk_relations(two, {});  // clears nothing of it
+    CHECK(weight() == 3);
+    store.upsert_edge(a, b, "depends on", "", two);
+    CHECK(weight() == 1);
+    // The deterministic edges are untouched by any of it.
+    CHECK(store.ensure_edge(b, a, "concerns", ""));
+    store.state_chunk_relations(one, {});
+    for (const apogee::embedstore::Neighbor& neighbor : store.node_neighbors(b)) {
+        if (neighbor.relation == "concerns") {
+            CHECK(neighbor.weight == 1);
+        }
+    }
+}
+
+TEST_CASE("a v7 store gains the edge support table on open, its edges keeping their weight",
+          "[embedstore][graph][migration][57t]") {
+    const Scratch scratch;
+    std::int64_t a = 0;
+    std::int64_t b = 0;
+    {
+        Store store{scratch.db()};
+        a = store.upsert_node("Atlas", "system", "").id;
+        b = store.upsert_node("Vault", "system", "").id;
+        store.upsert_edge(a, b, "stores readings in", "");
+        store.upsert_edge(a, b, "stores readings in", "");
+    }
+    // Back to v7, as a build before 57t left it.
+    raw_exec(scratch.db(),
+             "DROP TABLE kg_edge_chunks;"
+             "UPDATE store_meta SET value = '7' WHERE key = 'schema_version';");
+    Store store{scratch.db()};
+    CHECK(store.schema_version() == 8);
+    CHECK(store.node_neighbors(a).front().weight == 2);  // migrated as it is
+    store.upsert_edge(a, b, "stores readings in", "", ChunkRef{.collection = "", .chunk_id = 9});
+    CHECK(store.node_neighbors(a).front().weight == 1);  // counted from now on
+    // The support goes with its edge.
+    store.delete_graph();
+    CHECK(store.graph_stats().edges == 0);
+    CHECK(raw_count(scratch.db(), "SELECT COUNT(*) FROM kg_edge_chunks") == 0);
+}
+
+TEST_CASE("nodes_without_vectors lists prose and decision nodes with text and no vector",
+          "[embedstore][graph][vectors][57t]") {
+    const Scratch scratch;
+    Store store{scratch.db()};
+    const std::int64_t atlas = store.upsert_node("Atlas", "system", "collects readings").id;
+    const std::int64_t vault = store.upsert_node("Vault", "system", "").id;
+    const std::int64_t decision =
+        store.upsert_decision_node("KR-1", "use Vault", R"({"kind":"knowledge_record"})").id;
+    (void)store.upsert_node("app.run", "function", "");
+    (void)store.upsert_node("os.path", "name", "");
+    CHECK(store.nodes_without_vectors() == std::vector<std::int64_t>{atlas, vault, decision});
+    store.update_node_embedding(vault, {1.0F, 0.0F});
+    CHECK(store.nodes_without_vectors() == std::vector<std::int64_t>{atlas, decision});
+    // A description merged in clears the vector: listed again.
+    (void)store.upsert_node("Vault", "system", "keeps them");
+    CHECK(store.nodes_without_vectors() == std::vector<std::int64_t>{atlas, vault, decision});
 }
 
 TEST_CASE("add_mention dedups and maintains the salience counter",

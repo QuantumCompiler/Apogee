@@ -356,10 +356,11 @@ endif()
 
 # The code graph (27k) is model-free by construction, not by care: its files
 # -- `graph/code_*` -- may include one another, the store (`embedstore/`),
-# and by name the SHA-256 the content fingerprint uses and the cancellation
-# token. Not `harness/`, not `agentloop/`, not `agent/`, not `knowledge/`, not
-# the prose extractor: there is no route to a model from the code path to
-# take, so "zero model calls" is a property of the include graph.
+# and by name the SHA-256 the content fingerprint uses, the cancellation
+# token and (57t) the UTF-8 mend a source file's bytes take where they
+# enter. Not `harness/`, not `agentloop/`, not `agent/`, not `knowledge/`,
+# not the prose extractor: there is no route to a model from the code path
+# to take, so "zero model calls" is a property of the include graph.
 file(GLOB graph_code_sources "${PACKAGE_DIR_graph}/code_*.h" "${PACKAGE_DIR_graph}/code_*.cpp")
 if(graph_code_sources STREQUAL "")
     message(FATAL_ERROR "no code_* sources found under ${PACKAGE_DIR_graph} — "
@@ -369,7 +370,7 @@ foreach(source IN LISTS graph_code_sources)
     file(STRINGS "${source}" project_includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
     foreach(line IN LISTS project_includes)
         if(NOT line MATCHES "#[ \t]*include[ \t]*\"(graph/code_|embedstore/)"
-           AND NOT line MATCHES "#[ \t]*include[ \t]*\"contracts/(sha256|cancellation)\\.h\"")
+           AND NOT line MATCHES "#[ \t]*include[ \t]*\"contracts/(sha256|cancellation|utf8)\\.h\"")
             get_filename_component(name "${source}" NAME)
             list(APPEND VIOLATIONS "  graph/${name} reaches past the code path: ${line}")
         endif()
@@ -379,7 +380,7 @@ if(NOT VIOLATIONS STREQUAL "")
     string(REPLACE ";" "\n" pretty "${VIOLATIONS}")
     message(FATAL_ERROR "the code graph can reach a model:\n${pretty}\n"
                         "graph/code_* may include only graph/code_*, embedstore/, "
-                        "contracts/sha256.h and contracts/cancellation.h.")
+                        "contracts/sha256.h, contracts/cancellation.h and contracts/utf8.h.")
 endif()
 
 # tree-sitter's C API has ONE boundary (27k): `graph/code_parser.cpp` wraps

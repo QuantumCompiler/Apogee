@@ -147,15 +147,26 @@ void store_extraction(embedstore::Store& store, std::string_view collection, std
             ++out.edges_upserted;
         }
     }
+    // What this chunk states of relations replaces what it stated before
+    // (57t): an edge's weight is the distinct chunks that state it, so the
+    // same chunk extracted again -- `--force`, a retried file, a resumed
+    // build -- never moves it, and a relation it no longer states stops
+    // counting it.
+    std::vector<embedstore::StatedRelation> stated;
     for (const Relation& relation : result.relations) {
         const auto source = by_name.find(embedstore::normalize_entity_name(relation.source));
         const auto target = by_name.find(embedstore::normalize_entity_name(relation.target));
         if (source == by_name.end() || target == by_name.end()) {
             continue;  // unreachable after normalize; guarded anyway
         }
-        store.upsert_edge(source->second, target->second, relation.relation, relation.description);
+        stated.push_back(embedstore::StatedRelation{.source_id = source->second,
+                                                    .target_id = target->second,
+                                                    .relation = relation.relation,
+                                                    .description = relation.description});
         ++out.edges_upserted;
     }
+    store.state_chunk_relations(
+        embedstore::ChunkRef{.collection = std::string{collection}, .chunk_id = chunk_id}, stated);
 }
 
 }  // namespace
@@ -382,7 +393,16 @@ BuildResult build_multi(embedstore::Store& target, const std::vector<Member>& me
     }
 
     // 4. Embed new or changed entities, batched at the end so a failed embed
-    // never loses extraction work.
+    // never loses extraction work -- and every entity still without a vector
+    // (57t): one an earlier build's embed left behind when it failed or was
+    // cancelled, or a dedupe survivor whose vector a merged description
+    // cleared. Their text is unchanged, so nothing else would ever mark them
+    // again; the communities heal the same way (knowledge-graph-global).
+    if (embed && !options.dry_run) {
+        for (const std::int64_t id : target.nodes_without_vectors()) {
+            mutated.insert(id);
+        }
+    }
     if (embed && !options.dry_run && !mutated.empty()) {
         const std::vector<std::int64_t> ids(mutated.begin(), mutated.end());
         const std::vector<embedstore::GraphNode> nodes = target.nodes_by_ids(ids);

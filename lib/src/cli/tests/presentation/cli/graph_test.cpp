@@ -3,9 +3,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <string>
@@ -22,6 +24,8 @@
 #include "httpserver/admin_config.h"
 #include "httpserver/admin_graph.h"
 #include "httpserver/http_types.h"
+#include "operations/graph_sources.h"
+#include "platform/file_lock.h"
 #include "support/env_guard.h"
 
 /// `apogee graph` on the scripted mock as the extractor: a build over an
@@ -618,7 +622,7 @@ TEST_CASE("graph dedupe --output-format json prints the admin route's body, byte
     CHECK(nlohmann::json::parse(preview) == nlohmann::json::parse(R"({
         "groups": [{"kept": "Atlas", "kept_type": "system", "merged": ["Atlas Prime"]}],
         "merged_nodes": 1, "threshold": 0.92, "dry_run": true,
-        "code_entities": 0, "code_identity_merges": 0})"));
+        "code_entities": 0, "code_identity_merges": 0, "vectors_cleared": 0})"));
     CHECK(fixture.store().find_nodes("Atlas Prime").size() == 1);
 
     // The merge: what the preview said, done -- and then nothing left, on both.
@@ -691,4 +695,97 @@ TEST_CASE("embed ingest --graph --quiet carries the silence into the build it ch
     CHECK(out.find("Graph build complete for \"notes\":") != std::string::npos);
     CHECK(err.find("[graph] extracting") == std::string::npos);
     CHECK(err.find("\033[2K") == std::string::npos);
+}
+
+TEST_CASE("graph dedupe refuses a threshold that is not a finite number above 0 and at most 1",
+          "[commands][graph][dedupe][57t]") {
+    const Fixture fixture;
+    fixture.ingest();
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"graph", "build", "notes"}, &out, &err) == 0);
+    for (const std::string threshold : {"nan", "NaN", "inf", "-nan", "-inf"}) {
+        for (const bool json : {false, true}) {
+            INFO(threshold << (json ? " json" : " text"));
+            std::vector<std::string> args{"graph",       "dedupe",  "notes",
+                                          "--threshold", threshold, "--dry-run"};
+            if (json) {
+                args.insert(args.end(), {"--output-format", "json"});
+            }
+            CHECK(fixture.run(args, &out, &err) == 1);
+            CHECK(out.empty());
+            CHECK(err.find("--threshold must be in (0, 1]") != std::string::npos);
+        }
+    }
+    // And without --dry-run: refused, never a merge pass.
+    CHECK(fixture.run({"graph", "dedupe", "notes", "--threshold", "nan"}, &out, &err) == 1);
+    CHECK(out.empty());
+}
+
+TEST_CASE("graph dedupe says how many survivors lost their vector to a merged description",
+          "[commands][graph][dedupe][57t]") {
+    const Fixture fixture;
+    fixture.ingest();
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"graph", "build", "notes"}, &out, &err) == 0);
+    {
+        Store store = fixture.store();
+        const std::int64_t ledger = store.upsert_node("Ledger", "system", "").id;
+        const std::int64_t twin = store.upsert_node("Ledger Book", "system", "the record").id;
+        (void)store.add_mention(ledger, 777);
+        (void)store.add_mention(twin, 778);
+        store.update_node_embedding(ledger, {0.0F, 0.0F, 1.0F});
+        store.update_node_embedding(twin, {0.0F, 0.05F, 1.0F});
+    }
+    REQUIRE(fixture.run({"graph", "dedupe", "notes"}, &out, &err) == 0);
+    INFO(out);
+    CHECK(out.find("1 survivor(s) took a merged description and lost their vector") !=
+          std::string::npos);
+    CHECK(out.find("`apogee graph build notes` embeds them again") != std::string::npos);
+    CHECK(fixture.store().nodes_without_vectors().size() >= 1);
+}
+
+TEST_CASE("graph delete of a named graph is refused while a build holds its lock",
+          "[commands][graph][delete][lock][57t]") {
+    const Fixture fixture;
+    fixture.ingest();
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"config", "add-graph", "work", "--collections", "notes"}, &out, &err) ==
+            0);
+    REQUIRE(fixture.run({"graph", "build", "work"}, &out, &err) == 0);
+    const std::filesystem::path db = apogee::agentloop::graph_db_path("work");
+    REQUIRE(std::filesystem::exists(db));
+    {
+        // A build in another process holds the lock: the delete is refused,
+        // at once, and the graph is intact.
+        apogee::platform::FileLock::Refusal refusal;
+        const std::optional<apogee::platform::FileLock> building =
+            apogee::platform::FileLock::acquire(apogee::commands::graph_build_lock_path(db),
+                                                std::chrono::milliseconds{0}, refusal);
+        REQUIRE(building.has_value());
+        const auto started = std::chrono::steady_clock::now();
+        CHECK(fixture.run({"graph", "delete", "work"}, &out, &err) == 1);
+        CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds{1});
+        CHECK(out.empty());
+        CHECK(err.find("a build of \"work\" is running -- stop it, or wait for it, then delete") !=
+              std::string::npos);
+        CHECK(std::filesystem::exists(db));
+        REQUIRE(fixture.run({"graph", "stats", "work"}, &out, &err) == 0);
+        CHECK(out.find("No graph built") == std::string::npos);
+
+        // And a build that finds the lock taken -- a delete holding it --
+        // waits briefly, then refuses rather than building into the file.
+        CHECK(fixture.run({"graph", "build", "work"}, &out, &err) == 1);
+        CHECK(err.find("another build or a delete of \"work\" is running") != std::string::npos);
+        CHECK(out.find("Graph build complete") == std::string::npos);
+    }
+    // Let go: the delete goes through, and the lock file left beside it is
+    // nothing a read takes for a graph.
+    REQUIRE(fixture.run({"graph", "delete", "work"}, &out, &err) == 0);
+    CHECK(out.find("Deleted graph \"work\"") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(db));
+    REQUIRE(fixture.run({"graph", "stats", "work"}, &out, &err) == 0);
+    CHECK(out.find("No graph built for \"work\"") != std::string::npos);
 }

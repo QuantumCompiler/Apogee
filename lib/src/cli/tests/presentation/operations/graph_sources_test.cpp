@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -10,6 +11,8 @@
 #include <vector>
 
 #include "agentloop/attachments.h"
+#include "embedstore/store.h"
+#include "platform/file_lock.h"
 #include "support/env_guard.h"
 
 /// The bridge from a walk to a source build (27k, 27n): the files a walk
@@ -100,4 +103,50 @@ TEST_CASE("a source member reads its files from its root, byte for byte, or says
     CHECK(member.read("pkg/a.py", error) == std::optional<std::string>{bytes});
     CHECK_FALSE(member.read("gone.py", error).has_value());
     CHECK(error == "cannot open");
+}
+
+TEST_CASE("the graph build lock: a build holds it, a delete is refused at once while it does",
+          "[operations][graph][lock][57t]") {
+    using apogee::commands::delete_named_graph;
+    using apogee::commands::graph_build_lock_path;
+    using apogee::commands::lock_graph_build;
+    using apogee::commands::NamedGraphDeletion;
+    const apogee::testing::TempDir dir{"graph-lock-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path db = dir.path() / "graphs" / "work.db";
+    CHECK(graph_build_lock_path(db) == dir.path() / "graphs" / "work.db.build.lock");
+
+    // Nothing to delete: absent, and no lock taken for it.
+    CHECK(delete_named_graph(db, "work").outcome == NamedGraphDeletion::Outcome::Absent);
+
+    std::string refusal;
+    std::optional<apogee::platform::FileLock> build = lock_graph_build(db, "work", refusal);
+    REQUIRE(build.has_value());  // its folder made for it
+    {
+        apogee::embedstore::Store store{db};
+        (void)store.upsert_node("Atlas", "system", "");
+    }
+    // A second build waits, briefly, then refuses in words every surface says.
+    const auto started = std::chrono::steady_clock::now();
+    CHECK_FALSE(lock_graph_build(db, "work", refusal, std::chrono::milliseconds{50}).has_value());
+    CHECK(std::chrono::steady_clock::now() - started >= std::chrono::milliseconds{50});
+    CHECK(refusal ==
+          "another build or a delete of \"work\" is running -- wait for it to finish, then build "
+          "again");
+    // A delete is refused at once, naming the build, and touches nothing.
+    const NamedGraphDeletion refused = delete_named_graph(db, "work");
+    CHECK(refused.outcome == NamedGraphDeletion::Outcome::Building);
+    CHECK(refused.message ==
+          "a build of \"work\" is running -- stop it, or wait for it, then delete");
+    CHECK(std::filesystem::exists(db));
+
+    // The build ends (or dies -- the system lets go either way): the delete
+    // goes through, counting what went.
+    build->release();
+    const NamedGraphDeletion deleted = delete_named_graph(db, "work");
+    CHECK(deleted.outcome == NamedGraphDeletion::Outcome::Deleted);
+    CHECK(deleted.stats.nodes == 1);
+    CHECK_FALSE(std::filesystem::exists(db));
+    CHECK_FALSE(std::filesystem::exists(db.string() + "-wal"));
+    // The next build takes the lock as if nothing had happened.
+    CHECK(lock_graph_build(db, "work", refusal).has_value());
 }

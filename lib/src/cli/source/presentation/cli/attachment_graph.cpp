@@ -113,6 +113,17 @@ AttachmentGraphOutcome build_attachment_graph(
             out.record.supported[language] = count;
         }
         out.record.skipped = skipped_kinds(result);
+        // The first few named, the rest counted, as the kinds fold: the
+        // line stays one line however many Latin-1 files a tree holds.
+        const std::size_t named = std::min(result.mended.size(), kGraphLineMended);
+        for (std::size_t at = 0; at < named; ++at) {
+            const graph::MendedFile& file = result.mended[at];
+            out.mended.push_back(file.file + ": " + graph::mended_reason(file));
+        }
+        if (result.mended.size() > named) {
+            out.mended.push_back("and " + std::to_string(result.mended.size() - named) +
+                                 " more file(s) not UTF-8");
+        }
         const embedstore::CodeMemberCounts counts = store.code_member_counts(job.label);
         out.nodes = counts.nodes;
         out.edges = counts.edges;

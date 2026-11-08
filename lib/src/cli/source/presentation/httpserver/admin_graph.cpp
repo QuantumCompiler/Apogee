@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cmath>
 #include <exception>
 #include <filesystem>
 #include <memory>
@@ -24,6 +25,7 @@
 #include "operations/graph_dedupe_pass.h"
 #include "operations/graph_members.h"
 #include "operations/graph_sources.h"
+#include "platform/file_lock.h"
 
 namespace apogee::httpserver {
 namespace {
@@ -31,6 +33,7 @@ namespace {
 constexpr std::string_view kBuildJobKind = "graph-build";
 constexpr std::string_view kCommunitiesJobKind = "graph-communities";
 constexpr std::string_view kConfigError = "config_error";
+constexpr std::string_view kConflict = "conflict";
 constexpr int kNotImplemented = 501;
 
 [[nodiscard]] bool plain_name(std::string_view name) {
@@ -204,6 +207,11 @@ struct Generation {
     for (const graph::SkippedFile& file : result.skipped) {
         skipped.push_back({{"member", file.member}, {"file", file.file}, {"reason", file.reason}});
     }
+    // Used, with bytes that were not UTF-8 shown as U+FFFD (57t).
+    nlohmann::json mended = nlohmann::json::array();
+    for (const graph::MendedFile& file : result.mended) {
+        mended.push_back({{"member", file.member}, {"file", file.file}, {"bytes", file.bytes}});
+    }
     return nlohmann::json{{"files_used", result.files_used},
                           {"files_parsed", result.files_parsed},
                           {"files_unchanged", result.files_unchanged},
@@ -211,6 +219,7 @@ struct Generation {
                           {"files_by_language", result.files_by_language},
                           {"skipped", std::move(skipped)},
                           {"partial", result.partial},
+                          {"mended", std::move(mended)},
                           {"missing_sources", build.missing},
                           {"empty_sources", build.empty},
                           {"references_resolved", result.counts.resolved()},
@@ -354,6 +363,14 @@ HttpResponse admin_build_graph(const AdminConfigContext& context, Handler& plane
         workers.run(started.cancellation, [&jobs, job_id, target, force,
                                            cancellation = started.cancellation] {
             try {
+                // The graph build lock, as the CLI's build holds it (57t).
+                std::string refusal;
+                const std::optional<platform::FileLock> lock =
+                    commands::lock_graph_build(target.db_path, target.name, refusal);
+                if (!lock.has_value()) {
+                    jobs.fail(job_id, refusal);
+                    return;
+                }
                 const commands::GraphSourceBuild build = build_code_layer(
                     target.db_path, target.name, *target.named, force, cancellation, jobs, job_id);
                 if (build.result.cancelled) {
@@ -462,7 +479,16 @@ HttpResponse admin_build_graph(const AdminConfigContext& context, Handler& plane
                 graph::make_structured_extractor(plane.harness(), backend);
             graph::BuildResult result;
             std::optional<nlohmann::json> code;
+            // A named graph's build holds its build lock for the whole run,
+            // as the CLI's does (57t): a delete is refused while it runs.
+            std::optional<platform::FileLock> lock;
             if (target.is_named()) {
+                std::string refusal;
+                lock = commands::lock_graph_build(target.db_path, target.name, refusal);
+                if (!lock.has_value()) {
+                    jobs.fail(job_id, refusal);
+                    return;
+                }
                 // The code first, as on the CLI: free, local, no model.
                 if (!target.named->sources.empty()) {
                     const commands::GraphSourceBuild build =
@@ -697,25 +723,28 @@ HttpResponse admin_delete_graph(const AdminConfigContext& context, std::string_v
     }
     try {
         embedstore::GraphStats stats;
-        {
-            embedstore::Store store{target.db_path};
-            stats = store.graph_stats();
-            if (!target.is_named()) {
-                store.delete_graph();
-            }
-        }
         if (target.is_named()) {
             // Everything in a named graph's database is derived: the file
-            // goes. The graphs: entry stays -- DELETE /v1/admin/graphs/{name}
-            // removes that.
-            std::error_code code;
-            if (!std::filesystem::remove(target.db_path, code) || code) {
-                return error_response(500,
-                                      "could not delete the graph database: " + code.message());
+            // goes, under the graph build lock -- the CLI's one delete, 57t:
+            // a 409 while a build of it runs. The graphs: entry stays --
+            // DELETE /v1/admin/graphs/{name} removes that.
+            const commands::NamedGraphDeletion deletion =
+                commands::delete_named_graph(target.db_path, target.name);
+            switch (deletion.outcome) {
+                case commands::NamedGraphDeletion::Outcome::Absent:
+                    return missing_target(target);
+                case commands::NamedGraphDeletion::Outcome::Building:
+                    return error_response(409, deletion.message, kConflict);
+                case commands::NamedGraphDeletion::Outcome::Failed:
+                    return error_response(500, deletion.message);
+                case commands::NamedGraphDeletion::Outcome::Deleted:
+                    break;
             }
-            for (const char* sidecar : {"-wal", "-shm"}) {
-                std::filesystem::remove(target.db_path.string() + sidecar, code);
-            }
+            stats = deletion.stats;
+        } else {
+            embedstore::Store store{target.db_path};
+            stats = store.graph_stats();
+            store.delete_graph();
         }
         return json_response(
             200, nlohmann::json{{"deleted", nlohmann::json{{"nodes", stats.nodes},
@@ -925,7 +954,9 @@ HttpResponse admin_dedupe_graph(const AdminConfigContext& context, std::string_v
         }
         threshold = it->get<double>();
     }
-    if (threshold <= 0.0 || threshold > 1.0) {
+    // A JSON body cannot carry a NaN or an infinity, so this is the CLI's
+    // guard kept the same shape for symmetry (57t).
+    if (!std::isfinite(threshold) || threshold <= 0.0 || threshold > 1.0) {
         return error_response(400, "threshold must be a number in (0, 1]");
     }
     if (const auto it = body.find("dry_run"); it != body.end() && !it->is_null()) {

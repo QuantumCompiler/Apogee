@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -110,5 +111,62 @@ TEST_CASE("every vendored grammar's fixture builds to its golden graph", "[graph
             REQUIRE(golden.has_value());
             CHECK(built.dump == *golden);
         }
+    }
+}
+
+namespace {
+
+/// The imports a Rust file's `use` declarations expand to, as `kind path
+/// [as alias]`.
+[[nodiscard]] std::vector<std::string> rust_imports(const std::string& source) {
+    const CodeLanguage& rust = apogee::graph::code_language(apogee::graph::CodeLanguageId::Rust);
+    apogee::graph::CodeParser parser{rust.id};
+    const apogee::graph::FileFacts facts =
+        apogee::graph::extract_code_facts(rust, "src/lib.rs", source, parser.parse(source));
+    std::vector<std::string> out;
+    for (const apogee::graph::CodeImport& item : facts.imports) {
+        out.push_back(item.kind + " " + item.path +
+                      (item.alias.empty() ? "" : " as " + item.alias));
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("a Rust use tree expands to its leaves: groups, aliases, self and globs",
+          "[graph][code][extract][rust][57t]") {
+    CHECK(rust_imports("use a::b;\n") == std::vector<std::string>{"symbol a::b"});
+    CHECK(rust_imports("use crate::shapes::{Circle, Shape as S};\n") ==
+          std::vector<std::string>{"symbol crate::shapes::Circle",
+                                   "symbol crate::shapes::Shape as S"});
+    CHECK(rust_imports("use std::{io::{self, Read}, fmt::*, collections::HashMap};\n") ==
+          std::vector<std::string>{"namespace std::fmt", "symbol std::collections::HashMap",
+                                   "symbol std::io", "symbol std::io::Read"});
+    CHECK(rust_imports("use a::{\n    b,\n    c::{d, e as f},\n};\n") ==
+          std::vector<std::string>{"symbol a::b", "symbol a::c::d", "symbol a::c::e as f"});
+}
+
+TEST_CASE("a Rust use tree nested 100000 deep expands to its one leaf in linear time",
+          "[graph][code][extract][rust][57t]") {
+    // 500 KB: the depth that ran 90 s and more, and 40000, which crashed.
+    for (const std::size_t depth : {std::size_t{40000}, std::size_t{100000}}) {
+        std::string source = "use a::";
+        std::string expected = "symbol a";
+        for (std::size_t level = 0; level < depth; ++level) {
+            source += "{b::";
+            expected += "::b";
+        }
+        source += "c";
+        expected += "::c";
+        source += std::string(depth, '}') + ";\n";
+        const auto started = std::chrono::steady_clock::now();
+        const std::vector<std::string> imports = rust_imports(source);
+        const auto took = std::chrono::steady_clock::now() - started;
+        REQUIRE(imports.size() == 1);
+        CHECK(imports.front() == expected);
+        // Bounded far above what it takes (well under a second on the dev
+        // Mac with tree-sitter's own parse), far below the minutes the
+        // quadratic walk took.
+        CHECK(took < std::chrono::seconds{15});
     }
 }

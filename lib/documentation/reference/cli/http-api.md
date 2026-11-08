@@ -809,7 +809,13 @@ time the build set `graph.enabled` on its `embeddings:` entry -- through the
 same config editor the CLI uses, byte-identical; a `config_warning` when it
 could not; for a named graph `graph` and `collections`, and nothing enabled:
 the entry is the enablement). `DELETE /v1/admin/jobs/{id}` cancels between
-chunks; what finished stays, and the next build resumes.
+chunks; what finished stays, and the next build resumes. **A named graph's
+build holds its build lock** (57t) -- a `FileLock` on `<graph db>.build.lock`
+beside its database, the one the CLI's builds and deletes take -- for the
+whole run, so a delete is refused while it runs; a job that finds the lock
+held (another build, or a delete in the instant it takes) waits two seconds
+and then fails, its error `another build or a delete of "<id>" is running --
+wait for it to finish, then build again`.
 
 Body, every field optional: `model` (the extraction backend), `force`
 (re-extract every source), `limit` (stop after N chunks). The backend resolves
@@ -825,6 +831,18 @@ spend rule: a collection's through its own embedder when it is unmetered or
 the collection pins `retriever: vector`; a named graph's through the default
 chain -- its vectors are its own, whatever its members' chunk embedders --
 otherwise the graph is full-text searchable and complete.
+
+A relation's weight -- what `x<weight>` shows and what ranks a
+neighbourhood -- is **the distinct chunks that state it** (57t): what a chunk
+states replaces what it stated before, so a forced or retried build never
+moves it, and reconcile recounts it when a chunk or a member is gone (an edge
+no chunk states any longer is removed). An edge built before 57t keeps its
+stored weight until a chunk states it again, and is counted by its chunks
+from then on: `force` recounts every edge a chunk still states, and one no
+chunk states again keeps the weight it had.
+Entity vectors heal: the embed phase covers every prose entity still without
+a vector -- one an earlier embed's failure or cancel left, or a dedupe's
+survivor -- as well as what this build changed.
 
 Builds are incremental and resumable: a source is re-extracted only when it
 is stale -- no state row under its collection, its chunk count changed, its
@@ -843,10 +861,13 @@ between them, each stated at a `file:line` and stored with origin
 its bytes or the extractor change -- and re-linked whole, so the result is
 what a fresh build stores. The job's record carries a `code` object:
 `{files_used, files_parsed, files_unchanged, files_removed,
-files_by_language, skipped: [{member, file, reason}], partial,
-missing_sources, empty_sources, references_resolved, references_unresolved,
-nodes, edges}` -- every file it could not use named with why, never
-silently; a tree that is not a directory in `missing_sources` (what it
+files_by_language, skipped: [{member, file, reason}], partial, mended:
+[{member, file, bytes}], missing_sources, empty_sources,
+references_resolved, references_unresolved, nodes, edges}` -- every file it
+could not use named with why, never silently; `mended` (57t) each file used
+whose bytes were not all UTF-8, mended where it entered (each ill-formed
+sequence one U+FFFD, `bytes` how many it replaced) and parsed as mended, so a
+Latin-1 comment costs the file nothing -- never a failed build; a tree that is not a directory in `missing_sources` (what it
 contributed forgotten), one that offers no file -- inside a git repository
 only what git tracks or does not ignore is read -- in `empty_sources`. A graph of
 source trees alone needs **no generation backend**: it builds even on a
@@ -1003,11 +1024,17 @@ never considered, **`decision` nodes are never merged**, and neither is a
 per name as it is built. Synchronous -- storage and cosine, no generation --
 and **never automatic**: `200 {"groups": [{kept, kept_type, merged:
 [names]}], "merged_nodes", "threshold", "dry_run", "code_entities",
-"code_identity_merges"[, "prose_skipped"]}` -- `code_identity_merges` the
-code entities stated at more than one place (a declaration and its
-definition), `prose_skipped` the reason the vector pass did not run when no
-prose entity has a vector to compare; with `"dry_run": true` the groups are
-computed and nothing is written. `400` for a threshold outside `(0, 1]`; `404` for an unbuilt graph
+"code_identity_merges", "vectors_cleared"[, "prose_skipped"]}` --
+`code_identity_merges` the code entities stated at more than one place (a
+declaration and its definition), `vectors_cleared` (57t) the survivors a
+merged description cost their vector (`0` in a dry run) -- dedupe has no
+embedder, so they are full-text searchable and out of later dedupes until
+the next build embeds them -- and `prose_skipped` the reason the vector pass
+did not run when no prose entity has a vector to compare; with `"dry_run":
+true` the groups are computed and nothing is written. A folded edge's
+stating chunks move with it and count once each. `400` for a threshold that
+is not a finite number in `(0, 1]` (a JSON body cannot carry a NaN; the
+CLI's twin refuses `nan` and `inf` the same way); `404` for an unbuilt graph
 or a collection with no data. Since M31 `apogee graph dedupe {id} --output-format json` prints this
 body byte for byte (one pass and one builder, `operations/graph_dedupe_pass`).
 
@@ -1020,7 +1047,15 @@ untouched, and the next build starts from scratch. For a named graph:
 removes the graph's own database file (everything in it is derived) and
 returns the same shape; the member collections and the `graphs:` entry are
 untouched -- `DELETE /v1/admin/graphs/{id}` removes the entry. `404` when
-there is nothing built.
+there is nothing built. **A named graph is deleted under its build lock**
+(57t), as `apogee graph delete` deletes it: while a build of it runs --
+here, on the CLI, or the app's job -- the delete is `409 {"error":
+{"message": "a build of \"<id>\" is running -- stop it, or wait for it, then
+delete", "type": "conflict"}}` at once and the file is untouched, so no build
+goes on writing to a file the delete removed and then reports it built. The
+lock is a `FileLock` the system lets go of when its holder dies, so a crashed
+build never blocks a delete. A collection's graph is cleared through SQLite,
+which already orders it with a writer, and takes no lock.
 
 ### `PUT /v1/admin/embeddings/{id}/graph`
 

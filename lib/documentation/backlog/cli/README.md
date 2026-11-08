@@ -95,7 +95,6 @@ Every call is a recorded default; no **[user]** call blocks any of them. `graph 
 
 | # | Item | Version | File | Status |
 |---|---|---|---|---|
-| 57t | Graph builds survive real trees — a non-UTF-8 file mended and named instead of failing the code graph; the parser bounded on deep nesting (no SIGSEGV, no quadratic Rust use trees); lost entity vectors rebuilt on the next build; relation weight counts distinct chunks; a named graph delete refused while a build runs; a NaN dedupe threshold refused | v0.2.1 | [`graph-builds-survive-real-trees.md`](v0.2.1/graph-builds-survive-real-trees.md) | 🟢 |
 | 57u | Task stops kept while a run starts — a `task halt`/`task cancel` sent during a resume's setup is honored before any model call instead of being acknowledged and then cleared, and the TUI's Ctrl-C on a new run's setup is no longer swallowed | v0.2.1 | [`task-halt-during-resume.md`](v0.2.1/task-halt-during-resume.md) | 🟢 |
 | 57v | Web content parsers bounded and correct — nested tables, bare ampersands and nested empty links extract in linear time, an HTML attachment honours its meta charset, a fragment-only redirect stays on its page | v0.2.1 | [`web-content-parsers-bounded.md`](v0.2.1/web-content-parsers-bounded.md) | 🟢 |
 | 57w | A dry-run review sweep moves no watermark — `review sweep --dry-run` (the app's default sweep) leaves watermarks.json untouched, so the posting sweep or cron run after it still reviews and posts what it previewed | v0.2.1 | [`review-dry-run-moves-nothing.md`](v0.2.1/review-dry-run-moves-nothing.md) | 🟢 |

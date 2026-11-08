@@ -57,7 +57,16 @@
 /// decision node -- the link that lets a documents chunk about the same thing
 /// reach the *decision* in one hop. A `supersedes` edge mirrors the record's
 /// lineage when the target is in the graph too. Deterministic edges are
-/// facts (weight 1); extracted relations gain corroboration weight.
+/// facts (weight 1); an extracted relation's weight is the distinct chunks
+/// that state it (57t), what a chunk states replacing what it stated before.
+///
+/// ## Every entity embedded, eventually
+///
+/// The embed phase vectorises what this build created or changed **and every
+/// prose entity still without a vector** (57t) -- left by an earlier embed
+/// that failed or was cancelled, or by a dedupe that merged a description
+/// into a survivor -- so a re-run heals what a failure left, as the
+/// communities' run does for their summaries.
 namespace apogee::graph {
 
 /// The decision -> entity edge: the record's reasoning concerns that entity.
@@ -164,7 +173,8 @@ struct BuildResult {
     int chunks_failed = 0;
     /// Nodes created or description-changed, decision nodes included.
     int nodes_upserted = 0;
-    /// Edges created or re-corroborated; deterministic edges only when inserted.
+    /// Relations stated by the chunks extracted; deterministic edges only
+    /// when inserted.
     int edges_upserted = 0;
     int mentions_added = 0;
     int nodes_embedded = 0;
@@ -182,14 +192,16 @@ struct BuildResult {
     bool cancelled = false;
     /// An embed-phase failure. It does not fail the build: extraction is
     /// already committed, affected nodes stay lexical-only until the next
-    /// build re-embeds them.
+    /// build with an embedder re-embeds them (57t: the phase sweeps every
+    /// entity without a vector).
     std::string embed_error;
 };
 
 /// (Re)builds a collection's graph: reconcile → materialise records → plan by
 /// fingerprint → extract stale sources chunk by chunk with one retry → state
-/// row after a complete file only → embed mutated nodes last, so a failed
-/// embed never loses extraction work. Storage errors throw; a cancellation
+/// row after a complete file only → embed mutated nodes and every entity
+/// still without a vector last, so a failed embed never loses extraction
+/// work and the next build heals it. Storage errors throw; a cancellation
 /// returns with `cancelled` set. The single-member form of `build_multi`.
 [[nodiscard]] BuildResult build(embedstore::Store& store, const ExtractFn& extract,
                                 const EmbedFn& embed, const BuildOptions& options);

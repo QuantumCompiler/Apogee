@@ -14,6 +14,19 @@ std::size_t GraphDedupePass::merged_nodes() const {
     return merged;
 }
 
+std::size_t GraphDedupePass::vectors_cleared() const {
+    if (dry_run) {
+        return 0;
+    }
+    std::size_t cleared = 0;
+    for (const embedstore::MergeGroup& group : groups) {
+        if (group.kept.dim == 0) {
+            ++cleared;
+        }
+    }
+    return cleared;
+}
+
 GraphDedupePass plan_graph_dedupe(const embedstore::Store& store, double threshold, bool dry_run) {
     GraphDedupePass pass;
     pass.scope = store.dedupe_scope();
@@ -48,7 +61,8 @@ nlohmann::json graph_dedupe_document(const GraphDedupePass& pass) {
                        {"threshold", pass.threshold},
                        {"dry_run", pass.dry_run},
                        {"code_entities", pass.scope.code_entities},
-                       {"code_identity_merges", pass.scope.code_identity_merges}};
+                       {"code_identity_merges", pass.scope.code_identity_merges},
+                       {"vectors_cleared", pass.vectors_cleared()}};
     if (!pass.prose_skipped.empty()) {
         out["prose_skipped"] = pass.prose_skipped;
     }

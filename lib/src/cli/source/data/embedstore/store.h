@@ -283,11 +283,30 @@ public:
     [[nodiscard]] UpsertResult upsert_node(std::string_view name, std::string_view type,
                                            std::string_view description);
 
-    /// Inserts a directed relation, or -- when the (source, target, relation)
-    /// triple exists -- increments its weight: each re-extraction from another
-    /// chunk is corroboration. Descriptions merge first-non-empty-wins.
+    /// Inserts a directed relation stated by no recorded chunk, or -- when
+    /// the (source, target, relation) triple exists -- increments its weight.
+    /// The shape of every relation a build wrote before 57t, kept for a
+    /// store's own fixtures and that history: a build records the chunk that
+    /// states a relation (the overload below), so its weight counts chunks,
+    /// never calls. Descriptions merge first-non-empty-wins.
     void upsert_edge(std::int64_t source_id, std::int64_t target_id, std::string_view relation,
                      std::string_view description);
+
+    /// Inserts a directed relation, or finds it, and records `chunk` as one
+    /// that states it -- idempotently (57t). Its weight is then the count of
+    /// distinct chunks that state it, `kg_edge_chunks` its support (the prose
+    /// counterpart of a code edge's `kg_edge_sites`): the same chunk
+    /// extracted again never moves it. Descriptions merge first-non-empty.
+    void upsert_edge(std::int64_t source_id, std::int64_t target_id, std::string_view relation,
+                     std::string_view description, const ChunkRef& chunk);
+
+    /// What one chunk states of relations, replacing what it stated before
+    /// (57t), in one transaction: its earlier support rows cleared, each of
+    /// `relations` upserted with the chunk as its support, and every edge
+    /// either side touched recounted -- a relation the chunk no longer
+    /// states stops counting it, and one no chunk states any longer is
+    /// removed. What `graph build` stores for a chunk it extracted.
+    void state_chunk_relations(const ChunkRef& chunk, const std::vector<StatedRelation>& relations);
 
     /// Inserts or refreshes a knowledge record's decision node (type
     /// `kNodeTypeDecision`, name = the record id). Unlike `upsert_node`, the
@@ -358,8 +377,10 @@ public:
     [[nodiscard]] std::vector<Chunk> chunks_by_source(std::string_view source) const;
 
     /// Prunes what chunk churn orphaned: mentions whose chunk no longer
-    /// exists, state rows for vanished sources, then -- after recomputing
-    /// every `mention_count` from the surviving mentions -- zero-mention nodes
+    /// exists, state rows for vanished sources, the support of relations
+    /// those chunks stated -- each such edge weighed again by the chunks
+    /// left, and removed when none is (57t) -- then, after recomputing
+    /// every `mention_count` from the surviving mentions, zero-mention nodes
     /// and their edges. One transaction. Runs first on every build; safe at
     /// any time. The single-member form of `reconcile_graph_multi`.
     [[nodiscard]] ReconcileResult reconcile_graph();
@@ -420,6 +441,13 @@ public:
     /// embedder can heal an earlier embed failure instead of needing a
     /// forced regeneration.
     [[nodiscard]] std::vector<std::int64_t> communities_without_vectors() const;
+
+    /// Prose entity and decision nodes with text and no vector (`dim = 0`),
+    /// in id order -- the code layer's kinds left out, as dedupe leaves them.
+    /// What a build's embed phase heals on its next run (57t), whatever lost
+    /// the vector: a failed embed, a cancel, or a dedupe that merged a
+    /// description into a survivor.
+    [[nodiscard]] std::vector<std::int64_t> nodes_without_vectors() const;
 
     // --- The knowledge graph: dedupe (embedstore/graph_dedupe.cpp) ---------
 
@@ -671,8 +699,10 @@ inline constexpr std::string_view kIndexBeingWritten =
 /// provenance tables (`kg_code_mentions`, `kg_edge_sites`). v7 (57s) added
 /// `source_ingests` -- the folder each ingested source came from and the
 /// model its vectors are from -- and the `embed_mixed` key beside the
-/// binding. An older store gains them on open;
-/// a current one is opened with a plain read and takes no write lock.
-inline constexpr int kSchemaVersion = 7;
+/// binding. v8 (57t) added `kg_edge_chunks`, the chunks that state an
+/// inferred relation, so its weight counts them. An older store gains them
+/// on open; a current one is opened with a plain read and takes no write
+/// lock.
+inline constexpr int kSchemaVersion = 8;
 
 }  // namespace apogee::embedstore

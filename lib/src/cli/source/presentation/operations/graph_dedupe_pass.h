@@ -31,6 +31,11 @@ struct GraphDedupePass {
 
     /// How many entities the groups fold into their survivors.
     [[nodiscard]] std::size_t merged_nodes() const;
+
+    /// How many survivors a merged description cost their vector (57t):
+    /// dedupe has no embedder, so they wait, out of every later dedupe,
+    /// until the next `graph build` embeds them again. 0 in a dry run.
+    [[nodiscard]] std::size_t vectors_cleared() const;
 };
 
 /// What a pass over `store` has to work with, at `threshold`: its scope, and
@@ -45,8 +50,9 @@ struct GraphDedupePass {
 void run_graph_dedupe(embedstore::Store& store, GraphDedupePass& pass);
 
 /// `{"groups": [{kept, kept_type, merged: [names]}], "merged_nodes",
-/// "threshold", "dry_run", "code_entities", "code_identity_merges"[,
-/// "prose_skipped"]}` -- the route's body, and the command line's document.
+/// "threshold", "dry_run", "code_entities", "code_identity_merges",
+/// "vectors_cleared"[, "prose_skipped"]}` -- the route's body, and the
+/// command line's document.
 [[nodiscard]] nlohmann::json graph_dedupe_document(const GraphDedupePass& pass);
 
 }  // namespace apogee::operations

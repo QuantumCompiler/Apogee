@@ -17,9 +17,12 @@
 /// **Node identity is (normalised name, type).** The first-extracted display
 /// casing is kept; descriptions merge first-non-empty-wins; a description
 /// change clears the stored vector so a stale embedding can never outlive its
-/// text. An edge's weight increments each time another chunk re-states it --
-/// corroboration -- except for the deterministic edges (`ensure_edge`), which
-/// are facts and stay at weight 1.
+/// text. An inferred edge's weight is the count of distinct chunks that state
+/// it -- corroboration -- each recorded in `kg_edge_chunks` (57t; until then
+/// it counted extraction calls, so the same chunk extracted again moved it),
+/// except for the deterministic edges (`ensure_edge`), which are facts and
+/// stay at weight 1. An edge an earlier build wrote, with no chunk recorded,
+/// keeps its weight until a chunk states it again.
 ///
 /// `kg_mentions.collection` and `kg_state.collection` carry the provenance
 /// column a **named multi-collection graph** keys on: its database lives
@@ -176,6 +179,15 @@ struct ChunkRef {
     [[nodiscard]] bool operator==(const ChunkRef&) const noexcept = default;
 };
 
+/// A relation one chunk states, by node id -- what a build hands
+/// `Store::state_chunk_relations` for each chunk it extracted (57t).
+struct StatedRelation {
+    std::int64_t source_id = 0;
+    std::int64_t target_id = 0;
+    std::string relation{};
+    std::string description{};
+};
+
 /// One relation row as stored -- the community detector's input, and the
 /// edge list an export carries (27m).
 struct GraphEdge {
@@ -205,7 +217,8 @@ struct ReconcileResult {
     std::int64_t mentions_pruned = 0;
     /// State rows for sources that vanished.
     std::int64_t states_pruned = 0;
-    /// Edges touching a node left with zero mentions.
+    /// Edges touching a node left with zero mentions, and (57t) inferred
+    /// edges no surviving chunk states any longer.
     std::int64_t edges_pruned = 0;
     /// Nodes left with zero mentions.
     std::int64_t nodes_pruned = 0;

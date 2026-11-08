@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <string_view>
 
@@ -56,5 +57,11 @@ private:
 /// Whether `text` is UTF-8 already -- `valid_utf8` would hand it back
 /// unchanged -- asked without copying it.
 [[nodiscard]] bool is_valid_utf8(std::string_view text) noexcept;
+
+/// How many of `text`'s bytes `valid_utf8` shows as U+FFFD -- every byte of
+/// every ill-formed or unfinished sequence; 0 exactly when `is_valid_utf8`.
+/// What a mend says it did (57t: a source file read as `N byte(s) shown as
+/// U+FFFD`).
+[[nodiscard]] std::size_t ill_formed_bytes(std::string_view text) noexcept;
 
 }  // namespace apogee::harness

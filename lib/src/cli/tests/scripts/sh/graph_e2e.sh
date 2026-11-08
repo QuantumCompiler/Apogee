@@ -12,7 +12,10 @@
 # database, a notes-only turn surfacing the knowledge collection's decision
 # one hop away under the graph's header, `dedupe --dry-run` on the
 # distinct-entity fixture finding nothing, `config delete-graph` leaving the
-# database and `graph delete` removing it; and delete.
+# database and `graph delete` removing it; a relation's weight unmoved by
+# forced rebuilds and a delete refused while a build runs (57t); delete;
+# and, with a mock embedder, entity vectors a build left unbuilt or a dedupe
+# cleared embedded by the next build (57t).
 #
 # POSIX only, like the other shell checks.
 set -eu
@@ -107,6 +110,14 @@ grep -q "Extractor: extractor" "$WORK_DIR/stats.txt" || fail "stats did not name
 "$APOGEE_BIN" graph show notes atlas </dev/null >"$WORK_DIR/show.txt" 2>&1 || fail "show"
 grep -q "Atlas (system) -- 2 mention(s)" "$WORK_DIR/show.txt" || fail "show: $(cat "$WORK_DIR/show.txt")"
 grep -q -- "-> Vault (system)" "$WORK_DIR/show.txt" || fail "show lacks the relation"
+# A relation's weight is the chunks that state it (57t): both documents say
+# Atlas stores readings in Vault, and three forced rebuilds leave it x2 --
+# the sweep's probe showed x6.
+for run in 1 2 3; do
+    "$APOGEE_BIN" graph build notes -m extractor --force -q </dev/null >/dev/null 2>&1 || fail "forced build $run"
+done
+"$APOGEE_BIN" graph show notes atlas </dev/null >"$WORK_DIR/show-forced.txt" 2>&1 || fail "show after forced builds"
+grep -q -- "-> Vault (system) x2" "$WORK_DIR/show-forced.txt" || fail "forced builds moved the weight: $(cat "$WORK_DIR/show-forced.txt")"
 # The reads as documents (37c): the counts and the entity the text prints,
 # nothing else on stdout.
 "$APOGEE_BIN" graph stats notes --output-format json </dev/null >"$WORK_DIR/stats.json" 2>/dev/null \
@@ -226,6 +237,38 @@ grep -q "^Deleted graph \"work\": 4 node(s)" "$WORK_DIR/delw.txt" || fail "graph
 [ ! -e "$APOGEE_HOME/embeddings/graphs/work.db" ] || fail "graph delete left the database"
 "$APOGEE_BIN" config delete-graph work </dev/null >/dev/null 2>&1 || fail "config delete-graph again"
 
+# --- a delete while a build runs is refused (57t) ---------------------------
+# A slow extractor holds a build of `race` open; `graph delete race`, sent
+# once the build is extracting, is refused naming it, and the build's
+# success is a graph `stats` reads -- never a file a delete removed.
+cat > "$WORK_DIR/slow.json" <<'JSON'
+{"turns": [{"text": "{\"entities\": [{\"name\": \"Atlas\", \"type\": \"system\", \"description\": \"\"}], \"relations\": []}", "delay_ms": 700}]}
+JSON
+"$APOGEE_BIN" config add-backend slow --type mock --model-path "$WORK_DIR/slow.json" >/dev/null || fail "add-backend slow"
+"$APOGEE_BIN" config add-graph race --collections notes --extract-backend slow </dev/null >/dev/null 2>&1 || fail "add-graph race"
+"$APOGEE_BIN" graph build race </dev/null >"$WORK_DIR/race.txt" 2>"$WORK_DIR/race.err" &
+race_pid=$!
+tries=0
+until grep -q "\[graph\] extracting" "$WORK_DIR/race.err" 2>/dev/null; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 300 ] || fail "the build never started extracting: $(cat "$WORK_DIR/race.err")"
+    sleep 0.1
+done
+if "$APOGEE_BIN" graph delete race </dev/null >"$WORK_DIR/race-delete.txt" 2>"$WORK_DIR/race-delete.err"; then
+    fail "a delete during a build was not refused: $(cat "$WORK_DIR/race-delete.txt")"
+fi
+grep -q "a build of \"race\" is running -- stop it, or wait for it, then delete" "$WORK_DIR/race-delete.err" || fail "the refusal did not name the build: $(cat "$WORK_DIR/race-delete.err")"
+[ ! -s "$WORK_DIR/race-delete.txt" ] || fail "a refused delete printed to stdout: $(cat "$WORK_DIR/race-delete.txt")"
+wait "$race_pid" || fail "the build failed: $(cat "$WORK_DIR/race.txt" "$WORK_DIR/race.err")"
+grep -q "Graph build complete for \"race\"" "$WORK_DIR/race.txt" || fail "no build summary: $(cat "$WORK_DIR/race.txt")"
+"$APOGEE_BIN" graph stats race </dev/null >"$WORK_DIR/race-stats.txt" 2>&1 || fail "stats race"
+if grep -q "No graph built" "$WORK_DIR/race-stats.txt"; then
+    fail "the build said built into a deleted file: $(cat "$WORK_DIR/race-stats.txt")"
+fi
+"$APOGEE_BIN" graph delete race </dev/null >/dev/null 2>&1 || fail "delete race once the build ended"
+[ ! -e "$APOGEE_HOME/embeddings/graphs/race.db" ] || fail "delete left race's database"
+"$APOGEE_BIN" config delete-graph race </dev/null >/dev/null 2>&1 || fail "config delete-graph race"
+
 # --- --quiet: no progress, the results still said (M1) ---------------------
 "$APOGEE_BIN" graph build notes -m extractor --force --quiet </dev/null >"$WORK_DIR/quiet.txt" 2>"$WORK_DIR/quiet.err" || fail "quiet build: $(cat "$WORK_DIR/quiet.err")"
 grep -q "Graph build complete for \"notes\"" "$WORK_DIR/quiet.txt" || fail "a quiet build lost its summary: $(cat "$WORK_DIR/quiet.txt")"
@@ -236,5 +279,40 @@ if grep -q "\[graph\] extracting\|\[graph\] embedding" "$WORK_DIR/quiet.err"; th
 grep -q "^Deleted the graph for \"notes\"" "$WORK_DIR/delete.txt" || fail "delete output: $(cat "$WORK_DIR/delete.txt")"
 "$APOGEE_BIN" embed info notes </dev/null >"$WORK_DIR/info.txt" 2>&1 || fail "embed info after delete"
 grep -Eq "chunks: +3" "$WORK_DIR/info.txt" || fail "delete took the chunks, or left the summary chunk: $(cat "$WORK_DIR/info.txt")"
+
+# --- entity vectors left unbuilt heal on the next build (57t) ----------------
+# A config-built mock embedder (`--embedding-model`) as the embedding role.
+# A build with no embedder leaves its entities without vectors, and the next
+# build -- nothing to extract -- embeds them and says so; a dedupe whose
+# survivor takes a merged description clears its vector, says so, and the
+# next build embeds it again. Before 57t both stayed at 0, said nowhere.
+cat > "$WORK_DIR/describer.json" <<'JSON'
+{"turns": [{"text": "{\"entities\": [{\"name\": \"Atlas\", \"type\": \"system\", \"description\": \"\"}, {\"name\": \"Vault\", \"type\": \"system\", \"description\": \"the warehouse\"}], \"relations\": []}"}]}
+JSON
+"$APOGEE_BIN" config add-backend describer --type mock --model-path "$WORK_DIR/describer.json" >/dev/null || fail "add-backend describer"
+"$APOGEE_BIN" embed ingest healing "$WORK_DIR/docs" </dev/null >/dev/null 2>&1 || fail "ingest healing"
+"$APOGEE_BIN" graph build healing -m describer -q </dev/null >"$WORK_DIR/heal0.txt" 2>&1 || fail "build healing with no embedder: $(cat "$WORK_DIR/heal0.txt")"
+"$APOGEE_BIN" graph stats healing </dev/null >"$WORK_DIR/heal0-stats.txt" 2>&1 || fail "stats healing"
+grep -q "Vectors:   0/2 entities embedded" "$WORK_DIR/heal0-stats.txt" || fail "a build with no embedder embedded something: $(cat "$WORK_DIR/heal0-stats.txt")"
+"$APOGEE_BIN" config add-backend vec --type mock --embedding-model mock-space >/dev/null || fail "add-backend vec"
+"$APOGEE_BIN" config set-default-embedding vec >/dev/null || fail "set-default-embedding vec"
+"$APOGEE_BIN" graph build healing -m describer </dev/null >"$WORK_DIR/heal1.txt" 2>"$WORK_DIR/heal1.err" || fail "the healing build: $(cat "$WORK_DIR/heal1.err")"
+grep -q "Nothing to extract" "$WORK_DIR/heal1.txt" || fail "the healing build re-extracted: $(cat "$WORK_DIR/heal1.txt")"
+grep -q "^  Entities embedded: 2$" "$WORK_DIR/heal1.txt" || fail "nothing to extract embedded nothing: $(cat "$WORK_DIR/heal1.txt" "$WORK_DIR/heal1.err")"
+"$APOGEE_BIN" graph stats healing </dev/null >"$WORK_DIR/heal1-stats.txt" 2>&1 || fail "stats healing after the heal"
+grep -q "Vectors:   2/2 entities embedded" "$WORK_DIR/heal1-stats.txt" || fail "the heal left entities without vectors: $(cat "$WORK_DIR/heal1-stats.txt")"
+# The mock's vectors have no negative component, so any two agree far above
+# this threshold: Atlas (the lower id, described by nothing) survives and
+# takes Vault's description, which costs it its vector.
+"$APOGEE_BIN" graph dedupe healing --threshold 0.05 </dev/null >"$WORK_DIR/heal-dedupe.txt" 2>&1 || fail "dedupe healing: $(cat "$WORK_DIR/heal-dedupe.txt")"
+grep -q "^Merged into Atlas (system): Vault$" "$WORK_DIR/heal-dedupe.txt" || fail "dedupe did not merge: $(cat "$WORK_DIR/heal-dedupe.txt")"
+grep -q "^1 survivor(s) took a merged description and lost their vector" "$WORK_DIR/heal-dedupe.txt" || fail "dedupe did not say the lost vector: $(cat "$WORK_DIR/heal-dedupe.txt")"
+"$APOGEE_BIN" graph stats healing </dev/null >"$WORK_DIR/heal2-stats.txt" 2>&1 || fail "stats healing after dedupe"
+grep -q "Vectors:   0/1 entities embedded" "$WORK_DIR/heal2-stats.txt" || fail "the survivor kept a stale vector: $(cat "$WORK_DIR/heal2-stats.txt")"
+"$APOGEE_BIN" graph build healing -m describer </dev/null >"$WORK_DIR/heal3.txt" 2>"$WORK_DIR/heal3.err" || fail "the build after dedupe: $(cat "$WORK_DIR/heal3.err")"
+grep -q "Nothing to extract" "$WORK_DIR/heal3.txt" || fail "the build after dedupe re-extracted: $(cat "$WORK_DIR/heal3.txt")"
+grep -q "^  Entities embedded: 1$" "$WORK_DIR/heal3.txt" || fail "the survivor was not embedded again: $(cat "$WORK_DIR/heal3.txt" "$WORK_DIR/heal3.err")"
+"$APOGEE_BIN" graph stats healing </dev/null >"$WORK_DIR/heal3-stats.txt" 2>&1 || fail "stats healing after the second heal"
+grep -q "Vectors:   1/1 entities embedded" "$WORK_DIR/heal3-stats.txt" || fail "the survivor stayed without a vector: $(cat "$WORK_DIR/heal3-stats.txt")"
 
 echo "apogee graph end-to-end: OK"
