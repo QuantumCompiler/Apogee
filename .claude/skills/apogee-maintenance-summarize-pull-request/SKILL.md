@@ -33,6 +33,7 @@ Plus `git status` — warn if uncommitted work would be missing from the MR. The
 - `ROADMAP.md` (`lib/documentation/assistant/<app>/ROADMAP.md`) checkbox/section changes → release-level framing.
 - New/changed files under `lib/src/`, `lib/scripts/`, `.claude/skills/` → the implementation surface.
 - Changes under `.github/workflows/` that add, remove or rename a job or change a matrix → the merge needs the required checks re-applied first (DEVELOPER.md → Changing the pipeline (`lib/documentation/assistant/cli/DEVELOPER.md#changing-the-pipeline`)); it goes under **Before merging**.
+- **Every release pull request, whatever changed:** run `lib/scripts/required-checks.py --verify` (read-only: it never writes) and carry what it printed under **Before merging**. Exit 0 is the proof that the "Stable: CI must pass" ruleset is in force (DEVELOPER.md → Required checks (`lib/documentation/assistant/cli/DEVELOPER.md#required-checks`)). Anything else -- a missing ruleset above all, which is how it stood until 57m -- is a line that **needs the user**: "`lib/scripts/required-checks.py --pr <N> --apply` once this PR's run passes" for a missing ruleset or a changed list, the ruleset's settings for a bypass list, enforcement or up-to-date, and `--verify` run again from an admin's `gh` when it says it cannot see the bypass list. Never word it as *re*-applying, and never say the checks are required until `--verify` has said so.
 
 ## 2. Write the description
 
@@ -59,7 +60,7 @@ Structure (omit empty sections; keep it readable — a reviewer who knows nothin
 <Where reviewer attention pays: risky seams, invariants touched, deliberate divergences.>
 
 ## Before merging
-<Steps the merge depends on that CI does not do. When the pipeline's jobs changed: once this PR's run passes, `lib/scripts/required-checks.py --pr <this PR> --apply`, or the required checks still name the old jobs and the PR cannot merge.>
+<Steps the merge depends on that CI does not do. Always: what `lib/scripts/required-checks.py --verify` printed -- in force, or what the user must fix. When the pipeline's jobs changed, or the ruleset is missing: once this PR's run passes, `lib/scripts/required-checks.py --pr <this PR> --apply` (the user's to run), or the required checks still name the old jobs -- or require nothing at all.>
 
 ## Open questions
 <Any [user] open calls surfaced or deliberately deferred by this branch.>

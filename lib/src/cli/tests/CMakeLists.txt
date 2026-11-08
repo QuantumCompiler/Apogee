@@ -751,6 +751,17 @@ if(UNIX)
     )
     set_tests_properties(cli.install_script PROPERTIES TIMEOUT 180)
 
+    # CI's `version bump` check run (57m): the real lib/scripts/version-check.sh
+    # in a throwaway repository with a bare origin of its own, a stand-in gh on
+    # a PATH of the test's own -- the macOS app counted, a release lookup that
+    # fails never read as "not released", the tag-on-origin path's 0/2/other.
+    # Needs no binary.
+    add_test(NAME cli.version_check
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/version_check.sh"
+            ${CMAKE_CURRENT_BINARY_DIR}/version-check
+    )
+    set_tests_properties(cli.version_check PROPERTIES TIMEOUT 120)
+
     # The completion stubs in the real shells (bash always; zsh and fish when
     # present) against the real binary -- what a stub SENDS `__complete`, which
     # the protocol's own tests cannot see. See the script for the two zsh bugs
@@ -1267,6 +1278,19 @@ if(UNIX)
                 $<TARGET_FILE:apogee>
         )
         set_tests_properties(cli.machine_schema_conformance PROPERTIES TIMEOUT 60)
+
+        # lib/scripts/required-checks.py against a fake GitHub (57m): --verify
+        # failing on a missing, disabled, bypassable, not-up-to-date or
+        # mismatched "Stable: CI must pass" ruleset and passing on a match, and
+        # the dry run's and --apply's 2026-10-03 cases, over documents recorded
+        # from the real repository. Reads and writes nothing outside its own
+        # directory; needs no binary.
+        add_test(NAME cli.required_checks
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/required_checks_check.py"
+                ${CMAKE_CURRENT_BINARY_DIR}/required-checks
+        )
+        set_tests_properties(cli.required_checks PROPERTIES TIMEOUT 120)
     endif()
 endif()
 

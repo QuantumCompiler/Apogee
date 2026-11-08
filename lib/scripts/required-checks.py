@@ -1,13 +1,25 @@
 #!/usr/bin/env python3
 """required-checks.py -- keep `stable`'s required status checks in step with the pipeline.
 
-    required-checks.py [--pr N] [--apply]
+    required-checks.py [--pr N] [--apply | --verify]
 
 Shows -- and with --apply, sets -- the status checks a pull request into the
 default branch must pass before it can merge, in a repository ruleset named
 "Stable: CI must pass" that has NO bypass list: an admin can still merge
 without an approval (the "Stable" ruleset's bypass), but nobody merges past a
 red or unfinished pipeline (user decision, 2026-10-03).
+
+--verify is the standing proof that the ruleset is in force (57m). It reads,
+never writes, and exits 1 -- saying each reason -- when the ruleset is
+missing, is not `active`, has any bypass actor -- or hides its bypass list,
+as GitHub does from a caller without admin access -- does not require the
+branch to be up to date, requires a list other than the pull request's
+passing checks, or is not among the rules GitHub applies to the default
+branch; it exits 0, printing the list, when it matches. A failure is the
+user's to fix: --apply for a missing ruleset or a changed list, the
+ruleset's settings for the rest, an admin's gh for a hidden bypass list. The ruleset was described as in force from 2026-10-03 and was never
+created -- the dry run's "no ruleset yet" was a printed line, not a failure --
+so the docs say it holds only once --verify says so.
 
 The checks are never typed. They are read from GitHub's own record of a pull
 request's CI: every job that RAN AND PASSED in that pull request's runs --
@@ -31,8 +43,9 @@ When the pipeline changes, the order is: open the pull request, let its run
 pass, run this with --pr <it> --apply, then merge. (Before --apply, the old
 names are still required, and a renamed job's old name would never report.)
 
-Needs gh, signed in with rights to administer the repository for --apply; run
-it from a checkout of the repository. Without --apply it changes nothing.
+Needs gh, signed in with rights to administer the repository for --apply and
+for a --verify that can pass (only an admin is shown the bypass list); run it
+from a checkout of the repository. Without --apply it changes nothing.
 
 When THIS SCRIPT must change -- its assumptions, each of which a pipeline
 change could break (DEVELOPER.md -> Changing the pipeline):
@@ -45,7 +58,12 @@ change could break (DEVELOPER.md -> Changing the pipeline):
   - a merged pull request's post-merge run is created at or after the merge
     (`merged_at`). A post-merge workflow started some other way needs another
     filter;
-  - the ruleset is named RULESET_NAME and targets the default branch.
+  - the ruleset is named RULESET_NAME and targets the default branch;
+  - --verify reads the rules GitHub applies to the default branch from
+    `rules/branches/<branch>`, each carrying the `ruleset_id` it came from;
+  - a ruleset's GET carries `bypass_actors` only for a caller who can
+    administer it, so --verify, missing the field, fails rather than reads
+    it as an empty list.
 """
 
 import argparse
@@ -57,6 +75,10 @@ RULESET_NAME = "Stable: CI must pass"
 
 
 def die(message):
+    # stdout is block-buffered into a file and stderr is not: flushed first,
+    # the refusal stays the last line of a log holding both, which is the line
+    # `make pr-ci` reports as the verdict (57m).
+    sys.stdout.flush()
     print(f"required-checks: {message}", file=sys.stderr)
     sys.exit(1)
 
@@ -146,13 +168,98 @@ def find_ruleset(repo):
     return None
 
 
-def current_checks(ruleset):
+def checks_rule(ruleset):
+    """The ruleset's required_status_checks rule, or None."""
     if ruleset is None:
-        return []
-    for rule in ruleset["rules"]:
+        return None
+    for rule in ruleset.get("rules", []):
         if rule["type"] == "required_status_checks":
-            return sorted((c["context"], c.get("integration_id")) for c in rule["parameters"]["required_status_checks"])
-    return []
+            return rule
+    return None
+
+
+def current_checks(ruleset):
+    rule = checks_rule(ruleset)
+    if rule is None:
+        return []
+    return sorted((c["context"], c.get("integration_id")) for c in rule["parameters"]["required_status_checks"])
+
+
+def setting_problems(ruleset):
+    """What keeps an existing ruleset from holding everyone, whatever its list:
+    its enforcement, its bypass list, and whether it requires the branch to be
+    up to date. Each is a setting --apply leaves as it finds it."""
+    problems = []
+    if ruleset.get("enforcement") != "active":
+        problems.append(f"'{RULESET_NAME}' is {ruleset.get('enforcement')}, so it enforces nothing")
+    # GitHub leaves `bypass_actors` out of a ruleset it shows a caller who
+    # cannot administer it, so an absent list is "could not see", never "none".
+    if "bypass_actors" not in ruleset:
+        problems.append(f"cannot see '{RULESET_NAME}''s bypass list (gh is not signed in with admin access, and "
+                        "GitHub shows the list to admins alone), so it may be skipped -- run --verify as a "
+                        "repository admin")
+    elif ruleset["bypass_actors"]:
+        problems.append(f"'{RULESET_NAME}' has a bypass list ({len(ruleset['bypass_actors'])} actors), so it can "
+                        "be skipped -- remove it in Settings -> Rules -> Rulesets for the checks to hold for everyone")
+    rule = checks_rule(ruleset)
+    if rule is not None and not rule["parameters"].get("strict_required_status_checks_policy"):
+        problems.append(f"'{RULESET_NAME}' does not require the branch to be up to date before merging, so the "
+                        "release's tree check can refuse the archives -- turn it on in Settings -> Rules -> Rulesets")
+    return problems
+
+
+def applies_to_branch(repo, branch, ruleset):
+    """Whether GitHub applies the ruleset's required checks to the branch, as
+    `rules/branches/<branch>` -- the rules in force there -- lists them."""
+    rules = gh_api(f"repos/{repo}/rules/branches/{branch}?per_page=100") or []
+    return any(rule["type"] == "required_status_checks" and rule.get("ruleset_id") == ruleset["id"]
+               for rule in rules)
+
+
+def verify(repo, branch, pr, wanted, ruleset):
+    """--verify: exit 0 printing the list when the ruleset holds as designed,
+    else exit 1 naming every reason. Reads only."""
+    number = pr["number"]
+    if ruleset is None:
+        print(f"\nNOT in force: there is no '{RULESET_NAME}' ruleset, so nothing is required to merge into '{branch}'")
+        print(f"needs the user: lib/scripts/required-checks.py --pr {number} --apply creates it "
+              "(it changes the repository's settings)")
+        print(f"required-checks: '{RULESET_NAME}' is not in force: there is no such ruleset -- "
+              f"the user's --pr {number} --apply creates it")
+        sys.exit(1)
+
+    problems = setting_problems(ruleset)
+    have = current_checks(ruleset)
+    if checks_rule(ruleset) is None:
+        problems.append(f"'{RULESET_NAME}' has no required-status-checks rule, so it requires no check")
+    missing = [c for c in wanted if c not in have]
+    extra = [c for c in have if c not in wanted]
+    for name, app_id in missing:
+        problems.append(f"'{name}' (app {app_id}) passed on #{number} but is not required")
+    for name, app_id in extra:
+        problems.append(f"'{name}' (app {app_id}) is required but did not run and pass on #{number}, "
+                        "so a merge would wait for it forever")
+    if ruleset.get("enforcement") == "active" and not applies_to_branch(repo, branch, ruleset):
+        problems.append(f"GitHub does not apply '{RULESET_NAME}' to '{branch}': rules/branches/{branch} "
+                        "lists no required checks from it -- its target must include the default branch")
+
+    if problems:
+        print(f"\nNOT in force as the pipeline needs ({len(problems)}):")
+        for problem in problems:
+            print(f"  - {problem}")
+        if missing or extra or checks_rule(ruleset) is None:
+            print(f"needs the user: once #{number}'s run has passed, "
+                  f"lib/scripts/required-checks.py --pr {number} --apply sets the list")
+        print(f"required-checks: '{RULESET_NAME}' is not in force as designed: {problems[0]}"
+              + (f" (and {len(problems) - 1} more)" if len(problems) > 1 else ""))
+        sys.exit(1)
+
+    print(f"\n'{RULESET_NAME}' is in force on '{branch}': active, no bypass list, the branch required to be "
+          f"up to date, and exactly the {len(wanted)} checks #{number} ran and passed:")
+    for name, app_id in wanted:
+        print(f"    {name}   (app {app_id})")
+    print(f"required-checks: in force -- '{RULESET_NAME}' requires the {len(wanted)} checks #{number} passed, "
+          "with no bypass and the branch up to date")
 
 
 def as_checks(pairs):
@@ -163,7 +270,10 @@ def main():
     parser = argparse.ArgumentParser(
         description="Show, and with --apply set, the checks a pull request into the default branch must pass.")
     parser.add_argument("--pr", type=int, help="the pull request whose CI defines the checks (default: newest open, else last merged)")
-    parser.add_argument("--apply", action="store_true", help=f"create or update the '{RULESET_NAME}' ruleset")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--apply", action="store_true", help=f"create or update the '{RULESET_NAME}' ruleset")
+    mode.add_argument("--verify", action="store_true",
+                      help=f"read only: exit 0 if '{RULESET_NAME}' is in force and requires exactly these checks, else 1")
     args = parser.parse_args()
 
     repo = repository()
@@ -174,6 +284,9 @@ def main():
     wanted = required_from_runs(repo, pr)
 
     ruleset = find_ruleset(repo)
+    if args.verify:
+        verify(repo, branch, pr, wanted, ruleset)
+        return
     have = current_checks(ruleset)
     added = [c for c in wanted if c not in have]
     removed = [c for c in have if c not in wanted]
@@ -187,12 +300,14 @@ def main():
         print(f"  - {name}   (app {app_id}; no longer run)")
 
     if ruleset is None:
-        print(f"\nno '{RULESET_NAME}' ruleset yet: --apply creates it, with no bypass list")
-    elif ruleset.get("bypass_actors"):
-        print(f"\nwarning: '{RULESET_NAME}' has a bypass list, so it can be skipped -- "
-              "remove it in Settings -> Rules -> Rulesets for the checks to hold for everyone")
-    if ruleset is not None and ruleset.get("enforcement") != "active":
-        print(f"warning: '{RULESET_NAME}' is {ruleset.get('enforcement')}, so it enforces nothing")
+        print(f"\nno '{RULESET_NAME}' ruleset yet, so nothing is enforced: no check is required to merge into "
+              f"'{branch}' until --apply creates it, with no bypass list")
+    else:
+        problems = setting_problems(ruleset)
+        if problems:
+            print()
+        for problem in problems:
+            print(f"warning: {problem}")
 
     if ruleset is not None and not added and not removed:
         print("\nthe ruleset already requires exactly these: nothing to change")

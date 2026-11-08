@@ -13,8 +13,9 @@
 #
 #   what changed        lib/scripts/changed.sh cli, against the latest
 #                       release -- unchanged means CI builds no CLI and
-#                       copies the release's instead, and so does this
-#   version bump        lib/scripts/version-check.sh
+#                       copies the release's instead, and so does this --
+#                       and changed.sh gui-darwin, for the version check
+#   version bump        lib/scripts/version-check.sh, with CI's arguments
 #   clone llama.cpp     lib/scripts/cicd.sh --clone-llama
 #   unit tests <host>   lib/scripts/cicd.sh --app cli --unit-tests, llama.cpp off
 #   build <host>        lib/scripts/cicd.sh --app cli --platform <host> --no-defer,
@@ -48,6 +49,11 @@
 # standard library instead -- a stand-in for the Linux and Windows x64
 # compiles, which a Mac's libc++ cannot vouch for (a missing #include lost four
 # platforms on 2026-09-25). It needs a GCC too, and is skipped without one.
+#
+# The summary also says whether the "Stable: CI must pass" ruleset is in
+# force, as `lib/scripts/required-checks.py --verify` reads it (57m): a line
+# for the user, not a job -- a ruleset gates the merge, not the run, so it
+# never fails the verdict. It needs gh signed in, and says so when it is not.
 #
 # What it does NOT rehearse, on purpose: uncommitted changes -- a pull request
 # carries commits, and a note says when some are left out; --uncommitted
@@ -199,6 +205,7 @@ tree="$(git -C "$root" rev-parse "$merged^{tree}")"
 # host. Asked of the test merge's own scripts, as the workflow asks the ones
 # it checked out; a branch from before the rule has none, and runs everything.
 cli=true
+app=true
 latest=""
 if [ -x "$unit_wt/lib/scripts/changed.sh" ] && [ -x "$unit_wt/lib/scripts/latest-release.sh" ]; then
     found="$(cd "$unit_wt" && lib/scripts/latest-release.sh)" || die "could not look up the latest release"
@@ -209,6 +216,14 @@ if [ -x "$unit_wt/lib/scripts/changed.sh" ] && [ -x "$unit_wt/lib/scripts/latest
     case "$(printf '%s\n' "$answer" | tail -1)" in
         cli=false) cli=false ;;
     esac
+    # The app's answer too, as CI's `what changed` gives `version bump` it
+    # (57m); a branch whose changed.sh has no gui-darwin keeps true.
+    if answer="$(cd "$unit_wt" && lib/scripts/changed.sh gui-darwin "$commit" HEAD 2>/dev/null)"; then
+        printf '%s\n' "$answer" | sed 's/^/[pr-ci] /'
+        case "$(printf '%s\n' "$answer" | tail -1)" in
+            gui-darwin=false) app=false ;;
+        esac
+    fi
 fi
 
 # --- the jobs -----------------------------------------------------------------
@@ -266,9 +281,12 @@ if [ "$cli" = false ]; then
     record "what changed" "the CLI is unchanged since $latest"
 fi
 
-# On every pull request, as in CI; a branch from before 2026-09-25 has the
-# old check, which takes no arguments.
-if [ -x "$unit_wt/lib/scripts/changed.sh" ]; then
+# On every pull request, as in CI, with CI's arguments; a branch from before
+# 2026-09-25 has the old check, which takes no arguments, and one from before
+# 57m a check with no --app.
+if grep -q -- '--app' "$unit_wt/lib/scripts/version-check.sh" 2>/dev/null; then
+    run_job "version bump" "$unit_wt" lib/scripts/version-check.sh --cli "$cli" --app "$app" --latest "$latest" || true
+elif [ -x "$unit_wt/lib/scripts/changed.sh" ]; then
     run_job "version bump" "$unit_wt" lib/scripts/version-check.sh --cli "$cli" --latest "$latest" || true
 else
     run_job "version bump" "$unit_wt" lib/scripts/version-check.sh || true
@@ -354,6 +372,31 @@ if [ "$cli" = true ]; then
     fi
 fi
 
+# --- the required checks -------------------------------------------------------
+# Not a CI job, and outside the verdict: whether "Stable: CI must pass" is in
+# force and requires what the pipeline last passed, read by
+# required-checks.py --verify -- read-only GETs, from this checkout, whose
+# origin names the repository. Its last line is the answer; a missing or
+# mismatched ruleset needs the user, whose --apply is the fix (57m).
+checks_script="$unit_wt/lib/scripts/required-checks.py"
+if ! grep -q -- '--verify' "$checks_script" 2>/dev/null; then
+    required="not checked (this branch's required-checks.py has no --verify)"
+elif ! command -v gh >/dev/null 2>&1 ||
+    ! { [ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] || gh auth status >/dev/null 2>&1; }; then
+    required="not checked (gh is not installed or not signed in)"
+else
+    set +e
+    (cd "$root" && python3 "$checks_script" --verify) >"$logs/required-checks.log" 2>&1 </dev/null
+    status=$?
+    set -e
+    verdict="$(sed -n '/./h; ${x;s/^required-checks: //;p;}' "$logs/required-checks.log")"
+    if [ "$status" -eq 0 ]; then
+        required="$verdict"
+    else
+        required="NEEDS THE USER: $verdict ($logs/required-checks.log)"
+    fi
+fi
+
 # --- the verdict --------------------------------------------------------------
 failed=0
 printf '\n[pr-ci] rehearsed the pull request %s -> %s\n' "$branch" "$BASE"
@@ -366,6 +409,7 @@ while [ $i -lt ${#names[@]} ]; do
     case "${results[$i]}" in FAILED*) failed=1 ;; esac
     i=$((i + 1))
 done
+printf '[pr-ci]   %-26s %s\n' "required checks" "$required"
 if [ "$cli" = true ]; then
     # What only CI's runners can say, given what ran here.
     printf '[pr-ci]   left to CI: the Windows test runs and the windows-arm64 build (no Windows here)'

@@ -1,0 +1,393 @@
+{
+  "_recorded": "Read-only gh api GETs against QuantumCompiler/Apogee, 2026-11-07 23:37-23:38 UTC (57m), trimmed to the fields required-checks.py reads plus their neighbours: pull request #11 (v0.2.0, merged), its head's pull-request runs (the ci.yml and darwin.yml runs that passed, and the post-merge ci.yml run), their jobs and check suites, and the repository's rulesets -- 'Stable' alone, 'Stable: CI must pass' never created -- with the rules GitHub applies to stable.",
+  "repo": "QuantumCompiler/Apogee",
+  "repository": {
+    "full_name": "QuantumCompiler/Apogee",
+    "default_branch": "stable"
+  },
+  "pull": {
+    "number": 11,
+    "state": "closed",
+    "merged_at": "2026-10-31T19:12:47Z",
+    "base": {
+      "ref": "stable"
+    },
+    "head": {
+      "ref": "v0.2.0",
+      "sha": "0e5b0f23a617b484a6986507a5cf3f4972ca2cb5"
+    }
+  },
+  "runs": {
+    "total_count": 3,
+    "workflow_runs": [
+      {
+        "id": 41233143727,
+        "name": "v0.2.0 PR Release",
+        "path": ".github/workflows/ci.yml",
+        "workflow_id": 341695789,
+        "event": "pull_request",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-10-31T19:12:50Z",
+        "check_suite_id": 111765965582,
+        "head_sha": "0e5b0f23a617b484a6986507a5cf3f4972ca2cb5",
+        "head_branch": "v0.2.0"
+      },
+      {
+        "id": 41226403105,
+        "name": "v0.2.0 Darwin Pull Request Checks",
+        "path": ".github/workflows/darwin.yml",
+        "workflow_id": 402861249,
+        "event": "pull_request",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-10-31T17:49:42Z",
+        "check_suite_id": 111748544850,
+        "head_sha": "0e5b0f23a617b484a6986507a5cf3f4972ca2cb5",
+        "head_branch": "v0.2.0"
+      },
+      {
+        "id": 41226403061,
+        "name": "v0.2.0 Pull Request Checks",
+        "path": ".github/workflows/ci.yml",
+        "workflow_id": 341695789,
+        "event": "pull_request",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-10-31T17:49:42Z",
+        "check_suite_id": 111748544826,
+        "head_sha": "0e5b0f23a617b484a6986507a5cf3f4972ca2cb5",
+        "head_branch": "v0.2.0"
+      }
+    ]
+  },
+  "jobs": {
+    "41226403061": {
+      "total_count": 14,
+      "jobs": [
+        {
+          "id": 124611353410,
+          "run_id": 41226403061,
+          "name": "what changed",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 124611387469,
+          "run_id": 41226403061,
+          "name": "version bump",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 124611387475,
+          "run_id": 41226403061,
+          "name": "clone llama.cpp",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 124611387548,
+          "run_id": 41226403061,
+          "name": "unit tests linux-arm64",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 124611387568,
+          "run_id": 41226403061,
+          "name": "unit tests windows-arm64",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 124611387589,
+          "run_id": 41226403061,
+          "name": "unit tests linux-x64",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 124611387610,
+          "run_id": 41226403061,
+          "name": "unit tests macos-arm64",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 124611387660,
+          "run_id": 41226403061,
+          "name": "unit tests windows-x64",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 124620828113,
+          "run_id": 41226403061,
+          "name": "build linux-x64",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 124620828119,
+          "run_id": 41226403061,
+          "name": "build linux-arm64",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 124620828165,
+          "run_id": 41226403061,
+          "name": "build windows-arm64",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 124620828180,
+          "run_id": 41226403061,
+          "name": "build windows-x64",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 124620828338,
+          "run_id": 41226403061,
+          "name": "build macos-arm64",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 124631220580,
+          "run_id": 41226403061,
+          "name": "tag and release",
+          "status": "completed",
+          "conclusion": "skipped"
+        }
+      ]
+    },
+    "41226403105": {
+      "total_count": 2,
+      "jobs": [
+        {
+          "id": 124611353320,
+          "run_id": 41226403105,
+          "name": "what changed (darwin)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 124611420002,
+          "run_id": 41226403105,
+          "name": "build darwin",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    "41233143727": {
+      "total_count": 6,
+      "jobs": [
+        {
+          "id": 124631312196,
+          "run_id": 41233143727,
+          "name": "tag and release",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 124631312266,
+          "run_id": 41233143727,
+          "name": "what changed",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "id": 124631312862,
+          "run_id": 41233143727,
+          "name": "unit tests ${{ matrix.name }}",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "id": 124631312869,
+          "run_id": 41233143727,
+          "name": "build ${{ matrix.name }}",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "id": 124631333675,
+          "run_id": 41233143727,
+          "name": "clone llama.cpp",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "id": 124631347131,
+          "run_id": 41233143727,
+          "name": "version bump",
+          "status": "completed",
+          "conclusion": "skipped"
+        }
+      ]
+    }
+  },
+  "check_suites": {
+    "111748544826": {
+      "id": 111748544826,
+      "app": {
+        "id": 15368,
+        "slug": "github-actions",
+        "name": "GitHub Actions"
+      }
+    },
+    "111748544850": {
+      "id": 111748544850,
+      "app": {
+        "id": 15368,
+        "slug": "github-actions",
+        "name": "GitHub Actions"
+      }
+    },
+    "111765965582": {
+      "id": 111765965582,
+      "app": {
+        "id": 15368,
+        "slug": "github-actions",
+        "name": "GitHub Actions"
+      }
+    }
+  },
+  "rulesets": [
+    {
+      "id": 23855785,
+      "name": "Stable",
+      "target": "branch",
+      "source_type": "Repository",
+      "source": "QuantumCompiler/Apogee",
+      "enforcement": "active",
+      "node_id": "RRS_lACqUmVwb3NpdG9yec5QI6iAzgFsAqk",
+      "created_at": "2026-09-22T19:58:30.377-06:00",
+      "updated_at": "2026-09-22T20:17:23.669-06:00"
+    }
+  ],
+  "ruleset_stable": {
+    "id": 23855785,
+    "name": "Stable",
+    "target": "branch",
+    "source_type": "Repository",
+    "source": "QuantumCompiler/Apogee",
+    "enforcement": "active",
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "~DEFAULT_BRANCH"
+        ]
+      }
+    },
+    "rules": [
+      {
+        "type": "deletion"
+      },
+      {
+        "type": "non_fast_forward"
+      },
+      {
+        "type": "update"
+      },
+      {
+        "type": "pull_request",
+        "parameters": {
+          "required_approving_review_count": 1,
+          "dismiss_stale_reviews_on_push": false,
+          "required_reviewers": [],
+          "require_code_owner_review": true,
+          "require_last_push_approval": false,
+          "required_review_thread_resolution": true,
+          "require_extra_approval_for_unattributed_changes": false,
+          "allowed_merge_methods": [
+            "merge",
+            "squash",
+            "rebase"
+          ]
+        }
+      },
+      {
+        "type": "required_status_checks",
+        "parameters": {
+          "strict_required_status_checks_policy": false,
+          "do_not_enforce_on_create": false,
+          "required_status_checks": []
+        }
+      }
+    ],
+    "node_id": "RRS_lACqUmVwb3NpdG9yec5QI6iAzgFsAqk",
+    "created_at": "2026-09-22T19:58:30.377-06:00",
+    "updated_at": "2026-09-22T20:17:23.669-06:00",
+    "bypass_actors": [
+      {
+        "actor_id": 2,
+        "actor_type": "RepositoryRole",
+        "bypass_mode": "always"
+      },
+      {
+        "actor_id": 5,
+        "actor_type": "RepositoryRole",
+        "bypass_mode": "always"
+      }
+    ],
+    "current_user_can_bypass": "always"
+  },
+  "rules_branches_stable": [
+    {
+      "type": "deletion",
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "QuantumCompiler/Apogee",
+      "ruleset_id": 23855785
+    },
+    {
+      "type": "non_fast_forward",
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "QuantumCompiler/Apogee",
+      "ruleset_id": 23855785
+    },
+    {
+      "type": "update",
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "QuantumCompiler/Apogee",
+      "ruleset_id": 23855785
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 1,
+        "dismiss_stale_reviews_on_push": false,
+        "required_reviewers": [],
+        "require_code_owner_review": true,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": true,
+        "require_extra_approval_for_unattributed_changes": false,
+        "allowed_merge_methods": [
+          "merge",
+          "squash",
+          "rebase"
+        ]
+      },
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "QuantumCompiler/Apogee",
+      "ruleset_id": 23855785
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": []
+      },
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "QuantumCompiler/Apogee",
+      "ruleset_id": 23855785
+    }
+  ]
+}

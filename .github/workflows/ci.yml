@@ -6,8 +6,12 @@
 #
 #   - the required checks. Once the pull request's run passes, and BEFORE it
 #     merges: lib/scripts/required-checks.py --pr <N>, then --apply (it
-#     changes the repository's settings). Until then the "Stable: CI must
-#     pass" ruleset waits for the old job names, and nothing can merge;
+#     changes the repository's settings, so it is the user's to run). Until
+#     then the "Stable: CI must pass" ruleset waits for the old job names, and
+#     nothing can merge. `required-checks.py --verify` (read-only, 57m) says
+#     whether the ruleset is in force and matches; the PR-description and
+#     docs-pass skills run it on every release pull request, whatever changed,
+#     and no job here reads the ruleset;
 #   - lib/scripts/pr-ci.sh rehearses this file's pull-request jobs, in this
 #     order, through the same scripts: mirror the change there;
 #   - lib/scripts/release-from-pr.sh finds the platforms a run built by its
@@ -42,8 +46,12 @@
 # must not be one; a platform that cannot pass is a platform to fix, not to
 # mark informational. GitHub enforces the requirement through a repository
 # ruleset on `stable`, "Stable: CI must pass", which has no bypass list -- an
-# admin may merge without an approval, never past a red pipeline (user
-# decision, 2026-10-03). Its check names are not typed by anyone:
+# admin may merge without an approval, never past a red or unfinished
+# pipeline -- and requires the branch up to date with `stable` (user
+# decisions, 2026-09-19 and 2026-10-03). It is in force only once
+# `lib/scripts/required-checks.py --verify` says so: until 57m found it
+# missing (2026-10-31) it had never been created, and every merge before then
+# went through with no check required. Its check names are not typed by anyone:
 # lib/scripts/required-checks.py reads them from a pull request's passing run
 # (every job that ran and passed, matrix rows expanded) and, with --apply,
 # sets them. When a job here is renamed, added or removed, run it against the
@@ -90,8 +98,11 @@
 # The script's header has the full order of checks.
 #
 # `version bump` exists because of that: a pull request that changes the CLI
-# and forgets to bump lib/release/VERSION would otherwise merge and publish nothing,
-# silently. It also says, on every pull request, what the merge will publish.
+# or the macOS app (darwin.yml's, which the release carries since GUI M17) and
+# forgets to bump lib/release/VERSION would otherwise merge and publish
+# nothing, silently. It also says, on every pull request, what the merge will
+# publish. It is the release's one check, for both deliverables, here in the
+# CLI pipeline: darwin.yml has none of its own (57m).
 #
 # The suite runs here again as of 2026-09-22, reversing 2026-09-20's "remove
 # the tests from the CI/CD" -- but ONLY the source-level suite. Nothing in
@@ -288,11 +299,16 @@ jobs:
     # On request (workflow_dispatch), everything runs. If this job fails, every
     # job after it is skipped, the required checks never report, and the pull
     # request cannot merge: fail closed.
+    #
+    # It asks the same of the macOS app (`gui-darwin`, 57m) for `version
+    # bump` alone: the app's own pipeline, darwin.yml, asks for its build, and
+    # nothing in this file builds the app.
     name: what changed
     if: github.event.action != 'closed'
     runs-on: ubuntu-24.04
     outputs:
       cli: ${{ steps.diff.outputs.cli }}
+      gui-darwin: ${{ steps.diff.outputs['gui-darwin'] }}
       latest: ${{ steps.diff.outputs.latest }}
     steps:
       # The whole history, so the latest release's commit is there to diff
@@ -302,7 +318,7 @@ jobs:
           fetch-depth: 0
 
       # On a pull request HEAD is its test merge -- what would merge.
-      - name: Has the CLI changed since the latest release?
+      - name: Have the CLI and the app changed since the latest release?
         id: diff
         env:
           GH_TOKEN: ${{ github.token }}
@@ -317,10 +333,12 @@ jobs:
           case "$EVENT" in
             pull_request)
               lib/scripts/changed.sh cli "$commit" HEAD
+              lib/scripts/changed.sh gui-darwin "$commit" HEAD
               ;;
             *)
               echo "on request: everything runs"
               echo "cli=true" | tee -a "$GITHUB_OUTPUT"
+              echo "gui-darwin=true" | tee -a "$GITHUB_OUTPUT"
               ;;
           esac
 
@@ -338,10 +356,12 @@ jobs:
     # merge declines to cut a release, and `tag and release` handles it by
     # publishing nothing.
     #
-    # It runs on every pull request, whatever changed: when the CLI did, it
-    # holds lib/release/VERSION and the CLI's version to the rules; when it did not, it
-    # says what the merge will publish -- a release with the CLI copied, or
-    # nothing.
+    # It runs on every pull request, whatever changed: when the CLI or the
+    # macOS app did, it holds lib/release/VERSION to being unreleased (and,
+    # for the CLI, the CLI's version to it); when neither did, it says what
+    # the merge will publish -- a release with both copied, or nothing. A
+    # release lookup that fails fails the check: only a 404 is "not
+    # released" (57m).
     name: version bump
     needs: changes
     if: github.event_name == 'pull_request' && github.event.action != 'closed'
@@ -352,10 +372,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CLI: ${{ needs.changes.outputs.cli }}
+          APP: ${{ needs.changes.outputs['gui-darwin'] }}
           LATEST: ${{ needs.changes.outputs.latest }}
         # lib/scripts/version-check.sh, so a local rehearsal (make pr-ci)
-        # runs the same check.
-        run: lib/scripts/version-check.sh --cli "$CLI" --latest "$LATEST"
+        # runs the same check, with the same arguments.
+        run: lib/scripts/version-check.sh --cli "$CLI" --app "$APP" --latest "$LATEST"
 
   clone-llama:
     # Stage one. The script reads the pin from the CLI's third_party build --
