@@ -879,3 +879,21 @@ TEST_CASE(
     // Folded with the turn's thinking once the answer comes.
     CHECK(stage.frame(96, 24).find("a sub-session on root") == std::string::npos);
 }
+
+TEST_CASE("the shell's reasoning goes through the one neutraliser, a row per line",
+          "[tui][session][57p]") {
+    // The build's check of the reasoning path the sweep did not read (57p):
+    // it drew reasoning outside styled_text, through `markdown::wrap`, which
+    // counted a control FTXUI never draws as a cell and kept a newline inside
+    // one row.
+    Stage stage;
+    stage.view.begin_session();
+    apogee::agentloop::Reporter& reporter = stage.view.reporter();
+    reporter.on_thinking();
+    reporter.on_thinking_token("Let me think\x1b]52;c;cm0gLXJmIH4K\x07 about it");
+    reporter.on_thinking_token("\nthen the next line");
+    const std::string frame = stage.frame(100, 20);
+    CHECK(has(frame, "Let me think\xEF\xBF\xBD]52;c;cm0gLXJmIH4K\xEF\xBF\xBD about it\n"));
+    CHECK(has(frame, "  then the next line\n"));
+    CHECK(frame.find('\x07') == std::string::npos);
+}

@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "agentloop/question.h"
 #include "ansi/ansi.h"
@@ -30,6 +32,18 @@ namespace apogee::commands {
 /// the same single-line discipline as every other interactive output and cannot
 /// land on top of a spinner frame.
 [[nodiscard]] agentloop::AskFn terminal_ask_fn(StatusLine& status, ansi::Style style);
+
+/// The lines the terminal's prompt draws for `question`, the `index`th of
+/// `total` (57p): the question as text beside its tag, each later row of it
+/// under the first row's text; each option numbered, its label drawn as one
+/// line -- so the option shown is the one its number picks -- and its
+/// description as text, its later rows indented under the label. Shown,
+/// never obeyed: no row starts at column 0 but the first, no row of the
+/// question starts where an option does, and no control character of the
+/// model's reaches the terminal.
+[[nodiscard]] std::vector<std::string> ask_prompt_lines(const agentloop::Question& question,
+                                                        std::size_t index, std::size_t total,
+                                                        const ansi::Style& style);
 
 /// What `typed` answers `question` with: a bare number naming one of its
 /// options is that option's label; anything else, free text, as typed --

@@ -390,6 +390,9 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     reporter_options.width = static_cast<std::size_t>(platform::terminal_width().value_or(80));
     reporter_options.markdown = !flags.raw && config.ui.markdown;
     reporter_options.hyperlinks = ansi::hyperlinks_supported();
+    // `-q` at a terminal decorates nothing, and still draws the answer
+    // shown, never obeyed (57p).
+    reporter_options.answer_is_terminal = platform::is_terminal(platform::StandardStream::Out);
 
     CliReporter reporter{status_writer, reporter_options};
 

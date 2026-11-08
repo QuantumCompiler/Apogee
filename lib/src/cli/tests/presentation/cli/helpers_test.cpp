@@ -593,3 +593,24 @@ suites:
     }
     CHECK(harness.held().empty());
 }
+
+TEST_CASE("an answer printed to stdout is drawn at a terminal and written as-is to a pipe",
+          "[commands][helpers][analyze][symphonies][57p]") {
+    // The sweep's entry 8 on `analyze`'s printed report (`--text`,
+    // `--markdown`, a structured agent, every interactive answer) and
+    // `symphonies play`'s output: the reporter's stream was neutralised, and
+    // these, printed after the run, were not -- the OSC 52 wrote the
+    // clipboard.
+    const std::string answer = "Here you go \x1b]52;c;cm0gLXJmIH4K\x07 text \x1b[2J end\r\n\tnext";
+    const std::string fffd = "\xEF\xBF\xBD";
+    const std::string drawn = apogee::commands::answer_for_stdout(answer, true);
+    CHECK(drawn == "Here you go " + fffd + "]52;c;cm0gLXJmIH4K" + fffd + " text " + fffd +
+                       "[2J end\n    next");
+    for (const char control : {'\x1b', '\x07', '\r', '\t'}) {
+        CHECK(drawn.find(control) == std::string::npos);
+    }
+    // A pipe or a file gets the bytes; valid text is the same either way.
+    CHECK(apogee::commands::answer_for_stdout(answer, false) == answer);
+    const std::string plain = "Résumé: 漢字 ✓\n- one\n";
+    CHECK(apogee::commands::answer_for_stdout(plain, true) == plain);
+}

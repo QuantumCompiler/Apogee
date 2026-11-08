@@ -30,6 +30,7 @@
 #include "agentloop/review_context.h"
 #include "agentloop/validate.h"
 #include "ansi/ansi.h"
+#include "ansi/inert.h"
 #include "backends/factory.h"
 #include "backends/model_roster.h"
 #include "backends/provider_cache.h"
@@ -695,7 +696,8 @@ public:
             session.title = title;
             logger::save(session);
             if (progress_) {
-                progress_("titled by " + backend_ + ": " + title);
+                // A line (57p): the model's words, never obeyed.
+                progress_("titled by " + backend_ + ": " + ansi::inert_line(title));
             }
         }
     }

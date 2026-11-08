@@ -5,11 +5,13 @@
 #include <algorithm>
 #include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include "agentloop/reporter.h"
 #include "agentloop/structured.h"
+#include "ansi/inert.h"
 #include "backends/factory.h"
 #include "cli/helpers.h"
 #include "cli/permissions.h"
@@ -281,7 +283,9 @@ void review_mr(const RootContext& context, const MrFlags& flags) {
         seams.narrow = make_pass(harness, utility.key);
     }
     seams.gate = make_gate(config, config_path, flags);
-    seams.progress = [](std::string_view line) { std::cerr << "[review] " << line << "\n"; };
+    seams.progress = [](std::string_view line) {
+        std::cerr << "[review] " << ansi::inert_line(line) << "\n";  // a line (57p)
+    };
     seams.skills_dir = harness::review_skills_dir();
     if (const harness::BackendConfig* entry = config.find_backend(model);
         entry != nullptr && entry->context_size.value_or(0) > 0) {
@@ -298,9 +302,11 @@ void review_mr(const RootContext& context, const MrFlags& flags) {
     try {
         result = review_merge_request(options, seams);
     } catch (const forge::ForgeError& e) {
-        fail(std::string{e.what()} + (e.remedy().empty() ? "" : " -- " + e.remedy()));
+        // The forge's words as a line (57p): its CLI's stderr is third-party
+        // text, drawn and never obeyed.
+        fail(forge_failure(e));
     } catch (const std::runtime_error& e) {
-        fail(e.what());
+        fail(ansi::inert_line(e.what()));
     }
     if (flags.format == ReadFormat::Json) {
         write_document(std::cout, result.document);
@@ -515,7 +521,9 @@ void review_sweep(const RootContext& context, const SweepFlags& flags) {
         }
         return it->second;
     };
-    const auto progress = [](std::string_view line) { std::cerr << "[review] " << line << "\n"; };
+    const auto progress = [](std::string_view line) {
+        std::cerr << "[review] " << ansi::inert_line(line) << "\n";
+    };
 
     review::WatermarkStore store{harness::review_dir() / "watermarks.json"};
     review::SweepOptions options;
@@ -583,48 +591,7 @@ void review_sweep(const RootContext& context, const SweepFlags& flags) {
     if (flags.format == ReadFormat::Json) {
         write_document(std::cout, document);
     } else {
-        for (const nlohmann::json& target : document["targets"]) {
-            if (target.contains("error")) {
-                std::cout << target["name"].get<std::string>() << ": "
-                          << target["error"].get<std::string>() << "\n";
-            }
-            for (const nlohmann::json& project : target["projects"]) {
-                std::string line = project["project"].get<std::string>() + ": ";
-                if (project.value("first_sweep", false)) {
-                    line += "first sweep -- starting at now (--since reviews earlier ones)";
-                } else {
-                    line += std::to_string(project["reviewed"].size()) + " reviewed";
-                    if (!project["skipped_drafts"].empty()) {
-                        line += ", " + std::to_string(project["skipped_drafts"].size()) +
-                                " draft(s) skipped";
-                    }
-                }
-                std::cout << line << "\n";
-                for (const nlohmann::json& run : project["reviewed"]) {
-                    std::cout << "  " << run["merge_request"].get<std::string>() << ": "
-                              << run["findings"].size() << " finding(s), "
-                              << (run["posted"].value("done", false)
-                                      ? std::string{"posted"}
-                                      : "posted nothing (" +
-                                            run["posted"].value("reason", std::string{}) + ")")
-                              << "\n";
-                }
-                if (project.contains("error")) {
-                    std::cout << "  stopped: " << project["error"].get<std::string>() << "\n";
-                }
-            }
-        }
-        std::cout << document["reviewed"].get<std::size_t>() << " reviewed, "
-                  << document["posted"].get<std::size_t>() << " posted";
-        if (document["deferred"].get<std::size_t>() > 0) {
-            std::cout << ", " << document["deferred"].get<std::size_t>()
-                      << " left for the next sweep (the cap is "
-                      << document["cap"].get<std::size_t>() << ")";
-        }
-        std::cout << (document.contains("document")
-                          ? " -- the document: " + document["document"].get<std::string>()
-                          : std::string{})
-                  << "\n";
+        std::cout << format_sweep(document);
     }
     if (document["errors"].get<std::size_t>() > 0) {
         throw CLI::RuntimeError(1);
@@ -632,6 +599,57 @@ void review_sweep(const RootContext& context, const SweepFlags& flags) {
 }
 
 }  // namespace
+
+std::string format_sweep(const nlohmann::json& document) {
+    // What a forge named and said, each a line (57p): a project, a merge
+    // request, a reason, an error.
+    const auto said = [](const nlohmann::json& text) {
+        return ansi::inert_line(text.get<std::string>());
+    };
+    std::ostringstream out;
+    for (const nlohmann::json& target : document["targets"]) {
+        if (target.contains("error")) {
+            out << said(target["name"]) << ": " << said(target["error"]) << "\n";
+        }
+        for (const nlohmann::json& project : target["projects"]) {
+            std::string line = said(project["project"]) + ": ";
+            if (project.value("first_sweep", false)) {
+                line += "first sweep -- starting at now (--since reviews earlier ones)";
+            } else {
+                line += std::to_string(project["reviewed"].size()) + " reviewed";
+                if (!project["skipped_drafts"].empty()) {
+                    line += ", " + std::to_string(project["skipped_drafts"].size()) +
+                            " draft(s) skipped";
+                }
+            }
+            out << line << "\n";
+            for (const nlohmann::json& run : project["reviewed"]) {
+                out << "  " << said(run["merge_request"]) << ": " << run["findings"].size()
+                    << " finding(s), "
+                    << (run["posted"].value("done", false)
+                            ? std::string{"posted"}
+                            : "posted nothing (" +
+                                  ansi::inert_line(run["posted"].value("reason", std::string{})) +
+                                  ")")
+                    << "\n";
+            }
+            if (project.contains("error")) {
+                out << "  stopped: " << said(project["error"]) << "\n";
+            }
+        }
+    }
+    out << document["reviewed"].get<std::size_t>() << " reviewed, "
+        << document["posted"].get<std::size_t>() << " posted";
+    if (document["deferred"].get<std::size_t>() > 0) {
+        out << ", " << document["deferred"].get<std::size_t>()
+            << " left for the next sweep (the cap is " << document["cap"].get<std::size_t>() << ")";
+    }
+    out << (document.contains("document")
+                ? " -- the document: " + document["document"].get<std::string>()
+                : std::string{})
+        << "\n";
+    return out.str();
+}
 
 std::string_view ReviewCommand::name() const noexcept {
     return "review";

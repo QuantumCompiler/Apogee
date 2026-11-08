@@ -30,6 +30,7 @@ add_library(apogee_tests_infrastructure OBJECT
     infrastructure/platform/termination_test.cpp
     infrastructure/platform/xcode_test.cpp
     infrastructure/ansi/ansi_test.cpp
+    infrastructure/ansi/inert_test.cpp
     infrastructure/events/bus_test.cpp
     support/env_guard.h
     support/env_guard.cpp
@@ -351,6 +352,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/helpers_test.cpp
     presentation/cli/interrupt_test.cpp
     presentation/cli/tool_vectors_test.cpp
+    presentation/views/ask_prompt_test.cpp
     presentation/views/thinking_view_test.cpp
     presentation/views/status_line_test.cpp
     presentation/views/download_progress_test.cpp

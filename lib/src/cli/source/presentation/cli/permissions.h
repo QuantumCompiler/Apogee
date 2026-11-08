@@ -171,8 +171,18 @@ bool revoke_for_session(SessionApprovals& approvals, const GatedName& name);
 
 /// The permission prompt's first line: the tag, the tool, and `-> <target>`
 /// when there is one -- for a file writer the file the call writes (57o).
+/// The tool and the target are drawn as lines, shown and never obeyed (57p).
 [[nodiscard]] std::string permission_prompt_line(const agent::GateRequest& request,
                                                  const ansi::Style& style);
+
+/// Every line the prompt draws above its question (57p), which the terminal
+/// and the full-screen shell both print: the first line, then the detail --
+/// a file writer's change by its counts (52a), any other detail whole, as
+/// text, each of its lines indented under the prompt, so nothing in it starts
+/// at column 0 where a prompt line starts. A detail that is the target
+/// itself is not said twice.
+[[nodiscard]] std::vector<std::string> permission_prompt_lines(const agent::GateRequest& request,
+                                                               const ansi::Style& style);
 
 /// The terminal prompt, or null when there is no terminal to prompt on -- and
 /// a null ConfirmFn is exactly what makes `ask` deny on a pipe.

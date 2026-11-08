@@ -1,5 +1,8 @@
 #pragma once
 
+#include <nlohmann/json.hpp>
+
+#include <string>
 #include <string_view>
 
 #include "cli/command.h"
@@ -14,6 +17,13 @@
 /// documents (machine-mode.md). Every skill's answer is held to the one
 /// finding contract, `harness::review_finding_schema_text()`.
 namespace apogee::commands {
+
+/// What `review sweep` prints of its `document` (machine-mode.md's
+/// `review.sweep`): each target's error, each project's count, each merge
+/// request reviewed and whether it was posted, and the totals. Every name, a
+/// reason and an error a forge gave are drawn as lines (57p) -- shown, never
+/// obeyed -- while the document keeps their true text.
+[[nodiscard]] std::string format_sweep(const nlohmann::json& document);
 
 class ReviewCommand final : public Command {
 public:

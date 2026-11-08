@@ -4,6 +4,8 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cctype>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -20,6 +22,7 @@
 #include "agent/tool.h"
 #include "agent/web_search.h"
 #include "agentloop/loop.h"
+#include "ansi/inert.h"
 #include "cli/helpers.h"
 #include "contracts/config.h"
 #include "contracts/host.h"
@@ -31,6 +34,7 @@
 #include "support/fake_transport.h"
 #include "tools/environment.h"
 #include "tools/fs.h"
+#include "tools/shell.h"
 #include "tools/toolsets.h"
 #include "views/status_line.h"
 #include "views/terminal.h"
@@ -806,6 +810,143 @@ TEST_CASE("the write prompt names the file written, on the terminal and in machi
     CHECK(event["target"] == "victim.txt");
     std::ifstream victim{root / "victim.txt"};
     CHECK(std::string{std::istreambuf_iterator<char>{victim}, {}} == "overwritten");
+}
+
+namespace {
+
+/// `text` with every SGR sequence of the prompt's own styling taken out.
+std::string without_sgr(std::string text) {
+    for (std::size_t at = text.find('\x1b'); at != std::string::npos; at = text.find('\x1b', at)) {
+        std::size_t end = at + 1;
+        if (end < text.size() && text[end] == '[') {
+            ++end;
+            while (end < text.size() &&
+                   (std::isdigit(static_cast<unsigned char>(text[end])) != 0 || text[end] == ';')) {
+                ++end;
+            }
+            if (end < text.size() && text[end] == 'm') {
+                text.erase(at, end + 1 - at);
+                continue;
+            }
+        }
+        ++at;
+    }
+    return text;
+}
+
+const std::string kFffd{apogee::ansi::kReplacementCharacter};
+
+}  // namespace
+
+TEST_CASE("a forged command is drawn as it is: the person cannot be shown ls -la for touch PWNED",
+          "[commands][permissions][57p]") {
+    // The sweep's entry 1 (rated high), its PTY probe's very command: the CR
+    // and the erase drew `[permission] run_command -> ls -la` over the real
+    // prompt line, the person typed y, and touch PWNED ran.
+    const std::string probe =
+        "touch PWNED #\r\x1b[2K\x1b[1;35m[permission]\x1b[0m run_command -> ls -la";
+    REQUIRE(probe.size() < 80);  // not cut: the target is the whole command
+    const std::string detail = probe + "\ncwd: /work";
+    const GateRequest request{"run_command", probe, detail};
+
+    const std::vector<std::string> plain =
+        apogee::commands::permission_prompt_lines(request, apogee::ansi::Style{});
+    const std::string drawn = "touch PWNED #" + kFffd + kFffd + "[2K" + kFffd +
+                              "[1;35m[permission]" + kFffd + "[0m run_command -> ls -la";
+    REQUIRE(plain.size() == 3);
+    CHECK(plain[0] == "[perm] run_command -> " + drawn);
+    // The detail as text: the CR dropped, the escapes shown, every line under
+    // the prompt.
+    CHECK(plain[1] == "  touch PWNED #" + kFffd + "[2K" + kFffd + "[1;35m[permission]" + kFffd +
+                          "[0m run_command -> ls -la");
+    CHECK(plain[2] == "  cwd: /work");
+    for (const std::string& line : plain) {
+        INFO(line);
+        CHECK(line.find('\x1b') == std::string::npos);
+        CHECK(line.find('\r') == std::string::npos);
+    }
+
+    // In colour, the prompt's own styling and nothing of the command's.
+    const std::vector<std::string> coloured =
+        apogee::commands::permission_prompt_lines(request, apogee::ansi::Style{true});
+    REQUIRE(coloured.size() == plain.size());
+    for (std::size_t i = 0; i < coloured.size(); ++i) {
+        CHECK(without_sgr(coloured[i]) == plain[i]);
+        CHECK(coloured[i].find('\r') == std::string::npos);
+    }
+    CHECK(coloured[0].find("\x1b[2K") == std::string::npos);
+    CHECK(coloured[0].find("\x1b[1;35m[permission]") == std::string::npos);
+}
+
+TEST_CASE(
+    "a search query's lines stay under the prompt, and a target already whole is not repeated",
+    "[commands][permissions][57p]") {
+    // web_search's detail, `search: <query>`, through the same lines: a
+    // newline in the query cannot start a forged prompt line at column 0.
+    GateRequest search{"web_search", "search.example",
+                       "search: cats\n[permission] fetch_url -> evil.example\x1b[8m"};
+    search.outbound = true;
+    const std::vector<std::string> lines =
+        apogee::commands::permission_prompt_lines(search, apogee::ansi::Style{});
+    REQUIRE(lines.size() == 3);
+    CHECK(lines[0] == "[perm] web_search -> search.example");
+    CHECK(lines[1] == "  search: cats");
+    CHECK(lines[2] == "  [permission] fetch_url -> evil.example" + kFffd + "[8m");
+
+    // An MCP tool whose arguments fit: the target is them, said once.
+    const GateRequest whole{"mcp__srv__write", R"({"path":"a"})", R"({"path":"a"})"};
+    CHECK(apogee::commands::permission_prompt_lines(whole, apogee::ansi::Style{}).size() == 1);
+    // A file writer's change, still by its counts (52a).
+    GateRequest edit{"edit_file", "x", "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n"};
+    edit.edits = true;
+    const std::vector<std::string> counted =
+        apogee::commands::permission_prompt_lines(edit, apogee::ansi::Style{});
+    REQUIRE(counted.size() == 2);
+    CHECK(counted[1].starts_with("  +1"));
+}
+
+TEST_CASE(
+    "run_command is asked about with its whole command and cwd, on the terminal and in "
+    "machine mode",
+    "[commands][permissions][machine][57p]") {
+    // The sweep's entry 2: a command past 80 characters was asked about by
+    // its first 77, no detail, and nothing earlier in the stream said more.
+    const apogee::testing::TempDir temp{"permissions-detail-" +
+                                        std::to_string(std::random_device{}())};
+    apogee::agent::ToolRegistry registry;
+    apogee::tools::register_shell_tool(registry, temp.path(), std::chrono::seconds{10});
+    const std::string command =
+        "echo checking the build status of the project before continuing with tests;  "
+        "touch PWNED-by-the-hidden-tail-of-the-command";
+    REQUIRE(command.size() > 120);
+
+    std::vector<std::string> printed;
+    std::ostringstream machine;
+    apogee::commands::JsonReporter reporter{machine};
+    apogee::agent::DispatchContext context;
+    context.permission = make_permission_checker({}, nullptr);
+    context.confirm = [&](const GateRequest& request) {
+        printed = apogee::commands::permission_prompt_lines(request, apogee::ansi::Style{});
+        reporter.emit_permission_question(request);
+        return false;  // denied: nothing runs
+    };
+    const apogee::agent::ToolOutcome denied = apogee::agent::dispatch(
+        registry,
+        apogee::harness::ToolCall{
+            "c", "run_command",
+            nlohmann::json{{"command", command}, {"cwd", temp.path().string()}}.dump()},
+        context);
+    CHECK(denied.is_error);
+    const std::string cut = command.substr(0, 77) + "...";
+    REQUIRE(printed.size() == 3);
+    CHECK(printed[0] == "[perm] run_command -> " + cut);
+    CHECK(printed[1] == "  " + command);
+    CHECK(printed[2] == "  cwd: " + temp.path().string());
+    const nlohmann::json event = nlohmann::json::parse(machine.str());
+    CHECK(event["kind"] == "permission");
+    CHECK(event["target"] == cut);  // the short form, unchanged
+    CHECK(event["detail"] == command + "\ncwd: " + temp.path().string());
+    CHECK_FALSE(std::filesystem::exists(temp.path() / "PWNED-by-the-hidden-tail-of-the-command"));
 }
 
 namespace {

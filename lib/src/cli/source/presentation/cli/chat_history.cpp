@@ -9,6 +9,7 @@
 #include <sstream>
 
 #include "agentloop/content.h"
+#include "ansi/inert.h"
 #include "backends/factory.h"
 #include "cli/chat_attachments.h"
 #include "cli/chat_recall.h"
@@ -134,13 +135,15 @@ nlohmann::json session_info_view(const logger::Session& session) {
 }
 
 std::string format_session_row(const logger::Session& session) {
+    // The name and the host's as lines (57p): a title a model chose, saved
+    // before titles were cleaned, is drawn and never obeyed.
     std::ostringstream out;
     out << session.chat_id << "  " << session.updated_at << "  " << session.turns << " turns  "
-        << session.display_name();
+        << ansi::inert_line(session.display_name());
     // Who began it, for a chat an ACP host began (56c); every other row is
     // as it was.
     if (!session.origin.empty()) {
-        out << "  (from " << session.origin << ")";
+        out << "  (from " << ansi::inert_line(session.origin) << ")";
     }
     return out.str();
 }
@@ -149,18 +152,18 @@ std::string format_session_info(const logger::Session& session) {
     std::ostringstream out;
     out << "id:        " << session.chat_id << "\n";
     if (!session.custom_name.empty()) {
-        out << "name:      " << session.custom_name << "\n";
+        out << "name:      " << ansi::inert_line(session.custom_name) << "\n";
     }
     if (!session.title.empty()) {
-        out << "title:     " << session.title << "\n";
+        out << "title:     " << ansi::inert_line(session.title) << "\n";
     }
     out << "backend:   " << (session.backend.empty() ? "(default)" : session.backend) << "\n";
     // Who began it and where, for a chat an ACP host began (56c).
     if (!session.origin.empty()) {
-        out << "origin:    " << session.origin << "\n";
+        out << "origin:    " << ansi::inert_line(session.origin) << "\n";
     }
     if (!session.cwd.empty()) {
-        out << "cwd:       " << session.cwd << "\n";
+        out << "cwd:       " << ansi::inert_line(session.cwd) << "\n";
     }
     out << "started:   " << session.started_at << "\n"
         << "updated:   " << session.updated_at << "\n"
@@ -229,14 +232,21 @@ nlohmann::json saved_chat_view(const logger::Session& session,
                           {"warnings", std::move(dropped)}};
 }
 
-std::string format_saved_chat(const logger::Session& session) {
+std::string format_saved_chat(const logger::Session& session, bool terminal) {
+    // What a person or a model wrote is drawn as the live chat drew it (57p):
+    // on a terminal, as text -- an OSC 52 the chat showed as U+FFFD is not
+    // obeyed on replay -- and to a pipe as written. A name or a label is a
+    // line wherever it goes.
+    const auto payload = [terminal](std::string_view text) {
+        return terminal ? ansi::inert_text(text) : std::string{text};
+    };
     std::ostringstream out;
-    out << session.display_name() << " -- " << session.chat_id << ", on "
-        << (session.backend.empty() ? "(default)" : session.backend)
-        << (session.model.empty() ? "" : " (" + session.model + ")") << "\n";
+    out << ansi::inert_line(session.display_name()) << " -- " << session.chat_id << ", on "
+        << (session.backend.empty() ? "(default)" : ansi::inert_line(session.backend))
+        << (session.model.empty() ? "" : " (" + ansi::inert_line(session.model) + ")") << "\n";
     if (const std::vector<logger::SavedAttachment> attached = logger::saved_attachments(session);
         !attached.empty()) {
-        out << "attached to the chat: " << attachments_line(attached) << "\n";
+        out << "attached to the chat: " << ansi::inert_line(attachments_line(attached)) << "\n";
     }
     const std::vector<logger::SavedTurn> turns = logger::saved_turns(session);
     if (turns.empty()) {
@@ -251,30 +261,36 @@ std::string format_saved_chat(const logger::Session& session) {
             out << " -- history compacted; what came before is this summary:\n";
             std::istringstream summary{*turn.compacted};
             for (std::string line; std::getline(summary, line);) {
-                out << (line.empty() ? "" : "  ") << line << "\n";
+                out << (line.empty() ? "" : "  ") << payload(line) << "\n";
             }
         } else {
-            out << "\nYou: " << turn.user << "\n";
+            out << "\nYou: " << payload(turn.user) << "\n";
         }
         if (!turn.attachments.empty()) {
-            out << "attached: " << attachments_line(turn.attachments) << "\n";
+            out << "attached: " << ansi::inert_line(attachments_line(turn.attachments)) << "\n";
         }
         for (const logger::SavedTool& tool : turn.tools) {
-            out << "[tool] " << tool.name << (tool.summary.empty() ? "" : " " + tool.summary)
-                << " -- "
+            out << "[tool] " << ansi::inert_line(tool.name)
+                << (tool.summary.empty() ? "" : " " + ansi::inert_line(tool.summary)) << " -- "
                 << (tool.result_bytes.has_value()
                         ? "returned " + human_size(static_cast<std::int64_t>(*tool.result_bytes))
                         : std::string{"no result kept"})
                 << "\n";
         }
         if (const std::string answer = answer_text(turn); !answer.empty()) {
-            out << answer << "\n";
+            out << payload(answer) << "\n";
         }
         if (!turn.answered && !turn.compacted.has_value()) {
             out << "(no answer kept: the turn was cancelled or failed)\n";
         }
     }
     return out.str();
+}
+
+std::string compact_question(const logger::Session& session) {
+    return "Compact " + ansi::inert_line(session.display_name()) + " (" + session.chat_id +
+           ")? Its " + std::to_string(session.messages.size()) +
+           " messages are folded into a summary. [y/N] ";
 }
 
 std::string title_prompt() {
@@ -339,6 +355,12 @@ std::string sanitize_title(std::string_view raw) {
         line = strip(raw.substr(start, end - start), kFront, kBack);
         start = end + 1;
     }
+    // No control character is kept (57p): a title is printed by every
+    // listing, and one the model wrote with an escape sequence in it would
+    // retitle the terminal or clear the screen at each. A title is cosmetic,
+    // so they are dropped rather than drawn.
+    const std::string cleaned = ansi::without_controls(line);
+    line = strip(cleaned, kFront, kBack);
 
     // Bounded so one runaway answer cannot make every listing row wrap.
     constexpr std::size_t kMaxTitle = 60;
@@ -434,7 +456,8 @@ void ChatsCommand::bind(CLI::App& root, const RootContext& context) {
                 std::cerr << "apogee chats: " << warning.message << "\n";
             }
         }
-        std::cout << format_saved_chat(loaded.session);
+        std::cout << format_saved_chat(loaded.session,
+                                       platform::is_terminal(platform::StandardStream::Out));
     });
 
     auto title_name = std::make_shared<std::string>();
@@ -478,9 +501,7 @@ void ChatsCommand::bind(CLI::App& root, const RootContext& context) {
             } catch (const std::exception& e) {
                 fail(e.what());
             }
-            std::cerr << "Compact " << session.display_name() << " (" << session.chat_id
-                      << ")? Its " << session.messages.size()
-                      << " messages are folded into a summary. [y/N] " << std::flush;
+            std::cerr << compact_question(session) << std::flush;
             std::string answer;
             if (!std::getline(std::cin, answer) ||
                 (answer != "y" && answer != "Y" && answer != "yes")) {

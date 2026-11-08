@@ -693,8 +693,12 @@ void play(const RootContext& context, const PlayFlags& flags, ReadFormat format)
                            suite == nullptr ? std::string{} : config.models.default_suite, result));
         return;
     }
-    std::cout << result.output;
-    if (result.output.empty() || result.output.back() != '\n') {
+    // The last stage's answer: at a terminal drawn as text, never obeyed;
+    // to a pipe, as written (57p).
+    const std::string shown =
+        answer_for_stdout(result.output, platform::is_terminal(platform::StandardStream::Out));
+    std::cout << shown;
+    if (shown.empty() || shown.back() != '\n') {
         std::cout << "\n";
     }
 }

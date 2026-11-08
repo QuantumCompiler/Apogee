@@ -1577,3 +1577,37 @@ TEST_CASE("the listing is a cloud section by provider and a local one by format,
     CHECK(apogee::commands::model_row_json(rows.at(6))["group"] == "ollama-cli");
     CHECK(apogee::commands::model_row_json(rows.at(7))["group"] == "other");
 }
+
+TEST_CASE("info and the listing draw a GGUF's own strings as lines; the document keeps them",
+          "[commands][models][info][57p]") {
+    // The sweep's entry 9: a third party's GGUF named itself with a title
+    // change and a screen clear, and `models info` obeyed both.
+    const std::string name = "Tiny\x1b]0;OWNED\x07\x1b[2J model";
+    const std::string architecture = "llama\x1b[8m";
+    apogee::testing::GgufBuilder builder;
+    builder.magic().u32(3).u64(1).u64(2);
+    builder.string_kv("general.architecture", architecture);
+    builder.string_kv("general.name", name);
+    builder.tensor("token_embd.weight");
+    const apogee::testing::TempDir temp{"models-info-inert-" +
+                                        std::to_string(std::random_device{}())};
+    const std::filesystem::path path = temp.path() / "fake.gguf";
+    REQUIRE(builder.write_to(path));
+
+    Config config = sample_config();
+    BackendConfig local;
+    local.type = BackendType::LlamaCpp;
+    local.model_path = path.string();
+    config.backends["fakeg"] = local;
+    const std::string body = render_model_info(config, "fakeg");
+    CHECK(body.find("name:         Tiny\xEF\xBF\xBD]0;OWNED\xEF\xBF\xBD\xEF\xBF\xBD[2J model\n") !=
+          std::string::npos);
+    CHECK(body.find("architecture: llama\xEF\xBF\xBD[8m\n") != std::string::npos);
+    CHECK(body.find('\x1b') == std::string::npos);
+    CHECK(body.find('\x07') == std::string::npos);
+
+    const std::vector<ModelRow> rows = build_model_rows(config);
+    CHECK(row_for(rows, "fakeg").architecture == architecture);  // the row as the file says
+    CHECK(render_model_table(rows).find('\x1b') == std::string::npos);
+    CHECK(render_model_jsonl(rows).find(R"(llama\u001b[8m)") != std::string::npos);
+}

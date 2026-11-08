@@ -9,9 +9,9 @@
 #include "cli/chat.h"
 #include "cli/chat_session.h"
 #include "cli/execute.h"
+#include "cli/permissions.h"
 #include "cli/tui_common.h"
 #include "contracts/config.h"
-#include "contracts/text_diff.h"
 #include "harness/roles.h"
 #include "logger/session.h"
 #include "views/ask_prompt.h"
@@ -135,20 +135,10 @@ agent::ConfirmFn TuiOutput::confirm_fn(std::filesystem::path config_path,
                                        std::shared_ptr<SessionApprovals> approvals) {
     return [this, config_path = std::move(config_path),
             approvals = std::move(approvals)](const agent::GateRequest& request) {
-        // What the terminal prints, kept in the transcript; the prompt below.
+        // What the terminal prints, line for line (57p), kept in the
+        // transcript; the prompt below.
         tui::Prompt prompt;
-        prompt.lines.push_back(
-            style_.tag(ansi::Role::Permission) + " " + std::string{request.tool} +
-            (request.target.empty() ? "" : " -> " + std::string{request.target}));
-        if (!request.detail.empty()) {
-            // The whole URL: what would leave the machine is in it. A file
-            // writer's diff is said by its counts, as the terminal says it
-            // (52a).
-            prompt.lines.push_back(style_.dim(
-                "  " + (request.edits
-                            ? harness::describe_diff_counts(harness::diff_counts(request.detail))
-                            : std::string{request.detail})));
-        }
+        prompt.lines = permission_prompt_lines(request, style_);
         prompt.lines.push_back(request.outbound ? "Allow reaching this website?" : "Allow?");
         prompt.choices = {tui::Choice{.key = "y", .label = "yes"},
                           tui::Choice{.key = "n", .label = "no"},

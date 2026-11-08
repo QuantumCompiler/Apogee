@@ -137,6 +137,23 @@ std::string tail_of(std::string_view text, std::size_t keep) {
     return std::string{text.substr(start)};
 }
 
+/// The directory `run_command` runs in: the `cwd` the call gives, else the
+/// default -- one answer for the run and for the prompt that asks about it.
+std::filesystem::path command_cwd(const std::string& given, const std::filesystem::path& fallback) {
+    return given.empty() ? fallback : std::filesystem::path{given};
+}
+
+/// That directory as the prompt names it (57p): whole, so a relative one says
+/// where it lands.
+std::string shown_cwd(const std::filesystem::path& cwd) {
+    if (cwd.is_absolute()) {
+        return cwd.string();
+    }
+    std::error_code code;
+    const std::filesystem::path whole = std::filesystem::absolute(cwd, code);
+    return code ? cwd.string() : whole.lexically_normal().string();
+}
+
 }  // namespace
 
 std::string_view shell_program() noexcept {
@@ -223,6 +240,21 @@ void register_shell_tool(agent::ToolRegistry& registry, const std::filesystem::p
         }
         return command;
     };
+    // The whole command and where it runs (57p): the target above is cut to
+    // fit a prompt's line, and its hidden tail would run unseen. Asked only
+    // when someone is about to be, so a run that never prompts pays nothing.
+    tool.describe_detail = [default_cwd](std::string_view arguments) {
+        agent::ToolOutcome unused;
+        const std::optional<Arguments> args = parse_arguments(arguments, "", unused);
+        if (!args.has_value()) {
+            return std::string{};
+        }
+        const std::string command = args->string("command");
+        if (command.empty()) {
+            return std::string{};
+        }
+        return command + "\ncwd: " + shown_cwd(command_cwd(args->string("cwd"), default_cwd));
+    };
     tool.run = [default_cwd, timeout](std::string_view arguments) -> agent::ToolOutcome {
         agent::ToolOutcome failure;
         const std::optional<Arguments> args =
@@ -234,10 +266,7 @@ void register_shell_tool(agent::ToolRegistry& registry, const std::filesystem::p
         if (command.empty()) {
             return error("command is required");
         }
-        std::filesystem::path cwd = default_cwd;
-        if (const std::string given = args->string("cwd"); !given.empty()) {
-            cwd = std::filesystem::path{given};
-        }
+        const std::filesystem::path cwd = command_cwd(args->string("cwd"), default_cwd);
         std::error_code code;
         if (!std::filesystem::is_directory(cwd, code)) {
             return error("cwd " + cwd.string() + " is not a directory");

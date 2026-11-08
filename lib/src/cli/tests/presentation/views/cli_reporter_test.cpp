@@ -481,3 +481,57 @@ TEST_CASE("the todo is a kept, dim block on stderr, the same lines every surface
     reporter.on_todo({});
     CHECK(h.progress.str().find("todo · cleared\n") != std::string::npos);
 }
+
+TEST_CASE("an unrendered answer at a terminal is drawn, never obeyed; a pipe gets it as written",
+          "[ux][reporter][answer][57p]") {
+    // The sweep's entry 8: `--raw`, `ui.markdown: false` and `complete -q`
+    // at a terminal wrote the answer's bytes straight to it -- an OSC 52
+    // wrote the clipboard, a CSI erased what was just shown.
+    const std::string answer = "Here you go \x1b]52;c;cm0gLXJmIH4K\x07 text \x1b[2J end";
+    const std::string drawn =
+        "Here you go \xEF\xBF\xBD]52;c;cm0gLXJmIH4K\xEF\xBF\xBD text \xEF\xBF\xBD[2J end\n";
+
+    struct Case {
+        bool decorate;
+        bool terminal;
+        const char* why;
+    };
+
+    for (const Case c : {Case{true, true, "--raw or ui.markdown: false at a terminal"},
+                         Case{false, true, "complete -q at a terminal: nothing decorated"},
+                         Case{false, false, "a pipe"}}) {
+        INFO(c.why);
+        std::ostringstream out;
+        std::ostringstream err;
+        TerminalWriter writer{err};
+        CliReporter::Options options;
+        options.answer_stream = &out;
+        options.decorate = c.decorate;
+        options.style = Style{false};
+        options.markdown = false;
+        options.answer_is_terminal = c.terminal;
+        {
+            CliReporter reporter{writer, options};
+            reporter.on_answer_start();
+            // Streamed in two pieces, the second's tab placed from where the
+            // first left the row.
+            reporter.on_answer_token(answer.substr(0, 20));
+            reporter.on_answer_token(answer.substr(20));
+            reporter.on_answer_end();
+        }
+        CHECK(out.str() == (c.terminal ? drawn : answer + "\n"));
+    }
+}
+
+TEST_CASE("a tool status a model chose is a line", "[ux][reporter][57p]") {
+    // A vendor's own search says its query on the tool line, and an MCP tool
+    // name is its server's.
+    Harness h;
+    CliReporter reporter = h.make(false, Verbosity::Verbose);  // every status a kept line
+    reporter.on_tool_status("web_search, run by Anthropic: \"cats\r\x1b[2K[tool] read_file a\"");
+    reporter.on_clear_status();
+    CHECK(h.progress.str().find("run by Anthropic: \"cats\xEF\xBF\xBD\xEF\xBF\xBD[2K[tool]") !=
+          std::string::npos);
+    CHECK(h.progress.str().find('\x1b') == std::string::npos);
+    CHECK(h.progress.str().find('\r') == std::string::npos);
+}

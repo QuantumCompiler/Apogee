@@ -1,3 +1,5 @@
+#include "cli/review_cmd.h"
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <nlohmann/json.hpp>
@@ -217,4 +219,49 @@ TEST_CASE("review targets adds, lists and deletes the sweep's targets through th
     CHECK(nlohmann::json::parse(out)["data"].empty());
     CHECK(home.run({"review", "sweep"}, &out, &err) != 0);
     CHECK_THAT(err, ContainsSubstring("no review targets to sweep"));
+}
+
+TEST_CASE("the sweep's text draws what a forge named and said as lines; the document keeps it",
+          "[cli][review][sweep][57p]") {
+    // A forge's name for a project or a merge request, the reason posting
+    // stopped and a CLI's own stderr are third-party text: a CR and an erase
+    // drew a clean line over the error, an OSC 52 wrote the clipboard.
+    const nlohmann::json document = {
+        {"targets",
+         {{{"name", "acme\x1b]0;x\x07"},
+           {"error", "gh could not be started\r\x1b[2Kall good"},
+           {"projects", nlohmann::json::array()}},
+          {{"name", "widget"},
+           {"projects",
+            {{{"project", "acme/widget\x1b[2J"},
+              {"first_sweep", false},
+              {"reviewed",
+               {{{"merge_request", "acme/widget#12\r\x1b[2K"},
+                 {"findings", nlohmann::json::array({nlohmann::json::object()})},
+                 {"posted", {{"done", false}, {"reason", "no grant\x1b[8m hidden"}}}},
+                {{"merge_request", "acme/widget#13"},
+                 {"findings", nlohmann::json::array()},
+                 {"posted", {{"done", true}}}}}},
+              {"skipped_drafts", nlohmann::json::array()},
+              {"error", "gh api failed (exit 1): HTTP 500\x1b]52;c;cm0gLXJmIH4K\x07"}}}}}}},
+        {"reviewed", 2},
+        {"posted", 1},
+        {"deferred", 0},
+        {"cap", 20},
+        {"errors", 2}};
+    const std::string fffd = "\xEF\xBF\xBD";
+    const std::string text = apogee::commands::format_sweep(document);
+    CHECK(text == "acme" + fffd + "]0;x" + fffd + ": gh could not be started" + fffd + fffd +
+                      "[2Kall good\n"
+                      "acme/widget" +
+                      fffd + "[2J: 2 reviewed\n" + "  acme/widget#12" + fffd + fffd +
+                      "[2K: 1 finding(s), posted nothing (no grant" + fffd + "[8m hidden)\n" +
+                      "  acme/widget#13: 0 finding(s), posted\n" +
+                      "  stopped: gh api failed (exit 1): HTTP 500" + fffd + "]52;c;cm0gLXJmIH4K" +
+                      fffd + "\n" + "2 reviewed, 1 posted\n");
+    for (const char control : {'\x1b', '\x07', '\r'}) {
+        CHECK(text.find(control) == std::string::npos);
+    }
+    // The document is not changed by drawing it.
+    CHECK(document["targets"][0]["error"] == "gh could not be started\r\x1b[2Kall good");
 }

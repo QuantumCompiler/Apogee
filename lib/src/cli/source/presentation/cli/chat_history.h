@@ -35,11 +35,12 @@ namespace apogee::commands {
 [[nodiscard]] nlohmann::json session_info_view(const logger::Session& session);
 
 /// One row of `apogee chats list`: `  (from <origin>)` at its end for a chat
-/// an ACP host began (56c), and nothing more for any other.
+/// an ACP host began (56c), and nothing more for any other. The name and the
+/// origin drawn as lines, shown and never obeyed (57p).
 [[nodiscard]] std::string format_session_row(const logger::Session& session);
 
 /// The body of `apogee chats info <name>`: `origin:` and `cwd:` lines only
-/// for a chat an ACP host began (56c).
+/// for a chat an ACP host began (56c). Every name drawn as a line (57p).
 [[nodiscard]] std::string format_session_info(const logger::Session& session);
 
 /// What rode a turn, named as `chats show`'s text names it -- `report.pdf (1
@@ -59,8 +60,11 @@ namespace apogee::commands {
     const logger::Session& session, const std::vector<logger::ResumeWarning>& warnings = {});
 
 /// The body of `apogee chats show <name>`: the same turns, each as the chat
-/// drew it, plainly -- the user's words, the tools called, the answer.
-[[nodiscard]] std::string format_saved_chat(const logger::Session& session);
+/// drew it, plainly -- the user's words, the tools called, the answer. For a
+/// `terminal`, what was written is drawn as text, shown never obeyed, as the
+/// live chat drew it; for a pipe, as written (57p). The header's names, the
+/// attachments and the tool lines are lines either way.
+[[nodiscard]] std::string format_saved_chat(const logger::Session& session, bool terminal);
 
 /// Deletes the conversation `name` names (its id or its name) -- its file, its
 /// attachments' index, its recall summary -- what `chats delete` runs, and
@@ -97,6 +101,12 @@ struct CompactionDone {
 /// unchanged`. `conversation` is the chat's own backend, never named.
 [[nodiscard]] std::string compaction_line(const CompactionDone& done,
                                           std::string_view conversation);
+
+/// What `chats compact <name>` asks at a terminal before it compacts (52d):
+/// `Compact <name> (<id>)? Its N messages are folded into a summary. [y/N] `
+/// -- the name a line (57p), so a title saved before titles were cleaned
+/// cannot retitle the terminal or draw over the question.
+[[nodiscard]] std::string compact_question(const logger::Session& session);
 
 /// `chats compact <name>`'s work (52d), on a saved chat: compacted, its
 /// attachments told, saved -- what the verb runs once asked, and the shell's

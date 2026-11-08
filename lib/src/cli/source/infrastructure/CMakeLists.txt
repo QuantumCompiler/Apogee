@@ -40,6 +40,8 @@ target_link_libraries(apogee_infrastructure_events PUBLIC nlohmann_json::nlohman
 apogee_add_module(ansi
     ansi/ansi.h
     ansi/ansi.cpp
+    ansi/inert.h
+    ansi/inert.cpp
     ansi/text_width.h
     ansi/text_width.cpp
 )

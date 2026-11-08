@@ -19,6 +19,7 @@
 #include "agentloop/embed_func.h"
 #include "agentloop/graph_context.h"
 #include "agentloop/media.h"
+#include "ansi/inert.h"
 #include "cli/command.h"
 #include "cli/embed.h"
 #include "cli/tool_vectors.h"
@@ -520,6 +521,10 @@ std::string media_refusal_message(const std::string& model, harness::Medium medi
                    role("vision", "set-default-vision") + local;
     }
     return {};
+}
+
+std::string answer_for_stdout(std::string_view answer, bool stdout_is_terminal) {
+    return stdout_is_terminal ? ansi::inert_text(answer) : std::string{answer};
 }
 
 std::vector<harness::ChatMessage> build_messages(

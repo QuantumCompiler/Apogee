@@ -69,4 +69,9 @@ struct ReviewMrResult {
 [[nodiscard]] ReviewMrResult review_merge_request(const ReviewMrOptions& options,
                                                   const ReviewMrSeams& seams);
 
+/// What `review mr` says of a refusal on the forge's side: its message --
+/// `gh`'s or `glab`'s own stderr among it -- then ` -- <remedy>` when there
+/// is one, as one line (57p), drawn as a sweep draws the same error.
+[[nodiscard]] std::string forge_failure(const forge::ForgeError& error);
+
 }  // namespace apogee::commands

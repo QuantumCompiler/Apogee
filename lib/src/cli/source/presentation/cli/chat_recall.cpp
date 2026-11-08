@@ -13,6 +13,7 @@
 #include "agentloop/embed_func.h"
 #include "agentloop/rag.h"
 #include "agentloop/recall.h"
+#include "ansi/inert.h"
 #include "contracts/layout.h"
 #include "operations/backend_names.h"
 #include "operations/retrieval.h"
@@ -99,10 +100,11 @@ nlohmann::json recall_view(const RecallHoldings& held,
 }
 
 std::string recall_row(const agentloop::RecallEntry& summary) {
-    std::string row = "  " + summary.chat_id;
+    // Each part a line (57p): the title a model chose is drawn, never obeyed.
+    std::string row = "  " + ansi::inert_line(summary.chat_id);
     for (const std::string* part : {&summary.updated_at, &summary.title}) {
         if (!part->empty()) {
-            row += "  " + *part;
+            row += "  " + ansi::inert_line(*part);
         }
     }
     return row;

@@ -3,7 +3,10 @@
 #include <charconv>
 #include <iostream>
 #include <string>
+#include <vector>
 
+#include "ansi/inert.h"
+#include "ansi/text_width.h"
 #include "platform/platform.h"
 
 namespace apogee::commands {
@@ -30,23 +33,31 @@ std::string trim(std::string_view text) {
     return std::string{text.substr(begin, end - begin)};
 }
 
+/// `text` drawn as text, split into its rows -- a trailing newline making no
+/// empty last row.
+std::vector<std::string> rows_of(std::string_view text) {
+    const std::string shown = ansi::inert_text(text);
+    std::vector<std::string> rows;
+    std::size_t start = 0;
+    while (start < shown.size()) {
+        const std::size_t newline = shown.find('\n', start);
+        const std::size_t end = newline == std::string::npos ? shown.size() : newline;
+        rows.push_back(shown.substr(start, end - start));
+        start = end + 1;
+    }
+    if (rows.empty()) {
+        rows.emplace_back();
+    }
+    return rows;
+}
+
 /// Presents one question and returns the answer.
 std::string ask_one(StatusLine& status, const ansi::Style& style,
                     const agentloop::Question& question, std::size_t index, std::size_t total) {
     // Through the status line, not raw stderr: the spinner may be mid-frame,
     // and print_line bumps the generation counter so an in-flight repaint
     // cannot land on top of the question.
-    std::string header = style.tag(ansi::Role::Permission) + " ";
-    if (total > 1) {
-        header += "(" + std::to_string(index + 1) + "/" + std::to_string(total) + ") ";
-    }
-    status.print_line(header + question.question);
-
-    for (std::size_t i = 0; i < question.options.size(); ++i) {
-        std::string line = "  " + std::to_string(i + 1) + ") " + question.options[i].label;
-        if (!question.options[i].description.empty()) {
-            line += style.dim(" -- " + question.options[i].description);
-        }
+    for (const std::string& line : ask_prompt_lines(question, index, total, style)) {
         status.print_line(line);
     }
     // Free text is ALWAYS accepted. The model's options are a convenience, not
@@ -62,6 +73,44 @@ std::string ask_one(StatusLine& status, const ansi::Style& style,
 }
 
 }  // namespace
+
+std::vector<std::string> ask_prompt_lines(const agentloop::Question& question, std::size_t index,
+                                          std::size_t total, const ansi::Style& style) {
+    std::string counter;
+    if (total > 1) {
+        counter = "(" + std::to_string(index + 1) + "/" + std::to_string(total) + ") ";
+    }
+    const std::string header = style.tag(ansi::Role::Permission) + " " + counter;
+    // The question as text: its first row beside the tag, every other one
+    // under that row's text -- past the tag's column, so none starts where a
+    // prompt line or an option starts (57p).
+    const std::string question_indent(
+        ansi::display_width("[" + std::string{ansi::to_string(ansi::Role::Permission)} + "] " +
+                            counter),
+        ' ');
+    std::vector<std::string> lines;
+    for (const std::string& row : rows_of(question.question)) {
+        lines.push_back(lines.empty() ? header + row : question_indent + row);
+    }
+    for (std::size_t i = 0; i < question.options.size(); ++i) {
+        // The label as one line: the option drawn is the one its number
+        // picks -- a CR and an erase cannot draw another over it.
+        const std::string number = "  " + std::to_string(i + 1) + ") ";
+        std::string line = number + ansi::inert_line(question.options[i].label);
+        if (question.options[i].description.empty()) {
+            lines.push_back(std::move(line));
+            continue;
+        }
+        // The description as text, its later rows under the label.
+        const std::vector<std::string> rows = rows_of(question.options[i].description);
+        lines.push_back(line + style.dim(" -- " + rows.front()));
+        const std::string indent(ansi::display_width(number), ' ');
+        for (std::size_t row = 1; row < rows.size(); ++row) {
+            lines.push_back(indent + style.dim(rows[row]));
+        }
+    }
+    return lines;
+}
 
 std::string chosen_answer(const agentloop::Question& question, std::string_view typed) {
     const std::string answer = trim(typed);

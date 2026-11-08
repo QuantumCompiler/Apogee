@@ -917,6 +917,23 @@ link names where the link leads. A path that lands outside the root is refused
 unasked, the tool result saying so. An MCP tool asks too where the config
 gives it `ask`, even when its server marks it read-only.
 
+`run_command`'s `target` is the command cut to fit one line: past 80
+characters, its first 77 and `...`. Since 57p the question carries the rest:
+`detail` is the **whole command**, then a last line `cwd: <directory>` naming
+where it runs -- the `cwd` the call gives, made absolute, or the default.
+An MCP tool's `target` is its arguments cut the same way, and its `detail`
+the **whole arguments** as the model wrote them. Show the `detail`: a hidden
+tail would run unseen. `target` keeps its short form, so what `always`
+remembers and what a task's ledger records are unchanged.
+
+```jsonl
+{"type":"question","kind":"permission","tool":"run_command","target":"echo checking the build status of the project before continuing with tests;  ...","detail":"echo checking the build status of the project before continuing with tests;  make test\ncwd: /work/app","questions":[…]}
+```
+
+Every field carries the model's text exactly. A driver that draws it on a
+terminal makes it safe to draw; the CLI's own terminal draws each control
+character as U+FFFD, the `detail`'s lines indented under the prompt.
+
 Since 56a a question asked about a tool call names it: `tool_call_id`, the
 `id` of the call's `tool_call` events, so a driver that draws each call can put
 the question on its card -- `"tool_call_id":"call_7"` beside `tool` and

@@ -49,6 +49,15 @@ settings (though still no hook).
 `--deny`, `/deny` and `/revoke` take every host `--allow-host` takes,
 `localhost` and IPv6 literals such as `[::1]` included.
 
+**The question shows what will run, whole and as it is** (57p). The prompt
+for `run_command` shows the whole command, however long, and the folder it
+runs in (`cwd: …`); an MCP tool's shows its whole arguments -- on the
+terminal, in the full-screen shell, and in machine mode's `detail`. Whatever
+the model wrote is drawn, never obeyed: a control character in a command, a
+path, a question or an option shows as U+FFFD, so a carriage return and an
+erase cannot draw a harmless command over the real one, and each line of a
+long command sits indented under the prompt.
+
 **`apogee serve --tools` offers this same set, whole** (57n): every native
 toolset, `fetch_url` (and `web_search` where configured), `todo_write` and
 every enabled MCP server -- the registry `chat` builds, so files under

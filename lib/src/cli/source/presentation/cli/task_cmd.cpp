@@ -19,6 +19,7 @@
 #include "agentloop/member_call.h"
 #include "agentloop/tool_selection.h"
 #include "ansi/ansi.h"
+#include "ansi/inert.h"
 #include "backends/factory.h"
 #include "cli/chat_history.h"
 #include "cli/chat_recall.h"
@@ -262,7 +263,10 @@ void print_section(std::ostream& out, const tasks::TaskView& view, std::string_v
                 out << heading << ":\n";
                 any = true;
             }
-            out << "  " << round_name(turn) << ": " << row(record) << "\n";
+            // A line (57p): a target, a question and an answer are the
+            // model's or a declaration's, drawn and never obeyed; the ledger
+            // keeps them as they were.
+            out << "  " << round_name(turn) << ": " << ansi::inert_line(row(record)) << "\n";
         }
     }
 }
@@ -312,7 +316,7 @@ void print_status(std::ostream& out, const tasks::Task& task, const tasks::TaskV
         << "started:       " << view.created_at << "\n"
         << "updated:       " << view.updated_at << "\n";
     if (!view.reason.empty()) {
-        out << "reason:        " << view.reason << "\n";
+        out << "reason:        " << ansi::inert_line(view.reason) << "\n";
     }
     // Each check's state as the newest completed round left it.
     out << "checks:\n";
@@ -327,7 +331,7 @@ void print_status(std::ostream& out, const tasks::Task& task, const tasks::TaskV
         std::istringstream lines{view.plan};
         std::string line;
         while (std::getline(lines, line)) {
-            out << "  " << line << "\n";
+            out << "  " << ansi::inert_line(line) << "\n";  // the model's plan, a line each (57p)
         }
     }
     if (!view.turns.empty()) {
@@ -648,6 +652,7 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
     reporter_options.width = static_cast<std::size_t>(platform::terminal_width().value_or(80));
     reporter_options.markdown = !flags.raw && config.ui.markdown;
     reporter_options.hyperlinks = ansi::hyperlinks_supported();
+    reporter_options.answer_is_terminal = platform::is_terminal(platform::StandardStream::Out);
     CliReporter reporter{status_writer, reporter_options};
     const ansi::Style& style = reporter_options.style;
     // A model loading says so on the spinner -- never into machine mode's
@@ -960,7 +965,9 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
                           .turn = turn,
                           .say =
                               [&reporter, &style](std::string_view line) {
-                                  reporter.status().print_line(style.dim(std::string{line}));
+                                  // The narration repeats a model's target and
+                                  // question: a line, before it is styled (57p).
+                                  reporter.status().print_line(style.dim(ansi::inert_line(line)));
                               },
                           .interrupt = InterruptScope::token(),
                           .poll = std::chrono::milliseconds{200},

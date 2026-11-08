@@ -46,8 +46,9 @@ struct GateRequest {
     /// Shown beside the target, never decided on: `fetch_url`'s whole URL,
     /// so the person asked can see what would leave the machine in it;
     /// `write_file`'s and `edit_file`'s change as a unified diff (52a),
-    /// worked out only for a person about to be asked, so a checker never
-    /// sees one.
+    /// `run_command`'s whole command and its `cwd:`, an MCP tool's whole
+    /// arguments (57p) -- worked out only for a person about to be asked, so
+    /// a checker never sees one.
     std::string_view detail{};
     /// The tool sends data off the machine (`Tool::outbound`). Its answers
     /// are per host rather than per tool: allowing one website is not
@@ -151,9 +152,11 @@ struct Tool {
     std::function<std::string(std::string_view arguments)> describe_target;
 
     /// More for the prompt to show than the target it is decided on -- the
-    /// URL beside the host, a file writer's diff (52a). Optional. Run only
-    /// when someone is about to be asked, from the arguments the call runs
-    /// with.
+    /// URL beside the host, a file writer's diff (52a), `run_command`'s whole
+    /// command and the directory it runs in, an MCP tool's whole arguments
+    /// (57p). Optional. Run only when someone is about to be asked, from the
+    /// arguments the call runs with. The text as the call has it: the
+    /// surface that draws it makes it safe to draw.
     std::function<std::string(std::string_view arguments)> describe_detail;
 
     /// Why a call cannot act on what it names at all, or empty (57o): a file

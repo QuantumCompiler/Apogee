@@ -784,6 +784,7 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
         reporter_options.style =
             ansi::Style::detect(flags->no_color ? ansi::ColorMode::Never : ansi::ColorMode::Auto);
         reporter_options.width = static_cast<std::size_t>(platform::terminal_width().value_or(80));
+        reporter_options.answer_is_terminal = stdout_tty;
         CliReporter reporter{status_writer, reporter_options};
         const ansi::Style& style = reporter_options.style;
         const auto note = [&](std::string_view line, bool warning) {
@@ -833,7 +834,11 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
                                                           loaded.structured(), turn.answer);
             const std::string output = render_output(turn, rendering);
             if (print && !streamed) {
-                std::cout << output << "\n" << std::flush;
+                // At a terminal, drawn as text, never obeyed (57p): `--text`,
+                // `--markdown`, a structured agent and every interactive
+                // answer print here, not through the reporter's stream. The
+                // saved report and a pipe keep the bytes.
+                std::cout << answer_for_stdout(output, stdout_tty) << "\n" << std::flush;
             }
             if (will_save) {
                 std::string error;

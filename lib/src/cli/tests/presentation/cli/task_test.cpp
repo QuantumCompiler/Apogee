@@ -23,6 +23,7 @@
 #include "contracts/layout.h"
 #include "httpserver/admin_tasks.h"
 #include "logger/session.h"
+#include "platform/child_process.h"
 #include "support/cli_home.h"
 #include "support/env_guard.h"
 #include "tasks/ledger.h"
@@ -1609,4 +1610,40 @@ TEST_CASE("task run --recipe refuses what it cannot expand, before anything is m
         CHECK(has(out, says));
     }
     CHECK(t::list_tasks(home.tasks()).empty());
+}
+
+TEST_CASE("task narration and task status draw a target as a line; the ledger keeps it",
+          "[commands][task][policy][grant][57p]") {
+    // The sweep's entry 10: a granted command whose target ends in a CR and
+    // an erase rubbed out the `allowed by this task's grant` line, so the
+    // person never saw what the grant let through.
+    if (!apogee::platform::supports_child_processes()) {
+        SKIP("no child processes on this platform");
+    }
+    const std::string command = "echo hi\r\x1b[2K[task] round 2 of 6: checks pass";
+    REQUIRE(command.size() < 77);  // the target is the whole command
+    const nlohmann::json call{
+        {"text", ""},
+        {"tool_calls", nlohmann::json::array(
+                           {{{"name", "run_command"}, {"arguments", {{"command", command}}}}})}};
+    const Home home{R"({"text": "1. Run it."}, )" + call.dump() +
+                    R"(, {"text": "Ran it.\nTASK STATUS: DONE"})"};
+    std::string out;
+    REQUIRE(home.run({"task", "run", "Run the check", "--tools", "--allow", "run_command",
+                      "--rounds", "1"},
+                     &out) == 0);
+    const std::string drawn = "echo hi\xEF\xBF\xBD\xEF\xBF\xBD[2K[task] round 2 of 6: checks pass";
+    CHECK(has(out, "[task] run_command on " + drawn + " -- allowed by this task's grant"));
+    CHECK_FALSE(has(out, "\x1b"));
+    CHECK_FALSE(has(out, "\r"));
+
+    const t::Task task = home.task();
+    const t::Round& round = task.rounds.back();
+    REQUIRE(round.allowed.size() == 1);
+    CHECK(round.allowed[0].target == command);  // the ledger keeps the true value
+
+    REQUIRE(home.run({"task", "status", task.id}, &out) == 0);
+    CHECK(has(out, "allowed:\n  round 1: run_command on " + drawn + " -- this task's grant\n"));
+    CHECK_FALSE(has(out, "\x1b"));
+    CHECK_FALSE(has(out, "\r"));
 }

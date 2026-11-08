@@ -119,6 +119,11 @@ void Registry::register_into(agent::ToolRegistry& registry,
                 }
                 return text;
             };
+            // The whole arguments (57p): the target is cut to a prompt's
+            // line, and what this call does may be in its tail.
+            tool.describe_detail = [](std::string_view arguments) {
+                return std::string{arguments};
+            };
             registry.add(tool);
         }
     }

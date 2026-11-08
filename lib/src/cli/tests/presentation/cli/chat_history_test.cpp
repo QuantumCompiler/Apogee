@@ -10,8 +10,11 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "agentloop/recall.h"
+#include "cli/chat_recall.h"
 #include "cli/complete_protocol.h"
 #include "cli/complete_sources.h"
 #include "cli/registry.h"
@@ -600,4 +603,108 @@ TEST_CASE("chats show completes the saved chats by id and name, and takes each i
         INFO(candidate);
         CHECK(run(home, {"chats", "show", candidate}).code == 0);
     }
+}
+
+namespace {
+
+/// The sweep's entry 6: a title a utility model replied with.
+constexpr const char* kForgedTitle = "Benign \x1b]0;OWNED\x07Title\x1b[2J";
+
+/// Whether `text` holds a control a terminal would obey, a newline aside.
+[[nodiscard]] bool obeyable(std::string_view text) {
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        const auto byte = static_cast<unsigned char>(text[i]);
+        if ((byte < 0x20 && byte != '\n') || byte == 0x7F) {
+            return true;
+        }
+        if (byte == 0xC2 && i + 1 < text.size() &&
+            (static_cast<unsigned char>(text[i + 1]) & 0xE0U) == 0x80U) {
+            return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
+TEST_CASE("a replayed chat is drawn at a terminal as the live chat drew it, and piped as written",
+          "[chats][show][history][57p]") {
+    // The sweep's entry 5: the live chat showed the OSC 52 as U+FFFD, and
+    // `chats show` obeyed it -- the clipboard held `rm -rf ~`.
+    apogee::logger::Session session;
+    session.chat_id = kChatId;
+    session.title = kForgedTitle;  // saved before titles were cleaned
+    session.backend = "local";
+    session.turns = 1;
+    const std::string answer = "Here you go \x1b]52;c;cm0gLXJmIH4K\x07 text";
+    session.messages = {ChatMessage::user("hi\x1b[2J"), ChatMessage::assistant(answer)};
+
+    const std::string terminal = apogee::commands::format_saved_chat(session, true);
+    CHECK_FALSE(obeyable(terminal));
+    CHECK(terminal.find("Here you go \xEF\xBF\xBD]52;c;cm0gLXJmIH4K\xEF\xBF\xBD text\n") !=
+          std::string::npos);
+    CHECK(terminal.starts_with("Benign \xEF\xBF\xBD]0;OWNED\xEF\xBF\xBDTitle\xEF\xBF\xBD[2J -- "));
+
+    // A pipe receives what was written; the header's name is a line wherever
+    // it goes.
+    const std::string piped = apogee::commands::format_saved_chat(session, false);
+    CHECK(piped.find(answer + "\n") != std::string::npos);
+    CHECK(piped.find("You: hi\x1b[2J\n") != std::string::npos);
+    CHECK(piped.starts_with("Benign \xEF\xBF\xBD]0;OWNED"));
+}
+
+TEST_CASE("a title keeps no control character, and one saved before is drawn as a line",
+          "[chats][history][title][57p]") {
+    const std::string title = apogee::commands::sanitize_title(kForgedTitle);
+    CHECK(title == "Benign ]0;OWNEDTitle[2J");
+    CHECK_FALSE(obeyable(title));
+    CHECK(apogee::commands::sanitize_title("  \x1b[1mBold idea\x1b[0m.\n") == "[1mBold idea[0m");
+
+    apogee::logger::Session saved;
+    saved.chat_id = kChatId;
+    saved.updated_at = "2026-11-01T00:00:00Z";
+    saved.title = kForgedTitle;
+    saved.origin = "Xcode\x1b]0;x\x07";
+    saved.cwd = "/work\r\x1b[2K";
+    CHECK_FALSE(obeyable(apogee::commands::format_session_row(saved)));
+    CHECK_FALSE(obeyable(apogee::commands::format_session_info(saved)));
+    CHECK(apogee::commands::format_session_info(saved).find(
+              "title:     Benign \xEF\xBF\xBD]0;OWNED") != std::string::npos);
+    // `chats compact` names it the same way in the question it asks.
+    const std::string asked = apogee::commands::compact_question(saved);
+    CHECK_FALSE(obeyable(asked));
+    CHECK(asked == "Compact Benign \xEF\xBF\xBD]0;OWNED\xEF\xBF\xBDTitle\xEF\xBF\xBD[2J (" +
+                       std::string{kChatId} +
+                       ")? Its 0 messages are folded into a summary. [y/N] ");
+    const std::string row = apogee::commands::recall_row(apogee::agentloop::RecallEntry{
+        .chat_id = kChatId, .title = kForgedTitle, .updated_at = "2026-11-01", .summary = ""});
+    CHECK_FALSE(obeyable(row));
+    CHECK(row.ends_with("Benign \xEF\xBF\xBD]0;OWNED\xEF\xBF\xBDTitle\xEF\xBF\xBD[2J"));
+}
+
+TEST_CASE("chats list and chats info draw no control character from a saved title",
+          "[chats][history][title][57p]") {
+    // What the sweep probed on the binary: every `chats list` retitled the
+    // terminal and cleared the screen.
+    const CliHome home{kConfig};
+    apogee::logger::Session session;
+    session.chat_id = kChatId;
+    session.title = kForgedTitle;
+    session.backend = "local";
+    session.turns = 1;
+    session.messages = {ChatMessage::user("hi"), ChatMessage::assistant("hello")};
+    apogee::logger::save(session);
+    for (const std::vector<std::string>& args :
+         {std::vector<std::string>{"chats", "list"},
+          std::vector<std::string>{"chats", "info", kChatId}}) {
+        const Run read = run(home, args);
+        INFO(read.err);
+        REQUIRE(read.code == 0);
+        CHECK(read.out.find("Benign \xEF\xBF\xBD]0;OWNED") != std::string::npos);
+        CHECK(read.out.find('\x1b') == std::string::npos);
+        CHECK(read.out.find('\x07') == std::string::npos);
+    }
+    // The document keeps the title as saved.
+    const nlohmann::json listed = document(run(home, {"chats", "list", "--output-format", "json"}));
+    CHECK(listed["data"][0]["name"] == kForgedTitle);
 }

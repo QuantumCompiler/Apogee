@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "agent/web_search.h"
+#include "ansi/inert.h"
 #include "contracts/config_edit.h"
 #include "contracts/errors.h"
 #include "contracts/host.h"
@@ -312,8 +313,38 @@ bool answer_permission(std::string_view text, const agent::GateRequest& request,
 }
 
 std::string permission_prompt_line(const agent::GateRequest& request, const ansi::Style& style) {
-    return style.tag(ansi::Role::Permission) + " " + std::string{request.tool} +
-           (request.target.empty() ? "" : " -> " + std::string{request.target});
+    // Each a line (57p): a CR and an erase in a command would otherwise draw a
+    // harmless one over the prompt, and the person approve what they never
+    // saw.
+    return style.tag(ansi::Role::Permission) + " " + ansi::inert_line(request.tool) +
+           (request.target.empty() ? "" : " -> " + ansi::inert_line(request.target));
+}
+
+std::vector<std::string> permission_prompt_lines(const agent::GateRequest& request,
+                                                 const ansi::Style& style) {
+    std::vector<std::string> lines{permission_prompt_line(request, style)};
+    if (request.detail.empty() || request.detail == request.target) {
+        return lines;  // a target already whole is not said twice
+    }
+    if (request.edits) {
+        // A file writer's diff is said by its counts (52a) -- the change's
+        // size at a glance; machine mode carries the diff itself.
+        lines.push_back(
+            style.dim("  " + harness::describe_diff_counts(harness::diff_counts(request.detail))));
+        return lines;
+    }
+    // The whole URL, the whole command and where it runs, the whole
+    // arguments: what this call does is in it. Shown as text, every line
+    // under the prompt, so nothing in it starts where a prompt line starts.
+    const std::string shown = ansi::inert_text(request.detail);
+    std::size_t start = 0;
+    while (start < shown.size()) {
+        const std::size_t newline = shown.find('\n', start);
+        const std::size_t end = newline == std::string::npos ? shown.size() : newline;
+        lines.push_back(style.dim("  " + shown.substr(start, end - start)));
+        start = end + 1;
+    }
+    return lines;
 }
 
 agent::ConfirmFn terminal_confirm_fn(StatusLine& status, ansi::Style style,
@@ -327,15 +358,8 @@ agent::ConfirmFn terminal_confirm_fn(StatusLine& status, ansi::Style style,
             approvals = std::move(approvals)](const agent::GateRequest& request) {
         // Through the status line, so a spinner frame cannot land on top of
         // the prompt -- the same discipline the question prompt keeps.
-        status.print_line(permission_prompt_line(request, style));
-        if (!request.detail.empty()) {
-            // The whole URL: what would leave the machine is in it. A file
-            // writer's diff is said by its counts (52a) -- the change's size
-            // at a glance; machine mode carries the diff itself.
-            status.print_line(style.dim(
-                "  " + (request.edits
-                            ? harness::describe_diff_counts(harness::diff_counts(request.detail))
-                            : std::string{request.detail})));
+        for (const std::string& line : permission_prompt_lines(request, style)) {
+            status.print_line(line);
         }
         std::cerr << style.dim(request.outbound
                                    ? "Allow reaching this website? [y]es / [n]o / [a]lways / "

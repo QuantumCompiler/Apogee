@@ -3,6 +3,7 @@
 #include <set>
 #include <stdexcept>
 
+#include "ansi/inert.h"
 #include "contracts/review_skill.h"
 #include "review/diff.h"
 #include "review/identity.h"
@@ -227,7 +228,19 @@ ReviewMrResult review_merge_request(const ReviewMrOptions& options, const Review
     } else {
         lines.push_back("posted nothing: " + posted.value("reason", std::string{}));
     }
+    // Every line drawn as a line (57p): a pull request's title is a third
+    // party's, a finding's file and claim a model's, and a title carrying a
+    // screen clear would hide what the reviewer reads after it. The document
+    // keeps the true text.
+    for (std::string& line : lines) {
+        line = ansi::inert_line(line);
+    }
     return result;
+}
+
+std::string forge_failure(const forge::ForgeError& error) {
+    return ansi::inert_line(std::string{error.what()} +
+                            (error.remedy().empty() ? "" : " -- " + error.remedy()));
 }
 
 }  // namespace apogee::commands

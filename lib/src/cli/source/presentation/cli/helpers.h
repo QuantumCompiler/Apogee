@@ -310,6 +310,13 @@ void add_read_format(CLI::App* command, const std::shared_ptr<ReadFormat>& forma
 [[nodiscard]] std::string media_refusal_message(const std::string& model, harness::Medium medium,
                                                 std::string_view helper = {});
 
+/// A model's answer as a command prints it to stdout (57p): at a terminal,
+/// drawn as text -- an escape sequence in it shown, never obeyed -- and to a
+/// pipe or a file, the bytes as written. `analyze`'s report and `symphonies
+/// play`'s output print through it; what a command saves keeps the true
+/// bytes either way.
+[[nodiscard]] std::string answer_for_stdout(std::string_view answer, bool stdout_is_terminal);
+
 /// Builds the message list for a one-shot turn.
 ///
 /// Order matters and is fixed here so every surface produces the same shape:
