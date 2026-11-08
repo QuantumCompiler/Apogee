@@ -614,7 +614,7 @@ std::string format_sweep(const nlohmann::json& document) {
         for (const nlohmann::json& project : target["projects"]) {
             std::string line = said(project["project"]) + ": ";
             if (project.value("first_sweep", false)) {
-                line += "first sweep -- starting at now (--since reviews earlier ones)";
+                line += review::first_sweep_note(document.value("dry_run", false));
             } else {
                 line += std::to_string(project["reviewed"].size()) + " reviewed";
                 if (!project["skipped_drafts"].empty()) {
@@ -701,7 +701,8 @@ void ReviewCommand::bind(CLI::App& root, const RootContext& context) {
                     "Grant posting on every target this run sweeps (else only where a target's "
                     "post: true says)");
     sweep->add_flag("--dry-run", sweep_flags->dry_run,
-                    "Review and keep the documents; post nothing");
+                    "Review and keep the documents; post nothing and save no watermark, so a "
+                    "later sweep still reviews what this one previewed");
     sweep->add_option("--since", sweep_flags->since,
                       "Where a target seen for the first time starts (default: now -- history "
                       "stays unreviewed)");

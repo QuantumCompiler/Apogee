@@ -6,10 +6,13 @@
 
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <map>
+#include <optional>
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "support/env_guard.h"
@@ -19,7 +22,9 @@
 /// advancing per repository and kept across runs, a crash resuming where it
 /// stopped, the cap deferring the rest, drafts skipped unless counted, an
 /// owner expanded to its repositories, and the grant -- declared, given at
-/// launch, or absent -- passed to every review.
+/// launch, or absent -- passed to every review. A dry run (57w) moves no
+/// watermark on any path, so the posting sweep after it reviews and posts
+/// what it previewed.
 namespace {
 
 using apogee::forge::ForgeProject;
@@ -119,6 +124,11 @@ struct World {
     std::vector<std::string> asked;
     std::vector<std::string> reviewed;
     std::vector<bool> grants;
+    /// The merge requests a review posted to: granted, and not a dry run --
+    /// the command hands each review the run's `--dry-run`, as here.
+    std::vector<std::string> posted;
+    /// The sweep's progress lines.
+    std::vector<std::string> said;
     /// A review of this merge request fails, as a crash would leave it.
     std::uint64_t failing = 0;
 
@@ -135,18 +145,39 @@ struct World {
             forge->asked = &asked;
             return forge;
         };
-        const apogee::review::ReviewOne review_one =
-            [this](const apogee::forge::MergeRequestRef& ref, const SweepTarget&, bool post) {
-                if (ref.number == failing) {
-                    throw std::runtime_error("the model went away");
-                }
-                reviewed.push_back(apogee::forge::to_string(ref));
-                grants.push_back(post);
-                return nlohmann::json{{"merge_request", apogee::forge::to_string(ref)},
-                                      {"findings", nlohmann::json::array()},
-                                      {"posted", {{"done", post}}}};
-            };
-        return apogee::review::run_sweep(targets, store, options, client_for, review_one);
+        const apogee::review::ReviewOne review_one = [this, dry = options.dry_run](
+                                                         const apogee::forge::MergeRequestRef& ref,
+                                                         const SweepTarget&, bool post) {
+            if (ref.number == failing) {
+                throw std::runtime_error("the model went away");
+            }
+            reviewed.push_back(apogee::forge::to_string(ref));
+            grants.push_back(post);
+            const bool done = post && !dry;
+            if (done) {
+                posted.push_back(apogee::forge::to_string(ref));
+            }
+            return nlohmann::json{{"merge_request", apogee::forge::to_string(ref)},
+                                  {"findings", nlohmann::json::array()},
+                                  {"posted", {{"done", done}}}};
+        };
+        const apogee::review::ProgressFn progress = [this](std::string_view line) {
+            said.emplace_back(line);
+        };
+        return apogee::review::run_sweep(targets, store, options, client_for, review_one, progress);
+    }
+
+    [[nodiscard]] std::filesystem::path marks_file() const {
+        return dir.path() / "watermarks.json";
+    }
+
+    /// The store file's bytes, or nullopt when there is none.
+    [[nodiscard]] std::optional<std::string> marks_bytes() const {
+        std::ifstream in{marks_file(), std::ios::binary};
+        if (!in) {
+            return std::nullopt;
+        }
+        return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
     }
 
     [[nodiscard]] std::optional<std::string> mark(const std::string& key) const {
@@ -280,4 +311,124 @@ TEST_CASE("a watermark file that is not the store's is refused, saying how to st
     CHECK(apogee::review::watermark_key(
               ForgeProject{.forge = apogee::forge::Forge::GitLab, .host = "", .project = "g/p"}) ==
           "gitlab.com/g/p");
+}
+
+TEST_CASE("a dry run moves no watermark, so the posting sweep after it posts what it previewed",
+          "[review][sweep][57w]") {
+    // A seeded mark, a draft skipped and two merge requests reviewed on a
+    // post: true target -- the app's "Sweep (dry run)" before its "Sweep and
+    // post...", or before the cron's sweep.
+    World world;
+    world.open["acme/widget"] = {listing("acme/widget", 11, "2026-10-18T08:00:00Z", /*draft=*/true),
+                                 listing("acme/widget", 12, "2026-10-18T09:00:00Z"),
+                                 listing("acme/widget", 13, "2026-10-18T10:00:00Z")};
+    const std::vector<SweepTarget> targets{repo("acme", "acme/widget", /*post=*/true)};
+    apogee::review::WatermarkStore{world.marks_file()}.set("github.com/acme/widget",
+                                                           "2026-10-17T00:00:00Z");
+    const std::optional<std::string> seeded = world.marks_bytes();
+    REQUIRE(seeded.has_value());
+
+    const nlohmann::json dry = world.sweep(targets, apogee::review::SweepOptions{.dry_run = true});
+    CHECK(world.reviewed ==
+          std::vector<std::string>{"github.com/acme/widget#12", "github.com/acme/widget#13"});
+    CHECK(world.posted.empty());
+    CHECK(dry["dry_run"] == true);
+    CHECK(dry["reviewed"] == 2);
+    CHECK(dry["posted"] == 0);
+    const nlohmann::json& previewed = dry["targets"][0]["projects"][0];
+    CHECK(previewed["skipped_drafts"] == nlohmann::json::array({"github.com/acme/widget#11"}));
+    CHECK(previewed["watermark_before"] == "2026-10-17T00:00:00Z");
+    // Where a posting sweep would leave the mark -- not saved.
+    CHECK(previewed["watermark_after"] == "2026-10-18T10:00:00Z");
+    CHECK(world.marks_bytes() == seeded);
+
+    // The posting sweep starts where the dry run did, and posts both.
+    const nlohmann::json real = world.sweep(targets, {});
+    CHECK(world.asked.back() == "acme/widget after 2026-10-17T00:00:00Z");
+    CHECK(world.posted ==
+          std::vector<std::string>{"github.com/acme/widget#12", "github.com/acme/widget#13"});
+    CHECK(real["posted"] == 2);
+    CHECK(world.mark("github.com/acme/widget") == previewed["watermark_after"].get<std::string>());
+}
+
+TEST_CASE("a dry run over a repository seen for the first time seeds no watermark",
+          "[review][sweep][57w]") {
+    const std::vector<SweepTarget> targets{repo("acme", "acme/widget", /*post=*/true)};
+    const std::vector<MergeRequestListing> open{listing("acme/widget", 1, "2026-10-17T09:00:00Z"),
+                                                listing("acme/widget", 2, "2026-10-18T09:00:00Z")};
+
+    SECTION("at now: said as what a posting sweep would do, and nothing saved") {
+        World world;
+        world.open["acme/widget"] = open;
+        const nlohmann::json dry =
+            world.sweep(targets, apogee::review::SweepOptions{.dry_run = true});
+        const nlohmann::json& project = dry["targets"][0]["projects"][0];
+        CHECK(project["first_sweep"] == true);
+        CHECK(project["watermark_before"].is_null());
+        CHECK(project["watermark_after"] == "2026-10-18T12:00:00Z");
+        CHECK(world.reviewed.empty());
+        CHECK_FALSE(world.marks_bytes().has_value());
+        REQUIRE(world.said.size() == 1);
+        CHECK(world.said[0] ==
+              "github.com/acme/widget: first sweep -- a posting sweep starts at now (--since "
+              "reviews earlier ones); a dry run saves no watermark");
+
+        // So a later --since posting sweep still reaches back.
+        const nlohmann::json real = world.sweep(
+            targets, apogee::review::SweepOptions{.since = std::string{"2026-10-18T00:00:00Z"}});
+        CHECK(world.posted == std::vector<std::string>{"github.com/acme/widget#2"});
+        CHECK(world.mark("github.com/acme/widget") == "2026-10-18T09:00:00Z");
+        CHECK(world.said.back() == "reviewing github.com/acme/widget#2");
+    }
+
+    SECTION("from --since: reviewed, nothing saved, the same --since posting after it") {
+        World world;
+        world.open["acme/widget"] = open;
+        const apogee::review::SweepOptions since{.since = std::string{"2026-10-01T00:00:00Z"},
+                                                 .dry_run = true};
+        const nlohmann::json dry = world.sweep(targets, since);
+        const nlohmann::json& project = dry["targets"][0]["projects"][0];
+        CHECK(project["first_sweep"] == false);
+        CHECK(project["watermark_before"].is_null());
+        CHECK(project["watermark_after"] == "2026-10-18T09:00:00Z");
+        CHECK(world.reviewed ==
+              std::vector<std::string>{"github.com/acme/widget#1", "github.com/acme/widget#2"});
+        CHECK(world.posted.empty());
+        CHECK_FALSE(world.marks_bytes().has_value());
+
+        apogee::review::SweepOptions posting = since;
+        posting.dry_run = false;
+        (void)world.sweep(targets, posting);
+        CHECK(world.posted ==
+              std::vector<std::string>{"github.com/acme/widget#1", "github.com/acme/widget#2"});
+        CHECK(world.mark("github.com/acme/widget") ==
+              project["watermark_after"].get<std::string>());
+    }
+}
+
+TEST_CASE("a store's preview keeps its marks in memory and writes nothing",
+          "[review][sweep][57w]") {
+    const apogee::testing::TempDir dir{"review-preview-" + std::to_string(std::random_device{}())};
+    apogee::review::WatermarkStore store{dir.path() / "marks" / "watermarks.json"};
+    store.set("github.com/acme/widget", "2026-10-17T00:00:00Z");
+
+    apogee::review::WatermarkStore preview = store.preview();
+    CHECK(preview.path() == store.path());
+    CHECK(preview.get("github.com/acme/widget") == "2026-10-17T00:00:00Z");
+    preview.set("github.com/acme/widget", "2026-10-18T00:00:00Z");
+    preview.set("github.com/acme/gadget", "2026-10-18T00:00:00Z");
+    CHECK(preview.get("github.com/acme/widget") == "2026-10-18T00:00:00Z");
+    CHECK(preview.get("github.com/acme/gadget") == "2026-10-18T00:00:00Z");
+    // The store, in memory and on disk, is as it was.
+    CHECK(store.get("github.com/acme/widget") == "2026-10-17T00:00:00Z");
+    CHECK_FALSE(store.get("github.com/acme/gadget").has_value());
+    const apogee::review::WatermarkStore reread{store.path()};
+    CHECK(reread.get("github.com/acme/widget") == "2026-10-17T00:00:00Z");
+    CHECK_FALSE(reread.get("github.com/acme/gadget").has_value());
+
+    // A preview of a store with no file makes none, nor its folder.
+    const apogee::review::WatermarkStore none{dir.path() / "absent" / "watermarks.json"};
+    apogee::review::WatermarkStore empty = none.preview();
+    empty.set("github.com/acme/widget", "2026-10-18T00:00:00Z");
+    CHECK_FALSE(std::filesystem::exists(dir.path() / "absent"));
 }

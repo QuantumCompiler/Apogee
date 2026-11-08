@@ -95,7 +95,6 @@ Every call is a recorded default; no **[user]** call blocks any of them. `graph 
 
 | # | Item | Version | File | Status |
 |---|---|---|---|---|
-| 57w | A dry-run review sweep moves no watermark — `review sweep --dry-run` (the app's default sweep) leaves watermarks.json untouched, so the posting sweep or cron run after it still reviews and posts what it previewed | v0.2.1 | [`review-dry-run-moves-nothing.md`](v0.2.1/review-dry-run-moves-nothing.md) | 🟢 |
 
 ### v0.2.2
 

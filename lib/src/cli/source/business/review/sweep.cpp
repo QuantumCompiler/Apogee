@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <stdexcept>
+#include <string>
 
 #include "contracts/config_edit.h"
 
@@ -46,12 +48,21 @@ std::optional<std::string> WatermarkStore::get(const std::string& key) const {
 
 void WatermarkStore::set(const std::string& key, std::string value) {
     marks_[key] = std::move(value);
+    if (!saves_) {
+        return;  // a preview: the mark moves in memory alone
+    }
     nlohmann::json json = nlohmann::json::object();
     for (const auto& [mark, at] : marks_) {
         json[mark] = at;
     }
     std::filesystem::create_directories(path_.parent_path());
     harness::write_file_atomically(path_, json.dump(2) + "\n");
+}
+
+WatermarkStore WatermarkStore::preview() const {
+    WatermarkStore copy = *this;
+    copy.saves_ = false;
+    return copy;
 }
 
 std::string watermark_key(const forge::ForgeProject& project) {
@@ -64,6 +75,12 @@ forge::ForgeProject target_project(const harness::ReviewTargetConfig& target) {
         .forge = target.forge == "gitlab" ? forge::Forge::GitLab : forge::Forge::GitHub,
         .host = target.host,
         .project = target.repo.empty() ? target.owner : target.repo};
+}
+
+std::string_view first_sweep_note(bool dry_run) noexcept {
+    return dry_run ? "first sweep -- a posting sweep starts at now (--since reviews earlier "
+                     "ones); a dry run saves no watermark"
+                   : "first sweep -- starting at now (--since reviews earlier ones)";
 }
 
 nlohmann::json run_sweep(const std::vector<SweepTarget>& targets, WatermarkStore& store,
@@ -82,6 +99,13 @@ nlohmann::json run_sweep(const std::vector<SweepTarget>& targets, WatermarkStore
             progress(line);
         }
     };
+    // A dry run sweeps a preview (57w): the same loop, every mark below moved
+    // in memory alone, so what it previewed is still new to the next sweep.
+    std::optional<WatermarkStore> preview;
+    if (options.dry_run) {
+        preview.emplace(store.preview());
+    }
+    WatermarkStore& marks = preview.has_value() ? *preview : store;
     std::size_t budget = options.cap;
     std::size_t deferred = 0;
     std::size_t reviewed = 0;
@@ -122,7 +146,7 @@ nlohmann::json run_sweep(const std::vector<SweepTarget>& targets, WatermarkStore
             const forge::ForgeProject project{
                 .forge = named.forge, .host = named.host, .project = path};
             const std::string key = watermark_key(project);
-            const std::optional<std::string> before = store.get(key);
+            const std::optional<std::string> before = marks.get(key);
             nlohmann::json project_doc{
                 {"project", key},
                 {"watermark_before",
@@ -135,13 +159,13 @@ nlohmann::json run_sweep(const std::vector<SweepTarget>& targets, WatermarkStore
                 mark = *before;
             } else if (options.since.has_value()) {
                 mark = *options.since;
-                store.set(key, mark);
+                marks.set(key, mark);
             } else {
                 // History stays unreviewed unless asked: start at now.
-                store.set(key, options.now);
+                marks.set(key, options.now);
                 project_doc["first_sweep"] = true;
                 project_doc["watermark_after"] = options.now;
-                say(key + ": first sweep -- starting at now (--since reviews earlier ones)");
+                say(key + ": " + std::string{first_sweep_note(options.dry_run)});
                 target_doc["projects"].push_back(std::move(project_doc));
                 continue;
             }
@@ -159,7 +183,7 @@ nlohmann::json run_sweep(const std::vector<SweepTarget>& targets, WatermarkStore
                 const forge::MergeRequestListing& item = listing[i];
                 if (item.draft && !target.config.drafts) {
                     project_doc["skipped_drafts"].push_back(forge::to_string(item.ref));
-                    store.set(key, item.updated_at);
+                    marks.set(key, item.updated_at);
                     continue;
                 }
                 if (budget == 0) {
@@ -181,9 +205,9 @@ nlohmann::json run_sweep(const std::vector<SweepTarget>& targets, WatermarkStore
                     ++errors;
                     break;
                 }
-                store.set(key, item.updated_at);
+                marks.set(key, item.updated_at);
             }
-            const std::optional<std::string> after = store.get(key);
+            const std::optional<std::string> after = marks.get(key);
             project_doc["watermark_after"] =
                 after.has_value() ? nlohmann::json(*after) : nlohmann::json();
             target_doc["projects"].push_back(std::move(project_doc));

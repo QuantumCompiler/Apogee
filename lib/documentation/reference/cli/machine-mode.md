@@ -1151,7 +1151,14 @@ could not be reviewed is not advanced past, so the next sweep tries it again.
 `reviewed`, `posted`, `deferred` (past the cap, waiting for the next sweep)
 and `errors` count the whole run, and `document` names where it was kept
 (the data directory's `review/sweeps/`). A sweep with errors exits `1`; one a
-live sweep's lock refuses exits `1` naming its pid.
+live sweep's lock refuses exits `1` naming its pid. A dry run (`dry_run`
+true, `--dry-run`) posts nothing and **saves no watermark** (57w): its
+document keeps the same fields, `watermark_after` and `first_sweep` saying
+where a posting sweep would leave each mark and start a repository seen for
+the first time, but `review/watermarks.json` is left as it was, absent
+included, so the posting sweep after it still reviews and posts what it
+previewed. It still takes the sweep lock, and its document is kept like any
+other.
 
 Since 49c a generated clip's record is a document, whether or not it landed:
 

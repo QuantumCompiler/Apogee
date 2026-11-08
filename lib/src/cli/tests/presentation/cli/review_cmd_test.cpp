@@ -265,3 +265,37 @@ TEST_CASE("the sweep's text draws what a forge named and said as lines; the docu
     // The document is not changed by drawing it.
     CHECK(document["targets"][0]["error"] == "gh could not be started\r\x1b[2Kall good");
 }
+
+TEST_CASE("a dry run's first sweep and the --dry-run help say no watermark is saved",
+          "[cli][review][sweep][57w]") {
+    nlohmann::json document = {{"dry_run", true},
+                               {"targets",
+                                {{{"name", "acme"},
+                                  {"projects",
+                                   {{{"project", "github.com/acme/widget"},
+                                     {"first_sweep", true},
+                                     {"watermark_before", nullptr},
+                                     {"watermark_after", "2026-10-18T12:00:00Z"},
+                                     {"reviewed", nlohmann::json::array()},
+                                     {"skipped_drafts", nlohmann::json::array()}}}}}}},
+                               {"reviewed", 0},
+                               {"posted", 0},
+                               {"deferred", 0},
+                               {"cap", 20},
+                               {"errors", 0}};
+    CHECK(apogee::commands::format_sweep(document) ==
+          "github.com/acme/widget: first sweep -- a posting sweep starts at now (--since reviews "
+          "earlier ones); a dry run saves no watermark\n0 reviewed, 0 posted\n");
+    // A posting sweep's first sweep is said as it always was.
+    document["dry_run"] = false;
+    CHECK(apogee::commands::format_sweep(document) ==
+          "github.com/acme/widget: first sweep -- starting at now (--since reviews earlier "
+          "ones)\n0 reviewed, 0 posted\n");
+
+    const apogee::testing::CliHome home{std::string{kConfig}};
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"review", "sweep", "--help"}, &out, &err) == 0);
+    CHECK_THAT(out, ContainsSubstring("post nothing and save no watermark, so a later sweep "
+                                      "still reviews what this one previewed"));
+}
