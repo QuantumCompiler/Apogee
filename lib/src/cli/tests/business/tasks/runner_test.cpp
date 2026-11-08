@@ -519,10 +519,100 @@ TEST_CASE("a request a process that ended left behind does not stop the next run
     Fixture fixture;
     REQUIRE(t::save_task(fixture.root, fixture.task(kAnswer42)).empty());
     REQUIRE(t::write_request(fixture.root, "task-20261004-120000", t::Request::Cancel).empty());
+    // The next run takes the lock first, as `task run` and `task resume` do:
+    // that is where the request turns stale (57u).
+    std::string error;
+    const std::optional<t::TaskLock> lock =
+        t::TaskLock::acquire(fixture.root, "task-20261004-120000", error);
+    REQUIRE(lock.has_value());
     fixture.scripted.steps = {{.answer = "plan"}, {.answer = "42\nTASK STATUS: DONE"}};
     const t::RunOutcome outcome = fixture.run(fixture.task(kAnswer42));
     CHECK(outcome.task.status == t::kDone);
     CHECK(fixture.scripted.seen.size() == 2);
+}
+
+TEST_CASE("a cancel sent while the run starts ends it before any model call",
+          "[tasks][runner][cancel][57u]") {
+    Fixture fixture;
+    std::string error;
+    const std::optional<t::TaskLock> lock =
+        t::TaskLock::acquire(fixture.root, "task-20261004-120000", error);
+    REQUIRE(lock.has_value());
+    // Sent after the lock was taken, before the run began: providers being
+    // built, MCP servers connecting.
+    REQUIRE(t::write_request(fixture.root, "task-20261004-120000", t::Request::Cancel).empty());
+    fixture.scripted.steps = {{.answer = "plan"}, {.answer = "42\nTASK STATUS: DONE"}};
+    t::Task created = fixture.task(kAnswer42);
+    t::record_transition(created, t::kCreatedEvent, "2026-10-04T12:00:00Z", 0, created.goal);
+    const t::RunOutcome outcome = fixture.run(created);
+    CHECK(outcome.task.status == t::kCancelled);
+    CHECK(outcome.task.reason == "cancelled by 'apogee task cancel' before the plan");
+    CHECK(fixture.scripted.seen.empty());  // no model call
+    CHECK(outcome.task.rounds.empty());
+    CHECK(events(outcome.task) ==
+          std::vector<std::string>{"created:planning", "started:planning", "finished:cancelled"});
+    CHECK(t::task_to_json(fixture.on_disk()) == t::task_to_json(outcome.task));
+    // Consumed, and the task may be resumed.
+    CHECK(t::read_request(fixture.root, "task-20261004-120000") == t::Request::None);
+    CHECK(t::resume_refusal(outcome.task).empty());
+}
+
+TEST_CASE("a halt sent while the run starts ends it halted before any model call",
+          "[tasks][runner][halt][57u]") {
+    Fixture fixture;
+    std::string error;
+    const std::optional<t::TaskLock> lock =
+        t::TaskLock::acquire(fixture.root, "task-20261004-120000", error);
+    REQUIRE(lock.has_value());
+    REQUIRE(t::write_request(fixture.root, "task-20261004-120000", t::Request::Halt).empty());
+    fixture.scripted.steps = {{.answer = "plan"}};
+    const t::RunOutcome outcome = fixture.run(fixture.task(kAnswer42));
+    CHECK(outcome.task.status == t::kHalted);
+    CHECK(outcome.task.reason == "halted by 'apogee task halt' before the plan");
+    CHECK(fixture.scripted.seen.empty());
+    CHECK(t::live(outcome.task));
+    CHECK(t::read_request(fixture.root, "task-20261004-120000") == t::Request::None);
+}
+
+TEST_CASE("a resume stopped while it starts names the round it would have run",
+          "[tasks][runner][resume][57u]") {
+    // The sweep's probe: a task failed on a question in round 1, resumed,
+    // and stopped while the resume was still connecting its MCP servers.
+    Fixture fixture;
+    fixture.scripted.steps = {{.answer = "plan"}, {.question = "Which file?"}};
+    const t::RunOutcome failed = fixture.run(fixture.task(kAnswer42));
+    REQUIRE(failed.task.status == t::kFailed);
+    REQUIRE(fixture.scripted.seen.size() == 2);
+
+    for (const t::Request request : {t::Request::Cancel, t::Request::Halt}) {
+        INFO(t::to_string(request));
+        std::string error;
+        const std::optional<t::TaskLock> lock =
+            t::TaskLock::acquire(fixture.root, "task-20261004-120000", error);
+        REQUIRE(lock.has_value());
+        REQUIRE(t::write_request(fixture.root, "task-20261004-120000", request).empty());
+        const t::RunOutcome resumed = fixture.run(failed.task, /*resume=*/true);
+        CHECK(fixture.scripted.seen.size() == 2);  // no model call
+        CHECK(resumed.task.status == (request == t::Request::Cancel ? t::kCancelled : t::kHalted));
+        CHECK(resumed.task.reason == (request == t::Request::Cancel
+                                          ? "cancelled by 'apogee task cancel' before round 1"
+                                          : "halted by 'apogee task halt' before round 1"));
+        CHECK(events(resumed.task).back() == "finished:" + resumed.task.status);
+        CHECK(events(resumed.task).at(events(resumed.task).size() - 2) == "resumed:running");
+    }
+}
+
+TEST_CASE("Ctrl-C pressed as the run begins ends it before any model call, said as interrupted",
+          "[tasks][runner][cancel][57u]") {
+    Fixture fixture;
+    const apogee::harness::CancellationToken interrupt =
+        apogee::harness::CancellationToken::create();
+    interrupt.cancel();
+    fixture.scripted.steps = {{.answer = "plan"}};
+    const t::RunOutcome outcome = fixture.run(fixture.task(kAnswer42), false, interrupt);
+    CHECK(outcome.task.status == t::kCancelled);
+    CHECK(outcome.task.reason == "interrupted before the plan");
+    CHECK(fixture.scripted.seen.empty());
 }
 
 TEST_CASE("a finished task is not run again", "[tasks][runner]") {

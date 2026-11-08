@@ -22,7 +22,7 @@ struct Progress::State : std::enable_shared_from_this<Progress::State> {
     /// A run was started and its end not yet drawn.
     std::atomic<bool> busy{false};
     std::mutex mutex;
-    std::function<void()> cancel;  // taken by the first cancel
+    Cancel cancel;  // taken by the first cancel
     std::thread worker;
 
     void append(std::string line) {
@@ -42,8 +42,8 @@ Progress::~Progress() {
     join();
 }
 
-bool Progress::start(std::string heading, std::function<void(const Say& say)> work,
-                     std::function<void()> cancel, std::function<void()> ended) {
+bool Progress::start(std::string heading, std::function<void(const Say& say)> work, Cancel cancel,
+                     std::function<void()> ended) {
     if (state_->busy.exchange(true)) {
         return false;  // a run is going
     }
@@ -95,17 +95,16 @@ bool Progress::start(std::string heading, std::function<void(const Say& say)> wo
     return true;
 }
 
-bool Progress::cancel() {
-    std::function<void()> cancel;
+std::optional<std::string> Progress::cancel() {
+    Cancel cancel;
     {
         const std::lock_guard lock{state_->mutex};
         cancel = std::exchange(state_->cancel, nullptr);
     }
     if (!cancel) {
-        return false;
+        return std::nullopt;
     }
-    cancel();
-    return true;
+    return cancel();
 }
 
 bool Progress::running() const {

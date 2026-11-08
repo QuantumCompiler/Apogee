@@ -490,6 +490,37 @@ struct Drive {
     std::optional<tasks::Task> existing;
 };
 
+/// From the lock to the run (57u): a refusal in between -- a grant, a
+/// backend, a suite -- leaves no request it never read, and a new task no
+/// directory, which `task list` would otherwise find with no ledger in it.
+/// Dropped before the lock is let go, and kept from the run on, which reads
+/// and clears the request itself.
+class StartingRun {
+public:
+    StartingRun(fs::path root, std::string id) : root_{std::move(root)}, id_{std::move(id)} {}
+
+    ~StartingRun() {
+        if (!started_) {
+            tasks::discard_unread_request(root_, id_);
+        }
+    }
+
+    StartingRun(const StartingRun&) = delete;
+    StartingRun& operator=(const StartingRun&) = delete;
+    StartingRun(StartingRun&&) = delete;
+    StartingRun& operator=(StartingRun&&) = delete;
+
+    /// The run begins: what the request asks is its to honour.
+    void started() noexcept {
+        started_ = true;
+    }
+
+private:
+    fs::path root_;
+    std::string id_;
+    bool started_ = false;
+};
+
 /// `task run` and `task resume`: the session assembled as `chat` assembles
 /// one, with nobody to ask, and the runner driven over its turns.
 /// In machine mode the events go to `events` -- stdout for the command, a
@@ -559,6 +590,10 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
     if (!lock.has_value()) {
         fail_user(lock_error);
     }
+    // A stop may be sent from here on, before the ledger is read or written:
+    // the lock names this task. Declared after the lock, so it is let go
+    // first (57u).
+    StartingRun starting{root, task_id};
 
     tasks::Task task;
     logger::Session session;
@@ -958,6 +993,7 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
     }
 
     const InterruptScope interrupt;
+    starting.started();
     const tasks::RunOutcome outcome = tasks::run_task(
         tasks::RunRequest{.root = root,
                           .task = task,
@@ -1424,11 +1460,34 @@ std::string task_status_text(const std::string& id) {
 std::string request_task_stop(const std::string& id, tasks::Request request) {
     const fs::path root = harness::tasks_dir();
     const std::string verb{tasks::to_string(request)};
+    // A new run still starting (57u): the lock names its task before its
+    // ledger is written. The request is left for it, and the run reads it
+    // before any model call.
+    if (const std::optional<std::string> running = tasks::running_task(root);
+        running.has_value() && (id.empty() || id == *running) &&
+        !tasks::ledger_written(root, *running)) {
+        if (const std::string failure = tasks::write_request(root, *running, request);
+            !failure.empty()) {
+            throw std::runtime_error("could not ask task " + *running + " to " + verb + ": " +
+                                     failure);
+        }
+        // The run let the lock go without a ledger: it was refused before it
+        // started, so the request is for no one and goes with its directory.
+        if (tasks::running_task(root) != running && !tasks::ledger_written(root, *running)) {
+            tasks::discard_unread_request(root, *running);
+            throw std::runtime_error("task " + *running +
+                                     " ended before it started -- there is nothing to " + verb);
+        }
+        return "asked task " + *running + " to " + verb + ": it stops before it starts";
+    }
     tasks::Task task = find_task(root, id, /*prefer_running=*/true);
-    if (!task_stoppable(task, request)) {
+    // A resume still starting runs the task, though its ledger still says
+    // how it last stopped -- failed, cancelled -- until the run begins.
+    const bool runs = tasks::running_task(root) == task.id;
+    if (!task_stoppable(task, request, runs)) {
         throw std::runtime_error(stop_refusal(task, verb));
     }
-    if (tasks::running_task(root) == task.id) {
+    if (runs) {
         if (const std::string failure = tasks::write_request(root, task.id, request);
             !failure.empty()) {
             throw std::runtime_error("could not ask task " + task.id + " to " + verb + ": " +
@@ -1453,7 +1512,7 @@ std::string request_task_stop(const std::string& id, tasks::Request request) {
         task = std::move(*fresh);
     }
     // Read again under the lock: what it holds now is what is stopped.
-    if (!task_stoppable(task, request)) {
+    if (!task_stoppable(task, request, /*running=*/false)) {
         throw std::runtime_error(stop_refusal(task, verb));
     }
     if (request == tasks::Request::Halt) {
@@ -1520,7 +1579,10 @@ TaskGate compose_task_gate(const harness::Config& config, const agent::ToolRegis
     return out;
 }
 
-bool task_stoppable(const tasks::Task& task, tasks::Request request) noexcept {
+bool task_stoppable(const tasks::Task& task, tasks::Request request, bool running) noexcept {
+    if (running) {
+        return !tasks::finished(task);
+    }
     return request == tasks::Request::Halt ? tasks::live(task) : !tasks::finished(task);
 }
 

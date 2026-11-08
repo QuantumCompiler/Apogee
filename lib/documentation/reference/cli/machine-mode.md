@@ -359,6 +359,19 @@ would read goes to stderr, with the outcome; the exit code is the task's (`0`
 done, `130` cancelled, `2` a provider's failure, `1` anything else short of
 done).
 
+**A stop sent while the run starts is kept** (57u). From the moment `task run`
+or `task resume` takes the task lock -- before it builds its providers and
+connects its MCP servers, before any event -- `apogee task halt|cancel <id>`
+is for that run: it exits 0 (`asked task <id> to cancel: it stops before it
+starts` for a new task, whose ledger is not yet written), and the run ends
+before any model call. Its stream is then `session`, `task_started`, and
+`task_finished` with no turn between: `status` `cancelled` (exit 130) or
+`halted` (exit 1), `reason` `cancelled by 'apogee task cancel' before the
+plan` -- or `before round <n>`, the round it would have run next -- or
+`halted by 'apogee task halt' before ...`. A run refused before it starts (a
+grant, a backend) keeps nothing of the stop: no `request` file and, for a new
+task, no task.
+
 **A task names its backend or is refused** (M29). A task whose backend cannot
 answer is refused at launch, as [a session's is](#a-launch-refused): `-m`
 naming a backend that did not start or one the config defines nowhere, and on

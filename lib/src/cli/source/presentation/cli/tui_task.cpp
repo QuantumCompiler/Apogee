@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <ostream>
 #include <streambuf>
 #include <string>
@@ -14,6 +15,7 @@
 #include "cli/task_cmd.h"
 #include "cli/tui_common.h"
 #include "contracts/layout.h"
+#include "platform/platform.h"
 #include "tasks/ledger.h"
 #include "tasks/task.h"
 #include "tasks/view.h"
@@ -26,12 +28,8 @@ namespace {
 struct LastTasks {
     std::mutex mutex;
     std::map<std::string, tasks::Task> by_id;
-};
-
-/// The run in the widget: its id, once its first event names it.
-struct LiveRun {
-    std::mutex mutex;
-    std::string id;
+    /// The task the lock's live holder runs, as the read found it.
+    std::optional<std::string> running;
 };
 
 /// A stream that hands each line written to it to `line`: a run's events,
@@ -124,11 +122,7 @@ private:
 [[nodiscard]] bool start_run(tui::Progress& progress, const RootContext& context,
                              const MachineBudgetSource& machine, const TaskRunRequest& request,
                              std::string heading) {
-    const auto live = std::make_shared<LiveRun>();
-    {
-        const std::lock_guard lock{live->mutex};
-        live->id = request.resume;
-    }
+    const auto live = std::make_shared<TaskRunStop>(request.resume);
     return progress.start(
         std::move(heading),
         [&context, machine, request, live](const tui::Progress::Say& say) {
@@ -142,9 +136,10 @@ private:
                     } catch (const nlohmann::json::exception&) {
                         return;
                     }
+                    // On the run's own thread, as the event is written: a
+                    // stop kept for it lands before its first turn (57u).
                     if (const std::string id = field(event, "task_id"); !id.empty()) {
-                        const std::lock_guard lock{live->mutex};
-                        live->id = id;
+                        live->named(id);
                     }
                     for (std::string& worded : task_event_lines(event)) {
                         told = true;
@@ -159,21 +154,79 @@ private:
                     ") -- the reason is on the notice row");
             }
         },
-        [live]() {
-            std::string id;
-            {
-                const std::lock_guard lock{live->mutex};
-                id = live->id;
-            }
-            try {
-                (void)request_task_stop(id, tasks::Request::Cancel);
-            } catch (const std::exception&) {
-                // Not running yet, or already over: nothing to stop.
-            }
-        });
+        [live]() { return live->stop(); });
+}
+
+/// The task this process's run holds the lock for, while it is still
+/// starting and no event has named it; empty when the lock is another
+/// process's, or nobody's.
+[[nodiscard]] std::string own_locked_task() {
+    const std::optional<tasks::LockHolder> holder = tasks::lock_holder(harness::tasks_dir());
+    if (!holder.has_value() || !holder->running || holder->pid != platform::current_process_id()) {
+        return {};
+    }
+    return holder->task_id;
 }
 
 }  // namespace
+
+TaskRunStop::TaskRunStop(std::string id) : id_{std::move(id)} {}
+
+void TaskRunStop::named(const std::string& id) {
+    bool ask = false;
+    {
+        const std::scoped_lock lock{mutex_};
+        if (id_.empty()) {
+            id_ = id;
+        }
+        named_ = true;
+        ask = std::exchange(pending_, false);
+    }
+    if (!ask) {
+        return;
+    }
+    try {
+        (void)request_task_stop(id, tasks::Request::Cancel);
+    } catch (const std::exception&) {
+        // The run named itself and is past stopping -- over already. The
+        // notice row said the stop was kept; the narration says how it ended.
+    }
+}
+
+std::string TaskRunStop::stop() {
+    std::string id;
+    bool named = false;
+    {
+        const std::scoped_lock lock{mutex_};
+        id = id_;
+        named = named_;
+    }
+    if (!named) {
+        // Still starting: this process's lock names the task before any
+        // event does -- a new run's, or the very task a resume runs.
+        if (const std::string locked = own_locked_task();
+            !locked.empty() && (id.empty() || locked == id)) {
+            id = locked;
+            named = true;
+        }
+    }
+    if (!named) {
+        // Not even the lock yet: kept, and asked once the run names its task.
+        // A resume's task asked now would be no process's, cancelled under
+        // the lock by the core itself -- and then resumed by this run.
+        const std::scoped_lock lock{mutex_};
+        if (!named_) {
+            pending_ = true;
+            return "asked the run to stop: it stops before it starts";
+        }
+        id = id_;
+    }
+    try {
+        return request_task_stop(id, tasks::Request::Cancel);
+    } catch (const std::exception& e) {
+        return std::string{"nothing to stop: "} + e.what();
+    }
+}
 
 std::vector<std::string> task_event_lines(const nlohmann::json& event) {
     const std::string type = field(event, "type");
@@ -231,8 +284,8 @@ tui::ListOptions task_view_options(const RootContext& context,
         const std::filesystem::path root = harness::tasks_dir();
         std::vector<std::string> problems;
         std::vector<tasks::Task> all = tasks::list_tasks(root, &problems);
-        const nlohmann::json document =
-            tasks::to_json(tasks::make_task_list(all, true, tasks::lock_holder(root)));
+        const std::optional<tasks::LockHolder> holder = tasks::lock_holder(root);
+        const nlohmann::json document = tasks::to_json(tasks::make_task_list(all, true, holder));
         std::vector<tui::ListRow> rows;
         for (const nlohmann::json& summary : document["data"]) {
             const std::string status = field(summary, "status");
@@ -252,6 +305,9 @@ tui::ListOptions task_view_options(const RootContext& context,
         }
         {
             const std::lock_guard lock{last->mutex};
+            last->running = holder.has_value() && holder->running && !holder->task_id.empty()
+                                ? std::optional<std::string>{holder->task_id}
+                                : std::nullopt;
             last->by_id.clear();
             for (tasks::Task& task : all) {
                 std::string id = task.id;
@@ -287,7 +343,7 @@ tui::ListOptions task_view_options(const RootContext& context,
         return [last, request](const tui::ListRow& row) {
             const std::lock_guard lock{last->mutex};
             const tasks::Task* task = task_of(*last, row.key);
-            return task != nullptr && task_stoppable(*task, request);
+            return task != nullptr && task_stoppable(*task, request, last->running == row.key);
         };
     };
     options.actions = {

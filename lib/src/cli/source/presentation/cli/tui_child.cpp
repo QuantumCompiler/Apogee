@@ -169,7 +169,10 @@ bool start_child_run(tui::Progress& progress, const RootContext& context,
                 [&say](std::string line) { say(std::move(line)); }, stop.get());
             say(exit_line(code));
         },
-        [stop]() { stop->stop(); });
+        [stop]() {
+            stop->stop();
+            return std::string{};  // the view's own words
+        });
 }
 
 std::string run_typed(tui::Progress& progress, const RootContext& context,

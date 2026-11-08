@@ -449,8 +449,9 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         // each held to the verb's own test.
         const tasks::Request request =
             kind == kHaltableTaskValue ? tasks::Request::Halt : tasks::Request::Cancel;
+        const std::optional<std::string> running = tasks::running_task(harness::tasks_dir());
         for (const tasks::Task& task : tasks::list_tasks(harness::tasks_dir())) {
-            if (task_stoppable(task, request)) {
+            if (task_stoppable(task, request, running == task.id)) {
                 list.names.push_back(task.id);
             }
         }

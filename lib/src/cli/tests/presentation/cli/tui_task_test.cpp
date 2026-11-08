@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -44,14 +45,16 @@ using apogee::tui::Key;
 /// A home whose one backend answers from `turns`, recall off, the tools'
 /// root in `work()` -- as `task_test` builds one.
 struct Home {
-    explicit Home(const std::string& turns) : home{"{}\n"} {
+    /// `extra`: more of the config, at its top level.
+    explicit Home(const std::string& turns, const std::string& extra = {}) : home{"{}\n"} {
         script = home.home() / "script.json";
         std::ofstream{script} << R"({"turns": [)" << turns << "]}";
         fs::create_directories(home.home() / "work");
         std::ofstream{home.config_path(), std::ios::trunc}
             << "backends:\n  m:\n    type: mock\n    model_path: " << script.string()
             << "\nmodels:\n  default: m\nmemory:\n  recall: false\ntools:\n  fs_root: "
-            << (home.home() / "work").string() << "\n";
+            << (home.home() / "work").string() << "\n"
+            << extra;
         context.config_path = home.config_path().string();
     }
 
@@ -299,9 +302,193 @@ TEST_CASE("Ctrl-C stops a live run from the Task view as task cancel does", "[cl
     stage.until([&stage]() { return has(stage.frame(), "round_started · round 1"); },
                 "the round running");
     stage.press(Key::named(Key::Name::CtrlC));
-    CHECK(has(stage.frame(), "asked the run to stop"));
+    // The core's own line, naming the task it asked (57u).
+    CHECK(has(stage.frame(), "asked task task-"));
+    CHECK(has(stage.frame(), "to cancel: its turn ends now"));
     CHECK_FALSE(stage.shell.quit_requested());
     stage.until([&stage]() { return !stage.progress->running(); }, "the run ending");
     CHECK(has(stage.frame(), "finished · cancelled"));
     CHECK(home.only_task().status == apogee::tasks::kCancelled);
+}
+
+TEST_CASE(
+    "Ctrl-C reaches a run still starting through the lock, or keeps it until the run "
+    "names itself",
+    "[cli][tui][task][57u]") {
+    const Home home{R"({"text": "x"})"};
+    const std::string id = "task-20261108-120000";
+    std::string error;
+    {
+        // A new run still starting: no event has named it, but this
+        // process's lock does.
+        const std::optional<apogee::tasks::TaskLock> lock =
+            apogee::tasks::TaskLock::acquire(home.tasks(), id, error);
+        REQUIRE(lock.has_value());
+        apogee::commands::TaskRunStop stop;
+        CHECK(stop.stop() == "asked task " + id + " to cancel: it stops before it starts");
+        CHECK(apogee::tasks::read_request(home.tasks(), id) == apogee::tasks::Request::Cancel);
+    }
+    apogee::tasks::discard_unread_request(home.tasks(), id);
+    {
+        // Pressed before the run even took the lock: kept, and asked the
+        // moment its first event names the task.
+        apogee::commands::TaskRunStop stop;
+        CHECK(stop.stop() == "asked the run to stop: it stops before it starts");
+        const std::optional<apogee::tasks::TaskLock> lock =
+            apogee::tasks::TaskLock::acquire(home.tasks(), id, error);
+        REQUIRE(lock.has_value());
+        CHECK(apogee::tasks::read_request(home.tasks(), id) == apogee::tasks::Request::None);
+        stop.named(id);
+        CHECK(apogee::tasks::read_request(home.tasks(), id) == apogee::tasks::Request::Cancel);
+        // Asked once: a later event asks nothing again.
+        apogee::tasks::clear_request(home.tasks(), id);
+        stop.named(id);
+        CHECK(apogee::tasks::read_request(home.tasks(), id) == apogee::tasks::Request::None);
+    }
+    apogee::tasks::discard_unread_request(home.tasks(), id);
+    {
+        // Another process's lock is never this run's: kept, not sent to it.
+        std::filesystem::create_directories(home.tasks());
+        std::ofstream{home.tasks() / "task.lock"} << "1\ntask-other\n";
+        apogee::commands::TaskRunStop stop;
+        CHECK(stop.stop() == "asked the run to stop: it stops before it starts");
+        CHECK(apogee::tasks::read_request(home.tasks(), "task-other") ==
+              apogee::tasks::Request::None);
+        fs::remove(home.tasks() / "task.lock");
+    }
+    {
+        // The run already over: said, never silence.
+        apogee::tasks::Task done;
+        done.id = id;
+        done.goal = "a goal";
+        done.status = std::string{apogee::tasks::kDone};
+        done.session_id = "20261108-120000-abcd";
+        done.working_directory = fs::current_path().string();
+        REQUIRE(apogee::tasks::save_task(home.tasks(), done).empty());
+        apogee::commands::TaskRunStop stop{id};
+        stop.named(id);  // the run's events named it
+        CHECK(stop.stop() ==
+              "nothing to stop: task " + id + " is done -- there is nothing to cancel");
+    }
+}
+
+TEST_CASE(
+    "Ctrl-C on a resume still starting waits for its lock, never cancelling the task "
+    "under it",
+    "[cli][tui][task][57u]") {
+    // Asked before the resume holds the lock, the core finds no process
+    // running the task and cancels it under the lock itself -- which the
+    // resume then takes and resumes, every round run.
+    const Home home{R"({"text": "x"})"};
+    const std::string id = "task-20261108-130000";
+    apogee::tasks::Task failed;
+    failed.id = id;
+    failed.goal = "a goal";
+    failed.plan = "1. Answer.";
+    failed.status = std::string{apogee::tasks::kFailed};
+    failed.reason = "a question nobody answered";
+    failed.session_id = "20261108-130000-abcd";
+    failed.working_directory = fs::current_path().string();
+    REQUIRE(apogee::tasks::save_task(home.tasks(), failed).empty());
+    const auto unchanged = [&home, &id]() {
+        std::string error;
+        const std::optional<apogee::tasks::Task> now =
+            apogee::tasks::load_task(home.tasks(), id, error);
+        REQUIRE(now.has_value());
+        return now->status == apogee::tasks::kFailed && now->transitions.empty();
+    };
+    std::string error;
+    {
+        // Pressed before the resume took the lock: kept, the ledger untouched.
+        apogee::commands::TaskRunStop stop{id};
+        CHECK(stop.stop() == "asked the run to stop: it stops before it starts");
+        CHECK(unchanged());
+        CHECK(apogee::tasks::read_request(home.tasks(), id) == apogee::tasks::Request::None);
+        // The resume takes its lock and its first event names the task: asked
+        // then, for the run to read before any model call.
+        std::optional<apogee::tasks::TaskLock> lock =
+            apogee::tasks::TaskLock::acquire(home.tasks(), id, error);
+        REQUIRE(lock.has_value());
+        stop.named(id);
+        CHECK(apogee::tasks::read_request(home.tasks(), id) == apogee::tasks::Request::Cancel);
+        CHECK(unchanged());
+        lock->release();
+    }
+    apogee::tasks::clear_request(home.tasks(), id);
+    {
+        // The resume holds its lock, no event yet: this process's lock names
+        // the very task, so the core asks the run.
+        std::optional<apogee::tasks::TaskLock> lock =
+            apogee::tasks::TaskLock::acquire(home.tasks(), id, error);
+        REQUIRE(lock.has_value());
+        apogee::commands::TaskRunStop stop{id};
+        CHECK(stop.stop() == "asked task " + id +
+                                 " to cancel: its turn ends now, through the loop's own "
+                                 "cancellation");
+        CHECK(apogee::tasks::read_request(home.tasks(), id) == apogee::tasks::Request::Cancel);
+        CHECK(unchanged());
+        lock->release();
+    }
+    apogee::tasks::clear_request(home.tasks(), id);
+    {
+        // This process's lock naming another task -- the view's own `c` on a
+        // task no process runs -- is not the resume's: kept, nothing asked.
+        std::optional<apogee::tasks::TaskLock> lock =
+            apogee::tasks::TaskLock::acquire(home.tasks(), "task-20261108-140000", error);
+        REQUIRE(lock.has_value());
+        apogee::commands::TaskRunStop stop{id};
+        CHECK(stop.stop() == "asked the run to stop: it stops before it starts");
+        CHECK(apogee::tasks::read_request(home.tasks(), id) == apogee::tasks::Request::None);
+        CHECK(apogee::tasks::read_request(home.tasks(), "task-20261108-140000") ==
+              apogee::tasks::Request::None);
+        CHECK(unchanged());
+        lock->release();
+    }
+    {
+        // Another process's lock on the task -- the resume will be refused
+        // at the lock -- is never this run's to stop.
+        std::ofstream{home.tasks() / "task.lock"} << "1\n" << id << "\n";
+        apogee::commands::TaskRunStop stop{id};
+        CHECK(stop.stop() == "asked the run to stop: it stops before it starts");
+        CHECK(apogee::tasks::read_request(home.tasks(), id) == apogee::tasks::Request::None);
+        CHECK(unchanged());
+        fs::remove(home.tasks() / "task.lock");
+    }
+}
+
+TEST_CASE("Ctrl-C on a new run's setup in the Task view stops it before any model call",
+          "[cli][tui][task][57u]") {
+    if (!fs::exists("/bin/sh")) {
+        SKIP("no /bin/sh to hold the run in its setup");
+    }
+    // An MCP server that takes three seconds to fail: the run holds the lock
+    // and has written no ledger and no event naming its task meanwhile.
+    const Home home{R"({"text": "1. Plan."}, {"text": "It is 42.\nTASK STATUS: DONE"})",
+                    "mcp_servers:\n  slow:\n    command: /bin/sh\n    args: ['-c', 'sleep 3']\n"};
+    Stage stage{home.context};
+    stage.press(Key::character("r"));
+    stage.type("Find the answer");
+    stage.press(Key::named(Key::Name::Return));
+    stage.press(Key::character("y"));
+    std::string id;
+    stage.until(
+        [&home, &id]() {
+            const std::optional<apogee::tasks::LockHolder> holder =
+                apogee::tasks::lock_holder(home.tasks());
+            id = holder.has_value() ? holder->task_id : std::string{};
+            return !id.empty();
+        },
+        "the run taking its lock");
+    REQUIRE_FALSE(apogee::tasks::ledger_written(home.tasks(), id));
+    stage.press(Key::named(Key::Name::CtrlC));
+    CHECK(has(stage.frame(), "asked task " + id + " to cancel: it stops before it starts"));
+    stage.until([&stage]() { return !stage.progress->running(); }, "the run ending");
+    CHECK(has(stage.frame(),
+              "finished · cancelled -- cancelled by 'apogee task cancel' before "
+              "the plan"));
+    const apogee::tasks::Task task = home.only_task();
+    CHECK(task.id == id);
+    CHECK(task.status == apogee::tasks::kCancelled);
+    CHECK(task.rounds.empty());  // no turn ran
+    CHECK(apogee::tasks::read_request(home.tasks(), id) == apogee::tasks::Request::None);
 }

@@ -138,9 +138,9 @@ public:
         if (const std::string refused = resume_refusal(task_); !refused.empty()) {
             return RunOutcome{.task = task_, .error = refused};
         }
-        // A request is for a running process; one standing now was left for a
-        // process that ended before reading it, and this run is a new decision.
-        clear_request(request_.root, task_.id);
+        // No request is cleared here (57u): one a process that ended left was
+        // cleared when this one took the lock (`TaskLock::acquire`), and one
+        // standing now was sent to this run while it was starting.
         if (task_.status == kStalled) {
             task_.no_progress = 0;  // resuming is the breaker's way out, as the cycle's
         }
@@ -158,7 +158,10 @@ public:
         const RequestWatcher watcher{request_.root, task_.id, request_.interrupt, turn_token_,
                                      request_.poll};
         watcher_ = &watcher;
-        if (task_.plan.empty()) {
+        // A stop sent while the run was starting is honoured before any
+        // model call (57u).
+        stop_before_start();
+        if (task_.plan.empty() && task_.status == kPlanning) {
             plan();
         }
         while (error_.empty() && task_.status == kRunning) {
@@ -389,24 +392,33 @@ private:
 
     /// A halt or cancel standing at a round's end stops the task there.
     void stop_if_asked() {
+        stop_for(rounds_used(task_) == 0 ? std::string{"after the plan"}
+                                         : "after round " + std::to_string(rounds_used(task_)));
+    }
+
+    /// A halt or cancel standing as the run begins -- sent while it was
+    /// starting, its providers built and its MCP servers connecting -- stops
+    /// it before its first turn (57u): the plan when it has none, else the
+    /// round it would run next.
+    void stop_before_start() {
+        stop_for(task_.plan.empty() ? std::string{"before the plan"}
+                                    : "before round " + std::to_string(rounds_used(task_) + 1));
+    }
+
+    /// The standing request, if any, ends the task `when` -- `after round 2`.
+    void stop_for(const std::string& when) {
         if (watcher_ == nullptr) {
             return;
         }
         const Request request = watcher_->standing();
         if (request == Request::Halt) {
             task_.status = std::string{kHalted};
-            task_.reason =
-                "halted by 'apogee task halt' after " +
-                (rounds_used(task_) == 0 ? std::string{"the plan"}
-                                         : "round " + std::to_string(rounds_used(task_)));
+            task_.reason = "halted by 'apogee task halt' " + when;
         } else if (request == Request::Cancel) {
             task_.status = std::string{kCancelled};
-            task_.reason =
-                (watcher_->cancel_requested() ? "cancelled by 'apogee task cancel'"
-                                              : std::string{"interrupted"}) +
-                " after " +
-                (rounds_used(task_) == 0 ? std::string{"the plan"}
-                                         : "round " + std::to_string(rounds_used(task_)));
+            task_.reason = (watcher_->cancel_requested() ? "cancelled by 'apogee task cancel'"
+                                                         : std::string{"interrupted"}) +
+                           " " + when;
         }
     }
 

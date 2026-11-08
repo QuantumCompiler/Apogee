@@ -62,7 +62,12 @@ inline constexpr std::string_view kLockFileName = "task.lock";
                                             std::string& error);
 
 /// Every task, newest first. A ledger that cannot be read is skipped and
-/// named in `problems`.
+/// named in `problems` -- except a directory with no ledger that a stop sent
+/// while a new run started made (57u): the run's while the lock's live
+/// holder names it, or one holding that unread stop alone once the run
+/// ended before it started (killed during its setup), neither a task yet nor
+/// a problem. The second stays on disk: removed, its id could be minted
+/// again in the same second, after a later one's `-2`, and list out of turn.
 [[nodiscard]] std::vector<Task> list_tasks(const std::filesystem::path& root,
                                            std::vector<std::string>* problems = nullptr);
 
@@ -74,10 +79,26 @@ enum class Request : std::uint8_t { None, Halt, Cancel };
 
 /// Leaves `request` for the task `id`'s running process. The error text, or
 /// empty.
+///
+/// **A request is addressed to the lock's holder** (57u): one standing when
+/// `TaskLock::acquire` takes the lock was left for a process that has ended,
+/// and is cleared there; one written after it -- while the run is still
+/// starting, its providers built and its MCP servers connecting -- is for
+/// this process, and the runner reads it before any model call.
 [[nodiscard]] std::string write_request(const std::filesystem::path& root, std::string_view id,
                                         Request request);
 [[nodiscard]] Request read_request(const std::filesystem::path& root, std::string_view id);
 void clear_request(const std::filesystem::path& root, std::string_view id);
+
+/// Whether task `id`'s ledger is on disk: false while a new run is still
+/// starting, though the lock already names it.
+[[nodiscard]] bool ledger_written(const std::filesystem::path& root, std::string_view id);
+
+/// What a run refused before it ran leaves, removed (57u): the request it
+/// never read, and the task's directory when that leaves it empty -- a new
+/// task refused before its ledger was written, which `task list` must never
+/// see. A ledger, and anything else in the directory, stays.
+void discard_unread_request(const std::filesystem::path& root, std::string_view id);
 
 // --- the lock ---------------------------------------------------------------------
 
@@ -102,7 +123,14 @@ struct LockHolder {
 class TaskLock {
 public:
     /// nullopt with `error` set when another task runs, or the lock cannot be
-    /// made.
+    /// made. Once the lock is this process's, the named task's standing
+    /// request is cleared (57u): it was left for a process that ended before
+    /// reading it, and this run is a new decision -- 27h's rule, its point
+    /// moved from the run's start to the lock changing hands, so a stop sent
+    /// while this run is still starting is kept for it. Another task's
+    /// directory is never touched: a new run killed during its setup leaves
+    /// the stop it never read, which `list_tasks` passes over, and keeps its
+    /// id from being minted again.
     [[nodiscard]] static std::optional<TaskLock> acquire(const std::filesystem::path& root,
                                                          std::string_view task_id,
                                                          std::string& error);
