@@ -32,14 +32,45 @@ struct ParityTests {
         #expect(ParityTable.violations(words: []) == ["no command words -- the law would pass vacuously"])
     }
 
-    @Test("today's truth: twenty-four screens, the gaps by their items, the console's two, three carve-outs, the plumbing")
+    @Test("today's truth: twenty-four screens, the gaps by their items, the console's two, four carve-outs -- acp the fourth (5a) -- the plumbing")
     func census() {
         func count(_ match: (CommandPlace.Kind) -> Bool) -> Int { ParityTable.places.filter { match($0.kind) }.count }
         #expect(count { if case .screen = $0 { true } else { false } } == 24)
         #expect(count { if case .queued = $0 { true } else { false } } == 0)
         #expect(count { $0 == .console } == 2)
-        #expect(count { if case .carvedOut = $0 { true } else { false } } == 3)
+        #expect(count { if case .carvedOut = $0 { true } else { false } } == 4)
         #expect(count { $0 == .plumbing } == 3)
+    }
+
+    /// GUI 5a: the CLI's 56a carved `acp` out of the shell -- an agent host
+    /// runs it over its own stdio -- and its exec line refuses it by prefix,
+    /// `acp registration` (56d) with it. The app mirrors that row.
+    @Test("5a: acp is a carve-out as the shell's row is -- an agent host such as Xcode starts it over its own stdio, the app never does, its registration in Settings › Xcode")
+    func acpRow() throws {
+        let acp = try #require(ParityTable.place(of: "acp"))
+        guard case .carvedOut(let reason) = acp.kind else {
+            Issue.record("acp is \(acp.kind), not a carve-out")
+            return
+        }
+        #expect(reason.contains("agent host that starts it over its own stdio") && reason.contains("Xcode"))
+        #expect(reason.contains("the app never starts it"))
+        #expect(reason.contains("Settings › Xcode") && reason.contains("apogee acp registration"))
+        #expect(acp.note.contains("Settings › Xcode"))
+        #expect(ParityTable.refusal(of: ["acp"])?.reason == reason)
+        #expect(ParityTable.refusal(of: ["acp", "registration"])?.words == ["acp"], "refused by acp's prefix, as the exec line refuses it")
+        #expect(ParityTable.refusal(of: ["acpx"]) == nil)
+    }
+
+    @Test("5a: the mcp, config and check rows name Settings › Xcode, and mcp's says the pane never connects")
+    func xcodeRows() throws {
+        for command in ["mcp", "config", "check"] {
+            let row = try #require(ParityTable.place(of: command))
+            #expect(row.note.contains("Settings › Xcode"), "\(command)")
+        }
+        let mcp = try #require(ParityTable.place(of: "mcp"))
+        #expect(mcp.note.contains("mcp create --from xcode") && mcp.note.contains("never mcp list or mcp test"))
+        let config = try #require(ParityTable.place(of: "config"))
+        #expect(config.note.contains("config get") && config.note.contains("config delete-mcp-server"))
     }
 
     @Test("4i: the rows name what Training, Models, Suites and the session now cover -- adapters, pull, the CLI's fit, a chat under a suite")
@@ -116,11 +147,12 @@ struct ParityTests {
         }
     }
 
-    @Test("the refusals are the CLI exec line's set, word for word: the three doors, the two $EDITOR verbs, the three carve-outs -- each carve-out by its row's reason")
+    @Test("the refusals are the CLI exec line's set, word for word: the three doors, the two $EDITOR verbs, the four carve-outs -- each carve-out by its row's reason")
     func refusalSet() {
-        // tui_parity.cpp's kRefusals, in its order.
+        // tui_parity.cpp's kRefusals as a set, in the app's own order: the
+        // doors, the $EDITOR verbs, then the carve-outs in the table's rows.
         #expect(ParityTable.refusals.map { $0.words.joined(separator: " ") }
-            == ["chat", "execute", "tui", "agents edit", "symphonies edit", "serve", "reset", "uninstall"])
+            == ["chat", "execute", "tui", "agents edit", "symphonies edit", "serve", "acp", "reset", "uninstall"])
         for place in ParityTable.places {
             guard case .carvedOut(let reason) = place.kind else { continue }
             #expect(ParityTable.refusal(of: [place.command])?.reason == reason, "\(place.command)")
@@ -129,6 +161,23 @@ struct ParityTests {
             #expect(refusal.words.count <= 2 && !refusal.reason.isEmpty)
             #expect(ParityTable.place(of: refusal.words[0]) != nil, "a refusal names a classified command")
         }
+    }
+
+    /// The set read from the CLI's own table, so a refusal the exec line
+    /// gains or drops fails here the day it lands (5a: `acp`).
+    @Test("the refusals are the exec line's kRefusals as a set, read from tui_parity.cpp itself")
+    func refusalSetIsTheExecLines() throws {
+        let table = try String(
+            contentsOf: repoRoot.appendingPathComponent("lib/src/cli/source/presentation/cli/tui_parity.cpp"), encoding: .utf8)
+        let start = try #require(table.range(of: "constexpr std::array kRefusals{"))
+        let end = try #require(table.range(of: "};", range: start.upperBound..<table.endIndex))
+        let block = String(table[start.upperBound..<end.lowerBound])
+        let regex = try NSRegularExpression(pattern: #"ShellRefusal\{"([^"]+)""#)
+        let words = regex.matches(in: block, range: NSRange(block.startIndex..., in: block)).compactMap {
+            Range($0.range(at: 1), in: block).map { String(block[$0]) }
+        }
+        #expect(words.count >= 9, "the real table, not a stub")
+        #expect(Set(words) == Set(ParityTable.refusals.map { $0.words.joined(separator: " ") }))
     }
 
     @Test("a refusal of a command the binary no longer has fails by name, as does one with no reason")

@@ -4,6 +4,8 @@
 
 *2026-10-25: the console refuses what the TUI's exec line refuses -- the carve-outs, the doors and the two `edit` verbs -- by the command path the binary would run, after its root options (4g).*
 
+*2026-11-08: a fourth carve-out, `acp` (GUI 5a): the CLI's 56a carved it out of the shell -- an agent host such as Xcode starts it over its own stdio -- and its exec line refuses it by word prefix, so 56d's `acp registration` is refused with it. The app mirrors that row; the registration's fields are drawn in Settings › Xcode, read through `acp registration --output-format json`. The refusal set is now also read from `tui_parity.cpp`'s `kRefusals` itself (`refusalSetIsTheExecLines`).*
+
 ## Context
 
 The user's first hands-on run of the built app, 2026-10-20, found the structural hole. The GUI covered the design's 29 screens, but nothing held it to the CLI's whole surface. An audit against the TUI's own classification (`lib/src/cli/source/presentation/cli/tui_parity.cpp`, the CLI's ADR 0010) measured **8 whole command families with no GUI place**: `knowledge`, `embed`, `symphonies`, `train`, `datasets`, `agents`, `mcp` and `review`. It also found partials (execute sessions, prose graphs, task recipes, `analyze`) and no recorded carve-outs.
@@ -20,12 +22,13 @@ The TUI never drifted this way because ADR 0010 made its coverage mechanical: on
 - **a carve-out**, with the reason the console refuses it by;
 - **plumbing**, a protocol other programs speak and never a person's page.
 
-**The carve-outs** are the TUI's three, each with the GUI's own reason:
+**The carve-outs** are the TUI's four, each with the GUI's own reason:
 - `serve`: a daemon the app would orphan;
+- `acp` (since 5a, 2026-11-08): it speaks the Agent Client Protocol to the agent host that starts it over its own stdio, such as Xcode, and the app never starts it -- the fields Xcode's Add an Agent takes are in Settings › Xcode, and `acp registration` with it is refused by its prefix;
 - `reset`: it deletes the data directory the running app stands on;
 - `uninstall`: it removes Apogee and its data directory, and the app never uninstalls the binary it drives.
 
-**The console's refusals are the TUI exec line's, in the same table** (since 4g, 2026-10-25). Besides the three carve-outs:
+**The console's refusals are the TUI exec line's, in the same table** (since 4g, 2026-10-25). Besides the four carve-outs:
 - **the doors**, `chat`, `execute` and `tui`, each pointing at the app's own place: a conversation is New session (⌘N), an execute session New execute session (⌥⌘N), and the full-screen shell is the terminal's;
 - **the two-word `agents edit` and `symphonies edit`**, whose `$EDITOR` needs a terminal the console doesn't have.
 
@@ -49,6 +52,6 @@ The console matches them on the command path the binary would run: past every ro
 - every screen's module has its folder;
 - every queued item is a row of the GUI backlog's index;
 - the census is pinned;
-- the refusal set is the TUI exec line's, each refusal of a command the binary has and with a reason (`refusalSet`, `refusalLaw`), and the console refuses each behind every root option (`ConsoleSafetyTests`).
+- the refusal set is the TUI exec line's, each refusal of a command the binary has and with a reason (`refusalSet`, `refusalLaw`) -- since 5a read from `tui_parity.cpp`'s `kRefusals` as a set too (`refusalSetIsTheExecLines`) -- and the console refuses each behind every root option (`ConsoleSafetyTests`).
 
 The GUI's CLAUDE.md checklist carries the rule: a change that adds or removes a CLI command classifies it here in the same change.

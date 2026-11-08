@@ -48,6 +48,7 @@ public struct SettingsView: View {
                     case .backends: BackendsPane(model: model)
                     case .media: MediaPane(model: model)
                     case .permissions: PermissionsPane(model: model)
+                    case .xcode: XcodePane(xcode: model.xcode)
                     }
                 }
                 .padding(Spacing.xl)

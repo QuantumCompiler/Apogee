@@ -2236,6 +2236,23 @@ a{color:inherit}a:hover{color:inherit}
 </div>
 </sc-if>
 
+<sc-if value="{{set.isXcode}}">
+<p style="margin: 16px 0 6px; font-size: var(--t-body); color: var(--text-secondary)">Two routes join Apogee and Xcode, each in apogee’s own words. The app writes nothing into Xcode: you add Apogee in Xcode’s own sheet.</p>
+<h3 class="lbl" style="margin: 18px 0 0; padding-bottom: 6px; border-bottom: 1px solid var(--line-border)">WHAT CHECK SAYS OF XCODE</h3>
+<sc-for list="{{set.xcodeRows}}" as="xr"><div style="display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line-border)"><span aria-hidden="true" style="color: {{xr.markColor}}">{{xr.mark}}</span><span style="font-size: var(--t-small); overflow-wrap: anywhere">{{xr.text}}</span></div></sc-for>
+<h3 class="lbl" style="margin: 24px 0 0; padding-bottom: 6px; border-bottom: 1px solid var(--line-border)">LET APOGEE USE XCODE’S TOOLS</h3>
+<p style="margin: 10px 0 0; font-size: var(--t-small); color: var(--text-secondary)">{{set.xcodeDesc}}</p>
+<p style="margin: 8px 0 0; font-size: var(--t-body); color: {{set.xcodeStateColor}}">{{set.xcodeState}}</p>
+<p style="margin: 8px 0 0; font-size: var(--t-meta); color: var(--text-secondary)">{{set.xcodeNote}}</p>
+<sc-if value="{{set.xcodeCanRegister}}"><p style="margin: 8px 0 0; font-size: var(--t-meta); color: var(--text-tertiary)">Register writes Apogee’s config and connects to nothing: Xcode is first reached when a session starts the server, and asks you then.</p><div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px"><button type="button" class="btn" onClick="{{set.xcodeRegister}}">Register</button><span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">apogee mcp create xcode --from xcode</span></div></sc-if>
+<sc-if value="{{set.xcodeRegistered}}"><div style="margin-top: 10px"><button type="button" class="btn-g" onClick="{{set.xcodeAskRemove}}">Remove…</button></div></sc-if>
+<sc-if value="{{set.xcodeHasSaid}}"><div style="margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line-border); border-radius: 6px"><div style="display: flex; align-items: baseline; gap: 8px"><span style="flex: 1 1 auto; font-size: var(--t-small); font-weight: 600">{{set.xcodeSaidTitle}}</span><button type="button" class="btn-g" onClick="{{set.xcodeDismiss}}" style="height: 24px; font-size: var(--t-small)">Dismiss</button></div><div class="mono" style="margin-top: 6px; font-size: var(--t-meta); line-height: 1.6; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere">{{set.xcodeSaidText}}</div></div></sc-if>
+<h3 class="lbl" style="margin: 24px 0 0; padding-bottom: 6px; border-bottom: 1px solid var(--line-border)">USE APOGEE AS AN AGENT IN XCODE</h3>
+<p style="margin: 10px 0 6px; font-size: var(--t-small)">{{set.xcodeHeading}}</p>
+<sc-for list="{{set.xcodeFields}}" as="xf"><div style="display: grid; grid-template-columns: 170px minmax(0, 1fr) 64px; gap: 12px; align-items: center; min-height: 34px; padding: 4px 0; border-bottom: 1px solid var(--line-border)"><span style="font-size: var(--t-small); color: var(--text-secondary)">{{xf.label}}</span><span class="mono" style="font-size: var(--t-meta); color: {{xf.valueColor}}; overflow-wrap: anywhere">{{xf.value}}</span><sc-if value="{{xf.canCopy}}"><button type="button" class="btn-g" onClick="{{xf.copy}}" aria-label="{{xf.aria}}" style="height: 24px; font-size: var(--t-small)">Copy</button></sc-if></div></sc-for>
+<p style="margin: 10px 0 0; font-size: var(--t-meta); color: var(--text-secondary)">{{set.xcodeApproval}}</p>
+</sc-if>
+
 </div>
 </div>
 </div>
@@ -2435,7 +2452,7 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{ui.toastOn}}"><div role="status" style="position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 80; max-width: calc(100% - 48px); padding: 9px 16px; border-radius: 8px; background: var(--text-primary); color: var(--surface-window); font-size: var(--t-small); box-shadow: 0 8px 24px rgba(0,0,0,.3)">{{ui.toastText}}</div></sc-if>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","chat:play","chat:suite","monitor","console","knowledge","knowledge:collections","graph:prose","training","training:datasets","training:pipelines","training:cycle","library","library:symphonies","library:mcp","review","review:post","review:targets","review:skills","models","models:downloads","models:store","models:convert","models:register","models:roles","models:delete","download","suites","tasks","newtask","newtask:recipe","execute","graph","video","video:run","video:install","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions"],"default":"chat"},"still":{"editor":"boolean","default":false},"apogee":{"editor":"enum","options":["installed","missing","config-typo"],"default":"installed"},"$preview":{"width":1440,"height":900}}'>
+<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","chat:play","chat:suite","monitor","console","knowledge","knowledge:collections","graph:prose","training","training:datasets","training:pipelines","training:cycle","library","library:symphonies","library:mcp","review","review:post","review:targets","review:skills","models","models:downloads","models:store","models:convert","models:register","models:roles","models:delete","download","suites","tasks","newtask","newtask:recipe","execute","graph","video","video:run","video:install","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions","settings:xcode"],"default":"chat"},"still":{"editor":"boolean","default":false},"apogee":{"editor":"enum","options":["installed","missing","config-typo"],"default":"installed"},"$preview":{"width":1440,"height":900}}'>
 class Component extends DCLogic {
   constructor(props) {
     super(props);
@@ -2451,6 +2468,8 @@ class Component extends DCLogic {
       tr: { tab: 'runs', sel: '20261021-051826', regime: 'foundation', dataset: 'heat-notes', running: false },
       confirm: null,
       settingsPane: 'general',
+      xcodeReg: false,
+      xcodeSaid: null,
       menu: null,
       menuIdx: 0,
       menuDismissed: false,
@@ -5365,6 +5384,11 @@ class Component extends DCLogic {
       const pf = s.confirm.form;
       cf = Object.assign(cf, { title: 'That didn\'t work', body: s.confirm.refusal, confirmLabel: 'Change the promotion…', cancelLabel: 'OK', runBg: '', runColor: '', run: () => this.setState({ confirm: null, gs: pf }) });
     }
+    if (s.confirm && s.confirm.kind === 'xcodeRemove') {
+      /* Settings › Xcode (5a): asked first, then config delete-mcp-server
+         xcode, read back by config get (xcode-config-delete.txt). */
+      cf = Object.assign(cf, { title: 'Remove Xcode\'s tools from Apogee?', body: 'apogee config delete-mcp-server xcode -- its config entry goes; Xcode is left as it is.', confirmLabel: 'Remove', run: () => this.say('removed MCP server \'xcode\' from /Users/someone/.apogee-dev/config/config.json', { confirm: null, xcodeReg: false, xcodeSaid: { title: 'Removed from Apogee\'s agents', lines: ['removed MCP server \'xcode\' from /Users/someone/.apogee-dev/config/config.json'] } }) });
+    }
     if (s.confirm && s.confirm.kind === 'mcpRemove') {
       /* The app's 4k: asked first, then config delete-mcp-server, read back. */
       const nm = s.confirm.name;
@@ -5481,8 +5505,25 @@ class Component extends DCLogic {
       const ct = consented[id];
       return backendRow({ isApi: true, name: name, detail: detail, hasConsent: !!ct, backend: ct ? ct[0] : '', consent: ct ? (ct[1].length ? 'Vendor-run tools consented: ' + ct[1].join(', ') + ' -- the vendor runs them under your key' : 'Vendor-run tools: none consented') : '', consentColor: ct && ct[1].length ? 'var(--model-api)' : 'var(--text-tertiary)', status: set ? 'key set' : 'not set', statusColor: set ? 'var(--model-api)' : 'var(--text-tertiary)', editing: s.keyEdit === id, placeholder: placeholder, saveKey: () => this.say(name + ' key saved. It won’t be shown again.', { keys: Object.assign({}, this.state.keys, { [id]: true }), keyEdit: null, keyDraft: '' }), actions: set ? [{ label: 'Replace key…', cls: 'btn', run: () => this.setState({ keyEdit: id, keyDraft: '' }) }, { label: 'Remove', cls: 'btn-g', run: () => this.say(name + ' key removed', { keys: Object.assign({}, this.state.keys, { [id]: false }) }) }] : [{ label: 'Add key…', cls: 'btn', run: () => this.setState({ keyEdit: id, keyDraft: '' }) }] });
     };
-    const panes = [['general', 'General'], ['appearance', 'Appearance'], ['roles', 'Models & roles'], ['media', 'Video & voice'], ['backends', 'Backends & keys'], ['permissions', 'Permissions'], ['web', 'Web access'], ['memory', 'Memory'], ['keyboard', 'Keyboard']];
+    const panes = [['general', 'General'], ['appearance', 'Appearance'], ['roles', 'Models & roles'], ['media', 'Video & voice'], ['backends', 'Backends & keys'], ['permissions', 'Permissions'], ['web', 'Web access'], ['memory', 'Memory'], ['keyboard', 'Keyboard'], ['xcode', 'Xcode']];
     const pane = s.settingsPane;
+    /* Settings › Xcode (the app's 5a), from apogee-dev's recordings over a
+       sandbox home on a Mac with Xcode 27.1, the home /Users/someone
+       (lib/src/darwin/tests/business/reads/Fixtures/xcode-*): check's Xcode
+       section, every row, ok rows included; the xcode preset of mcp presets,
+       registered by its own line and read back by config get
+       mcp_servers.xcode; the fields acp registration prints. Nothing here
+       reaches Xcode: the pane never runs mcp list or mcp test, which connect
+       and would raise Xcode's approval. */
+    const xcodeApproval = 'Xcode approves an agent by its code signature and its binary\'s hash. Apogee\'s macOS builds are ad-hoc signed, so Xcode asks again after every install or update.';
+    const xcodeRows = [
+      ['xcode', 'Xcode 27.1 (27A9275), /Applications/Xcode.app/Contents/Developer'],
+      ['mcpbridge', 'Xcode\'s tools for Apogee\'s agents: ' + (s.xcodeReg ? 'registered as \'xcode\'' : 'apogee mcp create xcode --from xcode') + ' -- they answer while Xcode runs with the project open and its Settings › Intelligence › Model Context Protocol › "Allow External Agents to Use Xcode Tools" is on, which check cannot see'],
+      ['acp agents', 'Xcode 27.1 hosts ACP agents -- add Apogee in Settings › Intelligence › Agents › Add an Agent: apogee acp registration prints the fields'],
+      ['approval', xcodeApproval]
+    ];
+    const xcodeCreated = ['registered MCP server \'xcode\'', '  command: /usr/bin/xcrun', '  config:  /Users/someone/.apogee-dev/config/config.json', '', 'Test it:  apogee mcp test xcode XcodeListWindows \'{}\'', 'Xcode answers only while it runs with your project open, and with its Settings › Intelligence › Model Context Protocol › "Allow External Agents to Use Xcode Tools" on. The first connection asks you in Xcode to allow this apogee: Xcode approves an agent by its code signature and its binary\'s hash, and Apogee\'s macOS builds are ad-hoc signed, so Xcode asks again after every install or update.', 'It connects at the start of the next tool-using run.'];
+    const xcodeFields = [['Name', 'Apogee (dev)'], ['Executable', '/Users/someone/.local/bin/apogee-dev'], ['Interpreter', null], ['Arguments', 'acp'], ['Environment Variables', 'APOGEE_HOME=/Users/someone/.apogee-dev'], ['', 'PATH=/Users/someone/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin']];
     const toolPolicy = (name, desc) => ({ name: name, desc: desc, seg: [['ask', 'Ask'], ['allow', 'Allow'], ['deny', 'Deny']].map((o) => seg(s.policies[name], o[0], o[1], () => {
       const st = this.state;
       const patch = { policies: Object.assign({}, st.policies, { [name]: o[0] }) };
@@ -5495,7 +5536,23 @@ class Component extends DCLogic {
       panes: panes.map((p) => ({ label: p[1], current: pane === p[0], bg: pane === p[0] ? 'var(--surface-selection)' : '', color: pane === p[0] ? 'var(--text-primary)' : 'var(--text-secondary)', weight: pane === p[0] ? 500 : 400, pick: () => this.setState({ settingsPane: p[0] }) })),
       title: panes.find((p) => p[0] === pane)[1],
       close: () => this.setState({ overlay: null, keyEdit: null }),
-      isGeneral: pane === 'general', isAppearance: pane === 'appearance', isRoles: pane === 'roles', isBackends: pane === 'backends', isPermissions: pane === 'permissions', isWeb: pane === 'web', isMemory: pane === 'memory', isKeyboard: pane === 'keyboard', isMedia: pane === 'media',
+      isGeneral: pane === 'general', isAppearance: pane === 'appearance', isRoles: pane === 'roles', isBackends: pane === 'backends', isPermissions: pane === 'permissions', isWeb: pane === 'web', isMemory: pane === 'memory', isKeyboard: pane === 'keyboard', isMedia: pane === 'media', isXcode: pane === 'xcode',
+      xcodeRows: xcodeRows.map((r) => ({ text: r[0] + ': ' + r[1], mark: '✓', markColor: 'var(--status-accent)' })),
+      xcodeDesc: 'Xcode\'s own tools for any model: build, run, tests, previews, documentation search, the issue navigator, file reads and writes -- served by Xcode 26.3 or later through xcrun mcpbridge',
+      xcodeState: s.xcodeReg ? 'In Apogee\'s config as xcode: /usr/bin/xcrun' : 'Not in Apogee\'s config.',
+      xcodeStateColor: s.xcodeReg ? 'var(--text-primary)' : 'var(--text-secondary)',
+      xcodeNote: 'Xcode answers only while it runs with your project open, and with its Settings › Intelligence › Model Context Protocol › "Allow External Agents to Use Xcode Tools" on. The first connection asks you in Xcode to allow this apogee: Xcode approves an agent by its code signature and its binary\'s hash, and Apogee\'s macOS builds are ad-hoc signed, so Xcode asks again after every install or update.',
+      xcodeCanRegister: !s.xcodeReg,
+      xcodeRegistered: s.xcodeReg,
+      xcodeRegister: () => this.say('registered MCP server \'xcode\'', { xcodeReg: true, xcodeSaid: { title: 'Registered for Apogee\'s agents', lines: xcodeCreated } }),
+      xcodeAskRemove: () => this.setState({ confirm: { kind: 'xcodeRemove' } }),
+      xcodeHasSaid: !!s.xcodeSaid,
+      xcodeSaidTitle: s.xcodeSaid ? s.xcodeSaid.title : '',
+      xcodeSaidText: s.xcodeSaid ? s.xcodeSaid.lines.join('\n') : '',
+      xcodeDismiss: () => this.setState({ xcodeSaid: null }),
+      xcodeHeading: 'Add Apogee (dev) to Xcode 26.6 or later: Settings › Intelligence › Agents › Add an Agent',
+      xcodeFields: xcodeFields.map((f) => ({ label: f[0], value: f[1] === null ? '(leave empty)' : f[1], canCopy: f[1] !== null, valueColor: f[1] === null ? 'var(--text-tertiary)' : 'var(--text-primary)', copy: () => this.say('Copied to the clipboard'), aria: 'Copy ' + (f[0] || 'the next entry') })),
+      xcodeApproval: xcodeApproval,
       defaultVideo: s.defaultVideo || '',
       videoOpts: models.filter((mm) => mm.media === 'pipeline').map((mm) => ({ value: mm.id, label: mm.name })).concat([{ value: '', label: 'None: each clip names its pipeline' }]),
       onDefaultVideo: (e) => { const v = e.target.value; this.say(v ? find(v).name + ' is now the default for video' : 'No default pipeline: each clip names its own', { defaultVideo: v || null }); },

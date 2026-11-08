@@ -34,7 +34,15 @@ struct ConsoleSafetyTests {
         ("tui", "the app is the full-screen shell's counterpart already -- run it at a prompt for the terminal's own"),
         ("agents edit reviewer", "opens your $EDITOR, which needs a terminal the console doesn't have -- run it at a prompt"),
         ("symphonies edit digest", "opens your $EDITOR, which needs a terminal the console doesn't have -- run it at a prompt"),
+        // GUI 5a: the exec line refuses `acp` by its prefix (the CLI's 56a),
+        // `acp registration` (56d) with it.
+        ("acp", Self.acp),
+        ("acp --allow-bypass", Self.acp),
+        ("acp registration", Self.acp),
+        ("acp registration --output-format json", Self.acp),
     ]
+
+    static let acp = "speaks the Agent Client Protocol to the agent host that starts it over its own stdio, such as Xcode, and the app never starts it -- the fields Xcode's Add an Agent takes are in Settings › Xcode, and print at a prompt (apogee acp registration)"
 
     /// Every root option the binary takes before its command (`apogee
     /// --help`): those without a value, the two valued ones with their value
@@ -91,6 +99,9 @@ struct ConsoleSafetyTests {
             "execute-nothing",
             "--config serve",
             "--config=reset models list",
+            "--config acp",
+            "mcp presets",
+            "config get mcp_servers.xcode",
         ]
         let jobs = lines.map { _ in ScriptedJob() }
         let (model, starter) = console(ScriptedRunner(), jobs)

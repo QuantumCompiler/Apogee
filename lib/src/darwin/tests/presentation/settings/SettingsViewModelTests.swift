@@ -167,7 +167,8 @@ struct SettingsViewModelTests {
 
     @Test("the keyboard list is the design's own")
     func keyboard() {
-        #expect(SettingsViewModel.Pane.allCases.map(\.title) == ["General", "Appearance", "Backends & keys", "Video & voice", "Permissions"])
+        #expect(SettingsViewModel.Pane.allCases.map(\.title) == ["General", "Appearance", "Backends & keys", "Video & voice", "Permissions", "Xcode"])
+        #expect(SettingsViewModel.Pane.xcode.symbol == "hammer", "listed last, always (GUI 5a)")
     }
 
     @Test("a key provider reads as its company writes it; any other as the CLI says it")

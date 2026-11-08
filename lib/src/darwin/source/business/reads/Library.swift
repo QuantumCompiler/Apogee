@@ -77,14 +77,58 @@ public struct MCPPreset: Sendable, Equatable, Identifiable {
     /// Why it is not registered into Apogee (it is for another host), in the
     /// CLI's words.
     public let refusal: String?
+    /// Whether this machine can run it, as the binary resolved it here (the
+    /// CLI's 47c); `nil` where the row doesn't say.
+    public var runnable: Bool?
+    /// What this machine lacks to run it, in the CLI's words, where it can't.
+    public var missing: String?
+    /// The command that provides what is missing, where the CLI names one.
+    public var remedy: String?
+    /// What it needs done outside Apogee, in the words the listing prints
+    /// under it (the CLI's 56d: Xcode's switch, the open project, Xcode's
+    /// approval); present only on a row that has one.
+    public var note: String?
     public var id: String { name }
+
+    public init(
+        name: String, description: String, provides: String, register: String?, refusal: String?,
+        runnable: Bool? = nil, missing: String? = nil, remedy: String? = nil, note: String? = nil
+    ) {
+        self.name = name
+        self.description = description
+        self.provides = provides
+        self.register = register
+        self.refusal = refusal
+        self.runnable = runnable
+        self.missing = missing
+        self.remedy = remedy
+        self.note = note
+    }
+
+    /// The server name its own `register` line gives -- `apogee mcp create
+    /// <server> --from <preset>` (the CLI's `mcp_presets.cpp`) -- never one
+    /// the app makes up; `nil` where the row has no such line.
+    public var serverName: String? {
+        let words = (register ?? "").split(separator: " ").map(String.init)
+        guard words.count == 6, words[1] == "mcp", words[2] == "create", words[4] == "--from", words[5] == name else { return nil }
+        return words[3]
+    }
+
+    /// What registering it runs, as a person types it -- its line's `mcp
+    /// create <server> --from <preset>`, built as Library's Register builds
+    /// it; `nil` where the row has no such line.
+    public var registration: [String]? {
+        serverName.map { ["mcp", "create", $0, "--from", name] }
+    }
 
     public static func list(from document: ReadDocument) -> [MCPPreset] {
         (document.entries ?? []).compactMap { v in
             v["name"]?.stringValue.map {
                 MCPPreset(
                     name: $0, description: v["description"]?.stringValue ?? "", provides: v["provides"]?.stringValue ?? "",
-                    register: v["register"]?.stringValue, refusal: v["refusal"]?.stringValue)
+                    register: v["register"]?.stringValue, refusal: v["refusal"]?.stringValue,
+                    runnable: v["runnable"]?.boolValue, missing: v["missing"]?.stringValue, remedy: v["remedy"]?.stringValue,
+                    note: v["note"]?.stringValue)
             }
         }
     }

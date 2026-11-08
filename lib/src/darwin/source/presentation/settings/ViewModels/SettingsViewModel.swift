@@ -6,7 +6,8 @@ import InfrastructureProcess
 import Observation
 
 /// Settings: General, Appearance, Backends & keys, Video & voice,
-/// Permissions -- each over the verbs a person types, each change read back.
+/// Permissions, Xcode -- each over the verbs a person types, each change read
+/// back.
 ///
 /// SwiftUI-free (ADR 0002). **A key never touches the app's state**: it is
 /// written to `auth add`'s standard input and dropped -- no property, no
@@ -20,6 +21,10 @@ public final class SettingsViewModel {
         case backends
         case media
         case permissions
+        /// Apogee and Xcode (GUI 5a): `check`'s Xcode rows, Xcode's tools for
+        /// Apogee's agents, and the fields Xcode's Add an Agent takes. Always
+        /// listed, last: how a person finds the route.
+        case xcode
 
         public var id: String { rawValue }
 
@@ -30,6 +35,7 @@ public final class SettingsViewModel {
             case .backends: "Backends & keys"
             case .media: "Video & voice"
             case .permissions: "Permissions"
+            case .xcode: "Xcode"
             }
         }
 
@@ -40,6 +46,7 @@ public final class SettingsViewModel {
             case .backends: "key"
             case .media: "film"
             case .permissions: "hand.raised"
+            case .xcode: "hammer"
             }
         }
     }
@@ -147,6 +154,9 @@ public final class SettingsViewModel {
     public private(set) var allowedHostsUnread: String?
     public private(set) var checks: [CheckRow] = []
     public private(set) var checkSummary: String?
+    /// Whether `check` printed its document yet: until it has, nothing is
+    /// said of what it holds (the Xcode pane's rows among it).
+    public private(set) var checkRead = false
     /// What Health draws of `check`, in order: what fails, what to look at,
     /// then each row skipped with what brings it -- an optional ability not
     /// set up, its remedy the command (GUI 4f; the captions' `ffmpeg-full`
@@ -190,6 +200,9 @@ public final class SettingsViewModel {
     public var vocabulary: @MainActor () -> String? = { nil }
 
     public let theme: ThemeSettings
+    /// The Xcode pane's reads and changes (GUI 5a), its `check` rows this
+    /// view-model's own.
+    public let xcode: XcodeSettings
     private let runner: any CommandRunning
     private let starter: any JobStarting
     private let preferences: Preferences
@@ -209,7 +222,11 @@ public final class SettingsViewModel {
         self.starter = starter
         self.preferences = preferences
         theme = ThemeSettings(preferences: preferences)
+        xcode = XcodeSettings(runner: runner)
         binaryOverride = preferences.binaryOverride?.path
+        xcode.checkRows = { [weak self] in self?.checkRead == true ? self?.checks : nil }
+        xcode.rereadCheck = { [weak self] in await self?.rereadCheck() }
+        xcode.say = { [weak self] in self?.say?($0) }
     }
 
     /// The binary this launch found, and -- when discovery passed the
@@ -219,6 +236,7 @@ public final class SettingsViewModel {
         self.binary = binary?.path
         self.version = version
         self.skippedOverride = skippedOverride
+        xcode.use(binary: binary)
         await refresh()
     }
 
@@ -433,7 +451,15 @@ public final class SettingsViewModel {
             let failures = document.value["failures"]?.intValue ?? 0
             let warnings = document.value["warnings"]?.intValue ?? 0
             checkSummary = failures == 0 && warnings == 0 ? "Everything checks out" : "\(failures) failing, \(warnings) to look at"
+            checkRead = true
         }
+    }
+
+    /// `check` alone, again: after the Xcode pane's change, so its rows and
+    /// Health follow the config -- one read, not every pane's.
+    func rereadCheck() async {
+        guard let binary = binaryURL else { return }
+        await readCheck(binary)
     }
 
     /// A config value, or `nil` when the config does not set it (the default).

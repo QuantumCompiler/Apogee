@@ -1,0 +1,1 @@
+removed MCP server 'xcode' from /Users/someone/.apogee-dev/config/config.json

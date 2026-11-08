@@ -19,18 +19,28 @@ struct PreviewRunner: CommandRunning {
     let refused: [[String]]
     /// Commands the binary refused in its recorded words, before any answer.
     let refusals: [([String], String)]
+    /// Reads the binary refused in its recorded words: an older binary's
+    /// refusal of a verb it lacks, exiting 109 as its parser does for words
+    /// it doesn't take.
+    let readRefusals: [([String], String)]
 
     init(
         reads: [([String], String)], commands: [([String], String)] = [], refused: [[String]] = [],
-        refusals: [([String], String)] = []
+        refusals: [([String], String)] = [], readRefusals: [([String], String)] = []
     ) {
         self.reads = reads
         self.commands = commands
         self.refused = refused
         self.refusals = refusals
+        self.readRefusals = readRefusals
     }
 
     func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
+        if let stderr = Self.answer(arguments, readRefusals) {
+            var tail = BoundedTail()
+            tail.append(Data(stderr.utf8))
+            return .failed(exit: ChildExit(reason: .exited, status: 109), stderrTail: tail)
+        }
         guard let text = Self.answer(arguments, reads) else {
             return .couldNotStart("no preview document for apogee \(arguments.joined(separator: " "))")
         }

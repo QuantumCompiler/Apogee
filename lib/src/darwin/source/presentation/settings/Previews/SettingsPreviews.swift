@@ -93,6 +93,56 @@ enum SettingsPreview {
             once: ["providers", "register", "codex"])
     }
 
+    /// GUI 5a's sandbox, recorded from the branch's `apogee-dev` on a Mac with
+    /// Xcode 27.1 (the home written `/Users/someone`): `check` with its
+    /// Xcode section, `mcp presets` with the `xcode` row, `acp
+    /// registration`'s fields, and `config get mcp_servers.xcode` --
+    /// `registered`, its command; else the CLI's `no such config key`.
+    /// `check` and `presets` stand for the other recordings: Xcode absent
+    /// (a stub `xcode-select` that fails), `xcrun` off `PATH`.
+    static func xcodeRunner(
+        registered: Bool = false, check: String? = nil, presets: String = SettingsDocuments.xcodeMCPPresets
+    ) -> PreviewRunner {
+        PreviewRunner(
+            reads: [
+                (["models", "list"], SettingsDocuments.modelsList),
+                (["auth", "list"], authList),
+                (["providers", "scan"], providersScan),
+                (["check"], check ?? (registered ? SettingsDocuments.xcodeCheckRegistered : SettingsDocuments.xcodeCheck)),
+                (["mcp", "presets"], presets),
+                (["acp", "registration"], SettingsDocuments.xcodeACPRegistration),
+            ],
+            commands: [
+                (["config", "get", "permissions"], permissions),
+                (["mcp", "create", "xcode", "--from", "xcode"], SettingsDocuments.xcodeMCPCreate),
+            ] + (registered ? [(["config", "get", "mcp_servers.xcode"], SettingsDocuments.xcodeConfigGet)] : []),
+            refused: [["config", "get"]],
+            refusals: registered ? [] : [(["config", "get", "mcp_servers.xcode"], SettingsDocuments.xcodeConfigGetNone)])
+    }
+
+    /// A binary before the CLI's 56d, in its recordings: `check` with no
+    /// Xcode section (GUI 4f's), two presets and no `xcode` (2e's), and `acp
+    /// registration` refused in its parser's words (the build tree's release
+    /// binary of 2026-10-26, GUI 5a's).
+    static let xcodeOlderRunner = PreviewRunner(
+        reads: [
+            (["models", "list"], SettingsDocuments.modelsList),
+            (["auth", "list"], authList),
+            (["providers", "scan"], providersScan),
+            (["check"], SettingsDocuments.checkCaptionsSkipped),
+            (["mcp", "presets"], SettingsDocuments.mcpPresetsOlder),
+        ],
+        commands: [(["config", "get", "permissions"], permissions)],
+        refused: [["config", "get"]],
+        readRefusals: [(["acp", "registration"], SettingsDocuments.xcodeACPRegistrationOlder)])
+
+    /// The Xcode pane's home as Register changes it: unregistered until `mcp
+    /// create` is asked, registered -- `check`'s bridge row naming it -- from
+    /// then on.
+    static func xcodeRegistering() -> PreviewChanging {
+        PreviewChanging(xcodeRunner(), after: xcodeRunner(registered: true), once: ["mcp", "create"])
+    }
+
     /// Reads the panes, then registers `provider` as its row's Register…
     /// does, once the person said yes.
     static func register(_ model: SettingsViewModel, _ provider: String) async {
