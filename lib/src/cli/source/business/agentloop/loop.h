@@ -95,8 +95,16 @@ struct Options {
     /// Injected into each outgoing request at `transient_at`, never appended to
     /// history. The seam RAG will ride; see splice_transient. The tools'
     /// environment note (`ToolRegistry::environment`) is put ahead of it.
-    std::vector<harness::ChatMessage> transient_prefix;
+    /// Each message says what it is (57q), so a trim names what it cut.
+    std::vector<Injected> transient_prefix;
     std::size_t transient_at = 0;
+
+    /// Where in `history` the turn this run continues starts (57q): a
+    /// corrective schema turn continues the turn it corrects, so the results
+    /// that answer was built on are this turn's -- sent whole unless the
+    /// window overflows -- not an earlier turn's stubs. Unset: the last user
+    /// message, a new turn.
+    std::optional<std::size_t> turn_start;
 
     /// Whether the final answer is delivered live through the Reporter.
     /// Status reporting happens either way.

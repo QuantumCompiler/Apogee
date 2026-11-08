@@ -3,10 +3,12 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <set>
 #include <utility>
 
 #include "agentloop/question.h"
 #include "harness/roles.h"
+#include "logger/operational.h"
 #include "logger/session.h"
 
 namespace apogee::agentloop {
@@ -14,10 +16,32 @@ namespace {
 
 constexpr std::size_t kCharactersPerToken = 4;
 
-/// Why a finished turn's result is a stub, and why an overflowing turn's is.
+/// Why a finished turn's result is a stub, and why an overflowing turn's is
+/// -- with nothing to call it again by in a request that offers no tools
+/// (57q): an objection's, a final pass's.
 constexpr std::string_view kFinishedWhy = "not kept after its turn -- call it again if you need it";
 constexpr std::string_view kOverflowWhy =
     "not sent: the context window was full -- call it again, narrower, if you need it";
+constexpr std::string_view kOverflowNoToolsWhy = "not sent: the context window was full";
+
+/// What a trim calls an injected source (57q).
+[[nodiscard]] std::string_view source_name(InjectedSource source) noexcept {
+    switch (source) {
+        case InjectedSource::Retrieval:
+            return "the retrieved context";
+        case InjectedSource::Recall:
+            return "the recalled sessions";
+        case InjectedSource::Plan:
+            return "the plan-mode note";
+        case InjectedSource::Review:
+            return "the review note";
+        case InjectedSource::Standing:
+            return "the standing context";
+        case InjectedSource::Delegate:
+            return "the delegate's notes";
+    }
+    return "the injected context";
+}
 
 /// `bytes` as "60 KB" (rounded up) or "N bytes" below one.
 [[nodiscard]] std::string size_of(std::size_t bytes) {
@@ -124,32 +148,40 @@ public:
     Assembler(const TurnBudget& budget, harness::ChatRequest shape,
               const std::vector<harness::ChatMessage>& history,
               const std::vector<harness::ChatMessage>& pinned,
-              const std::vector<harness::ChatMessage>& injected, std::size_t at,
-              std::size_t turn_start, const std::vector<InlineAttachment>& inlined)
+              const std::vector<Injected>& injected, std::size_t at, std::size_t turn_start,
+              const std::vector<InlineAttachment>& inlined)
         : budget_{budget},
           request_{std::move(shape)},
           pinned_{pinned},
           extra_{injected},
           available_{budget.budget.available()} {
-        Stubbed stubbed = stub_tool_results(history, turn_start);
+        // Every call sent with its results (57q): a history an older
+        // compaction left holding a call without them is sent without the
+        // call, and every index into it moves with what was left out.
+        Paired paired = pair_tool_calls(history);
+        const auto moved = [&paired](std::size_t index) {
+            return paired.position[std::min(index, paired.position.size() - 1)];
+        };
+        Stubbed stubbed = stub_tool_results(paired.messages, moved(turn_start));
         out_.stubs = stubbed.stubs;
         out_.stubbed_bytes = stubbed.bytes;
         sent_ = std::move(stubbed.messages);
-        turn_ = std::min(turn_start, sent_.size());
-        position_ = std::min(at, sent_.size());
+        turn_ = std::min(moved(turn_start), sent_.size());
+        position_ = std::min(moved(at), sent_.size());
         for (const InlineAttachment& attachment : inlined) {
-            if (attachment.message >= sent_.size() ||
-                sent_[attachment.message].role != harness::Role::User) {
+            const std::size_t at_message =
+                attachment.message < history.size() ? moved(attachment.message) : sent_.size();
+            if (at_message >= sent_.size() || sent_[at_message].role != harness::Role::User) {
                 out_.inline_dropped.push_back(attachment.name);
                 continue;  // its message is gone: compacted, or never sent
             }
-            harness::ChatMessage& message = sent_[attachment.message];
+            harness::ChatMessage& message = sent_[at_message];
             // Every attachment on one message remembers the message as it
             // was before the first of them, so taking one off rebuilds it
             // from the rest (26q: a folder's map rides beside its text).
-            const auto earlier = std::ranges::find(anchors_, attachment.message, &Anchor::position);
+            const auto earlier = std::ranges::find(anchors_, at_message, &Anchor::position);
             anchors_.push_back(
-                Anchor{.position = attachment.message,
+                Anchor{.position = at_message,
                        .name = attachment.name,
                        .base = earlier != anchors_.end() ? earlier->base : message.content,
                        .text = attachment.text,
@@ -185,7 +217,9 @@ private:
 
     void build() {
         std::vector<harness::ChatMessage> transient = pinned_;
-        transient.insert(transient.end(), extra_.begin(), extra_.end());
+        for (const Injected& injected : extra_) {
+            transient.push_back(injected.message);
+        }
         out_.messages = splice_transient(sent_, transient, position_);
         out_.transient_start = transient.empty() ? 0 : position_;
         out_.transient_length = transient.size();
@@ -253,11 +287,15 @@ private:
 
     /// This turn's tool results, oldest first: to their share, then to the
     /// newest alone -- what the model asked for last and has not read yet.
+    /// An `ask_user` answer is the user's own words, and never one of them
+    /// (57q), as it is never a finished turn's stub.
     void stub_this_turn() {
+        const auto calls = calls_by_id(sent_);
         std::vector<std::size_t> results;
         for (std::size_t index = turn_; index < sent_.size(); ++index) {
             if (sent_[index].role == harness::Role::Tool &&
-                sent_[index].content.plain_text().size() > kStubbedAbove) {
+                sent_[index].content.plain_text().size() > kStubbedAbove &&
+                !is_answer(sent_[index], calls)) {
                 results.push_back(index);
             }
         }
@@ -280,14 +318,15 @@ private:
         for (const std::size_t index : results) {
             this_turn += tokens_of(index);
         }
-        const auto calls = calls_by_id(sent_);
+        // "Call it again" only where something can be called (57q).
+        const std::string_view why = request_.tools.empty() ? kOverflowNoToolsWhy : kOverflowWhy;
         int stubbed = 0;
         std::size_t next = 0;
         const auto stub_next = [&] {
             this_turn -= tokens_of(results[next]);
             harness::ChatMessage& message = sent_[results[next++]];
             message.content = tool_result_stub(call_for(message, calls),
-                                               message.content.plain_text().size(), kOverflowWhy);
+                                               message.content.plain_text().size(), why);
             ++stubbed;
             rebuild();
         };
@@ -310,19 +349,36 @@ private:
         }
     }
 
-    /// The injected context, from its end, to none.
+    /// The injected context, from its end, to none -- each source cut named
+    /// in the order cut (57q): never "the retrieved context" for a standing
+    /// context or a note, nor a count of messages that names nothing.
     void drop_injected() {
-        int dropped = 0;
+        std::vector<InjectedSource> dropped;
         while (over() && !extra_.empty()) {
+            dropped.push_back(extra_.back().source);
             extra_.pop_back();
-            ++dropped;
             rebuild();
         }
-        if (dropped > 0) {
-            out_.trims.push_back(extra_.empty()
-                                     ? std::string{"the retrieved context not sent"}
-                                     : counted(dropped, "injected message", "injected messages") +
-                                           " not sent");
+        std::vector<InjectedSource> named;
+        for (const InjectedSource source : dropped) {
+            if (std::ranges::find(named, source) == named.end()) {
+                named.push_back(source);
+            }
+        }
+        for (const InjectedSource source : named) {
+            const auto cut = std::ranges::count(dropped, source);
+            const auto kept = std::ranges::count(extra_, source, &Injected::source);
+            std::string phrase{source_name(source)};
+            if (kept > 0) {
+                phrase = "part of " + phrase + " not sent (" + std::to_string(cut) + " of " +
+                         std::to_string(cut + kept) + " messages)";
+            } else {
+                phrase += " not sent";
+                if (cut > 1) {
+                    phrase += " (" + std::to_string(cut) + " messages)";
+                }
+            }
+            out_.trims.push_back(std::move(phrase));
         }
     }
 
@@ -362,7 +418,7 @@ private:
     const TurnBudget& budget_;
     harness::ChatRequest request_;
     const std::vector<harness::ChatMessage>& pinned_;
-    std::vector<harness::ChatMessage> extra_;
+    std::vector<Injected> extra_;
     std::int64_t available_;
     std::vector<harness::ChatMessage> sent_;
     std::size_t turn_ = 0;
@@ -483,6 +539,83 @@ std::size_t current_turn_start(const std::vector<harness::ChatMessage>& messages
     return messages.size();
 }
 
+std::vector<Injected> injected_as(const std::vector<harness::ChatMessage>& messages,
+                                  InjectedSource source) {
+    std::vector<Injected> out;
+    out.reserve(messages.size());
+    for (const harness::ChatMessage& message : messages) {
+        out.push_back(Injected{.message = message, .source = source});
+    }
+    return out;
+}
+
+Paired pair_tool_calls(const std::vector<harness::ChatMessage>& messages) {
+    Paired out;
+    out.position.assign(messages.size() + 1, 0);
+    const auto repaired = [&out](const std::string& what) {
+        logger::log(logger::Level::Warn, "agentloop", what + " -- left out of the request");
+        ++out.repaired;
+    };
+    std::size_t index = 0;
+    while (index < messages.size()) {
+        out.position[index] = out.messages.size();
+        const harness::ChatMessage& message = messages[index];
+        if (message.role == harness::Role::Tool) {
+            // Reached only past every call's run: a result nothing asked for.
+            repaired("a tool result (" + message.tool_call_id + " " + message.name +
+                     ") with no call before it");
+            ++index;
+            continue;
+        }
+        if (message.role != harness::Role::Assistant || message.tool_calls.empty()) {
+            out.messages.push_back(message);
+            ++index;
+            continue;
+        }
+        // The call's results are the tool messages straight after it.
+        std::size_t end = index + 1;
+        std::set<std::string, std::less<>> answered;
+        while (end < messages.size() && messages[end].role == harness::Role::Tool) {
+            answered.insert(messages[end].tool_call_id);
+            ++end;
+        }
+        std::set<std::string, std::less<>> asked;
+        harness::ChatMessage sent = message;
+        std::string unanswered;
+        std::erase_if(sent.tool_calls, [&](const harness::ToolCall& call) {
+            asked.insert(call.id);
+            if (answered.contains(call.id)) {
+                return false;
+            }
+            unanswered += (unanswered.empty() ? "" : ", ") + call.id + " " + call.name;
+            return true;
+        });
+        const std::string text = sent.content.plain_text();
+        const bool said_something =
+            sent.content.is_rich() || text.find_first_not_of(" \t\r\n") != std::string::npos;
+        if (!unanswered.empty()) {
+            repaired("a tool call with no result (" + unanswered + ")" +
+                     (sent.tool_calls.empty() && !said_something ? ", its empty message"
+                                                                 : std::string{}));
+        }
+        if (!sent.tool_calls.empty() || said_something) {
+            out.messages.push_back(std::move(sent));
+        }
+        for (std::size_t result = index + 1; result < end; ++result) {
+            out.position[result] = out.messages.size();
+            if (asked.contains(messages[result].tool_call_id)) {
+                out.messages.push_back(messages[result]);
+            } else {
+                repaired("a tool result (" + messages[result].tool_call_id + " " +
+                         messages[result].name + ") with no call before it");
+            }
+        }
+        index = end;
+    }
+    out.position[messages.size()] = out.messages.size();
+    return out;
+}
+
 std::string tool_result_stub(const std::string& call, std::size_t bytes, std::string_view why) {
     return "[" + call + " returned " + size_of(bytes) + "; " + std::string{why} + ".]";
 }
@@ -511,7 +644,7 @@ Stubbed stub_tool_results(const std::vector<harness::ChatMessage>& messages, std
 Assembly assemble_request(const TurnBudget& budget, const harness::ChatRequest& shape,
                           const std::vector<harness::ChatMessage>& history,
                           const std::vector<harness::ChatMessage>& pinned,
-                          const std::vector<harness::ChatMessage>& injected, std::size_t at,
+                          const std::vector<Injected>& injected, std::size_t at,
                           std::size_t turn_start, const std::vector<InlineAttachment>& inlined) {
     Assembler assembler{budget, shape, history, pinned, injected, at, turn_start, inlined};
     return assembler.assemble();

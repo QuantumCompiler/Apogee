@@ -502,7 +502,8 @@ TEST_CASE("transient content reaches the request but never history", "[agentloop
 
     Options options;
     options.model = "mock";
-    options.transient_prefix = {ChatMessage::system("INJECTED RAG CONTEXT")};
+    options.transient_prefix = {{.message = ChatMessage::system("INJECTED RAG CONTEXT"),
+                                 .source = apogee::agentloop::InjectedSource::Retrieval}};
     options.transient_at = 0;
 
     (void)apogee::agentloop::run(*f.harness, f.history, options);
@@ -916,13 +917,15 @@ backends:
     const std::vector<ChatMessage> before = history;
     Options options;
     options.model = "cloud";
-    options.transient_prefix = {ChatMessage::system("retrieved: four excerpts")};
+    const std::vector<ChatMessage> excerpts{ChatMessage::system("retrieved: four excerpts")};
+    options.transient_prefix =
+        apogee::agentloop::injected_as(excerpts, apogee::agentloop::InjectedSource::Retrieval);
     NoticeReporter reporter;
     (void)apogee::agentloop::run(harness, history, options, reporter);
 
     const apogee::harness::ChatRequest& sent = provider->requests().front();
     const std::vector<ChatMessage> expected =
-        apogee::agentloop::splice_transient(before, options.transient_prefix, 0);
+        apogee::agentloop::splice_transient(before, excerpts, 0);
     REQUIRE(sent.messages.size() == expected.size());
     for (std::size_t index = 0; index < expected.size(); ++index) {
         CHECK(sent.messages[index].content.plain_text() == expected[index].content.plain_text());
@@ -1236,4 +1239,47 @@ TEST_CASE("a tool the vendor ran is said as a tool line, the answer around it wh
           std::vector<std::string>{"answer_start", "answer_end",
                                    R"(tool_status:web_search, run by Anthropic: "apogee")",
                                    "answer_start", "answer_end"});
+}
+
+TEST_CASE("a run continuing a turn sends that turn's results whole, and a broken history whole",
+          "[agentloop][loop][budget][57q]") {
+    const std::string big(4000, 'x');
+    ChatMessage reading = ChatMessage::assistant("");
+    reading.tool_calls = {ToolCall{"r", "read_file", "{}"}};
+    apogee::harness::ToolResult read;
+    read.tool_call_id = "r";
+    read.name = "read_file";
+    read.content = big;
+    const auto sent_whole = [&big](const apogee::harness::ChatRequest& request) {
+        return std::ranges::any_of(request.messages, [&big](const ChatMessage& message) {
+            return message.content.plain_text() == big;
+        });
+    };
+
+    // A follow-up in the same turn -- a correction -- names where it started.
+    Fixture f = make_fixture({text_turn("again")});
+    f.history = {ChatMessage::user("read it"), reading, ChatMessage::from_tool_result(read),
+                 ChatMessage::assistant("not quite"), ChatMessage::user("fix it")};
+    Options continuing;
+    continuing.model = "mock";
+    continuing.turn_start = 0;
+    (void)apogee::agentloop::run(*f.harness, f.history, continuing);
+    CHECK(sent_whole(f.provider->requests().back()));
+    // Unset, the turn is the last question's, and the read a finished turn's.
+    f.history.push_back(ChatMessage::user("and now?"));
+    Options fresh;
+    fresh.model = "mock";
+    (void)apogee::agentloop::run(*f.harness, f.history, fresh);
+    CHECK_FALSE(sent_whole(f.provider->requests().back()));
+
+    // A history an older compaction left holding a call and no result is
+    // answered, the call never sent -- and never taken out of history.
+    Fixture stuck = make_fixture({text_turn("answered")});
+    stuck.history = {ChatMessage::system("a summary"), reading, ChatMessage::user("next?")};
+    const RunResult result = apogee::agentloop::run(*stuck.harness, stuck.history, fresh);
+    CHECK(result.answer == "answered");
+    for (const ChatMessage& message : stuck.provider->requests().back().messages) {
+        CHECK(message.tool_calls.empty());
+    }
+    CHECK(stuck.history[1].tool_calls.size() == 1);
 }

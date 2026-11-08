@@ -5,6 +5,7 @@
 #include <atomic>
 #include <fstream>
 #include <functional>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
@@ -40,18 +41,31 @@ std::string expand_mock_text(std::string_view text, const harness::ChatRequest& 
     }
     std::string last_tool_result;
     std::string last_user;
+    std::optional<std::string> first_user;
     std::string system;
+    std::string call_ids;
     for (const harness::ChatMessage& message : request.messages) {
         if (message.role == harness::Role::Tool) {
             last_tool_result = message.content.plain_text();
         } else if (message.role == harness::Role::User) {
             last_user = message.content.plain_text();
+            if (!first_user.has_value()) {
+                first_user = last_user;
+            }
         } else if (message.role == harness::Role::System) {
             system += system.empty() ? "" : "\n\n";
             system += message.content.plain_text();
         }
+        for (const harness::ToolCall& call : message.tool_calls) {
+            call_ids += (call_ids.empty() ? "" : ",") + call.id;
+        }
     }
     replace_all(out, "{{last_user}}", last_user);
+    // The first user message as it was sent, and every tool call's id in
+    // the request (57q): so a check on the real binary can see an attachment
+    // still ride an earlier message, and no call sent without its result.
+    replace_all(out, "{{first_user}}", first_user.value_or(std::string{}));
+    replace_all(out, "{{tool_call_ids}}", call_ids);
     // How many tool definitions the request carried (26r), and which (27o).
     replace_all(out, "{{tool_count}}", std::to_string(request.tools.size()));
     if (out.find("{{tool_names}}") != std::string::npos) {

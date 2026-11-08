@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "agentloop/content.h"
@@ -18,6 +19,8 @@ using apogee::agentloop::BudgetSource;
 using apogee::agentloop::ContextBudget;
 using apogee::agentloop::current_turn_start;
 using apogee::agentloop::fitting_prefix;
+using apogee::agentloop::Injected;
+using apogee::agentloop::InjectedSource;
 using apogee::agentloop::kStubbedAbove;
 using apogee::agentloop::stub_tool_results;
 using apogee::agentloop::TokenCount;
@@ -243,7 +246,8 @@ TEST_CASE("with room, the request is the history with its stubs and nothing trim
           "[agentloop][budget]") {
     const std::vector<ChatMessage> history = conversation();
     const std::vector<ChatMessage> pinned{ChatMessage::system(std::string(50, 'E'))};
-    const std::vector<ChatMessage> injected{ChatMessage::system(std::string(1000, 'R'))};
+    const std::vector<Injected> injected{{.message = ChatMessage::system(std::string(1000, 'R')),
+                                          .source = InjectedSource::Retrieval}};
     const Assembly assembly =
         assemble_request(scripted(100000), ChatRequest{}, history, pinned, injected, 0, 7);
 
@@ -263,7 +267,8 @@ TEST_CASE("an overflowing request is trimmed in reverse priority, and every trim
           "[agentloop][budget]") {
     const std::vector<ChatMessage> history = conversation();
     const std::vector<ChatMessage> pinned{ChatMessage::system(std::string(50, 'E'))};
-    const std::vector<ChatMessage> injected{ChatMessage::system(std::string(1000, 'R'))};
+    const std::vector<Injected> injected{{.message = ChatMessage::system(std::string(1000, 'R')),
+                                          .source = InjectedSource::Retrieval}};
     const auto assemble = [&](std::int64_t window) {
         return assemble_request(scripted(window), ChatRequest{}, history, pinned, injected, 0, 7);
     };
@@ -402,7 +407,8 @@ TEST_CASE("an inlined attachment is trimmed last, and with the exchange it rode"
     const std::vector<apogee::agentloop::InlineAttachment> inlined{
         {.message = 0, .name = "old.md", .text = std::string(2000, 'A')},
         {.message = 2, .name = "new.md", .text = std::string(1000, 'B')}};
-    const std::vector<ChatMessage> injected{ChatMessage::system(std::string(500, 'R'))};
+    const std::vector<Injected> injected{{.message = ChatMessage::system(std::string(500, 'R')),
+                                          .source = InjectedSource::Retrieval}};
 
     SECTION("the old exchange goes, and its attachment with it") {
         const Assembly assembly =
@@ -509,4 +515,184 @@ TEST_CASE("media read as it is rides ahead of the text and the message, in what 
                            .parts = {ContentPart::from_image_url("data:image/png;base64,AAAA")}}});
     CHECK(over.inline_dropped == std::vector<std::string>{"shot.png (as it is)"});
     CHECK_FALSE(over.messages.back().content.is_rich());
+}
+
+// ---------------------------------------------------------------------------
+// 57q: every call sent with its results, the user's answers whole, and a
+// trim that names what it cut
+// ---------------------------------------------------------------------------
+
+namespace {
+
+bool carries_call(const std::vector<ChatMessage>& messages, const std::string& id) {
+    return std::ranges::any_of(messages, [&](const ChatMessage& message) {
+        return std::ranges::any_of(message.tool_calls,
+                                   [&](const ToolCall& call) { return call.id == id; }) ||
+               message.tool_call_id == id;
+    });
+}
+
+}  // namespace
+
+TEST_CASE("a call with no result is sent without the call, and the history is untouched",
+          "[agentloop][budget][57q]") {
+    // A chat an older compaction saved with a call and no result: every
+    // later request to Anthropic was refused. The request is repaired; what
+    // is saved is not.
+    const std::vector<ChatMessage> history{
+        ChatMessage::system("The following is a summary... SUMMARY"),
+        calling({ToolCall{.id = "call-A", .name = "list_directory", .arguments = "{}"}}),
+        ChatMessage::user("and now?"),
+    };
+    const Assembly assembly =
+        assemble_request(scripted(100000), ChatRequest{}, history, {}, {}, 0, 2);
+    CHECK_FALSE(carries_call(assembly.messages, "call-A"));
+    // The empty message that only called is left out; the question is sent.
+    REQUIRE(assembly.messages.size() == 2);
+    CHECK(assembly.messages.back().content.plain_text() == "and now?");
+    REQUIRE(history[1].tool_calls.size() == 1);
+    CHECK(history[1].tool_calls.front().id == "call-A");
+}
+
+TEST_CASE("pairing keeps what answers, drops what does not, and moves every index with it",
+          "[agentloop][budget][57q]") {
+    using apogee::agentloop::pair_tool_calls;
+    ChatMessage said_and_called = ChatMessage::assistant("let me look");
+    said_and_called.tool_calls = {ToolCall{.id = "x", .name = "read_file", .arguments = "{}"},
+                                  ToolCall{.id = "y", .name = "grep", .arguments = "{}"}};
+    const std::vector<ChatMessage> history{
+        ChatMessage::user("one"),
+        said_and_called,
+        result("x", "read_file", "x's result"),
+        result("ghost", "grep", "answers nothing"),
+        ChatMessage::assistant("half done"),
+        ChatMessage::user("two"),
+        result("stray", "grep", "no call before it"),
+        calling({ToolCall{.id = "z", .name = "grep", .arguments = "{}"}}),
+    };
+    const apogee::agentloop::Paired paired = pair_tool_calls(history);
+    CHECK(paired.repaired == 4);  // y, ghost, stray, z
+    REQUIRE(paired.messages.size() == 5);
+    // The text is kept with the call that was answered.
+    CHECK(paired.messages[1].content.plain_text() == "let me look");
+    REQUIRE(paired.messages[1].tool_calls.size() == 1);
+    CHECK(paired.messages[1].tool_calls.front().id == "x");
+    CHECK(paired.messages[2].tool_call_id == "x");
+    CHECK(paired.messages[3].content.plain_text() == "half done");
+    CHECK(paired.messages[4].content.plain_text() == "two");
+    // Where each message went, and where what sat before it now goes.
+    CHECK(paired.position == std::vector<std::size_t>{0, 1, 2, 3, 3, 4, 5, 5, 5});
+
+    // A history already whole comes back as it is.
+    const std::vector<ChatMessage> whole = conversation();
+    const apogee::agentloop::Paired same = pair_tool_calls(whole);
+    CHECK(same.repaired == 0);
+    CHECK(same.messages.size() == whole.size());
+
+    // An attachment on a message after the one left out still rides it.
+    const std::vector<ChatMessage> anchored{
+        calling({ToolCall{.id = "gone", .name = "list_directory", .arguments = "{}"}}),
+        ChatMessage::user("what is in it?")};
+    const Assembly assembly = assemble_request(scripted(100000), ChatRequest{}, anchored, {}, {}, 0,
+                                               1, {{.message = 1, .name = "a.md", .text = "A"}});
+    CHECK(assembly.inline_dropped.empty());
+    REQUIRE(assembly.messages.size() == 1);
+    CHECK(assembly.messages[0].content.plain_text() == "A\nwhat is in it?");
+}
+
+TEST_CASE("an ask_user answer is never stubbed for overflow; the older large result is",
+          "[agentloop][budget][57q]") {
+    // 26c's table keeps every ask_user answer whole; the overflow stubbed the
+    // oldest of this turn's results first, which was the user's answer, and
+    // the model asked the same questions again.
+    const std::vector<ChatMessage> history{
+        ChatMessage::user(std::string(10, 'u')),
+        calling({ToolCall{.id = "q", .name = "ask_user", .arguments = "{}"},
+                 ToolCall{.id = "r1", .name = "read_file", .arguments = R"({"path":"b"})"},
+                 ToolCall{.id = "r2", .name = "read_file", .arguments = R"({"path":"c"})"}}),
+        result("q", "ask_user", std::string(600, 'A')),
+        result("r1", "read_file", std::string(3000, 'b')),
+        result("r2", "read_file", std::string(3000, 'c')),
+    };
+    const Assembly assembly =
+        assemble_request(scripted(4000), ChatRequest{}, history, {}, {}, 0, 0);
+    CHECK(has(assembly.messages, 'A', 600));
+    CHECK_FALSE(has(assembly.messages, 'b', 3000));
+    CHECK(has(assembly.messages, 'c', 3000));
+    CHECK(assembly.trims ==
+          std::vector<std::string>{"1 of this turn's tool results sent as a stub"});
+}
+
+TEST_CASE("an overflow stub says to call again only where a tool can be called",
+          "[agentloop][budget][57q]") {
+    const std::vector<ChatMessage> history{
+        ChatMessage::user("read both"),
+        calling({ToolCall{.id = "r1", .name = "read_file", .arguments = R"({"path":"b"})"},
+                 ToolCall{.id = "r2", .name = "read_file", .arguments = R"({"path":"c"})"}}),
+        result("r1", "read_file", std::string(3000, 'b')),
+        result("r2", "read_file", std::string(3000, 'c')),
+    };
+    const auto stub_of = [&](const ChatRequest& shape) {
+        const Assembly assembly = assemble_request(scripted(4000), shape, history, {}, {}, 0, 0);
+        REQUIRE(assembly.messages.size() == 4);
+        return assembly.messages[2].content.plain_text();
+    };
+    // An objection's request, a final pass: nothing to call it again by.
+    CHECK(stub_of(ChatRequest{}) ==
+          R"([read_file({"path":"b"}) returned 3 KB; not sent: the context window was full.])");
+    ChatRequest with_tools;
+    with_tools.tools.push_back(apogee::harness::Tool{.name = "read_file"});
+    CHECK(stub_of(with_tools) ==
+          R"([read_file({"path":"b"}) returned 3 KB; not sent: the context window was full -- )"
+          "call it again, narrower, if you need it.]");
+}
+
+TEST_CASE("a trim names each injected source it cut, in the order cut",
+          "[agentloop][budget][57q]") {
+    // A chat turn's injected list: the standing context first, then the
+    // review note, then any retrieval -- cut from the end. The notice once
+    // blamed retrieved context that was never there.
+    const std::vector<ChatMessage> history{ChatMessage::system(std::string(100, 'S')),
+                                           ChatMessage::user(std::string(100, 'q'))};
+    const auto injected_of = [](std::vector<std::pair<char, InjectedSource>> sources) {
+        std::vector<Injected> out;
+        for (const auto& [fill, source] : sources) {
+            out.push_back(
+                {.message = ChatMessage::system(std::string(300, fill)), .source = source});
+        }
+        return out;
+    };
+    const std::vector<Injected> no_retrieval = injected_of({{'T', InjectedSource::Standing},
+                                                            {'U', InjectedSource::Standing},
+                                                            {'V', InjectedSource::Review}});
+    const auto trims = [&](const std::vector<Injected>& injected, std::int64_t window) {
+        return assemble_request(scripted(window), ChatRequest{}, history, {}, injected, 0, 1).trims;
+    };
+
+    SECTION("all of it: the review note, then the standing context, never retrieval") {
+        CHECK(trims(no_retrieval, 250) ==
+              std::vector<std::string>{"the review note not sent",
+                                       "the standing context not sent (2 messages)"});
+    }
+
+    SECTION("part of a source is named as part of it") {
+        CHECK(trims(no_retrieval, 600) ==
+              std::vector<std::string>{"the review note not sent",
+                                       "part of the standing context not sent (1 of 2 messages)"});
+    }
+
+    SECTION("every source a chat injects, each by its name") {
+        const std::vector<Injected> every = injected_of({{'T', InjectedSource::Standing},
+                                                         {'V', InjectedSource::Review},
+                                                         {'P', InjectedSource::Plan},
+                                                         {'R', InjectedSource::Retrieval},
+                                                         {'E', InjectedSource::Recall}});
+        CHECK(trims(every, 250) == std::vector<std::string>{"the recalled sessions not sent",
+                                                            "the retrieved context not sent",
+                                                            "the plan-mode note not sent",
+                                                            "the review note not sent",
+                                                            "the standing context not sent"});
+        const std::vector<Injected> delegate = injected_of({{'D', InjectedSource::Delegate}});
+        CHECK(trims(delegate, 250) == std::vector<std::string>{"the delegate's notes not sent"});
+    }
 }

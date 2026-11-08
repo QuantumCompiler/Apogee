@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <stdexcept>
@@ -934,4 +935,41 @@ TEST_CASE("check_answer on request: the verifier once, round three unreachable",
                                           {})
               .result == Validated::Result::Unchecked);
     CHECK(world.helper->requests().size() == 1);
+}
+
+TEST_CASE("an objection is answered over the turn's tool results whole, not their stubs",
+          "[agentloop][validate][answers][check][57q]") {
+    using apogee::backends::MockTurn;
+    using apogee::harness::ChatMessage;
+    // The objection's question is a user message, so the turn once started
+    // there: the results the answer was built on were sent as stubs telling
+    // the model to call again -- in a request that offers no tools.
+    AnswerWorld world{{MockTurn{.text = "It is 382."}}, {MockTurn{.text = "OBJECT: misread"}}};
+    world.harness.set_active_suite("request");
+    const std::string file(40 * 1024, 'f');
+    ChatMessage reading = ChatMessage::assistant("");
+    reading.tool_calls = {
+        apogee::harness::ToolCall{.id = "r", .name = "read_file", .arguments = "{}"}};
+    apogee::harness::ToolResult read;
+    read.tool_call_id = "r";
+    read.name = "read_file";
+    read.content = file;
+    const std::vector<ChatMessage> history{ChatMessage::user("What does the file say?"), reading,
+                                           ChatMessage::from_tool_result(read),
+                                           ChatMessage::assistant("It is 381.")};
+    const apogee::agentloop::MemberCalls::Turn turn = world.calls.begin_turn({}, {});
+    const Verifier verifier =
+        apogee::agentloop::bind_verifier(world.harness, world.calls, "utility");
+    const Validated checked = apogee::agentloop::check_answer(world.harness, "root", history,
+                                                              verifier, {}, std::nullopt, {});
+    CHECK(checked.revisions == 1);
+    REQUIRE(world.root->requests().size() == 1);
+    const apogee::harness::ChatRequest& asked = world.root->requests().front();
+    CHECK(asked.tools.empty());
+    CHECK(std::ranges::any_of(asked.messages, [&file](const ChatMessage& message) {
+        return message.content.plain_text() == file;
+    }));
+    CHECK(std::ranges::none_of(asked.messages, [](const ChatMessage& message) {
+        return message.content.plain_text().find("call it again") != std::string::npos;
+    }));
 }

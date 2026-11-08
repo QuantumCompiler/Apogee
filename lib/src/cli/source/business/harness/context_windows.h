@@ -22,7 +22,10 @@ namespace apogee::harness {
 ///
 /// Matching is case-insensitive and prefix-based on the longest entry, so a
 /// pinned id (`claude-sonnet-5-20260101`) resolves through its family prefix
-/// (`claude-sonnet-5`) without the table needing a row per dated release.
+/// (`claude-sonnet-5`) without the table needing a row per dated release. A
+/// family's bare id whose later members differ is matched exactly (57q):
+/// `gpt-4` and its two snapshots are 8,192 tokens, `gpt-4-turbo` 128,000,
+/// and a `gpt-4-…` id the table does not list is unknown, never 8,192.
 ///
 /// **0 means "unknown", never "unlimited".** A caller must decide what to do
 /// with an unknown window — usually skip context warnings rather than invent a

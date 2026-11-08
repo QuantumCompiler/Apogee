@@ -669,7 +669,8 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
                     fail_user(rag.error);
                 }
                 if (rag.error.empty() && !rag.prefix.empty()) {
-                    options.transient_prefix = rag.prefix;
+                    options.transient_prefix =
+                        agentloop::injected_as(rag.prefix, agentloop::InjectedSource::Retrieval);
                 }
                 note(describe_retrieval(rag_choice, rag), !rag.error.empty());
                 if (rag.error.empty() && !rag.prefix.empty() && !rag.sources.empty()) {

@@ -112,8 +112,10 @@ struct Compaction {
 /// Summarises `history` into a single system message to free context space.
 ///
 /// Preserves any leading system messages, replaces the conversation with a
-/// summary, and keeps the most recent assistant message so the model has one
-/// prior turn to reference.
+/// summary, and keeps the most recent assistant message that calls no tools
+/// so the model has one prior turn to reference -- or none, when the
+/// conversation was all tool work (57q): a call kept without the results the
+/// summary folded is a history no provider takes.
 ///
 /// The summary is a **system** message, not an assistant one: system reads as
 /// authoritative record, so the model can answer "what have we discussed?"
@@ -125,7 +127,8 @@ struct Compaction {
 /// A history with no exchange to fold asks no model and says so.
 ///
 /// Tool results are shown to the summariser as their stubs (26c): tool
-/// output is condensed before conversation.
+/// output is condensed before conversation. Its calls are paired with their
+/// results as any request's are (`pair_tool_calls`, 57q).
 ///
 /// `model` writes the summary: the utility model when one is set, else the
 /// conversation's own backend (26b). It is asked as a side request, so a

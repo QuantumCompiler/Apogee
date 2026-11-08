@@ -131,7 +131,11 @@ Compaction compact_history(const harness::Harness& harness,
     // summariser reads each result as its stub, since the answers that used
     // them carry what mattered -- and a whole file would be most of what it
     // read.
-    request.messages = stub_tool_results(conversation, conversation.size()).messages;
+    // Its calls paired with their results as every request's are (57q): a
+    // conversation an older compaction left holding a call without them must
+    // not fail its own compaction.
+    request.messages =
+        pair_tool_calls(stub_tool_results(conversation, conversation.size()).messages).messages;
     request.messages.push_back(harness::ChatMessage::user(std::string{kSummaryPrompt}));
     // Not a turn of the conversation: on the chat's own local model it runs
     // on a context of its own, and the conversation's cache is untouched
@@ -156,10 +160,14 @@ Compaction compact_history(const harness::Harness& harness,
     compacted.push_back(
         harness::ChatMessage::system(std::string{logger::kCompactionPreamble} + summary));
 
-    // Keep the most recent assistant message so the model has at least one
-    // prior turn to reference, rather than a confusing "no prior context".
+    // Keep the most recent plain answer so the model has at least one prior
+    // turn to reference, rather than a confusing "no prior context". Never a
+    // message that calls tools (57q): its results are folded into the
+    // summary, and a call kept without them is a history every later request
+    // fails on -- the state the loop's rollback exists to prevent (Milestone
+    // F). A conversation that was all tool work keeps the summary alone.
     for (auto it = conversation.rbegin(); it != conversation.rend(); ++it) {
-        if (it->role == harness::Role::Assistant) {
+        if (it->role == harness::Role::Assistant && it->tool_calls.empty()) {
             compacted.push_back(*it);
             break;
         }

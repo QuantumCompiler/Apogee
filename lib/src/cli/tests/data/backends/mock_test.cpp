@@ -295,6 +295,17 @@ TEST_CASE("placeholders expand against the request: the last tool result and the
                      apogee::harness::Tool{.name = "read_file"}};
     CHECK(apogee::backends::expand_mock_text("{{tool_count}}: {{tool_names}}", request) ==
           "2: graph_explain,read_file");
+    // The first user message as sent, and every call's id (57q).
+    CHECK(apogee::backends::expand_mock_text("[{{first_user}}] [{{tool_call_ids}}]", request) ==
+          "[q] []");
+    apogee::harness::ChatMessage calling = apogee::harness::ChatMessage::assistant("");
+    calling.tool_calls = {apogee::harness::ToolCall{.id = "call-A", .name = "a"},
+                          apogee::harness::ToolCall{.id = "call-B", .name = "b"}};
+    apogee::harness::ChatRequest asked = request;
+    asked.messages.push_back(calling);
+    asked.messages.push_back(apogee::harness::ChatMessage::user("later"));
+    CHECK(apogee::backends::expand_mock_text("[{{first_user}}] [{{tool_call_ids}}]", asked) ==
+          "[q] [call-A,call-B]");
 
     // And through the provider, streamed and not.
     apogee::backends::MockProvider::Options options;

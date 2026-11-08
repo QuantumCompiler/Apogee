@@ -192,7 +192,9 @@ agent::ToolOutcome run_delegate(const DelegateContext& context, std::string_view
     sub.stream_answer = false;
     sub.max_iterations = kDelegateSubTurns;
     for (const std::string& note : context.notes) {
-        sub.transient_prefix.push_back(harness::ChatMessage::system(note));
+        sub.transient_prefix.push_back(
+            agentloop::Injected{.message = harness::ChatMessage::system(note),
+                                .source = agentloop::InjectedSource::Delegate});
     }
 
     std::vector<harness::ChatMessage> history{

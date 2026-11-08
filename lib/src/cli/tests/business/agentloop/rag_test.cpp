@@ -123,7 +123,8 @@ TEST_CASE("injected context never reaches persisted history", "[agentloop][rag][
 
     apogee::agentloop::Options loop;
     loop.model = "mock";
-    loop.transient_prefix = rag.prefix;
+    loop.transient_prefix =
+        apogee::agentloop::injected_as(rag.prefix, apogee::agentloop::InjectedSource::Retrieval);
     loop.stream_answer = false;
 
     apogee::agentloop::NullReporter reporter;
@@ -388,7 +389,8 @@ TEST_CASE("context from a vector turn never reaches persisted history either",
         apogee::harness::ChatMessage::user("what does zarquon require?")};
     apogee::agentloop::Options loop;
     loop.model = "mock";
-    loop.transient_prefix = rag.prefix;
+    loop.transient_prefix =
+        apogee::agentloop::injected_as(rag.prefix, apogee::agentloop::InjectedSource::Retrieval);
     loop.stream_answer = false;
     apogee::agentloop::NullReporter reporter;
     (void)apogee::agentloop::run(harness, history, loop, reporter);
@@ -470,7 +472,8 @@ TEST_CASE(
         apogee::harness::ChatMessage::user("who supplies it?")};
     apogee::agentloop::Options loop;
     loop.model = "mock";
-    loop.transient_prefix = expanded.prefix;
+    loop.transient_prefix = apogee::agentloop::injected_as(
+        expanded.prefix, apogee::agentloop::InjectedSource::Retrieval);
     loop.stream_answer = false;
     apogee::agentloop::NullReporter reporter;
     (void)apogee::agentloop::run(harness, history, loop, reporter);

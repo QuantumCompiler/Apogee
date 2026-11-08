@@ -510,7 +510,8 @@ Handler::TurnOutcome Handler::run_turn(TurnPlan& plan, agentloop::Reporter& repo
         if (rag.error.empty() && !rag.prefix.empty()) {
             // Spliced into the OUTGOING request only; never into the history
             // the session persists.
-            loop_options.transient_prefix = rag.prefix;
+            loop_options.transient_prefix =
+                agentloop::injected_as(rag.prefix, agentloop::InjectedSource::Retrieval);
         }
         if (sse != nullptr) {
             harness::StatusEvent result =

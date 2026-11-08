@@ -410,11 +410,30 @@ struct SettingSaid {
     return SettingSaid{.ok = true, .line = permission_mode_line(*chosen)};
 }
 
+/// Moves every attachment anchor at or past message `from` by `by` (57q): the
+/// messages an inlined attachment and a folder's map ride are held by index
+/// (26d, 26q), so a message added or taken out ahead of them moves them all.
+/// An anchor left in place names the message beside its own, which the
+/// budget then drops as gone -- and the chat retrieves the file for good.
+void move_attachment_anchors(logger::Session& session, std::size_t from, std::ptrdiff_t by) {
+    const auto move = [from, by](std::optional<std::size_t>& at) {
+        if (at.has_value() && *at >= from) {
+            at = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(*at) + by);
+        }
+    };
+    for (logger::Attachment& attachment : session.attachments) {
+        move(attachment.inline_at);
+        move(attachment.map_at);
+    }
+}
+
 /// The prompt is the transcript's first message, put there as the chat
 /// opened: replaced in place -- matched by the prompt it held, so a
 /// compaction's summary is never taken for it -- or added at the head, so
 /// the next turn is sent under it. Until 52d `/system` moved only the
 /// setting, and every request after kept the old prompt (found 2026-10-20).
+/// A prompt added or taken out moves every message after it, and the
+/// attachments riding them move with them (57q).
 [[nodiscard]] SettingSaid set_system_prompt(logger::Session& session, std::string_view text) {
     const std::string before = session.params.system_prompt;
     session.params.system_prompt = harness::valid_utf8(text);
@@ -425,10 +444,12 @@ struct SettingSaid {
                       messages.front().content.plain_text() == before;
     if (held && now.empty()) {
         messages.erase(messages.begin());
+        move_attachment_anchors(session, 1, -1);
     } else if (held) {
         messages.front() = harness::ChatMessage::system(now);
     } else if (!now.empty()) {
         messages.insert(messages.begin(), harness::ChatMessage::system(now));
+        move_attachment_anchors(session, 0, 1);
     }
     return {.line = "system prompt updated"};
 }

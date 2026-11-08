@@ -879,6 +879,52 @@ TEST_CASE("compaction moves an inlined attachment to retrieval", "[chat][cli][at
     CHECK_FALSE(session.attachments[0].inline_at.has_value());
 }
 
+namespace {
+
+/// The user text of the turn `chats show` lists `name` on, or empty.
+[[nodiscard]] std::string shown_on(HelperChat& chat, const std::string& chat_id,
+                                   const std::string& name) {
+    if (chat.run({"chats", "show", chat_id, "--output-format", "json"}) != 0) {
+        return {};
+    }
+    const nlohmann::json shown = nlohmann::json::parse(chat.out);
+    for (const nlohmann::json& turn : shown.at("turns")) {
+        for (const nlohmann::json& attachment : turn.at("user").at("attachments")) {
+            if (attachment.at("name") == name) {
+                return turn.at("user").at("text").get<std::string>();
+            }
+        }
+    }
+    return {};
+}
+
+}  // namespace
+
+TEST_CASE("a system prompt added moves the attachments with the messages they ride",
+          "[chat][cli][attachments][doors][57q]") {
+    // The prompt is added at the head (52d), so every message after it moves
+    // by one; the anchors did not, and the file inlined on turn one was
+    // dropped as gone -- "no longer fits" on a 32k window -- and retrieved
+    // for good.
+    HelperChat chat{
+        texts({"one", "two sent: {{first_user}}"}), {"Prompted"}, "    context_size: 32768\n"};
+    const std::filesystem::path notes = chat.home.path() / "notes.txt";
+    std::ofstream{notes, std::ios::binary} << "The launch code is 7731.\n";
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat"}, "/attach " + notes.string() + "\none\n/system Be terse.\ntwo\n") ==
+            0);
+    CHECK(chat.err.find("-- inlined whole") != std::string::npos);
+    CHECK(chat.err.find("no longer fits") == std::string::npos);
+    const apogee::logger::Session session = HelperChat::only_session();
+    REQUIRE(session.messages.front().content.plain_text() == "Be terse.");
+    REQUIRE(session.attachments.size() == 1);
+    REQUIRE(session.attachments[0].inline_at.has_value());
+    CHECK(session.messages.at(*session.attachments[0].inline_at).content.plain_text() == "one");
+    // Turn two's request still carried the file on turn one's message.
+    CHECK(replies(session).back().find("The launch code is 7731.") != std::string::npos);
+    CHECK(shown_on(chat, session.chat_id, session.attachments[0].name) == "one");
+}
+
 TEST_CASE("a collection gets what the attachments leave of the retrieval share",
           "[chat][cli][attachments][rag]") {
     // A 7,000-token window: 3,500 after the reserve, 700 of it retrieval's.
@@ -2250,6 +2296,76 @@ TEST_CASE("a set line moves the run settings from the next turn, as the slash co
     CHECK(typed.params.thinking == driven.params.thinking);
 }
 
+TEST_CASE("the probe's four lines: after a set system line, turn two still sends the file",
+          "[chat][cli][attachments][machine][doors][57q]") {
+    // What the macOS app sends from its settings: an attach, a question, a
+    // `set` line, a question. Turn two once said the file no longer fit.
+    HelperChat chat{
+        texts({"one", "two sent: {{first_user}}"}), {"Driven"}, "    context_size: 32768\n"};
+    const std::filesystem::path notes = chat.home.path() / "notes.txt";
+    std::ofstream{notes, std::ios::binary} << "The launch code is 7731.\n";
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat", "--input-format", "stream-json", "--output-format", "stream-json"},
+                     R"({"type":"attach","path":")" + notes.generic_string() + "\"}\n" +
+                         R"({"type":"user","text":"one"})" + "\n" +
+                         R"({"type":"set","system":"Be terse."})" + "\n" +
+                         R"({"type":"user","text":"two"})" + "\n") == 0);
+    INFO(chat.out);
+    const std::vector<std::string> notices = notices_of(driven_events(chat.out));
+    CHECK(said(notices, "system prompt updated -- from the next turn"));
+    CHECK(std::ranges::none_of(notices, [](const std::string& line) {
+        return line.find("no longer fits") != std::string::npos;
+    }));
+    const apogee::logger::Session session = HelperChat::only_session();
+    CHECK(replies(session).back().find("The launch code is 7731.") != std::string::npos);
+    REQUIRE(session.attachments.size() == 1);
+    CHECK(shown_on(chat, session.chat_id, session.attachments[0].name) == "one");
+}
+
+TEST_CASE("a system prompt cleared moves a file and a folder's map back with their messages",
+          "[chat][cli][attachments][machine][doors][map][57q]") {
+    // The other head edit: a prompt taken out moves every message after it
+    // back by one, and the anchors with them.
+    HelperChat chat{
+        texts({"one", "two sent: {{first_user}}"}), {"Cleared"}, "    context_size: 32768\n"};
+    const std::filesystem::path notes = chat.home.path() / "notes.txt";
+    std::ofstream{notes, std::ios::binary} << "The launch code is 7731.\n";
+    const std::filesystem::path proj = chat.home.path() / "proj";
+    std::filesystem::create_directories(proj / "docs");
+    std::filesystem::create_directories(proj / "notes");
+    std::ofstream{proj / "docs" / "guide.md"} << "the guide\n";
+    std::ofstream{proj / "notes" / "todo.md"} << "the list\n";
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat", "--system", "Be terse.", "--input-format", "stream-json",
+                      "--output-format", "stream-json"},
+                     R"({"type":"attach","path":")" + notes.generic_string() + "\"}\n" +
+                         R"({"type":"attach","path":")" + proj.generic_string() + "\"}\n" +
+                         R"({"type":"user","text":"one"})" + "\n" +
+                         R"({"type":"set","system":""})" + "\n" +
+                         R"({"type":"user","text":"two"})" + "\n") == 0);
+    INFO(chat.out);
+    const std::vector<std::string> notices = notices_of(driven_events(chat.out));
+    CHECK(said(notices, "system prompt updated -- from the next turn"));
+    CHECK(std::ranges::none_of(notices, [](const std::string& line) {
+        return line.find("no longer fits") != std::string::npos;
+    }));
+    const apogee::logger::Session session = HelperChat::only_session();
+    REQUIRE_FALSE(session.messages.empty());
+    CHECK(session.messages.front().role == apogee::harness::Role::User);
+    REQUIRE(session.attachments.size() == 2);
+    for (const apogee::logger::Attachment& attachment : session.attachments) {
+        INFO(attachment.name);
+        const std::optional<std::size_t> at =
+            attachment.inline_at.has_value() ? attachment.inline_at : attachment.map_at;
+        REQUIRE(at.has_value());
+        CHECK(session.messages.at(*at).content.plain_text() == "one");
+        CHECK(shown_on(chat, session.chat_id, attachment.name) == "one");
+    }
+    const std::string sent = replies(session).back();
+    CHECK(sent.find("The launch code is 7731.") != std::string::npos);
+    CHECK(sent.find("--- map of attachment: ") != std::string::npos);
+}
+
 TEST_CASE("a set line names what it refuses and sets nothing; a model moves the next turn",
           "[chat][cli][machine][doors]") {
     HelperChat chat{texts({"chatty answers"}), {"Title", "helper answers"}};
@@ -2538,6 +2654,54 @@ TEST_CASE("chats compact folds a saved chat's history, asked first or --yes",
                                std::to_string(saved.messages.size()) + " messages into " +
                                std::to_string(compacted.messages.size()) + ", by helper"));
     CHECK(chat.run({"chats", "compact", "no-such-chat", "--yes"}) != 0);
+}
+
+TEST_CASE(
+    "chats compact never leaves a tool call without its result, and a chat that has one "
+    "answers",
+    "[chat][cli][doors][history][compaction][57q]") {
+    // The state a failed or cancelled step leaves: a finished tool phase at
+    // the end of history. Compaction kept the call and folded its result,
+    // and every later Anthropic request was refused with a 400.
+    using apogee::harness::ChatMessage;
+    HelperChat chat{texts({"calls sent: [{{tool_call_ids}}]"}), {"what was said, in short"}};
+    INFO(chat.err);
+    ChatMessage listing = ChatMessage::assistant("");
+    listing.tool_calls = {apogee::harness::ToolCall{
+        .id = "call-A", .name = "list_directory", .arguments = R"({"path":"."})"}};
+    apogee::harness::ToolResult listed;
+    listed.tool_call_id = "call-A";
+    listed.name = "list_directory";
+    listed.content = "a.txt";
+    apogee::logger::Session probe;
+    probe.chat_id = "20261108-120000-a57c";
+    probe.backend = "chatty";
+    probe.turns = 1;
+    probe.messages = {ChatMessage::user("q1"), ChatMessage::assistant("done"),
+                      ChatMessage::user("list it"), listing, ChatMessage::from_tool_result(listed)};
+    apogee::logger::save(probe);
+
+    REQUIRE(chat.run({"chats", "compact", probe.chat_id, "--yes"}) == 0);
+    CHECK(chat.out.starts_with("compacted " + probe.chat_id + ": 5 messages into 2"));
+    const apogee::logger::Session compacted = apogee::logger::load(probe.chat_id, {}).session;
+    for (const ChatMessage& message : compacted.messages) {
+        CHECK(message.tool_calls.empty());
+    }
+    CHECK(compacted.messages.back().content.plain_text() == "done");
+
+    // A chat an older compaction already saved this way: its next turn is
+    // sent without the call, and answers -- the file itself untouched.
+    apogee::logger::Session stuck;
+    stuck.chat_id = "20261108-120001-b57c";
+    stuck.backend = "chatty";
+    stuck.turns = 1;
+    stuck.messages = {
+        ChatMessage::system(std::string{apogee::logger::kCompactionPreamble} + "SUMMARY"), listing};
+    apogee::logger::save(stuck);
+    REQUIRE(chat.run({"chat", "--resume", stuck.chat_id}, "next?\n") == 0);
+    const apogee::logger::Session answered = apogee::logger::load(stuck.chat_id, {}).session;
+    CHECK(replies(answered).back() == "calls sent: []");
+    CHECK(answered.messages.at(1).tool_calls.size() == 1);
 }
 
 TEST_CASE("chats recall shows what recall holds, and forgets it with consent, transcripts kept",

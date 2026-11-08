@@ -217,7 +217,8 @@ ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& s
         loop_options.inline_attachments = std::move(turn.inlined);
         if (turn.retrieved.has_value()) {
             if (turn.retrieved->error.empty() && !turn.retrieved->prefix.empty()) {
-                loop_options.transient_prefix = turn.retrieved->prefix;
+                loop_options.transient_prefix = agentloop::injected_as(
+                    turn.retrieved->prefix, agentloop::InjectedSource::Retrieval);
                 share_used = turn.retrieved->tokens;
                 sent = turn.retrieved->sources;
             }
@@ -234,8 +235,10 @@ ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& s
             harness, config, rag_choice.collection, query, rag.limit, session.retriever,
             session.rerank, {}, session.backend, budget, share_used, side);
         if (retrieved.error.empty() && !retrieved.prefix.empty()) {
+            const std::vector<agentloop::Injected> excerpts =
+                agentloop::injected_as(retrieved.prefix, agentloop::InjectedSource::Retrieval);
             loop_options.transient_prefix.insert(loop_options.transient_prefix.end(),
-                                                 retrieved.prefix.begin(), retrieved.prefix.end());
+                                                 excerpts.begin(), excerpts.end());
             share_used += retrieved.tokens;
             sent.insert(sent.end(), retrieved.sources.begin(), retrieved.sources.end());
         }
@@ -252,8 +255,10 @@ ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& s
             recall->for_turn(query, budget, share_used,
                              rag_choice.active() ? rag_choice.collection : std::string{}, side);
         if (!recalled.prefix.empty()) {
+            const std::vector<agentloop::Injected> earlier =
+                agentloop::injected_as(recalled.prefix, agentloop::InjectedSource::Recall);
             loop_options.transient_prefix.insert(loop_options.transient_prefix.end(),
-                                                 recalled.prefix.begin(), recalled.prefix.end());
+                                                 earlier.begin(), earlier.end());
             reporter.on_recall(recalled.sessions, recalled.decisions);
         }
     }
@@ -262,22 +267,27 @@ ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& s
         // Shift+Tab can leave plan mode between turns, and the transcript
         // must not keep telling the model it is in it.
         if (const std::string note = plan_note(*gate.approvals); !note.empty()) {
-            loop_options.transient_prefix.insert(loop_options.transient_prefix.begin(),
-                                                 harness::ChatMessage::system(note));
+            loop_options.transient_prefix.insert(
+                loop_options.transient_prefix.begin(),
+                agentloop::Injected{.message = harness::ChatMessage::system(note),
+                                    .source = agentloop::InjectedSource::Plan});
         }
     }
     if (!review_note.empty()) {
         // The review note rides the transient prefix, never the transcript:
         // `/branch` can change it between turns, and a resumed session gets
         // whatever ITS flags say rather than a stale note from last time.
-        loop_options.transient_prefix.insert(loop_options.transient_prefix.begin(),
-                                             harness::ChatMessage::system(review_note));
+        loop_options.transient_prefix.insert(
+            loop_options.transient_prefix.begin(),
+            agentloop::Injected{.message = harness::ChatMessage::system(review_note),
+                                .source = agentloop::InjectedSource::Review});
     }
     // The session's standing context (41b) heads what the turn injects: the
     // last the budget would trim, and never in the transcript.
-    std::vector<harness::ChatMessage> head;
+    std::vector<agentloop::Injected> head;
     for (const std::string& note : standing) {
-        head.push_back(harness::ChatMessage::system(note));
+        head.push_back(agentloop::Injected{.message = harness::ChatMessage::system(note),
+                                           .source = agentloop::InjectedSource::Standing});
     }
     loop_options.transient_prefix.insert(loop_options.transient_prefix.begin(), head.begin(),
                                          head.end());

@@ -167,6 +167,11 @@ std::string answer_objection(const harness::Harness& harness, const std::string&
                              const std::vector<harness::ChatMessage>& history,
                              std::string_view objection, std::optional<std::int64_t> max_tokens,
                              const harness::CancellationToken& cancellation) {
+    // The turn answered starts where it did before the question was put
+    // (57q): its tool results are what the answer was built on, and the
+    // request offers no tools to read them again by -- so they are sent
+    // whole, never as an earlier turn's stubs.
+    const std::size_t answered = current_turn_start(history);
     std::vector<harness::ChatMessage> asked = history;
     asked.push_back(harness::ChatMessage::user(objection_question(objection)));
     harness::ChatRequest request;
@@ -176,8 +181,7 @@ std::string answer_objection(const harness::Harness& harness, const std::string&
     // and the conversation's cache untouched.
     request.transient.side_request = true;
     const TurnBudget budget = turn_budget(harness, model, max_tokens);
-    Assembly assembly =
-        assemble_request(budget, request, asked, {}, {}, 0, current_turn_start(asked));
+    Assembly assembly = assemble_request(budget, request, asked, {}, {}, 0, answered);
     request.messages = std::move(assembly.messages);
     return trim(harness.chat(request, cancellation).message.content.plain_text());
 }
@@ -336,7 +340,10 @@ RunResult run(const harness::Harness& harness, std::vector<harness::ChatMessage>
     if (check_tools && !verifier.has_value()) {
         reporter.on_notice("validate: tool arguments checked by structure only -- " + no_verifier);
     }
-    const std::size_t turn_start = current_turn_start(history);
+    // A run continuing a turn -- a corrective schema turn (57q) -- starts
+    // where that turn did; a new one at its question.
+    const std::size_t turn_start =
+        std::min(options.turn_start.value_or(current_turn_start(history)), history.size());
     bool stubs_said = false;
     std::vector<std::string> trims_said;
 

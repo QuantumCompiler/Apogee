@@ -299,7 +299,8 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
                                   agentloop::turn_budget(harness, model, max_tokens));
             machine_options.inline_attachments = std::move(turn.inlined);
             if (turn.retrieved.has_value() && turn.retrieved->error.empty()) {
-                machine_options.transient_prefix = turn.retrieved->prefix;
+                machine_options.transient_prefix = agentloop::injected_as(
+                    turn.retrieved->prefix, agentloop::InjectedSource::Retrieval);
                 if (!turn.retrieved->prefix.empty()) {
                     reporter.on_sources(turn.retrieved->sources);
                 }
@@ -447,7 +448,8 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         loop_options.inline_attachments = std::move(turn.inlined);
         if (turn.retrieved.has_value()) {
             if (turn.retrieved->error.empty() && !turn.retrieved->prefix.empty()) {
-                loop_options.transient_prefix = turn.retrieved->prefix;
+                loop_options.transient_prefix = agentloop::injected_as(
+                    turn.retrieved->prefix, agentloop::InjectedSource::Retrieval);
                 share_used = turn.retrieved->tokens;
                 sent = turn.retrieved->sources;
             }
@@ -473,8 +475,10 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         // Whenever there is a prefix: the chunks, or the graph context that
         // survived a judge dropping every chunk.
         if (rag.error.empty() && !rag.prefix.empty()) {
+            const std::vector<agentloop::Injected> retrieved =
+                agentloop::injected_as(rag.prefix, agentloop::InjectedSource::Retrieval);
             loop_options.transient_prefix.insert(loop_options.transient_prefix.end(),
-                                                 rag.prefix.begin(), rag.prefix.end());
+                                                 retrieved.begin(), retrieved.end());
             sent.insert(sent.end(), rag.sources.begin(), rag.sources.end());
         }
         reporter.status().print_line(reporter_options.style.tag(role) + " " +

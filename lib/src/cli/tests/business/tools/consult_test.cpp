@@ -182,7 +182,8 @@ TEST_CASE("a consult runs the member on exactly the brief and returns its answer
     options.model = "root";
     options.tools = &registry;
     options.member_calls = world.calls.get();
-    options.transient_prefix = {ChatMessage::system("retrieved: a secret document")};
+    options.transient_prefix = {{.message = ChatMessage::system("retrieved: a secret document"),
+                                 .source = apogee::agentloop::InjectedSource::Retrieval}};
     options.transient_at = 1;
     Said said;
     const apogee::agentloop::RunResult result =
