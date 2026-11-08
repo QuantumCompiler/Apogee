@@ -311,6 +311,11 @@ bool answer_permission(std::string_view text, const agent::GateRequest& request,
     return apply_answer(parse_answer(text), request, config_path, approvals, note);
 }
 
+std::string permission_prompt_line(const agent::GateRequest& request, const ansi::Style& style) {
+    return style.tag(ansi::Role::Permission) + " " + std::string{request.tool} +
+           (request.target.empty() ? "" : " -> " + std::string{request.target});
+}
+
 agent::ConfirmFn terminal_confirm_fn(StatusLine& status, ansi::Style style,
                                      std::filesystem::path config_path,
                                      std::shared_ptr<SessionApprovals> approvals) {
@@ -322,8 +327,7 @@ agent::ConfirmFn terminal_confirm_fn(StatusLine& status, ansi::Style style,
             approvals = std::move(approvals)](const agent::GateRequest& request) {
         // Through the status line, so a spinner frame cannot land on top of
         // the prompt -- the same discipline the question prompt keeps.
-        status.print_line(style.tag(ansi::Role::Permission) + " " + std::string{request.tool} +
-                          (request.target.empty() ? "" : " -> " + std::string{request.target}));
+        status.print_line(permission_prompt_line(request, style));
         if (!request.detail.empty()) {
             // The whole URL: what would leave the machine is in it. A file
             // writer's diff is said by its counts (52a) -- the change's size
@@ -410,6 +414,14 @@ std::vector<std::string> edit_tools(const agent::ToolRegistry& registry) {
     return out;
 }
 
+bool website_shaped(std::string_view name) noexcept {
+    const bool dotted = name.find('.') != std::string_view::npos;
+    const bool bracketed = name.starts_with('[');
+    const bool ipv6 = name.find(':') != std::string_view::npos;
+    const bool single_label = !dotted && name.find('_') == std::string_view::npos;
+    return dotted || bracketed || ipv6 || single_label;
+}
+
 GatedName name_gated(std::string_view name, const std::vector<std::string>& gated, bool websites,
                      bool child_processes) {
     GatedName out;
@@ -424,8 +436,12 @@ GatedName name_gated(std::string_view name, const std::vector<std::string>& gate
         out.unoffered = true;
         return out;
     }
-    // A website, by the host it names -- as a session's own answer keeps it.
-    if (websites && name.find('.') != std::string_view::npos) {
+    // A website, by the host it names -- as a session's own answer keeps it,
+    // and as `--allow-host` takes it (57o): any name `canonical_host` accepts,
+    // `localhost`, an intranet name and an IPv6 literal included, except a
+    // dotless one with a `_`, which is shaped like a tool -- so a mistyped
+    // `write_flie` is still caught as one.
+    if (websites && website_shaped(name)) {
         if (const std::optional<std::string> host = harness::canonical_host(name);
             host.has_value()) {
             out.key = *host;

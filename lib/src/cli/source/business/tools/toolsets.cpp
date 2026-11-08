@@ -82,6 +82,8 @@ void register_native_toolsets(agent::ToolRegistry& registry, const ToolsetOption
         GitOptions git;
         git.timeout = options.git_timeout;
         git.working_directory = effective_cwd(options);
+        // The file tools' root bounds a repository the model names (57o).
+        git.fs_root = effective_fs_root(options.fs_root).path;
         git.review = options.review;
         git.live_review = options.live_review;
         register_git_tools(registry, git);

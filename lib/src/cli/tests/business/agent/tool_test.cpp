@@ -426,3 +426,53 @@ TEST_CASE("fetch_url with no fetcher wired says so", "[agent][fetch]") {
     CHECK(outcome.is_error);
     CHECK(outcome.content.find("not available") != std::string::npos);
 }
+
+TEST_CASE("a call its tool refuses for its target is refused unrun, before the gate asks",
+          "[agent][permission][57o]") {
+    // The file tools' twin of "an outbound tool must name its target" (57o):
+    // a writer whose path lands outside the root is never asked about.
+    using apogee::agent::ToolCallReport;
+    using apogee::agent::ToolCallState;
+    bool ran = false;
+    int checked = 0;
+    int asked = 0;
+    std::vector<ToolCallState> states;
+    Tool writer = simple_tool("write_file", true);
+    writer.run = [&ran](std::string_view) {
+        ran = true;
+        return ToolOutcome{"written", false};
+    };
+    writer.target_refusal = [](std::string_view arguments) -> std::string {
+        return arguments == R"({"path":"../out"})" ? "Error: '../out' is outside the allowed root"
+                                                   : std::string{};
+    };
+    ToolRegistry registry;
+    registry.add(writer);
+    DispatchContext context;
+    context.permission = [&checked](const GateRequest&) {
+        ++checked;
+        return Permission::Allow;
+    };
+    context.confirm = [&asked](const GateRequest&) {
+        ++asked;
+        return true;
+    };
+    context.on_call = [&states](const ToolCallReport& report) { states.push_back(report.state); };
+
+    const ToolOutcome refused =
+        dispatch(registry, ToolCall{"c1", "write_file", R"({"path":"../out"})"}, context);
+    CHECK(refused.is_error);
+    CHECK(refused.content == "Error: '../out' is outside the allowed root");
+    CHECK_FALSE(ran);
+    CHECK(checked == 0);
+    CHECK(asked == 0);
+    CHECK(states == std::vector<ToolCallState>{ToolCallState::Pending, ToolCallState::Failed});
+    CHECK_FALSE(permitted(writer, R"({"path":"../out"})", context));
+    CHECK(checked == 0);
+
+    // A target it takes goes on to the gate, as ever.
+    CHECK_FALSE(
+        dispatch(registry, ToolCall{"c2", "write_file", R"({"path":"in"})"}, context).is_error);
+    CHECK(ran);
+    CHECK(checked == 1);
+}

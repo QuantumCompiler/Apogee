@@ -331,7 +331,20 @@ agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options) {
         }
         if (!specs.empty()) {
             options.mcp->connect_all(specs, mcp_options);
-            options.mcp->register_into(registry);
+            // A tool the config gives `deny` or `ask` is gated by it whatever
+            // its server's readOnlyHint says (57o): `deny` refuses it, `ask`
+            // asks (and so denies under serve). `allow`, like no level,
+            // keeps the hint's default -- a read-only tool stays ungated, so
+            // it runs unasked in every mode, plan mode included, and a
+            // read-only agent keeps it; one with no hint is gated as ever and
+            // `allow` runs it. Before the policy, so a read-only agent treats
+            // a denied or asked tool as it treats one with no hint.
+            const harness::PermissionsConfig* permissions =
+                options.config != nullptr ? &options.config->permissions : nullptr;
+            options.mcp->register_into(registry, [permissions](std::string_view name) {
+                return permissions != nullptr && permissions->levels.contains(name) &&
+                       permissions->level(name) != harness::PermissionLevel::Allow;
+            });
         }
     }
 

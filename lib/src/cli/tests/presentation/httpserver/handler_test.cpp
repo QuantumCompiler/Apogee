@@ -25,6 +25,7 @@
 #include "backends/mlx_local.h"
 #include "backends/mock.h"
 #include "cli/embed.h"
+#include "cli/helpers.h"
 #include "cli/permissions.h"
 #include "contracts/config.h"
 #include "contracts/errors.h"
@@ -34,8 +35,10 @@
 #include "logger/session.h"
 #include "support/env_guard.h"
 #include "support/fake_llama.h"
+#include "support/fake_mcp_server.h"
 #include "support/fake_mlx_driver.h"
 #include "support/fake_transport.h"
+#include "tools/git.h"
 #include "tools/todo.h"
 
 /// The conformance suite: every route, driven through the listener-free mux.
@@ -1685,6 +1688,68 @@ TEST_CASE("a served destructive tool runs only when the config allows it; ask is
         fixture.registry.add(writer(&ran));
         REQUIRE(fixture.send(post("/v1/chat/completions", chat_body("write it"))).status == 200);
         CHECK_FALSE(ran);
+    }
+}
+
+TEST_CASE("a served git call stays in the root, and a served MCP deny holds over the server's hint",
+          "[httpserver][tools][permission][57o]") {
+    // 57o on the served path: the registry `serve --tools` builds, nobody to
+    // ask, the config's levels the only answer.
+    const auto tool_results = [](const Fixture& fixture) {
+        std::string text;
+        for (const auto& request : fixture.provider->requests()) {
+            for (const ChatMessage& message : request.messages) {
+                if (message.role == Role::Tool) {
+                    text += message.content.plain_text();
+                }
+            }
+        }
+        return text;
+    };
+    SECTION("git_show of a repository outside the root is refused, never read") {
+        const apogee::testing::TempDir temp{"handler-git-" +
+                                            std::to_string(std::random_device{}())};
+        std::filesystem::create_directories(temp.path() / "proj");
+        ToolCall call;
+        call.id = "call_g";
+        call.name = "git_show";
+        call.arguments = nlohmann::json{{"repo", (temp.path() / "elsewhere").string()}}.dump();
+        Fixture fixture{{tool_turn({call}), text_turn("after")}, served_default(), true};
+        apogee::tools::GitOptions git;
+        git.working_directory = temp.path() / "proj";
+        git.fs_root = temp.path() / "proj";
+        apogee::tools::register_git_tools(fixture.registry, git);
+        REQUIRE(fixture.send(post("/v1/chat/completions", chat_body("show it"))).status == 200);
+        CHECK(tool_results(fixture).find("outside the allowed root") != std::string::npos);
+    }
+    SECTION("an MCP tool the config denies is refused unrun, though its server says read-only") {
+        Config config;
+        apogee::harness::McpServerConfig well;
+        well.command = "well";
+        config.mcp_servers.emplace("srv", well);
+        config.permissions.levels["mcp__srv__echo"] = apogee::harness::PermissionLevel::Deny;
+        std::vector<std::shared_ptr<apogee::testing::FakeMcpTransport>> made;
+        const auto servers = std::make_shared<apogee::mcp::Registry>();
+        const ToolRegistry built = apogee::commands::make_built_in_tools(
+            apogee::commands::BuiltInToolOptions{.config = &config,
+                                                 .mcp = servers,
+                                                 .mcp_spawn = apogee::testing::fake_fleet(&made)});
+        REQUIRE(built.find("mcp__srv__echo") != nullptr);
+        ToolCall call;
+        call.id = "call_m";
+        call.name = "mcp__srv__echo";
+        call.arguments = R"({"text":"hi"})";
+        HandlerOptions options = served_default();
+        options.permission = apogee::commands::make_permission_checker(config, nullptr);
+        Fixture fixture{{tool_turn({call}), text_turn("after")}, std::move(options), true};
+        fixture.registry.add(*built.find("mcp__srv__echo"));
+        REQUIRE(fixture.send(post("/v1/chat/completions", chat_body("echo it"))).status == 200);
+        CHECK(tool_results(fixture).find("denied permission") != std::string::npos);
+        for (const auto& transport : made) {
+            for (const nlohmann::json& frame : transport->sent()) {
+                CHECK(frame.value("method", "") != "tools/call");
+            }
+        }
     }
 }
 

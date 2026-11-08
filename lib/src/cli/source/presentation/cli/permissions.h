@@ -126,8 +126,15 @@ struct GatedName {
     bool unoffered = false;
 };
 
+/// Whether a name that is no gated tool reads as a website (57o): dotted,
+/// bracketed, holding a `:` (an IPv6 literal), or a single label with no `_`
+/// -- `localhost`, an intranet name. A dotless name with a `_` is shaped like
+/// a tool, so a mistyped one is refused as a typo. `canonical_host` still
+/// has to accept it.
+[[nodiscard]] bool website_shaped(std::string_view name) noexcept;
+
 /// `child_processes` is the platform's answer by default; a test sets it to
-/// see either side on any host.
+/// see either side on any host. Takes every host `--allow-host` takes (57o).
 [[nodiscard]] GatedName name_gated(std::string_view name, const std::vector<std::string>& gated,
                                    bool websites = true,
                                    bool child_processes = platform::supports_child_processes());
@@ -161,6 +168,11 @@ bool revoke_for_session(SessionApprovals& approvals, const GatedName& name);
 /// be null (nothing is remembered).
 [[nodiscard]] agent::PermissionChecker make_permission_checker(
     const harness::Config& config, std::shared_ptr<SessionApprovals> approvals);
+
+/// The permission prompt's first line: the tag, the tool, and `-> <target>`
+/// when there is one -- for a file writer the file the call writes (57o).
+[[nodiscard]] std::string permission_prompt_line(const agent::GateRequest& request,
+                                                 const ansi::Style& style);
 
 /// The terminal prompt, or null when there is no terminal to prompt on -- and
 /// a null ConfirmFn is exactly what makes `ask` deny on a pipe.

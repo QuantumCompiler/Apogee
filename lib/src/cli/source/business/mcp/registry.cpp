@@ -93,7 +93,8 @@ std::size_t Registry::connected_count() const noexcept {
     return clients_.size();
 }
 
-void Registry::register_into(agent::ToolRegistry& registry) const {
+void Registry::register_into(agent::ToolRegistry& registry,
+                             const std::function<bool(std::string_view)>& named) const {
     for (const auto& [server, client] : clients_) {
         for (const ToolInfo& info : client->tools()) {
             agent::Tool tool;
@@ -101,7 +102,11 @@ void Registry::register_into(agent::ToolRegistry& registry) const {
             tool.description =
                 info.description.empty() ? "(" + server + ") " + info.name : info.description;
             tool.parameters_schema = info.input_schema.dump();
-            tool.writes = !(info.read_only_hint.has_value() && *info.read_only_hint);
+            // A `deny` or `ask` the person set outranks the server's hint
+            // (57o): the tool is gated, and the checker decides it by that
+            // level.
+            tool.writes = !(info.read_only_hint.has_value() && *info.read_only_hint) ||
+                          (named && named(tool.name));
             tool.run = [connection = client, name = info.name](std::string_view arguments) {
                 const ToolCallResult result =
                     connection->call_tool(name, arguments, harness::CancellationToken{});

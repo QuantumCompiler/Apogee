@@ -1442,9 +1442,12 @@ The twin of `apogee config set-permission <tool> <level>`. `{id}` is a tool
 name; body `{"level": "ask" | "allow" | "deny"}`. `200 {tool, level,
 restart_required}`; `400` on an unknown level or a name that is not a tool
 name. A served run reads its levels once at startup, so `restart_required` is
-`true` when the level now differs from what this server started with. Read-only
-tools have no level: they never prompt, and `permissions.read_file` is not a
-key.
+`true` when the level now differs from what this server started with. The
+native read-only tools have no level: they never prompt, and
+`permissions.read_file` is not a key. A `deny` or `ask` on an MCP tool binds
+even when its server marks the tool read-only (57o): `deny` refuses it, `ask`
+denies it here. `allow` runs it, as the server's `readOnlyHint` alone runs a
+read-only tool the config names no level for.
 
 On a served request nobody can answer a prompt, so `ask` means deny there:
 `allow` in the config is the only way a destructive tool runs under `serve`,

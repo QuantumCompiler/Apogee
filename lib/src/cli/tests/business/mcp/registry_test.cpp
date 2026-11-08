@@ -167,6 +167,23 @@ TEST_CASE("tools register namespaced, gated unless read-only, and dispatch to th
     CHECK(connected);
 }
 
+TEST_CASE("a tool the person named is gated whatever its server's hint; the rest keep it",
+          "[mcp][registry][permission][57o]") {
+    // A level in the config outranks readOnlyHint (57o): the composition
+    // passes which names carry one, and those are gated so the level binds.
+    const Run run{{server("srv", "well")}};
+    apogee::agent::ToolRegistry named;
+    run.registry.register_into(named,
+                               [](std::string_view name) { return name == "mcp__srv__echo"; });
+    REQUIRE(named.find("mcp__srv__echo") != nullptr);
+    CHECK(named.find("mcp__srv__echo")->writes);
+    CHECK(named.find("mcp__srv__write")->writes);
+    apogee::agent::ToolRegistry unnamed;
+    run.registry.register_into(unnamed);
+    CHECK_FALSE(unnamed.find("mcp__srv__echo")->writes);
+    CHECK(unnamed.find("mcp__srv__write")->writes);
+}
+
 TEST_CASE("built-ins dispatch identically with zero, one failed, or one connected server",
           "[mcp][registry]") {
     apogee::agent::Tool native;

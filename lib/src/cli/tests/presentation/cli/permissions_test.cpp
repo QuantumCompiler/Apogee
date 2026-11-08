@@ -3,20 +3,26 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "agent/tool.h"
 #include "agent/web_search.h"
 #include "agentloop/loop.h"
 #include "cli/helpers.h"
 #include "contracts/config.h"
+#include "contracts/host.h"
 #include "machine/driver_input.h"
 #include "machine/json_reporter.h"
 #include "platform/platform.h"
@@ -24,6 +30,7 @@
 #include "support/fake_mcp_server.h"
 #include "support/fake_transport.h"
 #include "tools/environment.h"
+#include "tools/fs.h"
 #include "tools/toolsets.h"
 #include "views/status_line.h"
 #include "views/terminal.h"
@@ -686,6 +693,274 @@ TEST_CASE("a name that is neither a gated tool nor a website is refused, naming 
     CHECK(approvals.tools.empty());
     CHECK(apogee::commands::name_gated("example.org", gated()).host);
     CHECK_FALSE(apogee::commands::name_gated("example.org", gated(), false).error.empty());
+}
+
+TEST_CASE("the launch flag and the slash verbs deny every host --allow-host takes",
+          "[commands][permissions][presets][57o]") {
+    // 26o's "--deny takes either kind", regressed by a dot test (57o): each
+    // name `canonical_host` accepts is a website unless it is shaped like a
+    // tool -- dotless with a `_`.
+    for (const auto& [given, key] : std::vector<std::pair<std::string, std::string>>{
+             {"localhost", "localhost"},
+             {"LocalHost", "localhost"},
+             {"intranet", "intranet"},
+             {"[::1]", "::1"},
+             {"::1", "::1"},
+             {"[::ffff:127.0.0.1]", "::ffff:127.0.0.1"},
+             {"docs.python.org", "docs.python.org"},
+             {"a_b.example", "a_b.example"}}) {
+        INFO(given);
+        const GatedName name = apogee::commands::name_gated(given, gated());
+        CHECK(name.error.empty());
+        CHECK(name.host);
+        CHECK(name.key == key);
+        // The same canonical form `--allow-host` stores.
+        CHECK(apogee::harness::canonical_host(given) == key);
+    }
+    // Tool-shaped names are still typos, and a gated tool is still a tool.
+    for (const char* typo : {"write_flie", "mcp__srv__echo", "run_comand"}) {
+        INFO(typo);
+        const GatedName name = apogee::commands::name_gated(typo, gated());
+        CHECK_FALSE(name.host);
+        CHECK(name.error.find("is not a tool this chat asks about") != std::string::npos);
+    }
+    CHECK_FALSE(apogee::commands::name_gated("write_file", gated()).host);
+    // Not a host at all: refused as before.
+    CHECK_FALSE(apogee::commands::name_gated("not a host", gated()).error.empty());
+    CHECK_FALSE(apogee::commands::name_gated("[::1", gated()).error.empty());
+    // `--allow` stays tools only.
+    CHECK_FALSE(apogee::commands::name_gated("localhost", gated(), false).error.empty());
+
+    // The launch flag, and what the checker then does in each mode: a
+    // session's no comes before bypass.
+    for (const char* host : {"localhost", "[::1]", "::1", "intranet"}) {
+        INFO(host);
+        const auto approvals = std::make_shared<SessionApprovals>();
+        REQUIRE(
+            apogee::commands::seed_approvals(*approvals, PermissionPresets{.deny = {host}}, gated())
+                .empty());
+        approvals->mode = apogee::commands::PermissionMode::Bypass;
+        const apogee::agent::PermissionChecker check = make_permission_checker({}, approvals);
+        CHECK(check(website(*apogee::harness::canonical_host(host))) == Permission::Deny);
+        CHECK(check(website(host)) == Permission::Deny);
+        CHECK(check(website("example.org")) == Permission::Allow);
+    }
+    SessionApprovals approvals;
+    CHECK(apogee::commands::seed_approvals(approvals, PermissionPresets{.deny = {"write_flie"}},
+                                           gated())
+              .starts_with("--deny: 'write_flie' is not a tool this chat asks about"));
+
+    // A session's yes for localhost -- the prompt's `s` -- is taken back.
+    const auto answered = std::make_shared<SessionApprovals>();
+    std::string note;
+    GateRequest asked{"fetch_url", "localhost"};
+    asked.outbound = true;
+    REQUIRE(apogee::commands::answer_permission("s", asked, {}, answered, note));
+    CHECK(answered->hosts.contains("localhost"));
+    const GatedName localhost = apogee::commands::name_gated("localhost", gated());
+    apogee::commands::deny_for_session(*answered, localhost);
+    CHECK(make_permission_checker({}, answered)(website("localhost")) == Permission::Deny);
+    CHECK(apogee::commands::revoke_for_session(*answered, localhost));
+    CHECK(make_permission_checker({}, answered)(website("localhost")) == Permission::Ask);
+}
+
+TEST_CASE("the write prompt names the file written, on the terminal and in machine mode",
+          "[commands][permissions][machine][57o]") {
+    // The sweep's PTY probe (57o): the model's path repainted the prompt line
+    // and `..` dropped a component that does not exist, so the person saw
+    // `write_file -> notes.txt` and victim.txt was overwritten.
+    const apogee::testing::TempDir temp{"permissions-target-" +
+                                        std::to_string(std::random_device{}())};
+    const std::filesystem::path root = temp.path() / "work2";
+    std::filesystem::create_directories(root);
+    std::ofstream{root / "victim.txt"} << "original";
+    apogee::agent::ToolRegistry registry;
+    apogee::tools::register_fs_tools(registry, root);
+    const std::string probe =
+        "x\r\x1b[2K\x1b[35m[perm]\x1b[0m write_file -> notes.txt\x1b[8m/../victim.txt";
+
+    std::vector<std::string> printed;
+    std::ostringstream machine;
+    apogee::commands::JsonReporter reporter{machine};
+    apogee::agent::DispatchContext context;
+    context.permission = make_permission_checker({}, nullptr);
+    context.confirm = [&](const GateRequest& request) {
+        // What the terminal prints first, and what machine mode sends.
+        printed.push_back(apogee::commands::permission_prompt_line(request, apogee::ansi::Style{}));
+        reporter.emit_permission_question(request);
+        return true;
+    };
+    const apogee::agent::ToolOutcome wrote = apogee::agent::dispatch(
+        registry,
+        apogee::harness::ToolCall{
+            "w", "write_file", nlohmann::json{{"path", probe}, {"content", "overwritten"}}.dump()},
+        context);
+    REQUIRE_FALSE(wrote.is_error);
+    REQUIRE(printed.size() == 1);
+    CHECK(printed.front().ends_with(" write_file -> victim.txt"));
+    CHECK(printed.front().find("notes.txt") == std::string::npos);
+    CHECK(printed.front().find('\x1b') == std::string::npos);
+    CHECK(printed.front().find('\r') == std::string::npos);
+    const nlohmann::json event = nlohmann::json::parse(machine.str());
+    CHECK(event["kind"] == "permission");
+    CHECK(event["target"] == "victim.txt");
+    std::ifstream victim{root / "victim.txt"};
+    CHECK(std::string{std::istreambuf_iterator<char>{victim}, {}} == "overwritten");
+}
+
+namespace {
+
+/// A registry built as a `--tools` session builds it, over one fake server
+/// whose `echo` says readOnlyHint and whose `write` says nothing -- with the
+/// config's level for `mcp__srv__echo`, when given. Built in place: the tools
+/// keep pointers to the config and the server registry.
+struct McpWorld {
+    Config config;
+    std::vector<std::shared_ptr<apogee::testing::FakeMcpTransport>> made;
+    std::shared_ptr<apogee::mcp::Registry> mcp = std::make_shared<apogee::mcp::Registry>();
+    apogee::agent::ToolRegistry registry;
+
+    explicit McpWorld(
+        std::optional<PermissionLevel> level,
+        apogee::harness::AgentToolPolicy policy = apogee::harness::AgentToolPolicy::All) {
+        apogee::harness::McpServerConfig well;
+        well.command = "well";
+        config.mcp_servers.emplace("srv", well);
+        if (level.has_value()) {
+            config.permissions.levels["mcp__srv__echo"] = *level;
+        }
+        registry = apogee::commands::make_built_in_tools(
+            apogee::commands::BuiltInToolOptions{.config = &config,
+                                                 .policy = policy,
+                                                 .mcp = mcp,
+                                                 .mcp_spawn = apogee::testing::fake_fleet(&made)});
+    }
+
+    /// How many `tools/call` frames reached the server.
+    [[nodiscard]] int calls() const {
+        int calls = 0;
+        for (const auto& transport : made) {
+            for (const nlohmann::json& frame : transport->sent()) {
+                if (frame.value("method", "") == "tools/call") {
+                    ++calls;
+                }
+            }
+        }
+        return calls;
+    }
+
+    [[nodiscard]] apogee::agent::ToolOutcome call(
+        const apogee::agent::DispatchContext& context) const {
+        return apogee::agent::dispatch(
+            registry, apogee::harness::ToolCall{"e", "mcp__srv__echo", R"({"text":"hi"})"},
+            context);
+    }
+};
+
+}  // namespace
+
+TEST_CASE("a config level on an MCP tool binds even when its server calls it read-only",
+          "[commands][permissions][mcp][57o]") {
+    // The sweep (57o): `deny` on a tool whose server sends readOnlyHint was
+    // accepted, shown by `check` as `ok ... deny`, and the tool still ran. A
+    // level the person set now gates it; with none, the hint still decides.
+    SECTION("deny: refused unrun, with or without someone to ask") {
+        const McpWorld world{PermissionLevel::Deny};
+        REQUIRE(world.registry.find("mcp__srv__echo") != nullptr);
+        CHECK(world.registry.find("mcp__srv__echo")->writes);
+        int asked = 0;
+        apogee::agent::DispatchContext context;
+        context.permission = make_permission_checker(world.config, nullptr);
+        context.confirm = [&asked](const GateRequest&) {
+            ++asked;
+            return true;
+        };
+        const apogee::agent::ToolOutcome refused = world.call(context);
+        CHECK(refused.is_error);
+        CHECK(refused.content.find("denied permission") != std::string::npos);
+        CHECK(asked == 0);
+        // Bypass does not loosen a config deny either.
+        const auto bypass = std::make_shared<SessionApprovals>();
+        bypass->mode = apogee::commands::PermissionMode::Bypass;
+        context.permission = make_permission_checker(world.config, bypass);
+        CHECK(world.call(context).is_error);
+        CHECK(world.calls() == 0);
+        // And the session's gated set names it, so /allow and /deny can.
+        const std::vector<std::string> named = apogee::commands::gated_tools(world.registry);
+        CHECK(std::ranges::find(named, "mcp__srv__echo") != named.end());
+    }
+    SECTION("ask: asked where someone can answer, denied where nobody can") {
+        const McpWorld world{PermissionLevel::Ask};
+        apogee::agent::DispatchContext pipe;
+        pipe.permission = make_permission_checker(world.config, nullptr);
+        CHECK(world.call(pipe).is_error);
+        CHECK(world.calls() == 0);
+        int asked = 0;
+        apogee::agent::DispatchContext terminal = pipe;
+        terminal.confirm = [&asked](const GateRequest& request) {
+            CHECK(request.tool == "mcp__srv__echo");
+            ++asked;
+            return true;
+        };
+        CHECK_FALSE(world.call(terminal).is_error);
+        CHECK(asked == 1);
+        CHECK(world.calls() == 1);
+    }
+    SECTION("allow: runs unasked -- the hint's default, so in plan mode too") {
+        // `allow` gates nothing the hint left ungated (the review): plan
+        // mode refuses every writer over any allow, so a read tool made a
+        // writer by its `allow` was refused there for a false reason.
+        const McpWorld world{PermissionLevel::Allow};
+        CHECK_FALSE(world.registry.find("mcp__srv__echo")->writes);
+        apogee::agent::DispatchContext pipe;
+        pipe.permission = make_permission_checker(world.config, nullptr);
+        CHECK_FALSE(world.call(pipe).is_error);
+        CHECK(world.calls() == 1);
+        const auto plan = std::make_shared<SessionApprovals>();
+        plan->mode = apogee::commands::PermissionMode::Plan;
+        apogee::agent::DispatchContext planning;
+        planning.permission = make_permission_checker(world.config, plan);
+        const apogee::agent::ToolOutcome ran = world.call(planning);
+        CHECK_FALSE(ran.is_error);
+        CHECK(ran.content.find("plan mode") == std::string::npos);
+        CHECK(world.calls() == 2);
+        // A tool with no hint is a writer as ever: `allow` runs it, and plan
+        // mode still refuses it over that allow.
+        McpWorld writer{std::nullopt};
+        writer.config.permissions.levels["mcp__srv__write"] = PermissionLevel::Allow;
+        CHECK(writer.registry.find("mcp__srv__write")->writes);
+        planning.permission = make_permission_checker(writer.config, plan);
+        CHECK(apogee::agent::dispatch(
+                  writer.registry,
+                  apogee::harness::ToolCall{"w", "mcp__srv__write", R"({"text":"hi"})"}, planning)
+                  .is_error);
+        // And a deny stays a deny in plan mode.
+        const McpWorld denied{PermissionLevel::Deny};
+        planning.permission = make_permission_checker(denied.config, plan);
+        CHECK(denied.call(planning).is_error);
+        CHECK(denied.calls() == 0);
+    }
+    SECTION("no level: the hint's default -- ungated, runs unprompted") {
+        const McpWorld world{std::nullopt};
+        CHECK_FALSE(world.registry.find("mcp__srv__echo")->writes);
+        CHECK(world.registry.find("mcp__srv__write")->writes);  // no hint: gated as ever
+        apogee::agent::DispatchContext pipe;
+        pipe.permission = make_permission_checker(world.config, nullptr);
+        CHECK_FALSE(world.call(pipe).is_error);
+        CHECK(world.calls() == 1);
+    }
+    SECTION("a read-only agent drops a denied or asked tool and keeps an allowed one") {
+        // `deny` and `ask` make the tool gated, so a read-only agent treats
+        // it as one with no hint; `allow`, like no level, keeps the hint.
+        for (const PermissionLevel level : {PermissionLevel::Deny, PermissionLevel::Ask}) {
+            const McpWorld gated{level, apogee::harness::AgentToolPolicy::ReadOnly};
+            CHECK(gated.registry.find("mcp__srv__echo") == nullptr);
+        }
+        const McpWorld allowed{PermissionLevel::Allow, apogee::harness::AgentToolPolicy::ReadOnly};
+        CHECK(allowed.registry.find("mcp__srv__echo") != nullptr);
+        const McpWorld unnamed{std::nullopt, apogee::harness::AgentToolPolicy::ReadOnly};
+        CHECK(unnamed.registry.find("mcp__srv__echo") != nullptr);
+    }
 }
 
 TEST_CASE("a shell or git tool this build never offers is refused saying why, not as a typo",

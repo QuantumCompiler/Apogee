@@ -1560,6 +1560,52 @@ TEST_CASE("machine mode takes the permission mode at launch, asking nothing it c
     CHECK_FALSE(std::filesystem::exists(chat.home.path() / "work" / "out.txt"));
 }
 
+TEST_CASE("a chat's --deny, /deny and /revoke take every host --allow-host takes, IPv6 too",
+          "[chat][cli][permissions][presets][57o]") {
+    // The sweep (57o): `--deny localhost`, `[::1]`, `::1` and `intranet` were
+    // refused as "not a tool this chat asks about" while `--allow-host`
+    // took them, so a bypass session could not keep the model off a local
+    // service, and a localhost yes could not be taken back.
+    const nlohmann::json fetches_localhost = nlohmann::json::array(
+        {{{"tool_calls",
+           {{{"name", "fetch_url"}, {"arguments", {{"url", "http://localhost:9/status"}}}}}}},
+         {{"text", "{{last_tool_result}}"}}});
+    HelperChat chat{fetches_localhost, {"Title"}};
+    for (const auto& [given, canonical] :
+         std::vector<std::pair<std::string, std::string>>{{"localhost", "localhost"},
+                                                          {"[::1]", "::1"},
+                                                          {"::1", "::1"},
+                                                          {"intranet", "intranet"}}) {
+        INFO(given);
+        REQUIRE(chat.run({"chat", "--tools", "--deny", given}, "/permissions\n") == 0);
+        CHECK((chat.out + chat.err).find("website " + canonical + ": deny (this session)") !=
+              std::string::npos);
+    }
+
+    // In bypass mode, where nothing asks, the session's no still refuses --
+    // unrun, the model told so.
+    REQUIRE(chat.run({"chat", "--tools", "--allow-bypass", "--deny", "localhost"},
+                     "/permission-mode bypass\nfetch it\n") == 0);
+    CHECK((chat.out + chat.err).find("permission to reach localhost was not given") !=
+          std::string::npos);
+
+    // A yes for localhost -- `--allow-host`, as the prompt's `s` gives one --
+    // is taken back by /deny and forgotten by /revoke.
+    REQUIRE(chat.run({"chat", "--tools", "--allow-host", "localhost"},
+                     "/deny localhost\n/permissions\n/allow localhost\n/revoke localhost\n"
+                     "/permissions\n") == 0);
+    const std::string said = chat.out + chat.err;
+    CHECK(said.find("website localhost denied for this chat") != std::string::npos);
+    CHECK(said.find("website localhost: deny (this session)") != std::string::npos);
+    CHECK(said.find("website localhost: asked again from now on") != std::string::npos);
+    CHECK(said.find("is not a tool this chat asks about") == std::string::npos);
+
+    // A tool-shaped typo is still caught as one.
+    CHECK(chat.run({"chat", "--tools", "--deny", "write_flie"}, "") != 0);
+    CHECK((chat.out + chat.err).find("'write_flie' is not a tool this chat asks about") !=
+          std::string::npos);
+}
+
 TEST_CASE("the slash verbs answer for the chat, and /permissions says from where",
           "[chat][cli][permissions][presets]") {
     HelperChat chat{texts({"fine"}), {"Title"}, "", "permissions:\n  delete_file: allow\n"};

@@ -1405,6 +1405,12 @@ void bind_set_permission(CLI::App& parent, const RootContext& context) {
     auto level = std::make_shared<std::string>();
     CLI::App* cmd = parent.add_subcommand(
         "set-permission", "Set what the permission gate does for a tool: ask, allow, or deny");
+    // What a level binds (57o): an MCP tool's level holds even where its
+    // server calls the tool read-only; the native read tools have none.
+    cmd->footer(
+        "A level on an MCP tool (mcp__<server>__<tool>) binds even when its server marks it "
+        "read-only: deny refuses it, ask asks (and so denies under serve), allow runs it. The "
+        "native read tools (read_file, git_status, ...) never ask and take no level.");
     cmd->add_option("tool", *tool, "Tool name, e.g. write_file or run_command")
         ->type_name(kToolValue)
         ->required();

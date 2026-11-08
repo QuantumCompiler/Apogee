@@ -85,7 +85,14 @@ public:
     /// Adds every connected server's tools as `mcp__<server>__<tool>`. A tool
     /// is `writes` unless its `readOnlyHint` is true: a third-party tool with
     /// no annotation is treated as destructive and goes through the gate.
-    void register_into(agent::ToolRegistry& registry) const;
+    ///
+    /// `named` says which namespaced names a level the person set must gate
+    /// (57o) -- `make_built_in_tools` names those given `deny` or `ask`: such
+    /// a tool is `writes` whatever its server's hint, so its level binds -- a
+    /// server's own say-so never undoes the person's `deny`. Empty, the hint
+    /// alone decides, as for every tool nobody named.
+    void register_into(agent::ToolRegistry& registry,
+                       const std::function<bool(std::string_view)>& named = {}) const;
 
     /// A direct call, for `mcp test`: the same path a dispatched tool takes.
     [[nodiscard]] ToolCallResult call(std::string_view namespaced, std::string_view arguments,

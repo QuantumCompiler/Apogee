@@ -190,6 +190,86 @@ bool looks_binary(const std::filesystem::path& path) {
     return read_bytes(path, 8 * 1024).find('\0') != std::string::npos;
 }
 
+/// The most links one path is followed through (57o): POSIX's usual
+/// `SYMLOOP_MAX`. Past it the path is refused as unresolvable.
+constexpr int kMaxLinkHops = 40;
+
+/// Where a resolved path really lands, every link in it followed (57o).
+struct LinkWalk {
+    /// The path with no link left in it, or empty with `error` set.
+    std::filesystem::path path;
+    /// The first link followed, to name in a refusal; empty when none was.
+    std::filesystem::path first_link;
+    std::string error;
+};
+
+/// `resolved` -- a `platform::resolve_path` answer -- with the links it still
+/// holds followed (57o). `weakly_canonical` follows only a link whose target
+/// exists: a dangling one counts as a file not yet created and stays a name,
+/// and a lexical `..` after a missing folder steps past a link without
+/// reading it. A writer that opened such a path followed the link out of the
+/// root. So each component is asked, in order, whether it is a link; the
+/// first one is read (`read_symlink`, from its own folder), the rest of the
+/// path put after its target and resolved again, until none is left.
+LinkWalk follow_links(std::filesystem::path resolved) {
+    LinkWalk out;
+    for (int hop = 0;; ++hop) {
+        std::filesystem::path prefix;
+        std::filesystem::path link;
+        std::filesystem::path rest;
+        for (const std::filesystem::path& part : resolved) {
+            if (part.empty()) {
+                continue;  // a trailing separator
+            }
+            if (!link.empty()) {
+                rest /= part;
+                continue;
+            }
+            prefix /= part;
+            if (!prefix.has_relative_path()) {
+                continue;  // the root: `/`, `C:\`
+            }
+            std::error_code code;
+            if (platform::is_link(prefix, code)) {
+                link = prefix;
+                continue;
+            }
+            if (code) {
+                out.error = prefix.string() + " cannot be read: " + code.message();
+                return out;
+            }
+            if (!std::filesystem::exists(prefix, code)) {
+                break;  // nothing below a missing folder exists, links included
+            }
+        }
+        if (link.empty()) {
+            out.path = std::move(resolved);
+            return out;
+        }
+        if (hop == kMaxLinkHops) {
+            out.error = "it passes through more than " + std::to_string(kMaxLinkHops) + " links";
+            return out;
+        }
+        if (out.first_link.empty()) {
+            out.first_link = link;
+        }
+        std::error_code code;
+        std::filesystem::path target = std::filesystem::read_symlink(link, code);
+        if (code) {
+            out.error = "the link " + link.string() + " cannot be read: " + code.message();
+            return out;
+        }
+        if (target.is_relative()) {
+            target = link.parent_path() / target;
+        }
+        resolved = platform::resolve_path(rest.empty() ? target : target / rest, code);
+        if (code) {
+            out.error = "the link " + link.string() + " cannot be resolved: " + code.message();
+            return out;
+        }
+    }
+}
+
 }  // namespace
 
 std::optional<std::filesystem::path> resolve_in_root(const std::filesystem::path& root,
@@ -215,14 +295,27 @@ std::optional<std::filesystem::path> resolve_in_root(const std::filesystem::path
     // about to be created by where it will land. `weakly_canonical` on POSIX;
     // on Windows the seam's own resolution, since the x64 build's library
     // follows no junction or symlink (57k).
-    const std::filesystem::path resolved = platform::resolve_path(candidate, code);
+    const std::filesystem::path first = platform::resolve_path(candidate, code);
     if (code) {
         error = "'" + std::string{path} + "' cannot be resolved: " + code.message();
         return std::nullopt;
     }
+    // Then the links that resolution leaves standing -- a dangling one, or one
+    // a `..` stepped past -- followed to where they lead (57o), so the path
+    // returned holds no link and a writer never opens one.
+    const LinkWalk walk = follow_links(first);
+    if (!walk.error.empty()) {
+        error = "'" + std::string{path} + "' cannot be resolved inside the allowed root " +
+                canonical_root.string() + ": " + walk.error;
+        return std::nullopt;
+    }
+    const std::filesystem::path& resolved = walk.path;
     if (!is_within(canonical_root, resolved)) {
         error = "'" + std::string{path} + "' is outside the allowed root " +
                 canonical_root.string() +
+                (walk.first_link.empty() ? std::string{}
+                                         : " (through the link " + walk.first_link.string() +
+                                               ", it leads to " + resolved.string() + ")") +
                 ". The file tools work in the folder Apogee was started in unless "
                 "tools.fs_root in the config says otherwise: start Apogee in a folder that "
                 "contains it, or set tools.fs_root to expand access.";
@@ -475,6 +568,40 @@ std::string diff_label(const std::filesystem::path& root, const std::filesystem:
     return text.empty() || text.starts_with("..") ? path.generic_string() : text;
 }
 
+/// A file writer's target for the gate (57o): the file the call writes --
+/// resolved inside the root, links followed and `..` taken -- named as the
+/// diff names it, never the `path` argument as the model wrote it. So
+/// `notes.txt/../victim.txt` is asked about as `victim.txt`, on the terminal
+/// and in machine mode's question alike. Empty when it does not resolve:
+/// such a call is refused before anyone is asked (`writer_refusal`).
+std::string writer_target(const std::filesystem::path& root, std::string_view arguments) {
+    agent::ToolOutcome unused;
+    const std::optional<Arguments> args = parse_arguments(arguments, "", unused);
+    if (!args.has_value()) {
+        return {};
+    }
+    std::string problem;
+    const std::optional<std::filesystem::path> path =
+        resolve_in_root(root, args->string("path"), problem);
+    return path.has_value() ? diff_label(root, *path) : std::string{};
+}
+
+/// Why a file writer's call is refused unrun (57o): its path does not
+/// resolve inside the root -- `resolve_in_root`'s own message, as the run
+/// would give it -- or empty. Arguments that do not parse are left to the
+/// run, which says what shape it wanted.
+std::string writer_refusal(const std::filesystem::path& root, std::string_view arguments) {
+    agent::ToolOutcome unused;
+    const std::optional<Arguments> args = parse_arguments(arguments, "", unused);
+    if (!args.has_value()) {
+        return {};
+    }
+    std::string problem;
+    return resolve_in_root(root, args->string("path"), problem).has_value()
+               ? std::string{}
+               : error(problem).content;
+}
+
 }  // namespace
 
 void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::path& root,
@@ -563,7 +690,16 @@ void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::pat
         R"({"type":"object","properties":{"path":{"type":"string","description":"Absolute path, ~ path, or a path relative to the root"},"content":{"type":"string","description":"The text to write"}},"required":["path","content"]})";
     write.writes = true;
     write.edits = true;
-    write.describe_target = read.describe_target;
+    // The file written, never the argument as typed (57o); a path that does
+    // not land inside the root is refused before the gate asks.
+    const auto writer_target_of = [root](std::string_view arguments) {
+        return writer_target(root, arguments);
+    };
+    const auto writer_refusal_of = [root](std::string_view arguments) {
+        return writer_refusal(root, arguments);
+    };
+    write.describe_target = writer_target_of;
+    write.target_refusal = writer_refusal_of;
     // The change as a diff against what is there now (52a): the question
     // shows what the call would write, from the arguments it judges.
     write.describe_detail = [root](std::string_view arguments) -> std::string {
@@ -592,15 +728,27 @@ void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::pat
             return failure;
         }
         const std::filesystem::path& path = planned->path;
-        std::error_code code;
-        std::filesystem::create_directories(path.parent_path(), code);
-        std::ofstream out{path, std::ios::binary | std::ios::trunc};
-        if (!out) {
-            return error("could not open " + path.string() + " for writing");
+        // Written beside the file and renamed over it (57o), as `edit_file`
+        // writes: the path holds no link -- `resolve_in_root` followed them
+        // all -- and a rename replaces whatever stands there and follows
+        // nothing, so a link put there after the check is not written
+        // through either. Missing folders are made; an existing file keeps
+        // its mode, and a new one takes the umask's.
+        //
+        // An existing file the person may not write is refused, as it was
+        // before the rename (57o): a rename would replace a read-only file,
+        // so it is opened for writing first -- nothing truncated, nothing
+        // written -- and refused in the old words when that fails.
+        if (std::error_code code; std::filesystem::is_regular_file(path, code)) {
+            const std::fstream probe{path, std::ios::in | std::ios::out | std::ios::binary};
+            if (!probe.is_open()) {
+                return error("could not open " + path.string() + " for writing");
+            }
         }
-        out << planned->content;
-        if (!out) {
-            return error("could not write " + path.string());
+        try {
+            harness::write_file_atomically(path, planned->content);
+        } catch (const std::exception& e) {
+            return error("could not write " + path.string() + ": " + e.what());
         }
         return ok("Wrote " + std::to_string(planned->content.size()) + " bytes to " +
                   path.string());
@@ -620,7 +768,8 @@ void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::pat
         R"({"type":"object","properties":{"path":{"type":"string","description":"Absolute path, ~ path, or a path relative to the root"},"old_string":{"type":"string","description":"The exact text to replace"},"new_string":{"type":"string","description":"The text to put in its place"},"replace_all":{"type":"boolean","description":"Replace every occurrence rather than exactly one"}},"required":["path","old_string","new_string"]})";
     edit.writes = true;
     edit.edits = true;
-    edit.describe_target = read.describe_target;
+    edit.describe_target = writer_target_of;
+    edit.target_refusal = writer_refusal_of;
     // What validation checks before waking a verifier (27g): the file must
     // be there to be edited.
     edit.precheck = [root](std::string_view arguments) -> std::string {
@@ -666,7 +815,8 @@ void register_fs_tools(agent::ToolRegistry& registry, const std::filesystem::pat
     remove.parameters_schema = path_only;
     remove.writes = true;
     remove.edits = true;
-    remove.describe_target = read.describe_target;
+    remove.describe_target = writer_target_of;
+    remove.target_refusal = writer_refusal_of;
     remove.precheck = [root](std::string_view arguments) -> std::string {
         return existing_file_problem(root, arguments, "delete_file deletes an existing file");
     };

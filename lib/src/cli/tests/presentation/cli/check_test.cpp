@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <optional>
 #include <random>
 #include <string>
@@ -17,11 +18,14 @@
 #include <utility>
 #include <vector>
 
+#include "agent/tool.h"
 #include "agentloop/recall.h"
 #include "backends/adapters.h"
 #include "backends/provider_cache.h"
 #include "backends/provider_table.h"
+#include "cli/helpers.h"
 #include "cli/line_tokens.h"
+#include "cli/permissions.h"
 #include "contracts/assets.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
@@ -42,6 +46,7 @@
 #include "support/cli_home.h"
 #include "support/env_guard.h"
 #include "support/fake_existence_view.h"
+#include "support/fake_mcp_server.h"
 #include "support/fake_xcode.h"
 #include "support/gguf_builder.h"
 #include "support/mlx_model.h"
@@ -905,6 +910,47 @@ TEST_CASE("the doctor reports the credential store: absent is fine, present must
     std::ofstream{store.path(), std::ios::trunc} << "{ not json";
     CHECK(store_row().status == Status::Warn);
     CHECK(store_row().detail.find("credentials.json") != std::string::npos);
+}
+
+TEST_CASE("check's level on an MCP tool is the level the gate enforces, read-only hint or not",
+          "[commands][check][tools][mcp][57o]") {
+    // The sweep (57o): `ok permissions.mcp__self__list_notes deny` while the
+    // tool still ran. One config, read by both: the row says deny, and the
+    // registry a --tools session builds from it refuses the call unrun.
+    Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml",
+                  "permissions:\n  mcp__srv__echo: deny\n"
+                  "mcp_servers:\n  srv:\n    command: well\n");
+    load_into(inputs);
+    const CheckReport report = run_checks(inputs);
+    const auto* row = row_with(report, "permissions.mcp__srv__echo");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Ok);
+    CHECK(row->detail == "deny");
+
+    // The server registry is kept for the test's life: its clients answer
+    // the calls, so a refusal below is the gate's and never a closed pipe.
+    std::vector<std::shared_ptr<apogee::testing::FakeMcpTransport>> made;
+    const auto servers = std::make_shared<apogee::mcp::Registry>();
+    const apogee::agent::ToolRegistry registry = apogee::commands::make_built_in_tools(
+        apogee::commands::BuiltInToolOptions{.config = &inputs.config,
+                                             .mcp = servers,
+                                             .mcp_spawn = apogee::testing::fake_fleet(&made)});
+    REQUIRE(registry.find("mcp__srv__echo") != nullptr);
+    apogee::agent::DispatchContext context;
+    context.permission = apogee::commands::make_permission_checker(inputs.config, nullptr);
+    context.confirm = [](const apogee::agent::GateRequest&) { return true; };
+    const apogee::agent::ToolOutcome outcome = apogee::agent::dispatch(
+        registry, apogee::harness::ToolCall{"e", "mcp__srv__echo", R"({"text":"hi"})"}, context);
+    CHECK(outcome.is_error);
+    CHECK(outcome.content.find("denied permission") != std::string::npos);
+    for (const auto& transport : made) {
+        for (const nlohmann::json& frame : transport->sent()) {
+            CHECK(frame.value("method", "") != "tools/call");
+        }
+    }
 }
 
 TEST_CASE("the doctor's Tools section: keys, the root, the switches, and git",

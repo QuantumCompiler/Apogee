@@ -338,3 +338,32 @@ TEST_CASE("every built-in tool's parameters are a JSON Schema a template can rea
         CHECK_FALSE(tool.description.empty());
     }
 }
+
+TEST_CASE("the gate asks about the file a call writes, and never about one outside the root",
+          "[tools][gate][permission][57o]") {
+    // Through the shared loop, as every surface runs a call: the target the
+    // prompt names is the file written, resolved inside the root (57o), and a
+    // path that lands outside is refused before anyone is asked.
+    const std::string repaint =
+        "x\r\x1b[2K\x1b[35m[perm]\x1b[0m write_file -> notes.txt\x1b[8m/../victim.txt";
+    World world{
+        {calls({ToolCall{"w", "write_file",
+                         nlohmann::json{{"path", repaint}, {"content", "overwritten"}}.dump()},
+                ToolCall{"o", "write_file", R"({"path":"../escaped.txt","content":"x"})"},
+                ToolCall{"d", "delete_file", R"({"path":"sub/../in.txt"})"}}),
+         says("done")}};
+    std::vector<std::string> asked;
+    Options ask;
+    ask.permission = [](const apogee::agent::GateRequest&) { return Permission::Ask; };
+    ask.confirm = [&asked](const apogee::agent::GateRequest& request) {
+        asked.push_back(std::string{request.tool} + " -> " + std::string{request.target});
+        return request.tool != "delete_file";
+    };
+    const std::vector<ChatMessage> history = world.run(ask);
+    CHECK(asked == std::vector<std::string>{"write_file -> victim.txt", "delete_file -> in.txt"});
+    CHECK(tool_result(history, "o").find("outside the allowed root") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(world.temp.path() / "escaped.txt"));
+    std::ifstream victim{world.root / "victim.txt"};
+    CHECK(std::string{std::istreambuf_iterator<char>{victim}, {}} == "overwritten");
+    CHECK(std::filesystem::exists(world.root / "in.txt"));
+}

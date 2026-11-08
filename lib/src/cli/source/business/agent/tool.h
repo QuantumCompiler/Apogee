@@ -156,6 +156,14 @@ struct Tool {
     /// with.
     std::function<std::string(std::string_view arguments)> describe_detail;
 
+    /// Why a call cannot act on what it names at all, or empty (57o): a file
+    /// writer's path that does not resolve inside the sandbox root. Such a
+    /// call is refused unrun, with this as its error, before the gate asks --
+    /// the file tools' twin of "an outbound tool must name its target", so
+    /// nobody is asked about a write that was never going to land. Optional;
+    /// dispatch and `permitted` both read it.
+    std::function<std::string(std::string_view arguments)> target_refusal;
+
     /// A structural check of a call's arguments the tool can answer without
     /// running or asking anyone -- a path that must exist, and does not:
     /// why the call cannot do what it says, or empty. Optional. Only a

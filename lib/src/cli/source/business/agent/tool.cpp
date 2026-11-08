@@ -172,6 +172,10 @@ bool permitted(const Tool& tool, std::string_view arguments, const DispatchConte
     if (!gated(tool)) {
         return true;
     }
+    // A call that cannot act on what it names is never asked about (57o).
+    if (tool.target_refusal && !tool.target_refusal(arguments).empty()) {
+        return false;
+    }
     const std::string target =
         tool.describe_target ? tool.describe_target(arguments) : std::string{};
     if (!tool.describe_detail) {
@@ -225,6 +229,16 @@ ToolOutcome dispatch(const ToolRegistry& registry, const harness::ToolCall& call
             throw;
         }
     };
+
+    // Refused unrun, before the gate asks (57o): a file writer whose path
+    // does not resolve inside the root. The person is never asked about a
+    // write that cannot land, and the model reads the tool's own refusal.
+    if (tool->target_refusal) {
+        if (const std::string why = tool->target_refusal(call.arguments); !why.empty()) {
+            report(ToolCallState::Failed, named);
+            return ToolOutcome{harness::valid_utf8(why), true};
+        }
+    }
 
     if (tool->outbound) {
         const std::string& target = named;

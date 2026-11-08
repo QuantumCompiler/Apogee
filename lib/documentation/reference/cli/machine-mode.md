@@ -910,6 +910,13 @@ emits a `question` with `"kind": "permission"`, the `tool` and its `target`
 {"type":"question","kind":"permission","tool":"write_file","target":"notes/todo.md","questions":[{"header":"Permission","question":"Allow write_file on notes/todo.md?","multi_select":false,"options":[{"label":"yes","description":"Allow this once"},{"label":"no","description":"Deny"},{"label":"always","description":"Allow, and remember it in the config"},{"label":"session","description":"Allow for the rest of this session"}]}]}
 ```
 
+A file writer's `target` is the file the call writes (57o): resolved inside
+the tools' root -- links followed, `..` taken -- and named relative to it, so
+`notes.txt/../victim.txt` is asked about as `victim.txt`, and a path through a
+link names where the link leads. A path that lands outside the root is refused
+unasked, the tool result saying so. An MCP tool asks too where the config
+gives it `ask`, even when its server marks it read-only.
+
 Since 56a a question asked about a tool call names it: `tool_call_id`, the
 `id` of the call's `tool_call` events, so a driver that draws each call can put
 the question on its card -- `"tool_call_id":"call_7"` beside `tool` and

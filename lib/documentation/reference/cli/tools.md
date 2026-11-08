@@ -24,6 +24,31 @@ neither `run_command` nor any git tool is offered or served, `check`'s `git`
 row is skipped saying why, and `--allow`, `--deny`, `/allow` or a task's
 grant naming one is refused with that reason (57k).
 
+**What the gate shows is what it enforces** (57o). The file tools work inside
+`tools.fs_root` (the launch folder when unset), and a path is judged by where
+it lands: every link in it is followed, one whose target does not exist yet
+included, so a link that leads out of the root is refused by every file tool
+and nothing is written through it. A file writer's question names the file the
+call writes, relative to the root -- `notes/../a.md` is asked about as `a.md`
+-- and a path that lands outside is refused before anyone is asked. The git
+tools never ask, so they are confined instead: a `repo` the model names must
+be inside the same root (with none, they use the repository above the launch
+folder, as before), and so must the repository git opens there -- a `.git`
+file, link or folder, a `core.worktree`, a `commondir` or an
+`objects/info/alternates` that leads out of the root is refused, while the
+checkout a launch in a subfolder sits in, a linked worktree and a submodule's
+checkout still read. No git they start runs a command a repository's own
+config names -- no `core.fsmonitor`, filter driver, external diff or textconv,
+hook (from `.git/hooks` or a `core.hooksPath`), or signature check, nor
+anything inside a submodule: a submodule shows as the commit ids it moved
+between, never diffed, logged or summarised inside it, whatever
+`diff.submodule` or `status.submoduleSummary` asks -- and none of their reads
+writes the repository's index. The review form's `git fetch` is the one
+exception, as Milestone V left it: it runs with the repository's own remote
+settings (though still no hook).
+`--deny`, `/deny` and `/revoke` take every host `--allow-host` takes,
+`localhost` and IPv6 literals such as `[::1]` included.
+
 **`apogee serve --tools` offers this same set, whole** (57n): every native
 toolset, `fetch_url` (and `web_search` where configured), `todo_write` and
 every enabled MCP server -- the registry `chat` builds, so files under
@@ -244,7 +269,8 @@ served by `xcrun mcpbridge`. Apogee connects them **for that session alone**:
   in the config's entries, never in a host's.
 - **The gate is Apogee's.** A host handing over a server is not you agreeing to
   its calls. Each of its tools is gated as any MCP tool is: one its server marks
-  `readOnlyHint` runs unasked, and every other asks through the host's
+  `readOnlyHint` runs unasked unless `permissions:` gives it `deny` or `ask`
+  (57o: those bind whatever the hint says), and every other asks through the host's
   permission sheet -- in accept-edits mode too, which never covers an MCP tool.
 
 **Xcode asks too.** The first time an agent reaches Xcode's tools, Xcode shows
