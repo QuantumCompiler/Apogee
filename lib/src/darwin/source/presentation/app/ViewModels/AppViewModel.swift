@@ -62,6 +62,8 @@ final class AppViewModel {
     /// as their supervisors list them: what the monitor shows, and what quit
     /// stops (4c).
     let children: ChildRegistry
+    /// The place changes, applied one after another (GUI 6b).
+    let placeChanges: PlaceChanges
 
     /// The composition. `children` is where every job and session the app
     /// starts is listed; `home` holds the media places' folders. A test hands
@@ -81,7 +83,7 @@ final class AppViewModel {
         let shell = ShellViewModel(preferences: preferences)
         let sessions = SessionLibraryViewModel(
             starter: starter ?? ApogeeClient(identity: ClientIdentity(version: version ?? "development"), children: children),
-            runner: runner ?? ReadRunner(), preferences: preferences)
+            runner: runner ?? ReadRunner(), preferences: preferences, jobs: jobs)
         let models = ModelsViewModel(runner: runner ?? ReadRunner())
         let store = StoreViewModel(runner: runner ?? ReadRunner())
         let downloads = DownloadsViewModel(starter: jobs)
@@ -209,9 +211,13 @@ final class AppViewModel {
         }
         suites.sessionSwitchable = { [weak sessions] in sessions?.canSwitchSuite ?? false }
         // Sessions in view or not: the library keeps its one child to the
-        // session on screen. A place coming into view reads again.
+        // session on screen. A place coming into view reads again. Each change
+        // is applied once the one before it has been (GUI 6b): one made while
+        // an earlier one waits on the binary's re-ask never runs ahead of it,
+        // so the last place chosen is the one in force.
+        let placeChanges = PlaceChanges()
         shell.routeChanged = { [weak sessions, weak models, weak store, weak tasks, weak suites, weak graph, weak video, weak compose, weak voice, weak records, weak collections, weak training, weak agents, weak symphonies, weak mcp, weak review] destination in
-            Task {
+            placeChanges.apply {
                 // A binary changed under the app is asked again before the
                 // place it opens reads or runs anything (GUI 4k).
                 await sessions?.checkBinary()
@@ -263,11 +269,15 @@ final class AppViewModel {
         self.voice = voice
         self.settings = settings
         self.children = children
+        self.placeChanges = placeChanges
         termination = Termination(
             pending: { [weak sessions] in sessions?.needsShutdown ?? false },
             shutDown: { [weak sessions] in await sessions?.quit() ?? ShutdownReport(ended: true, deleteFailure: nil) },
             jobsRunning: { children.children(.job).count },
             stopJobs: { await children.stop(.job, grace: Termination.jobGrace) })
+        // A binary the library adopts after launch -- Try again's -- is
+        // handed to every place as the launch hands one (GUI 6b).
+        sessions.binaryAdopted = { [weak self] _ in await self?.connectPlaces() }
     }
 
     /// Whether `registry` holds a run that installs into Apogee's Python
@@ -293,6 +303,13 @@ final class AppViewModel {
     /// is handed the binary.
     func start() async {
         await sessions.start(inView: shell.route == .sessions)
+        await connectPlaces()
+    }
+
+    /// Every place handed the binary the library holds, each reading what it
+    /// reads on it: at launch, and again whenever the library adopts one
+    /// later -- the one a session's Try again found (GUI 6b).
+    func connectPlaces() async {
         await models.connect(binary: sessions.binaryURL)
         await store.connect(binary: sessions.binaryURL)
         downloads.connect(binary: sessions.binaryURL)

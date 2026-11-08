@@ -1,4 +1,5 @@
 #if DEBUG
+import BusinessJobs
 import BusinessReads
 import BusinessSession
 import DataDiscovery
@@ -150,6 +151,31 @@ struct PreviewChats: ChatStarting {
 
     func openChat(binary: URL, launch: ChatLaunch) -> any ChatSession {
         PreviewChat(saying: lines, silentFrom: silentFrom, byTurn: byTurn)
+    }
+}
+
+/// Where a preview's long runs go -- a saved chat's compaction (GUI 6b):
+/// nothing starts the binary. Each run stays running, as a person sees one
+/// working, until it is stopped.
+struct PreviewJobs: JobStarting {
+    func startJob(binary: URL, arguments: [String], streaming: Bool, folder: URL?) -> any JobRunning {
+        PreviewJob()
+    }
+}
+
+/// A run that says nothing and works until it is stopped; stopped, its
+/// updates end -- with no `ended`: a `JobEnd` that was stopped carries
+/// InfrastructureProcess's types, which this module does not link.
+final class PreviewJob: JobRunning, Sendable {
+    let updates: AsyncStream<JobUpdate>
+    private let continuation: AsyncStream<JobUpdate>.Continuation
+
+    init() {
+        (updates, continuation) = AsyncStream.makeStream(of: JobUpdate.self)
+    }
+
+    func stop(grace: Duration) async {
+        continuation.finish()
     }
 }
 

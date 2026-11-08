@@ -140,16 +140,17 @@ enum SessionsPreview {
     /// The branch binary (schema 2026-10-26, the CLI's M31) over M15's
     /// sandbox: three saved chats -- the oldest written by the installed,
     /// older binary -- `chats info`'s document for one, and `chats recall`'s
-    /// listing of all three; Forget answering as it did there.
-    static func documents() -> SessionLibraryViewModel {
+    /// listing of all three; Forget answering as it did there. Without
+    /// `recall`, the listing can't be read: the read fails, as one would
+    /// with no binary to answer it (GUI 6b).
+    static func documents(recall: Bool = true) -> SessionLibraryViewModel {
         let runner = PreviewRunner(
             reads: [
                 (["chats", "list"], SessionsDocuments.chatsListRecall),
                 (["chats", "info"], SessionsDocuments.chatsInfoDocument),
-                (["chats", "recall"], SessionsDocuments.chatsRecallListing),
                 (["models", "list"], modelsList),
                 (["models", "status"], modelsStatus),
-            ],
+            ] + (recall ? [(["chats", "recall"], SessionsDocuments.chatsRecallListing)] : []),
             commands: [
                 (["__machine-schema"], SessionsDocuments.machineSchemaM31),
                 (["config", "get", "suites"], suites),
@@ -157,7 +158,8 @@ enum SessionsPreview {
             ])
         let now = Self.now
         return SessionLibraryViewModel(
-            starter: PreviewChats(lines: mockActor), runner: runner, preferences: Preferences(store: MemoryStore()), now: { now })
+            starter: PreviewChats(lines: mockActor), runner: runner, preferences: Preferences(store: MemoryStore()),
+            jobs: PreviewJobs(), now: { now })
     }
 
     /// The chat `chats info`'s document was recorded on: Dev Server Port.
@@ -172,17 +174,27 @@ enum SessionsPreview {
 
     /// The library over `chats`, each session it opens saying `lines` --
     /// or, `missing`, no binary found. `openChat` is the conversation left
-    /// open last time, and `models` what `models list` answers. Not started.
+    /// open last time, and `models` what `models list` answers; its long
+    /// runs go to `jobs`, none of which starts the binary. Not started.
     static func library(
         chats: String = chatsList, lines: [String] = mockActor, missing: Bool = false, openChat: String? = nil,
-        defaultSuite: String = "", models: String = modelsList, byTurn: Bool = false
+        defaultSuite: String = "", models: String = modelsList, byTurn: Bool = false, jobs: PreviewJobs = PreviewJobs()
     ) -> SessionLibraryViewModel {
         let now = Self.now
         return SessionLibraryViewModel(
             starter: PreviewChats(lines: lines, missing: missing ? passedOver : nil, byTurn: byTurn),
             runner: runner(chats: chats, defaultSuite: defaultSuite, models: models),
             preferences: Preferences(store: MemoryStore(openChat.map { ["openChat": $0] } ?? [:])),
-            now: { now })
+            jobs: jobs, now: { now })
+    }
+
+    /// The first saved chat's compaction asked and confirmed: its job --
+    /// a preview's, which works until it is stopped -- running (GUI 6b).
+    static func compactFirst(_ library: SessionLibraryViewModel) async {
+        guard let chat = library.chats.first else { return }
+        library.askToCompact(chat)
+        Task { await library.confirm() }
+        await until { library.isCompacting(chat) }
     }
 
     /// The window around it, its preferences held in memory.

@@ -176,6 +176,49 @@ struct ReadsAsDocumentsTests {
         #expect(fallback.recall == library.recall && fallback.recallListing == nil && fallback.recallFailure == nil)
     }
 
+    /// The read refused, in the words a test gives it: exit 1.
+    static func unreadable(_ said: String) -> ReadOutcome {
+        .failed(exit: ChildExit(reason: .exited, status: 1), stderrTail: tail(said))
+    }
+
+    @Test("6b: a failed read after a listing leaves none of it -- no summaries, no count line, no choice -- and Forget, still offered, says recall could not be read in Settings' words")
+    func failedReadClearsTheListing() async throws {
+        let runner = ScriptedRunner()
+        runner.reading(["chats", "recall"], printed("chats-recall.json"))
+        let library = await library(runner)
+        await library.refreshRecall()
+        library.selectRecall(Self.port)
+        #expect(library.inspector.recallSummaries?.count == 3 && library.inspector.recallSelected != nil)
+        runner.reading(["chats", "recall"], Self.unreadable("apogee chats: the recall index could not be opened"))
+        await library.askToForgetRecall()
+        #expect(library.recallFailure == "apogee chats: the recall index could not be opened (exited with status 1)")
+        let inspector = library.inspector
+        #expect(inspector.recallSummaries == nil && inspector.recall == nil && inspector.recallSelected == nil, "the failure alone")
+        #expect(inspector.recallFailure == library.recallFailure)
+        #expect(library.recallSelection == nil)
+        #expect(library.pending == .forgetRecall, "still offered: the CLI says nothing to forget itself")
+        let asked = library.forgetRecallMessage
+        #expect(!asked.contains("These go") && !asked.contains("Launch Emails"), "no earlier read's summaries named: \(asked)")
+        #expect(asked.hasPrefix("Recall could not be read: apogee chats: the recall index could not be opened (exited with status 1). "))
+        #expect(asked == RecallListing.forgetQuestion(listing: nil, countLine: nil, unread: library.recallFailure), "one wording, Settings' too")
+        runner.reading(["chats", "recall"], printed("chats-recall.json"))
+        await library.refreshRecall()
+        #expect(library.recallFailure == nil && library.inspector.recallSummaries?.count == 3, "a good read lists again")
+    }
+
+    @Test("6b: an earlier empty listing never keeps Forget disabled once a read fails")
+    func failedReadAfterAnEmptyOne() async {
+        let runner = ScriptedRunner()
+        runner.reading(["chats", "recall"], printed("chats-recall-empty.json"))
+        let library = await library(runner)
+        await library.refreshRecall()
+        #expect(!library.canForgetRecall && !library.inspector.canForgetRecall, "nothing held: nothing to forget")
+        runner.reading(["chats", "recall"], Self.unreadable("apogee chats: the recall index could not be opened"))
+        await library.refreshRecall()
+        #expect(library.canForgetRecall && library.inspector.canForgetRecall, "unread: whatever recall holds now may be forgotten")
+        #expect(library.inspector.recallSummaries == nil)
+    }
+
     @Test("the text fallback reads the count line even where an M31 binary's text lists the summaries after it")
     func countLineFromAListingText() async {
         let runner = ScriptedRunner()

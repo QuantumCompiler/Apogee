@@ -45,7 +45,7 @@ What already works: a node explained by a click while the graph holds it (findin
 - GUI 4h (`library-tasks-review-correctness`): "Async results land where they started", the discipline findings 2, 3 and 4 extend, and the collections search's re-check.
 - GUI 4g: `Argv.text`, the question after `--`, which the re-asked query keeps.
 - The CLI's text-mode `embed info` (`embed.cpp:550-563`): the Vectors line's words (`N of M chunk(s), D-d [model]`, `model not recorded -- re-ingest to bind`, `MIXED: W widths`), which finding 5's line follows.
-- Sibling items: [`sessions-reads-stay-current.md`](sessions-reads-stay-current.md) (6b), the same stale-read class in the Sessions place; [`compose-edit-render-honest.md`](compose-edit-render-honest.md) (6j), [`tasks-screen-truthful.md`](tasks-screen-truthful.md) (6g).
+- Sibling items: 6b (`sessions-reads-stay-current`, shipped 2026-11-08 — [Milestone G](../../../assistant/darwin/MILESTONES.md#milestone-g--the-second-sweeps-gui-findings)), the same stale-read class in the Sessions place; [`compose-edit-render-honest.md`](compose-edit-render-honest.md) (6j), [`tasks-screen-truthful.md`](tasks-screen-truthful.md) (6g).
 
 **Decisions made** (dated):
 - 2026-10-31: Specced from the second CLI/GUI bug sweep (the user's call: every finding becomes a v0.2.1 item in its queue, CLI track 57, GUI track 6).

@@ -36,13 +36,14 @@ struct SavedChatActsTests {
     /// read, out of view: no session started.
     func library(
         _ runner: ScriptedRunner, vocabulary: String = schema("machine-schema"), sessions: [ScriptedSession] = [],
-        open: String? = nil
+        open: String? = nil, jobs: ScriptedJobs = ScriptedJobs()
     ) async -> (SessionLibraryViewModel, ScriptedStarter) {
         runner.reading(["chats", "list"], Self.listed)
         runner.commanding(["__machine-schema"], .done(stdout: vocabulary))
         let starter = ScriptedStarter(sessions: sessions)
         let library = SessionLibraryViewModel(
-            starter: starter, runner: runner, preferences: Preferences(store: MemoryStore(open.map { ["openChat": $0] } ?? [:])))
+            starter: starter, runner: runner, preferences: Preferences(store: MemoryStore(open.map { ["openChat": $0] } ?? [:])),
+            jobs: jobs)
         await library.start(inView: open != nil)
         return (library, starter)
     }
@@ -72,12 +73,18 @@ struct SavedChatActsTests {
         #expect(library.info?.failure?.hasPrefix("apogee chats: no chat named") == true)
     }
 
-    @Test("Compact asks first, then runs chats compact --yes, reads back and says the CLI's line")
+    /// Says each line of a text the binary printed, as a supervised job hands
+    /// its stdout on.
+    func say(_ text: String, on job: ScriptedJob) {
+        text.split(whereSeparator: \.isNewline).forEach { job.say(String($0)) }
+    }
+
+    @Test("Compact asks first, then runs chats compact --yes as a supervised job -- never a read's command, ended at 60 s -- busy until it ends, read back, the CLI's line said (GUI 6b)")
     func compactAsksThenRuns() async throws {
         let runner = ScriptedRunner()
-        runner.commanding(["chats", "compact"], .done(stdout: printed("chats-compact.txt")))
         runner.commanding(["chats", "info"], .done(stdout: printed("chats-info-compacted.txt")))
-        let (library, _) = await library(runner)
+        let jobs = ScriptedJobs()
+        let (library, _) = await library(runner, jobs: jobs)
         var said: [String] = []
         library.say = { said.append($0) }
         let chat = try #require(library.chats.first)
@@ -85,10 +92,22 @@ struct SavedChatActsTests {
         await library.showInfo(chat)
         library.askToCompact(chat)
         #expect(library.pending == .compact(chat))
-        #expect(!runner.calls.contains { $0.hasPrefix("run chats compact") }, "nothing runs before the person's word")
+        #expect(jobs.starts.isEmpty, "nothing runs before the person's word")
         let reads = runner.calls.filter { $0 == "read chats list" }.count
-        await library.confirm()
-        #expect(runner.calls.contains("run chats compact \(Self.first) --yes"), "the CLI refuses it on a pipe without --yes")
+        let confirmed = Task { await library.confirm() }
+        #expect(await eventually { jobs.starts.count == 1 })
+        #expect(
+            jobs.starts == [ScriptedJobs.Start(binary: ScriptedStarter.binary.url, arguments: ["chats", "compact", Self.first, "--yes"], streaming: false)],
+            "the CLI refuses it on a pipe without --yes")
+        #expect(!runner.calls.contains { $0.hasPrefix("run chats compact") }, "never a read's command, which ends at 60 s")
+        #expect(library.isCompacting(chat), "its row busy while the model folds it")
+        #expect(!library.canCompact(chat), "not asked twice while it runs")
+        library.askToCompact(chat)
+        #expect(library.pending == nil)
+        say(printed("chats-compact.txt"), on: jobs.jobs[0])
+        jobs.jobs[0].end()
+        await confirmed.value
+        #expect(!library.isCompacting(chat) && library.canCompact(chat))
         #expect(runner.calls.filter { $0 == "read chats list" }.count == reads + 1, "read back")
         #expect(library.info?.fields.first { $0.label == "compacted" }?.value == "1 time(s)", "its details read again")
         #expect(said.last == "compacted \(Self.first): 4 messages into 2, by compactor")
@@ -98,17 +117,46 @@ struct SavedChatActsTests {
     @Test("nothing to fold is said as the CLI says it, and a dismissed question runs nothing")
     func compactNothingAndDismissed() async throws {
         let runner = ScriptedRunner()
-        runner.commanding(["chats", "compact"], .done(stdout: printed("chats-compact-again.txt")))
-        let (library, _) = await library(runner)
+        let jobs = ScriptedJobs()
+        let (library, _) = await library(runner, jobs: jobs)
         var said: [String] = []
         library.say = { said.append($0) }
         let chat = try #require(library.chats.first)
         library.askToCompact(chat)
         library.dismissPending()
-        #expect(!runner.calls.contains { $0.hasPrefix("run chats compact") })
+        #expect(jobs.starts.isEmpty)
         library.askToCompact(chat)
-        await library.confirm()
+        let confirmed = Task { await library.confirm() }
+        #expect(await eventually { jobs.starts.count == 1 })
+        say(printed("chats-compact-again.txt"), on: jobs.jobs[0])
+        jobs.jobs[0].end()
+        await confirmed.value
         #expect(said.last == "nothing to compact in \(Self.first) -- no exchange to fold yet")
+    }
+
+    @Test("Stop interrupts a saved chat's compaction; stopped or refused, it says Not compacted -- a refusal in the CLI's words (GUI 6b)")
+    func compactStoppedOrRefused() async throws {
+        let runner = ScriptedRunner()
+        let jobs = ScriptedJobs()
+        let (library, _) = await library(runner, jobs: jobs)
+        var said: [String] = []
+        library.say = { said.append($0) }
+        let chat = try #require(library.chats.first)
+        library.askToCompact(chat)
+        let stopped = Task { await library.confirm() }
+        #expect(await eventually { library.isCompacting(chat) })
+        await library.stopCompacting(chat)
+        await stopped.value
+        #expect(jobs.jobs[0].stopped == 1, "Stop is the job's interrupt")
+        #expect(said.last == "Not compacted: stopped")
+        #expect(!library.isCompacting(chat) && library.canCompact(chat))
+        library.askToCompact(chat)
+        let refused = Task { await library.confirm() }
+        #expect(await eventually { jobs.starts.count == 2 })
+        jobs.jobs[1].end(status: 1, stderr: printed("chats-compact-missing.err"))
+        await refused.value
+        #expect(said.last == "Not compacted: apogee chats: no chat named '\(Self.first)'")
+        #expect(library.failure == "apogee chats: no chat named '\(Self.first)'")
     }
 
     @Test("the open session's own conversation, its child running, is compacted by its session -- never under it")

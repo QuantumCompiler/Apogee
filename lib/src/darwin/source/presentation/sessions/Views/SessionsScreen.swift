@@ -59,10 +59,7 @@ public struct SessionsScreen: View {
                     chooseRecall: { library.selectRecall($0) }
                 ) { shell.go(.models) }
                     .frame(width: CGFloat(library.inspectorWidth))
-                    .task {
-                        await library.refreshRoles()
-                        await library.refreshRecall()
-                    }
+                    .task { await library.refreshInspector() }
             }
         }
         .confirmationDialog(
@@ -578,6 +575,27 @@ public struct SessionCommands: Commands {
         await library.start(inView: false)
         await library.refreshRecall()
     }
+}
+
+#Preview("Recall that can't be read: the failure alone, Forget still offered") {
+    @Previewable @State var library = SessionsPreview.documents(recall: false)
+    InspectorPane(inspector: library.inspector, showInfo: {}, compact: {}, forgetRecall: {}) {}
+        .frame(width: 360, height: 760)
+        .task {
+            await library.start(inView: false)
+            await library.refreshRoles()
+            await library.refreshRecall()
+        }
+}
+
+#Preview("Forgetting what recall holds when it can't be read: the question says so") {
+    let library = SessionsPreview.documents(recall: false)
+    SessionsScreen(library: library, shell: SessionsPreview.shell())
+        .frame(width: 1100, height: 720)
+        .task {
+            await library.start(inView: true)
+            await library.askToForgetRecall()
+        }
 }
 
 #Preview("Forgetting what recall holds: the summaries it erases, named") {

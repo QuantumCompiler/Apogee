@@ -108,4 +108,32 @@ struct CapabilitiesTests {
         await library.checkBinary()
         #expect(!library.capabilitiesKnown && !library.hasTrack52, "a build that doesn't answer: nothing kept of the one before")
     }
+
+    @Test("6b: a check made while the binary is asked again waits for its answer -- never returns on the flags the ask cleared -- and asks nothing twice")
+    func checkWaitsForTheAskInFlight() async {
+        let runner = runner(schema: schema("machine-schema-older"))
+        let library = library(runner, ScriptedStarter(sessions: []))
+        let file = Held(BinaryFingerprint(fileNumber: 7, size: 100, modified: Date(timeIntervalSince1970: 1)))
+        library.fingerprint = { _ in file.value }
+        await library.start(inView: false)
+        // Another build installed where it stood, slow to say what it can do.
+        file.value = BinaryFingerprint(fileNumber: 8, size: 120, modified: Date(timeIntervalSince1970: 2))
+        runner.commanding(["__machine-schema"], .done(stdout: schema("machine-schema")))
+        runner.hold(["__machine-schema"])
+        let asking = Task { await library.checkBinary() }
+        #expect(await eventually { runner.calls.filter { $0 == "run __machine-schema" }.count == 2 })
+        #expect(!library.capabilitiesKnown, "cleared while it is asked")
+        let returned = Held(false)
+        let second = Task {
+            await library.checkBinary()
+            returned.value = true
+        }
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(!returned.value, "the second check waits for the answer, its file already the one compared")
+        runner.release()
+        await second.value
+        #expect(library.capabilitiesKnown && library.keepsOutsideRenames, "known once it returns: the branch's build, 2026-10-25")
+        await asking.value
+        #expect(runner.calls.filter { $0 == "run __machine-schema" }.count == 2, "asked once for the new file")
+    }
 }

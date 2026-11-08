@@ -192,6 +192,9 @@ public final class SettingsViewModel {
     /// The summaries themselves, where the binary lists them (the CLI's
     /// M31): what Forget erases, named in its question. `nil` read as text.
     public private(set) var recallListing: RecallListing?
+    /// Why the last read of what recall holds failed, in the CLI's words:
+    /// Forget's question says so in place of an earlier read's (GUI 6b).
+    public private(set) var recallUnread: String?
     /// Forgetting recall waits on the person's word, its holdings shown.
     public var forgetting = false
     /// The binary's vocabulary date, as the app read it at launch
@@ -412,6 +415,7 @@ public final class SettingsViewModel {
         guard hasTrack52() else {
             recallHolds = nil
             recallListing = nil
+            recallUnread = nil
             return
         }
         let asks = ProseReads.asksDocuments(vocabulary: vocabulary())
@@ -419,12 +423,15 @@ public final class SettingsViewModel {
         case .document(let listing):
             recallListing = listing
             recallHolds = listing.countLine
+            recallUnread = nil
         case .text(let text):
             recallListing = nil
             recallHolds = RecallListing.countLine(in: text)
-        case .failed:
+            recallUnread = nil
+        case .failed(let why):
             recallListing = nil
             recallHolds = nil
+            recallUnread = why
         }
     }
 
@@ -530,10 +537,11 @@ public final class SettingsViewModel {
     }
 
     /// Forget's question: how many summaries go and which, named, where the
-    /// binary lists them (GUI M15); the count line where it doesn't.
+    /// binary lists them (GUI M15); the count line where it doesn't; that
+    /// recall could not be read, where the read just failed -- in the words
+    /// the Sessions inspector asks it in (GUI 6b).
     public var forgetMessage: String {
-        let what = recallListing.map { "These go: \($0.forgetting). " } ?? recallHolds.map { "Now: \($0). " } ?? ""
-        return what + "apogee chats recall --forget --yes -- every chat's summary goes, so no later session recalls them; every transcript stays."
+        RecallListing.forgetQuestion(listing: recallListing, countLine: recallHolds, unread: recallUnread)
     }
 
     /// Whether Forget has anything to erase: where the binary lists the

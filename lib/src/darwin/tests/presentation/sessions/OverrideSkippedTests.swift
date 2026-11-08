@@ -125,3 +125,163 @@ struct OverrideSkippedTests {
         await library.shutDown()
     }
 }
+
+/// GUI 6b, the first finding: a binary that Try again finds -- nothing found
+/// at launch, apogee installed meanwhile -- was never the library's, so the
+/// chat answered while the list, its acts and a private session's promised
+/// delete went on as if there were no binary.
+@Suite("Try again adopts the binary (GUI 6b)", .timeLimit(.minutes(1)))
+@MainActor
+struct TryAgainAdoptsTests {
+    static let found = DiscoveryOutcome.found(ScriptedStarter.binary, skipped: [])
+
+    /// The library launched with no binary found: the list says so, and the
+    /// session window shows how to install.
+    func launchedMissing(_ runner: ScriptedRunner, _ sessions: [ScriptedSession]) async -> (SessionLibraryViewModel, ScriptedStarter) {
+        let starter = ScriptedStarter(outcome: .notFound(skipped: []), sessions: sessions)
+        let library = SessionLibraryViewModel(starter: starter, runner: runner, preferences: Preferences(store: MemoryStore()))
+        await library.start(inView: true)
+        #expect(library.listing == .missing)
+        #expect(await eventually { if case .missing = library.current.connection { true } else { false } })
+        return (library, starter)
+    }
+
+    /// What the scripted binary answers once it is installed: the list, the
+    /// models, the roles plain and under rich, its vocabulary and recall.
+    func installedRunner() -> ScriptedRunner {
+        let runner = ScriptedRunner()
+        runner.reading(["chats", "list"], SavedChatActsTests.listed)
+        runner.reading(["models", "list"], SessionLibraryPrivateTests.models)
+        runner.reading(["models", "status"], printed("roles-status-duo.json"))
+        runner.reading(["models", "status", "--suite", "rich"], printed("roles-status-rich.json"))
+        runner.commanding(["__machine-schema"], .done(stdout: schema("machine-schema")))
+        runner.commanding(["chats", "recall"], .done(stdout: printed("chats-recall.txt")))
+        return runner
+    }
+
+    static let recallHolds = "recall holds 2 chat summaries in /Users/someone/.apogee/memory/chats.db"
+
+    func roleValues(_ library: SessionLibraryViewModel) -> [String: String] {
+        Dictionary(library.roles.map { ($0.label, $0.value) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    @Test("Try again's binary is the library's: its capabilities asked, the list, the models and the open inspector's reads made, handed up -- and Rename, Delete and the roles run on it")
+    func tryAgainAdopts() async throws {
+        let runner = installedRunner()
+        let child = ScriptedSession()
+        let (library, starter) = await launchedMissing(runner, [child])
+        var handed: [URL] = []
+        library.binaryAdopted = { handed.append($0) }
+        // The inspector, open while nothing was installed: its one read as
+        // it appeared had nothing to read with.
+        await library.refreshInspector()
+        #expect(runner.calls.isEmpty, "nothing to read with")
+        #expect(library.inspector.roles.isEmpty && library.inspector.recall == nil)
+        starter.outcome = Self.found
+        // The window's Try again: the session locates for itself.
+        library.current.start()
+        #expect(await eventually { handed == [ScriptedStarter.binary.url] }, "handed up once, for every place")
+        #expect(library.binaryURL == ScriptedStarter.binary.url && library.binaryVersion == "0.1.9")
+        #expect(runner.calls.prefix(3) == ["run __machine-schema", "read chats list", "read models list"], "asked, then read, as a launch does")
+        #expect(
+            runner.calls.filter { $0.hasPrefix("read models status") || $0 == "run chats recall" } == ["read models status", "run chats recall"],
+            "the open inspector's reads, made once each before every place was handed it")
+        #expect(library.capabilitiesKnown && library.hasTrack52)
+        #expect(library.listing == .read && library.chats.count == 2)
+        #expect(library.emptyText == nil, "never 'Apogee isn't installed' again")
+        #expect(library.current.modelChoices == ["local", "claude"])
+        #expect(starter.openedCount == 1, "the chat itself connected on it")
+        // Neither read was asked for again: the inspector on screen has both.
+        #expect(roleValues(library)["utility"] == "m2   (via suite duo)", "the roles, the session's suite unsaid: plain")
+        #expect(library.inspector.recall == Self.recallHolds, "the Recall section, and its Forget, drawn")
+        let chat = try #require(library.chats.first)
+        await library.rename(chat, to: "Ports")
+        #expect(runner.calls.contains("run chats title \(chat.id) -- Ports"))
+        library.askToDelete(chat)
+        await library.confirm()
+        #expect(runner.calls.contains("run chats delete \(chat.id)"))
+        // The session says its own suite: the roles follow it, read once by
+        // the adoption.
+        child.emit(#"{"type":"session","protocol_version":1,"model":"m3","next_turn":1,"suite":"rich"}"#)
+        #expect(await eventually { runner.calls.contains("read models status --suite rich") }, "read again under the session's suite")
+        #expect(await eventually { roleValues(library)["utility"] == "m4   (via suite rich)" })
+        #expect(library.inspector.suite == "rich")
+        await library.shutDown()
+    }
+
+    @Test("the inspector that appeared before the launch's discovery answered: its reads are made once the binary is found, never left with neither")
+    func inspectorBeforeTheLaunchsBinary() async {
+        let runner = installedRunner()
+        let library = SessionLibraryViewModel(
+            starter: ScriptedStarter(sessions: [ScriptedSession()]), runner: runner, preferences: Preferences(store: MemoryStore()))
+        // The window drew the inspector -- its one read -- before discovery answered.
+        await library.refreshInspector()
+        #expect(runner.calls.isEmpty, "nothing to read with")
+        await library.start(inView: true)
+        #expect(runner.calls.filter { $0.hasPrefix("read models status") } == ["read models status"], "the roles, once")
+        #expect(runner.calls.filter { $0 == "run chats recall" }.count == 1, "recall, once")
+        #expect(roleValues(library)["utility"] == "m2   (via suite duo)")
+        #expect(library.inspector.recall == Self.recallHolds)
+        await library.shutDown()
+    }
+
+    @Test("an inspector that has read once nothing is owed: the window opened again reads nothing more of it")
+    func nothingOwedOnceRead() async {
+        let runner = installedRunner()
+        let library = SessionLibraryViewModel(
+            starter: ScriptedStarter(sessions: [ScriptedSession(), ScriptedSession()]), runner: runner,
+            preferences: Preferences(store: MemoryStore()))
+        await library.start(inView: true)
+        await library.refreshInspector()
+        #expect(runner.calls.filter { $0.hasPrefix("read models status") }.count == 1)
+        await library.shutDown()
+        await library.start(inView: true)
+        #expect(runner.calls.filter { $0.hasPrefix("read models status") }.count == 1, "owed nothing")
+        #expect(runner.calls.filter { $0 == "run chats recall" }.count == 1)
+        await library.shutDown()
+    }
+
+    @Test("an older binary's private fallback, opened before the binary was found: its promised delete runs once Try again's binary is the library's")
+    func privateFallbackDeletedOnTheAdoptedBinary() async {
+        let runner = ScriptedRunner()
+        runner.reading(["chats", "list"], SessionLibraryPrivateTests.list)
+        let secret = ScriptedSession("secret")
+        let next = ScriptedSession("next")
+        let (library, starter) = await launchedMissing(runner, [secret, next])
+        starter.outcome = Self.found
+        // ⇧⌘N: a private session, on a build that has not said it has
+        // --private -- the fallback, deleted when it closes.
+        await library.newPrivateSession()
+        #expect(await eventually { starter.openedCount == 1 })
+        #expect(starter.launches.first == ChatLaunch(noRecall: true))
+        #expect(await eventually { runner.calls.contains("read models list") }, "the binary taken up")
+        secret.emit(SessionLibraryPrivateTests.old)
+        _ = await eventually { library.current.transcript.status == .ready }
+        runner.reading(["chats", "list"], #"{"object":"list","data":[{"id":"p9","name":"secret","turns":1,"updated":"2026-10-20T17:00:00Z"},{"id":"c1","name":"Recipes","turns":1,"updated":"2026-10-12T09:00:00Z"}]}"#)
+        library.current.draft = "something private"
+        library.current.submit()
+        secret.emit(#"{"type":"result","text":"ok","turn":1}"#)
+        #expect(await eventually { library.current.chatID == "p9" }, "its own chat, found against the list the adoption read")
+        await library.newSession()
+        #expect(runner.calls.contains("run chats delete p9"), "deleted when it closed, as it promised")
+        await library.shutDown()
+    }
+
+    @Test("a session that finds the binary the library already has adopts nothing: nothing is asked or read again")
+    func sameBinaryAdoptsNothing() async {
+        let runner = ScriptedRunner()
+        runner.reading(["chats", "list"], SavedChatActsTests.listed)
+        runner.commanding(["__machine-schema"], .done(stdout: schema("machine-schema")))
+        let child = ScriptedSession()
+        let library = SessionLibraryViewModel(
+            starter: ScriptedStarter(sessions: [child]), runner: runner, preferences: Preferences(store: MemoryStore()))
+        var handed = 0
+        library.binaryAdopted = { _ in handed += 1 }
+        await library.start(inView: true)
+        child.emit(SuiteLibraryTests.session)
+        #expect(await eventually { library.current.transcript.status == .ready })
+        #expect(handed == 0)
+        #expect(runner.calls.filter { $0 == "run __machine-schema" }.count == 1)
+        await library.shutDown()
+    }
+}

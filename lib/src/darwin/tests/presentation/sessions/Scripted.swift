@@ -1,3 +1,4 @@
+import BusinessJobs
 import BusinessReads
 import BusinessSession
 import DataDiscovery
@@ -118,11 +119,17 @@ final class ScriptedSession: ChatSession, @unchecked Sendable {
     }
 }
 
-/// Where a test's sessions come from: a fixed discovery outcome, and the
-/// sessions handed out in turn. Held, every locate waits until
-/// `releaseLocate()` lets it answer -- a binary still being located.
+/// Where a test's sessions come from: a discovery outcome -- the test may
+/// change it, a binary installed meanwhile (GUI 6b) -- and the sessions
+/// handed out in turn. Held, every locate waits until `releaseLocate()`
+/// lets it answer -- a binary still being located.
 final class ScriptedStarter: ChatStarting, @unchecked Sendable {
-    let outcome: DiscoveryOutcome
+    private let answer: Mutex<DiscoveryOutcome>
+    /// What every later locate answers.
+    var outcome: DiscoveryOutcome {
+        get { answer.withLock { $0 } }
+        set { answer.withLock { $0 = newValue } }
+    }
     private let sessions: Mutex<[any ChatSession]>
     private let opened = Mutex(0)
     private let handedOut = Mutex<[any ChatSession]>([])
@@ -139,7 +146,7 @@ final class ScriptedStarter: ChatStarting, @unchecked Sendable {
         outcome: DiscoveryOutcome = .found(ScriptedStarter.binary, skipped: []), sessions: [any ChatSession],
         holdsLocate: Bool = false
     ) {
-        self.outcome = outcome
+        answer = Mutex(outcome)
         self.sessions = Mutex(sessions)
         locating = Mutex(Locating(held: holdsLocate))
     }
@@ -293,6 +300,14 @@ final class ScriptedRunner: CommandRunning, @unchecked Sendable {
     /// Where its commands are noted beside the sessions' acts, when given.
     private let ledger: Ledger?
 
+    private struct Holding {
+        var prefix: [String]?
+        var waiting: [CheckedContinuation<Void, Never>] = []
+    }
+
+    /// Commands held open until `release()`: a binary slow to answer.
+    private let holding = Mutex(Holding())
+
     init(ledger: Ledger? = nil) {
         self.ledger = ledger
     }
@@ -311,6 +326,22 @@ final class ScriptedRunner: CommandRunning, @unchecked Sendable {
         commands.withLock { $0.insert((prefix, outcome), at: 0) }
     }
 
+    /// Every later command starting with `prefix` waits, once called, until
+    /// `release()` lets it answer.
+    func hold(_ prefix: [String]) {
+        holding.withLock { $0.prefix = prefix }
+    }
+
+    /// Lets every held command answer, and every later one at once.
+    func release() {
+        let waiting = holding.withLock { holding in
+            holding.prefix = nil
+            defer { holding.waiting = [] }
+            return holding.waiting
+        }
+        waiting.forEach { $0.resume() }
+    }
+
     func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
         log.withLock { $0.append("read " + arguments.joined(separator: " ")) }
         return reads.withLock { rules in
@@ -323,8 +354,70 @@ final class ScriptedRunner: CommandRunning, @unchecked Sendable {
         // The vocabulary asked at launch (GUI 4k) is a read, not an act the
         // ledger orders.
         if arguments != ["__machine-schema"] { ledger?.note("run " + arguments.joined(separator: " ")) }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let now = holding.withLock { holding in
+                guard let prefix = holding.prefix, arguments.starts(with: prefix) else { return true }
+                holding.waiting.append(continuation)
+                return false
+            }
+            if now { continuation.resume() }
+        }
         return commands.withLock { rules in
             rules.first { arguments.starts(with: $0.0) }?.1
         } ?? .done(stdout: "")
+    }
+}
+
+/// A run a test drives by hand: what it said, and how it ended -- done, its
+/// failure in the CLI's words, or stopped by its Stop, as a supervised job
+/// ends when interrupted.
+final class ScriptedJob: JobRunning, @unchecked Sendable {
+    let updates: AsyncStream<JobUpdate>
+    private let continuation: AsyncStream<JobUpdate>.Continuation
+    private let stops = Mutex(0)
+
+    init() {
+        (updates, continuation) = AsyncStream.makeStream(of: JobUpdate.self)
+    }
+
+    /// How many times it was asked to stop.
+    var stopped: Int { stops.withLock { $0 } }
+
+    func say(_ line: String) { continuation.yield(.said(line)) }
+
+    /// It ended as `status` says: 0 is done; anything else a failure, the
+    /// stderr `said` its tail.
+    func end(status: Int32 = 0, stderr said: String = "", interrupted: Bool = false) {
+        var tail = BoundedTail()
+        tail.append(Data(said.utf8))
+        continuation.yield(.ended(JobEnd(exit: ChildExit(reason: .exited, status: status), stderrTail: tail, interrupted: interrupted)))
+        continuation.finish()
+    }
+
+    /// Stopped, it ends interrupted, as a child given SIGINT does.
+    func stop(grace: Duration) async {
+        stops.withLock { $0 += 1 }
+        end(status: 130, interrupted: true)
+    }
+}
+
+/// Where a test's long runs come from: each start recorded -- its argv, and
+/// whether it streams -- and handed a `ScriptedJob` the test drives.
+final class ScriptedJobs: JobStarting, @unchecked Sendable {
+    struct Start: Equatable {
+        let binary: URL
+        let arguments: [String]
+        let streaming: Bool
+    }
+
+    private let started = Mutex<[(Start, ScriptedJob)]>([])
+
+    var starts: [Start] { started.withLock { $0.map(\.0) } }
+    var jobs: [ScriptedJob] { started.withLock { $0.map(\.1) } }
+
+    func startJob(binary: URL, arguments: [String], streaming: Bool, folder: URL?) -> any JobRunning {
+        let job = ScriptedJob()
+        started.withLock { $0.append((Start(binary: binary, arguments: arguments, streaming: streaming), job)) }
+        return job
     }
 }
