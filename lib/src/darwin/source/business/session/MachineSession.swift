@@ -32,6 +32,9 @@ public actor MachineSession {
 
     private var inputClosed = false
     private var stopping = false
+    /// Its SIGTERM has been sent: by the stop at its deadline, or by a caller
+    /// giving up before it (`terminateNow()`). Sent once.
+    private var terminated = false
     private var refusedVersion: Int?
     private var ended = false
     /// Its place in the children registry, from its spawn until its end.
@@ -198,7 +201,8 @@ public actor MachineSession {
 
     /// Ends the session, escalating only as far as it must: a turn in flight
     /// is cancelled and the input closed; a child still running after `grace`
-    /// is terminated, and two seconds later killed.
+    /// is terminated -- unless `terminateNow()` already has -- and two seconds
+    /// later killed.
     public func stop(grace: Duration = .seconds(5)) async {
         guard let child, !ended else { return }
         if tracker.turnInFlight {
@@ -206,10 +210,30 @@ public actor MachineSession {
         }
         close()
         if await ends(within: grace) { return }
-        stopping = true
-        child.terminate()
+        terminate(child)
         if await ends(within: .seconds(2)) { return }
         child.kill()
+    }
+
+    /// The escalation's terminate step, taken now: for a caller that will
+    /// wait no longer -- the app quitting once the session's grace has passed
+    /// on its own clock, just before this actor's deadline -- so the child,
+    /// and its process group, is signalled before the caller goes (GUI 6a).
+    /// Its input is closed first, as the stop closes it. A stop in flight
+    /// sends no second SIGTERM at its deadline, and still kills two seconds
+    /// after it; a child already ended is left alone.
+    public func terminateNow() {
+        guard let child, !ended else { return }
+        close()
+        terminate(child)
+    }
+
+    /// SIGTERM to the child's group, once: from here on its end is a stop.
+    private func terminate(_ child: any RunningChild) {
+        stopping = true
+        guard !terminated else { return }
+        terminated = true
+        child.terminate()
     }
 
     private func ends(within duration: Duration) async -> Bool {

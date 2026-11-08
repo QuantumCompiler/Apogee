@@ -121,6 +121,11 @@ actor PreviewChat: ChatSession {
     func stop(grace: Duration) async {
         continuation.finish()
     }
+
+    /// Terminated, its stream ends as a stop's does.
+    func terminateNow() {
+        continuation.finish()
+    }
 }
 
 /// Where a preview's chats come from: the binary found where the release

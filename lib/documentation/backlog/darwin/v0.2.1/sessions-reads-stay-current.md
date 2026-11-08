@@ -47,7 +47,7 @@ What already works: the chat itself connects through Try again (finding 1). A su
 - GUI M15 (`reads-become-documents`): recall's listing and Forget's question.
 - GUI M13 (`sessions-read-suite-and-refusals`): the inspector's Suite line.
 - GUI 4i: Suites' `models status --suite` read.
-- Sibling item [`session-lines-survive-restarts.md`](session-lines-survive-restarts.md) (6a): the same session window, its lines across a restart.
+- Sibling item 6a (`session-lines-survive-restarts`, shipped 2026-11-08 — [Milestone G](../../../assistant/darwin/MILESTONES.md#milestone-g--the-second-sweeps-gui-findings)): the same session window, its lines across a restart.
 
 **Decisions made** (dated):
 - 2026-10-31: Specced from the second CLI/GUI bug sweep (the user's call: every finding becomes a v0.2.1 item in its queue, CLI track 57, GUI track 6).

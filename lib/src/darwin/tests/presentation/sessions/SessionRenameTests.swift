@@ -38,10 +38,12 @@ struct SessionRenameTests {
     static func chatID(_ lines: [String]) -> String { JSONValue.parse(lines[0])?["chat_id"]?.stringValue ?? "" }
 
     /// The library over one open saved session that has said `session`.
-    func opened(_ lines: [String], listed: String, ledger: Ledger, children: Int = 2) async -> (SessionLibraryViewModel, ScriptedRunner, ScriptedStarter) {
+    func opened(
+        _ lines: [String], listed: String, ledger: Ledger, children: Int = 2, firstStopping: ScriptedSession.Stopping = .ends
+    ) async -> (SessionLibraryViewModel, ScriptedRunner, ScriptedStarter) {
         let runner = ScriptedRunner(ledger: ledger)
         runner.reading(["chats", "list"], listed)
-        let sessions = (0..<children).map { ScriptedSession("child \($0 + 1)", ledger: ledger) }
+        let sessions = (0..<children).map { ScriptedSession("child \($0 + 1)", stopping: $0 == 0 ? firstStopping : .ends, ledger: ledger) }
         let starter = ScriptedStarter(sessions: sessions)
         let library = SessionLibraryViewModel(
             starter: starter, runner: runner, preferences: Preferences(store: MemoryStore(["openChat": Self.chatID(lines)])))
@@ -99,6 +101,74 @@ struct SessionRenameTests {
         #expect(await eventually { ledger.all.contains("run chats title \(id) -- Renamed From Outside") })
         #expect(Array(ledger.all.prefix(3)) == ["child 1: stop", "child 1: ended", "run chats title \(id) -- Renamed From Outside"])
         #expect(await eventually { starter.openedCount == 2 })
+    }
+
+    // MARK: - 6a, finding 7: a rename made while a close is in flight
+
+    @Test("an older binary: a rename waiting on a turn, then a switch confirmed -- chats title runs only once the closing child has gone, after its exit save")
+    func renameWaitingWhenASwitchCloses() async {
+        let ledger = Ledger()
+        let (library, _, starter) = await opened(Self.older, listed: Self.listedOlder, ledger: ledger, children: 2, firstStopping: .whenReleased)
+        let id = Self.chatID(Self.older)
+        library.current.draft = "Anything else?"
+        library.current.submit()
+        await library.rename(library.chats[0], to: "Renamed From Outside")
+        await library.open(.chat("c-other"))
+        #expect(library.pending == .stopTurn(for: .chat("c-other")))
+        let switching = Task { await library.confirm() }
+        #expect(await eventually { ledger.all == ["child 1: stop"] })
+        // The stopped turn's own result: the rename that waited for it is made.
+        starter.handed[0].emit(Self.older.first { JSONValue.parse($0)?["type"]?.stringValue == "result" }!)
+        await Lifecycle.settle()
+        #expect(ledger.all == ["child 1: stop"], "not while the child is still saving on its way out")
+        starter.handed[0].releaseStop()
+        await switching.value
+        #expect(await eventually { ledger.all.contains("run chats title \(id) -- Renamed From Outside") })
+        #expect(Array(ledger.all.prefix(3)) == ["child 1: stop", "child 1: ended", "run chats title \(id) -- Renamed From Outside"])
+        await Lifecycle.law(starter, "the rename after the switch")
+        #expect(starter.openedCount == 2, "the switch's chat, and nothing resumed: the closed session is gone for good")
+    }
+
+    @Test("an older binary: a rename from the sidebar just after a switch is confirmed waits for the closing child, then lands")
+    func renameJustAfterASwitch() async {
+        let ledger = Ledger()
+        let (library, _, starter) = await opened(Self.older, listed: Self.listedOlder, ledger: ledger, children: 2, firstStopping: .whenReleased)
+        let id = Self.chatID(Self.older)
+        let chat = library.chats[0]
+        let switching = Task { await library.open(.chat("c-other")) }
+        #expect(await eventually { ledger.all == ["child 1: stop"] })
+        let renaming = Task { await library.rename(chat, to: "Renamed From Outside") }
+        await Lifecycle.settle()
+        #expect(ledger.all == ["child 1: stop"], "the rename waits for the child's exit")
+        starter.handed[0].releaseStop()
+        await switching.value
+        await renaming.value
+        #expect(Array(ledger.all.prefix(3)) == ["child 1: stop", "child 1: ended", "run chats title \(id) -- Renamed From Outside"])
+        await Lifecycle.law(starter, "the rename")
+    }
+
+    @Test("leaving Sessions while a switch closes the open session returns at once -- the next place's reads never wait on the closing child -- and the switch's session starts once Sessions is back")
+    func leavingDuringASwitchWaitsForNothing() async {
+        let ledger = Ledger()
+        let (library, _, starter) = await opened(Self.newer, listed: Self.listedNewer, ledger: ledger, children: 2, firstStopping: .whenReleased)
+        let switching = Task { await library.open(.chat("c-other")) }
+        #expect(await eventually { ledger.all == ["child 1: stop"] })
+        let left = Flag()
+        let leaving = Task {
+            await library.leftView()
+            left.raised = true
+        }
+        #expect(await eventually { left.raised }, "returned while the closing child is still on its way out")
+        #expect(ledger.all == ["child 1: stop"], "nothing paused, nothing waited for")
+        starter.handed[0].releaseStop()
+        await switching.value
+        await leaving.value
+        await Lifecycle.settle()
+        #expect(starter.openedCount == 1, "out of view: the switch's session waits to start")
+        await library.cameIntoView()
+        #expect(await eventually { starter.openedCount == 2 })
+        #expect(starter.launches.last?.resume == "c-other")
+        await Lifecycle.law(starter, "leaving during a switch, then back")
     }
 
     @Test("an older binary whose child ends mid-turn, a rename waiting: it is made then, by chats title alone")

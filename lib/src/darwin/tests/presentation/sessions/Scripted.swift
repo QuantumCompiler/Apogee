@@ -109,6 +109,13 @@ final class ScriptedSession: ChatSession, @unchecked Sendable {
         if isLive { end(.finished) }
         ledger?.note("\(name): ended")
     }
+
+    /// The stop's SIGTERM sent now, by a caller giving up: recorded, in the
+    /// ledger's order -- a child that ignores it is ended only by its stop.
+    func terminateNow() async {
+        log.withLock { $0.append("terminate") }
+        ledger?.note("\(name): terminate")
+    }
 }
 
 /// Where a test's sessions come from: a fixed discovery outcome, and the

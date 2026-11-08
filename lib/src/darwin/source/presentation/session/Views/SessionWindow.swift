@@ -112,7 +112,7 @@ struct ConversationView<Accessory: View>: View {
                     .help("The suite this session runs under -- /suite, or click, to run it under another, or none")
             }
             Spacer()
-            if model.transcript.turnInFlight {
+            if model.transcript.turnInFlight || model.transcript.status == .restarting {
                 ProgressView().controlSize(.small)
             }
             MeterView(meter: model.meter)
@@ -344,6 +344,33 @@ struct MissingBinaryView: View {
     SessionWindow(model: model)
         .frame(width: 900, height: 520)
         .task { await SessionPreview.ready(model) }
+}
+
+#Preview("Restarting: moved to another suite, the child being stopped -- Send off, the input says why") {
+    let model = SessionViewModel(
+        starter: PreviewChats(lines: SessionPreview.resumedChat, holdsStop: true), launch: SessionPreview.resumeSaved)
+    SessionWindow(model: model)
+        .frame(width: 900, height: 520)
+        .task {
+            await SessionPreview.ready(model)
+            await model.switchSuite(to: "pair")
+        }
+}
+
+#Preview("A message not sent: a stop closed the child's input first -- Send again once it is back") {
+    let model = SessionViewModel(
+        starter: PreviewChats(lines: SessionPreview.resumedChat, refusesTurns: true), launch: SessionPreview.resumeSaved)
+    SessionWindow(model: model)
+        .frame(width: 900, height: 520)
+        .task {
+            await SessionPreview.ready(model)
+            model.draft = SessionPreview.resumedTurn
+            model.submit()
+            await SessionPreview.until { model.transcript.items.contains { if case .notSent = $0.content { true } else { false } } }
+            await model.pause()
+            model.resume()
+            await SessionPreview.until { model.transcript.status == .ready }
+        }
 }
 
 #Preview("Paused: freed for another session") {

@@ -30,7 +30,9 @@ public enum Presenting: String, Identifiable, Sendable {
 }
 
 /// A line held until the session can take it: made while a turn ran or a
-/// card stood, sent once the turn ends (`SessionViewModel.held`).
+/// card stood, or while a stop handed the session to another child (GUI 6a),
+/// sent once the turn ends or the next child speaks -- kept through a death
+/// for Start again (`SessionViewModel.held`, the strip's `heldWords`).
 public enum HeldLine: Equatable, Sendable {
     case attach(String)
     case detach(String)

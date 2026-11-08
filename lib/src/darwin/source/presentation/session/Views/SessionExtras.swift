@@ -117,21 +117,22 @@ struct AttachmentChips: View {
     }
 }
 
-/// What waits for the turn to end -- a setting, an attach, a detach -- said
-/// above the input until it is sent: none of it is applied yet, since the CLI
-/// drops a line sent while a turn asks (52d).
+/// What waits until the session can take it -- a setting, an attach, a
+/// detach -- said above the input until it is sent, with when it goes: the
+/// turn's end, the session back from a stop, its first child started, or
+/// started again after it ended (`SessionViewModel.heldWords`, GUI 6a).
+/// None of it is applied yet,
+/// since the CLI drops a line sent while a turn asks (52d) and a child that
+/// is going takes none.
 struct HeldLines: View {
     @Bindable var model: SessionViewModel
 
     var body: some View {
-        if !model.held.isEmpty {
-            Label(
-                "Sent when this turn ends: " + model.held.map(\.words).joined(separator: " · "),
-                systemImage: "clock.arrow.circlepath"
-            )
-            .font(.apogeeMeta)
-            .foregroundStyle(Palette.textTertiary)
-            .help("A session takes these between turns; sent now, the turn's question would drop them.")
+        if let words = model.heldWords {
+            Label(words, systemImage: "clock.arrow.circlepath")
+                .font(.apogeeMeta)
+                .foregroundStyle(Palette.textTertiary)
+                .help(model.heldHelp)
         }
     }
 }
@@ -203,9 +204,10 @@ struct SuggestionList: View {
 }
 
 /// The run settings: the model, thinking, effort, temperature, the system
-/// prompt. Applied as the `set` line -- held while a turn runs, sent when it
-/// ends -- or on an older build by restarting the session with the flags and
-/// `--resume`, which it says.
+/// prompt. Applied as the `set` line -- held while a turn runs or a stop
+/// hands the session on, sent once it can take it -- by starting an ended
+/// session again, or on an older build by restarting the session with the
+/// flags and `--resume`; its footer says which (`settingsFooter`).
 struct SettingsSheet: View {
     @Bindable var model: SessionViewModel
     @State private var draft: RunSettings
@@ -241,7 +243,7 @@ struct SettingsSheet: View {
                 TextField("System prompt", text: binding(\.system), axis: .vertical)
                     .lineLimit(3...6)
             }
-            Text(footer)
+            Text(model.settingsFooter)
                 .font(.apogeeSmall)
                 .foregroundStyle(Palette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -259,15 +261,6 @@ struct SettingsSheet: View {
         }
         .padding(Spacing.xl)
         .frame(width: 520)
-    }
-
-    private var footer: String {
-        guard model.canSet else {
-            return "This apogee changes these by restarting the session: the conversation carries on (--resume), and a local model loads again."
-        }
-        return model.takesLinesNow
-            ? "Applied from the next turn; apogee says each change."
-            : "A turn is running: the change is sent when it ends, and applied from the turn after; apogee says each change."
     }
 
     private func binding(_ key: WritableKeyPath<RunSettings, String?>) -> Binding<String> {
@@ -402,6 +395,30 @@ struct DiffView: View {
         .task { await SessionPreview.holdingASetting(model) }
 }
 
+#Preview("Held when the child died: sent when the session starts again") {
+    let model = SessionPreview.session(SessionPreview.setBetweenTurns, silentFrom: "result", ending: SessionPreview.wentAway)
+    HeldLines(model: model)
+        .frame(width: 640)
+        .padding(Spacing.xl)
+        .task { await SessionPreview.heldWhenItDied(model) }
+}
+
+#Preview("Held while the child is stopped for another: sent once the session is back") {
+    let model = SessionViewModel(starter: PreviewChats(lines: SessionPreview.mockActor, holdsStop: true))
+    HeldLines(model: model)
+        .frame(width: 640)
+        .padding(Spacing.xl)
+        .task { await SessionPreview.heldWhileRestarting(model) }
+}
+
+#Preview("Held before a new session's first child has spoken: sent once it starts") {
+    let model = SessionPreview.session([])
+    HeldLines(model: model)
+        .frame(width: 640)
+        .padding(Spacing.xl)
+        .task { SessionPreview.heldBeforeItStarts(model) }
+}
+
 #Preview("Slash commands after /") {
     let model = SessionPreview.session([SessionPreview.newerBuild])
     SuggestionList(model: model)
@@ -441,6 +458,18 @@ struct DiffView: View {
     let model = SessionPreview.session(SessionPreview.setBetweenTurns, silentFrom: "result")
     SettingsSheet(model: model)
         .task { await SessionPreview.holdingASetting(model) }
+}
+
+#Preview("Settings after the child died: applying starts the session again") {
+    let model = SessionPreview.session(SessionPreview.setBetweenTurns, silentFrom: "result", ending: SessionPreview.wentAway)
+    SettingsSheet(model: model)
+        .task { await SessionPreview.heldWhenItDied(model) }
+}
+
+#Preview("Settings while the child is stopped for another: sent once the session is back") {
+    let model = SessionViewModel(starter: PreviewChats(lines: [SessionPreview.newerBuild], holdsStop: true))
+    SettingsSheet(model: model)
+        .task { await SessionPreview.heldWhileRestarting(model) }
 }
 
 #Preview("Settings: the configured models that chat, over the registered kinds -- the embedding entry left out") {

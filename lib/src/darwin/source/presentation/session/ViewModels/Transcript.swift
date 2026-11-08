@@ -36,6 +36,10 @@ public struct Transcript: Equatable {
         case waiting(turn: Int)
         /// A `cancel` was sent; the turn's result has not arrived.
         case stopping(turn: Int)
+        /// Its child is being stopped so another can take it on -- a restart,
+        /// or a pause the session is resumed from: nothing reaches the child
+        /// now, so a turn waits and a line is held for the next one (GUI 6a).
+        case restarting
         /// Its child was ended to free it, while out of view; it resumes when
         /// it is back.
         case paused
@@ -66,6 +70,11 @@ public struct Transcript: Equatable {
     /// An `execute` session's: whether it orchestrates, as its `session`
     /// event said (M29); `nil` unsaid -- a chat, or a binary before M29.
     public private(set) var orchestrating: Bool?
+    /// The turns the live children answered, each `result` that did not
+    /// stop it: what a saved chat's `turns` counts, since a stopped turn is
+    /// rolled back before it is saved. A transcript started afresh counts from
+    /// none (GUI 6a: the guess for a binary that names no chat).
+    public private(set) var answeredTurns = 0
     /// Moves with every change: what a view watches to follow the end.
     public private(set) var revision = 0
     private var nextID = 0
@@ -109,7 +118,7 @@ public struct Transcript: Equatable {
     public var turnInFlight: Bool {
         switch status {
         case .thinking, .working, .answering, .waiting: true
-        case .connecting, .ready, .stopping, .paused, .ended: false
+        case .connecting, .ready, .stopping, .restarting, .paused, .ended: false
         }
     }
 
@@ -160,11 +169,21 @@ public struct Transcript: Equatable {
         }
     }
 
+    /// Its child is being stopped for another to take the conversation on:
+    /// until that one speaks, nothing is sent and the input says why (GUI 6a).
+    public mutating func restarting() {
+        guard status != .ended else { return }
+        status = .restarting
+        revision += 1
+    }
+
     /// The child was ended to free it: the conversation stays, quiet -- a
-    /// card it left standing closed, since its child can take no answer now.
+    /// card it left standing closed, since its child can take no answer now,
+    /// and an answer it was streaming finished, every line it wrote drawn.
     public mutating func paused() {
         closeActivity()
         closeStandingCards()
+        finishOpenAnswers()
         status = .paused
         revision += 1
     }
@@ -214,9 +233,11 @@ public struct Transcript: Equatable {
         append(.notice(text), turn: nil)
     }
 
-    /// A line could not be sent: the session had ended.
-    public mutating func notSent(_ reason: String) {
-        append(.error(reason), turn: nil)
+    /// The turn `text` was drawn as sent, but its line never reached the
+    /// child -- its input had closed, a stop under way or the child gone:
+    /// marked so beneath it, to be sent again (GUI 6a).
+    public mutating func notSent(_ text: String) {
+        append(.notSent(text), turn: nil)
     }
 
     // MARK: - The earlier turns
@@ -315,8 +336,11 @@ public struct Transcript: Equatable {
         case .event(let event):
             apply(event)
         case .ended(let end):
+            // The child is gone, mid-answer or not: what it streamed is all
+            // there is, so every line of it is drawn (GUI 6a).
             closeActivity()
             closeStandingCards()
+            finishOpenAnswers()
             append(.ended(Self.ending(end, spoke: spoke)), turn: nil)
             status = .ended
         }
@@ -456,8 +480,11 @@ public struct Transcript: Equatable {
             }
             if result.wasCancelled {
                 append(.stopped, turn: turn)
+            } else {
+                answeredTurns += 1
             }
-            status = .ready
+            // A restart under way keeps its state: the child is going.
+            if status != .restarting { status = .ready }
             revision += 1
         case .question(let question):
             closeActivity()
@@ -466,13 +493,16 @@ public struct Transcript: Equatable {
             } else {
                 append(.question(QuestionCard(question: question, answers: nil)), turn: turn)
             }
-            if case .stopping = status {} else { status = .waiting(turn: turn ?? 0) }
+            switch status {
+            case .stopping, .restarting, .ended: break
+            default: status = .waiting(turn: turn ?? 0)
+            }
         case .error(let message):
             closeActivity()
             closeStandingCards()
             finishAnswers(turn, usage: nil)
             append(.error(message), turn: turn)
-            status = .ready
+            if status != .restarting { status = .ready }
             revision += 1
         case .task(let type), .unknown(let type):
             append(.unknown(type: type), turn: turn)
@@ -518,7 +548,7 @@ public struct Transcript: Equatable {
     /// until its result says it stopped.
     private mutating func setStatus(_ next: Status) {
         if case .stopping = status { return }
-        if status == .ended { return }
+        if status == .ended || status == .restarting { return }
         status = next
     }
 
@@ -561,6 +591,18 @@ public struct Transcript: Equatable {
     private func openAnswer(_ turn: Int?) -> Int? {
         items.lastIndex { item in
             if case .answer(let answer) = item.content, isLive(item, turn), !answer.finished { true } else { false }
+        }
+    }
+
+    /// Every answer still streaming, in every range, finished: its child is
+    /// gone, so nothing more will come of it (GUI 6a).
+    private mutating func finishOpenAnswers() {
+        for index in items.indices {
+            if case .answer(var answer) = items[index].content, !answer.finished {
+                answer.finished = true
+                items[index].content = .answer(answer)
+                revision += 1
+            }
         }
     }
 
@@ -617,6 +659,9 @@ public struct TranscriptItem: Equatable, Identifiable {
         case permission(PermissionCard)
         /// The turn failed, in the CLI's own words.
         case error(String)
+        /// The turn drawn above was never written to the child: its input had
+        /// closed. Its text, to be sent again (GUI 6a).
+        case notSent(String)
         /// The turn was cancelled.
         case stopped
         /// A turn read back from the saved conversation with no answer kept:

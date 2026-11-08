@@ -155,6 +155,67 @@ struct SessionIdentityTests {
         #expect(await eventually { library.current.chatID == Self.switchedOlderID }, "its own, the empty one beside it passed over")
     }
 
+    // MARK: - 6a, finding 1: an outside chat is never the unsent session's
+
+    /// A chat a terminal's `apogee chat` wrote while the app's session sat
+    /// unsent: one answered turn, the count the session's own will have.
+    static let outsideID = "20261026-172750-7e11"
+    static let outside = #"{"data":[{"backend":"claude","id":"20261026-172750-7e11","model":"","name":"Terminal Notes","turns":1,"updated":"2026-10-26T17:27:50Z"}],"object":"list"}"#
+    /// Then the session's own first turn, saved beside it.
+    static let outsideAndOwn = #"{"data":[{"backend":"claude","id":"20261026-172800-d639","model":"","name":"20261026-172800-d639","turns":1,"updated":"2026-10-26T17:28:00Z"},{"backend":"claude","id":"20261026-172750-7e11","model":"","name":"Terminal Notes","turns":1,"updated":"2026-10-26T17:27:50Z"}],"object":"list"}"#
+
+    @Test("before M28: a chat written elsewhere while the new session is unsent is never taken for it -- it stays listed, and the session's own is found after its first turn")
+    func outsideChatWhileUnsent() async {
+        let runner = ScriptedRunner()
+        let store = MemoryStore()
+        let starter = ScriptedStarter(sessions: [ScriptedSession(), ScriptedSession()])
+        let library = await unsentOpen(runner, starter, store, saying: Self.switchedOlder[0])
+        runner.reading(["chats", "list"], Self.outside)
+        await library.cameIntoView()
+        #expect(library.current.chatID == nil && !library.current.isSaved, "nothing answered on it yet: no chat is its own")
+        #expect(library.groups.flatMap(\.chats).map(\.id) == [Self.outsideID], "the terminal's chat stays in the list")
+        #expect(store.string(forKey: "openChat") == nil)
+        runner.reading(["chats", "list"], Self.outsideAndOwn)
+        await firstTurn(library, starter.handed[0], Self.switchedOlder)
+        #expect(await eventually { library.current.chatID == Self.switchedOlderID }, "its own, once its turn is answered; the one that appeared while it was unsent passed over")
+        #expect(library.isOpen(library.chats.first { $0.id == Self.switchedOlderID }!))
+        #expect(!library.isOpen(library.chats.first { $0.id == Self.outsideID }!))
+    }
+
+    @Test("before M28: once its turn is answered, a chat whose turns are not the session's own is passed over")
+    func outsideChatOfOtherTurnsPassedOver() async {
+        let runner = ScriptedRunner()
+        let starter = ScriptedStarter(sessions: [ScriptedSession()])
+        let library = await unsentOpen(runner, starter, MemoryStore(), saying: Self.switchedOlder[0])
+        // The session's own save not listed yet; another apogee's three-turn chat is.
+        runner.reading(["chats", "list"], #"{"data":[{"backend":"claude","id":"20261026-172750-7e11","model":"","name":"Terminal Notes","turns":3,"updated":"2026-10-26T17:28:01Z"}],"object":"list"}"#)
+        await firstTurn(library, starter.handed[0], Self.switchedOlder)
+        await Lifecycle.settle()
+        #expect(library.current.chatID == nil, "one answered turn: a chat of three is not it")
+    }
+
+    @Test("before 52d's --private: a private session left unsent while a terminal writes a chat never takes it, and its close deletes only its own")
+    func privateNeverDeletesAnOutsideChat() async {
+        let ledger = Ledger()
+        let runner = ScriptedRunner(ledger: ledger)
+        let starter = ScriptedStarter(sessions: [ScriptedSession(), ScriptedSession("private", ledger: ledger), ScriptedSession()])
+        let library = await unsentOpen(runner, starter, MemoryStore(), saying: Lifecycle.older)
+        await library.newPrivateSession()
+        #expect(await eventually { starter.openedCount == 2 })
+        #expect(starter.launches.last == ChatLaunch(noRecall: true))
+        starter.handed[1].emit(Lifecycle.older)
+        #expect(await eventually { library.current.transcript.status == .ready })
+        runner.reading(["chats", "list"], Self.outside)
+        await library.cameIntoView()
+        #expect(library.current.chatID == nil, "the terminal's chat is not the private session's")
+        #expect(library.groups.flatMap(\.chats).map(\.id) == [Self.outsideID], "and it stays listed")
+        // Closed unsent, this binary saves the private chat empty beside it.
+        runner.reading(["chats", "list"], #"{"data":[{"backend":"claude","id":"p0","model":"","name":"p0","turns":0,"updated":"2026-10-26T17:29:00Z"},{"backend":"claude","id":"20261026-172750-7e11","model":"","name":"Terminal Notes","turns":1,"updated":"2026-10-26T17:27:50Z"}],"object":"list"}"#)
+        await library.newSession()
+        #expect(ledger.all == ["private: stop", "private: ended", "run chats delete p0"], "its own chat, found once it appears")
+        #expect(!runner.calls.contains("run chats delete \(Self.outsideID)"))
+    }
+
     @Test("before M28: a chat the session left saved as it closed -- a turn and all -- is never the next one's: the list is read afresh after the close")
     func leftSessionsChatNeverTaken() async {
         let runner = ScriptedRunner()

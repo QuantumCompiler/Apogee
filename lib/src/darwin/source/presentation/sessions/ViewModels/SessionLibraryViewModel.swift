@@ -292,10 +292,13 @@ public final class SessionLibraryViewModel {
     /// idle, else once its turn ends. A conversation nothing of which is
     /// written is never paused -- no `--resume` could carry it on, and the
     /// CLI refuses `--private` with one -- so it stays the one live child
-    /// until it is closed.
+    /// until it is closed. One already closing -- a switch, a delete -- is
+    /// passed over: it has nothing to pause, and the next place's reads never
+    /// wait on its child's exit (a pause would wait for it, GUI 6a); the
+    /// session the switch opens starts only once Sessions is back in view.
     public func leftView() async {
         inView = false
-        guard !current.isLostIfEnded else { return }
+        guard !current.isShutDown, !current.isLostIfEnded else { return }
         if busy {
             pauseWhenIdle = true
         } else {
@@ -326,16 +329,20 @@ public final class SessionLibraryViewModel {
     /// locating called off, its child asked to go and terminated if it will
     /// not -- then the delete its private fallback promised runs. The child is
     /// waited for at most the session's grace, on the library's clock: one
-    /// that will not end by then is given up, so the app still quits, and its
-    /// stop's escalation carries on. A close already in flight -- a switch's,
-    /// the window's -- is joined, never repeated.
+    /// that will not end by then is given up, so the app still quits -- but
+    /// only once its stop's SIGTERM has been sent, now rather than at the
+    /// stop's own deadline just after (GUI 6a), and the promised delete runs
+    /// only after that signal. A close already in flight -- a switch's, the
+    /// window's -- is joined, never repeated.
     public func quit() async -> ShutdownReport {
         shut = true
         let session = current
         let ended = await finishes(within: SessionViewModel.grace) { await session.shutDown() }
+        if !ended { await session.terminateNow() }
         let failure = await deletePromised(of: session)
         if session === current { closed = true }
-        return ShutdownReport(ended: ended, deleteFailure: failure)
+        let deleted = session.privateMode == .deletedOnClose && session.savedChatID != nil && failure == nil
+        return ShutdownReport(ended: ended, deleteFailure: failure, deletedWhileEnding: !ended && deleted)
     }
 
     /// Waits for `work` at most `limit` on the library's clock: whether it
@@ -409,7 +416,7 @@ public final class SessionLibraryViewModel {
         }
         chats = ChatSummary.list(from: document)
         listing = .read
-        identifyNewSession()
+        identifyNewSession(closed: false)
         if chats.contains(where: { $0.backend != nil }) && !modelsRead {
             await readModels()
         }
@@ -479,19 +486,33 @@ public final class SessionLibraryViewModel {
     /// A binary before M28 names none, and saves a new session under an id
     /// the app did not choose: the one id that appeared since it opened --
     /// against the list read afresh once the session before it had closed
-    /// (`replace`) -- is it. A chat with no turns is passed over: it can't be
-    /// a session that has run a turn, and an older binary saves an unsent
-    /// session's chat empty when it closes. Two at once (another session
-    /// saved meanwhile) name none, rather than guess. `includingEmpty` takes
-    /// an empty chat too: a closing private session's own, whose promised
-    /// delete must find it.
-    private func identifyNewSession(includingEmpty: Bool = false) {
+    /// (`replace`) -- whose turns are the turns the session has had answered
+    /// (GUI 6a). Nothing is guessed before its own turn is answered: a chat
+    /// written elsewhere meanwhile -- a terminal's `apogee chat` -- would be
+    /// taken, renamed, resumed and, for the private fallback, deleted as its
+    /// own. One that appears while the session has sent nothing is counted
+    /// among those listed before, so it is never a candidate later. Two at
+    /// once (another session saved meanwhile) name none, rather than guess.
+    /// `closed`: the session's child has gone, so its own chat is saved --
+    /// an unsent one empty, as an older binary saves it on closing -- and is
+    /// guessed whatever it has answered: a closing private session's own,
+    /// whose promised delete must find it.
+    private func identifyNewSession(closed: Bool) {
         if let named = current.chatID {
             if !current.isSaved, chats.contains(where: { $0.id == named }) { current.identify(named) }
             return
         }
         guard current.privateMode != .nothingWritten, let before = listedBeforeNew else { return }
-        let appeared = chats.filter { !before.contains($0.id) && (includingEmpty || $0.turns > 0) }.map(\.id)
+        let answered = current.transcript.answeredTurns
+        guard closed || answered > 0 else {
+            // Unsent and not closing, its own chat not written yet: whatever
+            // appears now is someone else's. Once it is shut down, the chat
+            // that appears may be the one its close saved, which `closed`
+            // then finds.
+            if !current.hasTurns && !current.isShutDown { listedBeforeNew = before.union(chats.map(\.id)) }
+            return
+        }
+        let appeared = chats.filter { !before.contains($0.id) && $0.turns == answered }.map(\.id)
         if appeared.count == 1, let id = appeared.first {
             current.identify(id)
             listedBeforeNew = nil
@@ -773,6 +794,9 @@ public final class SessionLibraryViewModel {
             preferences.openChat = nil
         }
         current.observer = { [weak self] event in self?.observe(event) }
+        // A suite move held over a turn is made once the list read after the
+        // turn has said whether it is written (GUI 6a).
+        current.movesAfterReadBack = true
         // A session that locates for itself -- none was found at launch --
         // may find a binary while passing the override over: said too.
         current.onLocated = { [weak self] outcome in
@@ -804,7 +828,7 @@ public final class SessionLibraryViewModel {
         if session.savedChatID == nil {
             await refresh()
             // Closed unsent, an older binary saved it empty: its own still.
-            if session === current { identifyNewSession(includingEmpty: true) }
+            if session === current { identifyNewSession(closed: true) }
         }
         guard let id = session.savedChatID else { return nil }
         if let begun = deletions[id] { return await begun.value }
@@ -894,11 +918,15 @@ public final class SessionLibraryViewModel {
         }
     }
 
-    /// A turn ended: what it changed is read back, a rename that waited for
-    /// it is made, and a session out of view is paused now it is idle.
+    /// A turn ended: what it changed is read back, a suite move held over it
+    /// made -- carried on or not as the list just read says (GUI 6a) -- a
+    /// rename that waited for it is made, and a session out of view is paused
+    /// now it is idle.
     private func turnEnded() {
+        let session = current
         Task {
             await refresh()
+            if session === current { await session.runHeldMove() }
             if let waiting = renameWhenIdle {
                 renameWhenIdle = nil
                 await rename(waiting.chat, to: waiting.name)
@@ -1205,15 +1233,19 @@ public final class SessionLibraryViewModel {
 /// What a quit did, for the app's log.
 public struct ShutdownReport: Equatable, Sendable {
     /// Whether the open session's child ended within the grace. One that
-    /// would not is given up, so the app can quit; its stop's escalation
-    /// carries on.
+    /// would not is given up, so the app can quit -- its stop's SIGTERM sent
+    /// first (GUI 6a).
     public let ended: Bool
     /// The private fallback's promised delete, when it failed: the CLI's words.
     public let deleteFailure: String?
+    /// The promised delete ran while the given-up child was still ending: a
+    /// binary before the CLI's 55b may write the chat back as it exits.
+    public let deletedWhileEnding: Bool
 
-    public init(ended: Bool, deleteFailure: String?) {
+    public init(ended: Bool, deleteFailure: String?, deletedWhileEnding: Bool = false) {
         self.ended = ended
         self.deleteFailure = deleteFailure
+        self.deletedWhileEnding = deletedWhileEnding
     }
 }
 

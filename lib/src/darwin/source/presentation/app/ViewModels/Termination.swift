@@ -6,9 +6,11 @@ import PresentationSessions
 /// stopped. With a session's child live or launching, a private session's
 /// promised delete still to run, or a supervised job running, the app
 /// answers "later", ends them -- the child stopped by its escalation, waited
-/// for at most the session's grace, then the delete; beside it each job
+/// for at most the session's grace and, given up, sent its SIGTERM before
+/// anything else happens (GUI 6a), then the delete; beside it each job
 /// stopped as its Stop does, within the same bound (4c) -- and only then
-/// replies, so the process never exits with a child or a promise left behind.
+/// replies, so the process never exits with a child unsignalled or a promise
+/// left behind.
 ///
 /// AppKit-free (ADR 0002): the app delegate asks it, maps its answer to
 /// AppKit's, and writes `log`'s lines to the system log. The reply is given
@@ -85,10 +87,13 @@ final class Termination {
             if session {
                 let report = await shutDown()
                 if !report.ended {
-                    log("quit: the session's child did not end within \(grace); given up so the app can quit -- its stop still escalates")
+                    log("quit: the session's child did not end within \(grace); sent it SIGTERM, and the app quits without waiting for it")
                 }
                 if let failure = report.deleteFailure {
                     log("quit: the private session was not deleted: \(failure)")
+                }
+                if report.deletedWhileEnding {
+                    log("quit: the private session was deleted while its child was ending; an older apogee may write it back")
                 }
             }
             if !(await stopping.value) {

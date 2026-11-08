@@ -84,6 +84,29 @@ struct SuiteLibraryTests {
         #expect(starter.live <= 1, "one live child")
     }
 
+    @Test("6a: a switch held over a new chat's first turn waits for the list read after it -- the chat found written there is carried on by --resume, never left an orphan")
+    func switchHeldOverAFirstTurn() async {
+        let first = ScriptedSession("first")
+        let second = ScriptedSession("second")
+        let starter = ScriptedStarter(sessions: [first, second])
+        let (library, runner) = await library(starter)
+        first.emit(Self.session)
+        #expect(await eventually { library.current.transcript.status == .ready })
+        library.current.draft = "Which suite answers?"
+        library.current.submit()
+        await library.switchSuite(to: "fast")
+        #expect(library.current.held == [.suite("fast", force: false)], "held for the turn's end")
+        // The CLI saves the first turn: the list read after it names the chat.
+        runner.reading(["chats", "list"], #"{"object":"list","data":[{"id":"c-first","name":"Which suite","turns":1,"updated":"2026-10-26T06:57:01Z"}]}"#)
+        first.emit(#"{"type":"result","text":"plain answers","turn":1}"#)
+        #expect(await eventually { starter.openedCount == 2 })
+        #expect(library.current.chatID == "c-first")
+        #expect(starter.launches[1].resume == "c-first" && starter.launches[1].suite == "fast", "carried on, the conversation written")
+        let said = library.current.transcript.items.compactMap { if case .notice(let text) = $0.content { text } else { nil } }
+        #expect(!said.contains { $0.contains("can't be carried on") })
+        #expect(library.current.transcript.items.contains { $0.content == .user("Which suite answers?") })
+    }
+
     @Test("Switch the session to it: the open session relaunched under the suite; nothing to switch once shut")
     func switchFromTheLibrary() async {
         let first = ScriptedSession()

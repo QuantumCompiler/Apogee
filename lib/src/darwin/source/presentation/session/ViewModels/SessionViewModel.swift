@@ -61,7 +61,9 @@ public final class SessionViewModel {
     /// a restart's flags. A relaunch carries them (`launch.settings`).
     public private(set) var settings: RunSettings
     /// The lines made while the session could not take them -- a turn
-    /// running or a card standing -- held, in order, until the turn ends.
+    /// running or a card standing, or a stop handing the conversation to
+    /// another child (GUI 6a) -- held, in order, until the turn ends or the
+    /// next child speaks; a child's death keeps them for Start again.
     /// While a question or permission prompt waits the CLI drops every line
     /// but its answer, with no notice, one sent mid-turn before the question
     /// included (52d; machine-mode.md -> The session's own doors): so nothing
@@ -111,6 +113,9 @@ public final class SessionViewModel {
     /// too.
     private var launching: Int?
     private var launches = 0
+    /// Whether any child of this session has spoken: until one has, a line
+    /// held is sent once the session starts, not "once it is back" (GUI 6a).
+    private var everSpoke = false
     /// The shutdown, once asked: every later ask joins it, and nothing starts
     /// the session again.
     private var ending: Task<Void, Never>?
@@ -123,6 +128,21 @@ public final class SessionViewModel {
     /// The vocabulary's date the last child that spoke announced: whether
     /// this binary says a suite's admission at launch itself (the CLI's M29).
     private var vocabulary: String?
+    /// A suite move held over the turn that just ended, waiting for the
+    /// library's read of the list after it (`movesAfterReadBack`).
+    private var moveAfterRead: SuiteFlags?
+    /// Whether a suite move released by a turn's end waits for that read
+    /// (`runHeldMove()`) -- kept, not made, until the library has read the
+    /// list after the turn.
+    public var moveAwaitsReadBack: Bool { moveAfterRead != nil }
+
+    /// Whether a suite move held over a turn waits, once the turn ends, for
+    /// whoever reads the conversation back -- the library, which runs it
+    /// (`runHeldMove()`) after its post-turn `chats list` read -- so whether
+    /// the turn is written, and the conversation carried on by `--resume`, is
+    /// the list's word (GUI M10: learned from the list, not inferred). With
+    /// none set, the move is made at the turn's end (GUI 6a).
+    public var movesAfterReadBack = false
 
     /// What a launch says of its suite: `--suite` and `--force`.
     private struct SuiteFlags {
@@ -290,7 +310,7 @@ public final class SessionViewModel {
     }
 
     /// Whether a turn has been sent in what the window shows.
-    private var hasTurns: Bool {
+    public var hasTurns: Bool {
         transcript.items.contains { if case .user = $0.content { true } else { false } }
     }
 
@@ -361,10 +381,11 @@ public final class SessionViewModel {
         }
         connection = .locating
         transcript = Transcript()
-        // A new child on an empty transcript: nothing the last one held or
-        // was sent stands for it. A saved conversation's attachments come
-        // back with its read.
-        held = []
+        // A new child on an empty transcript: nothing the last one was sent
+        // stands for it -- a saved conversation's attachments come back with
+        // its read. What was held for the last one still waits: it is sent
+        // once the new child speaks, as a resume or a restart sends it (GUI
+        // 6a), so Start again never drops it.
         setsSent = []
         attachments = []
         readsEarlier = true
@@ -420,7 +441,8 @@ public final class SessionViewModel {
             self.session = session
             let (lines, outbox) = AsyncStream.makeStream(of: Outbound.self)
             self.outbox = outbox
-            Task { await Self.write(lines, to: session) }
+            let unsent: @MainActor (String) -> Void = { [weak self] text in self?.transcript.notSent(text) }
+            Task { await Self.write(lines, to: session, unsent: unsent) }
             var spoke = false
             var refusal: String?
             for await event in session.events {
@@ -447,6 +469,7 @@ public final class SessionViewModel {
                 if case .event(let event) = event {
                     if case .session(let info) = event.kind {
                         spoke = true
+                        everSpoke = true
                         switching = nil
                         vocabulary = info.capabilities?.schema
                         // The chat it writes, in the binary's word (M28) --
@@ -457,7 +480,7 @@ public final class SessionViewModel {
                 }
                 // The turn ended: what waited for it goes now, before any
                 // line the person makes next.
-                releaseHeld()
+                releaseHeld(afterTurn: Self.endsTurn(event))
                 observer?(event)
             }
             outbox.finish()
@@ -493,11 +516,16 @@ public final class SessionViewModel {
         }
     }
 
-    /// Writes the queued lines one at a time, in order.
-    private static func write(_ lines: AsyncStream<Outbound>, to session: any ChatSession) async {
+    /// Writes the queued lines one at a time, in order; a turn whose line
+    /// the child could not take -- its input closed by a stop, or the child
+    /// gone -- is handed to `unsent`, never left drawn as sent (GUI 6a).
+    private static func write(
+        _ lines: AsyncStream<Outbound>, to session: any ChatSession, unsent: @escaping @MainActor (String) -> Void
+    ) async {
         for await line in lines {
             switch line {
-            case .user(let text): _ = try? await session.send(user: text)
+            case .user(let text):
+                do { _ = try await session.send(user: text) } catch { unsent(text) }
             case .answer(let text): try? await session.answer(text)
             case .cancel: try? await session.cancel()
             case .attach(let path): try? await session.attach(path: path, graph: nil)
@@ -520,6 +548,15 @@ public final class SessionViewModel {
         await ending?.value
     }
 
+    /// The shutdown given up on -- the app quitting once the grace has
+    /// passed: the child's stop escalated to its SIGTERM now, rather than at
+    /// its own deadline, so the child is signalled before the app goes (GUI
+    /// 6a). The stop's kill after it is not waited for (4a). Nothing without
+    /// a child.
+    public func terminateNow() async {
+        await session?.terminateNow()
+    }
+
     /// Whether it has been shut down: ended for good, never started again.
     public var isShutDown: Bool { ending != nil }
 
@@ -534,11 +571,22 @@ public final class SessionViewModel {
     /// Ends the child to free it -- its model unloads -- keeping the
     /// conversation shown; `resume()` carries it on with `--resume`. Returns
     /// once the child has gone. A session still locating its binary has its
-    /// launch called off, and is paused before it has a child.
+    /// launch called off, and is paused before it has a child. One already
+    /// shut down -- a close or a quit under way -- is not paused, but waited
+    /// for: the call returns once its child has gone, so what follows it --
+    /// a rename on a binary that would save its own title back -- lands after
+    /// the child's exit save (GUI 6a).
     public func pause() async {
-        guard !isShutDown, transcript.status != .ended, !isPaused else { return }
+        if let ending {
+            await ending.value
+            return
+        }
+        guard transcript.status != .ended, !isPaused else { return }
         if let session {
             pausing = true
+            // Nothing reaches a child that is going: Send is off and the input
+            // says why, and a line made now waits for the next child (6a).
+            transcript.restarting()
             await session.stop(grace: Self.grace)
             // Returns once its events are read to the end: paused, not pausing.
             await running?.value
@@ -596,6 +644,22 @@ public final class SessionViewModel {
         send(lastSent)
     }
 
+    /// Sends again, as typed, a turn whose line never reached the child
+    /// (`TranscriptItem.Content.notSent`), once the session takes a turn.
+    public func resend(_ text: String) {
+        guard transcript.acceptsInput, outbox != nil else { return }
+        send(text)
+    }
+
+    /// Whether the not-sent row `id` offers Send again: no turn has been sent
+    /// since it.
+    public func canResend(_ id: Int) -> Bool {
+        !transcript.items.contains { item in
+            guard item.id > id, case .user = item.content else { return false }
+            return true
+        }
+    }
+
     // MARK: - The input's reach
 
     /// Whether the session takes `detach`, `set`, `compact` -- the CLI's 52d,
@@ -622,24 +686,109 @@ public final class SessionViewModel {
         }
     }
 
+    /// What the strip above the input says of the held lines: when they go,
+    /// then each in a few words -- `nil` when nothing is held. The when
+    /// follows the session (GUI 6a): this turn's end while one runs or a card
+    /// stands; once the session is back while its child is stopped for
+    /// another, paused or starting; once it starts while no child of it has
+    /// spoken yet; when it starts again once it has ended -- its child dead,
+    /// or no binary found -- since no turn is there to end. Nothing once it
+    /// is shut down: no child will ever take them.
+    public var heldWords: String? {
+        guard !held.isEmpty, !isShutDown else { return nil }
+        let lead = switch heldUntil {
+        case .turnEnds: "Sent when this turn ends"
+        case .back: "Sent once the session is back"
+        case .started: "Sent once the session starts"
+        case .startedAgain: "Sent when the session starts again"
+        }
+        return lead + ": " + held.map(\.words).joined(separator: " · ")
+    }
+
+    /// Why the held lines wait, as the strip's help says it.
+    public var heldHelp: String {
+        switch heldUntil {
+        case .turnEnds: "A session takes these between turns; sent now, the turn's question would drop them."
+        case .back: "Nothing reaches the session while its child is stopped or started; these go to the next one as soon as it speaks."
+        case .started: "Nothing reaches the session before its child has started; these go to it as soon as it speaks."
+        case .startedAgain: "The session ended before these were sent; they go to it once it starts again, as soon as it speaks."
+        }
+    }
+
+    /// What the settings sheet says of when a change takes, as `apply`
+    /// makes it: by the `set` line from the next turn -- sent now, at this
+    /// turn's end, or once the session is back from a stop or a pause (GUI
+    /// 6a) -- by starting an ended session again with it, whatever the
+    /// build, or, on a build without `set`, by a restart. Nothing once it is
+    /// shut down.
+    public var settingsFooter: String {
+        guard !isShutDown else { return "The session is closing: nothing is changed." }
+        if heldUntil == .startedAgain { return "The session has ended: applying starts it again with the change." }
+        guard canSet else {
+            return "This apogee changes these by restarting the session: the conversation carries on (--resume), and a local model loads again."
+        }
+        if takesLinesNow { return "Applied from the next turn; apogee says each change." }
+        return switch heldUntil {
+        case .turnEnds: "A turn is running: the change is sent when it ends, and applied from the turn after; apogee says each change."
+        case .back: "The session isn't running right now: the change is sent once it is back, and applied from the next turn; apogee says each change."
+        case .started: "The session is starting: the change is sent once it has started, and applied from its first turn; apogee says each change."
+        case .startedAgain: "The session has ended: applying starts it again with the change."
+        }
+    }
+
+    /// When a line held now goes, by the session's state.
+    private enum HeldUntil {
+        /// At the turn's end: one runs, or a card stands.
+        case turnEnds
+        /// Once the next child speaks: a stop hands the session on, it is
+        /// paused, or its child is starting.
+        case back
+        /// Once its first child speaks: none of its children has spoken yet.
+        case started
+        /// Once it is started again: it ended, or no binary was found.
+        case startedAgain
+    }
+
+    private var heldUntil: HeldUntil {
+        if case .missing = connection { return .startedAgain }
+        switch transcript.status {
+        case .ended: return .startedAgain
+        case .restarting, .paused, .connecting: return everSpoke ? .back : .started
+        case .ready, .thinking, .working, .answering, .waiting, .stopping: return .turnEnds
+        }
+    }
+
+    /// Whether a line made now will reach a child: one is there, or one is
+    /// to come -- a launch locating its binary, a stop that starts another, a
+    /// session paused to be resumed. Never once it is shut down or has ended,
+    /// nor with no binary found (GUI 6a).
+    private var childToCome: Bool {
+        guard !isShutDown else { return false }
+        if outbox != nil { return true }
+        if transcript.status == .ended { return false }
+        if case .missing = connection { return false }
+        return true
+    }
+
     /// Attaches a file, folder or glob: its outcome arrives as notices. Made
-    /// mid-turn, it waits for the turn to end.
+    /// mid-turn, or while a stop hands the conversation to another child, it
+    /// waits until a child takes it -- no chip until then (GUI 6a).
     public func attach(_ path: String) {
-        guard outbox != nil else { return }
+        guard childToCome else { return }
         sendOrHold(.attach(path))
     }
 
     /// Detaches it, where the build takes `detach`; else there is no way to,
-    /// and the chip offers none (the design's G2 fallback). Made mid-turn, it
-    /// waits for the turn to end, the chip as it was.
+    /// and the chip offers none (the design's G2 fallback). Made mid-turn, or
+    /// during a stop, it waits until a child takes it, the chip as it was.
     public func detach(_ path: String) {
-        guard canDetach, outbox != nil else { return }
+        guard canDetach, childToCome else { return }
         sendOrHold(.detach(path))
     }
 
     /// Compacts the conversation now, where the build takes `compact`.
     public func compact() {
-        guard canCompact, outbox != nil else { return }
+        guard canCompact, childToCome else { return }
         sendOrHold(.compact)
     }
 
@@ -650,27 +799,40 @@ public final class SessionViewModel {
     /// relaunch after carries them.
     public func apply(_ change: RunSettings) async {
         guard !change.isEmpty, !isShutDown else { return }
-        if canSet, outbox != nil {
+        if canSet, childToCome {
             sendOrHold(.set(change))
             return
         }
-        settings = settings.merging(change)
+        // A `set` still held -- made for a turn that ended in the child's
+        // death -- goes into the relaunch's flags with this change, under it:
+        // never sent after it to the new child, so the person's latest word
+        // is the one the session runs on (GUI 6a).
+        let applied = takeHeldSets().merging(change)
+        settings = settings.merging(applied)
         launch.settings = settings
         let carried = savedChatID != nil || !transcript.items.contains { if case .user = $0.content { true } else { false } }
-        if transcript.status == .ended {
-            // No child to restart -- one ended, or refused its launch: the
-            // session starts again on the change.
+        if heldUntil == .startedAgain {
+            // No child to restart -- one ended, refused its launch, or none
+            // was found: the session starts again on the change.
             transcript.note(
                 carried
-                    ? "starting again with \(Self.words(change))"
-                    : "starting again with \(Self.words(change)) -- the earlier turns can't be carried on: this session isn't in the saved list")
+                    ? "starting again with \(Self.words(applied))"
+                    : "starting again with \(Self.words(applied)) -- the earlier turns can't be carried on: this session isn't in the saved list")
         } else {
             transcript.note(
                 carried
-                    ? "restarting with \(Self.words(change)) -- this apogee changes settings by restarting the session; the conversation carries on, and a local model loads again"
-                    : "restarting with \(Self.words(change)) -- the earlier turns can't be carried on: this session isn't in the saved list")
+                    ? "restarting with \(Self.words(applied)) -- this apogee changes settings by restarting the session; the conversation carries on, and a local model loads again"
+                    : "restarting with \(Self.words(applied)) -- the earlier turns can't be carried on: this session isn't in the saved list")
         }
         await restart()
+    }
+
+    /// The `set` lines held, taken out of `held` and laid over one another
+    /// in the order made; the other lines stay held.
+    private func takeHeldSets() -> RunSettings {
+        let sets = held.compactMap { if case .set(let change) = $0 { change } else { nil } }
+        held.removeAll { if case .set = $0 { true } else { false } }
+        return sets.reduce(RunSettings()) { $0.merging($1) }
     }
 
     /// Ends the child and starts it again on `launch`, resuming the saved
@@ -679,6 +841,9 @@ public final class SessionViewModel {
     private func restart() async {
         if let session, transcript.status != .ended {
             pausing = true
+            // As a pause does: nothing is sent to the child that is going
+            // (GUI 6a).
+            transcript.restarting()
             await session.stop(grace: Self.grace)
             await running?.value
         } else {
@@ -694,22 +859,52 @@ public final class SessionViewModel {
         beginLaunch()
     }
 
-    /// `line` now if the session takes it, else held for the turn's end.
+    /// `line` now if the session takes it, else held for the turn's end --
+    /// held too behind lines still waiting for a child that has not spoken
+    /// yet, so the lines reach it in the order made (GUI 6a).
     private func sendOrHold(_ line: HeldLine) {
-        if takesLinesNow { sendLine(line) } else { held.append(line) }
+        if takesLinesNow && held.isEmpty { sendLine(line) } else { held.append(line) }
     }
 
     /// What was held, in the order made, once the session can take it -- a
-    /// suite's move last, since it restarts the child the lines go to.
-    private func releaseHeld() {
+    /// suite's move last, since it restarts the child the lines go to. A move
+    /// released by a turn's end waits for the library's read of the list
+    /// after it, where the library runs it (`movesAfterReadBack`).
+    private func releaseHeld(afterTurn: Bool = false) {
         guard !held.isEmpty, takesLinesNow else { return }
         let lines = held
         held = []
         let moves = lines.filter { if case .suite = $0 { true } else { false } }
         lines.filter { !moves.contains($0) }.forEach(sendLine)
-        if case .suite(let suite, let force)? = moves.last {
+        guard case .suite(let suite, let force)? = moves.last else { return }
+        if afterTurn && movesAfterReadBack {
+            moveAfterRead = SuiteFlags(suite: suite, force: force)
+        } else {
             Task { await moveSuite(to: suite, force: force) }
         }
+    }
+
+    /// Whether `event` ends the turn: its `result`, or its `error`.
+    private static func endsTurn(_ event: SessionEvent) -> Bool {
+        guard case .event(let event) = event else { return false }
+        switch event.kind {
+        case .result, .error: return true
+        default: return false
+        }
+    }
+
+    /// The suite move held over the turn that just ended, made now that the
+    /// list has been read after it -- the conversation known written, and so
+    /// carried on, or not (GUI 6a). Held again if a turn has begun since;
+    /// nothing when no move waits.
+    public func runHeldMove() async {
+        guard let move = moveAfterRead, let suite = move.suite else { return }
+        moveAfterRead = nil
+        if midTurn {
+            held.append(.suite(suite, force: move.force))
+            return
+        }
+        await moveSuite(to: suite, force: move.force)
     }
 
     // MARK: - The suite
@@ -728,6 +923,7 @@ public final class SessionViewModel {
     public func switchSuite(to suite: String, force: Bool = false) async {
         guard canSwitchSuite, !(isExecute && suite == ChatLaunch.noSuite) else { return }
         held.removeAll { if case .suite = $0 { true } else { false } }
+        moveAfterRead = nil
         guard suite != runningSuite || force != launch.forceSuite else { return }
         if midTurn {
             held.append(.suite(suite, force: force))
@@ -736,10 +932,12 @@ public final class SessionViewModel {
         await moveSuite(to: suite, force: force)
     }
 
-    /// A turn runs, or is stopping, or a card waits on the person: a restart
-    /// now would end what the turn is doing.
+    /// A turn runs, or is stopping, or a card waits on the person -- or the
+    /// child is already being stopped for another: a restart now would end
+    /// what the turn is doing, or start a second.
     private var midTurn: Bool {
         if case .stopping = transcript.status { return true }
+        if transcript.status == .restarting { return true }
         return transcript.turnInFlight || transcript.standingCard != nil
     }
 
@@ -1015,6 +1213,7 @@ public final class SessionViewModel {
         case .answering: "Answering"
         case .waiting: "Waiting for you"
         case .stopping: "Stopping"
+        case .restarting: "Restarting"
         case .ended: transcript.launchRefusal == nil ? "Session ended" : "Refused at launch"
         }
     }
@@ -1023,6 +1222,7 @@ public final class SessionViewModel {
     public var inputPrompt: String {
         switch transcript.status {
         case .waiting: "Answer the question above"
+        case .restarting: "The session is restarting"
         case .ended: transcript.launchRefusal == nil ? "The session has ended" : "apogee refused to start this session"
         case .connecting, .paused: "Starting apogee"
         default: "Message Apogee"

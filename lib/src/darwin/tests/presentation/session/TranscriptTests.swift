@@ -173,6 +173,41 @@ struct TranscriptTests {
         #expect(!transcript.acceptsInput)
     }
 
+    // MARK: - 6a, finding 5: a dead child's answer stops streaming
+
+    /// A transcript whose answer has streamed `Totals:` and a table row, and
+    /// whose child then says nothing more: no `answer_end`, no `result`.
+    func streamedTotals() -> Transcript {
+        var transcript = Transcript()
+        transcript.apply(decoded(#"{"type":"session","protocol_version":1,"model":"local"}"#))
+        transcript.userSent("Totals by quarter?")
+        transcript.apply(decoded(#"{"type":"answer_start","turn":1}"#))
+        transcript.apply(decoded(#"{"type":"answer_delta","text":"Totals:\n| Q1 | 42 |","turn":1}"#))
+        #expect(shape(transcript) == ["user: Totals by quarter?", "answer streaming: Totals:\n| Q1 | 42 |"])
+        return transcript
+    }
+
+    @Test("a child that dies mid-answer -- crashed, killed when a Stop's grace ran out -- leaves the answer finished, so its held-back last line is drawn")
+    func deathFinishesTheAnswer() {
+        var transcript = streamedTotals()
+        var tail = BoundedTail()
+        tail.append(.init("Killed: 9\n".utf8))
+        transcript.apply(.ended(SessionEnd(reason: .failed, exit: ChildExit(reason: .signalled, status: 9), stderrTail: tail)))
+        #expect(shape(transcript) == [
+            "user: Totals by quarter?", "answer: Totals:\n| Q1 | 42 |", "ended: apogee ended by signal 9: Killed: 9",
+        ], "finished: the row the model wrote is drawn, not held back")
+    }
+
+    @Test("a child ended to free it mid-answer is paused with the answer finished; a resume's range opens on finished rows")
+    func pauseFinishesTheAnswer() {
+        var transcript = streamedTotals()
+        transcript.paused()
+        #expect(shape(transcript) == ["user: Totals by quarter?", "answer: Totals:\n| Q1 | 42 |"])
+        transcript.reopening()
+        transcript.apply(decoded(#"{"type":"session","protocol_version":1,"model":"local","next_turn":2}"#))
+        #expect(!transcript.items.contains { if case .answer(let answer) = $0.content { !answer.finished } else { false } }, "every range's answers finished")
+    }
+
     @Test("a binary that will not start says why")
     func couldNotStart() {
         var transcript = Transcript()
