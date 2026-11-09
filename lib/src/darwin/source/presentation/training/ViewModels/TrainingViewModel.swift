@@ -31,6 +31,17 @@ import Observation
 /// (the read itself), and a vocabulary dated before `keepsHaltSince` or
 /// `streamsPullSince` (the halt and the pull, which no read can ask before
 /// they run).
+///
+/// Since the CLI's 57g and 57h (GUI 6i) the place reads what a resume
+/// continues and whether the cycle can run from the documents, and offers no
+/// button the CLI would refuse: a cycle pass's pipeline is never resumed
+/// here; a resume names the stage and the `--pipeline` its document gives,
+/// and is held while a live process runs it or nothing finds its spec; a
+/// dead pass's lock and an unreadable history are states of their own, each
+/// holding what refuses on it; and `running`'s ids are listed, older than the
+/// five newest runs or not. An older binary's document carries none of
+/// those fields, and keeps 4j's rules, minus a cycle pass's resume and with
+/// a resume held where no named pipeline is its spec.
 @MainActor
 @Observable
 public final class TrainingViewModel {
@@ -222,9 +233,13 @@ public final class TrainingViewModel {
         /// `train pipeline run --pipeline <name>`: each stage a training run,
         /// held to the cumulative gate.
         case runPipeline(String)
-        /// `train pipeline resume <id>`: from the first stage that has not
-        /// passed.
-        case resumePipeline(String)
+        /// `train pipeline resume <id>`, from where the CLI says it starts --
+        /// after the last stage that passed, as the document's `resume` says
+        /// (the CLI's 57h); on an older binary, whose document says nothing,
+        /// the first stage that has not passed, as 4j read it. `pipeline` is
+        /// the `--pipeline` value the document names for the run's spec, or
+        /// nil for the bare form -- an older binary's.
+        case resumePipeline(String, pipeline: String? = nil)
         /// `train cycle run`: one pass, now.
         case runCycle
         /// `train cycle halt`: every pass refuses until a resume.
@@ -241,7 +256,7 @@ public final class TrainingViewModel {
             case .rollback(let backend): ["train", "rollback", backend]
             case .deleteDataset(let name): ["datasets", "delete", name, "--yes"]
             case .runPipeline(let name): ["train", "pipeline", "run", "--pipeline", name]
-            case .resumePipeline(let id): ["train", "pipeline", "resume", id]
+            case .resumePipeline(let id, let pipeline): ["train", "pipeline", "resume", id] + (pipeline.map { ["--pipeline", $0] } ?? [])
             case .runCycle: ["train", "cycle", "run"]
             case .haltCycle: ["train", "cycle", "halt"]
             case .resumeCycle: ["train", "cycle", "resume"]
@@ -551,6 +566,9 @@ public final class TrainingViewModel {
     /// The cycle, read only once `train status` says it has a history:
     /// before the first pass (or a halt) writes one, `train cycle status`
     /// exits 1 (the CLI's 55h), and the place's empty state says so instead.
+    /// A history that cannot be read is `cycle` null too, `cycle_error` saying
+    /// why (the CLI's 57h): the read, which would exit 1 on it, is not asked
+    /// either, and `cycleErrorText` says it.
     private func readCycle(after statusRead: ReadOutcome) async {
         guard let binary else { return }
         guard statusRead.document != nil else {
@@ -601,11 +619,32 @@ public final class TrainingViewModel {
         }
     }
 
-    /// What is running first, then the recent runs -- each once.
+    /// What is running first, then the recent runs -- each once. `train
+    /// status` names every running run by its id (`running`), and gives the
+    /// facts of its newest five alone (`recent_runs`): a running id among
+    /// those is that run; one older is a row of its id, status `running`,
+    /// with no other facts and no other read (GUI 6i).
     public var runs: [TrainingRun] {
-        let running = status?.running ?? []
-        return running + (status?.recent ?? []).filter { run in !running.contains { $0.id == run.id } }
+        let recent = status?.recent ?? []
+        var listed = Set<String>()
+        let running = (status?.runningIDs ?? []).compactMap { id -> TrainingRun? in
+            guard listed.insert(id).inserted else { return nil }
+            return recent.first { $0.id == id } ?? TrainingRun(runningID: id)
+        }
+        return running + recent.filter { !listed.contains($0.id) }
     }
+
+    /// A run's line under its id: its method, trainer and loss, and its gate
+    /// -- or, for a run known by its id alone, that it is still training.
+    public static func summary(_ run: TrainingRun) -> String {
+        guard !run.listedByID else { return listedByIDWords }
+        let facts = [run.method, run.trainer, run.finalLoss.map { String(format: "loss %.4f", $0) } ?? ""].filter { !$0.isEmpty }
+        return (facts + [gate(run)]).joined(separator: " · ")
+    }
+
+    /// What a run known by its id alone says, in its row and on its page.
+    public static let listedByIDWords =
+        "still training -- train status names it by its id alone, as it is older than the five newest runs whose facts it gives"
 
     public var currentRun: TrainingRun? { selectedRun.flatMap { id in runs.first { $0.id == id } } }
     public var currentRegime: TrainingRegime? { selectedRegime.flatMap { n in regimes.first { $0.name == n } } }
@@ -689,17 +728,106 @@ public final class TrainingViewModel {
         }
     }
 
-    /// Whether `run` can be resumed from here: it stopped short, and nothing
-    /// runs in this place now.
-    public func canResume(_ run: PipelineRun) -> Bool {
-        run.isResumable && !isRunning && binary != nil
+    /// Where a resume of `run` starts, as the CLI says it: its document's
+    /// `resume` (the CLI's 57h) -- after the last stage that passed -- or, on
+    /// an older binary, whose document carries none, the first stage that
+    /// has not passed of a run that stopped short. Never a cycle pass's: its
+    /// candidate is the cycle's alone, and `pipeline resume` refuses it on
+    /// every binary from 57h on, while an older one retrains it on the spec's
+    /// own data, outside the cycle (GUI 6i).
+    public static func resumePoint(_ run: PipelineRun) -> (stage: Int, name: String, note: String?)? {
+        guard !run.isCyclePass else { return nil }
+        if run.hasResumeField {
+            return run.resume.map { ($0.stage, $0.name, $0.note) }
+        }
+        guard run.isResumable, let stage = run.resumesAt else { return nil }
+        return (stage.index, stage.name, nil)
     }
 
-    /// Where a resume starts, in a line: `Resume from stage 2, refusals`.
-    public static func resumeWords(_ run: PipelineRun) -> String? {
-        guard run.isResumable, let stage = run.resumesAt else { return nil }
-        return "Resume from stage \(stage.index), \(stage.name)"
+    /// Why `run`'s Resume is held though it has a stage to resume, in the
+    /// CLI's words: a live process runs it (57g's `holder`, which `pipeline
+    /// resume` refuses), or no `--pipeline` the app can pass finds its spec --
+    /// the document names none (57h), or, on an older binary, the run's spec
+    /// name is none of the named pipelines -- and the console line that does
+    /// it. `nil` when Resume would run, and for a run with nothing to resume.
+    public func resumeHold(_ run: PipelineRun) -> String? {
+        guard Self.resumePoint(run) != nil else { return nil }
+        if let pid = run.holder {
+            return "This pipeline is running now (\(pid > 0 ? "process \(pid)" : "its lock names no process it can read")); a resume is refused while it runs."
+        }
+        let found = run.hasResumeField ? run.resume?.pipeline != nil : pipelineSpecs.contains(run.specName)
+        return found ? nil : "Resume needs its spec: run 'apogee train pipeline resume \(run.id) --pipeline <spec>' in the console."
     }
+
+    /// Whether `run` can be resumed from here: the CLI says where it resumes
+    /// (`resumePoint`), nothing holds it back (`resumeHold`), and nothing runs
+    /// in this place now.
+    public func canResume(_ run: PipelineRun) -> Bool {
+        Self.resumePoint(run) != nil && resumeHold(run) == nil && !isRunning && binary != nil
+    }
+
+    /// The resume `run` would start, as a person types it: the bare form, or
+    /// -- where the document names the spec (57h) -- with `--pipeline`.
+    public static func resume(_ run: PipelineRun) -> Pending {
+        .resumePipeline(run.id, pipeline: run.hasResumeField ? run.resume?.pipeline : nil)
+    }
+
+    /// Resume…'s help: the command, and where it starts -- as the document
+    /// says (57h), or as an older binary's page read it.
+    public static func resumeHelp(_ run: PipelineRun) -> String {
+        "apogee " + resume(run).arguments.joined(separator: " ")
+            + (run.hasResumeField ? ": after the last stage that passed" : ": from the first stage that has not passed")
+    }
+
+    /// Resume… pressed: the confirm asked, only when the resume would run.
+    public func requestResume(_ run: PipelineRun) {
+        guard canResume(run) else { return }
+        pending = Self.resume(run)
+    }
+
+    /// Where a resume starts, in a line, as the CLI's status says it: `Resume
+    /// from stage 2, refusals` -- and, where earlier stages failed their gate
+    /// and stay as they are, `; stage 1, a, failed its gate and stays as it
+    /// is`. `nil` for a run with nothing to resume, and a cycle pass.
+    public static func resumeWords(_ run: PipelineRun) -> String? {
+        resumePoint(run).map { "Resume from stage \($0.stage), \($0.name)" + ($0.note.map { "; \($0)" } ?? "") }
+    }
+
+    /// The run page's last line: a pipeline's stage runs are ordinary runs,
+    /// gated and promoted from Runs -- but a cycle pass's candidate is the
+    /// cycle's, judged by its dual gate (promoted on a pass, discarded on a
+    /// fail), and Run one pass runs the next, in the words of the CLI's 57h
+    /// status line. A pass running now is never said discarded: the CLI
+    /// says it running and offers nothing while a live process holds it
+    /// (57g), and its 57h line is for a pass that is not complete and that
+    /// no live process holds -- so a `running` pass with a holder, or on an
+    /// older binary (no `resume` in its document) that cannot tell a live
+    /// pass from a dead one, says it runs and the cycle judges it.
+    public static func pageLine(_ run: PipelineRun) -> String {
+        guard run.isCyclePass else { return ordinaryRunWords }
+        if run.status == "complete" { return cyclePassCompleteWords }
+        if run.status == "running", run.holder != nil || !run.hasResumeField { return cyclePassRunningWords(run.holder) }
+        return cyclePassWords
+    }
+
+    /// A pipeline's page line: its stage runs are ordinary runs.
+    static let ordinaryRunWords = "Each stage's run is an ordinary run: gate it and promote it from Runs."
+    /// 57h's line for a cycle pass that did not complete and that no live
+    /// process holds -- aborted, failed, or a dead pass's `running` -- its
+    /// door the tab's.
+    static let cyclePassWords =
+        "A cycle pass: its candidate was discarded, and no other verb resumes it -- Run one pass on the Cycle tab runs the next pass."
+    /// A running cycle pass's line: its process as the CLI names a holder
+    /// (57g's `running now (process N)`, or `its lock names no process it can
+    /// read`), or -- on an older binary, which states no holder -- running
+    /// as its manifest says; the cycle judges its candidate once it ends.
+    static func cyclePassRunningWords(_ holder: Int?) -> String {
+        let now = holder.map { "running now (\($0 > 0 ? "process \($0)" : "its lock names no process it can read"))" }
+        return "A cycle pass, \(now ?? "running as its manifest says"): its candidate is the cycle's, judged by its dual gate when the pass ends -- never from Runs."
+    }
+    /// A complete cycle pass's line: the cycle judged its candidate.
+    static let cyclePassCompleteWords =
+        "A cycle pass: its candidate is the cycle's, judged by its dual gate -- promoted on a pass, discarded on a fail, never from Runs. Run one pass on the Cycle tab runs the next pass."
 
     /// A stage in a line: its word, the gate's score once gated, and the
     /// trainer's facts while it trains.
@@ -781,15 +909,37 @@ public final class TrainingViewModel {
         live == .cycle || cycle?.active == true || status?.cycleActive == true
     }
 
-    /// Whether the loop is halted, as last read.
+    /// Whether the loop is halted, as last read. Unknown -- read here as not
+    /// -- while the history cannot be read (`cycleError`), when every control
+    /// is held instead, so nothing acts on it.
     public var cycleHalted: Bool {
         cycle?.halted ?? status?.cycle?.halted ?? false
     }
 
-    /// One pass can start: nothing runs here, no pass holds the cycle, and
-    /// it isn't halted -- each refused by the CLI otherwise, and said here
-    /// first.
-    public var canRunCycle: Bool { binary != nil && !isRunning && !cycleHeld && !cycleHalted }
+    /// The lock a dead pass left, by its path, as last read (the CLI's 57g):
+    /// `cycle run` refuses while it is there, and the person removes it --
+    /// this place never does (the CLI's 27h).
+    public var staleLock: String? {
+        cycle?.staleLock ?? status?.staleLock
+    }
+
+    /// Why the cycle's history cannot be read, naming its file, as `train
+    /// status` said it (the CLI's 57h). Run, Halt and Resume each refuse on
+    /// it.
+    public var cycleError: String? { status?.cycleError }
+
+    /// Whether the binary tells a dead pass's lock from a live one (57g). An
+    /// older binary reports a lock a dead pass left as a pass running.
+    private var statesLockLiveness: Bool {
+        status?.statesLockLiveness == true || cycle?.statesLockLiveness == true
+    }
+
+    /// One pass can start: nothing runs here, no pass holds the cycle, no
+    /// dead pass's lock is left, the history reads, and it isn't halted --
+    /// each refused by the CLI otherwise, and said here first.
+    public var canRunCycle: Bool {
+        binary != nil && !isRunning && !cycleHeld && !cycleHalted && staleLock == nil && cycleError == nil
+    }
 
     /// The vocabulary's date from which the binary keeps a halt taken while
     /// a pass runs -- the pass finishes and says so in a notice (the CLI's
@@ -802,12 +952,56 @@ public final class TrainingViewModel {
     /// loses it when the pass records itself.
     public var keepsHalt: Bool { (vocabulary() ?? "") >= Self.keepsHaltSince }
 
-    /// A halt can be taken: not halted already -- and, on a binary that loses
-    /// a halt taken during a pass, no pass holds the cycle.
-    public var canHaltCycle: Bool { binary != nil && !cycleHalted && (!cycleHeld || keepsHalt) }
+    /// A halt can be taken: the history reads, it isn't halted already --
+    /// and, on a binary that loses a halt taken during a pass, no pass holds
+    /// the cycle. A dead pass's lock holds no halt back: `cycle halt` writes
+    /// under the history's own lock, and says the stale one.
+    public var canHaltCycle: Bool {
+        binary != nil && cycleError == nil && !cycleHalted && (!cycleHeld || keepsHalt)
+    }
 
-    /// A resume is offered: the loop is halted.
-    public var canResumeCycle: Bool { binary != nil && cycleHalted }
+    /// A resume is offered: the loop is halted, and its history reads.
+    public var canResumeCycle: Bool { binary != nil && cycleError == nil && cycleHalted }
+
+    /// The State fact, never claiming a pass that is not running: one is
+    /// (this place's, or a live process's), the loop is halted, a dead pass
+    /// left its lock (57g), or idle -- 4j's order, a pass holding the cycle
+    /// first. The CLI's `train cycle status` and `train status` check halted
+    /// first, so a halt kept during a live pass (M30) reads `HALTED` there
+    /// and a pass running here; the halt and its reason are said beside it
+    /// (`cycleHoldText`).
+    public var cycleStateWords: String {
+        if cycleHeld { return "a pass is running" }
+        if cycleHalted { return "halted" }
+        return staleLock != nil ? "stopped, its lock left behind" : "idle"
+    }
+
+    /// A dead pass's lock in the CLI's words (57g's `stopped -- cycle.lock is
+    /// left by process <pid>, which is not running; remove <path> to run
+    /// again`), the process unnamed -- `stale_lock` is the path alone -- and
+    /// why Run one pass waits: `cycle run` refuses while it is there.
+    public var staleLockText: String? {
+        staleLock.map {
+            "Stopped -- cycle.lock is left by a process that is not running; remove \($0) to run again. Until then every pass refuses -- Run one pass here, and your scheduler's."
+        }
+    }
+
+    /// On an older binary, which reports any lock as a pass running, the
+    /// CLI's own remedy beside a cycle another process holds (its `cycle
+    /// run` refusal's `If none is, remove the file and run again`).
+    static let lockRemedyWords =
+        "If no pass is running, one that died left its lock: remove training/cycle/cycle.lock under your Apogee home."
+
+    /// What the cycle says in place of its history when that cannot be read
+    /// (57h's `cycle_error`) -- never the no-history text -- and that Run,
+    /// Halt and Resume are held on it, as each refuses.
+    public var cycleErrorText: String? {
+        guard cycleListing == .read, let cycleError else { return nil }
+        return "The cycle history could not be read: \(cycleError)\n\n\(Self.unreadableWords)"
+    }
+
+    /// Why the cycle's controls are held beside an unreadable history.
+    static let unreadableWords = "Run one pass, Halt and Resume are held: each refuses while the history cannot be read."
 
     /// Why Halt isn't offered while a pass holds the cycle, on a binary that
     /// loses a halt taken then (before the CLI's M30).
@@ -819,15 +1013,27 @@ public final class TrainingViewModel {
     static let keptWords = "The pass running now finishes, and keeps the halt"
 
     /// What the cycle's controls say about its state, when something holds
-    /// them back.
+    /// them back: a dead pass's lock, with its path and remedy (57g); a pass
+    /// holding the cycle on a binary that loses a halt taken then; a halt and
+    /// its reason; and, beside a cycle another process holds on an older
+    /// binary that cannot tell a dead pass's lock from a live one, the CLI's
+    /// remedy (GUI 6i).
     public var cycleHoldText: String? {
-        if cycleHeld && !keepsHalt { return Self.heldWords }
-        guard cycleHalted else { return nil }
-        let reason = cycle?.haltReason ?? status?.cycle?.haltReason ?? ""
-        let halted = "Halted: \(reason.isEmpty ? "'apogee train cycle halt' was run" : reason)."
-        return cycleHeld
-            ? "\(halted) \(Self.keptWords): every pass after it refuses -- your scheduler's too -- until Resume clears it."
-            : "\(halted) Every pass refuses -- your scheduler's too -- until Resume clears it."
+        let held: String?
+        if cycleHeld && !keepsHalt {
+            held = Self.heldWords
+        } else if cycleHalted {
+            let reason = cycle?.haltReason ?? status?.cycle?.haltReason ?? ""
+            let halted = "Halted: \(reason.isEmpty ? "'apogee train cycle halt' was run" : reason)."
+            held = cycleHeld
+                ? "\(halted) \(Self.keptWords): every pass after it refuses -- your scheduler's too -- until Resume clears it."
+                : "\(halted) Every pass refuses -- your scheduler's too -- until Resume clears it."
+        } else {
+            held = nil
+        }
+        let remedy = cycleHeld && live != .cycle && !statesLockLiveness ? Self.lockRemedyWords : nil
+        let said = [staleLockText, held, remedy].compactMap { $0 }
+        return said.isEmpty ? nil : said.joined(separator: " ")
     }
 
     /// The notice a pass running here says when a halt taken while it ran
@@ -855,9 +1061,10 @@ public final class TrainingViewModel {
         "No pass has run yet, so the cycle has no history: its first pass writes one -- Run one pass here, or your scheduler's first run. A pass needs training.cycle in your config; the run says so when it's missing."
 
     /// What the cycle says with no history yet -- `train status`'s `cycle`
-    /// null -- rather than the read that exits 1.
+    /// null -- rather than the read that exits 1; never while the CLI says
+    /// the history is there and cannot be read (`cycleErrorText`).
     public var noHistoryText: String? {
-        cycleListing == .read && cycle == nil ? Self.noHistoryWords : nil
+        cycleListing == .read && cycle == nil && cycleError == nil ? Self.noHistoryWords : nil
     }
 
     /// The anchor, in a line, as the CLI's `train cycle status` says it:
@@ -893,8 +1100,8 @@ public final class TrainingViewModel {
         case .rollback(let backend): "Point \(backend) back at its previous version?"
         case .deleteDataset(let name): "Delete the dataset \(name)?"
         case .runPipeline(let name): "Run the pipeline \(name)?"
-        case .resumePipeline(let id):
-            openPipeline.flatMap { $0.id == id ? $0.resumesAt : nil }.map { "Resume \(id) from stage \($0.index), \($0.name)?" }
+        case .resumePipeline(let id, _):
+            openPipeline.flatMap { $0.id == id ? Self.resumePoint($0) : nil }.map { "Resume \(id) from stage \($0.stage), \($0.name)?" }
                 ?? "Resume \(id)?"
         case .runCycle: "Run the training cycle once?"
         case .haltCycle: "Halt the training cycle?"
@@ -908,8 +1115,11 @@ public final class TrainingViewModel {
     public var pendingConsequence: String? {
         switch pending {
         case .runPipeline: "Each stage is a training run, held to the cumulative gate -- this machine is held until it ends."
-        case .resumePipeline:
-            "What passed stays; each stage from there is a training run, held to the cumulative gate -- this machine is held until it ends."
+        case .resumePipeline(let id, _):
+            // An earlier stage that failed its gate and stays failed, in the
+            // CLI's words (57h), before what the resume does.
+            (openPipeline.flatMap { $0.id == id ? Self.resumePoint($0)?.note : nil }.map { Self.sentence($0) + " " } ?? "")
+                + "What passed stays; each stage from there is a training run, held to the cumulative gate -- this machine is held until it ends."
         case .runCycle: "It trains, gates and may promote -- this machine is held until it ends."
         case .haltCycle:
             "Every 'cycle run' refuses until 'cycle resume' -- your scheduler's passes too."
@@ -917,6 +1127,12 @@ public final class TrainingViewModel {
         case .resumeCycle: "It clears the halt and the failure count: your scheduler's next pass runs."
         case .rollback, .deleteDataset, nil: nil
         }
+    }
+
+    /// The CLI's words as a sentence: a capital first, a stop last.
+    static func sentence(_ words: String) -> String {
+        guard let first = words.first else { return words }
+        return first.uppercased() + words.dropFirst() + (words.hasSuffix(".") ? "" : ".")
     }
 
     /// The confirm's button.
@@ -1087,7 +1303,7 @@ public final class TrainingViewModel {
             selectedPipelineRun = nil
             openedSpec = nil
             start(pending.arguments + Self.stream, doing: "Running \(name)", act: .pipeline(name))
-        case .resumePipeline(let id):
+        case .resumePipeline(let id, _):
             selectedPipelineRun = id
             openedSpec = nil
             start(pending.arguments + Self.stream, doing: "Resuming \(id)", act: .pipeline(id))

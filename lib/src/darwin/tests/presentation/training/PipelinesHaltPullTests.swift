@@ -141,7 +141,8 @@ struct PipelinesHaltPullTests {
         model.say = { said.append($0) }
         #expect(model.cycleHeld && !model.cycleHalted)
         #expect(model.canHaltCycle && !model.canRunCycle && !model.canResumeCycle)
-        #expect(model.cycleHoldText == nil, "nothing is held back, so nothing is said")
+        #expect(model.cycleHoldText == TrainingViewModel.lockRemedyWords,
+            "Run is held: recorded before the CLI's 57g, so the lock may be a dead pass's -- the CLI's remedy is said (GUI 6i)")
         model.pending = .haltCycle
         #expect(model.pendingConsequence
             == "Every 'cycle run' refuses until 'cycle resume' -- your scheduler's passes too. The pass running now finishes, and keeps the halt.")
@@ -153,7 +154,8 @@ struct PipelinesHaltPullTests {
         #expect(said == ["the pass running now finishes, and keeps the halt"], "the CLI's answer, its last line")
         #expect(model.cycleHeld && model.cycleHalted && model.canResumeCycle && !model.canHaltCycle && !model.canRunCycle)
         #expect(model.cycleHoldText
-            == "Halted: halted by 'apogee train cycle halt'. The pass running now finishes, and keeps the halt: every pass after it refuses -- your scheduler's too -- until Resume clears it.")
+            == "Halted: halted by 'apogee train cycle halt'. The pass running now finishes, and keeps the halt: every pass after it refuses -- your scheduler's too -- until Resume clears it. "
+                + TrainingViewModel.lockRemedyWords)
     }
 
     @Test("an older binary, or one that hasn't said, keeps 4j's: no Halt while a pass holds the cycle, and today's warning")
@@ -161,7 +163,7 @@ struct PipelinesHaltPullTests {
         for vocabulary in [Self.older, nil] {
             let (model, _, _) = await training(vocabulary: vocabulary, status: "train-status-cycle-active", cycle: "train-cycle-status-active")
             #expect(model.cycleHeld && !model.canHaltCycle && !model.canRunCycle)
-            #expect(model.cycleHoldText == TrainingViewModel.heldWords)
+            #expect(model.cycleHoldText == TrainingViewModel.heldWords + " " + TrainingViewModel.lockRemedyWords)
             model.pending = .haltCycle
             #expect(model.pendingConsequence == "Every 'cycle run' refuses until 'cycle resume' -- your scheduler's passes too.")
         }

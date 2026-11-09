@@ -314,12 +314,14 @@ struct PipelineCycleTests {
         #expect(!model.cycleHalted && model.canRunCycle && model.canHaltCycle)
     }
 
-    @Test("a pass another holds -- the person's scheduler's -- holds Run and Halt back, and says why")
+    @Test("a pass another holds -- the person's scheduler's -- holds Run and Halt back, and says why; an older binary's adds the CLI's remedy for a dead pass's lock")
     func heldElsewhere() async {
         let (model, _, _) = await training(status: "train-status-cycle-active", cycle: "train-cycle-status-active")
         #expect(model.cycle?.active == true && model.cycleHeld)
         #expect(!model.canRunCycle && !model.canHaltCycle && !model.canResumeCycle)
-        #expect(model.cycleHoldText == TrainingViewModel.heldWords)
+        #expect(model.cycleHoldText == TrainingViewModel.heldWords + " " + TrainingViewModel.lockRemedyWords,
+            "recorded before the CLI's 57g, which tells a dead pass's lock from a live one")
+        #expect(model.cycleStateWords == "a pass is running")
     }
 
     @Test("a failed train status is said where the cycle is, and no apogee is the place's empty state")

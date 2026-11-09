@@ -10,7 +10,9 @@ import SwiftUI
 /// rather than the read that exits 1. A halt taken while a pass ran here is
 /// kept on a binary that keeps it (the CLI's M30), and the pass's notice
 /// saying so is drawn: live as it comes, then on the tab while the halt
-/// stands.
+/// stands. A dead pass's lock is said with its file and a Finder button, the
+/// person's to remove, and a history the CLI cannot read is said where the
+/// history would be, never as none (the CLI's 57g and 57h, GUI 6i).
 struct CycleView: View {
     @Bindable var model: TrainingViewModel
 
@@ -28,6 +30,22 @@ struct CycleView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
+                if let lock = model.staleLock {
+                    // The lock a dead pass left (the CLI's 57g): the person
+                    // removes it, so its file is shown -- never removed here.
+                    HStack(spacing: Spacing.s) {
+                        Text(lock)
+                            .font(.apogeeMeta.monospaced())
+                            .foregroundStyle(Palette.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                        Button("Show in Finder") {
+                            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: lock)])
+                        }
+                        .help("Shows cycle.lock in the Finder, for you to remove")
+                    }
+                }
                 if model.live == nil, let kept = model.keptHalt {
                     VStack(alignment: .leading, spacing: Spacing.xs) {
                         Text("THE LAST PASS RUN HERE").font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary)
@@ -43,6 +61,14 @@ struct CycleView: View {
                 }
                 if let said = model.cycleText {
                     Text(said).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+                } else if let said = model.cycleErrorText {
+                    // The history is there and cannot be read (the CLI's
+                    // 57h): said where it would be drawn, never as none.
+                    Text(said)
+                        .font(.apogeeSmall)
+                        .foregroundStyle(Palette.error)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
                 } else if let said = model.noHistoryText {
                     Text(said)
                         .font(.apogeeSmall)
@@ -62,7 +88,7 @@ struct CycleView: View {
         HStack(alignment: .top, spacing: Spacing.xl) {
             fact("Promotes into", cycle.backend.isEmpty ? "—" : cycle.backend)
             fact("Anchor", TrainingViewModel.anchorWords(cycle))
-            fact("State", model.cycleHeld ? "a pass is running" : cycle.halted ? "halted" : "idle")
+            fact("State", model.cycleStateWords)
             fact("Failed in a row", "\(cycle.consecutiveFails)")
             fact("Passes", "\(cycle.totalRuns)")
         }
@@ -264,6 +290,46 @@ private struct LivePass: View {
     CycleView(model: training)
         .frame(width: 900, height: 560)
         .task { await training.connect(binary: previewBinary) }
+}
+
+#Preview("The cycle: a dead pass's lock left behind, Run held") {
+    let training = TrainingPreview.training(runner: TrainingPreview.cycleStaleLock, vocabulary: TrainingPreview.m30)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 640)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.tab = .cycle
+        }
+}
+
+#Preview("The cycle: a dead first pass's lock, no history yet") {
+    let training = TrainingPreview.training(runner: TrainingPreview.staleLockNoHistory, vocabulary: TrainingPreview.m30)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 480)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.tab = .cycle
+        }
+}
+
+#Preview("The cycle: its history unreadable, every control held") {
+    let training = TrainingPreview.training(runner: TrainingPreview.cycleUnreadable, vocabulary: TrainingPreview.m30)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 480)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.tab = .cycle
+        }
+}
+
+#Preview("The cycle: a live pass holds it, as a binary from 57g says") {
+    let training = TrainingPreview.training(runner: TrainingPreview.cycleLiveLock, vocabulary: TrainingPreview.m30)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 640)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.tab = .cycle
+        }
 }
 
 #Preview("The cycle: Apogee not installed") {

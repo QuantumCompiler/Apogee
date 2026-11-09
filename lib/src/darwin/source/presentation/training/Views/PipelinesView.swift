@@ -7,7 +7,9 @@ import SwiftUI
 /// count, its student and its page's stage plan where the binary lists them
 /// (the CLI's M30); every pipeline run, newest first; and the open page -- a
 /// spec's plan, or a run's stages as the manifest records them, live while it
-/// runs here (the CLI's 55h), with Resume where it stopped short.
+/// runs here (the CLI's 55h), with Resume where the CLI says a resume
+/// starts -- held, and why, where it would be refused, and never on a cycle
+/// pass's pipeline, whose page points at the Cycle tab (GUI 6i).
 struct PipelinesView: View {
     @Bindable var model: TrainingViewModel
 
@@ -201,17 +203,30 @@ private struct PipelinePage: View {
             .foregroundStyle(Palette.textTertiary)
         StageList(stages: model.pipelineStages)
         if let resume = TrainingViewModel.resumeWords(run) {
-            HStack {
-                Text(resume).font(.apogeeSmall)
+            HStack(alignment: .firstTextBaseline) {
+                Text(resume).font(.apogeeSmall).fixedSize(horizontal: false, vertical: true)
                 Spacer()
-                Button("Resume…") { model.pending = .resumePipeline(run.id) }
+                Button("Resume…") { model.requestResume(run) }
                     .disabled(!model.canResume(run))
-                    .help("apogee train pipeline resume \(run.id): from the first stage that has not passed")
+                    .help(TrainingViewModel.resumeHelp(run))
+            }
+            if let held = model.resumeHold(run) {
+                // Why Resume is held, and the console line that does it.
+                Text(held)
+                    .font(.apogeeSmall)
+                    .foregroundStyle(Palette.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
             }
         }
-        Text("Each stage's run is an ordinary run: gate it and promote it from Runs.")
+        Text(TrainingViewModel.pageLine(run))
             .font(.apogeeMeta)
             .foregroundStyle(Palette.textTertiary)
+            .fixedSize(horizontal: false, vertical: true)
+        if run.isCyclePass {
+            Button("Show the cycle") { model.tab = .cycle }
+                .help("The Cycle tab: its passes, and Run one pass")
+        }
     }
 }
 
@@ -331,6 +346,70 @@ struct StageList: View {
             training.tab = .pipelines
             await training.openPipelineRun(TrainingPreview.abortedID)
             training.pending = .resumePipeline(TrainingPreview.abortedID)
+        }
+}
+
+#Preview("A cycle pass's pipeline: no Resume, the Cycle tab named") {
+    let training = TrainingPreview.training(runner: TrainingPreview.resumes)
+    PipelinesView(model: training)
+        .frame(width: 960, height: 560)
+        .task {
+            await training.connect(binary: previewBinary)
+            await training.openPipelineRun(TrainingPreview.cyclePassID)
+        }
+}
+
+#Preview("A named pipeline whose name is not its key: Resume naming its spec, asking first") {
+    let training = TrainingPreview.training(runner: TrainingPreview.resumes)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 600)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.tab = .pipelines
+            await training.openPipelineRun(TrainingPreview.namedID)
+            if let run = training.openPipeline { training.requestResume(run) }
+        }
+}
+
+#Preview("A run whose first stage stays failed: Resume from stage 3, asking first") {
+    let training = TrainingPreview.training(runner: TrainingPreview.resumes)
+    TrainingScreen(model: training)
+        .frame(width: 1100, height: 640)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.tab = .pipelines
+            await training.openPipelineRun(TrainingPreview.keptFailedID)
+            if let run = training.openPipeline { training.requestResume(run) }
+        }
+}
+
+#Preview("A spec-file run whose file has gone: Resume held, the console line") {
+    let training = TrainingPreview.training(runner: TrainingPreview.resumes)
+    PipelinesView(model: training)
+        .frame(width: 960, height: 560)
+        .task {
+            await training.connect(binary: previewBinary)
+            await training.openPipelineRun(TrainingPreview.specFileID)
+        }
+}
+
+#Preview("A run a live process holds: Resume held") {
+    let training = TrainingPreview.training(runner: TrainingPreview.resumesHeld)
+    PipelinesView(model: training)
+        .frame(width: 960, height: 560)
+        .task {
+            await training.connect(binary: previewBinary)
+            await training.openPipelineRun(TrainingPreview.namedID)
+        }
+}
+
+#Preview("An older binary's run whose spec is not named: Resume held, the console line") {
+    let training = TrainingPreview.training(runner: TrainingPreview.abortedUnnamed)
+    PipelinesView(model: training)
+        .frame(width: 960, height: 560)
+        .task {
+            await training.connect(binary: previewBinary)
+            await training.openPipelineRun(TrainingPreview.abortedID)
         }
 }
 

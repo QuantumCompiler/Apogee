@@ -2230,7 +2230,7 @@ Probed on the branch's binary over a sandbox with the mock trainer: two named pi
 **Not done:**
 - No live pass of the app.
 - No design board draws the two tabs.
-- `TrainingStatus.running` decodes run objects where the CLI sends ids, so it stays empty. That's harmless, since `recent_runs` carries the running run.
+- `TrainingStatus.running` decodes run objects where the CLI sends ids, so it stays empty. That's harmless, since `recent_runs` carries the running run. *(Answered 2026-11-08 by 6i, below: it holds only while the running run is among the newest five, and `runningIDs` now reads the ids.)*
 - **CLI gaps the probes found:**
   - **No read lists the named pipeline specs** or their stage plan before a run.
   - **A halt during a pass is lost.** `train cycle halt` taken while a pass holds the lock answers "cycle halted", then the pass's save overwrites it: loaded at `cycle.cpp:403`, written at the end.
@@ -3245,3 +3245,129 @@ Decisions taken while building (2026-11-08), each for veto:
 - **The design** (the user's call to queue): the prototype does not draw a refused explain's alert over the canvas or a mixed collection's Vectors line -- a design follow-up touching `lib/design/spec/html/main.html` and the contract board.
 - **Out of scope, as the document says**: the CLI's own messages and reads (they already say the right thing); re-running a collection's search automatically after an ingest into it; a graph's near matches as clickable nodes.
 - **A 6g test that races under load, not fixed here** (outside this item's files): `TasksTruthTests/endedRunNeverOverridesAFreshRead` (`tests/presentation/tasks/TasksViewModelTests.swift:337-338`) waits for the selection and then expects rounds 0 and 1 at once, so a loaded machine can fold only round 0 by then; waiting for both rounds would settle it -- the user's to queue.
+
+### 2026-11-08 — `training-screens-follow-the-cli` (backlog item 6i): the Training screens follow the CLI's resume and status truth
+
+**Why.** Five findings from the second sweep (2026-10-31), re-read at `b26550bb` the same day; each a place where the Training place offered a button or drew a state the CLI does not back. The CLI's parts are 57g and 57h ([CLI Milestone AT](../cli/MILESTONES.md#milestone-at--the-second-sweeps-cli-findings), shipped 2026-11-01), whose fields this item reads:
+1. **Resume was offered on a cycle pass's aborted pipeline**, and that resume retrains on the spec's own dataset, not the pass's `cycle/work/merged.jsonl`, outside the cycle's dual gate: `PipelineRun.resumes` took any `aborted` or `failed` run.
+2. **The Runs list never held a run from `running`**: `TrainingStatus` decoded `running` as run objects, and the CLI writes ids (`"running": [ids]`, `training_reads.h`), so each was dropped. A run still training that is older than `recent_runs`' newest five could not be listed or opened. This answers 4j's "Not done" line above, which called it harmless while the running run is among the newest five.
+3. **A dead pass's `cycle.lock` held Run one pass back for good**, with the State fact `a pass is running` and nothing saying how to recover.
+4. **Resume always omitted `--pipeline`**, so it failed for a named pipeline whose `name:` is not its key and for every spec-file run. The confirm named the first stage that has not passed, while the CLI resumes after the last stage that passed (the sweep's pE: `from stage 1, a`, where it trains only stage 3).
+5. **An unreadable cycle history was drawn as no history**: the empty state, with Run enabled, and a halted history shown as not halted.
+
+Recorded from the build tree's binary (`lib/src/cli/build/macos-arm64/source/apogee`, `0.2.0 (3c4a36c0, 2026-11-09)`, with 57g and 57h), copied to the scratchpad and run with `HOME` and `APOGEE_HOME` pointed at a scratch directory, on the mock trainer over a stored `tiny` set, the home written `/Users/someone` in the fixtures (`tests/business/reads/Fixtures/`). Nothing was installed, nothing trained a real model, and no `train setup` or `bootstrap` ran:
+- **`nightly`** (`name: Nightly SFT`), aborted at stage 2: `spec_ref` `nightly`, `resume` `{stage 2, b, pipeline nightly}` (`train-pipeline-status-named.json`). The same run with a live process's id written into its `pipeline.lock`: `holder` `{"pid": 67959}`, `resume` still set, and the refusal `pipeline … is running now (process 67959) -- it cannot be resumed while it runs` (`…-named-held.json`, `train-pipeline-resume-held.err`).
+- **A spec-file run** (`two.yaml`), aborted at stage 2: `resume.pipeline` is the file's absolute path (`…-spec-file.json`). With the file moved away, `resume.pipeline` is `null`, and the bare resume is refused `-- pass --pipeline <spec> to resume <id>` (`…-spec-file-gone.json`, `train-pipeline-resume-no-spec.err`).
+- **`three --continue-on-fail`** (the sweep's pE): `resume` `{stage 3, c, pipeline three, note "stage 1, a, failed its gate and stays as it is"}` (`…-kept-failed.json`).
+- **A failing `train cycle run`**: the pass's pipeline `cycle-20261109-041521`, aborted, its stage trained on `cycle/work/merged.jsonl`, `resume` `null`, and `pipeline resume` refused `is a cycle pass, and its candidate was discarded` (`…-cycle-pass.json`, `train-pipeline-resume-cycle-pass.err`). Also the sandbox's run list and its named pipelines (`…-resumes-list.json`, `train-pipeline-list-sweep.json`).
+- **The cycle's lock**, written by hand after a `cycle resume`:
+  - with an exited process's id: `stale_lock` the path, `active` and `cycle_active` `false`, and `cycle run` refused `another cycle is already running (lock: …). If none is, remove the file and run again` (`train-cycle-status-stale-lock.json`, `train-status-cycle-stale-lock.json`, `train-cycle-run-stale-lock.err`);
+  - the same with no history yet: `cycle` null, `stale_lock` set (`train-status-stale-lock-no-history.json`);
+  - with a live `sleep`'s id: `active` `true`, `stale_lock` `null` (`…-live-lock.json`).
+- **`history.json`'s `runs` written as a string**: `cycle` null, `cycle_error` `…/history.json: cycle history: runs must be an array` (`train-status-cycle-unreadable.json`); `cycle status`, `run`, `halt` and `resume` each exit 1 on it (`train-cycle-status-unreadable.err`).
+- **The oldest of eight runs' manifest edited to `running`**: `running` names it, and `recent_runs` holds the five newest without it (`train-status-running-older.json`).
+- **A fresh scratch home**: every new field `null` (`train-status-fresh.json`).
+
+- [x] **The reads** (`business/reads/Training.swift`):
+  - `TrainingStatus.runningIDs`: each `running` entry as a string, or an object's `id`.
+  - `TrainingStatus.staleLock`, `statesLockLiveness` (whether the document carries `stale_lock`, null or not) and `cycleError`.
+  - `CycleHistory.staleLock` and `statesLockLiveness`.
+  - `PipelineRun.resume` (`Resume`: `stage`, `name`, `pipeline`, `note`), `hasResumeField`, `specRef` and `holder`, read from the document around the manifest. The manifest alone carries none of them.
+  - `PipelineRun.isCyclePass` (the CLI's `kCycleIdPrefix`, `cycle-`).
+  - `TrainingRun(runningID:)` and `listedByID`.
+  - `isResumable` and `resumesAt` stay, as the older binary's fallback.
+- [x] **Resume** (`TrainingViewModel`):
+  - **`resumePoint`** is the document's `resume` on a binary that writes it. On an older one it is today's status rule. It is never set for a cycle pass, on any binary.
+  - **`resumeHold`** holds Resume in the CLI's words:
+    - while 57g's `holder` is set: `This pipeline is running now (process N); a resume is refused while it runs.`;
+    - where nothing finds the spec -- `resume.pipeline` null, or on an older binary a `spec_name` that is none of `pipelineSpecs` -- with `Resume needs its spec: run 'apogee train pipeline resume <id> --pipeline <spec>' in the console.`
+  - **`canResume`** is both of those plus today's checks. **`requestResume`** asks the confirm only when the resume would run.
+  - **`Pending.resumePipeline(id, pipeline:)`** adds `--pipeline <resume.pipeline>` whenever the document names one. The confirm's title and Resume's line name `resume.stage` and its name, and the line and the confirm carry `note` as the CLI words it.
+  - **`pageLine`** replaces "gate it and promote it from Runs" on a cycle pass's page with 57h's words, its door the tab: `A cycle pass: its candidate was discarded, and no other verb resumes it -- Run one pass on the Cycle tab runs the next pass.` That line is for an aborted or failed pass, or a `running` one that no live process holds on a 57g/57h binary, as the CLI's `print_cycle_pass_line` says it. A complete pass has its own line. A pass running now has its own line too (`cyclePassRunningWords`): its manifest `running` with 57g's `holder` set, or on an older binary (no `resume`), which cannot tell a live pass from a dead one. It reads `A cycle pass, running now (process N): its candidate is the cycle's, judged by its dual gate when the pass ends -- never from Runs.` and never says discarded, because the CLI's status says the pipeline is running and offers nothing while a live process holds it. A **Show the cycle** button switches to the Cycle tab.
+- [x] **The Runs list**: each running id is taken from `recent_runs` when it is there. Otherwise it is a row of its id, status `running`, whose line and page say `still training -- train status names it by its id alone, …`. Running runs come first, each once. `summary(_:)` is the row's line.
+- [x] **The cycle**:
+  - **`staleLock`** (the cycle's read, else `train status`'s) holds Run one pass. The hold text leads with `Stopped -- cycle.lock is left by a process that is not running; remove <path> to run again. Until then every pass refuses …`, and the path is drawn selectable with **Show in Finder**. The app never removes the file.
+  - **`cycleStateWords`** (the State fact, moved from the view): `a pass is running`, `halted`, `stopped, its lock left behind` or `idle`, in 4j's order, a pass holding the cycle first. That is not the CLI's order: `train cycle status` and `train status` check halted first, so a halt kept during a live pass (M30) reads `HALTED -- <reason>` there and `a pass is running` here. The halt and its reason are said beside it in the hold text.
+  - **On an older binary** (no `stale_lock` in its documents), a cycle another process holds adds the CLI's remedy: `If no pass is running, one that died left its lock: remove training/cycle/cycle.lock under your Apogee home.`
+  - **`cycleError`** holds Run, Halt and Resume. `cycleErrorText` (`The cycle history could not be read: <cycle_error>`, then why the controls are held) is drawn where the history goes, in the error colour. `noHistoryText` is nil beside it. `train cycle status`, which exits 1 on it, is not asked.
+- [x] **Previews** (ADR 0004), twelve new, each recorded document copied byte for byte into `PreviewDocuments.swift`. Pipelines:
+  - a cycle pass's pipeline;
+  - Nightly SFT's Resume naming its spec, asking first;
+  - pE's Resume from stage 3, asking first;
+  - a spec-file run whose file has gone;
+  - a run a live process holds;
+  - an older binary's run whose spec is not named.
+
+  The cycle:
+  - a dead pass's lock;
+  - a dead first pass's lock with no history;
+  - an unreadable history;
+  - a live pass's lock as 57g says it.
+
+  Runs:
+  - a run older than the newest five, listed and open;
+  - a run known by its id alone.
+- [x] **The tests**, 20 new:
+  - **`TrainingTests`** (1): `running`'s ids, an object by its `id`, and the id-only run.
+  - **`PipelineCycleReadsTests`** (2): every new document field, an older document's absence of them, and the refusals' recorded words.
+  - **The new suite `TrainingFollowsCLITests`** (17, in its own file), by entry:
+    - **Entry 1:** a cycle pass never resumed, with its `resume` and without (an older binary's shape, derived in the test by stripping the 57g/57h fields), its page line, and a complete pass's; a pass running now (`cyclePassRunning`, the recorded pass derived in the test as it stands mid-pass: manifest `running`, its stage `training` and not gated) whose line says it runs and never discarded, with a live holder, a holder whose lock names no process, and an older binary's document, while a 57g/57h `running` pass with no holder keeps 57h's line; a `pipe-` twin at the same stage still resumed.
+    - **Entry 2:** `train-status-pipeline-running.json` listed once and first; the older run listed first and opened with no extra read.
+    - **Entry 3:** a stale lock -- Run held, path and remedy, the State stopped, Halt still offered; the same with no history; a live lock keeping today's words; an older binary's held cycle with the remedy; this place's own pass without it.
+    - **Entry 4:** Nightly SFT started as `train pipeline resume <id> --pipeline nightly --output-format stream-json`; pE's confirm `from stage 3, c?` and `Stage 1, a, failed its gate and stays as it is. …`; a spec-file run passing its path, and held once its file has gone; a live holder; an older binary's unnamed spec held and a spec-keyed run resumed bare, as `PipelineCycleTests` pins.
+    - **Entry 5:** `cycle_error` -- the read never asked, the line, nothing offered -- and a fresh home's empty state and controls.
+  - **Four existing assertions** (`PipelineCycleTests/heldElsewhere`, three in `PipelinesHaltPullTests`) now expect the remedy beside a held cycle. Their documents were recorded before 57g.
+- [x] **The docs**: this file's codebase map (`reads`, `training`), DEVELOPER.md's `BusinessReads` and `PresentationTraining` rows, the Business and Presentation layer cards, and the CLI's 57h record's "app's part" line. `ParityTable` is unchanged, since no command was added or removed.
+
+Decided before building (2026-10-31 and 2026-11-01, the document's): one item, since all five are the Training place acting on a read of `train status`, `train pipeline status` or `train cycle status` without the CLI's answer; the CLI-side fixes are 57g's and 57h's, which this reads as they shipped; entry 2 is the app's alone, the CLI's ids being right (ADR 0006).
+
+Decisions taken while building (2026-11-08), each for veto:
+- 2026-11-08 — **The document's defaults, taken as stated:**
+  - Resume is never offered on a cycle pass's pipeline, on any binary, by the `cycle-` prefix; its page says, in 57h's words, that the candidate is the cycle's and that Run one pass runs the next.
+  - On a binary whose document carries `resume`, Resume is offered only when it is non-null; the line and the confirm say `Resume from stage <stage>, <name>`; `--pipeline <resume.pipeline>` is added whenever it is set (57h's record: set whenever the lookup finds the spec, passing it the same as the bare form); a kept failed stage is said in the CLI's words. On an older binary, today's status rule, minus cycle passes, with Resume held and the console line where the run's `spec_name` is none of the named pipelines.
+  - A running id missing from `recent_runs` is a row of its id, status `running`, with no other facts and no other read; an object entry decodes by its `id`.
+  - With `stale_lock`, the CLI's line, the path selectable with a Finder button, the State `stopped, its lock left behind`, Run held with the line as its reason; on an older binary, the CLI's remedy beside a cycle another process holds.
+  - With `cycle_error`, `The cycle history could not be read: <cycle_error>` where the history is drawn, never the no-history text, Run, Halt and Resume held; on an older binary, `cycle: null` stays the empty state.
+  - A pass's recorded `gate_reason` is drawn as the history keeps it: passes recorded before 57h still carry the old resume advice, made harmless by entry 1.
+- 2026-11-08 — **Resume is held, with the console line, where a 57h binary's `resume.pipeline` is null** *(flagged)*: the default named the line for an older binary; on a new one a null `pipeline` means nothing finds the spec and the bare resume is refused naming `--pipeline` (`train-pipeline-resume-no-spec.err`), so the button would not run.
+- 2026-11-08 — **Resume is held while 57g's `holder` is set** *(flagged)*: the 2026-11-01 decision said `canResume` can read it, and the CLI refuses then. The line is the CLI's status text's (`This pipeline is running now (process N); a resume is refused while it runs`).
+- 2026-11-08 — **A crashed `running` pipeline is offered Resume on a binary that writes `resume`** *(flagged)*: with no `holder`, 57g takes a dead holder's lock over and `resume` is set, so the document's word stands over 4j's "only `aborted` or `failed`". An older binary keeps 4j's rule.
+- 2026-11-08 — **The stale lock's line names the path, not the process** *(flagged)*: `stale_lock` is the path alone (57g's record), so the CLI's `left by process <pid>` reads `left by a process that is not running`.
+- 2026-11-08 — **"Show in Finder", not "Reveal in Finder"** *(flagged)*: the same act, in the word the app's five other Finder buttons use.
+- 2026-11-08 — **Halt and the cycle's Resume stay offered beside a stale lock** *(flagged)*: neither refuses on it (`cycle halt` writes under the history's own lock and names the stale one); only Run one pass is held. With a stale lock and no history the empty state stays, as the CLI's own text says `no cycle runs yet` and then the lock.
+- 2026-11-08 — **`cycleHalted` stays a `Bool`** *(flagged)*: with `cycle_error` it reads false, but every control is held by the error and no State fact is drawn without a history, so nothing reads it as not halted. The CLI's 57h record asked that it not default to false; holding every control is how that is kept here.
+- 2026-11-08 — **The remedy beside an older binary's held cycle covers today's recordings** *(flagged)*: `train-cycle-status-held.json` and `train-status-cycle-active.json` were recorded before 57g and carry no `stale_lock`, so they are an older binary's documents and now say the remedy (four existing assertions changed). The guardrail's "a live pass's lock keeps today's words" is pinned over 57g's own recording, `train-*-live-lock.json` (`stale_lock` null).
+- 2026-11-08 — **A complete cycle pass has its own page line** *(flagged)*: 57h's line is for a pass that did not complete. A complete one reads `its candidate is the cycle's, judged by its dual gate -- promoted on a pass, discarded on a fail, never from Runs`. A **Show the cycle** button sits under either line.
+- 2026-11-08 — **A cycle pass running now is never said discarded** *(flagged, the review's)*: 57h's line is the CLI's for a pass that is not complete and that no live process holds; while one holds it, `train pipeline status` prints `This pipeline is running now (process N); a resume is refused while it runs` and stops there. So a `running` pass with 57g's `holder` reads `A cycle pass, running now (process N): its candidate is the cycle's, judged by its dual gate when the pass ends -- never from Runs.`, with `its lock names no process it can read` for a holder of pid 0. The same holds for a pass this place started and opens from Pipelines, whose document carries the holder. On an older binary (no `resume`), whose `running` may be a live pass or a dead one, the line says `running as its manifest says` in place of the process, the conservative reading: it claims no discard the CLI did not state. A 57g/57h `running` pass with no holder died while it ran and keeps 57h's discarded line. No preview draws the running state (the review called it optional); the derived document is the test's.
+- 2026-11-08 — **The State fact keeps 4j's order, not the CLI's** *(flagged, the review's)*: a pass holding the cycle is said first, where the CLI says halted first. Only the doc comment and this record were corrected. Beside a halt kept during a live pass the hold text says `Halted: <reason>. The pass running now finishes, and keeps the halt …`, so the halt is still said.
+- 2026-11-08 — **The id-only run says why it has no facts** *(flagged)*, in its row and on its page. Its Gate it and Promote… stay as for any running run (out of scope).
+- 2026-11-08 — **The kept-failed note leads the confirm's consequence** as a sentence (`Stage 1, a, failed its gate and stays as it is.`), before what the resume does.
+- 2026-11-08 — **The recordings came from the macos-arm64 build tree's binary, not a `MODE=dev` build** *(flagged for the record)*: same source (3c4a36c0), release channel, over a scratch `HOME` and `APOGEE_HOME`, copied to the scratchpad so the gate's rebuild could not race it. The states no mock run reaches were set by hand, each then read by the binary. Those states: a lock written with a dead or live process's id; a history removed (the no-history recording, `train-status-stale-lock-no-history.json`, came from the home that had run passes, so it still carries recent runs and the cycle pass as `latest_pipeline` while `cycle` is null); a history made unreadable; a run's manifest set to `running`; a spec file moved away. The older binary's shapes are derived in the tests, never recorded.
+- 2026-11-08 — **The new view-model tests live in their own file**, `tests/presentation/training/TrainingFollowsCLITests.swift`, beside 4j's and M14's suites, rather than appended to `PipelineCycleTests.swift`.
+- 2026-11-08 — **The design is not changed here** *(flagged)*: the item's seam names no design file, and the prototype draws none of the new states (a held Resume's line, a cycle pass's page line, a stale lock, an unreadable history, an id-only run). Drawing them is a design follow-up in M11's shape, the user's to queue.
+
+**Verified.**
+- **Targeted** (the shared scheme `Apogee`, `-only-testing` `BusinessReadsTests` and `PresentationTrainingTests`): 182 of 182 passed at the build (the result bundle's `totalTestCount`), the 19 new among them, with no `warning:` line in the log. The new previews compiled in that Debug build. After the review's fixes: 183 of 183, `cyclePassRunning` the 20th new, again with no `warning:` line.
+- **Each fix undone, the tests fail**: four mutants were planted at once in a copy-backed `TrainingViewModel.swift`, then the file was restored from its copy and the diff checked. Running `TrainingFollowsCLITests` alone, each was caught:
+  - Run one pass not held by a stale lock: `staleLock`, `staleLockNoHistory`;
+  - a cycle pass let through `resumePoint`: `cyclePassNotResumed`;
+  - `running`'s ids ignored: `runningOlderListed`;
+  - `--pipeline` dropped from the arguments: `namedResume`, `keptFailedResume`, `specFileRun`.
+  - After the review, a fifth: `pageLine`'s running line removed (the earlier rule, every pass short of complete said discarded), caught by `cyclePassRunning` alone. The file was restored from its copy and compared byte for byte.
+- **The previews' documents**: all 55 statics in `PreviewDocuments.swift` with a recorded fixture, the 14 new among them, equal their fixtures byte for byte (the final newline apart).
+- **The full gate after the review's fixes** (`lib/scripts/cicd.sh --test`, every app, the layer cards included, nothing else running), green:
+  - **The CLI**: 4507 of 4507 ctest cases passed (no C++ changed here).
+  - **The macOS app**: 1157 of 1157 (the xcresult's `totalTestCount`: 1137 before and the 20 new), the layering check among them, the Release `Apogee.app` built, signed ad hoc and verified.
+  - **No `warning:` line** in the log.
+- **The full gate at the build**, before the review (`lib/scripts/cicd.sh --test`, every app, nothing else running):
+  - **The CLI**: 4507 of 4507 ctest cases passed.
+  - **The macOS app**: 1156 cases (the xcresult's `totalTestCount`: 1137 before and the 19 new), 1155 passed, with one failure in a module this item does not touch: 6g's `TasksTruthTests/endedRunNeverOverridesAFreshRead` (`model.rounds(of:)` read `[0]` where `[0, 1]` was expected). That is the race under the CLI suite's load that 6h's record names.
+  - **The app's gate re-run alone** (`lib/scripts/cicd.sh --app darwin --test`) was green: 1156 of 1156, the layering check among them, the Release `Apogee.app` built, signed ad hoc and verified.
+  - **No `warning:` line** in either log.
+
+**Not done.**
+- **No live pass**: GUI [M18](../../backlog/darwin/macos/maintenance/app-dev-channel.md) has not shipped, so no development build was launched. The user's runs on `apogee-dev` once M18 lands: Resume on a named pipeline and on a spec-file run; a failed scheduled pass's pipeline opened in Pipelines, and a pass's pipeline opened there while it runs; a pass killed mid-run, then the Cycle tab; a damaged `history.json`; and a long `train run` beside five newer runs.
+- **The design** (the user's call to queue): the new states are not drawn in `lib/design/spec`. That is a follow-up touching `html/main.html` and the contract board, published by the user.
+- **Out of scope, as the document says**: every CLI-side fix; a button that removes `cycle.lock`; promote for a cycle pass's stage run from Runs (`train promote cycle-<id>-sN` is not refused by the CLI either); a per-run status read for a running run's facts.
+- **Seen in the probes, the CLI's to weigh**: `cycle run`'s refusal on a dead pass's lock still begins `another cycle is already running` (27h's recorded wording, kept by 57g), though every read now says the lock is stale. The app holds Run with the reads' words and never shows that refusal.
+- **6g's racy test, not fixed here** (outside this item's files): `TasksTruthTests/endedRunNeverOverridesAFreshRead` failed again under the full gate's load and passed alone, as 6h's record found (it passed in the post-review gate). Waiting for both rounds before checking would settle it -- the user's to queue.

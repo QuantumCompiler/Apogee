@@ -17,11 +17,29 @@ struct TrainingTests {
     @Test("a run: what it trained on what, its loss, and the gate's verdict and score once gated")
     func status() throws {
         let status = TrainingStatus(document: document("train-status"))
-        #expect(status.runs == 1 && status.running.isEmpty && !status.cycleActive)
+        #expect(status.runs == 1 && status.runningIDs.isEmpty && !status.cycleActive)
         let run = try #require(status.recent.first)
         #expect(run.status == "complete" && run.trainer == "mock" && run.method == "lora" && run.iterations == 4)
         #expect(run.finalLoss == 0.42)
         #expect(run.evalPassed == false && abs((run.evalScore ?? 0) - 0.4583) < 0.001)
+    }
+
+    @Test("running is the CLI's ids, in its order: a string each, or an object's id; one older than the five newest is in none of recent_runs")
+    func runningIDs() throws {
+        let running = TrainingStatus(document: document("train-status-pipeline-running"))
+        #expect(running.runningIDs == ["pipe-20261026-074116-s1"], "the ids train status writes, never dropped as runs")
+        #expect(running.recent.contains { $0.id == "pipe-20261026-074116-s1" && $0.status == "running" })
+        // Recorded from the build tree's binary over a scratch home, the
+        // oldest run's manifest edited to say `running` (GUI 6i).
+        let older = TrainingStatus(document: document("train-status-running-older"))
+        #expect(older.runningIDs == ["pipe-20261109-040503-s0"] && older.recent.count == 5 && older.runs == 8)
+        #expect(!older.recent.contains { $0.id == "pipe-20261109-040503-s0" })
+        let later = TrainingStatus(document: ReadDocument(text: #"{"running":["a",{"id":"b","status":"running"},{"x":1},"",3]}"#)!)
+        #expect(later.runningIDs == ["a", "b"], "an object by its id; nothing else is an id")
+        let run = TrainingRun(runningID: "a")
+        #expect(run.id == "a" && run.status == "running" && run.listedByID)
+        #expect(run.trainer.isEmpty && run.dataset.isEmpty && run.finalLoss == nil && run.evalPassed == nil)
+        #expect(TrainingStatus(document: document("train-status")).recent.allSatisfy { !$0.listedByID })
     }
 
     @Test("regimes, kits and datasets as the CLI lists them")
