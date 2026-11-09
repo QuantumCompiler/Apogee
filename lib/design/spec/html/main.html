@@ -1147,13 +1147,19 @@ a{color:inherit}a:hover{color:inherit}
 <p class="mono" style="margin: 14px 0 0; font-size: var(--t-meta); color: var(--text-tertiary)">apogee analyze --agent triage runs it.</p>
 </sc-if>
 <sc-if value="{{lb.syShown}}">
-<h2 style="margin: 0; font-size: var(--t-h2); font-weight: 600">critique-revise</h2>
-<p style="margin: 8px 0 0">Critique a draft against what it is meant to do, then revise it to answer the critique.</p>
-<div style="margin-top: 14px; font-weight: 500; font-size: var(--t-small)">1. critique · asks utility</div>
-<div style="margin-top: 6px; font-weight: 500; font-size: var(--t-small)">2. revise · asks chat</div>
-<p style="margin: 12px 0 0; font-size: var(--t-small); color: var(--text-tertiary)">A shipped starter: apogee symphonies edit critique-revise makes it yours, at a prompt.</p>
+<div style="display: flex; align-items: center; gap: 10px"><h2 style="flex: 1 1 auto; margin: 0; font-size: var(--t-h2); font-weight: 600">{{lb.sy.name}}</h2><sc-if value="{{lb.sy.ownFile}}"><button type="button" class="btn-g" onClick="{{lb.sy.edit}}">Edit…</button></sc-if></div>
+<p style="margin: 8px 0 0">{{lb.sy.desc}}</p>
+<sc-for list="{{lb.sy.stages}}" as="g"><div style="margin-top: 6px; font-weight: 500; font-size: var(--t-small)">{{g.text}}</div></sc-for>
+<sc-if value="{{lb.sy.hasNote}}"><p style="margin: 12px 0 0; font-size: var(--t-small); color: var(--text-tertiary)">{{lb.sy.note}}</p></sc-if>
 <h3 class="lbl" style="margin: 20px 0 6px">PLAY</h3>
-<input type="text" class="inp" value="A draft README for the tool." aria-label="Its input" style="width: 100%"><div style="margin-top: 8px"><button type="button" class="btn-g" onClick="{{lb.play}}">Play</button></div>
+<p style="margin: 0 0 6px; font-size: var(--t-small); color: var(--text-secondary)">{{lb.sy.inputDesc}}</p>
+<input type="text" class="inp" value="{{lb.sy.input}}" aria-label="Its input" style="width: 100%">
+<sc-if value="{{lb.sy.takesImage}}"><div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 8px">
+<sc-if value="{{lb.sy.hasImage}}"><span style="display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-small)"><svg class="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3.5" width="11" height="9" rx="1.5"></rect><path d="M4.5 10.5l2.5-3 2 2 1.5-1.5 1.5 2.5"></path></svg>{{lb.sy.imageName}}</span><button type="button" class="btn-g" onClick="{{lb.sy.removeImage}}" style="height: 24px; font-size: var(--t-small)">Remove</button><button type="button" class="btn-g" onClick="{{lb.sy.chooseImage}}" style="height: 24px; font-size: var(--t-small)">Choose another…</button></sc-if>
+<sc-if value="{{lb.sy.noImage}}"><button type="button" class="btn-g" onClick="{{lb.sy.chooseImage}}">Choose an image…</button><span style="font-size: var(--t-meta); color: var(--text-tertiary)">png, jpg, gif, webp or bmp</span></sc-if>
+</div></sc-if>
+<div style="margin-top: 8px"><button type="button" class="btn-g" onClick="{{lb.play}}" disabled="{{lb.sy.cantPlay}}">Play</button></div>
+<sc-if value="{{lb.sy.needsImage}}"><p style="margin: 8px 0 0; font-size: var(--t-small); color: var(--text-tertiary)">{{lb.sy.needsImageText}}</p></sc-if>
 <sc-if value="{{lb.played}}">
 <div class="mono" style="margin-top: 14px; font-size: var(--t-meta); color: var(--text-tertiary)">critique · utility (writer)</div><div style="font-size: var(--t-small)">1. The draft never says who it is for. 2. The second paragraph repeats the first.</div>
 <div class="mono" style="margin-top: 10px; font-size: var(--t-meta); color: var(--text-tertiary)">revise · chat (writer)</div><div style="font-size: var(--t-small)">A tighter draft, for new contributors: what the tool does, then how to run it.</div>
@@ -2452,7 +2458,7 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{ui.toastOn}}"><div role="status" style="position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 80; max-width: calc(100% - 48px); padding: 9px 16px; border-radius: 8px; background: var(--text-primary); color: var(--surface-window); font-size: var(--t-small); box-shadow: 0 8px 24px rgba(0,0,0,.3)">{{ui.toastText}}</div></sc-if>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","chat:play","chat:suite","monitor","console","knowledge","knowledge:collections","graph:prose","training","training:datasets","training:pipelines","training:cycle","library","library:symphonies","library:mcp","review","review:post","review:targets","review:skills","models","models:downloads","models:store","models:convert","models:register","models:roles","models:delete","download","suites","tasks","newtask","newtask:recipe","execute","graph","video","video:run","video:install","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions","settings:xcode"],"default":"chat"},"still":{"editor":"boolean","default":false},"apogee":{"editor":"enum","options":["installed","missing","config-typo"],"default":"installed"},"$preview":{"width":1440,"height":900}}'>
+<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","chat:play","chat:suite","monitor","console","knowledge","knowledge:collections","graph:prose","training","training:datasets","training:pipelines","training:cycle","library","library:symphonies","library:mcp","library:unsaved","library:refused","library:image","review","review:post","review:targets","review:skills","models","models:downloads","models:store","models:convert","models:register","models:roles","models:delete","download","suites","tasks","newtask","newtask:recipe","execute","graph","video","video:run","video:install","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions","settings:xcode"],"default":"chat"},"still":{"editor":"boolean","default":false},"apogee":{"editor":"enum","options":["installed","missing","config-typo"],"default":"installed"},"$preview":{"width":1440,"height":900}}'>
 class Component extends DCLogic {
   constructor(props) {
     super(props);
@@ -2669,7 +2675,16 @@ class Component extends DCLogic {
     } else if (where === 'download') set({ screen: 'models', overlay: 'download', dl: { repo: 'Wan-AI/Wan2.1-T2V-1.3B-Diffusers', format: 'gguf', quant: 'Q4_K_M' } });
     else if (where === 'graph' && sub === 'prose') set({ screen: 'graph', gView: 'prose' });
     else if (where === 'review') set({ screen: 'review', rv: { tab: sub === 'targets' ? 'targets' : sub === 'skills' ? 'skills' : 'runs', skill: 'security' }, overlay: sub === 'post' ? 'reviewpost' : null });
-    else if (where === 'library') set({ screen: 'library', lib: { tab: sub || 'agents', played: sub === 'symphonies' } });
+    else if (where === 'library') {
+      /* GUI 6f's states: Close asked over unsaved typing; Close asked after a
+         save apogee refused, its text in the file; a symphony that takes an
+         image, none chosen yet. */
+      const bad = this.libDigestRefused();
+      if (sub === 'unsaved') set({ screen: 'library', lib: { tab: 'agents', played: false }, gs: Object.assign(this.libEditor('agent'), { text: this.libTriage() + '\nFile each issue under one area.\n' }), confirm: { kind: 'editorClose', reason: 'unsaved' } });
+      else if (sub === 'refused') set({ screen: 'library', lib: { tab: 'symphonies', sym: 'notes-digest', played: false }, gs: Object.assign(this.libEditor('symphony'), { text: bad, saved: bad, onDisk: bad, onDiskRefused: true, refused: true, verdict: this.libRefusal() }), confirm: { kind: 'editorClose', reason: 'refusedOnDisk' } });
+      else if (sub === 'image') set({ screen: 'library', lib: { tab: 'symphonies', sym: 'describe-answer', played: false, image: null } });
+      else set({ screen: 'library', lib: { tab: sub || 'agents', played: sub === 'symphonies' } });
+    }
     else if (where === 'training' && (sub === 'pipelines' || sub === 'cycle')) set({ screen: 'training', tr: this.trainStart(sub) });
     else if (where === 'training') set({ screen: 'training', tr: sub === 'datasets' ? { tab: 'datasets', sel: '20261021-051826', regime: 'foundation', running: false } : { tab: 'runs', sel: '20261021-051826', regime: 'foundation', running: true } });
     else if (where === 'knowledge') set({ screen: 'knowledge', kn: sub === 'collections' ? { tab: 'collections', coll: 'notes', searched: true } : { tab: 'records', asked: true, branch: '', sel: 'kr-20261021T045944Z-1e2354', coll: 'notes', searched: false } });
@@ -2863,12 +2878,51 @@ class Component extends DCLogic {
     }
     if (s.gs && s.gs.kind === 'editor' && s.gs.saving && clock - s.gs.at >= 4) {
       const g = s.gs;
-      const verdict = 'Saved. Apogee checks an agent\'s prompt and schema when it runs -- its first run says what is wrong, if anything.' + (g.text === g.saved ? '' : '\nWhat you typed since pressing Save isn\'t saved yet.');
-      next.gs = Object.assign({}, g, { saving: false, verdict: verdict });
+      const since = g.text === g.saved ? '' : '\nWhat you typed since pressing Save isn\'t saved yet.';
+      if (g.sym) {
+        /* symphonies show judges the file: the prototype knows the recorded
+           refusal alone (symphony-show-unknown-key.err). Put it back and
+           close (GUI 6f) closes once apogee has read the original. */
+        const bad = /\btemprature:/.test(g.saved);
+        const done = Object.assign({}, g, { saving: false, refused: bad, onDiskRefused: bad, closeAfter: false, verdict: (bad ? this.libRefusal() : 'Saved, and apogee reads it.') + since });
+        next.gs = g.closeAfter && g.onDisk === g.original ? null : done;
+      } else {
+        next.gs = Object.assign({}, g, { saving: false, verdict: 'Saved. Apogee checks an agent\'s prompt and schema when it runs -- its first run says what is wrong, if anything.' + since });
+      }
     }
     if (s.fixing && clock - s.fixing.at >= 6) { next.fixing = null; next.toast = s.fixing.argv + ' finished'; next.toastAt = clock; }
     if (s.toast && !next.toast && clock - s.toastAt > 12) next.toast = null;
     this.setState(next);
+  }
+
+  /* The Library's editor files (GUI 6f): the triage prompt `agents create
+     triage --description "Sort incoming issues by area"` scaffolds, and
+     notes-digest's spec as the branch's apogee-dev read it (its document is
+     lib/src/darwin/tests/business/reads/Fixtures/symphony-show.json), with
+     the unknown key symphony-show-unknown-key.err refuses. */
+  libTriage() {
+    return 'You are triage -- Sort incoming issues by area.\n\nDescribe the task this agent performs and exactly how it should respond. This\nfile is the system prompt loaded for "apogee analyze --agent triage"; edit it\nto shape the agent\'s behavior, then run the agent to try it.\n\nA report that finds nothing notable is a complete, valid result.\n';
+  }
+
+  libDigest() {
+    return 'description: Summarize then check.\ninput:\n  description: The text to summarize.\nstages:\n  - name: summarize\n    role: utility\n    prompt: "Summarize: {{input}}"\n  - name: verify\n    role: chat\n    prompt: "Check this summary against the text. Summary: {{summarize}} Text: {{input}}"\n';
+  }
+
+  libDigestRefused() {
+    return this.libDigest().replace('    role: chat\n', '    role: chat\n    temprature: 0.2\n');
+  }
+
+  libRefusal() {
+    return 'apogee symphonies: /Users/someone/.apogee/symphonies/notes-digest.yaml: stages[1]: unknown key \'temprature\' (accepted: name, role, play, prompt, input, schema, image, brief_tokens, answer_tokens) (exited with status 1)';
+  }
+
+  /* A definition file opened in the editor, as the app's DefinitionEditor
+     holds it: the text as opened (`original`), as the file holds it
+     (`onDisk`, moved by every write), and as typed. */
+  libEditor(which) {
+    const sym = which === 'symphony';
+    const text = sym ? this.libDigest() : this.libTriage();
+    return { kind: 'editor', sym: sym, title: sym ? 'notes-digest' : 'triage · prompts/triage.txt', path: sym ? '/Users/someone/.apogee/symphonies/notes-digest.yaml' : '/Users/someone/.apogee/prompts/triage.txt', original: text, onDisk: text, text: text, saved: null, saving: false, verdict: '', refused: false, onDiskRefused: false, closeAfter: false };
   }
 
   nowTime() {
@@ -5389,6 +5443,21 @@ class Component extends DCLogic {
          xcode, read back by config get (xcode-config-delete.txt). */
       cf = Object.assign(cf, { title: 'Remove Xcode\'s tools from Apogee?', body: 'apogee config delete-mcp-server xcode -- its config entry goes; Xcode is left as it is.', confirmLabel: 'Remove', run: () => this.say('removed MCP server \'xcode\' from /Users/someone/.apogee-dev/config/config.json', { confirm: null, xcodeReg: false, xcodeSaid: { title: 'Removed from Apogee\'s agents', lines: ['removed MCP server \'xcode\' from /Users/someone/.apogee-dev/config/config.json'] } }) });
     }
+    if (s.confirm && s.confirm.kind === 'editorClose') {
+      /* The app's 6f: Close asked first. Keep editing is the cancel, so Esc
+         keeps editing. */
+      const eg = s.gs || {};
+      const eFile = (eg.path || '').split('/').pop();
+      const eShut = () => this.setState({ confirm: null, gs: null });
+      if (s.confirm.reason === 'refusedOnDisk') {
+        cf = Object.assign(cf, { title: eFile + ' holds the text apogee refused', body: 'Put it back as it was writes the text it held when you opened it, and apogee reads it again. Leave it keeps the refused text in the file, and apogee can\'t play it until it is fixed.' + (eg.text !== eg.onDisk ? ' What you typed since the save is lost either way.' : ''), cancelLabel: 'Keep editing', hasAlt: true, altLabel: 'Leave it', alt: eShut, confirmLabel: 'Put it back as it was', runBg: '', runColor: '', run: () => {
+          const g2 = this.state.gs;
+          this.setState({ confirm: null, gs: Object.assign({}, g2, { text: g2.original, saving: true, at: this.state.clock, saved: g2.original, onDisk: g2.original, onDiskRefused: false, verdict: '', closeAfter: true }) });
+        } });
+      } else {
+        cf = Object.assign(cf, { title: 'Discard your changes to ' + eFile + '?', body: 'What you typed isn\'t saved, and closing loses it.', cancelLabel: 'Keep editing', confirmLabel: 'Discard', run: eShut });
+      }
+    }
     if (s.confirm && s.confirm.kind === 'mcpRemove') {
       /* The app's 4k: asked first, then config delete-mcp-server, read back. */
       const nm = s.confirm.name;
@@ -5832,11 +5901,23 @@ class Component extends DCLogic {
     const lbRows = lbTab === 'agents'
       ? [['triage', 'yours · read-only'], ['security-review', 'shipped · read-only'], ['release-notes', 'shipped · read-only'], ['code-review', 'shipped · read-only']]
       : lbTab === 'symphonies'
-        ? [['critique-revise', '2 stages · shipped'], ['digest', '2 stages · shipped'], ['summarize-verify', '2 stages · shipped'], ['quick-check', '1 stage · config'], ['notes-digest', '2 stages · file']]
+        ? [['critique-revise', '2 stages · shipped'], ['describe-answer', '2 stages · shipped'], ['digest', '2 stages · shipped'], ['summarize-verify', '2 stages · shipped'], ['quick-check', '1 stage · config'], ['notes-digest', '2 stages · file']]
         : [['code', 'connected · 2 tools']];
     const lbWhat = { agents: 'agents', symphonies: 'symphonies', mcp: 'MCP servers' }[lbTab];
     const lbCmd = { agents: 'agents', symphonies: 'symphonies', mcp: 'mcp' }[lbTab];
     const lbRowsNow = noBin || (lbTab === 'mcp' && lbs.mcpGone) ? [] : lbRows;
+    /* The symphony pages the prototype draws, from symphonies-list.json and
+       symphony-show.json: an image row only where the symphony's own
+       document says input.image (GUI 6f). */
+    const lbSyms = {
+      'critique-revise': { desc: 'Critique a draft against what it is meant to do, then revise it to answer the critique.', stages: ['critique · asks utility', 'revise · asks chat'], source: 'shipped', inputDesc: 'The draft, opening with a line that says what it is for when that is not obvious.', input: 'A draft README for the tool.', image: false },
+      'describe-answer': { desc: 'Describe an image with the vision member, then answer a question about it from the description.', stages: ['describe · asks vision', 'answer · asks chat'], source: 'shipped', inputDesc: 'A question about the image, which is given with --image.', input: 'What does the sign in the window say?', image: true },
+      'notes-digest': { desc: 'Summarize then check.', stages: ['summarize · asks utility', 'verify · asks chat'], source: 'file', inputDesc: 'The text to summarize.', input: 'Tuesday’s meeting notes.', image: false }
+    };
+    const lbSym = lbSyms[lbs.sym] ? lbs.sym : 'critique-revise';
+    const lbSy = lbSyms[lbSym];
+    const lbImage = lbSy.image ? lbs.image || null : null;
+    const lbPlayLine = ['apogee symphonies play', lbSym, '--input "' + lbSy.input + '"'].concat(lbImage ? ['--image /Users/someone/Pictures/' + lbImage] : []).concat(['--output-format json']).join(' ');
     const lb = {
       agOn: lbTab === 'agents', syOn: lbTab === 'symphonies', mcOn: lbTab === 'mcp',
       agShown: lbTab === 'agents' && !noBin, syShown: lbTab === 'symphonies' && !noBin, mcShown: lbTab === 'mcp' && !noBin && !lbs.mcpGone,
@@ -5846,13 +5927,28 @@ class Component extends DCLogic {
       noPresets: noBin, hasPresets: !noBin,
       agBg: lbTab === 'agents' ? 'var(--surface-control)' : 'transparent', syBg: lbTab === 'symphonies' ? 'var(--surface-control)' : 'transparent', mcBg: lbTab === 'mcp' ? 'var(--surface-control)' : 'transparent',
       showAgents: () => lbPatch({ tab: 'agents' }), showSymphonies: () => lbPatch({ tab: 'symphonies' }), showMcp: () => lbPatch({ tab: 'mcp' }),
-      rows: lbRowsNow.map((r, i) => ({ name: r[0], meta: r[1], current: i === 0, bg: i === 0 ? 'var(--surface-selection)' : '', pick: () => {} })),
-      /* The editor (4h's DefinitionEditor): read-only while a save runs. */
-      files: ['prompts/triage.txt', 'schemas/triage-output.json'].map((f, i) => ({ name: f, edit: i === 0 ? () => this.setState({ gs: { kind: 'editor', file: f, text: 'You are triage -- Sort incoming issues by area.\n\nDescribe the task this agent performs and exactly how it should respond. This\nfile is the system prompt loaded for "apogee analyze --agent triage"; edit it\nto shape the agent\'s behavior, then run the agent to try it.\n\nA report that finds nothing notable is a complete, valid result.\n', saved: null, saving: false, verdict: '' } }) : () => this.say('Edited in the app, saved to ' + f + ' (prototype)') })),
+      rows: lbRowsNow.map((r, i) => {
+        const on = lbTab === 'symphonies' ? r[0] === lbSym : i === 0;
+        /* Choosing another symphony clears the image chosen for the last. */
+        const pick = lbTab === 'symphonies' && lbSyms[r[0]] ? () => lbPatch({ sym: r[0], image: r[0] === lbSym ? lbs.image : null, played: r[0] === lbSym ? lbs.played : false }) : () => {};
+        return { name: r[0], meta: r[1], current: on, bg: on ? 'var(--surface-selection)' : '', pick: pick };
+      }),
+      /* The editor (4h's DefinitionEditor; 6f's close prompt). */
+      files: ['prompts/triage.txt', 'schemas/triage-output.json'].map((f, i) => ({ name: f, edit: i === 0 ? () => this.setState({ gs: this.libEditor('agent') }) : () => this.say('Edited in the app, saved to ' + f + ' (prototype)') })),
+      sy: {
+        name: lbSym, desc: lbSy.desc, ownFile: lbSy.source === 'file', edit: () => this.setState({ gs: this.libEditor('symphony') }),
+        stages: lbSy.stages.map((g, i) => ({ text: (i + 1) + '. ' + g })),
+        hasNote: lbSy.source === 'shipped', note: 'A shipped starter: apogee symphonies edit ' + lbSym + ' makes it yours, at a prompt.',
+        inputDesc: lbSy.inputDesc, input: lbSy.input,
+        takesImage: lbSy.image, hasImage: !!lbImage, noImage: lbSy.image && !lbImage, imageName: lbImage || '',
+        chooseImage: () => lbPatch({ image: 'storefront.png' }), removeImage: () => lbPatch({ image: null }),
+        needsImage: lbSy.image && !lbImage, needsImageText: lbSym + ' takes an image with its input: choose one to play it.',
+        cantPlay: lbSy.image && !lbImage
+      },
       newAgent: () => this.say('apogee agents create <name> (prototype)'),
       del: () => this.say('apogee agents delete triage --purge | --keep-files: confirmed first (prototype)'),
-      play: () => lbPatch({ played: true }),
-      played: !!lbs.played,
+      play: () => lbSym === 'critique-revise' ? lbPatch({ played: true }) : this.say(lbPlayLine + ' (prototype)'),
+      played: !!lbs.played && lbSym === 'critique-revise',
       toggle: () => this.say('apogee mcp disable code (prototype)'),
       removeMcp: () => this.setState({ confirm: { kind: 'mcpRemove', name: 'code' } })
     };
@@ -7058,15 +7154,25 @@ class Component extends DCLogic {
       });
     }
     if (gst.kind === 'editor') {
-      /* The agent's prompt, edited in the app (4h): Save makes it read-only
-         until apogee's word on the file is back. */
-      const changed = gst.saved != null ? gst.text !== gst.saved : gst.text.indexOf('File each issue under one area.') >= 0;
+      /* A definition file edited in the app (4h): Save makes it read-only
+         until apogee's word on the file is back. Close (and Esc) asks first
+         when it would lose typing, or leave a text apogee refused in the
+         file with no way back to the original (6f); a save running, or
+         nothing to lose, closes at once. Put it back as it was: a
+         symphony's after a refused save (2e), an agent's after any save. */
+      const changed = gst.text !== gst.original;
+      const unsaved = gst.text !== gst.onDisk;
+      const refusedOnDisk = !!gst.onDiskRefused && gst.onDisk !== gst.original;
+      const offersRestore = gst.sym ? !!gst.refused : gst.onDisk !== gst.original;
+      const write = (text) => gsUpd({ text: text, saving: true, at: this.state.clock, saved: text, onDisk: text, onDiskRefused: false, verdict: '' });
+      const close = () => gst.saving || (!unsaved && !refusedOnDisk) ? gsClose() : this.setState({ confirm: { kind: 'editorClose', reason: refusedOnDisk ? 'refusedOnDisk' : 'unsaved' } });
       gsh = Object.assign(gsh, {
-        width: 720, title: 'triage · ' + gst.file, hasSub: true, sub: '/Users/someone/.apogee/' + gst.file, subFont: 'var(--font-mono)',
+        width: 720, title: gst.title, hasSub: true, sub: gst.path, subFont: 'var(--font-mono)',
         parts: [part({ isArea: true, value: gst.text, aria: 'The file', disabled: !!gst.saving, onChange: (e) => gsUpd({ text: e.target.value }) })],
         hasBusy: !!gst.saving, busy: 'Saving: the editor waits for apogee\'s word on the file, then takes your typing again.',
-        after: !gst.saving && gst.verdict ? [para(gst.verdict, 'var(--text-secondary)')] : [],
-        right: [btn('Close', gsClose), btn('Save', () => gsUpd({ saving: true, at: this.state.clock, saved: this.state.gs.text, verdict: '' }), 'btn-p', !!gst.saving || (!changed && !gst.verdict))]
+        after: !gst.saving && gst.verdict ? [para(gst.verdict, gst.refused ? 'var(--status-error)' : 'var(--text-secondary)')] : [],
+        left: offersRestore ? [btn('Put it back as it was', () => write(this.state.gs.original), 'btn-g', !!gst.saving)] : [],
+        right: [btn('Close', close), btn('Save', () => write(this.state.gs.text), 'btn-p', !!gst.saving || (!changed && !gst.verdict))]
       });
     }
     if (gst.kind === 'target') {

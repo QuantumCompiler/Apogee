@@ -41,6 +41,12 @@ final class ScriptedRunner: CommandRunning, @unchecked Sendable {
         readFailures.withLock { $0.insert((prefix, outcome), at: 0) }
     }
 
+    /// Takes back every failure scripted for `prefix`: the reads it starts
+    /// answer from their documents again.
+    func clearingFailures(_ prefix: [String]) {
+        readFailures.withLock { $0.removeAll { $0.0 == prefix } }
+    }
+
     func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
         log.withLock { $0.append("read " + arguments.joined(separator: "|")) }
         await gate(arguments)?.pass()

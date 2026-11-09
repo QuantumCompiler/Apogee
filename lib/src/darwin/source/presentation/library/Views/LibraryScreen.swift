@@ -3,6 +3,7 @@ import BusinessReads
 import PresentationShell
 import PresentationStyles
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The Library place (⌘0): agents, symphonies and MCP servers -- the
 /// definitions sessions and runs draw on.
@@ -52,11 +53,13 @@ public struct LibraryScreen: View {
             }
         }
         .sheet(isPresented: $agents.creating) { AgentSheet(model: agents) }
-        .sheet(item: Binding(get: { agents.editor.map(EditorID.init) }, set: { if $0 == nil { agents.closeEditor() } })) { _ in
-            EditorSheet(editor: Binding(get: { agents.editor! }, set: { agents.editor = $0 }), save: { await agents.save() }, restore: nil, close: agents.closeEditor)
+        // A sheet dismissed by the system closes as Close does: asked first
+        // when something would be lost (GUI 6f).
+        .sheet(item: Binding(get: { agents.editor.map(EditorID.init) }, set: { if $0 == nil { agents.requestClose() } })) { _ in
+            EditorSheet(model: agents)
         }
-        .sheet(item: Binding(get: { symphonies.editor.map(EditorID.init) }, set: { if $0 == nil { symphonies.closeEditor() } })) { _ in
-            EditorSheet(editor: Binding(get: { symphonies.editor! }, set: { symphonies.editor = $0 }), save: { await symphonies.save() }, restore: { await symphonies.restore() }, close: symphonies.closeEditor)
+        .sheet(item: Binding(get: { symphonies.editor.map(EditorID.init) }, set: { if $0 == nil { symphonies.requestClose() } })) { _ in
+            EditorSheet(model: symphonies)
         }
         .alert("That didn't work", isPresented: Binding(get: { (agents.failure ?? symphonies.failure ?? mcp.failure) != nil }, set: { if !$0 { agents.dismissFailure(); symphonies.dismissFailure(); mcp.dismissFailure() } })) {
             Button("OK") { agents.dismissFailure(); symphonies.dismissFailure(); mcp.dismissFailure() }
@@ -164,6 +167,7 @@ struct AgentsView: View {
 
 struct SymphoniesView: View {
     @Bindable var model: SymphoniesViewModel
+    @State private var choosingImage = false
 
     var body: some View {
         ListPage(rows: model.symphonies, selected: model.selected, pick: { model.select($0) }, note: model.emptyText) { symphony in
@@ -207,8 +211,11 @@ struct SymphoniesView: View {
                         Text("PLAY").font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary)
                         Text(symphony.inputDescription).font(.apogeeSmall).foregroundStyle(Palette.textSecondary)
                         TextField("Its input", text: $model.input, axis: .vertical).lineLimit(3...8).textFieldStyle(.roundedBorder)
+                        if symphony.takesImage {
+                            ImageRow(name: model.imageName, choose: { choosingImage = true }, remove: { model.image = nil })
+                        }
                         HStack {
-                            Button("Play") { model.playIt() }.disabled(model.isPlaying || model.input.trimmingCharacters(in: .whitespaces).isEmpty)
+                            Button("Play") { model.playIt() }.disabled(!model.canPlay)
                             if let playing = model.shownProgress {
                                 ProgressView().controlSize(.small)
                                 Text(playing.busy ?? "starting").font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textSecondary).lineLimit(1)
@@ -216,6 +223,11 @@ struct SymphoniesView: View {
                             } else if model.isPlaying, let other = model.playingName {
                                 Text("\(other) is playing -- one play at a time").font(.apogeeMeta).foregroundStyle(Palette.textTertiary)
                             }
+                        }
+                        if model.needsImage {
+                            Text("\(symphony.name) takes an image with its input: choose one to play it.")
+                                .font(.apogeeSmall)
+                                .foregroundStyle(Palette.textTertiary)
                         }
                         if let play = model.shownPlay {
                             ForEach(play.stages) { stage in
@@ -241,6 +253,30 @@ struct SymphoniesView: View {
         ) {
             Button("Delete its config entry", role: .destructive) { Task { await model.confirmDelete() } }
             Button("Cancel", role: .cancel) { model.pendingDelete = nil }
+        }
+        .fileImporter(isPresented: $choosingImage, allowedContentTypes: SymphoniesViewModel.imageTypes.compactMap { UTType(filenameExtension: $0) }) { result in
+            if case .success(let url) = result { model.image = url.path }
+        }
+    }
+}
+
+/// A play's image, for a symphony whose input takes one: the file chosen,
+/// with Remove, or the way to choose it (GUI 6f).
+struct ImageRow: View {
+    let name: String?
+    let choose: () -> Void
+    let remove: () -> Void
+
+    var body: some View {
+        HStack(spacing: Spacing.s) {
+            if let name {
+                Label(name, systemImage: "photo").font(.apogeeSmall).lineLimit(1).truncationMode(.middle)
+                Button("Remove", action: remove).buttonStyle(.borderless)
+                Button("Choose another…", action: choose).buttonStyle(.borderless)
+            } else {
+                Button("Choose an image…", action: choose)
+                Text("png, jpg, gif, webp or bmp").font(.apogeeMeta).foregroundStyle(Palette.textTertiary)
+            }
         }
     }
 }
@@ -357,44 +393,64 @@ struct AgentSheet: View {
 }
 
 /// A definition file in the app's editor: saved to the file the CLI reads,
-/// then the binary's word on it.
-struct EditorSheet: View {
-    @Binding var editor: DefinitionEditor
-    let save: () async -> Void
-    let restore: (() async -> Void)?
-    let close: () -> Void
+/// then the binary's word on it. Close and Esc go through the view-model,
+/// which asks first when typing or the file's original would be lost
+/// (GUI 6f); the sheet can't be dismissed past that question.
+struct EditorSheet<Model: DefinitionEditing & Observable>: View {
+    @Bindable var model: Model
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.m) {
-            Text(editor.title).font(.apogeeHeading)
-            Text(editor.path).font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
-            TextEditor(text: $editor.text)
-                .font(.apogeeCode)
-                .frame(minHeight: 320)
-                .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.border))
-                .disabled(editor.saving)
-                .opacity(editor.saving ? 0.6 : 1)
-            if editor.saving {
-                HStack(spacing: Spacing.s) {
-                    ProgressView().controlSize(.small)
-                    Text("Saving: the editor waits for apogee's word on the file, then takes your typing again.")
-                        .font(.apogeeSmall)
-                        .foregroundStyle(Palette.textSecondary)
+        if let editor = model.editor {
+            VStack(alignment: .leading, spacing: Spacing.m) {
+                Text(editor.title).font(.apogeeHeading)
+                Text(editor.path).font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+                TextEditor(text: Binding(get: { model.editor?.text ?? "" }, set: { model.editor?.text = $0 }))
+                    .font(.apogeeCode)
+                    .frame(minHeight: 320)
+                    .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.border))
+                    .disabled(editor.saving)
+                    .opacity(editor.saving ? 0.6 : 1)
+                if editor.saving {
+                    HStack(spacing: Spacing.s) {
+                        ProgressView().controlSize(.small)
+                        Text("Saving: the editor waits for apogee's word on the file, then takes your typing again.")
+                            .font(.apogeeSmall)
+                            .foregroundStyle(Palette.textSecondary)
+                    }
+                } else if let verdict = editor.verdict {
+                    Text(verdict).font(.apogeeSmall).foregroundStyle(editor.refused ? Palette.error : Palette.textSecondary).textSelection(.enabled)
                 }
-            } else if let verdict = editor.verdict {
-                Text(verdict).font(.apogeeSmall).foregroundStyle(editor.refused ? Palette.error : Palette.textSecondary).textSelection(.enabled)
+                HStack {
+                    if model.offersRestore { Button("Put it back as it was") { Task { await model.restore() } }.disabled(editor.saving) }
+                    Spacer()
+                    Button("Close") { model.requestClose() }.keyboardShortcut(.cancelAction)
+                    Button("Save") { Task { await model.save() } }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(editor.saving || (!editor.changed && editor.verdict == nil))
+                }
             }
-            HStack {
-                if let restore, editor.refused { Button("Put it back as it was") { Task { await restore() } }.disabled(editor.saving) }
-                Spacer()
-                Button("Close", action: close).keyboardShortcut(.cancelAction)
-                Button("Save") { Task { await save() } }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(editor.saving || (!editor.changed && editor.verdict == nil))
+            .padding(Spacing.xl)
+            .frame(width: 720)
+            .interactiveDismissDisabled(editor.closeReason != nil)
+            .confirmationDialog(
+                model.closing.map(editor.question) ?? "",
+                isPresented: Binding(get: { model.closing != nil }, set: { if !$0 { model.keepEditing() } }),
+                titleVisibility: .visible
+            ) {
+                switch model.closing {
+                case .unsaved:
+                    Button("Discard", role: .destructive) { model.discardAndClose() }
+                case .refusedOnDisk:
+                    Button("Put it back as it was") { Task { await model.restoreAndClose() } }
+                    Button("Leave it", role: .destructive) { model.leaveAndClose() }
+                case nil:
+                    EmptyView()
+                }
+                Button("Keep editing", role: .cancel) { model.keepEditing() }
+            } message: {
+                Text(model.closing.map(editor.explanation) ?? "")
             }
         }
-        .padding(Spacing.xl)
-        .frame(width: 720)
     }
 }
 
@@ -537,20 +593,61 @@ struct EditorSheet: View {
 }
 
 #Preview("Editing the person's own prompt") {
-    EditorSheet(
-        editor: .constant(
-            DefinitionEditor(
-                title: "triage", path: "/Users/someone/.apogee/prompts/triage.txt",
-                original: LibraryPreview.triagePrompt, text: LibraryPreview.triagePrompt + "\nFile each issue under one area.\n")),
-        save: {}, restore: nil, close: {})
+    EditorSheet(model: LibraryPreview.agentEditor(typed: true))
 }
 
 #Preview("Saving: the editor read-only until apogee answers") {
-    EditorSheet(
-        editor: .constant(
-            DefinitionEditor(
-                title: "triage", path: "/Users/someone/.apogee/prompts/triage.txt",
-                original: LibraryPreview.triagePrompt, text: LibraryPreview.triagePrompt + "\nFile each issue under one area.\n", saving: true)),
-        save: {}, restore: nil, close: {})
+    EditorSheet(model: LibraryPreview.agentEditor(saving: true))
+}
+
+#Preview("An agent's prompt after a save: Put it back as it was") {
+    EditorSheet(model: LibraryPreview.agentEditor(saved: true))
+}
+
+#Preview("Closing with typing unsaved: asked first") {
+    EditorSheet(model: LibraryPreview.agentEditor(typed: true, closing: true))
+}
+
+#Preview("A symphony's save refused: Put it back as it was") {
+    EditorSheet(model: LibraryPreview.refusedSymphony())
+}
+
+#Preview("Closing after a refused save: put it back, leave it, or keep editing") {
+    EditorSheet(model: LibraryPreview.refusedSymphony(closing: true))
+}
+
+#Preview("Symphonies: describe-answer waits for its image") {
+    let symphonies = LibraryPreview.symphonies()
+    SymphoniesView(model: symphonies)
+        .frame(width: 1000, height: 760)
+        .task {
+            await symphonies.connect(binary: previewBinary)
+            if let describe = symphonies.symphonies.first(where: { $0.name == "describe-answer" }) {
+                symphonies.select(describe)
+                symphonies.input = "What does the sign in the window say?"
+            }
+        }
+}
+
+#Preview("Symphonies: describe-answer with its image chosen") {
+    let symphonies = LibraryPreview.symphonies()
+    SymphoniesView(model: symphonies)
+        .frame(width: 1000, height: 760)
+        .task {
+            await symphonies.connect(binary: previewBinary)
+            if let describe = symphonies.symphonies.first(where: { $0.name == "describe-answer" }) {
+                symphonies.select(describe)
+                symphonies.input = "What does the sign in the window say?"
+                symphonies.image = "/Users/someone/Pictures/storefront.png"
+            }
+        }
+}
+
+#Preview("A play's image: none chosen, and one chosen") {
+    VStack(alignment: .leading, spacing: Spacing.m) {
+        ImageRow(name: nil, choose: {}, remove: {})
+        ImageRow(name: "storefront.png", choose: {}, remove: {})
+    }
+    .padding(Spacing.xl)
 }
 #endif
