@@ -77,7 +77,13 @@ public final class ModelsViewModel {
     /// The selected model's `models info`, when read.
     public private(set) var info: ModelInfo?
     public private(set) var infoFailure: String?
+    /// The roles `models status` resolves -- its six, never its `suite` or
+    /// `footprint` field (GUI 6d).
     public private(set) var roles: [RoleAssignment] = []
+    /// The suite the roles resolve under, as the same read names it; `nil`
+    /// with none active. Shown as a line, with no picker: Suites changes it
+    /// (GUI 6d).
+    public private(set) var rolesSuite: String?
     public private(set) var rolesFailure: String?
     public var pendingDelete: PendingDelete?
     /// A backend whose entry waits on the person's word to go: `config
@@ -248,6 +254,7 @@ public final class ModelsViewModel {
         let outcome = await runner.read(binary: binary, ["models", "status"])
         if let document = outcome.document {
             roles = RoleAssignment.list(from: document)
+            rolesSuite = RoleAssignment.suite(from: document)
             rolesFailure = nil
         } else {
             rolesFailure = outcome.failure

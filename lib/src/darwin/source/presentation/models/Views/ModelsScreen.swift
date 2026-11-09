@@ -493,6 +493,11 @@ struct RolesView: View {
                 Text("Which model does which job. Helpers run beside the chat model; an unset role falls back as shown.")
                     .font(.apogeeBody)
                     .foregroundStyle(Palette.textSecondary)
+                if let suite = model.rolesSuite {
+                    Text("Roles resolve under suite \(suite) (Suites changes it)")
+                        .font(.apogeeSmall)
+                        .foregroundStyle(Palette.textSecondary)
+                }
                 if let failure = model.rolesFailure {
                     Text(failure).font(.apogeeSmall).foregroundStyle(Palette.error)
                 }
@@ -737,6 +742,13 @@ struct RenameModelSheet: View {
     let models = ModelsPreview.models(over: ModelsPreview.chatOnEmbeddingRunner)
     RolesView(model: models)
         .frame(width: 960, height: 480)
+        .task { await models.connect(binary: previewBinary) }
+}
+
+#Preview("Roles under the default suite duo, described: the six roles and the suite as a line, no Suite or Footprint row") {
+    let models = ModelsPreview.models(over: ModelsPreview.describedSuiteRunner)
+    RolesView(model: models)
+        .frame(width: 960, height: 560)
         .task { await models.connect(binary: previewBinary) }
 }
 

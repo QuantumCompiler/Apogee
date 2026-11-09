@@ -272,6 +272,13 @@ struct DownloadCard: View {
     }
 }
 
+#Preview("A quantization stopped while the store was read first: nothing ran, Run again and Dismiss") {
+    let jobs = ModelsPreview.readingFirst()
+    DownloadsView(model: jobs)
+        .frame(width: 900, height: 420)
+        .task { await ModelsPreview.stopBeforeItRuns(jobs) }
+}
+
 #Preview("A failed quantization run again: the quantization, registering what it made") {
     let store = ModelsPreview.quantizeStore()
     let jobs = ModelsPreview.quantizing(store)

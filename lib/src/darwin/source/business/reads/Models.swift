@@ -374,7 +374,31 @@ public struct RoleAssignment: Sendable, Equatable, Identifiable {
         role == "chat" ? ["config", "set-default"] : ["config", "set-default-\(role)"]
     }
 
+    /// The roles `models status` resolves, in its order (the CLI's
+    /// `role_status`). An allow-list: the document's other fields -- the
+    /// `suite` it opens with under a suite, the `footprint` it ends with, any
+    /// field a later CLI adds (the protocol grows additively, the CLI's ADR
+    /// 0006) -- are tolerated and never made a role, whose picker would run a
+    /// `config set-default-<field>` the CLI refuses (GUI 6d). A role the CLI
+    /// adds is a CLI change the parity work surfaces.
+    public static let resolved = ["chat", "embedding", "extraction", "vision", "transcription", "utility"]
+
+    /// The document's roles, as `models status` says them: the six it
+    /// resolves, and nothing else of its fields.
     public static func list(from document: ReadDocument) -> [RoleAssignment] {
-        Field.list(from: document).map { RoleAssignment(role: $0.label, said: $0.value) }
+        Field.list(from: document).filter { resolved.contains($0.label) }.map { RoleAssignment(role: $0.label, said: $0.value) }
+    }
+
+    /// The suite the roles resolve under, as `models status` names it, when
+    /// one is active (the CLI's 27d): the typed footprint's `suite` where the
+    /// document carries it (the CLI's M31), else the `suite` field's name --
+    /// which the CLI writes `<name>   (<description>)` for a suite with a
+    /// description, the description cut off here (GUI 6d). `nil` with no
+    /// suite active, and from a binary before suites.
+    public static func suite(from document: ReadDocument) -> String? {
+        if let typed = document.value["footprint"].flatMap(SuiteFootprint.init(typed:)) { return typed.suite }
+        guard let said = Field.list(from: document).first(where: { $0.label == "suite" })?.value else { return nil }
+        let name = said.range(of: "   (").map { String(said[..<$0.lowerBound]) } ?? said
+        return name.isEmpty ? nil : name
     }
 }

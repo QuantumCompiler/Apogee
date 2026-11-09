@@ -83,6 +83,78 @@ struct SuitesViewModelTests {
         #expect(after.contains("run config get suites") && after.contains("read models status"), "read back")
     }
 
+    // MARK: - A described default suite (GUI 6d)
+
+    /// The described sandbox, recorded from `apogee-dev` over a sandbox
+    /// `APOGEE_HOME`: mock backends m1-m4; `duo` -- chat m1, utility m2,
+    /// described "two" -- and `rich` (m3, m4). `models status` names the
+    /// default as the CLI resolves it, from `plain`.
+    static func described(_ plain: String) -> ScriptedRunner {
+        let runner = ScriptedRunner()
+        runner.saying(["config", "get", "suites"], recorded("suites-config-get-described.txt"))
+        runner.saying(["config", "get", "suites.duo"], recorded("suites-config-get-duo.txt"))
+        runner.saying(["config", "get", "suites.rich"], recorded("suites-config-get-rich.txt"))
+        runner.reading(["models", "list"], recorded("suites-models-list-described.json"))
+        status(plain, on: runner)
+        return runner
+    }
+
+    /// `models status` as `plain`, each suite's own read after it so it wins.
+    static func status(_ plain: String, on runner: ScriptedRunner) {
+        runner.reading(["models", "status"], recorded(plain))
+        runner.reading(["models", "status", "--suite", "duo"], recorded("suites-models-status-described-typed.json"))
+        runner.reading(["models", "status", "--suite", "rich"], recorded("suites-models-status-described-rich-typed.json"))
+    }
+
+    @Test("a default suite with a description is the default: from the typed footprint, and from the field alone on a binary that types none")
+    func describedDefault() async {
+        for plain in ["suites-models-status-described-typed.json", "suites-models-status-described.json"] {
+            let suites = SuitesViewModel(runner: Self.described(plain))
+            await suites.connect(binary: Self.binary)
+            #expect(suites.suites.map(\.name) == ["duo", "rich"])
+            #expect(suites.defaultSuite == "duo", "\(plain): the name, never \"duo   (two)\"")
+        }
+    }
+
+    @Test("Use for new sessions on a described suite: once the CLI takes it, the place reads it as the default -- its badge, and Stop using it by default")
+    func useDescribedForNewSessions() async throws {
+        // Before: no default suite (the same sandbox shape, as recorded).
+        let runner = Self.described("roles-status-off.json")
+        let suites = SuitesViewModel(runner: runner)
+        await suites.connect(binary: Self.binary)
+        #expect(suites.defaultSuite == nil)
+        let duo = try #require(suites.suites.first { $0.name == "duo" })
+        // The CLI's state after `config set-default-suite duo`, as recorded.
+        Self.status("suites-models-status-described-typed.json", on: runner)
+        await suites.makeDefault(duo)
+        #expect(runner.calls.contains("run config set-default-suite duo"))
+        #expect(suites.defaultSuite == duo.name, "the badge and Stop using it by default follow")
+    }
+
+    @Test("every recorded models status reads its default as before; a decorated field is matched only to a suite that was read")
+    func everyRecordedDefault() throws {
+        let names = ["cloud", "duo", "fast", "pair", "partial", "rich", "shared", "vast"]
+        var expected: [String: String?] = [
+            "suites-models-status.json": "fast", "suites-models-status-typed.json": "fast",
+            "roles-status-duo.json": "duo", "roles-status-rich.json": "rich", "roles-status-off.json": nil,
+            "suites-models-status-described.json": "duo", "suites-models-status-described-typed.json": "duo",
+            "suites-models-status-described-rich-typed.json": "rich",
+        ]
+        for name in ["cloud", "fast", "pair", "shared", "vast"] {
+            expected["suites-models-status-\(name).json"] = name
+        }
+        for name in ["cloud", "fast", "pair", "partial", "shared", "vast"] {
+            expected["suites-models-status-\(name)-typed.json"] = name
+        }
+        for (file, suite) in expected {
+            let document = try #require(ReadDocument(text: recorded(file)), "\(file) is recorded")
+            #expect(SuitesViewModel.defaultSuite(in: document, among: names) == suite, "\(file)")
+        }
+        let described = try #require(ReadDocument(text: recorded("suites-models-status-described.json")))
+        #expect(SuitesViewModel.defaultSuite(in: described, among: ["rich"]) == nil, "a suite the place did not read is never guessed")
+        #expect(SuitesViewModel.defaultSuite(in: described, among: ["du", "duo"]) == "duo", "the name whole, never a prefix of it")
+    }
+
     @Test("no suites is said plainly; no binary is said")
     func empty() async {
         let runner = ScriptedRunner()

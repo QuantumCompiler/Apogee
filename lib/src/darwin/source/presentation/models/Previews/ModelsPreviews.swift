@@ -240,6 +240,15 @@ enum ModelsPreview {
         (["models", "status"], ModelsDocuments.chatOnEmbeddingStatus),
     ])
 
+    /// Four mock backends with `duo` -- chat m1, utility m2, described "two"
+    /// -- the default suite, as `models list` and `models status` read them
+    /// from `apogee-dev` over a sandbox (GUI 6d): the status opens with the
+    /// suite and ends with its footprint, neither of them a role.
+    static let describedSuiteRunner = PreviewRunner(reads: [
+        (["models", "list"], ModelsDocuments.describedList),
+        (["models", "status"], ModelsDocuments.describedStatus),
+    ])
+
     // MARK: - A drafter and its base (the CLI's 53i)
 
     static let drafter = "Gemma4-E4B-Assistant/mlx/4d5e6f708192"
@@ -476,6 +485,24 @@ enum ModelsPreview {
         jobs.reader = store
         jobs.quantize(QuantizeForm(handle: quantizeF16, base: "Llama3.2-1B-Instruct", bytes: nil))
         return jobs
+    }
+
+    /// A quantization started over a store slow to answer its first read
+    /// (GUI 6d): the card shows Stop while `models list --all` runs, before
+    /// any child exists.
+    static func readingFirst() -> DownloadsViewModel {
+        let jobs = DownloadsViewModel(starter: PreviewJobQueue([]))
+        jobs.connect(binary: previewBinary)
+        jobs.reader = PreviewSlowStore(store: quantizeStore(), delay: .seconds(3))
+        jobs.quantize(QuantizeForm(handle: quantizeF16, base: "Llama3.2-1B-Instruct", bytes: nil))
+        return jobs
+    }
+
+    /// Stop on that card while the read runs: it ends stopped, nothing ran,
+    /// and the read's answer starts nothing.
+    static func stopBeforeItRuns(_ jobs: DownloadsViewModel) async {
+        guard let download = jobs.downloads.first else { return }
+        await jobs.stop(download)
     }
 
     /// Run again on the failed quantization, once it has failed: the store

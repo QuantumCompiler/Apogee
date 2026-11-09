@@ -267,4 +267,38 @@ struct ModelsViewModelTests {
         let older = await connected(ScriptedRunner())
         #expect(older.rows.filter { $0.group == "mlx" }.allSatisfy { older.opensSessions($0) && $0.mlxKind == nil })
     }
+
+    @Test("Roles under a default suite: the six roles and the suite as a line; no picker ever runs config set-default-suite or set-default-footprint (GUI 6d)")
+    func rolesUnderASuite() async throws {
+        // Recorded from apogee-dev over a sandbox: mock backends m1-m4, `duo`
+        // (chat m1, utility m2, described "two") the default.
+        let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../business/reads/Fixtures")
+        func fixture(_ name: String) -> String {
+            (try? String(contentsOf: fixtures.appendingPathComponent("\(name).json"), encoding: .utf8)) ?? ""
+        }
+        for status in ["suites-models-status-described-typed", "suites-models-status-described"] {
+            let runner = ScriptedRunner()
+            runner.reading(["models", "list"], fixture("suites-models-list-described"))
+            runner.reading(["models", "status"], fixture(status))
+            let model = ModelsViewModel(runner: runner)
+            await model.connect(binary: Self.binary)
+            #expect(model.roles.map(\.role) == ["chat", "embedding", "extraction", "vision", "transcription", "utility"], "\(status)")
+            #expect(model.rolesSuite == "duo", "\(status): the line names the suite")
+            #expect(model.backends == ["m1", "m2", "m3", "m4"])
+            for role in model.roles {
+                for backend in model.choices(for: role) { await model.assign(role, to: backend) }
+            }
+            let ran = runner.calls.filter { $0.hasPrefix("run config set-default") }
+            #expect(!ran.isEmpty && ran.allSatisfy { !$0.hasPrefix("run config set-default-suite") && !$0.hasPrefix("run config set-default-footprint") },
+                    "\(status): \(ran)")
+            #expect(ran.contains("run config set-default-utility m1") && ran.contains("run config set-default m2"))
+        }
+        // No suite active: no line.
+        let runner = ScriptedRunner()
+        runner.reading(["models", "list"], fixture("suites-models-list-described"))
+        runner.reading(["models", "status"], fixture("roles-status-off"))
+        let model = ModelsViewModel(runner: runner)
+        await model.connect(binary: Self.binary)
+        #expect(model.rolesSuite == nil && model.roles.count == 6)
+    }
 }

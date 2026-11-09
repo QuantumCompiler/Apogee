@@ -78,4 +78,14 @@ struct JobResumeTests {
         #expect(progress.status == .failed("Couldn't read the store first, so nothing ran"))
         #expect(progress.resumeCommand == nil)
     }
+
+    @Test("a run stopped before its child started is a stop, never a failure, with nothing to resume (GUI 6d)")
+    func stoppedBeforeStart() {
+        var progress = JobProgress()
+        let end = JobEnd.stoppedBeforeStart("Stopped before it ran: nothing ran")
+        #expect(end.exit == nil && end.interrupted && !end.succeeded && end.detail == "Stopped before it ran: nothing ran")
+        progress.apply(.ended(end))
+        #expect(progress.status == .stopped)
+        #expect(progress.resumeCommand == nil)
+    }
 }

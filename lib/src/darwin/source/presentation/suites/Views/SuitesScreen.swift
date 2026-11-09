@@ -269,6 +269,16 @@ struct SuiteDetail: View {
         .task { await suites.connect(binary: previewBinary) }
 }
 
+#Preview("A described default suite: duo's badge, and Stop using it by default") {
+    let suites = SuitesPreview.describedModel()
+    SuitesScreen(model: suites)
+        .frame(width: 1100, height: 560)
+        .task {
+            await suites.connect(binary: previewBinary)
+            suites.select("duo")
+        }
+}
+
 #Preview("The typed footprint: every suite, vast over budget") {
     let suites = SuitesPreview.typedModel(sessionOpen: true)
     SuitesScreen(model: suites)

@@ -88,6 +88,31 @@ enum SuitesPreview {
             (["config", "get", "suites.partial"], SuitesDocuments.configGetPartial),
         ])
 
+    // MARK: - A described default suite (GUI 6d)
+
+    /// Recorded from `apogee-dev` over a sandbox: mock backends m1-m4,
+    /// `duo` -- chat m1, utility m2, described "two" -- the default, whose
+    /// `models status` field reads `duo   (two)`, and `rich` (m3, m4).
+    static let described = PreviewRunner(
+        reads: [
+            (["models", "status"], SuitesDocuments.describedStatus),
+            (["models", "status", "--suite", "duo"], SuitesDocuments.describedStatus),
+            (["models", "status", "--suite", "rich"], SuitesDocuments.describedStatusRich),
+            (["models", "list"], SuitesDocuments.describedList),
+        ],
+        commands: [
+            (["config", "get", "suites"], SuitesDocuments.configGetDescribed),
+            (["config", "get", "suites.duo"], SuitesDocuments.configGetDuo),
+            (["config", "get", "suites.rich"], SuitesDocuments.configGetRich),
+        ])
+
+    /// The described suites, a session open.
+    static func describedModel() -> SuitesViewModel {
+        let suites = SuitesViewModel(runner: described)
+        suites.sessionSwitchable = { true }
+        return suites
+    }
+
     /// The typed suites, a session open or not.
     static func typedModel(sessionOpen: Bool = false) -> SuitesViewModel {
         let suites = SuitesViewModel(runner: typed)

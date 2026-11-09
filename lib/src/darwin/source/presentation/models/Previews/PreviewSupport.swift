@@ -69,6 +69,22 @@ final class PreviewStore: CommandRunning, @unchecked Sendable {
     }
 }
 
+/// A store slow to answer: each read answered by `store` only after `delay`,
+/// as `models list --all` takes seconds over a large store's walk (GUI 6d).
+struct PreviewSlowStore: CommandRunning {
+    let store: PreviewStore
+    let delay: Duration
+
+    func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
+        try? await Task.sleep(for: delay)
+        return await store.read(binary: binary, arguments)
+    }
+
+    func command(binary: URL, _ arguments: [String]) async -> CommandOutcome {
+        await store.command(binary: binary, arguments)
+    }
+}
+
 /// A job that says what it was given, then keeps running -- a run in
 /// progress -- or, when it `finishes`, ends there, as a finished run's
 /// stream does. Stop ends it as an interrupted run's stream ends.
