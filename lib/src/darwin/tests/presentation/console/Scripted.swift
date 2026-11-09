@@ -10,11 +10,24 @@ import Synchronization
 final class ScriptedRunner: CommandRunning, @unchecked Sendable {
     private let answers = Mutex<[([String], CommandOutcome)]>([])
     private let log = Mutex<[String]>([])
+    /// Commands held open until the test releases them: the next command
+    /// each prefix starts waits on its gate.
+    private let gates = Mutex<[([String], AsyncStream<Void>)]>([])
 
     var calls: [String] { log.withLock { $0 } }
 
     func answering(_ prefix: [String], _ outcome: CommandOutcome) {
         answers.withLock { $0.insert((prefix, outcome), at: 0) }
+    }
+
+    /// Holds the next command `prefix` starts -- recorded in `calls` as it
+    /// starts -- until the returned closure is called, then answers it by the
+    /// rules, as a slow `__complete` would: so an answer can land after the
+    /// line changed, and two can land in either order (GUI 6e).
+    func holding(_ prefix: [String]) -> @Sendable () -> Void {
+        let (gate, open) = AsyncStream.makeStream(of: Void.self)
+        gates.withLock { $0.append((prefix, gate)) }
+        return { open.finish() }
     }
 
     func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
@@ -24,6 +37,13 @@ final class ScriptedRunner: CommandRunning, @unchecked Sendable {
 
     func command(binary: URL, _ arguments: [String]) async -> CommandOutcome {
         log.withLock { $0.append("run " + arguments.joined(separator: "|")) }
+        let gate = gates.withLock { held -> AsyncStream<Void>? in
+            guard let index = held.firstIndex(where: { arguments.starts(with: $0.0) }) else { return nil }
+            return held.remove(at: index).1
+        }
+        if let gate {
+            for await _ in gate {}
+        }
         return answers.withLock { rules in rules.first { arguments.starts(with: $0.0) }?.1 } ?? .done(stdout: "")
     }
 }

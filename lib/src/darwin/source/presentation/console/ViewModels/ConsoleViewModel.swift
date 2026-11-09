@@ -9,14 +9,17 @@ import PresentationShell
 /// catch-all (ADR 0003) while screens accrete, as the CLI's exec line was the
 /// shell's.
 ///
-/// SwiftUI-free (ADR 0002). A run is the shipped jobs core's: its stdout
+/// SwiftUI-free (ADR 0002). A line is split as the CLI's exec line splits it
+/// (`cli/line_tokens`, GUI 6e), and run with every word it passes. A run is
+/// the shipped jobs core's: its stdout
 /// streamed as the supervisor reads it, the busy line its stderr's last line,
 /// the stderr kept at the end, Stop as Ctrl-C. Completion is the binary's own
 /// (`apogee __complete`), never a list the app carries, and it edits the line
-/// as it was typed. A command the parity table refuses -- a carve-out, a door
-/// the app already is, an `$EDITOR` verb -- is refused with the table's
-/// reason and never started, whatever root options precede it: the command
-/// is read past them as the binary reads it (GUI 4g).
+/// as it was typed -- only while it is the line it was asked about (GUI 6e).
+/// A command the parity table refuses -- a carve-out, a door the app already
+/// is, an `$EDITOR` verb -- is refused with the table's reason and never
+/// started, whatever root options precede it: the command is read past them
+/// as the binary reads it (GUI 4g).
 @MainActor
 @Observable
 public final class ConsoleViewModel {
@@ -69,71 +72,160 @@ public final class ConsoleViewModel {
 
     // MARK: - The line
 
-    /// A line split as a shell splits it, and where the word being typed
-    /// starts in the line as it was typed.
+    /// A line split as the CLI's exec line splits it, and where the word
+    /// being typed starts in the line as it was typed.
     public struct Split: Equatable, Sendable {
         /// The words before the one being typed.
         public let words: [String]
         /// The word being typed, as the binary is given it: empty when the
-        /// line ends in a space.
+        /// line ends in a blank, or when it is an empty `''` or `""`.
         public let partial: String
-        /// How many characters of the line come before the word being typed
-        /// -- its opening quote or backslash counted -- so that completion
-        /// replaces what was typed: the line's whole length when it ends in a
-        /// space.
+        /// How many Unicode scalars of the line come before the word being
+        /// typed -- its opening quote or backslash counted -- so that
+        /// completion replaces what was typed: the line's whole length when
+        /// it ends in a blank, so less than it whenever a last word was
+        /// begun, an empty quoted one too.
         public let partialStart: Int
     }
 
-    /// A line split as a shell splits it -- whitespace between words, quotes
-    /// grouping, a backslash escaping -- with the word being typed apart:
-    /// empty when the line ends in a space. `nil` for an unclosed quote.
+    /// Why a line does not split, in the CLI's own words (`line_tokens.cpp`).
+    public enum Unsplittable: Error, Equatable, Sendable {
+        /// A `'` with no `'` after it.
+        case singleQuoteOpen
+        /// A `"` with no unescaped `"` after it.
+        case doubleQuoteOpen
+        /// A backslash outside quotes as the line's last character.
+        case backslashEndsTheLine
+
+        /// The CLI splitter's error, word for word, as the exec line says
+        /// it after "not run: ".
+        public var reason: String {
+            switch self {
+            case .singleQuoteOpen: "a single quote is left open"
+            case .doubleQuoteOpen: "a double quote is left open"
+            case .backslashEndsTheLine: "a backslash ends the line with nothing to escape"
+            }
+        }
+    }
+
+    /// A line split as the CLI's one splitter splits it (`cli/line_tokens`,
+    /// which the exec line runs) -- the CLI's blanks between words, quotes
+    /// grouping, a backslash escaping as POSIX shells have it, nothing
+    /// expanded -- with the word being typed apart: empty when the line ends
+    /// in a blank. `nil` for a line that does not split. The quoting table
+    /// is `split`'s.
     public static func words(_ line: String) -> (words: [String], partial: String)? {
         split(line).map { ($0.words, $0.partial) }
     }
 
-    /// The line split as `words` splits it, with the typed start of the word
-    /// being typed. `nil` for an unclosed quote.
-    public static func split(_ line: String) -> Split? {
-        var words: [String] = []
-        var word = ""
-        var inWord = false
-        var start = 0
-        var quote: Character?
-        var escaped = false
-        for (offset, character) in line.enumerated() {
-            if escaped {
-                word.append(character)
-                escaped = false
-            } else if character == "\\" && quote != "'" {
-                if !inWord { start = offset }
-                escaped = true
-                inWord = true
-            } else if let open = quote {
-                if character == open { quote = nil } else { word.append(character) }
-            } else if character == "\"" || character == "'" {
-                if !inWord { start = offset }
-                quote = character
-                inWord = true
-            } else if character.isWhitespace {
-                if inWord { words.append(word) }
-                word = ""
-                inWord = false
-            } else {
-                if !inWord { start = offset }
-                word.append(character)
-                inWord = true
-            }
-        }
-        guard quote == nil, !escaped else { return nil }
-        return Split(words: words, partial: inWord ? word : "", partialStart: inWord ? start : line.count)
+    /// The CLI's blanks, and only these (`line_tokens.cpp`'s `blank`): a
+    /// space, a tab, a line feed and a carriage return. A no-break space
+    /// (⌥Space) or any other Unicode space is a character of its word, as
+    /// at the exec line.
+    static func isBlank(_ scalar: Unicode.Scalar) -> Bool {
+        scalar == " " || scalar == "\t" || scalar == "\n" || scalar == "\r"
     }
 
-    /// The arguments a line runs: its words, without a leading `apogee`.
+    /// What a backslash escapes inside double quotes: these four alone, as
+    /// in POSIX shells and the CLI's splitter (`line_tokens.cpp`). Before
+    /// any other character the backslash is kept.
+    static let escapedInDoubleQuotes: Set<Unicode.Scalar> = ["\"", "\\", "$", "`"]
+
+    /// The line split as `words` splits it, with the typed start of the word
+    /// being typed. `nil` for an unclosed quote, or a backslash that ends the
+    /// line with nothing to escape: `tokens` says which.
+    public static func split(_ line: String) -> Split? {
+        try? tokens(line).get()
+    }
+
+    /// The line split as the CLI's splitter splits it, or why it does not
+    /// split, in the CLI's words.
+    ///
+    /// The quoting table is the CLI's, exactly (GUI 6e): inside double
+    /// quotes a backslash escapes only `"`, `\`, `$` and a backtick, and
+    /// before anything else -- `\d`, `C:\temp` -- it is an ordinary
+    /// character of the word; inside single quotes nothing escapes; outside
+    /// quotes a backslash takes the next character as it is; `''` and `""`
+    /// are an empty word. The line is read by its Unicode scalars: the CLI
+    /// reads its bytes, and every character it treats specially is ASCII,
+    /// which in UTF-8 is never part of another character -- where Swift's
+    /// characters would merge CR LF, or a combining mark, into the blank,
+    /// quote or backslash before it.
+    public static func tokens(_ line: String) -> Result<Split, Unsplittable> {
+        let scalars = Array(line.unicodeScalars)
+        var words: [String] = []
+        var word = String.UnicodeScalarView()
+        var inWord = false
+        var start = 0
+        var quote: Unicode.Scalar?
+        var at = 0
+        while at < scalars.count {
+            let scalar = scalars[at]
+            if quote == "'" {
+                if scalar == "'" { quote = nil } else { word.append(scalar) }
+            } else if quote == "\"" {
+                if scalar == "\"" {
+                    quote = nil
+                } else if scalar == "\\", at + 1 < scalars.count, escapedInDoubleQuotes.contains(scalars[at + 1]) {
+                    word.append(scalars[at + 1])
+                    at += 1
+                } else {
+                    word.append(scalar)
+                }
+            } else if scalar == "\\" {
+                guard at + 1 < scalars.count else { return .failure(.backslashEndsTheLine) }
+                if !inWord { start = at }
+                word.append(scalars[at + 1])
+                inWord = true
+                at += 1
+            } else if scalar == "\"" || scalar == "'" {
+                if !inWord { start = at }
+                quote = scalar
+                inWord = true
+            } else if isBlank(scalar) {
+                if inWord { words.append(String(word)) }
+                word = String.UnicodeScalarView()
+                inWord = false
+            } else {
+                if !inWord { start = at }
+                word.append(scalar)
+                inWord = true
+            }
+            at += 1
+        }
+        if let quote { return .failure(quote == "'" ? .singleQuoteOpen : .doubleQuoteOpen) }
+        return .success(Split(words: words, partial: inWord ? String(word) : "", partialStart: inWord ? start : scalars.count))
+    }
+
+    /// The arguments a line runs: every word the exec line would pass --
+    /// the last one too whenever it was begun, an empty `''` or `""` among
+    /// them (`say ''` runs `say` with an empty argument) -- without a
+    /// leading `apogee`.
     public static func arguments(_ line: String) -> [String]? {
-        guard let split = words(line) else { return nil }
-        var all = split.words + (split.partial.isEmpty ? [] : [split.partial])
-        if all.first == "apogee" { all.removeFirst() }
-        return all
+        try? runs(line).get()
+    }
+
+    /// `arguments`, or why the line does not split.
+    static func runs(_ line: String) -> Result<[String], Unsplittable> {
+        tokens(line).map { split in
+            let begun = split.partialStart < line.unicodeScalars.count
+            var all = split.words + (begun ? [split.partial] : [])
+            if all.first == "apogee" { all.removeFirst() }
+            return all
+        }
+    }
+
+    /// The line as the console keeps and shows it: the CLI's blanks trimmed
+    /// from both ends -- never one a backslash made part of the last word,
+    /// so `say end\ ` is kept, and recalled, as it runs.
+    static func trimmed(_ line: String) -> String {
+        let runs = arguments(line)
+        var scalars = Array(line.unicodeScalars.drop(while: isBlank))
+        while let last = scalars.last, isBlank(last),
+              arguments(String(String.UnicodeScalarView(scalars.dropLast()))) == runs {
+            scalars.removeLast()
+        }
+        return String(String.UnicodeScalarView(scalars))
     }
 
     /// The root options that take the word after them as their value
@@ -166,14 +258,21 @@ public final class ConsoleViewModel {
 
     /// Asks the binary what may come next: `apogee __complete <words> <partial>`,
     /// one bounded run. One candidate completes the word; several are offered.
+    /// An answer applies only to the line it was asked about (GUI 6e): one
+    /// that lands after the person typed more, or after a later Tab changed
+    /// the line, is dropped -- the line and the offered candidates left as
+    /// they stand. Two Tabs on the same line get the same answer, so
+    /// whichever lands is right.
     public func complete() async {
-        guard let binary, let split = Self.words(input) else {
+        let asked = input
+        guard let binary, let split = Self.words(asked) else {
             suggestions = []
             return
         }
         var words = split.words
         if words.first == "apogee" { words.removeFirst() }
         let outcome = await runner.command(binary: binary, ["__complete"] + words + [split.partial])
+        guard input == asked else { return }
         guard case .done(let stdout) = outcome else {
             suggestions = []
             return
@@ -191,18 +290,24 @@ public final class ConsoleViewModel {
     /// it back.
     public func accept(_ candidate: String) {
         guard let split = Self.split(input) else { return }
-        input = String(input.prefix(split.partialStart)) + Self.quoted(candidate) + " "
+        let kept = String.UnicodeScalarView(input.unicodeScalars.prefix(split.partialStart))
+        input = String(kept) + Self.quoted(candidate) + " "
         suggestions = []
     }
 
     /// A word as the line splits it back into that word: bare when it holds
-    /// no blank, quote or backslash, else in double quotes with any `"` or
-    /// `\` in it escaped.
+    /// none of the CLI's blanks, no quote and no backslash, else in double
+    /// quotes with any `"` or `\` in it escaped -- scalar by scalar, as the
+    /// line is split.
     static func quoted(_ word: String) -> String {
-        let special: (Character) -> Bool = { $0.isWhitespace || $0 == "\"" || $0 == "'" || $0 == "\\" }
-        if !word.isEmpty && !word.contains(where: special) { return word }
-        let escaped = word.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-        return "\"" + escaped + "\""
+        let special: (Unicode.Scalar) -> Bool = { isBlank($0) || $0 == "\"" || $0 == "'" || $0 == "\\" }
+        if !word.isEmpty && !word.unicodeScalars.contains(where: special) { return word }
+        var escaped = String.UnicodeScalarView()
+        for scalar in word.unicodeScalars {
+            if scalar == "\"" || scalar == "\\" { escaped.append("\\") }
+            escaped.append(scalar)
+        }
+        return "\"" + String(escaped) + "\""
     }
 
     public func dismissSuggestions() {
@@ -211,14 +316,20 @@ public final class ConsoleViewModel {
 
     // MARK: - Running
 
-    /// Runs the line as typed. A command the parity table refuses is refused
-    /// with its reason, read past any root option; a bare `apogee` asks for a
-    /// command; nothing runs while a run is live.
+    /// Runs the line as typed, split as typed. A line that does not split
+    /// says why in the CLI's words; a command the parity table refuses is
+    /// refused with its reason, read past any root option; a bare `apogee`
+    /// asks for a command; nothing runs while a run is live.
     public func run() {
-        let line = input.trimmingCharacters(in: .whitespaces)
+        let line = Self.trimmed(input)
         guard !line.isEmpty, job == nil else { return }
-        guard let arguments = Self.arguments(line) else {
-            append(.problem, "A quote is left open.")
+        let arguments: [String]
+        switch Self.runs(input) {
+        case .success(let words):
+            arguments = words
+        case .failure(let unsplittable):
+            let reason = unsplittable.reason
+            append(.problem, reason.prefix(1).uppercased() + reason.dropFirst() + ".")
             return
         }
         guard !arguments.isEmpty else {
@@ -228,7 +339,7 @@ public final class ConsoleViewModel {
         input = ""
         suggestions = []
         history.append(line)
-        append(.command, "apogee " + line.replacingOccurrences(of: #"^apogee\s+"#, with: "", options: .regularExpression))
+        append(.command, "apogee " + line.replacingOccurrences(of: #"^apogee[ \t\n\r]+"#, with: "", options: .regularExpression))
         if let refusal = ParityTable.refusal(of: Self.commandPath(arguments)) {
             append(.problem, "Not run here: \(refusal.reason).")
             return

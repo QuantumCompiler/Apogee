@@ -126,7 +126,7 @@ struct ConsoleSafetyTests {
             #expect(model.lines.last?.kind == .note)
             #expect(model.input == typed, "the line is left to finish")
         }
-        #expect(!model.lines.contains { $0.text == "A quote is left open." })
+        #expect(!model.lines.contains { $0.kind == .problem }, "never that a quote is open, or any problem")
         #expect(model.history.isEmpty, "nothing was run")
     }
 
@@ -174,5 +174,79 @@ struct ConsoleSafetyTests {
         model.input = "chats show Bo"
         model.accept("Bobby")
         #expect(model.input == "chats show Bobby ")
+    }
+
+    @Test("an answer that lands after more typing is dropped: the line stays as typed, the suggestions as they stood; one that lands on the line unchanged completes it")
+    func staleAnswerDropped() async {
+        let runner = ScriptedRunner()
+        runner.answering(["__complete", "models"], .done(stdout: "info\nlist\n"))
+        runner.answering(["__complete", "models", "in"], .done(stdout: "info\n"))
+        runner.answering(["__complete", "chats", "sh"], .done(stdout: "show\nshare\n"))
+        runner.answering(["__complete", "models", "li"], .couldNotStart("the binary went away"))
+        let (model, _) = console(runner)
+        model.input = "models "
+        await model.complete()
+        #expect(model.suggestions == ["info", "list"])
+
+        // The sweep's scenario: `models in`, Tab, then ` x` before the answer.
+        let stale: [(asked: String, prefix: [String], typed: String)] = [
+            ("models in", ["__complete", "models", "in"], "models in x"),
+            ("chats sh", ["__complete", "chats", "sh"], "chats show"),
+            ("models li", ["__complete", "models", "li"], "models list"),
+        ]
+        for (asked, prefix, typed) in stale {
+            model.input = asked
+            let release = runner.holding(prefix)
+            let tab = Task { await model.complete() }
+            #expect(await eventually { runner.calls.last == "run " + prefix.joined(separator: "|") }, "\(asked)")
+            model.input = typed
+            release()
+            await tab.value
+            #expect(model.input == typed, "the answer for \(asked) never edits \(typed)")
+            #expect(model.suggestions == ["info", "list"], "a dropped answer leaves the suggestions as they stand: \(asked)")
+        }
+
+        // Held, and released with the line unchanged: it completes as 4g built it.
+        model.input = "models in"
+        let release = runner.holding(["__complete", "models", "in"])
+        let tab = Task { await model.complete() }
+        #expect(await eventually { runner.calls.last == "run __complete|models|in" })
+        release()
+        await tab.value
+        #expect(model.input == "models info " && model.suggestions.isEmpty)
+    }
+
+    @Test("two Tabs answered in either order, the line changed between them: only the answer about the line as it stands applies")
+    func answersOutOfOrder() async {
+        for laterLandsFirst in [true, false] {
+            let runner = ScriptedRunner()
+            runner.answering(["__complete", "models", "in"], .done(stdout: "info\n"))
+            runner.answering(["__complete", "models", "info"], .done(stdout: "My Model\n"))
+            let (model, _) = console(runner)
+            let releaseEarlier = runner.holding(["__complete", "models", "in"])
+            let releaseLater = runner.holding(["__complete", "models", "info"])
+            model.input = "models in"
+            let earlier = Task { await model.complete() }
+            #expect(await eventually { runner.calls == ["run __complete|models|in"] })
+            model.input = "models info "
+            let later = Task { await model.complete() }
+            #expect(await eventually { runner.calls.count == 2 })
+            #expect(runner.calls.last == "run __complete|models|info|")
+            if laterLandsFirst {
+                releaseLater()
+                await later.value
+                #expect(model.input == #"models info "My Model" "#)
+                releaseEarlier()
+                await earlier.value
+            } else {
+                releaseEarlier()
+                await earlier.value
+                #expect(model.input == "models info ", "the answer for models in never edits models info")
+                releaseLater()
+                await later.value
+            }
+            #expect(model.input == #"models info "My Model" "#, "later first: \(laterLandsFirst)")
+            #expect(model.suggestions.isEmpty)
+        }
     }
 }
