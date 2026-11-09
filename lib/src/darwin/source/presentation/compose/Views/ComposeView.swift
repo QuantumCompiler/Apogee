@@ -192,6 +192,14 @@ struct ProjectPage: View {
                     Text(error).font(.apogeeSmall).foregroundStyle(Palette.error)
                 }
                 if let diff = model.diff(project) {
+                    if let differs = model.renderDiffers(project) {
+                        // Rendered from the preview drawn beside Render, whose
+                        // plan the render made again (GUI 6j).
+                        Label(differs, systemImage: "exclamationmark.triangle")
+                            .font(.apogeeSmall)
+                            .foregroundStyle(Palette.warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     DiffList(changes: diff.changes, compared: diff.compared)
                 }
                 ForEach(project.scenes) { scene in
@@ -301,6 +309,14 @@ struct ComposeSheet: View {
                 }
                 if let diff = model.previewDiff {
                     DiffList(changes: diff.changes, compared: diff.compared)
+                    if let line = model.renderPlansAgain {
+                        // The CLI's edit dry run writes nothing (its 52c):
+                        // Render runs the command again, and plans again.
+                        Label(line, systemImage: "arrow.triangle.2.circlepath")
+                            .font(.apogeeSmall)
+                            .foregroundStyle(Palette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             default:
                 Text("New composition").font(.apogeeHeading)
@@ -377,6 +393,7 @@ struct ComposeSheet: View {
                     Button("Render") { model.renderEdit() }
                         .keyboardShortcut(.return, modifiers: .command)
                         .disabled(model.plannedArguments == nil || model.isRunning)
+                        .help(model.renderHelp)
                 default:
                     if model.plansAlone() {
                         Button("Plan first") { model.compose(planFirst: true) }.disabled(model.plannedArguments == nil || model.isRunning)
@@ -523,6 +540,27 @@ struct ComposeSheet: View {
     let model = ComposePreview.editing("sheet-edit")
     ComposeSheet(model: model)
         .task { await model.previewEdit() }
+}
+
+#Preview("An edit's preview, Render's replanning said") {
+    @Previewable @State var model: ComposeViewModel?
+    Group {
+        if let model { ComposeSheet(model: model) } else { ProgressView() }
+    }
+    .task { model = await ComposePreview.previewedEdit("sheet-replanning") }
+}
+
+#Preview("A rendered edit that differs from its preview") {
+    @Previewable @State var model: ComposeViewModel?
+    Group {
+        if let model, let project = model.selectedProject {
+            ProjectPage(model: model, project: project)
+        } else {
+            ProgressView()
+        }
+    }
+    .frame(width: 820, height: 720)
+    .task { model = await ComposePreview.renderedOtherwise("page-replanned") }
 }
 
 #Preview("An edit's preview planning, Stop beside it") {

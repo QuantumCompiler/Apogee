@@ -51,6 +51,11 @@ public struct ProjectRecord: Sendable, Equatable, Identifiable {
     public let created: String?
     public let music: String?
     public let voice: String?
+    /// The backend that planned it, as its `plan.backend` names it (the
+    /// CLI's `video_project.cpp`): an edit's dry run names the one that
+    /// planned the edit, which Render runs again (GUI 6j). `nil` where the
+    /// document names none, as an older binary's may not.
+    public let planner: String?
 
     public var id: String { output }
 
@@ -84,6 +89,7 @@ public struct ProjectRecord: Sendable, Equatable, Identifiable {
         created = value["created"]?.stringValue
         music = value["settings"]?["music"]?.stringValue
         voice = value["settings"]?["voice"]?.stringValue
+        planner = value["plan"]?["backend"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
     }
 
     public var name: String { (output as NSString).lastPathComponent }
@@ -158,6 +164,28 @@ extension MediaLibrary {
             changes.append(SceneChange(index: old.index, narration: old.narration, kind: .removed, moved: false))
         }
         return (changes, true)
+    }
+
+    /// Whether an edit, rendered, changed its project as its preview said it
+    /// would (GUI 6j): the CLI's edit dry run writes nothing (its 52c), so
+    /// Render plans the edit again. Compared scene by scene in order -- each
+    /// scene's source (`from`), its change words and its narration -- and
+    /// the parent's scenes left out: what the diff draws. Never the seeds: a
+    /// re-rolled or new scene draws a fresh one on every run, and the preview
+    /// never promised it.
+    public static func sameChanges(_ rendered: ProjectRecord, as previewed: ProjectRecord) -> Bool {
+        said(rendered) == said(previewed) && (rendered.removed ?? []).sorted() == (previewed.removed ?? []).sorted()
+    }
+
+    /// One scene as an edit's comparison reads it.
+    private struct SceneSaid: Equatable {
+        let from: String?
+        let changes: [String]
+        let narration: String
+    }
+
+    private static func said(_ project: ProjectRecord) -> [SceneSaid] {
+        project.scenes.map { SceneSaid(from: $0.from, changes: $0.changes ?? [], narration: $0.narration) }
     }
 }
 

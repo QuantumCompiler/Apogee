@@ -1945,8 +1945,9 @@ a{color:inherit}a:hover{color:inherit}
 <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-border); color: var(--text-primary)">{{comp.ed.spend}}</div>
 <div style="margin-top: 4px; color: var(--text-tertiary)">Everything unchanged is copied byte for byte, with its record, under its new number.</div>
 </div>
+<sc-if value="{{comp.ed.replans}}"><p style="display: flex; align-items: flex-start; gap: 6px; margin: 10px 0 0; color: {{comp.ed.replansColor}}"><svg class="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" style="flex: 0 0 auto; margin-top: 2px"><path d="M13 8a5 5 0 0 1-9 3M3 8a5 5 0 0 1 9-3"></path><path d="M12 2.5V5H9.5M4 13.5V11h2.5"></path></svg><span>{{comp.ed.replansText}}</span></p></sc-if>
 <label style="display: flex; flex-direction: column; gap: 6px; margin-top: 12px; color: var(--text-secondary)">Save as<input type="text" class="inp mono" value="{{comp.ed.out}}" onChange="{{comp.ed.onOut}}" style="width: 100%"></label>
-<div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px"><button type="button" class="btn-p" onClick="{{comp.ed.render}}">Render as a new video</button><button type="button" class="btn-g" onClick="{{comp.ed.discard}}">Discard</button></div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px"><button type="button" class="btn-p" onClick="{{comp.ed.render}}" title="{{comp.ed.renderTitle}}">Render as a new video</button><button type="button" class="btn-g" onClick="{{comp.ed.discard}}">Discard</button></div>
 </sc-if>
 <h3 class="lbl" style="margin: 18px 0 8px">ON THE COMMAND LINE</h3>
 <div class="mono" style="padding: 8px 10px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); line-height: 1.6; color: var(--text-secondary); overflow-wrap: anywhere">{{comp.ed.command}}</div>
@@ -6618,7 +6619,7 @@ class Component extends DCLogic {
       };
     }
     let pv = { title: '', hasTag: false, tag: '', meta: '', brief: '', status: '', statusColor: '', rendering: false, stopped: false, stop: () => {}, resume: () => {}, showProgress: false, phases: [], hasStopNote: false, stopNote: '', showPlayer: false, pl: player('none', 1, { w: 16, h: 9 }), tl: { pic: [], voice: [], cues: [], hasBed: false, noBed: true, head: 0, legend: '', end: '', note: '' }, scenes: [], files: [], facts: [], chain: [], file: '' };
-    let edv = { locked: true, lockedText: '', text: '', onText: () => {}, textNote: '', redoText: '', redoColor: '', voice: '', onVoice: () => {}, pipeline: '', onPipeline: () => {}, music: '', musicOpts: [], onMusic: () => {}, captions: true, captionsLabel: '', toggleCaptions: () => {}, notPreviewing: true, previewing: false, previewingText: '', preview: () => {}, cantPreview: true, previewNote: '', failed: false, failText: '', shown: false, head: '', diff: [], notes: [], spend: '', out: '', onOut: () => {}, render: () => {}, discard: () => {}, command: '' };
+    let edv = { locked: true, lockedText: '', text: '', onText: () => {}, textNote: '', redoText: '', redoColor: '', voice: '', onVoice: () => {}, pipeline: '', onPipeline: () => {}, music: '', musicOpts: [], onMusic: () => {}, captions: true, captionsLabel: '', toggleCaptions: () => {}, notPreviewing: true, previewing: false, previewingText: '', preview: () => {}, cantPreview: true, previewNote: '', failed: false, failText: '', shown: false, head: '', diff: [], notes: [], spend: '', replans: false, replansText: '', replansColor: '', renderTitle: '', out: '', onOut: () => {}, render: () => {}, discard: () => {}, command: '' };
     if (pj) {
       const times = this.projTimes(pj);
       const total = times.total;
@@ -6845,6 +6846,14 @@ class Component extends DCLogic {
         diff: diff,
         notes: notes.map((x) => ({ text: x })),
         spend: spend,
+        /* GUI 6j: the edit's dry run writes nothing (the CLI's 52c), so
+           Render runs the command again and its planner plans the edit
+           again -- the preview's plan.backend names it. A re-roll alone
+           plans nothing, so it says nothing. */
+        replans: ed.stage === 'shown' && !!pvw && !pvw.failed && !!ed.text.trim(),
+        replansText: 'Render plans the edit again with ' + planM.name + ': what renders can differ from this preview, and the planner is called a second time.',
+        replansColor: planM.kind === 'api' ? 'var(--model-api)' : 'var(--text-secondary)',
+        renderTitle: ed.text.trim() ? 'Plans the edit again with ' + planM.name + ', then renders it: it can differ from this preview' : 'Nothing is planned: only what changed renders again',
         out: edOut,
         onOut: (e) => { const st = this.state; const cur = st.ed && st.ed.projId === pj.id ? st.ed : this.freshEdit(pj); this.setState({ ed: Object.assign({}, cur, { out: e.target.value }) }); },
         render: () => {

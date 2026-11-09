@@ -464,3 +464,239 @@ struct ComposeCaptionsTests {
         #expect(model.plannedOutput?.lastPathComponent == "the-tides-twice-a-day.mp4", "no captions, no .srt to keep")
     }
 }
+
+/// GUI 6j: the CLI's edit dry run writes nothing (its 52c), so Render runs
+/// the command again and its planner plans the edit again. Over the edit's
+/// dry runs recorded on a mock planner (tests/business/media/Fixtures/
+/// compose-edit-*): the sheet says it, a preview for other arguments goes,
+/// and the page says where the render's plan came out otherwise.
+@Suite("ComposeRenderPlansAgain", .timeLimit(.minutes(1)))
+@MainActor
+struct ComposeRenderPlansAgainTests {
+    static let instruction = "make the second scene the moon"
+    static let replanning =
+        "Render plans the edit again with planner: what renders can differ from this preview, and the planner is called a second time."
+
+    /// A recorded document with its home moved to `folder`.
+    static func relocated(_ name: String, to folder: URL) -> String {
+        Recorded.media(name).replacingOccurrences(of: "/Users/someone/Movies/Apogee", with: folder.path)
+    }
+
+    /// A recorded dry run's project as its render saves it: done, each scene
+    /// spoken and rendered, its sources and changes as the dry run wrote them.
+    static func made(_ document: String) -> String {
+        document.replacingOccurrences(of: #""status":"planned""#, with: #""status":"done""#)
+            .replacingOccurrences(of: #""clip":null"#, with: #""clip":{"file":"/s/clip.mp4"}"#)
+            .replacingOccurrences(of: #""voice":null"#, with: #""voice":{"file":"/s/voice.wav"}"#)
+    }
+
+    /// The recorded parent, made, open in the edit sheet with `instruction`
+    /// and `redo`.
+    func editing(_ folder: URL, jobs: ScriptedJobs, toasts: Toasts = Toasts(), instruction: String = instruction, redo: Set<Int> = [])
+        throws -> ComposeViewModel
+    {
+        let parent = folder.appendingPathComponent("tides.mp4").path
+        try Self.made(Self.relocated("compose-edit-parent.json", to: folder)).write(toFile: parent + ".json", atomically: true, encoding: .utf8)
+        let model = ComposeViewModel(starter: jobs, pollInterval: .milliseconds(20))
+        model.folders = { [folder] }
+        model.say = { toasts.say($0) }
+        model.connect(binary: Recorded.binary)
+        let project = try #require(model.projects.first)
+        model.edit(project)
+        model.form.instruction = instruction
+        model.form.redo = redo
+        return model
+    }
+
+    /// Previews the sheet's edit, the dry run printing `document`.
+    func preview(_ model: ComposeViewModel, _ job: ScriptedJob, printing document: String) async {
+        let previewing = Task { await model.previewEdit() }
+        _ = await eventually { model.previewing }
+        job.replay(stdout: document, status: 0, streaming: false)
+        await previewing.value
+    }
+
+    @Test("a drawn preview says Render plans again, naming plan.backend's planner; without one, the line without the name")
+    func lineNamesThePlanner() async throws {
+        let folder = try Recorded.folder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let job = ScriptedJob()
+        let model = try editing(folder, jobs: ScriptedJobs([job]))
+        #expect(model.renderPlansAgain == nil, "nothing said before a preview")
+        #expect(model.renderHelp == "Plans the edit and renders it, in one run")
+        await preview(model, job, printing: Self.relocated("compose-edit-preview.json", to: folder))
+        #expect(model.previewDiff?.changes.map(\.kind) == [.unchanged, .changed(["prompt"])])
+        #expect(model.renderPlansAgain == Self.replanning)
+        #expect(model.renderHelp == "Plans the edit again with planner, then renders it: it can differ from this preview")
+        // An older document, naming no planner.
+        let older = ScriptedJob()
+        let unnamed = try editing(folder, jobs: ScriptedJobs([older]))
+        await preview(unnamed, older, printing: Self.relocated("compose-edit-preview.json", to: folder)
+            .replacingOccurrences(of: #""plan":{"attempts":1,"backend":"planner"},"#, with: ""))
+        #expect(unnamed.previewDiff != nil)
+        #expect(unnamed.renderPlansAgain == "Render plans the edit again: what renders can differ from this preview.")
+    }
+
+    @Test("a re-roll alone plans nothing: its preview stands, and no line says Render plans again")
+    func redoAloneSaysNoReplan() async throws {
+        let folder = try Recorded.folder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let job = ScriptedJob()
+        let model = try editing(folder, jobs: ScriptedJobs([job]), instruction: "", redo: [2])
+        await preview(model, job, printing: Self.relocated("compose-edit-redo.json", to: folder))
+        #expect(model.previewDiff?.changes.map(\.kind) == [.unchanged, .changed(["seed"])])
+        #expect(model.renderPlansAgain == nil)
+        #expect(model.renderHelp == "Renders the scenes chosen again on fresh seeds; nothing is planned")
+    }
+
+    @Test("a preview, then the instruction changed: the diff and the line go -- and stay gone when it is typed back")
+    func instructionChangeDropsThePreview() async throws {
+        let folder = try Recorded.folder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let job = ScriptedJob()
+        let model = try editing(folder, jobs: ScriptedJobs([job]))
+        await preview(model, job, printing: Self.relocated("compose-edit-preview.json", to: folder))
+        #expect(model.previewDiff != nil)
+        model.form.instruction = "make the first scene the moon"
+        #expect(model.preview == nil)
+        #expect(model.previewDiff == nil)
+        #expect(model.renderPlansAgain == nil)
+        model.form.instruction = Self.instruction
+        #expect(model.previewDiff == nil, "a dropped preview is planned again, never brought back")
+    }
+
+    @Test("a preview, then a re-roll toggled: the diff and the line go")
+    func redoToggleDropsThePreview() async throws {
+        let folder = try Recorded.folder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let job = ScriptedJob()
+        let model = try editing(folder, jobs: ScriptedJobs([job]))
+        await preview(model, job, printing: Self.relocated("compose-edit-preview.json", to: folder))
+        #expect(model.renderPlansAgain == Self.replanning)
+        model.form.redo.insert(1)
+        #expect(model.previewDiff == nil)
+        #expect(model.renderPlansAgain == nil)
+    }
+
+    @Test("typed into while it planned: the plan lands for the earlier words, so it is dropped and said")
+    func changedWhilePlanning() async throws {
+        let folder = try Recorded.folder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let job = ScriptedJob()
+        let toasts = Toasts()
+        let model = try editing(folder, jobs: ScriptedJobs([job]), toasts: toasts)
+        let previewing = Task { await model.previewEdit() }
+        #expect(await eventually { model.previewing })
+        model.form.instruction = Self.instruction + ", at night"
+        job.replay(stdout: Self.relocated("compose-edit-preview.json", to: folder), status: 0, streaming: false)
+        await previewing.value
+        #expect(model.previewDiff == nil)
+        #expect(toasts.contain("The edit changed while it was planned"))
+    }
+
+    @Test("the sheet closed while it planned -- Cancel, or another sheet opened: the plan is dropped, and nothing is said")
+    func closedWhilePlanning() async throws {
+        let folder = try Recorded.folder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let job = ScriptedJob()
+        let toasts = Toasts()
+        let model = try editing(folder, jobs: ScriptedJobs([job]), toasts: toasts)
+        let previewing = Task { await model.previewEdit() }
+        #expect(await eventually { model.previewing })
+        model.sheet = nil
+        job.replay(stdout: Self.relocated("compose-edit-preview.json", to: folder), status: 0, streaming: false)
+        await previewing.value
+        #expect(model.preview == nil)
+        #expect(model.previewDiff == nil)
+        #expect(!toasts.contain("The edit changed"), "nothing changed: the person closed the sheet")
+        // Closed, then the new sheet opened before the planner answered.
+        let later = ScriptedJob()
+        let other = try editing(folder, jobs: ScriptedJobs([later]), toasts: toasts)
+        let planning = Task { await other.previewEdit() }
+        #expect(await eventually { other.previewing })
+        other.sheet = nil
+        other.newComposition()
+        later.replay(stdout: Self.relocated("compose-edit-preview.json", to: folder), status: 0, streaming: false)
+        await planning.value
+        #expect(other.preview == nil)
+        #expect(!toasts.contain("The edit changed"))
+    }
+
+    /// A preview, then Render, its document `rendered` written beside the
+    /// output as the CLI saves it: the view-model, the output, the render's argv.
+    func rendered(_ folder: URL, preview document: String, rendered: String) async throws -> (ComposeViewModel, String, [String]?) {
+        let previewJob = ScriptedJob()
+        let render = ScriptedJob()
+        let jobs = ScriptedJobs([previewJob, render])
+        let model = try editing(folder, jobs: jobs)
+        await preview(model, previewJob, printing: Self.relocated(document, to: folder))
+        let output = try #require(model.plannedOutput?.path)
+        model.renderEdit()
+        try Self.made(Self.relocated(rendered, to: folder)).write(toFile: output + ".json", atomically: true, encoding: .utf8)
+        render.end()
+        _ = await eventually { !model.isRunning && model.selectedProject?.output == output }
+        return (model, output, jobs.arguments(1))
+    }
+
+    @Test("rendered, the plan made again came out otherwise: the page says its changes differ -- and Render's command is today's")
+    func pageSaysTheRenderDiffers() async throws {
+        let folder = try Recorded.folder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let (model, output, argv) = try await rendered(folder, preview: "compose-edit-preview.json", rendered: "compose-edit-replanned.json")
+        let parent = folder.appendingPathComponent("tides.mp4").path
+        #expect(argv == ["video", "compose", "--from", parent, "--edit", Self.instruction, "-o", output], "the render's argv, unchanged")
+        let project = try #require(model.selectedProject)
+        #expect(project.status == "done")
+        #expect(model.diff(project)?.changes.map(\.kind) == [.changed(["narration"]), .unchanged], "the page draws the render's own diff")
+        #expect(model.renderDiffers(project) == "The render planned again, and its changes differ from the preview")
+    }
+
+    @Test("rendered as previewed: nothing extra is said")
+    func pageSaysNothingWhenTheyMatch() async throws {
+        let folder = try Recorded.folder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let (model, _, _) = try await rendered(folder, preview: "compose-edit-preview.json", rendered: "compose-edit-preview.json")
+        let project = try #require(model.selectedProject)
+        #expect(model.renderDiffers(project) == nil)
+    }
+
+    @Test("a re-rolled scene's seed differs, its words match: nothing extra is said")
+    func seedOnlyDifferenceSaysNothing() async throws {
+        let folder = try Recorded.folder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let previewJob = ScriptedJob()
+        let render = ScriptedJob()
+        let jobs = ScriptedJobs([previewJob, render])
+        let model = try editing(folder, jobs: jobs, redo: [1])
+        await preview(model, previewJob, printing: Self.relocated("compose-edit-reroll-preview.json", to: folder))
+        #expect(model.renderPlansAgain == Self.replanning, "an instruction with a re-roll plans again")
+        let output = try #require(model.plannedOutput?.path)
+        model.renderEdit()
+        try Self.made(Self.relocated("compose-edit-reroll-again.json", to: folder)).write(toFile: output + ".json", atomically: true, encoding: .utf8)
+        render.end()
+        #expect(await eventually { !model.isRunning && model.selectedProject?.output == output })
+        let project = try #require(model.selectedProject)
+        #expect(project.scenes.first?.seed != ProjectRecord(JSONValue.parse(Recorded.media("compose-edit-reroll-preview.json"))!)?.scenes.first?.seed)
+        #expect(model.renderDiffers(project) == nil)
+    }
+
+    @Test("a render not started from the drawn preview -- none, or one dropped by a change -- gets no line")
+    func renderWithoutAPreviewSaysNothing() async throws {
+        let folder = try Recorded.folder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let previewJob = ScriptedJob()
+        let render = ScriptedJob()
+        let jobs = ScriptedJobs([previewJob, render])
+        let model = try editing(folder, jobs: jobs)
+        await preview(model, previewJob, printing: Self.relocated("compose-edit-preview.json", to: folder))
+        model.form.instruction = "make the first scene the moon"
+        let output = try #require(model.plannedOutput?.path)
+        model.renderEdit()
+        #expect(jobs.arguments(1)?.contains("make the first scene the moon") == true)
+        try Self.made(Self.relocated("compose-edit-replanned.json", to: folder)).write(toFile: output + ".json", atomically: true, encoding: .utf8)
+        render.end()
+        #expect(await eventually { !model.isRunning && model.selectedProject?.output == output })
+        let project = try #require(model.selectedProject)
+        #expect(model.renderDiffers(project) == nil, "no preview stood beside this Render")
+    }
+}

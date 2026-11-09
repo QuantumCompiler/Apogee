@@ -223,6 +223,60 @@ enum ComposePreview {
         return model
     }
 
+    // MARK: - An edit planned again (GUI 6j)
+
+    /// A recorded document's home, `/Users/someone/Movies/Apogee`, moved to `folder`.
+    static func relocated(_ document: String, to folder: URL) -> String {
+        document.replacingOccurrences(of: "/Users/someone/Movies/Apogee", with: folder.path)
+    }
+
+    /// The recorded edits' parent placed in `folder` as `tides.mp4`: the
+    /// plan they were made over, marked done and its scenes made, as its
+    /// render would leave it.
+    static func placeEditParent(in folder: URL) {
+        let output = folder.appendingPathComponent("tides.mp4").path
+        try? asRendered(relocated(ComposeDocuments.composeEditParent, to: folder))
+            .write(toFile: output + ".json", atomically: true, encoding: .utf8)
+    }
+
+    /// A recorded dry run's project as its render saves it: done, each scene
+    /// spoken and rendered. The scenes' sources and changes stand as the
+    /// dry run wrote them -- the CLI records them before its first save.
+    static func asRendered(_ document: String) -> String {
+        document.replacingOccurrences(of: #""status":"planned""#, with: #""status":"done""#)
+            .replacingOccurrences(of: #""clip":null"#, with: #""clip":{"file":"/s/clip.mp4"}"#)
+            .replacingOccurrences(of: #""voice":null"#, with: #""voice":{"file":"/s/voice.wav"}"#)
+    }
+
+    /// The recorded parent open in the edit sheet with the recordings'
+    /// instruction, its preview drawn from the edit's recorded dry run --
+    /// which names its planner -- and `then` the starts after it.
+    static func previewedEdit(_ name: String, then: [PreviewRun] = []) async -> ComposeViewModel {
+        let folder = folder(name)
+        placeEditParent(in: folder)
+        let preview = PreviewRun(stdout: relocated(ComposeDocuments.composeEditPreview, to: folder))
+        let model = compositions(folder, selecting: "tides.mp4", starter: PreviewRuns([preview] + then))
+        if let project = model.selectedProject {
+            model.edit(project)
+            model.form.instruction = "make the second scene the moon"
+        }
+        await model.previewEdit()
+        return model
+    }
+
+    /// That preview rendered, the render planning again with the planner
+    /// answering otherwise: the same command's second recorded dry run, as
+    /// its render saves it, beside the output -- its page open.
+    static func renderedOtherwise(_ name: String) async -> ComposeViewModel {
+        let model = await previewedEdit(name, then: [PreviewRun()])
+        guard let output = model.plannedOutput?.path, let folder = model.folders().first else { return model }
+        model.renderEdit()
+        try? asRendered(relocated(ComposeDocuments.composeEditReplanned, to: folder))
+            .write(toFile: output + ".json", atomically: true, encoding: .utf8)
+        await until { !model.isRunning }
+        return model
+    }
+
     /// A made composition beside two the scan passes over: a document cut
     /// short, and a project moved here from another folder, naming its old place.
     static func skipping(_ name: String) -> ComposeViewModel {

@@ -22,6 +22,12 @@ import Observation
 /// preview is a run of the place's -- Stop reaches it, a time limit bounds
 /// it, nothing renders beside it. The scan's passed-over projects are
 /// listed, and the sheet says before the run whether the captions burn in.
+///
+/// Since GUI 6j the preview is said for what it is: the CLI's edit dry run
+/// writes nothing (its 52c), so Render runs the command again and its
+/// planner plans the edit again. The sheet says so beside Render, a preview
+/// planned for other arguments is dropped, and an edit's page says when the
+/// render's own plan came out otherwise than the preview drawn beside it.
 @MainActor
 @Observable
 public final class ComposeViewModel {
@@ -38,8 +44,13 @@ public final class ComposeViewModel {
     public private(set) var skipped: [MediaLibrary.Skipped] = []
     public private(set) var selected: String?
     public var sheet: Sheet?
-    public var form = ComposeForm()
-    /// The edit's preview: the edited project a dry run printed, and its diff.
+    /// The sheet's form; a change that alters the command Render would run
+    /// drops the preview planned for the earlier one (GUI 6j).
+    public var form = ComposeForm() {
+        didSet { dropStalePreview() }
+    }
+    /// The edit's preview: the edited project a dry run printed, and its diff
+    /// -- only while the form still makes the command it was planned for.
     public private(set) var preview: ProjectRecord?
     /// How long the edit's dry run is given before it is stopped: one
     /// planning call, a planner that never answers bounded and said.
@@ -97,6 +108,14 @@ public final class ComposeViewModel {
     private var installJob: (any JobRunning)?
     /// The arguments of each composition's last run, to resume it exactly.
     private var commands: [String: [String]] = [:]
+    /// The command the drawn preview was planned for: Render's own, without
+    /// the dry run (GUI 6j).
+    private var previewedArguments: [String]?
+    /// Each edit rendered from the preview drawn beside its Render, by its
+    /// output: that preview, kept in memory for this run of the app alone --
+    /// never written -- so the page can say where the render's own plan came
+    /// out otherwise (GUI 6j).
+    private var previewedRenders: [String: ProjectRecord] = [:]
 
     /// A refused composition, run again once its install is in -- and only then.
     private struct Retry {
@@ -165,6 +184,7 @@ public final class ComposeViewModel {
     public func newComposition() {
         form = ComposeForm()
         preview = nil
+        previewedArguments = nil
         sheet = .new
         Task { await readStore() }
     }
@@ -246,6 +266,7 @@ public final class ComposeViewModel {
         guard !waitsForTheInstall() else { return }
         if let folder = outputFolder { try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
         sheet = nil
+        previewedRenders[output] = nil
         start(planFirst && plansAlone() ? Argv.adding(["--dry-run"], to: arguments) : arguments, output: output, resumable: arguments)
     }
 
@@ -428,6 +449,7 @@ public final class ComposeViewModel {
         form = ComposeForm()
         form.from = project.output
         preview = nil
+        previewedArguments = nil
         sheet = .edit(project)
     }
 
@@ -435,9 +457,16 @@ public final class ComposeViewModel {
     /// the diff from its own comparison (52c), or the documents compared.
     /// A run of the place's: never beside a composition or an install, Stop
     /// reaches it, and a planner that has not answered within `previewLimit`
-    /// is stopped and said.
+    /// is stopped and said. A plan that lands once its edit's sheet has
+    /// closed is dropped unsaid; one for words changed meanwhile, said.
     public func previewEdit() async {
-        guard let binary, !isRunning, let arguments = form.arguments(output: plannedOutput?.path ?? "", dryRun: true) else { return }
+        let output = plannedOutput?.path ?? ""
+        guard let binary, !isRunning, let arguments = form.arguments(output: output, dryRun: true) else { return }
+        // What Render would run for this form: the preview is its plan, and
+        // stands only while the form still makes it.
+        let renders = form.arguments(output: output)
+        // The edit it plans: it lands only on that edit's sheet.
+        let from = form.from
         let job = starter.startJob(binary: binary, arguments: Argv.adding(["--output-format", "json"], to: arguments), streaming: false)
         previewJob = job
         previewTimedOut = false
@@ -470,8 +499,20 @@ public final class ComposeViewModel {
             return
         }
         if let value = JSONValue.parse(lines.joined(separator: "\n")), let project = ProjectRecord(value) {
+            // Its sheet closed while it planned -- Cancel, Esc, or another
+            // sheet opened: nothing changed, the person put the edit away, so
+            // the plan is dropped unsaid (GUI 6j).
+            guard case .edit = sheet, form.from == from else {
+                preview = nil
+                previewedArguments = nil
+                return
+            }
             preview = project
+            previewedArguments = renders
             failure = nil
+            // Typed into while it planned: the plan is the earlier words'.
+            dropStalePreview()
+            if preview == nil { say?("The edit changed while it was planned: preview the changes again") }
         } else {
             preview = nil
             failure = end?.stderrTail.lastLine ?? "the edit could not be planned"
@@ -488,19 +529,74 @@ public final class ComposeViewModel {
         return value == 1 ? "1 second" : "\(value.rounded() == value ? String(Int(value)) : String(value)) seconds"
     }
 
-    /// The preview's diff against the project it edits.
+    /// The preview's diff against the project it edits -- only while the
+    /// form still makes the command it was planned for (GUI 6j).
     public var previewDiff: (changes: [SceneChange], compared: Bool)? {
-        guard let preview, case .edit(let parent) = sheet else { return nil }
+        guard let preview, previewStands, case .edit(let parent) = sheet else { return nil }
         return MediaLibrary.diff(edited: preview, parent: parent)
     }
 
+    /// Whether the drawn preview is the plan of the command Render would run
+    /// now: the same instruction, the same re-rolls, the same output.
+    private var previewStands: Bool {
+        guard let previewedArguments, let output = plannedOutput?.path else { return false }
+        return form.arguments(output: output) == previewedArguments
+    }
+
+    /// A preview planned for other arguments, dropped: the sheet offers
+    /// Preview the changes again and draws no diff beside Render (GUI 6j).
+    private func dropStalePreview() {
+        guard preview != nil, !previewStands else { return }
+        preview = nil
+        previewedArguments = nil
+    }
+
+    /// Whether Render's run calls the planner: an edit with an instruction.
+    /// A re-roll alone keeps the scenes as they are, so the CLI plans
+    /// nothing for it (`video_compose.cpp`: the planner only for `--edit`).
+    private var plansAgain: Bool { !form.instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    /// What the edit sheet says under the drawn preview, beside Render (GUI
+    /// 6j): the CLI's edit dry run writes nothing (its 52c), so Render runs
+    /// the command again and plans the edit again -- with the planner the
+    /// preview's `plan.backend` names, where its document names one. `nil`
+    /// with no preview standing, and for a re-roll alone, which plans nothing.
+    public var renderPlansAgain: String? {
+        guard previewDiff != nil, let preview, plansAgain else { return nil }
+        guard let planner = preview.planner else {
+            return "Render plans the edit again: what renders can differ from this preview."
+        }
+        return "Render plans the edit again with \(planner): what renders can differ from this preview, and the planner is called a second time."
+    }
+
+    /// Render's help: what its run does, in brief (GUI 6j).
+    public var renderHelp: String {
+        guard plansAgain else { return "Renders the scenes chosen again on fresh seeds; nothing is planned" }
+        guard previewDiff != nil, let preview else { return "Plans the edit and renders it, in one run" }
+        return "Plans the edit again" + (preview.planner.map { " with \($0)" } ?? "") + ", then renders it: it can differ from this preview"
+    }
+
     /// Renders the edit: the same command, without the dry run -- never
-    /// beside its preview.
+    /// beside its preview. A render with an instruction plans the edit again;
+    /// the preview drawn beside it is kept for the page, in memory alone.
     public func renderEdit() {
         guard !isRunning, let output = plannedOutput?.path, let arguments = form.arguments(output: output) else { return }
+        previewedRenders[output] = plansAgain && previewStands ? preview : nil
         sheet = nil
         preview = nil
+        previewedArguments = nil
         start(arguments, output: output, resumable: arguments)
+    }
+
+    /// What an edit's page says above its diff when the app rendered it from
+    /// the preview drawn beside Render and the render's own plan changed the
+    /// project otherwise (GUI 6j): per scene in order, its source, change
+    /// words and narration, and the scenes left out -- never the seeds. `nil`
+    /// when they match, and for a project the app did not render from a
+    /// preview in this run.
+    public func renderDiffers(_ project: ProjectRecord) -> String? {
+        guard let previewed = previewedRenders[project.output], !MediaLibrary.sameChanges(project, as: previewed) else { return nil }
+        return "The render planned again, and its changes differ from the preview"
     }
 
     /// A project's diff against the one it was edited from.
