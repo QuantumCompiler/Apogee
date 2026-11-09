@@ -84,8 +84,10 @@ public final class GraphViewModel {
     /// A command running now -- an export, a report saved, a delete -- by
     /// what it is doing.
     public private(set) var working: String?
-    /// Why the last of those didn't work, in the CLI's words: said apart
-    /// from the graph's reads, which the place draws.
+    /// Why the last of those didn't work -- or why a clicked node could not
+    /// be explained -- in the CLI's words: said apart from the graph's reads,
+    /// which the place draws (GUI 6h: an explain's failure is the explain's,
+    /// never the canvas's `failure`).
     public private(set) var problem: String?
     public var say: (@MainActor (String) -> Void)?
     /// The binary's vocabulary date, as the app read it at launch
@@ -97,6 +99,11 @@ public final class GraphViewModel {
     private let starter: any JobStarting
     private var binary: URL?
     private var job: (any JobRunning)?
+    /// The clicked node whose explain refusal `problem` says: the selection
+    /// that refusal's alert takes with it when it goes -- its OK, Clear, or
+    /// another act's line in its place -- so a refused node never stays
+    /// highlighted with no card to close (GUI 6h).
+    private var refused: String?
 
     public init(runner: any CommandRunning, starter: any JobStarting) {
         self.runner = runner
@@ -113,11 +120,26 @@ public final class GraphViewModel {
     }
 
     /// The graphs (the binary's own completion of a graph's name -- no read
-    /// lists them), the chosen one's counts, and the question asked again.
+    /// lists them), the chosen one's counts, and the question asked again;
+    /// a node explained before that the graph no longer explains -- one a
+    /// Rebuild removed -- dropped, the CLI's line said once (GUI 6h).
     public func refresh() async {
+        if let dropped = await reread() { say?(dropped) }
+    }
+
+    /// `refresh()`'s reads; the CLI's line for a selected node it could no
+    /// longer explain, for the caller to say -- last, after its own line, so
+    /// the toast that stays is the one saying why the card went.
+    ///
+    /// The re-run search keeps the canvas. A re-explain that fails, whatever
+    /// the reason, drops the selection and its card, so no later refresh
+    /// asks again and raises the same line: the node is explained again by
+    /// a click, never by a refresh. A clicked node whose refusal the alert
+    /// still says is not asked again at all -- the alert already says why.
+    private func reread() async -> String? {
         guard let binary else {
             failure = "Apogee isn't installed, so there is no graph to read."
-            return
+            return nil
         }
         if case .done(let names) = await runner.command(binary: binary, ["__complete", "graph", "stats", ""]) {
             // One candidate a line; a description, where one follows, after a tab.
@@ -129,7 +151,7 @@ public final class GraphViewModel {
         guard let graph else {
             stats = nil
             result = nil
-            return
+            return nil
         }
         let outcome = await runner.read(binary: binary, ["graph", "stats", graph])
         if let document = outcome.document {
@@ -144,7 +166,10 @@ public final class GraphViewModel {
             report = nil
         }
         if result != nil { await search() }
-        if let selected { await explain(selected) }
+        guard let selected, selected != refused, let why = await explain(selected) else { return nil }
+        self.selected = nil
+        explain = nil
+        return why
     }
 
     public func choose(_ graph: String) async {
@@ -177,23 +202,31 @@ public final class GraphViewModel {
 
     /// Explains a node: `graph explain --graph <graph> -- <name>` -- a name
     /// the graph gave it, which may begin with a dash (an Objective-C
-    /// method's `-[Foo bar]`).
+    /// method's `-[Foo bar]`). A refusal is said in the `problem` alert, in
+    /// the CLI's words, and the canvas kept; the node stays highlighted
+    /// while the alert is up, and its OK drops the selection (GUI 6h).
     public func select(_ name: String) async {
         selected = name
-        await explain(name)
+        if let why = await explain(name) {
+            problem = why
+            refused = name
+        }
     }
 
-    private func explain(_ name: String) async {
-        guard let binary, let graph else { return }
+    /// `name`'s explain card, landing only while `name` is still the
+    /// selection; why there is none, in the CLI's words -- the explain's own,
+    /// never the canvas's `failure` (GUI 6h). nil once explained, or when
+    /// another node was chosen meanwhile.
+    private func explain(_ name: String) async -> String? {
+        guard let binary, let graph else { return nil }
         let outcome = await runner.read(binary: binary, ["graph", "explain", "--graph", graph] + Argv.text(name))
-        guard selected == name else { return }
+        guard selected == name else { return nil }
         if let document = outcome.document, let explained = GraphExplain(document: document) {
             explain = explained
-            failure = nil
-        } else {
-            explain = nil
-            failure = outcome.failure ?? "\(name) could not be explained"
+            return nil
         }
+        explain = nil
+        return outcome.failure ?? "\(name) could not be explained"
     }
 
     /// Walks to a neighbour: it is explained, and -- when the picture does not
@@ -206,9 +239,12 @@ public final class GraphViewModel {
         await select(name)
     }
 
+    /// The selection and its card closed -- and a clicked node's explain
+    /// refusal with them (GUI 6h).
     public func clearSelection() {
         selected = nil
         explain = nil
+        if refused != nil { dismissProblem() }
     }
 
     // MARK: - Building
@@ -247,16 +283,17 @@ public final class GraphViewModel {
             self.job = nil
             let progress = building
             building = nil
-            await refresh()
+            let dropped = await reread()
             if let finished {
                 finished(progress)
-                return
+            } else {
+                switch progress?.status {
+                case .done: say?(progress?.notices.last ?? "Built")
+                case .failed(let message): failure = message
+                default: break
+                }
             }
-            switch progress?.status {
-            case .done: say?(progress?.notices.last ?? "Built")
-            case .failed(let message): failure = message
-            default: break
-            }
+            if let dropped { say?(dropped) }
         }
     }
 
@@ -360,17 +397,27 @@ public final class GraphViewModel {
         working = doing
         let outcome = await runner.command(binary: binary, arguments)
         working = nil
-        await refresh()
+        let dropped = await reread()
         if let failure = outcome.failure {
+            dismissProblem()
             problem = failure
         } else if case .done(let stdout) = outcome {
-            problem = nil
+            dismissProblem()
             say?(stdout.split(whereSeparator: \.isNewline).first.map(String.init) ?? "Done")
         }
+        if let dropped { say?(dropped) }
     }
 
+    /// The alert gone -- its OK, or another line taking its place. A clicked
+    /// node's explain refusal takes that node's selection with it: the OK
+    /// is that refusal's Clear (GUI 6h).
     public func dismissProblem() {
+        if let refused, selected == refused {
+            selected = nil
+            explain = nil
+        }
         problem = nil
+        refused = nil
     }
 
     public var isBuilding: Bool { building != nil }

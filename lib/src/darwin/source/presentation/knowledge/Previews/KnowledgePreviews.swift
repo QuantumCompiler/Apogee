@@ -98,6 +98,14 @@ enum KnowledgePreview {
     /// `embed info notes`, read.
     static var notes: CollectionInfo { CollectionInfo(document: ReadDocument(text: KnowledgeDocuments.collectionInfo)!)! }
 
+    /// `embed info notes` on the branch's `apogee-dev` over GUI 6h's sandbox:
+    /// three notes ingested with `--retriever vector` on a mock embedder, read.
+    static var vectorised: CollectionInfo { CollectionInfo(document: ReadDocument(text: KnowledgeDocuments.collectionInfoVectors)!)! }
+
+    /// `embed info mixed` on that sandbox: three notes under one mock
+    /// embedder, a fourth under another, read.
+    static var mixed: CollectionInfo { CollectionInfo(document: ReadDocument(text: KnowledgeDocuments.collectionInfoVectorsMixed)!)! }
+
     /// A run's progress once it has said `updates`, folded as the
     /// view-models fold a job's.
     static func progress(_ updates: [JobUpdate]) -> JobProgress {

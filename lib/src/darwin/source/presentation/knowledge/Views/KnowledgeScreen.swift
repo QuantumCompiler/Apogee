@@ -90,13 +90,16 @@ struct RecordsView: View {
                     TextField("Ask the records", text: $model.question)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit { Task { await model.search() } }
-                    if model.query != nil { Button("Clear") { model.clearSearch() } }
+                    if model.asked != nil { Button("Clear") { model.clearSearch() } }
                     Picker("Branch", selection: $model.branch) {
                         Text("Every branch").tag(String?.none)
                         ForEach(KnowledgeRecord.statuses, id: \.self) { Text($0.capitalized).tag(String?.some($0)) }
                     }
                     .labelsHidden()
                     .fixedSize()
+                    // A question standing is asked again under the branch
+                    // picked, never left answering the old one (GUI 6h).
+                    .onChange(of: model.branch) { Task { await model.branchChanged() } }
                 }
                 .padding(Spacing.m)
                 if let run = model.run {
@@ -670,6 +673,16 @@ struct IngestSheet: View {
 
 #Preview("A text-only collection") {
     CollectionPage(model: KnowledgePreview.collections(), info: KnowledgePreview.notes)
+        .frame(width: 720, height: 560)
+}
+
+#Preview("A vectorised collection: its vectors, their width and model") {
+    CollectionPage(model: KnowledgePreview.collections(), info: KnowledgePreview.vectorised)
+        .frame(width: 720, height: 560)
+}
+
+#Preview("A collection whose vectors come from two models") {
+    CollectionPage(model: KnowledgePreview.collections(), info: KnowledgePreview.mixed)
         .frame(width: 720, height: 560)
 }
 

@@ -60,6 +60,54 @@ struct ReviewCorrectnessTests {
         #expect(model.skillsText?.hasPrefix("The review skills could not be read: it did not finish within") == true)
     }
 
+    /// GUI 6h: each click starts its own read, so a slow one can answer
+    /// after the next click. The documents are the branch's binary's own
+    /// (`review skills show security | ai-ml --output-format json`).
+    @Test("a slow skill reply is dropped: the detail is the highlighted skill's, or nothing while it is read")
+    func slowSkillReplyDropped() async throws {
+        let (model, runner) = await model()
+        runner.reading(["review", "skills", "show", "security"], fixture("review-skill-show"))
+        runner.reading(["review", "skills", "show", "ai-ml"], fixture("review-skill-show-ai-ml"))
+        await model.show(skill: "ai-ml")
+        #expect(model.shownSkill?.name == "ai-ml")
+        let slow = runner.holding(["review", "skills", "show", "security"])
+        let security = Task { await model.show(skill: "security") }
+        #expect(await eventually { slow.arrived == 1 })
+        #expect(model.selectedSkill == "security" && model.shownSkill == nil, "ai-ml's detail goes at the click on security")
+        let answered = runner.holding(["review", "skills", "show", "ai-ml"])
+        let aiML = Task { await model.show(skill: "ai-ml") }
+        #expect(await eventually { answered.arrived == 1 })
+        #expect(model.selectedSkill == "ai-ml")
+        #expect(model.shownSkill == nil, "between the click and ai-ml's reply: nothing, never security's")
+        answered.open()
+        await aiML.value
+        #expect(model.shownSkill?.name == "ai-ml")
+        slow.open()
+        await security.value
+        #expect(model.selectedSkill == "ai-ml")
+        #expect(model.shownSkill?.name == "ai-ml", "security's late reply never lands under ai-ml")
+        #expect(model.shownSkill?.description.hasPrefix("Machine-learning code") == true)
+        #expect(model.failure == nil)
+    }
+
+    @Test("a slow skill read's failure is dropped once another skill is chosen; its own still says it")
+    func slowSkillFailureDropped() async throws {
+        let (model, runner) = await model()
+        runner.reading(["review", "skills", "show", "ai-ml"], fixture("review-skill-show-ai-ml"))
+        runner.failing(["review", "skills", "show", "security"], .timedOut(after: .seconds(60), stderrTail: BoundedTail()))
+        let slow = runner.holding(["review", "skills", "show", "security"])
+        let security = Task { await model.show(skill: "security") }
+        #expect(await eventually { slow.arrived == 1 })
+        await model.show(skill: "ai-ml")
+        #expect(model.shownSkill?.name == "ai-ml")
+        slow.open()
+        await security.value
+        #expect(model.failure == nil, "security's failure is not raised over ai-ml")
+        #expect(model.shownSkill?.name == "ai-ml")
+        await model.show(skill: "security")
+        #expect(model.shownSkill == nil && model.failure?.hasPrefix("it did not finish within") == true, "asked while chosen, it is said")
+    }
+
     @Test("a target pins its lenses: the sheet offers the skills read, and the ones ticked are its --skills")
     func targetPinsLenses() async {
         let (model, _) = await model()

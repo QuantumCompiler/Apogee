@@ -243,10 +243,17 @@ public final class ReviewViewModel {
     }
 
     /// `review skills show <name>`: the lens whole, its prompt read-only.
+    /// Another skill's detail is cleared at the click, so the panel never
+    /// shows the last one while this one is read, and the reply -- or its
+    /// failure -- lands only while `name` is still the one chosen: a slow
+    /// read answered after the next click is dropped, as the graph's explain
+    /// and the collections' reads drop theirs (GUI 4h, 6h).
     public func show(skill name: String) async {
         selectedSkill = name
+        if shownSkill?.name != name { shownSkill = nil }
         guard let binary else { return }
         let outcome = await runner.read(binary: binary, ["review", "skills", "show", name])
+        guard selectedSkill == name else { return }
         if let document = outcome.document, let skill = ReviewSkill(document: document) {
             shownSkill = skill
         } else {

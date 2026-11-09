@@ -591,6 +591,18 @@ struct NewGraphSheet: View {
         .task { await graph.connect(binary: previewBinary) }
 }
 
+#Preview("A node's explain refused, in the CLI's words: the canvas kept") {
+    let graph = GraphPreview.graph(GraphPreview.explainRefused)
+    GraphScreen(model: graph, shell: GraphPreview.shell())
+        .frame(width: 1200, height: 720)
+        .task {
+            await graph.connect(binary: previewBinary)
+            graph.question = GraphPreview.question
+            await graph.search()
+            await graph.select("ingest.runner.helper")
+        }
+}
+
 #Preview("An export refused, in the CLI's words") {
     let graph = GraphPreview.graph(GraphPreview.exportRefused)
     GraphScreen(model: graph, shell: GraphPreview.shell())

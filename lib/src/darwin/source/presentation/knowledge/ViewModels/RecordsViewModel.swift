@@ -62,12 +62,23 @@ public final class RecordsViewModel {
         public let state: Raw
     }
 
+    /// A question as it was asked: its text and the branch it was asked
+    /// under (nil for every branch) -- what the matches shown answer, and
+    /// what a Branch change asks again (GUI 6h).
+    public struct Asked: Equatable, Sendable {
+        public let question: String
+        public let branch: String?
+    }
+
     public private(set) var records: [KnowledgeRecord] = []
     public private(set) var listing: Listing = .notRead
     /// The branch the list shows; nil for every branch.
     public var branch: String?
     public var question = ""
     public private(set) var query: KnowledgeQuery?
+    /// The question standing -- answered, or being asked -- and its branch;
+    /// nil with no question asked, or once cleared.
+    public private(set) var asked: Asked?
     public private(set) var selected: String?
     public var pendingDelete: KnowledgeRecord?
     public var captureForm = CaptureForm()
@@ -89,6 +100,9 @@ public final class RecordsViewModel {
     private let starter: any JobStarting
     private var binary: URL?
     private var job: (any JobRunning)?
+    /// Counts the questions asked: a reply lands only if no question was
+    /// asked, and no search cleared, since its own.
+    private var asks = 0
 
     public init(runner: any CommandRunning, starter: any JobStarting) {
         self.runner = runner
@@ -202,8 +216,31 @@ public final class RecordsViewModel {
     /// `--output-format`. The question after `--` (`Argv`, GUI 4g).
     public func search() async {
         let question = question.trimmingCharacters(in: .whitespaces)
-        guard let binary, !question.isEmpty else { return }
-        let outcome = await runner.command(binary: binary, ["knowledge", "query", "--status", branch ?? "", "--json"] + Argv.text(question))
+        guard binary != nil, !question.isEmpty else { return }
+        await ask(Asked(question: question, branch: branch))
+    }
+
+    /// The Branch picker moved (GUI 6h): a question standing is asked again
+    /// under the new branch -- its old matches cleared first, so they never
+    /// stand under the new label -- and with none, the list just filters.
+    public func branchChanged() async {
+        guard let asked, asked.branch != branch else { return }
+        query = nil
+        await ask(Asked(question: asked.question, branch: branch))
+    }
+
+    /// Asks `asked` and lands its reply -- or its failure -- only while it
+    /// is still the question standing and its branch the one picked: a reply
+    /// held past a later question, a Branch change or a Clear is dropped, as
+    /// the collections' search drops one asked of another collection (4h).
+    private func ask(_ asked: Asked) async {
+        guard let binary else { return }
+        asks += 1
+        let mine = asks
+        self.asked = asked
+        let outcome = await runner.command(
+            binary: binary, ["knowledge", "query", "--status", asked.branch ?? "", "--json"] + Argv.text(asked.question))
+        guard asks == mine, self.asked == asked, branch == asked.branch else { return }
         if case .done(let stdout) = outcome, let document = ReadDocument(text: stdout), let query = KnowledgeQuery(document: document) {
             self.query = query
             failure = nil
@@ -216,6 +253,8 @@ public final class RecordsViewModel {
     public func clearSearch() {
         query = nil
         question = ""
+        asked = nil
+        asks += 1
     }
 
     /// A score as the CLI's retriever scores it.

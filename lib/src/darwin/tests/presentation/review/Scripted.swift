@@ -24,13 +24,22 @@ final class ScriptedRunner: CommandRunning, @unchecked Sendable {
     }
 
     private let readFailures = Mutex<[([String], ReadOutcome)]>([])
+    private let gates = Mutex<[([String], Gate)]>([])
 
     func failing(_ prefix: [String], _ outcome: ReadOutcome) {
         readFailures.withLock { $0.insert((prefix, outcome), at: 0) }
     }
 
+    /// Holds every later read starting with `prefix` at a gate the test opens.
+    func holding(_ prefix: [String]) -> Gate {
+        let gate = Gate()
+        gates.withLock { $0.insert((prefix, gate), at: 0) }
+        return gate
+    }
+
     func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
         log.withLock { $0.append("read " + arguments.joined(separator: "|")) }
+        await gates.withLock { rules in rules.first { arguments.starts(with: $0.0) }?.1 }?.pass()
         if let failure = readFailures.withLock({ rules in rules.first { arguments.starts(with: $0.0) }?.1 }) { return failure }
         return reads.withLock { rules in rules.first { arguments.starts(with: $0.0) } }.map { .document(ReadDocument(text: $0.1)!) }
             ?? .couldNotStart("no scripted read for \(arguments)")
@@ -39,6 +48,42 @@ final class ScriptedRunner: CommandRunning, @unchecked Sendable {
     func command(binary: URL, _ arguments: [String]) async -> CommandOutcome {
         log.withLock { $0.append("run " + arguments.joined(separator: "|")) }
         return answers.withLock { rules in rules.first { arguments.starts(with: $0.0) }?.1 } ?? .done(stdout: "")
+    }
+}
+
+/// A read held until the test lets it go: a slow binary, caught mid-act.
+/// `arrived` counts the reads that reached it.
+final class Gate: @unchecked Sendable {
+    private struct State {
+        var arrived = 0
+        var open = false
+        var waiting: [CheckedContinuation<Void, Never>] = []
+    }
+
+    private let state = Mutex(State())
+
+    var arrived: Int { state.withLock { $0.arrived } }
+
+    func pass() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let go = state.withLock { state -> Bool in
+                state.arrived += 1
+                if state.open { return true }
+                state.waiting.append(continuation)
+                return false
+            }
+            if go { continuation.resume() }
+        }
+    }
+
+    func open() {
+        let waiting = state.withLock { state -> [CheckedContinuation<Void, Never>] in
+            state.open = true
+            let waiting = state.waiting
+            state.waiting = []
+            return waiting
+        }
+        waiting.forEach { $0.resume() }
     }
 }
 

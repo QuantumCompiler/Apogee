@@ -67,6 +67,17 @@ enum GraphPreview {
         commands: [(["__complete", "graph", "stats"], "demo\n")],
         refusals: [(["graph", "export"], GraphDocuments.exportRefused)])
 
+    /// The code graph, a node's explain refused in the CLI's recorded words
+    /// (GUI 6h): the node a Rebuild removed -- `helper`, renamed -- asked of
+    /// the graph that no longer holds it.
+    static let explainRefused = PreviewRunner(
+        reads: [
+            (["graph", "stats"], GraphDocuments.stats),
+            (["graph", "query"], GraphDocuments.query),
+        ],
+        commands: [(["__complete", "graph", "stats"], "demo\n")],
+        readRefusals: [(["graph", "explain"], GraphDocuments.explainGone)])
+
     /// A collection's prose graph, built: its stats, its report, an entity
     /// explained. Its name as GraphViewModelTests completes it.
     static let prose = PreviewRunner(

@@ -94,13 +94,54 @@ public struct CollectionRow: Sendable, Equatable, Identifiable {
 /// `embed info <collection> --output-format json`: a collection's sources and
 /// health, in the CLI's words.
 public struct CollectionInfo: Sendable, Equatable {
+    /// A collection's vectors, as `embed info`'s `vectors` object states
+    /// them (`embed.cpp`'s `collection_info_document`; machine-mode.md):
+    /// how many chunks carry one, how wide they are, and the embedding model
+    /// they were made with -- read as the CLI sent them, never counted here
+    /// (GUI 6h). Keys a later CLI adds are tolerated (ADR 0006).
+    public struct Vectors: Sendable, Equatable {
+        /// How many chunks carry a vector.
+        public let chunks: Int
+        /// The vectors' width, `D` in the CLI's `D-d`.
+        public let dimension: Int
+        /// How many different widths the vectors have: more than one is the
+        /// CLI's `MIXED` warning.
+        public let widths: Int
+        /// The embedding model the collection is bound to; nil when none is
+        /// recorded -- or when the vectors come from several (`mixed`).
+        public let model: String?
+        /// Since the CLI's 57s: each model the vectors come from, when a
+        /// partial re-ingest under another model left more than one -- an
+        /// unrecorded one `nil`. Empty when they come from one.
+        public let mixed: [String?]
+
+        public init(chunks: Int, dimension: Int, widths: Int, model: String?, mixed: [String?] = []) {
+            self.chunks = chunks
+            self.dimension = dimension
+            self.widths = widths
+            self.model = model
+            self.mixed = mixed
+        }
+
+        /// The object `embed info` sends; nil for its `null` -- a text-only
+        /// collection -- or for anything that is not an object.
+        public init?(_ value: JSONValue?) {
+            guard let value, value.objectValue != nil else { return nil }
+            chunks = value["chunks"]?.intValue ?? 0
+            dimension = value["dimension"]?.intValue ?? 0
+            widths = value["widths"]?.intValue ?? 1
+            model = value["model"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
+            mixed = (value["mixed"]?.arrayValue ?? []).map { $0.stringValue.flatMap { $0.isEmpty ? nil : $0 } }
+        }
+    }
+
     public let name: String
     public let chunks: Int
     /// The text index's health, as `embed info` says it (`ok` ...).
     public let index: String
     public let sources: [String]
-    /// How many chunks carry vectors; `nil` when the collection is text only.
-    public let vectors: Int?
+    /// The collection's vectors; `nil` when it is text only.
+    public let vectors: Vectors?
     public let path: String
 
     public init?(document: ReadDocument) {
@@ -110,7 +151,7 @@ public struct CollectionInfo: Sendable, Equatable {
         chunks = v["chunks"]?.intValue ?? 0
         index = v["index"]?.stringValue ?? ""
         sources = (v["sources"]?.arrayValue ?? []).compactMap(\.stringValue)
-        vectors = v["vectors"]?.intValue
+        vectors = Vectors(v["vectors"])
         path = v["path"]?.stringValue ?? ""
     }
 }

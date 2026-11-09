@@ -1,5 +1,6 @@
 import BusinessJobs
 import BusinessReads
+import DataProtocol
 import Foundation
 import Testing
 
@@ -121,6 +122,28 @@ struct CollectionsViewModelTests {
         #expect(runner.calls.contains("read embed|info|notes"))
         #expect(model.info?.sources.count == 5)
         #expect(model.info.map(CollectionsViewModel.vectors) == "none -- a text index only")
+    }
+
+    /// GUI 6h: `embed info`'s `vectors` object, recorded from the branch's
+    /// `apogee-dev` (`collection-info-vectors*.json`), said in the CLI's
+    /// text-mode words; the unrecorded model and the widths are handmade
+    /// from that shape, as `embed.cpp`'s text prints them.
+    @Test("a vectorised collection says its vectors as the CLI's embed info does; a text-only one still says so")
+    func vectorsLine() async throws {
+        let runner = ScriptedRunner()
+        runner.reading(["embed", "list"], fixture("collections-list"))
+        runner.reading(["embed", "info"], fixture("collection-info-vectors"))
+        let model = CollectionsViewModel(runner: runner, starter: ScriptedJobs([]))
+        await model.connect(binary: Self.binary)
+        await model.select(model.collections[1])
+        #expect(model.info.map(CollectionsViewModel.vectors) == "3 of 3 chunks, 8-d [mock-embed]")
+        let mixed = try #require(CollectionInfo(document: ReadDocument(text: fixture("collection-info-vectors-mixed"))!))
+        #expect(CollectionsViewModel.vectors(mixed) == "4 of 4 chunks, 8-d [mixed: 'mock-embed' and 'mock-embed-b' -- re-ingest every source with one model]")
+        let unbound = try #require(CollectionInfo(document: ReadDocument(text: #"{"collection":"old","chunks":1,"vectors":{"chunks":1,"dimension":384,"widths":2}}"#)!))
+        #expect(CollectionsViewModel.vectors(unbound) == "1 of 1 chunk, 384-d [model not recorded -- re-ingest to bind] -- MIXED: 2 widths")
+        #expect(CollectionsViewModel.spoken(["a", nil, "c"]) == "'a', an unrecorded model and 'c'")
+        let textOnly = try #require(CollectionInfo(document: ReadDocument(text: fixture("collection-info"))!))
+        #expect(CollectionsViewModel.vectors(textOnly) == "none -- a text index only")
     }
 
     @Test("a search is embed query, its lines as printed -- the retriever and the scores the CLI's")

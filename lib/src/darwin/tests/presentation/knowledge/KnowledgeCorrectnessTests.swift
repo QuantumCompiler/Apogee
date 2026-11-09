@@ -84,3 +84,151 @@ struct KnowledgeCorrectnessTests {
         #expect(model.results?.hasPrefix("0.000  [lexical]  heat-pumps.md#0") == true, "asked of knowledge, they land")
     }
 }
+
+/// GUI 6h: Knowledge shows what it was asked about. The collections are the
+/// branch's `apogee-dev` over a sandbox home -- `mixed` (three notes under
+/// one mock embedder, a fourth under another) and `notes` (three notes,
+/// `--retriever vector`) -- and a question's answers are `knowledge
+/// query`'s recorded document over every branch, narrowed here to one
+/// branch's records for that branch's reply.
+@Suite("Knowledge shows what it was asked about (GUI 6h)", .timeLimit(.minutes(1)))
+@MainActor
+struct KnowledgeCurrentTests {
+    static let binary = URL(fileURLWithPath: "/Users/someone/.local/bin/apogee")
+    static let question = "why was the cancel button removed"
+
+    /// The recorded every-branch answer, narrowed to `status`'s records -- a
+    /// handmade reply from the recorded one, as `--status <status>` would
+    /// answer.
+    static func only(_ status: String, of document: String) -> String {
+        var object = try! JSONSerialization.jsonObject(with: Data(document.utf8)) as! [String: Any]
+        let records = object["records"] as! [[String: Any]]
+        object["records"] = records.filter { (($0["record"] as? [String: Any])?["status"] as? String) == status }
+        return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+    }
+
+    func records() async -> (RecordsViewModel, ScriptedRunner) {
+        let runner = ScriptedRunner()
+        runner.reading(["knowledge", "list"], fixture("knowledge-list"))
+        let every = fixture("knowledge-query")
+        runner.answering(["knowledge", "query", "--status", ""], .done(stdout: every))
+        runner.answering(["knowledge", "query", "--status", "shipped"], .done(stdout: Self.only("shipped", of: every)))
+        runner.answering(["knowledge", "query", "--status", "rejected"], .done(stdout: Self.only("rejected", of: every)))
+        let model = RecordsViewModel(runner: runner, starter: ScriptedJobs([]))
+        await model.connect(binary: Self.binary)
+        return (model, runner)
+    }
+
+    func asked(_ runner: ScriptedRunner) -> [String] {
+        runner.calls.filter { $0.hasPrefix("run knowledge|query") }
+    }
+
+    @Test("a Branch change asks the standing question again under the new branch; its matches are the new reply's")
+    func branchChangeReasks() async {
+        let (model, runner) = await records()
+        model.branch = "shipped"
+        model.question = Self.question
+        await model.search()
+        #expect(model.query?.matches.map(\.record.status) == ["shipped", "shipped"])
+        model.question = "typed since, not asked"
+        model.branch = nil
+        await model.branchChanged()
+        #expect(asked(runner).last == "run knowledge|query|--status||--json|--|\(Self.question)", "the question shown, asked over every branch")
+        #expect(model.query?.matches.count == 3 && model.query?.matches.first?.record.status == "rejected")
+        #expect(model.asked == RecordsViewModel.Asked(question: Self.question, branch: nil))
+        model.branch = "rejected"
+        await model.branchChanged()
+        #expect(asked(runner).last == "run knowledge|query|--status|rejected|--json|--|\(Self.question)")
+        #expect(model.query?.matches.map(\.record.status) == ["rejected"])
+    }
+
+    @Test("the old branch's matches go at the change; a reply held past a second change is dropped")
+    func heldReplyDropped() async {
+        let (model, runner) = await records()
+        model.branch = "shipped"
+        model.question = Self.question
+        await model.search()
+        let held = runner.holding(["knowledge", "query", "--status", ""])
+        model.branch = nil
+        let everyBranch = Task { await model.branchChanged() }
+        #expect(await eventually { held.arrived == 1 })
+        #expect(model.query == nil, "the shipped matches never stand under Every branch")
+        model.branch = "rejected"
+        await model.branchChanged()
+        #expect(model.query?.matches.map(\.record.status) == ["rejected"])
+        held.open()
+        await everyBranch.value
+        #expect(model.query?.matches.map(\.record.status) == ["rejected"], "every branch's late reply is dropped")
+        #expect(model.failure == nil)
+    }
+
+    @Test("with no question standing the list just filters; Clear drops a reply still coming")
+    func noQuestionFilters() async {
+        let (model, runner) = await records()
+        model.branch = "rejected"
+        await model.branchChanged()
+        #expect(asked(runner).isEmpty, "nothing asked")
+        #expect(model.shown.map(\.status) == ["rejected"])
+        model.question = Self.question
+        let held = runner.holding(["knowledge", "query", "--status", "rejected"])
+        let asking = Task { await model.search() }
+        #expect(await eventually { held.arrived == 1 })
+        model.clearSearch()
+        held.open()
+        await asking.value
+        #expect(model.query == nil && model.asked == nil, "cleared: its reply never lands")
+        model.branch = nil
+        await model.branchChanged()
+        #expect(asked(runner).count == 1, "nothing standing to ask again")
+    }
+
+    func collections(_ jobs: [ScriptedJob]) async -> (CollectionsViewModel, ScriptedRunner) {
+        let runner = ScriptedRunner()
+        runner.reading(["embed", "list"], fixture("collections-list-vectors"))
+        runner.reading(["embed", "info", "mixed"], fixture("collection-info-vectors-mixed"))
+        runner.reading(["embed", "info", "notes"], fixture("collection-info-vectors"))
+        runner.answering(["embed", "query"], .done(stdout: fixture("collection-query", "txt")))
+        let model = CollectionsViewModel(runner: runner, starter: ScriptedJobs(jobs))
+        await model.connect(binary: Self.binary)
+        return (model, runner)
+    }
+
+    @Test("an ingest into another collection drops the shown one's results and page, at once")
+    func ingestIntoAnotherDropsResults() async throws {
+        let job = ScriptedJob()
+        let (model, runner) = await collections([job])
+        await model.select(try #require(model.collections.first { $0.name == "mixed" }))
+        model.question = "how does a heat pump work"
+        await model.search()
+        #expect(model.results != nil && model.info?.name == "mixed")
+        model.newIngest()
+        model.ingestForm.collection = "notes"
+        model.ingestForm.path = "/Users/someone/notes"
+        model.ingest()
+        let reading = runner.holding(["embed", "info", "notes"])
+        job.end()
+        #expect(await eventually { reading.arrived == 1 })
+        #expect(model.selected == "notes")
+        #expect(model.info == nil && model.results == nil, "no moment holds mixed's page or lines under notes")
+        reading.open()
+        #expect(await eventually { !model.isRunning && model.info?.name == "notes" })
+        #expect(model.results == nil)
+        #expect(model.info.map(CollectionsViewModel.vectors) == "3 of 3 chunks, 8-d [mock-embed]")
+    }
+
+    @Test("an ingest into the collection shown keeps its results: they are its own")
+    func ingestMoreKeepsResults() async throws {
+        let job = ScriptedJob()
+        let (model, _) = await collections([job])
+        await model.select(try #require(model.collections.first { $0.name == "notes" }))
+        model.question = "how does a heat pump work"
+        await model.search()
+        let lines = try #require(model.results)
+        model.newIngest(into: "notes")
+        model.ingestForm.path = "/Users/someone/more-notes"
+        model.ingest()
+        job.end()
+        #expect(await eventually { !model.isRunning })
+        #expect(model.results == lines && model.info?.name == "notes")
+    }
+}
