@@ -28,18 +28,68 @@ public final class TasksViewModel {
     public final class Run: Identifiable {
         public let id: Int
         public let arguments: [String]
+        /// The task a resume continues, read once from its arguments when it
+        /// was started (`resumedTask(in:)`): known from the click, before its
+        /// stream names it. `nil` for a new run.
+        public let resumes: String?
         public fileprivate(set) var state = TaskRunState()
         fileprivate var job: (any JobRunning)?
 
         init(id: Int, arguments: [String]) {
             self.id = id
             self.arguments = arguments
+            resumes = TasksViewModel.resumedTask(in: arguments)
         }
 
         public var isRunning: Bool { job != nil }
+
+        /// The task this run is for: the one its stream names once
+        /// `task_started` arrives, else the one a resume was started on --
+        /// so a resume still starting up, or one the CLI refused before it
+        /// started, is that task's run. `nil` for a new run until its stream
+        /// names its task, and for one refused before it had one.
+        public var target: String? { state.taskID ?? resumes }
+    }
+
+    /// One gated call on a task's page, as `task status` prints it under
+    /// `allowed:` or `denied:` -- `round 1: write_file on report.txt --
+    /// nobody present to allow it`.
+    public struct TaskUse: Equatable, Sendable {
+        public enum Kind: Equatable, Sendable {
+            case allowed
+            case denied
+        }
+
+        public let kind: Kind
+        /// The turn it was made in: 0 for the plan.
+        public let round: Int
+        /// Whether that turn was the plan, which `task status` names `plan`.
+        public let inPlan: Bool
+        public let use: TaskView.Use
+
+        /// The call and its authority in `task status`'s words.
+        public var words: String { kind == .allowed ? TaskUseWords.allowed(use) : TaskUseWords.denied(use) }
+
+        /// The row as `task status` prints it: its turn, then its words.
+        public var line: String { (inPlan ? "plan" : "round \(round)") + ": " + words }
+    }
+
+    /// Why a task stopped, or that its process is gone, as the page says it
+    /// beneath the header.
+    public struct Ending: Equatable, Sendable {
+        public let text: String
+        /// Done says it in the accent; every other ending as a warning.
+        public let done: Bool
     }
 
     public private(set) var tasks: [TaskSummary] = []
+    /// How many tasks the ledger holds in all, as `task list` says
+    /// (`total`); it lists only the newest 50 unless asked for `--all`.
+    public private(set) var listTotal: Int?
+    /// Whether the list reads `task list --all`: once Show all is asked, for
+    /// the life of the place. The first read is the CLI's default, as a
+    /// person typing `task list` sees it.
+    public private(set) var showingAll = false
     public private(set) var listing: Listing = .notRead
     public private(set) var selected: String?
     /// The selected task's `task status`, when it is not one followed live.
@@ -84,18 +134,34 @@ public final class TasksViewModel {
         await refresh()
     }
 
-    /// `task list`, and the selected task's `task status`.
+    /// `task list` -- with `--all` once Show all was asked -- and the
+    /// selected task's `task status`.
     public func refresh() async {
         guard let binary else { return }
         if listing != .read { listing = .reading }
-        let outcome = await runner.read(binary: binary, ["task", "list"])
+        let outcome = await runner.read(binary: binary, ["task", "list"] + (showingAll ? ["--all"] : []))
         if let document = outcome.document {
             tasks = TaskSummary.list(from: document)
+            listTotal = document.total
             listing = .read
         } else {
             listing = .failed(outcome.failure ?? "the list could not be read")
         }
         if let selected { await readStatus(selected) }
+    }
+
+    /// Show all: every task the ledger holds, `task list --all`, from now on.
+    public func showAll() async {
+        showingAll = true
+        await refresh()
+    }
+
+    /// The list's last line when it shows fewer tasks than the ledger holds:
+    /// "The newest 50 of 60 tasks", beside Show all. `nil` when it lists
+    /// every one.
+    public var truncation: String? {
+        guard listing == .read, !showingAll, let total = listTotal, total > tasks.count else { return nil }
+        return "The newest \(tasks.count) of \(total) tasks"
     }
 
     private func readStatus(_ id: String) async {
@@ -117,45 +183,179 @@ public final class TasksViewModel {
         await readStatus(id)
     }
 
-    /// The live run following `id`, when the app started it.
+    /// The app's newest run for `id` -- in flight or ended, a resume the CLI
+    /// refused among them -- matched on the task it targets (`Run.target`).
     public func run(for id: String) -> Run? {
-        runs.first { $0.state.taskID == id }
+        runs.first { $0.target == id }
     }
 
-    /// The app's run of `id` while its child still runs.
+    /// The app's run of `id` while its child still runs -- a resume from the
+    /// click on, before its stream names the task.
     private func live(_ id: String) -> Run? {
-        run(for: id).flatMap { $0.isRunning ? $0 : nil }
+        runs.first { $0.isRunning && $0.target == id }
     }
 
-    /// What the detail pane shows for the selection: the live run's view
-    /// while its child runs, else the read -- which takes over once the run
-    /// ends, so a run killed mid-round reads as the ledger says it.
+    /// The app's run of `id` in flight with its stream under way: its child
+    /// running, and its `task_started` in, so its own view is the newest
+    /// word on the task. Before that -- a resume starting up -- the page
+    /// still draws the read.
+    public func following(_ id: String) -> Run? {
+        live(id).flatMap { $0.state.view == nil ? nil : $0 }
+    }
+
+    /// Whether the app's own run of `id` is in flight, starting up or under
+    /// way: its row's running mark.
+    public func inFlight(_ id: String) -> Bool { live(id) != nil }
+
+    /// Whether the app's resume of `id` is starting up: its child running,
+    /// its stream not yet at `task_started`. The page says "Resuming…" in
+    /// place of Resume, and a second click starts nothing.
+    public func resuming(_ id: String) -> Bool {
+        live(id).map { $0.resumes == id && $0.state.view == nil } ?? false
+    }
+
+    /// The runs starting a new task whose stream has not named it yet: each
+    /// a "Starting a task…" row. A resume is its task's own row's, never one
+    /// of these.
+    public var starting: [Run] {
+        runs.filter { $0.isRunning && $0.target == nil }
+    }
+
+    /// What the detail pane shows for the selection: the app's run's view
+    /// while it follows the task, else the last word on it (`lastView`) --
+    /// which takes over once the run ends, so a run killed mid-round, or a
+    /// task finished elsewhere after the app's run ended, reads as the
+    /// ledger says it.
     public var shown: TaskView? {
         guard let selected else { return nil }
-        if let view = live(selected)?.state.view { return view }
+        if let view = following(selected)?.state.view { return view }
         return lastView(of: selected)
     }
 
-    /// The last word on `id` when no run of the app's is in flight: its
-    /// `task status`, else what the app's own run last said of it.
+    /// The last word on `id` when no run of the app's follows it: the newer
+    /// of its `task status` and the view the app's newest run of it last
+    /// held, by `updated_at` -- the read on a tie, or when either stamp
+    /// can't be read. So an ended run's stale view never stands over a
+    /// fresh read, and a read that failed never hides what the run said.
     private func lastView(of id: String) -> TaskView? {
-        if let status, status.id == id { return status }
-        return run(for: id)?.state.view
+        let read = status.flatMap { $0.id == id ? $0 : nil }
+        let ran = runs.first { $0.target == id && $0.state.view != nil }?.state.view
+        guard let ran else { return read }
+        guard let read else { return ran }
+        return Self.newer(ran, than: read) ? ran : read
     }
 
-    /// Whether the detail offers the stops: the app's own run in flight, or a
-    /// task the ledger says a process runs now -- never one killed mid-round.
+    /// Whether `view` was written after `other`, by their `updated_at`;
+    /// `false` when they tie or either can't be read.
+    static func newer(_ view: TaskView, than other: TaskView) -> Bool {
+        guard let at = date(view.updatedAt), let otherAt = date(other.updatedAt) else { return false }
+        return at > otherAt
+    }
+
+    /// Whether the detail offers the stops: the app's own run in flight --
+    /// a resume still starting up among them, whose stop the CLI keeps
+    /// (its 57u) -- or a task the ledger says a process runs now, never one
+    /// killed mid-round.
     public func stoppable(_ id: String) -> Bool {
-        if let live = live(id) { return TaskView.running.contains(live.state.status) }
+        if let live = live(id) {
+            guard live.state.view != nil else { return live.resumes == id }
+            return TaskView.running.contains(live.state.status)
+        }
         return lastView(of: id).map(Self.canStop) ?? false
     }
 
     /// Whether the detail offers Resume: exactly the states `task resume`
     /// continues, with the folder it resumes in known, and no run of the
-    /// app's in flight.
+    /// app's in flight -- a resume starting up included.
     public func resumable(_ id: String) -> Bool {
         guard live(id) == nil else { return false }
         return lastView(of: id).map(Self.canResume) ?? false
+    }
+
+    // MARK: - The page's parts
+    //
+    // Each part of a task's page from one source: the app's run while it
+    // follows the task (`following`), else the last word on it (`lastView`).
+    // An ended run keeps only its Activity, its own record of what it said.
+
+    /// Why it stopped, or that its process is gone: the run's `task_finished`
+    /// while it follows the task, else the last word's reason once it is no
+    /// longer running.
+    public func ending(of id: String) -> Ending? {
+        if let run = following(id) {
+            return run.state.finished.map { Ending(text: $0.reason, done: $0.status == "done") }
+        }
+        guard let view = lastView(of: id) else { return nil }
+        if view.interrupted {
+            return Ending(text: "Its process is gone: it was killed mid-round, and Resume runs that round again.", done: false)
+        }
+        guard !view.reason.isEmpty, !view.isRunning else { return nil }
+        return Ending(text: view.reason, done: view.status == "done")
+    }
+
+    /// The plan: recorded by the run's `task_plan`, else its view's -- a
+    /// resumed task's from `task_started` -- else the last word's.
+    public func plan(of id: String) -> String {
+        if let run = following(id) { return run.state.plan ?? run.state.view?.plan ?? "" }
+        return lastView(of: id)?.plan ?? ""
+    }
+
+    /// The checks, as the run last scored them, else the last word's.
+    public func checks(of id: String) -> [TaskView.Check] {
+        if let run = following(id) { return run.state.checks.isEmpty ? (run.state.view?.checks ?? []) : run.state.checks }
+        return lastView(of: id)?.checks ?? []
+    }
+
+    /// Every turn in order, the plan first: the run's -- seeded with the
+    /// turns its `task_started` carried, so a resumed task keeps its plan
+    /// and earlier rounds -- else the last word's.
+    public func rounds(of id: String) -> [TaskView.Round] {
+        if let run = following(id) {
+            let rounds = run.state.orderedRounds
+            return rounds.isEmpty ? (run.state.view?.rounds ?? []) : rounds
+        }
+        return lastView(of: id)?.rounds ?? []
+    }
+
+    /// Every call let through, round by round, as `task status` lists them
+    /// under `allowed:` -- and, while the run follows the task, its round in
+    /// flight's `task_grant` lines until that round lands.
+    public func allowed(of id: String) -> [TaskUse] {
+        let landed = uses(rounds(of: id), \.allowed, .allowed)
+        guard let run = following(id) else { return landed }
+        return landed
+            + run.state.grants.map {
+                TaskUse(kind: .allowed, round: $0.round, inPlan: $0.round == 0, use: TaskView.Use(tool: $0.tool, target: $0.target, by: $0.by))
+            }
+    }
+
+    /// Every call refused, round by round, as `task status` lists them under
+    /// `denied:`.
+    public func denied(of id: String) -> [TaskUse] {
+        uses(rounds(of: id), \.denied, .denied)
+    }
+
+    /// A Rounds row's refusals: `denied:` and each in `task status`'s words,
+    /// the row's own round not repeated; `nil` for a round that refused
+    /// nothing.
+    public static func deniedOnRow(_ round: TaskView.Round) -> String? {
+        round.denied.isEmpty ? nil : "denied: " + round.denied.map(TaskUseWords.denied).joined(separator: "; ")
+    }
+
+    private func uses(_ rounds: [TaskView.Round], _ key: KeyPath<TaskView.Round, [TaskView.Use]>, _ kind: TaskUse.Kind) -> [TaskUse] {
+        rounds.flatMap { round in
+            round[keyPath: key].map { TaskUse(kind: kind, round: round.round, inPlan: round.kind == "plan", use: $0) }
+        }
+    }
+
+    /// The Grants line, as `task status` words its `grants:`: the tools
+    /// granted up front, or "none" with what that means for a task with
+    /// tools; `nil` for a task without tools, which `task status` gives no
+    /// such line.
+    public func grants(of id: String) -> String? {
+        guard let view = following(id)?.state.view ?? lastView(of: id) else { return nil }
+        if !view.grants.isEmpty { return view.grants.joined(separator: ", ") }
+        return view.tools ? "none -- with nobody present, a tool that asks is denied" : nil
     }
 
     /// The tasks to list: the ledger's, and any run the app started that the
@@ -171,12 +371,14 @@ public final class TasksViewModel {
         return live + tasks
     }
 
+    /// The list's line when it has no row to show: a run the CLI refused
+    /// before it made a task leaves none.
     public var emptyText: String? {
         switch listing {
         case .notRead, .reading: return nil
         case .missing: return "Apogee isn't installed, so there are no tasks to list."
         case .failed(let message): return "The tasks could not be read: \(message)"
-        case .read: return tasks.isEmpty && runs.isEmpty ? "No tasks yet. Start one: a goal, the checks that say it is done, and what it may do." : nil
+        case .read: return listed.isEmpty && starting.isEmpty ? "No tasks yet. Start one: a goal, the checks that say it is done, and what it may do." : nil
         }
     }
 
@@ -233,15 +435,22 @@ public final class TasksViewModel {
         follow(["task", "resume", id, "--output-format", "stream-json"], folder: URL(fileURLWithPath: view.folder, isDirectory: true))
     }
 
+    /// The task a run's arguments resume: the id after `task resume`, as
+    /// `resume(_:)` writes the line; `nil` for any other run.
+    public nonisolated static func resumedTask(in arguments: [String]) -> String? {
+        guard arguments.count > 2, arguments.starts(with: ["task", "resume"]) else { return nil }
+        return arguments[2]
+    }
+
     /// Whether a row says its task was killed mid-round: its `interrupted`,
     /// as the CLI's M32 puts it on every row (GUI M16) -- read with the list,
-    /// no task's page asked -- while no run of the app's follows it, nor a
-    /// resume of it the app started whose stream hasn't named it yet. A row
-    /// that can't say, from a binary before M32, reads as its status: there
-    /// the task's page still says it, as 4h made it.
+    /// no task's page asked -- while no run of the app's is in flight for
+    /// it, a resume whose stream hasn't named it yet among them (its target,
+    /// the same lookup the page's Resume asks). A row that can't say, from a
+    /// binary before M32, reads as its status: there the task's page still
+    /// says it, as 4h made it.
     public func interrupted(_ task: TaskSummary) -> Bool {
         task.interrupted == true && live(task.id) == nil
-            && !runs.contains { $0.isRunning && $0.arguments.starts(with: ["task", "resume", task.id]) }
     }
 
     /// Whether a row's menu offers Resume: exactly the rows that say their
@@ -272,6 +481,14 @@ public final class TasksViewModel {
             }
             run.job = nil
             await refresh()
+            // Refused before it started: machine mode writes the refusal to
+            // stderr alone, so the run has no task and its row would vanish
+            // with nothing said. Its words go to the alert, as halt's and
+            // cancel's failures do; a refused resume's stay in its Activity.
+            if let refusal = run.state.refusal {
+                failure = refusal
+                say?("That didn't work: \(refusal)")
+            }
         }
     }
 
@@ -472,10 +689,15 @@ public struct TaskRunState: Equatable {
         public let reason: String
     }
 
+    /// A call a grant let through in the round in flight, as `task_grant`
+    /// said it; kept only until that round's `task_round` lands, whose
+    /// `allowed` then carries it.
     public struct Grant: Equatable {
         public let round: Int
         public let tool: String
         public let target: String
+        /// On whose authority, as the event says: `grant`.
+        public let by: String
     }
 
     public private(set) var taskID: String?
@@ -483,8 +705,12 @@ public struct TaskRunState: Equatable {
     public private(set) var view: TaskView?
     public private(set) var transitions: [Transition] = []
     public private(set) var plan: String?
+    /// Every turn by its round: those `task_started` carried -- a resumed
+    /// task's plan and earlier rounds -- then each a `task_round` or
+    /// `task_plan` brought.
     public private(set) var rounds: [Int: TaskView.Round] = [:]
     public private(set) var checks: [TaskView.Check] = []
+    /// The round in flight's `task_grant` lines.
     public private(set) var grants: [Grant] = []
     public private(set) var roundsUsed: Int?
     /// The answer streaming in the turn now.
@@ -500,12 +726,28 @@ public struct TaskRunState: Equatable {
     /// The status now: the last transition's.
     public var status: String { transitions.last?.status ?? view?.status ?? "starting" }
 
+    /// Why the CLI refused the run before it started, in its words: a run
+    /// that ended without success, not stopped by its Stop, whose stream
+    /// never named its task -- machine mode writes such a refusal to stderr
+    /// alone (`task_cmd.cpp`'s `fail_user`), so it is the bounded tail's
+    /// last line, `apogee task: ` and all. `nil` for any other end.
+    public var refusal: String? {
+        guard let exit, !exit.succeeded, !exit.interrupted, taskID == nil else { return nil }
+        return Self.endLine(exit)
+    }
+
+    /// The one line a failed end says: stderr's last, else why it never
+    /// started, else its exit.
+    static func endLine(_ end: JobEnd) -> String {
+        end.stderrTail.lastLine ?? end.detail ?? "the task's apogee ended (\(end.exit.map { "\($0)" } ?? "did not start"))"
+    }
+
     public mutating func apply(_ update: JobUpdate) {
         switch update {
         case .ended(let end):
             exit = end
             if finished == nil, !end.succeeded {
-                activity.append(end.stderrTail.lastLine ?? end.detail ?? "the task's apogee ended (\(end.exit.map { "\($0)" } ?? "did not start"))")
+                activity.append(Self.endLine(end))
             }
         case .said(let line):
             activity.append(line)
@@ -531,6 +773,8 @@ public struct TaskRunState: Equatable {
         if let round = fields["round"], round.objectValue != nil {
             let parsed = TaskView.round(round)
             rounds[parsed.round] = parsed
+            // Landed: its `allowed` now carries what its grants let through.
+            if parsed.outcome != "in_flight" { grants.removeAll { $0.round == parsed.round } }
         }
         if fields["checks"] != nil { checks = TaskView.checks(fields["checks"]) }
         if let used = fields["rounds_used"]?.intValue { roundsUsed = used }
@@ -539,6 +783,9 @@ public struct TaskRunState: Equatable {
             for entry in fields["history"]?.arrayValue ?? [] { record(entry, at: transitions.count - (fields["transition"] == nil ? 0 : 1)) }
             view = fields["task"].flatMap(TaskView.init)
             if let view, checks.isEmpty { checks = view.checks }
+            // A resumed task's plan and earlier rounds, keyed by round: the
+            // stream's own rounds add to them, never replace them.
+            for turn in view?.rounds ?? [] where rounds[turn.round] == nil { rounds[turn.round] = turn }
         case "task_plan":
             if let text = fields["plan"]?.stringValue { plan = text }
         case "task_round":
@@ -547,7 +794,7 @@ public struct TaskRunState: Equatable {
             grants.append(
                 Grant(
                     round: fields["round"]?.intValue ?? 0, tool: fields["tool"]?.stringValue ?? "",
-                    target: fields["target"]?.stringValue ?? ""))
+                    target: fields["target"]?.stringValue ?? "", by: fields["by"]?.stringValue ?? "grant"))
         case "task_finished":
             finished = Finished(status: fields["status"]?.stringValue ?? status, reason: fields["reason"]?.stringValue ?? "")
             view = fields["task"].flatMap(TaskView.init) ?? view
@@ -577,5 +824,47 @@ public struct TaskRunState: Equatable {
     /// The rounds in order: the plan first.
     public var orderedRounds: [TaskView.Round] {
         rounds.keys.sorted().map { rounds[$0]! }
+    }
+}
+
+/// A gated call in `task status`'s words (`task_cmd.cpp`'s `on_target`,
+/// `authority_words` and `refusal_words`), never new ones: the tool on its
+/// target, then on whose authority it ran or why it was refused.
+public enum TaskUseWords {
+    /// `run_command on ls -- this task's grant`. An authority the CLI has no
+    /// words for is shown as it is written; none at all, as the call alone.
+    public static func allowed(_ use: TaskView.Use) -> String {
+        let authority = authority(use.by)
+        return onTarget(use) + (authority.isEmpty ? "" : " -- " + authority)
+    }
+
+    /// `write_file on report.txt -- nobody present to allow it`. A reason
+    /// the CLI has no words for is left out, as it leaves it out.
+    public static func denied(_ use: TaskView.Use) -> String {
+        let why = refusal(use.by)
+        return onTarget(use) + (why.isEmpty ? "" : " -- " + why)
+    }
+
+    /// The tool, and what it was called on when it names something.
+    public static func onTarget(_ use: TaskView.Use) -> String {
+        use.target.isEmpty ? use.tool : "\(use.tool) on \(use.target)"
+    }
+
+    static func authority(_ by: String) -> String {
+        switch by {
+        case "grant": "this task's grant"
+        case "person": "the person at the terminal"
+        case "config": "the config"
+        default: by
+        }
+    }
+
+    static func refusal(_ by: String) -> String {
+        switch by {
+        case "config": "the config denies it"
+        case "nobody": "nobody present to allow it"
+        case "person": "refused at the prompt"
+        default: ""
+        }
     }
 }

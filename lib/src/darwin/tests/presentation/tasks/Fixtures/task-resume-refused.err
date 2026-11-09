@@ -1,0 +1,1 @@
+apogee task: task task-20261109-021236 cannot resume: --allow write_file: the config says permissions.write_file: deny -- a task's grant is never wider than the config (its grants are held to the config and its agent as they are now)

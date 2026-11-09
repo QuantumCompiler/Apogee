@@ -43,7 +43,7 @@ struct TaskList: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 1) {
-                ForEach(model.runs.filter { $0.isRunning && $0.state.taskID == nil }) { run in
+                ForEach(model.starting) { run in
                     HStack {
                         ProgressView().controlSize(.small)
                         Text("Starting a task…").font(.apogeeSmall).foregroundStyle(Palette.textSecondary)
@@ -59,7 +59,7 @@ struct TaskList: View {
                             Text(task.goal).font(.apogeeBody).foregroundStyle(Palette.textPrimary).lineLimit(2)
                             HStack(spacing: Spacing.xs) {
                                 let interrupted = model.interrupted(task)
-                                if task.isRunning || model.run(for: task.id)?.isRunning == true {
+                                if task.isRunning || model.inFlight(task.id) {
                                     Circle().fill(Palette.accent).frame(width: 6, height: 6)
                                 }
                                 // A task killed mid-round says so from its row
@@ -86,6 +86,17 @@ struct TaskList: View {
                         }
                     }
                 }
+                if let truncation = model.truncation {
+                    // Past the newest 50 (`task list`'s `total`): every task
+                    // the ledger holds is a click away.
+                    HStack(spacing: Spacing.xs) {
+                        Text(truncation + " ·").font(.apogeeSmall).foregroundStyle(Palette.textTertiary)
+                        Button("Show all") { Task { await model.showAll() } }
+                            .buttonStyle(.link)
+                            .font(.apogeeSmall)
+                    }
+                    .padding(Spacing.m)
+                }
                 if let empty = model.emptyText {
                     Text(empty).font(.apogeeSmall).foregroundStyle(Palette.textTertiary).padding(Spacing.m)
                 }
@@ -103,8 +114,11 @@ struct TaskDetail: View {
 
     var body: some View {
         if let id = model.selected, let view = model.shown {
+            // Every part below is the view-model's answer: the app's run
+            // while it follows the task, else the newer of the read and the
+            // run's last view. The run itself keeps only its Activity.
             let run = model.run(for: id)
-            let live = run?.isRunning == true ? run : nil
+            let live = model.following(id)
             let status = live?.state.status ?? view.status
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.l) {
@@ -120,25 +134,26 @@ struct TaskDetail: View {
                             Button("Stop after this round") { Task { await model.halt(id) } }
                             Button("Stop now") { Task { await model.cancel(id) } }
                         }
-                        if model.resumable(id) {
+                        if model.resuming(id) {
+                            // The app's resume is starting up: one per click.
+                            Button("Resuming…") {}.disabled(true)
+                            Text("in \(view.folder), where it was started").font(.apogeeMeta).foregroundStyle(Palette.textTertiary).lineLimit(1).truncationMode(.middle)
+                        } else if model.resumable(id) {
                             Button("Resume") { model.resume(id) }
                             Text("in \(view.folder), where it was started").font(.apogeeMeta).foregroundStyle(Palette.textTertiary).lineLimit(1).truncationMode(.middle)
                         }
                     }
-                    if live == nil && view.interrupted {
-                        Text("Its process is gone: it was killed mid-round, and Resume runs that round again.")
-                            .font(.apogeeBody)
-                            .foregroundStyle(Palette.warning)
-                    } else if let finished = run?.state.finished {
-                        Text(finished.reason).font(.apogeeBody).foregroundStyle(finished.status == "done" ? Palette.accent : Palette.warning)
-                    } else if !view.reason.isEmpty && !view.isRunning {
-                        Text(view.reason).font(.apogeeBody).foregroundStyle(view.status == "done" ? Palette.accent : Palette.warning)
+                    if let ending = model.ending(of: id) {
+                        Text(ending.text).font(.apogeeBody).foregroundStyle(ending.done ? Palette.accent : Palette.warning)
                     }
-                    let plan = run?.state.plan ?? view.plan
+                    if let grants = model.grants(of: id) {
+                        section("Grants") { Text(grants).font(.apogeeCode).textSelection(.enabled) }
+                    }
+                    let plan = model.plan(of: id)
                     if !plan.isEmpty {
                         section("Plan") { Text(plan).font(.apogeeBody).textSelection(.enabled) }
                     }
-                    let checks = run.map(\.state.checks).flatMap { $0.isEmpty ? nil : $0 } ?? view.checks
+                    let checks = model.checks(of: id)
                     if !checks.isEmpty {
                         section("Checks") {
                             ForEach(Array(checks.enumerated()), id: \.offset) { _, check in
@@ -156,7 +171,7 @@ struct TaskDetail: View {
                             }
                         }
                     }
-                    let rounds = run.map(\.state.orderedRounds).flatMap { $0.isEmpty ? nil : $0 } ?? view.rounds
+                    let rounds = model.rounds(of: id)
                     if !rounds.isEmpty {
                         section("Rounds") {
                             ForEach(rounds, id: \.round) { round in
@@ -169,8 +184,8 @@ struct TaskDetail: View {
                                         .font(.apogeeSmall)
                                         .foregroundStyle(round.outcome == "in_flight" ? Palette.accent : Palette.textSecondary)
                                     Text("\(round.checksPassed) checks passed").font(.apogeeMeta).foregroundStyle(Palette.textTertiary)
-                                    if !round.denied.isEmpty {
-                                        Text("denied: \(round.denied.joined(separator: ", "))").font(.apogeeMeta).foregroundStyle(Palette.warning)
+                                    if let denied = TasksViewModel.deniedOnRow(round) {
+                                        Text(denied).font(.apogeeMeta).foregroundStyle(Palette.warning)
                                     }
                                     Spacer()
                                     Text(round.tokens > 0 ? "\(round.tokensEstimated ? "~" : "")\(round.tokens) tokens" : "")
@@ -180,10 +195,19 @@ struct TaskDetail: View {
                             }
                         }
                     }
-                    if let run, !run.state.grants.isEmpty {
-                        section("Let through by its grants") {
-                            ForEach(Array(run.state.grants.enumerated()), id: \.offset) { _, grant in
-                                Text("round \(grant.round): \(grant.tool) \(grant.target)").font(.apogeeCode)
+                    let allowed = model.allowed(of: id)
+                    if !allowed.isEmpty {
+                        section("Allowed") {
+                            ForEach(Array(allowed.enumerated()), id: \.offset) { _, use in
+                                Text(use.line).font(.apogeeCode).textSelection(.enabled)
+                            }
+                        }
+                    }
+                    let denied = model.denied(of: id)
+                    if !denied.isEmpty {
+                        section("Denied") {
+                            ForEach(Array(denied.enumerated()), id: \.offset) { _, use in
+                                Text(use.line).font(.apogeeCode).foregroundStyle(Palette.warning).textSelection(.enabled)
                             }
                         }
                     }
@@ -467,6 +491,91 @@ enum TaskStatusWords {
         .task {
             await tasks.connect(binary: previewBinary)
             await tasks.select(TasksPreview.exhausted)
+        }
+}
+
+#Preview("A denied round, its grants and the calls they let through, read") {
+    let tasks = TasksPreview.sweep()
+    TaskDetail(model: tasks)
+        .frame(width: 800, height: 640)
+        .task {
+            await tasks.connect(binary: previewBinary)
+            await tasks.select(TasksPreview.uses)
+        }
+}
+
+#Preview("A run live: a call its grant let through, its round in flight") {
+    let tasks = TasksPreview.sweep(said: TasksPreview.stream(TasksDocuments.runUses, prefix: 32))
+    TaskDetail(model: tasks)
+        .frame(width: 800, height: 640)
+        .task {
+            await tasks.connect(binary: previewBinary)
+            tasks.form.goal = "Write the report"
+            tasks.form.allowCommands = true
+            tasks.start()
+        }
+}
+
+#Preview("The list: the newest 50 of 60, with Show all") {
+    let tasks = TasksPreview.sweep()
+    TaskList(model: tasks)
+        .frame(width: 300, height: 520)
+        .task { await tasks.connect(binary: previewBinary) }
+}
+
+#Preview("A refused start: the CLI's words in the alert") {
+    let tasks = TasksPreview.sweep(said: [TasksPreview.ended(1, stderr: TasksDocuments.runRefused)])
+    TasksScreen(model: tasks)
+        .frame(width: 1100, height: 560)
+        .task {
+            await tasks.connect(binary: previewBinary)
+            TasksPreview.startRefused(tasks)
+        }
+}
+
+#Preview("A resume starting: Resuming…, and the stops") {
+    let tasks = TasksPreview.sweep()
+    TaskDetail(model: tasks)
+        .frame(width: 800, height: 560)
+        .task {
+            await tasks.connect(binary: previewBinary)
+            await tasks.select(TasksPreview.stalled)
+            tasks.resume(TasksPreview.stalled)
+        }
+}
+
+#Preview("A resumed task live: its plan and every earlier round kept") {
+    let tasks = TasksPreview.sweep(said: TasksPreview.stream(TasksDocuments.resume, prefix: 8))
+    TaskDetail(model: tasks)
+        .frame(width: 800, height: 640)
+        .task {
+            await tasks.connect(binary: previewBinary)
+            await tasks.select(TasksPreview.stalled)
+            tasks.resume(TasksPreview.stalled)
+        }
+}
+
+#Preview("A refused resume: its line kept on the task's page") {
+    let tasks = TasksPreview.sweep(said: [TasksPreview.ended(1, stderr: TasksDocuments.resumeRefused)])
+    TaskDetail(model: tasks)
+        .frame(width: 800, height: 560)
+        .task {
+            await tasks.connect(binary: previewBinary)
+            await tasks.select(TasksPreview.stalledGranted)
+            tasks.resume(TasksPreview.stalledGranted)
+        }
+}
+
+#Preview("The app's run ended halted; a fresh read says done") {
+    let tasks = TasksPreview.sweep(said: TasksPreview.stream(TasksDocuments.runHalted) + [TasksPreview.ended(1)])
+    TaskDetail(model: tasks)
+        .frame(width: 800, height: 640)
+        .task {
+            await tasks.connect(binary: previewBinary)
+            tasks.form.goal = "Answer when asked"
+            tasks.form.requires = "42"
+            tasks.form.tools = false
+            tasks.start()
         }
 }
 
