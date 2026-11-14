@@ -18,6 +18,7 @@ Apogee was built CLI-first and docs-first, with the GUI designed in from the sta
 
 1. **The desktop application** — one per platform (`darwin`, `linux`, `windows`), each the same product: Apogee's sessions and operations in a graphical shell, over the machine-mode child, or, pointed at a server, over its connection (the Mac's own files and shell then offered to the server's agent as device tools, as Claude Code's are; the user's call, 2026-11-07).
 2. **The mobile applications** *(added 2026-11-07, the user's call)* — iPhone, the foldable iPhone included, and iPad. They are clients of the person's own Apogee server only, the same product in layouts for each size. They are built from the macOS app's Swift code (`lib/src/darwin`), whose layers below Presentation are already free of AppKit.
+3. **The server window** *(added 2026-11-14, the user's call, from the admin-mode and people spike)*: on the Mac that serves, a separate "Apogee Server" window beside the harness window. It administers that Mac's server through the local CLI over pipes: the server itself (status, start and stop as a background service, how clients connect), devices and apps with their scopes and pending pairings, activity and the audit trail, and people with their access. It is offered only on that Mac, never on iPhone or iPad.
 
 ## Scope (in)
 

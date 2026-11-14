@@ -116,6 +116,17 @@ Opened 2026-11-07 from the Apple-platforms brainstorm (the CLI's track 59 builds
 - [ ] **The iPad app** *(8b — [backlog](../../backlog/darwin/ipados/v0.2.5/ipad-app.md), gated on 8a)* — the app's places in iPad layouts at every window size. The sidebar and side panes sit beside the place where they fit, and otherwise the sidebar is drawn over the place and the panes open as sheets, never disabled. It carries the Mac's keys and the pointer, and Settings as a sheet. The iPad is remote only: first launch pairs with the person's own server, with no server it says how to set one up, and it is held to the same parity table, while the Mac stays unchanged and standalone.
 - [ ] **Getting the app onto iPhone and iPad** *(8c — [backlog](../../backlog/darwin/v0.2.5/iphone-and-ipad-distribution.md), gated on 8a)* — darwin.yml builds the iOS app for a device and tests it on iPhone and iPad simulators with no secret, and one build.sh command installs it on the person's devices by the route the user chooses (TestFlight under the Apple Developer Program, or personal sideloading). The Mac app stays ad-hoc signed and its release is unchanged.
 
+### v0.2.6 — Track 10, the server window
+
+Opened 2026-11-14 from the admin-mode and people spike (the CLI's tracks 62 and 63; the GUI SPEC's Core surfaces 3 was amended the same day). On the Mac that serves, a separate Apogee Server window drives the local CLI over pipes, never the port.
+
+- [ ] **Design the server window** *(10a — [backlog](../../backlog/darwin/macos/v0.2.6/design-the-server-window.md))* — the window drawn in `lib/design/spec` and on the canvas first, per the design's law: the menu way in, shown only on the Mac that serves, and its places (Server, Devices with pairing and the QR, Apps with each scope beside what was asked, Activity, Audit, and People for 10c), each mapped to its CLI words, with every missing word added to BuildContract.
+- [ ] **The server window** *(10b — [backlog](../../backlog/darwin/macos/v0.2.6/server-window.md), gated on 10a, CLI 62a, CLI 62c, CLI 62h)* — **split first**. Server (status, how clients connect, the background service), Devices and Apps (pairing with a QR, rename, revoke, scopes), and Activity and Audit when the binary has them; `serve` gets verb-level parity, and devices and apps become this window's screens.
+
+### v0.2.7 — Track 10, people in the server window
+
+- [ ] **People in the server window** *(10c — [backlog](../../backlog/darwin/macos/v0.2.7/people-screens.md), gated on 10b, CLI 63a, CLI 63c)* — the owner and members with their access, devices, apps, usage against their limit and the household key, added, renamed and removed at the server Mac over pipes, never showing a member's chat contents.
+
 ### v0.3.0 — Track 9, iPhone, the foldable and the three platforms whole
 
 The plan's target: macOS, iPadOS and iOS fully working (the user's call, 2026-11-07).

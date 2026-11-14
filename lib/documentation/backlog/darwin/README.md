@@ -98,6 +98,23 @@ The iPad, and getting the app onto iPhone and iPad ([preamble](#v024)).
 | 8b | The iPad app — every place in iPad layouts (sidebar beside or over the place, side panes beside or as sheets at every Split View, Slide Over and Stage Manager size), the Mac's keys with a hardware keyboard and the pointer, Settings as a sheet, first launch pairing with the person's server or saying how to set one up, one ParityTable | v0.2.5 | [`ipad-app.md`](ipados/v0.2.5/ipad-app.md) | 🔒 8a |
 | 8c | Getting the app onto iPhone and iPad — the iOS app built and tested on every pull request with no secret, a way onto the person's devices by the path the user picks, and the Mac's ad-hoc app and release unchanged | v0.2.5 | [`iphone-and-ipad-distribution.md`](v0.2.5/iphone-and-ipad-distribution.md) | 🔒 8a |
 
+### v0.2.6
+
+**Track 10, the server window**, opened 2026-11-14 from the admin-mode and people spike (the CLI's [track 62 preamble](../cli/README.md#v026) carries the walls and the user's calls; the GUI SPEC's Core surfaces 3 was amended the same day). On the Mac that serves, a separate **Apogee Server** window drives the local CLI over pipes, never the port: **10a** draws it in the design first (closing A9), and **10b**, **split first**, builds Server, Devices, Apps, Activity and Audit. The People place is **10c**, in v0.2.7.
+
+| # | Item | Version | File | Status |
+|---|---|---|---|---|
+| 10a | Design the server window — the Apogee Server window drawn in lib/design/spec and on the canvas before it is built: how it opens from the Apogee menu (only on the Mac that serves), and its six places (Server, Devices with pairing and the QR, Apps with each scope beside what the app asked for, Activity, Audit, and People drawn now for 10c); each part drawn against its CLI words, with every missing word added as a BuildContract gap and its fallback | v0.2.6 | [`design-the-server-window.md`](macos/v0.2.6/design-the-server-window.md) | 🟢 |
+| 10b | The server window: administering this Mac's server — a second Apogee Server window on the Mac that serves, driving the local CLI over pipes, with Server, Devices, Apps, Activity and Audit (the last two shown when the binary has them); serve split into a screen and a refusal, devices and apps made screens of this window (7a amended), ADR 0003 amended; split first into three | v0.2.6 | [`server-window.md`](macos/v0.2.6/server-window.md) | 🔒 10a, CLI 62a, CLI 62c, CLI 62h |
+
+### v0.2.7
+
+The server window's People place, on the CLI's track 63 ([preamble](#v026)).
+
+| # | Item | Version | File | Status |
+|---|---|---|---|---|
+| 10c | People in the server window — the owner and members in the Apogee Server window on the Mac that serves: each member's preset and access, their devices and apps, usage against their limit, and the household cloud key granted with its limit; adding, renaming and removing people through the local CLI over pipes, built as 10a draws it, previews over recorded documents, metadata only and never a member's chat contents | v0.2.7 | [`people-screens.md`](macos/v0.2.7/people-screens.md) | 🔒 10b, CLI 63a, CLI 63c |
+
 ### v0.3.0
 
 iPhone, the foldable iPhone, and the three Apple platforms whole: the plan's target ([preamble](#v024)).
