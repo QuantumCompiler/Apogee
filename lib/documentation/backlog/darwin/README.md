@@ -78,11 +78,15 @@ Upkeep and fixes, claimable at any time by name: opened 2026-10-20 with its firs
 
 The Mac stays complete with no server, and 9c checks it.
 
+**Apps as clients: 7d and 7e**, opened 2026-11-14 (the CLI's [v0.2.3 preamble](../cli/README.md#v023) carries the spike). **7d** carves the client core into ApogeeKit, a Swift package other apps embed and the Mac app depends on; **7e** writes the package's law (its ADR, the layering and public-interface checks, the contributor rules).
+
 | # | Item | Version | File | Status |
 |---|---|---|---|---|
 | 7a | The app's connection: local or your server — a transport seam under ChildSpawner (the child process by default and unchanged, or a paired server's connection), Settings → Connections to pair, pick and forget servers, and an indicator showing the active connection everywhere; with no server paired, the app is exactly today's | v0.2.4 | [`app-connection-local-or-server.md`](v0.2.4/app-connection-local-or-server.md) | 🔒 CLI 59b, CLI 59d |
 | 7b | The Mac offers its own files and shell to a server session — a folder granted per project and server, each device call run by the Mac's own local apogee and asked on the session window's permission card marked On this Mac, grants revocable in Settings, never offered while connected locally | v0.2.4 | [`mac-offers-its-files-and-shell.md`](macos/v0.2.4/mac-offers-its-files-and-shell.md) | 🔒 7a, CLI 60b |
 | 7c | Every place works against a server — each place's reads, commands and jobs run through the active connection, the media places show and play the server's records, the parity table classifies each command's remote meaning, and an act a server cannot do says why | v0.2.4 | [`every-place-against-a-server.md`](v0.2.4/every-place-against-a-server.md) | 🔒 7a, CLI 59e |
+| 7d | ApogeeKit: the client core as a Swift package — the lower layers and 7a's connection carved into a root Package.swift other apps embed, the Mac app linking it as its one copy, the layering check reading both maps, a sample command-line client building outside the app | v0.2.4 | [`apogeekit-swift-package.md`](v0.2.4/apogeekit-swift-package.md) | 🔒 7a |
+| 7e | Maintaining ApogeeKit — a darwin ADR (the one client core; its public interface only grows), the layering check's package rules and a public-interface check against a baseline, the darwin contributor guide's rule and checklist lines, a DEVELOPER recipe | v0.2.4 | [`maintaining-apogeekit.md`](v0.2.4/maintaining-apogeekit.md) | 🔒 7d |
 
 ### v0.2.5
 
