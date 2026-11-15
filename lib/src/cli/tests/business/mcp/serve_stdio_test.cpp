@@ -328,3 +328,37 @@ TEST_CASE("calls join after the reads, not read-only, each answered by its own n
                                               {answering("c", ""), answering("c", "")}),
                       "the call 'c' would shadow a tool of the same name");
 }
+
+TEST_CASE("a served tool reaches a website only where the config's checker allows it",
+          "[mcp][serve][57x]") {
+    // `apogee mcp serve` serves git_diff, whose review fetch asks about the
+    // host it reaches (57x). Nobody is there to ask: the checker decides,
+    // and with none no website is reached.
+    apogee::agent::ToolRegistry registry;
+    apogee::agent::Tool fetching;
+    fetching.name = "git_diff";
+    fetching.description = "diffs";
+    fetching.reaches_hosts = true;
+    std::vector<std::string> reached;
+    fetching.run_gated = [&reached](std::string_view args, const apogee::agent::TargetGate& gate) {
+        const std::string host = nlohmann::json::parse(args).value("host", std::string{});
+        if (!gate(host, "https://" + host + "/r.git")) {
+            return apogee::agent::ToolOutcome{"refused " + host, true};
+        }
+        reached.push_back(host);
+        return apogee::agent::ToolOutcome{"fetched " + host, false};
+    };
+    registry.add(fetching);
+    REQUIRE(apogee::mcp::read_only_tools(registry).size() == 1);
+
+    CHECK(apogee::mcp::dispatch_through(registry)("git_diff", {{"host", "github.com"}}).is_error);
+    const apogee::mcp::Dispatch listed =
+        apogee::mcp::dispatch_through(registry, [](const apogee::agent::GateRequest& request) {
+            CHECK(request.outbound);
+            return request.target == "github.com" ? apogee::agent::Permission::Allow
+                                                  : apogee::agent::Permission::Ask;
+        });
+    CHECK(listed("git_diff", {{"host", "github.com"}}).text == "fetched github.com");
+    CHECK(listed("git_diff", {{"host", "evil.example"}}).text == "refused evil.example");
+    CHECK(reached == std::vector<std::string>{"github.com"});
+}

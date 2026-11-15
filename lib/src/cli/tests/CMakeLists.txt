@@ -32,6 +32,8 @@ add_library(apogee_tests_infrastructure OBJECT
     infrastructure/ansi/ansi_test.cpp
     infrastructure/ansi/inert_test.cpp
     infrastructure/events/bus_test.cpp
+    support/git_http_server.h
+    support/git_http_server.cpp
     support/env_guard.h
     support/env_guard.cpp
     support/file_time.h

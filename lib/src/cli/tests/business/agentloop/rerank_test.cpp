@@ -88,8 +88,9 @@ TEST_CASE("the ranking is read out of prose and fences, dropping junk ids",
     CHECK_FALSE(parse_rerank_ids(R"({"ranking": 1})", 5).has_value());
 }
 
-TEST_CASE("a reply that is not one usable ranking is no verdict, and only [] drops everything",
-          "[agentloop][rerank][parse][57r]") {
+TEST_CASE(
+    "a reply that is not one usable ranking is no verdict, and only an empty list drops everything",
+    "[agentloop][rerank][parse][57r]") {
     // The second sweep's probe (57r): `["2", "1"]` and a prose mention of a
     // passage the judge did not see were read as "none help", and every
     // chunk was dropped; a reply naming a passage before its ranking was

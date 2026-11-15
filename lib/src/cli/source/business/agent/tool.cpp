@@ -23,6 +23,12 @@ void ToolRegistry::add(Tool tool) {
         throw std::invalid_argument("ToolRegistry::add: outbound tool '" + tool.name +
                                     "' names no target");
     }
+    if (tool.reaches_hosts && !tool.run_gated) {
+        // Its hosts are asked about through the gate dispatch hands it (57x).
+        // A tool that reaches one with no gate to ask would ask nobody.
+        throw std::invalid_argument("ToolRegistry::add: tool '" + tool.name +
+                                    "' reaches hosts while it runs but takes no gate");
+    }
     const std::string name = tool.name;
     const auto [unused, inserted] = tools_.emplace(name, std::move(tool));
     if (!inserted) {
@@ -104,19 +110,20 @@ namespace {
 /// person asked is shown beside it, worked out only once someone is about to
 /// be asked (52a): a file writer's diff reads the file, and a call the
 /// checker settles -- allowed by the config, accept-edits, an `always` --
-/// never shows it.
+/// never shows it. `website` says the target is a host: an outbound tool's,
+/// or one a tool reaches while it runs (57x).
 bool resolve(const Tool& tool, std::string_view target, std::string_view detail,
              const std::function<std::string()>& late_detail, const DispatchContext& context,
-             std::string_view call_id) {
+             std::string_view call_id, bool website) {
     // An address the gate cannot read is not one it can allow. The tool's own
     // parser is what named the target, so a call it could not name one for is
     // a call it would refuse anyway; denying here keeps that true even for a
     // tool that forgot to.
-    if (tool.outbound && target.empty()) {
+    if (website && target.empty()) {
         return false;
     }
 
-    const GateRequest request{tool.name, target, detail, tool.outbound, tool.edits, call_id};
+    const GateRequest request{tool.name, target, detail, website, tool.edits, call_id};
     const Permission decision = context.permission ? context.permission(request) : Permission::Ask;
 
     switch (decision) {
@@ -138,15 +145,17 @@ bool resolve(const Tool& tool, std::string_view target, std::string_view detail,
         return context.confirm(request);
     }
     const std::string shown = late_detail();
-    return context.confirm(
-        GateRequest{tool.name, target, shown, tool.outbound, tool.edits, call_id});
+    return context.confirm(GateRequest{tool.name, target, shown, website, tool.edits, call_id});
 }
 
 }  // namespace
 
 bool permitted_target(const Tool& tool, std::string_view target, std::string_view detail,
                       const DispatchContext& context, std::string_view call_id) {
-    return resolve(tool, target, detail, {}, context, call_id);
+    // A target named while the tool runs is a website for a tool that
+    // reaches hosts, though its own calls are not gated (57x): one rule here,
+    // never a case in the tool.
+    return resolve(tool, target, detail, {}, context, call_id, tool.outbound || tool.reaches_hosts);
 }
 
 namespace {
@@ -179,11 +188,11 @@ bool permitted(const Tool& tool, std::string_view arguments, const DispatchConte
     const std::string target =
         tool.describe_target ? tool.describe_target(arguments) : std::string{};
     if (!tool.describe_detail) {
-        return resolve(tool, target, {}, {}, context, call_id);
+        return resolve(tool, target, {}, {}, context, call_id, tool.outbound);
     }
     return resolve(
         tool, target, {}, [&tool, arguments] { return tool.describe_detail(arguments); }, context,
-        call_id);
+        call_id, tool.outbound);
 }
 
 ToolOutcome dispatch(const ToolRegistry& registry, const harness::ToolCall& call,

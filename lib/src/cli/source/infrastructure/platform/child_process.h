@@ -43,6 +43,16 @@ struct ChildCommand {
     /// subscription plan to per-token billing.
     std::vector<std::pair<std::string, std::string>> extra_environment;
 
+    /// Variables the child does not inherit (57x), each matched by its whole
+    /// name and dropped before `extra_environment` is added. The caller's
+    /// explicit choice, like an added one: the git tools drop `GIT_CONFIG`
+    /// from their own `git config` reads -- `git config` is the one git
+    /// command that honours it -- so those reads list what every other git
+    /// command reads; and they drop the person's `GIT_NO_LAZY_FETCH` before
+    /// adding their own, since a child reading a variable takes the first of
+    /// two entries for one name, and an added one comes after the inherited.
+    std::vector<std::string> unset_environment{};
+
     /// The folder the child starts in (56a), applied in the spawn; empty
     /// starts it where this process stands, as every child started before.
     /// Everything the child starts in turn inherits it. A folder that does not

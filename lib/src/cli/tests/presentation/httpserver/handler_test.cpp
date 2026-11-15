@@ -400,7 +400,8 @@ TEST_CASE("a truncated answer says length, in both shapes", "[httpserver][chat]"
                    nlohmann::json{{"prompt", "go"}})))["choices"][0]["finish_reason"] == "length");
 }
 
-TEST_CASE("a streamed chat completion frames chunks and ends with [DONE]", "[httpserver][sse]") {
+TEST_CASE("a streamed chat completion frames chunks and ends with the DONE sentinel",
+          "[httpserver][sse]") {
     const Fixture fixture;
     nlohmann::json body = chat_body("hello");
     body["stream"] = true;

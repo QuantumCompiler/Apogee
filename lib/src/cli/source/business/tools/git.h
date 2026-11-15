@@ -1,8 +1,10 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -17,7 +19,8 @@
 /// allow-list -- a token that starts with a letter or digit -- is what closes
 /// it.
 ///
-/// The tools read and never prompt, so **they are confined instead** (57o):
+/// The tools read and never prompt for a read, so **they are confined
+/// instead** (57o):
 /// an explicit `repo` must resolve inside the file tools' root, and so must
 /// what git opens there, whether the folder was named or walked to -- its
 /// git directory, its common directory, its work tree and its object store's
@@ -37,6 +40,33 @@
 /// head adds), with the refs resolved against a remote and fetched on demand
 /// when they are absent locally. The defaults for that form come from
 /// `ReviewDefaults`, set by flags, never inferred from the model's text.
+///
+/// **The review fetch stays in bounds** (57x). It is the one thing the tools
+/// do that can leave the machine, so `git_diff` and `git_log` reach hosts
+/// while they run (`agent::Tool::reaches_hosts`) and every fetch -- a ref
+/// named alone or qualified by its remote, from either tool -- takes one
+/// path: `remote` must be a remote the repository has; its URL is read as
+/// data and judged before git runs (`parse_fetch_url`: a folder must be
+/// inside the root and its repository confined as `repo` is; a network
+/// URL's host is put through the gate as a website; any other transport is
+/// refused); the repository's own settings that would run a command or send
+/// the fetch elsewhere refuse it by name (`fetch_setting_refusal`), a header
+/// setting that names another site among them (`fetch_header_refusal`), each
+/// listing read whole or the fetch refused; and git
+/// fetches **by that URL**, with an explicit refspec, so no
+/// `remote.<name>.*` key applies, no submodule is fetched into, no redirect
+/// is followed, no bundle or protocol-v2 packfile URI a server names on
+/// another host is taken (`http.followRedirects`, `transfer.bundleURI` and
+/// `fetch.uriProtocols` are each set off on every fetch), and only the judged
+/// transport, to the one host asked about, is used. The person's own global
+/// and system settings, and their environment, stay theirs -- so their own
+/// `http.<url>.followRedirects` for the remote's URL, which outranks the bare
+/// switch, still follows a redirect. Every `git config` read the tools make
+/// drops the person's `GIT_CONFIG`, which `git config` alone honours, so the
+/// settings and filter drivers it lists are the ones git's other commands
+/// read. And no git a tool
+/// starts fetches a missing object from a promisor remote by its name
+/// (`GIT_NO_LAZY_FETCH`, the person's own value dropped for the tools' `1`).
 namespace apogee::tools {
 
 /// How a review diff resolves when the model passes no `head`/`base`.
@@ -103,6 +133,85 @@ struct GitOptions {
 /// `=`) sets `refusal`.
 [[nodiscard]] std::vector<std::string> filter_neutralising_options(std::string_view scoped_names,
                                                                    std::string& refusal);
+
+/// A remote's URL as the review fetch judges it (57x), read as data before
+/// git runs.
+struct FetchUrl {
+    enum class Kind : std::uint8_t {
+        /// A folder: a path, or a `file://` URL. Nothing leaves the machine;
+        /// it must be inside the root.
+        Local,
+        /// `https`, `http`, `ssh` (a URL or scp-like `[user@]host:path`) or
+        /// `git`: its host is asked about as a website.
+        Network,
+    };
+    Kind kind = Kind::Local;
+    /// `file`, `https`, `http`, `ssh` or `git`: the one transport the fetch
+    /// may use.
+    std::string transport{};
+    /// A network URL's host in `contracts/host.h`'s canonical form; empty for
+    /// a folder.
+    std::string host{};
+    /// What git is handed, rebuilt from the parts judged -- the scheme
+    /// lower-cased, the host canonical; for a folder, its path, which the
+    /// fetch resolves against the root before git sees it.
+    std::string url{};
+    /// `url` with any password masked, for the question.
+    std::string shown{};
+};
+
+/// Reads `url` as the review fetch judges it (57x), or nullopt with `refusal`
+/// saying why it is not fetched from: a URL beginning with `-` (git would
+/// read it as an option), a host or user name beginning with `-` (ssh
+/// would), a host `contracts/host.h` does not accept or more than one `@`
+/// before it, a `file://` URL naming a host or holding a percent escape, an
+/// scp-like address with no `/` (git could read it as a remote's name), an
+/// `ssh://` or `git://` path holding a `@`, `[`, `]` or `%`, or a user part
+/// holding a `[` or `]` (git would read either back into the host, reaching
+/// one never judged: `ssh://[other]@good/x` reaches `other`), a LOCAL or
+/// `file://` folder path holding `@[` or opening with `[` (git's `host_end()`
+/// reads it as a bracketed host and enters the folder after the matching `]`,
+/// not the one judged), a control character, or
+/// any transport but the five -- `ext::`, `fd::`, a `<vcs>::` helper,
+/// `ftp://`. Schemes are read in any case.
+[[nodiscard]] std::optional<FetchUrl> parse_fetch_url(std::string_view url, std::string& refusal);
+
+/// The refusal for the repository's own settings a fetch would run or follow
+/// (57x), or empty: `scoped_names` is `git config --show-scope --name-only
+/// --get-regexp` output, and only `local` and `worktree` scope -- the
+/// repository's own, an `include.path` it pulls in among them -- counts;
+/// the person's global, system and command-line settings are theirs. The
+/// keys: those that run a command (`core.sshCommand`, `core.gitProxy`,
+/// `core.askPass`, `core.alternateRefsCommand`, `credential.helper` and
+/// `credential.<url>.helper`) and those that send the fetch elsewhere
+/// (`url.<base>.insteadOf`, an empty base -- `url..insteadof` -- included,
+/// `http.proxy` and `http.<url>.proxy`, `http.curloptResolve`,
+/// `http.followRedirects`, `http.cookieFile` and `http.saveCookies` -- which
+/// would write a cookie jar over any file the person can -- and
+/// `fetch.bundleURI`).
+[[nodiscard]] std::string fetch_setting_refusal(std::string_view scoped_names);
+
+/// The refusal for the repository's own header settings that would have a
+/// review fetch's request name a site other than the one asked about (57x),
+/// or empty: `scoped_values` is `git config -z --show-scope --get-regexp`
+/// output for `http.[<url>.]extraHeader` and `http.[<url>.]userAgent`, and
+/// only `local` and `worktree` scope counts, as with `fetch_setting_refusal`.
+/// Refused: an `extraHeader` that is a `Host` header (its name, before the
+/// first `:` or `;`, is `Host` in any case once spaces are trimmed), which a
+/// server holding several sites at one address answers from the site it
+/// names; and either setting holding a control character, which would start a
+/// header line of its own. Any other header -- a credential, as
+/// `actions/checkout` writes one -- is sent to the host asked about. The
+/// refusal never repeats the value.
+[[nodiscard]] std::string fetch_header_refusal(std::string_view scoped_values);
+
+/// The transports the review fetch's protocol fence names (57x): every one
+/// git ships -- its built-in `file`, `git` and `ssh`, and each `git-remote-*`
+/// helper it installs (`ext`, `fd`, `ftp`, `ftps`, `http`, `https`). A fetch
+/// sets `protocol.<name>.allow=never` for each but the judged transport,
+/// since a repository's own `protocol.<name>.allow` outranks a bare
+/// `protocol.allow=never`. A test holds the list to the installed git's.
+[[nodiscard]] std::span<const std::string_view> fetch_fence_transports();
 
 void register_git_tools(agent::ToolRegistry& registry, const GitOptions& options);
 

@@ -254,7 +254,7 @@ TEST_CASE("the editor writes adapters in a JSONC config in place, its comments k
     CHECK(replaced.substr(replaced.size() - (untouched.size() - end)) == untouched.substr(end));
 }
 
-TEST_CASE("set-backend's adapters value reads <path>[:<scale>], comma-separated",
+TEST_CASE("set-backend's adapters value reads <path> or <path>:<scale>, comma-separated",
           "[config_edit][adapters]") {
     using apogee::harness::parse_adapter_list;
     CHECK(parse_adapter_list("/a/one.gguf") ==

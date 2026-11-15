@@ -9,6 +9,8 @@
 #include <string>
 #include <system_error>
 
+#include "support/env_guard.h"
+
 #if !defined(_WIN32)
 #include <fcntl.h>
 #include <unistd.h>
@@ -267,6 +269,45 @@ TEST_CASE("a child inherits its three pipes and nothing else the parent holds",
     ::close(held[0]);
     ::close(held[1]);
 #endif
+}
+
+TEST_CASE("a child inherits no variable it is told to drop, and every other one as it stands",
+          "[platform][child][57x]") {
+    // 57x: the git tools' own `git config` reads drop GIT_CONFIG, which
+    // makes `git config` read one file alone where every other git command
+    // reads the repository's config.
+    if (!apogee::platform::supports_child_processes()) {
+        SUCCEED("no child-process support on this platform");
+        return;
+    }
+    const apogee::testing::EnvGuard dropped{"APOGEE_CHILD_DROPPED", "here"};
+    const apogee::testing::EnvGuard longer{"APOGEE_CHILD_DROPPED_NOT", "longer"};
+    const apogee::testing::EnvGuard kept{"APOGEE_CHILD_KEPT", "kept"};
+    const auto said = [](const ChildCommand& command) {
+        std::string error;
+        auto child = apogee::platform::start_child(command, error);
+        INFO(error);
+        REQUIRE(child != nullptr);
+        child->close_stdin();
+        return drain(*child, std::chrono::seconds{5});
+    };
+
+    ChildCommand command;
+    command.program = "sh";
+    command.arguments = {"-c",
+                         "printf '%s %s %s %s' \"${APOGEE_CHILD_DROPPED-unset}\" "
+                         "\"${APOGEE_CHILD_DROPPED_NOT-unset}\" \"${APOGEE_CHILD_KEPT-unset}\" "
+                         "\"${APOGEE_CHILD_ADDED-unset}\""};
+    // The control: every variable inherited as it stands.
+    CHECK(said(command) == "here longer kept unset");
+
+    // Dropped by its whole name alone, with nothing added...
+    command.unset_environment = {"APOGEE_CHILD_DROPPED"};
+    CHECK(said(command) == "unset longer kept unset");
+
+    // ...and with a variable added beside it.
+    command.extra_environment = {{"APOGEE_CHILD_ADDED", "added"}};
+    CHECK(said(command) == "unset longer kept added");
 }
 
 TEST_CASE("a child starts in the folder it is given, and where this process stands without one",

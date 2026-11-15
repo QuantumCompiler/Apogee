@@ -92,7 +92,8 @@ struct BuiltInToolOptions {
     /// declare no `writes` -- MCP tools included, which are read-only exactly
     /// when their server said so. An `outbound` tool stays, gated per
     /// website: with nobody to ask it reaches only `tools.allowed_hosts`, so a
-    /// non-interactive run still never blocks. `None` builds nothing and
+    /// non-interactive run still never blocks -- as do the git tools, whose
+    /// review fetch asks about the website it would reach (57x). `None` builds nothing and
     /// dials no server. `All` is every tool, under the gate, as `chat` has it.
     harness::AgentToolPolicy policy = harness::AgentToolPolicy::All;
     /// Which `mcp_servers:` entries to connect: null means every enabled one

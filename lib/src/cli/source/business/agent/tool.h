@@ -50,9 +50,10 @@ struct GateRequest {
     /// arguments (57p) -- worked out only for a person about to be asked, so
     /// a checker never sees one.
     std::string_view detail{};
-    /// The tool sends data off the machine (`Tool::outbound`). Its answers
-    /// are per host rather than per tool: allowing one website is not
-    /// allowing the next.
+    /// The target is a website: the tool sends data off the machine
+    /// (`Tool::outbound`), or reaches a host while it runs (`Tool::
+    /// reaches_hosts`, 57x). Its answers are per host rather than per tool:
+    /// allowing one website is not allowing the next.
     bool outbound = false;
     /// The tool edits a file or a note (`Tool::edits`): what a session's
     /// accept-edits mode lets run without asking (39b).
@@ -103,8 +104,9 @@ using ConfirmFn = std::function<bool(const GateRequest& request)>;
 using RefusalNote = std::function<std::string(const GateRequest& request)>;
 
 /// Puts one more target through the gate while a tool runs: `fetch_url`'s
-/// redirect to a new host. The same checker and the same prompt the call's
-/// own target went through; true means go ahead.
+/// redirect to a new host, or the host a git review fetch would reach (57x).
+/// The same checker and the same prompt the call's own target went through;
+/// true means go ahead.
 using TargetGate = std::function<bool(std::string_view target, std::string_view detail)>;
 
 /// One callable tool.
@@ -126,6 +128,16 @@ struct Tool {
     /// `writes` tools) still keeps it (2026-09-25).
     bool outbound = false;
 
+    /// Whether this tool reaches a host only while it runs (57x): the git
+    /// tools' review fetch. Its own calls are not gated -- most of them reach
+    /// nowhere, and a read never asks -- but every target it puts through its
+    /// `TargetGate` is a **website**, decided by host exactly as an
+    /// `outbound` tool's is: `tools.allowed_hosts`, the session's answers, a
+    /// prompt naming the host, and a deny where nobody can answer. A
+    /// read-only agent policy keeps it, as it keeps `fetch_url`. Such a tool
+    /// sets `run_gated`.
+    bool reaches_hosts = false;
+
     /// Whether this tool edits a file or a note -- `write_file`, `edit_file`,
     /// `delete_file`, `write_note`, `delete_note` (39b). Implies `writes`. A
     /// session in accept-edits mode runs these without asking; a command, an
@@ -141,7 +153,8 @@ struct Tool {
 
     /// The implementation for a tool that reaches further targets while it
     /// runs, which it puts through `gate` one at a time -- a redirect's next
-    /// host. Set instead of `run`; dispatch hands it the gate.
+    /// host, a review fetch's host. Set instead of `run`; dispatch hands it
+    /// the gate.
     std::function<ToolOutcome(std::string_view arguments, const TargetGate& gate)> run_gated;
 
     /// Extracts the operation's target (a path, a command, a host) for the
@@ -275,7 +288,9 @@ struct DispatchContext {
 [[nodiscard]] bool permitted(const Tool& tool, std::string_view arguments,
                              const DispatchContext& context, std::string_view call_id = {});
 
-/// The same resolution for one named target -- what a `TargetGate` asks.
+/// The same resolution for one named target -- what a `TargetGate` asks. For
+/// a tool that `reaches_hosts` the target is a website, as an outbound
+/// tool's is (57x).
 [[nodiscard]] bool permitted_target(const Tool& tool, std::string_view target,
                                     std::string_view detail, const DispatchContext& context,
                                     std::string_view call_id = {});

@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -614,15 +615,22 @@ std::unique_ptr<ChildProcess> start_child(const ChildCommand& command, std::stri
     }
     argv.push_back(nullptr);
 
-    // The environment is INHERITED, with only what the caller explicitly added
-    // layered on. Never synthesised: see ChildCommand::extra_environment.
+    // The environment is INHERITED, less only what the caller explicitly
+    // dropped and with only what it explicitly added layered on. Never
+    // synthesised: see ChildCommand::extra_environment.
     std::vector<std::string> env_storage;
     std::vector<char*> envp;
-    if (command.extra_environment.empty()) {
+    if (command.extra_environment.empty() && command.unset_environment.empty()) {
         envp.clear();
     } else {
         for (char** entry = environ; entry != nullptr && *entry != nullptr; ++entry) {
-            env_storage.emplace_back(*entry);
+            const std::string_view inherited{*entry};
+            const std::string_view name = inherited.substr(0, inherited.find('='));
+            if (std::ranges::find(command.unset_environment, name) !=
+                command.unset_environment.end()) {
+                continue;
+            }
+            env_storage.emplace_back(inherited);
         }
         for (const auto& [name, value] : command.extra_environment) {
             std::string entry = name;

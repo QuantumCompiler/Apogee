@@ -476,3 +476,100 @@ TEST_CASE("a call its tool refuses for its target is refused unrun, before the g
     CHECK(ran);
     CHECK(checked == 1);
 }
+
+TEST_CASE("a tool that reaches a host while it runs asks about it as a website, and nothing else",
+          "[agent][permission][57x]") {
+    // The git review fetch's mechanism (57x): its calls are not gated, but a
+    // host it puts through its gate is judged as an outbound tool's target
+    // is -- by host, with the website's prompt -- one rule here, never a
+    // case in the tool.
+    /// A request as the gate saw it, its views copied out.
+    struct Seen {
+        std::string tool;
+        std::string target;
+        std::string detail;
+        std::string call_id;
+        bool outbound = false;
+    };
+
+    const auto seen = [](const GateRequest& request) {
+        return Seen{std::string{request.tool}, std::string{request.target},
+                    std::string{request.detail}, std::string{request.call_id}, request.outbound};
+    };
+    std::vector<Seen> checked;
+    std::vector<Seen> asked;
+    std::vector<std::string> said;
+    Tool fetching = simple_tool("git_diff");
+    fetching.run = nullptr;
+    fetching.reaches_hosts = true;
+    fetching.run_gated = [&said](std::string_view arguments,
+                                 const apogee::agent::TargetGate& gate) {
+        if (arguments == "{}") {
+            return ToolOutcome{"local only", false};
+        }
+        const bool allowed = gate("github.com", "https://github.com/acme/widget.git");
+        said.emplace_back(allowed ? "fetched" : "refused");
+        return ToolOutcome{said.back(), !allowed};
+    };
+    ToolRegistry registry;
+    registry.add(fetching);
+    DispatchContext context;
+    Permission answer = Permission::Ask;
+    context.permission = [&](const GateRequest& request) {
+        checked.push_back(seen(request));
+        return answer;
+    };
+    context.confirm = [&](const GateRequest& request) {
+        asked.push_back(seen(request));
+        return true;
+    };
+
+    // A call that reaches nowhere asks nothing: the tool itself is not gated.
+    CHECK(permitted(fetching, "{}", context));
+    CHECK(dispatch(registry, ToolCall{"c0", "git_diff", "{}"}, context).content == "local only");
+    CHECK(checked.empty());
+    CHECK(asked.empty());
+
+    // The host it reaches is a website to the checker and to the prompt.
+    CHECK(dispatch(registry, ToolCall{"c1", "git_diff", R"({"head":"x"})"}, context).content ==
+          "fetched");
+    REQUIRE(checked.size() == 1);
+    CHECK(checked.front().tool == "git_diff");
+    CHECK(checked.front().target == "github.com");
+    CHECK(checked.front().outbound);
+    REQUIRE(asked.size() == 1);
+    CHECK(asked.front().outbound);
+    CHECK(asked.front().detail == "https://github.com/acme/widget.git");
+    CHECK(asked.front().call_id == "c1");
+
+    // Allowed by the checker, nobody is asked; denied, nothing goes.
+    answer = Permission::Allow;
+    CHECK(dispatch(registry, ToolCall{"c2", "git_diff", R"({"head":"x"})"}, context).content ==
+          "fetched");
+    answer = Permission::Deny;
+    CHECK(dispatch(registry, ToolCall{"c3", "git_diff", R"({"head":"x"})"}, context).is_error);
+    CHECK(asked.size() == 1);
+    // Nobody to ask: ask is a no.
+    answer = Permission::Ask;
+    context.confirm = nullptr;
+    CHECK(dispatch(registry, ToolCall{"c4", "git_diff", R"({"head":"x"})"}, context).is_error);
+    CHECK(said == std::vector<std::string>{"fetched", "fetched", "refused", "refused"});
+
+    // A tool with a gate that is not said to reach hosts asks as before:
+    // its targets are not websites.
+    Tool other = fetching;
+    other.name = "other";
+    other.reaches_hosts = false;
+    registry.add(other);
+    checked.clear();
+    context.confirm = [](const GateRequest&) { return true; };
+    (void)dispatch(registry, ToolCall{"c5", "other", R"({"head":"x"})"}, context);
+    REQUIRE(checked.size() == 1);
+    CHECK_FALSE(checked.front().outbound);
+
+    // One that reaches hosts must take the gate to ask with.
+    Tool gateless = simple_tool("gateless");
+    gateless.reaches_hosts = true;
+    ToolRegistry refusing;
+    CHECK_THROWS_AS(refusing.add(gateless), std::invalid_argument);
+}

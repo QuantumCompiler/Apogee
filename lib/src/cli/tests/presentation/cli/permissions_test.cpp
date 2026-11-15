@@ -28,12 +28,16 @@
 #include "contracts/host.h"
 #include "machine/driver_input.h"
 #include "machine/json_reporter.h"
+#include "platform/child_process.h"
 #include "platform/platform.h"
 #include "support/env_guard.h"
 #include "support/fake_mcp_server.h"
 #include "support/fake_transport.h"
+#include "support/git_http_server.h"
 #include "tools/environment.h"
 #include "tools/fs.h"
+#include "tools/git.h"
+#include "tools/process.h"
 #include "tools/shell.h"
 #include "tools/toolsets.h"
 #include "views/status_line.h"
@@ -1309,4 +1313,225 @@ TEST_CASE("/permissions leads with the mode and says what it does to each answer
     approvals.mode = PermissionMode::DontAsk;
     CHECK(apogee::commands::describe_permissions(config, approvals, gated(), edits).at(2) ==
           "run_command  deny   (dont-ask mode)");
+}
+
+// ---------------------------------------------------------------------------
+// The git review fetch through the gate (57x): a network remote is a website,
+// asked about by its canonical host through the same checker and prompt
+// `fetch_url` has.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Git in `dir` for a fixture, its own config only; fails the test on error.
+void fixture_git(const std::filesystem::path& dir, std::vector<std::string> arguments) {
+    apogee::platform::ChildCommand command;
+    command.program = "git";
+    command.arguments = {"-C", dir.string()};
+    command.arguments.insert(command.arguments.end(), arguments.begin(), arguments.end());
+    command.extra_environment = {
+        {"GIT_CONFIG_GLOBAL", "/dev/null"}, {"GIT_CONFIG_SYSTEM", "/dev/null"},
+        {"GIT_AUTHOR_NAME", "t"},           {"GIT_AUTHOR_EMAIL", "t@example.com"},
+        {"GIT_COMMITTER_NAME", "t"},        {"GIT_COMMITTER_EMAIL", "t@example.com"}};
+    const apogee::tools::ProcessOutcome outcome =
+        apogee::tools::run_to_completion(command, std::chrono::seconds{30});
+    INFO("git " << arguments.front() << ": " << outcome.err.text());
+    REQUIRE(outcome.exit_code.value_or(1) == 0);
+}
+
+/// A launch repository whose `origin` is served over http from 127.0.0.1,
+/// holding a branch the repository has never seen; the git tools over it.
+struct ServedReview {
+    apogee::testing::EnvGuard no_global{"GIT_CONFIG_GLOBAL", "/dev/null"};
+    apogee::testing::EnvGuard no_system{"GIT_CONFIG_SYSTEM", "/dev/null"};
+    apogee::testing::EnvGuard no_prompt{"GIT_TERMINAL_PROMPT", "0"};
+    apogee::testing::TempDir temp{"permissions-git-" + std::to_string(std::random_device{}())};
+    std::filesystem::path root = temp.path() / "proj";
+    std::filesystem::path served = temp.path() / "served";
+    std::unique_ptr<apogee::testing::GitHttpServer> server;
+    apogee::agent::ToolRegistry registry;
+
+    ServedReview() {
+        std::filesystem::create_directories(root);
+        std::filesystem::create_directories(served);
+        fixture_git(root, {"init", "-q", "-b", "main"});
+        std::ofstream{root / "README.md", std::ios::binary} << "launch\n";
+        fixture_git(root, {"add", "."});
+        fixture_git(root, {"commit", "-q", "-m", "launch"});
+        fixture_git(root, {"checkout", "-q", "-b", "remote-only"});
+        std::ofstream{root / "r.txt", std::ios::binary} << "REMOTE ONLY TEXT\n";
+        fixture_git(root, {"add", "r.txt"});
+        fixture_git(root, {"commit", "-q", "-m", "remote only"});
+        fixture_git(root, {"checkout", "-q", "main"});
+        fixture_git(temp.path(),
+                    {"clone", "-q", "--bare", root.string(), (served / "r.git").string()});
+        fixture_git(root, {"branch", "-D", "remote-only"});
+        fixture_git(served / "r.git", {"update-server-info"});
+        server = std::make_unique<apogee::testing::GitHttpServer>(served, temp.path() / "log");
+        if (server->running()) {
+            fixture_git(root, {"remote", "add", "origin", server->url("r.git")});
+        }
+        apogee::tools::GitOptions options;
+        options.working_directory = root;
+        options.fs_root = root;
+        apogee::tools::register_git_tools(registry, options);
+    }
+
+    [[nodiscard]] apogee::agent::ToolOutcome review(const apogee::agent::DispatchContext& context,
+                                                    std::string_view fetch = "auto") const {
+        return apogee::agent::dispatch(
+            registry,
+            apogee::harness::ToolCall{
+                "r", "git_diff",
+                nlohmann::json{{"head", "remote-only"}, {"base", "main"}, {"fetch", fetch}}.dump()},
+            context);
+    }
+};
+
+}  // namespace
+
+TEST_CASE(
+    "a review fetch's host is a website to the gate: listed, answered, denied, or refused "
+    "with nobody to ask",
+    "[commands][permissions][outbound][git][57x]") {
+    if (!apogee::platform::supports_child_processes() ||
+        apogee::platform::find_on_path("git").empty()) {
+        SKIP("git is not available");
+    }
+    const ServedReview world;
+    if (!world.server->running()) {
+        SKIP("python3 cannot serve here");
+    }
+    std::vector<std::pair<std::string, std::string>> asked;  // tool, target
+    std::vector<std::string> details;
+    const auto counting_confirm = [&](bool answer) {
+        return [&asked, &details, answer](const GateRequest& request) {
+            asked.emplace_back(std::string{request.tool}, std::string{request.target});
+            details.emplace_back(request.detail);
+            CHECK(request.outbound);
+            return answer;
+        };
+    };
+
+    SECTION("a pipe and serve, with nobody to ask and no listed host, refuse: nothing is sent") {
+        apogee::agent::DispatchContext context;
+        context.permission =
+            make_permission_checker(Config{}, std::make_shared<SessionApprovals>());
+        const apogee::agent::ToolOutcome refused = world.review(context);
+        INFO(refused.content);
+        CHECK(refused.is_error);
+        CHECK(refused.content.find("permission to reach 127.0.0.1 was not given") !=
+              std::string::npos);
+        CHECK(refused.content.find("config add-allowed-host 127.0.0.1") != std::string::npos);
+        CHECK(world.server->requests().empty());
+    }
+    SECTION("the prompt names the URL's host, never the remote's name, and a no sends nothing") {
+        apogee::agent::DispatchContext context;
+        context.permission =
+            make_permission_checker(Config{}, std::make_shared<SessionApprovals>());
+        context.confirm = counting_confirm(false);
+        CHECK(world.review(context).is_error);
+        CHECK(asked == std::vector<std::pair<std::string, std::string>>{{"git_diff", "127.0.0.1"}});
+        CHECK(details == std::vector<std::string>{world.server->url("r.git")});
+        CHECK(world.server->requests().empty());
+    }
+    SECTION("a listed host runs unasked, and the review diffs what it fetched") {
+        Config config;
+        config.tools.allowed_hosts = {"127.0.0.1"};
+        apogee::agent::DispatchContext context;
+        context.permission = make_permission_checker(config, std::make_shared<SessionApprovals>());
+        context.confirm = counting_confirm(true);
+        const apogee::agent::ToolOutcome fetched = world.review(context);
+        INFO(fetched.content);
+        CHECK_FALSE(fetched.is_error);
+        CHECK(fetched.content.find("Review: main...origin/remote-only") != std::string::npos);
+        CHECK(fetched.content.find("REMOTE ONLY TEXT") != std::string::npos);
+        CHECK(asked.empty());
+        CHECK_FALSE(world.server->requests().empty());
+    }
+    SECTION("the prompt's always lists the host, and the next review asks nothing") {
+        const std::filesystem::path config_path = world.temp.path() / "config.json";
+        std::ofstream{config_path} << apogee::harness::config_template();
+        const auto approvals = std::make_shared<SessionApprovals>();
+        apogee::agent::DispatchContext context;
+        context.permission = make_permission_checker(Config{}, approvals);
+        context.confirm = [&](const GateRequest& request) {
+            asked.emplace_back(std::string{request.tool}, std::string{request.target});
+            std::string note;
+            return apogee::commands::answer_permission("always", request, config_path, approvals,
+                                                       note);
+        };
+        CHECK_FALSE(world.review(context).is_error);
+        CHECK(asked.size() == 1);
+        CHECK(apogee::harness::load_config(config_path).tools.allowed_hosts ==
+              std::vector<std::string>{"127.0.0.1"});
+        CHECK_FALSE(world.review(context, "always").is_error);
+        CHECK(asked.size() == 1);
+    }
+    SECTION("--deny refuses the host, over the config's own list") {
+        Config config;
+        config.tools.allowed_hosts = {"127.0.0.1"};
+        const auto approvals = std::make_shared<SessionApprovals>();
+        REQUIRE(apogee::commands::seed_approvals(*approvals,
+                                                 PermissionPresets{.deny = {"127.0.0.1"}}, gated())
+                    .empty());
+        apogee::agent::DispatchContext context;
+        context.permission = make_permission_checker(config, approvals);
+        context.confirm = counting_confirm(true);
+        CHECK(world.review(context).is_error);
+        CHECK(asked.empty());
+        CHECK(world.server->requests().empty());
+    }
+    SECTION("a review that fetches nothing asks nothing") {
+        int checked = 0;
+        apogee::agent::DispatchContext context;
+        context.permission = [&checked](const GateRequest&) {
+            ++checked;
+            return Permission::Deny;
+        };
+        context.confirm = counting_confirm(true);
+        const apogee::agent::ToolOutcome never = world.review(context, "never");
+        CHECK(never.is_error);
+        CHECK(never.content.find("fetching is disabled") != std::string::npos);
+        CHECK(apogee::agent::dispatch(world.registry,
+                                      apogee::harness::ToolCall{"s", "git_status", "{}"}, context)
+                  .content.find("Branch:") != std::string::npos);
+        CHECK(checked == 0);
+        CHECK(asked.empty());
+    }
+}
+
+TEST_CASE("machine mode's question for a review fetch is a website's, its URL shown",
+          "[commands][permissions][machine][git][57x]") {
+    if (!apogee::platform::supports_child_processes() ||
+        apogee::platform::find_on_path("git").empty()) {
+        SKIP("git is not available");
+    }
+    const ServedReview world;
+    if (!world.server->running()) {
+        SKIP("python3 cannot serve here");
+    }
+    const std::filesystem::path config_path = world.temp.path() / "config.json";
+    std::ofstream{config_path} << apogee::harness::config_template();
+    std::ostringstream out;
+    apogee::commands::JsonReporter reporter{out};
+    std::istringstream in{R"({"type":"answer","text":"session"})"
+                          "\n"};
+    apogee::commands::DriverInput driver{in};
+    const auto approvals = std::make_shared<SessionApprovals>();
+    apogee::agent::DispatchContext context;
+    context.permission = make_permission_checker(Config{}, approvals);
+    context.confirm = make_driver_confirm_fn(reporter, driver, config_path, approvals);
+    const apogee::agent::ToolOutcome fetched = world.review(context);
+    INFO(fetched.content);
+    CHECK_FALSE(fetched.is_error);
+    const nlohmann::json event = nlohmann::json::parse(out.str());
+    CHECK(event["type"] == "question");
+    CHECK(event["kind"] == "permission");
+    CHECK(event["tool"] == "git_diff");
+    CHECK(event["target"] == "127.0.0.1");
+    CHECK(event["outbound"] == true);
+    CHECK(event["detail"] == world.server->url("r.git"));
+    CHECK(event["tool_call_id"] == "r");
+    CHECK(approvals->hosts.contains("127.0.0.1"));
 }

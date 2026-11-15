@@ -204,4 +204,71 @@ if sed -n 's/.*SYSTEM<<\(.*\)>>.*/\1/p' "$WORK_DIR/resume.out" | grep -q "Git re
     fail "the review note was persisted into the transcript: $(cat "$WORK_DIR/resume.out")"
 fi
 
+# --- the review fetch asks about the website it would reach (57x) -----------
+# A bare repository served over git's dumb HTTP from a listener on 127.0.0.1
+# this script owns, holding a branch the launch repository has never seen,
+# and `origin` pointing there. With no host listed, a run with nobody to ask
+# is refused, saying how to allow the host, and nothing is sent; with the
+# host allowed -- `--allow-host` where the command takes it, the config's
+# list for analyze -- the branch is fetched and reviewed.
+if command -v python3 >/dev/null 2>&1; then
+    git -C "$WORK_DIR/repo" checkout -q -b remote-only
+    echo 'REMOTE ONLY TEXT' > "$WORK_DIR/repo/remote.txt"
+    git -C "$WORK_DIR/repo" add remote.txt
+    git -C "$WORK_DIR/repo" commit -q -m "remote only"
+    git -C "$WORK_DIR/repo" checkout -q main
+    mkdir -p "$WORK_DIR/served"
+    git clone -q --bare "$WORK_DIR/repo" "$WORK_DIR/served/r.git"
+    git -C "$WORK_DIR/repo" branch -q -D remote-only
+    git -C "$WORK_DIR/served/r.git" update-server-info
+    : > "$WORK_DIR/served.log"
+    python3 -I - "$WORK_DIR/served" "$WORK_DIR/served.log" "$WORK_DIR/port" <<'PY' &
+import functools, http.server, socketserver, sys
+folder, log, port_file = sys.argv[1], sys.argv[2], sys.argv[3]
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        with open(log, "a") as out:
+            out.write(self.path + "\n")
+        super().do_GET()
+    def log_message(self, *args):
+        pass
+server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), functools.partial(Handler, directory=folder))
+with open(port_file + ".tmp", "w") as out:
+    out.write(str(server.server_address[1]))
+import os
+os.replace(port_file + ".tmp", port_file)
+server.timeout = 1
+for _ in range(120):
+    server.handle_request()
+PY
+    SERVER=$!
+    trap 'kill "$SERVER" 2>/dev/null || true; rm -rf "$WORK_DIR"' EXIT
+    i=0
+    while [ ! -s "$WORK_DIR/port" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+    [ -s "$WORK_DIR/port" ] || fail "the listener did not start"
+    git -C "$WORK_DIR/repo" remote add origin "http://127.0.0.1:$(cat "$WORK_DIR/port")/r.git"
+
+    "$APOGEE_BIN" analyze --agent security-review --branch remote-only --json "x" </dev/null >"$WORK_DIR/unlisted.json" 2>"$WORK_DIR/unlisted.err" || true
+    grep -q "permission to reach 127.0.0.1 was not given" "$WORK_DIR/unlisted.json" || fail "an unlisted host was not refused: $(cat "$WORK_DIR/unlisted.json" "$WORK_DIR/unlisted.err")"
+    grep -q "add-allowed-host 127.0.0.1" "$WORK_DIR/unlisted.json" || fail "the refusal did not say how to allow the host: $(cat "$WORK_DIR/unlisted.json")"
+    [ -s "$WORK_DIR/served.log" ] && fail "a refused fetch reached the host: $(cat "$WORK_DIR/served.log")"
+
+    printf 'review it\n' | "$APOGEE_BIN" chat --tools --branch remote-only --allow-host 127.0.0.1 >"$WORK_DIR/allowed.out" 2>"$WORK_DIR/allowed.err" || fail "chat --allow-host: $(cat "$WORK_DIR/allowed.err")"
+    grep -q "Review: main...origin/remote-only" "$WORK_DIR/allowed.out" || fail "--allow-host did not fetch the branch: $(cat "$WORK_DIR/allowed.out")"
+    grep -q "REMOTE ONLY TEXT" "$WORK_DIR/allowed.out" || fail "the fetched branch's change was not diffed: $(cat "$WORK_DIR/allowed.out")"
+    grep -q "info/refs" "$WORK_DIR/served.log" || fail "the allowed fetch never reached the listener"
+
+    git -C "$WORK_DIR/repo" update-ref -d refs/remotes/origin/remote-only
+    : > "$WORK_DIR/served.log"
+    "$APOGEE_BIN" config add-allowed-host 127.0.0.1 >/dev/null || fail "config add-allowed-host"
+    "$APOGEE_BIN" analyze --agent security-review --branch remote-only --fetch --json "x" </dev/null >"$WORK_DIR/listed.json" 2>"$WORK_DIR/listed.err" || fail "analyze with the host listed: $(cat "$WORK_DIR/listed.err")"
+    grep -q "Review: origin/main...origin/remote-only" "$WORK_DIR/listed.json" || fail "a listed host was not fetched from: $(cat "$WORK_DIR/listed.json")"
+    grep -q "info/refs" "$WORK_DIR/served.log" || fail "the listed fetch never reached the listener"
+
+    { kill "$SERVER"; wait "$SERVER"; } 2>/dev/null || true
+    git -C "$WORK_DIR/repo" remote remove origin
+else
+    echo "analyze_e2e: python3 not found; the review fetch's listener case is skipped"
+fi
+
 echo "apogee analyze end-to-end: OK"

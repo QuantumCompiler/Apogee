@@ -492,7 +492,7 @@ TEST_CASE("the permissions twin edits the same line the CLI edits, byte for byte
                                     .body)["restart_required"] == false);
 }
 
-TEST_CASE("the allowed-hosts twins leave the same bytes the CLI and the [a]lways answer leave",
+TEST_CASE("the allowed-hosts twins leave the same bytes the CLI and the always answer leave",
           "[httpserver][admin][hosts]") {
     const Fixture fixture;
     const std::string shipped = Fixture::bytes(fixture.http_config);

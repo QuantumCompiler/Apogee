@@ -22,6 +22,7 @@
 #include "cli/complete.h"
 #include "cli/helpers.h"
 #include "cli/models.h"
+#include "cli/permissions.h"
 #include "cli/suite_residency.h"
 #include "cli/train.h"
 #include "contracts/config.h"
@@ -478,7 +479,10 @@ int serve_mcp(const RootContext& context, std::istream& in, std::ostream& out, s
     // search_documents resolves its retriever as chat's tool does -- the
     // collection's embedder asked of the providers (54b) -- so they are
     // built before it searches.
-    mcp::Dispatch native = [&models, through = mcp::dispatch_through(registry)](
+    // A served review fetch reaches only the websites the config lists
+    // (57x): nobody is there to ask.
+    mcp::Dispatch native = [&models, through = mcp::dispatch_through(
+                                         registry, make_permission_checker(config, nullptr))](
                                std::string_view name, const nlohmann::json& args) {
         if (name == "search_documents") {
             (void)models.ready();

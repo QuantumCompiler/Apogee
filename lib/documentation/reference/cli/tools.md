@@ -31,10 +31,10 @@ included, so a link that leads out of the root is refused by every file tool
 and nothing is written through it. A file writer's question names the file the
 call writes, relative to the root -- `notes/../a.md` is asked about as `a.md`
 -- and a path that lands outside is refused before anyone is asked. The git
-tools never ask, so they are confined instead: a `repo` the model names must
-be inside the same root (with none, they use the repository above the launch
-folder, as before), and so must the repository git opens there -- a `.git`
-file, link or folder, a `core.worktree`, a `commondir` or an
+tools never ask about a read, so they are confined instead: a `repo` the
+model names must be inside the same root (with none, they use the repository
+above the launch folder, as before), and so must the repository git opens
+there -- a `.git` file, link or folder, a `core.worktree`, a `commondir` or an
 `objects/info/alternates` that leads out of the root is refused, while the
 checkout a launch in a subfolder sits in, a linked worktree and a submodule's
 checkout still read. No git they start runs a command a repository's own
@@ -43,9 +43,79 @@ hook (from `.git/hooks` or a `core.hooksPath`), or signature check, nor
 anything inside a submodule: a submodule shows as the commit ids it moved
 between, never diffed, logged or summarised inside it, whatever
 `diff.submodule` or `status.submoduleSummary` asks -- and none of their reads
-writes the repository's index. The review form's `git fetch` is the one
-exception, as Milestone V left it: it runs with the repository's own remote
-settings (though still no hook).
+writes the repository's index, nor fetches a missing object from a partial
+clone's promisor remote (git 2.44 and later honor this) -- whatever your own
+`GIT_NO_LAZY_FETCH` says, since the tools set it to `1` in place of yours.
+
+**The review fetch stays in bounds** (57x). `git_diff` with `head` or
+`base`, and `git_log` under `--branch` or `/branch`, fetch a ref that is not
+here -- the one thing the git tools do that can leave the machine, so it
+asks. `remote` must be a remote the repository has: a path, a URL or an
+unknown name is refused (`'<remote>' is not a remote this repository has`).
+Its URL is read and judged before git runs. A folder must be inside the
+root, its repository confined as `repo` is, and the folder must itself be
+that repository's top -- not a plain folder a `.git` beside it (`sub.git`)
+would make git serve from outside. A folder whose path holds `@[` or begins
+with `[` -- in the remote's URL, or in the full path git is handed once links
+are followed -- is refused too, since git reads that as a host and enters a
+different folder. A folder is fetched from with no question, since nothing
+leaves the machine. An `https`, `http`, `ssh`
+(`user@host:path` too) or `git` URL is asked about **by its host, as a
+website** -- the same gate `fetch_url` goes through: `tools.allowed_hosts`,
+the session's answers, the prompt (`git_diff -> github.com`, the URL shown
+under it with any password masked, `always` adding the host to the list),
+and a no where nobody can answer, saying how to allow the host:
+`--allow-host <host>` where the command takes it (`chat`, `execute`,
+`complete`), `config add-allowed-host <host>`, or `always` when asked. Each
+host is asked about once per call. Any other transport -- `ext::`, `fd::`, a
+`<vcs>::` helper, `ftp://` -- and a URL or host beginning with `-` are
+refused, as are an `ssh://` or `git://` path holding a `@`, `[`, `]` or `%`
+and a user part holding a `[` or `]` (git would read either back into the
+host, reaching one never asked about: `ssh://[other]@github.com/x` goes to
+`other`). Your flags (`--branch`, `--remote`, `--fetch`) choose which remote
+and when; they grant no host. Git then fetches **by that URL**, never by the
+remote's name, with an explicit refspec into `refs/remotes/<remote>/<branch>`:
+no `remote.<name>.uploadpack` or other setting of the remote applies, no
+submodule is fetched into, no redirect is followed, and no bundle or
+protocol-v2 packfile URI a server names on another host is taken --
+`http.followRedirects`, `transfer.bundleURI` and `fetch.uriProtocols` are
+each set off on every fetch, so only the judged transport, to the one host
+asked about, is used. A repository whose own config -- including a file its
+`include.path` pulls in -- sets something a fetch would run or follow
+(`core.sshCommand`, `core.gitProxy`, `core.askPass`,
+`core.alternateRefsCommand`, a `credential.helper`, a `url.<base>.insteadOf`
+(an empty base, `[url ""]`, included), an `http.proxy`,
+`http.curloptResolve`, `http.followRedirects`, `http.cookieFile` or
+`http.saveCookies` -- which would write a cookie jar over a file -- or
+`fetch.bundleURI`), or that sends a header naming another site (an
+`http.extraHeader` that is a `Host` header, which a server holding several
+sites at one address -- a shared host, a CDN, a reverse proxy -- would answer
+from the site it names; or an `http.extraHeader` or `http.userAgent` holding
+a line break or other control character, which would start a header line of
+its own), is not fetched from, the refusal naming the key: fetch it
+yourself, or remove the setting. Any other header the repository's own config
+sets -- a credential, such as the `AUTHORIZATION` header `actions/checkout`
+writes -- is sent, to the host asked about. A `GIT_CONFIG` in your
+environment hides no such setting: only `git config` reads that variable,
+and the tools' own config reads drop it, so they see what the fetch will
+read, as they see a repository's filter drivers. Nor does a long config:
+one whose listing of those settings, or of its filter drivers, runs past the
+256 KiB the tools read whole is not fetched from, or not read at all, since
+what it set first could not be judged. Your own global and
+system settings and your environment (but for `GIT_NO_LAZY_FETCH`, above)
+stay yours -- your credential helper,
+your ssh and its config, your proxy and your own `insteadOf` all apply --
+with three the `-c` switches above override whatever their scope: your global
+`transfer.bundleURI`, `http.followRedirects` and `fetch.uriProtocols` are not
+used by the review fetch, since the host asked about must be the host
+reached -- though your own `http.<url>.followRedirects`, set for a URL, still
+applies, to that server's redirects and the alternates it names, since git ranks a key that names a URL above the bare switch. One
+rewrite of yours applies: a URL your rewrites would change a second time is
+not fetched (`git would rewrite its URL again`), since git would then reach
+an address nobody judged. A
+fetch that is not made leaves the review to what is already here, said as
+`Not fetched: ...` in the answer's header, or refused when the ref is not
+here at all.
 `--deny`, `/deny` and `/revoke` take every host `--allow-host` takes,
 `localhost` and IPv6 literals such as `[::1]` included.
 
@@ -325,7 +395,9 @@ call is `search_documents` embedding a query (next):
   `collection_info`), and the four [graph tools](#navigating-a-knowledge-graph).
   These are the same tools a tool-using run offers a model, with the same
   `tools:` settings: `fs_root` is the folder the file tools start in, and
-  `tools.disabled` switches a toolset off here too. The writers (`write_file`,
+  `tools.disabled` switches a toolset off here too. A served `git_diff`'s
+  review fetch reaches a network remote only when `tools.allowed_hosts`
+  lists its host (57x): nobody is there to be asked. The writers (`write_file`,
   `edit_file`, `write_note`, `run_command`, ...) are withheld, because
   Apogee's permission gate lives in its own loop. `search_documents`
   searches as it does for a model in a chat (since 54b): its retriever is

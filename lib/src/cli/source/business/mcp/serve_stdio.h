@@ -37,8 +37,12 @@ int serve_stdio(std::istream& in, std::ostream& out, std::string_view server_nam
 /// The read-only tools of a registry, as served tools; the dispatch that
 /// runs them. What `apogee mcp serve` serves first: a writing tool is
 /// withheld because the permission gate lives in the loop, not in a server.
+/// `websites` decides a website a served tool reaches while it runs -- the
+/// git review fetch's host (57x) -- with nobody to ask, so only what it
+/// allows is reached; with none, no website is.
 [[nodiscard]] std::vector<ServedTool> read_only_tools(const agent::ToolRegistry& registry);
-[[nodiscard]] Dispatch dispatch_through(const agent::ToolRegistry& registry);
+[[nodiscard]] Dispatch dispatch_through(const agent::ToolRegistry& registry,
+                                        agent::PermissionChecker websites = {});
 
 /// A read served beside a registry's tools (54a): listed as a tool marked
 /// read-only, and answered by its own function -- the document the CLI

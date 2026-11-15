@@ -105,8 +105,9 @@ std::vector<ServedTool> read_only_tools(const agent::ToolRegistry& registry) {
     return out;
 }
 
-Dispatch dispatch_through(const agent::ToolRegistry& registry) {
-    return [&registry](std::string_view name, const nlohmann::json& args) {
+Dispatch dispatch_through(const agent::ToolRegistry& registry, agent::PermissionChecker websites) {
+    return [&registry, websites = std::move(websites)](std::string_view name,
+                                                       const nlohmann::json& args) {
         const agent::Tool* tool = registry.find(name);
         ToolCallResult result;
         if (tool == nullptr || tool->writes) {
@@ -118,10 +119,12 @@ Dispatch dispatch_through(const agent::ToolRegistry& registry) {
         call.id = "stdio";
         call.name = std::string{name};
         call.arguments = args.dump();
-        // No permission context: only read-only tools are served, and the
-        // gate never consults it for those.
-        const agent::ToolOutcome outcome =
-            agent::dispatch(registry, call, agent::DispatchContext{});
+        // Only read-only tools are served, and the gate never asks about
+        // their own calls; a website one reaches while it runs (57x) is the
+        // checker's to decide, with nobody to ask.
+        agent::DispatchContext context;
+        context.permission = websites;
+        const agent::ToolOutcome outcome = agent::dispatch(registry, call, context);
         result.text = outcome.content;
         result.is_error = outcome.is_error;
         return result;
