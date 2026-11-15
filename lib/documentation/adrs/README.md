@@ -8,5 +8,6 @@ The standing rules, dated and append-only, each with its reason and its enforcem
 | [`gui/`](gui/) | **Every GUI app**, what binds every graphical app alike, whatever its language |
 | [`darwin/`](darwin/) | **The Apple apps**, macOS, iPadOS and iOS, one Swift codebase; an item or note for one OS sits in its subfolder |
 | [`mod/`](mod/) | **The mod**, the Claude plugin, driving the same binary |
+| [`design/`](design/) | **The design**, the prototype every GUI app is built from (`lib/design/`) |
 | `unix/` | **The Linux app**, not built yet |
 | `windows/` | **The Windows app**, not built yet |

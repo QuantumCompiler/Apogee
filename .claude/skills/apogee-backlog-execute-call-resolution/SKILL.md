@@ -9,11 +9,11 @@ A backlog group (one home's table: a version, `maintenance`, `architecture`, or 
 
 ## 0. Which application?
 
-Apogee's documentation is split by kind, then by platform ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/{assistant,backlog,adrs,reference}/<app>/`, where `<app>` is **`cli`** (the harness), **`darwin`** (the Apple apps, macOS, iPadOS and iOS, with an item for one OS under `darwin/macos/`, `darwin/ipados/` or `darwin/ios/`, and what binds every GUI app under `gui/`), or **`mod`** (the Claude plugin). `unix/` and `windows/` hold the apps not yet built. Resolve which application this invocation means before touching anything, in order:
+Apogee's documentation is split by kind, then by platform ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/{assistant,backlog,adrs,reference}/<app>/`, where `<app>` is **`cli`** (the harness), **`darwin`** (the Apple apps, macOS, iPadOS and iOS, with an item for one OS under `darwin/macos/`, `darwin/ipados/` or `darwin/ios/`, and what binds every GUI app under `gui/`), **`mod`** (the Claude plugin), or **`design`** (the design prototype at `lib/design/`, the reference every GUI app is built from). `unix/` and `windows/` hold the apps not yet built. Resolve which application this invocation means before touching anything, in order:
 
 1. **The arguments.** An id or table names its queue — the CLI's version tables (`v0.1.<x>`, `v0.2.0`) with their numeric tracks (`52a`) and the standing `M<n>`/`A<n>` queues; the GUI's and the mod's indexes with their lettered tracks. A named document resolves by which backlog holds it. A bare version can mean any queue — they all carry work per release.
-2. **The conversation.** What the work touches: the harness's commands, backends and seams are the CLI's; screens, windows and the design are the GUI's; the Claude plugin (panes, slash commands, `$`-API work, `lib/src/mod/`) is the mod's. Work that spans queues gets cross-queue siblings, gated both ways.
-3. **Still ambiguous? Ask.** One AskUserQuestion — which application's queue (the CLI, the GUI, or the mod) — before anything is treated as decided. Never guess between them.
+2. **The conversation.** What the work touches: the harness's commands, backends and seams are the CLI's; screens and windows an app builds are the GUI's; the design prototype itself (`lib/design/`, drawing a screen before an app builds it) is the design's; the Claude plugin (panes, slash commands, `$`-API work, `lib/src/mod/`) is the mod's. Work that spans queues gets cross-queue siblings, gated both ways.
+3. **Still ambiguous? Ask.** One AskUserQuestion — which application's queue (the CLI, the GUI, the mod, or the design) — before anything is treated as decided. Never guess between them.
 
 Everything below reads from the chosen application's folders, written `<app>`: its backlog index (`lib/documentation/backlog/<app>/README.md`) is the authority on that queue's tables, numbering, document format and link depths, and its contributor docs (`lib/documentation/assistant/<app>/CLAUDE.md` first) carry the invariants. Where this skill says `<app>`, substitute the chosen application's folder name.
 
@@ -39,10 +39,10 @@ Per answer, in the document, immediately:
 1. **Decisions made** gains the dated entry — the question, the choice, whose call it was ("the user's call, <date>" / "the default, confirmed <date>").
 2. **The call leaves Open calls.**
 3. **Consequences propagate**: any constraint, seam line, guardrail or acceptance criterion that branched on the call is rewritten to its decided form (the house precedent: when the config-format comments call landed on JSONC, the editor contract, migration golden, template line and acceptance criteria all flipped to the decided shape in the same pass — a decision recorded but not propagated is drift wearing a date).
-4. **The flags come down elsewhere**: an index row, track preamble or ROADMAP line that advertised the call as blocking is updated to say it was answered, with the date — the "**was answered the same day**" phrasing is the house style.
+4. **The flags come down elsewhere**: an index row, track preamble or ROADMAP line that advertised the call as blocking is updated to say it was answered, with the date — the "**was answered the same day**" phrasing is the house style. The same goes for [the release overview](../../../lib/documentation/backlog/README.md#keeping-this-page-true): a row still waiting on the user's decision says so in its "Waits on" cell, an answered one no longer does, and its line on how many items wait on a decision stays true.
 
 ## 4. Validate and report
 
 - The group's documents grep clean: no `[user]` tags remain except the deliberate skips; no `[default:` entries remain except those skipped or deliberately left for build time (say which and why).
-- The standard index validation (rows ↔ docs, gates, links) still passes — resolution edits documents, so the sweep proves nothing tore.
+- The standard index validation (rows ↔ docs, gates, links, and the release overview against the index) still passes — resolution edits documents, so the sweep proves nothing tore.
 - Report: every call asked and its answer, one line each; the decisions recorded per document; the consequences that were propagated; the skips (🚧 docs, declined calls, missing documents) with what still blocks what; and the group's state now — ideally "nothing in this table waits on a question."

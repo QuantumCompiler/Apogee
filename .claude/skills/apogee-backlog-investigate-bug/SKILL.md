@@ -9,11 +9,11 @@ A bug report arrives as a symptom — a transcript, a wrong number, a hang, "ver
 
 ## 0. Which application?
 
-Apogee's documentation is split by kind, then by platform ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/{assistant,backlog,adrs,reference}/<app>/`, where `<app>` is **`cli`** (the harness), **`darwin`** (the Apple apps, macOS, iPadOS and iOS, with an item for one OS under `darwin/macos/`, `darwin/ipados/` or `darwin/ios/`, and what binds every GUI app under `gui/`), or **`mod`** (the Claude plugin). `unix/` and `windows/` hold the apps not yet built. Resolve which application this invocation means before touching anything, in order:
+Apogee's documentation is split by kind, then by platform ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/{assistant,backlog,adrs,reference}/<app>/`, where `<app>` is **`cli`** (the harness), **`darwin`** (the Apple apps, macOS, iPadOS and iOS, with an item for one OS under `darwin/macos/`, `darwin/ipados/` or `darwin/ios/`, and what binds every GUI app under `gui/`), **`mod`** (the Claude plugin), or **`design`** (the design prototype at `lib/design/`, the reference every GUI app is built from). `unix/` and `windows/` hold the apps not yet built. Resolve which application this invocation means before touching anything, in order:
 
 1. **The arguments.** An id or table names its queue — the CLI's version tables (`v0.1.<x>`, `v0.2.0`) with their numeric tracks (`52a`) and the standing `M<n>`/`A<n>` queues; the GUI's and the mod's indexes with their lettered tracks. A named document resolves by which backlog holds it. A bare version can mean any queue — they all carry work per release.
-2. **The conversation.** What the work touches: the harness's commands, backends and seams are the CLI's; screens, windows and the design are the GUI's; the Claude plugin (panes, slash commands, `$`-API work, `lib/src/mod/`) is the mod's. Work that spans queues gets cross-queue siblings, gated both ways.
-3. **Still ambiguous? Ask.** One AskUserQuestion — which application's queue (the CLI, the GUI, or the mod) — before anything is treated as decided. Never guess between them.
+2. **The conversation.** What the work touches: the harness's commands, backends and seams are the CLI's; screens and windows an app builds are the GUI's; the design prototype itself (`lib/design/`, drawing a screen before an app builds it) is the design's; the Claude plugin (panes, slash commands, `$`-API work, `lib/src/mod/`) is the mod's. Work that spans queues gets cross-queue siblings, gated both ways.
+3. **Still ambiguous? Ask.** One AskUserQuestion — which application's queue (the CLI, the GUI, the mod, or the design) — before anything is treated as decided. Never guess between them.
 
 Everything below reads from the chosen application's folders, written `<app>`: its backlog index (`lib/documentation/backlog/<app>/README.md`) is the authority on that queue's tables, numbering, document format and link depths, and its contributor docs (`lib/documentation/assistant/<app>/CLAUDE.md` first) carry the invariants. Where this skill says `<app>`, substitute the chosen application's folder name.
 
@@ -46,9 +46,10 @@ One document in `maintenance/`, kebab-case, to `/apogee-backlog-create-item`'s f
 ## 4. Place it and update the docs
 
 1. **Index**: the row takes the home's next maintenance id ever assigned, at its table's end (claimable at any time by name; a gate only if it truly consumes a pending item); the preamble gains the item's one-sentence origin, and a home whose maintenance table does not exist yet gains it with this first item, the CLI's conventions mirrored.
+   - **The overview**: [the release overview](../../../lib/documentation/backlog/README.md#keeping-this-page-true) gains the row in its maintenance table.
 2. **ROADMAP**: one line in the home's matching section, in its style — the evidence summarized, the fix's shape, the link.
 3. **MILESTONES is never touched**; SPEC only if the user agreed a principle actually changed (rare for a bug — a bug is behavior diverging from the docs, not the docs changing).
-4. Validate with the standard scripted routine (rows ↔ docs, sequences, gates, links) before reporting.
+4. Validate with the standard scripted routine (rows ↔ docs, sequences, gates, links, and the release overview's maintenance table against the index) before reporting.
 
 ## 5. Report
 

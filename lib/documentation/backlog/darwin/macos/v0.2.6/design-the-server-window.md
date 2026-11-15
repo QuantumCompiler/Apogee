@@ -101,6 +101,7 @@ This item delivers: a **way into the window** (the Apogee menu's item, present o
   These shaped the People, Devices and pending-pairing boards.
 
 **Decisions made** (dated):
+- 2026-11-14: Gated on design [1e](../../../design/v0.2.1/styles-shell-and-the-first-screen.md) (the user's calls that day, design track 1): the design prototype is being rebuilt in React, and the old `main.html` is frozen from design 1c, taking fixes only. So this window is drawn in the React app once its first screen exists, never in the old format. Where this document names `main.html`, its boards or the canvas, read the React app's server module, its gallery entries and `lib/design/main.html`; design 1t re-words it.
 - 2026-11-14: Specced from the admin-mode and people spike. The user's calls:
   - **An admin mode** is a separate "Apogee Server" window in the macOS app, offered only on the Mac that serves, driving the local CLI over pipes.
   - **Administering is local by default.** The owner may mark chosen paired devices as allowed to administer remotely (62g). This revises 59d's default that the admin plane keeps one token for any network caller.
@@ -200,7 +201,7 @@ This item delivers: a **way into the window** (the Apogee menu's item, present o
 - [ ] Every pre-existing start preset renders exactly as before (the snapshot comparison), and the harness window has no new item on a Mac that doesn't serve.
 - [ ] The changed files are published to the Apogee Desktop canvas and read back identical. Nothing is committed unless the user asks.
 
-**Scope note.** Earmarked for v0.2.6 (darwin/macos track 10, item 10a); ungated. [10b](server-window.md) is gated on it, and [10c](../v0.2.7/people-screens.md) builds its People boards. Out of scope:
+**Scope note.** Earmarked for v0.2.6 (darwin/macos track 10, item 10a); gated on design 1e. [10b](server-window.md) is gated on it, and [10c](../v0.2.7/people-screens.md) builds its People boards. Out of scope:
 - any Swift, CLI or test change (10b, 10c and CLI tracks 62 and 63);
 - the client side's Connections pane, pair sheet and indicator (7a);
 - the window on iPhone or iPad (never offered);

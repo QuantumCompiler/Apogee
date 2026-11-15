@@ -49,7 +49,7 @@ Nothing is built yet. The planned layout ([ADR 0001](../../adrs/mod/layer-enforc
 
 ## Working process
 
-The CLI docs' lifecycle, mirrored — read [Working process](../cli/CLAUDE.md#working-process) there. The mod's deltas: mod work lands in **this** tree's boards and queue; an item needing a CLI change (a new document, a served tool) gets a CLI-queue sibling, cross-gated by path.
+The CLI docs' lifecycle, mirrored — read [Working process](../cli/CLAUDE.md#working-process) there. The mod's deltas: mod work lands in **this** tree's boards and queue; an item needing a CLI change (a new document, a served tool) gets a CLI-queue sibling, cross-gated by path, the waiting row's "Waits on" on the [backlog overview](../../backlog/README.md#keeping-this-page-true) naming it (`CLI 58a`), or the tie listed under "Ties to later releases" when that row is in a later release.
 
 **Superpowers** works inside the lifecycle as the CLI docs map it ([Superpowers fits the docs-first lifecycle](../cli/CLAUDE.md#superpowers-fits-the-docs-first-lifecycle), 2026-11-07).
 

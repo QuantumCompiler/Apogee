@@ -9,11 +9,11 @@ A spike ends as a report: walls with evidence, measurements, a proposed split, a
 
 ## 0. Which application?
 
-Apogee's documentation is split by kind, then by platform ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/{assistant,backlog,adrs,reference}/<app>/`, where `<app>` is **`cli`** (the harness), **`darwin`** (the Apple apps, macOS, iPadOS and iOS, with an item for one OS under `darwin/macos/`, `darwin/ipados/` or `darwin/ios/`, and what binds every GUI app under `gui/`), or **`mod`** (the Claude plugin). `unix/` and `windows/` hold the apps not yet built. Resolve which application this invocation means before touching anything, in order:
+Apogee's documentation is split by kind, then by platform ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/{assistant,backlog,adrs,reference}/<app>/`, where `<app>` is **`cli`** (the harness), **`darwin`** (the Apple apps, macOS, iPadOS and iOS, with an item for one OS under `darwin/macos/`, `darwin/ipados/` or `darwin/ios/`, and what binds every GUI app under `gui/`), **`mod`** (the Claude plugin), or **`design`** (the design prototype at `lib/design/`, the reference every GUI app is built from). `unix/` and `windows/` hold the apps not yet built. Resolve which application this invocation means before touching anything, in order:
 
 1. **The arguments.** An id or table names its queue — the CLI's version tables (`v0.1.<x>`, `v0.2.0`) with their numeric tracks (`52a`) and the standing `M<n>`/`A<n>` queues; the GUI's and the mod's indexes with their lettered tracks. A named document resolves by which backlog holds it. A bare version can mean any queue — they all carry work per release.
-2. **The conversation.** What the work touches: the harness's commands, backends and seams are the CLI's; screens, windows and the design are the GUI's; the Claude plugin (panes, slash commands, `$`-API work, `lib/src/mod/`) is the mod's. Work that spans queues gets cross-queue siblings, gated both ways.
-3. **Still ambiguous? Ask.** One AskUserQuestion — which application's queue (the CLI, the GUI, or the mod) — before anything is treated as decided. Never guess between them.
+2. **The conversation.** What the work touches: the harness's commands, backends and seams are the CLI's; screens and windows an app builds are the GUI's; the design prototype itself (`lib/design/`, drawing a screen before an app builds it) is the design's; the Claude plugin (panes, slash commands, `$`-API work, `lib/src/mod/`) is the mod's. Work that spans queues gets cross-queue siblings, gated both ways.
+3. **Still ambiguous? Ask.** One AskUserQuestion — which application's queue (the CLI, the GUI, the mod, or the design) — before anything is treated as decided. Never guess between them.
 
 Everything below reads from the chosen application's folders, written `<app>`: its backlog index (`lib/documentation/backlog/<app>/README.md`) is the authority on that queue's tables, numbering, document format and link depths, and its contributor docs (`lib/documentation/assistant/<app>/CLAUDE.md` first) carry the invariants. Where this skill says `<app>`, substitute the chosen application's folder name.
 
@@ -47,13 +47,14 @@ Every document follows the backlog README's format and `/apogee-backlog-create-i
 ## 4. Place the set and update the docs
 
 1. **Index** (backlog README (`lib/documentation/backlog/<app>/README.md`)): one row per document in its table (creating a table and its directory for a first item), ids ascending, gates in the Status cells — and **the track preamble tells the spike's story**: when it ran, what it measured (the headline numbers), how it split, and which calls are recorded where. That paragraph is what lets a future agent trust the documents without the chat.
+   - **The overview**: [the release overview](../../../lib/documentation/backlog/README.md#keeping-this-page-true) gains the set: its rows in the release's section when it is the release in progress, otherwise one Later releases track line, with the counts updated.
 2. **ROADMAP.md (`lib/documentation/assistant/<app>/ROADMAP.md`)**: the release's section (or Maintenance/Architecture) gains one line per item; a new release section is introduced with the spike summarized the way the existing sections do it.
 3. **SPEC.md** only per step 2's rule — the dated revision agreed with the user, nothing else.
 4. **MILESTONES.md is never touched** — unless the spike itself shipped a kept probe or a milestone-recorded run, in which case that record already exists and is only cited, never written here.
 
 ## 5. Validate before reporting
 
-The standard scripted routine, never by eye: rows ↔ documents both ways; Version cells match directories where the table carries them; every sequence ascends; every gate (including the new sibling gates) names a real pending id; the full relative-link sweep (the two illustrative MILESTONES lines are known false positives); every measurement quoted in a document appears with the same number the report gave.
+The standard scripted routine, never by eye: rows ↔ documents both ways; the release overview's rows (or its Later releases line) match the index; Version cells match directories where the table carries them; every sequence ascends; every gate (including the new sibling gates) names a real pending id; the full relative-link sweep (the two illustrative MILESTONES lines are known false positives); every measurement quoted in a document appears with the same number the report gave.
 
 ## 6. Report
 

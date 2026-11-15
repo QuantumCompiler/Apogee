@@ -9,11 +9,11 @@ Apogee is built docs-first: every work item has its own document in `lib/documen
 
 ## 0. Which application?
 
-Apogee's documentation is split by kind, then by platform ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/{assistant,backlog,adrs,reference}/<app>/`, where `<app>` is **`cli`** (the harness), **`darwin`** (the Apple apps, macOS, iPadOS and iOS, with an item for one OS under `darwin/macos/`, `darwin/ipados/` or `darwin/ios/`, and what binds every GUI app under `gui/`), or **`mod`** (the Claude plugin). `unix/` and `windows/` hold the apps not yet built. Resolve which application this invocation means before touching anything, in order:
+Apogee's documentation is split by kind, then by platform ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/{assistant,backlog,adrs,reference}/<app>/`, where `<app>` is **`cli`** (the harness), **`darwin`** (the Apple apps, macOS, iPadOS and iOS, with an item for one OS under `darwin/macos/`, `darwin/ipados/` or `darwin/ios/`, and what binds every GUI app under `gui/`), **`mod`** (the Claude plugin), or **`design`** (the design prototype at `lib/design/`, the reference every GUI app is built from). `unix/` and `windows/` hold the apps not yet built. Resolve which application this invocation means before touching anything, in order:
 
 1. **The arguments.** An id or table names its queue — the CLI's version tables (`v0.1.<x>`, `v0.2.0`) with their numeric tracks (`52a`) and the standing `M<n>`/`A<n>` queues; the GUI's and the mod's indexes with their lettered tracks. A named document resolves by which backlog holds it. A bare version can mean any queue — they all carry work per release.
-2. **The conversation.** What the work touches: the harness's commands, backends and seams are the CLI's; screens, windows and the design are the GUI's; the Claude plugin (panes, slash commands, `$`-API work, `lib/src/mod/`) is the mod's. Work that spans queues gets cross-queue siblings, gated both ways.
-3. **Still ambiguous? Ask.** One AskUserQuestion — which application's queue (the CLI, the GUI, or the mod) — before anything is treated as decided. Never guess between them.
+2. **The conversation.** What the work touches: the harness's commands, backends and seams are the CLI's; screens and windows an app builds are the GUI's; the design prototype itself (`lib/design/`, drawing a screen before an app builds it) is the design's; the Claude plugin (panes, slash commands, `$`-API work, `lib/src/mod/`) is the mod's. Work that spans queues gets cross-queue siblings, gated both ways.
+3. **Still ambiguous? Ask.** One AskUserQuestion — which application's queue (the CLI, the GUI, the mod, or the design) — before anything is treated as decided. Never guess between them.
 
 Everything below reads from the chosen application's folders, written `<app>`: its backlog index (`lib/documentation/backlog/<app>/README.md`) is the authority on that queue's tables, numbering, document format and link depths, and its contributor docs (`lib/documentation/assistant/<app>/CLAUDE.md` first) carry the invariants. Where this skill says `<app>`, substitute the chosen application's folder name.
 
@@ -37,7 +37,7 @@ Read `lib/documentation/backlog/<app>/README.md` (`lib/documentation/backlog/<ap
 
 Read the whole document: What/why, Core constraints, Seam + files, **Reference**, Decisions made, Open calls, Guardrails, Acceptance criteria, Scope note.
 
-- **Split-first rule:** if the item is marked **split first** (in its Scope note or index row), do NOT build from it. The work is to groom it into its listed sub-documents (confirm the split with the user), add them to the index, and stop.
+- **Split-first rule:** if the item is marked **split first** (in its Scope note or index row), do NOT build from it. The work is to groom it into its listed sub-documents (confirm the split with the user), add them to the index and to [the release overview](../../../lib/documentation/backlog/README.md#keeping-this-page-true) in place of the parent's row, and stop.
 - **Reference:** read the in-house precedents and external prior art the section names before designing — the item docs cite them because they carry proven behavior and recorded lessons.
 
 ## 4. Resolve the Open calls before writing code
@@ -70,6 +70,7 @@ When the acceptance criteria pass, in the same change (per CLAUDE.md):
 
 1. Record the work in `MILESTONES.md` (`lib/documentation/assistant/<app>/MILESTONES.md`) (fold into the matching milestone, or start a new lettered one).
 2. **Delete the item's backlog document and its index row** — the backlog holds pending work only. Update any other document whose gate this satisfied.
+   - Take the row out of [the release overview](../../../lib/documentation/backlog/README.md#keeping-this-page-true) too, updating its counts, "can start today" and any gate it satisfied.
 3. Check the box / move the line in ROADMAP.md.
 4. Update the Codebase Map in CLAUDE.md and DEVELOPER.md for new/moved files.
 5. Update SPEC.md only if scope, non-goals, or principles actually changed.

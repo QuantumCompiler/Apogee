@@ -9,11 +9,11 @@ The group is one home's index table: a version, `maintenance`, `architecture`, t
 
 ## 0. Which application?
 
-Apogee's documentation is split by kind, then by platform ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/{assistant,backlog,adrs,reference}/<app>/`, where `<app>` is **`cli`** (the harness), **`darwin`** (the Apple apps, macOS, iPadOS and iOS, with an item for one OS under `darwin/macos/`, `darwin/ipados/` or `darwin/ios/`, and what binds every GUI app under `gui/`), or **`mod`** (the Claude plugin). `unix/` and `windows/` hold the apps not yet built. Resolve which application this invocation means before touching anything, in order:
+Apogee's documentation is split by kind, then by platform ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/{assistant,backlog,adrs,reference}/<app>/`, where `<app>` is **`cli`** (the harness), **`darwin`** (the Apple apps, macOS, iPadOS and iOS, with an item for one OS under `darwin/macos/`, `darwin/ipados/` or `darwin/ios/`, and what binds every GUI app under `gui/`), **`mod`** (the Claude plugin), or **`design`** (the design prototype at `lib/design/`, the reference every GUI app is built from). `unix/` and `windows/` hold the apps not yet built. Resolve which application this invocation means before touching anything, in order:
 
 1. **The arguments.** An id or table names its queue — the CLI's version tables (`v0.1.<x>`, `v0.2.0`) with their numeric tracks (`52a`) and the standing `M<n>`/`A<n>` queues; the GUI's and the mod's indexes with their lettered tracks. A named document resolves by which backlog holds it. A bare version can mean any queue — they all carry work per release.
-2. **The conversation.** What the work touches: the harness's commands, backends and seams are the CLI's; screens, windows and the design are the GUI's; the Claude plugin (panes, slash commands, `$`-API work, `lib/src/mod/`) is the mod's. Work that spans queues gets cross-queue siblings, gated both ways.
-3. **Still ambiguous? Ask.** One AskUserQuestion — which application's queue (the CLI, the GUI, or the mod) — before anything is treated as decided. Never guess between them.
+2. **The conversation.** What the work touches: the harness's commands, backends and seams are the CLI's; screens and windows an app builds are the GUI's; the design prototype itself (`lib/design/`, drawing a screen before an app builds it) is the design's; the Claude plugin (panes, slash commands, `$`-API work, `lib/src/mod/`) is the mod's. Work that spans queues gets cross-queue siblings, gated both ways.
+3. **Still ambiguous? Ask.** One AskUserQuestion — which application's queue (the CLI, the GUI, the mod, or the design) — before anything is treated as decided. Never guess between them.
 
 Everything below reads from the chosen application's folders, written `<app>`: its backlog index (`lib/documentation/backlog/<app>/README.md`) is the authority on that queue's tables, numbering, document format and link depths, and its contributor docs (`lib/documentation/assistant/<app>/CLAUDE.md` first) carry the invariants. Where this skill says `<app>`, substitute the chosen application's folder name.
 
@@ -30,6 +30,7 @@ For each item, in order:
 
 1. Mark its row 🚧, build **per its document** — constraints, seam, guardrails, acceptance criteria, real-weights rules where they apply — and verify (`lib/scripts/cicd.sh --test` before anything is called done).
 2. Ship it through the Documentation and Status flow: MILESTONES entry; the document deleted with its index row (and any other item's gate this satisfied, updated); ROADMAP line checked/moved; codebase maps updated; SPEC only on a real shape change.
+   The row leaves [the release overview](../../../lib/documentation/backlog/README.md#keeping-this-page-true) in the same change, with its counts, "can start today" and the gates it satisfied.
    Superpowers works inside each item exactly as `/apogee-backlog-execute-item` step 5 says ([Superpowers fits the docs-first lifecycle](../../../lib/documentation/assistant/cli/CLAUDE.md#superpowers-fits-the-docs-first-lifecycle)). The group command answers its waits in advance:
    - The plan is self-reviewed, and the method is `subagent-driven-development` (or `executing-plans` without a subagent tool).
    - The worktree is consented to and based on the release branch.
@@ -70,8 +71,8 @@ This skill is chosen precisely when successive items should complete with nobody
 
 ## 5. End of the run
 
-- A version table that empties is **not** a release: the emptied table stays in the index until the pre-merge docs pass retires it (`/apogee-maintenance-update-documents`), and the roll (VERSION bump, ROADMAP state swap) is `/apogee-maintenance-update-release`'s job, on the user's word. Maintenance and Architecture tables persist empty — they are permanent fixtures.
-- Run the standard index validation (rows ↔ docs, sequences, gates, links) — the run deleted rows and documents in step pairs, and the sweep proves it stayed consistent.
+- A version table that empties is **not** a release: the emptied table stays in the index until the pre-merge docs pass retires it (`/apogee-maintenance-update-documents`), and the roll (VERSION bump, ROADMAP state swap) is `/apogee-maintenance-update-release`'s job, on the user's word, and making the overview's next release "in progress" follows the release's own steps (`lib/documentation/assistant/cli/DEVELOPER.md` → What you actually do, step 5). Maintenance and Architecture tables persist empty — they are permanent fixtures.
+- Run the standard index validation (rows ↔ docs, sequences, gates, links, and the release overview against the index) — the run deleted rows and documents in step pairs, and the sweep proves it stayed consistent.
 
 ## 6. Report
 

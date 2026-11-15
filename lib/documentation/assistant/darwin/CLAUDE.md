@@ -11,7 +11,7 @@ Project context for coding agents working on **the Apogee GUI** — the desktop 
 | **CLAUDE.md** (this file) | The contributor entry point: how to work, the hard rules, the codebase map. |
 | [**SPEC.md**](../gui/SPEC.md) | The product spec — what the GUI is, its scope, non-goals, and design principles. |
 | [**ROADMAP.md**](ROADMAP.md) | The high-level running board — each release at the feature/theme level, plus loose ideas and explicit non-goals. |
-| [**backlog/**](../../backlog/darwin/README.md) | **The work queue: one document per pending work item** (a sibling directory of `assistant/`). Its README carries the format, lifecycle, and a **priority-ordered index**. |
+| [**backlog/**](../../backlog/darwin/README.md) | **The work queue: one document per pending work item** (a sibling directory of `assistant/`). Its README carries the format, lifecycle, and a **priority-ordered index**; the [backlog overview](../../backlog/README.md) mirrors it for the release in progress and changes in the same pass ([Keeping this page true](../../backlog/README.md#keeping-this-page-true)). |
 | [**MILESTONES.md**](MILESTONES.md) | The detailed record of finished work — what shipped and how it was built. |
 | [**DEVELOPER.md**](DEVELOPER.md) | The package-by-package architecture reference: directories, files, interfaces, build/test commands. |
 
@@ -74,7 +74,7 @@ What is shared between the three apps (one machine-mode client core, or three he
 
 The GUI is built docs-first, the same lifecycle as the CLI's. Where new work is written down, how a backlog item is worked, and the bare-"Continue" convention are exactly the CLI docs' rules — read [Working process](../cli/CLAUDE.md#working-process) there. The GUI's deltas:
 
-- GUI work lands in **this** tree's ROADMAP/backlog/MILESTONES, never the CLI's; an item that needs a CLI change (a new protocol event, a new read) gets a sibling item in the CLI's backlog, gated both ways.
+- GUI work lands in **this** tree's ROADMAP/backlog/MILESTONES, never the CLI's; an item that needs a CLI change (a new protocol event, a new read) gets a sibling item in the CLI's backlog, gated both ways, and on the [backlog overview](../../backlog/README.md#keeping-this-page-true) the waiting row's "Waits on" names the other queue's item (`CLI 59b`), or the tie is listed under "Ties to later releases" when the waiting row is in a later release.
 - **Versioning is repo-wide** (the release, `lib/release/VERSION`, the merge-is-the-release law — the CLI docs record it). The GUI ships inside those releases once it exists; its pipeline joins CI beside the CLI's.
 
 ### Superpowers
@@ -120,7 +120,7 @@ Every change should satisfy this before merge:
 When a work item ships, in the same change:
 
 1. **Extend [MILESTONES.md](MILESTONES.md)** — fold the work into the matching milestone (or start a new one for a genuinely new area): goal, what was built, trade-offs.
-2. **Delete the backlog document** and its index row — the backlog holds pending work only.
+2. **Delete the backlog document** and its index row — the backlog holds pending work only — and its row in the [backlog overview](../../backlog/README.md#keeping-this-page-true), updating the counts, "can start today" and any "Waits on" it satisfied.
 3. **Update [ROADMAP.md](ROADMAP.md)** — check the box / move the line to shipped.
 4. **Update the [Codebase Map](#codebase-map) and [DEVELOPER.md](DEVELOPER.md)** for any new/moved/deleted files.
 5. **Update [SPEC.md](../gui/SPEC.md)** only if scope, non-goals, or principles actually changed.

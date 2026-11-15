@@ -42,8 +42,8 @@ Apogee/
 │   └── actions/package/     — The one packaging step every build uses: package.sh (built) or cli-from-release.sh
 │                              (copied), then the artifact upload
 ├── .claude/
-│   └── skills/          — One agnostic set serving every application: each skill resolves CLI, GUI or mod from the ask, asking when ambiguous (2026-10-20; the mod joined 2026-10-21)
-│       ├── apogee-backlog-create-item/ — Repo-local skill: spec a new item into the backlog + index + roadmap
+│   └── skills/          — One agnostic set serving every application: each skill resolves CLI, GUI, mod or design from the ask, asking when ambiguous (2026-10-20; the mod joined 2026-10-21, the design 2026-11-14)
+│       ├── apogee-backlog-create-item/ — Repo-local skill: spec a new item into the backlog + index + overview + roadmap
 │       ├── apogee-backlog-create-spike/ — Repo-local skill: turn a spike's findings (chat or attached write-up) into the whole split's documents
 │       ├── apogee-backlog-execute-call-resolution/ — Repo-local skill: resolve a group's open calls one by one; answers recorded as dated decisions, consequences propagated
 │       ├── apogee-backlog-execute-group/ — Repo-local skill: run a whole index table unsupervised, serially; one commit per shipped item
@@ -67,9 +67,10 @@ Apogee/
     │   │                      append-only (layer law, mode parity, granular modules, mirrored tests,
     │   │                      install stability, backwards compat, tab completion, the module map); per-app directories as apps arrive
     │   ├── assistant/       — Contributor docs (CLAUDE, SPEC, ROADMAP, MILESTONES, this file)
-    │   └── backlog/         — The work queue: pending work, one document per item, in one
-    │                          subdirectory per index table (architecture/, maintenance/,
-    │                          v0.1.<x>/ — the tree mirrors the tables; see its README)
+    │   └── backlog/         — The work queue: one folder per product (cli/, darwin/, mod/,
+    │                          design/), each an index README and one document per pending
+    │                          item; backlog/README.md is the overview of the release in
+    │                          progress across every product, kept in step with each index
     ├── release/             — The release itself, apart from any application's build (2026-09-25)
     │   └── VERSION          — The release, x.y.z: what a merge publishes; the CLI's own version is in
     │                          lib/src/cli/CMakeLists.txt, and equals it whenever the CLI changes
@@ -1349,6 +1350,7 @@ In the Actions list that run is titled `v<VERSION> PR Release`, and the pull req
    ```sh
    git checkout stable && git pull && git checkout -b vX.Y.Z+1 && git push -u origin vX.Y.Z+1
    ```
+   Then the [backlog overview](../../backlog/README.md#keeping-this-page-true) moves on: the next release becomes "in progress", and its opening line names the new branch and the release just published.
 
 **Changes that leave the CLI alone** (2026-09-25, superseding the same day's documentation-only rule). A pull request that changes nothing the CLI is built from — documentation, skills, root Markdown, `lib/release/VERSION`, a future GUI application — builds no CLI, as above, and its merge publishes a release only if it bumped `lib/release/VERSION`. It is judged by its whole test merge, so a docs commit pushed onto a PR that also changes the CLI still runs everything. To push docs mid-review without a run, put `[skip ci]` in the commit message. The PR's last commit must still run, or its required checks never report and the merge has nothing to release.
 

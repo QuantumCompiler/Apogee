@@ -126,7 +126,7 @@ Opened 2026-11-07 from the Apple-platforms brainstorm (the CLI's track 59 builds
 
 Opened 2026-11-14 from the admin-mode and people spike (the CLI's tracks 62 and 63; the GUI SPEC's Core surfaces 3 was amended the same day). On the Mac that serves, a separate Apogee Server window drives the local CLI over pipes, never the port.
 
-- [ ] **Design the server window** *(10a — [backlog](../../backlog/darwin/macos/v0.2.6/design-the-server-window.md))* — the window drawn in `lib/design/spec` and on the canvas first, per the design's law: the menu way in, shown only on the Mac that serves, and its places (Server, Devices with pairing and the QR, Apps with each scope beside what was asked, Activity, Audit, and People for 10c), each mapped to its CLI words, with every missing word added to BuildContract.
+- [ ] **Design the server window** *(10a — [backlog](../../backlog/darwin/macos/v0.2.6/design-the-server-window.md), gated on design 1e)* — the window drawn in `lib/design/spec` and on the canvas first, per the design's law: the menu way in, shown only on the Mac that serves, and its places (Server, Devices with pairing and the QR, Apps with each scope beside what was asked, Activity, Audit, and People for 10c), each mapped to its CLI words, with every missing word added to BuildContract.
 - [ ] **The server window** *(10b — [backlog](../../backlog/darwin/macos/v0.2.6/server-window.md), gated on 10a, CLI 62a, CLI 62c, CLI 62h)* — **split first**. Server (status, how clients connect, the background service), Devices and Apps (pairing with a QR, rename, revoke, scopes), and Activity and Audit when the binary has them; `serve` gets verb-level parity, and devices and apps become this window's screens.
 
 ### v0.2.7 — Track 10, people in the server window

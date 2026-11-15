@@ -9,11 +9,11 @@ A home's backlog keeps one table per queued release, a directory per table, and 
 
 ## 0. Which application?
 
-Apogee's documentation is split by kind, then by platform ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/{assistant,backlog,adrs,reference}/<app>/`, where `<app>` is **`cli`** (the harness), **`darwin`** (the Apple apps, macOS, iPadOS and iOS, with an item for one OS under `darwin/macos/`, `darwin/ipados/` or `darwin/ios/`, and what binds every GUI app under `gui/`), or **`mod`** (the Claude plugin). `unix/` and `windows/` hold the apps not yet built. Resolve which application this invocation means before touching anything, in order:
+Apogee's documentation is split by kind, then by platform ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/{assistant,backlog,adrs,reference}/<app>/`, where `<app>` is **`cli`** (the harness), **`darwin`** (the Apple apps, macOS, iPadOS and iOS, with an item for one OS under `darwin/macos/`, `darwin/ipados/` or `darwin/ios/`, and what binds every GUI app under `gui/`), **`mod`** (the Claude plugin), or **`design`** (the design prototype at `lib/design/`, the reference every GUI app is built from). `unix/` and `windows/` hold the apps not yet built. Resolve which application this invocation means before touching anything, in order:
 
 1. **The arguments.** An id or table names its queue — the CLI's version tables (`v0.1.<x>`, `v0.2.0`) with their numeric tracks (`52a`) and the standing `M<n>`/`A<n>` queues; the GUI's and the mod's indexes with their lettered tracks. A named document resolves by which backlog holds it. A bare version can mean any queue — they all carry work per release.
-2. **The conversation.** What the work touches: the harness's commands, backends and seams are the CLI's; screens, windows and the design are the GUI's; the Claude plugin (panes, slash commands, `$`-API work, `lib/src/mod/`) is the mod's. Work that spans queues gets cross-queue siblings, gated both ways.
-3. **Still ambiguous? Ask.** One AskUserQuestion — which application's queue (the CLI, the GUI, or the mod) — before anything is treated as decided. Never guess between them.
+2. **The conversation.** What the work touches: the harness's commands, backends and seams are the CLI's; screens and windows an app builds are the GUI's; the design prototype itself (`lib/design/`, drawing a screen before an app builds it) is the design's; the Claude plugin (panes, slash commands, `$`-API work, `lib/src/mod/`) is the mod's. Work that spans queues gets cross-queue siblings, gated both ways.
+3. **Still ambiguous? Ask.** One AskUserQuestion — which application's queue (the CLI, the GUI, the mod, or the design) — before anything is treated as decided. Never guess between them.
 
 Everything below reads from the chosen application's folders, written `<app>`: its backlog index (`lib/documentation/backlog/<app>/README.md`) is the authority on that queue's tables, numbering, document format and link depths, and its contributor docs (`lib/documentation/assistant/<app>/CLAUDE.md` first) carry the invariants. Where this skill says `<app>`, substitute the chosen application's folder name.
 
@@ -33,7 +33,7 @@ Parallel sessions build and ship while you work. Before touching anything:
 
 ## 3. The scripted replace — ordered, word-bounded, case-sensitive
 
-One Python pass over the surveyed files (all backlog `*.md` plus `assistant/{ROADMAP,MILESTONES,SPEC,CLAUDE,DEVELOPER}.md` — the last two are usually no-ops but cheap to include). Apply replacements **in the order that prevents cascades**: descending when bumping up (`\b30([a-f])\b → 31\1` before `29→30` …; `v0\.1\.7\b → v0.1.8` before `6→7` …), ascending when bumping down (`28x→27x` before `29x→28x`). Three pattern classes:
+One Python pass over the surveyed files (all backlog `*.md` plus `assistant/{ROADMAP,MILESTONES,SPEC,CLAUDE,DEVELOPER}.md` — the last two are usually no-ops but cheap to include). **The release overview (`lib/documentation/backlog/README.md`) stays out of this pass:** one of its rows can hold several products' tracks for the same release, so it is edited by hand (section 4). Apply replacements **in the order that prevents cascades**: descending when bumping up (`\b30([a-f])\b → 31\1` before `29→30` …; `v0\.1\.7\b → v0.1.8` before `6→7` …), ascending when bumping down (`28x→27x` before `29x→28x`). Three pattern classes:
 
 1. **Lettered items:** `\b<N>([a-f])\b`, case-sensitive — the letter suffix is what keeps dates and model names (`Qwen3.8-27B`) safe.
 2. **Version strings:** `v0\.1\.<N>\b` — this also rewrites every link path (`v0.1.4/machine-handshake.md` → `v0.1.5/…`), matching the directory moves exactly.
@@ -46,6 +46,7 @@ A track whose document is deliberately unwritten (a "its document is still to be
 - **Narratives that the renumber makes false.** Any "(the number freed by …)" or "asked for … for vX" story must be re-read after the pass and rewritten to stay true (e.g. "as track 30; renumbered 31 the same day when X took v0.1.4 — nothing has shipped under either number").
 - **Record the renumber itself**, dated, where the queue's story is told: the new (or removed) track's preamble paragraph states that the former tracks N–M and versions vA–vB became N+1–M+1 and vA+1–vB+1 (or the reverse), numbers bumped with their directories and references, the user's call.
 - **The index:** insert the new version's table at its release-order position (or remove the vacated one), with its preamble; every other table keeps its rows in order — a swap renumbers, it never reorders.
+- **The overview:** [the release overview](../../../lib/documentation/backlog/README.md#keeping-this-page-true) follows the renumber: its release sections and Later releases lines carry the new versions and track numbers. Only this product's cells move: another product's track on the same release stays in its row, and a row the slide leaves empty goes.
 - **ROADMAP:** insert the new release's section at the right spot under **Up next** (or remove it); the scripted pass already bumped the surviving section headers and links.
 - **MILESTONES is edited only where it references pending work** — forward-looking lines like "backlog item 27, for v0.1.4" or a shipped spike's description of its pending split. Shipped history is never rewritten beyond those references.
 - **SPEC** usually needs only what the script already did (targeted-version mentions in scope bullets). Read its diff and confirm it is exactly that.
@@ -55,6 +56,7 @@ A track whose document is deliberately unwritten (a "its document is still to be
 Run the standard routine (a throwaway script, not by eye):
 
 - Parse every index table: rows ↔ documents on disk, both directions; each File link's display name equals its basename; **each row's Version cell equals its directory**.
+- The release overview's sections and Later releases lines match the indexes after the slide, and other products' cells are unchanged.
 - Sequences ascend: A*, M*, and the lettered items across the version tables.
 - Every 🔒 gate names a real pending id.
 - Full relative-link sweep over the backlog, README, ROADMAP, MILESTONES, CLAUDE, DEVELOPER (the two illustrative `](url)` / `](absolute URL)` lines in MILESTONES are known false positives).

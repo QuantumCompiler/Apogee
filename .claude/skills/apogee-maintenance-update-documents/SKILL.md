@@ -9,7 +9,7 @@ Apogee's docs are the source of truth — a merge request whose docs lag its cod
 
 ## 0. Which applications?
 
-Apogee's documentation is split by kind, then by platform ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/{assistant,backlog,adrs,reference}/<app>/`, where `<app>` is **`cli`** (the harness), **`darwin`** (the Apple apps, macOS, iPadOS and iOS, with an item for one OS under `darwin/macos/`, `darwin/ipados/` or `darwin/ios/`, and what binds every GUI app under `gui/`), or **`mod`** (the Claude plugin). `unix/` and `windows/` hold the apps not yet built. Written `<app>` below. **The branch decides the scope**: this pass covers every application the diff touched — both homes when both moved, each walked against its own docs. Repo-wide machinery (the pipeline, the release law) is recorded in the CLI's docs and audited once. If the user names a scope the diff disagrees with, ask with AskUserQuestion rather than guessing.
+Apogee's documentation is split by kind, then by platform ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/{assistant,backlog,adrs,reference}/<app>/`, where `<app>` is **`cli`** (the harness), **`darwin`** (the Apple apps, macOS, iPadOS and iOS, with an item for one OS under `darwin/macos/`, `darwin/ipados/` or `darwin/ios/`, and what binds every GUI app under `gui/`), **`mod`** (the Claude plugin), or **`design`** (the design prototype at `lib/design/`, the reference every GUI app is built from). `unix/` and `windows/` hold the apps not yet built. Written `<app>` below. **The branch decides the scope**: this pass covers every application the diff touched — both homes when both moved, each walked against its own docs. Repo-wide machinery (the pipeline, the release law) is recorded in the CLI's docs and audited once. If the user names a scope the diff disagrees with, ask with AskUserQuestion rather than guessing.
 
 ## 1. Establish what this branch changed
 
@@ -27,12 +27,14 @@ Work through the system in this order (read `CLAUDE.md` (`lib/documentation/assi
 
 1. **Backlog** (`lib/documentation/backlog/<app>/` (`lib/documentation/backlog/<app>/README.md`)):
    - Any item this branch **completed** → its work is recorded in MILESTONES.md, its document is **deleted**, its index row removed, and the track preamble above the index tables updated. A completed item still sitting in the backlog is the system's cardinal violation.
+   - [the release overview](../../../lib/documentation/backlog/README.md#keeping-this-page-true) matches the product indexes: every pending row of the release in progress listed with its gate, no shipped row left, the counts and "can start today" true, Later releases naming every queued track.
    - Any item this branch **started** → index row marked in progress.
    - Any **gate the branch satisfied** → downstream items' status lines updated.
    - Any decision made while building → a dated entry in the affected item's **Decisions made** (and `[default:]` calls that were exercised recorded as decisions).
    - **The in-development version's table, once empty, is retired here** — every item it held shipped or moved (the version is `lib/release/VERSION`, the branch's name). The merge *is* the release (CLAUDE.md (`lib/documentation/assistant/<app>/CLAUDE.md`) → Versioning), so a release's table never outlives its pull request (the user's call, 2026-10-16).
      - Remove its `### v<x.y.z>` heading, its track preambles and the empty table from the index; its directory is gone with its last document.
      - The shipped-tracks paragraph above the tables then names its tracks as complete in that version — in development on its branch, released when the branch merges into `stable` — and names the earliest table still open. The release roll later adds the release's link and date (`/apogee-maintenance-update-release`).
+     - The product's section in [the release overview](../../../lib/documentation/backlog/README.md#keeping-this-page-true) says the same: nothing left to build, the tracks it shipped and their milestones.
      - A table with rows still standing is never retired: report the rows; moving them is `/apogee-backlog-swap-item`'s, on the user's word. The standing **Architecture** and **Maintenance** tables are never retired, however empty.
 2. **MILESTONES.md (`lib/documentation/assistant/<app>/MILESTONES.md`)** — shipped work folded into the right lettered milestone (goal, what was built, trade-offs), or a new milestone for a genuinely new area.
 3. **ROADMAP.md (`lib/documentation/assistant/<app>/ROADMAP.md`)** — checkboxes for shipped themes; the "decisions needed" list still accurate; nothing shipped still listed as pending.
@@ -54,6 +56,7 @@ After the edits, verify the whole system (script it — don't eyeball):
 
 - every relative `.md` link in `lib/documentation/`, `.claude/skills/` and the eight layer cards (`lib/src/cli/{source,tests}/<layer>/CLAUDE.md`) resolves, and `harness.layer_context` passes -- the cards, the ADR index and ADRs 0001/0008 agree with `cmake/modules.cmake`;
 - the backlog index rows exactly match the documents on disk, numbering is sequential, and every gate names an existing item earlier in the order;
+- the release overview's rows match the product indexes: the same ids, links and gates for the release in progress and maintenance, the counts adding up, one Later releases line per queued track;
 - no version table is left empty — the in-development version's emptied table was retired above — and every version table's directory matches its rows;
 - every open call in every item is tagged `[user]` / `[default: …]` / `(consumed decision)`;
 - no template markers or `_TODO:_` placeholders were newly introduced without being deliberate.

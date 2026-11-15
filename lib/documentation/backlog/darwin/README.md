@@ -1,17 +1,17 @@
 # Apogee GUI — Backlog
 
-**The work queue: one document per work item.** This directory holds every GUI feature and fix that has been discussed and specced but **not yet built** — the layer between the loose ideas in [ROADMAP.md](../../assistant/darwin/ROADMAP.md) and the shipped record in [MILESTONES.md](../../assistant/darwin/MILESTONES.md). There is no separate TODO file: an agent takes an item from the index below and **implements it straight from its document**. (The CLI's queue is its own, at [`backlog/cli/`](../cli/README.md); an item that needs a CLI change gets a sibling document there, gated both ways.)
+**The work queue: one document per work item.** This directory holds every GUI feature and fix that has been discussed and specced but **not yet built** — the layer between the loose ideas in [ROADMAP.md](../../assistant/darwin/ROADMAP.md) and the shipped record in [MILESTONES.md](../../assistant/darwin/MILESTONES.md). There is no separate TODO file: an agent takes an item from the index below and **implements it straight from its document**. (The CLI's queue is its own, at [`backlog/cli/`](../cli/README.md); an item that needs a CLI change gets a sibling document there, gated both ways.) The release-by-release view across every product is the [backlog overview](../README.md); this index is the authority on its rows, and every change to it reaches the overview in the same pass ([Keeping this page true](../README.md#keeping-this-page-true)).
 
 ## Lifecycle
 
 1. A feature is **discussed in chat** and gets a line on [ROADMAP.md](../../assistant/darwin/ROADMAP.md) (and a [SPEC.md](../../assistant/gui/SPEC.md) update if it changes product shape).
-2. Once specced — seam, files, decisions, open calls — it gets **its own document here** (kebab-case filename, listed in the index below in priority order).
+2. Once specced — seam, files, decisions, open calls — it gets **its own document here** (kebab-case filename, listed in the index below in priority order). The same pass adds it to the [backlog overview](../README.md#keeping-this-page-true): its release's section, or its track's line under Later releases.
 3. When an agent **takes** it (told explicitly, or via the bare-"Continue" convention: the topmost item whose gate is satisfied), the document **is** the working spec — confirm scope with the user first (the document's **Open calls** are the natural questions), mark its index row **in progress** (🚧), and build. One item at a time.
-4. When it **ships**, the work is recorded in [MILESTONES.md](../../assistant/darwin/MILESTONES.md) per the docs flow in [CLAUDE.md](../../assistant/darwin/CLAUDE.md), and the document is **deleted, along with its index row** — a completed item must never remain in the backlog. On the same pass, update any gate the shipped work just satisfied.
+4. When it **ships**, the work is recorded in [MILESTONES.md](../../assistant/darwin/MILESTONES.md) per the docs flow in [CLAUDE.md](../../assistant/darwin/CLAUDE.md), and the document is **deleted, along with its index row** — a completed item must never remain in the backlog. On the same pass, update any gate the shipped work just satisfied. Its row leaves the [backlog overview](../README.md#keeping-this-page-true) too, with the counts, "can start today" and any "Waits on" it satisfied updated.
 
 **The standing invariant:** every document in this directory is pending work. If it's shipped (in MILESTONES.md), it's not here.
 
-**Tags and gates** follow the CLI backlog's conventions: an open call is `[user]` (genuinely user-owned; blocks the build) or `[default: …]` (agent-decidable, with the recommendation recorded); a decision owned by another item is `(consumed decision)`; a row's Status is 🟢 workable, 🔒 gated on a named real item (no cycles), or 🚧 in progress.
+**Tags and gates** follow the CLI backlog's conventions: an open call is `[user]` (genuinely user-owned; blocks the build) or `[default: …]` (agent-decidable, with the recommendation recorded); a decision owned by another item is `(consumed decision)`; a row's Status is 🟢 workable, 🔒 gated on a named real item (no cycles), or 🚧 in progress. A changed gate, a split, or a row moved to another table changes the [backlog overview](../README.md#keeping-this-page-true) in the same pass.
 
 ## Document format
 
@@ -108,7 +108,7 @@ The iPad, and getting the app onto iPhone and iPad ([preamble](#v024)).
 
 | # | Item | Version | File | Status |
 |---|---|---|---|---|
-| 10a | Design the server window — the Apogee Server window drawn in lib/design/spec and on the canvas before it is built: how it opens from the Apogee menu (only on the Mac that serves), and its six places (Server, Devices with pairing and the QR, Apps with each scope beside what the app asked for, Activity, Audit, and People drawn now for 10c); each part drawn against its CLI words, with every missing word added as a BuildContract gap and its fallback | v0.2.6 | [`design-the-server-window.md`](macos/v0.2.6/design-the-server-window.md) | 🟢 |
+| 10a | Design the server window — the Apogee Server window drawn in lib/design/spec and on the canvas before it is built: how it opens from the Apogee menu (only on the Mac that serves), and its six places (Server, Devices with pairing and the QR, Apps with each scope beside what the app asked for, Activity, Audit, and People drawn now for 10c); each part drawn against its CLI words, with every missing word added as a BuildContract gap and its fallback | v0.2.6 | [`design-the-server-window.md`](macos/v0.2.6/design-the-server-window.md) | 🔒 design 1e |
 | 10b | The server window: administering this Mac's server — a second Apogee Server window on the Mac that serves, driving the local CLI over pipes, with Server, Devices, Apps, Activity and Audit (the last two shown when the binary has them); serve split into a screen and a refusal, devices and apps made screens of this window (7a amended), ADR 0003 amended; split first into three | v0.2.6 | [`server-window.md`](macos/v0.2.6/server-window.md) | 🔒 10a, CLI 62a, CLI 62c, CLI 62h |
 
 ### v0.2.7
