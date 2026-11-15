@@ -334,7 +334,11 @@ struct TasksTruthTests {
         model.start()
         let lines = streamed("task-run-halted.jsonl")
         for line in lines.prefix(14) { job.say(line) }
-        #expect(await eventually { model.selected == Self.halted })
+        // task_started, the 2nd line, selects the task; round 1 starts on the
+        // 13th. The run folds its lines one at a time on the main actor, so
+        // wait for the later of the two before reading either.
+        _ = await eventually { model.rounds(of: Self.halted).map(\.round) == [0, 1] }
+        #expect(model.selected == Self.halted)
         #expect(model.rounds(of: Self.halted).map(\.round) == [0, 1])
         runner.reading(["task", "status", Self.halted], taskFixture("task-status-halted-done.json"))
         for line in lines.dropFirst(14) { job.say(line) }

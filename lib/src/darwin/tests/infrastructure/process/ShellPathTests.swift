@@ -137,28 +137,39 @@ struct ShellPathTests {
 
     @Test("a shell that never answers is cut off at the deadline, its whole group killed, and children get the fallback")
     func neverAnswers() async throws {
-        let shell = try ScriptedShell(
-            """
-            echo $$ > "$HOME/shell.pid"
-            sleep 30 &
-            echo $! > "$HOME/background.pid"
-            sleep 30
-            """)
-        defer { shell.remove() }
-        // Short, but long enough for a loaded machine to start the script.
-        let resolver = ShellPath(environment: shell.environment, deadline: .seconds(2))
-        let clock = ContinuousClock()
-        let started = clock.now
-        resolver.begin()
-        let answer = await resolver.answer()
-        #expect(clock.now - started < .seconds(5), "cut off at its deadline, not the shell's thirty seconds")
-        #expect(answer == ShellPath.Resolution(
-            path: shell.fallback, source: .fallback, shell: shell.url.path, reason: "didn't answer within 2 seconds"))
-        let shellPID = try #require(Int32(String(contentsOf: shell.home.appendingPathComponent("shell.pid"), encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
-        let backgroundPID = try #require(Int32(String(contentsOf: shell.home.appendingPathComponent("background.pid"), encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
-        #expect(await gone(shellPID))
-        #expect(await gone(backgroundPID))
-        #expect(try await childPath(resolver) == shell.fallback)
+        // Its group is seen killed only once the script has written both pids
+        // before its deadline. A loaded machine can start a freshly written
+        // script seconds late, and a shell cut off before its first line says
+        // nothing about its group: that run is asked again, the deadline
+        // doubled, every run held to its own deadline.
+        for seconds in [2, 4, 8] {
+            let shell = try ScriptedShell(
+                """
+                echo $$ > "$HOME/shell.pid"
+                sleep 30 &
+                echo $! > "$HOME/background.pid"
+                sleep 30
+                """)
+            defer { shell.remove() }
+            let resolver = ShellPath(environment: shell.environment, deadline: .seconds(seconds))
+            let clock = ContinuousClock()
+            let started = clock.now
+            resolver.begin()
+            let answer = await resolver.answer()
+            #expect(clock.now - started < .seconds(seconds + 3), "cut off at its deadline, not the shell's thirty seconds")
+            #expect(answer == ShellPath.Resolution(
+                path: shell.fallback, source: .fallback, shell: shell.url.path, reason: "didn't answer within \(seconds) seconds"))
+            func written(_ name: String) -> Int32? {
+                (try? String(contentsOf: shell.home.appendingPathComponent(name), encoding: .utf8))
+                    .flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            }
+            guard let shellPID = written("shell.pid"), let backgroundPID = written("background.pid") else { continue }
+            #expect(await gone(shellPID))
+            #expect(await gone(backgroundPID))
+            #expect(try await childPath(resolver) == shell.fallback)
+            return
+        }
+        Issue.record("the script never reached its background job before an 8-second deadline")
     }
 
     @Test("a shell that exits non-zero gives the fallback, and says so")
