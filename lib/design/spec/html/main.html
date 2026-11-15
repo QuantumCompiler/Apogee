@@ -107,12 +107,13 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{g.open}}">
 <sc-for list="{{g.rows}}" as="r" hint-placeholder-count="3">
 <div class="ap-crow" style="position: relative">
-<button type="button" class="hv" onClick="{{r.open}}" aria-current="{{r.current}}" style="width: 100%; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px 0 24px; margin-bottom: 1px; border: 0; border-radius: 5px; background: {{r.bg}}; color: {{r.color}}; font-size: var(--t-dense); text-align: left">
+<button type="button" class="hv" onClick="{{r.open}}" aria-current="{{r.current}}" title="{{r.help}}" style="width: 100%; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px 0 24px; margin-bottom: 1px; border: 0; border-radius: 5px; background: {{r.bg}}; color: {{r.color}}; font-size: var(--t-dense); text-align: left">
 <sc-if value="{{r.isLocal}}"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-label="local" style="color: {{r.glyph}}"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"></path></svg></sc-if>
 <sc-if value="{{r.isApi}}"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-label="cloud API, billed" style="color: var(--model-api)"><ellipse cx="8" cy="4.5" rx="5" ry="2"></ellipse><path d="M3 4.5V8c0 1.1 2.2 2 5 2s5-.9 5-2V4.5"></path><path d="M3 8v3.5c0 1.1 2.2 2 5 2s5-.9 5-2V8"></path></svg></sc-if>
 <sc-if value="{{r.isSub}}"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-label="subscription" style="color: var(--model-subscription)"><path d="M12.5 6A4.75 4.75 0 0 0 3.6 5.2"></path><path d="M3.5 10a4.75 4.75 0 0 0 8.9.8"></path><path d="M3.3 2.6v2.8h2.8"></path><path d="M12.7 13.4v-2.8H9.9"></path></svg></sc-if>
 <span style="flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis">{{r.title}}</span>
-<span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">{{r.time}}</span>
+<sc-if value="{{r.notBusy}}"><span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">{{r.time}}</span></sc-if>
+<sc-if value="{{r.busy}}"><span class="pulse" role="img" aria-label="compacting" style="flex: 0 0 auto; width: 6px; height: 6px; margin-right: 4px; border-radius: 50%; background: var(--status-accent)"></span></sc-if>
 </button>
 <button type="button" class="ib ap-more" onClick="{{r.toggleMenu}}" aria-haspopup="menu" aria-expanded="{{r.menuOpen}}" aria-label="Actions for {{r.title}}" style="position: absolute; top: 2px; right: 4px; width: 24px; height: 24px; background: var(--surface-control); color: var(--text-secondary)"><svg class="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h.1M8 8h.1M12.5 8h.1" stroke-width="2.4"></path></svg></button>
 <sc-if value="{{r.menuOpen}}"><div class="menu" role="menu" aria-label="{{r.title}}" style="position: absolute; top: 28px; right: 0; z-index: 41; width: 170px; padding: 4px"><sc-for list="{{r.items}}" as="it"><button type="button" role="menuitem" class="hv" onClick="{{it.run}}" disabled="{{it.disabled}}" style="width: 100%; display: flex; align-items: center; height: 28px; padding: 0 10px; border: 0; border-radius: 5px; background: transparent; color: {{it.color}}; font-size: var(--t-dense); text-align: left">{{it.label}}</button></sc-for></div></sc-if>
@@ -656,6 +657,26 @@ a{color:inherit}a:hover{color:inherit}
 </div>
 </div>
 </sc-if>
+<sc-if value="{{x.isNotSent}}">
+<div class="row">
+<div role="group" aria-label="Not sent" style="display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 14px; border: 1px solid var(--status-warning); border-radius: 8px; background: var(--surface-card)">
+<span class="lbl">NOT SENT</span>
+<p style="margin: 0; font-size: var(--t-body); color: var(--text-primary)">apogee had stopped taking input, so this message never reached it.</p>
+<sc-if value="{{x.canResend}}"><button type="button" class="btn" onClick="{{x.resend}}" disabled="{{x.resendOff}}" title="Sends the message above again, as typed">Send again</button></sc-if>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{x.isEnded}}">
+<div class="row">
+<div role="group" aria-label="Session ended" style="display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 14px; border: 1px solid var(--status-error); border-radius: 8px; background: var(--surface-card)">
+<span class="lbl">SESSION ENDED</span>
+<p style="margin: 0; font-size: var(--t-body); color: var(--text-primary); overflow-wrap: anywhere">{{x.text}}</p>
+<button type="button" class="mono hv" onClick="{{x.toggleDetails}}" aria-expanded="{{x.detailsOpen}}" style="display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px 0 4px; margin-left: -4px; border: 0; border-radius: 4px; background: transparent; font-size: var(--t-meta); color: var(--text-secondary)"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" style="transform: rotate({{x.detailsRot}}deg)"><path d="M6.5 4.5L10 8l-3.5 3.5"></path></svg>Details</button>
+<sc-if value="{{x.detailsOpen}}"><div class="mono" style="align-self: stretch; padding: 8px 10px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); line-height: 1.6; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere">{{x.details}}</div></sc-if>
+<sc-if value="{{x.canStartAgain}}"><button type="button" class="btn" onClick="{{x.startAgain}}">Start again</button></sc-if>
+</div>
+</div>
+</sc-if>
 </sc-for>
 
 <sc-if value="{{chat.pendingOn}}">
@@ -720,16 +741,16 @@ a{color:inherit}a:hover{color:inherit}
 </sc-for>
 </div>
 </sc-if>
-<sc-if value="{{cmp.hasHeld}}"><div class="mono" title="A session takes these between turns; sent now, the turn's question would drop them." style="display: flex; align-items: center; gap: 8px; padding: 10px 14px 0; font-size: var(--t-meta); color: var(--text-tertiary); overflow-wrap: anywhere"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9"></path><path d="M2.5 2.5v2.5H5"></path><path d="M8 5v3l2 1.5"></path></svg><span>{{cmp.heldText}}</span></div></sc-if>
+<sc-if value="{{cmp.hasHeld}}"><div class="mono" title="{{cmp.heldHelp}}" style="display: flex; align-items: center; gap: 8px; padding: 10px 14px 0; font-size: var(--t-meta); color: var(--text-tertiary); overflow-wrap: anywhere"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9"></path><path d="M2.5 2.5v2.5H5"></path><path d="M8 5v3l2 1.5"></path></svg><span>{{cmp.heldText}}</span></div></sc-if>
 <div style="display: flex; gap: 10px; padding: 12px 14px 2px">
 <span class="mono" aria-hidden="true" style="color: var(--status-accent); font-size: var(--t-prose); line-height: 22px">›</span>
-<textarea aria-label="Message" rows="2" value="{{cmp.draft}}" onChange="{{cmp.onDraft}}" onKeyDown="{{cmp.onKey}}" placeholder="{{cmp.placeholder}}" style="flex: 1 1 auto; min-width: 0; resize: none; padding: 0; border: 0; outline: none; background: transparent; font-size: var(--t-prose); line-height: 22px; color: var(--text-primary)"></textarea>
+<textarea aria-label="Message" rows="2" value="{{cmp.draft}}" onChange="{{cmp.onDraft}}" onKeyDown="{{cmp.onKey}}" placeholder="{{cmp.placeholder}}" disabled="{{cmp.inputOff}}" style="flex: 1 1 auto; min-width: 0; resize: none; padding: 0; border: 0; outline: none; background: transparent; font-size: var(--t-prose); line-height: 22px; color: var(--text-primary)"></textarea>
 </div>
 <div style="display: flex; align-items: center; gap: 6px; padding: 4px 8px 8px">
-<button type="button" class="ib" onClick="{{cmp.toggleAttach}}" aria-expanded="{{cmp.attachOpen}}" aria-label="Attach files, folders, images, audio or video" style="width: 28px; height: 28px"><svg class="i" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 7.5l-5.2 5.2a3 3 0 0 1-4.3-4.3l5.6-5.6a2 2 0 0 1 2.9 2.9l-5.5 5.5a1 1 0 0 1-1.4-1.4l5-5"></path></svg></button>
+<button type="button" class="ib" onClick="{{cmp.toggleAttach}}" disabled="{{cmp.cantAttach}}" aria-expanded="{{cmp.attachOpen}}" aria-label="Attach files, folders, images, audio or video" style="width: 28px; height: 28px"><svg class="i" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 7.5l-5.2 5.2a3 3 0 0 1-4.3-4.3l5.6-5.6a2 2 0 0 1 2.9 2.9l-5.5 5.5a1 1 0 0 1-1.4-1.4l5-5"></path></svg></button>
 <span class="ap-hints mono" style="display: flex; gap: 14px; margin-left: 4px; font-size: var(--t-meta); color: var(--text-tertiary)"><span><span style="color: var(--text-secondary)">/</span> commands</span><span><span style="color: var(--text-secondary)">@</span> files</span><span><span style="color: var(--text-secondary)">⏎</span> send</span><span><span style="color: var(--text-secondary)">⇧⏎</span> newline</span></span>
 <span style="flex: 1 1 auto"></span>
-<span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">{{cmp.status}}</span>
+<span class="mono" role="status" style="display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-meta); color: {{cmp.statusColor}}"><sc-if value="{{cmp.statusPulse}}"><span class="pulse" aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: var(--status-accent)"></span></sc-if>{{cmp.status}}</span>
 <sc-if value="{{cmp.streaming}}"><button type="button" class="mono" onClick="{{cmp.stop}}" aria-label="Stop (Command period)" style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px; background: var(--text-primary); color: var(--surface-window); border: 0; border-radius: 5px; font-size: var(--t-ui); font-weight: 600"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 1px; background: currentColor"></span>stop<span style="font-weight: 400; opacity: .7">⌘.</span></button></sc-if>
 <sc-if value="{{cmp.notStreaming}}"><button type="button" class="mono" onClick="{{cmp.send}}" disabled="{{cmp.cantSend}}" aria-label="Send (Return)" style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px; background: var(--text-primary); color: var(--surface-window); border: 0; border-radius: 5px; font-size: var(--t-ui); font-weight: 600"><svg class="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3.5M4 7.5l4-4 4 4"></path></svg>send<span style="font-weight: 400; opacity: .7">⏎</span></button></sc-if>
 </div>
@@ -1022,6 +1043,7 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{j.canResume}}"><button type="button" class="btn-p" onClick="{{j.resume}}">Resume from {{j.resumeFrom}}</button></sc-if>
 <sc-if value="{{j.running}}"><button type="button" class="btn-g" onClick="{{j.pause}}">Stop</button></sc-if>
 <sc-if value="{{j.isDone}}"><button type="button" class="btn-g" onClick="{{j.openModel}}">{{j.openLabel}}</button></sc-if>
+<sc-if value="{{j.notRan}}"><button type="button" class="btn-p" onClick="{{j.runAgain}}">Run again</button><button type="button" class="btn-g" onClick="{{j.dismiss}}">Dismiss</button></sc-if>
 <button type="button" class="mono hv" onClick="{{j.toggleLog}}" aria-expanded="{{j.logOpen}}" style="height: 28px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; font-size: var(--t-meta); color: var(--text-tertiary)">log</button>
 </div>
 <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 12px">
@@ -1033,6 +1055,7 @@ a{color:inherit}a:hover{color:inherit}
 </div>
 </sc-for>
 </div>
+<sc-if value="{{j.hasOutcome}}"><p style="margin: 12px 0 0; font-size: var(--t-small); color: var(--text-secondary)">{{j.outcome}}</p></sc-if>
 <sc-if value="{{j.logOpen}}"><div class="mono" style="margin-top: 12px; padding: 10px 12px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); line-height: 1.7; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere">{{j.log}}</div></sc-if>
 </div>
 </sc-for>
@@ -1043,7 +1066,10 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{mdl.isRoles}}">
 <div style="flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 20px 24px 28px">
 <div style="max-width: 820px">
-<p style="margin: 0 0 16px; font-size: var(--t-body); color: var(--text-secondary)">Which model does which job. Helpers run beside the chat model; an unset role falls back as shown, and the turn says when a helper did the work.</p>
+<div style="margin: 0 0 16px">
+<p style="margin: 0; font-size: var(--t-body); color: var(--text-secondary)">Which model does which job. Helpers run beside the chat model; an unset role falls back as shown, and the turn says when a helper did the work.</p>
+<sc-if value="{{mdl.hasRolesSuite}}"><p style="margin: 6px 0 0; font-size: var(--t-small); color: var(--text-secondary)">{{mdl.rolesSuiteLine}}</p></sc-if>
+</div>
 <sc-for list="{{mdl.roles}}" as="r" hint-placeholder-count="6">
 <div style="display: grid; grid-template-columns: 150px minmax(0, 1fr) 250px; gap: 12px 20px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--line-border)">
 <div><div style="font-size: var(--t-body); font-weight: 600">{{r.label}}</div><div class="mono" style="font-size: var(--t-label); color: var(--text-tertiary)">{{r.key}}</div></div>
@@ -1107,11 +1133,11 @@ a{color:inherit}a:hover{color:inherit}
 </nav>
 <div style="flex: 1 1 0; min-width: 0; overflow-y: auto; padding: 22px 28px 32px">
 <div style="max-width: 880px">
-<div style="display: flex; align-items: center; gap: 10px"><h2 style="flex: 1 1 auto; margin: 0; font-size: var(--t-h2); font-weight: 600">notes</h2><button type="button" class="btn-g" onClick="{{kno.ingest}}">Ingest more…</button><button type="button" class="btn-g" onClick="{{kno.delColl}}" style="color: var(--status-error)">Delete…</button></div>
-<div style="display: flex; gap: 32px; margin-top: 14px"><div><div class="lbl">CHUNKS</div><div>5</div></div><div><div class="lbl">TEXT INDEX</div><div>ok</div></div><div><div class="lbl">VECTORS</div><div>none -- a text index only</div></div></div>
-<div style="display: flex; gap: 8px; margin-top: 18px"><input type="text" class="inp" value="{{kno.cq}}" aria-label="Search notes" placeholder="Search notes" style="flex: 1 1 auto; min-width: 0"><button type="button" class="btn-g" onClick="{{kno.search}}">Search</button></div>
+<div style="display: flex; align-items: center; gap: 10px"><h2 style="flex: 1 1 auto; margin: 0; font-size: var(--t-h2); font-weight: 600">{{kno.page.name}}</h2><button type="button" class="btn-g" onClick="{{kno.ingest}}">Ingest more…</button><button type="button" class="btn-g" onClick="{{kno.delColl}}" style="color: var(--status-error)">Delete…</button></div>
+<div style="display: flex; gap: 32px; margin-top: 14px"><div style="flex: 0 0 auto"><div class="lbl">CHUNKS</div><div>{{kno.page.chunks}}</div></div><div style="flex: 0 0 auto"><div class="lbl">TEXT INDEX</div><div>{{kno.page.index}}</div></div><div style="flex: 1 1 auto; min-width: 0"><div class="lbl">VECTORS</div><div style="overflow-wrap: anywhere">{{kno.page.vectors}}</div></div></div>
+<div style="display: flex; gap: 8px; margin-top: 18px"><input type="text" class="inp" value="{{kno.cq}}" aria-label="Search {{kno.page.name}}" placeholder="Search {{kno.page.name}}" style="flex: 1 1 auto; min-width: 0"><button type="button" class="btn-g" onClick="{{kno.search}}">Search</button></div>
 <sc-if value="{{kno.searched}}"><div class="mono" style="margin-top: 10px; padding: 10px 12px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); line-height: 1.6; white-space: pre; overflow-x: auto"><sc-for list="{{kno.results}}" as="l"><div>{{l.text}}</div></sc-for></div></sc-if>
-<h3 class="lbl" style="margin: 22px 0 6px">SOURCES · 5</h3>
+<h3 class="lbl" style="margin: 22px 0 6px">SOURCES · {{kno.page.sourceCount}}</h3>
 <sc-for list="{{kno.sources}}" as="src"><div style="display: flex; align-items: center; min-height: 28px; border-bottom: 1px solid var(--line-border)"><span style="flex: 1 1 auto">{{src.name}}</span><button type="button" class="btn-g" onClick="{{src.remove}}" style="height: 24px; font-size: var(--t-small)">Remove…</button></div></sc-for>
 </div>
 </div>
@@ -1263,7 +1289,7 @@ a{color:inherit}a:hover{color:inherit}
 <button type="button" aria-pressed="{{trn.dsOn}}" onClick="{{trn.showDatasets}}" style="background: {{trn.dsBg}}; color: var(--text-primary)">Datasets</button>
 </div>
 <sc-if value="{{trn.runsOn}}"><button type="button" class="btn-g" onClick="{{trn.newRun}}" disabled="{{trn.cantNewRun}}">New run…</button></sc-if>
-<sc-if value="{{trn.cyOn}}"><button type="button" class="btn-g" onClick="{{trn.cyRun}}" disabled="{{trn.cyCantRun}}" title="apogee train cycle run">Run one pass…</button><sc-if value="{{trn.cyHalted}}"><button type="button" class="btn-g" onClick="{{trn.cyResume}}" title="apogee train cycle resume">Resume…</button></sc-if><sc-if value="{{trn.cyNotHalted}}"><button type="button" class="btn-g" onClick="{{trn.cyHalt}}" title="apogee train cycle halt">Halt…</button></sc-if></sc-if>
+<sc-if value="{{trn.cyOn}}"><button type="button" class="btn-g" onClick="{{trn.cyRun}}" disabled="{{trn.cyCantRun}}" title="apogee train cycle run">Run one pass…</button><sc-if value="{{trn.cyHalted}}"><button type="button" class="btn-g" onClick="{{trn.cyResume}}" title="apogee train cycle resume">Resume…</button></sc-if><sc-if value="{{trn.cyNotHalted}}"><button type="button" class="btn-g" onClick="{{trn.cyHalt}}" disabled="{{trn.cyCantHalt}}" title="apogee train cycle halt">Halt…</button></sc-if></sc-if>
 <sc-if value="{{trn.dsOn}}"><button type="button" class="btn-g" onClick="{{trn.newDataset}}" disabled="{{trn.noBin}}">New dataset…</button><button type="button" class="btn-g" onClick="{{trn.pull}}" disabled="{{trn.cantPull}}" title="apogee datasets pull owner/name: a Hugging Face dataset's data files, for Prepare">Pull…</button><button type="button" class="btn-g" onClick="{{trn.synth}}" disabled="{{trn.noBin}}">Synthesize…</button><button type="button" class="btn-g" onClick="{{trn.prepare}}" disabled="{{trn.noBin}}">Prepare a file…</button></sc-if>
 </header>
 <sc-if value="{{trn.barOn}}"><div style="display: flex; align-items: center; gap: 10px; padding: 8px 24px; border-bottom: 1px solid var(--line-border)"><span style="font-size: var(--t-small); white-space: nowrap">{{trn.barLabel}}</span><span class="mono" style="flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-meta); color: var(--text-secondary)">{{trn.barLine}}</span><button type="button" class="btn-g" onClick="{{trn.stop}}" style="height: 26px">Stop</button></div></sc-if>
@@ -1313,8 +1339,10 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{trn.noStages}}"><p style="margin: 0; font-size: var(--t-small); color: var(--text-tertiary)">No stage reported yet.</p></sc-if>
 </sc-if>
 <sc-if value="{{trn.pgRun}}">
-<sc-if value="{{trn.page.resumable}}"><div style="display: flex; align-items: center; gap: 12px; margin-top: 18px"><span style="flex: 1 1 auto; font-size: var(--t-small)">{{trn.page.resumeLine}}</span><button type="button" class="btn-g" onClick="{{trn.page.resume}}" disabled="{{trn.page.cantResume}}" title="{{trn.page.resumeCommand}}">Resume…</button></div></sc-if>
-<p style="margin: 18px 0 0; font-size: var(--t-meta); color: var(--text-tertiary)">Each stage’s run is an ordinary run: gate it and promote it from Runs.</p>
+<sc-if value="{{trn.page.resumable}}"><div style="display: flex; align-items: center; gap: 12px; margin-top: 18px"><span style="flex: 1 1 auto; font-size: var(--t-small); overflow-wrap: anywhere">{{trn.page.resumeLine}}</span><button type="button" class="btn-g" onClick="{{trn.page.resume}}" disabled="{{trn.page.cantResume}}" title="{{trn.page.resumeCommand}}">Resume…</button></div>
+<sc-if value="{{trn.page.hasHold}}"><p role="status" style="margin: 6px 0 0; font-size: var(--t-small); color: var(--status-warning); overflow-wrap: anywhere; user-select: text">{{trn.page.hold}}</p></sc-if></sc-if>
+<p style="margin: 18px 0 0; font-size: var(--t-meta); color: var(--text-tertiary)">{{trn.page.endLine}}</p>
+<sc-if value="{{trn.page.isCyclePass}}"><button type="button" class="btn-g" onClick="{{trn.page.showCycle}}" title="The Cycle tab: its passes, and Run one pass" style="margin-top: 10px">Show the cycle</button></sc-if>
 </sc-if>
 <sc-if value="{{trn.pgNone}}"><p style="margin: 0; font-size: var(--t-small); color: var(--text-tertiary)">Choose a pipeline run to see its stages.</p></sc-if>
 </div></div>
@@ -1323,7 +1351,8 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{trn.cyOn}}">
 <div style="flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 22px 28px 32px"><div style="max-width: 860px; display: flex; flex-direction: column; gap: 16px">
 <p style="margin: 0; font-size: var(--t-small); color: var(--text-secondary)">The cycle is unattended by design: your own scheduler -- launchd or cron -- runs <span class="mono">apogee train cycle run</span>. Nothing here schedules it; Run one pass is a single pass, now.</p>
-<sc-if value="{{trn.cyHasHold}}"><p role="status" style="margin: 0; font-size: var(--t-small); color: var(--status-warning); overflow-wrap: anywhere">{{trn.cyHold}}</p></sc-if>
+<sc-if value="{{trn.cyHasHold}}"><p role="status" style="margin: 0; font-size: var(--t-small); color: var(--status-warning); overflow-wrap: anywhere; user-select: text">{{trn.cyHold}}</p></sc-if>
+<sc-if value="{{trn.cyHasLock}}"><div style="display: flex; align-items: center; gap: 10px; min-width: 0"><span class="mono" style="flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; font-size: var(--t-meta); color: var(--text-secondary); user-select: text"><span style="display: inline-block; vertical-align: bottom; max-width: calc(100% - {{trn.cyLockTailW}}); overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{trn.cyLockHead}}</span>{{trn.cyLockTail}}</span><button type="button" class="btn-g" onClick="{{trn.cyFinder}}" title="Shows cycle.lock in the Finder, for you to remove" style="flex: 0 0 auto">Show in Finder</button></div></sc-if>
 <sc-if value="{{trn.cyLiveOn}}">
 <div style="padding: 14px 16px; border-radius: 8px; background: var(--surface-card)">
 <h3 class="lbl" style="margin: 0 0 8px">THIS PASS, RUNNING HERE</h3>
@@ -1332,11 +1361,12 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{trn.cyHasStages}}"><h3 class="lbl" style="margin: 14px 0 4px">STAGES</h3><sc-for list="{{trn.cyStages}}" as="g"><div style="display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 0 12px; align-items: baseline; padding: 6px 0"><span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary); text-align: right">{{g.index}}</span><div><div>{{g.name}}</div><div class="mono" style="font-size: var(--t-meta); color: {{g.color}}">{{g.line}}</div><sc-if value="{{g.hasRun}}"><div class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">{{g.runLine}}</div></sc-if></div></div></sc-for></sc-if>
 </div>
 </sc-if>
+<sc-if value="{{trn.cyHasErr}}"><div role="status" style="font-size: var(--t-small); color: var(--status-error); overflow-wrap: anywhere; user-select: text"><p style="margin: 0">{{trn.cyErr}}</p><p style="margin: 12px 0 0">Run one pass, Halt and Resume are held: each refuses while the history cannot be read.</p></div></sc-if>
 <sc-if value="{{trn.cyNone}}"><p style="margin: 0; font-size: var(--t-small); color: var(--text-tertiary)">No pass has run yet, so the cycle has no history: its first pass writes one -- Run one pass here, or your scheduler’s first run. A pass needs training.cycle in your config; the run says so when it’s missing.</p></sc-if>
 <sc-if value="{{trn.cyHas}}">
 <div style="display: flex; flex-wrap: wrap; gap: 14px 36px"><sc-for list="{{trn.cyFacts}}" as="f"><div><h3 class="lbl" style="margin: 0 0 4px">{{f.label}}</h3><div>{{f.value}}</div></div></sc-for></div>
 <h3 class="lbl" style="margin: 8px 0 0">PASSES, NEWEST FIRST</h3>
-<sc-if value="{{trn.cyNoPasses}}"><p class="mono" style="margin: 0; font-size: var(--t-meta); color: var(--text-tertiary)">no cycle runs recorded yet</p></sc-if>
+<sc-if value="{{trn.cyNoPasses}}"><p style="margin: 0; font-size: var(--t-small); color: var(--text-tertiary)">None yet.</p></sc-if>
 <sc-for list="{{trn.cyPasses}}" as="p"><div style="padding: 2px 0"><div class="mono" style="display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: var(--t-meta); color: var(--text-tertiary)"><span>{{p.at}}</span><sc-if value="{{p.hasPipeline}}"><span>pipeline {{p.pipeline}}</span></sc-if></div><div style="margin-top: 2px; color: {{p.color}}">{{p.line}}</div><sc-if value="{{p.hasReason}}"><p style="margin: 2px 0 0; font-size: var(--t-small); color: var(--text-secondary); overflow-wrap: anywhere">{{p.reason}}</p></sc-if><sc-if value="{{p.hasNote}}"><p style="margin: 2px 0 0; font-size: var(--t-small); color: var(--status-warning)">{{p.note}}</p></sc-if></div></sc-for>
 </sc-if>
 </div></div>
@@ -1426,6 +1456,7 @@ a{color:inherit}a:hover{color:inherit}
 <span style="display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-small); color: {{t.statusColor}}"><span style="width: 6px; height: 6px; border-radius: 50%; background: {{t.statusColor}}"></span>{{t.status}}</span>
 </button>
 </sc-for>
+<sc-if value="{{tsk.hasTruncation}}"><p style="margin: 8px 12px; font-size: var(--t-small); color: var(--text-tertiary)">{{tsk.truncation}} · <button type="button" onClick="{{tsk.showAll}}" title="apogee task list --all" style="padding: 0; border: 0; background: transparent; color: var(--status-accent); font-size: var(--t-small); text-decoration: underline; text-underline-offset: 3px">Show all</button></p></sc-if>
 </nav>
 <div style="flex: 1 1 0; min-width: 0; overflow-y: auto; padding: 22px 28px 32px">
 <div style="max-width: 860px">
@@ -1434,7 +1465,9 @@ a{color:inherit}a:hover{color:inherit}
 <span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; font-size: var(--t-small); color: {{tsk.cur.statusColor}}"><sc-if value="{{tsk.cur.isRunning}}"><span class="pulse" style="width: 7px; height: 7px; border-radius: 50%; background: var(--status-accent)"></span></sc-if>{{tsk.cur.status}}</span>
 <sc-if value="{{tsk.cur.canPause}}"><button type="button" class="btn" onClick="{{tsk.pause}}" title="apogee task halt">Stop after this round</button></sc-if>
 <sc-if value="{{tsk.cur.canStop}}"><button type="button" class="btn-g" onClick="{{tsk.stop}}" title="apogee task cancel">Stop now</button></sc-if>
-<sc-if value="{{tsk.cur.canResume}}"><button type="button" class="btn-p" onClick="{{tsk.resume}}" title="apogee task resume">{{tsk.cur.resumeLabel}}</button><sc-if value="{{tsk.cur.isInterrupted}}"><span class="mono" style="align-self: center; min-width: 0; font-size: var(--t-meta); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{tsk.cur.resumeWhere}}</span></sc-if></sc-if>
+<sc-if value="{{tsk.cur.canResume}}"><button type="button" class="btn-p" onClick="{{tsk.resume}}" title="apogee task resume">{{tsk.cur.resumeLabel}}</button></sc-if>
+<sc-if value="{{tsk.cur.isResuming}}"><button type="button" class="btn-p" disabled="{{ true }}" title="apogee task resume">Resuming…</button></sc-if>
+<sc-if value="{{tsk.cur.showWhere}}"><span class="mono" style="align-self: center; min-width: 0; font-size: var(--t-meta); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{tsk.cur.resumeWhere}}</span></sc-if>
 <sc-if value="{{tsk.cur.canRerun}}"><button type="button" class="btn-p" onClick="{{tsk.rerun}}">{{tsk.cur.rerunLabel}}</button></sc-if>
 </div>
 <sc-if value="{{tsk.cur.isInterrupted}}"><p style="margin: 12px 0 0; font-size: var(--t-small); color: var(--status-warning)">{{tsk.cur.interruptedLine}}</p></sc-if>
@@ -1447,6 +1480,7 @@ a{color:inherit}a:hover{color:inherit}
 </div>
 </sc-for>
 </div>
+<sc-if value="{{tsk.cur.hasGrants}}"><h3 class="lbl" style="margin: 24px 0 8px">GRANTS</h3><p class="mono" style="margin: 0; font-size: var(--t-ui); overflow-wrap: anywhere">{{tsk.cur.grants}}</p></sc-if>
 <h3 class="lbl" style="margin: 24px 0 8px">PLAN · FROM THE PLAN TURN</h3>
 <ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column">
 <sc-for list="{{tsk.cur.plan}}" as="p" hint-placeholder-count="5"><li style="display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 8px; padding: 6px 0; font-size: var(--t-body)"><span class="mono" style="font-size: var(--t-ui); color: var(--text-tertiary)">{{p.n}}.</span><span>{{p.text}}</span></li></sc-for>
@@ -1457,12 +1491,14 @@ a{color:inherit}a:hover{color:inherit}
 <div style="display: grid; grid-template-columns: 70px 64px minmax(0, 1fr) auto 52px; gap: 10px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--line-border)">
 <span style="font-size: var(--t-body); font-weight: 500">{{r.n}}</span>
 <span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">{{r.kind}}</span>
-<span style="min-width: 0; font-size: var(--t-small); color: var(--text-secondary)">{{r.text}}</span>
+<span style="min-width: 0; font-size: var(--t-small); color: var(--text-secondary)">{{r.text}}<sc-if value="{{r.hasDenied}}"><span style="display: block; margin-top: 2px; font-size: var(--t-meta); color: var(--status-warning); overflow-wrap: anywhere">{{r.denied}}</span></sc-if></span>
 <span style="font-size: var(--t-small); color: {{r.color}}">{{r.outcome}}</span>
 <span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary); text-align: right">{{r.tokens}}</span>
 </div>
 </sc-for>
 </div>
+<sc-if value="{{tsk.cur.hasAllowed}}"><h3 class="lbl" style="margin: 24px 0 8px">ALLOWED</h3><div style="display: flex; flex-direction: column; gap: 4px"><sc-for list="{{tsk.cur.allowed}}" as="u"><div class="mono" style="font-size: var(--t-ui); overflow-wrap: anywhere">{{u.line}}</div></sc-for></div></sc-if>
+<sc-if value="{{tsk.cur.hasDenied}}"><h3 class="lbl" style="margin: 24px 0 8px">DENIED</h3><div style="display: flex; flex-direction: column; gap: 4px"><sc-for list="{{tsk.cur.denied}}" as="u"><div class="mono" style="font-size: var(--t-ui); color: var(--status-warning); overflow-wrap: anywhere">{{u.line}}</div></sc-for></div></sc-if>
 <h3 class="lbl" style="margin: 24px 0 8px">CHECKS · WHAT DONE MEANS</h3>
 <sc-if value="{{tsk.cur.noChecks}}"><p style="margin: 0; font-size: var(--t-small); color: var(--text-tertiary)">No checks: the task is done when the model says it is.</p></sc-if>
 <div style="display: flex; flex-direction: column; gap: 6px">
@@ -1473,6 +1509,7 @@ a{color:inherit}a:hover{color:inherit}
 <h3 class="lbl" style="margin: 24px 0 8px">RECENT ACTIVITY</h3>
 <div class="card" style="padding: 8px 14px">
 <sc-for list="{{tsk.cur.log}}" as="l" hint-placeholder-count="4"><div class="tl"><span>{{l.tool}}</span><span style="color: var(--text-secondary); overflow-wrap: anywhere">{{l.target}}</span><span style="color: {{l.color}}">{{l.result}}</span></div></sc-for>
+<sc-if value="{{tsk.cur.hasRefused}}"><div class="mono" style="padding: 2px 0; font-size: var(--t-ui); line-height: 18px; color: var(--text-secondary); overflow-wrap: anywhere">{{tsk.cur.refused}}</div></sc-if>
 </div>
 <p style="margin: 12px 0 0; font-size: var(--t-small); color: var(--text-tertiary)">{{tsk.cur.perms}}</p>
 </div>
@@ -1518,6 +1555,7 @@ a{color:inherit}a:hover{color:inherit}
 </sc-for>
 </div>
 </div>
+<sc-if value="{{gr.hasCard}}">
 <aside class="ap-detail" aria-label="Symbol" style="flex: 0 0 300px; min-height: 0; overflow-y: auto; padding: 18px 20px; background: var(--surface-inspector); border-left: 1px solid var(--line-border); font-size: var(--t-small)">
 <div class="lbl">{{gr.sel.kind}}</div>
 <h2 class="mono" style="margin: 4px 0 2px; font-size: var(--t-title); font-weight: 600; overflow-wrap: anywhere">{{gr.sel.label}}</h2>
@@ -1535,6 +1573,7 @@ a{color:inherit}a:hover{color:inherit}
 <button type="button" class="btn-g" onClick="{{gr.openEditor}}">Open in editor</button>
 </div>
 </aside>
+</sc-if>
 </div>
 </sc-if>
 <sc-if value="{{gr.proseShown}}">
@@ -1807,6 +1846,15 @@ a{color:inherit}a:hover{color:inherit}
 </sc-for>
 </div>
 <sc-if value="{{comp.p.hasStopNote}}"><div role="note" style="display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 8px; font-size: var(--t-small); color: var(--text-secondary)"><span aria-hidden="true" style="flex: 0 0 auto; width: 8px; height: 8px; margin-top: 5px; border-radius: 2px; background: var(--status-warning)"></span><span>{{comp.p.stopNote}}</span></div></sc-if>
+</sc-if>
+<sc-if value="{{comp.p.isEdit}}">
+<section aria-label="Changes">
+<sc-if value="{{comp.p.differs}}"><p style="display: flex; align-items: flex-start; gap: 6px; margin: 0 0 10px; font-size: var(--t-small); color: var(--status-warning)"><svg class="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" style="flex: 0 0 auto; margin-top: 2px"><path d="M8 2.5l6 10.5H2z"></path><path d="M8 6.5v3M8 11.2v.1"></path></svg><span>{{comp.p.differsText}}</span></p></sc-if>
+<h3 class="lbl" style="margin: 0 0 6px">CHANGES</h3>
+<div style="display: grid; grid-template-columns: 22px auto minmax(0, 1fr); gap: 3px 12px; align-items: baseline">
+<sc-for list="{{comp.p.changes}}" as="d" hint-placeholder-count="4"><span class="mono" style="font-size: var(--t-meta); color: var(--text-tertiary)">{{d.n}}</span><span style="font-size: var(--t-small); color: {{d.color}}">{{d.text}}</span><span style="min-width: 0; font-size: var(--t-meta); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{d.narration}}</span></sc-for>
+</div>
+</section>
 </sc-if>
 <sc-if value="{{comp.p.showPlayer}}">
 <div style="display: flex; flex-direction: column; gap: 8px">
@@ -2101,6 +2149,7 @@ a{color:inherit}a:hover{color:inherit}
 <div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column">
 <header style="flex: 0 0 52px; display: flex; align-items: center; gap: 10px; padding: 0 16px 0 28px; border-bottom: 1px solid var(--line-border)"><h2 style="flex: 1 1 auto; margin: 0; font-size: var(--t-title); font-weight: 600">{{set.title}}</h2><button type="button" class="btn-p" onClick="{{set.close}}">Done</button></header>
 <div style="flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 8px 28px 32px">
+<sc-if value="{{set.hasFailure}}"><p style="margin: 12px 0 0; font-size: var(--t-small); color: var(--status-error); overflow-wrap: anywhere">{{set.failure}}</p></sc-if>
 
 <sc-if value="{{set.isGeneral}}">
 <div style="display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--line-border)"><div style="font-weight: 500">Model for new sessions</div><div><select class="inp" value="{{set.defaultModel}}" onChange="{{set.onDefaultModel}}" aria-label="Model for new sessions"><sc-for list="{{set.chatModelOpts}}" as="o"><option value="{{o.value}}">{{o.label}}</option></sc-for></select><div style="margin-top: 6px; font-size: var(--t-small); color: var(--text-tertiary)">You can switch in any session; a switch is noted in the conversation.</div></div></div>
@@ -2155,6 +2204,7 @@ a{color:inherit}a:hover{color:inherit}
 
 <sc-if value="{{set.isRoles}}">
 <p style="margin: 16px 0 6px; font-size: var(--t-body); color: var(--text-secondary)">The same roles as Models › Roles.</p>
+<sc-if value="{{mdl.hasRolesSuite}}"><p style="margin: 0 0 6px; font-size: var(--t-small); color: var(--text-secondary)">{{mdl.rolesSuiteLine}}</p></sc-if>
 <sc-for list="{{mdl.roles}}" as="r" hint-placeholder-count="6">
 <div style="display: grid; grid-template-columns: 150px minmax(0, 1fr) 240px; gap: 12px 20px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--line-border)">
 <div><div style="font-weight: 600">{{r.label}}</div><div class="mono" style="font-size: var(--t-label); color: var(--text-tertiary)">{{r.key}}</div></div>
@@ -2203,7 +2253,7 @@ a{color:inherit}a:hover{color:inherit}
 <h3 class="lbl" style="margin: 24px 0 0; padding-bottom: 6px; border-bottom: 1px solid var(--line-border)">HEALTH</h3>
 <p style="margin: 10px 0 6px; font-size: var(--t-body); color: {{set.healthColor}}">{{set.healthSummary}}</p>
 <sc-for list="{{set.healthRows}}" as="hr"><div style="padding: 6px 0; border-bottom: 1px solid var(--line-border)"><div style="font-size: var(--t-small); color: {{hr.color}}; overflow-wrap: anywhere">{{hr.text}}</div><sc-if value="{{hr.hasRemedy}}"><div class="mono" style="margin-top: 2px; font-size: var(--t-meta); color: var(--text-secondary); overflow-wrap: anywhere">{{hr.remedy}}</div></sc-if></div></sc-for>
-<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px"><button type="button" class="btn-g" onClick="{{set.fix}}" disabled="{{set.fixingOn}}" style="height: 26px; font-size: var(--t-small)">Fix what can be fixed (check --fix)</button><button type="button" class="btn-g" onClick="{{set.bootstrap}}" disabled="{{set.fixingOn}}" style="height: 26px; font-size: var(--t-small)">Install runtimes and register providers (bootstrap)</button><sc-if value="{{set.fixingOn}}"><span class="mono" style="display: inline-flex; align-items: center; gap: 8px; font-size: var(--t-meta); color: var(--text-secondary)"><span class="pulse" style="width: 6px; height: 6px; border-radius: 50%; background: var(--status-accent)"></span>working</span></sc-if></div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px"><button type="button" class="btn-g" onClick="{{set.fix}}" disabled="{{set.fixingOn}}" style="height: 26px; font-size: var(--t-small)">Fix what can be fixed (check --fix)</button><button type="button" class="btn-g" onClick="{{set.bootstrap}}" disabled="{{set.fixingOn}}" style="height: 26px; font-size: var(--t-small)">Install runtimes and register providers (bootstrap)</button><sc-if value="{{set.fixingOn}}"><span class="mono" style="display: inline-flex; align-items: center; gap: 8px; font-size: var(--t-meta); color: var(--text-secondary)"><span class="pulse" style="width: 6px; height: 6px; border-radius: 50%; background: var(--status-accent)"></span>working</span><button type="button" class="btn-g" onClick="{{set.stopFix}}" disabled="{{set.stopOff}}" aria-label="Stop {{set.fixArgv}}" style="height: 24px; font-size: var(--t-small)">Stop</button></sc-if></div>
 </sc-if>
 
 <sc-if value="{{set.isPermissions}}">
@@ -2229,7 +2279,7 @@ a{color:inherit}a:hover{color:inherit}
 <div style="display: flex; gap: 8px; margin-top: 10px"><input type="text" class="inp mono" value="{{set.siteDraft}}" onChange="{{set.onSiteDraft}}" placeholder="example.com" aria-label="Website to allow" style="flex: 0 1 280px"><button type="button" class="btn" onClick="{{set.addSite}}" disabled="{{set.siteEmpty}}">Add</button></div>
 <p style="margin: 8px 0 0; font-size: var(--t-small); color: var(--text-tertiary)">Any other website asks the first time. Redirects are followed one hop at a time, and each hop is checked against this list.</p>
 <h3 class="lbl" style="margin: 24px 0 0; padding-bottom: 6px; border-bottom: 1px solid var(--line-border)">WEB SEARCH</h3>
-<div style="display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; padding: 14px 0"><div style="font-weight: 500">Your SearXNG</div><div><input type="text" class="inp mono" value="{{set.searx}}" onChange="{{set.onSearx}}" placeholder="http://searx.local:8080" aria-label="SearXNG address" style="width: min(360px, 100%)"><div style="margin-top: 6px; font-size: var(--t-small); color: {{set.searxColor}}">{{set.searxNote}}</div></div></div>
+<div style="display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; padding: 14px 0"><div style="font-weight: 500">Your SearXNG</div><div><div class="mono" title="apogee config get tools.search.url" style="font-size: var(--t-ui); color: {{set.searxShownColor}}; overflow-wrap: anywhere">{{set.searxShown}}</div><div style="display: flex; gap: 8px; margin-top: 8px"><input type="text" class="inp mono" value="{{set.searxDraft}}" onChange="{{set.onSearxDraft}}" placeholder="http://localhost:8888" aria-label="SearXNG address" style="flex: 0 1 360px; min-width: 0"><button type="button" class="btn" onClick="{{set.setSearx}}" disabled="{{set.searxEmpty}}">Set</button></div><div style="margin-top: 6px; font-size: var(--t-small); color: {{set.searxColor}}">{{set.searxNote}}</div></div></div>
 </sc-if>
 
 <sc-if value="{{set.isMemory}}">
@@ -2451,7 +2501,7 @@ a{color:inherit}a:hover{color:inherit}
 <div style="position: absolute; inset: 0; z-index: 70; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.45)">
 <div role="alertdialog" aria-modal="true" aria-labelledby="cf-h" style="width: min(460px, 100%); border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-card); box-shadow: 0 24px 64px rgba(0,0,0,.45)">
 <div style="padding: 18px 20px 4px"><h2 id="cf-h" style="margin: 0; font-size: var(--t-title); font-weight: 600">{{cf.title}}</h2><p style="margin: 6px 0 0; font-size: var(--t-body); color: var(--text-secondary)">{{cf.body}}</p><sc-if value="{{cf.hasDetail}}"><div class="mono" style="margin-top: 10px; padding: 8px 10px; border-radius: 6px; background: var(--surface-code); font-size: var(--t-meta); line-height: 1.6; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere">{{cf.detail}}</div></sc-if><sc-if value="{{cf.hasCheck}}"><label style="display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; font-size: var(--t-small); color: var(--text-primary); cursor: pointer"><input type="checkbox" checked="{{cf.check}}" onChange="{{cf.toggleCheck}}" style="margin: 2px 0 0; accent-color: var(--status-accent)"><span>{{cf.checkLabel}}<span style="display: block; margin-top: 2px; color: var(--text-tertiary)">{{cf.checkNote}}</span></span></label></sc-if></div>
-<div style="display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 16px 20px 18px"><button type="button" class="btn-g" onClick="{{cf.cancel}}">{{cf.cancelLabel}}</button><sc-if value="{{cf.hasAlt}}"><button type="button" class="btn-p" onClick="{{cf.alt}}" style="background: var(--status-error); color: var(--surface-window)">{{cf.altLabel}}</button></sc-if><button type="button" class="btn-p" onClick="{{cf.run}}" style="background: {{cf.runBg}}; color: {{cf.runColor}}">{{cf.confirmLabel}}</button></div>
+<div style="display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 16px 20px 18px"><sc-if value="{{cf.hasCancel}}"><button type="button" class="btn-g" onClick="{{cf.cancel}}">{{cf.cancelLabel}}</button></sc-if><sc-if value="{{cf.hasAlt}}"><button type="button" class="btn-p" onClick="{{cf.alt}}" style="background: var(--status-error); color: var(--surface-window)">{{cf.altLabel}}</button></sc-if><button type="button" class="btn-p" onClick="{{cf.run}}" style="background: {{cf.runBg}}; color: {{cf.runColor}}">{{cf.confirmLabel}}</button></div>
 </div>
 </div>
 </sc-if>
@@ -2459,7 +2509,7 @@ a{color:inherit}a:hover{color:inherit}
 <sc-if value="{{ui.toastOn}}"><div role="status" style="position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 80; max-width: calc(100% - 48px); padding: 9px 16px; border-radius: 8px; background: var(--text-primary); color: var(--surface-window); font-size: var(--t-small); box-shadow: 0 8px 24px rgba(0,0,0,.3)">{{ui.toastText}}</div></sc-if>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","chat:play","chat:suite","monitor","console","knowledge","knowledge:collections","graph:prose","training","training:datasets","training:pipelines","training:cycle","library","library:symphonies","library:mcp","library:unsaved","library:refused","library:image","review","review:post","review:targets","review:skills","models","models:downloads","models:store","models:convert","models:register","models:roles","models:delete","download","suites","tasks","newtask","newtask:recipe","execute","graph","video","video:run","video:install","consent","compose","compose:edit","compose:new","compose:tide","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:permissions","settings:xcode"],"default":"chat"},"still":{"editor":"boolean","default":false},"apogee":{"editor":"enum","options":["installed","missing","config-typo"],"default":"installed"},"$preview":{"width":1440,"height":900}}'>
+<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["chat","chat:retry","chat:wal","chat:crash","chat:pr","chat:new","chat:private","chat:play","chat:suite","chat:restarting","chat:notsent","chat:ended","chat:compacting","monitor","console","knowledge","knowledge:collections","knowledge:mixed","graph:prose","graph:refused","training","training:datasets","training:pipelines","training:cycle","training:stalelock","training:unreadable","training:cyclepass","training:passrunning","training:resumeheld","library","library:symphonies","library:mcp","library:unsaved","library:refused","library:image","review","review:post","review:targets","review:skills","models","models:downloads","models:store","models:convert","models:register","models:roles","models:delete","models:notran","download","suites","tasks","tasks:denied","tasks:more","tasks:resuming","tasks:refused","tasks:resumerefused","newtask","newtask:recipe","execute","graph","video","video:run","video:install","consent","compose","compose:edit","compose:new","compose:tide","compose:differs","voice","settings:general","settings:appearance","settings:media","settings:backends","settings:fixing","settings:fixfailed","settings:permissions","settings:nosearch","settings:xcode"],"default":"chat"},"still":{"editor":"boolean","default":false},"apogee":{"editor":"enum","options":["installed","missing","config-typo"],"default":"installed"},"$preview":{"width":1440,"height":900}}'>
 class Component extends DCLogic {
   constructor(props) {
     super(props);
@@ -2507,6 +2557,11 @@ class Component extends DCLogic {
         pr: { choice: 'batch', other: '', answered: false, skipped: false, thinkUser: null, closed: false }
       },
       heldBy: {},
+      /* A session's child between children (the app's 6a): `restarting`
+         while a stop hands it to the next, `starting` while the next comes
+         up, `ended` once it died; none while it takes turns. */
+      lifeBy: {},
+      endDetails: {},
       drafts: { 'gemma-mlx': '/Users/someone/.apogee/models/Gemma4-12B-Assistant/mlx/8192a3b4c5d6', 'gemma-e4b': '/Users/someone/.apogee/models/Gemma4-E4B-Assistant/mlx/4d5e6f708192' },
       adapters: { qwen06: [['/Users/someone/.apogee/training/versions/qwen06/v1.lora.gguf', '1'], ['/Users/someone/extra.lora.gguf', '0.5']] },
       narr: { store: null, backends: null },
@@ -2515,6 +2570,9 @@ class Component extends DCLogic {
       gs: null,
       chatGone: {},
       compactedBy: {},
+      /* A saved chat's compaction, run as a job (the app's 6b): its id ->
+         { at }, its row busy and Stop compacting in its menu until it ends. */
+      compacting: {},
       recallHolds: 312,
       extra: {},
       modelBy: {},
@@ -2552,7 +2610,10 @@ class Component extends DCLogic {
       sessionAllow: [],
       sites: ['docs.python.org', 'github.com', 'huggingface.co', 'pypi.org'],
       siteDraft: '',
+      /* The web search address as config get tools.search.url reads it,
+         '' when unset (its empty line), and the field Set takes it from. */
       searx: 'http://searx.home.arpa:8080',
+      searxDraft: '',
       recall: true,
       recallCount: 312,
       newPrivate: false,
@@ -2560,13 +2621,17 @@ class Component extends DCLogic {
       suiteId: 'coding',
       taskId: 'slowhosts',
       tasks: [
-        { id: 'slowhosts', goal: 'Make the ingest runner tolerate slow hosts', kind: 'slowhosts', status: 'running', base: 372, since: 0, rounds: 8, suite: 'Coding · local', started: 'today 14:10', writes: 'allow', cmds: 'allow', haltAt: null },
+        { id: 'slowhosts', cli: 'task-20261026-141002', goal: 'Make the ingest runner tolerate slow hosts', kind: 'slowhosts', status: 'running', base: 372, since: 0, rounds: 8, suite: 'Coding · local', started: 'today 14:10', writes: 'allow', cmds: 'allow', haltAt: null },
         { id: 'parsers', goal: 'Upgrade the parsers to Python 3.12 syntax', kind: 'parsers', status: 'done', base: 700, since: null, rounds: 8, suite: 'Coding · local', started: 'Thu 09:32', writes: 'allow', cmds: 'allow', haltAt: null },
         { id: 'flaky', goal: 'Find the flaky tests in tests/', kind: 'flaky', status: 'exhausted', base: 840, since: null, rounds: 8, suite: 'Coding · local', started: 'yesterday 16:02', writes: 'none', cmds: 'allow', haltAt: null },
-        { id: 'hello', cli: 'task-20261026-060911', goal: 'say hello', kind: 'hello', status: 'running', interrupted: true, base: 80, since: null, rounds: 2, suite: 'Coding · local', folder: '/Users/someone/work', started: 'today 06:09', writes: 'none', cmds: 'none', haltAt: null }
+        { id: 'hello', cli: 'task-20261026-060911', goal: 'say hello', kind: 'hello', status: 'running', interrupted: true, base: 80, since: null, rounds: 2, suite: 'Coding · local', folder: '/Users/someone/work', started: 'today 06:09', writes: 'none', cmds: 'none', tools: false, haltAt: null }
       ],
+      /* Whether the Tasks list reads task list --all (the app's 6g): once
+         Show all is pressed, for the life of the place. */
+      taskAll: false,
       newTask: { goal: '', suite: 'coding', rounds: '8', writes: 'allow', cmds: 'none', require: '', requireFile: '' },
       gNode: 'run_batch',
+      gStale: false,
       gView: 'fns',
       gBuilt: '14:02',
       mediaTab: 'clips',
@@ -2581,7 +2646,13 @@ class Component extends DCLogic {
       binNext: null,
       binInstalled: false,
       providersReg: {},
+      /* Health's fix as a job (the app's 6c): { argv, at } while it runs,
+         then { end, endAt } once it has ended and Health is read again. A
+         failed one's words stay the red line under the pane's title until
+         the next read; healthFail is a row check --fix cannot mend. */
       fixing: null,
+      fixFailure: null,
+      healthFail: false,
       clipSel: 'lh-ext',
       clips: [
         { id: 'lh-ext', file: 'lighthouse-dusk-2.mp4', prompt: 'The lighthouse beam starts to sweep across the water as night falls, and the camera keeps drifting forward', mode: 'extend', image: null, pipeline: 'wan22', preset: 'final', steps: 50, w: 1280, h: 704, fps: 24, dur: 5, seed: 918273, seedSource: 'drawn', loras: [], parent: { move: 'extend', record: 'lighthouse-dusk.mp4.json', clip: 'lighthouse-dusk.mp4', continued: 'lighthouse-dusk.mp4' }, took: '7 min 51 s', when: 'Today 13:12', size: '9.2 MB' },
@@ -2602,11 +2673,11 @@ class Component extends DCLogic {
           { narration: 'Then the refrigerant cools, expands, and goes back outside to start again.', visual: 'Blue liquid flowing through a loop of pipes, from a warm room back out to a frosty garden, smooth tracking shot.', asset: null, secs: 6, spoken: 4.27, seed: 3301958, v: true, c: true },
           { narration: 'It moves heat rather than making it, which is why it needs so little electricity.', visual: 'A kitchen wall display showing a quiet energy readout as a family walks past, soft natural light.', asset: null, secs: 6.5, spoken: 4.95, seed: 640021, v: true, c: true }
         ] },
-        { id: 'market2', title: 'Night market teaser', file: 'night-market-2.mp4', brief: 'A 20-second teaser for the Friday night market on Mill Street. Lively, warm, a little mysterious.', status: 'rendered', voice: 'bm_george', pipeline: 'wan22', music: 'lanterns-bed.m4a', assets: '~/Pictures/market/', captions: true, planner: 'gpt-oss', attempts: 2, when: 'Yesterday 21:30', parent: 'market1', edits: [{ instruction: 'make the second scene the lantern stall, with someone lighting the lanterns', redo: [4], voice: null, pipeline: null, from: 'night-market.mp4.json' }], scenes: [
-          { narration: 'Every Friday, the car park on Mill Street turns into something else.', visual: 'An empty car park at dusk as strings of lights flicker on overhead, wide shot, slow push-in.', asset: null, secs: 5, spoken: 4.31, seed: 2211873, v: true, c: true },
-          { narration: 'Forty stalls. Food from eleven countries.', visual: 'A stallholder lighting paper lanterns one by one above a noodle stall, steam drifting past, handheld.', asset: null, secs: 5, spoken: 3.12, seed: 640917, v: true, c: true },
-          { narration: 'Come hungry.', visual: '', asset: 'stall-0412.mov', secs: 4.2, spoken: 1.04, seed: 0, v: true, c: true },
-          { narration: 'Fridays from six, on Mill Street.', visual: 'Paper lanterns swaying above a crowded aisle of stalls, warm light, the camera rising slowly.', asset: null, secs: 5, spoken: 2.41, seed: 3920114, v: true, c: true }
+        { id: 'market2', title: 'Night market teaser', file: 'night-market-2.mp4', brief: 'A 20-second teaser for the Friday night market on Mill Street. Lively, warm, a little mysterious.', status: 'rendered', voice: 'bm_george', pipeline: 'wan22', music: 'lanterns-bed.m4a', assets: '~/Pictures/market/', captions: true, planner: 'gpt-oss', attempts: 2, when: 'Yesterday 21:30', parent: 'market1', edits: [{ instruction: 'make the second scene the lantern stall, with someone lighting the lanterns', redo: [4], voice: null, pipeline: null, from: 'night-market.mp4.json' }], removed: [], scenes: [
+          { narration: 'Every Friday, the car park on Mill Street turns into something else.', visual: 'An empty car park at dusk as strings of lights flicker on overhead, wide shot, slow push-in.', asset: null, secs: 5, spoken: 4.31, seed: 2211873, v: true, c: true, from: 1, changes: [] },
+          { narration: 'Forty stalls. Food from eleven countries.', visual: 'A stallholder lighting paper lanterns one by one above a noodle stall, steam drifting past, handheld.', asset: null, secs: 5, spoken: 3.12, seed: 640917, v: true, c: true, from: 2, changes: ['prompt'] },
+          { narration: 'Come hungry.', visual: '', asset: 'stall-0412.mov', secs: 4.2, spoken: 1.04, seed: 0, v: true, c: true, from: 3, changes: [] },
+          { narration: 'Fridays from six, on Mill Street.', visual: 'Paper lanterns swaying above a crowded aisle of stalls, warm light, the camera rising slowly.', asset: null, secs: 5, spoken: 2.41, seed: 3920114, v: true, c: true, from: 4, changes: ['seed'] }
         ] },
         { id: 'market1', title: 'Night market teaser', file: 'night-market.mp4', brief: 'A 20-second teaser for the Friday night market on Mill Street. Lively, warm, a little mysterious.', status: 'rendered', voice: 'bm_george', pipeline: 'wan22', music: 'lanterns-bed.m4a', assets: '~/Pictures/market/', captions: true, planner: 'gpt-oss', attempts: 2, when: 'Yesterday 20:05', parent: null, edits: [], scenes: [
           { narration: 'Every Friday, the car park on Mill Street turns into something else.', visual: 'An empty car park at dusk as strings of lights flicker on overhead, wide shot, slow push-in.', asset: null, secs: 5, spoken: 4.31, seed: 2211873, v: true, c: true },
@@ -2627,6 +2698,10 @@ class Component extends DCLogic {
       nc: null,
       ed: null,
       crender: null,
+      /* GUI 6j: the preview drawn beside an edit's Render, by its output,
+         in memory for this run alone (never written), so the page can say
+         when the render's own plan changed the project otherwise. */
+      previewedRenders: {},
       speeches: [
         { id: 'sp2', file: 'walkthrough-intro.wav', text: 'Welcome to the Apogee walkthrough. In the next two minutes, you’ll see a model answer on this Mac, with nothing leaving it. Let’s start with a question.', voice: 'af_heart', speed: 1, sentences: [[0, 2.41], [2.41, 5.37], [7.78, 1.92]], when: 'Today 11:05', took: '3.1 s' },
         { id: 'sp1', file: 'standup-reminder.wav', text: 'Reminder: standup moves to nine forty-five tomorrow. Bring the ingest numbers.', voice: 'bm_george', speed: 1.1, sentences: [[0, 2.86], [2.86, 1.71]], when: 'Yesterday 17:40', took: '1.2 s' }
@@ -2649,6 +2724,11 @@ class Component extends DCLogic {
       if (!sub) s.cs = Object.assign({}, s.cs, { taskgroup: Object.assign({}, s.cs.taskgroup, { progress: 30 }) });
       else if (sub === 'private') set({ chatId: 'private', privateOpen: true });
       else if (sub === 'suite') set({ chatId: 'new', gs: { kind: 'suite', chat: 'new', choice: 'big', force: false } });
+      else if (sub === 'restarting' || sub === 'notsent' || sub === 'ended') this.lifeStart(sub);
+      /* GUI 6b: saved chats compacting as jobs, side by side as the app
+         allows -- one row busy, the other's menu open on Stop compacting
+         (its open menu's button covers its busy mark, as it covers a date). */
+      else if (sub === 'compacting') set({ compacting: { retry: { at: -12 }, kv: { at: 0 } }, menu: 'row:kv' });
       else set({ chatId: sub });
       if (sub === 'wal') s.cs = Object.assign({}, s.cs, { wal: { cite: 1 } });
     } else if (where === 'monitor') {
@@ -2663,7 +2743,7 @@ class Component extends DCLogic {
         ['command', 'apogee reset'], ['problem', 'Not run here: deletes the data directory the running app stands on -- run it at a prompt, with the app closed.']
       ] } });
     } else if (where === 'models') {
-      set({ screen: 'models', modelsTab: { downloads: 'jobs', jobs: 'jobs', store: 'store', convert: 'store', register: 'store', roles: 'roles', delete: 'store' }[sub] || 'backends' });
+      set({ screen: 'models', modelsTab: { downloads: 'jobs', jobs: 'jobs', store: 'store', convert: 'store', register: 'store', roles: 'roles', delete: 'store', notran: 'jobs' }[sub] || 'backends' });
       if (sub === 'delete') set({ storeSel: 'gguf/5b7e10aa93c2', confirm: { kind: 'storeDelete', sid: 'gguf/5b7e10aa93c2' } });
       if (sub === 'store' || sub === 'convert') set({ storeSel: 'safetensors/a04f3e19b2c7' });
       if (sub === 'convert') set({ overlay: 'store', sheet: { kind: 'convert', sid: 'safetensors/a04f3e19b2c7', target: 'gguf', ptype: 'f16', levels: ['Q4_K_M'], register: true, base: 'Qwen3-14B', mtype: '' } });
@@ -2673,8 +2753,19 @@ class Component extends DCLogic {
         const job = Object.assign(this.storeJob('convert', llama, { target: 'gguf', ptype: 'f16', levels: ['Q4_K_M'], names: ['Llama3.1-8B-Instruct-F16', 'Llama3.1-8B-Instruct-Q4KM'], command: 'apogee models convert Llama3.1-8B-Instruct/safetensors/ab28930be261 --register-with Q4_K_M' }, 0), { id: 'j2', t0: -20 });
         set({ jobs: [job].concat(s.jobs) });
       }
+      /* GUI 6d: a Quantize… card stopped while its first store read
+         (models list --all) still ran: no child ever started, nothing
+         ticked, the card ended at the press with Run again and Dismiss. */
+      if (sub === 'notran') {
+        const f16 = this.storeSets().find((x) => x.sid === 'gguf/9f3a01c4e2b1');
+        const job = Object.assign(this.storeJob('quantize', f16, { level: 'Q8_0', register: true, name: 'Gemma4-12B-Instruct-Q80' }, 0), { id: 'j3', state: 'notran' });
+        set({ jobs: [job].concat(s.jobs) });
+      }
     } else if (where === 'download') set({ screen: 'models', overlay: 'download', dl: { repo: 'Wan-AI/Wan2.1-T2V-1.3B-Diffusers', format: 'gguf', quant: 'Q4_K_M' } });
     else if (where === 'graph' && sub === 'prose') set({ screen: 'graph', gView: 'prose' });
+    /* GUI 6h: Runner._fetch clicked in a picture an update outside the app
+       has overtaken; its explain refused, the alert up over the canvas. */
+    else if (where === 'graph' && sub === 'refused') set({ screen: 'graph', gView: 'fns', gNode: '_fetch', gStale: true, confirm: { kind: 'explainRefused', node: '_fetch' } });
     else if (where === 'review') set({ screen: 'review', rv: { tab: sub === 'targets' ? 'targets' : sub === 'skills' ? 'skills' : 'runs', skill: 'security' }, overlay: sub === 'post' ? 'reviewpost' : null });
     else if (where === 'library') {
       /* GUI 6f's states: Close asked over unsaved typing; Close asked after a
@@ -2686,9 +2777,14 @@ class Component extends DCLogic {
       else if (sub === 'image') set({ screen: 'library', lib: { tab: 'symphonies', sym: 'describe-answer', played: false, image: null } });
       else set({ screen: 'library', lib: { tab: sub || 'agents', played: sub === 'symphonies' } });
     }
-    else if (where === 'training' && (sub === 'pipelines' || sub === 'cycle')) set({ screen: 'training', tr: this.trainStart(sub) });
+    /* training:stalelock, :unreadable, :cyclepass, :passrunning and
+       :resumeheld are GUI 6i's, over the 57g/57h recordings (trainSweep). */
+    else if (where === 'training' && sub && sub !== 'datasets') set({ screen: 'training', tr: this.trainStart(sub) });
     else if (where === 'training') set({ screen: 'training', tr: sub === 'datasets' ? { tab: 'datasets', sel: '20261021-051826', regime: 'foundation', running: false } : { tab: 'runs', sel: '20261021-051826', regime: 'foundation', running: true } });
-    else if (where === 'knowledge') set({ screen: 'knowledge', kn: sub === 'collections' ? { tab: 'collections', coll: 'notes', searched: true } : { tab: 'records', asked: true, branch: '', sel: 'kr-20261021T045944Z-1e2354', coll: 'notes', searched: false } });
+    /* knowledge:mixed is GUI 6h's: a collection whose vectors come from two
+       models, its Vectors line in embed info's words. */
+    else if (where === 'knowledge') set({ screen: 'knowledge', kn: sub === 'collections' ? { tab: 'collections', coll: 'notes', searched: true } : sub === 'mixed' ? { tab: 'collections', coll: 'mixed', searched: false } : { tab: 'records', asked: true, branch: '', sel: 'kr-20261021T045944Z-1e2354', coll: 'notes', searched: false } });
+    else if (where === 'tasks' && sub) this.tasksStart(sub);
     else if (where === 'suites' || where === 'tasks' || where === 'graph' || where === 'voice') set({ screen: where });
     else if (where === 'newtask') set({ screen: 'tasks', overlay: 'newtask', newTask: sub === 'recipe'
       ? { goal: '', suite: 'coding', rounds: '8', writes: 'none', cmds: 'none', require: '', requireFile: '', recipe: 'digest-folder', input: 'docs', grants: ['write_file'] }
@@ -2719,12 +2815,33 @@ class Component extends DCLogic {
         ed.preview = this.editPlan(p, ed.text, ed.redo);
         set({ ed: ed });
       }
+      /* GUI 6j: compose:edit's preview rendered, its Render's own plan
+         come out otherwise (the canned second answer), and the render
+         done: the page says so above the edit's changes. */
+      if (sub === 'differs') {
+        const p = s.projects.find((x) => x.id === 'heatpump');
+        const ed = Object.assign(this.freshEdit(p), { text: 'make the second scene show the indoor unit on the wall', redo: { 4: true }, stage: 'shown' });
+        ed.preview = this.editPlan(p, ed.text, ed.redo);
+        const r = this.editRender(p, ed);
+        const proj = Object.assign({}, r.proj, { status: 'rendered', scenes: r.proj.scenes.map((x) => Object.assign({}, x, { v: true, c: true })) });
+        set({ projects: [proj].concat(s.projects), projSel: proj.id, previewedRenders: { [proj.file]: r.previewed }, ed: this.freshEdit(proj) });
+      }
       if (sub === 'new') {
         const nc = Object.assign(this.freshCompose(), { stage: 'planned' });
         nc.plan = this.planFor(nc);
         set({ nc: nc, projSel: 'new' });
       }
-    } else if (where === 'settings') set({ overlay: 'settings', settingsPane: sub || 'general' });
+    } else if (where === 'settings') {
+      /* GUI 6c: Health's check --fix running, Stop beside its busy line;
+         the same fix failed -- check --fix exits 1 while a row still fails,
+         and an MCP server's missing command is one it cannot mend -- its
+         words the red line, both buttons back; the web search address
+         unset, said not set, Set off while the field is empty. */
+      if (sub === 'fixing') set({ overlay: 'settings', settingsPane: 'backends', fixing: { argv: 'check --fix', at: 0 } });
+      else if (sub === 'fixfailed') set({ overlay: 'settings', settingsPane: 'backends', healthFail: true, fixFailure: 'it exited with status 1', toast: 'check --fix failed: it exited with status 1' });
+      else if (sub === 'nosearch') set({ overlay: 'settings', settingsPane: 'web', searx: '' });
+      else set({ overlay: 'settings', settingsPane: sub || 'general' });
+    }
     if (where === 'voice') set({ play: { key: 'sp:sp2', on: false, base: 3.4, t0: 0 } });
   }
 
@@ -2867,6 +2984,20 @@ class Component extends DCLogic {
         next.toastAt = clock;
       }
     }
+    /* A child stopped for another, or started again, comes up after a
+       moment (the app's 6a): Restarting, then Starting apogee, then it
+       speaks and takes the lines held for it. An ended one waits for Start
+       again. */
+    const coming = Object.keys(s.lifeBy).filter((id) => s.lifeBy[id] && s.lifeBy[id].stage !== 'ended');
+    if (coming.length) {
+      const life = Object.assign({}, s.lifeBy);
+      coming.forEach((id) => {
+        const l = life[id];
+        if (l.stage === 'restarting' && clock - l.at >= 5) life[id] = { stage: 'starting', at: clock };
+        else if (l.stage === 'starting' && clock - l.at >= 4) delete life[id];
+      });
+      next.lifeBy = life;
+    }
     if (Object.keys(s.heldBy).some((id) => (s.heldBy[id] || []).length)) Object.assign(next, this.flushHeld(Object.assign({}, s, next)));
     if (s.tr && s.tr.job && clock >= s.tr.job.until) {
       const job = s.tr.job;
@@ -2891,7 +3022,60 @@ class Component extends DCLogic {
         next.gs = Object.assign({}, g, { saving: false, verdict: 'Saved. Apogee checks an agent\'s prompt and schema when it runs -- its first run says what is wrong, if anything.' + since });
       }
     }
-    if (s.fixing && clock - s.fixing.at >= 6) { next.fixing = null; next.toast = s.fixing.argv + ' finished'; next.toastAt = clock; }
+    /* Health's fix (the app's 6c) ends as its job does: a stop said
+       stopped; check --fix exiting 1 while a row still fails, nothing on
+       stderr, said failed in the fold's words; anything else finished.
+       Stop goes off as the run ends, Health is read again, and then both
+       buttons come back. A failure stays the red line until the next read. */
+    if (s.fixing) {
+      const f = s.fixing;
+      if (f.end == null && clock - f.at >= 6) next.fixing = Object.assign({}, f, { end: f.argv === 'check --fix' && s.healthFail ? 'failed' : 'done', endAt: clock });
+      else if (f.end != null && clock - f.endAt >= 2) {
+        next.fixing = null;
+        next.fixFailure = f.end === 'failed' ? 'it exited with status 1' : null;
+        next.toast = f.argv + ' ' + { done: 'finished', stopped: 'stopped', failed: 'failed: it exited with status 1' }[f.end];
+        next.toastAt = clock;
+      }
+    }
+    /* A saved chat's compaction (the app's 6b) ends as `chats compact`
+       does, its last line said (chats-compact.txt) and its Details read
+       back; the prototype gives it 30 ticks. It folds with the Utility role
+       as resolved -- the default suite's member, then models.default_utility,
+       then the chat's own backend -- and names it only when it isn't the
+       chat's own (chat_history.cpp). A chat deleted meanwhile stays deleted:
+       the CLI fails, and the app says its stderr's last line. */
+    const compactDone = Object.keys(s.compacting).filter((id) => clock - s.compacting[id].at >= 30);
+    if (compactDone.length) {
+      const left = Object.assign({}, s.compacting);
+      const by = Object.assign({}, s.compactedBy);
+      const member = ((this.suites()[s.defaultSuite] || {}).helpers || []).find((h) => h[0] === 'utility');
+      compactDone.forEach((id) => {
+        const info = this.chatInfo(id);
+        delete left[id];
+        if (s.chatGone[id]) { next.toast = 'Not compacted: apogee chats: ' + info.cli + ' was deleted while it was compacted -- it stays deleted'; return; }
+        by[id] = (by[id] || 0) + 1;
+        const compactor = (member && member[2]) || s.roles.utility || info.model;
+        next.toast = 'compacted ' + info.cli + ': ' + info.messages + ' messages into 2' + (compactor === info.model ? '' : ', by ' + compactor);
+      });
+      Object.assign(next, { compacting: left, compactedBy: by, toastAt: clock });
+    }
+    /* A resume starting up (the app's 6g) ends at its task_started -- the
+       prototype gives it 4 ticks -- and the task runs again. A halt sent
+       meanwhile is kept (the CLI's 57u) and stands as the run begins, so
+       it ends the run before any model call: halted before round N (or
+       before the plan), with nothing run. Or the CLI refused it before it
+       began: its line goes to the alert and stays in the task's activity. */
+    if (s.tasks.some((t) => t.resuming && clock - t.resuming.at >= 4)) {
+      let refusal = '';
+      next.tasks = s.tasks.map((t) => {
+        if (!t.resuming || clock - t.resuming.at < 4) return t;
+        const r = t.resuming;
+        if (r.refusal) { refusal = r.refusal; return Object.assign({}, t, { resuming: null, refused: r.refusal }); }
+        if (r.halt) return Object.assign({}, t, { resuming: null, refused: null, status: 'halted', interrupted: false, base: r.base, since: null, haltAt: null });
+        return Object.assign({}, t, { resuming: null, refused: null, status: 'running', interrupted: false, base: r.base, since: clock, haltAt: null });
+      });
+      if (refusal) Object.assign(next, { confirm: { kind: 'taskRefused', refusal: refusal }, toast: 'That didn\'t work: ' + refusal, toastAt: clock });
+    }
     if (s.toast && !next.toast && clock - s.toastAt > 12) next.toast = null;
     this.setState(next);
   }
@@ -2950,7 +3134,7 @@ class Component extends DCLogic {
     return {
       specs: [
         { name: 'nightly', stages: [{ name: 'base', on: 'aaaaaaaaaaaa', dataset: 'starter.jsonl', suites: 1 }] },
-        { name: 'skills', stages: [{ name: 'greetings', on: 'aaaaaaaaaaaa', dataset: 'starter.jsonl', suites: 1 }, { name: 'refusals', on: 'fused', dataset: 'regress.jsonl', suites: 2 }] }
+        { name: 'skills', stages: [{ name: 'greetings', on: 'aaaaaaaaaaaa', dataset: 'starter.jsonl', suites: 1 }, { name: 'refusals', on: 'fused', dataset: 'regress.jsonl', suites: 2, fail: ['50% (1/2)', 0.5] }] }
       ],
       ids: { skills: ['pipe-20261026-074112', 'pipe-20261026-074116', 'pipe-20261026-074117'], nightly: ['pipe-20261026-074115'] },
       done: { 'pipe-20261026-074112': '2026-10-26T07:41:13Z' },
@@ -2970,6 +3154,72 @@ class Component extends DCLogic {
     };
   }
 
+  /* GUI 6i's world: what the app's 6i recorded from the CLI's 57g and 57h
+     over a scratch home (lib/src/darwin/tests/business/reads/Fixtures/).
+     The named pipelines cyclic, nightly (its name: Nightly SFT) and three
+     are train-pipeline-list-sweep.json. The four runs train pipeline status
+     lists are train-pipeline-status-resumes-list.json, each stage as its own
+     read gives it: -cycle-pass, -kept-failed, -spec-file-gone (its file
+     moved away), -named, and -named-held (67959 is the live process its
+     lock names). The cycle's history after the failed pass and a resume is
+     train-cycle-status-stale-lock.json, its lock left by a process that is
+     not running. The unreadable history is train-status-cycle-unreadable.
+     The pass running now is derived as the app's test derives it: its
+     manifest running, its stage training and not gated, the same holder. */
+  trainSweep() {
+    const stage = (name, state, run, score) => ({ name: name, state: state, run: run, score: score });
+    const run = (id, spec, ref, status, stages, more) => Object.assign({ id: id, spec: spec, ref: ref, status: status, student: 'tiny', started: this.trainAt(id), completed: '', stages: stages }, more || {});
+    const home = '/Users/someone/.apogee/training/';
+    return {
+      specs: [
+        { name: 'cyclic', stages: [{ name: 'base', on: 'aaaaaaaaaaaa', dataset: 'starter.jsonl', suites: 1 }] },
+        { name: 'nightly', title: 'Nightly SFT', stages: [{ name: 'a', on: 'aaaaaaaaaaaa', dataset: 'starter.jsonl', suites: 1 }, { name: 'b', on: 'fused', dataset: 'regress.jsonl', suites: 2, fail: ['50% (1/2)', 0.5] }] },
+        { name: 'three', stages: [{ name: 'a', on: 'aaaaaaaaaaaa', dataset: 'regress.jsonl', suites: 1, fail: ['0% (0/1)', 0] }, { name: 'b', on: 'fused', dataset: 'fixed.jsonl', suites: 2 }, { name: 'c', on: 'fused', dataset: 'broken.jsonl', suites: 3 }] }
+      ],
+      ids: {},
+      passId: 'cycle-20261109-041521',
+      heldId: 'pipe-20261109-040503',
+      pid: 67959,
+      runs: [
+        run('cycle-20261109-041521', 'cyclic', null, 'aborted', [stage('base', 'failed', 'cycle-20261109-041521-s0', 0)]),
+        run('pipe-20261109-041458', 'three', 'three', 'failed', [stage('a', 'failed', 'pipe-20261109-041458-s0', 0), stage('b', 'passed', 'pipe-20261109-041458-s1', 1), stage('c', 'failed', 'pipe-20261109-041458-s2', null)]),
+        run('pipe-20261109-041444', 'two', '/Users/someone/two.yaml', 'aborted', [stage('a', 'passed', 'pipe-20261109-041444-s0', 1), stage('b', 'failed', 'pipe-20261109-041444-s1', 0.5)], { gone: true }),
+        run('pipe-20261109-040503', 'Nightly SFT', 'nightly', 'aborted', [stage('a', 'passed', 'pipe-20261109-040503-s0', 1), stage('b', 'failed', 'pipe-20261109-040503-s1', 0.5)])
+      ],
+      history: { backend: 'nightly-model', anchorV: 0, anchorScore: 0, fails: 0, halted: false, reason: '', runs: [
+        { at: '2026-11-09T04:15:21Z', source: 'directory', rows: 1, pipeline: 'cycle-20261109-041521', gate: 'fail', reason: "pipeline aborted: pipeline aborted -- stage 'base' failed the cumulative eval gate (0% (0/1))", score: 0, prev: 0, anchor: 0, promoted: 0, note: 'circuit breaker: 1 consecutive failed cycle(s) reached circuit_breaker_k 1' }
+      ] },
+      lock: home + 'cycle/cycle.lock',
+      error: home + 'cycle/history.json: cycle history: runs must be an array'
+    };
+  }
+
+  /* The canned training world a state reads: 4j's, or 6i's (trainSweep). */
+  trainWorld(tr) {
+    return tr && tr.world === 'sweep' ? this.trainSweep() : this.trainRecorded();
+  }
+
+  /* A named pipeline by its key: a run's spec_ref, else its spec name. */
+  trainSpec(tr, key) {
+    return this.trainWorld(tr).specs.find((p) => p.name === key) || null;
+  }
+
+  /* Where a resume starts, as 57h's document says it (`resume`): one past
+     the last stage that passed, with the earlier stages that failed their
+     gate and stay; `pipeline` the spec the lookup found, null when none is
+     (a spec file moved away). Null for a complete run, a cycle pass -- its
+     candidate is the cycle's alone -- or a run with no stage left. */
+  trainResumeAt(m) {
+    if (!m || m.status === 'complete' || m.id.indexOf('cycle-') === 0) return null;
+    let last = -1;
+    m.stages.forEach((g, i) => { if (g.state === 'passed') last = i; });
+    const from = last + 1;
+    if (from >= m.stages.length) return null;
+    const kept = m.stages.slice(0, from).map((g, i) => (g.state === 'failed' ? 'stage ' + (i + 1) + ', ' + g.name : '')).filter((x) => x);
+    const note = kept.length ? kept.slice(0, -1).join(', ') + (kept.length > 1 ? ' and ' : '') + kept[kept.length - 1] + (kept.length === 1 ? ', failed its gate and stays as it is' : ', failed their gates and stay as they are') : '';
+    return { stage: from + 1, name: m.stages[from].name, pipeline: m.gone ? null : m.ref || m.spec, note: note };
+  }
+
   trainState() {
     return Object.assign({ tab: 'runs', named: false, fixed: false, pruns: [], psel: null, live: null, cycle: null, cnext: 0 }, this.state.tr || {});
   }
@@ -2981,9 +3231,10 @@ class Component extends DCLogic {
 
   trainNextId(pruns) {
     const secs = (id) => Number(id.slice(-6, -4)) * 3600 + Number(id.slice(-4, -2)) * 60 + Number(id.slice(-2));
-    const top = pruns.filter((m) => m.id.indexOf('pipe-') === 0).reduce((a, m) => Math.max(a, secs(m.id)), secs('074112')) + 1;
+    const day = pruns.reduce((a, m) => { const d = m.id.slice(-15, -7); return d > a ? d : a; }, '20261026');
+    const top = pruns.filter((m) => m.id.slice(-15, -7) === day).reduce((a, m) => Math.max(a, secs(m.id)), day === '20261026' ? secs('074112') : 0) + 1;
     const two = (x) => String(x).padStart(2, '0');
-    return 'pipe-20261026-' + two(Math.floor(top / 3600)) + two(Math.floor(top / 60) % 60) + two(top % 60);
+    return 'pipe-' + day + '-' + two(Math.floor(top / 3600)) + two(Math.floor(top / 60) % 60) + two(top % 60);
   }
 
   trainKeep(pruns, m) {
@@ -2993,8 +3244,24 @@ class Component extends DCLogic {
   trainStart(sub) {
     const rec = this.trainRecorded();
     const base = { sel: '20261021-051826', regime: 'foundation', running: false, named: true, psel: null, live: null };
+    /* GUI 6i's states, each over trainSweep's recordings: a dead pass's lock
+       holding Run one pass; a history that cannot be read; a cycle pass's
+       page, never offered Resume; that pass as it stands mid-pass, another
+       process's, the cycle held; and a Resume a live process holds. A pass
+       run from these is not replayed (trainGo): none was recorded. */
+    if (['stalelock', 'unreadable', 'cyclepass', 'passrunning', 'resumeheld'].indexOf(sub) >= 0) {
+      const sw = this.trainSweep();
+      const now = sub === 'passrunning';
+      const pruns = sw.runs.map((m) => {
+        if (now && m.id === sw.passId) return Object.assign({}, m, { status: 'running', holder: sw.pid, stages: m.stages.map((g) => Object.assign({}, g, { state: 'training', score: null })) });
+        if (sub === 'resumeheld' && m.id === sw.heldId) return Object.assign({}, m, { holder: sw.pid });
+        return m;
+      });
+      const onCycle = sub === 'stalelock' || sub === 'unreadable';
+      return Object.assign(base, { world: 'sweep', tab: onCycle ? 'cycle' : 'pipelines', fixed: false, pruns: pruns, psel: sub === 'resumeheld' ? sw.heldId : onCycle ? null : sw.passId, cycle: sub === 'unreadable' || now ? null : sw.history, lock: sub === 'stalelock' ? sw.lock : '', cycleError: sub === 'unreadable' ? sw.error : '', held: now, cnext: 3 });
+    }
     if (sub === 'cycle') return Object.assign(base, { tab: 'cycle', fixed: true, pruns: rec.runs, cycle: this.trainCycleAfter(this.trainCycleAfter(null, rec.passes[0]), rec.passes[1]), cnext: 2 });
-    let live = this.trainLive({ kind: 'pipeline', spec: 'skills', pid: 'pipe-20261026-074112', resume: false, steps: this.trainRunSteps(rec.specs[1], 'pipe-20261026-074112', false) });
+    let live = this.trainLive({ kind: 'pipeline', spec: 'skills', ref: 'skills', pid: 'pipe-20261026-074112', resume: false, steps: this.trainRunSteps(rec.specs[1], 'pipe-20261026-074112', false) });
     const to = live.steps.findIndex((x) => x[0] === 'i' && x[1] === 2 && x[2] === 2);
     while (live.at <= to) live = this.trainStep(live, live.steps[live.at]);
     return Object.assign(base, { tab: 'pipelines', fixed: false, pruns: [], live: live, cycle: null, cnext: 0 });
@@ -3024,22 +3291,25 @@ class Component extends DCLogic {
 
   trainRunSteps(sp, id, fixed) {
     const n = sp.stages.length;
-    let steps = [['n', '[pipeline] ' + sp.name + ' as ' + id + ': ' + n + ' stage(s), mock on aaaaaaaaaaaa; no judge: unmatched items skip']];
+    let steps = [['n', '[pipeline] ' + (sp.title || sp.name) + ' as ' + id + ': ' + n + ' stage(s), mock on aaaaaaaaaaaa; no judge: unmatched items skip']];
     sp.stages.forEach((g, i) => steps.push(['s', i + 1, g.name, 'pending']));
     for (let i = 1; i <= n; i += 1) {
-      const fail = !fixed && sp.name === 'skills' && i === 2 ? ['50% (1/2)', 0.5] : null;
+      const fail = !fixed && sp.stages[i - 1].fail ? sp.stages[i - 1].fail : null;
       steps = steps.concat(this.trainSegment(sp, i, id, fail));
       if (fail) return steps.concat([['e', "pipeline aborted -- stage '" + sp.stages[i - 1].name + "' failed the cumulative eval gate (" + fail[0] + "). Fix the data or the suite and 'apogee train pipeline resume " + id + "', or pass --continue-on-fail to go on regardless"]]);
     }
     return steps;
   }
 
+  /* A resume, as 57h starts it: after the last stage that passed, its first
+     line naming where, a stage kept failed said on the next. */
   trainResumeSteps(sp, m) {
     const n = sp.stages.length;
-    let steps = [['n', '[pipeline] resuming ' + sp.name + ' as ' + m.id + ': ' + n + ' stage(s), mock on aaaaaaaaaaaa; no judge: unmatched items skip']];
+    const at = this.trainResumeAt(m);
+    let steps = [['n', '[pipeline] resuming ' + (sp.title || sp.name) + ' as ' + m.id + ' from stage ' + at.stage + ', ' + at.name + ': ' + n + ' stage(s), mock on aaaaaaaaaaaa; no judge: unmatched items skip']];
+    if (at.note) steps.push(['n', '[pipeline] ' + at.note]);
     m.stages.forEach((g, i) => steps.push(['s', i + 1, g.name, g.state, !!g.run, g.score]));
-    const from = m.stages.findIndex((g) => g.state !== 'passed');
-    for (let i = from + 1; i <= n; i += 1) steps = steps.concat(this.trainSegment(sp, i, m.id, null, m.id.indexOf('cycle-') === 0 ? 'merged.jsonl' : ''));
+    for (let i = at.stage; i <= n; i += 1) steps = steps.concat(this.trainSegment(sp, i, m.id, null, ''));
     return steps;
   }
 
@@ -3100,7 +3370,7 @@ class Component extends DCLogic {
     const lv = tr.live;
     if (lv.kind === 'pipeline') {
       const started = this.trainAt(lv.pid);
-      const m = { id: lv.pid, spec: lv.spec, status: lv.err ? 'aborted' : 'complete', student: 'tiny', started: started, completed: lv.err ? '' : this.trainRecorded().done[lv.pid] || started, stages: lv.stages };
+      const m = { id: lv.pid, spec: lv.spec, ref: lv.ref || lv.spec, status: lv.err ? 'aborted' : 'complete', student: 'tiny', started: started, completed: lv.err ? '' : this.trainRecorded().done[lv.pid] || started, stages: lv.stages };
       return { tr: Object.assign({}, tr, { live: null, pruns: this.trainKeep(tr.pruns, m), psel: !tr.psel || tr.psel === m.id ? m.id : tr.psel }), toast: lv.err || 'Pipeline ' + (lv.resume ? lv.pid : lv.spec) + ': ' + m.status };
     }
     const pruns = lv.pid ? this.trainKeep(tr.pruns, { id: lv.pid, spec: 'nightly', status: lv.err ? 'aborted' : 'complete', student: 'tiny', started: this.trainAt(lv.pid), completed: lv.err ? '' : this.trainAt(lv.pid), stages: lv.stages }) : tr.pruns;
@@ -3112,8 +3382,8 @@ class Component extends DCLogic {
     const tr = this.trainState();
     const lv = tr.live;
     if (lv.kind === 'pipeline') {
-      const sp = this.trainRecorded().specs.find((p) => p.name === lv.spec);
-      const m = { id: lv.pid, spec: lv.spec, status: 'aborted', student: 'tiny', started: this.trainAt(lv.pid), completed: '', stages: sp.stages.map((g, i) => lv.stages[i] || { name: g.name, state: 'pending', run: '', score: null }) };
+      const sp = this.trainSpec(tr, lv.ref || lv.spec);
+      const m = { id: lv.pid, spec: lv.spec, ref: lv.ref || lv.spec, status: 'aborted', student: 'tiny', started: this.trainAt(lv.pid), completed: '', stages: sp.stages.map((g, i) => lv.stages[i] || { name: g.name, state: 'pending', run: '', score: null }) };
       this.say("cancelled; recorded as aborted -- 'apogee train pipeline resume " + lv.pid + "' continues it", { tr: Object.assign({}, tr, { live: null, pruns: this.trainKeep(tr.pruns, m), psel: !tr.psel || tr.psel === m.id ? m.id : tr.psel }) });
       return;
     }
@@ -3126,24 +3396,33 @@ class Component extends DCLogic {
     const rec = this.trainRecorded();
     const done = (patch, toast) => this.setState(Object.assign({ confirm: null, tr: Object.assign({}, tr, patch) }, toast ? { toast: toast, toastAt: this.state.clock } : {}));
     if (c.act === 'run') {
-      const sp = rec.specs.find((p) => p.name === c.spec);
-      const id = (rec.ids[sp.name] || []).find((x) => !tr.pruns.some((m) => m.id === x)) || this.trainNextId(tr.pruns);
-      done({ psel: null, live: this.trainLive({ kind: 'pipeline', spec: sp.name, pid: id, resume: false, steps: this.trainRunSteps(sp, id, tr.fixed) }) });
+      const sp = this.trainSpec(tr, c.spec);
+      const id = (this.trainWorld(tr).ids[sp.name] || []).find((x) => !tr.pruns.some((m) => m.id === x)) || this.trainNextId(tr.pruns);
+      done({ psel: null, live: this.trainLive({ kind: 'pipeline', spec: sp.title || sp.name, ref: sp.name, pid: id, resume: false, steps: this.trainRunSteps(sp, id, tr.fixed) }) });
     } else if (c.act === 'resume') {
       const m = tr.pruns.find((x) => x.id === c.id);
-      const sp = rec.specs.find((p) => p.name === m.spec);
-      done({ psel: m.id, fixed: true, live: this.trainLive({ kind: 'pipeline', spec: sp.name, pid: m.id, resume: true, steps: this.trainResumeSteps(sp, m) }) });
+      const at = this.trainResumeAt(m);
+      const sp = this.trainSpec(tr, at.pipeline);
+      done({ psel: m.id, fixed: true, live: this.trainLive({ kind: 'pipeline', spec: m.spec, ref: at.pipeline, pid: m.id, resume: true, steps: this.trainResumeSteps(sp, m) }) });
     } else if (c.act === 'pass') {
       if (!tr.named) { done({}, rec.unconfigured); return; }
+      /* 6i's world records no pass after its failed one: 57h kept that
+         pass's file in the queue, so the next pass trains on it again, and
+         none of that was recorded. Not replayed, and the history left as
+         it stands, as Gate it and Run this regime are. */
+      if (tr.world === 'sweep') { done({}, 'apogee train cycle run: the next pass isn’t replayed here (prototype)'); return; }
       const p = this.trainPass(tr.cnext);
       done({ cnext: tr.cnext + 1, live: this.trainLive({ kind: 'cycle', spec: 'nightly', pid: p.pid, rec: p.rec, k: tr.cnext, haltKept: false, steps: p.steps }) });
     } else if (c.act === 'halt') {
-      const during = !!(tr.live && tr.live.kind === 'cycle');
+      /* A pass holds the cycle: this place's, or (6i's held state) another
+         process's -- the halt is kept either way, said the CLI's way. */
+      const here = !!(tr.live && tr.live.kind === 'cycle');
+      const during = here || !!tr.held;
       const h = Object.assign({ backend: tr.named ? 'nightly-model' : '', anchorV: 0, anchorScore: 0, fails: 0, runs: [] }, tr.cycle || {}, { halted: true, reason: "halted by 'apogee train cycle halt'" });
-      done({ cycle: h, live: during ? Object.assign({}, tr.live, { haltKept: true }) : tr.live }, during ? 'the pass running now finishes, and keeps the halt' : "cycle halted -- 'apogee train cycle run' refuses until 'apogee train cycle resume'");
+      done({ cycle: h, live: here ? Object.assign({}, tr.live, { haltKept: true }) : tr.live }, during ? 'the pass running now finishes, and keeps the halt' : "cycle halted -- 'apogee train cycle run' refuses until 'apogee train cycle resume'");
     } else if (c.act === 'unhalt') {
-      const during = !!(tr.live && tr.live.kind === 'cycle');
-      done({ cycle: Object.assign({}, tr.cycle, { halted: false, reason: '', fails: 0 }), live: during ? Object.assign({}, tr.live, { haltKept: false }) : tr.live }, 'cycle resumed (was halted: ' + (tr.cycle ? tr.cycle.reason : '') + '); the failure count is reset');
+      const here = !!(tr.live && tr.live.kind === 'cycle');
+      done({ cycle: Object.assign({}, tr.cycle, { halted: false, reason: '', fails: 0 }), live: here ? Object.assign({}, tr.live, { haltKept: false }) : tr.live }, 'cycle resumed (was halted: ' + (tr.cycle ? tr.cycle.reason : '') + '); the failure count is reset');
     }
   }
 
@@ -3597,6 +3876,8 @@ class Component extends DCLogic {
       out.forEach((o) => { o.status = 'done'; o.pct = 100; });
       return { steps: out, finished: true, current: -1 };
     }
+    /* Stopped before its child started (GUI 6d): no step ran or ticked. */
+    if (j.state === 'notran') return { steps: out, finished: false, current: -1 };
     if (j.state === 'interrupted') {
       out.forEach((o, i) => {
         if (i < j.failStep) { o.status = 'done'; o.pct = 100; }
@@ -3624,6 +3905,59 @@ class Component extends DCLogic {
     };
   }
 
+  /* The Tasks place's v0.2.1 states (the app's 6g), over the canned tasks.
+     denied: the recorded uses task (task-status-uses.json) -- a call its
+     grant let through and one refused with nobody present. more: a ledger
+     of 60, task list's newest 50 under its total. resuming: the killed
+     task's resume starting up, before its task_started. refused and
+     resumerefused: a start, or a resume, the CLI refused before it began --
+     permissions.write_file is deny and the task asks --allow write_file
+     (task-run-refused.err, task-resume-refused.err). */
+  tasksStart(sub) {
+    const s = this.state;
+    const set = (patch) => Object.assign(s, patch);
+    set({ screen: 'tasks' });
+    if (sub === 'denied') {
+      set({ taskId: 'report', tasks: [{ id: 'report', cli: 'task-20261109-021211', goal: 'Write the report', kind: 'report', status: 'exhausted', base: 0, since: null, rounds: 1, suite: 'Coding · local', folder: '/Users/someone/work', started: 'Nov 9 02:12', writes: 'none', cmds: 'allow', haltAt: null }].concat(s.tasks) });
+    } else if (sub === 'more') {
+      /* The 56 older tasks of the recording that filled its ledger to 60
+         (task-list-newest-50.json, task-list-all.json). */
+      const older = [];
+      for (let n = 56; n >= 1; n -= 1) older.push({ id: 'said' + n, goal: 'Say done, number ' + n, kind: 'said', status: 'done', base: 160, since: null, rounds: 2, suite: 'Coding · local', folder: '/Users/someone/work', started: 'Oct 19', writes: 'none', cmds: 'none', tools: false, haltAt: null });
+      set({ tasks: s.tasks.concat(older), taskAll: false });
+    } else if (sub === 'resuming') {
+      set({ taskId: 'hello', tasks: s.tasks.map((t) => (t.id === 'hello' ? Object.assign({}, t, { resuming: { at: 0, base: t.base, halt: false, refusal: '' } }) : t)) });
+    } else if (sub === 'refused' || sub === 'resumerefused') {
+      set({ policies: Object.assign({}, s.policies, { write_file: 'deny' }) });
+      let line = this.taskRefusal(['write_file'], '');
+      if (sub === 'resumerefused') {
+        /* Halted after round 2, then Resume: its grants are held to the
+           config as it is now. */
+        const slow = s.tasks.find((t) => t.id === 'slowhosts');
+        line = this.taskRefusal(this.taskGrants(slow), slow.cli);
+        set({ tasks: s.tasks.map((t) => (t.id === 'slowhosts' ? Object.assign({}, t, { status: 'halted', base: 330, since: null, refused: line }) : t)) });
+      }
+      set({ confirm: { kind: 'taskRefused', refusal: line }, toast: 'That didn\'t work: ' + line, toastAt: 0 });
+    } else set({ screen: 'tasks' });
+  }
+
+  /* A task's grants, in the order its --allow flags name them. */
+  taskGrants(t) {
+    return t.grants || [t.writes === 'allow' ? 'write_file' : null, t.cmds === 'allow' ? 'run_command' : null].filter((x) => x);
+  }
+
+  /* Why the CLI refuses a task's grants before anything runs (policy.cpp's
+     refuse_one, the first --allow past the config): a grant is never wider
+     than permissions.<tool>. A resume names its task and why it is held now
+     (task_cmd.cpp). Machine mode writes it to stderr alone, exit 1, and the
+     app says its last line, apogee task: kept. '' when nothing is refused. */
+  taskRefusal(grants, resumeId) {
+    const tool = grants.find((g) => this.state.policies[g] === 'deny');
+    if (!tool) return '';
+    const why = '--allow ' + tool + ': the config says permissions.' + tool + ': deny -- a task\'s grant is never wider than the config';
+    return 'apogee task: ' + (resumeId ? 'task ' + resumeId + ' cannot resume: ' + why + ' (its grants are held to the config and its agent as they are now)' : why);
+  }
+
   taskView(t) {
     const s = this.state;
     const tmpl = {
@@ -3631,8 +3965,26 @@ class Component extends DCLogic {
       parsers: { plan: ['Find the code that 3.12 syntax can simplify.', 'Rewrite the unions and the match statements.', 'Run the parser tests and the linter, and report the counts.'], plan0: 40, rounds: [['execute', 'rewrote 9 files; 3 tests failed', 'not done', 320, 14200], ['correct', 'fixed two match arms; 62 passed, ruff clean', 'done', 700, 9600]], checks: [['require', 'the answer contains “62 passed”', 2]] },
       flaky: { plan: ['Run the suite five times and compare the failures.', 'Isolate the tests that fail only sometimes.', 'Find the state they share.', 'Propose a fix and show it holds over five runs.'], plan0: 40, rounds: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => [n === 1 ? 'execute' : 'correct', n < 4 ? 'ran the suite 5 times: 2 of 5 failed' : n < 7 ? 'test_feed_timeout fails when run after test_cache; looked for shared state' : 'tried resetting the cache fixture; 1 of 5 still failed', 'not done', 40 + n * 100, 15000 + n * 300]), checks: [['require', 'the answer contains “0 of 5 runs failed”', 99]] },
       generic: { plan: ['(The plan turn writes the plan here, from your goal.)'], plan0: 60, rounds: [['execute', 'reported the goal done', 'done', 330, 8400]], checks: [] },
-      hello: { plan: ['Plan: say hello, then check it.'], plan0: 40, rounds: [['execute', 'reported the goal done', 'done', 160, 900]], checks: [['require', 'the answer contains "hello"', 1]] }
+      hello: { plan: ['Plan: say hello, then check it.'], plan0: 40, rounds: [['execute', 'reported the goal done', 'done', 160, 900]], checks: [['require', 'the answer contains "hello"', 1]] },
+      /* The app's 6g recording (task-status-uses.json): --allow run_command,
+         round 1 calls write_file report.txt and run_command ls. Its turns
+         began and ended at 02:12:11, created_at its updated_at, and each
+         reads tokens: 0 (estimated), so no time passes and no count shows.
+         Its one check ran and failed, with the CLI's description and
+         detail. */
+      report: { plan: ['Write the report.', 'List the folder.'], plan0: 0, planTok: 0, rounds: [['execute', 'reported done; tools: 1 ran, 1 denied', 'not done', 0, 0]], checks: [['require_file', 'the file /Users/someone/work/report.txt exists and is not empty', 99, '', 'no such file']] },
+      said: { plan: ['Say done.'], plan0: 40, rounds: [['execute', 'reported the goal done', 'done', 160, 900]], checks: [] }
     }[t.kind];
+    /* Each round's gated calls -- the tools that ask before they run -- as
+       the ledger keeps them: [round, tool, target]. A task never asks, so a
+       call its grants cover is allowed by this task's grant, and any other
+       is denied with nobody present to allow it (the app's 6g). */
+    const uses = {
+      slowhosts: [[1, 'write_file', 'tests/test_runner.py'], [1, 'run_command', 'pytest tests/test_runner.py -q'], [1, 'write_file', 'src/ingest/runner.py'], [2, 'run_command', 'pytest tests/ -q'], [2, 'write_file', 'tests/conftest.py'], [3, 'run_command', 'pytest tests/ -q'], [3, 'run_command', 'ruff check src/']],
+      parsers: ['feed', 'atom', 'rss', 'opml', 'jsonfeed', 'sitemap', 'dates', 'text', 'html'].map((f) => [1, 'write_file', 'src/ingest/parsers/' + f + '.py']).concat([[1, 'run_command', 'pytest tests/parsers -q'], [2, 'write_file', 'src/ingest/parsers/feed.py'], [2, 'write_file', 'src/ingest/parsers/atom.py'], [2, 'run_command', 'pytest tests/parsers -q'], [2, 'run_command', 'ruff check src/']]),
+      flaky: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => (n < 4 ? [[n, 'run_command', 'pytest tests/ -q']] : n < 7 ? [[n, 'run_command', 'pytest tests/test_cache.py tests/test_feed.py -q']] : [[n, 'write_file', 'tests/conftest.py'], [n, 'run_command', 'pytest tests/ -q']])).reduce((a, b) => a.concat(b), []),
+      report: [[1, 'write_file', 'report.txt'], [1, 'run_command', 'ls']]
+    }[t.kind] || [];
     /* A task killed mid-round reads running with its process gone (4h):
        it shows Resume, run in its folder, and no stops. */
     const interrupted = !!t.interrupted && t.status === 'running';
@@ -3640,8 +3992,11 @@ class Component extends DCLogic {
     const lastEnd = tmpl.rounds[tmpl.rounds.length - 1][3];
     if (t.haltAt != null && elapsed >= t.haltAt) elapsed = t.haltAt;
     if (elapsed > lastEnd) elapsed = lastEnd;
-    const halted = t.status === 'halted' || (t.status === 'running' && t.haltAt != null && elapsed >= t.haltAt);
-    const finished = t.status === 'done' || (t.status === 'running' && !halted && elapsed >= lastEnd && tmpl.rounds[tmpl.rounds.length - 1][2] === 'done');
+    /* A halt that lands as the last round passes its checks finds the task
+       done: the checks decide first. */
+    const passedLast = elapsed >= lastEnd && tmpl.rounds[tmpl.rounds.length - 1][2] === 'done';
+    const halted = t.status === 'halted' || (t.status === 'running' && t.haltAt != null && elapsed >= t.haltAt && !passedLast);
+    const finished = t.status === 'done' || (t.status === 'running' && !halted && passedLast);
     const exhausted = t.status === 'exhausted';
     const running = t.status === 'running' && !halted && !finished && !interrupted;
     const cancelled = t.status === 'cancelled';
@@ -3649,18 +4004,42 @@ class Component extends DCLogic {
     let roundsUsed = 0;
     let tokens = 0;
     let current = null;
+    /* A gated call in task status's words (task_cmd.cpp's on_target,
+       authority_words and refusal_words): the tool on its target, then on
+       whose authority it ran or why it was refused. */
+    const grants = this.taskGrants(t);
+    const onTarget = (u) => u[1] + (u[2] ? ' on ' + u[2] : '');
+    const allowedWords = (u) => onTarget(u) + ' -- this task\'s grant';
+    const deniedWords = (u) => onTarget(u) + ' -- nobody present to allow it';
+    /* A turn's tokens, and none drawn for a turn of 0, as the app does. */
+    const planTok = tmpl.planTok != null ? tmpl.planTok : 2100;
+    const kTok = (n) => (Math.round(n / 100) / 10) + 'K';
+    const rowTok = (n) => (n > 0 ? kTok(n) : '');
     const rounds = [];
-    if (elapsed >= tmpl.plan0) rounds.push({ n: 'Plan', kind: 'plan', text: 'the plan turn wrote ' + tmpl.plan.length + ' steps', outcome: 'recorded', color: 'var(--text-secondary)', tokens: '2.1K' });
-    else rounds.push({ n: 'Plan', kind: 'plan', text: 'writing the plan', outcome: running ? 'in flight' : 'stopped', color: running ? 'var(--status-accent)' : 'var(--status-warning)', tokens: '' });
+    if (elapsed >= tmpl.plan0) rounds.push({ n: 'Plan', kind: 'plan', text: 'the plan turn wrote ' + tmpl.plan.length + (tmpl.plan.length === 1 ? ' step' : ' steps'), outcome: 'recorded', color: 'var(--text-secondary)', tokens: rowTok(planTok), denied: '', hasDenied: false });
+    else rounds.push({ n: 'Plan', kind: 'plan', text: 'writing the plan', outcome: running ? 'in flight' : 'stopped', color: running ? 'var(--status-accent)' : 'var(--status-warning)', tokens: '', denied: '', hasDenied: false });
     tmpl.rounds.forEach((r, i) => {
       const startAt = i === 0 ? tmpl.plan0 : tmpl.rounds[i - 1][3];
-      if (elapsed < startAt) return;
+      /* Halted as a round ended: the next one never started. */
+      if (elapsed < startAt || (halted && elapsed <= startAt)) return;
       const done = elapsed >= r[3];
       if (done) { roundsUsed += 1; tokens += r[4]; }
       else current = i + 1;
       const label = done ? r[2] : running || interrupted ? 'in flight' : cancelled ? 'cancelled' : 'stopped';
-      rounds.push({ n: 'Round ' + (i + 1), kind: r[0], text: done ? r[1] : running ? 'working…' : interrupted ? '' : r[1], outcome: label, color: done ? (r[2] === 'done' ? 'var(--status-accent)' : 'var(--text-secondary)') : running ? 'var(--status-accent)' : 'var(--status-warning)', tokens: done ? (Math.round(r[4] / 100) / 10) + 'K' : '' });
+      /* A landed round's refusals on its row (the app's 6g): denied: and
+         each in task status's words, the row's own round not repeated. */
+      const refused = done ? uses.filter((u) => u[0] === i + 1 && grants.indexOf(u[1]) < 0).map(deniedWords) : [];
+      rounds.push({ n: 'Round ' + (i + 1), kind: r[0], text: done ? r[1] : running ? 'working…' : '', outcome: label, color: done ? (r[2] === 'done' ? 'var(--status-accent)' : 'var(--text-secondary)') : running ? 'var(--status-accent)' : 'var(--status-warning)', tokens: done ? rowTok(r[4]) : '', denied: refused.length ? 'denied: ' + refused.join('; ') : '', hasDenied: refused.length > 0 });
     });
+    /* Allowed and Denied, one task status row per use (the app's 6g): a
+       round's uses once it lands, with its task_round. While a live round's
+       result is in and its checks run, its task_grant lines already show
+       under Allowed; its refusals come only with the round. */
+    const landed = (u) => elapsed >= tmpl.rounds[u[0] - 1][3];
+    const resultIn = (u) => running && elapsed >= tmpl.rounds[u[0] - 1][3] - 8;
+    const useRow = (u, words) => ({ line: 'round ' + u[0] + ': ' + words(u) });
+    const allowed = uses.filter((u) => grants.indexOf(u[1]) >= 0 && (landed(u) || resultIn(u))).map((u) => useRow(u, allowedWords));
+    const denied = uses.filter((u) => grants.indexOf(u[1]) < 0 && landed(u)).map((u) => useRow(u, deniedWords));
     const budget = t.rounds || 8;
     let status = 'running · round ' + (current || roundsUsed + 1) + ' of ' + budget;
     let statusColor = 'var(--status-accent)';
@@ -3673,7 +4052,7 @@ class Component extends DCLogic {
     if (interrupted) { status = 'running, interrupted'; statusColor = 'var(--status-warning)'; }
     const checks = tmpl.checks.map((c) => {
       const passed = finished || roundsUsed >= c[2];
-      return { cmd: (c[0] === 'require' ? 'require · ' : 'require-file · ') + c[1], result: passed ? 'passed' + (c[3] ? ' · ' + c[3] : '') : roundsUsed ? 'not yet' : 'not run yet', color: passed ? 'var(--status-accent)' : roundsUsed ? 'var(--status-warning)' : 'var(--text-tertiary)' };
+      return { cmd: (c[0] === 'require' ? 'require · ' : 'require-file · ') + c[1], result: passed ? 'passed' + (c[3] ? ' · ' + c[3] : '') : roundsUsed ? c[4] || 'not yet' : 'not run yet', color: passed ? 'var(--status-accent)' : roundsUsed ? 'var(--status-warning)' : 'var(--text-tertiary)' };
     });
     const grant = (tool, on) => (on ? 'granted' : 'refused: not granted');
     const logs = {
@@ -3681,9 +4060,12 @@ class Component extends DCLogic {
       parsers: [['run_command', 'pytest tests/parsers -q', 'exit 0 · 62 passed'], ['run_command', 'ruff check src/', 'exit 0']],
       flaky: [['run_command', 'pytest tests/ -q  (run 5 of 5)', 'exit 1 · 1 failed'], ['read_file', 'tests/conftest.py  lines 1–64', '0.1 s'], ['write_file', 'tests/conftest.py', grant('write_file', t.writes === 'allow')]],
       hello: [],
-      generic: [['read_file', 'README.md', '0.1 s']]
+      generic: [['read_file', 'README.md', '0.1 s']],
+      report: [['write_file', 'report.txt', grant('write_file', t.writes === 'allow')], ['run_command', 'ls', 'exit 0']],
+      said: []
     }[t.kind].map((l) => ({ tool: l[0], target: l[1], result: l[2], color: l[2].indexOf('exit 1') === 0 ? 'var(--status-error)' : l[2] === 'running' ? 'var(--status-accent)' : l[2].indexOf('refused') === 0 ? 'var(--text-secondary)' : 'var(--text-tertiary)' }));
-    const granted = [t.writes === 'allow' ? 'write_file' : null, t.cmds === 'allow' ? 'run_command' : null].filter((x) => x);
+    const granted = grants;
+    const resumable = halted || cancelled || interrupted;
     return {
       goal: t.goal,
       meta: t.suite + ' · in ' + (t.folder || '~/code/ingest') + ' · started ' + t.started + ' · ' + (granted.length ? granted.join(' and ') + ' granted' : 'nothing that writes granted') + (t.cli ? ' · ' + t.cli : ''),
@@ -3691,19 +4073,39 @@ class Component extends DCLogic {
       statusColor: statusColor,
       listStatus: listStatus,
       isRunning: running,
-      canPause: running && t.haltAt == null,
-      canResume: halted || cancelled || interrupted,
+      elapsed: elapsed,
+      /* Where a halt stops it: the plan's end, then each round's. */
+      roundEnds: [tmpl.plan0].concat(tmpl.rounds.map((r) => r[3])),
+      /* The app's own resume starting up (6g): Resuming…, disabled, in
+         place of Resume until its task_started, the page still the read's,
+         and the stops offered -- a halt or cancel sent then is kept (the
+         CLI's 57u). */
+      canPause: (running && t.haltAt == null) || (!!t.resuming && !t.resuming.halt),
+      canResume: resumable && !t.resuming,
+      isResuming: !!t.resuming,
+      showWhere: resumable,
       resumeLabel: 'Resume',
       isInterrupted: interrupted,
       resumeWhere: 'in ' + (t.folder || '~/code/ingest') + ', where it was started',
       interruptedLine: 'Its process is gone: it was killed mid-round, and Resume runs that round again.',
       canRerun: exhausted,
       rerunLabel: 'Run again with ' + Math.min(32, budget * 2) + ' rounds',
-      canStop: running,
+      canStop: running || !!t.resuming,
+      /* task status's grants: line, from policy.grants; none for a task
+         with tools says what that means; a task without tools has none. */
+      hasGrants: t.tools !== false,
+      grants: grants.length ? grants.join(', ') : 'none -- with nobody present, a tool that asks is denied',
+      allowed: allowed,
+      hasAllowed: allowed.length > 0,
+      denied: denied,
+      hasDenied: denied.length > 0,
+      /* A resume the CLI refused keeps its line in the task's activity. */
+      refused: t.refused || '',
+      hasRefused: !!t.refused,
       budget: [
         { label: 'Rounds', value: roundsUsed + ' of ' + budget, pct: Math.min(100, Math.round(roundsUsed / budget * 100)), hasBar: true, color: roundsUsed / budget >= 0.75 ? 'var(--status-warning)' : 'var(--text-secondary)' },
         { label: 'Time so far', value: fmt(elapsed), pct: 0, hasBar: false, color: 'var(--text-secondary)' },
-        { label: 'Tokens · local, no charge', value: (Math.round((2100 + tokens) / 100) / 10) + 'K', pct: 0, hasBar: false, color: 'var(--text-secondary)' }
+        { label: 'Tokens · local, no charge', value: planTok + tokens > 0 ? kTok(planTok + tokens) : '0', pct: 0, hasBar: false, color: 'var(--text-secondary)' }
       ],
       plan: tmpl.plan.map((p, i) => ({ n: String(i + 1), text: p })),
       rounds: rounds,
@@ -3726,6 +4128,15 @@ class Component extends DCLogic {
       nodes: [['main', 'main', 'cli.py:5', 30, 230, 'function', 'def main(argv: list[str] | None = None) -> int', 'Parses arguments, loads settings and runs one batch.'], ['load_settings', 'load_settings', 'config.py:9', 230, 60, 'function', 'def load_settings(path: Path) -> Settings', 'Reads config.toml into a Settings object.'], ['init', 'Runner.__init__', 'runner.py:30', 230, 170, 'method', 'def __init__(self, settings: Settings, client: HttpClient)', 'Keeps the settings and the HTTP client.'], ['run_batch', 'Runner.run_batch', 'runner.py:52', 230, 330, 'method', 'async def run_batch(self, batch: list[str]) -> None', 'Starts one task per URL inside a TaskGroup.'], ['_fetch', 'Runner._fetch', 'runner.py:71', 450, 250, 'method', 'async def _fetch(self, url: str) -> bytes | None', 'Fetches one URL under a 10 s timeout.'], ['parse_feed', 'parse_feed', 'parsers/feed.py:40', 450, 420, 'function', 'def parse_feed(raw: bytes) -> Feed', 'Parses an RSS or Atom document.'], ['get', 'HttpClient.get', 'fetch.py:18', 640, 170, 'method', 'async def get(self, url: str) -> bytes', 'One GET, following redirects.'], ['backoff', 'backoff_delay', 'retry.py:12', 640, 310, 'function', 'def backoff_delay(attempt: int) -> float', '1 s, 2 s, 4 s and so on, capped at 30 s.'], ['from_xml', 'Feed.from_xml', 'parsers/feed.py:88', 640, 430, 'method', 'def from_xml(cls, root: Element) -> Feed', 'Builds a Feed from parsed XML.']],
       edges: [['main', 'load_settings'], ['main', 'init'], ['main', 'run_batch'], ['run_batch', '_fetch'], ['run_batch', 'parse_feed'], ['_fetch', 'get'], ['_fetch', 'backoff'], ['parse_feed', 'from_xml']]
     };
+  }
+
+  /* graph explain's refusal of a node the graph no longer has, in the
+     shape of the app's recording (graph-explain-gone.err: exit 1, stderr
+     alone, at most five near matches), on this prototype's graph: _fetch
+     renamed _fetch_one by an update run outside the app. The app adds how
+     it exited, as every refused read does. */
+  graphRefusal() {
+    return 'apogee graph: no node named \'src.ingest.runner.Runner._fetch\' in graph \'ingest\' -- near matches: function:src.ingest.runner.Runner._fetch_one (src/ingest/runner.py:71), file:src/ingest/runner.py (src/ingest/runner.py:1), function:src.ingest.runner.Runner.run_batch (src/ingest/runner.py:52), function:src.ingest.runner.Runner.__init__ (src/ingest/runner.py:30), file:src/ingest/fetch.py (src/ingest/fetch.py:1) (exited with status 1)';
   }
 
   tgLive() {
@@ -3797,6 +4208,62 @@ class Component extends DCLogic {
     return false;
   }
 
+  /* Where the session's child stands between children, or '' while it
+     takes turns (the app's 6a). */
+  lifeOf(id) {
+    const l = this.state.lifeBy[id];
+    return l ? l.stage : '';
+  }
+
+  /* Whether a line made now waits (the app's 6a sendOrHold): for the
+     turn's end, or for the next child while a stop hands the session on or
+     the next one starts. A suite move made while the next child starts
+     restarts it again rather than waiting, as the app's moveSuite does. */
+  holdsLines(id, kind) {
+    if (this.turnRunning(id)) return true;
+    const stage = this.lifeOf(id);
+    return stage === 'restarting' || (stage === 'starting' && kind !== 'suite');
+  }
+
+  /* An attach as a held line: sent to the next child, its chip drawn then. */
+  attachLine(chip) {
+    return { kind: 'attach', arg: chip.label, words: 'attach ' + chip.label, chip: chip };
+  }
+
+  /* GUI 6a's states, on the KV-cache session: moved to another suite, its
+     child being stopped and an attach made meanwhile; a turn its closed
+     input never took, the session back; a child that died mid-answer, two
+     lines held from its turn for Start again. The ending is the CLI child's
+     exit and the last line of its stderr, as the app's EndedCard says it. */
+  lifeStart(sub) {
+    const s = this.state;
+    const ask = 'Would a 16-bit cache fit at 128K?';
+    Object.assign(s, { chatId: 'kv', inspector: false });
+    if (sub === 'restarting') {
+      Object.assign(s, this.suiteMove('kv', 'big', false, s));
+      s.heldBy = Object.assign({}, s.heldBy, { kv: [this.attachLine({ kind: 'pdf', label: 'storage-engine-design.pdf', meta: '300 pages' })] });
+    } else if (sub === 'notsent') {
+      s.extra = Object.assign({}, s.extra, { kv: [{ kind: 'user', text: ask, chips: [], time: '16:52' }, { kind: 'notSent', text: ask }] });
+    } else {
+      s.extra = Object.assign({}, s.extra, { kv: [
+        { kind: 'user', text: ask, chips: [], time: '16:52' },
+        { kind: 'model', model: 'gpt-oss', time: '16:52', thought: 'thought for 3s', text: 'A 16-bit cache is twice the 8-bit one, 4.8 GB at 128K, so with the weights it', usage: '' },
+        { kind: 'ended', text: 'apogee exited with status 2: fatal: the model went away', details: 'loading\nfatal: the model went away' }
+      ] });
+      s.heldBy = Object.assign({}, s.heldBy, { kv: [{ kind: 'set', arg: '0.4', words: 'temperature 0.4' }, { kind: 'compact', words: 'compact' }] });
+      s.lifeBy = Object.assign({}, s.lifeBy, { kv: { stage: 'ended', at: 0 } });
+    }
+  }
+
+  /* Sends again, as typed, a turn whose line never reached the child (the
+     app's resend): only while the session takes a turn. */
+  resend(id, text) {
+    const s = this.state;
+    if (this.lifeOf(id) || this.turnRunning(id)) return;
+    const model = s.modelBy[id] || (this.chatDefs().find((d) => d.id === id) || s.custom.find((c) => c.id === id) || {}).model || s.roles.chat;
+    this.setState({ extra: this.extraWith(id, [{ kind: 'user', text: text, chips: [], time: this.nowTime() }]), pending: { chatId: id, at: s.clock, model: model } });
+  }
+
   /* What a held line or a sent one says, as the app's HeldLine.words and the
      CLI's notices word them (4b's recordings: set-between-turns, resumed-detach). */
   sendLine(id, line, from) {
@@ -3805,18 +4272,22 @@ class Component extends DCLogic {
     if (line.kind === 'set') return { extra: ex('temperature: ' + line.arg + ' -- from the next turn') };
     if (line.kind === 'detach') return { extra: ex('detached ' + line.arg), chipsBy: Object.assign({}, s.chipsBy, { [id]: (s.chipsBy[id] || []).filter((x) => x.label.indexOf(line.arg) < 0) }) };
     if (line.kind === 'compact') return { extra: ex('conversation summarized to free context — older turns → 1 summary'), ctxBy: Object.assign({}, s.ctxBy, { [id]: 9800 }) };
+    if (line.kind === 'attach') return { chipsBy: Object.assign({}, s.chipsBy, { [id]: (s.chipsBy[id] || []).concat([line.chip]) }) };
     if (line.kind === 'suite') return this.suiteMove(id, line.arg, line.force, s);
     return {};
   }
 
-  /* The held lines of a turn that has ended, sent in order. */
+  /* The held lines of a turn that has ended, or of a child that has come
+     back, sent in order -- a suite's move last, since it restarts the child
+     the others go to (the app's 6a). None while a child is still to come. */
   flushHeld(s) {
     let st = s;
     const patch = {};
     Object.keys(s.heldBy).forEach((id) => {
       const lines = s.heldBy[id] || [];
-      if (!lines.length || this.turnRunning(id)) return;
-      lines.forEach((line) => { const p = this.sendLine(id, line, st); st = Object.assign({}, st, p); Object.assign(patch, p); });
+      if (!lines.length || this.turnRunning(id) || (s.lifeBy || {})[id]) return;
+      const ordered = lines.filter((x) => x.kind !== 'suite').concat(lines.filter((x) => x.kind === 'suite'));
+      ordered.forEach((line) => { const p = this.sendLine(id, line, st); st = Object.assign({}, st, p); Object.assign(patch, p); });
       st = Object.assign({}, st, { heldBy: Object.assign({}, st.heldBy, { [id]: [] }) });
       patch.heldBy = st.heldBy;
     });
@@ -3863,6 +4334,10 @@ class Component extends DCLogic {
     else text = (named ? 'switching to suite ' + suite + ' (' + flags + ')' : 'leaving the suite (--suite off)') + ' -- machine mode carries no suite, so the session restarts under it; ' + (named ? 'the conversation carries on on the suite\'s chat member, and a local model loads again' : 'the conversation carries on on its model');
     const patch = { suiteBy: Object.assign({}, s.suiteBy, { [id]: { name: named ? suite : 'off', force: named && !!force } }), extra: Object.assign({}, s.extra, { [id]: (s.extra[id] || []).concat([{ kind: 'notice', text: text }]) }) };
     if (named) patch.modelBy = Object.assign({}, s.modelBy, { [id]: this.suites()[suite].main });
+    /* Its child is stopped for the next (the app's 6a): Restarting, Send
+       off, until the next one speaks. One that had died just starts again. */
+    const was = (s.lifeBy || {})[id];
+    patch.lifeBy = Object.assign({}, s.lifeBy, { [id]: { stage: was && was.stage === 'ended' ? 'starting' : 'restarting', at: s.clock } });
     return patch;
   }
 
@@ -3895,6 +4370,11 @@ class Component extends DCLogic {
   addChip(chip, clearMention) {
     const s = this.state;
     const k = this.draftKey();
+    /* While a child is to come, an attach waits for it, no chip until then;
+       once the session has ended, none is taken (the app's 6a). */
+    const stage = this.lifeOf(k);
+    if (stage === 'ended') { this.setState({ menu: null }); return; }
+    if (stage) { this.setState({ menu: null, heldBy: Object.assign({}, s.heldBy, { [k]: (s.heldBy[k] || []).concat([this.attachLine(chip)]) }) }); return; }
     const patch = { chipsBy: Object.assign({}, s.chipsBy, { [k]: (s.chipsBy[k] || []).concat([chip]) }), menu: null };
     if (clearMention) patch.draftBy = Object.assign({}, s.draftBy, { [k]: (s.draftBy[k] || '').replace(/(^|\s)@[^\s]*$/, '$1') });
     this.setState(patch);
@@ -3918,7 +4398,10 @@ class Component extends DCLogic {
       : cmd === 'suite' && arg ? { kind: 'suite', arg: arg, words: arg === 'off' ? 'leave the suite' : 'switch to suite ' + arg }
       : null;
     if (lineOf && lineOf.kind === 'suite' && arg !== 'off' && !this.suites()[arg]) { this.setState(Object.assign({ gs: { kind: 'suite', chat: id, choice: '', force: false } }, clear)); return; }
-    if (lineOf && this.turnRunning(id)) { this.setState(Object.assign({ heldBy: Object.assign({}, s.heldBy, { [id]: (s.heldBy[id] || []).concat([lineOf]) }) }, clear)); return; }
+    /* An ended session takes no line until it starts again; a suite move
+       starts it again under the suite (the app's 6a childToCome). */
+    if (lineOf && lineOf.kind !== 'suite' && this.lifeOf(id) === 'ended') { this.setState(clear); return; }
+    if (lineOf && this.holdsLines(id, lineOf.kind)) { this.setState(Object.assign({ heldBy: Object.assign({}, s.heldBy, { [id]: (s.heldBy[id] || []).concat([lineOf]) }) }, clear)); return; }
     if (lineOf) { this.setState(Object.assign(this.sendLine(id, lineOf), clear)); return; }
     if (cmd === 'model') {
       if (arg) {
@@ -3963,6 +4446,7 @@ class Component extends DCLogic {
     const text = (s.draftBy[id] || '').trim();
     const chips = s.chipsBy[id] || [];
     if (!text && !chips.length) return;
+    if (this.lifeOf(id)) return;
     if (text.indexOf('/') === 0 && !chips.length) { this.runCommand(text); return; }
     const model = s.modelBy[id] || (this.chatDefs().find((d) => d.id === id) || s.custom.find((c) => c.id === id) || {}).model || s.roles.chat;
     const item = { kind: 'user', text: text, chips: chips.map((c) => ({ label: c.label, meta: c.meta })), time: this.nowTime() };
@@ -4259,24 +4743,70 @@ class Component extends DCLogic {
     return { failed: false, scenes: scenes, removed: removed };
   }
 
-  renderEdit(p, ed) {
+  /* GUI 6j: the planner's second answer. Render runs the edit's command
+     again without --dry-run, and the dry run wrote nothing (the CLI's
+     52c), so an edit with an instruction is planned again; new and
+     re-rolled scenes draw fresh seeds every run. (Prototype) The canned
+     second answer: to an instruction about the indoor unit the planner
+     also rewrites that scene's narration. Any other instruction plans the
+     same words twice. */
+  replanEdit(p, text, redo) {
+    const plan = this.editPlan(p, text, redo);
+    if (plan.failed || !/indoor unit/i.test(text || '')) return plan;
+    return Object.assign({}, plan, { scenes: plan.scenes.map((x) => (x.changes.indexOf('its prompt changed') >= 0 && x.changes.indexOf('its narration changed') < 0
+      ? Object.assign({}, x, { narration: 'The slim unit on the wall indoors is where that heat comes back out.', changes: ['its narration changed'].concat(x.changes) })
+      : x)) });
+  }
+
+  /* The diff's words as the project document records them: a scene's
+     changes are narration, prompt, duration, asset and seed (the CLI's
+     changed_records, 52c). */
+  changeRecords(words) {
+    const rec = { 'its narration changed': 'narration', 'its prompt changed': 'prompt', 'its length changed': 'duration', 'a new seed': 'seed' };
+    return words.map((w) => rec[w] || w);
+  }
+
+  /* GUI 6j: whether a rendered edit changed its project as its preview
+     said: scene by scene in order, each scene's from, its changes and its
+     narration, and the parent's scenes removed. Never the seeds. */
+  sameChanges(rendered, previewed) {
+    const said = (p) => JSON.stringify(p.scenes.map((x) => [x.from == null ? null : x.from, x.changes || [], x.narration]));
+    const gone = (p) => JSON.stringify((p.removed || []).slice().sort((a, b) => a - b));
+    return said(rendered) === said(previewed) && gone(rendered) === gone(previewed);
+  }
+
+  /* An edit rendered: its project as Render's own run saves it, and the
+     preview drawn beside Render, kept only for an edit with an
+     instruction (a re-roll alone plans nothing). */
+  editRender(p, ed) {
     const st = this.state;
     const pv = ed.preview;
-    if (!pv || pv.failed) return;
+    if (!pv || pv.failed) return null;
+    const plan = this.replanEdit(p, ed.text, ed.redo);
+    if (plan.failed) return null;
     const voiceChanged = ed.voice !== p.voice;
     const pipeChanged = ed.pipeline !== p.pipeline;
     const redo = Object.keys(ed.redo).filter((k) => ed.redo[k]).map(Number).sort((a, b) => a - b);
-    const scenes = pv.scenes.map((x) => {
+    const scenes = plan.scenes.map((x) => {
       const src = x.src || {};
       const narr = voiceChanged || x.from == null || x.changes.indexOf('its narration changed') >= 0;
       const clip = !x.assetClip && (pipeChanged || x.from == null || x.changes.some((c) => c !== 'its narration changed'));
-      return { narration: x.narration, visual: x.visual, asset: x.asset, secs: x.secs, seed: x.seed, spoken: narr ? this.spokenSecs(x.narration, 1) : src.spoken, v: !narr, c: !clip };
+      return { narration: x.narration, visual: x.visual, asset: x.asset, secs: x.secs, seed: x.seed, spoken: narr ? this.spokenSecs(x.narration, 1) : src.spoken, v: !narr, c: !clip, from: x.from, changes: this.changeRecords(x.changes) };
     });
     const id = 'p' + st.clock;
     const out = ed.out != null && ed.out.trim() ? ed.out.trim() : this.uniqueName(p.file.replace(/\.mp4$/, '').replace(/-\d+$/, ''), '.mp4', this.movieNames());
     const edit = { instruction: ed.text.trim() || null, redo: redo, voice: voiceChanged ? ed.voice : null, pipeline: pipeChanged ? ed.pipeline : null, from: p.file + '.json' };
-    const proj = { id: id, title: p.title, file: out, brief: p.brief, status: 'rendering', voice: ed.voice, pipeline: ed.pipeline, music: ed.music || null, assets: p.assets, captions: ed.captions, planner: p.planner, attempts: p.attempts, when: 'Today ' + this.nowTime(), parent: p.id, edits: p.edits.concat([edit]), scenes: scenes };
-    this.setState({ projects: [proj].concat(st.projects), projSel: id, crender: { projId: id, t0: st.clock, tasks: this.renderTasks(proj), done: 0 }, ed: this.freshEdit(proj) });
+    const proj = { id: id, title: p.title, file: out, brief: p.brief, status: 'rendering', voice: ed.voice, pipeline: ed.pipeline, music: ed.music || null, assets: p.assets, captions: ed.captions, planner: p.planner, attempts: p.attempts, when: 'Today ' + this.nowTime(), parent: p.id, edits: p.edits.concat([edit]), removed: plan.removed.slice(), scenes: scenes };
+    const previewed = ed.text.trim() ? { scenes: pv.scenes.map((x) => ({ from: x.from, changes: this.changeRecords(x.changes), narration: x.narration })), removed: pv.removed.slice() } : null;
+    return { proj: proj, previewed: previewed };
+  }
+
+  renderEdit(p, ed) {
+    const r = this.editRender(p, ed);
+    if (!r) return;
+    const st = this.state;
+    const id = r.proj.id;
+    this.setState({ projects: [r.proj].concat(st.projects), projSel: id, previewedRenders: Object.assign({}, st.previewedRenders, { [r.proj.file]: r.previewed }), crender: { projId: id, t0: st.clock, tasks: this.renderTasks(r.proj), done: 0 }, ed: this.freshEdit(r.proj) });
   }
 
   renderVals() {
@@ -4555,10 +5085,27 @@ class Component extends DCLogic {
       if (list.length) chatMenuGroups.push({ title: g[0], items: list });
     });
 
-    const extra = items.map((x) => ({
+    /* GUI 6a: a turn its child's closed input never took is drawn Not sent,
+       with Send again while no turn was sent after it and enabled once the
+       session takes a turn; a child that died is drawn Session ended, its
+       exit in the app's words, with Start again while it stays ended. */
+    const life = s.lifeBy[cid] || null;
+    const takesTurn = !life && !this.turnRunning(cid);
+    const extra = items.map((x, i) => ({
       isNotice: x.kind === 'notice',
       isUser: x.kind === 'user',
       isModel: x.kind === 'model',
+      isNotSent: x.kind === 'notSent',
+      canResend: x.kind === 'notSent' && !items.slice(i + 1).some((y) => y.kind === 'user'),
+      resendOff: !takesTurn,
+      resend: () => this.resend(cid, x.text),
+      isEnded: x.kind === 'ended',
+      details: x.details || '',
+      detailsOpen: !!s.endDetails[cid],
+      detailsRot: s.endDetails[cid] ? 90 : 0,
+      toggleDetails: () => this.setState({ endDetails: Object.assign({}, this.state.endDetails, { [cid]: !this.state.endDetails[cid] }) }),
+      canStartAgain: x.kind === 'ended' && !!life && life.stage === 'ended',
+      startAgain: () => this.setState({ lifeBy: Object.assign({}, this.state.lifeBy, { [cid]: { stage: 'starting', at: this.state.clock } }) }),
       text: x.text,
       time: x.time || '',
       hasChips: !!(x.chips && x.chips.length),
@@ -4645,9 +5192,22 @@ class Component extends DCLogic {
     const chips = (s.chipsBy[cid] || []).map((c, i) => ({ label: c.label, meta: c.meta, isFile: c.kind === 'file', isFolder: c.kind === 'folder', isPdf: c.kind === 'pdf', isImage: c.kind === 'image', isAudio: c.kind === 'audio', isVideo: c.kind === 'video', remove: () => { const st = this.state; this.setState({ chipsBy: Object.assign({}, st.chipsBy, { [cid]: (st.chipsBy[cid] || []).filter((_, j) => j !== i) }) }); } }));
     const streaming = pendingHere || (cid === 'taskgroup' && tgLive) || (cid === 'retry' && rtWaiting) || (cid === 'pr' && pr.asking);
     const held = s.heldBy[cid] || [];
+    /* The held strip says when its lines go, following the session (the
+       app's heldWords and heldHelp); the input says why it is off while a
+       child is to come or has ended (inputPrompt, statusText). */
+    const stage = life ? life.stage : '';
+    const heldWhen = {
+      '': ['Sent when this turn ends', "A session takes these between turns; sent now, the turn's question would drop them."],
+      restarting: ['Sent once the session is back', 'Nothing reaches the session while its child is stopped or started; these go to the next one as soon as it speaks.'],
+      starting: ['Sent once the session is back', 'Nothing reaches the session while its child is stopped or started; these go to the next one as soon as it speaks.'],
+      ended: ['Sent when the session starts again', 'The session ended before these were sent; they go to it once it starts again, as soon as it speaks.']
+    }[stage];
+    const lifeSays = { restarting: ['The session is restarting', 'restarting'], starting: ['Starting apogee', 'starting apogee'], ended: ['The session has ended', 'session ended'] }[stage];
     const cmp = {
       draft: draft,
-      placeholder: 'Message ' + cm.name + (isPrivate ? ' · private' : ''),
+      placeholder: lifeSays ? lifeSays[0] : 'Message ' + cm.name + (isPrivate ? ' · private' : ''),
+      inputOff: !!life,
+      cantAttach: stage === 'starting' || stage === 'ended',
       onDraft: (e) => this.setDraft(e.target.value),
       onKey: (e) => {
         const st = this.state;
@@ -4676,10 +5236,13 @@ class Component extends DCLogic {
       chips: chips,
       streaming: streaming,
       notStreaming: !streaming,
-      cantSend: !draft.trim() && !chips.length,
-      status: streaming ? (pendingHere ? chat.pendingWord : (cid === 'retry' || cid === 'pr') ? 'waiting for you' : 'streaming') : '',
+      cantSend: (!draft.trim() && !chips.length) || !!life,
+      status: lifeSays ? lifeSays[1] : streaming ? (pendingHere ? chat.pendingWord : (cid === 'retry' || cid === 'pr') ? 'waiting for you' : 'streaming') : '',
+      statusColor: stage === 'ended' ? 'var(--status-error)' : 'var(--text-tertiary)',
+      statusPulse: stage === 'restarting',
       hasHeld: held.length > 0,
-      heldText: 'Sent when this turn ends: ' + held.map((x) => x.words).join(' · '),
+      heldText: heldWhen[0] + ': ' + held.map((x) => x.words).join(' · '),
+      heldHelp: heldWhen[1],
       send: () => this.send(),
       stop: () => this.stop()
     };
@@ -4765,7 +5328,8 @@ class Component extends DCLogic {
       hasChatActs: saved,
       details: () => this.setState({ gs: { kind: 'chatInfo', id: cid } }),
       compactChat: () => this.setState({ confirm: { kind: 'compactChat', id: cid } }),
-      cantCompactChat: !saved,
+      /* Not while a compaction of it runs as a job (the app's 6b). */
+      cantCompactChat: !saved || !!s.compacting[cid],
       recallOpen: !!io.recall,
       recallRot: io.recall ? 0 : -90,
       tRecall: toggleIns('recall'),
@@ -4782,7 +5346,7 @@ class Component extends DCLogic {
       ctxWindow: ctxKnown ? win.toLocaleString('en-US') + '-token window' : 'window not reported',
       ctxUsedFull: usedTok.toLocaleString('en-US'),
       ctxLines: ctxLines.map((l) => ({ label: l[0], value: l[1] })),
-      cantCompact: !ctxKnown || usedTok < 4000,
+      cantCompact: !ctxKnown || usedTok < 4000 || stage === 'ended',
       compact: () => this.runCommand('/compact'),
       facts: facts.map((f) => ({ label: f[0], value: f[1], color: 'var(--text-primary)' })),
       helpers: [helper('Embedding', 'embedding', 'not set — search uses keywords'), helper('Vision', 'vision', 'not set — uses ' + cm.name), helper('Transcription', 'transcription', 'not set — uses ' + cm.name), helper('Utility', 'utility', 'not set — uses ' + cm.name), helper('Extraction', 'extraction', 'not set — uses ' + cm.name)],
@@ -4805,8 +5369,15 @@ class Component extends DCLogic {
         /* The row's menu, as the app's row context menu (4k): each asks or
            shows in the Sessions place. */
         const act = (patch) => () => this.setState(Object.assign({ screen: 'chat', menu: null }, patch));
-        const items = [['Details…', act({ gs: { kind: 'chatInfo', id: c.id } }), 'var(--text-primary)'], ['Rename…', act({ gs: { kind: 'rename', id: c.id, name: s.titleBy[c.id] || c.title } }), 'var(--text-primary)'], ['Compact…', act({ confirm: { kind: 'compactChat', id: c.id } }), 'var(--text-primary)'], ['Delete…', act({ confirm: { kind: 'deleteChat', id: c.id } }), 'var(--status-error)']].map((x) => ({ label: x[0], run: x[1], color: x[2], disabled: false }));
-        return { title: s.titleBy[c.id] || c.title, time: c.time, current: cur, bg: cur ? 'var(--surface-selection)' : '', color: cur ? 'var(--text-primary)' : 'var(--text-secondary)', isLocal: mk === 'local' || mk === 'snap', isApi: mk === 'api', isSub: mk === 'sub', glyph: cur ? 'var(--model-local)' : 'var(--text-tertiary)', open: () => this.leaveFor({ type: 'open', id: c.id }), menuOpen: s.menu === menuKey, toggleMenu: () => this.setState({ menu: this.state.menu === menuKey ? null : menuKey }), items: items };
+        /* A saved chat compacting (the app's 6b): its date gives way to a
+           busy mark, its help names the command, and Compact… gives way to
+           Stop compacting -- the job's interrupt, said "Not compacted:
+           stopped" (the CLI saves a compaction only once it finishes). */
+        const compacting = !!s.compacting[c.id];
+        const stopCompacting = () => { const left = Object.assign({}, this.state.compacting); delete left[c.id]; this.say('Not compacted: stopped', { menu: null, compacting: left }); };
+        const name = s.titleBy[c.id] || c.title;
+        const items = [['Details…', act({ gs: { kind: 'chatInfo', id: c.id } }), 'var(--text-primary)'], ['Rename…', act({ gs: { kind: 'rename', id: c.id, name: name } }), 'var(--text-primary)'], compacting ? ['Stop compacting', stopCompacting, 'var(--text-primary)'] : ['Compact…', act({ confirm: { kind: 'compactChat', id: c.id } }), 'var(--text-primary)'], ['Delete…', act({ confirm: { kind: 'deleteChat', id: c.id } }), 'var(--status-error)']].map((x) => ({ label: x[0], run: x[1], color: x[2], disabled: false }));
+        return { title: name, time: c.time, busy: compacting, notBusy: !compacting, help: compacting ? name + ' · compacting: apogee chats compact ' + this.chatInfo(c.id).cli + ' --yes' : name + ' · ' + (s.modelBy[c.id] || c.model || s.roles.chat), current: cur, bg: cur ? 'var(--surface-selection)' : '', color: cur ? 'var(--text-primary)' : 'var(--text-secondary)', isLocal: mk === 'local' || mk === 'snap', isApi: mk === 'api', isSub: mk === 'sub', glyph: cur ? 'var(--model-local)' : 'var(--text-tertiary)', open: () => this.leaveFor({ type: 'open', id: c.id }), menuOpen: s.menu === menuKey, toggleMenu: () => this.setState({ menu: this.state.menu === menuKey ? null : menuKey }), items: items };
       });
       const open = !!q || !!navOpen[g];
       return { key: g, title: groupTitles[g], rows: rows, count: String(rows.length), open: open, rot: open ? 0 : -90, hasCurrent: !open && rows.some((r) => r.current), toggle: toggleNav(g) };
@@ -5260,19 +5831,28 @@ class Component extends DCLogic {
       const running = j.state === 'running' && !j.finished && j.pausedAt == null;
       const stoppedLike = j.state === 'interrupted' || (j.state === 'running' && j.pausedAt != null);
       const cur = v.current >= 0 ? v.steps[v.current].label.split(' ')[0].toLowerCase() : '';
+      /* Stopped before it ran (GUI 6d): DownloadsViewModel.stoppedBeforeRun's
+         words are the card's outcome; its log is empty, as nothing ran. Run
+         again reads the store afresh, then runs the job; Dismiss takes it off. */
+      const notRan = j.state === 'notran';
       return {
         repo: j.repo,
+        notRan: notRan,
+        hasOutcome: notRan,
+        outcome: notRan ? 'Stopped before it ran: nothing ran' : '',
+        runAgain: () => { const st = this.state; this.setState({ jobs: st.jobs.map((x) => (x.id === j.id ? Object.assign({}, x, { state: 'running', t0: st.clock, from: 0, fromPct: 0, pausedAt: null, pausedTotal: 0, started: this.nowTime() }) : x)) }); },
+        dismiss: () => this.setState({ jobs: this.state.jobs.filter((x) => x.id !== j.id) }),
         target: j.kind ? j.target : j.name + ' · ' + j.quant,
         openLabel: j.kind || j.format === 'pipeline' || j.format === 'voice' ? 'Show the weights' : 'Show the backend',
         running: running,
         isDone: done,
         canResume: stoppedLike,
         resumeFrom: cur || 'here',
-        statusText: done ? (j.state === 'static' ? 'done · Oct 2' : 'done · ' + (j.doneAt || 'now')) : running ? 'running · step ' + (v.current + 1) + ' of ' + v.steps.length : j.pausedAt != null ? 'paused' : 'stopped at ' + cur,
+        statusText: done ? (j.state === 'static' ? 'done · Oct 2' : 'done · ' + (j.doneAt || 'now')) : running ? 'running · step ' + (v.current + 1) + ' of ' + v.steps.length : j.pausedAt != null ? 'paused' : notRan ? 'stopped' : 'stopped at ' + cur,
         statusColor: done ? 'var(--text-secondary)' : running ? 'var(--status-accent)' : 'var(--status-warning)',
         steps: steps,
         logOpen: !!j.log,
-        log: j.kind ? j.started + '  ' + j.command + v.steps.filter((x) => x.status === 'done').map((x) => '\n' + (j.doneAt || this.nowTime()) + '  ' + x.label + ' · ok').join('') : j.id === 'j1' ? '2026-10-08 22:41 download  48.1 GB  ok\n2026-10-08 23:02 convert   F16 47.2 GB  ok\n2026-10-08 23:14 quantize  stopped at 38% — the app quit\n' + (j.state === 'running' ? this.nowTime() + ' quantize  started again from the kept F16' : '') : j.id === 'j0' ? '2026-10-02 18:03 download 24.1 GB ok\n2026-10-02 18:21 convert F16 24.0 GB ok\n2026-10-02 18:26 quantize Q4_K_M 7.3 GB ok\n2026-10-02 18:26 registered' : this.nowTime() + ' started · ' + j.repo,
+        log: notRan ? '' : j.kind ? j.started + '  ' + j.command + v.steps.filter((x) => x.status === 'done').map((x) => '\n' + (j.doneAt || this.nowTime()) + '  ' + x.label + ' · ok').join('') : j.id === 'j1' ? '2026-10-08 22:41 download  48.1 GB  ok\n2026-10-08 23:02 convert   F16 47.2 GB  ok\n2026-10-08 23:14 quantize  stopped at 38% — the app quit\n' + (j.state === 'running' ? this.nowTime() + ' quantize  started again from the kept F16' : '') : j.id === 'j0' ? '2026-10-02 18:03 download 24.1 GB ok\n2026-10-02 18:21 convert F16 24.0 GB ok\n2026-10-02 18:26 quantize Q4_K_M 7.3 GB ok\n2026-10-02 18:26 registered' : this.nowTime() + ' started · ' + j.repo,
         toggleLog: () => this.setState({ jobs: this.state.jobs.map((x) => (x.id === j.id ? Object.assign({}, x, { log: !x.log }) : x)) }),
         resume: () => this.setState({ jobs: this.state.jobs.map((x) => {
           if (x.id !== j.id) return x;
@@ -5284,13 +5864,27 @@ class Component extends DCLogic {
       };
     });
     const chatOpts = models.filter((mm) => mm.chat && !mm.missing && !(mm.kind === 'api' && !s.keys[mm.key])).map((mm) => ({ value: mm.id, label: mm.name + (mm.kind === 'api' ? ' · API, billed' : mm.kind === 'sub' ? ' · subscription' : '') }));
+    /* The roles resolve under the default suite, as models status says
+       (GUI 6d): its six roles alone, never its suite or footprint field as
+       a row or a picker. The suite is a line above the rows; a role its
+       member fills says so in the CLI's "(via suite <name>)", while the
+       picker keeps the config's own default (config set-default-<role>). */
+    const rolesSuite = s.defaultSuite ? this.suites()[s.defaultSuite] || null : null;
+    const viaSuite = (role) => {
+      if (!rolesSuite) return '';
+      if (role === 'chat') return rolesSuite.main;
+      const h = rolesSuite.helpers.find((x) => x[1].toLowerCase() === role);
+      return h ? h[2] : '';
+    };
+    /* The chat a role falls back to: the suite's own, else models.default. */
+    const chatNow = viaSuite('chat') || s.roles.chat;
     const roleDefs = [
       ['chat', 'Chat', 'Answers your messages; the model for new sessions.', chatOpts, null],
       ['embedding', 'Embedding', 'Searches attachments and past sessions by meaning.', models.filter((mm) => mm.embed).map((mm) => ({ value: mm.id, label: mm.name })), 'Not set: search falls back to keywords.'],
-      ['extraction', 'Extraction', 'Pulls structured facts out of documents for the knowledge graph.', chatOpts, 'Not set: uses the chat model, ' + find(s.roles.chat).name + '.'],
+      ['extraction', 'Extraction', 'Pulls structured facts out of documents for the knowledge graph.', chatOpts, 'Not set: uses ' + (chatNow === s.roles.chat ? 'the chat model, ' : 'the default model, ') + find(s.roles.chat).name + '.'],
       ['vision', 'Vision', 'Describes images for chat models that can’t see.', models.filter((mm) => mm.vision && !(mm.kind === 'api' && !s.keys[mm.key])).map((mm) => ({ value: mm.id, label: mm.name })), 'Not set: images go to the chat model, if it can see.'],
       ['transcription', 'Transcription', 'Turns audio and video into text.', models.filter((mm) => mm.hears).map((mm) => ({ value: mm.id, label: mm.name })), 'Not set: audio goes to the chat model, if it can hear.'],
-      ['utility', 'Utility', 'Small chores: session titles, search rewrites, summaries, the auto-thinking call.', chatOpts, 'Not set: uses the chat model, ' + find(s.roles.chat).name + '.']
+      ['utility', 'Utility', 'Small chores: session titles, search rewrites, summaries, the auto-thinking call.', chatOpts, 'Not set: uses the chat model, ' + find(chatNow).name + '.']
     ];
     const mdl = {
       tabs: [['backends', 'Backends', models.filter((mm) => !mm.media).length], ['store', 'Stored weights', sets.length], ['jobs', 'Jobs', runningJobs], ['roles', 'Roles', 0]].map((t) => ({ label: t[1], current: tab === t[0], bg: tab === t[0] ? 'var(--surface-control)' : 'transparent', color: tab === t[0] ? 'var(--text-primary)' : 'var(--text-secondary)', weight: tab === t[0] ? 600 : 400, hasCount: t[2] > 0, count: t[0] === 'jobs' ? t[2] + ' running' : String(t[2]), countColor: t[0] === 'jobs' ? 'var(--status-accent)' : 'var(--text-tertiary)', pick: () => this.setState({ modelsTab: t[0] }) })),
@@ -5310,14 +5904,20 @@ class Component extends DCLogic {
       dismissNarr: () => this.setState({ narr: Object.assign({}, this.state.narr, { backends: null }) }),
       closeSel: () => this.setState({ selModel: null }),
       jobs: jobsView,
-      roles: roleDefs.map((r) => ({
-        key: r[0], label: r[1], desc: r[2],
-        value: s.roles[r[0]] || '',
-        options: (r[4] ? [{ value: '', label: 'Not set' }] : []).concat(r[3]),
-        note: s.roles[r[0]] ? 'Set: ' + find(s.roles[r[0]]).name + (s.loaded[s.roles[r[0]]] ? ', loaded' : '') : r[4],
-        noteColor: s.roles[r[0]] ? 'var(--text-secondary)' : 'var(--text-tertiary)',
-        onChange: (e) => { const v = e.target.value; this.say(r[1] + ': ' + (v ? find(v).name : 'not set'), { roles: Object.assign({}, this.state.roles, { [r[0]]: v }) }); }
-      }))
+      hasRolesSuite: !!rolesSuite,
+      rolesSuiteLine: rolesSuite ? 'Roles resolve under suite ' + s.defaultSuite + ' (Suites changes it)' : '',
+      roles: roleDefs.map((r) => {
+        const via = viaSuite(r[0]);
+        const id = via || s.roles[r[0]];
+        return {
+          key: r[0], label: r[1], desc: r[2],
+          value: s.roles[r[0]] || '',
+          options: (r[4] ? [{ value: '', label: 'Not set' }] : []).concat(r[3]),
+          note: id ? (via ? '' : 'Set: ') + find(id).name + (via ? ' (via suite ' + s.defaultSuite + ')' : '') + (s.loaded[id] ? ', loaded' : '') : r[4],
+          noteColor: id ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+          onChange: (e) => { const v = e.target.value; this.say(r[1] + ': ' + (v ? find(v).name : 'not set'), { roles: Object.assign({}, this.state.roles, { [r[0]]: v }) }); }
+        };
+      })
     };
 
     /* ---------- download sheet ---------- */
@@ -5360,7 +5960,7 @@ class Component extends DCLogic {
     };
 
     /* ---------- confirm ---------- */
-    let cf = { title: '', body: '', detail: '', hasDetail: false, hasCheck: false, check: false, checkLabel: '', checkNote: '', toggleCheck: () => this.setState({ confirm: Object.assign({}, this.state.confirm, { andBackends: !this.state.confirm.andBackends }) }), confirmLabel: 'OK', cancelLabel: 'Cancel', hasAlt: false, altLabel: '', alt: () => {}, runBg: 'var(--status-error)', runColor: 'var(--surface-window)', run: () => {}, cancel: () => this.setState({ confirm: null }) };
+    let cf = { title: '', body: '', detail: '', hasDetail: false, hasCancel: true, hasCheck: false, check: false, checkLabel: '', checkNote: '', toggleCheck: () => this.setState({ confirm: Object.assign({}, this.state.confirm, { andBackends: !this.state.confirm.andBackends }) }), confirmLabel: 'OK', cancelLabel: 'Cancel', hasAlt: false, altLabel: '', alt: () => {}, runBg: 'var(--status-error)', runColor: 'var(--surface-window)', run: () => {}, cancel: () => this.setState({ confirm: null }) };
     /* A delete asks with the CLI's own plan (the app's 4e): `models delete`
        without --yes, its lines shown; the second door only when the plan
        names a backend; what it printed kept in the card after. */
@@ -5439,6 +6039,20 @@ class Component extends DCLogic {
       const pf = s.confirm.form;
       cf = Object.assign(cf, { title: 'That didn\'t work', body: s.confirm.refusal, confirmLabel: 'Change the promotion…', cancelLabel: 'OK', runBg: '', runColor: '', run: () => this.setState({ confirm: null, gs: pf }) });
     }
+    if (s.confirm && s.confirm.kind === 'taskRefused') {
+      /* A start or resume the CLI refused before it began (the app's 6g):
+         the place's alert, the stderr's last line as the CLI wrote it,
+         apogee task: kept, and OK alone. */
+      cf = Object.assign(cf, { title: 'That didn\'t work', body: s.confirm.refusal, hasCancel: false, confirmLabel: 'OK', runBg: '', runColor: '', run: () => this.setState({ confirm: null }) });
+    }
+    if (s.confirm && s.confirm.kind === 'explainRefused') {
+      /* A node's explain refused (the app's 6h, GraphViewModel.select): the
+         Graph place's alert over the kept canvas, the stderr's last line and
+         how it exited, apogee graph: and its near matches kept; nothing
+         toasted. OK alone, and it is the refusal's Clear (dismissProblem):
+         the node's selection goes with it, the picture stays. */
+      cf = Object.assign(cf, { title: 'That didn\'t work', body: this.graphRefusal(), hasCancel: false, confirmLabel: 'OK', runBg: '', runColor: '', run: () => this.setState({ confirm: null, gNode: '' }) });
+    }
     if (s.confirm && s.confirm.kind === 'xcodeRemove') {
       /* Settings › Xcode (5a): asked first, then config delete-mcp-server
          xcode, read back by config get (xcode-config-delete.txt). */
@@ -5489,11 +6103,18 @@ class Component extends DCLogic {
         const id = st2.confirm.id;
         if (live) {
           const line = { kind: 'compact', words: 'compact' };
-          if (this.turnRunning(id)) this.say('Compacting ' + info.title + ' in its session', { confirm: null, heldBy: Object.assign({}, st2.heldBy, { [id]: (st2.heldBy[id] || []).concat([line]) }) });
+          /* An ended session takes no line (the app's 6a compact guard). */
+          if (this.lifeOf(id) === 'ended') { this.setState({ confirm: null }); return; }
+          if (this.holdsLines(id, line.kind)) this.say('Compacting ' + info.title + ' in its session', { confirm: null, heldBy: Object.assign({}, st2.heldBy, { [id]: (st2.heldBy[id] || []).concat([line]) }) });
           else this.say('Compacting ' + info.title + ' in its session', Object.assign({ confirm: null, compactedBy: Object.assign({}, st2.compactedBy, { [id]: (st2.compactedBy[id] || 0) + 1 }) }, this.sendLine(id, line)));
           return;
         }
-        this.say('compacted ' + info.cli + ': ' + info.messages + ' messages into 2, by ' + info.model, { confirm: null, compactedBy: Object.assign({}, st2.compactedBy, { [id]: (st2.compactedBy[id] || 0) + 1 }) });
+        /* The app's 6b: a saved chat's compaction is a model turn over its
+           whole history, so it runs as a supervised job with no read's
+           timeout -- nothing said as it starts, its row busy until it ends
+           (tick), one at a time per chat. */
+        if (st2.compacting[id]) { this.setState({ confirm: null }); return; }
+        this.setState({ confirm: null, compacting: Object.assign({}, st2.compacting, { [id]: { at: st2.clock } }) });
       } });
     }
     if (s.confirm && s.confirm.kind === 'deleteChat') {
@@ -5569,6 +6190,10 @@ class Component extends DCLogic {
       ['skipped', 'MLX', 'video', 'not installed (opt-in) -- only \'models convert --mlx\' of a Wan set and \'video generate\' on MLX need it; pip builds mlx-video from GitHub at its pin, commit 87db56a51758 (2026-05-13)', 'apogee train setup --with mlx-video'],
       ['skipped', 'Video', 'ffmpeg captions', 'no subtitles filter (this ffmpeg was built without libass) -- a composition keeps its captions beside the video as an SRT', 'brew install ffmpeg-full && brew unlink ffmpeg; brew link --force ffmpeg-full']
     ];
+    /* What fails comes first (6c's failed fix): check_mcp's row for a
+       server whose command is not on PATH, which check --fix leaves as it
+       is -- so check --fix exits 1 while it stands. */
+    const healthNow = (s.healthFail ? [['fail', 'MCP', 'server: github', 'command not found on PATH: npx', 'install it, or: apogee config delete-mcp-server github']] : []).concat(healthDefs);
     const consented = { anthropic: ['sonnet', ['web_search', 'code_execution']], openai: ['openai', []], google: ['google', []] };
     const keyRow = (id, name, detail, placeholder) => {
       const set = !!s.keys[id];
@@ -5605,7 +6230,7 @@ class Component extends DCLogic {
     const setv = {
       panes: panes.map((p) => ({ label: p[1], current: pane === p[0], bg: pane === p[0] ? 'var(--surface-selection)' : '', color: pane === p[0] ? 'var(--text-primary)' : 'var(--text-secondary)', weight: pane === p[0] ? 500 : 400, pick: () => this.setState({ settingsPane: p[0] }) })),
       title: panes.find((p) => p[0] === pane)[1],
-      close: () => this.setState({ overlay: null, keyEdit: null }),
+      close: () => this.setState({ overlay: null, keyEdit: null, fixFailure: null }),
       isGeneral: pane === 'general', isAppearance: pane === 'appearance', isRoles: pane === 'roles', isBackends: pane === 'backends', isPermissions: pane === 'permissions', isWeb: pane === 'web', isMemory: pane === 'memory', isKeyboard: pane === 'keyboard', isMedia: pane === 'media', isXcode: pane === 'xcode',
       xcodeRows: xcodeRows.map((r) => ({ text: r[0] + ': ' + r[1], mark: '✓', markColor: 'var(--status-accent)' })),
       xcodeDesc: 'Xcode\'s own tools for any model: build, run, tests, previews, documentation search, the issue navigator, file reads and writes -- served by Xcode 26.3 or later through xcrun mcpbridge',
@@ -5672,12 +6297,24 @@ class Component extends DCLogic {
       hasNext: !!s.binNext,
       nextText: 'From the next launch: ' + (s.binNext || ''),
       providers: provRows.map((p) => ({ label: p[1], state: p[3] + (p[4] ? ' · ' + p[4] : ''), canRegister: p[4] === 'not registered', register: () => this.setState({ gs: { kind: 'registerProvider', id: p[0], label: p[1], type: p[2], tier: p[3], model: '' } }) })),
-      healthSummary: '0 failing, ' + healthDefs.filter((h) => h[0] === 'warn').length + ' to look at',
-      healthColor: 'var(--text-primary)',
-      healthRows: healthDefs.map((h) => ({ text: (h[0] === 'skipped' ? 'Not set up · ' : '') + h[1] + ' · ' + h[2] + ': ' + h[3], color: h[0] === 'warn' ? 'var(--status-warning)' : 'var(--text-secondary)', hasRemedy: !!h[4], remedy: h[4] })),
+      healthSummary: healthNow.filter((h) => h[0] === 'fail').length + ' failing, ' + healthNow.filter((h) => h[0] === 'warn').length + ' to look at',
+      healthColor: s.healthFail ? 'var(--status-error)' : 'var(--text-primary)',
+      healthRows: healthNow.map((h) => ({ text: (h[0] === 'skipped' ? 'Not set up · ' : '') + h[1] + ' · ' + h[2] + ': ' + h[3], color: { fail: 'var(--status-error)', warn: 'var(--status-warning)' }[h[0]] || 'var(--text-secondary)', hasRemedy: !!h[4], remedy: h[4] })),
+      /* The fix's job (the app's 6c): Stop beside its busy line, off once
+         the run has ended; bootstrap installs, so while another install
+         runs it starts nothing and names it as the registry labels it. */
       fixingOn: !!s.fixing,
+      fixArgv: s.fixing ? s.fixing.argv : '',
+      stopOff: !s.fixing || s.fixing.end != null,
+      stopFix: () => { const f = this.state.fixing; if (f && f.end == null) this.setState({ fixing: Object.assign({}, f, { end: 'stopped', endAt: this.state.clock }) }); },
       fix: () => this.setState({ fixing: { argv: 'check --fix', at: this.state.clock } }),
-      bootstrap: () => this.setState({ fixing: { argv: 'bootstrap', at: this.state.clock } }),
+      bootstrap: () => {
+        const st = this.state;
+        if (st.install && st.install.stage === 'running') { this.say('apogee train setup is already running: run bootstrap again once it has finished'); return; }
+        this.setState({ fixing: { argv: 'bootstrap', at: st.clock } });
+      },
+      hasFailure: !!s.fixFailure,
+      failure: s.fixFailure || '',
       backends: [
         { isHeader: true, isRow: false, title: 'ON THIS MAC', actions: [] },
         backendRow({ isLocal: true, name: 'llama.cpp', status: 'ready', statusColor: 'var(--status-accent)', detail: 'Built in · Metal · runs GGUF models' }),
@@ -5710,8 +6347,17 @@ class Component extends DCLogic {
       onSiteDraft: (e) => this.setState({ siteDraft: e.target.value }),
       siteEmpty: !s.siteDraft.trim(),
       addSite: () => { const h = this.state.siteDraft.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, ''); if (h) this.setState({ sites: this.state.sites.concat([h]), siteDraft: '' }); },
-      searx: s.searx,
-      onSearx: (e) => this.setState({ searx: e.target.value }),
+      /* The address as config get reads it: its empty line is unset, said
+         not set (the app's 6c). Set runs config set tools.search.url with
+         the field as typed and reads it back; it is off while the field is
+         empty or blank, since an empty value would clear the address with
+         no word -- clearing it stays a console command. */
+      searxShown: s.searx.trim() ? s.searx : 'not set',
+      searxShownColor: s.searx.trim() ? 'var(--text-primary)' : 'var(--text-tertiary)',
+      searxDraft: s.searxDraft,
+      onSearxDraft: (e) => this.setState({ searxDraft: e.target.value }),
+      searxEmpty: !s.searxDraft.trim(),
+      setSearx: () => { const v = this.state.searxDraft; if (v.trim()) this.say('tools.search.url is ' + v, { searx: v }); },
       searxNote: s.searx.trim() ? 'On. Searches go to this address and nowhere else.' : 'Off until an address is set. web_search never pretends to succeed.',
       searxColor: s.searx.trim() ? 'var(--status-accent)' : 'var(--text-tertiary)',
       recall: s.recall,
@@ -5752,7 +6398,7 @@ class Component extends DCLogic {
         const st = this.state;
         const id = st.chatId;
         const line = { kind: 'suite', arg: st.suiteId, force: curOver, words: 'switch to suite ' + st.suiteId };
-        if (this.turnRunning(id)) { this.setState({ screen: 'chat', heldBy: Object.assign({}, st.heldBy, { [id]: (st.heldBy[id] || []).concat([line]) }) }); return; }
+        if (this.holdsLines(id, line.kind)) { this.setState({ screen: 'chat', heldBy: Object.assign({}, st.heldBy, { [id]: (st.heldBy[id] || []).concat([line]) }) }); return; }
         this.setState(Object.assign({ screen: 'chat' }, this.sendLine(id, line)));
       },
       useForNew: () => { const st = this.state; const on = st.defaultSuite !== st.suiteId; this.say(on ? st.suiteId + ' is the default suite' : 'No default suite', { defaultSuite: on ? st.suiteId : '' }); },
@@ -5765,17 +6411,42 @@ class Component extends DCLogic {
     const updTask = (patch) => this.setState({ tasks: this.state.tasks.map((t) => (t.id === taskCur.id ? Object.assign({}, t, patch) : t)) });
     const elapsedNow = () => { const t = this.state.tasks.find((x) => x.id === taskCur.id); return t.base + (t.status === 'running' && t.since != null ? (this.state.clock - t.since) * 2 : 0); };
     const nt = s.newTask;
+    const taskRows = s.taskAll ? s.tasks : s.tasks.slice(0, 50);
+    /* A new task's id, as the ledger names it: the prototype's today. */
+    const newCli = () => 'task-20261026-' + this.nowTime().replace(':', '') + String(this.state.clock % 60).padStart(2, '0');
     const tsk = {
-      list: s.tasks.map((t) => { const v = this.taskView(t); return { goal: t.goal, status: v.listStatus, statusColor: t.interrupted && t.status === 'running' ? 'var(--status-accent)' : v.statusColor, current: t.id === taskCur.id, bg: t.id === taskCur.id ? 'var(--surface-selection)' : '', pick: () => this.setState({ taskId: t.id }) }; }),
+      /* task list's newest 50 under its total (the app's 6g): past it, the
+         count of rows read and Show all, which reads task list --all for
+         the life of the place. */
+      list: taskRows.map((t) => { const v = this.taskView(t); return { goal: t.goal, status: v.listStatus, statusColor: t.interrupted && t.status === 'running' ? 'var(--status-accent)' : v.statusColor, current: t.id === taskCur.id, bg: t.id === taskCur.id ? 'var(--surface-selection)' : '', pick: () => this.setState({ taskId: t.id }) }; }),
+      hasTruncation: taskRows.length < s.tasks.length,
+      truncation: 'The newest ' + taskRows.length + ' of ' + s.tasks.length + ' tasks',
+      showAll: () => this.setState({ taskAll: true }),
       cur: tv,
       pause: () => {
+        /* Sent while a resume starts up, the halt is kept (the CLI's 57u):
+           the run ends halted before its next round, with nothing run. */
+        if (taskCur.resuming) { updTask({ resuming: Object.assign({}, taskCur.resuming, { halt: true }) }); return; }
         const e = elapsedNow();
-        const tm = { slowhosts: [150, 330, 600], parsers: [320, 700], flaky: [140, 240, 340, 440, 540, 640, 740, 840], generic: [60, 330] }[taskCur.kind];
+        const tm = this.taskView(taskCur).roundEnds;
         updTask({ haltAt: tm.find((x) => x > e) || tm[tm.length - 1] });
       },
-      resume: () => updTask({ status: 'running', since: this.state.clock, haltAt: null, interrupted: false, base: taskCur.interrupted ? taskCur.base : elapsedNow() }),
-      rerun: () => { const st = this.state; const id = 't' + st.clock; this.setState({ tasks: [Object.assign({}, taskCur, { id: id, kind: 'generic', status: 'running', base: 0, since: st.clock, rounds: Math.min(32, (taskCur.rounds || 8) * 2), started: 'today ' + this.nowTime(), haltAt: null })].concat(st.tasks), taskId: id }); },
-      stop: () => updTask({ status: 'cancelled', base: elapsedNow(), since: null, haltAt: null }),
+      /* task resume, in the task's folder: Resuming… until its task_started
+         (tick), one per click. */
+      resume: () => {
+        const t = this.state.tasks.find((x) => x.id === taskCur.id);
+        if (t.resuming) return;
+        updTask({ resuming: { at: this.state.clock, base: this.taskView(t).elapsed, halt: false, refusal: this.taskRefusal(this.taskGrants(t), t.cli) }, refused: null });
+      },
+      rerun: () => {
+        const st = this.state;
+        const refusal = this.taskRefusal(this.taskGrants(taskCur), '');
+        if (refusal) { this.say('That didn\'t work: ' + refusal, { confirm: { kind: 'taskRefused', refusal: refusal } }); return; }
+        const id = 't' + st.clock;
+        this.setState({ tasks: [Object.assign({}, taskCur, { id: id, cli: newCli(), kind: 'generic', status: 'running', base: 0, since: st.clock, rounds: Math.min(32, (taskCur.rounds || 8) * 2), started: 'today ' + this.nowTime(), haltAt: null, interrupted: false, resuming: null, refused: null })].concat(st.tasks), taskId: id });
+      },
+      /* Stop now while a resume starts up: task cancel <id>, kept (57u). */
+      stop: () => (taskCur.resuming ? updTask({ status: 'cancelled', resuming: null, interrupted: false, base: taskCur.resuming.base, since: null, haltAt: null }) : updTask({ status: 'cancelled', base: elapsedNow(), since: null, haltAt: null })),
       openNew: () => this.setState({ overlay: 'newtask', newTask: { goal: '', suite: 'coding', rounds: '8', writes: 'allow', cmds: 'none', require: '', requireFile: '', recipe: '', input: '', grants: [] } })
     };
     const updNt = (patch) => this.setState({ newTask: Object.assign({}, this.state.newTask, patch) });
@@ -5836,8 +6507,14 @@ class Component extends DCLogic {
       start: () => {
         const st = this.state;
         const n = st.newTask;
+        /* The grants the line asks, in its --allow order. One wider than
+           the config is refused before anything runs (the app's 6g): the
+           sheet closes, no row is left, and the alert says the CLI's line. */
+        const asked = rc ? given : [n.writes === 'allow' ? 'write_file' : null, n.cmds === 'allow' ? 'run_command' : null].filter((x) => x);
+        const refusal = this.taskRefusal(asked, '');
+        if (refusal) { this.say('That didn\'t work: ' + refusal, { overlay: null, screen: 'tasks', confirm: { kind: 'taskRefused', refusal: refusal } }); return; }
         const id = 't' + st.clock;
-        const task = { id: id, goal: rc ? rc.goal.replace(/\{\{[^}]*\}\}/g, ntInput).trim() : n.goal.trim(), kind: 'generic', status: 'running', base: 0, since: st.clock, rounds: Number(n.rounds), suite: suitesDef[n.suite].name, started: 'today ' + this.nowTime(), writes: n.writes, cmds: n.cmds, haltAt: null };
+        const task = { id: id, cli: newCli(), goal: rc ? rc.goal.replace(/\{\{[^}]*\}\}/g, ntInput).trim() : n.goal.trim(), kind: 'generic', status: 'running', base: 0, since: st.clock, rounds: Number(n.rounds), suite: suitesDef[n.suite].name, started: 'today ' + this.nowTime(), writes: asked.indexOf('write_file') >= 0 ? 'allow' : 'none', cmds: asked.indexOf('run_command') >= 0 ? 'allow' : 'none', grants: asked, tools: rc ? rc.tools : true, haltAt: null };
         this.setState({ tasks: [task].concat(st.tasks), taskId: id, overlay: null, screen: 'tasks' });
       }
     };
@@ -5973,7 +6650,7 @@ class Component extends DCLogic {
     // The pipelines and the cycle: the named specs as `train pipeline list`
     // states them, the runs as `train pipeline status` lists them, a run's
     // stages live from its stream, the cycle as `train cycle status` reads.
-    const trRec = this.trainRecorded();
+    const trRec = this.trainWorld(trs);
     const trLive = trs.live;
     const trPl = trLive && trLive.kind === 'pipeline' ? trLive : null;
     const trCy = trLive && trLive.kind === 'cycle' ? trLive : null;
@@ -5991,10 +6668,30 @@ class Component extends DCLogic {
     });
     const trShowLive = !!trPl && (!trs.psel || trs.psel === trPl.pid);
     const trPage = !trShowLive && trs.psel ? trs.pruns.find((m) => m.id === trs.psel) || null : null;
-    const trFirst = trPage ? trPage.stages.findIndex((g) => g.state !== 'passed') : -1;
-    const trCanResume = !!trPage && trResumable(trPage) && trFirst >= 0;
+    /* GUI 6i: Resume where 57h's `resume` says, never on a cycle pass;
+       held, in the CLI's words, while a live process holds the run (57g's
+       holder) or where nothing finds its spec; the page's last line a cycle
+       pass's own, as the CLI's status says it. */
+    const trAt = this.trainResumeAt(trPage);
+    const trArgs = trAt ? 'apogee train pipeline resume ' + trPage.id + (trAt.pipeline ? ' --pipeline ' + trAt.pipeline : '') : '';
+    const trHold = !trAt ? '' : trPage.holder ? 'This pipeline is running now (process ' + trPage.holder + '); a resume is refused while it runs.' : !trAt.pipeline ? "Resume needs its spec: run 'apogee train pipeline resume " + trPage.id + " --pipeline <spec>' in the console." : '';
+    const trSentence = (w) => w.charAt(0).toUpperCase() + w.slice(1) + (/\.$/.test(w) ? '' : '.');
+    const trCyclePass = !!trPage && trPage.id.indexOf('cycle-') === 0;
+    const trEndLine = !trCyclePass ? 'Each stage’s run is an ordinary run: gate it and promote it from Runs.'
+      : trPage.status === 'complete' ? 'A cycle pass: its candidate is the cycle’s, judged by its dual gate -- promoted on a pass, discarded on a fail, never from Runs. Run one pass on the Cycle tab runs the next pass.'
+      : trPage.status === 'running' && trPage.holder ? 'A cycle pass, running now (process ' + trPage.holder + '): its candidate is the cycle’s, judged by its dual gate when the pass ends -- never from Runs.'
+      : 'A cycle pass: its candidate was discarded, and no other verb resumes it -- Run one pass on the Cycle tab runs the next pass.';
+    /* The cycle: a pass holding it (this place's, or another process's),
+       a dead pass's lock (57g's stale_lock), a history the CLI cannot read
+       (57h's cycle_error) -- each said, and what it holds back. */
     const trHist = trs.cycle;
+    const trErr = trs.cycleError || '';
+    const trLock = trs.lock || '';
+    const trHeld = !!trCy || !!trs.held;
     const trHalted = !!(trHist && trHist.halted);
+    const trHaltWords = trHalted ? 'Halted: ' + (trHist.reason || "'apogee train cycle halt' was run") + '.' + (trHeld ? ' The pass running now finishes, and keeps the halt: every pass after it refuses -- your scheduler’s too -- until Resume clears it.' : ' Every pass refuses -- your scheduler’s too -- until Resume clears it.') : '';
+    const trLockWords = trLock ? 'Stopped -- cycle.lock is left by a process that is not running; remove ' + trLock + ' to run again. Until then every pass refuses -- Run one pass here, and your scheduler’s.' : '';
+    const trHoldText = [trLockWords, trHaltWords].filter((x) => x).join(' ');
     const trn = {
       runsOn: (trs.tab || 'runs') === 'runs', plOn: trs.tab === 'pipelines', cyOn: trs.tab === 'cycle', regOn: trs.tab === 'regimes', dsOn: trs.tab === 'datasets',
       runsBg: (trs.tab || 'runs') === 'runs' ? 'var(--surface-control)' : 'transparent', plBg: trs.tab === 'pipelines' ? 'var(--surface-control)' : 'transparent', cyBg: trs.tab === 'cycle' ? 'var(--surface-control)' : 'transparent', regBg: trs.tab === 'regimes' ? 'var(--surface-control)' : 'transparent', dsBg: trs.tab === 'datasets' ? 'var(--surface-control)' : 'transparent',
@@ -6041,28 +6738,45 @@ class Component extends DCLogic {
         line: [trPage.spec, trPage.status, 'on ' + trPage.student].join(' · '),
         color: trResumable(trPage) ? 'var(--status-error)' : 'var(--text-secondary)',
         when: trPage.started + (trPage.completed ? ' → ' + trPage.completed : ''),
-        resumable: trCanResume,
-        resumeLine: trCanResume ? 'Resume from stage ' + (trFirst + 1) + ', ' + trPage.stages[trFirst].name : '',
-        cantResume: trBusy,
-        resumeCommand: 'apogee train pipeline resume ' + trPage.id,
-        resume: () => trAsk({ act: 'resume', id: trPage.id, title: 'Resume ' + trPage.id + ' from stage ' + (trFirst + 1) + ', ' + trPage.stages[trFirst].name + '?', body: 'What passed stays; each stage from there is a training run, held to the cumulative gate -- this machine is held until it ends.', detail: 'apogee train pipeline resume ' + trPage.id, label: 'Resume' })
-      } : { id: '', line: '', color: 'var(--text-secondary)', when: '', resumable: false, resumeLine: '', cantResume: true, resumeCommand: '', resume: () => {} },
-      cyHalted: trHalted,
-      cyNotHalted: !trHalted,
-      cyCantRun: trBusy || trHalted,
+        resumable: !!trAt,
+        resumeLine: trAt ? 'Resume from stage ' + trAt.stage + ', ' + trAt.name + (trAt.note ? '; ' + trAt.note : '') : '',
+        cantResume: trBusy || !!trHold,
+        resumeCommand: trAt ? trArgs + ': after the last stage that passed' : '',
+        hasHold: !!trHold,
+        hold: trHold,
+        endLine: trEndLine,
+        isCyclePass: trCyclePass,
+        showCycle: () => trPatch({ tab: 'cycle' }),
+        resume: () => { if (trAt && !trHold && !trBusy) trAsk({ act: 'resume', id: trPage.id, title: 'Resume ' + trPage.id + ' from stage ' + trAt.stage + ', ' + trAt.name + '?', body: (trAt.note ? trSentence(trAt.note) + ' ' : '') + 'What passed stays; each stage from there is a training run, held to the cumulative gate -- this machine is held until it ends.', detail: trArgs, label: 'Resume' }); }
+      } : { id: '', line: '', color: 'var(--text-secondary)', when: '', resumable: false, resumeLine: '', cantResume: true, resumeCommand: '', hasHold: false, hold: '', endLine: '', isCyclePass: false, showCycle: () => {}, resume: () => {} },
+      cyHalted: trHalted && !trErr,
+      cyNotHalted: !trHalted || !!trErr,
+      cyCantRun: trBusy || trHeld || trHalted || !!trLock || !!trErr,
+      cyCantHalt: !!trErr,
       cyRun: () => trAsk({ act: 'pass', title: 'Run the training cycle once?', body: 'It trains, gates and may promote -- this machine is held until it ends.', detail: 'apogee train cycle run', label: 'Run one pass' }),
-      cyHalt: () => trAsk({ act: 'halt', title: 'Halt the training cycle?', body: "Every 'cycle run' refuses until 'cycle resume' -- your scheduler’s passes too." + (trCy ? ' The pass running now finishes, and keeps the halt.' : ''), detail: 'apogee train cycle halt', label: 'Halt' }),
+      cyHalt: () => trAsk({ act: 'halt', title: 'Halt the training cycle?', body: "Every 'cycle run' refuses until 'cycle resume' -- your scheduler’s passes too." + (trHeld ? ' The pass running now finishes, and keeps the halt.' : ''), detail: 'apogee train cycle halt', label: 'Halt' }),
       cyResume: () => trAsk({ act: 'unhalt', title: 'Resume the training cycle?', body: 'It clears the halt and the failure count: your scheduler’s next pass runs.', detail: 'apogee train cycle resume', label: 'Resume' }),
-      cyHasHold: trHalted,
-      cyHold: trHalted ? 'Halted: ' + (trHist.reason || "'apogee train cycle halt' was run") + '. Every pass refuses -- your scheduler’s too -- until Resume clears it.' : '',
+      cyHasHold: !!trHoldText,
+      cyHold: trHoldText,
+      cyHasLock: !!trLock,
+      cyLock: trLock,
+      /* Cut in its middle when the row is narrow, as the app's
+         truncationMode(.middle) cuts it: the second half kept whole (its
+         width in ch, the path being mono), the first half ellipsized. */
+      cyLockHead: trLock.slice(0, Math.ceil(trLock.length / 2)),
+      cyLockTail: trLock.slice(Math.ceil(trLock.length / 2)),
+      cyLockTailW: (trLock.length - Math.ceil(trLock.length / 2)) + 'ch',
+      cyFinder: () => this.say('Revealed ' + trLock + ' in Finder (prototype)'),
+      cyHasErr: !!trErr,
+      cyErr: trErr ? 'The cycle history could not be read: ' + trErr : '',
       cyLiveOn: !!trCy,
       cyLines: trCy ? trCy.passes.map((l, i) => ({ state: l.state, text: l.text, color: i === trCy.passes.length - 1 ? 'var(--text-primary)' : 'var(--text-secondary)' })) : [],
       cyStarting: !!trCy && !trCy.passes.length,
       cyHasStages: !!trCy && trCy.stages.length > 0,
       cyStages: trCy ? trStageRows(trCy.stages, trCy.iter) : [],
-      cyNone: !trHist,
+      cyNone: !trHist && !trErr,
       cyHas: !!trHist,
-      cyFacts: trHist ? [['PROMOTES INTO', trHist.backend || '—'], ['ANCHOR', trHist.anchorV > 0 ? 'v' + trHist.anchorV + ' (' + trPct(trHist.anchorScore) + ')' : 'not set -- the first passing cycle sets it'], ['STATE', trHalted ? 'halted' : trCy ? 'running now' : 'idle'], ['FAILED IN A ROW', String(trHist.fails)], ['PASSES', String(trHist.runs.length)]].map((f) => ({ label: f[0], value: f[1] })) : [],
+      cyFacts: trHist ? [['PROMOTES INTO', trHist.backend || '—'], ['ANCHOR', trHist.anchorV > 0 ? 'v' + trHist.anchorV + ' (' + trPct(trHist.anchorScore) + ')' : 'not set -- the first passing pass sets it'], ['STATE', trHeld ? 'a pass is running' : trHalted ? 'halted' : trLock ? 'stopped, its lock left behind' : 'idle'], ['FAILED IN A ROW', String(trHist.fails)], ['PASSES', String(trHist.runs.length)]].map((f) => ({ label: f[0], value: f[1] })) : [],
       cyNoPasses: !!trHist && !trHist.runs.length,
       cyPasses: trHist ? trHist.runs.slice().reverse().map((p) => {
         const parts = [p.gate];
@@ -6101,6 +6815,33 @@ class Component extends DCLogic {
     ];
     const knShown = kns.asked ? [knRecs[2], knRecs[1], knRecs[0]] : knRecs.filter((r) => !kns.branch || r.status === kns.branch);
     const knCur = knRecs.find((r) => r.id === kns.sel);
+    /* A collection's page, from its `embed info` document. mixed is the app's
+       6h recording (collection-info-vectors-mixed.json): three notes ingested
+       under one embedder, a fourth under another. The knowledge store's own
+       collection has no recorded page, so it shows notes' as before. */
+    const knInfo = {
+      mixed: { chunks: 4, index: 'ok', vectors: { chunks: 4, dimension: 8, widths: 1, model: null, mixed: ['mock-embed', 'mock-embed-b'] }, sources: ['heat-pumps.md', 'insulation.md', 'solar.md', 'windows.md'] },
+      notes: { chunks: 5, index: 'ok', vectors: null, sources: ['graph://community/1', 'heat-pumps.md', 'kr-20261021T050657Z-c74d1a', 'solar.md', 'windows.md'] }
+    };
+    const knName = knInfo[kns.coll] ? kns.coll : 'notes';
+    const knPage = knInfo[knName];
+    /* The Vectors line in embed info's own text words, from its vectors
+       object (the app's 6h, CollectionsViewModel.vectors): n of total chunks,
+       the width, then the model -- or the models it is mixed from, said as
+       the CLI's spoken_models says them, or that none is recorded -- and the
+       widths when there are several. null is a text index only. */
+    const knSpoken = (ms) => { const n = ms.map((m) => (m ? '\'' + m + '\'' : 'an unrecorded model')); return n.length > 1 ? n.slice(0, -1).join(', ') + ' and ' + n[n.length - 1] : (n[0] || ''); };
+    const knVectors = (info) => {
+      const v = info.vectors;
+      if (!v) return 'none -- a text index only';
+      let line = v.chunks + ' of ' + info.chunks + ' chunk' + (info.chunks === 1 ? '' : 's') + ', ' + v.dimension + '-d';
+      if (v.mixed && v.mixed.length) line += ' [mixed: ' + knSpoken(v.mixed) + ' -- re-ingest every source with one model]';
+      else if (v.model) line += ' [' + v.model + ']';
+      else line += ' [model not recorded -- re-ingest to bind]';
+      if (v.widths > 1) line += ' -- MIXED: ' + v.widths + ' widths';
+      return line;
+    };
+    const knSearched = !!kns.searched && knName === 'notes';
     const kno = {
       recOn: kns.tab !== 'collections',
       colOn: kns.tab === 'collections',
@@ -6127,25 +6868,37 @@ class Component extends DCLogic {
       link: () => this.say('apogee knowledge link (prototype)'),
       move: () => this.say('apogee knowledge status (prototype)'),
       del: () => this.say('apogee knowledge delete: confirmed first (prototype)'),
-      colls: [['knowledge', '3 sources · 3 chunks'], ['notes', '5 sources · 5 chunks']].map((c) => ({ name: c[0], meta: c[1], current: c[0] === kns.coll, bg: c[0] === kns.coll ? 'var(--surface-selection)' : '', pick: () => knPatch({ coll: c[0] }) })),
-      cq: kns.searched ? 'how does a heat pump work' : '',
-      search: () => knPatch({ searched: true }),
-      searched: !!kns.searched,
+      /* Another collection chosen drops the lines asked of the one before
+         (the app's select, and 6h's ingest into another collection). */
+      colls: [['knowledge', '3 sources · 3 chunks'], ['mixed', '4 sources · 4 chunks'], ['notes', '5 sources · 5 chunks']].map((c) => ({ name: c[0], meta: c[1], current: c[0] === kns.coll, bg: c[0] === kns.coll ? 'var(--surface-selection)' : '', pick: () => knPatch({ coll: c[0], searched: c[0] === kns.coll ? kns.searched : false }) })),
+      page: { name: knName, chunks: knPage.chunks, index: knPage.index, vectors: knVectors(knPage), sourceCount: knPage.sources.length },
+      cq: knSearched ? 'how does a heat pump work' : '',
+      search: knName === 'notes' ? () => knPatch({ searched: true }) : () => this.say('apogee embed query ' + knName + ': its lines, as printed (prototype)'),
+      searched: knSearched,
       results: ['0.000  [lexical]  heat-pumps.md#0', '    # Heat pumps  A heat pump moves heat from a cold place to a warm one. In winter the outdoor unit pul…', '0.000  [lexical]  graph://community/1#0', '    The heat pump, its compressor and its outdoor unit: one machine moving heat indoors.', '0.000  [lexical]  windows.md#0', '    # Windows  Triple glazing halves the heat lost through a window. Frames matter as much as glass.', '0.000  [lexical]  kr-20261021T050657Z-c74d1a#0', '    Customers kept asking why the outdoor unit runs in winter.  Decision: Explain the outdoor unit in th…', '0.000  [lexical]  solar.md#0', '    # Solar roofs  Panels make the most power at noon. A battery carries the surplus into the evening.  …'].map((t) => ({ text: t })),
-      sources: ['graph://community/1', 'heat-pumps.md', 'kr-20261021T050657Z-c74d1a', 'solar.md', 'windows.md'].map((n) => ({ name: n, remove: () => this.say('apogee embed delete notes --source ' + n + ': confirmed first (prototype)') })),
+      sources: knPage.sources.map((n) => ({ name: n, remove: () => this.say('apogee embed delete ' + knName + ' --source ' + n + ': confirmed first (prototype)') })),
       ingest: () => this.say('apogee embed ingest: chosen in a sheet, run supervised (prototype)'),
-      delColl: () => this.say('apogee embed delete notes --yes: confirmed first (prototype)')
+      delColl: () => this.say('apogee embed delete ' + knName + ' --yes: confirmed first (prototype)')
     };
 
     /* ---------- graph ---------- */
     const gd = this.graphData(s.gView === 'prose' ? 'fns' : s.gView);
     const nodeById = {};
     gd.nodes.forEach((n) => { nodeById[n[0]] = n; });
-    const gSel = nodeById[s.gNode] ? s.gNode : gd.nodes[0][0];
-    const sn = nodeById[gSel];
+    /* A node's explain refused (the app's 6h). The picture was drawn before
+       a graph update run elsewhere renamed Runner._fetch (gStale), so a
+       click on it -- or a walk to it -- is refused: the place's alert says
+       the CLI's line over the kept canvas, the node highlighted under it
+       with no card. The alert's OK is that refusal's Clear: no node chosen
+       (gNode ''), no card, the picture kept; a click asks again. */
+    const gRef = s.confirm && s.confirm.kind === 'explainRefused' ? s.confirm.node : null;
+    const gSel = s.gNode === '' ? null : nodeById[s.gNode] ? s.gNode : gd.nodes[0][0];
+    const sn = gSel ? nodeById[gSel] : null;
+    const gCard = !!sn && gSel !== gRef;
+    const pickNode = (id) => this.setState(this.state.gStale && this.state.gView === 'fns' && id === '_fetch' ? { gNode: id, confirm: { kind: 'explainRefused', node: id } } : { gNode: id });
     const neighbors = {};
     gd.edges.forEach((e) => { if (e[0] === gSel) neighbors[e[1]] = true; if (e[1] === gSel) neighbors[e[0]] = true; });
-    const fileOfNode = (n) => (s.gView === 'files' ? n[1] : n[2].split(':')[0]);
+    const fileOfNode = (n) => (!n ? '' : s.gView === 'files' ? n[1] : n[2].split(':')[0]);
     const treeFiles = [['src/ingest/', 8, null], ['cli.py', 22, 'cli.py'], ['config.py', 22, 'config.py'], ['fetch.py', 22, 'fetch.py'], ['retry.py', 22, 'retry.py'], ['runner.py', 22, 'runner.py'], ['parsers/', 22, null], ['feed.py', 36, 'parsers/feed.py'], ['tests/', 8, null], ['test_runner.py', 22, null]];
     /* The graph's More menu (4k): export, the report, dedupe and delete,
        each through the command the CLI runs, its first line said. */
@@ -6195,12 +6948,12 @@ class Component extends DCLogic {
       rebuild: () => this.say('Graph rebuilt · 214 files · 1,284 symbols', { gBuilt: this.nowTime(), graphGone: Object.assign({}, this.state.graphGone || {}, { [gName]: false }) }),
       files: treeFiles.map((f) => {
         const isCur = f[2] && fileOfNode(sn) === f[2];
-        return { label: f[0], indent: f[1], bg: isCur ? 'var(--surface-selection)' : '', color: f[2] ? (isCur ? 'var(--text-primary)' : 'var(--text-secondary)') : 'var(--text-tertiary)', pick: () => { if (!f[2]) return; const hit = gd.nodes.find((n) => fileOfNode(n) === f[2]); if (hit) this.setState({ gNode: hit[0] }); } };
+        return { label: f[0], indent: f[1], bg: isCur ? 'var(--surface-selection)' : '', color: f[2] ? (isCur ? 'var(--text-primary)' : 'var(--text-secondary)') : 'var(--text-tertiary)', pick: () => { if (!f[2]) return; const hit = gd.nodes.find((n) => fileOfNode(n) === f[2]); if (hit) pickNode(hit[0]); } };
       }),
       nodes: gd.nodes.map((n) => {
         const isSel = n[0] === gSel;
         const near = !!neighbors[n[0]];
-        return { label: n[1], where: n[2], x: n[3], y: n[4], current: isSel, border: isSel ? 'var(--status-accent)' : near ? 'var(--line-strong)' : 'var(--line-border)', bg: isSel ? 'var(--surface-selection)' : 'var(--surface-card)', opacity: isSel || near ? 1 : 0.6, pick: () => this.setState({ gNode: n[0] }) };
+        return { label: n[1], where: n[2], x: n[3], y: n[4], current: isSel, border: isSel ? 'var(--status-accent)' : near ? 'var(--line-strong)' : 'var(--line-border)', bg: isSel ? 'var(--surface-selection)' : 'var(--surface-card)', opacity: !gSel || isSel || near ? 1 : 0.6, pick: () => pickNode(n[0]) };
       }),
       edges: gd.edges.map((e) => {
         const a = nodeById[e[0]];
@@ -6210,17 +6963,20 @@ class Component extends DCLogic {
       }),
       inLabel: s.gView === 'files' ? 'IMPORTED BY' : 'CALLED BY',
       outLabel: s.gView === 'files' ? 'IMPORTS' : 'CALLS',
+      hasCard: gCard,
       sel: (() => {
-        const callers = gd.edges.filter((e) => e[1] === gSel).map((e) => ({ label: nodeById[e[0]][1], pick: () => this.setState({ gNode: e[0] }) }));
-        const callees = gd.edges.filter((e) => e[0] === gSel).map((e) => ({ label: nodeById[e[1]][1], pick: () => this.setState({ gNode: e[1] }) }));
+        if (!gCard) return { kind: '', label: '', where: '', doc: '', sig: '', callers: [], callees: [], inCount: 0, outCount: 0, noCallers: false, noCallees: false };
+        const callers = gd.edges.filter((e) => e[1] === gSel).map((e) => ({ label: nodeById[e[0]][1], pick: () => pickNode(e[0]) }));
+        const callees = gd.edges.filter((e) => e[0] === gSel).map((e) => ({ label: nodeById[e[1]][1], pick: () => pickNode(e[1]) }));
         return { kind: sn[5].toUpperCase(), label: sn[1], where: s.gView === 'files' ? sn[6] : 'src/ingest/' + sn[2], doc: sn[7], sig: s.gView === 'files' ? sn[6] : sn[6], callers: callers, callees: callees, inCount: callers.length, outCount: callees.length, noCallers: !callers.length, noCallees: !callees.length };
       })(),
       ask: () => {
+        if (!sn) return;
         const st = this.state;
         const file = 'src/ingest/' + fileOfNode(sn);
         this.setState({ screen: 'chat', chatId: 'new', chipsBy: Object.assign({}, st.chipsBy, { new: [{ kind: 'file', label: file, meta: '' }] }), draftBy: Object.assign({}, st.draftBy, { new: 'Explain ' + sn[1] + ' and what depends on it.' }), extra: Object.assign({}, st.extra, { new: [] }) });
       },
-      openEditor: () => this.say('Opened ' + (s.gView === 'files' ? sn[1] : sn[2]) + ' in your editor (prototype)')
+      openEditor: () => { if (sn) this.say('Opened ' + (s.gView === 'files' ? sn[1] : sn[2]) + ' in your editor (prototype)'); }
     };
 
     /* ---------- media: shared ---------- */
@@ -6580,7 +7336,7 @@ class Component extends DCLogic {
           if (!n2 || !n2.plan) return;
           const id = 'p' + st.clock;
           const proj = { id: id, title: n2.plan.title, file: ncOut, brief: n2.brief.trim(), status: 'rendering', voice: n2.voice, pipeline: n2.pipeline, music: n2.music ? n2.music.split('/').pop() : null, assets: n2.assets, captions: n2.captions, planner: n2.planner, attempts: 1, when: 'Today ' + this.nowTime(), parent: null, edits: [], scenes: n2.plan.scenes.map((x) => Object.assign({}, x, { spoken: this.spokenSecs(x.narration, 1), seed: this.newSeed(), v: false, c: !!x.asset && !x.visual })) };
-          this.setState({ projects: [proj].concat(st.projects), projSel: id, nc: null, crender: { projId: id, t0: st.clock, tasks: this.renderTasks(proj), done: 0 }, ed: this.freshEdit(proj) });
+          this.setState({ projects: [proj].concat(st.projects), projSel: id, nc: null, previewedRenders: Object.assign({}, st.previewedRenders, { [ncOut]: null }), crender: { projId: id, t0: st.clock, tasks: this.renderTasks(proj), done: 0 }, ed: this.freshEdit(proj) });
         },
         replan: () => updN({ stage: 'planning', at: this.state.clock, plan: null }),
         planner: nc.planner,
@@ -6618,7 +7374,7 @@ class Component extends DCLogic {
         command: ncParts.join(' ')
       };
     }
-    let pv = { title: '', hasTag: false, tag: '', meta: '', brief: '', status: '', statusColor: '', rendering: false, stopped: false, stop: () => {}, resume: () => {}, showProgress: false, phases: [], hasStopNote: false, stopNote: '', showPlayer: false, pl: player('none', 1, { w: 16, h: 9 }), tl: { pic: [], voice: [], cues: [], hasBed: false, noBed: true, head: 0, legend: '', end: '', note: '' }, scenes: [], files: [], facts: [], chain: [], file: '' };
+    let pv = { title: '', hasTag: false, tag: '', meta: '', brief: '', status: '', statusColor: '', rendering: false, stopped: false, stop: () => {}, resume: () => {}, showProgress: false, phases: [], hasStopNote: false, stopNote: '', showPlayer: false, pl: player('none', 1, { w: 16, h: 9 }), tl: { pic: [], voice: [], cues: [], hasBed: false, noBed: true, head: 0, legend: '', end: '', note: '' }, isEdit: false, changes: [], differs: false, differsText: '', scenes: [], files: [], facts: [], chain: [], file: '' };
     let edv = { locked: true, lockedText: '', text: '', onText: () => {}, textNote: '', redoText: '', redoColor: '', voice: '', onVoice: () => {}, pipeline: '', onPipeline: () => {}, music: '', musicOpts: [], onMusic: () => {}, captions: true, captionsLabel: '', toggleCaptions: () => {}, notPreviewing: true, previewing: false, previewingText: '', preview: () => {}, cantPreview: true, previewNote: '', failed: false, failText: '', shown: false, head: '', diff: [], notes: [], spend: '', replans: false, replansText: '', replansColor: '', renderTitle: '', out: '', onOut: () => {}, render: () => {}, discard: () => {}, command: '' };
     if (pj) {
       const times = this.projTimes(pj);
@@ -6690,6 +7446,19 @@ class Component extends DCLogic {
         w = node.parent ? s.projects.find((x) => x.id === node.parent) : null;
         guard += 1;
       }
+      /* An edit's page draws its own changes, from its document's scenes'
+         from and changes and its removed (52c), in the app's words. GUI
+         6j: above them, when the app rendered it from the preview drawn
+         beside Render and the render's own plan changed it otherwise. */
+      const isEdit = !!pj.parent;
+      const parentP = isEdit ? s.projects.find((x) => x.id === pj.parent) : null;
+      const changeRows = isEdit ? pj.scenes.map((x, i) => {
+        const ch = x.changes || [];
+        const kept = x.from != null && !ch.length;
+        return { n: String(i + 1), text: x.from == null ? 'new' : kept ? 'kept as it is' : 'changed: ' + ch.join(', '), color: kept ? 'var(--text-tertiary)' : 'var(--text-primary)', narration: x.narration };
+      }).concat((pj.removed || []).map((k) => ({ n: String(k), text: 'removed', color: 'var(--text-primary)', narration: parentP && parentP.scenes[k - 1] ? parentP.scenes[k - 1].narration : '' }))) : [];
+      const previewedR = s.previewedRenders[pj.file];
+      const renderDiffers = isEdit && !!previewedR && !this.sameChanges(pj, previewedR);
       const redoList = Object.keys(ed.redo).filter((k) => ed.redo[k]).map(Number).sort((a, b) => a - b);
       const voiceChanged = ed.voice !== pj.voice;
       const pipeChanged = ed.pipeline !== pj.pipeline;
@@ -6763,6 +7532,10 @@ class Component extends DCLogic {
         ],
         hasStopNote: stopped && !!pj.stopNote,
         stopNote: pj.stopNote || '',
+        isEdit: isEdit,
+        changes: changeRows,
+        differs: renderDiffers,
+        differsText: 'The render planned again, and its changes differ from the preview',
         showPlayer: rendered,
         pl: pl,
         tl: {
@@ -6853,7 +7626,7 @@ class Component extends DCLogic {
         replans: ed.stage === 'shown' && !!pvw && !pvw.failed && !!ed.text.trim(),
         replansText: 'Render plans the edit again with ' + planM.name + ': what renders can differ from this preview, and the planner is called a second time.',
         replansColor: planM.kind === 'api' ? 'var(--model-api)' : 'var(--text-secondary)',
-        renderTitle: ed.text.trim() ? 'Plans the edit again with ' + planM.name + ', then renders it: it can differ from this preview' : 'Nothing is planned: only what changed renders again',
+        renderTitle: ed.text.trim() ? 'Plans the edit again with ' + planM.name + ', then renders it: it can differ from this preview' : 'Renders the scenes chosen again on fresh seeds; nothing is planned',
         out: edOut,
         onOut: (e) => { const st = this.state; const cur = st.ed && st.ed.projId === pj.id ? st.ed : this.freshEdit(pj); this.setState({ ed: Object.assign({}, cur, { out: e.target.value }) }); },
         render: () => {
@@ -6974,7 +7747,14 @@ class Component extends DCLogic {
       body: 'This downloads and installs Python packages into Apogee\'s own environment, once. Nothing is installed unless you say yes; the install runs here, with Stop, and what was refused runs again once it is in.',
       cli: 'apogee train setup --with video',
       decline: () => this.say('Not installed. apogee train setup --with video installs it whenever you want it', { rtAsk: null }),
-      install: () => { const st = this.state; this.setState({ rtAsk: null, install: { set: 'video', stage: 'running', at: st.clock, then: ra ? ra.then : null }, installTries: st.installTries + 1, screen: 'video', mediaTab: 'clips' }); }
+      /* One install at a time (the app's 6c): while Settings' bootstrap
+         runs, Install starts nothing, names it as the registry labels it,
+         and the sheet stays up so Install works once it has finished. */
+      install: () => {
+        const st = this.state;
+        if (st.fixing && st.fixing.argv === 'bootstrap' && st.fixing.end == null) { this.say('apogee bootstrap is already running: press Install again once it has finished'); return; }
+        this.setState({ rtAsk: null, install: { set: 'video', stage: 'running', at: st.clock, then: ra ? ra.then : null }, installTries: st.installTries + 1, screen: 'video', mediaTab: 'clips' });
+      }
     };
     /* The shared install card (InstallCard, 4f), its words RuntimeInstall's
        fold of the install's output (install-video-done.txt, -failed.err). */
@@ -7027,7 +7807,7 @@ class Component extends DCLogic {
         right: [btn('Cancel', gsClose), btn('Switch', () => {
           const st2 = this.state;
           const line = { kind: 'suite', arg: gst.choice, force: over && !!gst.force, words: gst.choice === 'off' ? 'leave the suite' : 'switch to suite ' + gst.choice };
-          if (this.turnRunning(sid)) { this.setState({ gs: null, heldBy: Object.assign({}, st2.heldBy, { [sid]: (st2.heldBy[sid] || []).concat([line]) }) }); return; }
+          if (this.holdsLines(sid, line.kind)) { this.setState({ gs: null, heldBy: Object.assign({}, st2.heldBy, { [sid]: (st2.heldBy[sid] || []).concat([line]) }) }); return; }
           this.setState(Object.assign({ gs: null }, this.sendLine(sid, line)));
         }, 'btn-p', cant)]
       });
@@ -7039,7 +7819,9 @@ class Component extends DCLogic {
         width: 460, title: info.title,
         hasGrid: true, grid: info.fields.map((f) => ({ label: f[0], value: f[1] })),
         after: [para('apogee chats info ' + info.cli, 'var(--text-tertiary)', 'var(--font-mono)', 'var(--t-meta)')],
-        left: [btn('Compact…', () => this.setState({ gs: null, confirm: { kind: 'compactChat', id: gst.id } }))],
+        /* Not while a compaction of it runs as a job (the app's 6b); when it
+           ends, these fields are read back. */
+        left: [btn('Compact…', () => this.setState({ gs: null, confirm: { kind: 'compactChat', id: gst.id } }), 'btn-g', !!s.compacting[gst.id])],
         right: [btn('Done', gsClose, 'btn-p')]
       });
     }

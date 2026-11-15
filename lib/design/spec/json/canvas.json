@@ -624,6 +624,33 @@
       "title": "Session · choosing a suite",
       "page": "build"
     },
+    "ScreenSessionRestarting.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 18240,
+      "y": 1400,
+      "title": "Session · restarting, a line held",
+      "page": "build"
+    },
+    "ScreenSessionNotSent.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 19760,
+      "y": 1400,
+      "title": "Session · a message not sent",
+      "page": "build"
+    },
+    "ScreenSessionEnded.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 21280,
+      "y": 1400,
+      "title": "Session · ended, its lines kept",
+      "page": "build"
+    },
     "ScreenModelsDelete.dc.html": {
       "expand": "fill",
       "w": 1440,
@@ -640,6 +667,69 @@
       "x": 12160,
       "y": 4040,
       "title": "Video · installing what a run needs",
+      "page": "build"
+    },
+    "ScreenTasksDenied.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 44080,
+      "y": 2720,
+      "title": "Tasks · grants, allowed and denied",
+      "page": "build"
+    },
+    "ScreenTasksRefused.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 45600,
+      "y": 2720,
+      "title": "Tasks · a refused start, the CLI’s words",
+      "page": "build"
+    },
+    "ScreenGraphRefused.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 47120,
+      "y": 2720,
+      "title": "Code graph · an explain refused, the CLI’s words",
+      "page": "build"
+    },
+    "ScreenTrainingStaleLock.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 48640,
+      "y": 2720,
+      "title": "Training · a dead pass’s lock, Run held",
+      "page": "build"
+    },
+    "ScreenTrainingCyclePass.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 50160,
+      "y": 2720,
+      "title": "Training · a cycle pass, never resumed",
+      "page": "build"
+    },
+    "ScreenTrainingResumeHeld.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 51680,
+      "y": 2720,
+      "title": "Training · a Resume held, the CLI’s words",
+      "page": "build"
+    },
+    "ScreenComposeDiffers.dc.html": {
+      "expand": "fill",
+      "w": 1440,
+      "h": 900,
+      "x": 13680,
+      "y": 4040,
+      "title": "Video · a rendered edit that differs from its preview",
       "page": "build"
     }
   },
@@ -663,7 +753,7 @@
     },
     "sessions": {
       "kind": "title1",
-      "maxW": 18160,
+      "maxW": 22720,
       "text": "Screens — sessions, the system monitor and the console",
       "x": 0,
       "y": 1100,
@@ -671,7 +761,7 @@
     },
     "library": {
       "kind": "title1",
-      "maxW": 44000,
+      "maxW": 53120,
       "text": "Screens — models, suites, tasks, the code graph, knowledge, training, the library and review",
       "x": 0,
       "y": 2420,
@@ -679,7 +769,7 @@
     },
     "media": {
       "kind": "title1",
-      "maxW": 13600,
+      "maxW": 15120,
       "text": "Screens — video and voice",
       "x": 0,
       "y": 3740,
@@ -687,7 +777,7 @@
     },
     "settings": {
       "kind": "title1",
-      "maxW": 7520,
+      "maxW": 9040,
       "text": "Screens — settings",
       "x": 0,
       "y": 5060,
@@ -736,6 +826,9 @@
     "ScreenSessionPlay.dc.html",
     "ScreenSessionExecute.dc.html",
     "ScreenSessionSuite.dc.html",
+    "ScreenSessionRestarting.dc.html",
+    "ScreenSessionNotSent.dc.html",
+    "ScreenSessionEnded.dc.html",
     "ScreenMonitor.dc.html",
     "ScreenConsole.dc.html",
     "ScreenModels.dc.html",
@@ -750,14 +843,20 @@
     "ScreenTasks.dc.html",
     "ScreenNewTask.dc.html",
     "ScreenNewTaskRecipe.dc.html",
+    "ScreenTasksDenied.dc.html",
+    "ScreenTasksRefused.dc.html",
     "ScreenGraph.dc.html",
     "ScreenGraphProse.dc.html",
+    "ScreenGraphRefused.dc.html",
     "ScreenKnowledge.dc.html",
     "ScreenCollections.dc.html",
     "ScreenTraining.dc.html",
     "ScreenTrainingDatasets.dc.html",
     "ScreenTrainingPipelines.dc.html",
     "ScreenTrainingCycle.dc.html",
+    "ScreenTrainingStaleLock.dc.html",
+    "ScreenTrainingCyclePass.dc.html",
+    "ScreenTrainingResumeHeld.dc.html",
     "ScreenLibrary.dc.html",
     "ScreenLibrarySymphonies.dc.html",
     "ScreenLibraryMCP.dc.html",
@@ -775,6 +874,7 @@
     "ScreenComposeEdit.dc.html",
     "ScreenComposeNew.dc.html",
     "ScreenComposeStopped.dc.html",
+    "ScreenComposeDiffers.dc.html",
     "ScreenVoice.dc.html",
     "ScreenSettingsGeneral.dc.html",
     "ScreenSettingsAppearance.dc.html",
