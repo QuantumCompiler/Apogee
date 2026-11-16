@@ -2884,3 +2884,702 @@ TEST_CASE("the review fetch's protocol fence names every transport the installed
         CHECK(std::ranges::find(fenced, std::string_view{transport}) != fenced.end());
     }
 }
+
+// ---------------------------------------------------------------------------
+// 57y: the whole git folder is judged, so no link anywhere git reads leads the
+// tools out of the root. Each case plants what the probe planted (2026-11-15),
+// shows plain git reading through it, then the tools refusing.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Plain git's stdout and stderr together, its exit status ignored, under
+/// the test's own environment: the control showing git reading through a
+/// planted link, its errors included -- `fatal: bad shallow line` is one.
+std::string plain_git_said(const std::filesystem::path& repo,
+                           const std::vector<std::string>& arguments) {
+    apogee::platform::ChildCommand plain;
+    plain.program = "git";
+    plain.arguments = {"-C", repo.string()};
+    plain.arguments.insert(plain.arguments.end(), arguments.begin(), arguments.end());
+    const apogee::tools::ProcessOutcome outcome =
+        apogee::tools::run_to_completion(plain, std::chrono::seconds{30});
+    return outcome.out.text() + outcome.err.text();
+}
+
+/// The probe's world (57y): the launch repository `proj` (the root), a
+/// repository `x` inside it, an outside repository whose one commit is
+/// `OUTSIDE SUBJECT` with the file `OUTSIDE SECRET TEXT`, its objects loose,
+/// and a plain outside file. Git's global and system config are the test's
+/// own.
+struct LinkWorld {
+    apogee::testing::EnvGuard no_global{"GIT_CONFIG_GLOBAL", "/dev/null"};
+    apogee::testing::EnvGuard no_system{"GIT_CONFIG_SYSTEM", "/dev/null"};
+    apogee::testing::TempDir temp{"tools-git-links-" + std::to_string(std::random_device{}())};
+    std::filesystem::path root = temp.path() / "proj";
+    std::filesystem::path x = root / "x";
+    std::filesystem::path outside = temp.path() / "outside";
+    std::filesystem::path plain_file = temp.path() / "outside.txt";
+    std::string commit;
+    std::string tree;
+    std::string blob;
+
+    LinkWorld() {
+        make_repo(root, "README.md", "launch\n", "launch");
+        make_repo(x, "x.txt", "x\n", "x commit");
+        make_repo(outside, "secret.txt", "OUTSIDE SECRET TEXT\n", "OUTSIDE SUBJECT");
+        commit = first_line(git(outside, {"rev-parse", "HEAD"}));
+        tree = first_line(git(outside, {"rev-parse", "HEAD^{tree}"}));
+        blob = first_line(git(outside, {"rev-parse", "HEAD:secret.txt"}));
+        std::ofstream{plain_file, std::ios::binary} << "OUTSIDE LINE ONE\nOUTSIDE LINE TWO\n";
+    }
+
+    /// The outside object's loose file.
+    [[nodiscard]] std::filesystem::path outside_object(const std::string& object) const {
+        return outside / ".git" / "objects" / object.substr(0, 2) / object.substr(2);
+    }
+
+    /// Links the outside `object`'s loose file into `store` under its own id,
+    /// as the probe did; returns the link.
+    std::filesystem::path link_object(const std::filesystem::path& store,
+                                      const std::string& object) const {
+        const std::filesystem::path link = store / object.substr(0, 2) / object.substr(2);
+        std::filesystem::create_directories(link.parent_path());
+        const apogee::testing::LinkMade made =
+            apogee::testing::make_file_link(outside_object(object), link);
+        INFO(made.why);
+        REQUIRE(made.made);
+        return link;
+    }
+
+    /// Makes `link` a link to the file `target`.
+    static void link_file(const std::filesystem::path& target, const std::filesystem::path& link) {
+        std::filesystem::create_directories(link.parent_path());
+        const apogee::testing::LinkMade made = apogee::testing::make_file_link(target, link);
+        INFO(made.why);
+        REQUIRE(made.made);
+    }
+
+    /// Makes `link` a link to the folder `target`.
+    static void link_folder(const std::filesystem::path& target,
+                            const std::filesystem::path& link) {
+        std::filesystem::create_directories(link.parent_path());
+        const apogee::testing::LinkMade made = apogee::testing::make_directory_link(target, link);
+        INFO(made.why);
+        REQUIRE(made.made);
+    }
+};
+
+/// Every tool in `tools_run` refuses `arguments` in 57o's words, naming the
+/// link `named`, and no answer holds any of `hidden`.
+void refused_naming(const Confined& tools, const nlohmann::json& arguments,
+                    const std::string& named, const std::vector<std::string>& hidden,
+                    const std::vector<std::string>& tools_run = {"git_status", "git_log",
+                                                                 "git_diff", "git_show"}) {
+    for (const std::string& tool : tools_run) {
+        INFO(tool << " " << arguments.dump());
+        const ToolOutcome outcome = tools.run(tool, arguments);
+        INFO(outcome.content);
+        CHECK(outcome.is_error);
+        CHECK(outcome.content.find("outside the allowed root") != std::string::npos);
+        CHECK(outcome.content.find(named + ", a link that leads out of it") != std::string::npos);
+        for (const std::string& text : hidden) {
+            CHECK(outcome.content.find(text) == std::string::npos);
+        }
+    }
+}
+
+/// Every tool refuses `arguments` in 57o's words with `reason`, and no
+/// answer holds any of `hidden`.
+void refused_with(const Confined& tools, const nlohmann::json& arguments, const std::string& reason,
+                  const std::vector<std::string>& hidden) {
+    for (const char* tool : {"git_status", "git_log", "git_diff", "git_show"}) {
+        INFO(tool << " " << arguments.dump());
+        const ToolOutcome outcome = tools.run(tool, arguments);
+        INFO(outcome.content);
+        CHECK(outcome.is_error);
+        CHECK(outcome.content.find("outside the allowed root") != std::string::npos);
+        CHECK(outcome.content.find(reason) != std::string::npos);
+        for (const std::string& text : hidden) {
+            CHECK(outcome.content.find(text) == std::string::npos);
+        }
+    }
+}
+
+/// The name a refusal gives a loose object's link: its folder and file.
+std::string object_link_name(const std::string& object) {
+    return object.substr(0, 2) + "/" + object.substr(2);
+}
+
+}  // namespace
+
+TEST_CASE("a loose object linked out of the root is refused, wherever the store holds it",
+          "[tools][git][sandbox][57y]") {
+    if (!have_git()) {
+        SKIP("git is not available, or this platform starts no child process to run it");
+    }
+    // The probe's loose-object finding: the outside commit, tree and blob
+    // linked under their own ids, and `git_show{ref:<commit>}` printed
+    // `OUTSIDE SUBJECT`, `git_diff{target:<commit>}` the outside text.
+    const LinkWorld world;
+    const Confined tools{world.root};
+    const std::vector<std::string> hidden{"OUTSIDE SUBJECT", "OUTSIDE SECRET TEXT"};
+
+    SECTION("in a repository the model names") {
+        const std::filesystem::path store = world.x / ".git" / "objects";
+        world.link_object(store, world.commit);
+        world.link_object(store, world.tree);
+        world.link_object(store, world.blob);
+        // The control: plain git reads the outside commit and file through them.
+        CHECK(plain_git_said(world.x, {"show", "-s", "--format=%s", world.commit})
+                  .find("OUTSIDE SUBJECT") != std::string::npos);
+        CHECK(plain_git_said(world.x, {"show", world.blob}).find("OUTSIDE SECRET TEXT") !=
+              std::string::npos);
+        refused_naming(tools, {{"repo", "x"}}, "", hidden);
+        refused_naming(tools, {{"repo", "x"}, {"ref", world.commit}}, "", hidden, {"git_show"});
+        refused_naming(tools, {{"repo", "x"}, {"target", world.commit}}, "", hidden, {"git_diff"});
+    }
+    SECTION("one linked blob is enough, and it is named") {
+        world.link_object(world.x / ".git" / "objects", world.blob);
+        CHECK(plain_git_said(world.x, {"show", world.blob}).find("OUTSIDE SECRET TEXT") !=
+              std::string::npos);
+        refused_naming(tools, {{"repo", "x"}, {"ref", world.blob}}, object_link_name(world.blob),
+                       hidden, {"git_show"});
+    }
+    SECTION("in the launch repository, with no repo named") {
+        world.link_object(world.root / ".git" / "objects", world.commit);
+        CHECK(
+            plain_git_said(world.root, {"cat-file", "-p", world.commit}).find("OUTSIDE SUBJECT") !=
+            std::string::npos);
+        refused_naming(tools, nlohmann::json::object(), object_link_name(world.commit), hidden);
+    }
+}
+
+TEST_CASE("a file git_status reads, linked to any outside file, is refused and never shown",
+          "[tools][git][sandbox][57y]") {
+    if (!have_git()) {
+        SKIP("git is not available, or this platform starts no child process to run it");
+    }
+    // The probe's state-file finding: no object or id needed, any file the
+    // person can read. `BISECT_START` linked out made `git_status` answer
+    // `started from branch '<the file>'`, the file whole.
+    const LinkWorld world;
+    const Confined tools{world.root};
+    const std::filesystem::path dot_git = world.x / ".git";
+    const std::vector<std::string> hidden{"OUTSIDE LINE"};
+
+    SECTION("BISECT_START") {
+        LinkWorld::link_file(world.plain_file, dot_git / "BISECT_START");
+        std::ofstream{dot_git / "BISECT_LOG", std::ios::binary} << "";
+        CHECK(plain_git_said(world.x, {"status"}).find("OUTSIDE LINE TWO") != std::string::npos);
+        refused_naming(tools, {{"repo", "x"}}, "BISECT_START", hidden);
+    }
+    SECTION("rebase-merge/head-name") {
+        LinkWorld::link_file(world.plain_file, dot_git / "rebase-merge" / "head-name");
+        std::ofstream{dot_git / "rebase-merge" / "onto", std::ios::binary}
+            << git(world.x, {"rev-parse", "HEAD"});
+        CHECK(plain_git_said(world.x, {"status"}).find("OUTSIDE LINE TWO") != std::string::npos);
+        refused_naming(tools, {{"repo", "x"}}, "head-name", hidden);
+    }
+    SECTION("shallow, which every tool reads") {
+        LinkWorld::link_file(world.plain_file, dot_git / "shallow");
+        CHECK(plain_git_said(world.x, {"log"}).find("bad shallow line: OUTSIDE LINE ONE") !=
+              std::string::npos);
+        refused_naming(tools, {{"repo", "x"}}, "shallow", hidden);
+    }
+    SECTION("config") {
+        const std::filesystem::path config = world.temp.path() / "outside-config";
+        std::ofstream{config, std::ios::binary}
+            << "[core]\n\trepositoryformatversion = 0\n\tbare = false\n"
+               "[user]\n\tname = OUTSIDE NAME\n";
+        std::filesystem::remove(dot_git / "config");
+        LinkWorld::link_file(config, dot_git / "config");
+        CHECK(plain_git_said(world.x, {"config", "user.name"}).find("OUTSIDE NAME") !=
+              std::string::npos);
+        refused_naming(tools, {{"repo", "x"}}, "config", {"OUTSIDE NAME"});
+    }
+}
+
+TEST_CASE("a ref linked out of the root is refused, and no outside id is shown",
+          "[tools][git][sandbox][57y]") {
+    if (!have_git()) {
+        SKIP("git is not available, or this platform starts no child process to run it");
+    }
+    // The probe's pseudo-ref finding: `CHERRY_PICK_HEAD` linked to an outside
+    // ref file made `git_status` print the outside commit's id, and the
+    // tools' own errors then named the tree and blob to link next.
+    const LinkWorld world;
+    const Confined tools{world.root};
+    const std::filesystem::path outside_ref = world.outside / ".git" / "refs" / "heads" / "main";
+    const std::string shown_id = world.commit.substr(0, 7);
+
+    SECTION("CHERRY_PICK_HEAD") {
+        LinkWorld::link_file(outside_ref, world.x / ".git" / "CHERRY_PICK_HEAD");
+        CHECK(plain_git_said(world.x, {"status"}).find(shown_id) != std::string::npos);
+        refused_naming(tools, {{"repo", "x"}}, "CHERRY_PICK_HEAD", {shown_id});
+    }
+    SECTION("a branch under refs/heads") {
+        LinkWorld::link_file(outside_ref, world.x / ".git" / "refs" / "heads" / "stolen");
+        CHECK(plain_git_said(world.x, {"rev-parse", "refs/heads/stolen"}).find(world.commit) !=
+              std::string::npos);
+        refused_naming(tools, {{"repo", "x"}}, "stolen", {shown_id});
+    }
+    // Two reftable repositories, `t` in the root and one outside holding
+    // `outside-branch`; false where this git makes none (before 2.45 it knows
+    // no --ref-format, and says so as an unknown option, not a fatal error).
+    const std::filesystem::path table = world.root / "t";
+    const std::filesystem::path outside_table = world.temp.path() / "outside-table";
+    const auto make_tables = [&]() {
+        std::filesystem::create_directories(table);
+        std::filesystem::create_directories(outside_table);
+        apogee::platform::ChildCommand init;
+        init.program = "git";
+        init.arguments = {"-C", table.string(), "init", "-q", "--ref-format=reftable",
+                          "-b", "main"};
+        if (apogee::tools::run_to_completion(init, std::chrono::seconds{30})
+                .exit_code.value_or(1) != 0) {
+            return false;
+        }
+        git(outside_table, {"init", "-q", "--ref-format=reftable", "-b", "outside-branch"});
+        std::ofstream{outside_table / "o.txt", std::ios::binary} << "o\n";
+        git(outside_table, {"add", "."});
+        git(outside_table, {"commit", "-q", "-m", "outside table commit"});
+        std::ofstream{table / "t.txt", std::ios::binary} << "t\n";
+        git(table, {"add", "."});
+        git(table, {"commit", "-q", "-m", "table commit"});
+        return true;
+    };
+
+    SECTION("reftable, where this git makes one") {
+        if (!make_tables()) {
+            SKIP("this git makes no reftable repository");
+        }
+        std::filesystem::remove_all(table / ".git" / "reftable");
+        LinkWorld::link_folder(outside_table / ".git" / "reftable", table / ".git" / "reftable");
+        CHECK(plain_git_said(table, {"branch"}).find("outside-branch") != std::string::npos);
+        refused_naming(tools, {{"repo", "t"}}, "reftable", {"outside-branch"});
+    }
+    SECTION("a reftable stack naming a table outside its folder") {
+        // The second review's probe: `tables.list` lines are opened in the
+        // folder as written, so `../../..` reached an outside repository's
+        // table, as an alternates line would its objects.
+        if (!make_tables()) {
+            SKIP("this git makes no reftable repository");
+        }
+        std::string first_table;
+        {
+            std::ifstream in{outside_table / ".git" / "reftable" / "tables.list", std::ios::binary};
+            std::getline(in, first_table);
+        }
+        REQUIRE_FALSE(first_table.empty());
+        const std::filesystem::path stack = table / ".git" / "reftable" / "tables.list";
+        std::string own;
+        {
+            std::ifstream in{stack, std::ios::binary};
+            own.assign(std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{});
+        }
+        const std::string outward =
+            std::filesystem::relative(outside_table / ".git" / "reftable" / first_table,
+                                      table / ".git" / "reftable")
+                .generic_string();
+        std::ofstream{stack, std::ios::binary} << outward << "\n" << own;
+        CHECK(plain_git_said(table, {"branch"}).find("outside-branch") != std::string::npos);
+        refused_with(tools, {{"repo", "t"}}, "tables.list that leaves its folder",
+                     {"outside-branch"});
+    }
+}
+
+TEST_CASE("a store reached inside the root is walked too: an alternate's, a folder link's",
+          "[tools][git][sandbox][57y]") {
+    if (!have_git()) {
+        SKIP("git is not available, or this platform starts no child process to run it");
+    }
+    // The probe's finding around the one-level scan: a link that lands
+    // inside the root was followed, and nothing looked in where it landed.
+    const LinkWorld world;
+    const Confined tools{world.root};
+    const std::vector<std::string> hidden{"OUTSIDE SUBJECT", "OUTSIDE SECRET TEXT"};
+
+    SECTION("an alternate store inside the root holding a loose link out") {
+        const std::filesystem::path shared = world.root / "shared-store";
+        world.link_object(shared, world.commit);
+        std::filesystem::create_directories(world.x / ".git" / "objects" / "info");
+        std::ofstream{world.x / ".git" / "objects" / "info" / "alternates", std::ios::binary}
+            << shared.generic_string() << "\n";
+        CHECK(plain_git_said(world.x, {"cat-file", "-p", world.commit}).find("OUTSIDE SUBJECT") !=
+              std::string::npos);
+        refused_naming(tools, {{"repo", "x"}}, object_link_name(world.commit), hidden);
+    }
+    SECTION("an object folder linked to a folder inside the root holding a loose link out") {
+        // The folder the link lands on holds what x's own folder of that
+        // name held, plus the outside commit.
+        const std::string prefix = world.commit.substr(0, 2);
+        const std::filesystem::path own = world.x / ".git" / "objects" / prefix;
+        const std::filesystem::path landing = world.root / "landing";
+        std::filesystem::create_directories(landing);
+        if (std::filesystem::exists(own)) {
+            for (const auto& entry : std::filesystem::directory_iterator{own}) {
+                std::filesystem::rename(entry.path(), landing / entry.path().filename());
+            }
+            std::filesystem::remove(own);
+        }
+        LinkWorld::link_file(world.outside_object(world.commit), landing / world.commit.substr(2));
+        LinkWorld::link_folder(landing, own);
+        CHECK(plain_git_said(world.x, {"cat-file", "-p", world.commit}).find("OUTSIDE SUBJECT") !=
+              std::string::npos);
+        refused_naming(tools, {{"repo", "x"}}, world.commit.substr(2), hidden);
+    }
+}
+
+TEST_CASE("the review fetch from a folder remote whose store links out copies nothing in",
+          "[tools][git][review][sandbox][57y]") {
+    if (!have_git()) {
+        SKIP("git is not available, or this platform starts no child process to run it");
+    }
+    // The probe's laundering: a folder remote inside the root, its loose
+    // objects linked out and a branch naming the outside commit, and the
+    // review fetch copied the commit, tree and blob in as real files, which
+    // outlived the links.
+    FetchWorld world;
+    const std::filesystem::path up = world.inside_remote("r.git");
+    const std::string tree = first_line(git(world.outside, {"rev-parse", "HEAD^{tree}"}));
+    const std::string blob = first_line(git(world.outside, {"rev-parse", "HEAD:secret.txt"}));
+    for (const std::string& object : {world.outside_head, tree, blob}) {
+        const std::filesystem::path link = up / "objects" / object.substr(0, 2) / object.substr(2);
+        std::filesystem::create_directories(link.parent_path());
+        const apogee::testing::LinkMade made = apogee::testing::make_file_link(
+            world.outside / ".git" / "objects" / object.substr(0, 2) / object.substr(2), link);
+        INFO(made.why);
+        REQUIRE(made.made);
+    }
+    std::filesystem::create_directories(up / "refs" / "heads");
+    std::ofstream{up / "refs" / "heads" / "evil", std::ios::binary} << world.outside_head << "\n";
+    git(world.root, {"remote", "add", "o", up.generic_string()});
+
+    const ToolOutcome diff = world.run(
+        "git_diff", {{"head", "evil"}, {"base", "main"}, {"remote", "o"}, {"fetch", "always"}});
+    INFO(diff.content);
+    // The branch is the remote's alone, so the review stops at the fetch's
+    // refusal, which names the link.
+    CHECK(diff.is_error);
+    CHECK(diff.content.find("it was not fetched from 'o'") != std::string::npos);
+    CHECK(diff.content.find(", a link that leads out of it") != std::string::npos);
+    CHECK(diff.content.find("OUTSIDE SECRET TEXT") == std::string::npos);
+    for (const std::string& object : {world.outside_head, tree, blob}) {
+        INFO(object);
+        CHECK_FALSE(holds(world.root, object));
+    }
+    CHECK(world.gate.hosts.empty());
+    // The control: plain git's fetch copies all three in.
+    plain_git(world.root, {"-c", "protocol.file.allow=always", "fetch", "o", "evil"});
+    CHECK(holds(world.root, world.outside_head));
+    CHECK(holds(world.root, blob));
+}
+
+TEST_CASE("hooks, lfs and annex linked out, links landing inside and a loop of them still read",
+          "[tools][git][sandbox][57y]") {
+    if (!have_git()) {
+        SKIP("git is not available, or this platform starts no child process to run it");
+    }
+    // What the walk leaves alone: the three folders the tools never read,
+    // which people link to their own hooks or a store on another disk, and
+    // every link that lands inside the root -- walked where it lands, each
+    // folder once, so a loop of them ends.
+    const LinkWorld world;
+    const Confined tools{world.root};
+    const auto reads = [&](const nlohmann::json& arguments, const std::string& expected) {
+        for (const char* tool : {"git_status", "git_log", "git_diff", "git_show"}) {
+            INFO(tool << " " << arguments.dump());
+            const ToolOutcome outcome = tools.run(tool, arguments);
+            INFO(outcome.content);
+            CHECK_FALSE(outcome.is_error);
+        }
+        CHECK(tools.run("git_log", arguments).content.find(expected) != std::string::npos);
+    };
+    const std::filesystem::path dot_git = world.x / ".git";
+
+    SECTION("hooks, lfs and annex linked out") {
+        for (const char* name : {"hooks", "lfs", "annex"}) {
+            const std::filesystem::path theirs = world.temp.path() / ("their-" + std::string{name});
+            std::filesystem::create_directories(theirs);
+            std::ofstream{theirs / "kept", std::ios::binary} << "kept\n";
+            std::filesystem::remove_all(dot_git / name);
+            LinkWorld::link_folder(theirs, dot_git / name);
+        }
+        reads({{"repo", "x"}}, "x commit");
+    }
+    SECTION("links that land inside the root") {
+        // The refs moved to a folder inside the root and linked back, and the
+        // description a link to a file inside it.
+        const std::filesystem::path moved = world.root / "moved-refs";
+        std::filesystem::rename(dot_git / "refs", moved);
+        LinkWorld::link_folder(moved, dot_git / "refs");
+        std::filesystem::remove(dot_git / "description");
+        LinkWorld::link_file(world.root / "README.md", dot_git / "description");
+        reads({{"repo", "x"}}, "x commit");
+    }
+    SECTION("a loop of folder links inside the root ends, and the repository reads") {
+        std::filesystem::create_directories(dot_git / "extra");
+        LinkWorld::link_folder(dot_git / "extra", dot_git / "extra" / "again");
+        LinkWorld::link_folder(dot_git, dot_git / "extra" / "up");
+        LinkWorld::link_folder(dot_git / "objects", dot_git / "extra" / "store");
+        reads({{"repo", "x"}}, "x commit");
+    }
+}
+
+namespace {
+
+/// Takes the read permission off `folder` (0311) for its life -- git can
+/// still enter it and open a file in it by name, as a listing cannot -- and
+/// gives it back after, so the temporary folder can be removed.
+class Unlistable {
+public:
+    explicit Unlistable(std::filesystem::path folder) : folder_{std::move(folder)} {
+        using std::filesystem::perms;
+        std::filesystem::permissions(
+            folder_,
+            perms::owner_write | perms::owner_exec | perms::group_exec | perms::others_exec,
+            std::filesystem::perm_options::replace);
+    }
+
+    ~Unlistable() {
+        using std::filesystem::perms;
+        std::error_code code;
+        std::filesystem::permissions(folder_,
+                                     perms::owner_all | perms::group_read | perms::group_exec |
+                                         perms::others_read | perms::others_exec,
+                                     std::filesystem::perm_options::replace, code);
+    }
+
+    Unlistable(const Unlistable&) = delete;
+    Unlistable& operator=(const Unlistable&) = delete;
+    Unlistable(Unlistable&&) = delete;
+    Unlistable& operator=(Unlistable&&) = delete;
+
+    /// Whether the folder really cannot be listed: a superuser lists anyway.
+    [[nodiscard]] bool holds() const {
+        std::error_code code;
+        const std::filesystem::directory_iterator it{folder_, code};
+        return static_cast<bool>(code);
+    }
+
+private:
+    std::filesystem::path folder_;
+};
+
+}  // namespace
+
+TEST_CASE("a folder in the git folder that cannot be listed is refused, as git still opens it",
+          "[tools][git][sandbox][57y]") {
+    if (!have_git()) {
+        SKIP("git is not available, or this platform starts no child process to run it");
+    }
+    // The review's finding: a folder git can enter but nobody can list (0311)
+    // listed as empty, so the walk passed what git then opened by name --
+    // 57o's own refusal of objects linked out came back as a read.
+    const LinkWorld world;
+    const Confined tools{world.root};
+    const std::vector<std::string> hidden{"OUTSIDE SUBJECT", "OUTSIDE SECRET TEXT"};
+
+    SECTION("the git folder itself, its objects linked out") {
+        std::filesystem::remove_all(world.x / ".git" / "objects");
+        LinkWorld::link_folder(world.outside / ".git" / "objects", world.x / ".git" / "objects");
+        const Unlistable shut{world.x / ".git"};
+        if (!shut.holds()) {
+            SKIP("this user lists a folder with no read permission (a superuser)");
+        }
+        CHECK(plain_git_said(world.x, {"cat-file", "-p", world.commit}).find("OUTSIDE SUBJECT") !=
+              std::string::npos);
+        refused_with(tools, {{"repo", "x"}}, ".git, a folder that cannot be listed", hidden);
+    }
+    SECTION("an object folder holding a loose link out") {
+        const std::filesystem::path link =
+            world.link_object(world.x / ".git" / "objects", world.blob);
+        const Unlistable shut{link.parent_path()};
+        if (!shut.holds()) {
+            SKIP("this user lists a folder with no read permission (a superuser)");
+        }
+        CHECK(plain_git_said(world.x, {"show", world.blob}).find("OUTSIDE SECRET TEXT") !=
+              std::string::npos);
+        refused_with(tools, {{"repo", "x"}},
+                     world.blob.substr(0, 2) + ", a folder that cannot be listed", hidden);
+    }
+}
+
+TEST_CASE(
+    "a path git opens is judged as written: a trailing space or carriage return borrows nothing",
+    "[tools][git][sandbox][57y]") {
+    if (!have_git()) {
+        SKIP("git is not available, or this platform starts no child process to run it");
+    }
+    // The review's finding: the file tools' resolver trims what a model
+    // types, so `<root>/st ` was judged as `<root>/st` -- a missing sibling,
+    // inside -- while git opened the link `st ` to an outside store.
+    const LinkWorld world;
+    const Confined tools{world.root};
+    const std::vector<std::string> hidden{"OUTSIDE SUBJECT", "OUTSIDE SECRET TEXT"};
+    const std::filesystem::path alternates = world.x / ".git" / "objects" / "info" / "alternates";
+    std::filesystem::create_directories(alternates.parent_path());
+    const std::filesystem::path outside_store = world.outside / ".git" / "objects";
+
+    SECTION("an alternates line naming a link that ends in a space") {
+        LinkWorld::link_folder(outside_store, world.root / "st ");
+        std::ofstream{alternates, std::ios::binary} << (world.root / "st ").generic_string()
+                                                    << "\n";
+        CHECK(plain_git_said(world.x, {"cat-file", "-p", world.commit}).find("OUTSIDE SUBJECT") !=
+              std::string::npos);
+        refused_with(tools, {{"repo", "x"}}, "objects borrowed from", hidden);
+    }
+    SECTION("a link in the git folder whose name ends in a space") {
+        LinkWorld::link_folder(outside_store, alternates.parent_path() / "st ");
+        std::ofstream{alternates, std::ios::binary} << "info/st \n";
+        CHECK(plain_git_said(world.x, {"cat-file", "-p", world.commit}).find("OUTSIDE SUBJECT") !=
+              std::string::npos);
+        refused_with(tools, {{"repo", "x"}}, "st , a link that leads out of it", hidden);
+    }
+    SECTION("an alternates line ending in a carriage return") {
+        LinkWorld::link_folder(outside_store, world.root / "st\r");
+        std::ofstream{alternates, std::ios::binary} << (world.root / "st").generic_string()
+                                                    << "\r\n";
+        CHECK(plain_git_said(world.x, {"cat-file", "-p", world.commit}).find("OUTSIDE SUBJECT") !=
+              std::string::npos);
+        refused_with(tools, {{"repo", "x"}}, "objects borrowed from", hidden);
+        // Said with the carriage return escaped, so the refusal never
+        // rewrites the line it is shown on.
+        const std::string said = tools.run("git_log", {{"repo", "x"}}).content;
+        CHECK(said.find("st\\r") != std::string::npos);
+        CHECK(said.find('\r') == std::string::npos);
+    }
+}
+
+TEST_CASE("what the walk leaves out at the top is judged when git reads it by another name",
+          "[tools][git][sandbox][57y]") {
+    if (!have_git()) {
+        SKIP("git is not available, or this platform starts no child process to run it");
+    }
+    const LinkWorld world;
+    const Confined tools{world.root};
+    const std::filesystem::path dot_git = world.x / ".git";
+    const std::filesystem::path outside_ref = world.outside / ".git" / "refs" / "heads" / "main";
+
+    SECTION("a link landing on the git folder reaches lfs as refs/x/lfs") {
+        // The review's probe: `refs/x -> ..` and `lfs` linked to an outside
+        // refs folder, and a CHERRY_PICK_HEAD naming `refs/x/lfs/heads/main`
+        // had git_status print the outside commit's whole id.
+        LinkWorld::link_folder(dot_git, dot_git / "refs" / "x");
+        LinkWorld::link_folder(world.outside / ".git" / "refs", dot_git / "lfs");
+        std::ofstream{dot_git / "CHERRY_PICK_HEAD", std::ios::binary}
+            << "ref: refs/x/lfs/heads/main\n";
+        git(world.x, {"config", "core.abbrev", "40"});
+        CHECK(plain_git_said(world.x, {"status"}).find(world.commit) != std::string::npos);
+        refused_with(tools, {{"repo", "x"}}, "lfs, a link that leads out of it", {world.commit});
+    }
+    SECTION("a file named lfs, a root ref on a case-insensitive disk") {
+        LinkWorld::link_file(outside_ref, dot_git / "lfs");
+        // The control holds where the disk ignores case (git reads `LFS`
+        // there); elsewhere git reads no such ref, and the refusal stands.
+        if (plain_git_said(world.x, {"rev-parse", "LFS"}).find(world.commit) == std::string::npos) {
+            WARN("this disk tells LFS from lfs, so git reads no root ref through the link here");
+        }
+        refused_with(tools, {{"repo", "x"}}, "lfs, a link that leads out of it", {world.commit});
+    }
+    SECTION("a link named lfs whose target cannot be resolved, though the system opens it") {
+        // The second review's probe: a relative link through a chain of
+        // folders longer than realpath takes (macOS's 1,024 bytes) was taken
+        // for a link to nothing and left out, while the system followed it and
+        // git read the root ref `LFS`. Elsewhere it resolves, and is a link to
+        // an outside file like the case above.
+        // Made relative to `x`, as a person's shell makes it: an absolute
+        // path that long is refused by the very limit probed.
+        std::string chain;
+        for (int step = 0; step < 85; ++step) {
+            chain += (step == 0 ? "" : "/") + std::string{"dddddddddd"};
+        }
+        apogee::platform::ChildCommand make;
+        make.program = "/bin/sh";
+        make.arguments = {
+            "-c", "mkdir -p \"$1\" && ln -s \"$2\" \"$1/leaf\" && ln -s \"../$1/leaf\" .git/lfs",
+            "sh", chain, outside_ref.string()};
+        make.working_directory = world.x.string();
+        const apogee::tools::ProcessOutcome made =
+            apogee::tools::run_to_completion(make, std::chrono::seconds{30});
+        INFO(made.err.text());
+        REQUIRE(made.exit_code.value_or(1) == 0);
+        std::ofstream{dot_git / "CHERRY_PICK_HEAD", std::ios::binary} << "ref: LFS\n";
+        if (plain_git_said(world.x, {"status"}).find(world.commit.substr(0, 7)) ==
+            std::string::npos) {
+            WARN("this disk tells LFS from lfs, so git reads no root ref through the link here");
+        }
+        refused_with(tools, {{"repo", "x"}}, "lfs, a link that leads out of it",
+                     {world.commit.substr(0, 7)});
+    }
+}
+
+TEST_CASE(
+    "a submodule's git folder is walked as the superproject's is: hooks left out, refs judged",
+    "[tools][git][sandbox][57y]") {
+    if (!have_git()) {
+        SKIP("git is not available, or this platform starts no child process to run it");
+    }
+    // `modules/` is walked (the item's decision: its refs linked out showed an
+    // outside id through the superproject's git_diff), and each submodule's
+    // own git folder leaves out what the superproject's does.
+    const LinkWorld world;
+    const Confined tools{world.root};
+    const std::filesystem::path super = world.root / "super";
+    make_repo(super, "p.txt", "p\n", "super commit");
+    const std::filesystem::path source = world.temp.path() / "subsrc";
+    make_repo(source, "s.txt", "s\n", "submodule commit");
+    git(super,
+        {"-c", "protocol.file.allow=always", "submodule", "add", "-q", source.string(), "sub"});
+    git(super, {"commit", "-q", "-m", "add the submodule"});
+    const std::filesystem::path module = super / ".git" / "modules" / "sub";
+    REQUIRE(std::filesystem::is_regular_file(module / "HEAD"));
+
+    SECTION("its hooks, lfs and annex linked out still read") {
+        for (const char* name : {"hooks", "lfs", "annex"}) {
+            const std::filesystem::path theirs =
+                world.temp.path() / ("their-sub-" + std::string{name});
+            std::filesystem::create_directories(theirs);
+            std::filesystem::remove_all(module / name);
+            LinkWorld::link_folder(theirs, module / name);
+        }
+        for (const char* tool : {"git_status", "git_log", "git_diff", "git_show"}) {
+            INFO(tool);
+            const ToolOutcome outcome = tools.run(tool, {{"repo", "super"}});
+            INFO(outcome.content);
+            CHECK_FALSE(outcome.is_error);
+        }
+    }
+    SECTION("a submodule at a nested path, its hooks linked out, still reads") {
+        // The second review's finding: a submodule's git folder is named
+        // after its path, so `libs/foo` lives at `modules/libs/foo`.
+        git(super, {"-c", "protocol.file.allow=always", "submodule", "add", "-q", source.string(),
+                    "libs/foo"});
+        git(super, {"commit", "-q", "-m", "add a nested submodule"});
+        const std::filesystem::path nested = super / ".git" / "modules" / "libs" / "foo";
+        REQUIRE(std::filesystem::is_regular_file(nested / "HEAD"));
+        const std::filesystem::path theirs = world.temp.path() / "their-nested-hooks";
+        std::filesystem::create_directories(theirs);
+        std::filesystem::remove_all(nested / "hooks");
+        LinkWorld::link_folder(theirs, nested / "hooks");
+        for (const char* tool : {"git_status", "git_log", "git_diff", "git_show"}) {
+            INFO(tool);
+            const ToolOutcome outcome = tools.run(tool, {{"repo", "super"}});
+            INFO(outcome.content);
+            CHECK_FALSE(outcome.is_error);
+        }
+    }
+    SECTION("its branch linked out is refused") {
+        std::filesystem::remove(module / "refs" / "heads" / "main");
+        LinkWorld::link_file(world.outside / ".git" / "refs" / "heads" / "main",
+                             module / "refs" / "heads" / "main");
+        // The control, with the tools' own submodule flags (a status inside
+        // the submodule would fail on the missing object first).
+        CHECK(plain_git_said(super,
+                             {"diff", "HEAD", "--submodule=short", "--ignore-submodules=dirty"})
+                  .find(world.commit) != std::string::npos);
+        refused_with(tools, {{"repo", "super"}}, "main, a link that leads out of it",
+                     {world.commit});
+    }
+}

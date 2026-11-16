@@ -35,7 +35,15 @@ tools never ask about a read, so they are confined instead: a `repo` the
 model names must be inside the same root (with none, they use the repository
 above the launch folder, as before), and so must the repository git opens
 there -- a `.git` file, link or folder, a `core.worktree`, a `commondir` or an
-`objects/info/alternates` that leads out of the root is refused, while the
+`objects/info/alternates` that leads out of the root is refused, and so is a
+link anywhere in the repository's git folder, or in an object store it borrows
+from, that leads out (57y). The whole folder is judged -- loose objects,
+refs, `shallow`, `config`, `reftable/` and the tables its `tables.list` names,
+the files `git status` reads, each submodule's git folder under `modules/` --
+all but the folders `hooks/`, `lfs/` and `annex/` at the top of each git
+folder, which the tools never read. A link that lands inside the root is
+followed and judged where it lands, and a folder in it that cannot be listed
+is refused, since git can still open a file there by name. The
 checkout a launch in a subfolder sits in, a linked worktree and a submodule's
 checkout still read. No git they start runs a command a repository's own
 config names -- no `core.fsmonitor`, filter driver, external diff or textconv,
@@ -53,7 +61,9 @@ here -- the one thing the git tools do that can leave the machine, so it
 asks. `remote` must be a remote the repository has: a path, a URL or an
 unknown name is refused (`'<remote>' is not a remote this repository has`).
 Its URL is read and judged before git runs. A folder must be inside the
-root, its repository confined as `repo` is, and the folder must itself be
+root, its repository confined as `repo` is -- so a store whose objects are
+links out of the root is never fetched from, nothing copied in (57y) -- and
+the folder must itself be
 that repository's top -- not a plain folder a `.git` beside it (`sub.git`)
 would make git serve from outside. A folder whose path holds `@[` or begins
 with `[` -- in the remote's URL, or in the full path git is handed once links

@@ -85,10 +85,20 @@ struct Opened {
 constexpr std::size_t kMaxObjectStores = 32;
 
 /// Whether `path` lands inside `root`, judged by the sandbox's own resolver:
-/// every link followed, a dangling one included.
+/// every link followed, a dangling one included. That resolver trims the
+/// whitespace a model's typing leaves around a path, but git opens a path
+/// exactly as written, so one that begins or ends in a space, tab, carriage
+/// return or line feed -- a link named `st `, an alternates line ending in
+/// `\r` -- is never judged inside (57y): its trimmed sibling is not what git
+/// opens.
 bool lands_inside(const std::filesystem::path& root, const std::filesystem::path& path) {
+    const std::string text = path.string();
+    const auto blank = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+    if (text.empty() || blank(text.front()) || blank(text.back())) {
+        return false;
+    }
     std::string unused;
-    return resolve_in_root(root, path.string(), unused).has_value();
+    return resolve_in_root(root, text, unused).has_value();
 }
 
 /// The same place, both resolved: a back-pointer and the file it names.
@@ -100,70 +110,267 @@ bool same_place(const std::filesystem::path& a, const std::filesystem::path& b) 
     return !code_a && !code_b && left == right;
 }
 
-/// The first link directly inside `dir` that leads out of `root`, or empty
-/// (57o). A link that cannot be read counts as one that leads out.
-std::filesystem::path link_out_of(const std::filesystem::path& root,
-                                  const std::filesystem::path& dir) {
-    std::error_code code;
-    for (std::filesystem::directory_iterator it{
-             dir, std::filesystem::directory_options::skip_permission_denied, code};
-         !code && it != std::filesystem::directory_iterator{}; it.increment(code)) {
-        std::error_code link_code;
-        const bool link = platform::is_link(it->path(), link_code);
-        if (link_code || (link && !lands_inside(root, it->path()))) {
-            return it->path();
+/// The folders at the top of a git directory the walk leaves alone (57y).
+/// The tools never read them -- hooks run nothing (`core.hooksPath=/dev/null`),
+/// and with every filter driver off no LFS or annex content is opened -- and
+/// people link them to their own hooks or to a large store on another disk.
+/// Left out only as folders: a file of one of these names is a root ref git
+/// can read (`LFS` on a case-insensitive disk), so it is judged like the rest.
+constexpr std::array<std::string_view, 3> kUnreadFolders{"hooks", "lfs", "annex"};
+
+bool unread_name(const std::string& name) {
+    return std::ranges::any_of(kUnreadFolders,
+                               [&name](std::string_view unread) { return unread == name; });
+}
+
+/// A folder still to walk (57y).
+struct WalkFolder {
+    /// Where it is listed: a link's target once one landed here.
+    std::filesystem::path listed;
+    /// The path a refusal names: as git reaches it, through the link.
+    std::filesystem::path shown;
+    /// A git directory's top, whose `kUnreadFolders` are left out.
+    bool git_dir = false;
+    /// A git directory's `modules/` or `worktrees/`, whose folders holding a
+    /// `HEAD` are git directories of their own (a submodule's, a worktree's).
+    bool holds_git_dirs = false;
+    /// Only its `kUnreadFolders` are judged: a top reached again by a link,
+    /// under a name git reads, after it was walked without them.
+    bool unread_only = false;
+    /// A `reftable` folder, whose `tables.list` names the tables git opens.
+    bool reftable = false;
+};
+
+/// What the walk has seen across one repository's tops (57y).
+struct Walked {
+    /// Every folder walked or queued, resolved: the tops, the stores and
+    /// each folder a link landed on, so a loop of links ends.
+    std::set<std::filesystem::path> folders;
+    /// The tops, resolved, whose `kUnreadFolders` were left out.
+    std::set<std::filesystem::path> tops;
+    /// The tops whose `kUnreadFolders` a landing link has had judged.
+    std::set<std::filesystem::path> unread_judged;
+};
+
+/// `text` with each control character written as an escape (`\r`, `\n`,
+/// `\t`, `\xNN`), so a refusal naming a path never rewrites the terminal it is
+/// shown on (57y): a link or alternates line ending in a carriage return did.
+std::string escaped(std::string_view text) {
+    std::string out;
+    out.reserve(text.size());
+    for (const char c : text) {
+        const auto byte = static_cast<unsigned char>(c);
+        if (c == '\r') {
+            out += "\\r";
+        } else if (c == '\n') {
+            out += "\\n";
+        } else if (c == '\t') {
+            out += "\\t";
+        } else if (byte < 0x20 || byte == 0x7f) {
+            constexpr std::string_view hex = "0123456789abcdef";
+            out += "\\x";
+            out += hex[byte >> 4U];
+            out += hex[byte & 0x0fU];
+        } else {
+            out += c;
+        }
+    }
+    return out;
+}
+
+/// Why a reftable stack names a table outside its folder, or empty (57y):
+/// git opens each line of `tables.list` in that folder as written, so a line
+/// that is not a bare file name -- `../../outside/.../x.ref` -- or that lands
+/// outside the root is refused, as an alternates line outside is.
+std::string table_out_of(const std::filesystem::path& root, const std::filesystem::path& folder,
+                         const std::filesystem::path& shown) {
+    std::ifstream in{folder / "tables.list", std::ios::binary};
+    std::string line;
+    while (std::getline(in, line)) {
+        const bool bare = !line.empty() && line.find('/') == std::string::npos &&
+                          line.find('\\') == std::string::npos && line != "." && line != "..";
+        if (!bare || !lands_inside(root, folder / line)) {
+            return "a table named by a line of " + escaped((shown / "tables.list").string()) +
+                   " that leaves its folder ('" + escaped(line) + "')";
         }
     }
     return {};
 }
 
-/// What a git or common directory holds that a read shows: the objects, the
-/// refs, `HEAD`, and the index whose paths `git status` lists (57o). A link
-/// there that leads out is refused; one elsewhere -- `hooks` linked to the
-/// person's own, say -- is nothing these tools read.
-constexpr std::array<std::string_view, 5> kReadEntries{"objects", "refs", "packed-refs", "HEAD",
-                                                       "index"};
+/// Why `start` holds something git would read from outside `root`, or empty
+/// (57y): the first link at any depth that leads out of the root, or a folder
+/// that cannot be listed -- git may still open a file in it by name, so what
+/// it holds cannot be judged. The whole folder is walked, because git reads
+/// far more in a git directory than any list names: loose objects, every ref,
+/// the operation-state files `git status` shows, `shallow`, `info/`, `config`,
+/// `reftable/`, `modules/`. A link that lands inside the root is walked where
+/// it lands, each such folder once, and named as git reaches it; a link that
+/// cannot be read counts as one that leads out. Entry types come from the
+/// listing (`platform::is_link` on the entry), so a store of loose objects
+/// costs no `lstat` per file. A `reftable` folder's `tables.list` is judged
+/// line by line (`table_out_of`).
+std::string link_out_under(const std::filesystem::path& root, WalkFolder start, Walked& walked) {
+    const auto leads_out = [](const std::filesystem::path& shown) {
+        return escaped(shown.string()) + ", a link that leads out of it";
+    };
+    std::vector<WalkFolder> pending;
+    pending.push_back(std::move(start));
+    while (!pending.empty()) {
+        const WalkFolder folder = std::move(pending.back());
+        pending.pop_back();
+        if (folder.reftable) {
+            if (std::string out = table_out_of(root, folder.listed, folder.shown); !out.empty()) {
+                return out;
+            }
+        }
+        std::error_code code;
+        std::filesystem::directory_iterator it{folder.listed, code};
+        for (;; it.increment(code)) {
+            if (code) {
+                // A folder gone since it was seen (git's own prune) holds
+                // nothing to read; one that cannot be listed is refused.
+                if (code == std::errc::no_such_file_or_directory) {
+                    break;
+                }
+                return escaped(folder.shown.string()) +
+                       ", a folder that cannot be listed, so what git reads in it cannot be "
+                       "judged";
+            }
+            if (it == std::filesystem::directory_iterator{}) {
+                break;
+            }
+            const std::filesystem::directory_entry& entry = *it;
+            // A name and a shown path are built only where one is needed, so
+            // a store of loose objects costs neither for a plain file.
+            const bool unread = (folder.git_dir || folder.unread_only) &&
+                                unread_name(entry.path().filename().string());
+            if (folder.unread_only && !unread) {
+                continue;
+            }
+            const auto shown = [&folder, &entry] { return folder.shown / entry.path().filename(); };
+            std::error_code link_code;
+            const bool link = platform::is_link(entry, link_code);
+            if (link_code) {
+                return leads_out(shown());
+            }
+            if (!link) {
+                std::error_code kind_code;
+                if (!entry.is_directory(kind_code) || (unread && folder.git_dir)) {
+                    continue;
+                }
+                const std::string name = entry.path().filename().string();
+                std::error_code head_code;
+                const bool git_dir = folder.holds_git_dirs && std::filesystem::is_regular_file(
+                                                                  entry.path() / "HEAD", head_code);
+                // Under a git directory's `modules/` or `worktrees/`, a folder
+                // holding a `HEAD` is a git directory; one without is a step
+                // of a name with a slash (`modules/libs/foo`), looked under.
+                const bool holds =
+                    !git_dir && ((folder.git_dir && (name == "modules" || name == "worktrees")) ||
+                                 folder.holds_git_dirs);
+                pending.push_back({.listed = entry.path(),
+                                   .shown = shown(),
+                                   .git_dir = git_dir,
+                                   .holds_git_dirs = holds,
+                                   .reftable = name == "reftable"});
+                continue;
+            }
+            std::error_code where_code;
+            const std::filesystem::path landed = platform::resolve_path(entry.path(), where_code);
+            std::error_code kind_code;
+            const bool folder_there =
+                !where_code && std::filesystem::is_directory(landed, kind_code);
+            if (unread && folder.git_dir) {
+                // Left out as a folder, or as a link to nothing at all. A file,
+                // or a link whose target cannot even be resolved, is judged: a
+                // root ref git can read (`LFS` on a case-insensitive disk).
+                std::error_code there_code;
+                if (folder_there || std::filesystem::status(entry.path(), there_code).type() ==
+                                        std::filesystem::file_type::not_found) {
+                    continue;
+                }
+            }
+            if (!lands_inside(root, entry.path())) {
+                return leads_out(shown());
+            }
+            if (folder_there) {
+                const bool reftable = entry.path().filename() == "reftable";
+                if (walked.folders.insert(landed).second) {
+                    pending.push_back({.listed = landed, .shown = shown(), .reftable = reftable});
+                } else if (walked.tops.contains(landed) &&
+                           walked.unread_judged.insert(landed).second) {
+                    // A top reached by a name git reads: what was left out
+                    // there is read through this name.
+                    pending.push_back({.listed = landed, .shown = shown(), .unread_only = true});
+                }
+            }
+        }
+    }
+    return {};
+}
 
 /// Why a repository wholly inside the root still reads from outside it, or
-/// empty (57o): one of `kReadEntries` made a link out of it, a link in its
-/// object store or its `pack` folder that leads out, or an
+/// empty (57o, 57y): a link anywhere in its git or common directory, or in an
+/// object store its alternates chain borrows from, that leads out of the root
+/// -- the first one found -- a folder there that cannot be listed, or an
 /// `objects/info/alternates` line that borrows objects from outside. Said as
 /// what git would open.
 std::string object_store_leak(const std::filesystem::path& root, const Opened& opened) {
+    Walked walked;
+    // Whether `folder` is still to walk, recording it resolved, so no folder
+    // is walked twice by a link that leads back to it.
+    const auto first_visit = [&walked](const std::filesystem::path& folder,
+                                       std::filesystem::path& resolved) {
+        std::error_code code;
+        resolved = platform::resolve_path(folder, code);
+        if (code) {
+            resolved = folder;
+        }
+        return walked.folders.insert(resolved).second;
+    };
     std::vector<std::filesystem::path> tops{opened.git_dir};
     if (!same_place(opened.common_dir, opened.git_dir)) {
         tops.push_back(opened.common_dir);
     }
+    std::vector<bool> fresh;
     for (const std::filesystem::path& top : tops) {
-        for (const std::string_view name : kReadEntries) {
-            const std::filesystem::path entry = top / name;
-            std::error_code code;
-            const bool link = platform::is_link(entry, code);
-            if (code || (link && !lands_inside(root, entry))) {
-                return entry.string() + ", a link that leads out of it";
-            }
+        std::filesystem::path resolved;
+        fresh.push_back(first_visit(top, resolved));
+        walked.tops.insert(resolved);
+    }
+    for (std::size_t at = 0; at < tops.size(); ++at) {
+        if (!fresh[at]) {
+            continue;
+        }
+        if (std::string out = link_out_under(
+                root, {.listed = tops[at], .shown = tops[at], .git_dir = true}, walked);
+            !out.empty()) {
+            return out;
         }
     }
     std::vector<std::filesystem::path> stores{opened.common_dir / "objects"};
     for (std::size_t at = 0; at < stores.size(); ++at) {
         const std::filesystem::path store = stores[at];
-        for (const std::filesystem::path& dir : {store, store / "pack"}) {
-            if (const std::filesystem::path out = link_out_of(root, dir); !out.empty()) {
-                return out.string() + ", a link that leads out of it";
+        // The common directory's own store was walked with it; a borrowed
+        // one is walked here, before its own alternates are read.
+        std::filesystem::path resolved;
+        if (at > 0 && first_visit(store, resolved)) {
+            if (std::string out = link_out_under(root, {.listed = store, .shown = store}, walked);
+                !out.empty()) {
+                return out;
             }
         }
         const std::filesystem::path list = store / "info" / "alternates";
         std::ifstream in{list, std::ios::binary};
         std::string line;
+        // Split on line feeds alone, as git reads the file: a carriage
+        // return is part of the path git opens (57y).
         while (std::getline(in, line)) {
-            if (!line.empty() && line.back() == '\r') {
-                line.pop_back();
-            }
             if (line.empty() || line.front() == '#') {
                 continue;
             }
             if (line.front() == '"') {
-                return "an object store named by a quoted line in " + list.string() +
+                return "an object store named by a quoted line in " + escaped(list.string()) +
                        ", which cannot be judged";
             }
             std::filesystem::path alternate{line};
@@ -171,7 +378,8 @@ std::string object_store_leak(const std::filesystem::path& root, const Opened& o
                 alternate = store / alternate;
             }
             if (!lands_inside(root, alternate)) {
-                return "objects borrowed from " + alternate.string() + " (" + list.string() + ")";
+                return "objects borrowed from " + escaped(alternate.string()) + " (" +
+                       escaped(list.string()) + ")";
             }
             const bool seen = std::ranges::any_of(stores, [&](const std::filesystem::path& known) {
                 return same_place(known, alternate);

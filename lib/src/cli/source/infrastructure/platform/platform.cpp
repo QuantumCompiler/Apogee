@@ -359,6 +359,20 @@ bool is_link(const std::filesystem::path& path, std::error_code& code) noexcept 
 #endif
 }
 
+bool is_link(const std::filesystem::directory_entry& entry, std::error_code& code) noexcept {
+    code.clear();
+#if defined(_WIN32)
+    return own_attributes(entry.path(), code).link();
+#else
+    const bool link = entry.is_symlink(code);
+    if (code == std::errc::no_such_file_or_directory) {
+        code.clear();
+        return false;
+    }
+    return !code && link;
+#endif
+}
+
 void remove_tree(const std::filesystem::path& path, std::error_code& code) {
     code.clear();
 #if defined(_WIN32)

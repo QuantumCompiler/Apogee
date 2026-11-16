@@ -426,6 +426,43 @@ TEST_CASE("a directory link is seen as itself, never as what it points at",
     CHECK_FALSE(code);
 }
 
+TEST_CASE("an entry a listing gives is seen as a link exactly as its path is",
+          "[platform][links][57y]") {
+    // The git tools' walk (57y) asks each entry of a listing, so a store of
+    // loose objects costs no lstat per file: the answer must be the path
+    // form's, a directory link (a junction on Windows) above all.
+    const Outside box;
+    const std::filesystem::path listed = box.root.path() / "listed";
+    std::filesystem::create_directories(listed / "folder");
+    std::ofstream{listed / "file.txt"} << "file";
+    const apogee::testing::LinkMade folder_link =
+        apogee::testing::make_directory_link(box.outside, listed / "folder-link");
+    INFO(folder_link.why);
+    REQUIRE(folder_link.made);
+    const apogee::testing::LinkMade file_link =
+        apogee::testing::make_file_link(box.kept, listed / "file-link");
+    std::size_t links = 0;
+    std::size_t entries = 0;
+    for (const std::filesystem::directory_entry& entry :
+         std::filesystem::directory_iterator{listed}) {
+        INFO(entry.path().string());
+        std::error_code entry_code;
+        std::error_code path_code;
+        const bool by_entry = apogee::platform::is_link(entry, entry_code);
+        CHECK(by_entry == apogee::platform::is_link(entry.path(), path_code));
+        CHECK_FALSE(entry_code);
+        CHECK_FALSE(path_code);
+        links += by_entry ? 1 : 0;
+        ++entries;
+    }
+    // Not vacuous: every entry was asked, and each link seen as one.
+    CHECK(entries == (file_link.made ? 4U : 3U));
+    CHECK(links == (file_link.made ? 2U : 1U));
+    if (!file_link.made) {
+        WARN("the file link was not made, so only the directory link was asked: " << file_link.why);
+    }
+}
+
 TEST_CASE("a tree goes with its links removed as themselves, what they point at left whole",
           "[platform][links][57k]") {
     const Outside box;

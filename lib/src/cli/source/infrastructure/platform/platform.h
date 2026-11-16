@@ -115,6 +115,17 @@ enum class Architecture : std::uint8_t { X64, Arm64 };
 /// when it cannot be read. POSIX asks `symlink_status`.
 [[nodiscard]] bool is_link(const std::filesystem::path& path, std::error_code& code) noexcept;
 
+/// The same question about an entry a directory listing gave (57y), answered
+/// from the type the listing read where the platform supplies one -- on POSIX
+/// the entry's cached type, from `readdir`'s `d_type` -- so walking a folder
+/// of tens of thousands of files costs no `lstat` per file. So an entry
+/// removed or replaced since the listing is answered as listed; where the
+/// listing read no type, as the path form answers (false with `code` clear
+/// when nothing is there). On Windows it is `is_link(entry.path())`, which
+/// sees the junction the library's own type does not.
+[[nodiscard]] bool is_link(const std::filesystem::directory_entry& entry,
+                           std::error_code& code) noexcept;
+
 /// Removes `path` and everything under it, a link removed as itself and never
 /// followed: what it points at is left whole. Nothing there is no error. On
 /// Windows a directory link (a junction or a directory symbolic link) goes

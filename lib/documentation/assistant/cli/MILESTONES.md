@@ -13082,3 +13082,128 @@ Decisions taken while building (2026-11-01), each for veto:
 - **TLS settings and other headers stay the repository's**: `http.sslVerify`, `http.sslCAInfo`, `http.sslCAPath`, and an `http.extraHeader` or `http.userAgent` that names no `Host` and holds no control character, in a repository's own config, still apply to an allowed host -- none reroutes a fetch by itself, and what they send goes to the host asked about -- noted for a later item if wanted. A header a particular front routes by besides `Host` (`X-Forwarded-Host` and the like) is that front's own convention and is sent. (`http.cookieFile` and `http.saveCookies` were in this list until review, which found `saveCookies` has the fetch *write* a file; they are now refused by name. `http.extraHeader` was in it as a whole until round 8's second follow-up, which found a `Host` header sends the fetch to another site at the same address; that and a control character are now refused by name -- see the review-stage decisions above.)
 - **57o's smaller edges stay as found** (out of scope here): a submodule's `.git` naming an outside repository; a loose object or pack file that is a link out of the root inside the object store's sub-folders -- `objects/xx/<rest>` a symbolic link to a file outside, which 57o's `confine` does not refuse, since it scans the store's top, `pack` and the alternates chain, not each sub-folder (a folder remote holding one is judged by the same `confine`, so this item does not refuse it either; not probed here); and the walk past a `.git` file.
 - **For the user, on the dev channel**: `make -C lib/src/cli install MODE=dev`, then in a checkout whose `origin` is on GitHub, `apogee-dev chat --tools --branch <a branch not fetched>` -- the question reads `git_diff -> github.com`, and `always` lists the host; an unattended `apogee-dev analyze --branch …` with the host unlisted is refused saying how to allow it.
+
+### 2026-11-15 — `git-folder-links-stay-in-bounds` (backlog item 57y): links in a git folder stay in bounds
+
+**Why.** 57o confined the git tools, which never ask before a read, to repositories inside the root and to what git opens there. But its link check judged a fixed list: five entries (`objects`, `refs`, `packed-refs`, `HEAD`, `index`), the entries directly in `objects/` and `objects/pack/`, and the alternates file. Its Not done left one edge as found: loose objects linked one by one were not scanned. The user had the edge checked on 2026-11-15, and the probe found a class. Each finding was re-run by a second agent, every tool run paired with a plain-git control:
+- **Loose objects linked out:** another repository's commit, tree and blob, linked under their own ids, gave `git_show` its `OUTSIDE SUBJECT` and `git_diff` its `OUTSIDE SECRET TEXT`. One linked blob was enough.
+- **A state file `git_status` reads, linked to any outside file:** `BISECT_START` printed a 400-line, 15,456-byte file whole, and the rebase state files the same.
+- **`shallow` linked out:** all four tools printed its first line in `fatal: bad shallow line`.
+- **Refs:** the pseudo-refs gave the outside commit's id.
+- **Entries the list never named:** `reftable/`, `config` and `modules/` linked out were read.
+- **Behind a link that lands inside:** a link out sitting in an alternate store inside the root, or in a folder an `objects/<2>` link landed on, was never looked at.
+- **The 57x review fetch** from a folder remote with linked objects copied the outside objects in as real files, which outlived the links.
+
+The user placed it in v0.2.1 as 57y, the last item of track 57.
+
+- [x] **The whole git folder judged** (`tools/git.cpp`). `object_store_leak` no longer walks a list (`kReadEntries` and `link_out_of` are gone). Each top is walked whole, recursively, by `link_out_under`: the git directory, the common directory and each object store the alternates chain borrows from, and the first link found whose target `lands_inside` says leads out of the root is refused, in 57o's words (`<path>, a link that leads out of it`).
+  - **What is left out:** `kUnreadFolders`, `hooks/`, `lfs/` and `annex/`, as folders, at the top of each git directory the walk enters. That is the opened one, the common one, and each folder holding a `HEAD` anywhere under a git directory's `modules/` or `worktrees/`: a submodule's, including one at a nested path such as `modules/libs/foo`, or a worktree's. The tools never read them.
+    - A file of one of those names, or a link to a file, is judged like the rest. It is a root ref git can read: `LFS` on a case-insensitive disk.
+    - A link to nothing at all there is left out. A link whose target cannot even be resolved is judged.
+  - **A reftable stack's `tables.list` is judged line by line** (`table_out_of`): git opens each line in the folder as written, so a line that is not a bare file name, or that lands outside the root, is refused, as an alternates line outside is.
+  - **Refusals escape control characters** (`escaped`), so a path holding a carriage return never rewrites the line it is shown on.
+  - **Links that land inside:** a link landing inside the root is walked where it lands, and each landed folder only once (`Walked` holds them resolved), so a loop of links ends.
+    - A link that lands on a top already walked without those three has them judged after all (`unread_only`), since git reads them through the link's name: `refs/x -> ..` made `refs/x/lfs/heads/main` a branch.
+    - A refusal names a link as git reaches it, through the landing link, never by its resolved path.
+  - **What cannot be judged is refused:**
+    - A folder that cannot be listed: `<folder>, a folder that cannot be listed, so what git reads in it cannot be judged`. Git can still enter a folder at mode 0311 and open a file in it by name. A folder gone since it was seen (git's own prune) is skipped.
+    - A link that cannot be read counts as one that leads out, as before.
+  - **A path git opens is judged as written** (`lands_inside`). The file tools' resolver trims the whitespace around a path a model types, so a path beginning or ending in a space, tab, carriage return or line feed is never judged inside. An alternates line is split on line feeds alone, as git reads it, so a carriage return stays part of the path.
+  - **The alternates chain** is kept as it was: an outside line is refused, a quoted line refused, and the chain is capped at 32 stores. Each borrowed store is now walked before its own alternates are read.
+  - **The review fetch** is covered with no change of its own: a folder remote is confined through the same constructor (`judge_folder`), so a store whose objects link out is never fetched from.
+- [x] **Entry types from the listing** (`platform/platform.h/.cpp`). There is a new overload, `is_link(const std::filesystem::directory_entry&, std::error_code&)`:
+  - **On POSIX** it asks the type the listing already read (`directory_entry::is_symlink`, from `readdir`'s `d_type`), so a store of tens of thousands of loose objects costs no `lstat` per file.
+  - **On Windows** it is the path form's own-attributes read, which sees a junction. The git tools are not registered on Windows (57k), so the walk is not run there.
+- [x] **Tests** (11 new cases, `[57y]`, holding 881 assertions):
+  - **`tools/git_test.cpp` (10).** Each case plants what the probe planted, then shows plain git reading through it as the control. Then every tool it names is refused in 57o's words naming the link, and none of the outside text or id is shown:
+    - outside objects linked into a named repository (`git_show` by the commit and by the blob, `git_diff` by `target`);
+    - one blob alone;
+    - the launch repository, with no `repo` named;
+    - `BISECT_START`, `rebase-merge/head-name`, `shallow` and `config` linked to an outside file;
+    - `CHERRY_PICK_HEAD`, a branch ref and `reftable/` linked out (`reftable/` skipped by name where git makes no reftable repository);
+    - an alternate store inside the root holding a loose link out, and an object folder linked to a folder inside the root that holds one;
+    - the review fetch from a folder remote whose loose objects link out. It is refused (`it was not fetched from 'o': … a link that leads out of it`), and none of the three objects is in the repository afterwards; plain git's fetch copies all three in.
+    - **And the cases that still read:** `hooks/`, `lfs/` and `annex/` linked out; refs moved inside the root and linked back, with a description linked to a file inside the root; and a loop of folder links, which ends.
+    - **The review's cases:**
+      - `.git` itself, and an object folder holding a loose link out, each at mode 0311 (skipped by name where the user lists any folder, a superuser);
+      - an alternates line naming a link `st ` and one ending in `\r`, and a link in the git folder named `st `;
+      - `refs/x -> ..` with `lfs` linked to an outside refs folder and a `CHERRY_PICK_HEAD` naming `refs/x/lfs/heads/main`, the full id shown under `core.abbrev=40`;
+      - a file `lfs` linked to an outside ref. Its control holds where the disk ignores case; elsewhere it is said and the refusal still checked.
+      - a submodule's own `hooks/`, `lfs/` and `annex/` linked out still read from the superproject, and so does a nested submodule's `hooks/` (`libs/foo`). Its `refs/heads/main` linked out is refused there. The control is plain git's `diff HEAD --submodule=short --ignore-submodules=dirty` showing the outside id.
+      - from the second review: a link `lfs` through a chain of folders too long for `realpath` (built with relative paths, as a shell makes it), read as `LFS`; a `tables.list` line naming an outside repository's table, where git makes reftable repositories; and the carriage-return case said escaped.
+  - **`platform/platform_test.cpp` (1).** The overload agrees with the path form for a file, a folder, a directory link and a file link.
+  - **Each case seen failing on the code before:**
+    - **The first seven**, with `HEAD`'s `git.cpp` built into the test binary: the five refusal cases failed, 148 of 488 assertions. Every failure was a refusal or leak check: the outside text was shown 10 times and the three objects were copied in, while every control held. The reading case and the platform case passed, as they should.
+    - **All eleven, after the first review**: on `HEAD`, 9 failed (238 of 786 assertions). On the first version of the walk, the four review cases failed: the unlistable folders, the whitespace, the landing link and the file `lfs`, and the submodule's hooks (85 assertions).
+    - **After the second review**: on the second version, the four new sections failed (31 of 881 assertions): the long link under `lfs`, the `tables.list` line, the nested submodule and the escaped carriage return.
+  - **Mutations, each caught by `[57y]`:**
+    - walking `hooks/`, `lfs/` and `annex/` failed the reading case;
+    - not walking a link that lands inside failed the store case;
+    - walking one level only failed five of the seven cases.
+- [x] **Docs.**
+  - [tools.md](../../reference/cli/tools.md)'s "What the gate shows is what it enforces": a link anywhere in the git folder, or in a store it borrows from, that leads out is refused. The whole folder is judged except `hooks/`, `lfs/` and `annex/`, and a link landing inside is judged where it lands. Its review-fetch paragraph says a store whose objects link out is never fetched from.
+  - DEVELOPER.md's `tools/` and `platform/` rows, and the `git_test` and `platform_test` rows.
+  - ROADMAP ticked.
+  - The backlog document and its rows deleted, from the CLI index and the overview. The v0.2.1 CLI table is now empty, and stays until the pre-merge docs pass retires it.
+
+**Decisions made while building** (2026-11-15, each recorded for veto):
+- **The open calls' defaults, taken as stated:**
+  - 2026-11-15 — The walk skips `hooks/`, `lfs/` and `annex/` at the top of a git directory, and walks `rr-cache/`. *Widened at review* (below): "a git directory" now covers each submodule's and worktree's as well as the two tops, and only folders are skipped.
+  - 2026-11-15 — A folder link that lands inside the root is walked where it lands, each resolved folder once, so a loop of links ends.
+  - 2026-11-15 — `info/exclude`, `config` and `reftable/` linked out are refused like the rest (the `config` and `reftable/` cases pin two of them).
+  - 2026-11-15 — The refusal is 57o's words, naming the first link found.
+  - 2026-11-15 — No timing test: the cost was measured at build (below) and is recorded here.
+- **Build-time judgments:**
+  - 2026-11-15 — **The listing's type comes from a platform overload.** It is `is_link(directory_entry)`, so the one `#ifdef` stays in the platform seam. The other way, a `platform::is_link` call per entry, would have cost an `lstat` per loose object.
+  - 2026-11-15 — **Real folders are not recorded in `walked`; only folders a link lands on are.** Recording every folder would need one `resolve_path` per folder, and a link's target is the only way back into a folder already walked. So a folder reached both directly and through a link is walked at most twice, and the walk still ends.
+  - 2026-11-15 — **The common directory's own `objects/` is not walked a second time** for the alternates chain. It was walked with the common directory, or where its link landed.
+  - 2026-11-15 — **CLAUDE.md is not changed.** The item named "CLAUDE.md's confinement invariant line", but CLAUDE.md has no line on the git tools' confinement: 57o's rule lives in tools.md and DEVELOPER.md, and both now say the folder is judged whole. Writing a new `## ⚠` invariant for it would be a new rule, which is the user's to make.
+  - 2026-11-15 — **The review fetch's refusal is not a `Not fetched:` line here.** The item's guardrail expected one, but the case asks for a branch only the refused remote has. So the review stops with the fetch's refusal as an error (`ref 'evil' is not in this repository, and it was not fetched from 'o': …`), which names the link. A review of branches already here would carry the same reason as `Not fetched:` (57x's rule, unchanged).
+
+**Review-stage hardening** (2026-11-15). Two reviewers worked on the first version's binary: one probed it against the binary before the change, the other read the diff. Each finding was reproduced and fixed with a `[57y]` case seen failing first, unless marked otherwise. For the user's veto:
+- 2026-11-15 — **A folder that cannot be listed is refused** (both reviewers). The walk listed each folder with `skip_permission_denied` and ended a folder's loop quietly on any error. So a `.git` at mode 0311, with `objects/` and `refs/` linked out, listed as empty, and the tools read the outside commit. 57o's own `lstat` of the named entries had refused that. The probe also reached it from an extracted archive whose `.git` entry kept mode 0111. Now the walk refuses the folder by name, failing closed, and a folder gone since it was seen is skipped.
+- 2026-11-15 — **A path is judged as written** (the probe). `resolve_in_root` trims what a model types, so an alternates line naming the link `<root>/st ` was judged as `<root>/st`, a missing sibling inside the root. The same went for a link in the git folder named `st `, and for a line ending in `\r` that the loop popped. Through each, the outside store was read: `OUTSIDE SUBJECT` and `-OUTSIDE SECRET TEXT`, on the old binary too. `lands_inside` now judges nothing that begins or ends in whitespace inside, and the alternates loop keeps a carriage return.
+- 2026-11-15 — **A top reached again by a link has its unread folders judged** (the diff review). A link landing on the git folder itself (`refs/x -> ..`) was not followed, the top being walked already, and git then read `lfs`, linked out, as `refs/x/lfs/heads/main`: `git_status` printed the outside commit's full id under `core.abbrev=40`.
+- 2026-11-15 — **Only folders are left out** (the probe). On a case-insensitive disk `.git/lfs`, linked to an outside ref file, is the root ref `LFS`: `git_log{branch:'LFS'}` read the outside branch's tip. A file, or a link to one, under those names is now judged.
+- 2026-11-15 — **Each submodule's and worktree's git directory leaves out the same three** (both reviewers; a false refusal of the first version). git copies template hooks that are links, and a submodule's LFS store lives in `modules/<name>/lfs`, so a submodule's `hooks/` linked out refused the superproject. A folder holding a `HEAD` directly under a git directory's `modules/` or `worktrees/` is now walked as a git directory's top.
+  - A submodule named with a slash (`modules/a/b`) is not recognised, so it is walked whole: the conservative side.
+  - A folder made to look like one of these gains nothing: its three are judged as soon as a link lands on it, and git reads a root ref only as a file.
+- 2026-11-15 — **A refusal names the link as git reaches it** (the diff review), through the landing link, never by its resolved path.
+- 2026-11-15 — **The reftable case skips by git's exit status** (the diff review). git before 2.45 knows no `--ref-format` and says so as an unknown option, not `fatal`, so on Ubuntu 24.04's git 2.43 (`make pr-ci`'s container) the case would have failed instead of skipping. Not run there.
+- 2026-11-15 — **Not changed, recorded:**
+  - **The description file.** A template's `description` that is a link out refuses the repository, though no tool reads it. It is a file, so a root ref (`DESCRIPTION`) on a case-insensitive disk; the probe found git copying such a link from `init.templateDir`.
+  - **Folders walked twice.** A plain folder reached both directly and through a landing link is walked twice: cost only.
+
+**Review-stage hardening, round 2** (2026-11-15). A second probe on the second version's binary found all seven first-round findings refused, and everything on the still-read list still reading, but one case. Fixed with a `[57y]` section seen failing first; for the user's veto:
+- 2026-11-15 — **A submodule at a nested path is recognised** (a false refusal). A submodule's git folder is named after its path, `modules/libs/foo`, and only `modules/<name>` holding a `HEAD` had been recognised, so `libs/foo`'s `hooks/` linked out refused the superproject. Folders under `modules/` or `worktrees/` without a `HEAD` are now looked under.
+- 2026-11-15 — **Only a link to nothing at all is left out under those three names** (a hole the second version opened). A relative link through a chain of folders longer than `realpath` takes (macOS's 1,024 bytes) failed to resolve and was taken for a link to nothing. The system still followed it, and git read the root ref `LFS` through it: `git_status` printed the outside id. It is now left out only when the system finds nothing there; any other failure is judged, and refused.
+- 2026-11-15 — **A `tables.list` line is judged** (older; every binary read it). Prepending `../../../../../outside/.../<table>.ref` to a reftable stack had `git_status` show the outside branch's commit. Lines are now judged as alternates lines are.
+- 2026-11-15 — **The carriage return in a refusal is escaped** (cosmetic): the alternates refusal had printed it raw, so a terminal overwrote the line's start.
+- 2026-11-15 — **Found and left for a follow-up** (older; every binary read them):
+  - **A submodule's git folder reached through its work tree** is never walked: a `sub/.git` folder kept in the work tree, or a `sub/.git` file or link naming an outside repository, the latter 57o's recorded edge. The superproject's `git_diff` printed `+Subproject commit <the outside id>`. A folder made to look like a submodule's git folder under `modules/` also gets its three names left out, but reaching it needs that same work-tree route. Not done, below.
+  - **A repository's own `include.path`** pulled an outside config in, and `git_status` showed its `branch.main.merge` value. Settings git reads from files outside the root are a different mechanism from links. Not done, below.
+
+**Measured cost** (2026-11-15). A `complete --tools` turn with one `git_status` call through the mock backend, from a sandbox home, timed as the median of 15 runs, alternating the binary before the change with the binary after it:
+- **This checkout's `.git`** (2,549 entries, 2,119 loose objects, no links): 227.4 ms before and 228.2 ms after, +0.8 ms (+0.4%), within the noise.
+- **A store of 50,003 loose objects** (50,294 entries): 242.5 ms before and 278.3 ms after, +35.7 ms (+14.7%).
+
+These are in line with the item's estimate (about 8 ms here and 50 ms on 50,000 loose objects, measured with a stand-in for the walk).
+
+Re-timed on the final walk with 41 runs each, the Mac's load average about 5 from other work:
+- **This checkout:** 220.9 ms before and 224.2 ms after, +3.3 ms (+1.5%).
+- **The 50,000-object store:** 244.2 ms before and 276.8 ms after, +32.5 ms (+13.3%).
+
+The second version, timed while a probe ran beside it, read +8.1 ms and +46.5 ms. Building each entry's name and display path only when needed brought it back.
+
+**Verified.**
+- **The gate**, run on the final tree (2026-11-15, from 19:46), `lib/scripts/cicd.sh --app cli --test` (`make -C lib/src/cli test`): exit 0. **4,550 ctest cases**, 4,549 passed and the `pdftotext` case skipped. That is 11 more than 57x's 4,539, which is this item's eleven, with no compiler warning in the log. Two earlier full gates passed on the way: 4,546 cases on the first version, 4,550 on the second.
+- **The `[57y]`, `[tools]`, `[platform]` and `[mcp]` suites** on the final build: all passed (881, 5,019, 636 and 1,179 assertions).
+- **The macOS app** is untouched, so its pipeline was not run.
+
+**Not done:**
+- **CI has not run this**, so the Linux and Windows rows wait on the user's push. Neither `make pr-ci` nor the whole `make lint` was run, nor GCC 13 in the Linux container. The changed files were scanned with MinGW g++ and Homebrew clang 22 and have no warnings, and the first review compiled `git.cpp` warning-free with g++-15 and Apple clang. The git tools are not registered on Windows (57k), so the walk does not run there.
+- **Hard links stay out of scope.** No link check can see one, and a hard link is a path inside the root to the same file.
+- **The race between the walk and git's own read stays as 57o left it.** A link planted after the walk and before git reads is not seen.
+- **Objects a fetch copied in before this fix are not hunted.** Once copied they are real files.
+- **A repository's own `include.path` reads a config outside the root**, its values shown where git shows them (`branch.<name>.merge` in `git_status`), on the old binary too. A config file linked out is refused; a config file *named* by a setting is not. Judging the settings that name files git reads (`include.path`, `includeIf`) is a follow-up of its own, beside the next one.
+- **A submodule's git directory kept in its work tree is not walked.** The probe found the case: `sub/.git` as a folder, the way `git submodule add` of an existing repository leaves it, with `refs/heads/main` linked out. The superproject's `git_diff` printed `+Subproject commit <the outside id>`, a commit id and nothing more, on the old binary too. A `sub/.git` that is a link or a `gitdir:` file naming an outside repository does the same, which is 57o's recorded edge. The absorbed form, under `modules/`, is walked and refused. Closing it means judging every populated gitlink's `.git` on each `git_diff` and `git_status`, one more git process per call: a follow-up of its own.
