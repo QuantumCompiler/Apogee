@@ -6,15 +6,15 @@ The work queue, seen one release at a time. This page is the **overview**: what 
 
 The branch is `v0.2.1`; the last published release is v0.2.0.
 
-**Still to build: 25 items.**
+**Still to build: 26 items.**
 - **The design:** 20. The prototype is being rebuilt in React.
 - **The mod:** 4. The Claude plugin is born.
 - **The Apple apps:** 1, the app's icon.
-- **The CLI:** none; its three tracks for this release have shipped.
+- **The CLI:** 1, closing a gap in the git tools' confinement.
 
-On top of that, 3 maintenance items can be picked up any time. None of the 25 waits on a decision from you.
+On top of that, 4 maintenance items can be picked up any time. None of the 26 waits on a decision from you.
 
-**Can start today** (nothing gates them): [design 1a](design/v0.2.1/design-app-architecture-and-law.md), [mod 1a](mod/v0.2.1/mod-scaffold.md) and [Apple apps 11a](darwin/v0.2.1/apogee-logo-as-the-app-icon.md).
+**Can start today** (nothing gates them): [design 1a](design/v0.2.1/design-app-architecture-and-law.md), [mod 1a](mod/v0.2.1/mod-scaffold.md), [Apple apps 11a](darwin/v0.2.1/apogee-logo-as-the-app-icon.md) and [CLI 57y](cli/v0.2.1/git-folder-links-stay-in-bounds.md).
 
 ### The design ([queue](design/README.md#v021))
 
@@ -68,10 +68,16 @@ On top of that, 3 maintenance items can be picked up any time. None of the 25 wa
 
 ### The CLI ([queue](cli/README.md#v021))
 
-Nothing is left to build. This release's three CLI tracks have shipped:
+One item is left, added to the second bug sweep on 2026-11-15:
+
+| # | Item | Waits on |
+|---|---|---|
+| 57y | [Links in a git folder stay in bounds](cli/v0.2.1/git-folder-links-stay-in-bounds.md): the git tools judge the whole `.git` folder | — |
+
+The rest of this release's three CLI tracks has shipped:
 - the mod's CLI siblings, `apogee mcp serve` (track 54, [Milestone W](../assistant/cli/MILESTONES.md#milestone-w--the-mcp-client));
 - Apogee in Xcode (track 56, [Milestone AS](../assistant/cli/MILESTONES.md#milestone-as--apogee-in-xcode));
-- the second bug sweep's CLI findings (track 57, [Milestone AT](../assistant/cli/MILESTONES.md#milestone-at--the-second-sweeps-cli-findings)).
+- the second bug sweep's CLI findings (track 57, [Milestone AT](../assistant/cli/MILESTONES.md#milestone-at--the-second-sweeps-cli-findings)), all but 57y.
 
 **One step is yours.** After the release's build, you turn on the merge ruleset so CI gates merges into `stable` (57m, [the ROADMAP line](../assistant/cli/ROADMAP.md#v021--the-mods-cli-siblings-track-54-apogee-in-xcode-track-56-and-the-second-bug-sweep-track-57)).
 
@@ -87,6 +93,7 @@ Maintenance items aren't tied to a release; any one can be picked up by name.
 | Product | # | Item | Waits on |
 |---|---|---|---|
 | CLI | M34 | [A failed Claude CLI turn says why](cli/maintenance/claude-cli-says-why.md) | — |
+| CLI | M35 | [The code server's write guard holds for deletes, folders and permissions](cli/maintenance/code-exec-write-guard-holds.md) | — |
 | Apple apps (macOS) | M18 | [A development build of the app runs on the dev channel](darwin/macos/maintenance/app-dev-channel.md) | — |
 | Apple apps (macOS) | M19 | [Copy in Settings › Xcode says it copied](darwin/macos/maintenance/xcode-copy-says-copied.md) | — |
 
