@@ -4,13 +4,16 @@
 #include <array>
 #include <cctype>
 #include <charconv>
+#include <cstdint>
 #include <fstream>
+#include <future>
 #include <map>
 #include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 #include "contracts/host.h"
@@ -64,6 +67,14 @@ struct GitError : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
 
+/// git found no repository where it was asked (57z): `rev-parse` refused the
+/// folder. A submodule's `.git` that opens none is one git reads nothing
+/// through, so `confine_submodules` passes it by; everywhere else it is a
+/// GitError like any other.
+struct GitUnopenable : GitError {
+    using GitError::GitError;
+};
+
 std::string rstrip(std::string text) {
     while (!text.empty() && (text.back() == '\n' || text.back() == '\r' || text.back() == ' ')) {
         text.pop_back();
@@ -99,6 +110,25 @@ bool lands_inside(const std::filesystem::path& root, const std::filesystem::path
     }
     std::string unused;
     return resolve_in_root(root, text, unused).has_value();
+}
+
+/// Whether `path` is `folder` or lies under it, both resolved (57z).
+bool same_or_within(const std::filesystem::path& folder, const std::filesystem::path& path) {
+    std::error_code folder_code;
+    std::error_code path_code;
+    const std::filesystem::path resolved_folder = platform::resolve_path(folder, folder_code);
+    const std::filesystem::path resolved_path = platform::resolve_path(path, path_code);
+    if (folder_code || path_code) {
+        return false;
+    }
+    auto step = resolved_path.begin();
+    for (const std::filesystem::path& part : resolved_folder) {
+        if (step == resolved_path.end() || *step != part) {
+            return false;
+        }
+        ++step;
+    }
+    return true;
 }
 
 /// The same place, both resolved: a back-pointer and the file it names.
@@ -416,6 +446,179 @@ std::string outside_root(const std::filesystem::path& root, std::string_view sho
 constexpr std::string_view kListedTooMuch =
     "this repository's config lists more than the tools read whole";
 
+/// What the `Git` constructor lists from a repository's config, in one
+/// `git config` call: the filter drivers it switches off (57o), and every
+/// setting that names a file git opens for these tools (57z) -- an include,
+/// and the mailmap, excludes and attributes files.
+constexpr std::string_view kListedSettings =
+    "^(filter\\..*|include\\.path|includeif\\..*\\.path|core\\.excludesfile|"
+    "core\\.attributesfile|mailmap\\.file)$";
+
+/// The most bytes of a gitlink listing (`git ls-files -s -z`) the tools read
+/// whole (57z): about a million tracked files. A longer one refuses the call,
+/// as a config listing past its bound does (57x).
+constexpr std::size_t kMaxIndexListing = std::size_t{64} * 1024 * 1024;
+
+/// Whether the index file at `file` may hold a gitlink, read from its bytes
+/// (57z): every gitlink entry's mode field is `00 00 e0 00` (mode 160000,
+/// big-endian) in every index version, so where those four bytes appear
+/// nowhere there is none. A match elsewhere (an object id, a size) only costs
+/// the listing. A file that does not begin as an index (`DIRC`), or that is
+/// there but cannot be read, may hold one -- git's own listing then says what
+/// it is. Read in 1 MiB pieces, the last three bytes of each carried into the
+/// next, and searched from the rare `e0`, so its size never sits in memory.
+bool file_may_hold_gitlinks(const std::filesystem::path& file) {
+    std::error_code code;
+    if (!std::filesystem::exists(std::filesystem::symlink_status(file, code))) {
+        return static_cast<bool>(code);
+    }
+    std::ifstream in{file, std::ios::binary};
+    std::string head(4, '\0');
+    if (!in.read(head.data(), 4) || head != "DIRC") {
+        return true;
+    }
+    constexpr std::size_t kPiece = std::size_t{1} << 20U;
+    std::string window = head;
+    std::string piece(kPiece, '\0');
+    for (;;) {
+        in.read(piece.data(), static_cast<std::streamsize>(piece.size()));
+        const auto got = static_cast<std::size_t>(in.gcount());
+        if (got == 0) {
+            return !in.eof();  // a read that failed may hide one
+        }
+        window.append(piece, 0, got);
+        for (std::size_t at = window.find('\xe0', 2);
+             at != std::string::npos && at + 1 < window.size(); at = window.find('\xe0', at + 1)) {
+            if (window[at - 2] == '\0' && window[at - 1] == '\0' && window[at + 1] == '\0') {
+                return true;
+            }
+        }
+        window.erase(0, window.size() > 3 ? window.size() - 3 : 0);
+    }
+}
+
+/// Whether the repository's index may hold a gitlink (57z), so the listing
+/// -- a git process on every `git_status` -- runs only where one may be: its
+/// `index`, and each `sharedindex.*` a split index keeps its entries in
+/// beside it. The person's `GIT_INDEX_FILE` names another index: "may".
+bool index_may_hold_gitlinks(const std::filesystem::path& git_dir) {
+    if (platform::utf8_environment("GIT_INDEX_FILE").has_value()) {
+        return true;
+    }
+    if (file_may_hold_gitlinks(git_dir / "index")) {
+        return true;
+    }
+    std::error_code code;
+    for (std::filesystem::directory_iterator it{git_dir, code};
+         !code && it != std::filesystem::directory_iterator{}; it.increment(code)) {
+        if (it->path().filename().string().starts_with("sharedindex.") &&
+            file_may_hold_gitlinks(it->path())) {
+            return true;
+        }
+    }
+    // A git folder that cannot be listed may hide a shared index.
+    return static_cast<bool>(code);
+}
+
+/// One setting of a `git config -z --show-scope --show-origin --get-regexp`
+/// listing (57z): `<scope>\0<origin>\0<key>[\n<value>]\0`.
+struct ListedSetting {
+    std::string scope;
+    std::string origin;
+    std::string key;
+    std::optional<std::string> value;
+};
+
+std::vector<ListedSetting> parse_listing(std::string_view listing) {
+    std::vector<std::string_view> fields;
+    for (std::size_t from = 0; from < listing.size();) {
+        std::size_t end = listing.find('\0', from);
+        if (end == std::string_view::npos) {
+            end = listing.size();
+        }
+        fields.push_back(listing.substr(from, end - from));
+        from = end + 1;
+    }
+    std::vector<ListedSetting> settings;
+    for (std::size_t at = 0; at + 2 < fields.size(); at += 3) {
+        ListedSetting setting;
+        setting.scope = std::string{fields[at]};
+        setting.origin = std::string{fields[at + 1]};
+        const std::string_view entry = fields[at + 2];
+        if (const std::size_t line = entry.find('\n'); line != std::string_view::npos) {
+            setting.key = std::string{entry.substr(0, line)};
+            setting.value = std::string{entry.substr(line + 1)};
+        } else {
+            setting.key = std::string{entry};
+        }
+        settings.push_back(std::move(setting));
+    }
+    return settings;
+}
+
+/// Why a repository's own setting has git open a file outside `root`, or
+/// empty (57z). Judged only where the file that sets it lies inside the
+/// root -- anything that can write the root could have written it; a config
+/// file outside the root is the person's, its settings theirs -- and only in
+/// the repository's own scopes, `local` and `worktree`, which count what an
+/// include pulls in. The path is resolved as git resolves it: `~/` the
+/// person's home; an include's relative path against the folder of the file
+/// that sets it; the other files' against the work tree's top (`work_top`).
+/// A path git expands itself (`%(prefix)/`, `~user/`) cannot be judged.
+std::string named_file_outside(const std::filesystem::path& root,
+                               const std::filesystem::path& origin_base,
+                               const std::filesystem::path& work_top,
+                               const ListedSetting& setting) {
+    if ((setting.scope != "local" && setting.scope != "worktree") || !setting.value.has_value() ||
+        setting.value->empty() || setting.key.starts_with("filter.")) {
+        return {};
+    }
+    constexpr std::string_view kFile = "file:";
+    if (!setting.origin.starts_with(kFile)) {
+        return {};
+    }
+    std::filesystem::path origin{setting.origin.substr(kFile.size())};
+    if (origin.is_relative()) {
+        // Relative to the folder git works in, as it prints it: the work
+        // tree's top, which git moves to from any folder below it.
+        origin = origin_base / origin;
+    }
+    if (!lands_inside(root, origin)) {
+        return {};
+    }
+    // git reads a path prefixed `:(optional)` as the path, and takes the
+    // setting as unset only where nothing is there.
+    constexpr std::string_view kOptional = ":(optional)";
+    const std::string value = setting.value->starts_with(kOptional)
+                                  ? setting.value->substr(kOptional.size())
+                                  : *setting.value;
+    const bool include = setting.key == "include.path" ||
+                         (setting.key.starts_with("includeif.") && setting.key.ends_with(".path"));
+    const auto said = [&](const std::string& what) {
+        return "the file " + escaped(setting.key) + " " + what + " in " +
+               escaped(origin.lexically_normal().string()) + " (" + escaped(value) + ")";
+    };
+    if (value.starts_with("%(prefix)/") || value.starts_with(":(") ||
+        (value.starts_with("~") && value != "~" && !value.starts_with("~/"))) {
+        return said("names, which git expands itself and cannot be judged,");
+    }
+    std::filesystem::path named{value};
+    if (value.starts_with("~")) {
+        // `~/` is $HOME as git reads it: an empty one makes `~/x` `/x`.
+        const std::optional<std::string> home = platform::utf8_environment("HOME");
+        if (!home.has_value()) {
+            return said("names, which git expands itself and cannot be judged,");
+        }
+        named = std::filesystem::path{*home + value.substr(1)};
+    } else if (named.is_relative()) {
+        named = (include ? origin.parent_path() : work_top) / named;
+    }
+    if (!lands_inside(root, named)) {
+        return said("names");
+    }
+    return {};
+}
+
 class Git {
 public:
     /// The repository at `repo`. When `root` is set, git is first asked
@@ -432,9 +635,11 @@ public:
         : repo_{std::move(repo)}, timeout_{timeout} {
         if (!root.empty()) {
             confine(root, shown);
+            root_ = root;
+            shown_ = std::string{shown};
         }
-        const ProcessOutcome listed =
-            invoke({"config", "--show-scope", "--name-only", "--get-regexp", "^filter\\."});
+        const ProcessOutcome listed = invoke({"config", "-z", "--show-scope", "--show-origin",
+                                              "--get-regexp", std::string{kListedSettings}});
         // 1 is "no such key"; anything else but 0 is a config git could not
         // read, or a git too old for --show-scope: never run on a guess.
         if (!listed.start_error.empty() || listed.timed_out ||
@@ -450,10 +655,112 @@ public:
             throw GitError(std::string{kListedTooMuch} +
                            ", so its filter drivers could not all be switched off");
         }
+        const std::vector<ListedSetting> settings = parse_listing(listed.out.text());
+        std::string scoped_names;
+        for (const ListedSetting& setting : settings) {
+            if (setting.key.starts_with("filter.")) {
+                scoped_names += setting.scope + "\t" + setting.key + "\n";
+            }
+        }
         std::string refusal;
-        filters_ = filter_neutralising_options(listed.out.text(), refusal);
+        filters_ = filter_neutralising_options(scoped_names, refusal);
         if (!refusal.empty()) {
             throw GitError(refusal);
+        }
+        // A file the repository's own config names for git to open is held
+        // inside the root as an alternates line is (57z).
+        if (!root.empty()) {
+            // git prints an origin relative to the folder it works in: the
+            // work tree's top when it was started in the work tree, else the
+            // folder it was started in (a git folder itself, a bare one).
+            const std::filesystem::path folder = std::filesystem::absolute(repo_);
+            const bool in_work_tree = !work_tree_.empty() && same_or_within(work_tree_, folder) &&
+                                      !same_or_within(git_dir_, folder);
+            const std::filesystem::path base = in_work_tree ? work_tree_ : folder;
+            const std::filesystem::path top = work_tree_.empty() ? folder : work_tree_;
+            for (const ListedSetting& setting : settings) {
+                if (std::string opens = named_file_outside(root, base, top, setting);
+                    !opens.empty()) {
+                    throw GitError(outside_root(root, shown, opens, {}));
+                }
+            }
+        }
+    }
+
+    /// Confines each populated submodule git reads through this repository's
+    /// work tree (57z): for a diff against the work tree and for status, git
+    /// reads a submodule's HEAD -- and its config -- through `<path>/.git`,
+    /// outside what `confine` judged. Each is opened as a repository the
+    /// model names is, with 57o's rules, 57y's walk and the settings above,
+    /// and refused in the sandbox's words naming it. The gitlinks come from
+    /// the index (`git ls-files -s -z`, mode 160000), since `.gitmodules`
+    /// misses one added with `git add`; the listing is read whole or the call
+    /// refused. A repository opened with no root confines nothing.
+    void confine_submodules() const {
+        if (root_.empty() || work_tree_.empty() || !index_may_hold_gitlinks(git_dir_)) {
+            return;
+        }
+        // Listed from the work tree's top: from a folder below it git lists
+        // only that folder's part, relative to it.
+        const ProcessOutcome listed = invoke({"-C", work_tree_.string(), "ls-files", "-s", "-z"},
+                                             OutputLimit{.head = kMaxIndexListing, .tail = 0});
+        if (!listed.start_error.empty() || listed.timed_out || listed.exit_code.value_or(1) != 0) {
+            const std::string said = rstrip(listed.err.text());
+            throw GitError("this repository's index could not be read to judge its submodules" +
+                           (said.empty() ? std::string{} : ": " + said));
+        }
+        if (listed.out.omitted() > 0) {
+            throw GitError(
+                "this repository's index lists more than the tools read whole, so its "
+                "submodules could not all be judged");
+        }
+        const std::string text = listed.out.text();
+        std::set<std::string> paths;
+        for (std::size_t from = 0; from < text.size();) {
+            std::size_t end = text.find('\0', from);
+            if (end == std::string::npos) {
+                end = text.size();
+            }
+            const std::string_view entry = std::string_view{text}.substr(from, end - from);
+            from = end + 1;
+            const std::size_t tab = entry.find('\t');
+            if (entry.starts_with("160000 ") && tab != std::string_view::npos) {
+                paths.emplace(entry.substr(tab + 1));
+            }
+        }
+        // A populated one inside the root: one outside it is part of the
+        // person's repository above the folder Apogee was started in, which
+        // 57o reads, and nothing the model wrote.
+        std::vector<std::string> judged;
+        for (const std::string& path : paths) {
+            const std::filesystem::path folder = work_tree_ / path;
+            std::error_code code;
+            if (std::filesystem::exists(std::filesystem::symlink_status(folder / ".git", code)) &&
+                lands_inside(root_, folder)) {
+                judged.push_back(path);
+            }
+        }
+        // Each is two git processes and 57y's walk, so they are judged
+        // eight at a time, in path order, the first refusal reported.
+        const std::size_t width =
+            std::clamp<std::size_t>(std::thread::hardware_concurrency(), std::size_t{1}, 8);
+        for (std::size_t at = 0; at < judged.size(); at += width) {
+            std::vector<std::future<void>> batch;
+            for (std::size_t one = at; one < std::min(judged.size(), at + width); ++one) {
+                batch.push_back(std::async(std::launch::async, [this, path = judged[one]] {
+                    try {
+                        const Git submodule{
+                            work_tree_ / path, timeout_, root_,
+                            "the submodule at '" + escaped(path) + "' of " + shown_};
+                    } catch (const GitUnopenable&) {
+                        // Its `.git` opens no repository: git reads nothing
+                        // through it either.
+                    }
+                }));
+            }
+            for (std::future<void>& done : batch) {
+                done.get();
+            }
         }
     }
 
@@ -572,8 +879,8 @@ private:
         }
         if (failed(outcome)) {
             const std::string said = rstrip(outcome.err.text());
-            throw GitError(said.empty() ? "git could not open a repository at " + repo_.string()
-                                        : said);
+            throw GitUnopenable(
+                said.empty() ? "git could not open a repository at " + repo_.string() : said);
         }
         std::vector<std::string> lines;
         std::istringstream in{outcome.out.text()};
@@ -669,8 +976,10 @@ private:
     /// directory vouches for. A `.git` file, link or folder the model could
     /// have written, a `core.worktree`, a `commondir` or an alternates file
     /// that leads out is refused in the sandbox's words.
-    void confine(const std::filesystem::path& root, std::string_view shown) const {
+    void confine(const std::filesystem::path& root, std::string_view shown) {
         const Opened opened = discover();
+        work_tree_ = opened.work_tree;
+        git_dir_ = opened.git_dir;
         std::string opens;
         std::filesystem::path through;
         if (lands_inside(root, opened.git_dir)) {
@@ -692,7 +1001,8 @@ private:
         }
     }
 
-    [[nodiscard]] ProcessOutcome invoke(std::vector<std::string> arguments) const {
+    [[nodiscard]] ProcessOutcome invoke(std::vector<std::string> arguments,
+                                        OutputLimit limit = {}) const {
         platform::ChildCommand command;
         command.program = "git";
         command.arguments = {"-C", repo_.string()};
@@ -720,11 +1030,19 @@ private:
         for (std::string& argument : arguments) {
             command.arguments.push_back(std::move(argument));
         }
-        return run_to_completion(command, timeout_);
+        return run_to_completion(command, timeout_, limit);
     }
 
     std::filesystem::path repo_;
     std::chrono::milliseconds timeout_;
+    /// The root it was confined to, and how a refusal names it (57z): what
+    /// `confine_submodules` judges against. Empty when opened with no root.
+    std::filesystem::path root_;
+    std::string shown_;
+    /// The work tree and git directory git reported at `confine` (57o),
+    /// the work tree empty with none.
+    std::filesystem::path work_tree_;
+    std::filesystem::path git_dir_;
     /// `-c filter.<name>.clean=` and its siblings, per driver (57o).
     std::vector<std::string> filters_;
 };
@@ -1815,6 +2133,7 @@ void register_git_tools(agent::ToolRegistry& registry, const GitOptions& options
     status.run = [open](std::string_view arguments) {
         return guarded(arguments, "{}", [&](const Arguments& args) {
             const Git git = open(args);
+            git.confine_submodules();
             return "Repo:    " + git.repo().string() + "\nBranch:  " + git.current_branch() +
                    "  (default: " + git.default_branch() + ")\n\n" +
                    git.run({"status", "--ignore-submodules=dirty"});
@@ -1979,6 +2298,12 @@ void register_git_tools(agent::ToolRegistry& registry, const GitOptions& options
                     header = "Repo: " + git.repo().string() + "  |  Branch: " + branch +
                              "  |  Diff vs " + target + " -- changes since merge base\n\n";
                 }
+            }
+            if (spec == "HEAD") {
+                // Against the work tree, where git reads each submodule's
+                // HEAD through its `.git` (57z); every other form names two
+                // commits and reads none.
+                git.confine_submodules();
             }
             std::vector<std::string> command{"diff", spec};
             if (!file.empty()) {

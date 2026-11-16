@@ -13207,3 +13207,123 @@ The second version, timed while a probe ran beside it, read +8.1 ms and +46.5 ms
 - **Objects a fetch copied in before this fix are not hunted.** Once copied they are real files.
 - **A repository's own `include.path` reads a config outside the root**, its values shown where git shows them (`branch.<name>.merge` in `git_status`), on the old binary too. A config file linked out is refused; a config file *named* by a setting is not. Judging the settings that name files git reads (`include.path`, `includeIf`) is a follow-up of its own, beside the next one.
 - **A submodule's git directory kept in its work tree is not walked.** The probe found the case: `sub/.git` as a folder, the way `git submodule add` of an existing repository leaves it, with `refs/heads/main` linked out. The superproject's `git_diff` printed `+Subproject commit <the outside id>`, a commit id and nothing more, on the old binary too. A `sub/.git` that is a link or a `gitdir:` file naming an outside repository does the same, which is 57o's recorded edge. The absorbed form, under `modules/`, is walked and refused. Closing it means judging every populated gitlink's `.git` on each `git_diff` and `git_status`, one more git process per call: a follow-up of its own.
+
+### 2026-11-15 — `submodules-and-config-files-stay-in-bounds` (backlog item 57z): submodules and the files a repository's config names stay in bounds
+
+**Why.** 57y had the git tools judge the whole `.git` folder for links that lead out of the root. Its second review found two routes to outside files that still reach git, through something other than the repository's own git folder. The user queued them as 57z (2026-11-15), track 57's last item. Probed on the binary at 57y (`79bdbcc6`), each case with plain git as the control:
+- **A submodule's git folder, reached through its work tree.** For a work-tree diff and for status, git reads each populated submodule's `HEAD` through `<path>/.git`. Three forms each had `git_diff{repo:'super'}` print `+Subproject commit 1054fe6f…`, an outside commit's id, and `git_status` print `modified: sub (new commits)`:
+  - an embedded `sub/.git` folder with `refs/heads/main` linked out;
+  - a `gitdir:` file naming an outside repository (57o's recorded edge);
+  - a link to one.
+- **A file the repository's own config names.** git reads the files a repository's `.git/config` names, and nothing judged them.
+  - Six forms of include made `git_status` print an outside config's `branch.main.merge` (`OUTSIDE-SECRET-BRANCH`): `include.path` absolute or relative, `includeIf` on `gitdir:` or `onbranch:`, an include of a link out inside the root, and a nested include.
+  - `mailmap.file` had `git_show` print a line of an outside mailmap.
+  - `core.excludesFile` and `core.attributesFile` changed what `git_status` and `git_diff` showed.
+
+- [x] **A submodule is confined as the repository is** (`tools/git.cpp`, `Git::confine_submodules`). It runs before `git_status`, and before `git_diff`'s work-tree form (its spec `HEAD`). The forms that name two commits read no submodule's work tree.
+  - **The gitlinks come from the index** (`git ls-files -s -z`, mode 160000), not `.gitmodules`, which misses one added by `git add`. The listing is run from the work tree's top, whatever folder the call named, and read whole up to 64 MiB (`kMaxIndexListing`), or the call is refused.
+  - **Each populated one inside the root** (`<path>/.git` present) is opened as `repo` is: 57o's rules, 57y's walk, and its own config judged as below. They are opened eight at a time, in path order, and the first refusal is reported.
+    - One outside the root is part of the person's repository above the launch folder, and is left.
+    - One whose `.git` opens no repository (`GitUnopenable`) is passed by, as git passes it. The superproject's diff and status read a submodule's config too: an outside include there that does not parse failed plain git's (probed while building). A refusal names it: `the submodule at 'sub' of the repository at 'super' is outside the allowed root …`.
+  - **The listing runs only where the index may hold a gitlink** (`index_may_hold_gitlinks`). Every gitlink entry's mode field is the bytes `00 00 e0 00` in every index version, so an index without them holds none.
+    - The index is checked for its `DIRC` header, then read in 1 MiB pieces and searched from the rare `e0`.
+    - A split index's `sharedindex.*` files are read the same way, and the person's `GIT_INDEX_FILE` always lists.
+    - A false match only costs the listing.
+- [x] **A file the repository's own config names is judged like an alternates line** (`named_file_outside`). The constructor's one config listing widens to read values with their scope and origin, in the same one process: `git config -z --show-scope --show-origin --get-regexp '^(filter\..*|include\.path|includeif\..*\.path|core\.excludesfile|core\.attributesfile|mailmap\.file)$'`. The filter drivers' names come from the same listing (`parse_listing`, then `filter_neutralising_options` as before).
+  - **What is judged:** a setting in the repository's own scopes, `local` and `worktree`, which count what an include pulls in, and only when the file that sets it is inside the root. Anything that can write the root could have written that file. A config file outside the root (a launch in a subfolder of the person's checkout, a linked worktree's main repository) is theirs, its includes too.
+  - **How each path resolves**, as git does:
+    - a relative origin is read against the work tree's top, which git moves to from any folder below it;
+    - `:(optional)` is stripped;
+    - `~/` comes from `HOME`, so an empty one makes it `/`;
+    - an include's relative path is read against its origin file's folder;
+    - the other three are read against the work tree's top (probed: git reads a relative `core.excludesFile` there, from any folder).
+  - **What cannot be judged:** a path git expands itself (`%(prefix)/`, `~user/`, another `:(` prefix).
+  - **The refusal:** `git opens the file include.path names in <origin> (<path>)`.
+- [x] **A child is reaped as soon as it exits** (`platform/child_process.cpp`, `wait_for_exit`). The wait polled every 20 ms, and a child that has just closed its pipes is rarely reaped at the first look, so every short-lived child paid about 20 ms. It now polls from 1 ms, doubling to 20 ms. Found while measuring this item's cost: each submodule's two git processes cost about 90 ms. It speeds up every git call the tools make, and every other short child.
+- [x] **Tests** (`[57z]`, 4 new cases; 57o's submodule case changed and tagged `[57z]` too; 902 assertions):
+  - **Submodules:** an embedded git folder with its branch linked out, also launched in the superproject with no `repo` and named by a folder below its top; the same in a split index (`update-index --split-index`), the gitlink's bytes asserted to be in the shared file and not the index; a `gitdir:` file naming an outside repository; a `.git` link to one; and its own config including an outside file. Each control is plain git's `diff --ignore-submodules=dirty --submodule=short` printing the outside id, or a broken include failing it. `git_diff` and `git_status` are refused naming the submodule, with no outside id; `git_log`, `git_show` and a two-commit `git_diff` still answer.
+  - **Still reading:**
+    - an embedded submodule with new commits beside an absorbed one;
+    - a submodule whose `.git` opens no repository;
+    - a submodule outside the root, the launch in a folder beside it;
+    - a linked worktree's submodule whose git folder sits in the main repository outside the root, vouched by its `core.worktree`.
+  - **Named files**, each refused with its control:
+    - the six include forms, plus a relative include with the repository named by a folder below its top;
+    - a `%(prefix)/` include, and a `~/` one under an empty `HOME`;
+    - `mailmap.file`, `core.excludesFile` and `core.attributesFile`, plain and behind `:(optional)`;
+    - a relative `core.excludesFile` (`../../excludes`), outside from the work tree's top but inside from `.git`, which pins the rule.
+
+    The `includeIf.gitdir:` control matches the root's real path, since git does.
+  - **Still reading:** an include and named files inside the root; the person's `GIT_CONFIG_GLOBAL` including a file outside it; and a launch in a subfolder of a repository whose own config includes the person's file, with no `repo` and with `repo: '.'`.
+  - **57o's case changed:** "a submodule whose `.git` names a repository outside shows its commit ids, never more". It had pinned the edge this item closes: the subjects and files hidden, the ids shown. Now the call is refused naming the submodule, with no id shown.
+  - **Seen failing first:** on 57y's code, 3 of the 5 cases failed (178 of 642 assertions), every refusal section among them. On the version before review, 6 sections of 4 cases failed (78 of 902 assertions): the subfolder forms of both routes, `:(optional)`, the empty `HOME`, the `.git` that opens no repository, and `repo: '.'` in a subfolder launch.
+  - **Mutations, each caught:**
+    - no named file judged (the 11 route-2 sections failed);
+    - no submodule confined;
+    - settings set outside the root judged too (the subfolder launch failed);
+    - `git_status` skipping the check;
+    - the index scan answering "none";
+    - a split index not listed;
+    - the shared index not scanned.
+- [x] **Docs.**
+  - [tools.md](../../reference/cli/tools.md)'s "What the gate shows is what it enforces": a submodule's git folder and the files a repository's own config names, the person's own settings left theirs.
+  - DEVELOPER.md's `tools/` and `platform/` rows, and the `git_test` row.
+  - ROADMAP ticked.
+  - The backlog document and its rows deleted, in the CLI index and the overview. The v0.2.1 CLI table is empty again, until the pre-merge docs pass retires it.
+
+**Decisions made while building** (2026-11-15, each for the user's veto):
+- **The open calls' defaults, taken as stated:**
+  - 2026-11-15 — A submodule whose git folder leads out refuses the whole call, in 57o's words naming it.
+  - 2026-11-15 — The gitlinks come from `git ls-files -s -z`, read whole up to 64 MiB, and a longer listing refuses the call.
+  - 2026-11-15 — An `includeIf` path is judged whatever its condition. **The cost, named:** a project whose own `.git/config`, inside the root, includes the person's file outside it (`include.path = ~/.gitconfig-work`) is refused. Their way out is the same include in their global config.
+  - 2026-11-15 — The refusal names the setting, its origin file and the path; a submodule's names its path.
+  - 2026-11-15 — No timing test. The costs are measured below.
+- **Build-time judgments:**
+  - 2026-11-15 — **A submodule's own config is judged too**, correcting the item's scope note ("the superproject never reads it"). Probed while building: an include in the submodule's config naming a broken outside file failed the superproject's plain `git diff` and `git status` with `fatal: bad config line 1 in file <outside>`. So each submodule is opened with the whole constructor, its config listing included, at one more git process per submodule.
+  - 2026-11-15 — **A setting is judged only where the file that sets it is inside the root.** The item said "the repository's own config". Its scope alone would have refused a launch in a subfolder of the person's checkout whose `.git/config`, outside the root, includes their own file. Its origin inside the root is what makes a setting writable by anything that can write the root.
+  - 2026-11-15 — **The gitlink listing runs only where the index may hold one.** The item put the listing on every `git_status`. Measured on 57y's process wait, that was +37 ms a call on this checkout, which has none.
+  - 2026-11-15 — **`wait_for_exit` backs off from 1 ms** (above). The item touched no platform code. It is in because this item's cost was otherwise mostly that wait, and the change shortens every child, not only the git tools'.
+
+**Review-stage hardening** (2026-11-15). Two reviewers worked on the first build: one probed its binary against 57y's, the other read the diff. Each finding was reproduced, then fixed with a `[57z]` section seen failing first. For the user's veto:
+- 2026-11-15 — **A folder below the top escaped both routes** (both reviewers).
+  - **Route 1:** the listing ran `-C repo_`, and from a subfolder git lists only that part, relative to it. `git_status{repo:'super/d'}` printed `modified: ../sub (new commits)` and `git_diff` the outside id. It now lists from the work tree's top.
+  - **Route 2:** git prints a relative origin against the work tree's top, wherever it was started, while the check read it against the folder named. So `git_status{repo:'sub/a/b'}` printed `OUTSIDE-SECRET-BRANCH`.
+  - **The reverse:** `repo: '.'` in a subfolder launch refused the person's own config. Both are fixed by reading the origin against the top (a git folder or bare repository: the folder itself).
+- 2026-11-15 — **`:(optional)` is stripped** (the probe). git 2.53 strips the prefix and opens the path, and the check had read it as a relative path inside the root. `git_show` printed the outside mailmap's `OUTSIDE NAME`, and the excludes and attributes files applied. Any other `:(` prefix is refused as unjudgeable.
+- 2026-11-15 — **`~/` comes from `HOME` as git reads it** (the probe). With `HOME` set and empty, git reads `~/x` as `/x`. Apogee's home lookup gave nothing, so the path stayed relative and was judged inside.
+- 2026-11-15 — **A submodule whose `.git` opens no repository is passed by** (both reviewers). Plain git reads it as unpopulated, and 57y answered. The first build failed the call with git's bare `fatal: not a git repository`. `discover`'s refusal is now `GitUnopenable`, which only `confine_submodules` passes by.
+- 2026-11-15 — **Submodules outside the root are left, and the rest are judged eight at a time** (the probe). Two git processes each, one after another, made `git_status` take 3,759 ms in a superproject with 200 populated submodules, against 392 ms for 57y. Launched in a folder beside them, nothing could be refused, and it still listed them all.
+- 2026-11-15 — **The index scan reads its header, then pieces** (the diff review). A planted 1 GiB sparse `index` cost 1 GiB of memory, read whole. One that does not begin `DIRC` now goes straight to git's listing, which refuses it at once.
+- 2026-11-15 — **Not changed, recorded:**
+  - **The listing's bound.** A file whose size is 57,344 bytes puts the gitlink bytes in its entry, so the listing runs, and past 64 MiB (roughly a million tracked files) it refuses the call even with no submodule.
+  - **The submodule's own config.** It is judged as above, so a submodule whose config includes the person's file is refused: the open call's named cost, extended.
+  - **An untracked folder's `.git` naming an outside path.** It still tells `git_status` whether a repository is there, since git opens the outside `HEAD` to decide (not a gitlink, so not listed; on the old binary too).
+
+**Measured cost** (2026-11-15). A `complete --tools` turn with one `git_status` call through the mock backend, timed as the median of 7 to 21 runs, alternating 57y's binary with 57z's final one:
+
+| Repository | 57y | 57z | Change |
+|---|---|---|---|
+| This checkout (no gitlinks) | 227.1 ms | 83.1 ms | −144.0 ms |
+| A 100,000-file index | 413.5 ms | 245.5 ms | −168.0 ms |
+| Three absorbed submodules | 248.1 ms | 111.3 ms | −136.7 ms, all three judged |
+| 50 populated submodules | 281.4 ms | 336.0 ms | +54.6 ms |
+| 200 populated submodules | 389.7 ms | 1,043.8 ms | +654.1 ms |
+
+Before the wait change, 57z's own cost was:
+- **No gitlinks:** +1.3 ms here and +2.9 ms on 100,000 files, with the index scan; +36.8 ms without it.
+- **Submodules:** each populated one about 90 ms, sequential, nearly all of it the 20 ms wait. 200 of them took 3,759 ms before the review's batching.
+
+The bare listing costs 11.2 ms on this checkout (3,001 files) and 34.4 ms on 100,000; one submodule's discovery costs 7.7 ms. The suite itself ran in 726 s, against 993 s for 57y's last gate.
+
+**Verified.**
+- **The gate**, run on the final tree (2026-11-15, from 22:22), `lib/scripts/cicd.sh --app cli --test` (`make -C lib/src/cli test`): exit 0. **4,554 ctest cases**, 4,553 passed and the `pdftotext` case skipped. That is 57y's 4,550 plus this item's four, with no compiler warning in the log, in 723 s. The gate before the review passed the same 4,554.
+- **The `[57z]`, `[tools]`, `[platform]` and `[mcp]` suites** on the final build: all passed (902, 5,880, 636 and 1,179 assertions).
+- **Both reviewers' reproductions, re-run on the final binary:** the `:(optional)` settings and the relative include named through `sub/a/b` are now refused, where 57y and the first build read them.
+- **The macOS app** is untouched, so its pipeline was not run.
+
+**Not done:**
+- **CI has not run this**, so the Linux and Windows rows wait on the user's push. Neither `make pr-ci` nor the whole `make lint` was run, nor GCC 13 in the Linux container. The changed files compile without warnings under MinGW g++ and Homebrew clang 22. The git tools are not registered on Windows (57k); `wait_for_exit`'s change is the POSIX one.
+- **A launch inside a submodule's work tree with no `repo` named** makes the tools find the superproject, as before. Not this item's.
+- **An untracked folder's `.git` naming an outside path** tells `git_status` whether a repository is there (recorded above).
+- **A superproject with hundreds of populated submodules** pays about 3 ms each on every `git_status` and work-tree `git_diff`, eight judged at a time.
+- **Hard links, and the race between judging and git's own read**, as 57o and 57y left them.

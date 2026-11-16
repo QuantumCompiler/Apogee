@@ -908,8 +908,8 @@ TEST_CASE("git_diff never diffs inside a submodule, so the submodule's own confi
     nothing_runs();
 }
 
-TEST_CASE("a submodule whose .git names a repository outside shows its commit ids, never more",
-          "[tools][git][sandbox][57o]") {
+TEST_CASE("a submodule whose .git names a repository outside is refused, its ids and log unshown",
+          "[tools][git][sandbox][57o][57z]") {
     if (!have_git()) {
         SKIP("git is not available");
     }
@@ -918,7 +918,9 @@ TEST_CASE("a submodule whose .git names a repository outside shows its commit id
     // superproject, so git reaches that clone for the commit the submodule is
     // at. The superproject's own config would show more of it --
     // `status.submoduleSummary` and `diff.submodule = log` the clone's commit
-    // subjects, `diff.submodule = diff` its files.
+    // subjects, `diff.submodule = diff` its files. 57o hid those and showed
+    // the commit ids; since 57z the submodule is confined as the repository
+    // is, so the call is refused naming it and not even an id is shown.
     const apogee::testing::TempDir temp{"tools-git-subout-" +
                                         std::to_string(std::random_device{}())};
     const std::filesystem::path root = temp.path() / "proj";
@@ -950,17 +952,21 @@ TEST_CASE("a submodule whose .git names a repository outside shows its commit id
                   {"diff", "--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty", "HEAD"})
                   .find(mode == "log" ? "outside subject" : "outside file text") !=
               std::string::npos);
+        CHECK(git(root, {"diff", "--no-ext-diff", "--ignore-submodules=dirty", "--submodule=short",
+                         "HEAD"})
+                  .find("+Subproject commit " + outside_head) != std::string::npos);
         for (const char* tool : {"git_status", "git_diff"}) {
             INFO(tool);
             const ToolOutcome outcome = tools.run(tool, nlohmann::json::object());
             INFO(outcome.content);
-            CHECK_FALSE(outcome.is_error);
+            CHECK(outcome.is_error);
+            CHECK(outcome.content.find("the submodule at 'sm' of ") != std::string::npos);
+            CHECK(outcome.content.find("outside the allowed root") != std::string::npos);
             CHECK(outcome.content.find("outside subject") == std::string::npos);
             CHECK(outcome.content.find("outside file text") == std::string::npos);
             CHECK(outcome.content.find("secret.txt") == std::string::npos);
+            CHECK(outcome.content.find(outside_head) == std::string::npos);
         }
-        CHECK(tools.run("git_diff", nlohmann::json::object())
-                  .content.find("+Subproject commit " + outside_head) != std::string::npos);
     }
 }
 
@@ -3581,5 +3587,410 @@ TEST_CASE(
                   .find(world.commit) != std::string::npos);
         refused_with(tools, {{"repo", "super"}}, "main, a link that leads out of it",
                      {world.commit});
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 57z: the git tools' last read routes out of the root -- a submodule git
+// reads through the work tree, and a file the repository's own config names.
+// Each case plants what the probe planted (2026-11-15) and shows plain git
+// reading outside before the tools refuse.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// The superproject `super` in the root, its commit, and the submodule
+/// helpers 57z's cases share.
+struct SubmoduleWorld {
+    LinkWorld world;
+    std::filesystem::path super = world.root / "super";
+
+    SubmoduleWorld() {
+        make_repo(super, "p.txt", "p\n", "super commit");
+    }
+
+    /// An embedded repository at `super/<name>` added as a gitlink, its git
+    /// folder kept in the work tree (no `.gitmodules` entry): what `git add`
+    /// of a nested repository leaves.
+    [[nodiscard]] std::filesystem::path embed(const std::string& name) const {
+        const std::filesystem::path sub = super / name;
+        make_repo(sub, "s.txt", "s\n", name + " commit");
+        git(super, {"add", name});
+        git(super, {"commit", "-q", "-m", "add " + name});
+        return sub;
+    }
+
+    /// Plain git's diff with the tools' own submodule flags: the control that
+    /// shows git reading the submodule's HEAD.
+    [[nodiscard]] std::string plain_diff() const {
+        return plain_git_said(
+            super, {"diff", "--no-ext-diff", "--ignore-submodules=dirty", "--submodule=short"});
+    }
+};
+
+}  // namespace
+
+TEST_CASE("a submodule git reads through the work tree is confined as the repository is",
+          "[tools][git][sandbox][57z]") {
+    if (!have_git()) {
+        SKIP("git is not available, or this platform starts no child process to run it");
+    }
+    // The probe's route 1: for a work-tree diff and for status, git reads
+    // each populated submodule's HEAD through `<path>/.git`, which nothing
+    // judged, so git_diff printed `+Subproject commit <the outside id>`.
+    const SubmoduleWorld box;
+    const LinkWorld& world = box.world;
+    const Confined tools{world.root};
+    const std::filesystem::path outside_ref = world.outside / ".git" / "refs" / "heads" / "main";
+    const auto refused_both = [&](const nlohmann::json& arguments, const Confined& on) {
+        for (const char* tool : {"git_diff", "git_status"}) {
+            INFO(tool << " " << arguments.dump());
+            const ToolOutcome outcome = on.run(tool, arguments);
+            INFO(outcome.content);
+            CHECK(outcome.is_error);
+            CHECK(outcome.content.find("the submodule at 'sub' of ") != std::string::npos);
+            CHECK(outcome.content.find("outside the allowed root") != std::string::npos);
+            CHECK(outcome.content.find(world.commit) == std::string::npos);
+            CHECK(outcome.content.find(world.commit.substr(0, 7)) == std::string::npos);
+        }
+    };
+
+    SECTION("an embedded git folder whose branch is linked out") {
+        const std::filesystem::path sub = box.embed("sub");
+        std::filesystem::remove(sub / ".git" / "refs" / "heads" / "main");
+        LinkWorld::link_file(outside_ref, sub / ".git" / "refs" / "heads" / "main");
+        CHECK(box.plain_diff().find("+Subproject commit " + world.commit) != std::string::npos);
+        refused_both({{"repo", "super"}}, tools);
+        // Launched in the superproject with no repo named, the same; and
+        // named by a folder below its top, where git lists only that part.
+        refused_both(nlohmann::json::object(), Confined{box.super});
+        std::filesystem::create_directories(box.super / "d");
+        std::ofstream{box.super / "d" / "k.txt", std::ios::binary} << "k\n";
+        git(box.super, {"add", "d"});
+        git(box.super, {"commit", "-q", "-m", "a folder"});
+        refused_both({{"repo", "super/d"}}, tools);
+    }
+    SECTION("a split index, its gitlink in the shared index file") {
+        // The index read for gitlinks before the listing runs: a split index
+        // keeps its entries in a shared file beside it, so it is listed.
+        const std::filesystem::path sub = box.embed("sub");
+        git(box.super, {"update-index", "--split-index"});
+        // Not vacuous: the gitlink's bytes are in a shared file, not the index.
+        const auto holds_mode = [](const std::filesystem::path& file) {
+            std::ifstream in{file, std::ios::binary};
+            const std::string bytes{std::istreambuf_iterator<char>{in}, {}};
+            return bytes.find(std::string{"\0\0\xe0\0", 4}) != std::string::npos;
+        };
+        bool shared_holds = false;
+        for (const auto& entry : std::filesystem::directory_iterator{box.super / ".git"}) {
+            if (entry.path().filename().string().starts_with("sharedindex.")) {
+                shared_holds = shared_holds || holds_mode(entry.path());
+            }
+        }
+        REQUIRE(shared_holds);
+        REQUIRE_FALSE(holds_mode(box.super / ".git" / "index"));
+        std::filesystem::remove(sub / ".git" / "refs" / "heads" / "main");
+        LinkWorld::link_file(outside_ref, sub / ".git" / "refs" / "heads" / "main");
+        CHECK(box.plain_diff().find("+Subproject commit " + world.commit) != std::string::npos);
+        refused_both({{"repo", "super"}}, tools);
+    }
+    SECTION("a .git file naming an outside repository") {
+        const std::filesystem::path sub = box.embed("sub");
+        std::filesystem::remove_all(sub / ".git");
+        std::ofstream{sub / ".git", std::ios::binary}
+            << "gitdir: " << (world.outside / ".git").generic_string() << "\n";
+        CHECK(box.plain_diff().find("+Subproject commit " + world.commit) != std::string::npos);
+        refused_both({{"repo", "super"}}, tools);
+    }
+    SECTION("a .git link to an outside repository") {
+        const std::filesystem::path sub = box.embed("sub");
+        std::filesystem::remove_all(sub / ".git");
+        LinkWorld::link_folder(world.outside / ".git", sub / ".git");
+        CHECK(box.plain_diff().find("+Subproject commit " + world.commit) != std::string::npos);
+        refused_both({{"repo", "super"}}, tools);
+    }
+    SECTION("its own config including an outside file") {
+        // The superproject's diff and status read a submodule's config too:
+        // an outside file that does not parse fails plain git's (the
+        // control). One that parses is refused by the tools before git runs.
+        const std::filesystem::path sub = box.embed("sub");
+        const std::filesystem::path broken = world.temp.path() / "broken.cfg";
+        std::ofstream{broken, std::ios::binary} << "[broken\n";
+        git(sub, {"config", "include.path", broken.generic_string()});
+        CHECK(box.plain_diff().find("bad config line") != std::string::npos);
+        const std::filesystem::path outside_cfg = world.temp.path() / "sub-extra.cfg";
+        std::ofstream{outside_cfg, std::ios::binary} << "[core]\n\tabbrev = 12\n";
+        // Edited as a file: reading the config would follow the broken include.
+        git(world.temp.path(), {"config", "--file", (sub / ".git" / "config").string(),
+                                "--replace-all", "include.path", outside_cfg.generic_string()});
+        refused_both({{"repo", "super"}}, tools);
+    }
+    SECTION("the reads that never open a submodule's work tree still answer") {
+        const std::filesystem::path sub = box.embed("sub");
+        std::filesystem::remove(sub / ".git" / "refs" / "heads" / "main");
+        LinkWorld::link_file(outside_ref, sub / ".git" / "refs" / "heads" / "main");
+        const std::string first =
+            first_line(git(box.super, {"rev-list", "--max-parents=0", "HEAD"}));
+        for (const auto& [tool, arguments] : std::vector<std::pair<std::string, nlohmann::json>>{
+                 {"git_log", {{"repo", "super"}}},
+                 {"git_show", {{"repo", "super"}}},
+                 {"git_diff", {{"repo", "super"}, {"target", first}}}}) {
+            INFO(tool << " " << arguments.dump());
+            const ToolOutcome outcome = tools.run(tool, arguments);
+            INFO(outcome.content);
+            CHECK_FALSE(outcome.is_error);
+            CHECK(outcome.content.find(world.commit) == std::string::npos);
+        }
+    }
+}
+
+TEST_CASE(
+    "a submodule whose git folder is inside the root, or vouched for from outside it, still reads",
+    "[tools][git][sandbox][57z]") {
+    if (!have_git()) {
+        SKIP("git is not available, or this platform starts no child process to run it");
+    }
+    const SubmoduleWorld box;
+    const LinkWorld& world = box.world;
+    const std::filesystem::path source = world.temp.path() / "subsrc";
+    make_repo(source, "s.txt", "s\n", "submodule commit");
+    const auto reads = [](const Confined& on, const nlohmann::json& arguments) {
+        for (const char* tool : {"git_status", "git_diff", "git_log", "git_show"}) {
+            INFO(tool << " " << arguments.dump());
+            const ToolOutcome outcome = on.run(tool, arguments);
+            INFO(outcome.content);
+            CHECK_FALSE(outcome.is_error);
+        }
+    };
+
+    SECTION("an embedded submodule with new commits, and an absorbed one") {
+        const std::filesystem::path sub = box.embed("sub");
+        std::ofstream{sub / "s.txt", std::ios::binary} << "moved\n";
+        git(sub, {"commit", "-q", "-am", "moved on"});
+        git(box.super, {"-c", "protocol.file.allow=always", "submodule", "add", "-q",
+                        source.string(), "absorbed"});
+        git(box.super, {"commit", "-q", "-m", "add absorbed"});
+        const Confined tools{world.root};
+        reads(tools, {{"repo", "super"}});
+        CHECK(tools.run("git_diff", {{"repo", "super"}}).content.find("+Subproject commit") !=
+              std::string::npos);
+    }
+    SECTION("a submodule whose .git opens no repository reads as git reads it, unpopulated") {
+        const std::filesystem::path sub = box.embed("sub");
+        std::filesystem::remove_all(sub / ".git");
+        std::ofstream{sub / ".git", std::ios::binary}
+            << "gitdir: " << (box.super / "nowhere").generic_string() << "\n";
+        CHECK(plain_git_said(box.super, {"status", "--ignore-submodules=dirty"}).find("fatal") ==
+              std::string::npos);
+        reads(Confined{world.root}, {{"repo", "super"}});
+    }
+    SECTION("a submodule outside the root, the launch in a folder beside it") {
+        // The person's repository above the folder Apogee was started in: a
+        // submodule outside that folder is theirs, whatever its .git names.
+        const std::filesystem::path sub = box.embed("sub");
+        std::filesystem::remove_all(sub / ".git");
+        std::ofstream{sub / ".git", std::ios::binary}
+            << "gitdir: " << (world.outside / ".git").generic_string() << "\n";
+        std::filesystem::create_directories(box.super / "app");
+        std::ofstream{box.super / "app" / "a.txt", std::ios::binary} << "a\n";
+        git(box.super, {"add", "app"});
+        git(box.super, {"commit", "-q", "-m", "app"});
+        reads(Confined{box.super / "app"}, nlohmann::json::object());
+    }
+    SECTION(
+        "a linked worktree's submodule, its git folder in the main repository outside the root") {
+        // The main repository lives outside the root; the worktree is the
+        // root, and its submodule's git folder sits in the main repository's
+        // `worktrees/<id>/modules/`, vouched for by its `core.worktree`.
+        const std::filesystem::path main = world.temp.path() / "main";
+        make_repo(main, "m.txt", "m\n", "main commit");
+        git(main,
+            {"-c", "protocol.file.allow=always", "submodule", "add", "-q", source.string(), "sm"});
+        git(main, {"commit", "-q", "-m", "add sm"});
+        const std::filesystem::path worktree = world.temp.path() / "wt";
+        git(main, {"worktree", "add", "-q", worktree.string()});
+        git(worktree, {"-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q"});
+        REQUIRE(std::filesystem::is_regular_file(worktree / "sm" / ".git"));
+        reads(Confined{worktree}, nlohmann::json::object());
+    }
+}
+
+TEST_CASE(
+    "a file the repository's own config names for git to open is judged like an alternates line",
+    "[tools][git][sandbox][57z]") {
+    if (!have_git()) {
+        SKIP("git is not available, or this platform starts no child process to run it");
+    }
+    // The probe's route 2: the repository's own config named an outside
+    // file -- an include, a mailmap, an excludes or attributes file -- and
+    // git read it, `git_status` printing the outside config's value.
+    const LinkWorld world;
+    const Confined tools{world.root};
+    const std::filesystem::path cfg = world.temp.path() / "cfgdir" / "config";
+    std::filesystem::create_directories(cfg.parent_path());
+    std::ofstream{cfg, std::ios::binary}
+        << "[branch \"main\"]\n\tremote = origin\n\tmerge = refs/heads/OUTSIDE-SECRET-BRANCH\n";
+    git(world.x, {"remote", "add", "origin", "https://example.invalid/r.git"});
+    const std::vector<std::string> hidden{"OUTSIDE-SECRET-BRANCH"};
+    const auto included = [&]() {
+        CHECK(plain_git_said(world.x, {"status"}).find("OUTSIDE-SECRET-BRANCH") !=
+              std::string::npos);
+    };
+
+    SECTION("include.path, absolute") {
+        git(world.x, {"config", "include.path", cfg.generic_string()});
+        included();
+        refused_with(tools, {{"repo", "x"}}, "include.path", hidden);
+    }
+    SECTION("include.path, relative to the including file") {
+        git(world.x, {"config", "include.path", "../../../cfgdir/config"});
+        included();
+        refused_with(tools, {{"repo", "x"}}, "include.path", hidden);
+    }
+    SECTION("includeIf on the git folder") {
+        // git matches the real path of the git folder, links resolved.
+        git(world.x, {"config",
+                      "includeIf.gitdir:" +
+                          std::filesystem::canonical(world.root).generic_string() + "/.path",
+                      cfg.generic_string()});
+        included();
+        refused_with(tools, {{"repo", "x"}}, "includeif.gitdir:", hidden);
+    }
+    SECTION("includeIf on the branch") {
+        git(world.x, {"config", "includeIf.onbranch:main.path", cfg.generic_string()});
+        included();
+        refused_with(tools, {{"repo", "x"}}, "includeif.onbranch:main.path", hidden);
+    }
+    SECTION("an include of a file inside the root that is a link out") {
+        LinkWorld::link_file(cfg, world.root / "inroot.cfg");
+        git(world.x, {"config", "include.path", "../../inroot.cfg"});
+        included();
+        refused_with(tools, {{"repo", "x"}}, "include.path", hidden);
+    }
+    SECTION("a nested include: a file inside the root including the outside one") {
+        std::ofstream{world.x / "nested.cfg", std::ios::binary}
+            << "[include]\n\tpath = " << cfg.generic_string() << "\n";
+        git(world.x, {"config", "include.path", "../nested.cfg"});
+        included();
+        refused_with(tools, {{"repo", "x"}}, "nested.cfg", hidden);
+    }
+    SECTION("a relative include, the repository named by a folder below its top") {
+        // git prints the origin relative to the work tree's top, wherever it
+        // was started: judged from `x/sub/dir`, it would land inside.
+        git(world.x, {"config", "include.path", "../../../cfgdir/config"});
+        std::filesystem::create_directories(world.x / "sub" / "dir");
+        std::ofstream{world.x / "sub" / "dir" / "k.txt", std::ios::binary} << "k\n";
+        git(world.x, {"add", "sub"});
+        git(world.x, {"commit", "-q", "-m", "sub"});
+        CHECK(plain_git_said(world.x / "sub" / "dir", {"status"}).find("OUTSIDE-SECRET-BRANCH") !=
+              std::string::npos);
+        refused_with(tools, {{"repo", "x/sub/dir"}}, "include.path", hidden);
+    }
+    SECTION("a ~/ path under an empty HOME, which git reads as the filesystem's root") {
+        const apogee::testing::EnvGuard empty_home{"HOME", ""};
+        git(world.x, {"config", "include.path", "~" + cfg.generic_string()});
+        included();
+        refused_with(tools, {{"repo", "x"}}, "include.path", hidden);
+    }
+    SECTION("a path git expands at its own install, which cannot be judged") {
+        git(world.x, {"config", "include.path", "%(prefix)/etc/gitconfig"});
+        refused_with(tools, {{"repo", "x"}}, "include.path", hidden);
+    }
+    SECTION("the three named files behind :(optional), which git strips") {
+        const std::filesystem::path mailmap = world.temp.path() / "mailmap";
+        std::ofstream{mailmap, std::ios::binary} << "OUTSIDE NAME <t@example.com>\n";
+        git(world.x, {"config", "mailmap.file", ":(optional)" + mailmap.generic_string()});
+        CHECK(plain_git_said(world.x, {"show", "-s"}).find("OUTSIDE NAME") != std::string::npos);
+        refused_with(tools, {{"repo", "x"}}, "mailmap.file", {"OUTSIDE NAME"});
+        git(world.x, {"config", "--unset", "mailmap.file"});
+        for (const char* key : {"core.excludesFile", "core.attributesFile"}) {
+            INFO(key);
+            git(world.x, {"config", key, ":(optional)" + mailmap.generic_string()});
+            refused_with(tools, {{"repo", "x"}}, "core.", {});
+            git(world.x, {"config", "--unset", key});
+        }
+    }
+    SECTION("a relative core.excludesFile, read against the work tree's top") {
+        // `../../excludes` from x is outside the root; from x/.git it would
+        // land inside it, so this pins the rule git reads it by.
+        std::ofstream{world.temp.path() / "excludes", std::ios::binary} << "untracked-secret.txt\n";
+        std::ofstream{world.x / "untracked-secret.txt", std::ios::binary} << "u\n";
+        git(world.x, {"config", "core.excludesFile", "../../excludes"});
+        CHECK(plain_git_said(world.x, {"status", "--porcelain"}).find("untracked-secret") ==
+              std::string::npos);
+        refused_with(tools, {{"repo", "x"}}, "core.excludesfile", {});
+    }
+    SECTION("mailmap.file") {
+        const std::filesystem::path mailmap = world.temp.path() / "mailmap";
+        std::ofstream{mailmap, std::ios::binary} << "OUTSIDE NAME <t@example.com>\n";
+        git(world.x, {"config", "mailmap.file", mailmap.generic_string()});
+        CHECK(plain_git_said(world.x, {"show", "-s"}).find("OUTSIDE NAME") != std::string::npos);
+        refused_with(tools, {{"repo", "x"}}, "mailmap.file", {"OUTSIDE NAME"});
+    }
+    SECTION("core.excludesFile") {
+        const std::filesystem::path excludes = world.temp.path() / "excludes";
+        std::ofstream{excludes, std::ios::binary} << "untracked-secret.txt\n";
+        std::ofstream{world.x / "untracked-secret.txt", std::ios::binary} << "u\n";
+        git(world.x, {"config", "core.excludesFile", excludes.generic_string()});
+        CHECK(plain_git_said(world.x, {"status", "--porcelain"}).find("untracked-secret") ==
+              std::string::npos);
+        refused_with(tools, {{"repo", "x"}}, "core.excludesfile", {});
+    }
+    SECTION("core.attributesFile") {
+        const std::filesystem::path attributes = world.temp.path() / "attributes";
+        std::ofstream{attributes, std::ios::binary} << "* -diff\n";
+        std::ofstream{world.x / "x.txt", std::ios::binary} << "changed\n";
+        git(world.x, {"config", "core.attributesFile", attributes.generic_string()});
+        CHECK(plain_git_said(world.x, {"diff"}).find("Binary files") != std::string::npos);
+        refused_with(tools, {{"repo", "x"}}, "core.attributesfile", {});
+    }
+}
+
+TEST_CASE("a named file inside the root, and the person's own settings outside it, still read",
+          "[tools][git][sandbox][57z]") {
+    if (!have_git()) {
+        SKIP("git is not available, or this platform starts no child process to run it");
+    }
+    const LinkWorld world;
+    const std::filesystem::path cfg = world.temp.path() / "cfgdir" / "config";
+    std::filesystem::create_directories(cfg.parent_path());
+    std::ofstream{cfg, std::ios::binary}
+        << "[branch \"main\"]\n\tremote = origin\n\tmerge = refs/heads/THEIR-OWN-BRANCH\n";
+    git(world.x, {"remote", "add", "origin", "https://example.invalid/r.git"});
+    const auto reads = [](const Confined& on, const nlohmann::json& arguments,
+                          const std::string& expected) {
+        for (const char* tool : {"git_status", "git_diff", "git_log", "git_show"}) {
+            INFO(tool << " " << arguments.dump());
+            const ToolOutcome outcome = on.run(tool, arguments);
+            INFO(outcome.content);
+            CHECK_FALSE(outcome.is_error);
+        }
+        CHECK(on.run("git_status", arguments).content.find(expected) != std::string::npos);
+    };
+
+    SECTION("an include and named files inside the root") {
+        std::ofstream{world.x / "inside.cfg", std::ios::binary}
+            << "[branch \"main\"]\n\tremote = origin\n\tmerge = refs/heads/INSIDE-BRANCH\n";
+        git(world.x, {"config", "include.path", "../inside.cfg"});
+        std::ofstream{world.x / "mailmap", std::ios::binary} << "Inside Name <t@example.com>\n";
+        git(world.x, {"config", "mailmap.file", "mailmap"});
+        std::ofstream{world.root / "excludes", std::ios::binary} << "nothing-here\n";
+        git(world.x, {"config", "core.excludesFile", (world.root / "excludes").generic_string()});
+        reads(Confined{world.root}, {{"repo", "x"}}, "INSIDE-BRANCH");
+    }
+    SECTION("the person's global config including a file outside the root") {
+        const std::filesystem::path global = world.temp.path() / "global.gitconfig";
+        std::ofstream{global, std::ios::binary} << "[include]\n\tpath = " << cfg.generic_string()
+                                                << "\n";
+        const apogee::testing::EnvGuard theirs{"GIT_CONFIG_GLOBAL", global.string()};
+        reads(Confined{world.root}, {{"repo", "x"}}, "THEIR-OWN-BRANCH");
+    }
+    SECTION("a repository whose own config sits outside the root, the launch in its subfolder") {
+        // The person's repository above the folder Apogee was started in: its
+        // `.git/config` is theirs, and so is what it includes.
+        git(world.x, {"config", "include.path", cfg.generic_string()});
+        std::filesystem::create_directories(world.x / "deeper");
+        reads(Confined{world.x / "deeper"}, nlohmann::json::object(), "THEIR-OWN-BRANCH");
+        reads(Confined{world.x / "deeper"}, {{"repo", "."}}, "THEIR-OWN-BRANCH");
     }
 }

@@ -238,6 +238,11 @@ public:
 
     [[nodiscard]] std::optional<int> wait_for_exit(std::chrono::milliseconds timeout) override {
         const auto deadline = std::chrono::steady_clock::now() + timeout;
+        // From 1 ms, doubling to 20 (57z): a child that closed its pipes is
+        // usually a moment from being reaped, and a fixed 20 ms first sleep
+        // cost every short-lived child -- each git call a tool makes -- that
+        // much again. A slow one is checked no more often than before.
+        useconds_t pause = 1000;
         for (;;) {
             if (exited()) {
                 return WIFEXITED(exit_status_) ? WEXITSTATUS(exit_status_) : -1;
@@ -248,7 +253,8 @@ public:
             // Polling rather than blocking in waitpid: the caller wants a
             // budget, and SIGCHLD handling would be a process-wide change for
             // one backend's benefit.
-            ::usleep(20 * 1000);
+            ::usleep(pause);
+            pause = std::min<useconds_t>(pause * 2, 20 * 1000);
         }
     }
 

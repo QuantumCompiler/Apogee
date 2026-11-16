@@ -6,15 +6,15 @@ The work queue, seen one release at a time. This page is the **overview**: what 
 
 The branch is `v0.2.1`; the last published release is v0.2.0.
 
-**Still to build: 26 items.**
+**Still to build: 25 items.**
 - **The design:** 20. The prototype is being rebuilt in React.
 - **The mod:** 4. The Claude plugin is born.
 - **The Apple apps:** 1, the app's icon.
-- **The CLI:** 1, closing the git tools' last read routes out of the root.
+- **The CLI:** none; its three tracks for this release have shipped.
 
-On top of that, 4 maintenance items can be picked up any time. None of the 26 waits on a decision from you.
+On top of that, 4 maintenance items can be picked up any time. None of the 25 waits on a decision from you.
 
-**Can start today** (nothing gates them): [design 1a](design/v0.2.1/design-app-architecture-and-law.md), [mod 1a](mod/v0.2.1/mod-scaffold.md), [Apple apps 11a](darwin/v0.2.1/apogee-logo-as-the-app-icon.md) and [CLI 57z](cli/v0.2.1/submodules-and-config-files-stay-in-bounds.md).
+**Can start today** (nothing gates them): [design 1a](design/v0.2.1/design-app-architecture-and-law.md), [mod 1a](mod/v0.2.1/mod-scaffold.md) and [Apple apps 11a](darwin/v0.2.1/apogee-logo-as-the-app-icon.md).
 
 ### The design ([queue](design/README.md#v021))
 
@@ -68,16 +68,10 @@ On top of that, 4 maintenance items can be picked up any time. None of the 26 wa
 
 ### The CLI ([queue](cli/README.md#v021))
 
-One item is left, added to the second bug sweep on 2026-11-15:
-
-| # | Item | Waits on |
-|---|---|---|
-| 57z | [Submodules and the files a repository's config names stay in bounds](cli/v0.2.1/submodules-and-config-files-stay-in-bounds.md): the git tools' last read routes out of the root | — |
-
-The rest of this release's three CLI tracks has shipped:
+Nothing is left to build. This release's three CLI tracks have shipped:
 - the mod's CLI siblings, `apogee mcp serve` (track 54, [Milestone W](../assistant/cli/MILESTONES.md#milestone-w--the-mcp-client));
 - Apogee in Xcode (track 56, [Milestone AS](../assistant/cli/MILESTONES.md#milestone-as--apogee-in-xcode));
-- the second bug sweep's CLI findings (track 57, [Milestone AT](../assistant/cli/MILESTONES.md#milestone-at--the-second-sweeps-cli-findings)), all but 57z.
+- the second bug sweep's CLI findings (track 57, [Milestone AT](../assistant/cli/MILESTONES.md#milestone-at--the-second-sweeps-cli-findings)).
 
 **One step is yours.** After the release's build, you turn on the merge ruleset so CI gates merges into `stable` (57m, [the ROADMAP line](../assistant/cli/ROADMAP.md#v021--the-mods-cli-siblings-track-54-apogee-in-xcode-track-56-and-the-second-bug-sweep-track-57)).
 

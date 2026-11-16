@@ -43,8 +43,16 @@ the files `git status` reads, each submodule's git folder under `modules/` --
 all but the folders `hooks/`, `lfs/` and `annex/` at the top of each git
 folder, which the tools never read. A link that lands inside the root is
 followed and judged where it lands, and a folder in it that cannot be listed
-is refused, since git can still open a file there by name. The
-checkout a launch in a subfolder sits in, a linked worktree and a submodule's
+is refused, since git can still open a file there by name. Since 57z the
+same holds for what git reaches past the repository's own git folder: each
+submodule git reads through the work tree -- its `.git` folder, file or link,
+and its own config -- is held as the repository is, before `git_status` and a
+diff against the work tree; and a file the repository's own config names for
+git to open -- an `include.path` or `includeIf` include, `mailmap.file`,
+`core.excludesFile`, `core.attributesFile` -- must be inside the root, when the
+config file that names it is. A config file outside the root is yours, and so
+is what it names: your global settings, and the repository above the folder
+Apogee was started in. The checkout a launch in a subfolder sits in, a linked worktree and a submodule's
 checkout still read. No git they start runs a command a repository's own
 config names -- no `core.fsmonitor`, filter driver, external diff or textconv,
 hook (from `.git/hooks` or a `core.hooksPath`), or signature check, nor
