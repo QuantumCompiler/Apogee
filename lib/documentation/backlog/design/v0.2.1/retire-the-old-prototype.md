@@ -54,8 +54,8 @@
 **Reference.**
 - The recon of 2026-11-14: boards §0, §3 (`canvas.json`) and §4 (`tokens.json`); tooling §4 (the 51 lines, the 7 Swift lines, the other `lib/design` mentions) and §5 (pending items); critic V1, V2, G11, R17, R18.
 - The rules being moved: [`lib/design/spec/CLAUDE.md`](../../../../design/spec/CLAUDE.md) (96 lines; the rules at :35-41) and `lib/design/spec/README.md` (54 lines).
-- The law it ends on: the design's ADR 0001 (`lib/documentation/adrs/design/react-design-prototype.md`, written by [1a](design-app-architecture-and-law.md)).
-- Siblings: [design-app-architecture-and-law.md](design-app-architecture-and-law.md) (1a), [scaffold-and-layering-check.md](scaffold-and-layering-check.md) (1b), [old-prototype-baseline.md](old-prototype-baseline.md) (1c), [styles-shell-and-the-first-screen.md](styles-shell-and-the-first-screen.md) (1e), [gallery-and-foundations.md](gallery-and-foundations.md) (1q), [build-boards-as-pages.md](build-boards-as-pages.md) (1r), [parity-proof.md](parity-proof.md) (1s).
+- The law it ends on: the design's ADR 0001 ([`lib/documentation/adrs/design/react-design-prototype.md`](../../../adrs/design/react-design-prototype.md), written by 1a).
+- Siblings: [react-design-prototype.md](../../../adrs/design/react-design-prototype.md) (1a's ADR 0001), [scaffold-and-layering-check.md](scaffold-and-layering-check.md) (1b), [old-prototype-baseline.md](old-prototype-baseline.md) (1c), [styles-shell-and-the-first-screen.md](styles-shell-and-the-first-screen.md) (1e), [gallery-and-foundations.md](gallery-and-foundations.md) (1q), [build-boards-as-pages.md](build-boards-as-pages.md) (1r), [parity-proof.md](parity-proof.md) (1s).
 - Cross-queue: [10a](../../darwin/macos/v0.2.6/design-the-server-window.md), [10b](../../darwin/macos/v0.2.6/server-window.md), [10c](../../darwin/macos/v0.2.7/people-screens.md), [8b](../../darwin/ipados/v0.2.5/ipad-app.md), [9a](../../darwin/ios/v0.3.0/iphone-app.md), [9b](../../darwin/ios/v0.3.0/foldable-iphone.md), [7a](../../darwin/v0.2.4/app-connection-local-or-server.md).
 
 **Decisions made** (dated):

@@ -21,7 +21,7 @@
   - it lets you **pick the voice model**, Kokoro on PyTorch or its MLX build (CLI 53m);
   - it finds speeches by **scanning folders** for their records, `~/Music/Apogee` plus folders you add;
   - it **asks to install the voice runtime** when a speech is refused for it. The prototype's voice runtime is always installed (`runtimes.voice: true`, 2577).
-- **The layers** (the design's ADR 0001, from [1a](design-app-architecture-and-law.md)): `VoiceViewModel` is a plain TypeScript class that never imports React. Its services are injected: the stand-in's read runner, job starter, speech records and preferences. The view only draws it.
+- **The layers** (the design's ADR 0001, from [1a](../../../adrs/design/react-design-prototype.md)): `VoiceViewModel` is a plain TypeScript class that never imports React. Its services are injected: the stand-in's read runner, job starter, speech records and preferences. The view only draws it.
 - **Every string is the binary's.** Voices come from `models info`'s `voices` field. Speeches, timings and facts come from the record. The record's timings are used as written, never estimated again, so `spokenSecs` does not survive the port.
 - **One player.** The waveform's play button, time and seek use 1k's shared player from `styles`, never a copy.
 - **Shared state goes through services.** The chosen voice for compositions is a preference, read by [1l](compose-screens.md) and [1i](settings-and-appearance.md). The header's model line opens the store ([1h](models-screens.md)). The sidebar badge and the monitor row read the running speech from 1e's shell.

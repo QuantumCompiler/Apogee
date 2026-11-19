@@ -1,5 +1,8 @@
 # CLAUDE.md — the Apogee Desktop design
 
+> **Frozen** ([the design's interim rule](../../documentation/assistant/design/CLAUDE.md#the-interim-rule-while-the-port-runs), decided by 1a on 2026-11-18): from item 1c's baseline on, this prototype takes fixes only, never a new screen, state, start preset or board, so the new-screen row of "What a change touches" below no longer applies.
+> New design is drawn in the React app at `lib/design/prototype/` from item 1e on, under [the design's ADR 0001](../../documentation/adrs/design/react-design-prototype.md); the rest of this file is item 1t's to rewrite.
+
 Context for agents working on **the design** of Apogee's desktop applications. The design is the reference the apps under `lib/src/darwin/`, `linux/` and `windows/` are built from; the apps' own docs are [`lib/documentation/gui/`](../../documentation/CLAUDE.md). [README.md](README.md) has the file layout and how to open the design; this file says how to work on it.
 
 ## ⚠ The repo and the canvas move together

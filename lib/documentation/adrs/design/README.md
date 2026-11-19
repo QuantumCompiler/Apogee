@@ -4,5 +4,4 @@ The standing rules of the design prototype (`lib/design/`), dated and append-onl
 
 | # | Record | Date |
 |---|---|---|
-
-*(None yet. The first, the design app's architecture, is item [1a](../../backlog/design/v0.2.1/design-app-architecture-and-law.md).)*
+| [0001](react-design-prototype.md) | The design prototype is a layered React app built into one file: four layers mirroring the Mac app module for module, plain-TypeScript view-models, the binary's own recorded documents, one committed self-contained `lib/design/main.html` with a staleness check, local gates, the design's five rules, and the canvas retired | 2026-11-18 |

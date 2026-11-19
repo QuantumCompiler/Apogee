@@ -13,7 +13,7 @@
 The new prototype is only a good source for the next app if its layers are as real as the Mac app's. So 1b lays down the folders, the one-file build and a TypeScript copy of the Swift layering check, all behind one `npm run check`. It ports no screen. The app it builds is an empty window that opens with a double-click.
 
 **Core constraint(s).**
-- **The law is 1a's ADR** (`lib/documentation/adrs/design/react-design-prototype.md`, written by [`design-app-architecture-and-law.md`](design-app-architecture-and-law.md)), which mirrors the GUI's four layers ([ADR 0001](../../../adrs/gui/layer-enforcement.md)) and the Mac app's MVVM modules ([ADR 0002](../../../adrs/darwin/presentation-mvvm.md)). The check enforces that ADR. It does not invent rules of its own.
+- **The law is 1a's ADR** ([`lib/documentation/adrs/design/react-design-prototype.md`](../../../adrs/design/react-design-prototype.md), written by 1a, shipped 2026-11-18), which mirrors the GUI's four layers ([ADR 0001](../../../adrs/gui/layer-enforcement.md)) and the Mac app's MVVM modules ([ADR 0002](../../../adrs/darwin/presentation-mvvm.md)). The check enforces that ADR. It does not invent rules of its own.
 - **One file, opened from disk.** The build writes one self-contained `lib/design/main.html`, with its code and styles inlined. Browsers block a `file://` page's separate scripts, so nothing in it may load another file.
 - **The build writes only `lib/design/main.html`.** It never touches `lib/design/spec/`, which stays the old prototype until 1t retires it.
 - **Checks run locally, before a commit.** `changed.sh`, `.github/workflows/` and the required checks are untouched, and the README's "CI never reads it" stays true.
@@ -113,7 +113,7 @@ The new prototype is only a good source for the next app if its layers are as re
 - [ ] Four layer cards exist. All 19 Presentation modules sit where `modules.json` says, `styles` without `Views/`/`ViewModels/` and the rest with both.
 - [ ] `lib/design/spec/`, `lib/scripts/changed.sh` and `.github/` are unchanged by this item.
 
-**Scope note.** Earmarked for v0.2.1 (design track 1); gated on 1a, whose ADR is the law this check holds. 1c and 1d are gated on this item. Out of scope:
+**Scope note.** Earmarked for v0.2.1 (design track 1); its gate, 1a, shipped 2026-11-18, and 1a's ADR is the law this check holds. 1c and 1d are gated on this item. Out of scope:
 - every screen and state (1e onward);
 - the CLI stand-in and its fixtures (1d);
 - tokens, fonts and the shell (1e);

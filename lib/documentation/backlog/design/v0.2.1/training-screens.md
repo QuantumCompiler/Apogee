@@ -26,7 +26,7 @@
 
 **Core constraint(s).**
 - **The prototype is the source of truth.** Layout, states, controls and wording match it. Every command string stays word for word (`apogee train pipeline resume <id>`, `apogee train cycle halt`, the promote sheet's built command line).
-- **The layers and MVVM shape** are the design's ADR 0001 ([1a](design-app-architecture-and-law.md)): the view-model is a plain TypeScript class that never imports React, takes its services by injection, and is driven only through its public methods.
+- **The layers and MVVM shape** are the design's ADR 0001 ([1a](../../../adrs/design/react-design-prototype.md)): the view-model is a plain TypeScript class that never imports React, takes its services by injection, and is driven only through its public methods.
 - **Real data only.** Reads and streams come from the stand-in ([1d](cli-stand-in.md)) answering with recorded files read in place. The re-shaped `trainRecorded()` tables are not carried over. A state nobody recorded gets a hand-made file in the CLI's exact shape and words, named `*-handmade*`.
 - **Tokens only**, through the styles module ([1e](styles-shell-and-the-first-screen.md)).
 - **The old prototype is frozen.** This item reads it; it never edits it.

@@ -17,7 +17,7 @@
 - **Git is read, never written.** No index change, no checkout, no commit. Other sessions commit in this checkout mid-run.
 - **Opened the README's way** ([spec/README.md](../../../../design/spec/README.md) "Opening it"): the archived `html/` folder served by `python3 -m http.server`, then `main.html?start=<preset>&still=true`. A page opened from disk cannot load the boards.
 - **Still frames at the boards' size:** 1440 × 900, the `$preview` every Screen board declares.
-- **The freeze** is 1a's rule ([design-app-architecture-and-law.md](design-app-architecture-and-law.md)): from this revision on, the old prototype takes fixes only.
+- **The freeze** is 1a's rule ([the interim rule](../../../assistant/design/CLAUDE.md#the-interim-rule-while-the-port-runs)): from this revision on, the old prototype takes fixes only.
 - **One download, with consent.** Playwright's Chromium (about 150 MB) is fetched once, when this item builds, on the user's yes. Nothing else is downloaded. No `apogee` binary runs.
 
 **Seam + files.**

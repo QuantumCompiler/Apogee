@@ -48,7 +48,7 @@
 - The Mac app's services and fakes: [module-schemes-and-previews.md](../../../adrs/darwin/module-schemes-and-previews.md) (ADR 0004), [presentation-mvvm.md](../../../adrs/darwin/presentation-mvvm.md), [assistant/darwin/CLAUDE.md](../../../assistant/darwin/CLAUDE.md).
 - The CLI's documents and streams: [machine-mode.md](../../../reference/cli/machine-mode.md).
 - The old prototype's clock and props: [the design guide](../../../../design/spec/CLAUDE.md) (`tick()`, and the 30-tick check the feature items' per-preset tests succeed).
-- Siblings: [1a](design-app-architecture-and-law.md) (the law and module map), [1b](scaffold-and-layering-check.md) (the folders, the layering check and its fixture-root exception), [1c](old-prototype-baseline.md) (the frozen line numbers), [1e](styles-shell-and-the-first-screen.md) (the Monitor pilot and preset routing), [1f](session-screen.md) (the chat recordings), [1k](video-and-runtime-consent.md) (`business/media` and the install sequence).
+- Siblings: [1a](../../../adrs/design/react-design-prototype.md) (the law and module map, the design's ADR 0001), [1b](scaffold-and-layering-check.md) (the folders, the layering check and its fixture-root exception), [1c](old-prototype-baseline.md) (the frozen line numbers), [1e](styles-shell-and-the-first-screen.md) (the Monitor pilot and preset routing), [1f](session-screen.md) (the chat recordings), [1k](video-and-runtime-consent.md) (`business/media` and the install sequence).
 
 **Decisions made** (dated):
 - 2026-11-14: The user's call: rebuild the prototype in React, TypeScript and Vite with the production GUIs' four layers, so a new app ports from it. The stand-in is its lower three layers.

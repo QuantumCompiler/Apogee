@@ -13,13 +13,14 @@ The design is moving to a new form (the user's call, 2026-11-14, track 1 of [the
   - built into one self-contained `lib/design/main.html` that opens with a double-click.
   - The canvas is retired once the new app covers every board.
 
-The law of the new form is the design's ADR 0001, written by [1a](../../backlog/design/v0.2.1/design-app-architecture-and-law.md).
+The law of the new form is [the design's ADR 0001](../../adrs/design/react-design-prototype.md): its layers and modules, its data, its one-file build, its local gates, the five rules and the canvas's retirement.
 
 ## The interim rule, while the port runs
 
-[default, 2026-11-14, recorded in 1a]: the old prototype is **frozen** as the port's reference from item 1c's baseline on. It takes fixes only, never a new screen or state. New design waits for the React app's first screen (1e) and is drawn there.
-
-An item already queued elsewhere that touches the design lands wherever the prototype is when it builds, and says so in its record. Those items are the Apple apps' 10a and 10c. (11a landed in the old prototype's files on 2026-11-18, as the logo board.)
+**Decided by 1a** (2026-11-18; the default recorded 2026-11-14, which the user let stand):
+- **The old prototype is frozen** as the port's reference from item 1c's baseline revision on. It takes fixes only: never a new screen, state, start preset or board.
+- **New design waits for the React app's first screen** (1e), and is drawn there under [ADR 0001](../../adrs/design/react-design-prototype.md).
+- **An item already queued elsewhere that touches the design** lands wherever the prototype is when it builds, and says so in its record. Those items are the Apple apps' 10a, gated on 1e so it is drawn in the React app, and 10c. (11a landed in the old prototype's files on 2026-11-18, as the logo board.)
 
 ## The rules that don't change
 

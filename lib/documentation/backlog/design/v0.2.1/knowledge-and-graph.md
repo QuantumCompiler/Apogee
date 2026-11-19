@@ -52,7 +52,7 @@
 - The Mac modules: `lib/src/darwin/source/presentation/{knowledge,graph}/`, their tests under `lib/src/darwin/tests/presentation/{knowledge,graph}/`.
 - The boards: `lib/design/spec/html/ScreenKnowledge.dc.html`, `ScreenCollections.dc.html`, `ScreenGraph.dc.html`, `ScreenGraphProse.dc.html`.
 - [Layer enforcement](../../../adrs/gui/layer-enforcement.md), [presentation MVVM](../../../adrs/darwin/presentation-mvvm.md), [module schemes and previews](../../../adrs/darwin/module-schemes-and-previews.md); [the old design guide](../../../../design/spec/CLAUDE.md) (the 30-tick check).
-- Siblings: [`design-app-architecture-and-law.md`](design-app-architecture-and-law.md) (1a), [`cli-stand-in.md`](cli-stand-in.md) (1d), [`styles-shell-and-the-first-screen.md`](styles-shell-and-the-first-screen.md) (1e, the gate; the sidebar's Code graph ⌘5 and Knowledge ⌘8 places), [`session-screen.md`](session-screen.md) (1f, where "Ask about this" lands), [`parity-proof.md`](parity-proof.md) (1s).
+- Siblings: [`react-design-prototype.md`](../../../adrs/design/react-design-prototype.md) (1a's ADR 0001), [`cli-stand-in.md`](cli-stand-in.md) (1d), [`styles-shell-and-the-first-screen.md`](styles-shell-and-the-first-screen.md) (1e, the gate; the sidebar's Code graph ⌘5 and Knowledge ⌘8 places), [`session-screen.md`](session-screen.md) (1f, where "Ask about this" lands), [`parity-proof.md`](parity-proof.md) (1s).
 
 **Decisions made** (dated):
 - 2026-11-14: The user's call: the prototype is rebuilt in React, TypeScript and Vite, with the production GUIs' four layers and MVVM modules, so a new app ports from it. It builds to one self-contained `lib/design/main.html` that opens with a double-click. This is a design-queue item in v0.2.1.

@@ -6,25 +6,24 @@ The work queue, seen one release at a time. This page is the **overview**: what 
 
 The branch is `v0.2.1`; the last published release is v0.2.0.
 
-**Still to build: 24 items.**
-- **The design:** 20. The prototype is being rebuilt in React.
+**Still to build: 23 items.**
+- **The design:** 19. The prototype is being rebuilt in React; its law, 1a, has shipped.
 - **The mod:** 4. The Claude plugin is born.
 - **The Apple apps:** none; their three tracks for this release have shipped.
 - **The CLI:** none; its three tracks for this release have shipped.
 
-On top of that, 4 maintenance items can be picked up any time. None of the 24 waits on a decision from you.
+On top of that, 4 maintenance items can be picked up any time. None of the 23 waits on a decision from you.
 
-**Can start today** (nothing gates them): [design 1a](design/v0.2.1/design-app-architecture-and-law.md) and [mod 1a](mod/v0.2.1/mod-scaffold.md).
+**Can start today** (nothing gates them): [design 1b](design/v0.2.1/scaffold-and-layering-check.md) and [mod 1a](mod/v0.2.1/mod-scaffold.md).
 
 ### The design ([queue](design/README.md#v021))
 
-**Track 1:** the design prototype is rebuilt in React and TypeScript, using the same layers and screen modules as the Mac app. It reads the CLI's own recorded output, and it builds into one `lib/design/main.html` that opens with a double-click. The old one-file prototype is frozen once 1c takes its baseline. From 1e on, new screens are drawn in the React app.
+**Track 1:** the design prototype is rebuilt in React and TypeScript, using the same layers and screen modules as the Mac app. It reads the CLI's own recorded output, and it builds into one `lib/design/main.html` that opens with a double-click. The old one-file prototype is frozen once 1c takes its baseline. From 1e on, new screens are drawn in the React app. The law, 1a, has shipped: the design's [ADR 0001](../adrs/design/react-design-prototype.md) ([Milestone A](../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react)).
 
 | # | Item | Waits on |
 |---|---|---|
 | **Foundations** | | |
-| 1a | [The design app's architecture and law](design/v0.2.1/design-app-architecture-and-law.md) | — |
-| 1b | [Scaffold the React app and its layering check](design/v0.2.1/scaffold-and-layering-check.md) | 1a |
+| 1b | [Scaffold the React app and its layering check](design/v0.2.1/scaffold-and-layering-check.md) | — |
 | 1c | [The old prototype's baseline](design/v0.2.1/old-prototype-baseline.md) | 1b |
 | 1d | [The CLI stand-in](design/v0.2.1/cli-stand-in.md) | 1b |
 | 1e | [Styles, the shell and the first screen](design/v0.2.1/styles-shell-and-the-first-screen.md) | 1d |
