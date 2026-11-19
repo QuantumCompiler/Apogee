@@ -2,7 +2,9 @@
 
 **Position.** Third of the four ([the design's ADR 0001](../../../../documentation/adrs/design/react-design-prototype.md), applying [GUI ADR 0001](../../../../documentation/adrs/gui/layer-enforcement.md)): the services the view-models consume, behind the Mac app's own interfaces, so a later port swaps a real CLI in under the same names.
 
-**Modules:** none yet. Item 1d adds reads (CommandRunning and its five read outcomes), jobs (a job as a stream of updates, ended last) and session (a chat from ChatStarting, replaying a recorded machine-mode stream); media follows with 1k. The ADR lists all four.
+**Modules:** `reads` (CommandRunning, its five read outcomes and four command outcomes, and ReadRunner over the process stand-in), `jobs` (a job as a stream of updates, ended last, replayed from a recording on the clock), `session` (a chat from ChatStarting, replaying a recorded machine-mode stream, a turn a send, waiting at each question). All three are design 1d's; media follows with 1k, and the ADR lists all four.
+
+**What they hold**, each under the Mac app's name: `CommandRunning`, `ReadOutcome`, `CommandOutcome`, `ReadWithStderr` and `ReadRunner`; `JobStarting`, `JobRunning`, `JobUpdate`, `JobEnd`, `JobStarter` and `SupervisedJob`; `ChatStarting`, `ChatSession`, `SessionEvent`, `SessionEnd`, `ChatLaunch`, `ApogeeClient` and `MachineSession`. A view-model sees the interfaces only, so a later port swaps a real CLI in under them.
 
 **May import:** this layer, Data and Infrastructure, and the packages `package.json` lists as dependencies. No React, no `.tsx` file, no Node built-in, no module above.
 

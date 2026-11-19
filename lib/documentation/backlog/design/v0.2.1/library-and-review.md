@@ -71,7 +71,7 @@ Line numbers are the recon's (the working tree of 2026-11-14), and the file keep
 - **The Mac tests** whose cases the TS tests mirror: `tests/presentation/library/LibraryEditorCloseTests.swift`, `MCPRemoveTests.swift`, and `tests/presentation/review/ReviewViewModelTests.swift`.
 - **The law:** [`adrs/gui/layer-enforcement.md`](../../../adrs/gui/layer-enforcement.md), [`adrs/darwin/presentation-mvvm.md`](../../../adrs/darwin/presentation-mvvm.md) and [`adrs/darwin/module-schemes-and-previews.md`](../../../adrs/darwin/module-schemes-and-previews.md).
 - **The old check this item's tests replace:** [`spec/CLAUDE.md` → Checking a change](../../../../design/spec/CLAUDE.md#checking-a-change), which runs every start preset for 30 ticks.
-- **Siblings:** [`cli-stand-in.md`](cli-stand-in.md) (1d), [`styles-shell-and-the-first-screen.md`](styles-shell-and-the-first-screen.md) (1e), [`gallery-and-foundations.md`](gallery-and-foundations.md) (1q) and [`parity-proof.md`](parity-proof.md) (1s).
+- **Siblings:** [`DEVELOPER.md` → the CLI stand-in](../../../assistant/design/DEVELOPER.md#the-cli-stand-in) (1d), [`styles-shell-and-the-first-screen.md`](styles-shell-and-the-first-screen.md) (1e), [`gallery-and-foundations.md`](gallery-and-foundations.md) (1q) and [`parity-proof.md`](parity-proof.md) (1s).
 
 **Decisions made** (dated):
 - 2026-11-14: The user's call. The prototype is rebuilt in React, TypeScript and Vite, with the production GUIs' four layers and MVVM screen modules. It stays the design's cross-platform source of truth.

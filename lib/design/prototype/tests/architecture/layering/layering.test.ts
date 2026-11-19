@@ -15,8 +15,12 @@ describe('the layering check, on this prototype', () => {
     expect(violations, violations.join('\n')).toEqual([])
   })
 
-  // The Mac app's LayeringTests.swift:21. 1d writes it, once the lower layers have modules.
-  test.todo('every layer has a module, so the shape is real rather than aspirational')
+  // The Mac app's LayeringTests.swift:21, written by 1d once the lower layers had modules.
+  test('every layer has a module, so the shape is real rather than aspirational', () => {
+    const map = ModuleMap.read(new DiskTree(root))
+    const layers = new Set(map.modules.map((module) => module.id.split('/')[0]))
+    for (const layer of LayeringCheck.layers) expect(layers.has(layer), `no module in ${layer}`).toBe(true)
+  })
 
   test('a dependency planted in the real modules.json fails as its rule', () => {
     const tree = new DiskTree(root)
@@ -225,6 +229,70 @@ describe('the layering check, on planted violations', () => {
     ])
   })
 
+  test('a recording imported by name with ?raw, from a place\'s Previews/ or a test, passes (design 1d)', () => {
+    const planted = new Planted()
+    planted.files['source/presentation/session/Previews/Recorded.ts'] =
+      "import agentsList from '@recorded/business/reads/Fixtures/agents-list.json?raw'\n" +
+      "import handmade from '../../../../fixtures/business/reads/agents-list-handmade.json?raw'\n\n" +
+      'export const rules = [agentsList, handmade]\n'
+    planted.files['tests/business/session/Recorded.test.ts'] =
+      "import stream from '@recorded/data/protocol/Fixtures/mock-actor.jsonl?raw'\n" +
+      "import handmade from '../../../fixtures/data/protocol/turn-handmade.jsonl?raw'\n" + stubTest
+    planted.files['scripts/recorded.test.ts'] = "import err from '@recorded/business/reads/Fixtures/agents-list-bad-config.err?raw'\n" + stubTest
+    expect(planted.violations()).toEqual([])
+  })
+
+  test('a recording imported in Business fails, naming the file: the stand-in is handed its rules', () => {
+    const planted = new Planted()
+    planted.files['source/business/session/ChatLaunch.ts'] += "import stream from '@recorded/data/protocol/Fixtures/mock-actor.jsonl?raw'\n"
+    planted.files['source/business/session/Recorded.spec.ts'] = "export { default } from '@recorded/business/reads/Fixtures/agents-list.json?raw'\n"
+    planted.files['source/infrastructure/process/Previews/Recorded.ts'] =
+      "export { default } from '../../../../fixtures/business/reads/agents-list-handmade.json?raw'\n"
+    planted.files['source/presentation/shell/Views/Recorded.ts'] = "import err from '@recorded/business/reads/Fixtures/agents-list-bad-config.err?raw'\n"
+    expect(planted.violations()).toEqual([
+      "source/business/session/ChatLaunch.ts imports @recorded/data/protocol/Fixtures/mock-actor.jsonl?raw, a recording: only a Presentation module's Previews/ and the tests import recordings, and the stand-in is handed its rules",
+      "source/business/session/Recorded.spec.ts imports @recorded/business/reads/Fixtures/agents-list.json?raw, a recording: only a Presentation module's Previews/ and the tests import recordings, and the stand-in is handed its rules",
+      "source/infrastructure/process/Previews/Recorded.ts imports ../../../../fixtures/business/reads/agents-list-handmade.json?raw, a recording: only a Presentation module's Previews/ and the tests import recordings, and the stand-in is handed its rules",
+      "source/presentation/shell/Views/Recorded.ts imports @recorded/business/reads/Fixtures/agents-list-bad-config.err?raw, a recording: only a Presentation module's Previews/ and the tests import recordings, and the stand-in is handed its rules",
+    ])
+  })
+
+  test('a glob over @recorded fails, naming the file: a recording is imported by name', () => {
+    const planted = new Planted()
+    planted.files['source/presentation/session/Previews/Every.ts'] =
+      "export const every = import.meta.glob('@recorded/**/Fixtures/*.json', { query: '?raw', eager: true })\n" +
+      'export const one = (name: string) => import(`@recorded/business/reads/Fixtures/${name}.json?raw`)\n' +
+      "export const own = import.meta.glob('../../../../fixtures/**/*.json', { query: '?raw' })\n"
+    planted.files['tests/data/protocol/Every.test.ts'] = "const all = import.meta.glob('@recorded/**/*.jsonl')\n" + stubTest
+    expect(planted.violations()).toEqual([
+      'source/presentation/session/Previews/Every.ts globs @recorded/**/Fixtures/*.json: a recording is imported by name, so the build bundles only the recordings a preset uses',
+      'source/presentation/session/Previews/Every.ts globs @recorded/business/reads/Fixtures/*: a recording is imported by name, so the build bundles only the recordings a preset uses',
+      'source/presentation/session/Previews/Every.ts globs ../../../../fixtures/**/*.json: a recording is imported by name, so the build bundles only the recordings a preset uses',
+      'tests/data/protocol/Every.test.ts globs @recorded/**/*.jsonl: a recording is imported by name, so the build bundles only the recordings a preset uses',
+    ])
+  })
+
+  test('a recording is a file in a Fixtures/ folder, named in full, imported with ?raw', () => {
+    const planted = new Planted()
+    planted.files['source/presentation/session/Previews/Wrong.ts'] =
+      "import parsed from '@recorded/business/reads/Fixtures/agents-list.json'\n" +
+      "import swift from '@recorded/presentation/monitor/MonitorViewModelTests.swift?raw'\n" +
+      "import out from '@recorded/business/reads/Fixtures/../../../presentation/shell/Fixtures/x.json?raw'\n" +
+      "import url from '@recorded/business/reads/Fixtures/agents-list.json?url'\n" +
+      "import folder from '@recorded/business/reads/Fixtures?raw'\n" +
+      "import own from '../../../../fixtures/business/reads/agents-list-handmade.json'\n"
+    const sentence = (specifier: string) =>
+      `source/presentation/session/Previews/Wrong.ts imports ${specifier}: a recording is a file in a Fixtures/ folder of @recorded, or under fixtures/, named in full and imported with ?raw so its text stays byte for byte`
+    expect(planted.violations()).toEqual([
+      sentence('@recorded/business/reads/Fixtures/agents-list.json'),
+      sentence('@recorded/presentation/monitor/MonitorViewModelTests.swift?raw'),
+      sentence('@recorded/business/reads/Fixtures/../../../presentation/shell/Fixtures/x.json?raw'),
+      sentence('@recorded/business/reads/Fixtures/agents-list.json?url'),
+      sentence('@recorded/business/reads/Fixtures?raw'),
+      sentence('../../../../fixtures/business/reads/agents-list-handmade.json'),
+    ])
+  })
+
   test('an import of a module the map does not declare fails', () => {
     const planted = new Planted()
     planted.files['source/data/protocol/MachineProtocol.ts'] =
@@ -270,6 +338,14 @@ describe('the layering check, on planted violations', () => {
       "import { SessionWindow } from '../../session/Views/SessionWindow'\n" + planted.files['source/presentation/shell/Views/ShellView.tsx']
     expect(planted.violations()).toEqual([
       "presentation/shell depends on the place presentation/session: the shell never imports a place, and app hands it each place's screen",
+    ])
+  })
+
+  test('React imported in Data fails, naming the file (design 1d)', () => {
+    const planted = new Planted()
+    planted.files['source/data/protocol/MachineProtocol.ts'] += "import { createElement } from 'react'\n"
+    expect(planted.violations()).toEqual([
+      'source/data/protocol/MachineProtocol.ts imports react: React stays in Presentation, and data/protocol is data',
     ])
   })
 
@@ -375,7 +451,7 @@ describe('the layering check, on planted violations', () => {
 })
 
 describe('how the check reads a file', () => {
-  test("imports are read with TypeScript's parser, in every form", () => {
+  test("imports are read with TypeScript's parser, in every form; a computed import() as the glob Vite makes of it", () => {
     const source = [
       "import React from 'react'",
       "import type { A } from './a'",
@@ -391,9 +467,11 @@ describe('how the check reads a file', () => {
       "const template = `require('j')`",
       "import k from './k?raw'",
       'export const l = 1',
+      'const m = import(`./m/${name}.ts`)',
+      'const n = import(`./n.ts`)',
     ].join('\n')
     expect(LayeringCheck.importsIn(source, 'sample.ts')).toEqual([
-      'react', './a', './side-effect.css', '../b', '../c', './d', 'e', 'f', 'g', './k?raw',
+      'react', './a', './side-effect.css', '../b', '../c', './d', 'e', 'f', 'g', './k?raw', './m/*', './n.ts',
     ])
   })
 

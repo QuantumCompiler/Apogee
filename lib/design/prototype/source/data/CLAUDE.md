@@ -2,7 +2,9 @@
 
 **Position.** Second of the four ([the design's ADR 0001](../../../../documentation/adrs/design/react-design-prototype.md), applying [GUI ADR 0001](../../../../documentation/adrs/gui/layer-enforcement.md)): the CLI's documents and events as types, decoded as tolerantly as the Mac app decodes them.
 
-**Modules:** none yet. Item 1d adds protocol (the CLI's documents and stream events as types, an unknown event kept rather than thrown), as the ADR lists it. There is no discovery or preferences module: the process stand-in's modes take discovery's place, and the person's choices live in view-model state.
+**Modules:** `protocol` (design 1d: the CLI's documents and stream lines as types, decoded as tolerantly as the Mac app's DataProtocol; an unknown event kept, never thrown).
+
+**What `protocol` holds:** `ReadDocument`, `EventDecoder` into a `ProtocolEvent`, `JobEvent` (the Mac app keeps it in BusinessJobs; design 1d puts its decoding here, under its name), `DriverLine` and `MachineProtocol`. There is no discovery or preferences module: the process stand-in's modes take discovery's place, and the person's choices live in view-model state.
 
 **May import:** this layer and Infrastructure, and the packages `package.json` lists as dependencies. No React, no `.tsx` file, no Node built-in, no module above.
 

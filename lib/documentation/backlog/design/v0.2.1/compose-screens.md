@@ -55,7 +55,7 @@
 **Reference.**
 - The prototype: `main.html` sections `video: compositions` and `media: shared`, the `vid.isCompose` markup, `applyStart`'s compose branch, and `tick()`'s plan, preview and render steps. Its guide is [`lib/design/spec/CLAUDE.md`](../../../../design/spec/CLAUDE.md), whose 30-tick check the per-preset test succeeds.
 - The Mac module: `lib/src/darwin/source/presentation/compose/` and its tests, `tests/presentation/compose/` (4 test files). Previews follow [module-schemes-and-previews.md](../../../adrs/darwin/module-schemes-and-previews.md); the Mac app's guide is [`assistant/darwin/CLAUDE.md`](../../../assistant/darwin/CLAUDE.md).
-- The siblings: [video-and-runtime-consent.md](video-and-runtime-consent.md) (1k, the player and the Video screen), [cli-stand-in.md](cli-stand-in.md) (1d), [styles-shell-and-the-first-screen.md](styles-shell-and-the-first-screen.md) (1e), [voice-screen.md](voice-screen.md) (1m, the other 1k child), [parity-proof.md](parity-proof.md) (1s).
+- The siblings: [video-and-runtime-consent.md](video-and-runtime-consent.md) (1k, the player and the Video screen), [DEVELOPER.md → the CLI stand-in](../../../assistant/design/DEVELOPER.md#the-cli-stand-in) (1d), [styles-shell-and-the-first-screen.md](styles-shell-and-the-first-screen.md) (1e), [voice-screen.md](voice-screen.md) (1m, the other 1k child), [parity-proof.md](parity-proof.md) (1s).
 
 **Decisions made** (dated):
 - 2026-11-14: The user's call: the prototype is rebuilt in React, TypeScript and Vite, with the production apps' four layers and screen modules, so a new app ports from it. It ships in v0.2.1, in the design's own queue.

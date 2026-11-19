@@ -6,25 +6,24 @@ The work queue, seen one release at a time. This page is the **overview**: what 
 
 The branch is `v0.2.1`; the last published release is v0.2.0.
 
-**Still to build: 21 items.**
-- **The design:** 17. The prototype is being rebuilt in React; its law (1a), its scaffold (1b) and the old prototype's baseline (1c) have shipped.
+**Still to build: 20 items.**
+- **The design:** 16. The prototype is being rebuilt in React; its law (1a), its scaffold (1b), the old prototype's baseline (1c) and the CLI stand-in (1d) have shipped.
 - **The mod:** 4. The Claude plugin is born.
 - **The Apple apps:** none; their three tracks for this release have shipped.
 - **The CLI:** none; its three tracks for this release have shipped.
 
-On top of that, 4 maintenance items can be picked up any time. None of the 21 waits on a decision from you.
+On top of that, 4 maintenance items can be picked up any time. None of the 20 waits on a decision from you.
 
-**Can start today** (nothing gates them): [design 1d](design/v0.2.1/cli-stand-in.md) and [mod 1a](mod/v0.2.1/mod-scaffold.md).
+**Can start today** (nothing gates them): [design 1e](design/v0.2.1/styles-shell-and-the-first-screen.md) and [mod 1a](mod/v0.2.1/mod-scaffold.md).
 
 ### The design ([queue](design/README.md#v021))
 
-**Track 1:** the design prototype is rebuilt in React and TypeScript, using the same layers and screen modules as the Mac app. It reads the CLI's own recorded output, and it builds into one `lib/design/main.html` that opens with a double-click. The old one-file prototype is frozen at `b375fac9`, 1c's baseline. From 1e on, new screens are drawn in the React app. The law, 1a, has shipped: the design's [ADR 0001](../adrs/design/react-design-prototype.md). So has the scaffold, 1b: the empty app, its module map and layering check, and one `npm run check` ([DEVELOPER.md](../assistant/design/DEVELOPER.md)). So has the old prototype's baseline, 1c: its still frames at that revision, re-made by `npm run baseline` ([DEVELOPER.md](../assistant/design/DEVELOPER.md#the-old-prototypes-baseline)). All three are in [Milestone A](../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react).
+**Track 1:** the design prototype is rebuilt in React and TypeScript, using the same layers and screen modules as the Mac app. It reads the CLI's own recorded output, and it builds into one `lib/design/main.html` that opens with a double-click. The old one-file prototype is frozen at `b375fac9`, 1c's baseline. From 1e on, new screens are drawn in the React app. The law, 1a, has shipped: the design's [ADR 0001](../adrs/design/react-design-prototype.md). So has the scaffold, 1b: the empty app, its module map and layering check, and one `npm run check` ([DEVELOPER.md](../assistant/design/DEVELOPER.md)). So has the old prototype's baseline, 1c: its still frames at that revision, re-made by `npm run baseline` ([DEVELOPER.md](../assistant/design/DEVELOPER.md#the-old-prototypes-baseline)). So has the CLI stand-in, 1d: the app's three lower layers, answering every read, command, job and chat from the CLI's own recordings ([DEVELOPER.md](../assistant/design/DEVELOPER.md#the-cli-stand-in)). All four are in [Milestone A](../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react).
 
 | # | Item | Waits on |
 |---|---|---|
 | **Foundations** | | |
-| 1d | [The CLI stand-in](design/v0.2.1/cli-stand-in.md) | — |
-| 1e | [Styles, the shell, the composition root and the first screen](design/v0.2.1/styles-shell-and-the-first-screen.md) | 1d |
+| 1e | [Styles, the shell, the composition root and the first screen](design/v0.2.1/styles-shell-and-the-first-screen.md) | — |
 | **Screens** | | |
 | 1f | [The session screen](design/v0.2.1/session-screen.md) (split in two before building) | 1e |
 | 1g | [Sessions: the list, the inspector, the execute door and the console](design/v0.2.1/sessions-inspector-execute-and-console.md) | 1f |

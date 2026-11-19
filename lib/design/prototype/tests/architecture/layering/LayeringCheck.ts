@@ -33,6 +33,12 @@ type Layer = (typeof LayeringCheck.layers)[number]
  *   dependency or Node built-in only outside source/ (tests, scripts and
  *   config), and no relative import, Vite glob or `new URL(…, import.meta.url)`
  *   leaves `lib/design/prototype/`;
+ * - the fixture roots (design 1d, a part of ADR 0001 §4's data rule held
+ *   mechanically): `@recorded/…`, the Mac app's tests by Vite's alias, and
+ *   `fixtures/`, the design's own, are reached only from a Presentation
+ *   module's `Previews/` and from the tests, each recording by its full name
+ *   in a `Fixtures/` folder (or under `fixtures/`) with `?raw`, and never by a
+ *   glob;
  * - a module depends only on its own layer or a lower one; `styles` leans on
  *   no sibling; the shell imports no place; a file imports another module
  *   only when the map declares the dependency;
@@ -60,6 +66,12 @@ export class LayeringCheck {
   static readonly appPackage = 'app'
 
   static readonly entryPoint = 'source/main.tsx'
+
+  /** Vite's alias for the Mac app's tests, whose `Fixtures/` folders hold the CLI's recordings (design 1d). */
+  static readonly recordedAlias = '@recorded'
+
+  /** The design's own fixture root: its hand-made files and new recordings (design 1d). */
+  static readonly fixturesRoot = 'fixtures'
 
   /** The files whose imports are read. */
   static readonly codeExtensions = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs']
@@ -156,11 +168,18 @@ export class LayeringCheck {
       for (const specifier of LayeringCheck.importsIn(this.tree.contents(file) ?? '', file)) {
         const bare = LayeringCheck.withoutQuery(specifier)
         if (LayeringCheck.isRelative(bare)) {
-          if (LayeringCheck.resolve(file, bare) === undefined) {
+          const resolved = LayeringCheck.resolve(file, bare)
+          if (resolved === undefined) {
             found.push(
               `${file} imports ${specifier}, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages`,
             )
+          } else if (LayeringCheck.inFixtures(resolved)) {
+            found.push(...LayeringCheck.recording(file, specifier, LayeringCheck.fixturePathIsWhole(resolved)))
           }
+          continue
+        }
+        if (bare === LayeringCheck.recordedAlias || bare.startsWith(`${LayeringCheck.recordedAlias}/`)) {
+          found.push(...LayeringCheck.recording(file, specifier, LayeringCheck.recordedPathIsWhole(bare)))
           continue
         }
         if (isBuiltin(bare)) {
@@ -185,6 +204,65 @@ export class LayeringCheck {
       }
     }
     return found
+  }
+
+  /**
+   * A recording reached from `file` by `specifier` (design 1d): never by a
+   * glob; only from a Presentation module's `Previews/` or a test; and by its
+   * full name (`whole`) with `?raw`.
+   */
+  private static recording(file: string, specifier: string, whole: boolean): string[] {
+    const bare = LayeringCheck.withoutQuery(specifier)
+    if (/[*{}]/.test(bare)) {
+      return [`${file} globs ${specifier}: a recording is imported by name, so the build bundles only the recordings a preset uses`]
+    }
+    const found: string[] = []
+    if (!LayeringCheck.mayImportRecordings(file)) {
+      found.push(
+        `${file} imports ${specifier}, a recording: only a Presentation module's Previews/ and the tests import recordings, and the stand-in is handed its rules`,
+      )
+    }
+    if (!whole || specifier.slice(bare.length) !== '?raw') {
+      found.push(
+        `${file} imports ${specifier}: a recording is a file in a Fixtures/ folder of @recorded, or under fixtures/, named in full and imported with ?raw so its text stays byte for byte`,
+      )
+    }
+    return found
+  }
+
+  /** A Presentation module's `Previews/` file, or a test: what may import a recording (design 1d's default). */
+  static mayImportRecordings(file: string): boolean {
+    return /^source\/presentation\/[^/]+\/Previews\//.test(file) || LayeringCheck.isTest(file)
+  }
+
+  /**
+   * A file under `tests/` or `e2e/`, or a `*.test.*` / `*.spec.*` beside a
+   * script -- never under source/, where a test-named file is source like any
+   * other (no runner reads it there) and would carry a recording into a layer.
+   */
+  static isTest(file: string): boolean {
+    return (
+      file.startsWith('tests/') ||
+      file.startsWith('e2e/') ||
+      (!file.startsWith('source/') && /\.(test|spec)\.[cm]?[jt]sx?$/.test(file))
+    )
+  }
+
+  /** A path, from the prototype's root, under the design's own fixture root. */
+  private static inFixtures(path: string): boolean {
+    return path === LayeringCheck.fixturesRoot || path.startsWith(`${LayeringCheck.fixturesRoot}/`)
+  }
+
+  /** `fixtures/<…>/<file>`: a file under the root, not the root itself. */
+  private static fixturePathIsWhole(path: string): boolean {
+    return path.split('/').length >= 2 && !path.endsWith('/')
+  }
+
+  /** `@recorded/<…>/Fixtures/<…>/<file>`: no empty, `.` or `..` part, and a `Fixtures` folder above the file. */
+  private static recordedPathIsWhole(bare: string): boolean {
+    const parts = bare.split('/').slice(1)
+    const fixtures = parts.indexOf('Fixtures')
+    return parts.every((part) => part !== '' && part !== '.' && part !== '..') && fixtures >= 0 && fixtures < parts.length - 1
   }
 
   // MARK: - Edges
@@ -243,7 +321,7 @@ export class LayeringCheck {
         const bare = LayeringCheck.withoutQuery(specifier)
         if (LayeringCheck.isRelative(bare)) {
           const resolved = LayeringCheck.resolve(file, bare)
-          if (resolved === undefined) continue // outside() names it
+          if (resolved === undefined || LayeringCheck.inFixtures(resolved)) continue // outside() names it
           const target = LayeringCheck.moduleAt(resolved, byId)
           if (!target) {
             found.push(`${file} imports ${resolved}, which is not a module of this map`)
@@ -379,7 +457,9 @@ export class LayeringCheck {
    * parser: `import`, `export … from`, `import()`, `require`, `import x =
    * require` and `import('…')` types, and the two other ways Vite pulls a file
    * into the build: each pattern of an `import.meta.glob` (its `!` negations
-   * left out) and the path of a `new URL('…', import.meta.url)`.
+   * left out) and the path of a `new URL('…', import.meta.url)`. A computed
+   * `import(`…${x}…`)`, which Vite turns into a glob, is read as its fixed
+   * head and `*` (design 1d).
    */
   static importsIn(source: string, fileName: string): string[] {
     const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, LayeringCheck.scriptKind(fileName))
@@ -403,7 +483,10 @@ export class LayeringCheck {
         (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
           (ts.isIdentifier(node.expression) && node.expression.text === 'require'))
       ) {
-        add(node.arguments[0])
+        const first = node.arguments[0]
+        // A computed `import(`…${x}…`)` is a glob to Vite: read as its fixed head and `*`.
+        if (first && ts.isTemplateExpression(first) && node.expression.kind === ts.SyntaxKind.ImportKeyword) found.push(`${first.head.text}*`)
+        else add(first)
       } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
         add(node.argument.literal)
       } else if (

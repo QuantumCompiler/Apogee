@@ -1,0 +1,169 @@
+import { BoundedTail } from './BoundedTail'
+import { ChildExit } from './ChildExit'
+
+/** What one recorded call printed. Each part is the binary's own: a recording, or a slice of one. */
+export interface Answer {
+  /** What it wrote on stdout: a read's document, a job's stream, a chat's lines. */
+  readonly stdout?: string
+  /** What it wrote on stderr: a recorded `.err`. */
+  readonly stderr?: string
+  /** How it exited: 0 unless the rule names another (a recorded `.exit`, read by `recordedExit`). */
+  readonly exit?: number
+  /** It ran past its time and was stopped: no exit of its own, terminated. */
+  readonly timedOut?: boolean
+}
+
+/**
+ * One rule of the table: an argument prefix, and what the binary printed for
+ * it. Several answers come in order, one a call, the last repeating: an
+ * install that fails, then succeeds.
+ */
+export interface Rule {
+  /** The arguments after `apogee`, as the caller gives them (a read without its `--output-format`). */
+  readonly arguments: readonly string[]
+  readonly answer: Answer | readonly [Answer, ...Answer[]]
+}
+
+/** A preset's rule tables, one a kind, as `PreviewRunner` keeps reads and commands apart. */
+export interface Rules {
+  readonly reads?: readonly Rule[]
+  readonly commands?: readonly Rule[]
+  readonly jobs?: readonly Rule[]
+  readonly chats?: readonly Rule[]
+}
+
+export type RuleKind = keyof Rules
+
+/** The `apogee` prop of the old prototype (`main.html:2512`, read at `:4817-4819`, at `b375fac9`). */
+export type ApogeeMode = 'installed' | 'missing' | 'config-typo'
+
+/**
+ * What the modes answer with, shared by every preset: handed in, since a
+ * recording is imported only by a `Previews/` file or a test
+ * (`presentation/app/Previews/ModeRules.ts`).
+ */
+export interface ModeRules {
+  /** The CLI's refusal of a config it cannot read: `agents-list-bad-config.err`, word for word. */
+  readonly configTypoRefusal: string
+}
+
+/** A child run to its end, with everything it said kept: the Mac app's `CapturedRun`. */
+export interface CapturedRun {
+  readonly exit: ChildExit
+  readonly stdout: string
+  /** Whether stdout ran past the limit. A recording never does. */
+  readonly stdoutTruncated: boolean
+  readonly stderrTail: BoundedTail
+  readonly timedOut: boolean
+}
+
+/** A call's end: it ran and printed `run`, or it never started, and `reason` says why. */
+export type ChildAnswer = { readonly started: true; readonly run: CapturedRun } | { readonly started: false; readonly reason: string }
+
+/** Where the binary is, as the mode says: the Mac app's `DiscoveryOutcome`, whose place the three modes take. */
+export type DiscoveryOutcome = { readonly case: 'found'; readonly binary: string } | { readonly case: 'notFound' }
+
+/** One call the child ran, kept for the tests as the Mac app's scripted runners keep theirs. */
+export interface Call {
+  readonly kind: RuleKind
+  readonly arguments: readonly string[]
+  readonly input?: string
+}
+
+/** The status a recorded `.exit` file holds. */
+export function recordedExit(text: string): number {
+  const trimmed = text.trim()
+  if (!/^-?\d+$/.test(trimmed)) throw new Error(`a recorded .exit holds one status, not ${JSON.stringify(text)}`)
+  return Number(trimmed)
+}
+
+/**
+ * The stand-in for running `apogee` (design 1d): it takes an argument list and
+ * answers from its rule table with what the CLI printed, in one of the three
+ * modes. It never starts a process, reads a file or reaches the network: its
+ * rules are handed to it, each answer a bundled recording.
+ *
+ * - The longest prefix wins; of two as long, the later rule (`PreviewStore`'s rule).
+ * - `missing`: no binary is found, and nothing runs.
+ * - `config-typo`: every call exits 1 with the recorded refusal, its verb
+ *   swapped, as the old prototype's `cfgRefusal` does (`main.html:4820` at `b375fac9`).
+ */
+export class StandInChild {
+  /** Where the binary is said to be, as the Mac app's previews say it (`previewBinary`); never run. */
+  static readonly binary = '/Users/someone/.local/bin/apogee'
+
+  readonly rules: Rules
+  readonly apogee: ApogeeMode
+  /** Every call that ran -- answered by a rule, or refused by the config -- in order. */
+  readonly calls: Call[] = []
+  /** Each call no rule answered, as `<kind>: apogee <arguments>`: what a per-preset test holds empty. */
+  readonly unanswered: string[] = []
+  private readonly answered = new Map<Rule, number>()
+
+  constructor(
+    settings: { readonly rules: Rules; readonly apogee: ApogeeMode },
+    readonly modes: ModeRules,
+  ) {
+    this.rules = settings.rules
+    this.apogee = settings.apogee
+  }
+
+  /** Where the binary is: found, unless the mode is `missing`. */
+  locateBinary(): DiscoveryOutcome {
+    return this.apogee === 'missing' ? { case: 'notFound' } : { case: 'found', binary: StandInChild.binary }
+  }
+
+  /** Runs `apogee <args>` as `kind`, `input` on its stdin, and answers what it printed. */
+  run(kind: RuleKind, args: readonly string[], input?: string): ChildAnswer {
+    if (this.apogee === 'missing') return { started: false, reason: 'apogee is not installed' }
+    const said = `apogee ${args.join(' ')}`
+    this.calls.push(StandInChild.call(kind, args, input))
+    if (this.apogee === 'config-typo') {
+      const verb = args[0]
+      const refusal = verb === undefined ? this.modes.configTypoRefusal : this.modes.configTypoRefusal.replace(/^apogee [^:\s]+:/, `apogee ${verb}:`)
+      return { started: true, run: StandInChild.captured({ stderr: refusal, exit: 1 }) }
+    }
+    const rule = StandInChild.longestPrefix(this.rules[kind] ?? [], args)
+    if (!rule) {
+      this.note(kind, said)
+      return { started: false, reason: `no recorded answer for ${said}` }
+    }
+    const answers: readonly Answer[] = Array.isArray(rule.answer) ? rule.answer : [rule.answer as Answer]
+    const count = this.answered.get(rule) ?? 0
+    this.answered.set(rule, count + 1)
+    const answer = answers[Math.min(count, answers.length - 1)] ?? {}
+    return { started: true, run: StandInChild.captured(answer) }
+  }
+
+  /** Logs what nobody recorded, as `<kind>: <what>`: a call, or a chat's turn past its recording. */
+  note(kind: RuleKind, what: string): void {
+    this.unanswered.push(`${kind}: ${what}`)
+  }
+
+  /** The rule whose arguments are the longest prefix of `args`; of two as long, the later. */
+  static longestPrefix(rules: readonly Rule[], args: readonly string[]): Rule | undefined {
+    let best: Rule | undefined
+    for (const rule of rules) {
+      const prefix = rule.arguments
+      if (prefix.length > args.length || prefix.some((word, index) => word !== args[index])) continue
+      if (!best || prefix.length >= best.arguments.length) best = rule
+    }
+    return best
+  }
+
+  private static call(kind: RuleKind, args: readonly string[], input: string | undefined): Call {
+    return input === undefined ? { kind, arguments: [...args] } : { kind, arguments: [...args], input }
+  }
+
+  /** What an answer leaves: a timed-out child was terminated, so its end is signal 15. */
+  private static captured(answer: Answer): CapturedRun {
+    const timedOut = answer.timedOut ?? false
+    return {
+      exit: answer.exit !== undefined ? ChildExit.exited(answer.exit) : timedOut ? ChildExit.signalled(15) : ChildExit.exited(0),
+      stdout: answer.stdout ?? '',
+      stdoutTruncated: false,
+      stderrTail: BoundedTail.of(answer.stderr ?? ''),
+      timedOut,
+    }
+  }
+}

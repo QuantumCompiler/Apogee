@@ -1,0 +1,170 @@
+import { describe, expect, test } from 'vitest'
+import agentsListBadConfig from '@recorded/business/reads/Fixtures/agents-list-bad-config.err?raw'
+import agentsList from '@recorded/business/reads/Fixtures/agents-list.json?raw'
+import chatsShow from '@recorded/business/reads/Fixtures/chats-show.json?raw'
+import chatsShowAfterStop from '@recorded/business/reads/Fixtures/chats-show-after-stop.json?raw'
+import launchRefusedModel from '@recorded/data/protocol/Fixtures/launch-refused-model.err?raw'
+import launchRefusedModelExit from '@recorded/data/protocol/Fixtures/launch-refused-model.exit?raw'
+import storeList from '@recorded/business/reads/Fixtures/store-list.json?raw'
+import storeListAll from '@recorded/business/reads/Fixtures/store-list-all.json?raw'
+import storeListKinds from '@recorded/business/reads/Fixtures/store-list-kinds.json?raw'
+import storeListRoutes from '@recorded/business/reads/Fixtures/store-list-routes.json?raw'
+import { BoundedTail } from '../../../source/infrastructure/process/BoundedTail'
+import { ChildExit } from '../../../source/infrastructure/process/ChildExit'
+import { recordedExit, StandInChild } from '../../../source/infrastructure/process/StandInChild'
+import type { ModeRules, Rules } from '../../../source/infrastructure/process/StandInChild'
+
+const modes: ModeRules = { configTypoRefusal: agentsListBadConfig }
+
+function child(rules: Rules, apogee: 'installed' | 'missing' | 'config-typo' = 'installed'): StandInChild {
+  return new StandInChild({ rules, apogee }, modes)
+}
+
+/** What a call printed, when it started. */
+function printed(answer: ReturnType<StandInChild['run']>): { stdout: string; stderr: string; exit: string; timedOut: boolean } {
+  if (!answer.started) throw new Error(`it did not start: ${answer.reason}`)
+  const { run } = answer
+  return { stdout: run.stdout, stderr: run.stderrTail.text, exit: ChildExit.description(run.exit), timedOut: run.timedOut }
+}
+
+describe('the stand-in child: its rule table', () => {
+  test('the longest prefix wins', () => {
+    const stand = child({
+      reads: [
+        { arguments: ['store', 'list'], answer: { stdout: storeList } },
+        { arguments: ['store', 'list', '--all'], answer: { stdout: storeListAll } },
+        { arguments: ['store'], answer: { stdout: storeListKinds } },
+      ],
+    })
+    expect(printed(stand.run('reads', ['store', 'list', '--all', '--kinds'])).stdout).toBe(storeListAll)
+    expect(printed(stand.run('reads', ['store', 'list'])).stdout).toBe(storeList)
+    expect(printed(stand.run('reads', ['store', 'info'])).stdout).toBe(storeListKinds)
+  })
+
+  test('of two equally long prefixes, the later rule wins (PreviewStore\'s rule)', () => {
+    const stand = child({
+      reads: [
+        { arguments: ['store', 'list'], answer: { stdout: storeList } },
+        { arguments: ['store', 'list'], answer: { stdout: storeListRoutes } },
+      ],
+    })
+    expect(printed(stand.run('reads', ['store', 'list', '--all'])).stdout).toBe(storeListRoutes)
+  })
+
+  test('a rule\'s answers come in order, one a call, and the last repeats', () => {
+    const stand = child({
+      reads: [{ arguments: ['chats', 'show'], answer: [{ stdout: chatsShow }, { stdout: chatsShowAfterStop }] }],
+    })
+    expect([1, 2, 3, 4].map(() => printed(stand.run('reads', ['chats', 'show', 'wal'])).stdout)).toEqual([
+      chatsShow,
+      chatsShowAfterStop,
+      chatsShowAfterStop,
+      chatsShowAfterStop,
+    ])
+  })
+
+  test('it answers with what the CLI printed: stdout, stderr and an exit, or a timeout', () => {
+    const stand = child({
+      chats: [{ arguments: ['chat'], answer: { stderr: launchRefusedModel, exit: recordedExit(launchRefusedModelExit) } }],
+      commands: [{ arguments: ['models', 'pull'], answer: { timedOut: true } }],
+    })
+    expect(printed(stand.run('chats', ['chat', '-m', 'nothing']))).toEqual({
+      stdout: '',
+      stderr: launchRefusedModel,
+      exit: 'exited with status 1',
+      timedOut: false,
+    })
+    expect(printed(stand.run('commands', ['models', 'pull', 'x']))).toEqual({
+      stdout: '',
+      stderr: '',
+      exit: 'ended by signal 15',
+      timedOut: true,
+    })
+  })
+
+  test('reads, commands, jobs and chats are four tables: a read\'s rule never answers a command', () => {
+    const stand = child({ reads: [{ arguments: ['agents', 'list'], answer: { stdout: agentsList } }] })
+    expect(stand.run('commands', ['agents', 'list'])).toEqual({
+      started: false,
+      reason: 'no recorded answer for apogee agents list',
+    })
+  })
+
+  test('a call nobody answered does not start, and is logged; every call is kept, with its input', () => {
+    const stand = child({ commands: [{ arguments: ['auth', 'add'], answer: {} }] })
+    expect(stand.run('reads', ['system'])).toEqual({ started: false, reason: 'no recorded answer for apogee system' })
+    stand.run('commands', ['auth', 'add', 'anthropic'], 'the key, on stdin')
+    expect(stand.unanswered).toEqual(['reads: apogee system'])
+    expect(stand.calls).toEqual([
+      { kind: 'reads', arguments: ['system'] },
+      { kind: 'commands', arguments: ['auth', 'add', 'anthropic'], input: 'the key, on stdin' },
+    ])
+  })
+
+  test('a recorded .exit is read as its status, and anything else is refused', () => {
+    expect(recordedExit(launchRefusedModelExit)).toBe(1)
+    expect(() => recordedExit('one\n')).toThrow('a recorded .exit holds one status, not "one\\n"')
+  })
+})
+
+describe('the stand-in child: its three modes', () => {
+  const rules: Rules = { reads: [{ arguments: ['agents', 'list'], answer: { stdout: agentsList } }] }
+
+  test('installed: the binary is found where the previews say, and the rules answer', () => {
+    const stand = child(rules)
+    expect(stand.locateBinary()).toEqual({ case: 'found', binary: '/Users/someone/.local/bin/apogee' })
+    expect(printed(stand.run('reads', ['agents', 'list'])).stdout).toBe(agentsList)
+  })
+
+  test('missing: no binary is found, and nothing runs', () => {
+    const stand = child(rules, 'missing')
+    expect(stand.locateBinary()).toEqual({ case: 'notFound' })
+    expect(stand.run('reads', ['agents', 'list'])).toEqual({
+      started: false,
+      reason: 'apogee is not installed',
+    })
+    expect(stand.calls).toEqual([])
+    expect(stand.unanswered).toEqual([])
+  })
+
+  test('config-typo: every call exits 1 with the recorded refusal, its verb swapped', () => {
+    const stand = child(rules, 'config-typo')
+    expect(stand.locateBinary()).toEqual({ case: 'found', binary: '/Users/someone/.local/bin/apogee' })
+    for (const [kind, args] of [
+      ['reads', ['agents', 'list']],
+      ['reads', ['review', 'list']],
+      ['jobs', ['models', 'pull', 'x']],
+    ] as const) {
+      expect(printed(stand.run(kind, args))).toEqual({
+        stdout: '',
+        stderr: agentsListBadConfig.replace('apogee agents:', `apogee ${args[0]}:`),
+        exit: 'exited with status 1',
+        timedOut: false,
+      })
+    }
+    expect(stand.calls.map((call) => call.arguments[0])).toEqual(['agents', 'review', 'models'])
+  })
+})
+
+describe('what a child leaves', () => {
+  test('an exit says itself as the Mac app says it', () => {
+    expect(ChildExit.description(ChildExit.exited(0))).toBe('exited with status 0')
+    expect(ChildExit.succeeded(ChildExit.exited(0))).toBe(true)
+    expect(ChildExit.succeeded(ChildExit.exited(1))).toBe(false)
+    expect(ChildExit.succeeded({ reason: 'signalled', status: 0 })).toBe(false)
+    expect(ChildExit.description({ reason: 'signalled', status: 2 })).toBe('ended by signal 2')
+  })
+
+  test('a stderr tail keeps the last 8 KiB, and its last line is the last with anything on it, trimmed', () => {
+    const tail = BoundedTail.of('first\n  the reason  \n\n')
+    expect(tail.lastLine).toBe('the reason')
+    expect(tail.isEmpty).toBe(false)
+    expect(new BoundedTail().lastLine).toBeUndefined()
+    expect(new BoundedTail().isEmpty).toBe(true)
+    const long = new BoundedTail()
+    long.append('x'.repeat(9000))
+    long.append('\nend')
+    expect(long.text.length).toBe(8 * 1024)
+    expect(long.text.endsWith('\nend')).toBe(true)
+  })
+})

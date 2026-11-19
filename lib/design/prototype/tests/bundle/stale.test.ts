@@ -1,9 +1,9 @@
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, test } from 'vitest'
-import { builtHash, inputFiles, sourcesHash, staleness } from '../../tooling/sources'
+import { builtHash, inputFiles, inputPath, recordingsNamed, sourcesHash, staleness } from '../../tooling/sources'
 
 /** The prototype's root: this file is tests/bundle/stale.test.ts. */
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -15,11 +15,21 @@ afterEach(() => {
   for (const directory of scratch.splice(0)) rmSync(directory, { recursive: true, force: true })
 })
 
-/** A copy of the build's inputs, to plant an edit in. */
+/**
+ * A copy of the build's inputs, to plant an edit in, laid out as the
+ * repository is -- `lib/design/prototype/` beside `lib/src/darwin/tests/` --
+ * so the recordings the source names are found where `@recorded` points.
+ * Returns the copy's prototype root.
+ */
 function copyOfInputs(): string {
-  const copy = mkdtempSync(join(tmpdir(), 'apogee-design-stale-'))
-  scratch.push(copy)
-  for (const file of inputFiles(root)) cpSync(join(root, file), join(copy, file))
+  const top = mkdtempSync(join(tmpdir(), 'apogee-design-stale-'))
+  scratch.push(top)
+  const copy = join(top, 'lib/design/prototype')
+  for (const file of inputFiles(root)) {
+    const to = inputPath(copy, file)
+    mkdirSync(dirname(to), { recursive: true })
+    cpSync(inputPath(root, file), to)
+  }
   return copy
 }
 
@@ -66,3 +76,53 @@ describe('the staleness check', () => {
     expect(sourcesHash(copy)).toBe(sourcesHash(root))
   })
 })
+
+describe('the two fixture roots in the hash (design 1d)', () => {
+  test('from @recorded, exactly the recordings source/ names: no Swift test, no recording only a test reads', () => {
+    const recorded = inputFiles(root).filter((file) => file.startsWith('@recorded/'))
+    expect(recorded).toEqual(recordingsNamed(root))
+    expect(recorded).toContain('@recorded/business/reads/Fixtures/agents-list-bad-config.err')
+    expect(recorded.every((file) => file.includes('/Fixtures/'))).toBe(true)
+    expect(recorded).not.toContain('@recorded/data/protocol/Fixtures/mock-actor.jsonl')
+    expect(inputPath(root, '@recorded/business/reads/Fixtures/agents-list-bad-config.err')).toBe(
+      resolve(root, '../../src/darwin/tests/business/reads/Fixtures/agents-list-bad-config.err'),
+    )
+  })
+
+  test('a named recording re-recorded stales the build; a recording no source names, or a Swift test, does not', () => {
+    const copy = copyOfInputs()
+    const before = sourcesHash(copy)
+    const tests = resolve(copy, '../../src/darwin/tests')
+    mkdirSync(join(tests, 'presentation/monitor'), { recursive: true })
+    writeFileSync(join(tests, 'presentation/monitor/MonitorViewModelTests.swift'), '// edited by another session\n')
+    mkdirSync(join(tests, 'data/protocol/Fixtures'), { recursive: true })
+    writeFileSync(join(tests, 'data/protocol/Fixtures/mock-actor.jsonl'), '{"type":"session"}\n')
+    expect(sourcesHash(copy)).toBe(before)
+    writeFileSync(join(tests, 'business/reads/Fixtures/agents-list-bad-config.err'), 'apogee agents: re-recorded\n')
+    expect(sourcesHash(copy)).not.toBe(before)
+  })
+
+  test('a recording a source starts naming joins the inputs', () => {
+    const copy = copyOfInputs()
+    const before = inputFiles(copy)
+    const preview = join(copy, 'source/presentation/monitor/Previews/MonitorPreset.ts')
+    writeFileSync(preview, "import system from '@recorded/business/reads/Fixtures/suites-system.json?raw'\nexport const rules = [system]\n")
+    const tests = resolve(copy, '../../src/darwin/tests/business/reads/Fixtures')
+    writeFileSync(join(tests, 'suites-system.json'), readFileSync(resolve(recordedRootOf(root), 'business/reads/Fixtures/suites-system.json')))
+    expect(inputFiles(copy)).toEqual([...before, '@recorded/business/reads/Fixtures/suites-system.json', 'source/presentation/monitor/Previews/MonitorPreset.ts'].sort())
+  })
+
+  test("every file under the design's own fixtures/ is an input", () => {
+    const copy = copyOfInputs()
+    const before = sourcesHash(copy)
+    mkdirSync(join(copy, 'fixtures/business/reads'), { recursive: true })
+    writeFileSync(join(copy, 'fixtures/business/reads/system-handmade.json'), '{}\n')
+    expect(inputFiles(copy)).toContain('fixtures/business/reads/system-handmade.json')
+    expect(sourcesHash(copy)).not.toBe(before)
+  })
+})
+
+/** The Mac app's tests, from a prototype root. */
+function recordedRootOf(prototype: string): string {
+  return resolve(prototype, '../../src/darwin/tests')
+}

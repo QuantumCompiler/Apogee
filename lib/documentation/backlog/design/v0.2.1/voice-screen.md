@@ -35,7 +35,7 @@
   - speaking;
   - the form refusing text over 4,000 characters;
   - the form refusing a name that exists.
-- Wiring into [1d](cli-stand-in.md)'s stand-in:
+- Wiring into [1d](../../../assistant/design/DEVELOPER.md#the-cli-stand-in)'s stand-in:
   - `models list` answers with `models-stored-list.json`;
   - `models info Kokoro-82M/voice/5f3a2c91d0e4` answers with `models-stored-info-voice.json`;
   - the speech records are `speech-torch.json` and `speech-mlx.json`, read in place;

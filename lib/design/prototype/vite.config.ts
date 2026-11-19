@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { viteSingleFile } from 'vite-plugin-singlefile'
 import { oneFile } from './tooling/oneFile.ts'
+import { recordedAlias, recordedRoot } from './tooling/sources.ts'
 
 const root = dirname(fileURLToPath(import.meta.url))
 
@@ -13,9 +14,13 @@ const root = dirname(fileURLToPath(import.meta.url))
 // staleness check reads the hash the build writes into main.html.
 // APOGEE_DESIGN_OUT names another destination: the determinism test's builds
 // write there, never over the committed file.
+// `@recorded` reaches the Mac app's recordings in place (design 1d): each is
+// imported by name with `?raw` and inlined, and the dev server may read them.
 export default defineConfig({
   root,
   publicDir: false,
+  resolve: { alias: { [recordedAlias]: recordedRoot(root) } },
+  server: { fs: { allow: [root, recordedRoot(root)] } },
   plugins: [
     react(),
     viteSingleFile(),

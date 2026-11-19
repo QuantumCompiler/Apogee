@@ -59,7 +59,7 @@
   - **Console refusals.** The Mac refuses through the shell's parity table (`ParityTable.refusal`, `:343`). The prototype hard-codes three words.
   - **Inspector width.** The prototype draws the inspector at 304 px (markup 763). BuildLayout and `tokens.json` `layoutPx.inspector` say 360, and the Mac's inspector can be resized.
 - **Siblings:**
-  - [cli-stand-in.md](cli-stand-in.md) (1d): the stand-in, the clock, hand-made files;
+  - [DEVELOPER.md → the CLI stand-in](../../../assistant/design/DEVELOPER.md#the-cli-stand-in) (1d): the stand-in, the clock, hand-made files;
   - [styles-shell-and-the-first-screen.md](styles-shell-and-the-first-screen.md) (1e): places, keys, the sheet and confirm host;
   - [session-screen.md](session-screen.md) (1f);
   - [gallery-and-foundations.md](gallery-and-foundations.md) (1q);
