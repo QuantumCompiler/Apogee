@@ -1,8 +1,8 @@
 # Sessions: the list, the inspector, the execute door and the console
 
-**What / why.** The second half of the Sessions place in the React prototype. 1f ports the session itself (the transcript and the composer). This item ports what sits around it: the sidebar's list of saved sessions, the inspector beside the session, the "New execute session" door, and the console. It covers about 350 prototype lines and 2 start presets (recon, critic R6). The parts, in `lib/design/spec/html/main.html`:
+**What / why.** The second half of the Sessions place in the React prototype. 1u and 1v port the session itself (1u the turn and the composer, 1v the scenarios and the session's states). This item ports what sits around it: the sidebar's list of saved sessions, the inspector beside the session, the "New execute session" door, and the console. It covers about 350 prototype lines and 2 start presets (recon, critic R6). The parts, in `lib/design/spec/html/main.html`:
 - **The session list.** The `sidebar` section, 5020–5103 (84 lines; `nav` built at 5060), its session-list half only. It draws the date groups (Today, Yesterday, Previous 7 days, Earlier), the search field ("No sessions match …", "N matching · groups open while you search"), the private session's row, the three new-session buttons (⌘N, ⇧⌘N, ⌥⌘N), and each row's model glyph (local, cloud API billed, subscription). Each row has a menu: Details…, Rename…, Compact… (Stop compacting while one runs) and Delete…. The markup is the header buttons at 85–87 and `<nav class="ap-list" aria-label="Sessions">` at 90–127. The places bar (129 on) and the system strip are 1e's shell.
-- **The inspector.** The `inspector` section, 4913–5019 (107 lines; `ins` at 4972). Its markup is `chat.inspectorOn`, 762–856, inside the session screen's block. It has six sections that fold (session, turn, context, model, helpers, recall; `insOpen` keeps 6 keys) and an "expand all" button. Its turn rows and status are written per session scenario (taskgroup, retry, wal, crash, pr, kv). **It reads the session's state, so this item waits for 1f.**
+- **The inspector.** The `inspector` section, 4913–5019 (107 lines; `ins` at 4972). Its markup is `chat.inspectorOn`, 762–856, inside the session screen's block. It has six sections that fold (session, turn, context, model, helpers, recall; `insOpen` keeps 6 keys) and an "expand all" button. Its turn rows and status are written per session scenario (taskgroup, retry, wal, crash, pr, kv). **It reads the session's state, the scenarios' included, so this item waits for 1v.**
 - **The execute door.** `the execute door` section, 6167–6192 (26 lines; `ex` at 6175), and the `ui.executeOpen` sheet, 2329–2346 (18 lines). It offers a suite, a model, a folder and "Orchestrate". It shows the command exactly as it will run, then Cancel or Open.
 - **The console.** The `console` section, 4557–4582 (26 lines; `con` at 4561), and the `ui.consoleOpen` panel, 2105–2116 (12 lines). It opens with ⇧⌘K. It has its lines, the suggestions Tab offers, a running bar with Stop, and three refusals: `serve`, `reset` and `uninstall` each print "Not run here: …" with a reason.
 - **Two presets:**
@@ -26,7 +26,7 @@
 **Seam + files.**
 - **`presentation/sessions/`** (paths under `lib/design/prototype/`, shaped by 1b's scaffold):
   - `ViewModels/SessionLibraryViewModel`: the list, the row menu, the inspector, recall and the door. It mirrors the Mac's single view-model of that name (1,571 lines), with the door's fields as `ExecuteForm`, the Mac's name.
-  - `Views/`: `SessionsScreen` (the Sessions place: 1f's session view with the inspector beside it), `SessionList`, `InspectorPane`, `RecallSummaries`, `ChatInfoSheet`, `RenameSheet` and `ExecuteDoorSheet`. These are the Mac's names (`SessionsScreen.swift:9`, `:148`, `:246`, `:290`; `SessionList.swift:8`, `:249`; `ExecuteDoor.swift:7`).
+  - `Views/`: `SessionsScreen` (the Sessions place: 1u's session view with the inspector beside it), `SessionList`, `InspectorPane`, `RecallSummaries`, `ChatInfoSheet`, `RenameSheet` and `ExecuteDoorSheet`. These are the Mac's names (`SessionsScreen.swift:9`, `:148`, `:246`, `:290`; `SessionList.swift:8`, `:249`; `ExecuteDoor.swift:7`).
   - `Previews/`: one named preview per visible state.
 - **`presentation/console/`:**
   - `ViewModels/ConsoleViewModel`, the Mac's name (412 lines);
@@ -37,9 +37,10 @@
   - `config get suites` and `config get models.default_suite` for the door (:772–781);
   - `symphonies list` before the door opens a session (:797–803);
   - `chats title`, `chats delete`, `chats compact` and `chats recall --forget --yes`.
+  - 1u's interim reads of the model facts (`models list` once, `models info` for the session's model, made by `AppViewModel` and handed to the session) move here, and the session takes them from `SessionLibraryViewModel`, as the Mac's does (`SessionLibraryViewModel.swift:506–511`, `:525–533`).
 - **Fixtures wired into the stand-in:**
   - **The list and inspector:** `chats-list.json`, `chats-info.json`, `chats-recall.json`, `chats-compact.txt`, `models-info-*.json` and `models-status-*.json` (all under `tests/business/reads/Fixtures/`).
-  - **`execute`:** `symphonies-list.json` and 1f's `play` session. No recorded suite list names `coding` (`suites-config-get.txt` lists cloud, fast and pair) and no `config get models.default_suite` answer is recorded, so both are hand-made:
+  - **`execute`:** `symphonies-list.json` and 1u's `play` session. No recorded suite list names `coding` (`suites-config-get.txt` lists cloud, fast and pair) and no `config get models.default_suite` answer is recorded, so both are hand-made:
     - `suites-config-get-coding-handmade.txt`, holding `coding`;
     - `config-get-default-suite-handmade.txt`, holding `coding`, which the door's "The default suite (coding)" reads.
   - **`console`:** `config-scan.txt`, which the Mac's console previews already use. Hand-made:
@@ -61,7 +62,7 @@
 - **Siblings:**
   - [DEVELOPER.md → the CLI stand-in](../../../assistant/design/DEVELOPER.md#the-cli-stand-in) (1d): the stand-in, the clock, hand-made files;
   - [DEVELOPER.md → styles, the shell and the first screen](../../../assistant/design/DEVELOPER.md#styles-the-shell-and-the-first-screen) (1e): places, keys, the sheet and confirm host;
-  - [session-screen.md](session-screen.md) (1f);
+  - [session-turn-and-composer.md](session-turn-and-composer.md) (1u) and [session-scenarios-and-states.md](session-scenarios-and-states.md) (1v, the gate);
   - [gallery-and-foundations.md](gallery-and-foundations.md) (1q);
   - [parity-proof.md](parity-proof.md) (1s).
 - The design home: [assistant/design/CLAUDE.md](../../../assistant/design/CLAUDE.md).
@@ -73,18 +74,21 @@
 - 2026-11-14: The recorded default: data is the Mac app's recorded fixtures, read in place, with `*-handmade*` files for unrecorded states. View-models are plain TypeScript that never imports React.
 - 2026-11-14: The recorded default: parity is judged on layout, states, controls and wording, not pixels or data, against the old prototype frozen at 1c (fixes only).
 - 2026-11-14: Item 1g of track 1, gated on 1f because the inspector reads the session's state.
+- 2026-11-19: 1f was split into 1u (the turn and the composer) and 1v (the scenarios and the session's states), and 1f stays spent (the user's answer before the group run: "1g's gate moves to the second"). This item is now gated on 1v. Its consumed decisions name the part that owns each: the header's inspector button and the `endPrivate` confirm are 1u's, and the `chat:*` session states are 1v's. 1u reserves an open inspector's 304 px with a placeholder column in the session window, which this item replaces. 1u and 1v compare only the main pane with the frozen prototype, so the session list and the inspector of the 13 `chat:*` presets are compared here (the run owner's ruling, for veto).
 
 **Open calls:**
 - [default: one `SessionLibraryViewModel`, as in the Mac, rather than a separate inspector view-model. Split it only if it passes about 800 lines, and keep the Mac's names on the parts.]
-- [default: `SessionsScreen` becomes the Sessions place's screen, holding 1f's session view with the inspector beside it, as the Mac's does. 1f's 13 presets then render through it, and their tests stay green.]
+- [default: `SessionsScreen` becomes the Sessions place's screen, holding 1u's session view with the inspector beside it, as the Mac's does. The 13 `chat:*` presets (1u's 4, 1v's 9) then render through it, and their tests stay green.]
 - [default: the date groups come from each row's recorded `updated`, measured against the stand-in's fixed "now", the way the Mac's `when(_:)` does (`:1363`). The model glyph comes from the backend's kind, as in `kind(of:)` (`:1357`).]
-- [default: the inspector's turn rows come from 1f's replayed session events, not from per-scenario tables. Its model facts come from `models info` and its helpers from `models status`.]
+- [default: the inspector's turn rows come from the replayed session events (1u's turn, 1v's scenarios), not from per-scenario tables. Its model facts come from `models info` and its helpers from `models status`.]
 - [default: the console asks the stand-in for completions through `__complete`, as the Mac does. A run line with a recorded answer prints it; any other line prints the prototype's "Done.".]
 - [default: the console's refusals are the prototype's three, in its wording, kept in a small table in `ConsoleViewModel`. The Mac's full parity table is not ported here.]
 - [default: the inspector is drawn at the prototype's 304 px. The 360 in BuildLayout goes on 1s's list of differences.]
 - (consumed decision: 1d) where hand-made files live, the fixed "now", and the stand-in's `command` and `__complete`.
 - (consumed decision: 1e) the places half of the sidebar, the keys, the sheet and confirm host, and the toast.
-- (consumed decision: 1f) the header's inspector button (⌥⌘I), the `chat:*` session states, and the `endPrivate` confirm that leaving a private session raises.
+- (consumed decision: 1u) the header's inspector button (titled "Inspector ⌥⌘I"; the key itself is this item's) and its `inspectorOpen`, and the `endPrivate` confirm that leaving a private session raises (the list's rows and new-session buttons call 1u's `leave` intent).
+- (consumed decision: 1v) the `chat:*` session states, and the compact jobs' state behind `chat:compacting`'s busy rows and row menu.
+- (consumed decision: 1v) the Streaming session `console` opens over, at its `progress: 15` frame (main.html 2737, 2543 and 2553 at `b375fac9`), with `chat`'s stream: 1v exposes that setup, and this item's `console` preset reuses it.
 
 **Guardrail(s).**
 - **Per-preset tests** for `execute` and `console`.
@@ -103,11 +107,12 @@
 - [ ] At the `console` preset it shows the console with the `models list` output, the refused `apogee reset`, `models ` typed and ten suggestions.
 - [ ] Every screen's sidebar lists the recorded chats by date. Search filters them, and each row's menu opens Details, Rename, Compact and Delete.
 - [ ] On every `chat:*` preset, ⌥⌘I opens the inspector with its six sections, and "expand all" opens and closes them.
+- [ ] Side by side with the frozen old prototype (1c), the session list and the inspector of each of the 13 `chat:*` presets match on layout, states, controls and wording (1u and 1v compared only the main pane). Every difference is listed as intended (the CLI's data) or as a defect.
 - [ ] The local checks (typecheck, unit tests, layering, staleness) pass.
 
-**Scope note.** Earmarked for v0.2.1 (design track 1); gated on 1f. Out of scope:
+**Scope note.** Earmarked for v0.2.1 (design track 1); gated on [1v](session-scenarios-and-states.md), which is gated on [1u](session-turn-and-composer.md). Out of scope:
 - the places bar, the system strip and the monitor (1e);
-- the transcript and the composer (1f);
+- the transcript and the composer (1u), and the scenarios and the session's states (1v);
 - the gallery rows for these boards (1q);
 - the parity verdict (1s);
 - porting the Mac's parity table or its resizable inspector;

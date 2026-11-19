@@ -42,7 +42,7 @@
   - `Views/`: `TasksScreen`, `TaskList`, `TaskDetail`, `NewTaskSheet`, and the `taskRefused` alert.
   - `Previews/`: one per preset.
 - The CLI stand-in (1d): each preset's fixtures wired in, read in place. A state nobody recorded gets a `*-handmade*` file in the CLI's exact shape.
-- The app root (1e): wires the suite actions to Sessions, the default suite to Models, and the Tasks badge in the sidebar.
+- The app root (1e): wires the suite actions to Sessions, the default suite to Models, and the Tasks badge in the sidebar. Open a chat under a suite calls 1u's `SessionViewModel.leave({ type: 'new', suite, force })`, so a private session with a turn sent asks `endPrivate` first, as the old `openChat` (main.html:6396 at `b375fac9`) does through `leaveFor`. If 1u has not landed, 1u wires it.
 - Tests under `tests/presentation/suites/` and `tests/presentation/tasks/`.
 
 **Reference.**
@@ -50,7 +50,7 @@
 - The Mac modules: `lib/src/darwin/source/presentation/suites/` and `.../tasks/`, and their tests; [darwin MILESTONES](../../../assistant/darwin/MILESTONES.md) 4i (training and suites parity) and 6g (the Tasks screen).
 - The CLI's documents: [machine-mode.md](../../../reference/cli/machine-mode.md) (`task list`, `task status`, `task run`).
 - The law: [layer enforcement](../../../adrs/gui/layer-enforcement.md), [presentation MVVM](../../../adrs/darwin/presentation-mvvm.md), [module schemes and previews](../../../adrs/darwin/module-schemes-and-previews.md), [the darwin guide](../../../assistant/darwin/CLAUDE.md).
-- Siblings: [`react-design-prototype.md`](../../../adrs/design/react-design-prototype.md) (1a's ADR 0001), [`DEVELOPER.md` → the old prototype's baseline](../../../assistant/design/DEVELOPER.md#the-old-prototypes-baseline) (1c's baseline, shipped), [`DEVELOPER.md` → the CLI stand-in](../../../assistant/design/DEVELOPER.md#the-cli-stand-in) (1d), [`DEVELOPER.md` → styles, the shell and the first screen](../../../assistant/design/DEVELOPER.md#styles-the-shell-and-the-first-screen) (1e), [`session-screen.md`](session-screen.md) (1f), [`models-screens.md`](models-screens.md) (1h), [`parity-proof.md`](parity-proof.md) (1s).
+- Siblings: [`react-design-prototype.md`](../../../adrs/design/react-design-prototype.md) (1a's ADR 0001), [`DEVELOPER.md` → the old prototype's baseline](../../../assistant/design/DEVELOPER.md#the-old-prototypes-baseline) (1c's baseline, shipped), [`DEVELOPER.md` → the CLI stand-in](../../../assistant/design/DEVELOPER.md#the-cli-stand-in) (1d), [`DEVELOPER.md` → styles, the shell and the first screen](../../../assistant/design/DEVELOPER.md#styles-the-shell-and-the-first-screen) (1e), [`session-turn-and-composer.md`](session-turn-and-composer.md) (1u, `chat:suite` and the session's suite sheet), [`models-screens.md`](models-screens.md) (1h), [`parity-proof.md`](parity-proof.md) (1s).
 
 **Decisions made** (dated):
 - 2026-11-14: The user's call: rebuild the prototype in React, TypeScript and Vite, with the production apps' four layers and MVVM feature modules. The build is one self-contained `lib/design/main.html` that opens with a double-click. This is a design-queue item in v0.2.1.
@@ -65,7 +65,7 @@
 - [default: New suite… keeps the prototype's toast. It has no CLI verb behind it yet.]
 - [default: the New task sheet's command line and its "The same run as typing" expansion are built by `NewTaskForm`, ported line for line from the section, with unit tests on each flag.]
 - [default: Folder in the sheet stays read-only, showing the preset's folder.]
-- (consumed decision: 1d) the stream replay, the clock and the preset table. (consumed decision: 1e) the confirm host, the toast and the sidebar badge. (consumed decision: 1f) `chat:suite` and the suite sheet in a session. (consumed decision: 1c) the baseline's revision, which fixes the preset list (it captures every preset, board or not). (consumed decision: 1s) gallery boards for `tasks:more`, `tasks:resuming` and `tasks:resumerefused`.
+- (consumed decision: 1d) the stream replay, the clock and the preset table. (consumed decision: 1e) the confirm host, the toast and the sidebar badge. (consumed decision: 1u) `chat:suite`, the suite sheet in a session, and the `leave` intent with its `endPrivate` confirm. (consumed decision: 1c) the baseline's revision, which fixes the preset list (it captures every preset, board or not). (consumed decision: 1s) gallery boards for `tasks:more`, `tasks:resuming` and `tasks:resumerefused`.
 
 **Guardrail(s).**
 - **Per-preset test** (the successor of the 30-tick check), for every preset in both "installed" and "missing" modes: build the view-model on the stand-in, step the clock 30 ticks, and walk everything the views read. No throw, no `undefined`, no `NaN`.
@@ -84,7 +84,7 @@
 - [ ] `lib/design/main.html?start=<preset>` opens every Suites, Tasks and New task preset, and each matches the 1c baseline on layout, states, controls and wording.
 - [ ] A live task plays through its rounds from a recorded stream; halt, cancel, resume and rerun each behave as in the old prototype.
 - [ ] Every row comes from a recorded fixture or a `*-handmade*` file; no task or suite data is written into the source.
-- [ ] Open a chat under a suite and Switch the session to it reach Sessions through the app root.
+- [ ] Open a chat under a suite and Switch the session to it reach Sessions through the app root, and Open a chat under a suite asks the `endPrivate` confirm while a private session has a turn sent (once 1u has landed).
 - [ ] The local checks are green: typecheck, unit tests, the layering check, and the build staleness check.
 
-**Scope note.** Earmarked for v0.2.1 (design track 1); its gate, 1e, shipped 2026-11-18 ([Milestone A](../../../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react)). Out of scope: the session's own suite sheet and `chat:suite` (1f), the Roles tab and the Models side of the default suite (1h), the side-by-side report (1s), gallery boards for the board-less presets (1s), and any change to the Mac app's Suites or Tasks. The Mac's empty states ("No suites yet", "No tasks yet", "No task chosen") are new design, drawn in the React app after the port, not here.
+**Scope note.** Earmarked for v0.2.1 (design track 1); its gate, 1e, shipped 2026-11-18 ([Milestone A](../../../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react)). Out of scope: the session's own suite sheet and `chat:suite` (1u), the Roles tab and the Models side of the default suite (1h), the side-by-side report (1s), gallery boards for the board-less presets (1s), and any change to the Mac app's Suites or Tasks. The Mac's empty states ("No suites yet", "No tasks yet", "No task chosen") are new design, drawn in the React app after the port, not here.
