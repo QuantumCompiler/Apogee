@@ -35,7 +35,6 @@ export function titleOf(destination: Destination): string {
  * none is left.
  */
 const portedBy: Readonly<Partial<Record<Destination, string>>> = {
-  sessions: '1f',
   models: '1h',
   suites: '1p',
   tasks: '1p',

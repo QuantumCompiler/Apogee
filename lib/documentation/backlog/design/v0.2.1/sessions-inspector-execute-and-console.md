@@ -62,7 +62,7 @@
 - **Siblings:**
   - [DEVELOPER.md → the CLI stand-in](../../../assistant/design/DEVELOPER.md#the-cli-stand-in) (1d): the stand-in, the clock, hand-made files;
   - [DEVELOPER.md → styles, the shell and the first screen](../../../assistant/design/DEVELOPER.md#styles-the-shell-and-the-first-screen) (1e): places, keys, the sheet and confirm host;
-  - [session-turn-and-composer.md](session-turn-and-composer.md) (1u) and [session-scenarios-and-states.md](session-scenarios-and-states.md) (1v, the gate);
+  - [DEVELOPER.md → the session](../../../assistant/design/DEVELOPER.md#the-session) (1u, shipped 2026-11-19) and [session-scenarios-and-states.md](session-scenarios-and-states.md) (1v, the gate);
   - [gallery-and-foundations.md](gallery-and-foundations.md) (1q);
   - [parity-proof.md](parity-proof.md) (1s).
 - The design home: [assistant/design/CLAUDE.md](../../../assistant/design/CLAUDE.md).
@@ -75,6 +75,8 @@
 - 2026-11-14: The recorded default: parity is judged on layout, states, controls and wording, not pixels or data, against the old prototype frozen at 1c (fixes only).
 - 2026-11-14: Item 1g of track 1, gated on 1f because the inspector reads the session's state.
 - 2026-11-19: 1f was split into 1u (the turn and the composer) and 1v (the scenarios and the session's states), and 1f stays spent (the user's answer before the group run: "1g's gate moves to the second"). This item is now gated on 1v. Its consumed decisions name the part that owns each: the header's inspector button and the `endPrivate` confirm are 1u's, and the `chat:*` session states are 1v's. 1u reserves an open inspector's 304 px with a placeholder column in the session window, which this item replaces. 1u and 1v compare only the main pane with the frozen prototype, so the session list and the inspector of the 13 `chat:*` presets are compared here (the run owner's ruling, for veto).
+
+- 2026-11-19: **Where 1u's interim pieces are** (from 1u's build): the inspector's column is `InspectorPlaceholder` in `source/presentation/session/Views/SessionExtras.tsx`, drawn by `SessionWindow` while `SessionViewModel.inspectorOpen`; the model facts' reads are `AppViewModel.readModelFacts` (`models list`, once) and `AppViewModel.observe` (`models info <model>` on the `session` event and on an answer by another model); the suite reads are `AppViewModel.chooseSuite` (`config get suites`, `config get models.default_suite`, `models status --suite <name>`) and `AppViewModel.openSession`'s read of `config get models.default_suite` when a new or private chat opens (so the header names its suite; the Mac reads it only at the chooser and the door); the leave intent is carried out by `AppViewModel.carryOut`, which opens a new or a private session on Sessions, any overlay closed (the old `sessionGo`), and, for `open` and `execute`, says in the toast that this item ports them. Each moves into `SessionLibraryViewModel` here.
 
 **Open calls:**
 - [default: one `SessionLibraryViewModel`, as in the Mac, rather than a separate inspector view-model. Split it only if it passes about 800 lines, and keep the Mac's names on the parts.]
@@ -110,7 +112,7 @@
 - [ ] Side by side with the frozen old prototype (1c), the session list and the inspector of each of the 13 `chat:*` presets match on layout, states, controls and wording (1u and 1v compared only the main pane). Every difference is listed as intended (the CLI's data) or as a defect.
 - [ ] The local checks (typecheck, unit tests, layering, staleness) pass.
 
-**Scope note.** Earmarked for v0.2.1 (design track 1); gated on [1v](session-scenarios-and-states.md), which is gated on [1u](session-turn-and-composer.md). Out of scope:
+**Scope note.** Earmarked for v0.2.1 (design track 1); gated on [1v](session-scenarios-and-states.md), whose gate, 1u, shipped 2026-11-19 ([Milestone A](../../../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react)). Out of scope:
 - the places bar, the system strip and the monitor (1e);
 - the transcript and the composer (1u), and the scenarios and the session's states (1v);
 - the gallery rows for these boards (1q);

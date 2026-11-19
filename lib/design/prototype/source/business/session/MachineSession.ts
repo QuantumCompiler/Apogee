@@ -106,7 +106,10 @@ export class MachineSession implements ChatSession {
     if (lines) {
       this.released += 1
       this.queued.push(...lines)
-    } else {
+    } else if (this.run && ChildExit.succeeded(this.run.exit)) {
+      // A child that refused its launch exits without reading its input
+      // (machine-mode.md -> A launch refused): no recording is owed for a
+      // turn it never took (design 1u). Any other send past the recording is.
       this.child?.note('chats', `turn ${turn} of ${this.launchLine}`)
     }
     return turn

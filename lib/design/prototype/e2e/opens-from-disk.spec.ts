@@ -40,7 +40,12 @@ test('a double-click opens lib/design/main.html from disk: the monitor over the 
   await expect(page.getByRole('navigation', { name: 'Places' })).toBeVisible()
   await expect(monitor(page)).toBeVisible()
   await expect(monitor(page)).toContainText('THIS MAC · APPLE M3 MAX · 128 GB')
-  await expect(page.getByText('Sessions isn’t drawn here yet. Design item 1f ports it.')).toBeVisible()
+  // Under the monitor, Sessions is the session window's empty state, nothing launched (design 1u), until 1v puts Streaming there:
+  // the acts that need a session are drawn off.
+  await expect(page.getByRole('heading', { name: 'What are we working on?' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Message' })).toHaveAttribute('placeholder', 'Message apogee')
+  for (const act of ['Attach a folder', 'Choose a model', 'Choose a suite']) await expect(page.getByRole('button', { name: act })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Private session instead' })).toHaveCount(0)
   // The web fonts are inlined: they load from the page itself. The faces that
   // loaded are the two the window uses; none loads when no face exists.
   expect(
@@ -89,11 +94,11 @@ test('in the missing and config-typo modes the monitor says why it cannot read, 
   await expect(monitor(page)).toContainText("apogee system: /Users/someone/.apogee/config/config.json: not valid JSON: line 4, column 5: expected ',' or '}' after a member (exited with status 1)")
 })
 
-test('each of the 11 places opens by click, and an unported one shows its placeholder', async ({ page }) => {
+test('each of the 11 places opens by click: Sessions its session window, an unported one its placeholder', async ({ page }) => {
   const { errors } = watch(page)
   await page.goto(`${built}?start=monitor&still=true`)
   const places: Array<[string, string, string]> = [
-    ['Sessions', '⌘1', '1f'], ['Models', '⌘2', '1h'], ['Suites', '⌘3', '1p'], ['Tasks', '⌘4', '1p'], ['Code graph', '⌘5', '1o'], ['Video', '⌘6', '1k'],
+    ['Models', '⌘2', '1h'], ['Suites', '⌘3', '1p'], ['Tasks', '⌘4', '1p'], ['Code graph', '⌘5', '1o'], ['Video', '⌘6', '1k'],
     ['Voice', '⌘7', '1m'], ['Knowledge', '⌘8', '1o'], ['Training', '⌘9', '1j'], ['Library', '⌘0', '1n'], ['Review', '⇧⌘R', '1n'],
   ]
   for (const [title, key, item] of [...places].reverse()) {
@@ -103,6 +108,13 @@ test('each of the 11 places opens by click, and an unported one shows its placeh
     await expect(page.getByRole('heading', { name: title, level: 1 })).toBeVisible()
     await expect(page.getByText(`${title} isn’t drawn here yet. Design item ${item} ports it.`)).toBeVisible()
   }
+  // Sessions is ported (design 1u): the session window, no placeholder.
+  const sessions = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Sessions ⌘1' })
+  await sessions.click()
+  await expect(sessions).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('heading', { name: 'New session', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'What are we working on?' })).toBeVisible()
+  await expect(page.getByText(/^Sessions isn’t drawn here yet/)).toHaveCount(0)
   expect(errors).toEqual([])
 })
 
@@ -148,7 +160,8 @@ test("the sidebar's theme button re-colors the whole window in all 3 themes: eve
     expect(outside, `${theme}: colors not in the theme`).toEqual([])
     await expect(window).toHaveCSS('background-color', rgb(tokens.colors.themes[theme]?.colors['surface.window'] ?? ''))
     await button.click()
-    await expect(page.getByRole('status')).toHaveText(`Theme: ${next}`)
+    // The toast, not the composer's status line (design 1u).
+    await expect(page.getByRole('status').filter({ hasText: /^Theme: / })).toHaveText(`Theme: ${next}`)
   }
   await expect(window).toHaveAttribute('data-theme', 'dark')
 })
@@ -160,4 +173,91 @@ test('the type sizes are the tokens\', scaled by the text size: the window carri
     return ['display', 'body', 'meta', 'tag'].map((step) => style.getPropertyValue(`--t-${step}`).trim())
   })
   expect(sizes).toEqual(['24px', '13px', '11px', '9.5px'])
+})
+
+/** The session's four plain presets (design 1u), each still, from disk, at its frame. */
+const sessionFrames: ReadonlyArray<readonly [string, ReadonlyArray<string | RegExp>]> = [
+  ['chat:new', ['What are we working on?', 'suite fast, the default', 'claude answers through the anthropic API, billed per use.', 'Private session instead']],
+  ['chat:private', ['Private session', 'suite fast, the default', 'Nothing of this session is written: no transcript, no recall in later sessions.', 'private: nothing of this chat is written -- no transcript, no recall']],
+  [
+    'chat:play',
+    [
+      'execute · suite coding · orchestrating · in ingest',
+      'project context: AGENTS.md, 12 words, in every request',
+      'attaching . (2 files, 95 bytes)',
+      'graph: 2 nodes, 1 edge (supported: python 1; skipped: .md 1)',
+      'played summarize-verify',
+      'stage 2/2 verify — asking chat (root): Here is a passage and a summary of it. Passage: The board…',
+      'The board met on 14 October and moved the release to 3 November; Ana Ruiz owns the checklist.',
+    ],
+  ],
+  ['chat:suite', ['Run this session under', 'Now: suite fast, the default', 'it does not fit', 'Run it anyway (--force): apogee prices it over this machine\'s memory']],
+]
+
+for (const [preset, words] of sessionFrames) {
+  test(`?start=${preset}&still=true opens the session at its frame, the inspector's column reserved, with no console error and no request`, async ({ page }) => {
+    const { errors, requests } = watch(page)
+    await page.goto(`${built}?start=${preset}&still=true`)
+    for (const said of words) await expect(page.getByText(said).first()).toBeVisible()
+    await expect(page.getByRole('complementary', { name: 'Inspector' })).toContainText('The inspector isn’t drawn here yet. Design item 1g ports it.')
+    // Still: nothing moves.
+    const before = await page.locator('main').innerText()
+    await page.waitForTimeout(1500)
+    expect(await page.locator('main').innerText()).toBe(before)
+    expect(errors).toEqual([])
+    expect(requests).toEqual([`${built}?start=${preset}&still=true`])
+  })
+}
+
+test("the inspector's placeholder takes its own 304 px column while open and none when closed: the main column is the window's less the sidebar and that column", async ({ page }) => {
+  await page.goto(`${built}?start=chat:new&still=true`)
+  const width = (selector: string) => page.locator(selector).evaluate((element) => element.getBoundingClientRect().width)
+  const window = await width('#root > .ap')
+  const sidebar = await width('.ap-side')
+  const column = page.getByRole('region', { name: 'Conversation' }).or(page.getByRole('heading', { name: 'What are we working on?' }))
+  await expect(column.first()).toBeVisible()
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  expect(await inspector.evaluate((element) => element.getBoundingClientRect().width)).toBe(304)
+  const main = () => page.locator('main > div:nth-child(2) > div:first-child').evaluate((element) => element.getBoundingClientRect().width)
+  expect(await main()).toBe(window - sidebar - 304)
+  await page.getByRole('button', { name: 'Inspector (Option Command I)' }).click()
+  await expect(inspector).toHaveCount(0)
+  expect(await main()).toBe(window - sidebar)
+  await page.getByRole('button', { name: /^Context window: / }).click()
+  await expect(inspector).toBeVisible()
+})
+
+test('Choose a suite on chat:new opens the chooser over the recorded suites, the default marked now', async ({ page }) => {
+  const { errors, requests } = watch(page)
+  await page.goto(`${built}?start=chat:new&still=true`)
+  await page.getByRole('button', { name: 'Choose a suite' }).click()
+  await expect(page.getByText('Run this session under')).toBeVisible()
+  await expect(page.getByRole('radio', { name: /^fast \(the default\)/ })).toContainText('now')
+  await expect(page.getByText(/no recorded answer/)).toHaveCount(0)
+  expect(errors).toEqual([])
+  expect(requests).toEqual([`${built}?start=chat:new&still=true`])
+})
+
+test('a chat preset in the missing and config-typo modes: no binary, and a launch the CLI refused, in its words', async ({ page }) => {
+  await page.goto(`${built}?start=chat:new&still=true&apogee=missing`)
+  await expect(page.getByRole('heading', { name: 'Apogee isn’t installed' })).toBeVisible()
+  await page.goto(`${built}?start=chat:play&still=true&apogee=config-typo`)
+  await expect(page.getByText("apogee refused to start this session: apogee execute: /Users/someone/.apogee/config/config.json: not valid JSON: line 4, column 5: expected ',' or '}' after a member")).toBeVisible()
+})
+
+test('the composer: / lists the commands, @ the folder’s files, and a slash command it does not act on is said in the toast', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=chat:new&still=true`)
+  const input = page.getByRole('textbox', { name: 'Message' })
+  await input.fill('/mo')
+  await expect(page.getByRole('listbox', { name: 'Commands' }).getByRole('option')).toHaveCount(2)
+  await input.fill('look at @runner')
+  await expect(page.getByRole('listbox', { name: 'Files' })).toContainText('src/ingest/runner.py')
+  await input.press('Enter')
+  await expect(page.getByRole('button', { name: 'Remove src/ingest/runner.py' })).toBeVisible()
+  await input.fill('/recall off')
+  await input.press('Escape')
+  await input.press('Enter')
+  await expect(page.getByRole('status').filter({ hasText: '/recall off' })).toHaveText('/recall off — noted; this prototype doesn’t act on it')
+  expect(errors).toEqual([])
 })

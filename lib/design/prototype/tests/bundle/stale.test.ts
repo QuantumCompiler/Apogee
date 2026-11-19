@@ -83,7 +83,8 @@ describe('the two fixture roots in the hash (design 1d)', () => {
     expect(recorded).toEqual(recordingsNamed(root))
     expect(recorded).toContain('@recorded/business/reads/Fixtures/agents-list-bad-config.err')
     expect(recorded.every((file) => file.includes('/Fixtures/'))).toBe(true)
-    expect(recorded).not.toContain('@recorded/data/protocol/Fixtures/mock-actor.jsonl')
+    // A recording only a test reads (1u's previews name mock-actor.jsonl, so this names another).
+    expect(recorded).not.toContain('@recorded/data/protocol/Fixtures/question-cancelled.jsonl')
     expect(inputPath(root, '@recorded/business/reads/Fixtures/agents-list-bad-config.err')).toBe(
       resolve(root, '../../src/darwin/tests/business/reads/Fixtures/agents-list-bad-config.err'),
     )
@@ -96,7 +97,7 @@ describe('the two fixture roots in the hash (design 1d)', () => {
     mkdirSync(join(tests, 'presentation/monitor'), { recursive: true })
     writeFileSync(join(tests, 'presentation/monitor/MonitorViewModelTests.swift'), '// edited by another session\n')
     mkdirSync(join(tests, 'data/protocol/Fixtures'), { recursive: true })
-    writeFileSync(join(tests, 'data/protocol/Fixtures/mock-actor.jsonl'), '{"type":"session"}\n')
+    writeFileSync(join(tests, 'data/protocol/Fixtures/question-cancelled.jsonl'), '{"type":"session"}\n')
     expect(sourcesHash(copy)).toBe(before)
     writeFileSync(join(tests, 'business/reads/Fixtures/agents-list-bad-config.err'), 'apogee agents: re-recorded\n')
     expect(sourcesHash(copy)).not.toBe(before)

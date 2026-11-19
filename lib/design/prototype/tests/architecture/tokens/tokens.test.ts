@@ -95,3 +95,14 @@ describe('the token scan, on planted values', () => {
     ])
   })
 })
+
+describe("the code colors (design 1u): the lexer's five are tokens.json's code.* variables", () => {
+  test("a code color written as its value in the lexer fails, naming the file; the real lexer's are var(--code-…)", () => {
+    const lexer = "export const color = (kind: string) => (kind === 'keyword' ? 'var(--code-keyword)' : 'var(--code-string)')\n"
+    expect(scan.violations(new PlantedTree({ 'source/presentation/styles/Components/CodeLexer.ts': lexer }))).toEqual([])
+    const written = lexer.replace("'var(--code-keyword)'", "'#C792EA'")
+    expect(scan.violations(new PlantedTree({ 'source/presentation/styles/Components/CodeLexer.ts': written }))).toEqual([
+      'source/presentation/styles/Components/CodeLexer.ts writes the color #C792EA: every color is a var(--…) from tokens.json, and only its fixed values are written as they are',
+    ])
+  })
+})

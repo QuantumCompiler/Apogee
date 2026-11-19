@@ -124,6 +124,18 @@ describe('a chat replays a recorded machine-mode stream', () => {
     expect(child.unanswered).toEqual(['chats: turn 2 of apogee chat --output-format stream-json --input-format stream-json --tools'])
   })
 
+  test('a send to a child that refused its launch is no turn past a recording: it exits unread, as launch-refused-model.err records, and nothing is logged (design 1u)', async () => {
+    const refused = { chats: [{ arguments: ['chat'], answer: { stderr: launchRefusedModel, exit: recordedExit(launchRefusedModelExit) } }] }
+    for (const [rules, apogee] of [[refused, 'installed'], [chatRules, 'config-typo']] as const) {
+      const { chats, clock, child } = client(rules, {}, apogee)
+      const session = chats.openChat(binary)
+      await session.send('written before it spoke')
+      clock.advance(3)
+      expect(said(session).at(-1)).toMatch(/^ended: /)
+      expect(child.unanswered, apogee).toEqual([])
+    }
+  })
+
   test('the launch is the Mac app\'s: chat or execute, both directions in stream-json', () => {
     expect(ChatLaunch.arguments()).toEqual(['chat', '--output-format', 'stream-json', '--input-format', 'stream-json', '--tools'])
     expect(

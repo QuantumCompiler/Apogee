@@ -8,3 +8,9 @@ test("the module's front names it, and holds the tokens, the appearance machiner
   expect(typeof styles.ThemeService).toBe('function')
   expect(typeof styles.Observable).toBe('function')
 })
+
+test("its common components (design 1u): the markdown and code an answer draws, and the lexer that colours a fence", () => {
+  expect(typeof styles.MarkdownText).toBe('function')
+  expect(typeof styles.MarkdownDocument.parse).toBe('function')
+  expect(typeof styles.CodeLexer.runs).toBe('function')
+})

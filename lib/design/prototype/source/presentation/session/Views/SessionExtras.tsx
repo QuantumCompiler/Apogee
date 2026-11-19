@@ -1,0 +1,349 @@
+import type { ReactNode } from 'react'
+import type { ModelKind } from '../../../business/reads/Models'
+import { AttachmentKind } from '../ViewModels/SessionActions'
+import type { FolderFile, ModelFace, SessionFace, SlashItem } from '../ViewModels/SessionViewModel'
+
+/** The color a model's kind is marked in, as the old prototype's `kindColor`; none where the kind is not known. */
+export function kindColor(kind: ModelKind | 'unknown'): string | undefined {
+  switch (kind) {
+    case 'local':
+      return 'var(--model-local)'
+    case 'api':
+      return 'var(--model-api)'
+    case 'subscription':
+      return 'var(--model-subscription)'
+    default:
+      return undefined
+  }
+}
+
+/** A model's glyph, by its kind: the chip, the cylinder, the circling arrows (`main.html:185-187` at `b375fac9`). */
+export function ModelGlyph({ kind, size = 14 }: { readonly kind: ModelKind | 'unknown'; readonly size?: number }) {
+  const color = kindColor(kind)
+  if (!color) return null
+  return (
+    <svg className="i" width={size} height={size} viewBox="0 0 16 16" aria-hidden="true" style={{ color }}>
+      {kind === 'local' ? (
+        <>
+          <rect x="4" y="4" width="8" height="8" rx="1.5" />
+          <path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2" />
+        </>
+      ) : kind === 'api' ? (
+        <>
+          <ellipse cx="8" cy="4.5" rx="5" ry="2" />
+          <path d="M3 4.5V8c0 1.1 2.2 2 5 2s5-.9 5-2V4.5" />
+          <path d="M3 8v3.5c0 1.1 2.2 2 5 2s5-.9 5-2V8" />
+        </>
+      ) : (
+        <>
+          <path d="M12.5 6A4.75 4.75 0 0 0 3.6 5.2" />
+          <path d="M3.5 10a4.75 4.75 0 0 0 8.9.8" />
+          <path d="M3.3 2.6v2.8h2.8" />
+          <path d="M12.7 13.4v-2.8H9.9" />
+        </>
+      )}
+    </svg>
+  )
+}
+
+/** The kind's tag: `local · this Mac`, `API · billed per use`, in its color; nothing where the kind is not known. */
+export function ModelTag({ model }: { readonly model: ModelFace }) {
+  if (model.tag === '') return null
+  return (
+    <span className="mono" style={{ padding: '1px 6px', borderRadius: 4, background: 'var(--surface-control)', fontSize: 'var(--t-label)', whiteSpace: 'nowrap', color: kindColor(model.kind) }}>
+      {model.tag}
+    </span>
+  )
+}
+
+const privateEye = (
+  <>
+    <path d="M2 8s2.2-4 6-4c1 0 1.9.3 2.7.7M14 8s-2.2 4-6 4c-1 0-1.9-.3-2.7-.7" />
+    <path d="M6.6 9.4a2 2 0 0 1 2.8-2.8" />
+    <path d="M3 13L13 3" />
+  </>
+)
+
+export interface EmptySessionActions {
+  readonly attachFolder: () => void
+  readonly chooseModel: () => void
+  readonly chooseSuite: () => void
+  readonly privateInstead: () => void
+}
+
+/**
+ * A session with nothing said yet (`main.html:251-270` at `b375fac9`): what it
+ * is, the model it runs on, the first acts -- or, private, what is and is not
+ * kept -- and what the CLI said at launch, under it. The Mac app's
+ * `EmptySessionView`. A session nobody launched (the monitor's, until 1v)
+ * draws the acts that need one off.
+ */
+export function EmptySessionView({ face, model, acts }: { readonly face: SessionFace['empty']; readonly model: ModelFace; readonly acts: EmptySessionActions }) {
+  return (
+    <div style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32, textAlign: 'center' }}>
+      {face.privateWords !== '' ? (
+        <>
+          <span aria-hidden="true" style={{ width: 44, height: 44, display: 'grid', placeItems: 'center', borderRadius: 10, background: 'var(--surface-control)', color: 'var(--text-secondary)' }}>
+            <svg className="i" width="22" height="22" viewBox="0 0 16 16">
+              {privateEye}
+            </svg>
+          </span>
+          <h2 style={{ margin: 0, fontSize: 'var(--t-display)', lineHeight: 1.25, fontWeight: 600 }}>{face.heading}</h2>
+          <p style={{ margin: 0, maxWidth: 460, fontSize: 'var(--t-prose)', color: 'var(--text-secondary)' }}>{face.privateWords}</p>
+        </>
+      ) : (
+        <h2 style={{ margin: 0, fontSize: 'var(--t-display)', lineHeight: 1.25, fontWeight: 600 }}>{face.heading}</h2>
+      )}
+      {model.where !== '' ? (
+        <p style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--t-small)', color: 'var(--text-secondary)' }}>
+          <ModelTag model={model} />
+          {model.where}
+        </p>
+      ) : null}
+      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: 4 }}>
+        <button type="button" className="btn-g" onClick={acts.attachFolder} disabled={!face.launched}>
+          <svg className="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.8l1.5 1.5h4.7A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" />
+          </svg>
+          Attach a folder
+        </button>
+        <button type="button" className="btn-g" onClick={acts.chooseModel} disabled={!face.launched}>
+          <svg className="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M8 2l5.5 3v6L8 14l-5.5-3V5z" />
+            <path d="M2.5 5L8 8l5.5-3M8 8v6" />
+          </svg>
+          Choose a model
+        </button>
+        <button type="button" className="btn-g" onClick={acts.chooseSuite} disabled={!face.chooseSuite}>
+          <svg className="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M8 2.5l5.5 3L8 8.5l-5.5-3z" />
+            <path d="M2.5 8.5L8 11.5l5.5-3" />
+            <path d="M2.5 11L8 14l5.5-3" />
+          </svg>
+          Choose a suite
+        </button>
+        {face.privateInstead ? (
+          <button type="button" className="btn-g" onClick={acts.privateInstead}>
+            <svg className="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+              {privateEye}
+            </svg>
+            Private session instead
+          </button>
+        ) : null}
+      </div>
+      <p className="mono" style={{ margin: '8px 0 0', fontSize: 'var(--t-meta)', color: 'var(--text-tertiary)' }}>
+        / commands · @ mention a file · ⏎ send
+      </p>
+      {face.notices.map((notice, index) => (
+        <p key={index} role="note" className="mono" style={{ margin: 0, maxWidth: 560, fontSize: 'var(--t-meta)', color: 'var(--text-tertiary)', overflowWrap: 'anywhere' }}>
+          {notice}
+        </p>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * The context meter in the header (`main.html:239-243` at `b375fac9`): the
+ * bar with its 80% and 90% marks and the words, or a dashed bar where it
+ * cannot be known. The Mac app's `MeterView`. Its click opens the inspector.
+ */
+export function MeterView({ meter, open }: { readonly meter: SessionFace['header']['meter']; readonly open: () => void }) {
+  const color = meter.warns ? 'var(--status-warning)' : 'var(--text-secondary)'
+  return (
+    <button
+      type="button"
+      className="hv"
+      onClick={open}
+      aria-label={`Context window: ${meter.known ? `${meter.percent} percent full` : meter.text}. Show details`}
+      style={{ display: 'flex', alignItems: 'center', gap: 10, height: 32, padding: '0 8px', border: 0, borderRadius: 7, color: 'var(--text-tertiary)', fontSize: 'var(--t-small)' }}
+    >
+      <span>Context</span>
+      {meter.known ? (
+        <>
+          <span aria-hidden="true" style={{ position: 'relative', display: 'block', width: 140, height: 6, borderRadius: 3, background: 'var(--line-border)' }}>
+            <span style={{ display: 'block', width: `${meter.percent}%`, height: '100%', borderRadius: 3, background: color }} />
+            <span style={{ position: 'absolute', left: '80%', top: -4, width: 1, height: 14, background: 'var(--text-tertiary)' }} />
+            <span style={{ position: 'absolute', left: '90%', top: -4, width: 1, height: 14, background: 'var(--text-tertiary)' }} />
+          </span>
+          <span className="mono" style={{ fontSize: 'var(--t-meta)', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+            {meter.used} / {meter.window}
+          </span>
+          <span className="mono" style={{ fontSize: 'var(--t-meta)', fontWeight: 600, color }}>
+            {meter.percent}%
+          </span>
+        </>
+      ) : (
+        <>
+          <span aria-hidden="true" style={{ display: 'block', width: 138, height: 4, borderRadius: 3, border: '1px dashed var(--line-strong)' }} />
+          <span className="mono" style={{ fontSize: 'var(--t-meta)', whiteSpace: 'nowrap' }}>
+            {meter.text}
+          </span>
+        </>
+      )}
+    </button>
+  )
+}
+
+/** Each attachment kind's glyph: the old chips' own, copied as drawn (`main.html:731-736` at `b375fac9`). */
+const attachmentGlyphs: Readonly<Record<AttachmentKind, ReactNode>> = {
+  folder: <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.8l1.5 1.5h4.7A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" />,
+  file: (
+    <>
+      <path d="M9 2H4.5A1.5 1.5 0 0 0 3 3.5v9A1.5 1.5 0 0 0 4.5 14h7a1.5 1.5 0 0 0 1.5-1.5V6z" />
+      <path d="M9 2v4h4" />
+    </>
+  ),
+  pdf: (
+    <>
+      <path d="M9 2H4.5A1.5 1.5 0 0 0 3 3.5v9A1.5 1.5 0 0 0 4.5 14h7a1.5 1.5 0 0 0 1.5-1.5V6z" />
+      <path d="M9 2v4h4M5.5 9h5M5.5 11.5h3" />
+    </>
+  ),
+  image: (
+    <>
+      <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
+      <circle cx="6" cy="6.5" r="1.2" />
+      <path d="M13.5 10.5L10 7l-6 6" />
+    </>
+  ),
+  audio: <path d="M2.5 8h1M5 5.5v5M7.5 3.5v9M10 6v4M12.5 7v2" />,
+  video: (
+    <>
+      <rect x="2" y="3.5" width="9" height="9" rx="1.5" />
+      <path d="M11 7l3-2v6l-3-2" />
+    </>
+  ),
+}
+
+/** What the session holds attached, each with its kind's glyph (read from the path) and its remove where the session takes `detach` (`main.html:728-743` at `b375fac9`). The Mac app's `AttachmentChips`. */
+export function AttachmentChips({ paths, detach }: { readonly paths: readonly string[]; readonly detach: ((path: string) => void) | undefined }) {
+  if (paths.length === 0) return null
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '10px 12px 0' }}>
+      {paths.map((path) => (
+        <span key={path} className="chip" style={detach ? undefined : { paddingRight: 10 }}>
+          <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" style={{ color: 'var(--text-secondary)' }}>
+            {attachmentGlyphs[AttachmentKind.of(path)]}
+          </svg>
+          <span className="mono" style={{ fontSize: 'var(--t-ui)' }}>
+            {path}
+          </span>
+          {detach ? (
+            <button type="button" onClick={() => detach(path)} aria-label={`Remove ${path}`} className="ib" style={{ width: 22, height: 22, color: 'var(--text-tertiary)' }}>
+              <svg className="i" width="11" height="11" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
+              </svg>
+            </button>
+          ) : null}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+/** A row picked with the mouse keeps the input's focus. */
+const keep = (event: { preventDefault: () => void }) => event.preventDefault()
+
+export type Suggestions =
+  | { readonly kind: 'commands'; readonly items: readonly SlashItem[]; readonly query: string }
+  | { readonly kind: 'files'; readonly items: readonly FolderFile[]; readonly folder: string }
+
+/**
+ * The composer's `/` and `@` menus (`main.html:695-716` at `b375fac9`): the
+ * commands the draft names, or the symphonies after `/play `, or the
+ * folder's files; the highlighted row, and the keys. The Mac app's `SuggestionList`.
+ */
+export function SuggestionList({ suggestions, active, pickCommand, pickFile }: {
+  readonly suggestions: Suggestions
+  readonly active: number
+  readonly pickCommand: (item: SlashItem) => void
+  readonly pickFile: (file: FolderFile) => void
+}) {
+  const background = (index: number) => (index === active ? 'var(--surface-selection)' : undefined)
+  if (suggestions.kind === 'commands') {
+    return (
+      <div className="menu" role="listbox" aria-label="Commands" style={{ position: 'absolute', left: 0, bottom: 'calc(100% + 6px)', zIndex: 40, width: 'min(560px, 100%)' }}>
+        <div style={{ maxHeight: 320, overflowY: 'auto', padding: 4 }}>
+          {suggestions.items.map((item, index) => (
+            <button
+              key={item.name}
+              type="button"
+              role="option"
+              aria-selected={index === active}
+              onMouseDown={keep}
+              onClick={() => pickCommand(item)}
+              className="hv"
+              style={{ width: '100%', display: 'grid', gridTemplateColumns: '150px minmax(0, 1fr)', columnGap: 12, alignItems: 'baseline', padding: '6px 10px', border: 0, borderRadius: 6, background: background(index), color: 'var(--text-primary)', textAlign: 'left' }}
+            >
+              <span className="mono" style={{ fontSize: 'var(--t-ui)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                /{item.name} <span style={{ color: 'var(--text-tertiary)' }}>{item.args}</span>
+              </span>
+              <span style={{ fontSize: 'var(--t-small)', color: 'var(--text-secondary)' }}>{item.summary}</span>
+            </button>
+          ))}
+          {suggestions.items.length === 0 ? (
+            <p style={{ margin: 0, padding: '8px 10px', fontSize: 'var(--t-small)', color: 'var(--text-tertiary)' }}>No command starts with “{suggestions.query}”.</p>
+          ) : null}
+        </div>
+        <div className="mono" style={{ padding: '6px 12px', borderTop: '1px solid var(--line-border)', fontSize: 'var(--t-label)', color: 'var(--text-tertiary)' }}>
+          ↑↓ choose · ⇥ or ⏎ complete · esc close
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="menu" role="listbox" aria-label="Files" style={{ position: 'absolute', left: 0, bottom: 'calc(100% + 6px)', zIndex: 40, width: 'min(460px, 100%)' }}>
+      <div style={{ padding: 4 }}>
+        {suggestions.items.map((file, index) => (
+          <button
+            key={file.path}
+            type="button"
+            role="option"
+            aria-selected={index === active}
+            onMouseDown={keep}
+            onClick={() => pickFile(file)}
+            className="hv"
+            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, height: 30, padding: '0 10px', border: 0, borderRadius: 6, background: background(index), color: 'var(--text-secondary)', textAlign: 'left' }}
+          >
+            <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M9 2H4.5A1.5 1.5 0 0 0 3 3.5v9A1.5 1.5 0 0 0 4.5 14h7a1.5 1.5 0 0 0 1.5-1.5V6z" />
+              <path d="M9 2v4h4" />
+            </svg>
+            <span className="mono" style={{ flex: '1 1 auto', minWidth: 0, fontSize: 'var(--t-ui)', color: 'var(--text-primary)' }}>
+              {file.path}
+            </span>
+            <span className="mono" style={{ fontSize: 'var(--t-meta)', color: 'var(--text-tertiary)' }}>
+              {file.size}
+            </span>
+          </button>
+        ))}
+        {suggestions.items.length === 0 ? (
+          <p style={{ margin: 0, padding: '8px 10px', fontSize: 'var(--t-small)', color: 'var(--text-tertiary)' }}>No file in {suggestions.folder} matches.</p>
+        ) : null}
+      </div>
+      <div className="mono" style={{ padding: '6px 12px', borderTop: '1px solid var(--line-border)', fontSize: 'var(--t-label)', color: 'var(--text-tertiary)' }}>
+        in {suggestions.folder} · ↑↓ choose · ⏎ attach · esc close
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The inspector's column, reserved while it is open (design 1u, until 1g
+ * draws the pane): the old `ap-insp` aside's place, 304 px on
+ * `surface.inspector` with its left border (`main.html:763` at
+ * `b375fac9`), so the main column's width compares. 1e's floating
+ * `PlaceholderPanel` is the shell's and reserves no width.
+ */
+export function InspectorPlaceholder() {
+  return (
+    <aside
+      className="ap-insp"
+      aria-label="Inspector"
+      style={{ flex: '0 0 304px', minHeight: 0, display: 'grid', placeItems: 'center', padding: 24, boxSizing: 'border-box', background: 'var(--surface-inspector)', borderLeft: '1px solid var(--line-border)', fontSize: 'var(--t-small)', lineHeight: 1.45 }}
+    >
+      <p style={{ margin: 0, textAlign: 'center', color: 'var(--text-secondary)' }}>The inspector isn’t drawn here yet. Design item 1g ports it.</p>
+    </aside>
+  )
+}
