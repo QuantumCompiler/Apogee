@@ -57,6 +57,9 @@ paths_of() {
             echo "lib/scripts/changed.sh"
             # The release name, which the bundle reports as its version.
             echo "lib/release/VERSION"
+            # The logo its icon is made from: the suite holds the committed
+            # icon set to it.
+            echo "lib/design/assets/Logo.png"
             # Its pipeline's own definition.
             echo ".github/workflows/darwin.yml"
             ;;

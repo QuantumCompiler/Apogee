@@ -89,7 +89,7 @@ This item delivers:
 - (consumed decision: 7a owns the connection's form, its states and the Mac's credential home. The iPad uses them without the local choice.)
 - (consumed decision: 7c owns each place's behavior against a server, including the carve-out reasons that say "run it at a prompt", which are written for a server there.)
 - (consumed decision: 59b owns what happens to a chat turn left running when the connection drops, and 59e owns a task's. The iPad draws what they say.)
-- (consumed decision: 8a owns the iPadOS target, universal for iPhone and iPad, with its identifier and its test bundle. 8c owns distribution, including the Apple Developer Program, which is a [user] call there.)
+- (consumed decision: 8a owns the iPadOS target, universal for iPhone and iPad, with its identifier, its test bundle and its icon, one 1024-pixel image from `lib/design/assets/Logo.png`. 8c owns distribution, including the Apple Developer Program, which is a [user] call there.)
 
 **Guardrail(s).**
 - `ShellViewModelTests` pins the iPad form at every measured width and orientation, side panes never off, and the Mac's cases unchanged.

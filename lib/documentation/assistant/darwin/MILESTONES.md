@@ -3457,3 +3457,49 @@ Decisions taken while building (2026-11-08), each for veto:
 - In this checkout, after the patch: the app's gate (`lib/scripts/cicd.sh --app darwin --test`, run straight after a CLI gate) passed 1,174 of 1,174 (the xcresult's `totalTestCount`), no `warning:` line; `neverAnswers` took 2.0 s. The three tests' bundles (`InfrastructureProcessTests`, `BusinessJobsTests`, `PresentationTasksTests`) over 10 iterations: 120 tests, 1,230 of 1,230 runs passed, no `warning:` line.
 
 **Not done:** the CI runners' own load is the next proof; nothing else changed.
+
+---
+
+## Milestone H — The app's logo
+
+**Goal.** Track 11 (opened 2026-11-14, the user's call): `lib/design/assets/Logo.png` becomes the macOS app's icon and Apogee's official logo. The app shipped with macOS's generic icon, and neither the README nor the design showed the logo.
+
+### 2026-11-18 — `apogee-logo-as-the-app-icon` (backlog item 11a): the rocket is the app's icon
+
+**Why.** Measured 2026-11-14: `lib/src/darwin` had no asset catalog and the project named no icon, so `Apogee.app`, in every release since GUI M17, showed the generic icon in the Dock, Finder, the app switcher and the About panel. The logo, a 2048-pixel PNG committed in v0.2.0, was used nowhere.
+
+- [x] **The icon set** (`source/main/Assets.xcassets/AppIcon.appiconset`, 760 KB, committed): the ten macOS sizes, 16 to 512 points at 1x and 2x (16 to 1024 pixels), each at the density the catalog expects. The application target's synchronized folder compiles the catalog, and `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon` names it in Debug and Release; no framework changed.
+- [x] **The script** (`scripts/icon.sh` and `scripts/icon-small.swift`, new). `generate` first refuses a master that is cut short, damaged, not square or not 2048 pixels (`sips` reads a truncated PNG and stretches a wide one, without complaint). It then makes every copy in a temporary folder, with `sips` and, for the three smallest images, `scripts/icon-small.swift` (compiled and run by the script; Core Image), replacing nothing until all are made: the set, `lib/design/assets/Logo-320.png` for the README, and the design board with its embedded copy. It records the master's SHA-256 and each image's in the set's `Contents.json`. A second run writes identical bytes. `verify <app>` confirms a bundle's `Info.plist` names `AppIcon` and its `Assets.car` holds it as an icon at all ten sizes (`assetutil --info`).
+- [x] **The build** (`scripts/build.sh`): `build` and `package` each run `icon.sh verify`, and neither regenerates anything, so `package` refuses a bundle without the icon.
+- [x] **The check** (`tests/architecture/layering/IconSetCheck.swift`, `IconSetTests.swift`; `ModuleMap` now reads each target's `appIconNames`): every size macOS asks for is declared, every declared size is a PNG of exactly its pixels, the recorded master is the master on disk, each image matches the hash the script recorded, and both configurations name the icon. The records catch a set that has drifted, not one whose records were edited to match. A changed master fails naming the stale set and the command to run.
+- [x] **The pipeline** (`lib/scripts/changed.sh`): `gui-darwin` now counts `lib/design/assets/Logo.png`, so a master changed alone runs the app's pipeline, whose suite then fails until the set is regenerated.
+- [x] **The README**: the logo over the title, 160 wide.
+- [x] **The design** (`lib/design/spec`, in the old prototype's files, per the design's interim rule): `html/Logo.dc.html`, a Foundations board with the artwork and how it appears as the icon, its `canvas.json` entry and its README row; `CLAUDE.md`'s "What a change touches" gains the logo.
+- [x] **The docs**: the codebase map, DEVELOPER.md (the tree, the app's row, **The app's icon** with how to change the logo, `build.sh`, what the app is built from), the CLI's `changed.sh` line, and the design docs that named this item as pending.
+
+Decisions taken while building (2026-11-18), each for veto:
+- **The document's defaults, taken as stated:** the artwork full bleed, with macOS's icon shape framing it and no layered Liquid Glass file; the generated sizes committed and the check catching staleness; the README's logo a reduced PNG from the same script at 160 wide.
+- **The small sizes are the rocket alone, its outline thickened** (the user's call, 2026-11-18, from a comparison drawn as macOS draws them): the document's default was the whole artwork, or a rocket-only crop if that read poorly, and it counted on the white outline to hold. That outline is about 12 pixels wide on the 2048-pixel master, so about a quarter of a pixel at 32: the whole artwork was a dim smear and a crop barely better. `scripts/icon-small.swift` keeps the bright outline, which drops the gray glyphs, thickens it (40 master pixels for the 16-pixel image, 22 for the 32-pixel ones), crops to the rocket and scales. This is the one change to the artwork the item otherwise ruled out, confined to the three images of 32 pixels or fewer; 64 pixels and up are the artwork as drawn.
+- **macOS frames the full-bleed artwork, measured:** in scratch bundles and fresh copies of the build, `NSWorkspace` drew a full-bleed square in the rounded icon shape with its margin, so the first default's premise holds.
+- **The logo gets its own board, not the window's header** *(flagged)*: the document named the window's header, "and the About board if the canvas draws one". The prototype draws no identity in its header (the window controls and three buttons) and has no About board, and the app's window draws none either, so a logo there would have the design ask for something the app doesn't draw, which the item's seam (the app target only, no framework) rules out. The Foundations board shows the logo without implying app chrome.
+- **What this item handed on went into the items that own it:** M18 (the "Apogee Dev" icon), 8a and 8b (the iOS and iPadOS icon), and in the design queue 1q (a Logo page), 1c and 1s (one more board to capture and judge) and 1t (the script's board step).
+- **The README's file is 320 pixels, shown at 160**, so it stays sharp on a Retina display (68 KB against the master's 723 KB).
+- **`verify` lives in `icon.sh`, with `build.sh` calling it**, so the suite can run the refusals on planted bundles.
+- **Additions to the guardrails:** each image's hash is recorded, so a hand-replaced image of the right size fails, and the check requires all ten sizes rather than only those the set declares.
+- **`changed.sh` counts the master.** The document didn't name it, but without it the check could not fire on the pull request that changes the logo alone.
+- **The design's "CI never reads it" holds for `lib/design/spec`.** The suite reads only the master under `lib/design/assets/`, as the document asks; the board's copy is refreshed by `generate` and not checked. `assistant/design/CLAUDE.md` says so.
+
+**Verified.**
+- **The full gate** (`lib/scripts/cicd.sh --test`, every app, on the final code): green. The CLI's 4,554 of 4,554 ctest cases (the usual `pdftotext` case skipped; `changed.sh` is the CLI pipeline's only touched input), 713 s; the macOS app's 1,205 of 1,205 tests by the result bundle's count, built without a warning.
+- **The new checks**: `ArchitectureLayeringTests` is 56 cases, 32 of them new. They were red before the set, the script and each review fix existed. Twenty-five faults planted in `IconSetCheck` and `icon.sh`, one at a time, are each caught by a named test; four survived at first, and gained a test or a simpler branch.
+- **The real scripts on planted bundles**: `build.sh package` refused a signed bundle whose `Info.plist` names no icon, and one whose `Assets.car` holds only another icon. It passed the real build, as did `build.sh build`.
+- **As macOS draws it**: `NSWorkspace` on fresh copies of the Release app, and on scratch apps with a square, a tile and a small circle, in this Mac's Clear Dark icon style. The comparison of the small sizes was made the same way.
+- **The design**: the start-screen check over all 78 starts, 30 ticks each, no problems, and the board opened from `html/` over http. `cli.version_check` passes with the changed `changed.sh`.
+- **Three review passes**: one independent reviewer, then spec, code and docs reviews with a skeptic on each finding. Their findings are fixed: a truncated or non-square master was accepted, `generate` could stop half applied, `verify` accepted an image or a partial icon, and later items had lost what this one handed them.
+- `required-checks.py --verify`: **not in force**, "there is no 'Stable: CI must pass' ruleset". It needs the user's `required-checks.py --pr 11 --apply`.
+
+**Not done.**
+- **The user's look** (the first acceptance criterion): the rocket in Finder, the Dock, the app switcher and the About panel, and which small-size treatment to keep. GUI M18 has not shipped, so no development build was launched: it would drive the production `apogee` and share the installed app's settings. Finder can be judged without launching.
+- **One unexplained render**: `NSWorkspace` on `build/macos-arm64/Apogee.app` itself returned the unframed square, while every fresh copy of the same bundle was framed. A stale system record for that path is the likely cause, not proven.
+- **The canvas** was published (the board and its `canvas.json` entry) but not seen there: the browser pane is not signed in to claude.ai. Its copy of the board differs from the repository's by one line, `LOGO`, because the canvas takes an uploaded image rather than an embedded one. The canvas was already 13 boards behind the repository, and that catch-up was left alone.
+- **Not run**: CI's rows (the `xcode-27` runner included), which wait for a push.

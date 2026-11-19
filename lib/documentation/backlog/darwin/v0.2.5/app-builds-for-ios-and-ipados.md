@@ -68,6 +68,7 @@ This item delivers:
   - Every framework target and test bundle: `SUPPORTED_PLATFORMS = "macosx iphoneos iphonesimulator"`, `SDKROOT = auto`, `IPHONEOS_DEPLOYMENT_TARGET = 27.0` beside the Mac's 27.0, `TARGETED_DEVICE_FAMILY = "1,2"` (iPhone and iPad), `SUPPORTS_MACCATALYST = NO`.
   - The app target `Apogee`: the same, with its iOS keys under `[sdk=iphone*]` conditions so the Mac's resolve unchanged. Those keys are the generated Info.plist's launch screen, scene manifest and orientations, `SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO` and `SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO`.
   - The app embeds the same frameworks on both.
+  - The app's icon: `AppIcon.appiconset` holds only `mac` images, so this item adds the single 1024-pixel iOS image from the same master through `scripts/icon.sh generate`, and widens `IconSetCheck`, whose `slot(of:)` accepts only `mac` (handed on by 11a, [Milestone H](../../../assistant/darwin/MILESTONES.md#milestone-h--the-apps-logo)).
   - No new target and no membership exceptions.
 - `source/infrastructure/process/`:
   - `ProcessSpawner.swift`, `LoginShell.swift` and `ProcessMemory.swift` become `+macOS` files, unchanged inside.

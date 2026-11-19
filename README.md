@@ -1,3 +1,5 @@
+<p align="center"><img src="lib/design/assets/Logo-320.png" alt="The Apogee logo: a white rocket on a black field" width="160"></p>
+
 # Apogee
 
 **Local and cloud language models, one system.**

@@ -38,7 +38,7 @@ Measured by the recon of 2026-11-14:
 - The recon of 2026-11-14 (prototype map, boards, darwin architecture, tooling, critic). The figures above are its own, re-checked at HEAD where cited.
 - The Mac app's law the ADR mirrors: [GUI ADR 0001](../../../adrs/gui/layer-enforcement.md), [darwin ADR 0002](../../../adrs/darwin/presentation-mvvm.md), [darwin ADR 0004](../../../adrs/darwin/module-schemes-and-previews.md), [the darwin contributor guide](../../../assistant/darwin/CLAUDE.md) (view-models import no UI framework, `:114`).
 - The local-gate precedent: the CLI's lint and formatting are local gates, CI builds the executable and nothing else ([`assistant/cli/CLAUDE.md`](../../../assistant/cli/CLAUDE.md), `:230` and `:245`, re-checked).
-- Items queued elsewhere that touch the design: the Apple apps' 10a ([`design-the-server-window.md`](../../darwin/macos/v0.2.6/design-the-server-window.md)), 10c ([`people-screens.md`](../../darwin/macos/v0.2.7/people-screens.md)) and 11a ([`apogee-logo-as-the-app-icon.md`](../../darwin/v0.2.1/apogee-logo-as-the-app-icon.md)).
+- Items queued elsewhere that touch the design: the Apple apps' 10a ([`design-the-server-window.md`](../../darwin/macos/v0.2.6/design-the-server-window.md)) and 10c ([`people-screens.md`](../../darwin/macos/v0.2.7/people-screens.md)). 11a shipped 2026-11-18, adding `html/Logo.dc.html` to the old prototype.
 
 **Decisions made** (dated):
 - 2026-11-14 — The user's call: rebuild the prototype in a compiled web framework with the production GUIs' layered architecture, "a similar prototype that is written with the same type of layered architecture as the actual production GUI frameworks". It stays the design's cross-platform source of truth.
@@ -49,7 +49,7 @@ Measured by the recon of 2026-11-14:
 - 2026-11-14 — The recorded default (proposed, the user let it stand): source at `lib/design/prototype/`; the build writes one committed `lib/design/main.html`; a check fails when that file is stale against its source.
 - 2026-11-14 — The recorded default: the data is the Mac app's 613 fixture files, read in place at build time and bundled. A state nobody recorded gets a hand-made file in the CLI's exact shape, named `*-handmade*`, as the Mac app's 10 already are. View-models are plain TypeScript classes that never import React.
 - 2026-11-14 — The recorded default: the checks (typecheck, unit tests, layering, staleness) run locally before a commit, not in CI, as the CLI's lint does. `changed.sh` and the workflows are untouched.
-- 2026-11-14 — The recorded default: the old prototype is frozen from 1c's baseline, taking fixes only. New design waits for the React app's first screen (1e) and is drawn there. An item queued elsewhere that touches the design lands wherever the prototype is when it builds, and says so in its record (10a is gated on 1e; 11a may land in the old file as a fix).
+- 2026-11-14 — The recorded default: the old prototype is frozen from 1c's baseline, taking fixes only. New design waits for the React app's first screen (1e) and is drawn there. An item queued elsewhere that touches the design lands wherever the prototype is when it builds, and says so in its record (10a is gated on 1e; 11a landed in the old files, shipped 2026-11-18).
 
 **Open calls:**
 - [default: the design's ADRs number from 0001 in their own series, as the mod's do; the record cites the GUI's and darwin's ADRs and amends none.]
@@ -74,4 +74,4 @@ Measured by the recon of 2026-11-14:
 - [ ] `assistant/design/CLAUDE.md` states the freeze rule as decided by 1a and points to the ADR; `lib/design/spec/CLAUDE.md` says at its top that it is frozen.
 - [ ] No code, no install, no CI file and no `changed.sh` line is touched.
 
-**Scope note.** Earmarked for v0.2.1 (design track 1); ungated, and every other item in the track builds on it. Out of scope: any code or package (1b on), the baseline screenshots (1c), rewriting `lib/design/spec/CLAUDE.md` and `README.md` (1t), and re-wording the Apple apps' 10a, 10c, 8b, 9a, 9b and 11a (1t, except 10a's new gate on 1e, which the queue's opening records).
+**Scope note.** Earmarked for v0.2.1 (design track 1); ungated, and every other item in the track builds on it. Out of scope: any code or package (1b on), the baseline screenshots (1c), rewriting `lib/design/spec/CLAUDE.md` and `README.md` (1t), and re-wording the Apple apps' 10a, 10c, 8b, 9a and 9b (1t, except 10a's new gate on 1e, which the queue's opening records).

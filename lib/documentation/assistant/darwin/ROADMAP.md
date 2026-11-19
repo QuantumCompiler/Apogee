@@ -102,9 +102,9 @@ Opened 2026-10-31 (the user's call): a second bug sweep over the CLI and GUI —
 
 ### v0.2.1 — Track 11, the app's logo
 
-Opened 2026-11-14 (the user's call): `lib/design/assets/Logo.png` becomes the macOS app's icon and Apogee's official logo. Today the app shows macOS's generic icon.
+Opened 2026-11-14 (the user's call): `lib/design/assets/Logo.png` becomes the macOS app's icon and Apogee's official logo. Until then the app showed macOS's generic icon.
 
-- [ ] **The Apogee logo is the app's icon and the official logo** *(11a — [backlog](../../backlog/darwin/v0.2.1/apogee-logo-as-the-app-icon.md))* — every macOS icon size generated from the one master by a script into the app's asset catalog, the app target naming it, a check that fails on a stale or incomplete set, and the logo shown in the README and on the design canvas.
+- [x] **The Apogee logo is the app's icon and the official logo** *(11a, shipped 2026-11-18 — [Milestone H](MILESTONES.md#milestone-h--the-apps-logo))* — every macOS icon size generated from the one master by a script into the app's asset catalog, the app target naming it, a check that fails on a stale or incomplete set, and the logo shown in the README and on the design canvas.
 
 ### v0.2.4 — Track 7, the Mac as a client
 

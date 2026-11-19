@@ -28,6 +28,7 @@ These files are also the **Apogee Desktop** design canvas, <https://claude.ai/ar
 | What a part of the design needs from the CLI | `html/BuildContract.dc.html`: its row in the contract map, and the gap list if the CLI doesn't offer it. |
 | A color | The theme table in `main.html`'s `themes()` (all three themes) and `colorGroups()`; the rows in `html/ColorTokens.dc.html`; `colors` in `json/tokens.json`. |
 | A size, a region, a key | `html/BuildLayout.dc.html`, `json/tokens.json`'s layout values, and for a key, the Settings › Keyboard list in `main.html` (`set.keys`). |
+| The logo | Replace `lib/design/assets/Logo.png`, re-measure the rocket's crop in `lib/src/darwin/scripts/icon.sh` if the rocket moved or changed size, and run `icon.sh generate`, which rewrites the app's icon, the README's copy and `html/Logo.dc.html`'s embedded copy. On the canvas that board's `LOGO` line names an uploaded copy instead, so upload the new `Logo-320.png` and repoint it. |
 | A component's look | The component boards (`html/Components*.dc.html`) when the piece appears there, so they match the prototype. |
 
 `Main`, `Inspector`, `Trace`, `Chat` and `Appearance` are the exploration that led here. Leave them as they are.

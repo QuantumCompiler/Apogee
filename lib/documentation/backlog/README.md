@@ -6,15 +6,15 @@ The work queue, seen one release at a time. This page is the **overview**: what 
 
 The branch is `v0.2.1`; the last published release is v0.2.0.
 
-**Still to build: 25 items.**
+**Still to build: 24 items.**
 - **The design:** 20. The prototype is being rebuilt in React.
 - **The mod:** 4. The Claude plugin is born.
-- **The Apple apps:** 1, the app's icon.
+- **The Apple apps:** none; their three tracks for this release have shipped.
 - **The CLI:** none; its three tracks for this release have shipped.
 
-On top of that, 4 maintenance items can be picked up any time. None of the 25 waits on a decision from you.
+On top of that, 4 maintenance items can be picked up any time. None of the 24 waits on a decision from you.
 
-**Can start today** (nothing gates them): [design 1a](design/v0.2.1/design-app-architecture-and-law.md), [mod 1a](mod/v0.2.1/mod-scaffold.md) and [Apple apps 11a](darwin/v0.2.1/apogee-logo-as-the-app-icon.md).
+**Can start today** (nothing gates them): [design 1a](design/v0.2.1/design-app-architecture-and-law.md) and [mod 1a](mod/v0.2.1/mod-scaffold.md).
 
 ### The design ([queue](design/README.md#v021))
 
@@ -60,11 +60,7 @@ On top of that, 4 maintenance items can be picked up any time. None of the 25 wa
 
 ### The Apple apps ([queue](darwin/README.md#v021))
 
-**macOS.** Apogee in Xcode (track 5) and the second bug sweep's app findings (track 6) have shipped ([Milestone F](../assistant/darwin/MILESTONES.md#milestone-f--apogee-in-xcode-the-apps-side), [Milestone G](../assistant/darwin/MILESTONES.md#milestone-g--the-second-sweeps-gui-findings)). One item is left:
-
-| # | Item | Waits on |
-|---|---|---|
-| 11a | [The Apogee logo is the app's icon and the official logo](darwin/v0.2.1/apogee-logo-as-the-app-icon.md) | — |
+**macOS.** Nothing is left to build. Apogee in Xcode (track 5), the second bug sweep's app findings (track 6) and the app's logo (track 11) have shipped ([Milestone F](../assistant/darwin/MILESTONES.md#milestone-f--apogee-in-xcode-the-apps-side), [Milestone G](../assistant/darwin/MILESTONES.md#milestone-g--the-second-sweeps-gui-findings), [Milestone H](../assistant/darwin/MILESTONES.md#milestone-h--the-apps-logo)).
 
 ### The CLI ([queue](cli/README.md#v021))
 

@@ -27,7 +27,7 @@
   - default (capture): reads `baseline.json`, archives that revision, serves it, and captures:
     - every start preset at `apogee=installed`;
     - the same preset at `missing` and `config-typo`, kept only where the image differs from `installed`;
-    - the 14 other boards at their `canvas.json` size, full page, once per value of their prop menus.
+    - the 15 other boards at their `canvas.json` size, full page, once per value of their prop menus.
   - It writes the images, a hash list and an `index.html` contact sheet to `lib/design/prototype/.parity/baseline/<revision>/`.
 - `lib/design/prototype/parity/baseline.json`, new, committed: the full revision hash, the date, the tree hash of `lib/design/spec` at it, the preset list, the modes kept per preset, the 30-tick result, the Playwright version, the viewport, and a short history of re-records with their reasons.
 - `.gitignore`: `lib/design/prototype/.parity/`.
@@ -54,7 +54,7 @@
 - [default: `git archive <revision> lib/design/spec` into a temp folder, not `git worktree add`. It leaves no worktree entry in the shared checkout.]
 - [default: the revision is the newest commit touching `lib/design/spec` once it is clean. While the other session's work is uncommitted, this item waits and says so; it never commits that work itself.]
 - [default: capture all three `apogee` modes and keep a `missing` or `config-typo` image only when its hash differs from `installed`. No hand-picked list of screens.]
-- [default: the 14 non-screen boards are captured too (Build, Foundations, Components, Exploration), since 1q and 1r rebuild them and 1s judges them.]
+- [default: the 15 non-screen boards are captured too (Build, Foundations, Components, Exploration), since 1q and 1r rebuild them and 1s judges them.]
 - [default: the browser's clock is fixed to one instant and `Math.random` is seeded by an init script, so two runs give the same images.]
 - [default: the capture waits for the fonts (`document.fonts.ready`). If the Google Fonts link fails, the run is refused, never recorded with fallback fonts.]
 - [default: a fix to the frozen prototype re-records the baseline at the fix's commit, with the reason in `baseline.json`'s history.]
@@ -72,7 +72,7 @@ A real run is captured twice; the two hash lists must match.
 
 **Acceptance criteria:**
 - [ ] `baseline.json` is committed, naming the revision, its preset count, and the 30-tick result in all three modes.
-- [ ] `npm run baseline` re-makes every preset's image (plus the kept mode images and the 14 boards), and two runs match hash for hash.
+- [ ] `npm run baseline` re-makes every preset's image (plus the kept mode images and the 15 boards), and two runs match hash for hash.
 - [ ] In a scratch clone with `lib/design/spec` deleted, the same command still re-makes the same images.
 - [ ] The contact sheet is sent to the user to look through.
 - [ ] `spec/CLAUDE.md`, `spec/README.md` and the design guide say the old prototype is frozen at that revision.

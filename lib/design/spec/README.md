@@ -16,6 +16,7 @@ It is a reference for building the apps under `lib/src/darwin/`, `linux/` and `w
 | `html/BuildLayout.dc.html` | Regions and sizes, navigation and keys, the states every screen draws, and each piece as SwiftUI, Qt Quick and WinUI. |
 | `html/BuildProcesses.dc.html` | The process diagram: the app, its `apogee` children, and the files it reads and writes. |
 | `html/ColorTokens.dc.html`, `html/TypeSpace.dc.html` | Foundations: the color tokens and their contrast; type, space and shape. |
+| `html/Logo.dc.html` | The logo: the artwork, and how it appears as the app's icon. Its embedded copy is written by `lib/src/darwin/scripts/icon.sh`. |
 | `html/Components*.dc.html` | Components: model, context and sources; the turn; asking and failing; making media. |
 | `html/Main`, `Inspector`, `Trace`, `Chat`, `Appearance` `.dc.html` | Exploration: the first three directions and the first merged pass, superseded by the prototype and kept for reference. |
 | `json/tokens.json` | Machine-readable tokens: 25 colors in three themes, the type scale, fonts, radii, spacing, layout sizes and motion. Generated from the prototype's theme table. |

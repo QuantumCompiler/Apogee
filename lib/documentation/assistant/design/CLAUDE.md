@@ -19,7 +19,7 @@ The law of the new form is the design's ADR 0001, written by [1a](../../backlog/
 
 [default, 2026-11-14, recorded in 1a]: the old prototype is **frozen** as the port's reference from item 1c's baseline on. It takes fixes only, never a new screen or state. New design waits for the React app's first screen (1e) and is drawn there.
 
-An item already queued elsewhere that touches the design lands wherever the prototype is when it builds, and says so in its record. Those items are the Apple apps' 10a, 10c and 11a.
+An item already queued elsewhere that touches the design lands wherever the prototype is when it builds, and says so in its record. Those items are the Apple apps' 10a and 10c. (11a landed in the old prototype's files on 2026-11-18, as the logo board.)
 
 ## The rules that don't change
 
@@ -34,4 +34,4 @@ The design's rules carry over unchanged into the new form ([`lib/design/spec/CLA
 
 The docs-first lifecycle and its conventions are the CLI's ([`assistant/cli/CLAUDE.md`](../cli/CLAUDE.md)); this home states only its deltas. A change is specced in [the backlog](../../backlog/design/README.md), built from its document, and recorded in [MILESTONES.md](MILESTONES.md). Each step that changes the queue's index changes the [backlog overview](../../backlog/README.md#keeping-this-page-true) in the same pass. The plan is [ROADMAP.md](ROADMAP.md).
 
-The design is not an input to any app's build, and CI never reads it. Its checks run locally before a commit (1b).
+The design is not an input to any app's build, and CI never reads it. Its checks run locally before a commit (1b). The logo beside it is the one exception: `lib/design/assets/Logo.png` is the master the macOS app's icon is made from, and that app's suite reads it.

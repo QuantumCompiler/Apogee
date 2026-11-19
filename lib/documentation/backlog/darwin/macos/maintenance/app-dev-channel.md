@@ -12,12 +12,14 @@
 - **One channel per build, decided at build time**, as the CLI bakes its channel: no runtime switch to forget.
 - **The four layers** (ADR 0001): discovery stays in Data, takes the channel as a value; nothing reads a build setting below the composition root.
 - **Hermetic tests**: the discovery table per channel over scripted binaries, no real `~/.local/bin`.
+- **"Apogee Dev" is told apart from the release app in the Dock** by an icon derived from `lib/design/assets/Logo.png` through `scripts/icon.sh` (handed on by 11a, [Milestone H](../../../../assistant/darwin/MILESTONES.md#milestone-h--the-apps-logo)).
 
 **Seam + files.**
 - `Apogee.xcodeproj` — the app target's identifier `com.quantumcompiler.apogee$(APOGEE_CHANNEL_SUFFIX)` and product name, an `ApogeeChannel` Info.plist key; Debug defaulting to dev, Release to release.
 - `scripts/build.sh` — `--channel release|dev`: `build` and `package` default to release (CI's path, unchanged), `open` to dev.
 - `source/data/discovery/BinaryDiscovery.swift` — `candidates(override:channel:)`: release as today; dev the override and `apogee-dev` only.
 - `source/presentation/app/` — the channel read once from the bundle and passed down; the window and About say "Apogee Dev" on the dev channel.
+- The icon: `scripts/icon.sh generate` makes the variant beside `AppIcon`. `IconSetCheck` requires Debug and Release to name `AppIcon` and `icon.sh verify` (run by `build.sh`) requires the bundle to, so both change with it.
 - Tests: `tests/data/discovery/` (the per-channel table), a check that the Release build's identifier is unchanged.
 - Docs: GUI `CLAUDE.md` (the state of play becomes the rule as built), `DEVELOPER.md` (build and channels), the CLI's `DEVELOPER.md` channel table (the app's row).
 
@@ -37,6 +39,6 @@
 **Acceptance criteria:**
 - [ ] With both CLIs installed, a dev-channel app drives `apogee-dev` over `~/.apogee-dev` and leaves the installed app's settings untouched.
 - [ ] The release app, CI's artifact and the release asset are unchanged.
-- [ ] `build.sh open` opens "Apogee Dev"; the full suite is green.
+- [ ] `build.sh open` opens "Apogee Dev", its Dock icon visibly not the release app's; the full suite is green.
 
 **Scope note.** GUI Maintenance; ungated. Once it ships, the GUI `CLAUDE.md`'s "Not yet true of the app" list is retired.

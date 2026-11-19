@@ -26,6 +26,7 @@
 
 **Seam + files.** Under `lib/design/prototype/src/presentation/`:
 - `gallery/Models/`: the board table, converted once from `canvas.json` and committed. Pages, the headings (text, row, page; 6 of the 8, Exploration's 2 left out), and one entry per board: `{id, start?, title, page, row, height, props?}`. The id is the old board's file name, so 1s pairs each entry with its baseline image. Screen entries name a start preset; App is the live entry. Titles are the canvas's.
+- The logo's page (from the Apple apps' 11a, which added `html/Logo.dc.html` on 2026-11-18): a Foundations page with the artwork and its rounded icon form, from `lib/design/assets/Logo-320.png`, embedded by the build so `main.html` stays self-contained. `icon.sh` already regenerates that file, so the design app needs no script step.
 - `gallery/ViewModels/`: `GalleryViewModel` (plain TypeScript, no React): the open page, the focused board, each board's prop values, and the address it reads and writes: `?gallery` (Build), `?gallery=foundations`, and `&board=<id>` for a focused board. It never uses `?page=`, which 1r's pages own.
 - `gallery/Views/`:
   - the gallery itself: page tabs, headings, rows of 1440-wide frames scaled down to fit, laid out by row in table order;
@@ -74,7 +75,7 @@
 - **Key clash:** a planted shell binding of the gallery's key fails.
 
 **Acceptance criteria:**
-- [ ] `lib/design/main.html?gallery` opens on the Build page with the canvas's headings and rows; the Foundations tab shows the color, type and component boards.
+- [ ] `lib/design/main.html?gallery` opens on the Build page with the canvas's headings and rows; the Foundations tab shows the color, type, component and logo boards.
 - [ ] Every screen frame shows the real app at its preset, frozen; the App board is live; clicking a frame opens it at full size.
 - [ ] The prop switcher changes a board's theme and, on screens, the `apogee` mode.
 - [ ] The color page shows 25 tokens × 3 themes with computed ratios; the type page shows sizes, spacing (from 2 px), radii, layout and icons, all read from the tokens.

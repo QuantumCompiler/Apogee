@@ -14,17 +14,18 @@
 - **What cites the old files.**
   - **Docs:** 51 lines in 6 files name `main.html`, `.dc.html` or `support.js` (recon). 30 of them are in darwin's shipped `MILESTONES.md`, which stays as history.
   - **Swift:** 7 lines in 4 files name `main.html` or a board: `KeyMap.swift:78-79`, `Destination.swift:3-4`, `MarkdownText.swift:6` (its path starts on `:5`), `CodeLexerTests.swift:74` and `:264`. `:264` is a test's display name, not a comment. `Palette.swift:39` also cites `lib/design/spec/json/tokens.json`. Seven more lines name `tokens.json` bare (`Typography.swift:3,22`, `Metrics.swift:3,14,24`, `ShellViewModel.swift:115`, `SettingsViewModel.swift:796`); they stay true while the file keeps its name.
-  - **Other docs that send work to `lib/design/spec`:** `assistant/darwin/CLAUDE.md:82` and `assistant/cli/CLAUDE.md:304` (`:303` at HEAD), the brainstorming rule; darwin `ROADMAP.md:129` and the darwin index row at `README.md:110` (10a); for 11a, `ROADMAP.md:107` and `README.md:69`, `:73` (the canvas). `ROADMAP.md:28` is shipped history and `:105` names `assets/Logo.png`; both stay.
-  - **Pending Apple-apps items that draw design:** 8 in all. The six first named (10a, 10c, 8b, 9a, 9b, 11a), plus two the recon found (tooling §5): 10b (`server-window.md:100`, builds from the `ScreenServer*.dc.html` boards) and 7a (`app-connection-local-or-server.md:9`, `:66`).
+  - **Other docs that send work to `lib/design/spec`:** `assistant/darwin/CLAUDE.md:82` and `assistant/cli/CLAUDE.md:304` (`:303` at HEAD), the brainstorming rule; darwin `ROADMAP.md:129` and the darwin index row at `README.md:110` (10a). The app's `scripts/icon.sh` (11a, shipped 2026-11-18) also writes into `html/Logo.dc.html`; see Seam + files. `ROADMAP.md:28` is shipped history and `:105` names `assets/Logo.png`; both stay.
+  - **Pending Apple-apps items that draw design:** 7 in all. The five first named (10a, 10c, 8b, 9a, 9b), plus two the recon found (tooling §5): 10b (`server-window.md:100`, builds from the `ScreenServer*.dc.html` boards) and 7a (`app-connection-local-or-server.md:9`, `:66`).
 
 **Core constraint(s).**
 - **Only after the proof.** 1s's report is green and lists no defect, and the user has looked through it (1s's last criterion). `npm run parity` is run again just before the deletion (1s's default). Nothing is deleted on a partial port.
 - **Nothing is lost.** The deleted files stay in git history. 1c's baseline re-makes their pictures from its recorded revision, never from the working tree.
 - **The canvas is the user's artifact.** It is read before anything is published to it. Its comment threads are read, recorded, and left as they are. It is deleted only if the user asks.
 - **The design's rules survive word for word:** every part maps to the CLI; honest by default; every color is a token; keyboard first and accessible as drawn; copy in plain words. So does "not an input to any build, and CI never reads it" (`spec/README.md:5`).
-- **Swift edits are text only:** comments and one test's display name. They touch `lib/src/darwin/`, so the darwin pipeline runs on the PR. Stage only the edited paths (Xcode may re-save the project file).
+- **Swift edits are text only**, but for the icon script's board step (Seam + files): comments and one test's display name. They touch `lib/src/darwin/`, so the darwin pipeline runs on the PR. Stage only the edited paths (Xcode may re-save the project file).
 
 **Seam + files.**
+- **The icon script's board step** (from the Apple apps' 11a): `lib/src/darwin/scripts/icon.sh` stops writing `html/Logo.dc.html` (`board`, `board_with_logo` and the step that moves the board), and `IconSetTests.swift` loses the board fixture and assertions and the tests `boardWithoutItsLine` and `boardGone`. 1q's Logo page already holds the logo, so nothing is ported here.
 - **Deleted:** `lib/design/spec/html/` whole (`main.html`, `support.js`, every `.dc.html`), then `lib/design/spec/` itself once its last files move.
 - **Moved with `git mv`:** `json/tokens.json` → `lib/design/tokens.json`. 1e's build step reads the new path in the same change.
 - **Also deleted:** `json/canvas.json`, and 1q's test that compares the gallery's table against it. The gallery's table is the record from here on.
@@ -42,11 +43,11 @@
   - `CodeLexerTests.swift:74` and `:264` cite the styles module's code colours;
   - `Palette.swift:39` cites `lib/design/tokens.json`.
 - **Docs:**
-  - darwin `CLAUDE.md:82`, `DEVELOPER.md:49`, `ROADMAP.md:129` and `README.md:110`, plus `ROADMAP.md:107` and `README.md:69`, `:73` while 11a is pending;
+  - darwin `CLAUDE.md:82`, `DEVELOPER.md:49`, `ROADMAP.md:129` and `README.md:110`, and `DEVELOPER.md`'s **The app's icon**, which stops naming the board;
   - cli `CLAUDE.md:304`;
   - 1a's ADR: its links to `spec/CLAUDE.md` repointed, with a dated note.
   - Re-check each line number when this item builds.
-- **Pending Apple-apps items**, each still pending when this builds: 10a, 10b, 10c, 8b, 9a, 9b, 11a, 7a. Each is re-worded so that "drawn in `lib/design/spec` and on the canvas" becomes "drawn in the design app" (a module, a preset, a gallery entry). For example, 10a's byte-for-byte canvas read-back (`:183-201`) becomes the local gate and 1s-style parity, and 10a names 1r as a gate beside 1e (1r's default: 10a's contract, layout and processes additions land in 1r's data). An item that has shipped is left alone.
+- **Pending Apple-apps items**, each still pending when this builds: 10a, 10b, 10c, 8b, 9a, 9b, 7a. Each is re-worded so that "drawn in `lib/design/spec` and on the canvas" becomes "drawn in the design app" (a module, a preset, a gallery entry). For example, 10a's byte-for-byte canvas read-back (`:183-201`) becomes the local gate and 1s-style parity, and 10a names 1r as a gate beside 1e (1r's default: 10a's contract, layout and processes additions land in 1r's data). An item that has shipped is left alone.
 - **The agent's memory note** `design-lives-in-lib-design.md` and its `MEMORY.md` index line (outside the repo) are rewritten by the builder to the new layout.
 - **Docs on ship:** design `ROADMAP.md` and `MILESTONES.md`; [`adrs/design/README.md`](../../../adrs/design/README.md) if the ADR gains a note.
 
@@ -55,7 +56,7 @@
 - The rules being moved: [`lib/design/spec/CLAUDE.md`](../../../../design/spec/CLAUDE.md) (96 lines; the rules at :35-41) and `lib/design/spec/README.md` (54 lines).
 - The law it ends on: the design's ADR 0001 (`lib/documentation/adrs/design/react-design-prototype.md`, written by [1a](design-app-architecture-and-law.md)).
 - Siblings: [design-app-architecture-and-law.md](design-app-architecture-and-law.md) (1a), [scaffold-and-layering-check.md](scaffold-and-layering-check.md) (1b), [old-prototype-baseline.md](old-prototype-baseline.md) (1c), [styles-shell-and-the-first-screen.md](styles-shell-and-the-first-screen.md) (1e), [gallery-and-foundations.md](gallery-and-foundations.md) (1q), [build-boards-as-pages.md](build-boards-as-pages.md) (1r), [parity-proof.md](parity-proof.md) (1s).
-- Cross-queue: [10a](../../darwin/macos/v0.2.6/design-the-server-window.md), [10b](../../darwin/macos/v0.2.6/server-window.md), [10c](../../darwin/macos/v0.2.7/people-screens.md), [8b](../../darwin/ipados/v0.2.5/ipad-app.md), [9a](../../darwin/ios/v0.3.0/iphone-app.md), [9b](../../darwin/ios/v0.3.0/foldable-iphone.md), [11a](../../darwin/v0.2.1/apogee-logo-as-the-app-icon.md), [7a](../../darwin/v0.2.4/app-connection-local-or-server.md).
+- Cross-queue: [10a](../../darwin/macos/v0.2.6/design-the-server-window.md), [10b](../../darwin/macos/v0.2.6/server-window.md), [10c](../../darwin/macos/v0.2.7/people-screens.md), [8b](../../darwin/ipados/v0.2.5/ipad-app.md), [9a](../../darwin/ios/v0.3.0/iphone-app.md), [9b](../../darwin/ios/v0.3.0/foldable-iphone.md), [7a](../../darwin/v0.2.4/app-connection-local-or-server.md).
 
 **Decisions made** (dated):
 - 2026-11-14: The user's call: the prototype is rebuilt in React, TypeScript and Vite with the production GUIs' layered shape, and stays the design's cross-platform source of truth.
@@ -83,7 +84,7 @@
 - **Byte-identical rebuild:** after the move, `npm run build` writes a `lib/design/main.html` identical to the one before it, so moving `tokens.json` changes nothing drawn. The staleness check is green.
 - **Baseline survives:** `npm run baseline` re-makes every image with `lib/design/spec` gone from the working tree, and its hash list matches a run made just before the deletion.
 - **Dangling-citation scan**, a scratch script run at close: `git grep` for `lib/design/spec`, `support.js`, `.dc.html` and the canvas URL returns only the allowed lines: history (darwin `MILESTONES.md`, darwin `ROADMAP.md:28`, design `MILESTONES.md`), the parity files under `lib/design/prototype/parity/`, and the canvas's retirement note in the guide.
-- **Darwin suite:** green, with the same `totalTestCount` from the result bundle as before the edit.
+- **Darwin suite:** green, its `totalTestCount` from the result bundle the count before the edit less the two board tests removed.
 - **Links:** every relative link in the touched docs resolves.
 
 **Acceptance criteria:**
@@ -96,4 +97,4 @@
 - [ ] Every pending Apple-apps item that drew in `lib/design/spec` now draws in the design app.
 - [ ] The memory note and its index line describe the new layout.
 
-**Scope note.** Earmarked for v0.2.1 (design track 1); gated on 1s ([parity-proof.md](parity-proof.md)). It is the track's last item. Out of scope: any new screen or design change, deleting the canvas artifact (only on the user's word), CI or `changed.sh`, rewriting shipped history, and Swift code beyond comments and the one test name.
+**Scope note.** Earmarked for v0.2.1 (design track 1); gated on 1s ([parity-proof.md](parity-proof.md)). It is the track's last item. Out of scope: any new screen or design change, deleting the canvas artifact (only on the user's word), CI or `changed.sh`, rewriting shipped history, and Swift code beyond comments, the one test name and the icon script's board step.

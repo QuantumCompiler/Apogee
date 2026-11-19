@@ -8,7 +8,7 @@
 - **No preset opens Training's Regimes tab.** The old `applyStart()` ignores a `training:regimes` sub and opens Runs (`main.html:2757–2758`, working tree). 1j adds the preset to the new app, so the old side of that pair has to be reached by a click.
 - **The old data is invented** (critic V3: 0 `object:` keys, 0 `*_at`, `rounds_used` or `seed_source` keys in the script). The new app shows the CLI's recorded documents. Names, counts, sizes and transcripts will differ on nearly every screen, so pixel or string identity is impossible. Parity is structural: the same regions, states, controls and wording.
 - **Some differences are already decided** by feature items, for example: compose's stopped project keeps "Stopped" while its document says `cancelled` (1l); the inspector stays at the prototype's 304 px against BuildLayout's 360 (1g); every preset's sidebar now lists the recorded chats (1g). These must be listed and cited, not rediscovered as defects.
-- **Besides the screens**, 1c captures the 14 other boards once per prop value. 9 are rebuilt and judged here: the 3 Build boards (1r), ColorTokens, TypeSpace and the 4 Components boards (1q). The 5 Exploration boards are not ported (1q's default), so they have no new side.
+- **Besides the screens**, 1c captures the 15 other boards once per prop value. 10 are rebuilt and judged here: the 3 Build boards (1r), ColorTokens, TypeSpace, the 4 Components boards and Logo (1q). The 5 Exploration boards are not ported (1q's default), so they have no new side.
 
 **Core constraint(s).**
 - **The old side is 1c's baseline,** re-made by its script from the recorded revision. Never the canvas, never a working-tree copy.
@@ -22,7 +22,7 @@
 **Seam + files.** Everything under `lib/design/prototype/` unless named otherwise.
 - `scripts/parity.ts`, new, run as `npm run parity`:
   - re-makes or reuses 1c's baseline images (checked against its hash list);
-  - captures the new build at every preset in `baseline.json`, at each `apogee` mode 1c kept, plus the presets the new app added (1i's four pane presets, 1j's `training:regimes`) and the gallery's pages for the 9 rebuilt boards;
+  - captures the new build at every preset in `baseline.json`, at each `apogee` mode 1c kept, plus the presets the new app added (1i's four pane presets, 1j's `training:regimes`) and the gallery's pages for the 10 rebuilt boards;
   - for `training:regimes`, captures the old side by loading `training` still and clicking the Regimes tab;
   - reads each page's outline with Playwright's ARIA snapshot (landmarks, headings, tabs, buttons, fields, menus, dialogs, their labels, and the text around them), and diffs the two outlines;
   - matches each difference against `verdicts.json`, and fails on any difference with no verdict, or with a verdict of defect;
@@ -74,7 +74,7 @@
 A real run is made twice; the two outline sets must match.
 
 **Acceptance criteria:**
-- [ ] `npm run parity` captures every preset in `baseline.json`, the kept `apogee` modes, the new presets and the 9 rebuilt boards, and passes.
+- [ ] `npm run parity` captures every preset in `baseline.json`, the kept `apogee` modes, the new presets and the 10 rebuilt boards, and passes.
 - [ ] The report shows each pair side by side with its differences, each classed `data` or `fix` with its reason. No defect is open.
 - [ ] Every board-less preset at the baseline's revision, and `training:regimes`, has a gallery board in the built file.
 - [ ] MILESTONES.md carries the summary table: each preset, its differences by class, and the defects fixed.

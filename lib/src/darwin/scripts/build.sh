@@ -22,7 +22,7 @@
 #
 #   build/<target>/xcode/       xcodebuild's derived data, both configurations
 #   build/<target>/Apogee.app   the release build's bundle, its signature
-#                               verified
+#                               and its icon verified (scripts/icon.sh)
 #   build/<target>/apogee-gui-darwin.zip
 #                               `package`'s: Apogee-<version>/ holding the app
 #                               and a README -- what CI keeps as its artifact,
@@ -142,6 +142,7 @@ build_app() {
     local said
     said="$(codesign --verify --deep --strict --verbose=1 "$bundle" 2>&1)" ||
         die "the signature does not verify: ${said}"
+    "${app_dir}/scripts/icon.sh" verify "$bundle"
     log "[${target}] ${bundle}: Apogee ${version}, signed ad hoc, signature verified"
 }
 
@@ -152,6 +153,7 @@ package_app() {
     [[ -d "$bundle" ]] || die "no ${bundle} -- run '$0 build' first"
     local said version stage zip check record
     said="$(codesign --verify --deep --strict "$bundle" 2>&1)" || die "the signature does not verify: ${said}"
+    "${app_dir}/scripts/icon.sh" verify "$bundle"
     version="$(plutil -extract CFBundleShortVersionString raw "${bundle}/Contents/Info.plist" 2>/dev/null)" ||
         die "${bundle} carries no version: build it with '$0 build'"
     stage="${build_dir}/package/Apogee-${version}"
