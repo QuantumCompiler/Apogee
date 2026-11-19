@@ -1,0 +1,45 @@
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","tool_call","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-11-01","tools":true},"chat_id":"20261119-123647-9d0f","model":"claude","next_turn":1,"protocol_version":1,"type":"session"}
+{"turn":1,"type":"thinking"}
+{"text":"RetryBud","turn":1,"type":"thinking_delta"}
+{"text":"get(20) ","turn":1,"type":"thinking_delta"}
+{"text":"is built","turn":1,"type":"thinking_delta"}
+{"text":" inside ","turn":1,"type":"thinking_delta"}
+{"text":"upload_o","turn":1,"type":"thinking_delta"}
+{"text":"ne(). Wh","turn":1,"type":"thinking_delta"}
+{"text":"ether th","turn":1,"type":"thinking_delta"}
+{"text":"at is a ","turn":1,"type":"thinking_delta"}
+{"text":"bug depe","turn":1,"type":"thinking_delta"}
+{"text":"nds on w","turn":1,"type":"thinking_delta"}
+{"text":"hat the ","turn":1,"type":"thinking_delta"}
+{"text":"budget i","turn":1,"type":"thinking_delta"}
+{"text":"s meant ","turn":1,"type":"thinking_delta"}
+{"text":"to prote","turn":1,"type":"thinking_delta"}
+{"text":"ct, and ","turn":1,"type":"thinking_delta"}
+{"text":"the PR d","turn":1,"type":"thinking_delta"}
+{"text":"escripti","turn":1,"type":"thinking_delta"}
+{"text":"on doesn","turn":1,"type":"thinking_delta"}
+{"text":"’t say","turn":1,"type":"thinking_delta"}
+{"text":". Ask.","turn":1,"type":"thinking_delta"}
+{"id":"call-1","name":"read_file","state":"pending","target":"src/upload/uploader.py","turn":1,"type":"tool_call"}
+{"text":"[tool] read_file","turn":1,"type":"tool_status"}
+{"id":"call-1","name":"read_file","state":"running","target":"src/upload/uploader.py","turn":1,"type":"tool_call"}
+{"id":"call-1","name":"read_file","state":"done","target":"src/upload/uploader.py","turn":1,"type":"tool_call"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"answer_start"}
+{"text":"The chan","turn":1,"type":"answer_delta"}
+{"text":"ge adds ","turn":1,"type":"answer_delta"}
+{"text":"a `Retry","turn":1,"type":"answer_delta"}
+{"text":"Budget` ","turn":1,"type":"answer_delta"}
+{"text":"that cap","turn":1,"type":"answer_delta"}
+{"text":"s retrie","turn":1,"type":"answer_delta"}
+{"text":"s at 20 ","turn":1,"type":"answer_delta"}
+{"text":"per minu","turn":1,"type":"answer_delta"}
+{"text":"te. One ","turn":1,"type":"answer_delta"}
+{"text":"thing de","turn":1,"type":"answer_delta"}
+{"text":"cides wh","turn":1,"type":"answer_delta"}
+{"text":"ether it","turn":1,"type":"answer_delta"}
+{"text":"’s rig","turn":1,"type":"answer_delta"}
+{"text":"ht:","turn":1,"type":"answer_delta"}
+{"questions":[{"header":"Scope","multi_select":false,"options":[{"description":"Each file gets its own 20 retries.","label":"Per upload"},{"description":"One shared budget for every upload in a batch.","label":"Per batch"},{"description":"A budget for each server, shared across uploads.","label":"Per host"}],"question":"Should the retry budget apply per upload, per batch, or per host?"}],"turn":1,"type":"question"}
+{"finish_reason":"cancelled","model":"claude","text":"The change adds a `RetryBudget` that caps retries at 20 per minute. One thing decides whether it’s right:","turn":1,"type":"result"}

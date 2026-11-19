@@ -1,0 +1,26 @@
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","tool_call","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-11-01","tools":true},"chat_id":"20261119-111551-8425","model":"root","next_turn":2,"protocol_version":1,"type":"session"}
+{"turn":2,"type":"thinking"}
+{"text":"Twice th","turn":2,"type":"thinking_delta"}
+{"text":"e 8-bit ","turn":2,"type":"thinking_delta"}
+{"text":"cache.","turn":2,"type":"thinking_delta"}
+{"turn":2,"type":"answer_start"}
+{"text":"A 16-bit","turn":2,"type":"answer_delta"}
+{"text":" cache i","turn":2,"type":"answer_delta"}
+{"text":"s twice ","turn":2,"type":"answer_delta"}
+{"text":"the 8-bi","turn":2,"type":"answer_delta"}
+{"text":"t one, o","turn":2,"type":"answer_delta"}
+{"text":"r 4.8 GB","turn":2,"type":"answer_delta"}
+{"text":" at 128K","turn":2,"type":"answer_delta"}
+{"text":", so wit","turn":2,"type":"answer_delta"}
+{"text":"h the we","turn":2,"type":"answer_delta"}
+{"text":"ights it","turn":2,"type":"answer_delta"}
+{"text":" comes t","turn":2,"type":"answer_delta"}
+{"text":"o 16.9 G","turn":2,"type":"answer_delta"}
+{"text":"B, more ","turn":2,"type":"answer_delta"}
+{"text":"than thi","turn":2,"type":"answer_delta"}
+{"text":"s Mac se","turn":2,"type":"answer_delta"}
+{"text":"ts aside","turn":2,"type":"answer_delta"}
+{"text":" for mod","turn":2,"type":"answer_delta"}
+{"text":"els.","turn":2,"type":"answer_delta"}
+{"turn":2,"type":"answer_end"}
+{"finish_reason":"stop","model":"root","text":"A 16-bit cache is twice the 8-bit one, or 4.8 GB at 128K, so with the weights it comes to 16.9 GB, more than this Mac sets aside for models.","turn":2,"type":"result"}

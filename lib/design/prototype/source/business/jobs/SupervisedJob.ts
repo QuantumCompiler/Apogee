@@ -81,7 +81,7 @@ export class JobStarter implements JobStarting {
   startJob(_binary: string, args: readonly string[], streaming: boolean, _folder?: string): JobRunning {
     const answer = this.child.run('jobs', args)
     if (!answer.started) return SupervisedJob.notStarted(answer.reason)
-    return SupervisedJob.replay(answer.run, streaming, this.clock)
+    return SupervisedJob.replay(answer.run, streaming, this.clock, answer.replay.exitAfter)
   }
 }
 
@@ -90,19 +90,25 @@ export class JobStarter implements JobStarting {
  * stdout lines -- events of the 52b stream, or the lines it prints for
  * people -- then `.ended` with its exit. Here the run is a recording, one
  * line a tick (or the preset's pace), its end on the tick after its last
- * line. Stop ends it as an interrupted run's stream ends (`PreviewJob`'s 130).
+ * line -- held back that many ticks more where its rule's `exitAfter` says
+ * (design 1v), so a still frame can stand mid-job. Stop ends it at once, as
+ * an interrupted run's stream ends (`PreviewJob`'s 130).
  */
 export class SupervisedJob implements JobRunning {
   readonly updates: AsyncStream<JobUpdate>
   private readonly continuation: Continuation<JobUpdate>
   private readonly lines: string[]
   private next = 0
+  /** Ticks still to wait after the last line before `.ended`: the rule's `exitAfter`. */
+  private held: number
   private leave: () => void = () => {}
 
   private constructor(
     private readonly run: CapturedRun | undefined,
     private readonly streaming: boolean,
+    exitAfter = 0,
   ) {
+    this.held = exitAfter
     const { stream, continuation } = AsyncStream.make<JobUpdate>()
     this.updates = stream
     this.continuation = continuation
@@ -117,8 +123,8 @@ export class SupervisedJob implements JobRunning {
   }
 
   /** `run`, replayed on `clock`; in a still frame, as many ticks in as the frame, however late it opened. */
-  static replay(run: CapturedRun, streaming: boolean, clock: Clock): SupervisedJob {
-    const job = new SupervisedJob(run, streaming)
+  static replay(run: CapturedRun, streaming: boolean, clock: Clock, exitAfter = 0): SupervisedJob {
+    const job = new SupervisedJob(run, streaming, exitAfter)
     job.leave = clock.onTick(() => job.step(clock.linesPerTick))
     // After `leave` is set, so a recording shorter than the frame's ticks ends, and leaves, once.
     for (let tick = 0; tick < clock.missedTicks && !job.continuation.finished; tick += 1) job.step(clock.linesPerTick)
@@ -132,6 +138,10 @@ export class SupervisedJob implements JobRunning {
 
   private step(pace: number): void {
     if (this.next >= this.lines.length) {
+      if (this.held > 0) {
+        this.held -= 1
+        return
+      }
       if (this.run) this.end(JobEnd.of(this.run.exit, this.run.stderrTail, false))
       return
     }

@@ -1,0 +1,8 @@
+{
+ "turns": [
+  {
+   "reasoning": "Twice the 8-bit cache.",
+   "text": "A 16-bit cache is twice the 8-bit one, or 4.8 GB at 128K, so with the weights it comes to 16.9 GB, more than this Mac sets aside for models."
+  }
+ ]
+}

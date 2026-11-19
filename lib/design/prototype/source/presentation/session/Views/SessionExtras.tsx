@@ -75,8 +75,8 @@ export interface EmptySessionActions {
  * A session with nothing said yet (`main.html:251-270` at `b375fac9`): what it
  * is, the model it runs on, the first acts -- or, private, what is and is not
  * kept -- and what the CLI said at launch, under it. The Mac app's
- * `EmptySessionView`. A session nobody launched (the monitor's, until 1v)
- * draws the acts that need one off.
+ * `EmptySessionView`. A session nobody launched draws the acts that need one
+ * off.
  */
 export function EmptySessionView({ face, model, acts }: { readonly face: SessionFace['empty']; readonly model: ModelFace; readonly acts: EmptySessionActions }) {
   return (
@@ -325,6 +325,25 @@ export function SuggestionList({ suggestions, active, pickCommand, pickFile }: {
       <div className="mono" style={{ padding: '6px 12px', borderTop: '1px solid var(--line-border)', fontSize: 'var(--t-label)', color: 'var(--text-tertiary)' }}>
         in {suggestions.folder} · ↑↓ choose · ⏎ attach · esc close
       </div>
+    </div>
+  )
+}
+
+/**
+ * The held lines' strip above the input (`main.html:744` at `b375fac9`): when
+ * they go and each in a few words, its help on hover -- the Mac app's
+ * `HeldLines`, its `heldWords` and `heldHelp`.
+ */
+export function HeldLines({ held }: { readonly held: { readonly shown: boolean; readonly words: string; readonly help: string } }) {
+  if (!held.shown) return null
+  return (
+    <div className="mono" title={held.help} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px 0', fontSize: 'var(--t-meta)', color: 'var(--text-tertiary)', overflowWrap: 'anywhere' }}>
+      <svg className="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9" />
+        <path d="M2.5 2.5v2.5H5" />
+        <path d="M8 5v3l2 1.5" />
+      </svg>
+      <span>{held.words}</span>
     </div>
   )
 }

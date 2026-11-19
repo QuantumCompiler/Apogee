@@ -136,9 +136,9 @@ const media: ReadonlyArray<readonly [AttachmentKind, readonly string[]]> = [
 ]
 
 export const AttachmentKind = {
-  /** Read from the path: a trailing `/` a folder, `.pdf` a PDF, the CLI's image, audio and video extensions (lowercased, as it reads them), else a file. */
+  /** Read from the path: a trailing `/`, `.` or `..` a folder, `.pdf` a PDF, the CLI's image, audio and video extensions (lowercased, as it reads them), else a file. */
   of(path: string): AttachmentKind {
-    if (path.endsWith('/')) return 'folder'
+    if (path.endsWith('/') || path === '.' || path === '..') return 'folder'
     const name = path.split('/').at(-1) ?? path
     const dot = name.lastIndexOf('.')
     const extension = dot > 0 ? name.slice(dot).toLowerCase() : ''
@@ -147,9 +147,47 @@ export const AttachmentKind = {
   },
 }
 
-/** A line held until the session can take it -- made while a turn ran -- sent once the turn ends: the Mac app's `HeldLine` (1v adds the suite move, the child's life and the strip that says when they go). */
+/**
+ * A line held until the session can take it: made while a turn ran or a card
+ * stood, or while a stop handed the session to another child (GUI 6a), sent
+ * once the turn ends or the next child speaks -- kept through a death for
+ * Start again. The Mac app's `HeldLine`.
+ */
 export type HeldLine =
   | { readonly case: 'attach'; readonly path: string }
   | { readonly case: 'detach'; readonly path: string }
   | { readonly case: 'set'; readonly settings: RunSettings }
   | { readonly case: 'compact' }
+  /** A move to another suite, or none, made mid-turn: no line carries it, so the session restarts under it once the turn ends (GUI 4i). */
+  | { readonly case: 'suite'; readonly suite: string; readonly force: boolean }
+
+export const HeldLine = {
+  /** What it will do, in a few words: `attach report.pdf`, `temperature 0.9`, `compact` (the Mac app's `HeldLine.words`). */
+  words(line: HeldLine): string {
+    switch (line.case) {
+      case 'attach':
+        return `attach ${line.path}`
+      case 'detach':
+        return `detach ${line.path}`
+      case 'set':
+        return RunSettingsWords.of(line.settings)
+      case 'compact':
+        return 'compact'
+      case 'suite':
+        return line.suite === noSuite ? 'leave the suite' : `switch to suite ${line.suite}`
+    }
+  },
+}
+
+/** A settings change in a few words, as the Mac app's `SessionViewModel.words` says one: `model quiet`, `temperature 0.4`, `thinking on`. */
+export const RunSettingsWords = {
+  of(settings: RunSettings): string {
+    const parts: string[] = []
+    if (settings.model !== undefined) parts.push(`model ${settings.model}`)
+    if (settings.think !== undefined) parts.push(`thinking ${settings.think}`)
+    if (settings.effort !== undefined) parts.push(`effort ${settings.effort}`)
+    if (settings.system !== undefined) parts.push('a new system prompt')
+    if (settings.temperature !== undefined) parts.push(`temperature ${settings.temperature}`)
+    return parts.join(', ')
+  },
+}

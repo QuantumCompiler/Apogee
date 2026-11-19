@@ -75,7 +75,7 @@ export class MonitorViewModel extends Observable {
   isOpen = false
   /** The CPU's percent in each of the last 30 good readings, oldest first. */
   history: number[] = []
-  /** What Unload on a model's row does: the composition's (1u, 1v, 1g, 1k, 1l and 1m fill it). */
+  /** What Unload on a model's row does: the composition's (1g, 1k, 1l and 1m fill it: the CLI has no unload, so a session's child is what holds a model). */
   unload: (name: string) => void = () => {}
   /** What "Open models library" does: the composition's. */
   openLibrary: () => void = () => {}

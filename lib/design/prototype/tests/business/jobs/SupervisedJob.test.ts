@@ -3,6 +3,7 @@ import agentsListBadConfig from '@recorded/business/reads/Fixtures/agents-list-b
 import trainPipelineRun from '@recorded/business/jobs/Fixtures/train-pipeline-run.jsonl?raw'
 import agentsList from '@recorded/business/reads/Fixtures/agents-list.json?raw'
 import datasetsPull from '@recorded/business/reads/Fixtures/datasets-pull-handmade.txt?raw'
+import chatsCompact from '@recorded/business/reads/Fixtures/chats-compact.txt?raw'
 import { JobEnd, JobStarter, JobUpdate } from '../../../source/business/jobs/SupervisedJob'
 import { ReadRunner } from '../../../source/business/reads/ReadRunner'
 import type { JobRunning } from '../../../source/business/jobs/SupervisedJob'
@@ -28,6 +29,50 @@ const said = (job: JobRunning) => job.updates.yielded
 
 // The Mac app's training tests end this run with exit 2: its second stage failed the gate (TrainingStreamTests.swift:65).
 const pipelineRules: Rules = { jobs: [{ arguments: ['train', 'pipeline', 'run'], answer: { stdout: trainPipelineRun, exit: 2 } }] }
+
+describe("a job's end held back by its rule's delay (design 1v)", () => {
+  const compact = (exitAfter?: number): Rules => ({ jobs: [{ arguments: ['chats', 'compact'], answer: exitAfter === undefined ? { stdout: chatsCompact } : { stdout: chatsCompact, exitAfter } }] })
+
+  test('chats-compact.txt (one line) with no delay ends on the tick after its line, as today', () => {
+    const { jobs, clock } = starter(compact())
+    const job = jobs.startJob(binary, ['chats', 'compact', '20261026-142409-5159', '--yes'], false)
+    clock.advance(1)
+    expect(said(job)).toEqual([JobUpdate.said(lines(chatsCompact)[0] ?? '')])
+    clock.advance(1)
+    expect(said(job).at(-1)?.case).toBe('ended')
+  })
+
+  test('a delay of 0 is the same: the next tick', () => {
+    const { jobs, clock } = starter(compact(0))
+    const job = jobs.startJob(binary, ['chats', 'compact', '20261026-142409-5159', '--yes'], false)
+    clock.advance(2)
+    expect(said(job).at(-1)?.case).toBe('ended')
+  })
+
+  test('a delay of 5 plays .ended 5 ticks after that: the job runs, its line said, until then', () => {
+    const { jobs, clock } = starter(compact(5))
+    const job = jobs.startJob(binary, ['chats', 'compact', '20261026-142409-5159', '--yes'], false)
+    clock.advance(6)
+    expect(said(job).map((update) => update.case)).toEqual(['said'])
+    clock.advance(1)
+    expect(said(job).at(-1)).toEqual(JobUpdate.ended(JobEnd.of(ChildExit.exited(0), new BoundedTail(), false)))
+  })
+
+  test('a still frame stands mid-job: its start ticks short of the delay leave it running, and Stop still ends it at once', async () => {
+    vi.useFakeTimers()
+    try {
+      const { jobs, clock } = starter(compact(30), { start: 15, still: true })
+      const job = jobs.startJob(binary, ['chats', 'compact', '20261026-142409-5159', '--yes'], false)
+      clock.start()
+      vi.advanceTimersByTime(60_000)
+      expect(said(job).map((update) => update.case)).toEqual(['said'])
+      await job.stop()
+      expect(said(job).at(-1)).toEqual(JobUpdate.ended(JobEnd.of(ChildExit.exited(130), new BoundedTail(), true)))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
 
 describe('a job replays its recording on the clock', () => {
   test('train-pipeline-run.jsonl (33 lines) replays in order, one line a tick, then .ended with its rule\'s exit', () => {

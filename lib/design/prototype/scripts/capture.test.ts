@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, test } from 'vitest'
-import { branchBinary, capture, CaptureRefusal, recipes } from './capture.ts'
+import { branchBinary, capture, CaptureRefusal, minimalPdf, recipes } from './capture.ts'
 import type { Recipe } from './capture.ts'
 
 /** The prototype's root: this file is scripts/capture.test.ts. */
@@ -35,26 +35,35 @@ function filesUnder(root: string): string[] {
  * a session line and, for each `user` line, a turn; a `chats show` prints a
  * document. It never touches anything but its log.
  */
-function fakeBinary(folder: string): { binary: string; log: string } {
+function fakeBinary(folder: string): { binary: string; log: string; stdin: string } {
   const log = join(folder, 'calls.log')
+  const stdin = join(folder, 'stdin.log')
   const binary = join(folder, 'apogee')
   writeFileSync(
     binary,
     `#!/usr/bin/env node
 const fs = require('node:fs')
-fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args: process.argv.slice(2), home: process.env.APOGEE_HOME, userHome: process.env.HOME, cwd: process.cwd() }) + '\\n')
+const actors = Object.fromEntries(fs.readdirSync(process.env.APOGEE_HOME).filter((name) => name.endsWith('.json')).map((name) => [name, fs.readFileSync(process.env.APOGEE_HOME + '/' + name, 'utf8')]))
+const seeded = fs.existsSync('src/ingest/runner.py') ? fs.readFileSync('src/ingest/runner.py', 'utf8') : null
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args: process.argv.slice(2), home: process.env.APOGEE_HOME, userHome: process.env.HOME, cwd: process.cwd(), actors, seeded }) + '\\n')
 const args = process.argv.slice(2)
 if (args[0] === 'chats') { process.stdout.write('{"object":"chat","id":"20261119-000000-fake","turns":[]}\\n'); process.exit(0) }
 if (args.includes('stream-json')) {
-  process.stdout.write('{"model":"root","next_turn":1,"protocol_version":1,"chat_id":"20261119-000000-fake","type":"session"}\\n')
-  let turn = 0
+  const resumed = args.includes('--resume')
+  process.stdout.write(JSON.stringify({ model: 'root', next_turn: resumed ? 2 : 1, protocol_version: 1, chat_id: '20261119-000000-fake', type: 'session' }) + '\\n')
+  let turn = resumed ? 1 : 0
   let rest = ''
   process.stdin.on('data', (chunk) => {
     rest += chunk
     let at
     while ((at = rest.indexOf('\\n')) >= 0) {
-      const line = JSON.parse(rest.slice(0, at)); rest = rest.slice(at + 1)
-      if (line.type === 'user') { turn += 1; process.stdout.write(JSON.stringify({ finish_reason: 'stop', model: 'root', text: 'ROOT<' + line.text + '>', turn, type: 'result' }) + '\\n') }
+      const text = rest.slice(0, at)
+      const line = JSON.parse(text); rest = rest.slice(at + 1)
+      fs.appendFileSync(${JSON.stringify(stdin)}, text + '\\n')
+      if (line.type === 'user' && line.text.startsWith('ask')) { turn += 1; process.stdout.write(JSON.stringify({ questions: [{ header: 'Name', question: 'Which?', options: [] }], turn, type: 'question' }) + '\\n') }
+      else if (line.type === 'user') { turn += 1; process.stdout.write(JSON.stringify({ finish_reason: 'stop', model: 'root', text: 'ROOT<' + line.text + '>', turn, type: 'result' }) + '\\n') }
+      if (line.type === 'answer') process.stdout.write(JSON.stringify({ finish_reason: 'stop', model: 'root', text: 'ANSWERED<' + line.text + '>', turn, type: 'result' }) + '\\n')
+      if (line.type === 'cancel') process.stdout.write(JSON.stringify({ finish_reason: 'cancelled', model: 'root', text: '', turn, type: 'result' }) + '\\n')
     }
   })
   process.stdin.on('end', () => process.exit(0))
@@ -62,7 +71,7 @@ if (args.includes('stream-json')) {
 `,
   )
   chmodSync(binary, 0o755)
-  return { binary, log }
+  return { binary, log, stdin }
 }
 
 const recipe: Recipe = {
@@ -147,6 +156,105 @@ describe('the capture script: a stream recorded from the branch build, in a thro
     chmodSync(binary, 0o755)
     await expect(capture(recipe, { binary, fixturesRoot: fixtures, tempRoot: scratch() })).rejects.toThrow(/apogee config: refused/)
     expect(filesUnder(fixtures)).toEqual([])
+  })
+
+  test('the lines a recipe writes before its first turn go after the hello, in order (design 1v)', async () => {
+    const fixtures = scratch()
+    const fake = fakeBinary(scratch())
+    await capture(
+      { ...recipe, chatsShow: undefined, before: [{ type: 'attach', path: '.' }, { type: 'set', model: 'claude' }] },
+      { binary: fake.binary, fixturesRoot: fixtures, tempRoot: scratch() },
+    )
+    const written = readFileSync(fake.stdin, 'utf8').trim().split('\n').map((line) => (JSON.parse(line) as { type: string }).type)
+    expect(written).toEqual(['hello', 'attach', 'set', 'user'])
+  })
+
+  test('a recipe that cancels writes a cancel once the named line of its turn has come, in place of an answer, and the other turns go on as before (design 1v)', async () => {
+    const fixtures = scratch()
+    const fake = fakeBinary(scratch())
+    await capture(
+      { ...recipe, chatsShow: undefined, turns: ['ask one', 'ask two'], answers: { question: 'first' }, cancel: { at: 'question', turn: 2 } },
+      { binary: fake.binary, fixturesRoot: fixtures, tempRoot: scratch() },
+    )
+    const written = readFileSync(fake.stdin, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { type: string; text?: string })
+    expect(written.map((line) => line.type)).toEqual(['hello', 'user', 'answer', 'user', 'cancel'])
+    expect(written[2]?.text).toBe('first')
+    const stream = readFileSync(join(fixtures, 'data/protocol/fake-play.jsonl'), 'utf8').trim().split('\n')
+    expect(JSON.parse(stream.at(-1) ?? '{}')).toMatchObject({ finish_reason: 'cancelled', turn: 2, type: 'result' })
+  })
+
+  test('each later launch resumes the captured chat in the same throwaway home, its stream written to its own output (design 1v)', async () => {
+    const fixtures = scratch()
+    const temp = scratch()
+    const fake = fakeBinary(scratch())
+    const written = await capture(
+      {
+        ...recipe,
+        chatsShow: undefined,
+        resumes: [
+          { output: 'data/protocol/fake-resumed.jsonl', launch: ['chat', '--output-format', 'stream-json', '--input-format', 'stream-json', '--tools'], turns: [] },
+          { output: 'data/protocol/fake-resumed-turn.jsonl', launch: ['chat', '--output-format', 'stream-json', '--input-format', 'stream-json', '--tools', '--suite', 'coding'], turns: ['again'] },
+        ],
+      },
+      { binary: fake.binary, fixturesRoot: fixtures, tempRoot: temp },
+    )
+    expect(written.map((path) => relative(fixtures, path))).toEqual(['data/protocol/fake-play.jsonl', 'data/protocol/fake-resumed.jsonl', 'data/protocol/fake-resumed-turn.jsonl'])
+    expect(readFileSync(join(fixtures, 'data/protocol/fake-resumed.jsonl'), 'utf8')).toBe('{"model":"root","next_turn":2,"protocol_version":1,"chat_id":"20261119-000000-fake","type":"session"}\n')
+    expect(readFileSync(join(fixtures, 'data/protocol/fake-resumed-turn.jsonl'), 'utf8')).toContain('"text":"ROOT<again>","turn":2')
+    const calls = readFileSync(fake.log, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { args: string[]; home: string })
+    const launches = calls.filter((call) => call.args.includes('stream-json'))
+    expect(launches.map((call) => call.args.slice(5))).toEqual([['--tools', '--suite', 'coding'], ['--tools', '--resume', '20261119-000000-fake'], ['--tools', '--suite', 'coding', '--resume', '20261119-000000-fake']])
+    expect(new Set(launches.map((call) => call.home)).size, 'one throwaway home for every launch').toBe(1)
+    expect(readdirSync(temp), 'the throwaway home is gone').toEqual([])
+  })
+
+  test('a seeded file in a subfolder is written there, and a resume can swap a member’s actor before it launches (design 1v)', async () => {
+    const fixtures = scratch()
+    const fake = fakeBinary(scratch())
+    await capture(
+      {
+        ...recipe,
+        chatsShow: undefined,
+        folder: { 'src/ingest/runner.py': 'print(1)\n' },
+        resumes: [{ output: 'data/protocol/fake-resumed.jsonl', launch: ['chat', '--output-format', 'stream-json', '--input-format', 'stream-json', '--tools'], turns: ['again'], actors: { root: 'play-helper.json' } }],
+      },
+      { binary: fake.binary, fixturesRoot: fixtures, tempRoot: scratch() },
+    )
+    const launches = readFileSync(fake.log, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { args: string[]; actors: Record<string, string>; seeded: string | null })
+      .filter((call) => call.args.includes('stream-json'))
+    expect(launches.map((call) => call.seeded)).toEqual(['print(1)\n', 'print(1)\n'])
+    const actor = (name: string) => readFileSync(join(prototype, 'scripts', 'actors', name), 'utf8')
+    expect(launches[0]?.actors['play-root.json']).toBe(actor('play-root.json'))
+    expect(launches[1]?.actors['play-root.json'], 'the resume runs root over the swapped actor').toBe(actor('play-helper.json'))
+  })
+
+  test('a seeded PDF is a real one: each xref offset lands on its object, one page per text (design 1v)', () => {
+    const text = minimalPdf(['first page', 'second (page) \\ two'])
+    expect(text.startsWith('%PDF-1.4\n')).toBe(true)
+    const at = text.indexOf('\nxref\n') + 1
+    const xref = text.slice(at)
+    const offsets = [...xref.matchAll(/^(\d{10}) 00000 n $/gm)].map((match) => Number(match[1]))
+    expect(offsets.length).toBe(1 + 1 + 2 * 2 + 1)
+    offsets.forEach((offset, index) => expect(text.slice(offset, offset + `${index + 1} 0 obj`.length)).toBe(`${index + 1} 0 obj`))
+    expect(text).toContain('(second \\(page\\) \\\\ two) Tj')
+    expect(Number(/startxref\n(\d+)\n%%EOF\n$/.exec(text)?.[1])).toBe(at)
+  })
+
+  test('a resume refuses an output outside fixtures/ before anything runs', async () => {
+    const base = scratch()
+    const fixtures = join(base, 'fixtures')
+    mkdirSync(fixtures)
+    const fake = fakeBinary(scratch())
+    await expect(
+      capture({ ...recipe, resumes: [{ output: '../escaped.jsonl', launch: ['chat'], turns: [] }] }, { binary: fake.binary, fixturesRoot: fixtures, tempRoot: scratch() }),
+    ).rejects.toThrow(/outside fixtures/)
+    expect(existsSync(fake.log)).toBe(false)
   })
 
   test("each recipe's actor files are in scripts/actors/, outside fixtures/, each a mock script of turns", () => {

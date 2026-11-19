@@ -146,3 +146,15 @@ describe('the lines a driver writes', () => {
     )
   })
 })
+
+describe('a memory event names the chats it recalled (the CLI\'s 52a; design 1v)', () => {
+  test('chat-streaming-handmade.jsonl\'s recall: each session by id, name and time; an entry with no id skipped; a build before 52a names none', () => {
+    const event = EventDecoder.decode(
+      '{"chats":1,"decisions":0,"sessions":[{"id":"20260928-101500-5c3a","name":"asyncio timeouts in the scraper","updated":"2026-09-28T10:41:07Z"},{"name":"no id"}],"turn":2,"type":"memory"}',
+    )
+    expect(event.kind).toEqual({ case: 'memory', chats: 1, decisions: 0 })
+    expect(event.recalled).toEqual([{ id: '20260928-101500-5c3a', name: 'asyncio timeouts in the scraper', updated: '2026-09-28T10:41:07Z' }])
+    expect(EventDecoder.decode('{"chats":2,"decisions":1,"type":"memory"}').recalled).toEqual([])
+    expect(EventDecoder.decode('{"chats":1,"sessions":[{"id":"x"}],"type":"memory"}').recalled).toEqual([{ id: 'x', name: 'x', updated: undefined }])
+  })
+})

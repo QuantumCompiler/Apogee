@@ -3,7 +3,8 @@ import privateUnsent from '@recorded/data/protocol/Fixtures/private-unsent.jsonl
 import { useObserved } from '../../styles/Observation/useObserved'
 import { ContextMeter } from '../ViewModels/SessionActions'
 import type { SessionFace, SessionViewModel } from '../ViewModels/SessionViewModel'
-import { AttachmentChips, EmptySessionView, InspectorPlaceholder, MeterView, ModelGlyph, ModelTag, SuggestionList } from '../Views/SessionExtras'
+import { AttachmentChips, EmptySessionView, HeldLines, InspectorPlaceholder, MeterView, ModelGlyph, ModelTag, SuggestionList } from '../Views/SessionExtras'
+import { scenario } from './ScenarioStreams'
 import { sessionSamples } from './SessionPresets'
 import { useSessionPreview } from './SessionPreview'
 
@@ -27,7 +28,7 @@ export const EmptyNew = () => <Empty model={useSessionPreview(newUnsent, { ticks
 /** A private one: what is and is not kept, and the CLI's notice under it. */
 export const EmptyPrivate = () => <Empty model={useSessionPreview(privateUnsent, { launch: { privately: true }, ticks: 3 })} />
 
-/** Not launched (the monitor's, until 1v): no model named yet, and the acts that need a session drawn off. */
+/** Not launched (a preset that opens no session): no model named yet, and the acts that need a session drawn off. */
 export const EmptyNotLaunched = () => <Empty model={useSessionPreview(newUnsent, { unlaunched: true })} />
 
 function Meter({ meter }: { readonly meter: ContextMeter }) {
@@ -126,3 +127,26 @@ export const ModelKinds = () => (
     ))}
   </div>
 )
+
+// MARK: - 1v: the held lines' strip
+
+function Held({ model }: { readonly model: SessionViewModel }) {
+  useObserved(model)
+  return (
+    <div className="ap" data-theme="dark" style={frame}>
+      <HeldLines held={model.face().held} />
+    </div>
+  )
+}
+
+/** A line made while a turn runs: sent when this turn ends (`monitor`'s Streaming session, an attach made mid-reasoning). */
+export const HeldForTheTurn = () => {
+  const [recording, options] = scenario.streaming()
+  return <Held model={useSessionPreview(recording, { ...options, then: (model) => model.attach('notes.md') })} />
+}
+
+/** `chat:restarting`: an attach made while the child is stopped for another -- sent once the session is back. */
+export const HeldForTheNextChild = () => <Held model={useSessionPreview(...scenario.restarting())} />
+
+/** `chat:ended`: a setting and a compact held for a turn its child died in -- sent when the session starts again. */
+export const HeldForStartAgain = () => <Held model={useSessionPreview(...scenario.ended())} />

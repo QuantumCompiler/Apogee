@@ -1,3 +1,4 @@
+import { JobStarter } from '../../../business/jobs/SupervisedJob'
 import { CommandOutcome } from '../../../business/reads/CommandRunning'
 import { ModelInfo, ModelKind, ModelRow } from '../../../business/reads/Models'
 import { ReadRunner } from '../../../business/reads/ReadRunner'
@@ -13,6 +14,7 @@ import { StandInChild } from '../../../infrastructure/process/StandInChild'
 import type { ModeRules } from '../../../infrastructure/process/StandInChild'
 import { ModelsViewModel } from '../../models/ViewModels/ModelsViewModel'
 import { MonitorViewModel } from '../../monitor/ViewModels/MonitorViewModel'
+import { Compactions } from '../../session/ViewModels/Compactions'
 import type { SuiteChoice } from '../../session/ViewModels/SessionActions'
 import { SessionViewModel } from '../../session/ViewModels/SessionViewModel'
 import type { AttachChoice, FolderListing, SessionAction, SessionLeave } from '../../session/ViewModels/SessionViewModel'
@@ -40,6 +42,20 @@ export interface SessionSamples {
 export const playLine = '/play summarize-verify The board met on 14 October. It agreed to move the release to 3 November, and Ana Ruiz will own the checklist.'
 
 /**
+ * The turns 1v's presets write before the clock starts: the old scenarios'
+ * words, and the lines `scripts/capture.ts` sent the branch build for each
+ * recording.
+ */
+export const scenarioTurns = {
+  streaming: ['Where do fetches start in this repo, and what cancels them?', 'So one slow host takes the whole batch down. I want the other fetches to finish and just log the timeouts. What’s the idiomatic fix on 3.12?'],
+  retry: 'Make `_fetch()` retry timeouts and connection errors, using `settings.fetch.retries` (it’s already in config.toml). Go ahead and edit the file.',
+  wal: 'Why does group commit make the WAL cheaper under load? Point me to the pages.',
+  crash: 'What’s this stack trace telling me?',
+  pr: 'Review the retry-budget change in PR 482 before I merge it.',
+  kv: 'Would a 16-bit cache fit at 128K?',
+} as const
+
+/**
  * The application's view-model: the composition root (design 1e, ADR 0001
  * §3), the Mac app's `AppViewModel`. It builds the stand-in's services once
  * from the preset -- the child, the clock, the reads, the chat starter --
@@ -49,9 +65,8 @@ export const playLine = '/play summarize-verify The board met on 14 October. It 
  *
  * Until 1g's `SessionLibraryViewModel` exists it holds the one session and
  * does for it what that library does on the Mac: reads the model facts
- * (`models list`, `models info <model>`) and the suites, and carries a leave
- * out. A preset that opens no session (`monitor`, until 1v) leaves it
- * unlaunched: the empty state.
+ * (`models list`, `models info <model>`), the suites and a saved chat's
+ * earlier turns, carries a leave out, and holds the compactions (1v).
  */
 export class AppViewModel extends Observable {
   readonly name = 'Apogee'
@@ -63,6 +78,8 @@ export class AppViewModel extends Observable {
   readonly shell: ShellViewModel
   readonly monitor: MonitorViewModel
   readonly models: ModelsViewModel
+  /** Saved chats compacting as jobs (GUI 6b): held here until 1g's library takes them. */
+  readonly compactions: Compactions
   /** The one session: what Sessions shows. */
   session: SessionViewModel
 
@@ -91,6 +108,8 @@ export class AppViewModel extends Observable {
     this.shell = new ShellViewModel(this.clock, this.theme)
     this.monitor = new MonitorViewModel(this.reads, this.clock)
     this.models = new ModelsViewModel()
+    this.compactions = new Compactions(new JobStarter(this.child, this.clock), () => this.binary)
+    this.compactions.onSay = (text) => this.shell.say(text)
     this.places = { models: this.models }
     this.session = this.makeSession({})
 
@@ -100,7 +119,7 @@ export class AppViewModel extends Observable {
       this.shell.go('models')
       this.models.showStore()
     }
-    // Until Sessions (1u, 1v, 1g), Video (1k), Compose (1l) and Voice (1m)
+    // Until Sessions (1g), Video (1k), Compose (1l) and Voice (1m)
     // hold what a row unloads or stops, Unload says what the old prototype says.
     this.monitor.unload = (name) => this.shell.say(`Unloaded ${name}`)
     this.shell.routeChanged = (destination) => this.places[destination]?.appeared?.()
@@ -181,11 +200,17 @@ export class AppViewModel extends Observable {
       this.shell.go('sessions')
       this.shell.open('monitor')
       this.shell.setSystemOpen(true)
+      // Behind it, the Streaming session at chat's frame (1v; the old progress 30).
+      await this.openStreaming()
       return
     }
     if (where !== 'chat') return
     this.shell.go('sessions')
+    const session = () => this.session
     switch (sub) {
+      case undefined:
+        await this.openStreaming()
+        return
       case 'new':
         await this.openSession({})
         return
@@ -195,18 +220,96 @@ export class AppViewModel extends Observable {
       case 'play':
         await this.openSession({ execute: { suite: 'coding' }, folder: '~/code/ingest' })
         // A still chat preset writes its sends before the clock starts (DEVELOPER.md → the CLI stand-in).
-        this.session.writeAhead(playLine)
+        session().writeAhead(playLine)
         return
       case 'suite':
         await this.openSession({})
         await this.chooseSuite('vast')
         return
+      case 'retry':
+        await this.openSession({})
+        session().writeAhead(scenarioTurns.retry)
+        return
+      case 'wal':
+        // The capture's own lines before its turn: moved to the billed claude, the notes and the config attached.
+        await this.openSession({})
+        session().apply({ model: 'claude' })
+        session().attach('storage-engine-design.pdf')
+        session().attach('postgresql.conf')
+        // The old frame opens citation 1 (`wal: { cite: 1 }`).
+        session().citeTurn(1, 1)
+        session().writeAhead(scenarioTurns.wal)
+        return
+      case 'crash':
+        await this.openSession({})
+        session().attach('crash-0912.png')
+        session().writeAhead(scenarioTurns.crash)
+        return
+      case 'pr':
+        await this.openSession({})
+        // The old frame opens the card with Per batch picked (`pr: { choice: 'batch' }`): a pick only; nothing is written until Answer.
+        session().preselect('Per batch')
+        session().writeAhead(scenarioTurns.pr)
+        return
+      case 'restarting':
+        // GUI 6a on the kv chat, its inspector off: moved to the suite pair, its child being stopped, an attach made meanwhile.
+        await this.openSession({ resume: this.resumedChat() })
+        session().inspectorOpen = false
+        await this.chooseSuite('pair')
+        this.switchSuite()
+        session().attach('storage-engine-design.pdf')
+        return
+      case 'notsent':
+        // A turn its closed input never took: written while a restart had closed the child's input; the session comes back.
+        await this.openSession({ resume: this.resumedChat() })
+        session().inspectorOpen = false
+        await session().restart()
+        session().writeAhead(scenarioTurns.kv)
+        return
+      case 'ended':
+        // A child that died mid-answer, two lines made while its turn ran held for Start again.
+        await this.openSession({ resume: this.resumedChat() })
+        session().inspectorOpen = false
+        session().writeAhead(scenarioTurns.kv)
+        session().apply({ temperature: 0.4 })
+        session().compact()
+        return
+      case 'compacting':
+        // GUI 6b: two saved chats compacting as jobs, retry's first; the open session Streaming at its starting frame.
+        await this.openStreaming()
+        for (const id of this.compactingChats()) void this.compactions.compact(id)
+        return
     }
+  }
+
+  /**
+   * The Streaming session (1v), at whichever frame the preset's rule freezes
+   * it: `chat` and `monitor` at chat's, and `chat:compacting`, `console`
+   * (1g) and the `settings:*` presets (1i) at the starting one. Its capture's
+   * own lines before the turns -- the folder attached -- then its two turns.
+   */
+  async openStreaming(): Promise<void> {
+    await this.openSession({})
+    this.session.attach('.')
+    for (const text of scenarioTurns.streaming) this.session.writeAhead(text)
+  }
+
+  /** The saved chat the preset's chat rule resumes: the `--resume` it answers. */
+  private resumedChat(): string | undefined {
+    const args = this.preset.rules.chats?.find((rule) => rule.arguments.includes('--resume'))?.arguments ?? []
+    const at = args.indexOf('--resume')
+    return at >= 0 ? args[at + 1] : undefined
+  }
+
+  /** The saved chats the preset's jobs compact, in its order: each `chats compact <id>` it answers. */
+  private compactingChats(): string[] {
+    return (this.preset.rules.jobs ?? []).flatMap((rule) => (rule.arguments[0] === 'chats' && rule.arguments[1] === 'compact' && rule.arguments[2] !== undefined ? [rule.arguments[2]] : []))
   }
 
   /** A session over the stand-in's chat starter, its acts wired to the shell. */
   private makeSession(launch: ChatLaunch): SessionViewModel {
-    const session = new SessionViewModel(this.chats, this.clock, launch, this.samples.listing, this.samples.attachChoices)
+    // Its reader reads a saved conversation's earlier turns back, as the Mac's session reads them (`chats show <id>`).
+    const session = new SessionViewModel(this.chats, this.clock, launch, this.samples.listing, this.samples.attachChoices, this.reads)
     session.onAction = (action) => this.act(action)
     session.observer = (event) => this.observe(session, event)
     session.subscribe(() => {

@@ -11,6 +11,62 @@ export interface Answer {
   readonly exit?: number
   /** It ran past its time and was stopped: no exit of its own, terminated. */
   readonly timedOut?: boolean
+  /**
+   * Ticks the child takes to exit (design 1v): a chat's once its input
+   * closes, so a still frame can stand between a stop and the next child; a
+   * job's after its last line's next tick, so one can stand mid-job. 0, at
+   * once (1d's), unless named.
+   */
+  readonly exitAfter?: number
+  /** Where a chat's still frame stands, and where its live replay starts (design 1v). */
+  readonly freeze?: Freeze
+  /** A chat's choice point: the recording each line the person can write there plays from then on (design 1v). */
+  readonly continuations?: Continuations
+  /**
+   * A chat's Stop (design 1v): a recording of the same session whose turn a
+   * `cancel` ended. A cancel written while a turn is open drops that turn's
+   * unplayed lines and plays this recording's ending of the same turn in
+   * their place: its `result` with `finish_reason: "cancelled"`, and the
+   * calls reported `failed` just before it.
+   */
+  readonly cancelled?: string
+}
+
+/**
+ * A named event of a chat's recording (design 1v): the `nth` line of type
+ * `event`, counted from the recording's start. A still frame stands right
+ * after it, however many ticks it has; a live clock plays straight to it,
+ * then on at its pace.
+ */
+export interface Freeze {
+  /** What the preset calls the frame: `mid-reasoning`. */
+  readonly name: string
+  readonly event: string
+  readonly nth: number
+}
+
+/**
+ * A chat's choice point (design 1v): once the `nth` line of type `after` has
+ * played (the first unless named), the first answer, turn or setting written
+ * picks its branch -- `by` its key: an `answer` line's text, `user` for a
+ * turn sent again, and a setting by what it sets (`set model=claude`, each
+ * field `key=value` in the line's order). Each branch is a whole recording
+ * that shares the main one's lines up to there (its own capture from the
+ * same opening turns, or hand-made); the replay plays it from the line it
+ * has reached. A line no branch names is noted in `unanswered`.
+ */
+export interface Continuations {
+  readonly after: string
+  readonly nth?: number
+  readonly by: Readonly<Record<string, string>>
+}
+
+/** How a recorded child's replay moves, past what it printed: its rule's (design 1v). */
+export interface ReplayRules {
+  readonly exitAfter: number
+  readonly freeze: Freeze | undefined
+  readonly continuations: Continuations | undefined
+  readonly cancelled: string | undefined
 }
 
 /**
@@ -57,8 +113,8 @@ export interface CapturedRun {
   readonly timedOut: boolean
 }
 
-/** A call's end: it ran and printed `run`, or it never started, and `reason` says why. */
-export type ChildAnswer = { readonly started: true; readonly run: CapturedRun } | { readonly started: false; readonly reason: string }
+/** A call's end: it ran and printed `run`, replayed as `replay` says, or it never started, and `reason` says why. */
+export type ChildAnswer = { readonly started: true; readonly run: CapturedRun; readonly replay: ReplayRules } | { readonly started: false; readonly reason: string }
 
 /** Where the binary is, as the mode says: the Mac app's `DiscoveryOutcome`, whose place the three modes take. */
 export type DiscoveryOutcome = { readonly case: 'found'; readonly binary: string } | { readonly case: 'notFound' }
@@ -121,7 +177,7 @@ export class StandInChild {
     if (this.apogee === 'config-typo') {
       const verb = args[0]
       const refusal = verb === undefined ? this.modes.configTypoRefusal : this.modes.configTypoRefusal.replace(/^apogee [^:\s]+:/, `apogee ${verb}:`)
-      return { started: true, run: StandInChild.captured({ stderr: refusal, exit: 1 }) }
+      return { started: true, run: StandInChild.captured({ stderr: refusal, exit: 1 }), replay: StandInChild.replay({}) }
     }
     const rule = StandInChild.longestPrefix(this.rules[kind] ?? [], args)
     if (!rule) {
@@ -132,7 +188,12 @@ export class StandInChild {
     const count = this.answered.get(rule) ?? 0
     this.answered.set(rule, count + 1)
     const answer = answers[Math.min(count, answers.length - 1)] ?? {}
-    return { started: true, run: StandInChild.captured(answer) }
+    return { started: true, run: StandInChild.captured(answer), replay: StandInChild.replay(answer) }
+  }
+
+  /** An answer's replay rules, each as 1d replayed it unless the answer names it. */
+  static replay(answer: Answer): ReplayRules {
+    return { exitAfter: answer.exitAfter ?? 0, freeze: answer.freeze, continuations: answer.continuations, cancelled: answer.cancelled }
   }
 
   /** Logs what nobody recorded, as `<kind>: <what>`: a call, or a chat's turn past its recording. */

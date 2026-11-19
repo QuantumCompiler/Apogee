@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { presetFor } from '../../../source/presentation/app/Previews/Presets'
 import { modeRules } from '../../../source/presentation/app/Previews/ModeRules'
-import { AppViewModel } from '../../../source/presentation/app/ViewModels/AppViewModel'
+import { AppViewModel, scenarioTurns } from '../../../source/presentation/app/ViewModels/AppViewModel'
 import type { ApogeeMode } from '../../../source/infrastructure/process/StandInChild'
 import { sessionSamples } from '../../../source/presentation/session/Previews/SessionPresets'
 
@@ -47,10 +47,12 @@ describe('the composition root', () => {
     expect(app.child.unanswered).toEqual([])
   })
 
-  test('opening the file with no start shows the monitor, until 1v restores chat', async () => {
+  test('opening the file with no start shows chat, the old data-props default: the Streaming session mid-reasoning on Sessions (1v)', async () => {
     const app = await started(undefined)
-    expect(app.preset.route).toBe('monitor')
-    expect(app.shell.overlay).toBe('monitor')
+    expect(app.preset.route).toBe('chat')
+    expect(app.shell.route).toBe('sessions')
+    expect(app.shell.overlay).toBeUndefined()
+    expect(app.session.transcript.status.case).toBe('thinking')
   })
 
   test("the monitor's \"Open models library\" goes to Models' store tab and closes the monitor, as the old one does", async () => {
@@ -101,7 +103,8 @@ describe('the composition root', () => {
     await settled()
     expect(app.shell.overlay).toBeUndefined()
     expect(app.shell.systemOpen).toBe(false)
-    expect(app.child.calls).toHaveLength(4)
+    expect(app.child.calls.filter((call) => call.arguments[0] === 'system')).toHaveLength(4)
+    expect(app.child.calls.filter((call) => call.kind === 'chats'), 'its session opened once').toHaveLength(1)
   })
 })
 
@@ -110,19 +113,21 @@ describe('the preset table', () => {
     expect(presetFor({ start: 'monitor', still: true, apogee: 'installed' }).known).toBe(true)
     const unknown = presetFor({ start: 'no-such-screen', still: false, apogee: 'missing' })
     expect(unknown.known).toBe(false)
-    expect(unknown.preset.route).toBe('monitor')
+    expect(unknown.preset.route).toBe('chat')
     expect(unknown.preset.apogee).toBe('missing')
     expect(unknown.preset.clock.still).toBe(false)
   })
 })
 
 describe('the session in the composition (design 1u)', () => {
-  test('under the monitor, Sessions is the session window’s empty state, and nothing is launched', async () => {
+  test("under the monitor, Sessions is the Streaming session at chat's frame, launched (1v; the old progress 30)", async () => {
     const app = await started('monitor')
-    expect(app.session.face().state).toBe('empty')
-    expect(app.session.connection).toEqual({ case: 'idle' })
-    expect(app.child.calls.map((call) => call.kind)).toEqual(['reads', 'reads', 'reads', 'reads'])
-    expect(app.child.calls.every((call) => call.arguments[0] === 'system')).toBe(true)
+    const chat = await started('chat')
+    expect(app.shell.overlay).toBe('monitor')
+    expect(app.session.connection.case).toBe('connected')
+    expect(app.session.face().rows).toEqual(chat.session.face().rows)
+    expect(app.session.transcript.status.case).toBe('thinking')
+    expect(app.child.unanswered).toEqual([])
   })
 
   test('chat:new opens a new chat on Sessions: its empty state, its model from models list and models info, the inspector open', async () => {
@@ -169,22 +174,17 @@ describe('the session in the composition (design 1u)', () => {
     })
   }
 
-  test('under the monitor the session is not launched, so the empty state offers nothing that needs one: every act leaves nothing unanswered and nothing launched', async () => {
+  test('under the monitor the Streaming session’s acts reach the CLI: the suite chooser opens over the recorded suites, and an attach mid-turn is held for its end', async () => {
     const app = await started('monitor')
     const session = app.session
-    const face = session.face()
-    expect(face.empty).toMatchObject({ launched: false, privateInstead: false, chooseSuite: false })
-    expect(face.header.canSwitchSuite).toBe(false)
-    expect(face.composer.canAttach).toBe(false)
+    expect(session.face().header.canSwitchSuite).toBe(true)
     session.chooseSuite()
-    session.attach('~/code/ingest/')
+    session.attach('notes.md')
     await settled()
     expect(app.child.unanswered).toEqual([])
-    expect(app.session).toBe(session)
-    expect(session.connection).toEqual({ case: 'idle' })
-    expect(session.held).toEqual([])
-    expect(app.shell.sheet).toBeUndefined()
-    expect(app.shell.toast).toBeUndefined()
+    expect(app.shell.sheet).toBe('suite')
+    expect(session.held).toEqual([{ case: 'attach', path: 'notes.md' }])
+    expect(session.face().held.words).toBe('Sent when this turn ends: attach notes.md')
   })
 
   test('chat:play: the captured execute session, its play sent before the clock started, the frame its finished turn', async () => {
@@ -302,8 +302,8 @@ describe('the session in the composition (design 1u)', () => {
   })
 })
 
-test('a session replaced stops listening to the clock, launched or not: under the monitor the first was never launched', async () => {
-  const app = await started('monitor')
+test('a session replaced stops listening to the clock: chat:new’s, replaced by a private one three times', async () => {
+  const app = await started('chat:new')
   const listening = () => (app.clock as unknown as { listeners: unknown[] }).listeners.length
   const before = listening()
   for (let index = 0; index < 3; index += 1) {
@@ -311,4 +311,118 @@ test('a session replaced stops listening to the clock, launched or not: under th
     await settled()
   }
   expect(listening()).toBe(before)
+})
+
+describe("the session's scenarios and states in the composition (design 1v)", () => {
+  const rowsOf = (app: AppViewModel) => app.session.face().rows
+
+  test('chat: the Streaming session mid-reasoning -- the folder attached, the first exchange answered, the second recalling a past chat, its activity live, no answer yet', async () => {
+    const app = await started('chat')
+    const kinds = rowsOf(app).map((row) => row.kind)
+    // Turn 2 in the CLI's order: the rewrite opens its activity, then its sources and its recall (drawn above the reply by the view).
+    expect(kinds).toEqual(['notice', 'user', 'notice', 'notice', 'sources', 'activity', 'answer', 'user', 'activity', 'sources', 'recalled'])
+    expect(app.session.attachments).toEqual(['.'])
+    expect(rowsOf(app).filter((row) => row.kind === 'activity').at(-1)).toMatchObject({ live: true, summary: 'thinking · 3 steps' })
+    expect(app.session.face().composer).toMatchObject({ status: 'thinking', streaming: true })
+    expect(app.child.unanswered).toEqual([])
+  })
+
+  test('chat:retry: the permission card stands, the turn waiting for you', async () => {
+    const app = await started('chat:retry')
+    expect(rowsOf(app).find((row) => row.kind === 'permission')).toMatchObject({ title: 'Change a file?', answered: '', closed: false })
+    expect(app.session.face().composer.status).toBe('waiting for you')
+  })
+
+  test('chat:wal: moved to the billed claude, two files attached, the cited answer with citation 1 open', async () => {
+    const app = await started('chat:wal')
+    expect(rowsOf(app)[0]).toMatchObject({ kind: 'notice', text: 'switched to claude -- from the next turn', billed: true })
+    expect(rowsOf(app).find((row) => row.kind === 'answer')).toMatchObject({ cited: 1, footer: { model: 'claude', kind: 'api' } })
+    expect(app.session.attachments).toEqual(['storage-engine-design.pdf', 'postgresql.conf'])
+  })
+
+  test("chat:crash: vast didn't load -- the old card, the CLI's words", async () => {
+    const app = await started('chat:crash')
+    expect(rowsOf(app).at(-1)).toMatchObject({ kind: 'error', title: 'vast didn’t load', loadFailed: true, instead: 'claude', canRetry: true })
+  })
+
+  test('chat:pr: Claude is asking, its options, Per batch picked as the old frame opens it, the turn waiting for you', async () => {
+    const app = await started('chat:pr')
+    const card = rowsOf(app).find((row) => row.kind === 'question')
+    expect(card).toMatchObject({ label: 'Claude is asking', answered: [] })
+    expect(card?.kind === 'question' ? card.items.map((item) => item.picked) : []).toEqual(['Per batch'])
+    // A pick, not an answer: nothing is written until Answer.
+    expect(app.child.calls.filter((call) => call.kind === 'chats')).toHaveLength(1)
+    expect(app.session.model).toMatchObject({ name: 'claude', kind: 'subscription' })
+  })
+
+  test('chat:restarting: the kv chat read back, its child being stopped for the suite pair, an attach held, Send off, the inspector closed', async () => {
+    const app = await started('chat:restarting')
+    expect(rowsOf(app).map((row) => row.kind)).toEqual(['warning', 'user', 'answer', 'divider', 'notice', 'notice'])
+    // Moved before any child had said its vocabulary, so the move is said in the Mac's words (its moveWords), as the old frame says it.
+    expect(rowsOf(app).filter((row) => row.kind === 'notice').map((row) => (row.kind === 'notice' ? row.text : ''))).toEqual([
+      "switching to suite pair (--suite pair) -- machine mode carries no suite, so the session restarts under it; the conversation carries on on the suite's chat member, and a local model loads again",
+      'resume: a message could not be read and was skipped',
+    ])
+    expect(app.session.transcript.status).toEqual({ case: 'restarting' })
+    expect(app.session.face().held).toMatchObject({ shown: true, words: 'Sent once the session is back: attach storage-engine-design.pdf' })
+    expect(app.session.face().composer).toMatchObject({ placeholder: 'The session is restarting', status: 'restarting', pulse: true, inputOn: false })
+    expect(app.session.inspectorOpen).toBe(false)
+    expect(app.shell.sheet).toBeUndefined()
+    expect(app.child.unanswered).toEqual([])
+  })
+
+  test('chat:notsent: the turn its closed child never took, marked not sent after the resume’s notice; the session back, Send again enabled', async () => {
+    const app = await started('chat:notsent')
+    expect(rowsOf(app).map((row) => row.kind)).toEqual(['warning', 'user', 'answer', 'divider', 'notice', 'user', 'notSent'])
+    expect(rowsOf(app).at(-1)).toMatchObject({ kind: 'notSent', canResend: true, enabled: true })
+    expect(app.session.transcript.status).toEqual({ case: 'ready' })
+    expect(app.child.calls.filter((call) => call.kind === 'chats')).toHaveLength(2)
+  })
+
+  test('chat:notsent: Send again is answered by the returned child, as the chat-kv recipe recorded that turn', async () => {
+    const app = await started('chat:notsent')
+    app.session.resend(scenarioTurns.kv)
+    app.clock.advance(60)
+    await settled()
+    expect(app.session.transcript.status).toEqual({ case: 'ready' })
+    const last = rowsOf(app).at(-1)
+    expect(last?.kind).toBe('answer')
+    expect(last?.kind === 'answer' ? last.text : '').toMatch(/^A 16-bit cache is twice the 8-bit one/)
+    expect(app.child.unanswered).toEqual([])
+  })
+
+  test('chat:ended: the answer cut mid-stream, Session ended in the CLI’s words with Start again, two lines held for it', async () => {
+    const app = await started('chat:ended')
+    expect(rowsOf(app).at(-1)).toMatchObject({ kind: 'ended', text: 'apogee exited with status 2: fatal: the model went away', canStartAgain: true })
+    expect(app.session.face().held.words).toBe('Sent when the session starts again: temperature 0.4 · compact')
+    expect(app.session.face().composer).toMatchObject({ placeholder: 'The session has ended', status: 'session ended', inputOn: false })
+  })
+
+  test('chat:ended: Start again -- the held setting and compact reach the next child, which answers each in the CLI’s words', async () => {
+    const app = await started('chat:ended')
+    await app.session.start()
+    for (let tick = 0; tick < 6; tick += 1) {
+      app.clock.advance(1)
+      await settled()
+    }
+    const notices = rowsOf(app).flatMap((row) => (row.kind === 'notice' ? [row.text] : []))
+    expect(notices).toContain('temperature: 0.4 -- from the next turn')
+    expect(notices).toContain('history compacted')
+    expect(app.session.face().held.shown).toBe(false)
+    expect(app.child.unanswered).toEqual([])
+  })
+
+  test('chat:compacting: two saved chats compacting side by side, retry’s first; its open session Streaming at its earlier frame', async () => {
+    const app = await started('chat:compacting')
+    const chat = await started('chat')
+    const reasoning = (target: AppViewModel) => {
+      const activity = target.session.face().rows.filter((row) => row.kind === 'activity').at(-1)
+      return activity?.kind === 'activity' ? activity.reasoning : ''
+    }
+    expect(Object.keys(app.compactions.compactions)).toHaveLength(2)
+    expect(app.child.calls.filter((call) => call.kind === 'jobs').map((call) => call.arguments.slice(0, 2).join(' '))).toEqual(['chats compact', 'chats compact'])
+    expect(reasoning(app).length).toBeGreaterThan(0)
+    expect(reasoning(chat).startsWith(reasoning(app))).toBe(true)
+    expect(reasoning(chat).length).toBeGreaterThan(reasoning(app).length)
+  })
 })

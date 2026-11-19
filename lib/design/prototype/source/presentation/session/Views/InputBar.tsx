@@ -1,17 +1,20 @@
 import type { KeyboardEvent } from 'react'
 import { useObserved } from '../../styles/Observation/useObserved'
 import type { SessionViewModel } from '../ViewModels/SessionViewModel'
-import { AttachmentChips, SuggestionList } from './SessionExtras'
+import { AttachmentChips, HeldLines, SuggestionList } from './SessionExtras'
 
 /**
  * The composer (`main.html:693-759` at `b375fac9`): the `/`, `@` and attach
  * menus over it, the attached chips, the input, and its row -- attach, the
  * keys, the turn's status, and Send, or Stop while a turn runs. The Mac app's
- * `InputBar`. The held lines' strip is 1v's.
+ * `InputBar`. The held lines' strip stands over the input while lines wait
+ * (1v), and the input is off, saying why, while a child is to come back or
+ * has ended.
  */
 export function InputBar({ model }: { readonly model: SessionViewModel }) {
   useObserved(model)
-  const face = model.face().composer
+  const whole = model.face()
+  const face = whole.composer
   const slash = model.slashOpen ? model.slashItems : undefined
   const mention = model.mentionOpen ? model.mentionItems : undefined
 
@@ -77,6 +80,7 @@ export function InputBar({ model }: { readonly model: SessionViewModel }) {
         ) : null}
         <div style={{ border: '1px solid var(--line-strong)', borderRadius: 8, background: 'var(--surface-card)' }}>
           <AttachmentChips paths={face.attachments} detach={model.transcript.accepts.includes('detach') ? (path) => model.detach(path) : undefined} />
+          <HeldLines held={whole.held} />
           <div style={{ display: 'flex', gap: 10, padding: '12px 14px 2px' }}>
             <span className="mono" aria-hidden="true" style={{ color: 'var(--status-accent)', fontSize: 'var(--t-prose)', lineHeight: '22px' }}>
               ›
@@ -88,7 +92,7 @@ export function InputBar({ model }: { readonly model: SessionViewModel }) {
               onChange={(event) => model.setDraft(event.target.value)}
               onKeyDown={onKey}
               placeholder={face.placeholder}
-              disabled={model.transcript.status.case === 'ended' || model.connection.case === 'missing'}
+              disabled={!face.inputOn}
               style={{ flex: '1 1 auto', minWidth: 0, resize: 'none', padding: 0, border: 0, outline: 'none', background: 'transparent', fontSize: 'var(--t-prose)', lineHeight: '22px', color: 'var(--text-primary)' }}
             />
           </div>
@@ -122,6 +126,7 @@ export function InputBar({ model }: { readonly model: SessionViewModel }) {
             </span>
             <span style={{ flex: '1 1 auto' }} />
             <span className="mono" role="status" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 'var(--t-meta)', color: model.transcript.status.case === 'ended' ? 'var(--status-error)' : 'var(--text-tertiary)' }}>
+              {face.pulse ? <span className="pulse" aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--status-accent)' }} /> : null}
               {face.status}
             </span>
             {face.streaming ? (
@@ -140,7 +145,7 @@ export function InputBar({ model }: { readonly model: SessionViewModel }) {
                 type="button"
                 className="mono"
                 onClick={() => model.submit()}
-                disabled={!face.canSend && !face.draft.trim().startsWith('/')}
+                disabled={(!face.canSend && !face.draft.trim().startsWith('/')) || !face.inputOn}
                 aria-label="Send (Return)"
                 style={{ display: 'flex', alignItems: 'center', gap: 8, height: 28, padding: '0 10px', background: 'var(--text-primary)', color: 'var(--surface-window)', border: 0, borderRadius: 5, fontSize: 'var(--t-ui)', fontWeight: 600 }}
               >

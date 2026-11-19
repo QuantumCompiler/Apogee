@@ -5,6 +5,7 @@ import { efforts, thinkModes } from '../ViewModels/SessionViewModel'
 import { InputBar } from './InputBar'
 import { EmptySessionView, InspectorPlaceholder, kindColor, MeterView, ModelGlyph, ModelTag } from './SessionExtras'
 import { TranscriptRow } from './TranscriptRow'
+import type { RowActs } from './TranscriptRow'
 
 const check = (
   <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
@@ -214,26 +215,35 @@ function Header({ model, face }: { readonly model: SessionViewModel; readonly fa
   )
 }
 
-/** The rows, a turn's activity and its answer drawn together, as the old prototype draws a turn's reply in one column. */
-function Conversation({ rows, pending }: { readonly rows: readonly RowFace[]; readonly pending: ReactNode }) {
+/** What a turn's reply is made of: drawn together in one column, as the old prototype draws a reply. */
+const replyKinds: ReadonlySet<RowFace['kind']> = new Set(['activity', 'answer', 'sources', 'recalled', 'question', 'permission', 'error'])
+
+/**
+ * The rows, a turn's reply -- its recall, activity, cards, answer and sources
+ * -- drawn together, as the old prototype draws a turn's reply in one column.
+ * A recall heads its reply, as the old frame draws it above the reasoning,
+ * though the CLI says it after the turn's query rewrite and retrieval.
+ */
+function Conversation({ rows, pending, acts }: { readonly rows: readonly RowFace[]; readonly pending: ReactNode; readonly acts: RowActs }) {
   const groups: RowFace[][] = []
   for (const row of rows) {
     const last = groups.at(-1)
-    const together = (kind: RowFace['kind']) => kind === 'activity' || kind === 'answer'
+    const together = (kind: RowFace['kind']) => replyKinds.has(kind)
     if (last && together(row.kind) && together(last.at(-1)?.kind ?? 'user')) last.push(row)
     else groups.push([row])
   }
+  for (const [index, group] of groups.entries()) groups[index] = [...group.filter((row) => row.kind === 'recalled'), ...group.filter((row) => row.kind !== 'recalled')]
   return (
     <section className="ap-scroll" aria-label="Conversation" style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column-reverse', padding: '24px 28px 20px' }}>
       <div style={{ width: '100%', maxWidth: 860, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 24 }}>
         {groups.map((group) =>
-          group.length === 1 && group[0]?.kind !== 'activity' && group[0]?.kind !== 'answer' ? (
-            <TranscriptRow key={group[0]?.id} row={group[0] as RowFace} />
+          group.length === 1 && !replyKinds.has(group[0]?.kind ?? 'user') ? (
+            <TranscriptRow key={group[0]?.id} row={group[0] as RowFace} acts={acts} />
           ) : (
             <div key={group[0]?.id} className="row">
               <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {group.map((row) => (
-                  <TranscriptRow key={row.id} row={row} />
+                  <TranscriptRow key={row.id} row={row} acts={acts} />
                 ))}
               </div>
             </div>
@@ -290,6 +300,18 @@ function MissingBinary() {
 export function SessionWindow({ model }: { readonly model: SessionViewModel }) {
   useObserved(model)
   const face = model.face()
+  const acts: RowActs = {
+    answer: (id, answers) => model.answer(id, answers),
+    skip: (id) => model.skip(id),
+    openCitation: (row, index) => model.openCitation(row, index),
+    closeCitation: () => model.closeCitation(),
+    openSource: () => model.openSource(),
+    resend: (text) => model.resend(text),
+    startAgain: () => void model.start(),
+    retry: () => model.retry(),
+    askInstead: (name) => model.askInstead(name),
+    openChat: (id) => model.leave({ type: 'open', id }),
+  }
   return (
     <>
       <Header model={model} face={face.header} />
@@ -314,7 +336,7 @@ export function SessionWindow({ model }: { readonly model: SessionViewModel }) {
           ) : face.state === 'starting' ? (
             <div style={{ flex: '1 1 0', display: 'grid', placeItems: 'center', color: 'var(--text-tertiary)', fontSize: 'var(--t-small)' }}>Starting apogee…</div>
           ) : (
-            <Conversation rows={face.rows} pending={face.pending.shown ? <PendingLine pending={face.pending} /> : null} />
+            <Conversation rows={face.rows} pending={face.pending.shown ? <PendingLine pending={face.pending} /> : null} acts={acts} />
           )}
           <InputBar model={model} />
         </div>

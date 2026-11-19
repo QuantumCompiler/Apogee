@@ -1,0 +1,17 @@
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","tool_call","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-11-01","tools":true},"chat_id":"20261119-111551-8425","model":"root","next_turn":2,"protocol_version":1,"type":"session"}
+{"text":"resume: a message could not be read and was skipped","type":"notice"}
+{"turn":2,"type":"thinking"}
+{"text":"Twice th","turn":2,"type":"thinking_delta"}
+{"text":"e 8-bit ","turn":2,"type":"thinking_delta"}
+{"text":"cache.","turn":2,"type":"thinking_delta"}
+{"turn":2,"type":"answer_start"}
+{"text":"A 16-bit","turn":2,"type":"answer_delta"}
+{"text":" cache i","turn":2,"type":"answer_delta"}
+{"text":"s twice ","turn":2,"type":"answer_delta"}
+{"text":"the 8-bi","turn":2,"type":"answer_delta"}
+{"text":"t one, 4","turn":2,"type":"answer_delta"}
+{"text":".8 GB at","turn":2,"type":"answer_delta"}
+{"text":" 128K, s","turn":2,"type":"answer_delta"}
+{"text":"o with t","turn":2,"type":"answer_delta"}
+{"text":"he weigh","turn":2,"type":"answer_delta"}
+{"text":"ts it","turn":2,"type":"answer_delta"}

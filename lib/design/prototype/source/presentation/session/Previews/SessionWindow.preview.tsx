@@ -8,6 +8,7 @@ import stoppedTurn from '@recorded/data/protocol/Fixtures/stopped-turn.jsonl?raw
 import executePlay from '../../../../fixtures/data/protocol/execute-play-summarize-verify.jsonl?raw'
 import type { SessionViewModel } from '../ViewModels/SessionViewModel'
 import { SessionWindow } from '../Views/SessionWindow'
+import { scenario } from './ScenarioStreams'
 import { useSessionPreview } from './SessionPreview'
 
 /**
@@ -131,3 +132,32 @@ export const Missing = () => <Window model={useSessionPreview(newUnsent, { apoge
 
 /** A config the CLI cannot read: the launch refused, in its words. */
 export const ConfigTypo = () => <Window model={useSessionPreview(newUnsent, { apogee: 'config-typo', ticks: 2 })} />
+
+// MARK: - 1v: the scenarios and states, each at its preset's frame
+
+/** `chat` (and `monitor` behind its overlay): Streaming, three-quarters through the reasoning. */
+export const Streaming = () => <Window model={useSessionPreview(...scenario.streaming('chat'))} />
+
+/** `chat:compacting`'s open session: Streaming at its starting frame. */
+export const StreamingEarlier = () => <Window model={useSessionPreview(...scenario.streaming('start'))} />
+
+/** `chat:retry`: Permission, its card open. */
+export const Permission = () => <Window model={useSessionPreview(...scenario.permission())} />
+
+/** `chat:wal`: Sources, citation 1 open. */
+export const Sources = () => <Window model={useSessionPreview(...scenario.sources())} />
+
+/** `chat:crash`: Error, vast didn't load. */
+export const ErrorCard = () => <Window model={useSessionPreview(...scenario.error())} />
+
+/** `chat:pr`: Question, Claude asking. */
+export const Question = () => <Window model={useSessionPreview(...scenario.question())} />
+
+/** `chat:restarting`: moved to the suite pair, the child being stopped, an attach held, the inspector closed. */
+export const Restarting = () => <Window model={useSessionPreview(...scenario.restarting())} />
+
+/** `chat:notsent`: a turn its closed child never took, the session back. */
+export const NotSent = () => <Window model={useSessionPreview(...scenario.notSent())} />
+
+/** `chat:ended`: the child dead mid-answer, Session ended, two lines held for Start again. */
+export const Ended = () => <Window model={useSessionPreview(...scenario.ended())} />

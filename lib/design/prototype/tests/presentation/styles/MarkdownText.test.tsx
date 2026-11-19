@@ -74,3 +74,20 @@ test('mid-stream: an open fence is drawn as code, and nothing is lost', () => {
   expect(markup).toContain('<figure')
   expect(markup).toContain('async')
 })
+
+describe('citations: an answer drawn with its sources numbers [n] as a button that opens source n (design 1v)', () => {
+  const text = 'One flush pays for many commits [1]. It is off until you set it [2][3]. A list [4] is not a source, nor is [x].'
+
+  test('[1] to [3] are buttons, each named for its source and marked open; [4] and [x] stay text', () => {
+    const markup = renderToStaticMarkup(<MarkdownText text={text} citations={{ count: 3, open: () => {}, opened: 2, label: (n) => `Source ${n}` }} />)
+    expect((markup.match(/<button/g) ?? []).length).toBe(3)
+    expect(markup).toContain('aria-label="Source 1"')
+    expect(markup).toMatch(/aria-label="Source 2" aria-expanded="true"/)
+    expect(markup).toMatch(/aria-label="Source 3" aria-expanded="false"/)
+    expect(markup).toContain('A list [4] is not a source, nor is [x].')
+  })
+
+  test('with no citations the brackets are text, as before', () => {
+    expect(renderToStaticMarkup(<MarkdownText text={text} />)).not.toContain('<button')
+  })
+})

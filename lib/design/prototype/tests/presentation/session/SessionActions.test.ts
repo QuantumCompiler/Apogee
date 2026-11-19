@@ -52,5 +52,7 @@ describe("the session's acts and facts (the Mac app's SessionActions)", () => {
     expect(AttachmentKind.of('src/**/*.py')).toBe('file')
     expect(AttachmentKind.of('png')).toBe('file')
     expect(AttachmentKind.of('archive.tar.gz')).toBe('file')
+    // The working folder and its parent are folders, however they are written (the Streaming capture attaches `.`; design 1v).
+    for (const folder of ['.', '..', './', '../src/']) expect(AttachmentKind.of(folder), folder).toBe('folder')
   })
 })

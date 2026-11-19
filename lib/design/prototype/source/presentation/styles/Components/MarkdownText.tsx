@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { createContext, useContext, useMemo, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { CodeLexer } from './CodeLexer'
 import { MarkdownDocument, MarkdownLink } from './MarkdownDocument'
@@ -16,14 +16,55 @@ import type { MarkdownAlignment, MarkdownBlock, MarkdownSpan } from './MarkdownD
  * A link is followed only for http, https and mailto; any other is drawn and
  * not followed. An image is drawn as its alt text and its address, and never
  * fetched: no `<img>`, so an answer asks nothing of the network.
+ *
+ * With `citations` (design 1v), a `[n]` in the prose for a source the turn
+ * drew on, 1 to `count`, is a button that opens it -- the old prototype's
+ * citation (`main.html:457` at `b375fac9`); any other bracket stays text.
  */
-export function MarkdownText({ text, streaming = false }: { readonly text: string; readonly streaming?: boolean }) {
+export function MarkdownText({ text, streaming = false, citations }: { readonly text: string; readonly streaming?: boolean; readonly citations?: Citations }) {
   const document = useMemo(() => MarkdownDocument.parse(text), [text])
   return (
-    <div className="prose" data-streaming={streaming ? '' : undefined} style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
-      <Blocks blocks={document.blocks} />
-    </div>
+    <Cited.Provider value={citations}>
+      <div className="prose" data-streaming={streaming ? '' : undefined} style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+        <Blocks blocks={document.blocks} />
+      </div>
+    </Cited.Provider>
   )
+}
+
+/** The sources an answer may cite: how many, which is open, what opens one, and each one's name for the ear. */
+export interface Citations {
+  readonly count: number
+  readonly opened: number | undefined
+  readonly open: (index: number) => void
+  readonly label: (index: number) => string
+}
+
+const Cited = createContext<Citations | undefined>(undefined)
+
+/** Plain text, its `[n]` citations drawn as buttons where the answer has sources. */
+function CitedText({ text }: { readonly text: string }) {
+  const citations = useContext(Cited)
+  if (!citations || citations.count === 0) return text
+  const parts = text.split(/(\[\d+\])/)
+  return parts.map((part, index) => {
+    const n = /^\[(\d+)\]$/.exec(part)?.[1]
+    const number = n === undefined ? 0 : Number(n)
+    if (number < 1 || number > citations.count) return part
+    return (
+      <button
+        key={index}
+        type="button"
+        className="mono"
+        onClick={() => citations.open(number)}
+        aria-label={citations.label(number)}
+        aria-expanded={citations.opened === number}
+        style={{ display: 'inline-flex', alignItems: 'center', height: 17, padding: '0 5px', margin: '0 2px', border: 0, borderRadius: 4, background: 'var(--surface-control)', color: 'var(--status-accent)', fontSize: 'var(--t-label)', verticalAlign: 1 }}
+      >
+        {number}
+      </button>
+    )
+  })
 }
 
 function Blocks({ blocks }: { readonly blocks: readonly MarkdownBlock[] }) {
@@ -164,7 +205,7 @@ function Span({ span }: { readonly span: MarkdownSpan }) {
       </span>
     )
   }
-  let content: ReactNode = span.code ? <code>{span.text}</code> : span.text
+  let content: ReactNode = span.code ? <code>{span.text}</code> : <CitedText text={span.text} />
   if (span.emphasis) content = <em>{content}</em>
   if (span.strong) content = <strong>{content}</strong>
   if (span.link === undefined) return content

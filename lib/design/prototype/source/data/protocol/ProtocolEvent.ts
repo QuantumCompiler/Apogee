@@ -31,6 +31,13 @@ export interface SessionInfo {
   readonly orchestrating: boolean | undefined
 }
 
+/** A past chat a turn recalled (the CLI's 52a): what `--resume` takes, and the name and time the recall index recorded. The Mac app's `RecalledChat`. */
+export interface RecalledChat {
+  readonly id: string
+  readonly name: string
+  readonly updated: string | undefined
+}
+
 /** One excerpt a turn's retrieval sent the model. */
 export interface Source {
   readonly file: string
@@ -144,5 +151,14 @@ export class ProtocolEvent {
   /** The turn the event belongs to: the number of the `user` line it answers. */
   get turn(): number | undefined {
     return JSONValue.int(this.fields.turn)
+  }
+
+  /** A `memory` event's chats, named (the CLI's 52a); empty from a build before it, which gives counts alone. */
+  get recalled(): readonly RecalledChat[] {
+    return (JSONValue.array(this.fields.sessions) ?? []).flatMap((entry) => {
+      const fields = JSONValue.object(entry)
+      const id = JSONValue.string(fields?.id)
+      return id === undefined ? [] : [{ id, name: JSONValue.string(fields?.name) ?? id, updated: JSONValue.string(fields?.updated) }]
+    })
   }
 }

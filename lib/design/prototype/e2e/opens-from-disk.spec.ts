@@ -32,20 +32,21 @@ function watch(page: Page) {
 
 const monitor = (page: Page) => page.getByRole('dialog', { name: 'System monitor' })
 
-test('a double-click opens lib/design/main.html from disk: the monitor over the shell, no console error, no network request', async ({ page }) => {
+test('a double-click opens lib/design/main.html from disk: chat, the Streaming session mid-reasoning, no console error, no network request (design 1v)', async ({ page }) => {
   const { errors, requests } = watch(page)
   await page.goto(built)
   await expect(page).toHaveTitle('Apogee')
   await expect(page.getByRole('complementary', { name: 'Sidebar' })).toBeVisible()
   await expect(page.getByRole('navigation', { name: 'Places' })).toBeVisible()
-  await expect(monitor(page)).toBeVisible()
-  await expect(monitor(page)).toContainText('THIS MAC · APPLE M3 MAX · 128 GB')
-  // Under the monitor, Sessions is the session window's empty state, nothing launched (design 1u), until 1v puts Streaming there:
-  // the acts that need a session are drawn off.
-  await expect(page.getByRole('heading', { name: 'What are we working on?' })).toBeVisible()
-  await expect(page.getByRole('textbox', { name: 'Message' })).toHaveAttribute('placeholder', 'Message apogee')
-  for (const act of ['Attach a folder', 'Choose a model', 'Choose a suite']) await expect(page.getByRole('button', { name: act })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Private session instead' })).toHaveCount(0)
+  // chat, the old data-props default: no monitor over it.
+  await expect(monitor(page)).toHaveCount(0)
+  await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Sessions ⌘1' })).toHaveAttribute('aria-current', 'page')
+  const conversation = page.getByRole('region', { name: 'Conversation' })
+  await expect(conversation).toContainText('Where do fetches start in this repo, and what cancels them?')
+  await expect(conversation).toContainText('recalled 1 earlier chat')
+  await expect(conversation).toContainText('[tool] fetch_url')
+  await expect(conversation).toContainText('· 3 steps')
+  await expect(page.getByRole('button', { name: 'Stop (Command period)' })).toBeVisible()
   // The web fonts are inlined: they load from the page itself. The faces that
   // loaded are the two the window uses; none loads when no face exists.
   expect(
@@ -54,6 +55,16 @@ test('a double-click opens lib/design/main.html from disk: the monitor over the 
   expect(await page.evaluate(() => [...document.fonts].filter((face) => face.status === 'error').length)).toBe(0)
   expect(errors).toEqual([])
   expect(requests).toEqual([built])
+})
+
+test('?start=monitor&still=true: the monitor over the Streaming session at chat\'s frame, launched behind it (design 1v)', async ({ page }) => {
+  const { errors, requests } = watch(page)
+  await page.goto(`${built}?start=monitor&still=true`)
+  await expect(monitor(page)).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Conversation' })).toContainText('Where do fetches start in this repo, and what cancels them?')
+  await expect(page.getByRole('region', { name: 'Conversation' })).toContainText('· 3 steps')
+  expect(errors).toEqual([])
+  expect(requests).toEqual([`${built}?start=monitor&still=true`])
 })
 
 for (const form of ['?start=monitor&still=true', '#start=monitor&still=true']) {
@@ -108,12 +119,12 @@ test('each of the 11 places opens by click: Sessions its session window, an unpo
     await expect(page.getByRole('heading', { name: title, level: 1 })).toBeVisible()
     await expect(page.getByText(`${title} isn’t drawn here yet. Design item ${item} ports it.`)).toBeVisible()
   }
-  // Sessions is ported (design 1u): the session window, no placeholder.
+  // Sessions is ported (design 1u): the session window, no placeholder -- under the monitor, the Streaming session (1v).
   const sessions = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Sessions ⌘1' })
   await sessions.click()
   await expect(sessions).toHaveAttribute('aria-current', 'page')
   await expect(page.getByRole('heading', { name: 'New session', level: 1 })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'What are we working on?' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Conversation' })).toContainText('Where do fetches start in this repo, and what cancels them?')
   await expect(page.getByText(/^Sessions isn’t drawn here yet/)).toHaveCount(0)
   expect(errors).toEqual([])
 })
@@ -208,6 +219,67 @@ for (const [preset, words] of sessionFrames) {
     expect(requests).toEqual([`${built}?start=${preset}&still=true`])
   })
 }
+
+/** The session's scenarios and states (design 1v), each still, from disk, at its frame: its words, and whether the inspector's column is kept. */
+const scenarioFrames: ReadonlyArray<readonly [string, ReadonlyArray<string | RegExp>, boolean]> = [
+  ['chat', ['Where do fetches start in this repo, and what cancels them?', 'recalled 1 earlier chat', 'asyncio timeouts in the scraper', '[tool] fetch_url', '· 3 steps'], true],
+  ['chat:retry', ['Change a file?', 'root wants to write to an existing file', 'Show changes', 'Allow once', 'Allow for this session', 'Always allow', 'Deny', 'waiting for you'], true],
+  ['chat:wal', ['switched to claude -- from the next turn', ' · billed per use from here', 'SOURCES · 3', 'Open at page 185', 'score 0.94 · lexical'], true],
+  ['chat:crash', ['attaching crash-0912.png (1 file, 49 bytes)', 'vast didn’t load', /^vast: could not load the model at/, 'Unload and retry', 'Ask claude instead · billed'], true],
+  ['chat:pr', ['Claude is asking', 'Should the retry budget apply per upload, per batch, or per host?', 'Per upload', 'Per batch', 'Per host', 'Skip', '1–3 pick · ⏎ answer'], true],
+  ['chat:restarting', ['earlier in this conversation', 'a message could not be read and was skipped', /^switching to suite pair \(--suite pair\)/, 'Sent once the session is back: attach storage-engine-design.pdf', 'restarting'], false],
+  ['chat:notsent', ['NOT SENT', 'apogee had stopped taking input, so this message never reached it.', 'Send again'], false],
+  ['chat:ended', ['SESSION ENDED', 'apogee exited with status 2: fatal: the model went away', 'Start again', 'Sent when the session starts again: temperature 0.4 · compact'], false],
+  ['chat:compacting', ['Where do fetches start in this repo, and what cancels them?', '· 3 steps'], true],
+]
+
+for (const [preset, words, inspector] of scenarioFrames) {
+  test(`?start=${preset}&still=true opens the scenario at its frame, with no console error and no request (design 1v)`, async ({ page }) => {
+    const { errors, requests } = watch(page)
+    await page.goto(`${built}?start=${preset}&still=true`)
+    for (const said of words) await expect(page.getByText(said).first()).toBeVisible()
+    await expect(page.getByRole('complementary', { name: 'Inspector' })).toHaveCount(inspector ? 1 : 0)
+    const before = await page.locator('main').innerText()
+    await page.waitForTimeout(1500)
+    expect(await page.locator('main').innerText()).toBe(before)
+    expect(errors).toEqual([])
+    expect(requests).toEqual([`${built}?start=${preset}&still=true`])
+  })
+}
+
+test('chat:pr: it opens with Per batch picked and Answer on, as the old frame does; another pick, and the answer written collapses the card to what was asked and said', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=chat:pr&still=true`)
+  const answer = page.getByRole('button', { name: /^Answer/ })
+  await expect(page.getByRole('radio', { name: /Per batch/ })).toBeChecked()
+  await expect(answer).toBeEnabled()
+  await page.getByRole('radio', { name: /Per host/ }).check()
+  await expect(answer).toBeEnabled()
+  await answer.click()
+  await expect(page.getByText('asked: Should the retry budget apply per upload, per batch, or per host? → Per host')).toBeVisible()
+  await expect(page.getByText('change answer')).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('chat:retry, live: Stop while the card stands closes it -- not answered, the turn ended first -- then stopped, and Send comes back', async ({ page }) => {
+  const { errors, requests } = watch(page)
+  await page.goto(`${built}?start=chat:retry`)
+  await expect(page.getByText('Change a file?')).toBeVisible()
+  await page.getByRole('button', { name: 'Stop (Command period)' }).click()
+  await expect(page.getByText('write_file src/ingest/runner.py — not answered: the turn ended first')).toBeVisible()
+  await expect(page.getByText('stopped', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Stop (Command period)' })).toHaveCount(0)
+  expect(errors).toEqual([])
+  expect(requests).toEqual([`${built}?start=chat:retry`])
+})
+
+test('chat:wal: citation 2 opens its source in place of 1, and Close closes it', async ({ page }) => {
+  await page.goto(`${built}?start=chat:wal&still=true`)
+  await page.getByRole('button', { name: /^Source 2: postgresql.conf/ }).first().click()
+  await expect(page.getByRole('button', { name: 'Open the file' })).toBeVisible()
+  await page.getByRole('button', { name: 'Close source' }).click()
+  await expect(page.getByRole('button', { name: 'Close source' })).toHaveCount(0)
+})
 
 test("the inspector's placeholder takes its own 304 px column while open and none when closed: the main column is the window's less the sidebar and that column", async ({ page }) => {
   await page.goto(`${built}?start=chat:new&still=true`)

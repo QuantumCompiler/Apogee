@@ -399,7 +399,7 @@ describe("the face: everything the session's views draw, as words a test can wal
     expect(model.face().header.suiteWords, 'models.default_suite unset: a new chat runs under none').toBe('no suite')
   })
 
-  test('not launched (a preset that opens none, as the monitor until 1v): the empty state, and nothing offered that needs a session', async () => {
+  test('not launched (a preset that opens none): the empty state, and nothing offered that needs a session', async () => {
     const child = new StandInChild({ rules: {}, apogee: 'installed' }, { configTypoRefusal: agentsListBadConfig })
     const ticks = new Clock({})
     const model = new SessionViewModel(new ApogeeClient(child, ticks), ticks, {}, { folder: '', files: [] }, [{ label: 'Folder…', hint: '⇧⌘O', path: '~/code/ingest/' }])

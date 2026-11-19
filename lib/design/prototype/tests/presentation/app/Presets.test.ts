@@ -54,8 +54,30 @@ async function walk(app: AppViewModel, name: string, pressSuite = false): Promis
 }
 
 describe("the presets: the old prototype's 30-tick check's successor", () => {
-  test('the table holds the monitor and the session’s four plain presets (design 1u)', () => {
-    expect(Object.keys(presets)).toEqual(['monitor', 'chat:new', 'chat:private', 'chat:play', 'chat:suite'])
+  test('the table holds the monitor, and the session’s thirteen in the old data-props order: 1u’s four plain ones and 1v’s nine scenarios and states', () => {
+    expect(Object.keys(presets)).toEqual([
+      'monitor',
+      'chat',
+      'chat:retry',
+      'chat:wal',
+      'chat:crash',
+      'chat:pr',
+      'chat:new',
+      'chat:private',
+      'chat:play',
+      'chat:suite',
+      'chat:restarting',
+      'chat:notsent',
+      'chat:ended',
+      'chat:compacting',
+    ])
+  })
+
+  test('monitor is walked with its chat rule: the Streaming session behind it, launched, and nothing left unanswered', async () => {
+    const app = new AppViewModel(presetFor({ start: 'monitor', still: true, apogee: 'installed' }).preset, modeRules)
+    expect(await walk(app, 'monitor', true)).toEqual([])
+    expect(app.child.calls.filter((call) => call.kind === 'chats').map((call) => call.arguments[0])).toEqual(['chat'])
+    expect(app.session.face().empty.launched).toBe(true)
   })
 
   for (const name of Object.keys(presets)) {

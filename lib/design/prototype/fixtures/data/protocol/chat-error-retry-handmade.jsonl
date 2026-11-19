@@ -1,0 +1,53 @@
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","tool_call","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-11-01","tools":true},"chat_id":"20261119-111350-a0b3","model":"vast","next_turn":1,"protocol_version":1,"type":"session"}
+{"text":"attaching crash-0912.png (1 file, 49 bytes)","type":"notice"}
+{"text":"attached crash-0912.png: 1 file, 1 chunk, described by vast, from another chat's index, searched by its words: no embedding model is set ('apogee config set-default-embedding') -- read as it is with your next message, then its excerpts are retrieved each turn","turn":1,"type":"notice"}
+{"message":"vast: could not load the model at '/Users/someone/.apogee/models/vast/gguf/eeeeeeeeeeee/vast-F16.gguf' -- check that the file exists and is a valid GGUF\nllama.cpp said: llama_model_load: error loading model: unable to allocate Metal buffer of 7.9 GiB","turn":1,"type":"error"}
+{"turn":2,"type":"thinking"}
+{"turn":2,"type":"answer_start"}
+{"text":"It’s a","turn":2,"type":"answer_delta"}
+{"text":" cancell","turn":2,"type":"answer_delta"}
+{"text":"ation, n","turn":2,"type":"answer_delta"}
+{"text":"ot a cra","turn":2,"type":"answer_delta"}
+{"text":"sh. The ","turn":2,"type":"answer_delta"}
+{"text":"last fra","turn":2,"type":"answer_delta"}
+{"text":"mes are ","turn":2,"type":"answer_delta"}
+{"text":"`TaskGro","turn":2,"type":"answer_delta"}
+{"text":"up.__aex","turn":2,"type":"answer_delta"}
+{"text":"it__` ","turn":2,"type":"answer_delta"}
+{"text":"→ `_abor","turn":2,"type":"answer_delta"}
+{"text":"t()`, an","turn":2,"type":"answer_delta"}
+{"text":"d the ex","turn":2,"type":"answer_delta"}
+{"text":"ception ","turn":2,"type":"answer_delta"}
+{"text":"is `Exce","turn":2,"type":"answer_delta"}
+{"text":"ptionGro","turn":2,"type":"answer_delta"}
+{"text":"up: unha","turn":2,"type":"answer_delta"}
+{"text":"ndled er","turn":2,"type":"answer_delta"}
+{"text":"rors in ","turn":2,"type":"answer_delta"}
+{"text":"a TaskGr","turn":2,"type":"answer_delta"}
+{"text":"oup (1 s","turn":2,"type":"answer_delta"}
+{"text":"ub-excep","turn":2,"type":"answer_delta"}
+{"text":"tion)` w","turn":2,"type":"answer_delta"}
+{"text":"rapping ","turn":2,"type":"answer_delta"}
+{"text":"a `Timeo","turn":2,"type":"answer_delta"}
+{"text":"utError`","turn":2,"type":"answer_delta"}
+{"text":" from `r","turn":2,"type":"answer_delta"}
+{"text":"unner.py","turn":2,"type":"answer_delta"}
+{"text":":74`.\n\nS","turn":2,"type":"answer_delta"}
+{"text":"o one fe","turn":2,"type":"answer_delta"}
+{"text":"tch time","turn":2,"type":"answer_delta"}
+{"text":"d out an","turn":2,"type":"answer_delta"}
+{"text":"d the gr","turn":2,"type":"answer_delta"}
+{"text":"oup canc","turn":2,"type":"answer_delta"}
+{"text":"elled th","turn":2,"type":"answer_delta"}
+{"text":"e rest. ","turn":2,"type":"answer_delta"}
+{"text":"That mat","turn":2,"type":"answer_delta"}
+{"text":"ches wha","turn":2,"type":"answer_delta"}
+{"text":"t you fo","turn":2,"type":"answer_delta"}
+{"text":"und in t","turn":2,"type":"answer_delta"}
+{"text":"he inges","turn":2,"type":"answer_delta"}
+{"text":"t runner","turn":2,"type":"answer_delta"}
+{"text":" session","turn":2,"type":"answer_delta"}
+{"text":" this af","turn":2,"type":"answer_delta"}
+{"text":"ternoon.","turn":2,"type":"answer_delta"}
+{"turn":2,"type":"answer_end"}
+{"finish_reason":"stop","model":"vast","text":"It’s a cancellation, not a crash. The last frames are `TaskGroup.__aexit__` → `_abort()`, and the exception is `ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)` wrapping a `TimeoutError` from `runner.py:74`.\n\nSo one fetch timed out and the group cancelled the rest. That matches what you found in the ingest runner session this afternoon.","turn":2,"type":"result"}

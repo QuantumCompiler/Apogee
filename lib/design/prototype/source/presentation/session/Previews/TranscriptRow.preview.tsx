@@ -6,7 +6,10 @@ import stoppedTurn from '@recorded/data/protocol/Fixtures/stopped-turn.jsonl?raw
 import executePlay from '../../../../fixtures/data/protocol/execute-play-summarize-verify.jsonl?raw'
 import { useObserved } from '../../styles/Observation/useObserved'
 import type { RowFace, SessionViewModel } from '../ViewModels/SessionViewModel'
-import { ActivityView, QuietLine, TranscriptRow } from '../Views/TranscriptRow'
+import executePlayRefused from '@recorded/data/protocol/Fixtures/execute-play-refused.jsonl?raw'
+import { ActivityView, EndedCard, noActs, QuietLine, SourcesRow, TranscriptRow } from '../Views/TranscriptRow'
+import type { RowActs } from '../Views/TranscriptRow'
+import { scenario } from './ScenarioStreams'
 import type { SessionPreviewOptions } from './SessionPreview'
 import { useSessionPreview } from './SessionPreview'
 
@@ -70,8 +73,8 @@ export const AnswerFinished = () => <Rows model={useRows(markdownAnswer, { sends
 /** A turn stopped mid-answer: what it said, then the quiet stopped line. */
 export const StoppedTurn = () => <Rows model={useRows(stoppedTurn, { sends: ['Which port does the dev server use?', 'When is the launch?'], ticks: 14 })} />
 
-/** What this app does not draw yet: mock-actor.jsonl's question, a quiet line naming its type until 1v draws its card, never dropped. */
-export const NotDrawnYet = () => <Rows model={useRows(mockActor, { sends: ['Write me a note.'], ticks: 10 })} kinds={['quiet']} />
+/** mock-actor.jsonl's question, the Mac app's own recording: its card (1v), where 1u drew the quiet line. */
+export const MockActorQuestion = () => <Rows model={useRows(mockActor, { sends: ['Write me a note.'], ticks: 10 })} kinds={['question']} />
 
 /** A quiet line on its own. */
 export const Quiet = () => (
@@ -81,7 +84,7 @@ export const Quiet = () => (
 )
 
 /** The session's end: a launch the CLI refused, in its words. */
-export const Ended = () => <Rows model={useRows(newUnsent, { apogee: 'config-typo', ticks: 2 })} kinds={['ended']} />
+export const RefusedAtLaunch = () => <Rows model={useRows(newUnsent, { apogee: 'config-typo', ticks: 2 })} kinds={['ended']} />
 
 /** The activity on its own, closed to its line, its reasoning a click away: mock-actor.jsonl's, closed by its question. */
 export const ActivityClosed = () => <Activity model={useRows(mockActor, { sends: ['Write me a note.'], ticks: 10 })} />
@@ -95,3 +98,82 @@ function Activity({ model }: { readonly model: SessionViewModel }) {
     </div>
   )
 }
+
+// MARK: - 1v's rows
+
+/** Rows of a scenario's frame, with the acts the window hands them. */
+function ScenarioRows({ model, kinds }: { readonly model: SessionViewModel; readonly kinds: readonly RowFace['kind'][] }) {
+  useObserved(model)
+  const rows = model.face().rows.filter((row) => kinds.includes(row.kind))
+  const acts: RowActs = {
+    ...noActs,
+    openCitation: (row, index) => model.openCitation(row, index),
+    closeCitation: () => model.closeCitation(),
+    resend: (text) => model.resend(text),
+    retry: () => model.retry(),
+    askInstead: (name) => model.askInstead(name),
+  }
+  return (
+    <div className="ap" data-theme="dark" style={frame}>
+      {rows.map((row) => (
+        <TranscriptRow key={row.id} row={row} acts={acts} />
+      ))}
+    </div>
+  )
+}
+
+/** `chat`: what turn 2 recalled, the past chat named and openable. */
+export const Recalled = () => <ScenarioRows model={useSessionPreview(...scenario.streaming())} kinds={['recalled']} />
+
+/** `chat:wal`: the switch to the billed claude, the CLI's notice marked billed per use from here. */
+export const BilledSwitch = () => <ScenarioRows model={useSessionPreview(...scenario.sources())} kinds={['notice']} />
+
+/** `chat:wal`: the cited answer, citation 1 open under it, its SOURCES after it. */
+export const CitationOpen = () => <ScenarioRows model={useSessionPreview(...scenario.sources())} kinds={['answer']} />
+
+/** The cited answer with no citation open. */
+export const Cited = () => {
+  const [recording, options] = scenario.sources()
+  return <ScenarioRows model={useSessionPreview(recording, { ...options, then: (model) => model.closeCitation() })} kinds={['answer']} />
+}
+
+/** The SOURCES list on its own: each excerpt's file, its place and the CLI's score. */
+export const Sources = () => (
+  <div className="ap" data-theme="dark" style={frame}>
+    <SourcesRow
+      sources={[
+        { index: 1, file: 'storage-engine-design.pdf', place: 'pages 185–189', score: 'score 0.94 · lexical' },
+        { index: 2, file: 'postgresql.conf', place: 'lines 209–219', score: 'score 0.91 · lexical' },
+      ]}
+      open={() => {}}
+    />
+  </div>
+)
+
+/** `chat:crash`: vast didn't load -- the CLI's words, Unload and retry, Ask claude instead · billed. */
+export const FailedLoad = () => <ScenarioRows model={useSessionPreview(...scenario.error())} kinds={['error']} />
+
+/** A turn that failed otherwise: the Mac app's card, The turn failed and Try again (execute-play-refused.jsonl). */
+export const TurnFailed = () => <Rows model={useRows(executePlayRefused, { launch: { execute: {} }, sends: ['/play nosuch'], ticks: 3 })} kinds={['error']} />
+
+/** `chat:restarting`: the kv chat read back -- the loader's warning, its turn, the divider where the live session takes over. */
+export const ReadBack = () => <ScenarioRows model={useSessionPreview(...scenario.restarting())} kinds={['warning', 'user', 'answer', 'divider', 'notice']} />
+
+/** `chat:notsent`: Not sent, Send again enabled: the session is back. */
+export const NotSent = () => <ScenarioRows model={useSessionPreview(...scenario.notSent())} kinds={['user', 'notSent']} />
+
+/** Not sent while the child is still to come back: Send again off. */
+export const NotSentWaiting = () => {
+  const [recording, options] = scenario.notSent()
+  return <ScenarioRows model={useSessionPreview(recording, { ...options, ticks: 0 })} kinds={['notSent']} />
+}
+
+/** `chat:ended`: Session ended, the CLI's words, Details closed, Start again. */
+export const SessionEnded = () => <ScenarioRows model={useSessionPreview(...scenario.ended())} kinds={['ended']} />
+
+/** Session ended, its Details open: the child's stderr tail. */
+export const EndedDetails = () => (
+  <div className="ap" data-theme="dark" style={frame}>
+    <EndedCard text="apogee exited with status 2: fatal: the model went away" details={'loading\nfatal: the model went away'} canStartAgain startAgain={() => {}} open />
+  </div>
+)

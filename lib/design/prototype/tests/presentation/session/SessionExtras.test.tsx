@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, test } from 'vitest'
 import type { SessionFace } from '../../../source/presentation/session/ViewModels/SessionViewModel'
 import { AttachmentChips, EmptySessionView } from '../../../source/presentation/session/Views/SessionExtras'
+import { ActivityView, TranscriptRow } from '../../../source/presentation/session/Views/TranscriptRow'
 
 /** The old chips' glyphs (`main.html:731-736` at `b375fac9`), by a path each draws and no other does. */
 const glyphs = {
@@ -42,5 +43,31 @@ describe("the session's smaller views, drawn: what only the view decides", () =>
     const on = renderToStaticMarkup(<EmptySessionView face={{ ...face, launched: true, privateInstead: true, chooseSuite: true }} model={model} acts={acts} />)
     expect(on).not.toContain('disabled')
     expect(on).toContain('Private session instead')
+  })
+})
+
+describe("the rows 1v draws: what only the view decides", () => {
+  test('a live reasoning ends in the old caret; a closed one does not', () => {
+    const activity = { id: 0, kind: 'activity', summary: 'thinking · 1 step', live: true, waiting: false, reasoning: 'They want partial-failure tolerance.', lines: [] } as const
+    expect(renderToStaticMarkup(<ActivityView activity={activity} />)).toContain('class="caret"')
+    expect(renderToStaticMarkup(<ActivityView activity={{ ...activity, live: false, summary: 'thought · 1 step' }} />)).not.toContain('caret')
+  })
+
+  test('an activity whose turn waits on a card is drawn open, its reasoning and lines shown, and says it is paused, waiting for you', () => {
+    const activity = { id: 0, kind: 'activity', summary: 'thinking · 2 steps', live: false, waiting: true, reasoning: 'Loop in _fetch().', lines: [{ mark: '', text: '[tool] read_file' }] } as const
+    const markup = renderToStaticMarkup(<ActivityView activity={activity} />)
+    expect(markup).toContain('Loop in _fetch().')
+    expect(markup).toContain('[tool] read_file')
+    expect(markup).toContain('· paused · waiting for you')
+  })
+
+  test("an answer billed per use carries the API's glyph in its footer, in place of the kind's dot", () => {
+    const answer = { id: 0, kind: 'answer', text: 'x', finished: true, footer: { model: 'claude', kind: 'api', usage: [] }, sources: [], cited: 0 } as const
+    const markup = renderToStaticMarkup(<TranscriptRow row={answer} />)
+    expect(markup).toContain('title="billed per use"')
+    expect(markup).not.toContain('border-radius:50%')
+    const local = renderToStaticMarkup(<TranscriptRow row={{ ...answer, footer: { model: 'root', kind: 'local', usage: [] } }} />)
+    expect(local).toContain('border-radius:50%')
+    expect(local).not.toContain('billed per use')
   })
 })

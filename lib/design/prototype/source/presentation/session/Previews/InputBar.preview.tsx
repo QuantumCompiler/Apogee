@@ -3,6 +3,7 @@ import newUnsent from '@recorded/data/protocol/Fixtures/new-unsent.jsonl?raw'
 import privateUnsent from '@recorded/data/protocol/Fixtures/private-unsent.jsonl?raw'
 import type { SessionViewModel } from '../ViewModels/SessionViewModel'
 import { InputBar } from '../Views/InputBar'
+import { scenario } from './ScenarioStreams'
 import { useSessionPreview } from './SessionPreview'
 
 /** The composer on its own (design 1u), one preview per state a person sees differently. */
@@ -51,3 +52,14 @@ export const Ended = () => <Bar model={useSessionPreview(newUnsent, { apogee: 'c
 
 /** No binary found: the input off. */
 export const Missing = () => <Bar model={useSessionPreview(newUnsent, { apogee: 'missing' })} />
+
+// MARK: - 1v: the composer through the child's life
+
+/** `chat:restarting`: Send off and the input saying why, restarting pulsing, the attach held above it. */
+export const Restarting = () => <Bar model={useSessionPreview(...scenario.restarting())} />
+
+/** `chat:ended`: the session has ended -- the input off, the status in the error color, two lines held for Start again. */
+export const SessionEnded = () => <Bar model={useSessionPreview(...scenario.ended())} />
+
+/** `chat:retry`: a card waits -- the status says so, and Stop stands where Send does. */
+export const WaitingForYou = () => <Bar model={useSessionPreview(...scenario.permission())} />
