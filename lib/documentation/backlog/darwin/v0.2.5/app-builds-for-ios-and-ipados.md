@@ -106,7 +106,7 @@ This item delivers:
 - [7a](../v0.2.4/app-connection-local-or-server.md), this item's gate. Its `RemoteSpawner`/`RoutingSpawner` is the only transport the iOS build has. Its constraint "No UI framework is used below Presentation, which 8a relies on" is the one this item extends to the Mac's non-UI APIs.
 - [8b](../ipados/v0.2.5/ipad-app.md), the iPad's layouts, Settings, pairing and keys, built on this. [8c](iphone-and-ipad-distribution.md), the `build.sh` targets, CI's iOS steps and the path onto a device, built on this.
 - [7b](../macos/v0.2.4/mac-offers-its-files-and-shell.md), the Mac's device tools, whose host and sheets are Mac files here. Its default "iPhone and iPad offer no device tools" is the one this item builds.
-- [9a](../ios/v0.3.0/iphone-app.md), the iPhone's compact shell. [7c](../v0.2.4/every-place-against-a-server.md), what each place does against a server, including the iOS form of Show in Finder and the save panels.
+- [9a](../ios/v0.2.5/iphone-app.md), the iPhone's compact shell. [7c](../v0.2.4/every-place-against-a-server.md), what each place does against a server, including the iOS form of Show in Finder and the save panels.
 - Precedents:
   - 1a, the Xcode project as the module map.
   - 4c's `ChildRegistry` and `ProcessSpawner`, the door being isolated.
@@ -121,7 +121,7 @@ This item delivers:
   - iPhone and iPad are clients of the person's Apogee server only, with no core on the device. The Mac and the CLI stay standalone.
   - Remote mode is an add-on, never the only way the application runs. Anything that makes the Mac app need a server, a network or an account is a failure.
   - The "iPhone duo" is the foldable iPhone, whose two screens are 9b's. This item builds its device family.
-  - v0.3.0 is the target where macOS, iPadOS and iOS fully work, in successive versions before it.
+  - v0.2.5 is the target where macOS, iPadOS and iOS fully work, in successive versions up to it.
 - 2026-11-07: In v0.2.5 (track 8), gated on 7a. Without 7a's connection the iOS build would have no transport at all, and an app with nothing to drive. With it, the iOS composition reaches the server through the same seam every place already uses. 8b and 8c are gated on this item, because both need code that builds for iOS.
 - 2026-11-07: One codebase, not a fork. This is the SPEC's "built from the macOS app's Swift code". The probe shows the cost is bounded: 4 files and 7 lines below Presentation, and in Presentation 7 AppKit imports and about 35 Mac-only call sites (W9.2–W9.4).
 
@@ -169,4 +169,4 @@ This item delivers:
 - device tools on iPhone and iPad, which offer none (7b's default);
 - any new design board, since this item draws no new screen and the not-paired state is 7a's;
 - Mac Catalyst, watchOS and visionOS;
-- Windows and Android, which follow v0.3.0 (a recorded default).
+- Windows and Android, which follow v0.2.5 (a recorded default).

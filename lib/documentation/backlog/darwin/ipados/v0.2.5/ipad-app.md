@@ -57,7 +57,7 @@ This item delivers:
 **Reference.**
 - In this table: [8a](../../v0.2.5/app-builds-for-ios-and-ipados.md) (the iPadOS build, its dev identity and the iOS test bundle) and [8c](../../v0.2.5/iphone-and-ipad-distribution.md) (getting the app onto a real iPad).
 - Before it: [7a](../../v0.2.4/app-connection-local-or-server.md) (the connection and its server form, which the iPad uses without its local choice), [7c](../../v0.2.4/every-place-against-a-server.md) (every place against a server) and [7b](../../macos/v0.2.4/mac-offers-its-files-and-shell.md) (the Mac's device tools, which the iPad does not offer).
-- After it: [9a](../../ios/v0.3.0/iphone-app.md) (the compact shell, which takes over the iPad's narrowest windows too and reuses `PaneSheet`, Settings as a place and this pairing), [9b](../../ios/v0.3.0/foldable-iphone.md) (the unfolded screen, which uses this item's layout) and [9c](../../v0.3.0/three-apple-platforms-whole.md) (v0.3.0 whole).
+- After it: [9a](../../ios/v0.2.5/iphone-app.md) (the compact shell, which takes over the iPad's narrowest windows too and reuses `PaneSheet`, Settings as a place and this pairing), [9b](../../ios/v0.2.5/foldable-iphone.md) (the unfolded screen, which uses this item's layout) and [9c](../../v0.2.5/three-apple-platforms-whole.md) (v0.2.5 whole).
 - On the CLI side: [59a](../../../cli/v0.2.3/paired-devices.md) (pairing: what is exchanged, and the words), [59b](../../../cli/v0.2.3/machine-mode-over-the-network.md) (the transport), [59c](../../../cli/v0.2.3/many-sessions-at-once.md) (many sessions), [59d](../../../cli/v0.2.3/reads-and-commands-over-the-network.md) (reads and commands), [59e](../../../cli/v0.2.3/tasks-outlive-the-connection.md) (tasks outliving a dropped connection).
 - Precedents: the shell's window law (`ShellLayout`, the design's `layoutPx`), M18's dev identity, and the not-found screen's honest install line (1b).
 
@@ -68,7 +68,7 @@ This item delivers:
   - the server is an add-on, never the only way the app runs, so nothing may make the CLI or the Mac app need a server, a network or an account;
   - the SPEC amendment: the GUI reaches the CLI over stdio locally, or over an authenticated connection to the person's own `apogee serve`;
   - no customer accounts, billing or metering: the server admits the person and their devices only, so "no server yet" never offers a hosted one or a sign-up;
-  - v0.3.0 is the target where macOS, iPadOS and iOS fully work.
+  - v0.2.5 is the target where macOS, iPadOS and iOS fully work.
 - 2026-11-07: Placed in v0.2.5 (track 8), gated on 8a. The iPad is regular width, so most of the Mac's layout reflows onto it and the new work is the narrow and overlay forms, Settings, keys and pairing. That makes it the step before the iPhone. 9a builds its compact shell on this item's `ShellLayout`, `PaneSheet`, Settings place and pairing, so it follows.
 - 2026-11-07: Where the work happens (the user's call C): server tools by default, plus a connected desktop's own files and shell. The iPad offers no device tools of its own (iPadOS starts no shell), so a session driven from the iPad runs on the server's tools, plus what a connected Mac offers through [60b](../../../cli/v0.2.4/device-tools.md) and 7b.
 
@@ -118,4 +118,4 @@ This item delivers:
 - more than one window or more than one paired server;
 - push notifications;
 - any on-device model or core, and device tools offered by the iPad;
-- Android, which follows v0.3.0 (a recorded default).
+- Android, which follows v0.2.5 (a recorded default).

@@ -50,7 +50,7 @@ Priority-ordered: the topmost item whose gate is satisfied is the next one to bu
 - **Track 3, MLX kinds in the app** (3a, 3b), opened 2026-10-21 from the CLI's MLX-for-every-kind spike: each MLX set's kind, engines and drafters, in [Milestone D](../../assistant/darwin/MILESTONES.md#milestone-d--mlx-kinds-in-the-app).
 - **Track 4, the CLI/GUI audit's GUI findings** (4a–4l), opened 2026-10-22 (the user's call: a thorough bug and feature-disparity audit over both applications), in [Milestone E](../../assistant/darwin/MILESTONES.md#milestone-e--the-audits-gui-findings).
 
-Their story is [ROADMAP.md](../../assistant/darwin/ROADMAP.md), and each item's record is in [MILESTONES.md](../../assistant/darwin/MILESTONES.md). The earliest version table open is **v0.2.4**'s, the Mac as a client (v0.2.1's tracks 5, 6 and 11 have shipped); the standing Maintenance table holds the GUI's upkeep.
+Their story is [ROADMAP.md](../../assistant/darwin/ROADMAP.md), and each item's record is in [MILESTONES.md](../../assistant/darwin/MILESTONES.md). The earliest version table open is **v0.2.4**'s, the Mac as a client and the server window (v0.2.1's tracks 5, 6 and 11 have shipped); the standing Maintenance table holds the GUI's upkeep.
 
 ### Maintenance
 
@@ -76,12 +76,15 @@ Upkeep and fixes, claimable at any time by name: opened 2026-10-20 with its firs
 
 **The Apple-platforms plan: tracks 7, 8 and 9**, opened 2026-11-07. The vision, the user's calls and the measurements are in the CLI's [track 59–61 preamble](../cli/README.md#v023); the GUI SPEC and the machine-mode-client rule were amended the same day. The app is close to portable. It has 184 Swift files: 7 import AppKit, none import UIKit, and one file, `ProcessSpawner.swift`, starts the CLI. That one seam can take a network transport beside the child process. The release order:
 - **v0.2.4, the Mac as a client** (7a–7c), on the CLI's v0.2.3 server: the connection, local or your server; the Mac offering its own files and shell; every place working against a server.
-- **v0.2.5, iPad** (8a–8c): the code built for iOS and iPadOS, the iPad app, and getting the app onto iPhone and iPad. **8c carries the [user] call** (the Apple Developer Program, or personal sideloading).
-- **v0.3.0, iPhone, the foldable and the three platforms whole** (9a–9c).
+- **v0.2.5, iPad, iPhone, the foldable and the three platforms whole** (8a–8c, 9a–9c): the code built for iOS and iPadOS, the iPad app, and getting the app onto iPhone and iPad, then the iPhone, the foldable and the proof of the whole. **8c carries the [user] call** (the Apple Developer Program, or personal sideloading).
 
 The Mac stays complete with no server, and 9c checks it.
 
 **Apps as clients: 7d and 7e**, opened 2026-11-14 (the CLI's [v0.2.3 preamble](../cli/README.md#v023) carries the spike). **7d** carves the client core into ApogeeKit, a Swift package other apps embed and the Mac app depends on; **7e** writes the package's law (its ADR, the layering and public-interface checks, the contributor rules).
+
+**Track 10, the server window**, opened 2026-11-14 from the admin-mode and people spike (the CLI's [track 62 preamble](../cli/README.md#v024) carries the walls and the user's calls; the GUI SPEC's Core surfaces 3 was amended the same day). On the Mac that serves, a separate **Apogee Server** window drives the local CLI over pipes, never the port: **10a** draws it in the design first (closing A9), and **10b**, **split first**, builds Server, Devices, Apps, Activity and Audit. The People place is **10c**, in the same release, on the CLI's track 63.
+
+**Merged 2026-11-18** (the user's call): v0.2.4 took in v0.2.6 and v0.2.7 (track 10, the server window and its People place), and v0.2.5 took in v0.3.0 (track 9). The items kept their ids; their documents moved into the `v0.2.4/` and `v0.2.5/` folders, and every reference moved with them. Nothing had shipped under any of those versions.
 
 | # | Item | Version | File | Status |
 |---|---|---|---|---|
@@ -90,40 +93,21 @@ The Mac stays complete with no server, and 9c checks it.
 | 7c | Every place works against a server — each place's reads, commands and jobs run through the active connection, the media places show and play the server's records, the parity table classifies each command's remote meaning, and an act a server cannot do says why | v0.2.4 | [`every-place-against-a-server.md`](v0.2.4/every-place-against-a-server.md) | 🔒 7a, CLI 59e |
 | 7d | ApogeeKit: the client core as a Swift package — the lower layers and 7a's connection carved into a root Package.swift other apps embed, the Mac app linking it as its one copy, the layering check reading both maps, a sample command-line client building outside the app | v0.2.4 | [`apogeekit-swift-package.md`](v0.2.4/apogeekit-swift-package.md) | 🔒 7a |
 | 7e | Maintaining ApogeeKit — a darwin ADR (the one client core; its public interface only grows), the layering check's package rules and a public-interface check against a baseline, the darwin contributor guide's rule and checklist lines, a DEVELOPER recipe | v0.2.4 | [`maintaining-apogeekit.md`](v0.2.4/maintaining-apogeekit.md) | 🔒 7d |
+| 10a | Design the server window — the Apogee Server window drawn in lib/design/spec and on the canvas before it is built: how it opens from the Apogee menu (only on the Mac that serves), and its six places (Server, Devices with pairing and the QR, Apps with each scope beside what the app asked for, Activity, Audit, and People drawn now for 10c); each part drawn against its CLI words, with every missing word added as a BuildContract gap and its fallback | v0.2.4 | [`design-the-server-window.md`](macos/v0.2.4/design-the-server-window.md) | 🔒 design 1e |
+| 10b | The server window: administering this Mac's server — a second Apogee Server window on the Mac that serves, driving the local CLI over pipes, with Server, Devices, Apps, Activity and Audit (the last two shown when the binary has them); serve split into a screen and a refusal, devices and apps made screens of this window (7a amended), ADR 0003 amended; split first into three | v0.2.4 | [`server-window.md`](macos/v0.2.4/server-window.md) | 🔒 10a, CLI 62a, CLI 62c, CLI 62h |
+| 10c | People in the server window — the owner and members in the Apogee Server window on the Mac that serves: each member's preset and access, their devices and apps, usage against their limit, and the household cloud key granted with its limit; adding, renaming and removing people through the local CLI over pipes, built as 10a draws it, previews over recorded documents, metadata only and never a member's chat contents | v0.2.4 | [`people-screens.md`](macos/v0.2.4/people-screens.md) | 🔒 10b, CLI 63a, CLI 63c |
 
 ### v0.2.5
 
-The iPad, and getting the app onto iPhone and iPad ([preamble](#v024)).
+The iPad and getting the app onto iPhone and iPad (track 8), then the iPhone, the foldable iPhone and the three Apple platforms whole (track 9): the plan's target ([preamble](#v024)).
+
+Track 9 joined this release on 2026-11-18, when v0.2.5 took in v0.3.0 (the user's call; [v0.2.4](#v024) records the merge).
 
 | # | Item | Version | File | Status |
 |---|---|---|---|---|
 | 8a | The app's code builds for iPhone and iPad — one codebase for macOS, iOS and iPadOS, the Mac's code isolated in platform files, the layering check per platform, every scheme and the hermetic suite on the iOS simulator, the Mac app unchanged | v0.2.5 | [`app-builds-for-ios-and-ipados.md`](v0.2.5/app-builds-for-ios-and-ipados.md) | 🔒 7a |
 | 8b | The iPad app — every place in iPad layouts (sidebar beside or over the place, side panes beside or as sheets at every Split View, Slide Over and Stage Manager size), the Mac's keys with a hardware keyboard and the pointer, Settings as a sheet, first launch pairing with the person's server or saying how to set one up, one ParityTable | v0.2.5 | [`ipad-app.md`](ipados/v0.2.5/ipad-app.md) | 🔒 8a |
 | 8c | Getting the app onto iPhone and iPad — the iOS app built and tested on every pull request with no secret, a way onto the person's devices by the path the user picks, and the Mac's ad-hoc app and release unchanged | v0.2.5 | [`iphone-and-ipad-distribution.md`](v0.2.5/iphone-and-ipad-distribution.md) | 🔒 8a |
-
-### v0.2.6
-
-**Track 10, the server window**, opened 2026-11-14 from the admin-mode and people spike (the CLI's [track 62 preamble](../cli/README.md#v026) carries the walls and the user's calls; the GUI SPEC's Core surfaces 3 was amended the same day). On the Mac that serves, a separate **Apogee Server** window drives the local CLI over pipes, never the port: **10a** draws it in the design first (closing A9), and **10b**, **split first**, builds Server, Devices, Apps, Activity and Audit. The People place is **10c**, in v0.2.7.
-
-| # | Item | Version | File | Status |
-|---|---|---|---|---|
-| 10a | Design the server window — the Apogee Server window drawn in lib/design/spec and on the canvas before it is built: how it opens from the Apogee menu (only on the Mac that serves), and its six places (Server, Devices with pairing and the QR, Apps with each scope beside what the app asked for, Activity, Audit, and People drawn now for 10c); each part drawn against its CLI words, with every missing word added as a BuildContract gap and its fallback | v0.2.6 | [`design-the-server-window.md`](macos/v0.2.6/design-the-server-window.md) | 🔒 design 1e |
-| 10b | The server window: administering this Mac's server — a second Apogee Server window on the Mac that serves, driving the local CLI over pipes, with Server, Devices, Apps, Activity and Audit (the last two shown when the binary has them); serve split into a screen and a refusal, devices and apps made screens of this window (7a amended), ADR 0003 amended; split first into three | v0.2.6 | [`server-window.md`](macos/v0.2.6/server-window.md) | 🔒 10a, CLI 62a, CLI 62c, CLI 62h |
-
-### v0.2.7
-
-The server window's People place, on the CLI's track 63 ([preamble](#v026)).
-
-| # | Item | Version | File | Status |
-|---|---|---|---|---|
-| 10c | People in the server window — the owner and members in the Apogee Server window on the Mac that serves: each member's preset and access, their devices and apps, usage against their limit, and the household cloud key granted with its limit; adding, renaming and removing people through the local CLI over pipes, built as 10a draws it, previews over recorded documents, metadata only and never a member's chat contents | v0.2.7 | [`people-screens.md`](macos/v0.2.7/people-screens.md) | 🔒 10b, CLI 63a, CLI 63c |
-
-### v0.3.0
-
-iPhone, the foldable iPhone, and the three Apple platforms whole: the plan's target ([preamble](#v024)).
-
-| # | Item | Version | File | Status |
-|---|---|---|---|---|
-| 9a | The iPhone app — every place in compact layouts (tabs and stacks, chat first), remote-only over the person's own server, pairing on first launch, one parity table, and a conversation started on the Mac continued on the iPhone through the server | v0.3.0 | [`iphone-app.md`](ios/v0.3.0/iphone-app.md) | 🔒 8b |
-| 9b | The foldable iPhone — folding and unfolding moves between the compact and regular shells on one route, keeping the open session, the draft, a half-answered question, a running job's view and the transcript's place, with no connection change | v0.3.0 | [`foldable-iphone.md`](ios/v0.3.0/foldable-iphone.md) | 🔒 9a |
-| 9c | v0.3.0: macOS, iPadOS and iOS whole — every command classified per platform, a hermetic whole pass per platform against a scripted server, the Mac proven complete with no server, and the release shipped with pairing documented | v0.3.0 | [`three-apple-platforms-whole.md`](v0.3.0/three-apple-platforms-whole.md) | 🔒 9b, 8c |
+| 9a | The iPhone app — every place in compact layouts (tabs and stacks, chat first), remote-only over the person's own server, pairing on first launch, one parity table, and a conversation started on the Mac continued on the iPhone through the server | v0.2.5 | [`iphone-app.md`](ios/v0.2.5/iphone-app.md) | 🔒 8b |
+| 9b | The foldable iPhone — folding and unfolding moves between the compact and regular shells on one route, keeping the open session, the draft, a half-answered question, a running job's view and the transcript's place, with no connection change | v0.2.5 | [`foldable-iphone.md`](ios/v0.2.5/foldable-iphone.md) | 🔒 9a |
+| 9c | v0.2.5: macOS, iPadOS and iOS whole — every command classified per platform, a hermetic whole pass per platform against a scripted server, the Mac proven complete with no server, and the release shipped with pairing documented | v0.2.5 | [`three-apple-platforms-whole.md`](v0.2.5/three-apple-platforms-whole.md) | 🔒 9b, 8c |

@@ -76,7 +76,7 @@ This item delivers **the command door**: a paired device sends the words a perso
   - Work happens in server tools by default (call C), so a command run through this door names the server's files. A connected desktop offers its own files and shell, and when the Mac points at a server and is asked to change a project on the Mac, the Mac's files are the ones touched: that is 60b's and GUI 7b's, never this door's.
   - Remote mode is an add-on, never the only way the CLI or the Mac app runs. The CLI alone, and the Mac app over pipes to a local CLI, stay complete and the default; anything that makes them need a server, a network or an account is a failure.
   - iPhone and iPad are clients of the person's server only (no on-device core), which is why every read and command they need must cross the network. The Mac and the CLI stay standalone.
-  - Successive versions, with v0.3.0 the target where macOS, iPadOS and iOS (the iPhone and the foldable iPhone) fully work.
+  - Successive versions, with v0.2.5 the target where macOS, iPadOS and iOS (the iPhone and the foldable iPhone) fully work.
   Track 59, v0.2.3.
 - 2026-11-07: The SPEC amendment is approved and already written. The CLI's [SPEC.md](../../../assistant/cli/SPEC.md) → Core surfaces 4 names "the reads' documents" among what `serve` carries. GUI [CLAUDE.md](../../../assistant/darwin/CLAUDE.md) → The GUI is a machine-mode client was amended: "It is the same protocol". This item is the commands' half of that sentence.
 - 2026-11-07: The door runs the command itself, as a captured child of `serve`'s own binary. It does not add a REST twin per verb. That gives the same document and the same refusals by construction, and it scales to all 157 leaves where twins reached 46. The admin plane is unchanged.

@@ -127,9 +127,9 @@ Evidence re-measured 2026-11-14: sources at HEAD (`4acf4a2b`), and a probe on th
   - [62e](connections-and-activity.md): connections and activity keyed by credential.
   - [62f](audit-log.md): the audit log, which records renames and cancels.
   - [62g](administering-local-and-marked-devices.md): which credentials may administer.
-  - [63a](../v0.2.7/people-on-one-server.md): people that devices and apps belong to.
-  - darwin [10a](../../darwin/macos/v0.2.6/design-the-server-window.md): the pairing sheet, the devices and apps lists and the policy pane, drawn against these words.
-  - darwin [10b](../../darwin/macos/v0.2.6/server-window.md): the server window, gated on this item.
+  - [63a](people-on-one-server.md): people that devices and apps belong to.
+  - darwin [10a](../../darwin/macos/v0.2.4/design-the-server-window.md): the pairing sheet, the devices and apps lists and the policy pane, drawn against these words.
+  - darwin [10b](../../darwin/macos/v0.2.4/server-window.md): the server window, gated on this item.
   - darwin [7a](../../darwin/v0.2.4/app-connection-local-or-server.md): the client side of pairing, whose `PairingCode` decodes the payload this item prints.
 
 **Decisions made** (dated):
@@ -137,13 +137,13 @@ Evidence re-measured 2026-11-14: sources at HEAD (`4acf4a2b`), and a probe on th
   - **An admin mode:** a separate "Apogee Server" window in the macOS app, offered only on the Mac that serves. It drives the local CLI over pipes. So every fact the window shows must be a CLI document.
   - **Remote administering:** local by default. The owner may mark chosen paired devices as allowed to administer remotely, which revises 59d's default. The admin plane stays local-only otherwise. Which of this item's verbs such a device may run is 62g's.
   - **Server lifecycle:** the window installs the server as a background service (launchd) and starts, stops and restarts it (62d).
-  - **Placement:** both before v0.3.0. The server console is v0.2.6 (CLI track 62, darwin/macos track 10's 10a-10b), and people and access are v0.2.7 (CLI track 63, darwin/macos 10c). Nothing already queued is renumbered.
+  - **Placement:** both before v0.2.5, both in v0.2.4: the server console (CLI track 62, darwin/macos track 10's 10a-10b) and people and access (CLI track 63, darwin/macos 10c). Nothing already queued is renumbered.
   - **People:** a household or a small team (designed for both), owner and members, in the words "people" and "access" (Owner, Member), never "roles", which in Apogee means model roles (63a). The owner sees members' metadata (devices, apps, activity, which model, when), never chat contents, and the docs say honestly that whoever controls the server Mac can still read its disk. Members use the server's local models only, unless the owner grants a household cloud key, with a limit (63c).
   - **The model** (from the prior art, the agent's default): the owner is implicit, the OS account that owns `APOGEE_HOME` on the server Mac, plus members, each with an allowance in 59f's `AppScope` shape. Presets (Full, Family, Limited) stand in for groups, and a guest is a member on the Limited preset with nothing kept (63a, 63c).
   - **The defaults the user took:** live changes are applied on the spot (a reload), saying what still needs a restart (62b); an audit is kept 90 days of who, what and when, without request contents (62f); collections are shared libraries handed out per person, plus a member's own private ones; notes and saved decisions are personal by default; a member's apps are paired by the owner at the server Mac, capped at that member's allowance (63a, 63c), so `apps pair` here stays a verb run on the server's own Mac; tasks queue per person rather than being refused (63e).
   - **The SPEC amendments are already written:** CLI SPEC Core surfaces 4, "Revised again 2026-11-14", and GUI SPEC Core surfaces 3, the server window.
   - **The standing law:** remote use is an add-on. The CLI alone and the Mac app over pipes stay complete and need no server.
-- 2026-11-14: Placement: CLI 62h, v0.2.6, track 62, gated on 59a and 59f. darwin 10b gates on it, as on 62a and 62c.
+- 2026-11-14: Placement: CLI 62h, v0.2.4, track 62, gated on 59a and 59f. darwin 10b gates on it, as on 62a and 62c.
   - The spike proposed folding the device and app pieces into 59a and 59f as amendments. This item stands apart instead, so those two build as written in v0.2.3, and the admin reads land with the server console.
   - A builder of 59a or 59f who reads this first may lay down a row `id` and a kept pending row at no cost. That saves the migration here.
 - 2026-11-14: The `config get` half needs neither 59a nor 59f, and may be built first within this item. It stays here because one pane of the server window consumes it.
@@ -190,7 +190,7 @@ No **[user]** call blocks this item.
 - [ ] `chat` and `complete` behave as before with no registry, and the full suite is green on all five targets.
 - [ ] Optional live pass, said when skipped: the user runs `apogee-dev devices pair --output-format json` on the dev channel, renders `qr_payload` as a QR with any generator, scans it from a second device into a running `apogee-dev serve`, and sees `devices pending` turn `redeemed`.
 
-**Scope note.** Earmarked for v0.2.6 (track 62); gated on 59a, 59f. darwin 10b gates on it. Out of scope:
+**Scope note.** Earmarked for v0.2.4 (track 62); gated on 59a, 59f. darwin 10b gates on it. Out of scope: Moved here from v0.2.6 on 2026-11-18, when the releases were merged (the user's call); the id is unchanged.
 - Every screen: drawing the QR, the sheet, the lists and the policy pane (darwin 10a, 10b).
 - What a running server applies against the file (62b), whether one is running (62a), connections and activity (62e), the audit log (62f), and who may administer over the network (62g).
 - People, and devices or apps belonging to a person (63a).

@@ -77,7 +77,7 @@ This item delivers:
   - `#Preview` pairs: for each crossing state, compact and regular drawn from one view-model instance, the size class set through the environment, over the modules' `Previews/` fakes.
 
 **Reference.**
-- Siblings: [9a](iphone-app.md) (the compact shell, `CompactNavigation` and the route kept across launches), [8b](../../ipados/v0.2.5/ipad-app.md) (the regular shell this item unfolds into), [8a](../../v0.2.5/app-builds-for-ios-and-ipados.md) (the iOS target), [7a](../../v0.2.4/app-connection-local-or-server.md) and [7c](../../v0.2.4/every-place-against-a-server.md) (the connection, and every place against a server), and [9c](../../v0.3.0/three-apple-platforms-whole.md) (v0.3.0 whole, gated on this item).
+- Siblings: [9a](iphone-app.md) (the compact shell, `CompactNavigation` and the route kept across launches), [8b](../../ipados/v0.2.5/ipad-app.md) (the regular shell this item unfolds into), [8a](../../v0.2.5/app-builds-for-ios-and-ipados.md) (the iOS target), [7a](../../v0.2.4/app-connection-local-or-server.md) and [7c](../../v0.2.4/every-place-against-a-server.md) (the connection, and every place against a server), and [9c](../../v0.2.5/three-apple-platforms-whole.md) (v0.2.5 whole, gated on this item).
 - On the CLI side: [59b](../../../cli/v0.2.3/machine-mode-over-the-network.md) and [59e](../../../cli/v0.2.3/tasks-outlive-the-connection.md) (a turn or task left running when a connection drops), and [59c](../../../cli/v0.2.3/many-sessions-at-once.md) (one chat on two devices).
 - Precedents:
   - the window law (`ShellLayout`, the design's decision 10), which already keeps the inspector open across a narrowing;
@@ -91,10 +91,10 @@ This item delivers:
   - "iPhone duo" means the foldable iPhone, and the app adapts to its folded phone screen and its unfolded near-iPad screen;
   - iPhone and iPad are clients of the person's Apogee server only, with no on-device core;
   - the server is an add-on, never the only way the app runs, so nothing may make the CLI or the Mac app need a server, a network or an account;
-  - v0.3.0 is the target where macOS, iPadOS and iOS (the iPhone and the foldable) fully work;
+  - v0.2.5 is the target where macOS, iPadOS and iOS (the iPhone and the foldable) fully work;
   - the SPEC amendment is approved and written: the GUI reaches the CLI over stdio locally, or over an authenticated network connection to the person's own `apogee serve`;
   - paid features are a someday, not now: no customer accounts, billing or metering, and the server admits the person and their devices only.
-- 2026-11-07: Placed in v0.3.0 (track 9), after 9a and gated on it. A fold moves between 9a's compact shell and 8b's regular shell, so both must exist first. 9c, v0.3.0 whole, is gated on this item.
+- 2026-11-07: Placed in v0.2.5 (track 9), after 9a and gated on it. A fold moves between 9a's compact shell and 8b's regular shell, so both must exist first. 9c, v0.2.5 whole, is gated on this item.
 - 2026-11-07: Where the work happens (the user's call C): server tools by default, plus a connected desktop's own files and shell. The foldable offers no device tools of its own (iOS starts no shell), and a fold changes nothing about which tools a session has.
 
 **Open calls:**
@@ -130,9 +130,9 @@ This item delivers:
 - [ ] Every crossing state has its `#Preview` pair. The design canvas carries the fold boards. The full suite is green.
 - [ ] The user's live pass on a foldable device is optional, and said.
 
-**Scope note.** Earmarked for v0.3.0 (track 9). Gated on 9a, and through it on 8b, 8a, 7a and 7c, and CLI 59a, 59b, 59d and 59e (9a's chain). 9c is gated on it. Out of scope:
+**Scope note.** Earmarked for v0.2.5 (track 9). Gated on 9a, and through it on 8b, 8a, 7a and 7c, and CLI 59a, 59b, 59d and 59e (9a's chain). 9c is gated on it. Out of scope: Moved here from v0.3.0 on 2026-11-18, when the releases were merged (the user's call); the id is unchanged.
 - layouts aware of the hinge or posture, and content spanning the fold;
 - multiple windows or scenes on iPad, and a second live session;
 - restoration after the process ends, beyond 9a's route;
 - distribution to a device (8c);
-- Android foldables (after v0.3.0, a recorded default).
+- Android foldables (after v0.2.5, a recorded default).

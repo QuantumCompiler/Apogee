@@ -96,7 +96,7 @@ With no server paired, the app is exactly today's app.
   - The SPEC amendment is approved and written: the app reaches the CLI over stdio, or over an authenticated connection to the person's own `apogee serve`.
   - iPhone and iPad are server clients only. The Mac stays standalone.
   - Where the work happens (call C): server tools by default, and a connected desktop offers its own files and shell. When the Mac points at a server and is asked to change a project on the Mac, the Mac's files are the ones touched (7b builds that).
-  - Successive versions, with v0.3.0 the target where macOS, iPadOS and iOS (the iPhone and the foldable iPhone) fully work. Windows and Android follow v0.3.0 (a recorded default).
+  - Successive versions, with v0.2.5 the target where macOS, iPadOS and iOS (the iPhone and the foldable iPhone) fully work. Windows and Android follow v0.2.5 (a recorded default).
 - 2026-11-07: In v0.2.4 (track 7): it needs the server to speak the machine mode (59b) and the reads (59d), both in v0.2.3. It comes before 8a, which needs this seam to have anything to drive on iPhone and iPad.
 - 2026-11-07: The seam is `ChildSpawner`, not a new protocol above it. Every place already reaches the CLI through `spawn`/`capture` (W8.2), so a remote `RunningChild` keeps Business and Presentation unchanged in shape. Their one new fact is that a run can end `disconnected`.
 
@@ -141,5 +141,5 @@ No **[user]** call blocks this item.
 - tasks that outlive the connection (CLI 59e, 7c);
 - iPhone and iPad (8a onward);
 - finding servers on the network automatically (59a leaves Bonjour out too);
-- Windows and Android, which follow v0.3.0;
+- Windows and Android, which follow v0.2.5;
 - any account, billing or metering (the user's call: paid features are a someday).

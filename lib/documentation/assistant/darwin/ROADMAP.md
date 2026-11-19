@@ -106,7 +106,9 @@ Opened 2026-11-14 (the user's call): `lib/design/assets/Logo.png` becomes the ma
 
 - [x] **The Apogee logo is the app's icon and the official logo** *(11a, shipped 2026-11-18 — [Milestone H](MILESTONES.md#milestone-h--the-apps-logo))* — every macOS icon size generated from the one master by a script into the app's asset catalog, the app target naming it, a check that fails on a stale or incomplete set, and the logo shown in the README and on the design canvas.
 
-### v0.2.4 — Track 7, the Mac as a client
+### v0.2.4 — Track 7, the Mac as a client, and track 10, the server window
+
+Merged 2026-11-18 (the user's call): v0.2.4 took in v0.2.6 and v0.2.7 (track 10), and v0.2.5 took in v0.3.0 (track 9). The items kept their ids; nothing had shipped under those versions.
 
 Opened 2026-11-07 from the Apple-platforms brainstorm (the CLI's track 59 builds the server; the GUI SPEC and the machine-mode-client rule amended the same day). The Mac stays complete with no server.
 
@@ -116,30 +118,27 @@ Opened 2026-11-07 from the Apple-platforms brainstorm (the CLI's track 59 builds
 - [ ] **ApogeeKit: the client core as a Swift package** *(7d — [backlog](../../backlog/darwin/v0.2.4/apogeekit-swift-package.md), gated on 7a)* — the Mac app's lower layers (process, protocol, discovery, jobs, reads, media, session) and 7a's connection become a SwiftPM package other apps embed by git URL, the Mac app depends on it instead of its own copies, and a sample command-line client proves it builds outside the app; DataPreferences and Presentation stay in the app, and nothing needs a server.
 - [ ] **Maintaining ApogeeKit** *(7e — [backlog](../../backlog/darwin/v0.2.4/maintaining-apogeekit.md), gated on 7d)* — the package's law written down: its ADR, the layering and public-interface checks, and the contributor rules (the user's call, 2026-11-14).
 
-### v0.2.5 — Track 8, iPad
+#### Track 10, the server window
+
+Opened 2026-11-14 from the admin-mode and people spike (the CLI's tracks 62 and 63; the GUI SPEC's Core surfaces 3 was amended the same day). On the Mac that serves, a separate Apogee Server window drives the local CLI over pipes, never the port. The People place (10c) comes last, on the CLI's track 63.
+
+- [ ] **Design the server window** *(10a — [backlog](../../backlog/darwin/macos/v0.2.4/design-the-server-window.md), gated on design 1e)* — the window drawn in `lib/design/spec` and on the canvas first, per the design's law: the menu way in, shown only on the Mac that serves, and its places (Server, Devices with pairing and the QR, Apps with each scope beside what was asked, Activity, Audit, and People for 10c), each mapped to its CLI words, with every missing word added to BuildContract.
+- [ ] **The server window** *(10b — [backlog](../../backlog/darwin/macos/v0.2.4/server-window.md), gated on 10a, CLI 62a, CLI 62c, CLI 62h)* — **split first**. Server (status, how clients connect, the background service), Devices and Apps (pairing with a QR, rename, revoke, scopes), and Activity and Audit when the binary has them; `serve` gets verb-level parity, and devices and apps become this window's screens.
+- [ ] **People in the server window** *(10c — [backlog](../../backlog/darwin/macos/v0.2.4/people-screens.md), gated on 10b, CLI 63a, CLI 63c)* — the owner and members with their access, devices, apps, usage against their limit and the household key, added, renamed and removed at the server Mac over pipes, never showing a member's chat contents.
+
+### v0.2.5 — Track 8, iPad, and track 9, iPhone, the foldable and the three platforms whole
 
 - [ ] **The app's code builds for iPhone and iPad** *(8a — [backlog](../../backlog/darwin/v0.2.5/app-builds-for-ios-and-ipados.md), gated on 7a)* — every framework, test bundle and the app target build for macOS, iOS and iPadOS from one codebase. The child-process transport and every AppKit or Mac-only SwiftUI use move into +macOS platform files, with the layering check held per platform (a new ADR 0005) and the hermetic suite run on iPhone and iPad simulators. The Mac app stays byte-for-byte the same.
 - [ ] **The iPad app** *(8b — [backlog](../../backlog/darwin/ipados/v0.2.5/ipad-app.md), gated on 8a)* — the app's places in iPad layouts at every window size. The sidebar and side panes sit beside the place where they fit, and otherwise the sidebar is drawn over the place and the panes open as sheets, never disabled. It carries the Mac's keys and the pointer, and Settings as a sheet. The iPad is remote only: first launch pairs with the person's own server, with no server it says how to set one up, and it is held to the same parity table, while the Mac stays unchanged and standalone.
 - [ ] **Getting the app onto iPhone and iPad** *(8c — [backlog](../../backlog/darwin/v0.2.5/iphone-and-ipad-distribution.md), gated on 8a)* — darwin.yml builds the iOS app for a device and tests it on iPhone and iPad simulators with no secret, and one build.sh command installs it on the person's devices by the route the user chooses (TestFlight under the Apple Developer Program, or personal sideloading). The Mac app stays ad-hoc signed and its release is unchanged.
 
-### v0.2.6 — Track 10, the server window
-
-Opened 2026-11-14 from the admin-mode and people spike (the CLI's tracks 62 and 63; the GUI SPEC's Core surfaces 3 was amended the same day). On the Mac that serves, a separate Apogee Server window drives the local CLI over pipes, never the port.
-
-- [ ] **Design the server window** *(10a — [backlog](../../backlog/darwin/macos/v0.2.6/design-the-server-window.md), gated on design 1e)* — the window drawn in `lib/design/spec` and on the canvas first, per the design's law: the menu way in, shown only on the Mac that serves, and its places (Server, Devices with pairing and the QR, Apps with each scope beside what was asked, Activity, Audit, and People for 10c), each mapped to its CLI words, with every missing word added to BuildContract.
-- [ ] **The server window** *(10b — [backlog](../../backlog/darwin/macos/v0.2.6/server-window.md), gated on 10a, CLI 62a, CLI 62c, CLI 62h)* — **split first**. Server (status, how clients connect, the background service), Devices and Apps (pairing with a QR, rename, revoke, scopes), and Activity and Audit when the binary has them; `serve` gets verb-level parity, and devices and apps become this window's screens.
-
-### v0.2.7 — Track 10, people in the server window
-
-- [ ] **People in the server window** *(10c — [backlog](../../backlog/darwin/macos/v0.2.7/people-screens.md), gated on 10b, CLI 63a, CLI 63c)* — the owner and members with their access, devices, apps, usage against their limit and the household key, added, renamed and removed at the server Mac over pipes, never showing a member's chat contents.
-
-### v0.3.0 — Track 9, iPhone, the foldable and the three platforms whole
+#### Track 9, iPhone, the foldable and the three platforms whole
 
 The plan's target: macOS, iPadOS and iOS fully working (the user's call, 2026-11-07).
 
-- [ ] **The iPhone app** *(9a — [backlog](../../backlog/darwin/ios/v0.3.0/iphone-app.md), gated on 8b)* — the app in compact layouts on the iPhone: a tab bar and stacks that open on the conversation, every place reachable by touch, and side panes shown as sheets instead of dropped. It is a client of the person's own server only, pairs on first launch, and continues a conversation started on the Mac, then hands it back.
-- [ ] **The foldable iPhone** *(9b — [backlog](../../backlog/darwin/ios/v0.3.0/foldable-iphone.md), gated on 9a)* — the app moves between 9a's compact layout (folded) and 8b's regular, iPad-like layout (unfolded) in either direction, on one route rendered by two shells. The open session, the draft, a half-answered question card, a running job's view, playback and the transcript's place all survive, a streaming turn keeps streaming, and a fold opens no connection and sends nothing. This is proved by size-class transition tests on the view-models and paired previews, and an iPad window resized across the boundary takes the same path.
-- [ ] **v0.3.0: macOS, iPadOS and iOS whole** *(9c — [backlog](../../backlog/darwin/v0.3.0/three-apple-platforms-whole.md), gated on 9b, 8c)* — the release's proof. The parity table classifies every command for the Mac alone, the Mac against a server, the iPad and the iPhone. One hermetic pass runs against a scripted server on every platform and both of the foldable's traits, and a tripwire proves the Mac stays complete with no server. The release ships the Mac app as today, the iOS/iPadOS build by 8c's path, and docs and release notes that say how to pair.
+- [ ] **The iPhone app** *(9a — [backlog](../../backlog/darwin/ios/v0.2.5/iphone-app.md), gated on 8b)* — the app in compact layouts on the iPhone: a tab bar and stacks that open on the conversation, every place reachable by touch, and side panes shown as sheets instead of dropped. It is a client of the person's own server only, pairs on first launch, and continues a conversation started on the Mac, then hands it back.
+- [ ] **The foldable iPhone** *(9b — [backlog](../../backlog/darwin/ios/v0.2.5/foldable-iphone.md), gated on 9a)* — the app moves between 9a's compact layout (folded) and 8b's regular, iPad-like layout (unfolded) in either direction, on one route rendered by two shells. The open session, the draft, a half-answered question card, a running job's view, playback and the transcript's place all survive, a streaming turn keeps streaming, and a fold opens no connection and sends nothing. This is proved by size-class transition tests on the view-models and paired previews, and an iPad window resized across the boundary takes the same path.
+- [ ] **v0.2.5: macOS, iPadOS and iOS whole** *(9c — [backlog](../../backlog/darwin/v0.2.5/three-apple-platforms-whole.md), gated on 9b, 8c)* — the release's proof. The parity table classifies every command for the Mac alone, the Mac against a server, the iPad and the iPhone. One hermetic pass runs against a scripted server on every platform and both of the foldable's traits, and a tripwire proves the Mac stays complete with no server. The release ships the Mac app as today, the iOS/iPadOS build by 8c's path, and docs and release notes that say how to pair.
 
 ## Fast follow
 

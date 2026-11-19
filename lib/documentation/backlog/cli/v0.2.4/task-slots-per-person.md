@@ -64,12 +64,12 @@ This item replaces the install-wide lock with **task slots**. The owner always h
   - [personal-data-has-an-owner.md](personal-data-has-an-owner.md) (63b): who may list, read, attach to, halt, cancel and resume a task, and where a member's ledgers live.
   - [allowances-keys-and-usage.md](allowances-keys-and-usage.md) (63c): what each person may use, and usage per person (a running task's tokens count to its `started_by`).
   - [consent-goes-to-its-person.md](consent-goes-to-its-person.md) (63d): the authority words gain the person. `answered_by` is 63d's.
-  - [../v0.2.6/serve-status-and-runtime-record.md](../v0.2.6/serve-status-and-runtime-record.md) (62a): the record the owner's slots-and-queue view joins.
-  - [../v0.2.6/serve-reload-and-served-vs-disk.md](../v0.2.6/serve-reload-and-served-vs-disk.md) (62b): limits applied live.
-  - [../v0.2.6/audit-log.md](../v0.2.6/audit-log.md) (62f): the owner stopping a member's task is an audited act.
-  - [../v0.2.6/serve-as-a-background-service.md](../v0.2.6/serve-as-a-background-service.md) (62d): with the server as a service, a queued task does not wait for someone to start `serve`.
+  - [serve-status-and-runtime-record.md](serve-status-and-runtime-record.md) (62a): the record the owner's slots-and-queue view joins.
+  - [serve-reload-and-served-vs-disk.md](serve-reload-and-served-vs-disk.md) (62b): limits applied live.
+  - [audit-log.md](audit-log.md) (62f): the owner stopping a member's task is an audited act.
+  - [serve-as-a-background-service.md](serve-as-a-background-service.md) (62d): with the server as a service, a queued task does not wait for someone to start `serve`.
   - [../v0.2.3/tasks-outlive-the-connection.md](../v0.2.3/tasks-outlive-the-connection.md) (59e): the served task and its event log, whose "one task at a time" this revises.
-  - GUI [7c](../../darwin/v0.2.4/every-place-against-a-server.md) (the app's Tasks screen against a server shows `queued` and the place in line) and darwin [10c](../../darwin/macos/v0.2.7/people-screens.md) (the owner sets the limits in the server window).
+  - GUI [7c](../../darwin/v0.2.4/every-place-against-a-server.md) (the app's Tasks screen against a server shows `queued` and the place in line) and darwin [10c](../../darwin/macos/v0.2.4/people-screens.md) (the owner sets the limits in the server window).
 - Prior art: CI runners and print queues hold a waiting job and say its place rather than refuse it. Plex and Jellyfin cap concurrent streams per user and in total, the same two numbers as `per_member` and `member_slots`. Neither reserves capacity for the owner. This item does, because the owner's machine is also their own workstation.
 
 **Decisions made** (dated):
@@ -84,12 +84,12 @@ This item replaces the install-wide lock with **task slots**. The owner always h
   - Administering is **local by default**: the server is administered at its own Mac through the local CLI over pipes, plus paired devices the owner marks as allowed to administer remotely (62g, revising 59d's one admin token for any network caller). The task limits are set there.
   - The admin mode is a separate **Apogee Server window** in the macOS app, offered only on the Mac that serves, driving the local CLI over pipes. The owner sets the task limits in it (darwin 10c). The window installs the server as a **background service** (launchd) and starts, stops and restarts it (62d).
   - Remote use is an add-on. The CLI alone and the Mac app over pipes stay complete and need no server.
-  - Placement, both before v0.3.0: the server console in v0.2.6 (CLI track 62, darwin 10a-10b), people and access in v0.2.7 (CLI track 63, darwin 10c). Nothing already queued is renumbered.
+  - Placement, both before v0.2.5 and both in v0.2.4: the server console (CLI track 62, darwin 10a-10b), people and access (CLI track 63, darwin 10c). Nothing already queued is renumbered.
   - The SPEC amendments are written: CLI SPEC → Core surfaces 4, *Revised again 2026-11-14*; GUI SPEC → Core surfaces 3, the server window.
 - 2026-11-14: **The owner's tasks never starve, by a reserved slot, not by priority.** The owner always has `owner_slots` slots that no member can take. Members share `member_slots`. A member's long task can therefore never refuse or delay the owner's terminal `task run`, which is standalone use and must not depend on the server's members. Priority alone would still leave the owner waiting behind a member's task that is already running.
 - 2026-11-14: **A queue only where `serve` runs.** A queued task must be started later by a living process, and the CLI is never a daemon. At a terminal the owner's busy slot refuses as today. A member never sits at the server's terminal: the local terminal and pipe are the owner (63a).
 - 2026-11-14: **`started_by` is the person.** It is written as the person's id, absent read as the owner, with the credential that carried the start in `started_via`. This repurposes 59f's key, which names the credential. Under ADR 0006 it is a dated revision in [machine-mode.md](../../../reference/cli/machine-mode.md) and the release notes, with its migration stated: a ledger holding `started_by` and no `started_via` is a 59f-era ledger, and its value is a credential name, resolved through the registry to that row's person (a row from before 63a is the owner's). 59f's "an app lists only its own" keys on `started_via` from then on.
-- 2026-11-14: Placed in v0.2.7, track 63, after 63d, gated on 63a only: it needs a person on every credential and nothing else from the track. 63b's filters and 63c's usage read the `started_by` it writes, but neither blocks it.
+- 2026-11-14: Placed in v0.2.4, track 63, after 63d, gated on 63a only: it needs a person on every credential and nothing else from the track. 63b's filters and 63c's usage read the `started_by` it writes, but neither blocks it.
 
 **Open calls:**
 - [default: the limits and their defaults. `tasks.owner_slots: 1`, `tasks.member_slots: 1`, `tasks.per_member: 1`, `tasks.queue_per_member: 10`. With no members, only `owner_slots` applies, and at 1 it is today's install. A start past `queue_per_member` is refused naming the key. `member_slots: 0` refuses members' tasks with words, rather than queuing them forever. All are set through the one editor and applied by 62b's reload.]
@@ -128,7 +128,7 @@ No **[user]** call blocks this item. The user's one call for it, "a queue, not a
 - [ ] The full suite is green on all five targets.
 - [ ] Optional live pass, said when skipped: `apogee-dev serve` on the dev channel with two people's paired test devices, each starting a mock task with `member_slots: 1`, the second shown waiting and then running. Never the release `apogee`.
 
-**Scope note.** Earmarked for v0.2.7 (track 63); gated on 63a. Out of scope:
+**Scope note.** Earmarked for v0.2.4 (track 63); gated on 63a. Out of scope: Moved here from v0.2.7 on 2026-11-18, when the releases were merged (the user's call); the id is unchanged.
 - Who may see and control a task, and where members' ledgers live (63b).
 - Usage and limits on what a task may spend (63c).
 - Answers to questions inside a task (63d).

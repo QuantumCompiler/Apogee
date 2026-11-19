@@ -84,7 +84,7 @@ The HTTP inference plane gets all of this the day it ships, with no pairing and 
   - iPhone and iPad are clients of the person's server only. The Mac and the CLI stay standalone.
   - Where the work happens: the server's tools by default, and a connected desktop offers its own files and shell (60b). Those run on the device, so they hold no lane here.
   - Paid features are a someday. The server admits the person and their devices only, so fairness here is between one person's sessions and tasks: no tenants, quotas, accounting or metering.
-  - Placement: successive versions, with v0.3.0 the target where macOS, iPadOS and iOS fully work.
+  - Placement: successive versions, with v0.2.5 the target where macOS, iPadOS and iOS fully work.
 
   Track 59, v0.2.3, ungated.
 - 2026-11-07: It sits in v0.2.3, before the first client (GUI 7a, v0.2.4), because a server that answers one device at a time does not feel like Claude on every device. It is ungated: the lanes, the memory check and `queued` need neither pairing nor the network session, and the HTTP plane gets them the day they ship.

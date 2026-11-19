@@ -1,6 +1,6 @@
 # Design the server window
 
-**What / why.** The user's call, 2026-11-14, from the admin-mode and people spike: the Mac that runs the person's Apogee server gets an **admin mode**, a separate **"Apogee Server"** window in the macOS app, offered only on that Mac. It administers that Mac's server by driving the **local** CLI over pipes ([GUI SPEC](../../../../assistant/gui/SPEC.md) → Core surfaces, item 3, added the same day). Its places are the server itself (status; installing it as a background service and starting, stopping and restarting it; how clients connect, 62c's settings), devices, apps, activity, the audit trail and people. The design's own law says nothing is built before it is drawn: "A new screen or state worth its own board" needs a start preset, a `Screen<Name>.dc.html`, a `canvas.json` entry and a README row ([design CLAUDE.md](../../../../../design/spec/CLAUDE.md):27), and "Every part maps to the CLI … If none exists, draw it with its fallback and add the gap to the contract board" (`:37`). This item draws the whole window in `lib/design/spec` and on the Apogee Desktop canvas, every part against the CLI words it maps to and every missing word added to the BuildContract board's gap list, so [10b](server-window.md) builds the window and [10c](../v0.2.7/people-screens.md) builds People from boards that already exist.
+**What / why.** The user's call, 2026-11-14, from the admin-mode and people spike: the Mac that runs the person's Apogee server gets an **admin mode**, a separate **"Apogee Server"** window in the macOS app, offered only on that Mac. It administers that Mac's server by driving the **local** CLI over pipes ([GUI SPEC](../../../../assistant/gui/SPEC.md) → Core surfaces, item 3, added the same day). Its places are the server itself (status; installing it as a background service and starting, stopping and restarting it; how clients connect, 62c's settings), devices, apps, activity, the audit trail and people. The design's own law says nothing is built before it is drawn: "A new screen or state worth its own board" needs a start preset, a `Screen<Name>.dc.html`, a `canvas.json` entry and a README row ([design CLAUDE.md](../../../../../design/spec/CLAUDE.md):27), and "Every part maps to the CLI … If none exists, draw it with its fallback and add the gap to the contract board" (`:37`). This item draws the whole window in `lib/design/spec` and on the Apogee Desktop canvas, every part against the CLI words it maps to and every missing word added to the BuildContract board's gap list, so [10b](server-window.md) builds the window and [10c](people-screens.md) builds People from boards that already exist.
 
 **A9 — no admin screen is designed.** Re-measured 2026-11-14 at `4acf4a2b`:
 
@@ -19,7 +19,7 @@
 
    The window is therefore drawn mostly against CLI words that tracks 59, 62 and 63 will add. Each is drawn with its fallback, and each gap is added to the contract board, as the design's law asks.
 
-This item delivers: a **way into the window** (the Apogee menu's item, present only on a Mac that serves); the window's own chrome, with a sidebar of six places and its own keys; **Server** (running or stopped, the background service, how clients connect, and a change applied now or waiting for a restart); **Devices** (paired, pending with the code and QR, which may administer remotely, rename, revoke); **Apps** (each app's scope, what it asked for beside what was approved, pairing one, revoke); **Activity** (who is connected and what is running, with usage per credential); **Audit** (who changed, approved or used what, and when); and **People** (the owner and members, presets, allowances, keys and limits), drawn now and built in v0.2.7. Each part gets its contract-map row, each missing CLI word its gap and fallback, the window gets its layout and keys on BuildLayout, and the service gets its place on BuildProcesses.
+This item delivers: a **way into the window** (the Apogee menu's item, present only on a Mac that serves); the window's own chrome, with a sidebar of six places and its own keys; **Server** (running or stopped, the background service, how clients connect, and a change applied now or waiting for a restart); **Devices** (paired, pending with the code and QR, which may administer remotely, rename, revoke); **Apps** (each app's scope, what it asked for beside what was approved, pairing one, revoke); **Activity** (who is connected and what is running, with usage per credential); **Audit** (who changed, approved or used what, and when); and **People** (the owner and members, presets, allowances, keys and limits), drawn now and built by 10c later in the same release. Each part gets its contract-map row, each missing CLI word its gap and fallback, the window gets its layout and keys on BuildLayout, and the service gets its place on BuildProcesses.
 
 **Core constraint(s).**
 - **Nothing makes standalone use need a server or an account (the anti-goal).** The user's standing law: remote use is an add-on, and the CLI alone and the Mac app over pipes stay complete and need no server ([GUI SPEC](../../../../assistant/gui/SPEC.md) → Non-goals, No server requirement). On a Mac that does not serve, the harness window, its places, its keys and every existing board stay exactly as they are. There is no menu item, no sidebar entry, no sign-in and no "people" anywhere in the harness window.
@@ -70,22 +70,22 @@ This item delivers: a **way into the window** (the Apogee menu's item, present o
 **Reference.**
 - The siblings in this track:
   - [10b](server-window.md), the window built from these boards (gated on this item, CLI 62a, 62c and 62h).
-  - [10c](../v0.2.7/people-screens.md), People built from this item's People and member boards.
+  - [10c](people-screens.md), People built from this item's People and member boards.
 - The CLI words the window maps to:
-  - [62a](../../../cli/v0.2.6/serve-status-and-runtime-record.md), `serve status`;
-  - [62b](../../../cli/v0.2.6/serve-reload-and-served-vs-disk.md), reload, and served against disk;
-  - [62c](../../../cli/v0.2.6/serve-section-in-config.md), the config's `serve` section;
-  - [62d](../../../cli/v0.2.6/serve-as-a-background-service.md), the background service;
-  - [62e](../../../cli/v0.2.6/connections-and-activity.md), connections and activity;
-  - [62f](../../../cli/v0.2.6/audit-log.md), the audit log;
-  - [62g](../../../cli/v0.2.6/administering-local-and-marked-devices.md), administering locally plus marked devices;
-  - [62h](../../../cli/v0.2.6/local-admin-reads.md), what a local admin screen reads (pending pairings, requested scopes, rename, the QR payload, JSON policy reads);
+  - [62a](../../../cli/v0.2.4/serve-status-and-runtime-record.md), `serve status`;
+  - [62b](../../../cli/v0.2.4/serve-reload-and-served-vs-disk.md), reload, and served against disk;
+  - [62c](../../../cli/v0.2.4/serve-section-in-config.md), the config's `serve` section;
+  - [62d](../../../cli/v0.2.4/serve-as-a-background-service.md), the background service;
+  - [62e](../../../cli/v0.2.4/connections-and-activity.md), connections and activity;
+  - [62f](../../../cli/v0.2.4/audit-log.md), the audit log;
+  - [62g](../../../cli/v0.2.4/administering-local-and-marked-devices.md), administering locally plus marked devices;
+  - [62h](../../../cli/v0.2.4/local-admin-reads.md), what a local admin screen reads (pending pairings, requested scopes, rename, the QR payload, JSON policy reads);
   - [59a](../../../cli/v0.2.3/paired-devices.md), devices and pairing;
   - [59f](../../../cli/v0.2.3/paired-apps-with-scopes.md), apps and `AppScope` (`backends`, `collections`, `tools`, `commands`, `tasks`, with `requested` beside it, `:39`);
   - [59d](../../../cli/v0.2.3/reads-and-commands-over-the-network.md), what a network caller may run;
-  - [63a](../../../cli/v0.2.7/people-on-one-server.md), people;
-  - [63c](../../../cli/v0.2.7/allowances-keys-and-usage.md), allowances, keys and usage;
-  - [63e](../../../cli/v0.2.7/task-slots-per-person.md), each person's task queue, shown on Activity.
+  - [63a](../../../cli/v0.2.4/people-on-one-server.md), people;
+  - [63c](../../../cli/v0.2.4/allowances-keys-and-usage.md), allowances, keys and usage;
+  - [63e](../../../cli/v0.2.4/task-slots-per-person.md), each person's task queue, shown on Activity.
 - The client side: [7a](../../v0.2.4/app-connection-local-or-server.md), the Connections pane and pair sheet of a Mac that connects to a server. Its "New Window on <server>" (`:60`) is the precedent for a second window. Its default carving `devices` out of the app (`:111`) is amended by 10b.
 - In-house precedents:
   - Settings' panes, each over the verbs a person types with each change read back (`SettingsViewModel.Pane`, 6 panes; the design's six Settings boards);
@@ -106,7 +106,7 @@ This item delivers: a **way into the window** (the Apogee menu's item, present o
   - **An admin mode** is a separate "Apogee Server" window in the macOS app, offered only on the Mac that serves, driving the local CLI over pipes.
   - **Administering is local by default.** The owner may mark chosen paired devices as allowed to administer remotely (62g). This revises 59d's default that the admin plane keeps one token for any network caller.
   - **The window installs the server as a background service** (launchd) and starts, stops and restarts it.
-  - **Placement:** the server console in v0.2.6 (CLI track 62; darwin/macos track 10's 10a and 10b), people and access in v0.2.7 (CLI track 63; darwin/macos 10c), with nothing already queued renumbered.
+  - **Placement:** the server console (CLI track 62; darwin/macos track 10's 10a and 10b) and people and access (CLI track 63; darwin/macos 10c), both in v0.2.4, with nothing already queued renumbered.
   - **People:** design for both a household and a small team. The owner sees members' metadata (devices, apps, activity, which model, when), never chat contents, and says honestly that whoever controls the server Mac can still read its disk. Members use the server's local models only, unless the owner grants a household cloud key, with a limit.
   - **Defaults the user took:**
     - the words "people" and "access" (Owner, Member), never "roles", which means model roles in Apogee;
@@ -122,7 +122,7 @@ This item delivers: a **way into the window** (the Apogee menu's item, present o
     - presets (Full, Family, Limited) in place of groups;
     - a guest is a member on Limited with nothing kept.
   - **Already written:** the SPEC amendments (CLI SPEC → Core surfaces, item 4, "Revised again 2026-11-14"; GUI SPEC → Core surfaces, item 3).
-- 2026-11-14: First in darwin/macos track 10, ungated. The design's law draws every part with its fallback and adds each missing CLI word to the contract board, so it waits on no CLI item. [10b](server-window.md) is gated on it. It sits in v0.2.6 with CLI track 62 because the boards are the specification 10b builds from and the gap list CLI 62a–62h close. People is drawn now, a version early, so the window's sidebar has its place from the first build and 10c only builds.
+- 2026-11-14: First in darwin/macos track 10, ungated. The design's law draws every part with its fallback and adds each missing CLI word to the contract board, so it waits on no CLI item. [10b](server-window.md) is gated on it. It sits in v0.2.4 with CLI track 62 because the boards are the specification 10b builds from and the gap list CLI 62a–62h close. People is drawn now, ahead of 10c in the same release, so the window's sidebar has its place from the first build and 10c only builds.
 - 2026-11-14: macOS only (`backlog/darwin/macos/`). The window runs only on the Mac that serves. iPhone and iPad never show it (GUI SPEC → Core surfaces, item 3).
 - 2026-11-14: The contract board's new gaps, each with the item that closes it and its fallback (numbers assigned from the next free one when drawn):
 
@@ -141,14 +141,14 @@ This item delivers: a **way into the window** (the Apogee menu's item, present o
 
 **Open calls:**
 - (consumed decision) Every CLI word and its JSON shape belongs to its CLI item:
-  - [62a](../../../cli/v0.2.6/serve-status-and-runtime-record.md): what "this Mac serves" means, and the status fields;
-  - [62b](../../../cli/v0.2.6/serve-reload-and-served-vs-disk.md): which changes reload and which need a restart;
-  - [62c](../../../cli/v0.2.6/serve-section-in-config.md): the `serve.*` keys;
-  - [62d](../../../cli/v0.2.6/serve-as-a-background-service.md): the service verbs and the LaunchAgent;
-  - [62e](../../../cli/v0.2.6/connections-and-activity.md) and [62f](../../../cli/v0.2.6/audit-log.md): the activity and audit records;
-  - [62g](../../../cli/v0.2.6/administering-local-and-marked-devices.md): the mark's verb and what a marked device may do;
-  - [62h](../../../cli/v0.2.6/local-admin-reads.md): the pairing payload and the pending rows;
-  - [63a](../../../cli/v0.2.7/people-on-one-server.md) and [63c](../../../cli/v0.2.7/allowances-keys-and-usage.md): people, presets, allowances, keys and limits.
+  - [62a](../../../cli/v0.2.4/serve-status-and-runtime-record.md): what "this Mac serves" means, and the status fields;
+  - [62b](../../../cli/v0.2.4/serve-reload-and-served-vs-disk.md): which changes reload and which need a restart;
+  - [62c](../../../cli/v0.2.4/serve-section-in-config.md): the `serve.*` keys;
+  - [62d](../../../cli/v0.2.4/serve-as-a-background-service.md): the service verbs and the LaunchAgent;
+  - [62e](../../../cli/v0.2.4/connections-and-activity.md) and [62f](../../../cli/v0.2.4/audit-log.md): the activity and audit records;
+  - [62g](../../../cli/v0.2.4/administering-local-and-marked-devices.md): the mark's verb and what a marked device may do;
+  - [62h](../../../cli/v0.2.4/local-admin-reads.md): the pairing payload and the pending rows;
+  - [63a](../../../cli/v0.2.4/people-on-one-server.md) and [63c](../../../cli/v0.2.4/allowances-keys-and-usage.md): people, presets, allowances, keys and limits.
 
   The boards draw the words those documents record. Where a document is not yet written when this item is worked, the board draws the spike's capability wording and the gap row says it is provisional.
 - (consumed decision) The window's build is [10b](server-window.md)'s:
@@ -156,7 +156,7 @@ This item delivers: a **way into the window** (the Apogee menu's item, present o
   - how `ParityTable` classifies `devices`, `apps` and `serve`'s new verbs while bare `serve` stays carved out;
   - amending 7a's carve-out of `devices` (`:111`).
 
-  People's build is [10c](../v0.2.7/people-screens.md)'s.
+  People's build is [10c](people-screens.md)'s.
 - (consumed decision) The client side's Connections pane, pair sheet and indicator are [7a](../../v0.2.4/app-connection-local-or-server.md)'s to draw.
 - [default: the window is drawn inside `main.html`, as a second window chrome shown by the `server…` start presets, so every board mounts `App` as the others do and the prototype stays one file. A separate prototype file would split the canned data and the tick.]
 - [default: the menu item is "Apogee Server…" in the Apogee menu, on ⌥⌘S (free: the shell's keys are ⌘1–⌘0, ⇧⌘R, ⇧⌘L, ⌥⌘M, ⇧⌘K, ⌃⌘S and ⌘,; `KeyMap.swift:84-91`, `:99-123`). It is drawn present when the local CLI says this Mac serves (62a's meaning, consumed above), and absent otherwise. Because the window is offered only on the Mac that serves (the user's call), the harness window offers no "make this Mac a server" path: the first opt-in to serving (`apogee serve` or 62c's `config set serve.*` at a prompt) stays the CLI's. Once this Mac serves, installing the background service is the window's, by the user's call (Server, below). The menu board draws both the present and absent states.]
@@ -168,14 +168,14 @@ This item delivers: a **way into the window** (the Apogee menu's item, present o
   - How clients connect as a form over 62c's keys. Each change is read back and labelled "applied now" or "needs a restart" in 62b's words. A pending restart shows what is served beside what is on disk.
 
   Stop, Restart and removing the service are asked first, and each says which connected devices and apps it will drop (62e's count).]
-- [default: Devices lists paired devices (name, kind, paired, last seen, whose in v0.2.7) and the pending pairings with their expiry. Pair opens a sheet with the typed code, the QR drawn by the app from 62h's payload, the addresses, port and pin, and the expiry counted down from the CLI's own expiry (never invented). The sheet turns to "Paired as <name>" when the read-back shows the pairing redeemed. Rename and Revoke are offered, Revoke asked first with the apps on that device named (59f's cascade). "May administer from this device" is a mark, off by default, asked first, saying what it allows (62g).]
-- [default: Apps lists each app by name and the device it runs on. Its scope shows in the plain words `apps pair` prints (59f, `:137`), with what the app asked for beside what was approved, and Grant what it asked for. The scope editor has one row per `AppScope` part (backends, collections, tool classes, commands, task kinds), each an allow or deny that becomes `apps scope`'s flags. In v0.2.7 the editor shows the person's allowance as the ceiling, so it cannot widen past it.]
-- [default: Activity shows who is connected now (device or app, and person in v0.2.7), what each is running (sessions, jobs, tasks, with a person's queued tasks shown as queued, 63e), and usage per credential over a chosen period (requests and tokens per backend, billed backends marked). It shows metadata only, with no prompts, answers or file names. The honesty line reads: "Apogee doesn't show anyone's conversations here. Anyone who controls this Mac can still read its disk."]
+- [default: Devices lists paired devices (name, kind, paired, last seen, and whose once 63a answers) and the pending pairings with their expiry. Pair opens a sheet with the typed code, the QR drawn by the app from 62h's payload, the addresses, port and pin, and the expiry counted down from the CLI's own expiry (never invented). The sheet turns to "Paired as <name>" when the read-back shows the pairing redeemed. Rename and Revoke are offered, Revoke asked first with the apps on that device named (59f's cascade). "May administer from this device" is a mark, off by default, asked first, saying what it allows (62g).]
+- [default: Apps lists each app by name and the device it runs on. Its scope shows in the plain words `apps pair` prints (59f, `:137`), with what the app asked for beside what was approved, and Grant what it asked for. The scope editor has one row per `AppScope` part (backends, collections, tool classes, commands, task kinds), each an allow or deny that becomes `apps scope`'s flags. Once 63c answers, the editor shows the person's allowance as the ceiling, so it cannot widen past it.]
+- [default: Activity shows who is connected now (device or app, and person once 63a answers), what each is running (sessions, jobs, tasks, with a person's queued tasks shown as queued, 63e), and usage per credential over a chosen period (requests and tokens per backend, billed backends marked). It shows metadata only, with no prompts, answers or file names. The honesty line reads: "Apogee doesn't show anyone's conversations here. Anyone who controls this Mac can still read its disk."]
 - [default: Audit is a list, newest first, of who (owner, member, device, app), did what (changed, approved, revoked, used), to what, and when. It is filtered by who and by kind, and says it keeps 90 days and never what was asked. It is read-only, and the window offers no clearing.]
 - [default: People shows the owner first (this Mac's account, never removable, every right), then the members, each with a preset (Full, Family, Limited), their devices and apps, and their usage against their limit. A member's page shows their allowance in the `AppScope` shape, their personal data as counts only (chats, notes, tasks; never their contents), their shared collections handed out, and the household cloud key: granted or not, with its limit, marked billed. Adding a member starts with pairing their first device at this Mac. A guest is drawn as a member on Limited with "nothing kept". Removing a member is asked first and names their devices and apps.]
-- [default: the gap rows' "when" chips name the release that closes them (v0.2.6 or v0.2.7) rather than "Before v1". Their text names the CLI item, so a gap is closed by name when its item ships.]
+- [default: the gap rows' "when" chips name the release that closes them (v0.2.4) rather than "Before v1". Their text names the CLI item, so a gap is closed by name when its item ships.]
 - [default: no new color token. Status uses `status.accent`, `status.warning` and `status.error`, and billed uses `model.api`. A missing color goes through the theme table, `ColorTokens` and `tokens.json` together, as the design's law asks.]
-- [default: an older apogee (`server:older`) draws each place's fallback line naming its release, from the CLI's own refusal (exit 109, "The following arguments were not expected"), so the window is honest against 0.2.0 through 0.2.5.]
+- [default: an older apogee (`server:older`) draws each place's fallback line naming its release, from the CLI's own refusal (exit 109, "The following arguments were not expected"), so the window is honest against 0.2.0 through 0.2.3.]
 
 **Guardrail(s).**
 - The design's own check ([design CLAUDE.md](../../../../../design/spec/CLAUDE.md) → Checking a change): the node script runs every start preset, the new `server…` ones included, for 30 ticks and reports "N start screens, no problems".
@@ -201,10 +201,10 @@ This item delivers: a **way into the window** (the Apogee menu's item, present o
 - [ ] Every pre-existing start preset renders exactly as before (the snapshot comparison), and the harness window has no new item on a Mac that doesn't serve.
 - [ ] The changed files are published to the Apogee Desktop canvas and read back identical. Nothing is committed unless the user asks.
 
-**Scope note.** Earmarked for v0.2.6 (darwin/macos track 10, item 10a); gated on design 1e. [10b](server-window.md) is gated on it, and [10c](../v0.2.7/people-screens.md) builds its People boards. Out of scope:
+**Scope note.** Earmarked for v0.2.4 (darwin/macos track 10, item 10a); gated on design 1e. [10b](server-window.md) is gated on it, and [10c](people-screens.md) builds its People boards. Out of scope: Moved here from v0.2.6 on 2026-11-18, when the releases were merged (the user's call); the id is unchanged.
 - any Swift, CLI or test change (10b, 10c and CLI tracks 62 and 63);
 - the client side's Connections pane, pair sheet and indicator (7a);
 - the window on iPhone or iPad (never offered);
 - a way to make a Mac that doesn't serve into a server from the app (the window is offered only on the Mac that serves, the user's call, so the first opt-in stays the CLI's; installing the service on a Mac that serves is in scope);
-- the Linux and Windows apps' server windows, which follow v0.3.0;
+- the Linux and Windows apps' server windows, which follow v0.2.5;
 - network administering beyond 62g's marked devices.

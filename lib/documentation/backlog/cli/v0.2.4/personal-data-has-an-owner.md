@@ -146,11 +146,11 @@ Each personal row is one flat folder for everyone.
   - [63c](allowances-keys-and-usage.md), the allowance whose `collections` hands out shared libraries.
   - [63d](consent-goes-to-its-person.md), whose session's person is this item's `Session::person`.
   - [63e](task-slots-per-person.md), which moves the one task lock this item leaves in place.
-  - [62e](../v0.2.6/connections-and-activity.md) and [62f](../v0.2.6/audit-log.md): activity and the audit trail, both metadata.
-  - [62h](../v0.2.6/local-admin-reads.md), the local admin screen's reads.
+  - [62e](connections-and-activity.md) and [62f](audit-log.md): activity and the audit trail, both metadata.
+  - [62h](local-admin-reads.md), the local admin screen's reads.
   - [59a](../v0.2.3/paired-devices.md), [59b](../v0.2.3/machine-mode-over-the-network.md), [59d](../v0.2.3/reads-and-commands-over-the-network.md), [59e](../v0.2.3/tasks-outlive-the-connection.md), [59f](../v0.2.3/paired-apps-with-scopes.md) and [59g](../v0.2.3/capability-discovery.md): the doors and the narrowing this item runs through.
-  - [61a](../v0.3.1/sessions-as-training-data.md): exported sessions, held to (3)'s consent.
-  - darwin [10c](../../darwin/macos/v0.2.7/people-screens.md): the people screen that shows the metadata reads.
+  - [61a](../v0.2.6/sessions-as-training-data.md): exported sessions, held to (3)'s consent.
+  - darwin [10c](../../darwin/macos/v0.2.4/people-screens.md): the people screen that shows the metadata reads.
   - GUI [7a](../../darwin/v0.2.4/app-connection-local-or-server.md) and [7c](../../darwin/v0.2.4/every-place-against-a-server.md): a member's app against the server, which sees only their own through the same doors.
 - External prior art (the spike's reading of their official docs, 2026-11-14): Jellyfin's per-user library access, and Plex's libraries shared per person with its managed and invited home members. Both are the shape of "shared libraries handed out per person". The deliberate divergence is that the owner here never sees a member's conversations, and the docs say plainly that disk access is the limit of that promise.
 
@@ -170,7 +170,7 @@ Each personal row is one flat folder for everyone.
   - The audit keeps 90 days of who, what and when, without request contents (62f).
   - The SPEC amendments are already written ([SPEC.md](../../../assistant/cli/SPEC.md) → Core surfaces 4, "Revised again 2026-11-14"; [GUI SPEC](../../../assistant/gui/SPEC.md) → Core surfaces 3).
   - The standing law: remote use is an add-on, and the CLI alone and the Mac app over pipes stay complete with no server.
-- 2026-11-14: Placement, the user's call: both halves land before v0.3.0, the server console in v0.2.6 (CLI track 62, darwin/macos 10a–10b) and people and access in v0.2.7 (CLI track 63, darwin/macos 10c). This item is CLI 63b, v0.2.7, track 63, gated on 63a, **split first** into the three documents above. It sits after 63a because nothing can be someone's until a credential names a person. It sits beside 63c–63e, which gate on 63a too, and darwin 10c reads its metadata. Nothing already queued is renumbered.
+- 2026-11-14: Placement, the user's call: both halves land before v0.2.5, both in v0.2.4: the server console (CLI track 62, darwin/macos 10a–10b) and people and access (CLI track 63, darwin/macos 10c). This item is CLI 63b, v0.2.4, track 63, gated on 63a, **split first** into the three documents above. It sits after 63a because nothing can be someone's until a credential names a person. It sits beside 63c–63e, which gate on 63a too, and darwin 10c reads its metadata. Nothing already queued is renumbered.
 - 2026-11-14: The model comes from the prior art (the agent's default, from the spike's summary). The owner is implicit, as the OS account owning `APOGEE_HOME` on the server Mac. Members each have an allowance in 59f's `AppScope` shape, with presets (Full, Family, Limited) and a guest as a member on Limited with nothing kept. The owner's data stays where it is today, so an owner-only install is untouched.
 - 2026-11-14: This item revises recorded single-person defaults, for members:
   - 59e's "any of them may attach to, halt, cancel or resume any task" ([tasks-outlive-the-connection.md](../v0.2.3/tasks-outlive-the-connection.md):77) now holds only for one person's own devices.
@@ -223,7 +223,7 @@ No **[user]** call blocks this item.
 - [ ] An install with no members passes every existing suite unchanged. `chat`, `complete`, `execute` and `task run` are byte-identical, and a fresh install has no `people/`. The full suite is green on all five targets.
 - [ ] Optional live pass, said when skipped: the user runs `apogee-dev serve`, pairs two members' devices from 63a, and sees each one's chats, notes and tasks only their own, and the server window's people screen showing counts and times without contents.
 
-**Scope note.** Earmarked for v0.2.7 (track 63); gated on 63a. It is split first into three documents: (1) gated on 63a, (2) on (1), and (3)'s training half on (1), while its writer half is ungated. Out of scope:
+**Scope note.** Earmarked for v0.2.4 (track 63); gated on 63a. It is split first into three documents: (1) gated on 63a, (2) on (1), and (3)'s training half on (1), while its writer half is ungated. Out of scope: Moved here from v0.2.7 on 2026-11-18, when the releases were merged (the user's call); the id is unchanged.
 - The people registry, allowances and presets (63a).
 - Whose keys pay, and usage (63c).
 - Consent routing and "always" answers (63d).

@@ -46,7 +46,7 @@ When this item ships, `lib/design/main.html` opens by double-click and shows the
   - **The shell:** helmet 10–78; sidebar markup 81–170 and section 6 (5020–5103, places at 5052, `cycleTheme` 5099); section 28 `ui` (7564–7599); menu scrim 2066; confirm host 2478–2485; toast 2487.
 - The Mac app: `presentation/monitor` (MonitorViewModel, MonitorView), `shell/ViewModels/{Destination,KeyMap,ShellViewModel}.swift`, `shell/Views/ShellView.swift`, `app/ViewModels/AppViewModel.swift`, `styles/{Palette,Typography,Metrics}.swift`.
 - Siblings: [react-design-prototype.md](../../../adrs/design/react-design-prototype.md) (1a's ADR 0001), [scaffold-and-layering-check.md](scaffold-and-layering-check.md) (1b), [cli-stand-in.md](cli-stand-in.md) (1d), [settings-and-appearance.md](settings-and-appearance.md) (1i), [gallery-and-foundations.md](gallery-and-foundations.md) (1q), [parity-proof.md](parity-proof.md) (1s), [retire-the-old-prototype.md](retire-the-old-prototype.md) (1t).
-- Cross-queue: the Apple apps' 10a ([design-the-server-window.md](../../darwin/macos/v0.2.6/design-the-server-window.md)) is to be gated on this item and drawn in the React app. That gate belongs in 10a and the darwin index; this item changes no gate.
+- Cross-queue: the Apple apps' 10a ([design-the-server-window.md](../../darwin/macos/v0.2.4/design-the-server-window.md)) is to be gated on this item and drawn in the React app. That gate belongs in 10a and the darwin index; this item changes no gate.
 
 **Decisions made** (dated):
 - 2026-11-14: The user's call: the prototype is rebuilt in a compiled web framework with the production GUIs' four layers and MVVM modules, so it stays the design's cross-platform source of truth.

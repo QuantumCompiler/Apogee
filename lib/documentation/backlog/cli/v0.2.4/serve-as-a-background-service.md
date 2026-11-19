@@ -90,8 +90,8 @@ The plist runs a bare `serve`, so how the server connects lives only in the conf
   - [62g](administering-local-and-marked-devices.md), administering locally.
   - [59a](../v0.2.3/paired-devices.md): its TLS identity and registry sit under the config and are read by the service's serve unchanged.
   - [59d](../v0.2.3/reads-and-commands-over-the-network.md): `serve` is refused over the network.
-  - darwin [10a](../../darwin/macos/v0.2.6/design-the-server-window.md), drawing the window.
-  - darwin [10b](../../darwin/macos/v0.2.6/server-window.md), which drives these verbs.
+  - darwin [10a](../../darwin/macos/v0.2.4/design-the-server-window.md), drawing the window.
+  - darwin [10b](../../darwin/macos/v0.2.4/server-window.md), which drives these verbs.
   - darwin [7a](../../darwin/v0.2.4/app-connection-local-or-server.md), the client side.
   - darwin M18 [app-dev-channel.md](../../darwin/macos/maintenance/app-dev-channel.md), so a development build of the app drives `apogee-dev`.
 
@@ -100,16 +100,16 @@ The plist runs a bare `serve`, so how the server connects lives only in the conf
   - An admin mode: a separate "Apogee Server" window in the macOS app, offered only on the Mac that serves, driving the local CLI over pipes.
   - The window installs the server as a background service (launchd), and starts, stops and restarts it.
   - Remote administering is local by default, and the owner may mark chosen paired devices as allowed to administer remotely. This revises 59d's default that the admin plane keeps one token for any network caller; otherwise the admin plane stays local-only ([62g](administering-local-and-marked-devices.md)). The service changes nothing here: it runs the same `serve`, behind the same doors.
-  - Placement, both before v0.3.0: the server console in v0.2.6 (CLI track 62, darwin/macos track 10's 10a and 10b), people and access in v0.2.7 (CLI track 63, darwin/macos 10c), nothing already queued renumbered.
-  - People: a household or a small team, designed for both. The words are "people" and "access" (Owner, Member), never "roles", which in Apogee means model roles. The owner is implicit: the OS account that owns `APOGEE_HOME` on the server Mac. Each member has an allowance in 59f's scope shape, from presets (Full, Family, Limited) rather than groups, and a guest is a member on Limited with nothing kept. The owner sees members' metadata (devices, apps, activity, which model, when), never chat contents; whoever controls the server Mac can still read its disk, and the docs say so. Members use the server's local models only, unless the owner grants a household cloud key with a limit. All of it is track 63's ([63a](../v0.2.7/people-on-one-server.md)); this item adds nothing per person.
+  - Placement, both before v0.2.5 and both in v0.2.4: the server console (CLI track 62, darwin/macos track 10's 10a and 10b), people and access (CLI track 63, darwin/macos 10c), nothing already queued renumbered.
+  - People: a household or a small team, designed for both. The words are "people" and "access" (Owner, Member), never "roles", which in Apogee means model roles. The owner is implicit: the OS account that owns `APOGEE_HOME` on the server Mac. Each member has an allowance in 59f's scope shape, from presets (Full, Family, Limited) rather than groups, and a guest is a member on Limited with nothing kept. The owner sees members' metadata (devices, apps, activity, which model, when), never chat contents; whoever controls the server Mac can still read its disk, and the docs say so. Members use the server's local models only, unless the owner grants a household cloud key with a limit. All of it is track 63's ([63a](people-on-one-server.md)); this item adds nothing per person.
   - The defaults the user took: live changes applied on the spot (reload), with what still needs a restart said ([62b](serve-reload-and-served-vs-disk.md), whose "needs a restart" leads to this item's `restart`); a 90-day audit of who, what and when without request contents ([62f](audit-log.md)); collections as shared libraries handed out per person plus a member's own private ones; notes and saved decisions personal by default; members' apps paired by the owner at the server Mac, capped at that member's allowance; a per-person task queue rather than a refusal.
   - The standing law: remote use is an add-on, and the CLI alone and the Mac app over pipes stay complete and need no server.
   - The SPEC amendments are already written: CLI SPEC → Core surfaces 4 ("Revised again 2026-11-14"), GUI SPEC → Core surfaces 3 (the server window).
-- 2026-11-14: CLI 62d in v0.2.6, gated on [62a](serve-status-and-runtime-record.md) and [62c](serve-section-in-config.md):
+- 2026-11-14: CLI 62d in v0.2.4, gated on [62a](serve-status-and-runtime-record.md) and [62c](serve-section-in-config.md):
   - `status` reads 62a's record for the address, the start time and the build running.
   - The plist runs a bare `serve`, whose settings are 62c's section, so the service has no settings of its own.
-  - Darwin [10b](../../darwin/macos/v0.2.6/server-window.md) is gated on 10a, 62a, 62c and 62h, not on this item. Its Install, Start, Stop, Restart and Remove run these verbs once they exist; until then the window says to run `apogee serve` at a prompt, as [10a](../../darwin/macos/v0.2.6/design-the-server-window.md) draws it.
-- 2026-11-14: The service runs as the OS account that owns the root, in that account's session. That is the people plan's implicit owner ([63a](../v0.2.7/people-on-one-server.md)). Apogee never asks for an administrator's password.
+  - Darwin [10b](../../darwin/macos/v0.2.4/server-window.md) is gated on 10a, 62a, 62c and 62h, not on this item. Its Install, Start, Stop, Restart and Remove run these verbs once they exist; until then the window says to run `apogee serve` at a prompt, as [10a](../../darwin/macos/v0.2.4/design-the-server-window.md) draws it.
+- 2026-11-14: The service runs as the OS account that owns the root, in that account's session. That is the people plan's implicit owner ([63a](people-on-one-server.md)). Apogee never asks for an administrator's password.
 - 2026-11-14: Linux and Windows equivalents (a `systemd --user` unit, a Windows service) are out of scope. The verbs are declared on every platform, so help, completion and the parity tables match, and off macOS they refuse.
 
 **Open calls:**
@@ -137,11 +137,11 @@ The plist runs a bare `serve`, so how the server connects lives only in the conf
   - the label, channel, root, binary and plist path;
   - whether it is installed, enabled, loaded and running, with its pid and last exit;
   - from 62a: the address, the start time, and the version running against the version installed;
-  - `problems[]`: stale plist, binary gone, restarting after a failure, the version differing ("running 0.2.5, installed 0.2.6 -- restart to apply").
+  - `problems[]`: stale plist, binary gone, restarting after a failure, the version differing ("running 0.2.4, installed 0.2.5 -- restart to apply").
   The other verbs print one line, and with `--output-format json` they print the same document after the act. An update replaces the binary in place, and nothing restarts the service on its own: the window offers Restart.]
 - [default: **`uninstall` and `reset`**. `apogee uninstall` (and `make uninstall MODE=dev`, which runs that binary's own uninstall) removes that channel's service first, named in its plan. `reset` stops a running service before it rebuilds the root, leaves it installed and stopped, and says `apogee serve service start` brings it back once a backend is configured.]
 - [default: **the shell**: the exact-word refusal of bare `serve` lets `serve service …` (and 62a's `serve status`) run as commands. Whichever of 62a and this item builds first narrows it, and the other consumes it.]
-- (consumed decision) Lifting or narrowing the app's carve-out (`Parity.swift:83`) so the server window runs `serve service`, and how its buttons read, is darwin [10b](../../darwin/macos/v0.2.6/server-window.md)'s, drawn first by [10a](../../darwin/macos/v0.2.6/design-the-server-window.md).
+- (consumed decision) Lifting or narrowing the app's carve-out (`Parity.swift:83`) so the server window runs `serve service`, and how its buttons read, is darwin [10b](../../darwin/macos/v0.2.4/server-window.md)'s, drawn first by [10a](../../darwin/macos/v0.2.4/design-the-server-window.md).
 - (consumed decision) A development build of the app drives `apogee-dev`, not the release binary it finds first today ([darwin CLAUDE.md](../../../assistant/darwin/CLAUDE.md):89). That is M18's ([app-dev-channel.md](../../darwin/macos/maintenance/app-dev-channel.md)). This item's half is the label coming from the binary's own channel.
 - (consumed decision) Recording `install`, `start`, `stop`, `restart` and `uninstall` as acts with their actor is [62f](audit-log.md)'s. Which lifecycle verbs a network caller may run is [62g](administering-local-and-marked-devices.md)'s and 59d's (`:112`, `serve` refused as the ground under the server): 62g's default admits `serve service restart` for marked devices and keeps `install`, `uninstall` and `stop` refused; this item carves all six out until 62g builds, and adds `start` and `status` to the refused (host-local: they act on or read this Mac's launchd).
 
@@ -166,11 +166,11 @@ The plist runs a bare `serve`, so how the server connects lives only in the conf
 - [ ] `chat` and `complete` are unchanged, and the full suite is green on all five targets.
 - [ ] Optional live pass, said when skipped: the user runs `apogee-dev serve service install` on their Mac (the dev channel, `~/.apogee-dev`), logs out and back in, and sees `apogee-dev serve service status` report it serving. They note how Login Items shows the entry and whether macOS's firewall asks about incoming connections on a non-loopback bind, then stop and uninstall it. The release `apogee`, `~/.apogee` and `com.quantumcompiler.apogee.serve.plist` are untouched.
 
-**Scope note.** Earmarked for v0.2.6 (track 62); gated on 62a and 62c. Out of scope:
+**Scope note.** Earmarked for v0.2.4 (track 62); gated on 62a and 62c. Out of scope: Moved here from v0.2.6 on 2026-11-18, when the releases were merged (the user's call); the id is unchanged.
 - Linux (`systemd --user`) and Windows service equivalents. The verbs refuse there.
 - A boot-time LaunchDaemon, or a service run as another account.
 - Keeping the Mac awake: its energy settings are the owner's.
 - Restarting the service automatically after an update.
 - Reload ([62b](serve-reload-and-served-vs-disk.md)).
-- The window's screens and buttons (darwin [10b](../../darwin/macos/v0.2.6/server-window.md)).
+- The window's screens and buttons (darwin [10b](../../darwin/macos/v0.2.4/server-window.md)).
 - Scheduling tasks, training or review sweeps, which stay the person's own scheduler's.

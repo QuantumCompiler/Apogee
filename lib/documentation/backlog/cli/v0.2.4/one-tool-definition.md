@@ -46,7 +46,7 @@ This item adds that type: **`agent::ToolDefinition`**. It holds a tool's name, d
 
 **Reference.**
 - In-house precedents: 54a/54b (`with_reads`, `with_calls`, the tool set that only grows); 56a (`KindRow`, `ToolCallReport`); 39b (`edits`, the accept-edits mode); 26g (`definition_hash`); 28g (the protocol vocabulary declared as data and printed by `__machine-schema`). The v0.2.2 siblings that add served reads and calls before this item lands: [58b](../v0.2.2/mcp-serve-graphs-and-knowledge.md) and [58d](../v0.2.2/mcp-serve-opt-in-refresh.md).
-- Downstream: [60b](device-tools.md) sends definitions marked `device` over the network. GUI [7b](../../darwin/macos/v0.2.4/mac-offers-its-files-and-shell.md) writes the Mac's in Swift against the schema `$def`. [61a](../v0.3.1/sessions-as-training-data.md) can read a recorded call's class and hints from the definition, not from a name.
+- Downstream: [60b](device-tools.md) sends definitions marked `device` over the network. GUI [7b](../../darwin/macos/v0.2.4/mac-offers-its-files-and-shell.md) writes the Mac's in Swift against the schema `$def`. [61a](../v0.2.6/sessions-as-training-data.md) can read a recorded call's class and hints from the definition, not from a name.
 - External prior art: MCP's tool annotations at `2025-03-26`, the version the client speaks (`mcp/types.h:23`): `title`, `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`, all hints and never trusted for safety. The definition keeps three of the four hints. `idempotentHint` is left out, because no Apogee rule reads it. ACP's ToolKind words are the set `translate_test.cpp:69-70` holds.
 
 **Decisions made** (dated):
@@ -56,7 +56,7 @@ This item adds that type: **`agent::ToolDefinition`**. It holds a tool's name, d
   - Where the work happens is option C: server tools by default, and a connected desktop offers its own files and shell. When the Mac points at a server and is asked to change a project on the Mac, the Mac's files are the ones touched.
   - Remote use is an add-on, never the only way Apogee runs. The CLI alone, and the Mac app over pipes to a local CLI, stay complete and the default; anything that makes either need a server, a network or an account is a failure.
   - iPhone and iPad are clients of the person's Apogee server only, with no on-device core; the Mac and the CLI stay standalone. So the definitions marked `device` that 60b carries are a connected desktop's own files and shell, touched on that desktop; iPhone and iPad offer none.
-  - The common tool definition lands before v0.3.0.
+  - The common tool definition lands before v0.2.5.
 
   Track 60, v0.2.4.
 - 2026-11-07: Ungated, and first in track 60. The definition improves today's surfaces alone: MCP hosts get honest hints, and ACP's kinds come from the tool rather than a side table. 60b, the first dispatch to a device, needs it, so it sits in v0.2.4 beside the device tools, not in v0.2.3's network track.
@@ -69,7 +69,7 @@ This item adds that type: **`agent::ToolDefinition`**. It holds a tool's name, d
 - [default: an imported MCP tool's kind stays `other`, as today. MCP has no kind, and guessing one from a hint would change cards ACP hosts already draw.]
 - [default: the JSON form is snake_case like the machine protocol. The MCP edge maps it to camelCase. `tools/list` keeps its names, order and descriptions, and gains `destructiveHint` and `openWorldHint` (and `title` where one is set).]
 - [default: no new verb. The published form is the `$def` in `apogee __machine-schema`, and the definitions show up through `mcp serve`'s `tools/list` and `acp`'s cards. A user-facing "list my tools" read would be its own item, with its shell classification (ADR 0010).]
-- (consumed decision) The device's offer line, the server's dispatch to a device, and the gate for a device tool belong to [60b](device-tools.md). The Mac's definitions in Swift belong to GUI [7b](../../darwin/macos/v0.2.4/mac-offers-its-files-and-shell.md). The training kit's copied declarations, and any training use of the class, belong to [61a](../v0.3.1/sessions-as-training-data.md).
+- (consumed decision) The device's offer line, the server's dispatch to a device, and the gate for a device tool belong to [60b](device-tools.md). The Mac's definitions in Swift belong to GUI [7b](../../darwin/macos/v0.2.4/mac-offers-its-files-and-shell.md). The training kit's copied declarations, and any training use of the class, belong to [61a](../v0.2.6/sessions-as-training-data.md).
 
 **Guardrail(s).**
 - The definition table over every native tool: a kind from ACP's set, a class that matches `gated()`, `edits` and `outbound`, and `runs: harness`. A new tool with no kind fails, as a missing `KindRow` does today.

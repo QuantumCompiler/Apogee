@@ -1,6 +1,6 @@
 # Getting the app onto iPhone and iPad
 
-**What / why.** The vision (the user's call, 2026-11-07): Apogee is a private, self-hosted harness that feels like Claude on every device the person owns, with a strong machine of theirs serving their own desktops and phones. On iPhone and iPad the app is a client of that server only. [8a](app-builds-for-ios-and-ipados.md) makes the app's code compile for those devices, and [8b](../ipados/v0.2.5/ipad-app.md) and [9a](../ios/v0.3.0/iphone-app.md) give it their layouts. This item gets the built app **onto the person's iPhone and iPad**, and makes the pipeline build and test it on every pull request. It closes wall **W10**: an ad-hoc-signed app cannot be installed on iPhone or iPad, and CI builds no iOS app. Measured 2026-11-07 at HEAD (`4f92316d`):
+**What / why.** The vision (the user's call, 2026-11-07): Apogee is a private, self-hosted harness that feels like Claude on every device the person owns, with a strong machine of theirs serving their own desktops and phones. On iPhone and iPad the app is a client of that server only. [8a](app-builds-for-ios-and-ipados.md) makes the app's code compile for those devices, and [8b](../ipados/v0.2.5/ipad-app.md) and [9a](../ios/v0.2.5/iphone-app.md) give it their layouts. This item gets the built app **onto the person's iPhone and iPad**, and makes the pipeline build and test it on every pull request. It closes wall **W10**: an ad-hoc-signed app cannot be installed on iPhone or iPad, and CI builds no iOS app. Measured 2026-11-07 at HEAD (`4f92316d`):
 
 1. **The app is signed ad hoc, with no team.** Both project configurations set `CODE_SIGN_IDENTITY = "-"`, `CODE_SIGN_STYLE = Manual`, `DEVELOPMENT_TEAM = ""` and `ENABLE_HARDENED_RUNTIME = NO` (`Apogee.xcodeproj/project.pbxproj:7878-7884` Release, `:8731-8737` Debug), per the user's 2026-10-20 call (`scripts/build.sh:36-42`, `darwin.yml:25-35`). An ad-hoc signature has no provisioning profile. iPhone and iPad install only an app whose profile names the device (a development or ad hoc profile) or one delivered by TestFlight or the App Store. So no build of today's app can reach a device.
 2. **The project builds for the Mac only.** `SDKROOT = macosx` (`project.pbxproj:7889`, `:8744`). The resolved Release settings say `SUPPORTED_PLATFORMS = macosx`. `xcodebuild -scheme Apogee -showdestinations` lists "My Mac" and "Any Mac" as compatible, and every iOS Simulator destination as incompatible ("iPad (A16)'s iOS Simulator platform doesn't match Apogee.app's supported platforms"). 8a changes the project. This item builds what 8a makes.
@@ -45,7 +45,7 @@ It delivers three things:
 - Docs: GUI `DEVELOPER.md` (the targets, CI's iOS steps, how to install on an iPhone or iPad), GUI `CLAUDE.md` (Stack & environment and the release section: the iOS build and its signing), and the CLI `DEVELOPER.md`'s pipeline section (darwin's new steps).
 
 **Reference.**
-- Siblings: [8a](app-builds-for-ios-and-ipados.md), the code building for iOS, this item's gate. [8b](../ipados/v0.2.5/ipad-app.md), the iPad app. [9a](../ios/v0.3.0/iphone-app.md) and [9b](../ios/v0.3.0/foldable-iphone.md), the iPhone and the foldable, which reach the person's devices by this item's path. [9c](../v0.3.0/three-apple-platforms-whole.md), v0.3.0 whole, gated on this item. [7a](../v0.2.4/app-connection-local-or-server.md), the connection screen a freshly installed app opens on. [CLI 59a](../../cli/v0.2.3/paired-devices.md), the pairing that admits the device.
+- Siblings: [8a](app-builds-for-ios-and-ipados.md), the code building for iOS, this item's gate. [8b](../ipados/v0.2.5/ipad-app.md), the iPad app. [9a](../ios/v0.2.5/iphone-app.md) and [9b](../ios/v0.2.5/foldable-iphone.md), the iPhone and the foldable, which reach the person's devices by this item's path. [9c](three-apple-platforms-whole.md), v0.2.5 whole, gated on this item. [7a](../v0.2.4/app-connection-local-or-server.md), the connection screen a freshly installed app opens on. [CLI 59a](../../cli/v0.2.3/paired-devices.md), the pairing that admits the device.
 - Precedents: GUI 1a and 1d (the ad-hoc build and its pipeline, the 2026-10-20 calls), M17 (the release carries the Mac app), M18 (the dev channel's identifier), and the required-names pattern (`darwin.yml:2-11`: a required job never gets a job-level `if:`).
 - Apple's terms as checked above.
 
@@ -53,10 +53,10 @@ It delivers three things:
 - 2026-11-07: Specced from the Apple-platforms spike and brainstorm. The user's calls that shape this item:
   - iPhone and iPad are clients of the person's Apogee server only, with no core on the device.
   - The server is an add-on: the CLI and the Mac app stay standalone and the default, and anything that makes them need a server, a network or an account is a failure.
-  - v0.3.0 is the target where macOS, iPadOS and iOS (the iPhone and the foldable iPhone) fully work.
+  - v0.2.5 is the target where macOS, iPadOS and iOS (the iPhone and the foldable iPhone) fully work.
   - No customer accounts, billing or metering: the server admits only the person and their devices, so distribution reaches the person's own devices, not the public.
 - 2026-11-07: The Mac app's ad-hoc signing stays (the user's 2026-10-20 call) unless the user's call below changes it, and that would be its own item.
-- 2026-11-07: Placed in v0.2.5 (track 8), gated on 8a. A device can only take a build once the code builds for iOS. 9c, the v0.3.0 whole, is gated on this item, because "fully working on iPhone and iPad" means installed on them. It sits beside 8b, not after it: the path onto a device is independent of the iPad's layout, and 8b's live checks need a device build.
+- 2026-11-07: Placed in v0.2.5 (track 8), gated on 8a. A device can only take a build once the code builds for iOS. 9c, the v0.2.5 whole, is gated on this item, because "fully working on iPhone and iPad" means installed on them. It sits beside 8b, not after it: the path onto a device is independent of the iPad's layout, and 8b's live checks need a device build.
 
 **Open calls:**
 - **[user] Join (or use) the Apple Developer Program, or install by personal sideloading?** This call blocks the item. The options:
@@ -95,4 +95,4 @@ It delivers three things:
 - App Store submission and review for the public (the server admits only the person; paid features are a someday);
 - the iPad and iPhone layouts (8b, 9a, 9b);
 - the connection and pairing (7a, CLI 59a);
-- Android and Windows, which follow v0.3.0.
+- Android and Windows, which follow v0.2.5.

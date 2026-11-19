@@ -74,14 +74,14 @@ There is also **a served-against-disk read**. `GET /v1/admin/served`, and the `s
   - [59d](../v0.2.3/reads-and-commands-over-the-network.md), the command door.
   - [59e](../v0.2.3/tasks-outlive-the-connection.md), whose tasks keep the grants they started with.
   - [59f](../v0.2.3/paired-apps-with-scopes.md), scopes never past the config.
-  - darwin [10b](../../darwin/macos/v0.2.6/server-window.md), the server window, which shows the reload line and the drift.
+  - darwin [10b](../../darwin/macos/v0.2.4/server-window.md), the server window, which shows the reload line and the drift.
 
 **Decisions made** (dated):
 - 2026-11-14: Specced from the admin-mode and people spike (its `cli-admin-surface` probe; wall A1). The user's calls:
   - Admin mode is a separate "Apogee Server" window in the macOS app, offered only on the Mac that serves, driving the local CLI over pipes.
   - Administering is local by default, and the owner may mark chosen paired devices as allowed to administer remotely ([62g](administering-local-and-marked-devices.md)). This revises 59d's default, where the admin plane keeps one token for any network caller; otherwise the admin plane stays local-only.
   - The window installs the server as a launchd background service and starts, stops and restarts it ([62d](serve-as-a-background-service.md)).
-  - Both land before v0.3.0. The server console is in v0.2.6 (CLI track 62, darwin/macos track 10's 10a-10b), and people and access in v0.2.7 (CLI track 63, darwin/macos 10c). Nothing already queued is renumbered.
+  - Both land before v0.2.5, both in v0.2.4: the server console (CLI track 62, darwin/macos track 10's 10a-10b) and people and access (CLI track 63, darwin/macos 10c). Nothing already queued is renumbered.
   - People: a household or a small team, designed for both. The words are **people** and **access** (Owner, Member), never "roles", which in Apogee means model roles. That is the only sense "role" has in this document (`models.*`'s role pointers). The owner sees members' metadata (devices, apps, activity, which model, when), never their chat contents, and whoever controls the server Mac can still read its disk. Members use the server's local models only, unless the owner grants a household cloud key with a limit. All of this is track 63's. A reload here is per server, and nothing in it is per person.
   - The other defaults the user took (track 62 and 63's, not this item's): an audit kept 90 days of who, what and when without request contents ([62f](audit-log.md)); collections as shared libraries handed out per person plus a member's own private ones; notes and saved decisions personal by default; members' apps paired by the owner at the server Mac, capped at that member's allowance; a per-person task queue, not a refusal.
   - The SPEC amendments are already written (CLI SPEC Core surfaces 4, *Revised again 2026-11-14*; GUI SPEC Core surfaces 3).
@@ -127,7 +127,7 @@ There is also **a served-against-disk read**. `GET /v1/admin/served`, and the `s
 - [ ] With no server running, every config verb's output is byte-identical to today's. The full suite is green on all five targets.
 - [ ] Optional live pass, said when skipped: the user runs `apogee-dev serve` and, from a second terminal, changes a permission and a backend with `apogee-dev config`, sees the notice, and sees the change in `apogee-dev serve status`.
 
-**Scope note.** Earmarked for v0.2.6 (track 62); gated on 62a. Out of scope:
+**Scope note.** Earmarked for v0.2.4 (track 62); gated on 62a. Out of scope: Moved here from v0.2.6 on 2026-11-18, when the releases were merged (the user's call); the id is unchanged.
 - Watching the config file.
 - Making the listener, TLS or the admin token live: a restart remains their path.
 - The `serve:` config section ([62c](serve-section-in-config.md)).
@@ -135,5 +135,5 @@ There is also **a served-against-disk read**. `GET /v1/admin/served`, and the `s
 - Who may administer remotely ([62g](administering-local-and-marked-devices.md)).
 - The audit log's storage and reads ([62f](audit-log.md)).
 - Connections and activity ([62e](connections-and-activity.md)).
-- The server window's screens (darwin [10b](../../darwin/macos/v0.2.6/server-window.md)).
+- The server window's screens (darwin [10b](../../darwin/macos/v0.2.4/server-window.md)).
 - Anything per person (track 63).

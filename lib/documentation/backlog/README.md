@@ -72,7 +72,7 @@ Nothing is left to build. This release's three CLI tracks have shipped:
 
 ### Ties to later releases
 
-- **[Apple apps 10a](darwin/macos/v0.2.6/design-the-server-window.md)** (v0.2.6, designing the server window) waits on design 1e, so it is drawn in the React app.
+- **[Apple apps 10a](darwin/macos/v0.2.4/design-the-server-window.md)** (v0.2.4, designing the server window) waits on design 1e, so it is drawn in the React app.
 - **[Mod 2b](mod/v0.2.2/mod-graphs-and-knowledge.md)** (v0.2.2) waits on mod 1c.
 
 ## Any time: maintenance
@@ -88,18 +88,17 @@ Maintenance items aren't tied to a release; any one can be picked up by name.
 
 ## Later releases
 
-One line per track. Follow the link to see the items and their gates in that product's queue.
+One row per release, with each track linked. Follow a link to see the items and their gates in that product's queue.
 
 | Release | CLI | Apple apps | Mod |
 |---|---|---|---|
 | v0.2.2 | [Track 58, Claude aware of Apogee](cli/README.md#v022) (58a–58d) | — | [Track 2, Claude aware of Apogee](mod/README.md#v022) (2a–2b) |
 | v0.2.3 | [Track 59, the harness server](cli/README.md#v023) (59a–59h) | — | — |
-| v0.2.4 | [Track 60, one tool definition and device tools](cli/README.md#v024) (60a–60e) | [Track 7, the Mac as a client](darwin/README.md#v024) (7a–7e) | — |
-| v0.2.5 | — | [Track 8, iPad](darwin/README.md#v025) (8a–8c) | — |
-| v0.2.6 | [Track 62, the server console](cli/README.md#v026) (62a–62h) | [Track 10, the server window](darwin/README.md#v026) (10a–10b, macOS) | — |
-| v0.2.7 | [Track 63, people and access](cli/README.md#v027) (63a–63e) | [Track 10, people in the server window](darwin/README.md#v027) (10c, macOS) | — |
-| v0.3.0 | — | [Track 9, iPhone, the foldable and the three platforms whole](darwin/README.md#v030) (9a–9c) | — |
-| v0.3.1 | [Track 61, Apogee-tuned training](cli/README.md#v031) (61a–61b) | — | — |
+| v0.2.4 | [Track 60, one tool definition and device tools](cli/README.md#v024) (60a–60e); [track 62, the server console](cli/README.md#v024) (62a–62h); [track 63, people and access](cli/README.md#v024) (63a–63e) | [Track 7, the Mac as a client](darwin/README.md#v024) (7a–7e); [track 10, the server window and its People place](darwin/README.md#v024) (10a–10c, macOS) | — |
+| v0.2.5 | — | [Track 8, iPad](darwin/README.md#v025) (8a–8c); [track 9, iPhone, the foldable and the three platforms whole](darwin/README.md#v025) (9a–9c) | — |
+| v0.2.6 | [Track 61, Apogee-tuned training](cli/README.md#v026) (61a–61b) | — | — |
+
+On 2026-11-18 (the user's call), v0.2.4 took in v0.2.6 and v0.2.7, v0.2.5 took in v0.3.0, and v0.3.1 became v0.2.6. The items kept their ids.
 
 The design has nothing planned after v0.2.1 yet.
 

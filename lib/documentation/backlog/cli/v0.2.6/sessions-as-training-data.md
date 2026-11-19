@@ -99,7 +99,7 @@ This item delivers:
   - [60a](../v0.2.4/one-tool-definition.md) supplies the definitions the record keeps. Its scope hands this item the training kit's copied declarations and any training use of the permission class.
   - [60b](../v0.2.4/device-tools.md) is why a step's definitions may say `runs: device`: a call into the Mac's own files, recorded on the server.
   - [61b](apogee-tuning-regime.md) trains on the accepted dataset and cuts its held-out suite from it, by session.
-  - The Apple platforms land whole in [GUI 9c](../../darwin/v0.3.0/three-apple-platforms-whole.md) first, so the sessions this item exports include the phones'.
+  - The Apple platforms land whole in [GUI 9c](../../darwin/v0.2.5/three-apple-platforms-whole.md) first, so the sessions this item exports include the phones'.
 - External prior art: none checked for this document. The pair's field names (`prompt`, `chosen`, `rejected`) are Apogee's choice. Whether a trainer reads them as they are is 61b's to settle.
 
 **Decisions made** (dated):
@@ -109,7 +109,7 @@ This item delivers:
   - **Where the work happens is C.** Server tools by default, and a connected desktop offers its own files and shell. A step keeps its definitions' `runs`, so a call into the Mac's files is recorded as one.
   - **Remote is an add-on**, never the only way Apogee runs. Hence the anti-goal: the export works the same on a standalone install.
   - **iPhone and iPad are clients of the person's server only**; the Mac and the CLI stay standalone. So a phone's or a tablet's sessions are chat files on the server and are exported there, and a Mac's are exported where they ran: on the Mac when it ran alone, on the server when it pointed at one. No device sends its sessions anywhere for this item.
-  - **Placement.** The common tool definition lands before v0.3.0, and Apogee-tuned training after it. Track 61 sits in v0.3.1, the first version after the three Apple platforms are whole.
+  - **Placement.** The common tool definition lands before v0.2.5, and Apogee-tuned training after it. Track 61 sits in v0.2.6, the first version after the three Apple platforms are whole.
 - 2026-11-07: The item's terms, from the plan: opt-in, per session or collection; tool calls and their results, permission outcomes and the person's corrections; the train track's shapes (SFT, and preference pairs); private chats never; secrets and paths scrubbed; reviewed before use.
 - 2026-11-07: Ungated and first in track 61; 61b is gated on it. It builds on 60a's `ToolDefinition`, which is earmarked for v0.2.4 and so ships first by release order. If 60a has not shipped when this is taken, the record keeps the IR projection the registry gives today (`definitions()`: name, description, schema), and the classes follow when 60a lands.
 - 2026-11-07: W12 is restated from measurement. The miner exists, and the wall is everything but text pairs: calls, outcomes, corrections, the private flag, the scrub and the review.
@@ -149,7 +149,7 @@ This item delivers:
 - [ ] All of it runs with no `serve`, no pairing and no network. `reference/training.md` documents it, and the full suite is green.
 - [ ] Optional, and said if skipped: on `apogee-dev`, a real `execute` session in a scratch project exports, reviews and is accepted, and `train run --trainer mock` reads the accepted dataset.
 
-**Scope note.** Earmarked for v0.3.1 (track 61); ungated. [61b](apogee-tuning-regime.md) is gated on it (🔒 61a). Out of scope:
+**Scope note.** Earmarked for v0.2.6 (track 61); ungated. [61b](apogee-tuning-regime.md) is gated on it (🔒 61a). Out of scope: Moved here from v0.3.1 on 2026-11-18, when the releases were merged (the user's call); the id is unchanged.
 - Training on the new shapes: rendering `tools` in the trainers, and any preference trainer (61b).
 - An eval of any kind (61b).
 - Reconstructing records for sessions written before this item.

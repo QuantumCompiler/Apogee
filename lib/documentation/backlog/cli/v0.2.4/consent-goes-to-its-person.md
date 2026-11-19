@@ -74,10 +74,10 @@ The spike's measurement: `GET /v1/admin/permissions` returned the single shared 
   - [59b](../v0.2.3/machine-mode-over-the-network.md), the relay whose first-answer default this narrows to one person's devices.
   - [59e](../v0.2.3/tasks-outlive-the-connection.md), the served task whose any-device control this narrows.
   - [59f](../v0.2.3/paired-apps-with-scopes.md), apps that never answer a card. That stays true, and an app of a member's is held to that member's access.
-  - [62f](../v0.2.6/audit-log.md), the audit log, whose entries carry each answer.
-  - [62g](../v0.2.6/administering-local-and-marked-devices.md), administering locally plus marked devices.
+  - [62f](audit-log.md), the audit log, whose entries carry each answer.
+  - [62g](administering-local-and-marked-devices.md), administering locally plus marked devices.
   - GUI [7a](../../darwin/v0.2.4/app-connection-local-or-server.md), the app's permission card, which draws the option description it is given.
-  - darwin [10c](../../darwin/macos/v0.2.7/people-screens.md), people in the server window, where the owner sees and clears a member's grants.
+  - darwin [10c](../../darwin/macos/v0.2.4/people-screens.md), people in the server window, where the owner sees and clears a member's grants.
 
 **Decisions made** (dated):
 - 2026-11-14: Specced from the admin-mode and people spike (P3). The user's calls that shape it:
@@ -90,9 +90,9 @@ The spike's measurement: `GET /v1/admin/permissions` returned the single shared 
   - Members use the server's local models only, unless the owner grants a household cloud key with a limit (63c).
   - The model: the owner (implicitly the OS account that owns `APOGEE_HOME` on the server Mac) and members, each with an allowance in 59f's `AppScope` shape. Presets (Full, Family, Limited) are used instead of groups, and a guest is a member on the Limited preset with nothing kept.
   - The defaults the user took: live changes applied on the spot (reload), with what still needs a restart said; an audit kept 90 days of who, what and when, without request contents; collections as shared libraries handed out per person, plus a member's own private ones; notes and saved decisions personal by default; a member's apps paired by the owner at the server Mac, capped at that member's allowance; a per-person task queue, not a refusal.
-  - Placement: both before v0.3.0. The server console is v0.2.6 (CLI track 62, darwin/macos track 10's 10a-10b), and people and access are v0.2.7 (CLI track 63, darwin/macos 10c). Nothing already queued is renumbered.
+  - Placement: both before v0.2.5, both in v0.2.4: the server console (CLI track 62, darwin/macos track 10's 10a-10b) and people and access (CLI track 63, darwin/macos 10c). Nothing already queued is renumbered.
   - The SPEC amendments are already written (CLI SPEC Core surfaces 4, "Revised again 2026-11-14"; GUI SPEC Core surfaces 3, the server window).
-- 2026-11-14: Placed in v0.2.7, track 63, gated on 63a only. It needs to know whose a credential is, and nothing more. A live session's person comes from the link that started it, so it does not wait on 63b's stamp on disk. A resumed chat uses 63b's stamp once that ships. It sits beside 63b and 63c, after the server console (v0.2.6, track 62) and before v0.3.0.
+- 2026-11-14: Placed in v0.2.4, track 63, gated on 63a only. It needs to know whose a credential is, and nothing more. A live session's person comes from the link that started it, so it does not wait on 63b's stamp on disk. A resumed chat uses 63b's stamp once that ships. It sits beside 63b and 63c, after the server console (track 62) in the same release, and before v0.2.5.
 - 2026-11-14: A member's question is never shown to the owner, follows from the user's call. Its path, command or diff is chat content. The owner's power over a member's session is administrative: seeing that it waits, and ending it (62e, 63b), never answering it.
 - 2026-11-14: This revises two recorded defaults for people. 59b's "a question takes the first `answer`" becomes the first answer among the session's person's devices. 59e's "any of them may attach to, halt, cancel or resume any task" becomes the task's person, plus the owner for halt and cancel. With one person on a server, both read exactly as before.
 
@@ -109,7 +109,7 @@ The spike's measurement: `GET /v1/admin/permissions` returned the single shared 
 - (consumed decision) How a credential resolves to a person, the owner's identity, and how a served child learns its person are [63a](people-on-one-server.md)'s.
 - (consumed decision) The person stamped on a saved session and a task on disk, and who may list, read and attach, are [63b](personal-data-has-an-owner.md)'s.
 - (consumed decision) Which tool classes and hosts a person is offered at all is [63c](allowances-keys-and-usage.md)'s. A grant never widens it.
-- (consumed decision) The audit's file, retention (90 days) and format are [62f](../v0.2.6/audit-log.md)'s. This item supplies its entries.
+- (consumed decision) The audit's file, retention (90 days) and format are [62f](audit-log.md)'s. This item supplies its entries.
 
 **Guardrail(s).**
 - `cli.consent_per_person` turns the spike's probe into the regression fixture. It uses a scratch home, a scripted mock calling `write_file`, an owner and two members (63a's test fixture), `serve --port 0` on loopback with test credentials, and the server killed after.
@@ -134,7 +134,7 @@ The spike's measurement: `GET /v1/admin/permissions` returned the single shared 
 - [ ] With no members and no grants files, every local surface behaves as today. The full suite is green on all five targets.
 - [ ] Optional live pass, said when skipped: the user runs `apogee-dev serve` on the dev channel, with a member's device and the owner's both paired. The member's card appears on the member's device only, and an `always` from it leaves the dev config unchanged.
 
-**Scope note.** Earmarked for v0.2.7 (track 63), gated on 63a. Out of scope:
+**Scope note.** Earmarked for v0.2.4 (track 63), gated on 63a. Out of scope: Moved here from v0.2.7 on 2026-11-18, when the releases were merged (the user's call); the id is unchanged.
 - The people registry and credential resolution (63a).
 - Stamping and filtering personal data on disk (63b).
 - What each person may use at all, and whose keys pay (63c).

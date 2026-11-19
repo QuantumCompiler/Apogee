@@ -14,7 +14,7 @@
 - **What cites the old files.**
   - **Docs:** 51 lines in 6 files name `main.html`, `.dc.html` or `support.js` (recon). 30 of them are in darwin's shipped `MILESTONES.md`, which stays as history.
   - **Swift:** 7 lines in 4 files name `main.html` or a board: `KeyMap.swift:78-79`, `Destination.swift:3-4`, `MarkdownText.swift:6` (its path starts on `:5`), `CodeLexerTests.swift:74` and `:264`. `:264` is a test's display name, not a comment. `Palette.swift:39` also cites `lib/design/spec/json/tokens.json`. Seven more lines name `tokens.json` bare (`Typography.swift:3,22`, `Metrics.swift:3,14,24`, `ShellViewModel.swift:115`, `SettingsViewModel.swift:796`); they stay true while the file keeps its name.
-  - **Other docs that send work to `lib/design/spec`:** `assistant/darwin/CLAUDE.md:82` and `assistant/cli/CLAUDE.md:304` (`:303` at HEAD), the brainstorming rule; darwin `ROADMAP.md:129` and the darwin index row at `README.md:110` (10a). The app's `scripts/icon.sh` (11a, shipped 2026-11-18) also writes into `html/Logo.dc.html`; see Seam + files. `ROADMAP.md:28` is shipped history and `:105` names `assets/Logo.png`; both stay.
+  - **Other docs that send work to `lib/design/spec`:** `assistant/darwin/CLAUDE.md:82` and `assistant/cli/CLAUDE.md:304` (`:303` at HEAD), the brainstorming rule; darwin `ROADMAP.md:125` and the darwin index row at `README.md:96` (10a). The app's `scripts/icon.sh` (11a, shipped 2026-11-18) also writes into `html/Logo.dc.html`; see Seam + files. `ROADMAP.md:28` is shipped history and `:105` names `assets/Logo.png`; both stay.
   - **Pending Apple-apps items that draw design:** 7 in all. The five first named (10a, 10c, 8b, 9a, 9b), plus two the recon found (tooling §5): 10b (`server-window.md:100`, builds from the `ScreenServer*.dc.html` boards) and 7a (`app-connection-local-or-server.md:9`, `:66`).
 
 **Core constraint(s).**
@@ -43,7 +43,7 @@
   - `CodeLexerTests.swift:74` and `:264` cite the styles module's code colours;
   - `Palette.swift:39` cites `lib/design/tokens.json`.
 - **Docs:**
-  - darwin `CLAUDE.md:82`, `DEVELOPER.md:49`, `ROADMAP.md:129` and `README.md:110`, and `DEVELOPER.md`'s **The app's icon**, which stops naming the board;
+  - darwin `CLAUDE.md:82`, `DEVELOPER.md:49`, `ROADMAP.md:125` and `README.md:96`, and `DEVELOPER.md`'s **The app's icon**, which stops naming the board;
   - cli `CLAUDE.md:304`;
   - 1a's ADR: its links to `spec/CLAUDE.md` repointed, with a dated note.
   - Re-check each line number when this item builds.
@@ -56,7 +56,7 @@
 - The rules being moved: [`lib/design/spec/CLAUDE.md`](../../../../design/spec/CLAUDE.md) (96 lines; the rules at :35-41) and `lib/design/spec/README.md` (54 lines).
 - The law it ends on: the design's ADR 0001 ([`lib/documentation/adrs/design/react-design-prototype.md`](../../../adrs/design/react-design-prototype.md), written by 1a).
 - Siblings: [react-design-prototype.md](../../../adrs/design/react-design-prototype.md) (1a's ADR 0001), [scaffold-and-layering-check.md](scaffold-and-layering-check.md) (1b), [old-prototype-baseline.md](old-prototype-baseline.md) (1c), [styles-shell-and-the-first-screen.md](styles-shell-and-the-first-screen.md) (1e), [gallery-and-foundations.md](gallery-and-foundations.md) (1q), [build-boards-as-pages.md](build-boards-as-pages.md) (1r), [parity-proof.md](parity-proof.md) (1s).
-- Cross-queue: [10a](../../darwin/macos/v0.2.6/design-the-server-window.md), [10b](../../darwin/macos/v0.2.6/server-window.md), [10c](../../darwin/macos/v0.2.7/people-screens.md), [8b](../../darwin/ipados/v0.2.5/ipad-app.md), [9a](../../darwin/ios/v0.3.0/iphone-app.md), [9b](../../darwin/ios/v0.3.0/foldable-iphone.md), [7a](../../darwin/v0.2.4/app-connection-local-or-server.md).
+- Cross-queue: [10a](../../darwin/macos/v0.2.4/design-the-server-window.md), [10b](../../darwin/macos/v0.2.4/server-window.md), [10c](../../darwin/macos/v0.2.4/people-screens.md), [8b](../../darwin/ipados/v0.2.5/ipad-app.md), [9a](../../darwin/ios/v0.2.5/iphone-app.md), [9b](../../darwin/ios/v0.2.5/foldable-iphone.md), [7a](../../darwin/v0.2.4/app-connection-local-or-server.md).
 
 **Decisions made** (dated):
 - 2026-11-14: The user's call: the prototype is rebuilt in React, TypeScript and Vite with the production GUIs' layered shape, and stays the design's cross-platform source of truth.

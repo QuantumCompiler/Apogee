@@ -83,7 +83,7 @@ This item delivers four things:
   - [61a](sessions-as-training-data.md) supplies the dataset.
   - [60a](../v0.2.4/one-tool-definition.md) supplies the definitions a step offers. Its own Reference names 61a's use of them, a recorded call's class read from the definition and not from a name, and this item reads them through 61a's records.
   - [60b](../v0.2.4/device-tools.md) and [59b](../v0.2.3/machine-mode-over-the-network.md) are why held-out sessions include a desktop's own files and shell.
-  - The Apple platforms land whole in [GUI 9c](../../darwin/v0.3.0/three-apple-platforms-whole.md) before this item.
+  - The Apple platforms land whole in [GUI 9c](../../darwin/v0.2.5/three-apple-platforms-whole.md) before this item.
 - External prior art: none checked for this document. Function-calling leaderboards score name and argument matches as `match` does, but no external suite was read, and none is cited as followed.
 
 **Decisions made** (dated):
@@ -93,7 +93,7 @@ This item delivers four things:
   - **Where the work happens is C.** Server tools by default, and a connected desktop offers its own files and shell. Held-out steps keep their definitions' `runs`, so the eval measures whether a model calls the Mac's own tools when they are the ones offered, and so works on the Mac's files when asked to change a project on the Mac.
   - **Remote is an add-on**, never the only way Apogee runs. The CLI alone and the Mac app over pipes to a local CLI stay complete and the default. Hence the anti-goal above: the regime and the eval need no server, network or account.
   - **iPhone and iPad are clients of the person's server only**; the Mac and the CLI stay standalone. A session an iPhone or iPad drives runs on the server and is saved in the server's store, so the regime there trains on it as on any other. On a standalone Mac the store holds the Mac's own chats, and the regime trains on those.
-  - **Placement.** The common tool definition lands before v0.3.0, and Apogee-tuned training after it. Track 61 sits in v0.3.1, the first version after the three Apple platforms are whole.
+  - **Placement.** The common tool definition lands before v0.2.5, and Apogee-tuned training after it. Track 61 sits in v0.2.6, the first version after the three Apple platforms are whole.
 - 2026-11-07: Gated on 61a. The regime trains on 61a's dataset and the held-out suite is cut from it, so without 61a there is nothing of the person's to train on or hold out. The bundled `apogee-protocol` suite and `train eval --backend` would be useful alone, but they ship with the regime, so the gate and the data arrive together.
 
 **Open calls:**
@@ -142,7 +142,7 @@ This item delivers four things:
   - A family, or a snapshot, that is not installed is skipped and said. Nothing is pulled.
 - [ ] `reference/training.md` documents the format, the checks, the split, the gate and the regime, and the full suite is green.
 
-**Scope note.** Earmarked for v0.3.1 (track 61); gated on [61a](sessions-as-training-data.md). Out of scope:
+**Scope note.** Earmarked for v0.2.6 (track 61); gated on [61a](sessions-as-training-data.md). Out of scope: Moved here from v0.3.1 on 2026-11-18, when the releases were merged (the user's call); the id is unchanged.
 - Live multi-step episodes.
 - A judge of any kind.
 - A preference trainer over 61a's pairs.

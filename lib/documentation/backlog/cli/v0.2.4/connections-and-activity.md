@@ -18,7 +18,7 @@ Evidence re-measured 2026-11-14: sources at HEAD (`4acf4a2b`), and a probe on th
    None of them answers "who is connected now, from where, doing what, and how much have they used".
 
 This item delivers **an activity table in the running server, keyed by credential**:
-- One row per credential: a paired device, a paired app, the admin token, and anonymous callers (one row per peer address). Once [63a](../v0.2.7/people-on-one-server.md) ships, each row also names its person.
+- One row per credential: a paired device, a paired app, the admin token, and anonymous callers (one row per peer address). Once [63a](people-on-one-server.md) ships, each row also names its person.
 - Each row holds:
   - the addresses it called from;
   - whether it is connected, since when, and when it was last seen;
@@ -98,9 +98,9 @@ This item delivers **an activity table in the running server, keyed by credentia
   - [62h](local-admin-reads.md): the other reads a local admin screen needs.
   - [59a](../v0.2.3/paired-devices.md) and [59f](../v0.2.3/paired-apps-with-scopes.md): the credentials this item is keyed by; gated on both.
   - [59b](../v0.2.3/machine-mode-over-the-network.md), [59c](../v0.2.3/many-sessions-at-once.md), [59d](../v0.2.3/reads-and-commands-over-the-network.md) and [59e](../v0.2.3/tasks-outlive-the-connection.md): the doors whose requests are counted.
-  - [63a](../v0.2.7/people-on-one-server.md): adds the person to each row.
-  - [63c](../v0.2.7/allowances-keys-and-usage.md): usage per person that outlives a restart, and its limits.
-  - darwin [10a](../../darwin/macos/v0.2.6/design-the-server-window.md) and [10b](../../darwin/macos/v0.2.6/server-window.md): the server window's activity part, which reads `serve activity --output-format json` over pipes.
+  - [63a](people-on-one-server.md): adds the person to each row.
+  - [63c](allowances-keys-and-usage.md): usage per person that outlives a restart, and its limits.
+  - darwin [10a](../../darwin/macos/v0.2.4/design-the-server-window.md) and [10b](../../darwin/macos/v0.2.4/server-window.md): the server window's activity part, which reads `serve activity --output-format json` over pipes.
 - Prior art (the spike's survey, 2026-11-14): Open WebUI's admins can read users' chats, and its switch against that only hides them in the interface. The deliberate divergence here is structural: no field exists to hold a conversation, so no screen can show one. Jellyfin and Plex list each active device or member. Apogee's rows are the same idea, keyed by the credential that 59a and 59f mint.
 
 **Decisions made** (dated):
@@ -109,13 +109,13 @@ This item delivers **an activity table in the running server, keyed by credentia
   - Administering is local by default. The owner may mark chosen paired devices as allowed to administer remotely ([62g](administering-local-and-marked-devices.md)), which revises 59d's "the admin plane keeps its one token for scripts and the operator" ([reads-and-commands-over-the-network.md](../v0.2.3/reads-and-commands-over-the-network.md):84). Otherwise the admin plane, this item's route included, stays local-only.
   - The owner sees members' metadata (devices, apps, activity, which model, when) and never chat contents. Whoever controls the server Mac can still read its disk, and the documentation says so honestly.
   - The window installs the server as a background service (launchd) and starts, stops and restarts it ([62d](serve-as-a-background-service.md)). The table lives in the serving process, so it is the same under the service as under a terminal's `serve`.
-  - People are a household or a small team, and the design serves both. Members use the server's local models only, unless the owner grants a household cloud key with a limit ([63c](../v0.2.7/allowances-keys-and-usage.md)). So "which model" is a row's per-backend counts, the fact 63c's limits and usage build on.
+  - People are a household or a small team, and the design serves both. Members use the server's local models only, unless the owner grants a household cloud key with a limit ([63c](allowances-keys-and-usage.md)). So "which model" is a row's per-backend counts, the fact 63c's limits and usage build on.
   - The words are "people" and "access" (Owner, Member), never "roles", which already means model roles in Apogee. This item names no person and no access; it is keyed by credential until 63a.
   - The defaults the user took the same day, for the items that own them: live changes applied on the spot by a reload, with what still needs a restart said (62b); an audit kept 90 days of who, what and when, without request contents (62f); collections as shared libraries handed out per person plus private ones of a member's own, and notes and saved decisions personal by default (63b); a member's apps paired by the owner at the server Mac, capped at that member's allowance (63a, 63c); a task queue per person rather than a refusal (63e). The model behind them: the owner (the OS account that owns `APOGEE_HOME` on the server Mac) and members, each with an allowance in 59f's scope shape, presets (Full, Family, Limited) rather than groups, and a guest as a member on Limited with nothing kept. None changes this table, which keeps nothing past the server's run for anyone.
   - The SPEC amendments are approved and already written ([SPEC.md](../../../assistant/cli/SPEC.md) → Core surfaces 4, "Revised again 2026-11-14"; [GUI SPEC.md](../../../assistant/gui/SPEC.md) → Core surfaces 3, the server window).
   - The standing law: remote use is an add-on, and the CLI alone and the Mac app over pipes stay complete and need no server.
-- 2026-11-14: Placement (the user's call): both halves before v0.3.0, the server console in v0.2.6 (CLI track 62, darwin/macos track 10's 10a and 10b) and people and access in v0.2.7 (CLI track 63, darwin/macos 10c). This item is CLI 62e, v0.2.6, gated on 59a (device credentials), 59f (app credentials and a session's minter) and 62a (finding and reaching the running server). Darwin 10b reads it. 63a adds the person in v0.2.7. Nothing already queued is renumbered.
-- 2026-11-14: Three items, one caller, three lifetimes. This item is the live view, for the server's run. [62f](audit-log.md) is the kept record of who did what, 90 days, without request contents (the user's default). [63c](../v0.2.7/allowances-keys-and-usage.md) is usage per person that outlives a restart and carries limits. This item persists nothing.
+- 2026-11-14: Placement (the user's call): both halves before v0.2.5, both in v0.2.4: the server console (CLI track 62, darwin/macos track 10's 10a and 10b) and people and access (CLI track 63, darwin/macos 10c). This item is CLI 62e, v0.2.4, gated on 59a (device credentials), 59f (app credentials and a session's minter) and 62a (finding and reaching the running server). Darwin 10b reads it. 63a adds the person later in the same release. Nothing already queued is renumbered.
+- 2026-11-14: Three items, one caller, three lifetimes. This item is the live view, for the server's run. [62f](audit-log.md) is the kept record of who did what, 90 days, without request contents (the user's default). [63c](allowances-keys-and-usage.md) is usage per person that outlives a restart and carries limits. This item persists nothing.
 - 2026-11-14: The verb is `serve activity` (the plan's name), not the spike's `serve connections`, because a row outlives its connection: a disconnected device keeps its counts until the server stops.
 - 2026-11-14: "Never contents" is held by the types, not by the window. A title is left out with the messages, because a model writes it from the conversation.
 
@@ -159,7 +159,7 @@ No **[user]** call blocks this item.
 - [ ] With no server running, `apogee serve activity` exits 1 with 62a's words. `chat` and `complete` behave as before. The full suite is green on all five targets.
 - [ ] Optional live pass, said when skipped: the user runs `apogee-dev serve --bind 0.0.0.0 --allow-remote`, chats from a paired second machine, and sees its row, address and counts in `apogee-dev serve activity` on the server Mac.
 
-**Scope note.** Earmarked for v0.2.6 (track 62); gated on 59a, 59f and 62a. Darwin 10b reads it, and 63a extends it. Out of scope:
+**Scope note.** Earmarked for v0.2.4 (track 62); gated on 59a, 59f and 62a. Darwin 10b reads it, and 63a extends it. Out of scope: Moved here from v0.2.6 on 2026-11-18, when the releases were merged (the user's call); the id is unchanged.
 - Usage that outlives a restart, per-person usage, limits and whose keys pay (63c).
 - The audit log and its retention (62f).
 - The person on each row (63a).

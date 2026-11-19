@@ -77,7 +77,7 @@ This item delivers **people, and a person behind every credential**:
   - A member's session and command children get 59f's `--scope-file`, carrying the composed scope and the person id. A child started without one reads nothing new, as in 59f.
   - Until 63b ships, a member's sessions and tasks run with recall off, as 59f's app sessions do. A Limited person's sessions run as `chat --private` does: never written (`Session::never_written`, `session.h:184-189`).
   - `GET /v1/harness/device` answers the caller's person and their access in plain words.
-- 62f's audit writer ([audit-log.md](../v0.2.6/audit-log.md)): the actor gains `person` (id, and the name at that moment). The `people` verbs and every `--for` binding are audited actions.
+- 62f's audit writer ([audit-log.md](audit-log.md)): the actor gains `person` (id, and the name at that moment). The `people` verbs and every `--for` binding are audited actions.
 - `source/presentation/cli/people_cmd.h/.cpp` (new):
   - `apogee people add NAME [--preset full|family|limited] [--allow KIND:NAME]… [--deny KIND:NAME]… [--json]`;
   - `people list [--json]`;
@@ -145,13 +145,13 @@ This item delivers **people, and a person behind every credential**:
 - Siblings:
   - [59a](../v0.2.3/paired-devices.md), [59b](../v0.2.3/machine-mode-over-the-network.md), [59d](../v0.2.3/reads-and-commands-over-the-network.md), [59e](../v0.2.3/tasks-outlive-the-connection.md) and [59f](../v0.2.3/paired-apps-with-scopes.md): the gate, the doors and the scope this item keys by person. This item is gated on 59f.
   - [59g](../v0.2.3/capability-discovery.md): capability discovery, filtered by the caller's scope, which becomes the composed one.
-  - [62f](../v0.2.6/audit-log.md): the audit, whose actor gains the person.
-  - [62g](../v0.2.6/administering-local-and-marked-devices.md): administering is local, plus devices the owner marks. Only the owner's devices may be marked.
-  - [62h](../v0.2.6/local-admin-reads.md): what a local admin screen reads, which `people list --json` joins.
-  - [62b](../v0.2.6/serve-reload-and-served-vs-disk.md): reload. People need none, being read fresh by mtime.
-  - [62e](../v0.2.6/connections-and-activity.md): connections and activity, which gain the person column.
+  - [62f](audit-log.md): the audit, whose actor gains the person.
+  - [62g](administering-local-and-marked-devices.md): administering is local, plus devices the owner marks. Only the owner's devices may be marked.
+  - [62h](local-admin-reads.md): what a local admin screen reads, which `people list --json` joins.
+  - [62b](serve-reload-and-served-vs-disk.md): reload. People need none, being read fresh by mtime.
+  - [62e](connections-and-activity.md): connections and activity, which gain the person column.
   - [63b](personal-data-has-an-owner.md), [63c](allowances-keys-and-usage.md), [63d](consent-goes-to-its-person.md) and [63e](task-slots-per-person.md): the rest of track 63, each gated on this item.
-  - darwin [10c](../../darwin/macos/v0.2.7/people-screens.md): the people screens in the server window, gated on this item and 63c.
+  - darwin [10c](../../darwin/macos/v0.2.4/people-screens.md): the people screens in the server window, gated on this item and 63c.
   - darwin [7a](../../darwin/v0.2.4/app-connection-local-or-server.md): the app's side of a paired connection, unchanged by whose it is.
 - External prior art, from the spike (2026-11-14). It checked Open WebUI, LibreChat and Home Assistant in their official documentation, and Jellyfin, Plex Home and Nextcloud from third-party pages.
   - **Plex Home** is the closest match: one owner, up to 15 managed or invited members, and libraries shared per person.
@@ -183,7 +183,7 @@ This item delivers **people, and a person behind every credential**:
   - Members each have an allowance in 59f's `AppScope` shape.
   - Presets (Full, Family, Limited) are used instead of groups.
   - A guest is a member on the Limited preset with nothing kept.
-- 2026-11-14: Placement, the user's call: both halves land before v0.3.0, the server console in v0.2.6 (CLI track 62, darwin/macos 10a–10b) and people and access in v0.2.7 (CLI track 63, darwin/macos 10c). This item is CLI 63a, v0.2.7, first of track 63, gated on 59f. 63b–63e gate on it, and darwin 10c gates on it and 63c. Nothing already queued is renumbered. It collapses two walls into one item: who a person is (P1), and the ceiling a person puts on their credentials (P5).
+- 2026-11-14: Placement, the user's call: both halves land before v0.2.5, both in v0.2.4: the server console (CLI track 62, darwin/macos 10a–10b) and people and access (CLI track 63, darwin/macos 10c). This item is CLI 63a, v0.2.4, first of track 63, gated on 59f. 63b–63e gate on it, and darwin 10c gates on it and 63c. Nothing already queued is renumbered. It collapses two walls into one item: who a person is (P1), and the ceiling a person puts on their credentials (P5).
 - 2026-11-14: This item revises three recorded defaults, **for members only**:
   - 59a's "The server admits one person's devices" ([paired-devices.md](../v0.2.3/paired-devices.md):116) becomes "the owner's and the members' devices, each bound to its person".
   - 59f's "the person's devices are not scoped" ([paired-apps-with-scopes.md](../v0.2.3/paired-apps-with-scopes.md):148) stays true of the owner's devices. A member's devices are held to that member's access.
@@ -244,7 +244,7 @@ No **[user]** call blocks this item.
 - [ ] `chat`, `complete`, `execute` and `task run` behave byte for byte as before with no `people.json`. A stock OpenAI client gets the same responses with people added as without. The full suite is green on all five targets.
 - [ ] Optional live pass, said when skipped: the user runs `apogee-dev serve --bind 0.0.0.0 --allow-remote --devices-only`, adds a test member, pairs a second machine for them, and sees the owner's sessions invisible to it and a backend outside its access refused.
 
-**Scope note.** Earmarked for v0.2.7 (track 63); gated on 59f. 63b, 63c, 63d and 63e gate on it, and darwin 10c gates on it and 63c. Out of scope:
+**Scope note.** Earmarked for v0.2.4 (track 63); gated on 59f. 63b, 63c, 63d and 63e gate on it, and darwin 10c gates on it and 63c. Out of scope: Moved here from v0.2.7 on 2026-11-18, when the releases were merged (the user's call); the id is unchanged.
 - Personal data on disk, recall per person, notes, knowledge, collections and training (63b).
 - Household and per-person keys, limits and usage (63c).
 - Routing questions and approvals to the session's person (63d).
