@@ -4,7 +4,7 @@
 
 **Modules:** `clock` (the old prototype's 400 ms tick: a preset's start ticks applied at once, still stopping it there, a fixed "now" and the replay's pace; tests drive it by hand), `process` (the stand-in for running apogee: an argument list answered from a preset's rule table with what the CLI printed, in the three modes installed, missing and config-typo). Both are design 1d's.
 
-**What `process` holds:** `StandInChild` and its rule table -- each answer's replay rules too, `exitAfter`, `Freeze`, `Continuations` and `cancelled` (design 1v) -- the `Preset` type (so a place's `Previews/` can name one), the Mac app's `ChildExit`, `BoundedTail` and `LineFramer`, and `AsyncStream`, Swift's stream, which TypeScript lacks. The stand-in is handed its recordings: nothing in this layer imports one.
+**What `process` holds:** `StandInChild` and its rule table -- each answer's replay rules too, `exitAfter`, `Freeze`, `Continuations` and `cancelled` (design 1v) -- the `Preset` type (so a place's `Previews/` can name one; its `console` rules answer the console's own child beside the preset's, 1g), the Mac app's `ChildExit`, `BoundedTail` and `LineFramer`, and `AsyncStream`, Swift's stream, which TypeScript lacks. The stand-in is handed its recordings: nothing in this layer imports one.
 
 **May import:** this layer only, and the packages `package.json` lists as dependencies. No React, no `.tsx` file, no Node built-in (the app runs in a browser), no module above.
 

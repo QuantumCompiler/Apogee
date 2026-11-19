@@ -1,9 +1,10 @@
+import configScan from '@recorded/business/reads/Fixtures/config-scan.txt?raw'
 import { describe, expect, test } from 'vitest'
 import { presetFor } from '../../../source/presentation/app/Previews/Presets'
 import { modeRules } from '../../../source/presentation/app/Previews/ModeRules'
 import { AppViewModel, scenarioTurns } from '../../../source/presentation/app/ViewModels/AppViewModel'
 import type { ApogeeMode } from '../../../source/infrastructure/process/StandInChild'
-import { sessionSamples } from '../../../source/presentation/session/Previews/SessionPresets'
+import { kvChat, sessionSamples } from '../../../source/presentation/session/Previews/SessionPresets'
 
 /** Lets every read the start began land. */
 const settled = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -138,11 +139,15 @@ describe('the session in the composition (design 1u)', () => {
     expect(face.state).toBe('empty')
     expect(face.header).toMatchObject({ title: 'New session', inspectorOpen: true, model: { name: 'claude', kind: 'api', tag: 'API · billed per use' } })
     expect(face.header.meter.text, 'models info states no window for claude').toBe('unknown')
+    // 1g: the library reads its list and the model facts before any session opens, as the Mac's does, and the inspector's once the session has said its suite.
     expect(app.child.calls.map((call) => `${call.kind}: ${call.arguments.join(' ')}`)).toEqual([
-      'chats: chat --output-format stream-json --input-format stream-json --tools',
+      'reads: chats list',
       'reads: models list',
+      'chats: chat --output-format stream-json --input-format stream-json --tools',
       'commands: config get models.default_suite',
+      'reads: models status --suite fast',
       'reads: models info claude',
+      'reads: chats recall',
     ])
   })
 
@@ -425,4 +430,186 @@ describe("the session's scenarios and states in the composition (design 1v)", ()
     expect(reasoning(chat).startsWith(reasoning(app))).toBe(true)
     expect(reasoning(chat).length).toBeGreaterThan(reasoning(app).length)
   })
+})
+
+describe('the Sessions place in the composition (design 1g)', () => {
+  test('every screen’s sidebar lists the recorded chats by date: the monitor’s, a chat preset’s, and the console’s', async () => {
+    for (const start of ['monitor', 'chat:new', 'chat:pr', 'console']) {
+      const app = await started(start)
+      expect(app.library.listFace().count, start).toBe(13)
+      expect(app.library.listFace().groups.map((group) => group.title), start).toEqual(['Today', 'Yesterday', 'Previous 7 days', 'Earlier'])
+    }
+  })
+
+  test('the open session is its listed row, and its header takes the list’s name: chat is "TaskGroup timeouts in the ingest runner"', async () => {
+    const app = await started('chat')
+    expect(app.session.face().header.title).toBe('TaskGroup timeouts in the ingest runner')
+    expect(app.library.listFace().groups[0]?.rows.find((row) => row.current)?.title).toBe('TaskGroup timeouts in the ingest runner')
+  })
+
+  test('⌥⌘I, handed by the shell, shows and hides the inspector on a chat preset', async () => {
+    const app = await started('chat:restarting')
+    expect(app.session.inspectorOpen).toBe(false)
+    expect(app.shell.press({ key: 'i', modifiers: ['option', 'command'] })).toBe(true)
+    expect(app.session.inspectorOpen).toBe(true)
+    app.shell.press({ key: 'i', modifiers: ['option', 'command'] })
+    expect(app.session.inspectorOpen).toBe(false)
+  })
+
+  test('chat:compacting: retry’s and kv’s rows busy, kv’s menu open on Stop compacting, as the old frame opens it', async () => {
+    const app = await started('chat:compacting')
+    const rows = app.library.listFace().groups.flatMap((group) => group.rows)
+    expect(rows.filter((row) => row.busy).map((row) => row.title)).toEqual(['Make fetch retries configurable', 'Where llama.cpp sizes the KV cache'])
+    const kv = rows.find((row) => row.menuOpen)
+    expect(kv?.title).toBe('Where llama.cpp sizes the KV cache')
+    expect(kv?.items.map((item) => item.label)).toContain('Stop compacting')
+    expect(app.shell.menu).toBe(`row:${kv?.id}`)
+  })
+
+  test('execute: "New execute session" over the play session, suite coding, ~/code/ingest, orchestrating, and its line', async () => {
+    const app = await started('execute')
+    expect(app.shell.sheet).toBe('execute')
+    expect(app.session.face().header.banner).toBe('execute · suite coding · orchestrating · in ingest')
+    const door = app.library.door()
+    expect(door).toMatchObject({ suite: 'coding', folder: '~/code/ingest', orchestrate: true, canOrchestrate: true, command: 'cd ~/code/ingest && apogee execute --tools --suite coding --orchestrate' })
+    expect(door.suites[0]?.label).toBe('The default suite (coding)')
+    expect(door.models[0]?.label).toBe('The suite’s chat member')
+    expect(app.child.unanswered).toEqual([])
+  })
+
+  test('execute: Open opens the door’s session, the catalog read first, the door closed', async () => {
+    const app = await started('execute')
+    await app.library.openExecute()
+    await settled()
+    expect(app.shell.sheet).toBeUndefined()
+    expect(app.child.calls.filter((call) => call.kind === 'chats').at(-1)?.arguments).toEqual(['execute', '--output-format', 'stream-json', '--input-format', 'stream-json', '--tools', '--suite', 'coding', '--orchestrate'])
+    expect(app.child.unanswered).toEqual([])
+  })
+
+  test('console: the console over the Streaming session at its starting frame -- models list’s output, apogee reset refused, `models ` typed and ten words offered', async () => {
+    const app = await started('console')
+    expect(app.shell.overlay).toBe('console')
+    const face = app.console.face()
+    expect(face.lines[0]).toMatchObject({ kind: 'command', text: 'apogee models list' })
+    expect(face.lines.slice(-3).map((line) => [line.kind, line.text])).toEqual([
+      ['note', 'Done.'],
+      ['command', 'apogee reset'],
+      ['problem', 'Not run here: deletes the data directory the running app stands on -- run it at a prompt, with the app closed.'],
+    ])
+    expect(face.input).toBe('models ')
+    expect(face.suggestions).toEqual(['list', 'info', 'status', 'rename', 'pull', 'delete', 'quantize', 'convert', 'repair', 'migrate'])
+    expect(app.session.transcript.status.case).toBe('thinking')
+    expect(app.child.unanswered).toEqual([])
+    expect(app.consoleChild.calls.map((call) => `${call.kind}: ${call.arguments.join(' ')}`), 'the console’s lines reach its own child').toEqual(['jobs: models list', 'commands: __complete models '])
+    expect(app.consoleChild.unanswered).toEqual([])
+  })
+
+  test('off Sessions no row is current, as the old list draws it (`s.screen === \'chat\'`); back on Sessions the open session’s row is again', async () => {
+    const app = await started('chat')
+    const current = () => app.library.listFace().groups.flatMap((group) => group.rows.filter((row) => row.current).map((row) => row.title))
+    expect(current()).toEqual(['TaskGroup timeouts in the ingest runner'])
+    app.shell.go('models')
+    expect(current()).toEqual([])
+    app.shell.go('sessions')
+    expect(current()).toEqual(['TaskGroup timeouts in the ingest runner'])
+  })
+
+  for (const overlay of ['console', 'monitor'] as const) {
+    test(`a row's act leaves the ${overlay} open, as the old act does ({ screen: 'chat', menu: null }): Details… shows Sessions, its sheet over it`, async () => {
+      const app = await started(overlay)
+      app.shell.go('models')
+      expect(app.shell.overlay).toBe(overlay)
+      app.library.rowAct(kvChat, 'details')
+      await settled()
+      expect(app.shell.overlay).toBe(overlay)
+      expect(app.shell.route).toBe('sessions')
+      expect(app.shell.sheet).toBe('chatInfo')
+    })
+  }
+
+  test('Stop compacting stays on the place shown, as the old stopCompacting only says', async () => {
+    const app = await started('chat:compacting')
+    app.shell.go('models')
+    app.library.rowAct(kvChat, 'stopCompacting')
+    await settled()
+    await settled()
+    expect(app.shell.route).toBe('models')
+    expect(app.shell.toast?.text).toBe('Not compacted: stopped')
+  })
+
+  test('the console answers on every screen, as the default says: at chat, a line nobody recorded prints the prototype’s "Done."', async () => {
+    const app = await started('chat')
+    app.shell.open('console')
+    app.console.setInput('doctor')
+    const ran = app.console.run()
+    app.clock.advance(2)
+    await ran
+    expect(app.console.face().lines.map((line) => [line.kind, line.text])).toEqual([
+      ['command', 'apogee doctor'],
+      ['note', 'Done.'],
+    ])
+  })
+
+  test('at console, a line with a recorded answer prints it: Clear, then config scan says config-scan.txt, then "Done."', async () => {
+    const app = await started('console')
+    app.console.clear()
+    app.console.setInput('config scan')
+    const ran = app.console.run()
+    app.clock.advance(20)
+    await ran
+    const lines = app.console.face().lines
+    expect(lines[0]).toMatchObject({ kind: 'command', text: 'apogee config scan' })
+    expect(lines[1]).toMatchObject({ kind: 'out', text: configScan.split('\n')[0] })
+    expect(lines.at(-1)).toMatchObject({ kind: 'note', text: 'Done.' })
+  })
+
+  test("the console's catch-all is the console's alone: at chat, a row's compaction nobody recorded is not said done", async () => {
+    const app = await started('chat')
+    app.library.rowAct(kvChat, 'compact')
+    void app.library.confirm()
+    for (let tick = 0; tick < 3; tick += 1) {
+      app.clock.advance(1)
+      await settled()
+    }
+    expect(app.shell.toast?.text).toBe(`Not compacted: no recorded answer for apogee chats compact ${kvChat} --yes`)
+  })
+
+  test('a list row opens its chat through the session’s leave: a private conversation asks first', async () => {
+    const app = await started('chat:private')
+    app.session.setDraft('a secret')
+    app.session.submit()
+    app.library.open(kvChat)
+    expect(app.shell.confirm).toBe('endPrivate')
+    app.keepRunning()
+    expect(app.session.privateMode).toBe('nothingWritten')
+  })
+})
+
+test("chat:play: the inspector's turn rows are the play's stages, by their count, from the replayed events (design 1g)", async () => {
+  const app = await started('chat:play')
+  const rows = app.library.inspector().turn.rows
+  expect(rows.map((row) => row.label)).toEqual(['Stage 1/2', 'Stage 2/2', 'Usage'])
+  expect(rows[0]?.value).toMatch(/^summarize — asking utility \(helper\): /)
+  expect(app.library.inspector().turn.status).toEqual({ words: 'done', tone: 'tertiary' })
+})
+
+test("chat:retry: the inspector's turn waits for you at the gate -- the reads, then write_file needing your OK, in the old row's words (design 1g)", async () => {
+  const app = await started('chat:retry')
+  const face = app.library.inspector().turn
+  expect(face.status).toEqual({ words: 'waiting for you', tone: 'warning' })
+  expect(face.rows.map((row) => [row.label, row.value, row.sub])).toEqual([
+    ['Thinking', 'default', ''],
+    ['read_file', 'config.toml', 'done'],
+    ['read_file', 'src/ingest/runner.py', 'done'],
+    ['write_file', 'src/ingest/runner.py', '+11 −3 · needs your OK'],
+    ['Usage', 'reported when the turn ends', ''],
+  ])
+})
+
+test("chat:crash: the inspector's turn failed -- vast, in the error color, the CLI's words under it, and no usage row, as the old failed frame (design 1g)", async () => {
+  const app = await started('chat:crash')
+  const face = app.library.inspector().turn
+  expect(face.status).toEqual({ words: 'failed', tone: 'error' })
+  expect(face.rows.map((row) => [row.label, row.value, row.tone])).toEqual([['Model', 'vast', 'error']])
+  expect(face.rows[0]?.sub).toMatch(/^vast: could not load the model at /)
 })

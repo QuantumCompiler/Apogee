@@ -24,6 +24,8 @@ export interface ShellViewProps {
   readonly confirm?: (kind: string) => ReactNode
   /** The sidebar's session list (1g). */
   readonly sessions?: () => ReactNode
+  /** The sidebar's top row's new-session buttons (1g). */
+  readonly newSessions?: () => ReactNode
   /** The SYSTEM strip's numbers. */
   readonly strip?: SystemStrip | undefined
   /** Runs going on, by place: the places' badges. */
@@ -39,7 +41,7 @@ export interface ShellViewProps {
  * toast. It hands every key the browser passes to the shell's key map, and
  * tells the shell its width, which collapses the sidebar at 900 px.
  */
-export function ShellView({ model, screen, overlay, settings, sheet, confirm, sessions, strip, running }: ShellViewProps) {
+export function ShellView({ model, screen, overlay, settings, sheet, confirm, sessions, newSessions, strip, running }: ShellViewProps) {
   useObserved(model)
   useObserved(model.theme)
 
@@ -74,7 +76,7 @@ export function ShellView({ model, screen, overlay, settings, sheet, confirm, se
   } as CSSProperties
   return (
     <div className="ap" data-theme={model.theme.theme} data-collapsed={layout.collapsed ? '' : undefined} data-narrow={layout.narrow ? '' : undefined} style={style}>
-      {model.sidebarHidden ? null : <Sidebar model={model} strip={strip} sessions={sessions} running={running} />}
+      {model.sidebarHidden ? null : <Sidebar model={model} strip={strip} sessions={sessions} newSessions={newSessions} running={running} />}
       <main aria-label={titleOf(model.route)} style={{ flex: '1 1 0', minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
         {screen(model.route)}
       </main>

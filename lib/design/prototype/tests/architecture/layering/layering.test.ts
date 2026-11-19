@@ -71,6 +71,24 @@ describe('the layering check, on this prototype', () => {
     ])
   })
 
+  test("violations planted in the Sessions place and the console fail, each naming its file: React in the library's view-model, and the console importing sessions (design 1g)", () => {
+    const disk = new DiskTree(root)
+    const planted: Record<string, string> = {
+      'source/presentation/sessions/ViewModels/SessionLibraryViewModel.ts': `import { useState } from 'react'\n${disk.contents('source/presentation/sessions/ViewModels/SessionLibraryViewModel.ts')}`,
+      'source/presentation/console/Views/ConsoleView.tsx': `import { SessionList } from '../../sessions/Views/SessionList'\n${disk.contents('source/presentation/console/Views/ConsoleView.tsx')}`,
+    }
+    const tree: SourceTree = {
+      files: (directory) => disk.files(directory),
+      folders: (directory) => disk.folders(directory),
+      isDirectory: (path) => disk.isDirectory(path),
+      contents: (path) => planted[path] ?? disk.contents(path),
+    }
+    expect(new LayeringCheck(ModuleMap.read(tree), tree).violations()).toEqual([
+      'source/presentation/sessions/ViewModels/SessionLibraryViewModel.ts imports react: a view-model stays free of React, so it tests without a browser',
+      'source/presentation/console/Views/ConsoleView.tsx imports presentation/sessions, which presentation/console does not declare as a dependency',
+    ])
+  })
+
   test('the disk tree reads the prototype, never node_modules, build output or dot files', () => {
     const files = new DiskTree(root).files('')
     expect(files).toContain('modules.json')

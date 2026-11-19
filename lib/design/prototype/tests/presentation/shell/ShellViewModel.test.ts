@@ -71,6 +71,19 @@ describe('the shell view-model', () => {
     expect(model.press(press('⌘N')), 'a key no shell command owns is left to the page').toBe(false)
   })
 
+  test("a key the shell does not own goes to the places' keys (design 1g), and the shell's own keys never do", () => {
+    const { shell: model } = shell()
+    const handed: string[] = []
+    model.placeKeys = (keys) => {
+      handed.push(symbols(keys))
+      return keys.key === 'i'
+    }
+    expect(model.press(press('⌥⌘I'))).toBe(true)
+    expect(model.press(press('⌘N')), 'a key no place owns is still left to the page').toBe(false)
+    expect(model.press(press('⌥⌘M'))).toBe(true)
+    expect(handed).toEqual(['⌥⌘I', '⌘N'])
+  })
+
   test('the toast says one line and clears after 12 ticks of the clock; a newer one starts its own', () => {
     const { clock, shell: model } = shell()
     clock.advance(3)

@@ -57,9 +57,9 @@ export const Placeholder = () => {
   )
 }
 
-/** An overlay not yet ported: the console. */
+/** An overlay not yet ported, as the console's was until 1g: its title, what it says, and Close. */
 export const Panel = () => (
   <div className="ap" data-theme="dark" style={frame}>
-    <PlaceholderPanel title="Console" says="The console isn’t drawn here yet. Design item 1g ports it." onClose={() => {}} />
+    <PlaceholderPanel title="Console" says="An overlay's place over the window: its view is its module's, handed in by app." onClose={() => {}} />
   </div>
 )

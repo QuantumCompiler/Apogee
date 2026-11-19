@@ -32,7 +32,7 @@ export type SessionLeave =
   | { readonly type: 'open'; readonly id: string }
   | { readonly type: 'execute' }
 
-/** An act the window hands to its owner -- the app root until 1g's library: the Mac app's `SessionAction`, and the old prototype's doors. */
+/** An act the window hands to its owner -- the Sessions place's library (1g): the Mac app's `SessionAction`, and the old prototype's doors. */
 export type SessionAction =
   /** Choose the suite: the owner reads the suites and the CLI's verdict on each, then presents the chooser. */
   | { readonly case: 'chooseSuite' }
@@ -300,7 +300,7 @@ export class SessionViewModel extends Observable {
   citation: { readonly range: number; readonly turn: number | undefined; readonly index: number } | undefined = undefined
   /** The option a standing question card opens with picked: a preset's (the old `pr: { choice: 'batch' }`), for its first item where that item offers it. */
   private preselected: string | undefined = undefined
-  /** The inspector's column, open as the old `inspector: true` opens it (1g draws the pane, and may move this into its library). */
+  /** The inspector's column, open as the old `inspector: true` opens it; the Sessions place (1g) draws the pane and carries this from one session to the next. */
   inspectorOpen = true
   /** The open header or composer menu. */
   menu: 'model' | 'think' | 'attach' | undefined = undefined
@@ -316,7 +316,7 @@ export class SessionViewModel extends Observable {
   defaultSuite: string | undefined = undefined
   /** The suite chooser, while it is open. */
   suiteChooser: SuiteChooser | undefined = undefined
-  /** The session's name, as the Sessions place lists it (1g); until then the window's own words. */
+  /** The session's name, as the Sessions place lists its chat (1g's `knowName`); else the window's own words. */
   name: string | undefined = undefined
   /** Told every event, after the transcript has folded it: how the owner reads what a turn changed. */
   observer: ((event: SessionEvent) => void) | undefined = undefined
@@ -403,6 +403,12 @@ export class SessionViewModel extends Observable {
   /** `models.default_suite`, read when a new chat opens: the suite it runs under, which the header names. Empty when none is set. */
   knowDefaultSuite(name: string | undefined): void {
     this.update(() => (this.defaultSuite = name))
+  }
+
+  /** The session's name, as the Sessions place's list names its chat (1g): the header's title. */
+  knowName(name: string | undefined): void {
+    if (this.name === name) return
+    this.update(() => (this.name = name))
   }
 
   // MARK: - The session

@@ -8,7 +8,7 @@ import { PlayNarration } from './Play'
 /**
  * Where the turn stands: the Mac app's `Transcript.Status`. Restarting is
  * 1v's (a child stopped for another); paused, a child freed while out of
- * view, is 1g's.
+ * view, is the Mac library's, which the design draws none of (1g).
  */
 export type TranscriptStatus =
   /** Spawned; the session has not spoken. */

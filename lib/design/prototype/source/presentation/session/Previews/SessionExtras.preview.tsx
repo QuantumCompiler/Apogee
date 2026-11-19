@@ -3,7 +3,7 @@ import privateUnsent from '@recorded/data/protocol/Fixtures/private-unsent.jsonl
 import { useObserved } from '../../styles/Observation/useObserved'
 import { ContextMeter } from '../ViewModels/SessionActions'
 import type { SessionFace, SessionViewModel } from '../ViewModels/SessionViewModel'
-import { AttachmentChips, EmptySessionView, HeldLines, InspectorPlaceholder, MeterView, ModelGlyph, ModelTag, SuggestionList } from '../Views/SessionExtras'
+import { AttachmentChips, EmptySessionView, HeldLines, MeterView, ModelGlyph, ModelTag, SuggestionList } from '../Views/SessionExtras'
 import { scenario } from './ScenarioStreams'
 import { sessionSamples } from './SessionPresets'
 import { useSessionPreview } from './SessionPreview'
@@ -107,14 +107,6 @@ export const SuggestFiles = () => (
 
 /** An `@` that matches none. */
 export const SuggestNoFile = () => <Suggestions suggestions={{ kind: 'files', folder: sessionSamples.listing.folder, items: [] }} />
-
-/** The inspector's column, reserved until 1g draws the pane. */
-export const Inspector = () => (
-  <div className="ap" data-theme="dark" style={{ ...frame, height: 420, flexDirection: 'row', padding: 0 }}>
-    <div style={{ flex: '1 1 0' }} />
-    <InspectorPlaceholder />
-  </div>
-)
 
 /** Each kind's glyph and tag: local, API billed per use, subscription. */
 export const ModelKinds = () => (

@@ -10,6 +10,13 @@ import type { ApogeeMode, Rules } from './StandInChild'
 export interface Preset {
   /** The reads, commands, jobs and chats it answers, each with a recording. */
   readonly rules: Rules
+  /**
+   * What the console's lines are answered with beside `rules` (design 1g),
+   * on a stand-in child of the console's own, so an answer meant only for a
+   * line typed there -- its catch-all "Done." -- never answers a place's
+   * call. Absent, the console is answered by `rules` alone.
+   */
+  readonly console?: Rules
   /** Where the app opens: a plain string, the old prototype's `start` (`monitor`, `chat:wal`). How the page picks it is 1e's. */
   readonly route: string
   /** Its start tick and `still`, its fixed "now" and its pace. */

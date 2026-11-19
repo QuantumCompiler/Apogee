@@ -15,7 +15,7 @@ function unread(value: unknown, at: string, depth = 0): string[] {
   return []
 }
 
-/** What the views read of the app: the monitor's face and strip, the shell's state, every place's placeholder, and the session's view state (its header, transcript and composer, design 1u). */
+/** What the views read of the app: the monitor's face and strip, the shell's state, every place's placeholder, the session's view state (its header, transcript and composer, design 1u), and the Sessions place's list, inspector and door and the console (1g). */
 function whatTheViewsRead(app: AppViewModel) {
   const shell = app.shell
   return {
@@ -24,6 +24,8 @@ function whatTheViewsRead(app: AppViewModel) {
     shell: { route: shell.route, overlay: shell.overlay ?? 'none', systemOpen: shell.systemOpen, layout: shell.layout, themeName: shell.themeName, toast: shell.toast?.text ?? 'none', sheet: shell.sheet ?? 'none', confirm: shell.confirm ?? 'none' },
     places: destinations.map((destination) => placeholderOf(destination)?.says ?? 'ported'),
     session: app.session.face(),
+    sessions: { list: app.library.listFace(), inspector: app.library.inspector(), door: app.library.door(), info: app.library.info ?? 'none', renaming: app.library.renaming ?? 'none' },
+    console: app.console.face(),
     variables: app.theme.variables,
   }
 }
@@ -40,6 +42,8 @@ const modes: readonly ApogeeMode[] = ['installed', 'missing', 'config-typo']
 async function walk(app: AppViewModel, name: string, pressSuite = false): Promise<readonly string[]> {
   await app.start()
   await new Promise((resolve) => setTimeout(resolve, 0))
+  // The inspector's reads, made whether or not the preset opens it (⌥⌘I opens it on every one).
+  await app.library.inspectorAppeared()
   expect(unread(whatTheViewsRead(app), name)).toEqual([])
   const face = app.session.face()
   if (pressSuite && (face.empty.chooseSuite || face.header.canSwitchSuite)) {
@@ -50,11 +54,12 @@ async function walk(app: AppViewModel, name: string, pressSuite = false): Promis
   await new Promise((resolve) => setTimeout(resolve, 0))
   expect(unread(whatTheViewsRead(app), name)).toEqual([])
   app.stop()
-  return app.child.unanswered
+  // The console's own child too (1g): its lines are answered apart from the places'.
+  return [...app.child.unanswered, ...app.consoleChild.unanswered]
 }
 
 describe("the presets: the old prototype's 30-tick check's successor", () => {
-  test('the table holds the monitor, and the session’s thirteen in the old data-props order: 1u’s four plain ones and 1v’s nine scenarios and states', () => {
+  test('the table holds the monitor, the session’s thirteen in the old data-props order -- 1u’s four plain ones and 1v’s nine scenarios and states -- and 1g’s execute and console', () => {
     expect(Object.keys(presets)).toEqual([
       'monitor',
       'chat',
@@ -70,6 +75,8 @@ describe("the presets: the old prototype's 30-tick check's successor", () => {
       'chat:notsent',
       'chat:ended',
       'chat:compacting',
+      'execute',
+      'console',
     ])
   })
 

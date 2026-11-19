@@ -76,23 +76,28 @@ export interface SidebarProps {
   readonly model: ShellViewModel
   /** The SYSTEM strip's numbers, the monitor's, handed in by `app`; `undefined` before anything was read. */
   readonly strip?: SystemStrip | undefined
-  /** The session list's slot: empty until 1g fills it. */
+  /** The session list's slot: the Sessions place's list (1g), handed in by `app`. */
   readonly sessions?: (() => ReactNode) | undefined
+  /** The top row's new-session buttons (1g), handed in by `app`. */
+  readonly newSessions?: (() => ReactNode) | undefined
   /** Runs going on in a place, by place: its badge. */
   readonly running?: Readonly<Partial<Record<Destination, number>>> | undefined
 }
 
 /**
  * The sidebar (design 1e): the old prototype's (`main.html:81-170` at
- * `b375fac9`) -- the window's top row, the session list's slot, the eleven
- * places with their running badges, the SYSTEM strip, Settings and the
- * theme button. Below 900 px the window's `data-collapsed` makes it a
- * 56-px column of icons. The three new-session buttons and the list are 1g's.
+ * `b375fac9`) -- the window's top row with its new-session buttons, the
+ * session list, the eleven places with their running badges, the SYSTEM
+ * strip with the monitor's and the console's buttons, Settings and the theme
+ * button. Below 900 px the window's `data-collapsed` makes it a 56-px column
+ * of icons. The new-session buttons and the list are the Sessions place's
+ * (1g), handed in by `app`, as the shell imports no place.
  */
-export function Sidebar({ model, strip, sessions, running = {} }: SidebarProps) {
+export function Sidebar({ model, strip, sessions, newSessions, running = {} }: SidebarProps) {
   useObserved(model)
   useObserved(model.theme)
   const watching = model.overlay === 'monitor'
+  const typing = model.overlay === 'console'
   return (
     <aside
       className="ap-side"
@@ -106,6 +111,7 @@ export function Sidebar({ model, strip, sessions, running = {} }: SidebarProps) 
           ))}
         </span>
         <span style={{ flex: '1 1 auto' }} />
+        {newSessions?.()}
       </div>
 
       <nav className="ap-list" aria-label="Sessions" style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '0 8px 10px' }}>
@@ -185,6 +191,19 @@ export function Sidebar({ model, strip, sessions, running = {} }: SidebarProps) 
           >
             <svg className="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
               <path d="M1.5 8.5h3l1.5-4 3 8 1.5-4h4" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="ib"
+            onClick={() => model.perform({ kind: 'toggleConsole' })}
+            aria-label="Console (Shift Command K)"
+            aria-expanded={typing}
+            title="Console ⇧⌘K"
+            style={{ width: 26, height: 26, background: typing ? 'var(--surface-selection)' : undefined, color: 'var(--text-tertiary)' }}
+          >
+            <svg className="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M3 4.5l3.5 3.5L3 11.5M8 12h5" />
             </svg>
           </button>
         </div>

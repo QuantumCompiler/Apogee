@@ -2,7 +2,6 @@ import modelsInfoClaude from '@recorded/business/reads/Fixtures/models-info-swit
 import suitesConfigGet from '@recorded/business/reads/Fixtures/suites-config-get.txt?raw'
 import suitesDefaultSuite from '@recorded/business/reads/Fixtures/suites-default-suite.txt?raw'
 import suitesModelsInfoRoot from '@recorded/business/reads/Fixtures/suites-models-info-root.json?raw'
-import suitesModelsList from '@recorded/business/reads/Fixtures/suites-models-list.json?raw'
 import statusCloud from '@recorded/business/reads/Fixtures/suites-models-status-cloud.json?raw'
 import statusFast from '@recorded/business/reads/Fixtures/suites-models-status-fast.json?raw'
 import statusPair from '@recorded/business/reads/Fixtures/suites-models-status-pair.json?raw'
@@ -15,6 +14,7 @@ import chatsCompact from '@recorded/business/reads/Fixtures/chats-compact.txt?ra
 import newUnsent from '@recorded/data/protocol/Fixtures/new-unsent.jsonl?raw'
 import privateUnsent from '@recorded/data/protocol/Fixtures/private-unsent.jsonl?raw'
 import chatsShowKv from '../../../../fixtures/business/reads/chats-show-kv-handmade.json?raw'
+import modelsListKinds from '../../../../fixtures/business/reads/models-list-kinds-handmade.json?raw'
 import chatErrorRetry from '../../../../fixtures/data/protocol/chat-error-retry-handmade.jsonl?raw'
 import chatErrorSwitch from '../../../../fixtures/data/protocol/chat-error-switch-handmade.jsonl?raw'
 import chatError from '../../../../fixtures/data/protocol/chat-error-handmade.jsonl?raw'
@@ -64,13 +64,16 @@ export interface PresetOptions {
 const privateLaunch = ChatLaunch.arguments({ privately: true })
 
 /**
- * The model facts a session's header reads (until 1g's library reads them):
- * `models list` -- each backend's kind, the menu's groups -- and `models
- * info` for the model the `session` event names, its window.
+ * The model facts a session's header reads, as 1g's library reads them:
+ * `models list` -- each backend's kind, the menu's groups, the list's glyphs
+ * -- and `models info` for the model the `session` event names, its window.
+ * The list is `suites-models-list.json` with one subscription backend beside
+ * it (`models-list-kinds-handmade.json`, design 1g), so the session list's
+ * three glyphs each have a backend of their kind.
  */
 function modelReads(...models: ReadonlyArray<'claude' | 'root' | 'vast'>): Rule[] {
   const info = { claude: modelsInfoClaude, root: suitesModelsInfoRoot, vast: suitesModelsInfoVast }
-  return [{ arguments: ['models', 'list'], answer: { stdout: suitesModelsList } }, ...models.map((model): Rule => ({ arguments: ['models', 'info', model], answer: { stdout: info[model] } }))]
+  return [{ arguments: ['models', 'list'], answer: { stdout: modelsListKinds } }, ...models.map((model): Rule => ({ arguments: ['models', 'info', model], answer: { stdout: info[model] } }))]
 }
 
 /**

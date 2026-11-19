@@ -1,0 +1,10 @@
+list
+info
+status
+rename
+pull
+delete
+quantize
+convert
+repair
+migrate

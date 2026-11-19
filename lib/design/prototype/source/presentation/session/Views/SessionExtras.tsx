@@ -17,12 +17,17 @@ export function kindColor(kind: ModelKind | 'unknown'): string | undefined {
   }
 }
 
-/** A model's glyph, by its kind: the chip, the cylinder, the circling arrows (`main.html:185-187` at `b375fac9`). */
-export function ModelGlyph({ kind, size = 14 }: { readonly kind: ModelKind | 'unknown'; readonly size?: number }) {
+/**
+ * A model's glyph, by its kind: the chip, the cylinder, the circling arrows
+ * (`main.html:185-187` at `b375fac9`). The session list (1g) draws a local
+ * row's chip quiet unless it is the open session's (`color`), and names each
+ * glyph for a screen reader (`label`), as the old list does.
+ */
+export function ModelGlyph({ kind, size = 14, color: tint, label }: { readonly kind: ModelKind | 'unknown'; readonly size?: number; readonly color?: string; readonly label?: string }) {
   const color = kindColor(kind)
   if (!color) return null
   return (
-    <svg className="i" width={size} height={size} viewBox="0 0 16 16" aria-hidden="true" style={{ color }}>
+    <svg className="i" width={size} height={size} viewBox="0 0 16 16" {...(label === undefined ? { 'aria-hidden': true } : { 'aria-label': label, role: 'img' })} style={{ color: tint ?? color }}>
       {kind === 'local' ? (
         <>
           <rect x="4" y="4" width="8" height="8" rx="1.5" />
@@ -345,24 +350,5 @@ export function HeldLines({ held }: { readonly held: { readonly shown: boolean; 
       </svg>
       <span>{held.words}</span>
     </div>
-  )
-}
-
-/**
- * The inspector's column, reserved while it is open (design 1u, until 1g
- * draws the pane): the old `ap-insp` aside's place, 304 px on
- * `surface.inspector` with its left border (`main.html:763` at
- * `b375fac9`), so the main column's width compares. 1e's floating
- * `PlaceholderPanel` is the shell's and reserves no width.
- */
-export function InspectorPlaceholder() {
-  return (
-    <aside
-      className="ap-insp"
-      aria-label="Inspector"
-      style={{ flex: '0 0 304px', minHeight: 0, display: 'grid', placeItems: 'center', padding: 24, boxSizing: 'border-box', background: 'var(--surface-inspector)', borderLeft: '1px solid var(--line-border)', fontSize: 'var(--t-small)', lineHeight: 1.45 }}
-    >
-      <p style={{ margin: 0, textAlign: 'center', color: 'var(--text-secondary)' }}>The inspector isn’t drawn here yet. Design item 1g ports it.</p>
-    </aside>
   )
 }

@@ -22,7 +22,7 @@ export function PlaceholderScreen({ placeholder }: { readonly placeholder: Place
 }
 
 /**
- * An overlay not yet ported, the console (1g) among them: the monitor's panel
+ * An overlay not yet ported (none since the console, 1g): the monitor's panel
  * frame over the window, its title, the line naming the item that ports it,
  * and Close.
  */

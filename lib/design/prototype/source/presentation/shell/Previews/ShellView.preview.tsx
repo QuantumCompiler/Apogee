@@ -28,7 +28,7 @@ const screen = (destination: Destination) => {
   return placeholder ? <PlaceholderScreen placeholder={placeholder} /> : null
 }
 
-const overlay = (close: () => void) => () => <PlaceholderPanel title="Console" says="The console isn’t drawn here yet. Design item 1g ports it." onClose={close} />
+const overlay = (close: () => void) => () => <PlaceholderPanel title="Console" says="An overlay's place over the window: its view is its module's, handed in by app." onClose={close} />
 
 /** The window at Sessions, Graphite Dark, nothing over it. */
 export const Window = () => {
@@ -69,7 +69,7 @@ export const MenuOpen = () => {
   return <ShellView model={shell} screen={screen} overlay={overlay(() => shell.closeOverlay())} />
 }
 
-/** The console's place over the window, until 1g ports it. */
+/** An overlay's place over the window: the shell's frame (the console's own view is handed in by `app`, 1g). */
 export const ConsoleOpen = () => {
   const shell = useShell((model) => model.open('console'))
   return <ShellView model={shell} screen={screen} overlay={overlay(() => shell.closeOverlay())} />

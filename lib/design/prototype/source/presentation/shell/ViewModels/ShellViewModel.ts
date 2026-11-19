@@ -55,6 +55,8 @@ export class ShellViewModel extends Observable {
   width: number | undefined = undefined
   /** Told each time the place shown changes: how a place learns it came into view. */
   routeChanged: ((destination: Destination) => void) | undefined = undefined
+  /** The places' own keys (Sessions' ⌘N, ⌥⌘I …, design 1g), handed every key the shell does not own; whether one took it. */
+  placeKeys: ((keys: KeyChord) => boolean) | undefined = undefined
 
   private nextToast = 0
 
@@ -87,10 +89,10 @@ export class ShellViewModel extends Observable {
     return themeName(this.theme.appearance.themeChoice)
   }
 
-  /** Runs the shell command a key names; whether the shell owns that key. */
+  /** Runs the shell command a key names, else hands the key to the places; whether either owns it. */
   press(keys: KeyChord): boolean {
     const command = commandFor(keys)
-    if (command === undefined) return false
+    if (command === undefined) return this.placeKeys?.(keys) ?? false
     this.perform(command)
     return true
   }

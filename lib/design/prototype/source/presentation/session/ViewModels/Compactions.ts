@@ -15,7 +15,7 @@ export interface Compaction {
  * Saved chats compacting as jobs, side by side (GUI 6b; design 1v): the Mac
  * app's `compactions`, `isCompacting(_:)`, `stopCompacting(_:)` and
  * `canCompact`, which its `SessionLibraryViewModel` holds. Here a small class
- * of the session module, held by the composition until 1g's library takes it
+ * of the session module, held by the Sessions place's library (1g)
  * (`sessions` may import `session`, never the reverse).
  *
  * A compaction is `chats compact <id> --yes` -- the CLI asks nothing on a pipe

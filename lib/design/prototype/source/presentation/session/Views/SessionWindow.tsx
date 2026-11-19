@@ -3,7 +3,7 @@ import { useObserved } from '../../styles/Observation/useObserved'
 import type { RowFace, SessionFace, SessionViewModel } from '../ViewModels/SessionViewModel'
 import { efforts, thinkModes } from '../ViewModels/SessionViewModel'
 import { InputBar } from './InputBar'
-import { EmptySessionView, InspectorPlaceholder, kindColor, MeterView, ModelGlyph, ModelTag } from './SessionExtras'
+import { EmptySessionView, kindColor, MeterView, ModelGlyph, ModelTag } from './SessionExtras'
 import { TranscriptRow } from './TranscriptRow'
 import type { RowActs } from './TranscriptRow'
 
@@ -293,11 +293,12 @@ function MissingBinary() {
  * One chat session (design 1u): the old prototype's chat screen
  * (`main.html:174-858` at `b375fac9`) -- the header, then the conversation
  * (or why there is none yet) with its pending line and the composer, and
- * the inspector's column while it is open. The Mac app's `SessionWindow`,
- * its names. Everything drawn is the view-model's `face()`; every act is a
- * method of it.
+ * beside them, while it is open, the inspector its owner hands in (the
+ * Sessions place's, design 1g: the Mac's `SessionWindow` takes its
+ * inspector button the same way). The Mac app's `SessionWindow`, its names.
+ * Everything drawn is the view-model's `face()`; every act is a method of it.
  */
-export function SessionWindow({ model }: { readonly model: SessionViewModel }) {
+export function SessionWindow({ model, inspector }: { readonly model: SessionViewModel; readonly inspector?: ReactNode }) {
   useObserved(model)
   const face = model.face()
   const acts: RowActs = {
@@ -340,7 +341,7 @@ export function SessionWindow({ model }: { readonly model: SessionViewModel }) {
           )}
           <InputBar model={model} />
         </div>
-        {face.header.inspectorOpen ? <InspectorPlaceholder /> : null}
+        {face.header.inspectorOpen ? inspector : null}
       </div>
     </>
   )
