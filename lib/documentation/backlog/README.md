@@ -26,7 +26,7 @@ On top of that, 4 maintenance items can be picked up any time. None of the 23 wa
 | 1b | [Scaffold the React app and its layering check](design/v0.2.1/scaffold-and-layering-check.md) | — |
 | 1c | [The old prototype's baseline](design/v0.2.1/old-prototype-baseline.md) | 1b |
 | 1d | [The CLI stand-in](design/v0.2.1/cli-stand-in.md) | 1b |
-| 1e | [Styles, the shell and the first screen](design/v0.2.1/styles-shell-and-the-first-screen.md) | 1d |
+| 1e | [Styles, the shell, the composition root and the first screen](design/v0.2.1/styles-shell-and-the-first-screen.md) | 1d |
 | **Screens** | | |
 | 1f | [The session screen](design/v0.2.1/session-screen.md) (split in two before building) | 1e |
 | 1g | [Sessions: the list, the inspector, the execute door and the console](design/v0.2.1/sessions-inspector-execute-and-console.md) | 1f |

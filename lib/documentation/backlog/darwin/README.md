@@ -50,7 +50,7 @@ Priority-ordered: the topmost item whose gate is satisfied is the next one to bu
 - **Track 3, MLX kinds in the app** (3a, 3b), opened 2026-10-21 from the CLI's MLX-for-every-kind spike: each MLX set's kind, engines and drafters, in [Milestone D](../../assistant/darwin/MILESTONES.md#milestone-d--mlx-kinds-in-the-app).
 - **Track 4, the CLI/GUI audit's GUI findings** (4a–4l), opened 2026-10-22 (the user's call: a thorough bug and feature-disparity audit over both applications), in [Milestone E](../../assistant/darwin/MILESTONES.md#milestone-e--the-audits-gui-findings).
 
-Their story is [ROADMAP.md](../../assistant/darwin/ROADMAP.md), and each item's record is in [MILESTONES.md](../../assistant/darwin/MILESTONES.md). The earliest version table open is **v0.2.1**'s, Apogee in Xcode; the standing Maintenance table holds the GUI's upkeep.
+Their story is [ROADMAP.md](../../assistant/darwin/ROADMAP.md), and each item's record is in [MILESTONES.md](../../assistant/darwin/MILESTONES.md). The earliest version table open is **v0.2.4**'s, the Mac as a client (v0.2.1's tracks 5, 6 and 11 have shipped); the standing Maintenance table holds the GUI's upkeep.
 
 ### Maintenance
 
