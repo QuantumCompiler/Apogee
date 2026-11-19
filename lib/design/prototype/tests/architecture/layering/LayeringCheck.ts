@@ -39,6 +39,13 @@ type Layer = (typeof LayeringCheck.layers)[number]
  *   module's `Previews/` and from the tests, each recording by its full name
  *   in a `Fixtures/` folder (or under `fixtures/`) with `?raw`, and never by a
  *   glob;
+ * - the tokens root (design 1e): `@tokens` (the typed tokens module the build
+ *   generates from lib/design/spec/json/tokens.json), `@tokens/themes.css`
+ *   (its CSS) and `@tokens/tokens.json` (the file, for the declaration's
+ *   types), and nothing else under it, reached only from `presentation/styles`
+ *   and the tests -- the one way to that file from outside the prototype;
+ * - a `.css` file is read as code is: each `@import` and `url()` is held to
+ *   the same rules (design 1e), and nothing is loaded from the network;
  * - a module depends only on its own layer or a lower one; `styles` leans on
  *   no sibling; the shell imports no place; a file imports another module
  *   only when the map declares the dependency;
@@ -73,8 +80,20 @@ export class LayeringCheck {
   /** The design's own fixture root: its hand-made files and new recordings (design 1d). */
   static readonly fixturesRoot = 'fixtures'
 
-  /** The files whose imports are read. */
+  /** The design's tokens, generated from tokens.json at build time (design 1e). */
+  static readonly tokensAlias = '@tokens'
+
+  /** What the tokens root serves: the typed module, its CSS, and the file itself for the declaration's types. */
+  static readonly tokensForms = ['@tokens', '@tokens/themes.css', '@tokens/tokens.json']
+
+  /** The one module that reads the tokens; every other takes them from it. */
+  static readonly tokensReader = 'source/presentation/styles/'
+
+  /** The files whose imports are read with TypeScript's parser. */
   static readonly codeExtensions = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs']
+
+  /** The stylesheets, whose `@import` and `url()` are read (design 1e). */
+  static readonly styleExtensions = ['.css']
 
   constructor(
     readonly map: ModuleMap,
@@ -159,14 +178,18 @@ export class LayeringCheck {
 
   // MARK: - Nothing from outside
 
-  /** Every code file in the prototype: its packages listed, dev ones and Node outside source/, and nothing past its root. */
+  /** Every code file and stylesheet in the prototype: its packages listed, dev ones and Node outside source/, and nothing past its root. */
   private outside(): string[] {
     const found: string[] = []
     for (const file of this.tree.files('')) {
-      if (!LayeringCheck.isCode(file)) continue
+      if (!LayeringCheck.isRead(file)) continue
       const inSource = file.startsWith('source/')
       for (const specifier of LayeringCheck.importsIn(this.tree.contents(file) ?? '', file)) {
         const bare = LayeringCheck.withoutQuery(specifier)
+        if (LayeringCheck.isRemote(bare)) {
+          found.push(`${file} loads ${specifier}: the built file opens from disk and loads nothing from the network`)
+          continue
+        }
         if (LayeringCheck.isRelative(bare)) {
           const resolved = LayeringCheck.resolve(file, bare)
           if (resolved === undefined) {
@@ -180,6 +203,10 @@ export class LayeringCheck {
         }
         if (bare === LayeringCheck.recordedAlias || bare.startsWith(`${LayeringCheck.recordedAlias}/`)) {
           found.push(...LayeringCheck.recording(file, specifier, LayeringCheck.recordedPathIsWhole(bare)))
+          continue
+        }
+        if (bare === LayeringCheck.tokensAlias || bare.startsWith(`${LayeringCheck.tokensAlias}/`)) {
+          found.push(...LayeringCheck.tokensRead(file, specifier))
           continue
         }
         if (isBuiltin(bare)) {
@@ -228,6 +255,20 @@ export class LayeringCheck {
       )
     }
     return found
+  }
+
+  /**
+   * The tokens root reached from `file` by `specifier` (design 1e): one of its
+   * three forms, from `presentation/styles` or a test.
+   */
+  private static tokensRead(file: string, specifier: string): string[] {
+    if (!LayeringCheck.tokensForms.includes(LayeringCheck.withoutQuery(specifier))) {
+      return [`${file} imports ${specifier}: the tokens root serves ${LayeringCheck.tokensForms.join(', ').replace(/, ([^,]*)$/, ' and $1')}, and nothing else`]
+    }
+    if (!file.startsWith(LayeringCheck.tokensReader) && !LayeringCheck.isTest(file)) {
+      return [`${file} imports ${specifier}: only presentation/styles reads the tokens, and every other module takes them from it`]
+    }
+    return []
   }
 
   /** A Presentation module's `Previews/` file, or a test: what may import a recording (design 1d's default). */
@@ -307,7 +348,7 @@ export class LayeringCheck {
     const found: string[] = []
     const declared = new Set(module.dependsOn)
     for (const file of this.tree.files(module.path)) {
-      if (!LayeringCheck.isCode(file)) continue
+      if (!LayeringCheck.isRead(file)) continue
       const inViewModels = file.slice(module.path.length + 1).startsWith('ViewModels/')
       const extension = posix.extname(file)
       if (extension === '.tsx' || extension === '.jsx') {
@@ -462,6 +503,7 @@ export class LayeringCheck {
    * head and `*` (design 1d).
    */
   static importsIn(source: string, fileName: string): string[] {
+    if (LayeringCheck.styleExtensions.includes(posix.extname(fileName))) return LayeringCheck.cssImportsIn(source)
     const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, LayeringCheck.scriptKind(fileName))
     const found: string[] = []
     const isText = (node: ts.Node | undefined): node is ts.StringLiteral | ts.NoSubstitutionTemplateLiteral =>
@@ -513,6 +555,41 @@ export class LayeringCheck {
     }
     visit(file)
     return found
+  }
+
+  /**
+   * Every path a stylesheet names, in file order (design 1e): each `@import`
+   * (a string or `url()`), each other `url()`, and each `image-set()`
+   * candidate's path (`-webkit-image-set()` too), a string or a bare path, as
+   * Vite reads and inlines it; a `url()` among the candidates is read once,
+   * and another function, such as a gradient, loads nothing. Its comments are
+   * left out, and a `data:` URI or a bare `#fragment` too, since neither loads
+   * a file; a path's own `#fragment` is not part of it. As in an import, a path
+   * is relative only when it starts with `./`, `../` or `/`, and anything else
+   * names a package.
+   */
+  static cssImportsIn(source: string): string[] {
+    const text = source.replace(/\/\*[\s\S]*?\*\//g, '')
+    const found: Array<[number, string]> = []
+    const keep = (at: number, raw: string) => {
+      const path = raw.trim()
+      if (path === '' || path.startsWith('data:') || path.startsWith('#')) return
+      found.push([at, LayeringCheck.isRemote(path) ? path : path.replace(/#.*$/, '')])
+    }
+    const pattern = /@import\s+(?:url\(\s*)?(['"]?)([^'")\s;]+)\1|url\(\s*(['"]?)([^'")]*?)\3\s*\)/g
+    for (const match of text.matchAll(pattern)) keep(match.index, match[2] ?? match[4] ?? '')
+    // Vite's own reading of an image-set(): its body up to the closing
+    // parenthesis (a function inside it one level deep), then each candidate,
+    // a function call, a quoted string or a bare path, before its descriptor.
+    for (const set of text.matchAll(/image-set\(((?:[\w-]{1,256}\([^)]*\)|[^)])*)\)/g)) {
+      const body = set.index + 'image-set('.length
+      for (const candidate of (set[1] ?? '').matchAll(/(\s*)([\w-]+\([^)]*\)|"[^"]*"|'[^']*'|[^\s,]+)[^,]*,?/g)) {
+        const head = candidate[2] ?? ''
+        if (/^[\w-]+\(/.test(head)) continue
+        keep(body + candidate.index + (candidate[1] ?? '').length, head.replace(/^(['"])(.*)\1$/, '$2'))
+      }
+    }
+    return found.sort((a, b) => a[0] - b[0]).map(([, path]) => path)
   }
 
   /**
@@ -594,6 +671,16 @@ export class LayeringCheck {
 
   static isCode(file: string): boolean {
     return LayeringCheck.codeExtensions.includes(posix.extname(file))
+  }
+
+  /** A file whose imports the check reads: code, or a stylesheet (design 1e). */
+  static isRead(file: string): boolean {
+    return LayeringCheck.isCode(file) || LayeringCheck.styleExtensions.includes(posix.extname(file))
+  }
+
+  /** `https://…`, `http://…`, `//…`: a path the browser would fetch from the network. */
+  private static isRemote(specifier: string): boolean {
+    return /^([a-z][a-z0-9+.-]*:)?\/\//i.test(specifier)
   }
 
   private static isRelative(specifier: string): boolean {

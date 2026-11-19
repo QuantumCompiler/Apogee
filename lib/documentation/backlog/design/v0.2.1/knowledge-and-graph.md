@@ -43,7 +43,7 @@
   - `Views/`: the screen, the file tree, the canvas (nodes and SVG edges), the selected node's pane, the prose pane, the save panel and dedupe sheet contents.
   - `Previews/`: Functions view; Files view; prose graph; More open; save panel; dedupe with nothing to merge; dedupe offering a merge; merging; merged; delete asked; graph deleted.
 - The stand-in's preset table ([1d](../../../assistant/design/DEVELOPER.md#the-cli-stand-in)): 4 entries, each `{fixtures, route, clock}`, naming the files above. The tab and view (`knowledge:collections`, `graph:prose`) are the route's, so no third view-model holds them.
-- The confirm host and generic sheet host ([1e](styles-shell-and-the-first-screen.md)): `graphDelete`'s content, and the `savePanel` and `dedupe` contents.
+- The confirm host and generic sheet host ([1e](../../../assistant/design/DEVELOPER.md#styles-the-shell-and-the-first-screen)): `graphDelete`'s content, and the `savePanel` and `dedupe` contents.
 - Tests, mirrored under the prototype's test tree: view-model tests per intent, and the per-preset test.
 - Docs: the design's MILESTONES.md on ship.
 
@@ -52,7 +52,7 @@
 - The Mac modules: `lib/src/darwin/source/presentation/{knowledge,graph}/`, their tests under `lib/src/darwin/tests/presentation/{knowledge,graph}/`.
 - The boards: `lib/design/spec/html/ScreenKnowledge.dc.html`, `ScreenCollections.dc.html`, `ScreenGraph.dc.html`, `ScreenGraphProse.dc.html`.
 - [Layer enforcement](../../../adrs/gui/layer-enforcement.md), [presentation MVVM](../../../adrs/darwin/presentation-mvvm.md), [module schemes and previews](../../../adrs/darwin/module-schemes-and-previews.md); [the old design guide](../../../../design/spec/CLAUDE.md) (the 30-tick check).
-- Siblings: [`react-design-prototype.md`](../../../adrs/design/react-design-prototype.md) (1a's ADR 0001), [`DEVELOPER.md` → the CLI stand-in](../../../assistant/design/DEVELOPER.md#the-cli-stand-in) (1d), [`styles-shell-and-the-first-screen.md`](styles-shell-and-the-first-screen.md) (1e, the gate; the sidebar's Code graph ⌘5 and Knowledge ⌘8 places), [`session-screen.md`](session-screen.md) (1f, where "Ask about this" lands), [`parity-proof.md`](parity-proof.md) (1s).
+- Siblings: [`react-design-prototype.md`](../../../adrs/design/react-design-prototype.md) (1a's ADR 0001), [`DEVELOPER.md` → the CLI stand-in](../../../assistant/design/DEVELOPER.md#the-cli-stand-in) (1d), [`DEVELOPER.md` → styles, the shell and the first screen](../../../assistant/design/DEVELOPER.md#styles-the-shell-and-the-first-screen) (1e, the gate; the sidebar's Code graph ⌘5 and Knowledge ⌘8 places), [`session-screen.md`](session-screen.md) (1f, where "Ask about this" lands), [`parity-proof.md`](parity-proof.md) (1s).
 
 **Decisions made** (dated):
 - 2026-11-14: The user's call: the prototype is rebuilt in React, TypeScript and Vite, with the production GUIs' four layers and MVVM modules, so a new app ports from it. It builds to one self-contained `lib/design/main.html` that opens with a double-click. This is a design-queue item in v0.2.1.
@@ -91,7 +91,7 @@
 - [ ] The per-preset test, the view-model tests, the layering check and the staleness check pass locally.
 - [ ] The record names every place the port follows the prototype where the Mac app differs, and every recording that names another graph.
 
-**Scope note.** Earmarked for v0.2.1 (design track 1); gated on [1e](styles-shell-and-the-first-screen.md). Out of scope:
+**Scope note.** Earmarked for v0.2.1 (design track 1); its gate, 1e, shipped 2026-11-18 ([Milestone A](../../../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react)). Out of scope:
 - the confirm and sheet hosts, the menu scrim, the toast, and the sidebar's Knowledge and Code graph places (1e);
 - the Mac-only parts named above (search, graph picker, New graph, the capture, ingest and export forms), and a missing-CLI state;
 - any change to the Mac app or its fixtures, beyond a new `*-handmade*` file where 1d puts it;

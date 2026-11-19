@@ -17,7 +17,8 @@
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "paths": { "@tokens/tokens.json": ["../spec/json/tokens.json"] }
   },
   "include": ["source", "tests", "e2e", "tooling", "scripts", "parity", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"]
 }

@@ -1,4 +1,16 @@
-/** The styles module's stub: its name, nothing more. Tokens, type and the common components arrive with 1e. */
-export const styles = {
-  name: 'Styles',
-} as const
+/**
+ * The styles module (design 1e): the Presentation layer's floor, leaning on no
+ * sibling, the Mac app's `PresentationStyles`. It holds the tokens, typed
+ * (`Tokens/`, the only door to tokens.json's generated module); the
+ * appearance as one value and the old prototype's theme machinery over it
+ * (`Appearance/`), with the theme service; the observation every view-model
+ * extends (`Observation/`); and the stylesheets (`Stylesheet.ts`: the fonts,
+ * the generated variables and the helmet's shared classes). A component a
+ * second module wants is promoted here, never copied; none is yet.
+ */
+export const name = 'Styles'
+
+export * from './Tokens/Tokens'
+export * from './Appearance/Appearance'
+export { ThemeService } from './Appearance/ThemeService'
+export { Observable } from './Observation/Observable'

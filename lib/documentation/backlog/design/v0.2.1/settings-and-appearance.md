@@ -41,7 +41,7 @@
 - The old prototype: `main.html` settings section and `ui.settingsOpen` block (ranges above); `themes()`, `colorGroups()`, `withOverride()` and `rootVars()` (3284–3361 in the recon's copy); [`spec/CLAUDE.md`](../../../../design/spec/CLAUDE.md).
 - The Mac module: `lib/src/darwin/source/presentation/settings/` (7 files, 2,919 lines) and its 8 test files under `tests/presentation/settings/`.
 - The law: [layer enforcement](../../../adrs/gui/layer-enforcement.md), [presentation MVVM](../../../adrs/darwin/presentation-mvvm.md), [module schemes and previews](../../../adrs/darwin/module-schemes-and-previews.md), [the darwin guide](../../../assistant/darwin/CLAUDE.md).
-- Siblings: [`react-design-prototype.md`](../../../adrs/design/react-design-prototype.md) (1a's ADR 0001), [`DEVELOPER.md` → the CLI stand-in](../../../assistant/design/DEVELOPER.md#the-cli-stand-in) (1d), [`styles-shell-and-the-first-screen.md`](styles-shell-and-the-first-screen.md) (1e), [`models-screens.md`](models-screens.md) (1h), [`gallery-and-foundations.md`](gallery-and-foundations.md) (1q), [`parity-proof.md`](parity-proof.md) (1s).
+- Siblings: [`react-design-prototype.md`](../../../adrs/design/react-design-prototype.md) (1a's ADR 0001), [`DEVELOPER.md` → the CLI stand-in](../../../assistant/design/DEVELOPER.md#the-cli-stand-in) (1d), [`DEVELOPER.md` → styles, the shell and the first screen](../../../assistant/design/DEVELOPER.md#styles-the-shell-and-the-first-screen) (1e), [`models-screens.md`](models-screens.md) (1h), [`gallery-and-foundations.md`](gallery-and-foundations.md) (1q), [`parity-proof.md`](parity-proof.md) (1s).
 
 **Decisions made** (dated):
 - 2026-11-14: The user's call: rebuild the prototype in React, TypeScript and Vite, with the production apps' four layers and MVVM feature modules. The build is one self-contained `lib/design/main.html` that opens with a double-click. This is a design-queue item in v0.2.1.
@@ -79,4 +79,4 @@
 - [ ] Every preset's data comes from a recorded fixture or a `*-handmade*` file; no settings data is written into a view or view-model.
 - [ ] The local checks are green: typecheck, unit tests, the layering check, and the build staleness check.
 
-**Scope note.** Earmarked for v0.2.1 (design track 1); gated on 1e. Out of scope: the Roles view itself (1h), the theme service and key map (1e), the color and type pages (1q), the side-by-side report (1s), and any change to the Mac app's Settings. New panes or states wait until the port is done.
+**Scope note.** Earmarked for v0.2.1 (design track 1); its gate, 1e, shipped 2026-11-18 ([Milestone A](../../../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react)). Out of scope: the Roles view itself (1h), the theme service and key map (1e), the color and type pages (1q), the side-by-side report (1s), and any change to the Mac app's Settings. New panes or states wait until the port is done.

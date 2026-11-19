@@ -71,7 +71,7 @@ Line numbers are the recon's (the working tree of 2026-11-14), and the file keep
 - **The Mac tests** whose cases the TS tests mirror: `tests/presentation/library/LibraryEditorCloseTests.swift`, `MCPRemoveTests.swift`, and `tests/presentation/review/ReviewViewModelTests.swift`.
 - **The law:** [`adrs/gui/layer-enforcement.md`](../../../adrs/gui/layer-enforcement.md), [`adrs/darwin/presentation-mvvm.md`](../../../adrs/darwin/presentation-mvvm.md) and [`adrs/darwin/module-schemes-and-previews.md`](../../../adrs/darwin/module-schemes-and-previews.md).
 - **The old check this item's tests replace:** [`spec/CLAUDE.md` → Checking a change](../../../../design/spec/CLAUDE.md#checking-a-change), which runs every start preset for 30 ticks.
-- **Siblings:** [`DEVELOPER.md` → the CLI stand-in](../../../assistant/design/DEVELOPER.md#the-cli-stand-in) (1d), [`styles-shell-and-the-first-screen.md`](styles-shell-and-the-first-screen.md) (1e), [`gallery-and-foundations.md`](gallery-and-foundations.md) (1q) and [`parity-proof.md`](parity-proof.md) (1s).
+- **Siblings:** [`DEVELOPER.md` → the CLI stand-in](../../../assistant/design/DEVELOPER.md#the-cli-stand-in) (1d), [`DEVELOPER.md` → styles, the shell and the first screen](../../../assistant/design/DEVELOPER.md#styles-the-shell-and-the-first-screen) (1e), [`gallery-and-foundations.md`](gallery-and-foundations.md) (1q) and [`parity-proof.md`](parity-proof.md) (1s).
 
 **Decisions made** (dated):
 - 2026-11-14: The user's call. The prototype is rebuilt in React, TypeScript and Vite, with the production GUIs' four layers and MVVM screen modules. It stays the design's cross-platform source of truth.
@@ -123,4 +123,4 @@ Line numbers are the recon's (the working tree of 2026-11-14), and the file keep
 - [ ] The CLI-missing and config-typo modes show the recorded notes on both screens.
 - [ ] Every preset's state has a named preview. The local checks pass: typecheck, unit tests, the layering check, and the staleness check.
 
-**Scope note.** Earmarked for v0.2.1 (design track 1); gated on [1e](styles-shell-and-the-first-screen.md). Out of scope: Knowledge and Graph (1o); the sheet and confirm hosts themselves (1e); the parity screenshots (1s) and the gallery entries (1q); any new state or flow the Mac app has and the prototype lacks; any change to the old prototype, the Mac app or its recorded fixtures.
+**Scope note.** Earmarked for v0.2.1 (design track 1); its gate, 1e, shipped 2026-11-18 ([Milestone A](../../../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react)). Out of scope: Knowledge and Graph (1o); the sheet and confirm hosts themselves (1e); the parity screenshots (1s) and the gallery entries (1q); any new state or flow the Mac app has and the prototype lacks; any change to the old prototype, the Mac app or its recorded fixtures.

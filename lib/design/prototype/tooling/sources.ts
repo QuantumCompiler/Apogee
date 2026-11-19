@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { tokensAlias, tokensRoot } from './tokens.ts'
 
 /**
  * `@recorded`, the alias for the Mac app's tests (`lib/src/darwin/tests`),
@@ -19,7 +20,8 @@ export function recordedRoot(root: string): string {
  * app's source, the build's own configuration and tooling, the lock file that
  * pins every package, and the design's own fixture root, `fixtures/` (design
  * 1d). A folder stands for every file under it. The recordings `@recorded`
- * reaches are inputs too, but only those `source/` names (`recordingsNamed`).
+ * reaches are inputs too, but only those `source/` names (`recordingsNamed`),
+ * and so is tokens.json, as `@tokens/tokens.json` (`tokenInputs`, design 1e).
  */
 export const buildInputs = [
   'fixtures',
@@ -75,14 +77,23 @@ export function recordingsNamed(root: string): string[] {
   return [...named].sort()
 }
 
-/** Where an input is on disk: a recording under `@recorded`'s root, anything else under the prototype's. */
+/**
+ * The tokens the build generates CSS and the typed module from (design 1e):
+ * tokens.json, the one file outside the prototype the build reads besides
+ * the recordings, named by its root.
+ */
+export const tokenInputs = [`${tokensAlias}/tokens.json`] as const
+
+/** Where an input is on disk: a recording under `@recorded`'s root, the tokens under `@tokens`', anything else under the prototype's. */
 export function inputPath(root: string, file: string): string {
-  return file.startsWith(`${recordedAlias}/`) ? join(recordedRoot(root), file.slice(recordedAlias.length + 1)) : join(root, file)
+  if (file.startsWith(`${recordedAlias}/`)) return join(recordedRoot(root), file.slice(recordedAlias.length + 1))
+  if (file.startsWith(`${tokensAlias}/`)) return join(tokensRoot(root), file.slice(tokensAlias.length + 1))
+  return join(root, file)
 }
 
-/** Every input, by path (a recording as `@recorded/<path>`), sorted. */
+/** Every input, by path (a recording as `@recorded/<path>`, the tokens as `@tokens/tokens.json`), sorted. */
 export function inputFiles(root: string): string[] {
-  return [...buildInputs.flatMap((input) => filesUnder(root, input)), ...recordingsNamed(root)].sort()
+  return [...buildInputs.flatMap((input) => filesUnder(root, input)), ...recordingsNamed(root), ...tokenInputs].sort()
 }
 
 /** A SHA-256 over every input file -- its path, its length and its bytes -- in path order: `sha256-<hex>`. */

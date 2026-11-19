@@ -105,11 +105,14 @@ describe('the two fixture roots in the hash (design 1d)', () => {
   test('a recording a source starts naming joins the inputs', () => {
     const copy = copyOfInputs()
     const before = inputFiles(copy)
-    const preview = join(copy, 'source/presentation/monitor/Previews/MonitorPreset.ts')
-    writeFileSync(preview, "import system from '@recorded/business/reads/Fixtures/suites-system.json?raw'\nexport const rules = [system]\n")
+    // A recording no source names yet (1e's monitor preset already names suites-system.json).
+    expect(before).not.toContain('@recorded/business/reads/Fixtures/agents-list.json')
+    mkdirSync(join(copy, 'source/presentation/library/Previews'), { recursive: true })
+    const preview = join(copy, 'source/presentation/library/Previews/LibraryPreset.ts')
+    writeFileSync(preview, "import agents from '@recorded/business/reads/Fixtures/agents-list.json?raw'\nexport const rules = [agents]\n")
     const tests = resolve(copy, '../../src/darwin/tests/business/reads/Fixtures')
-    writeFileSync(join(tests, 'suites-system.json'), readFileSync(resolve(recordedRootOf(root), 'business/reads/Fixtures/suites-system.json')))
-    expect(inputFiles(copy)).toEqual([...before, '@recorded/business/reads/Fixtures/suites-system.json', 'source/presentation/monitor/Previews/MonitorPreset.ts'].sort())
+    writeFileSync(join(tests, 'agents-list.json'), readFileSync(resolve(recordedRootOf(root), 'business/reads/Fixtures/agents-list.json')))
+    expect(inputFiles(copy)).toEqual([...before, '@recorded/business/reads/Fixtures/agents-list.json', 'source/presentation/library/Previews/LibraryPreset.ts'].sort())
   })
 
   test("every file under the design's own fixtures/ is an input", () => {
@@ -119,6 +122,22 @@ describe('the two fixture roots in the hash (design 1d)', () => {
     writeFileSync(join(copy, 'fixtures/business/reads/system-handmade.json'), '{}\n')
     expect(inputFiles(copy)).toContain('fixtures/business/reads/system-handmade.json')
     expect(sourcesHash(copy)).not.toBe(before)
+  })
+})
+
+describe('the tokens in the hash (design 1e)', () => {
+  test('tokens.json is an input, named by its root, read from lib/design/spec/json', () => {
+    expect(inputFiles(root)).toContain('@tokens/tokens.json')
+    expect(inputPath(root, '@tokens/tokens.json')).toBe(resolve(root, '../spec/json/tokens.json'))
+  })
+
+  test('a token edit marks main.html stale', () => {
+    const copy = copyOfInputs()
+    const html = `<!doctype html><html><head><meta name="apogee-design-sources" content="${sourcesHash(copy)}"></head></html>`
+    expect(staleness(html, copy)).toBeUndefined()
+    const file = inputPath(copy, '@tokens/tokens.json')
+    writeFileSync(file, readFileSync(file, 'utf8').replace('"surface.window": "#131415"', '"surface.window": "#131416"'))
+    expect(staleness(html, copy)).toMatch(/^lib\/design\/main\.html is stale: /)
   })
 })
 

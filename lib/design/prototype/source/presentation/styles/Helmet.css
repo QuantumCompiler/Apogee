@@ -1,0 +1,86 @@
+/*
+ * The design's shared classes (design 1e): the old prototype's helmet,
+ * lib/design/spec/html/main.html:13-76 at b375fac9, under the window's `.ap`.
+ * Every color is a token variable, and so are the type sizes, the fonts and
+ * the motion (the caret's and the pulse's duration and timing function).
+ *
+ * The helmet's two width breakpoints, `max-width: 900px` (the sidebar
+ * collapses to 56 px) and `max-width: 600px` (a message row narrows), become
+ * `.ap[data-collapsed]` and `.ap[data-narrow]`: a media query cannot read a
+ * custom property, so the shell's view-model sets the two from the window's
+ * width against tokens.json's `collapseBelow` and `narrowBelow`, at or below
+ * each as `max-width` is.
+ */
+
+body { margin: 0 }
+a { color: inherit }
+a:hover { color: inherit }
+.ap .i { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto }
+.ap .mono { font-family: var(--font-mono) }
+.ap code { font-family: var(--font-mono); font-size: .86em; padding: 1px 5px; border-radius: var(--radius-chip); background: var(--surface-control); color: var(--text-primary) }
+.ap .k { color: var(--code-keyword) }
+.ap .s { color: var(--code-string) }
+.ap .c { color: var(--code-comment) }
+.ap .n { color: var(--code-number) }
+.ap .f { color: var(--code-function) }
+.ap input::placeholder, .ap textarea::placeholder { color: var(--text-tertiary) }
+.ap button, .ap select, .ap input, .ap textarea { font-family: inherit }
+.ap button { cursor: pointer; background-color: transparent }
+.ap button:disabled { cursor: default; opacity: .45 }
+.ap button:focus-visible, .ap a:focus-visible, .ap input:focus-visible, .ap select:focus-visible { outline: 2px solid var(--status-accent); outline-offset: 1px }
+.ap .hv:hover { background: var(--surface-control) }
+.ap .ap-crow .ap-more { opacity: 0 }
+.ap .ap-crow:hover .ap-more, .ap .ap-crow .ap-more:focus-visible, .ap .ap-crow .ap-more[aria-expanded="true"] { opacity: 1 }
+.ap .lbl { font-family: var(--font-mono); font-size: var(--t-label); font-weight: 500; letter-spacing: .08em; color: var(--text-tertiary) }
+.ap .btn { display: inline-flex; align-items: center; gap: 6px; height: var(--control-button); padding: 0 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--surface-control); color: var(--text-primary); font-size: var(--t-dense); white-space: nowrap }
+.ap .btn:hover { border-color: var(--text-tertiary) }
+.ap .btn-p { display: inline-flex; align-items: center; gap: 6px; height: var(--control-button); padding: 0 12px; border: 0; border-radius: var(--radius-control); background: var(--text-primary); color: var(--surface-window); font-size: var(--t-dense); font-weight: 600; white-space: nowrap }
+.ap .btn-p:hover { opacity: .9 }
+.ap .btn-g { display: inline-flex; align-items: center; gap: 6px; height: var(--control-button); padding: 0 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: transparent; color: var(--text-primary); font-size: var(--t-dense); white-space: nowrap }
+.ap .btn-g:hover { background: var(--surface-control) }
+.ap .ib { width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--text-secondary) }
+.ap .ib:hover { background: var(--surface-control); color: var(--text-primary) }
+.ap .inp { height: var(--control-button); box-sizing: border-box; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--surface-card); color: var(--text-primary); font-size: var(--t-dense) }
+.ap .row { display: flex; flex-direction: column; min-width: 0 }
+.ap .row.me { align-items: flex-end }
+.ap .me > * { max-width: min(80%, 640px) }
+.ap .me > div { align-items: flex-end !important }
+.ap .me .prose { padding: 10px 14px; border-radius: 16px; background: var(--surface-control); overflow-wrap: anywhere }
+.ap .tl { display: grid; grid-template-columns: 84px minmax(0, 1fr) auto; column-gap: 12px; align-items: baseline; padding: 2px 0; font-family: var(--font-mono); font-size: var(--t-ui); line-height: 18px; color: var(--text-tertiary) }
+.ap .note { display: flex; align-items: center; gap: 12px; font-family: var(--font-mono); font-size: var(--t-meta); color: var(--text-tertiary) }
+.ap .note > .rule { flex: 1 1 0; height: 1px; background: var(--line-border) }
+.ap .prose { font-size: var(--t-prose); line-height: 1.6 }
+.ap .chip { display: inline-flex; align-items: center; gap: 7px; height: var(--control-button); padding: 0 3px 0 8px; border: 1px solid var(--line-border); border-radius: var(--radius-control); background: var(--surface-control); font-size: var(--t-small); max-width: 100% }
+.ap .menu { border: 1px solid var(--line-strong); border-radius: var(--radius-menu); background: var(--surface-card); box-shadow: var(--shadow-menu); overflow: hidden }
+.ap .kv { display: grid; grid-template-columns: 84px minmax(0, 1fr) auto; gap: 7px 10px; align-items: baseline }
+.ap .isec { padding: 16px 18px; border-bottom: 1px solid var(--line-border) }
+.ap .seg { display: flex; height: 30px; padding: 2px; box-sizing: border-box; border: 1px solid var(--line-strong); border-radius: var(--radius-segment); background: var(--surface-card) }
+.ap .seg > button { padding: 0 12px; border: 0; border-radius: var(--radius-row); font-size: var(--t-dense) }
+.ap .card { border: 1px solid var(--line-border); border-radius: var(--radius-card); background: var(--surface-card) }
+.ap .ap-places-row { scrollbar-width: thin }
+.ap .ap-places-row::-webkit-scrollbar { height: 4px }
+.ap ::-webkit-scrollbar { width: 10px; height: 10px }
+.ap ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box }
+.ap ::-webkit-scrollbar-track { background: transparent }
+.ap input[type=color] { -webkit-appearance: none; appearance: none }
+.ap input[type=color]::-webkit-color-swatch-wrapper { padding: 2px }
+.ap input[type=color]::-webkit-color-swatch { border: 0; border-radius: var(--radius-chip) }
+.ap input[type=color]::-moz-color-swatch { border: 0; border-radius: var(--radius-chip) }
+@keyframes ap-blink { 50% { opacity: 0 } }
+@keyframes ap-pulse { 50% { opacity: .3 } }
+.ap .caret { animation: ap-blink var(--motion-caret) infinite }
+.ap .pulse { animation: ap-pulse var(--motion-pulse) infinite }
+@media (prefers-reduced-motion: reduce) {
+  .ap .caret, .ap .pulse { animation: none }
+}
+
+/* The old max-width: 900px: the sidebar a column of icons, the side panes closed. */
+.ap[data-collapsed] .ap-side { flex-basis: var(--layout-sidebar-collapsed) !important }
+.ap[data-collapsed] .ap-lab, .ap[data-collapsed] .ap-list, .ap[data-collapsed] .ap-search, .ap[data-collapsed] .ap-strip, .ap[data-collapsed] .ap-lights, .ap[data-collapsed] .ap-insp, .ap[data-collapsed] .ap-detail, .ap[data-collapsed] .ap-hints { display: none !important }
+.ap[data-collapsed] .ap-tools { flex-wrap: wrap !important; height: auto !important; flex-basis: auto !important; padding: 10px 16px !important }
+.ap[data-collapsed] .ap-places-row { flex-direction: column !important; overflow-x: visible !important }
+.ap[data-collapsed] .ap-scroll { padding: 16px !important }
+.ap[data-collapsed] .ap-compose { padding: 0 16px 16px !important }
+
+/* The old max-width: 600px: a message row narrows. */
+.ap[data-narrow] .me > * { max-width: 92% }

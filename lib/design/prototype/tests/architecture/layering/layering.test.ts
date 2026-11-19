@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest'
 import { LayeringCheck } from './LayeringCheck'
 import { ModuleMap } from './ModuleMap'
 import { DiskTree, PlantedTree } from './SourceTree'
+import type { SourceTree } from './SourceTree'
 
 /** The prototype's root, lib/design/prototype: this file is tests/architecture/layering/layering.test.ts. */
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
@@ -29,6 +30,26 @@ describe('the layering check, on this prototype', () => {
     const map = ModuleMap.parse(JSON.stringify(modules), tree.contents('package.json') ?? '{}')
     expect(new LayeringCheck(map, tree).violations()).toEqual([
       "presentation/styles depends on its sibling presentation/shell: styles is the Presentation layer's floor and leans on no other module",
+    ])
+  })
+
+  test("violations planted in the real modules fail, each naming its file: React in monitor's view-model, the shell importing the monitor, styles importing the shell (design 1e)", () => {
+    const disk = new DiskTree(root)
+    const planted: Record<string, string> = {
+      'source/presentation/monitor/ViewModels/MonitorViewModel.ts': `${disk.contents('source/presentation/monitor/ViewModels/MonitorViewModel.ts')}import { useState } from 'react'\n`,
+      'source/presentation/shell/Views/ShellView.tsx': `import { MonitorView } from '../../monitor/Views/MonitorView'\n${disk.contents('source/presentation/shell/Views/ShellView.tsx')}`,
+      'source/presentation/styles/Styles.ts': `${disk.contents('source/presentation/styles/Styles.ts')}export { ShellViewModel } from '../shell/ViewModels/ShellViewModel'\n`,
+    }
+    const tree: SourceTree = {
+      files: (directory) => disk.files(directory),
+      folders: (directory) => disk.folders(directory),
+      isDirectory: (path) => disk.isDirectory(path),
+      contents: (path) => planted[path] ?? disk.contents(path),
+    }
+    expect(new LayeringCheck(ModuleMap.read(tree), tree).violations()).toEqual([
+      'source/presentation/styles/Styles.ts imports presentation/shell, which presentation/styles does not declare as a dependency',
+      'source/presentation/shell/Views/ShellView.tsx imports presentation/monitor, which presentation/shell does not declare as a dependency',
+      'source/presentation/monitor/ViewModels/MonitorViewModel.ts imports react: a view-model stays free of React, so it tests without a browser',
     ])
   })
 
@@ -293,6 +314,71 @@ describe('the layering check, on planted violations', () => {
     ])
   })
 
+  test('the tokens root, from styles: @tokens, @tokens/themes.css and, for its types, @tokens/tokens.json pass (design 1e)', () => {
+    const planted = new Planted()
+    planted.files['source/presentation/styles/Tokens/TokensModule.d.ts'] =
+      "declare module '@tokens' {\n  export const tokens: typeof import('@tokens/tokens.json')\n}\n"
+    planted.files['source/presentation/styles/Palette.ts'] += "import { tokens } from '@tokens'\nimport '@tokens/themes.css'\nexport const all = tokens\n"
+    planted.files['tests/presentation/styles/Palette.test.ts'] = "import { tokens } from '@tokens'\n" + stubTest
+    expect(planted.violations()).toEqual([])
+  })
+
+  test('the tokens root from anywhere but styles fails, and so does any other file under it or tokens.json by its path', () => {
+    const planted = new Planted()
+    planted.files['source/presentation/session/Views/SessionWindow.tsx'] += "import { tokens } from '@tokens'\n"
+    planted.files['source/business/session/ChatLaunch.ts'] += "import '@tokens/themes.css'\n"
+    planted.files['source/presentation/styles/Palette.ts'] +=
+      "import other from '@tokens/other.json'\nimport raw from '../../../../spec/json/tokens.json'\n"
+    expect(planted.violations()).toEqual([
+      "source/business/session/ChatLaunch.ts imports @tokens/themes.css: only presentation/styles reads the tokens, and every other module takes them from it",
+      'source/presentation/session/Views/SessionWindow.tsx imports @tokens: only presentation/styles reads the tokens, and every other module takes them from it',
+      'source/presentation/styles/Palette.ts imports @tokens/other.json: the tokens root serves @tokens, @tokens/themes.css and @tokens/tokens.json, and nothing else',
+      'source/presentation/styles/Palette.ts imports ../../../../spec/json/tokens.json, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages',
+    ])
+  })
+
+  test('a .css file is read too: an @import or url() inside the prototype, a listed package or a data: URI passes (design 1e)', () => {
+    const planted = new Planted()
+    planted.dependencies['@fontsource/ibm-plex-sans'] = '5.3.0'
+    planted.files['source/presentation/styles/Helmet.css'] =
+      "@import './Fonts.css';\n/* @import '../../../../spec/html/commented.css'; */\n.ap .grain { background: url(./grain.png) }\n.ap .dot { background: url('data:image/png;base64,AAAA') }\n"
+    planted.files['source/presentation/styles/Fonts.css'] =
+      "@font-face { font-family: 'IBM Plex Sans'; src: url(\"@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2\") format('woff2') }\n"
+    planted.files['source/presentation/styles/grain.png'] = ''
+    expect(planted.violations()).toEqual([])
+  })
+
+  test('a .css @import or url() leaving lib/design/prototype/ fails with rule 4\'s sentence, as an import does; so do an unlisted package and the network', () => {
+    const planted = new Planted()
+    planted.files['source/presentation/styles/Helmet.css'] =
+      "@import url('../../../../spec/html/old.css');\n" +
+      '.ap .logo { background: url(../../../../assets/Logo.png) }\n' +
+      "@import 'normalize.css';\n" +
+      ".ap .x { background: url('vitest/x.png') }\n" +
+      "@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans');\n"
+    planted.files['source/presentation/shell/Views/Shell.css'] = "@import '../../session/Views/Session.css';\n"
+    planted.files['source/presentation/session/Views/Session.css'] = '.ap .s { color: var(--text-primary) }\n'
+    expect(planted.violations()).toEqual([
+      'source/presentation/styles/Helmet.css imports ../../../../spec/html/old.css, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages',
+      'source/presentation/styles/Helmet.css imports ../../../../assets/Logo.png, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages',
+      'source/presentation/styles/Helmet.css imports normalize.css, which package.json does not list: nothing comes from outside the prototype but its declared packages',
+      "source/presentation/styles/Helmet.css imports vitest, a dev dependency: source/ uses only package.json's dependencies, and dev dependencies stay in tests, scripts and config",
+      'source/presentation/styles/Helmet.css loads https://fonts.googleapis.com/css2?family=IBM+Plex+Sans: the built file opens from disk and loads nothing from the network',
+      'source/presentation/shell/Views/Shell.css imports presentation/session, which presentation/shell does not declare as a dependency',
+    ])
+  })
+
+  test("a .css image-set() leaving lib/design/prototype/ fails with rule 4's sentence, and a remote one with the network's", () => {
+    const planted = new Planted()
+    planted.files['source/presentation/styles/Helmet.css'] =
+      '.ap .logo { background-image: image-set("../../../../spec/html/x.png" 1x) }\n' +
+      ".ap .remote { background-image: -webkit-image-set('https://example.com/y.png' 1x) }\n"
+    expect(planted.violations()).toEqual([
+      'source/presentation/styles/Helmet.css imports ../../../../spec/html/x.png, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages',
+      'source/presentation/styles/Helmet.css loads https://example.com/y.png: the built file opens from disk and loads nothing from the network',
+    ])
+  })
+
   test('an import of a module the map does not declare fails', () => {
     const planted = new Planted()
     planted.files['source/data/protocol/MachineProtocol.ts'] =
@@ -473,6 +559,33 @@ describe('how the check reads a file', () => {
     expect(LayeringCheck.importsIn(source, 'sample.ts')).toEqual([
       'react', './a', './side-effect.css', '../b', '../c', './d', 'e', 'f', 'g', './k?raw', './m/*', './n.ts',
     ])
+  })
+
+  test('a .css file is read as its @import and url() paths, its comments and data: URIs left out (design 1e)', () => {
+    const source = [
+      "@import './a.css';",
+      '@import "b.css" screen;',
+      "@import url('./c.css');",
+      '@import url(d.css);',
+      "/* @import './commented.css'; url(./commented.png) */",
+      ".x { background: url(./e.png), url( \"./f.svg#g\" ) }",
+      "@font-face { src: url('@fontsource/h/files/h.woff2') format('woff2') }",
+      ".y { background: url('data:image/png;base64,AAAA') }",
+      ".z { background: url(#gradient) }",
+    ].join('\n')
+    expect(LayeringCheck.importsIn(source, 'sample.css')).toEqual([
+      './a.css', 'b.css', './c.css', 'd.css', './e.png', './f.svg', '@fontsource/h/files/h.woff2',
+    ])
+  })
+
+  test("a .css image-set() is read as each candidate's path, as Vite reads it: a url() once, a gradient or data: URI not at all", () => {
+    const source = [
+      ".x { background: image-set(\"./a.png\" 1x, '../b.png#frag' 2x) }",
+      '.y { background: -webkit-image-set(c.png 1x) }',
+      '.z { background: image-set(url(./d.png) 1x, linear-gradient(red, blue) 2x, "data:image/png;base64,AAAA" 3x) }',
+      "/* .w { background: image-set('./commented.png' 1x) } */",
+    ].join('\n')
+    expect(LayeringCheck.importsIn(source, 'sample.css')).toEqual(['./a.png', '../b.png', 'c.png', './d.png'])
   })
 
   test('a Vite glob is read as its patterns, as one string or an array, its negations left out', () => {

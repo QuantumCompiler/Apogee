@@ -1,6 +1,10 @@
 import { expect, test } from 'vitest'
-import { styles } from '../../../source/presentation/styles/Styles'
+import * as styles from '../../../source/presentation/styles/Styles'
 
-test('the stub names its module, and nothing more', () => {
+test("the module's front names it, and holds the tokens, the appearance machinery, the theme service and the observation primitive (design 1e)", () => {
   expect(styles.name).toBe('Styles')
+  expect(styles.themeIds).toEqual(['dark', 'light', 'contrast'])
+  expect(typeof styles.rootVars).toBe('function')
+  expect(typeof styles.ThemeService).toBe('function')
+  expect(typeof styles.Observable).toBe('function')
 })

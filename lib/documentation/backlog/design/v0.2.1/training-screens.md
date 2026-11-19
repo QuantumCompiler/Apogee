@@ -28,7 +28,7 @@
 - **The prototype is the source of truth.** Layout, states, controls and wording match it. Every command string stays word for word (`apogee train pipeline resume <id>`, `apogee train cycle halt`, the promote sheet's built command line).
 - **The layers and MVVM shape** are the design's ADR 0001 ([1a](../../../adrs/design/react-design-prototype.md)): the view-model is a plain TypeScript class that never imports React, takes its services by injection, and is driven only through its public methods.
 - **Real data only.** Reads and streams come from the stand-in ([1d](../../../assistant/design/DEVELOPER.md#the-cli-stand-in)) answering with recorded files read in place. The re-shaped `trainRecorded()` tables are not carried over. A state nobody recorded gets a hand-made file in the CLI's exact shape and words, named `*-handmade*`.
-- **Tokens only**, through the styles module ([1e](styles-shell-and-the-first-screen.md)).
+- **Tokens only**, through the styles module ([1e](../../../assistant/design/DEVELOPER.md#styles-the-shell-and-the-first-screen)).
 - **The old prototype is frozen.** This item reads it; it never edits it.
 
 **Seam + files.** The `training` module in the Presentation layer of `lib/design/prototype/` (folder shape per [1b](../../../assistant/design/DEVELOPER.md)):
@@ -78,4 +78,4 @@
 - [ ] ⌘9 opens Training, and the sidebar badge shows while a run or pass is live.
 - [ ] The local checks pass: typecheck, unit tests, the layering check, staleness.
 
-**Scope note.** Earmarked for v0.2.1 (design track 1); gated on [1e](styles-shell-and-the-first-screen.md). Out of scope: the parity screenshots and the `training:regimes` gallery board ([1s](parity-proof.md)); the Mac's run, synthesize and create sheets and its extra states; any edit to the old prototype or the Mac app.
+**Scope note.** Earmarked for v0.2.1 (design track 1); its gate, 1e, shipped 2026-11-18 ([Milestone A](../../../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react)). Out of scope: the parity screenshots and the `training:regimes` gallery board ([1s](parity-proof.md)); the Mac's run, synthesize and create sheets and its extra states; any edit to the old prototype or the Mac app.

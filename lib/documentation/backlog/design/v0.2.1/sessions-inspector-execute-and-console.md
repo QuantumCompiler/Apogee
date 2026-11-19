@@ -60,7 +60,7 @@
   - **Inspector width.** The prototype draws the inspector at 304 px (markup 763). BuildLayout and `tokens.json` `layoutPx.inspector` say 360, and the Mac's inspector can be resized.
 - **Siblings:**
   - [DEVELOPER.md → the CLI stand-in](../../../assistant/design/DEVELOPER.md#the-cli-stand-in) (1d): the stand-in, the clock, hand-made files;
-  - [styles-shell-and-the-first-screen.md](styles-shell-and-the-first-screen.md) (1e): places, keys, the sheet and confirm host;
+  - [DEVELOPER.md → styles, the shell and the first screen](../../../assistant/design/DEVELOPER.md#styles-the-shell-and-the-first-screen) (1e): places, keys, the sheet and confirm host;
   - [session-screen.md](session-screen.md) (1f);
   - [gallery-and-foundations.md](gallery-and-foundations.md) (1q);
   - [parity-proof.md](parity-proof.md) (1s).

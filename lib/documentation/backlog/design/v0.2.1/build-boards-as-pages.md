@@ -44,7 +44,7 @@
 - The recon of 2026-11-14: boards §1 (the three rows), §2 (their React form), §3 (canvas row 0), §6 (the native-controls table and BuildLayout's sections), §7 (commits per file), critic G13.
 - `tokens.json` (`layoutPx` 18 keys, `spacingPx`, `controlHeightPx`, `radiusPx`, `motion`, `type.scalePx`) and the Mac app's mirror of it in `lib/src/darwin/source/presentation/styles/Metrics.swift`.
 - The law: [layer enforcement](../../../adrs/gui/layer-enforcement.md), [presentation MVVM](../../../adrs/darwin/presentation-mvvm.md), [module schemes and previews](../../../adrs/darwin/module-schemes-and-previews.md), [the darwin guide](../../../assistant/darwin/CLAUDE.md).
-- Siblings: [`react-design-prototype.md`](../../../adrs/design/react-design-prototype.md) (1a's ADR 0001), [`DEVELOPER.md`](../../../assistant/design/DEVELOPER.md) (1b's scaffold, shipped), [`DEVELOPER.md` → the old prototype's baseline](../../../assistant/design/DEVELOPER.md#the-old-prototypes-baseline) (1c's baseline, shipped), [`styles-shell-and-the-first-screen.md`](styles-shell-and-the-first-screen.md) (1e), [`gallery-and-foundations.md`](gallery-and-foundations.md) (1q), [`parity-proof.md`](parity-proof.md) (1s), [`retire-the-old-prototype.md`](retire-the-old-prototype.md) (1t).
+- Siblings: [`react-design-prototype.md`](../../../adrs/design/react-design-prototype.md) (1a's ADR 0001), [`DEVELOPER.md`](../../../assistant/design/DEVELOPER.md) (1b's scaffold, shipped), [`DEVELOPER.md` → the old prototype's baseline](../../../assistant/design/DEVELOPER.md#the-old-prototypes-baseline) (1c's baseline, shipped), [`DEVELOPER.md` → styles, the shell and the first screen](../../../assistant/design/DEVELOPER.md#styles-the-shell-and-the-first-screen) (1e), [`gallery-and-foundations.md`](gallery-and-foundations.md) (1q), [`parity-proof.md`](parity-proof.md) (1s), [`retire-the-old-prototype.md`](retire-the-old-prototype.md) (1t).
 - Cross-queue: darwin 10a ([`design-the-server-window.md`](../../darwin/macos/v0.2.4/design-the-server-window.md), `:61-66`, `:197-198`) adds a SERVER WINDOW section, new gaps from G25 and decisions to the contract, and a second window to Layout and Processes. In the React app those are entries in this item's data.
 
 **Decisions made** (dated):
@@ -53,6 +53,13 @@
 - 2026-11-14: The recorded default: the old prototype is frozen from 1c's baseline; the ported words are the baseline's.
 - 2026-11-14: The recorded default: parity is judged on layout, states, controls and wording, not pixels.
 - 2026-11-14: The split: the native-controls header reads `SWIFTUI · MACOS 27`, the real floor (recon G13).
+- 2026-11-18: From design 1e (the monitor, [Milestone A](../../../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react)): six values the monitor wants that the CLI's `system` document does not carry. Each is drawn the honest way in the React app, and each becomes a gap on the rebuilt contract page (the frozen `BuildContract.dc.html` is not edited):
+  - **The GPU's use.** `system` reports the GPU's name and its model budget, never a percent, so the monitor draws no GPU percent and no GPU history bars.
+  - **What each held model takes.** `apogee.models_held` names the backends and gives no size, so a loaded model's row has no GB, and no weights-and-cache split or window.
+  - **What Apogee's other processes hold.** `apogee.process_bytes` is the reading process's own footprint. A session's child and the media runs are not counted anywhere, so "other apps" is memory used minus that one figure, and Apogee's share reads a few MB.
+  - **The store by format.** `disk.store_bytes` is one total. The store listing carries `bytes` on some rows only (`store-list.json`), so the monitor draws the one total, not the five format rows.
+  - **The volume's name.** `disk` gives the volume's free and total bytes, not its name, so the footer reads "free on the store's volume" where the old one said "on Macintosh HD".
+  - **Which models the sessions hold.** A one-shot `system` reports only its own process's `models_held`, which is always empty ("none by this process -- a session holds its own"), so the monitor cannot list the loaded models. It says "None by this process" in the CLI's words, never "No models loaded".
 
 **Open calls:**
 - [default: the data is converted once from the frozen boards by a throwaway script, then edited by hand as data. The script is not kept. The one-time proof (every row, gap, decision and call text-equal to the baseline's board) is recorded in MILESTONES.]
@@ -83,4 +90,4 @@
 - [ ] Adding a contract row is one data edit, shown in the design `DEVELOPER.md` recipe.
 - [ ] The local checks are green: typecheck, unit tests, the layering check and the build staleness check.
 
-**Scope note.** Earmarked for v0.2.1 (design track 1); gated on 1e. Out of scope: the gallery frame and its other pages (1q), the color and type pages (1q), the side-by-side report (1s), deleting the old boards and rewriting `spec/CLAUDE.md`'s change table (1t), and any new row or gap: new design waits for the port, and 10a's server window is its own item.
+**Scope note.** Earmarked for v0.2.1 (design track 1); its gate, 1e, shipped 2026-11-18 ([Milestone A](../../../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react)). Out of scope: the gallery frame and its other pages (1q), the color and type pages (1q), the side-by-side report (1s), deleting the old boards and rewriting `spec/CLAUDE.md`'s change table (1t), and any new row or gap: new design waits for the port, and 10a's server window is its own item.

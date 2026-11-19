@@ -4,7 +4,7 @@
 
 **Modules:** `reads` (CommandRunning, its five read outcomes and four command outcomes, and ReadRunner over the process stand-in), `jobs` (a job as a stream of updates, ended last, replayed from a recording on the clock), `session` (a chat from ChatStarting, replaying a recorded machine-mode stream, a turn a send, waiting at each question). All three are design 1d's; media follows with 1k, and the ADR lists all four.
 
-**What they hold**, each under the Mac app's name: `CommandRunning`, `ReadOutcome`, `CommandOutcome`, `ReadWithStderr` and `ReadRunner`; `JobStarting`, `JobRunning`, `JobUpdate`, `JobEnd`, `JobStarter` and `SupervisedJob`; `ChatStarting`, `ChatSession`, `SessionEvent`, `SessionEnd`, `ChatLaunch`, `ApogeeClient` and `MachineSession`. A view-model sees the interfaces only, so a later port swaps a real CLI in under them.
+**What they hold**, each under the Mac app's name: `CommandRunning`, `ReadOutcome`, `CommandOutcome`, `ReadWithStderr`, `ReadRunner` and `SystemReading` (the `system` document, 1e); `JobStarting`, `JobRunning`, `JobUpdate`, `JobEnd`, `JobStarter` and `SupervisedJob`; `ChatStarting`, `ChatSession`, `SessionEvent`, `SessionEnd`, `ChatLaunch`, `ApogeeClient` and `MachineSession`. A view-model sees the interfaces only, so a later port swaps a real CLI in under them.
 
 **May import:** this layer, Data and Infrastructure, and the packages `package.json` lists as dependencies. No React, no `.tsx` file, no Node built-in, no module above.
 

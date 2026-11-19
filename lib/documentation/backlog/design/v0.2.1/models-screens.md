@@ -48,7 +48,7 @@ This is the largest feature port after the session, and the place other places l
 - The Mac module: `lib/src/darwin/source/presentation/models/`, and its tests and fixtures under `lib/src/darwin/tests/presentation/models/`.
 - The boards: `lib/design/spec/html/ScreenModels*.dc.html` and `ScreenDownload.dc.html`.
 - [ADR 0001 (GUI)](../../../adrs/gui/layer-enforcement.md), [ADR 0002 (MVVM)](../../../adrs/darwin/presentation-mvvm.md), [ADR 0004 (previews)](../../../adrs/darwin/module-schemes-and-previews.md); [the old design guide](../../../../design/spec/CLAUDE.md).
-- Siblings: [`react-design-prototype.md`](../../../adrs/design/react-design-prototype.md) (1a's ADR 0001), [`DEVELOPER.md` → the CLI stand-in](../../../assistant/design/DEVELOPER.md#the-cli-stand-in) (1d), [`styles-shell-and-the-first-screen.md`](styles-shell-and-the-first-screen.md) (1e), [`sessions-inspector-execute-and-console.md`](sessions-inspector-execute-and-console.md) (1g, the sidebar's job rows), [`settings-and-appearance.md`](settings-and-appearance.md) (1i, the Models & roles and Backends & keys panes), [`parity-proof.md`](parity-proof.md) (1s).
+- Siblings: [`react-design-prototype.md`](../../../adrs/design/react-design-prototype.md) (1a's ADR 0001), [`DEVELOPER.md` → the CLI stand-in](../../../assistant/design/DEVELOPER.md#the-cli-stand-in) (1d), [`DEVELOPER.md` → styles, the shell and the first screen](../../../assistant/design/DEVELOPER.md#styles-the-shell-and-the-first-screen) (1e), [`sessions-inspector-execute-and-console.md`](sessions-inspector-execute-and-console.md) (1g, the sidebar's job rows), [`settings-and-appearance.md`](settings-and-appearance.md) (1i, the Models & roles and Backends & keys panes), [`parity-proof.md`](parity-proof.md) (1s).
 
 **Decisions made** (dated):
 - 2026-11-14: The user's call: the prototype is rebuilt in React, TypeScript and Vite, with the production GUIs' four layers and MVVM modules, so a new app ports from it. It builds to one self-contained `lib/design/main.html`. This is a design-queue item in v0.2.1.
@@ -78,7 +78,7 @@ This is the largest feature port after the session, and the place other places l
 - [ ] The per-preset test, the view-model tests, the layering check and the staleness check pass locally.
 - [ ] The record names every place the port follows the prototype where the Mac app differs.
 
-**Scope note.** Earmarked for v0.2.1 (design track 1); gated on 1e. Out of scope:
+**Scope note.** Earmarked for v0.2.1 (design track 1); its gate, 1e, shipped 2026-11-18 ([Milestone A](../../../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react)). Out of scope:
 - the confirm and sheet hosts and the toast (1e);
 - the sidebar's job rows (1g);
 - Settings' Models & roles and Backends & keys panes (1i);

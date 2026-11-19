@@ -6,39 +6,37 @@ The work queue, seen one release at a time. This page is the **overview**: what 
 
 The branch is `v0.2.1`; the last published release is v0.2.0.
 
-**Still to build: 20 items.**
-- **The design:** 16. The prototype is being rebuilt in React; its law (1a), its scaffold (1b), the old prototype's baseline (1c) and the CLI stand-in (1d) have shipped.
+**Still to build: 19 items.**
+- **The design:** 15. The prototype is being rebuilt in React; its law (1a), its scaffold (1b), the old prototype's baseline (1c), the CLI stand-in (1d) and its first screen (1e) have shipped.
 - **The mod:** 4. The Claude plugin is born.
 - **The Apple apps:** none; their three tracks for this release have shipped.
 - **The CLI:** none; its three tracks for this release have shipped.
 
-On top of that, 4 maintenance items can be picked up any time. None of the 20 waits on a decision from you.
+On top of that, 4 maintenance items can be picked up any time. None of the 19 waits on a decision from you.
 
-**Can start today** (nothing gates them): [design 1e](design/v0.2.1/styles-shell-and-the-first-screen.md) and [mod 1a](mod/v0.2.1/mod-scaffold.md).
+**Can start today** (nothing gates them): [design 1f](design/v0.2.1/session-screen.md) (split in two first), [design 1h](design/v0.2.1/models-screens.md), [design 1i](design/v0.2.1/settings-and-appearance.md), [design 1j](design/v0.2.1/training-screens.md), [design 1k](design/v0.2.1/video-and-runtime-consent.md), [design 1n](design/v0.2.1/library-and-review.md), [design 1o](design/v0.2.1/knowledge-and-graph.md), [design 1p](design/v0.2.1/suites-and-tasks.md), [design 1q](design/v0.2.1/gallery-and-foundations.md), [design 1r](design/v0.2.1/build-boards-as-pages.md) and [mod 1a](mod/v0.2.1/mod-scaffold.md).
 
 ### The design ([queue](design/README.md#v021))
 
-**Track 1:** the design prototype is rebuilt in React and TypeScript, using the same layers and screen modules as the Mac app. It reads the CLI's own recorded output, and it builds into one `lib/design/main.html` that opens with a double-click. The old one-file prototype is frozen at `b375fac9`, 1c's baseline. From 1e on, new screens are drawn in the React app. The law, 1a, has shipped: the design's [ADR 0001](../adrs/design/react-design-prototype.md). So has the scaffold, 1b: the empty app, its module map and layering check, and one `npm run check` ([DEVELOPER.md](../assistant/design/DEVELOPER.md)). So has the old prototype's baseline, 1c: its still frames at that revision, re-made by `npm run baseline` ([DEVELOPER.md](../assistant/design/DEVELOPER.md#the-old-prototypes-baseline)). So has the CLI stand-in, 1d: the app's three lower layers, answering every read, command, job and chat from the CLI's own recordings ([DEVELOPER.md](../assistant/design/DEVELOPER.md#the-cli-stand-in)). All four are in [Milestone A](../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react).
+**Track 1:** the design prototype is rebuilt in React and TypeScript, using the same layers and screen modules as the Mac app. It reads the CLI's own recorded output, and it builds into one `lib/design/main.html` that opens with a double-click. The old one-file prototype is frozen at `b375fac9`, 1c's baseline. New screens are drawn in the React app now. The law, 1a, has shipped: the design's [ADR 0001](../adrs/design/react-design-prototype.md). So has the scaffold, 1b: the empty app, its module map and layering check, and one `npm run check` ([DEVELOPER.md](../assistant/design/DEVELOPER.md)). So has the old prototype's baseline, 1c: its still frames at that revision, re-made by `npm run baseline` ([DEVELOPER.md](../assistant/design/DEVELOPER.md#the-old-prototypes-baseline)). So has the CLI stand-in, 1d: the app's three lower layers, answering every read, command, job and chat from the CLI's own recordings ([DEVELOPER.md](../assistant/design/DEVELOPER.md#the-cli-stand-in)). So has the first screen, 1e: the tokens generated from tokens.json, the shell with its 11 places, the composition root, and the system monitor on the CLI's recorded `system` document, so the built file opens at the monitor ([DEVELOPER.md](../assistant/design/DEVELOPER.md#styles-the-shell-and-the-first-screen)). All five are in [Milestone A](../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react).
 
 | # | Item | Waits on |
 |---|---|---|
-| **Foundations** | | |
-| 1e | [Styles, the shell, the composition root and the first screen](design/v0.2.1/styles-shell-and-the-first-screen.md) | — |
 | **Screens** | | |
-| 1f | [The session screen](design/v0.2.1/session-screen.md) (split in two before building) | 1e |
+| 1f | [The session screen](design/v0.2.1/session-screen.md) (split in two before building) | — |
 | 1g | [Sessions: the list, the inspector, the execute door and the console](design/v0.2.1/sessions-inspector-execute-and-console.md) | 1f |
-| 1h | [Models](design/v0.2.1/models-screens.md) | 1e |
-| 1i | [Settings and Appearance](design/v0.2.1/settings-and-appearance.md) | 1e |
-| 1j | [Training](design/v0.2.1/training-screens.md) | 1e |
-| 1k | [Video and the runtime consent](design/v0.2.1/video-and-runtime-consent.md) | 1e |
+| 1h | [Models](design/v0.2.1/models-screens.md) | — |
+| 1i | [Settings and Appearance](design/v0.2.1/settings-and-appearance.md) | — |
+| 1j | [Training](design/v0.2.1/training-screens.md) | — |
+| 1k | [Video and the runtime consent](design/v0.2.1/video-and-runtime-consent.md) | — |
 | 1l | [Compose](design/v0.2.1/compose-screens.md) | 1k |
 | 1m | [Voice](design/v0.2.1/voice-screen.md) | 1k |
-| 1n | [Library and Review](design/v0.2.1/library-and-review.md) | 1e |
-| 1o | [Knowledge and Code graph](design/v0.2.1/knowledge-and-graph.md) | 1e |
-| 1p | [Suites and Tasks](design/v0.2.1/suites-and-tasks.md) | 1e |
+| 1n | [Library and Review](design/v0.2.1/library-and-review.md) | — |
+| 1o | [Knowledge and Code graph](design/v0.2.1/knowledge-and-graph.md) | — |
+| 1p | [Suites and Tasks](design/v0.2.1/suites-and-tasks.md) | — |
 | **Review pages** | | |
-| 1q | [The gallery and the foundations](design/v0.2.1/gallery-and-foundations.md) (replaces the claude.ai canvas) | 1e |
-| 1r | [The build boards as pages](design/v0.2.1/build-boards-as-pages.md) | 1e |
+| 1q | [The gallery and the foundations](design/v0.2.1/gallery-and-foundations.md) (replaces the claude.ai canvas) | — |
+| 1r | [The build boards as pages](design/v0.2.1/build-boards-as-pages.md) | — |
 | **Finish** | | |
 | 1s | [The parity proof](design/v0.2.1/parity-proof.md): you see the side-by-side report before anything is deleted | every screen item (1g–1p) and both review pages (1q, 1r) |
 | 1t | [Retire the old prototype and rewrite the law](design/v0.2.1/retire-the-old-prototype.md): the old files and the canvas go | 1s |
@@ -69,7 +67,6 @@ Nothing is left to build. This release's three CLI tracks have shipped:
 
 ### Ties to later releases
 
-- **[Apple apps 10a](darwin/macos/v0.2.4/design-the-server-window.md)** (v0.2.4, designing the server window) waits on design 1e, so it is drawn in the React app.
 - **[Mod 2b](mod/v0.2.2/mod-graphs-and-knowledge.md)** (v0.2.2) waits on mod 1c.
 
 ## Any time: maintenance

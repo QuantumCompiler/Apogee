@@ -48,7 +48,7 @@
 - The darwin module: `lib/src/darwin/source/presentation/video/`, `styles/Components/{MediaPlayer,InstallCard,InstallConsentSheet}.swift`, and `business/media/{ClipForm,InstallConsent,MediaRecords}.swift`.
 - [`module-schemes-and-previews.md`](../../../adrs/darwin/module-schemes-and-previews.md): named previews per state.
 - The old design guide's node check ([`lib/design/spec/CLAUDE.md`](../../../../design/spec/CLAUDE.md), "Checking a change"), which the per-preset test replaces.
-- Siblings: [`DEVELOPER.md` → the old prototype's baseline](../../../assistant/design/DEVELOPER.md#the-old-prototypes-baseline) (1c's baseline, shipped), [`DEVELOPER.md` → the CLI stand-in](../../../assistant/design/DEVELOPER.md#the-cli-stand-in) (1d), [`styles-shell-and-the-first-screen.md`](styles-shell-and-the-first-screen.md) (1e), [`compose-screens.md`](compose-screens.md) (1l), [`voice-screen.md`](voice-screen.md) (1m), [`settings-and-appearance.md`](settings-and-appearance.md) (1i), [`gallery-and-foundations.md`](gallery-and-foundations.md) (1q), [`parity-proof.md`](parity-proof.md) (1s).
+- Siblings: [`DEVELOPER.md` → the old prototype's baseline](../../../assistant/design/DEVELOPER.md#the-old-prototypes-baseline) (1c's baseline, shipped), [`DEVELOPER.md` → the CLI stand-in](../../../assistant/design/DEVELOPER.md#the-cli-stand-in) (1d), [`DEVELOPER.md` → styles, the shell and the first screen](../../../assistant/design/DEVELOPER.md#styles-the-shell-and-the-first-screen) (1e), [`compose-screens.md`](compose-screens.md) (1l), [`voice-screen.md`](voice-screen.md) (1m), [`settings-and-appearance.md`](settings-and-appearance.md) (1i), [`gallery-and-foundations.md`](gallery-and-foundations.md) (1q), [`parity-proof.md`](parity-proof.md) (1s).
 
 **Decisions made** (dated):
 - 2026-11-14: The user's call: rebuild the prototype in React and TypeScript with the production GUIs' four layers and MVVM modules, so the prototype stays the design's cross-platform source of truth.
@@ -82,7 +82,7 @@
 - [ ] `MediaPlayer`, `InstallCard` and `InstallConsentSheet` live in `styles`, and the video module uses them from there.
 - [ ] A named preview exists for each visible state, and the local checks (typecheck, tests, layering, staleness) are green.
 
-**Scope note.** Earmarked for v0.2.1 (design track 1); gated on 1e. It gates 1l and 1m on the shared player. Out of scope:
+**Scope note.** Earmarked for v0.2.1 (design track 1); its gate, 1e, shipped 2026-11-18 ([Milestone A](../../../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react)). It gates 1l and 1m on the shared player. Out of scope:
 - the compositions tab (1l) and voice (1m);
 - the Settings panes (1i), except wiring the shared sheet;
 - the gallery's ComponentsMedia board (1q);

@@ -109,12 +109,17 @@ function scratch(): string {
   return folder
 }
 
-/** git in a planted repository, with no hook, signing or global identity in play. */
+/**
+ * git in a planted repository, with no hook, signing or global identity in play.
+ * Every GIT_* variable is dropped: an inherited GIT_DIR (a hook, or a run in a scratch
+ * copy) would otherwise point `-C <temp>` at the caller's repository and commit there.
+ */
 function plantedGit(repo: string, ...args: string[]): string {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_')))
   return execFileSync(
     'git',
     ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', '-c', 'user.name=Planted', '-c', 'user.email=planted@example.invalid', '-C', repo, ...args],
-    { encoding: 'utf8' },
+    { encoding: 'utf8', env },
   )
 }
 

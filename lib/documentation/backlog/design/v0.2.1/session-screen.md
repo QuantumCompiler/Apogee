@@ -86,8 +86,8 @@ So the port replaces five hand-written transcripts and a string counter with rec
 - [ ] Side by side with the frozen old prototype (1c), each preset matches on layout, states, controls and wording. Every difference is listed as intended (the CLI's data) or as a defect.
 - [ ] The local checks are green: typecheck, unit tests, layering check, staleness.
 
-**Scope note.** Earmarked for v0.2.1 (design track 1); gated on [1e](styles-shell-and-the-first-screen.md). **Split first**: (1) is gated on 1e, and (2) on (1). [1g](sessions-inspector-execute-and-console.md) is gated on this item. Out of scope:
+**Scope note.** Earmarked for v0.2.1 (design track 1); its gate, 1e, shipped 2026-11-18 ([Milestone A](../../../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react)). **Split first**: (1) is gated on 1e, which has shipped, and (2) on (1). [1g](sessions-inspector-execute-and-console.md) is gated on this item. Out of scope:
 - the session list, the inspector, the execute door and the console (1g);
 - the gallery ([1q](gallery-and-foundations.md)) and the full parity proof ([1s](parity-proof.md));
 - any change to the Mac app, its fixtures or its capture script;
-- any new design state: the old prototype is frozen, and new design waits for 1e.
+- any new design state: the old prototype is frozen, and new design is drawn in the React app after the port, not here.
