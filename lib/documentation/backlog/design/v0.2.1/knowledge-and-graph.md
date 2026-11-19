@@ -34,7 +34,7 @@
 - **The old prototype stays frozen** and is the reference. No new state is drawn here.
 
 **Seam + files.**
-- `presentation/knowledge/` under `lib/design/prototype/`, laid out per [1b](scaffold-and-layering-check.md):
+- `presentation/knowledge/` under `lib/design/prototype/`, laid out per [1b](../../../assistant/design/DEVELOPER.md):
   - `ViewModels/`: `RecordsViewModel` (list, branch filter, ask, selection, raw conversation, the record's actions) and `CollectionsViewModel` (list, selection, search, sources, the collection's actions).
   - `Views/`: the screen with its two tabs, the record pane, the collection pane.
   - `Previews/`: records listed; a question answered with scores; a record open; its raw conversation shown; a branch with none; collections read; a collection searched.

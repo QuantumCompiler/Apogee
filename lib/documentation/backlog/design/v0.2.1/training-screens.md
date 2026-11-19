@@ -31,7 +31,7 @@
 - **Tokens only**, through the styles module ([1e](styles-shell-and-the-first-screen.md)).
 - **The old prototype is frozen.** This item reads it; it never edits it.
 
-**Seam + files.** The `training` module in the Presentation layer of `lib/design/prototype/` (folder shape per [1b](scaffold-and-layering-check.md)):
+**Seam + files.** The `training` module in the Presentation layer of `lib/design/prototype/` (folder shape per [1b](../../../assistant/design/DEVELOPER.md)):
 - `ViewModels/TrainingViewModel.ts`: the Mac's name. Its tab list (runs, pipelines, cycle, regimes, datasets), a `PromoteForm`, a `Pending` for the five `train` confirm acts (run, resume, one pass, halt, resume the cycle), the pulled banner, the side job bar, and a `running` flag for the sidebar badge. Its reads are the Mac's (TrainingViewModel.swift:452–583): `train status`, `train versions`, `train regime list`, `datasets kits`, `datasets list`, `train pipeline list|status|show`, `train cycle status`.
 - `Views/`: `TrainingScreen`, `RunsView`, `PipelinesView` with `StageList`, `CycleView`, `RegimesView`, `DatasetsView` with `PulledBanner`, `PromoteSheet`, `PullSheet`. The Mac's names, rendered through 1e's sheet and confirm hosts.
 - `Previews/`: one named entry per state the prototype draws, each built from fixtures through the view-model's public API.

@@ -26,7 +26,7 @@
 - **One player.** The waveform's play button, time and seek use 1k's shared player from `styles`, never a copy.
 - **Shared state goes through services.** The chosen voice for compositions is a preference, read by [1l](compose-screens.md) and [1i](settings-and-appearance.md). The header's model line opens the store ([1h](models-screens.md)). The sidebar badge and the monitor row read the running speech from 1e's shell.
 
-**Seam + files.** Under the prototype's source (`lib/design/prototype/`, laid out by [1b](scaffold-and-layering-check.md)):
+**Seam + files.** Under the prototype's source (`lib/design/prototype/`, laid out by [1b](../../../assistant/design/DEVELOPER.md)):
 - `presentation/voice/ViewModels/VoiceViewModel.ts`: the speeches, the selection, the form (text, voice, speed, output name, errors, command), the run, and the selected speech's view (bars, sentences, facts, command). Its names follow the Mac's where they exist: `speeches`, `selected`, `voices`, `text`, `voice`, `speed`, `run`, `select`, `speak`, `plannedArguments`, `currentSentence`.
 - `presentation/voice/Views/`: the screen, the speak card, the speech list and the selected speech.
 - `presentation/voice/Previews/`: named states, each built over the stand-in at fixed fixtures:

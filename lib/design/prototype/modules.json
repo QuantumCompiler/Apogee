@@ -1,0 +1,42 @@
+{
+  "modules": {
+    "presentation/styles": [],
+    "presentation/shell": ["presentation/styles"],
+    "presentation/session": ["presentation/styles"],
+    "presentation/compose": ["presentation/styles"],
+    "presentation/sessions": ["presentation/session", "presentation/shell", "presentation/styles"],
+    "presentation/models": ["presentation/shell", "presentation/styles"],
+    "presentation/training": ["presentation/shell", "presentation/styles"],
+    "presentation/settings": ["presentation/shell", "presentation/styles"],
+    "presentation/graph": ["presentation/shell", "presentation/styles"],
+    "presentation/knowledge": ["presentation/shell", "presentation/styles"],
+    "presentation/console": ["presentation/shell", "presentation/styles"],
+    "presentation/library": ["presentation/shell", "presentation/styles"],
+    "presentation/review": ["presentation/shell", "presentation/styles"],
+    "presentation/suites": ["presentation/shell", "presentation/styles"],
+    "presentation/tasks": ["presentation/shell", "presentation/styles"],
+    "presentation/video": ["presentation/shell", "presentation/styles"],
+    "presentation/voice": ["presentation/shell", "presentation/styles"],
+    "presentation/monitor": ["presentation/shell", "presentation/styles"],
+    "presentation/app": [
+      "presentation/styles",
+      "presentation/shell",
+      "presentation/session",
+      "presentation/compose",
+      "presentation/sessions",
+      "presentation/models",
+      "presentation/training",
+      "presentation/settings",
+      "presentation/graph",
+      "presentation/knowledge",
+      "presentation/console",
+      "presentation/library",
+      "presentation/review",
+      "presentation/suites",
+      "presentation/tasks",
+      "presentation/video",
+      "presentation/voice",
+      "presentation/monitor"
+    ]
+  }
+}

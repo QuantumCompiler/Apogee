@@ -12,6 +12,7 @@ The design is moving to a new form (the user's call, 2026-11-14, track 1 of [the
   - its data the CLI's own recorded documents;
   - built into one self-contained `lib/design/main.html` that opens with a double-click.
   - The canvas is retired once the new app covers every board.
+- **Laid down so far:** the law (1a) and the scaffold (1b, 2026-11-18): the app's empty window, its four layers and 19 Presentation modules as stubs, the module map, the layering check and the one-file build, held by one `npm run check` ([DEVELOPER.md](DEVELOPER.md)).
 
 The law of the new form is [the design's ADR 0001](../../adrs/design/react-design-prototype.md): its layers and modules, its data, its one-file build, its local gates, the five rules and the canvas's retirement.
 
@@ -35,4 +36,13 @@ The design's rules carry over unchanged into the new form ([`lib/design/spec/CLA
 
 The docs-first lifecycle and its conventions are the CLI's ([`assistant/cli/CLAUDE.md`](../cli/CLAUDE.md)); this home states only its deltas. A change is specced in [the backlog](../../backlog/design/README.md), built from its document, and recorded in [MILESTONES.md](MILESTONES.md). Each step that changes the queue's index changes the [backlog overview](../../backlog/README.md#keeping-this-page-true) in the same pass. The plan is [ROADMAP.md](ROADMAP.md).
 
-The design is not an input to any app's build, and CI never reads it. Its checks run locally before a commit (1b). The logo beside it is the one exception: `lib/design/assets/Logo.png` is the master the macOS app's icon is made from, and that app's suite reads it.
+The design is not an input to any app's build, and CI never reads it. Its checks run locally before a commit: `npm run check` in `lib/design/prototype/`, which runs the typecheck, the unit tests, the layering check, the staleness check and the smoke test that opens the built file from disk, and never rebuilds ([DEVELOPER.md](DEVELOPER.md#develop-build-and-check)). The logo beside it is the one exception: `lib/design/assets/Logo.png` is the master the macOS app's icon is made from, and that app's suite reads it.
+
+## Codebase map
+
+| Path | Contents |
+|---|---|
+| `lib/design/spec/` | The old one-file prototype, its boards and `tokens.json`: the port's reference, frozen from 1c, retired by 1t. Its guide is [`lib/design/spec/CLAUDE.md`](../../../design/spec/CLAUDE.md). |
+| `lib/design/prototype/` | The React and TypeScript app (1b, 2026-11-18): `source/` in four layers with their cards, the module map `modules.json`, the tests (each module's, the layering check in `tests/architecture/layering/`, the built file's in `tests/bundle/`), the smoke test in `e2e/`, the build's own code in `tooling/`, npm with an exact-pinned lock file. [DEVELOPER.md](DEVELOPER.md#layout) has it file by file. |
+| `lib/design/main.html` | The built prototype, committed: one self-contained file that opens by double-click, written only by `npm run build`. |
+| `lib/design/assets/` | The logo, `Logo.png`, the macOS app icon's master. |

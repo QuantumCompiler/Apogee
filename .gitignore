@@ -28,6 +28,14 @@ buildServer.json
 __pycache__/
 *.pyc
 
+# The design prototype's npm install, Vite's scratch build and Playwright's output
+# (lib/documentation/assistant/design/DEVELOPER.md). Its one built file,
+# lib/design/main.html, is committed.
+lib/design/prototype/node_modules/
+lib/design/prototype/dist/
+lib/design/prototype/test-results/
+lib/design/prototype/playwright-report/
+
 # Superpowers (the repository enables it; see CLI CLAUDE.md -> Superpowers fits the
 # docs-first lifecycle): its plan workspaces and brainstorm mockups, the item
 # worktrees under .claude/worktrees/, and each machine's own settings.

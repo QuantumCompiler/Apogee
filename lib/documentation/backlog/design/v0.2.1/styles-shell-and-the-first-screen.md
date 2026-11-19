@@ -36,6 +36,7 @@ When this item ships, `lib/design/main.html` opens by double-click and shows the
   - `ViewModels/MonitorViewModel`: `connect`, `opened`, `closed` and `read`, as the Mac app names them. It reads `system` through the stand-in every 2 s (5 ticks) while open and keeps the last 30 readings for the history bars.
   - `Views/MonitorView`, and a `Previews/` equivalent for the `monitor` preset and the stand-in's missing and config-typo modes.
 - The `monitor` preset wired into the stand-in: the `system` fixture 1d extracts, a short run of readings for the history bars, and one failed read for the stale-GPU state.
+- `tests/architecture/layering/LayeringCheck.ts` (1b's check): read `.css` files too, so a CSS `@import` or `url()` is held to rule 4 as an import is. A path leaving `lib/design/prototype/` fails, and a package must be one `package.json` lists. `DEVELOPER.md`'s list of what the check reads says so.
 - `lib/design/main.html`: rebuilt and committed.
 - Docs on ship: `assistant/design/MILESTONES.md`, and `assistant/design/CLAUDE.md`'s "Where the design stands" (new design is drawn in the React app now).
 
@@ -45,7 +46,7 @@ When this item ships, `lib/design/main.html` opens by double-click and shows the
   - **The theme machinery:** `themes()` 3284, `colorGroups()` 3298, `lum()`/`ratio()` 3309–3322, `withOverride()` 3337, `rootVars()` 3347–3361 (at HEAD each is 118 lines earlier: `themes()` 3166, `rootVars()` 3229).
   - **The shell:** helmet 10–78; sidebar markup 81–170 and section 6 (5020–5103, places at 5052, `cycleTheme` 5099); section 28 `ui` (7564–7599); menu scrim 2066; confirm host 2478–2485; toast 2487.
 - The Mac app: `presentation/monitor` (MonitorViewModel, MonitorView), `shell/ViewModels/{Destination,KeyMap,ShellViewModel}.swift`, `shell/Views/ShellView.swift`, `app/ViewModels/AppViewModel.swift`, `styles/{Palette,Typography,Metrics}.swift`.
-- Siblings: [react-design-prototype.md](../../../adrs/design/react-design-prototype.md) (1a's ADR 0001), [scaffold-and-layering-check.md](scaffold-and-layering-check.md) (1b), [cli-stand-in.md](cli-stand-in.md) (1d), [settings-and-appearance.md](settings-and-appearance.md) (1i), [gallery-and-foundations.md](gallery-and-foundations.md) (1q), [parity-proof.md](parity-proof.md) (1s), [retire-the-old-prototype.md](retire-the-old-prototype.md) (1t).
+- Siblings: [react-design-prototype.md](../../../adrs/design/react-design-prototype.md) (1a's ADR 0001), [DEVELOPER.md](../../../assistant/design/DEVELOPER.md) (1b's scaffold, shipped), [cli-stand-in.md](cli-stand-in.md) (1d), [settings-and-appearance.md](settings-and-appearance.md) (1i), [gallery-and-foundations.md](gallery-and-foundations.md) (1q), [parity-proof.md](parity-proof.md) (1s), [retire-the-old-prototype.md](retire-the-old-prototype.md) (1t).
 - Cross-queue: the Apple apps' 10a ([design-the-server-window.md](../../darwin/macos/v0.2.4/design-the-server-window.md)) is to be gated on this item and drawn in the React app. That gate belongs in 10a and the darwin index; this item changes no gate.
 
 **Decisions made** (dated):
@@ -57,6 +58,7 @@ When this item ships, `lib/design/main.html` opens by double-click and shows the
 - 2026-11-14: The recorded default: `tokens.json` becomes the single source the prototype reads, and the colors, sizes and fonts are generated from it.
 - 2026-11-14: The recorded default: data is the Mac app's recorded fixtures, read in place at build time; view-models are plain TypeScript that never imports React.
 - 2026-11-14: The recorded default (the freeze rule, 1a): the old prototype is frozen from 1c's baseline and takes fixes only. From this item on, a new screen or state is drawn in the React app.
+- 2026-11-18: From 1b's review: the layering check reads every way a script pulls a file into the build (imports, `import.meta.glob`, `new URL(…, import.meta.url)`), but no `.css` file, since 1b has none. This item writes the first `.css` file, so it makes the check scan `.css` files for `@import` and `url()` (the seam and guardrail above). Until it does, a stylesheet could read a file from outside the prototype that neither the check nor the staleness hash sees.
 
 **Open calls:**
 - [default: routing reads `start` and `still` from both the query (`?start=monitor&still=true`, as the old prototype's links do) and the hash (`#start=monitor&still=true`). Both work from `file://`.]
@@ -80,6 +82,7 @@ When this item ships, `lib/design/main.html` opens by double-click and shows the
 - **`rootVars` parity:** for 3 themes × 4 sizes × 3 interface fonts × 3 code fonts, the output equals the frozen old `rootVars()`. `ratio()` gives the old prototype's contrast for all 25 rows.
 - **One-time proof:** `tokens.json`'s colors equal the frozen `themes()` and `colorGroups()` (75 values; groups 3, 3, 3, 9, 5, 2), recorded in MILESTONES.
 - **Layering check (1b), on planted violations:** `react` imported in `monitor/ViewModels/`, `shell` importing `monitor`, and `styles` importing `shell` each fail with a sentence naming the file.
+- **The check reads `.css`:** a planted `@import` and a planted `url()` leaving `lib/design/prototype/` each fail with rule 4's sentence, and one inside the prototype passes.
 - **Routing tests:** query and hash forms, a `file://` URL, `still`, and an unknown preset.
 - **Shell view-model tests:** each of the 11 places by its key, the toast clearing after 12 ticks, the scrim closing an open menu.
 - **`MonitorViewModel` tests** as the Mac app's: reads while open, stops when closed, the failure words.

@@ -35,7 +35,7 @@
 - **Every document is in the CLI's shape.** Recorded files are read in place. A state nobody recorded gets a hand-made file in the exact shape, named `*-handmade*`.
 - **The old prototype stays frozen.** This item reads it; it changes nothing in `lib/design/spec`.
 
-**Seam + files.** Paths are under `lib/design/prototype/`, in [1b](scaffold-and-layering-check.md)'s layout: code in `source/`, tests in `tests/`.
+**Seam + files.** Paths are under `lib/design/prototype/`, in [1b](../../../assistant/design/DEVELOPER.md)'s layout: code in `source/`, tests in `tests/`.
 - `source/presentation/compose/ViewModels/ComposeViewModel.ts`: the Mac names where they fit. That means `projects`, `selected`, `sheet` (new or edit), `select`, `newComposition`, `compose` (plan first, or render), `stop`, `resume`, `edit`, `previewEdit`, `renderEdit`. It also keeps the prototype's two refusals word for word: "One composition renders at a time. Stop the other first." and "…Wait for the other, or stop it."
 - `source/presentation/compose/Views/`: the list, the new-composition pane (brief, voice, voice model, music, assets, captions note), the project page, the scenes and timeline, and the edit pane. `Components/` only when a piece is used twice.
 - `source/presentation/compose/Previews/`: one named preview per preset, plus each state the view-model can reach (planning, rendering, previewing, preview failed, the edit pane locked).

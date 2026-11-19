@@ -18,10 +18,10 @@
 - **Opened the README's way** ([spec/README.md](../../../../design/spec/README.md) "Opening it"): the archived `html/` folder served by `python3 -m http.server`, then `main.html?start=<preset>&still=true`. A page opened from disk cannot load the boards.
 - **Still frames at the boards' size:** 1440 × 900, the `$preview` every Screen board declares.
 - **The freeze** is 1a's rule ([the interim rule](../../../assistant/design/CLAUDE.md#the-interim-rule-while-the-port-runs)): from this revision on, the old prototype takes fixes only.
-- **One download, with consent.** Playwright's Chromium (about 150 MB) is fetched once, when this item builds, on the user's yes. Nothing else is downloaded. No `apogee` binary runs.
+- **One download, with consent.** Playwright's Chromium was fetched once by 1b (2026-11-18, on the user's yes: Playwright 1.64.1's Chromium 156, about 286 MiB downloaded and 572 MB on disk in `~/Library/Caches/ms-playwright`). This item reuses it and downloads nothing. No `apogee` binary runs.
 
 **Seam + files.**
-- `lib/design/prototype/package.json` (from 1b): `playwright` as an exact-pinned dev dependency, in the lockfile; a `baseline` script.
+- `lib/design/prototype/package.json` (from 1b): `playwright` as an exact-pinned dev dependency at 1b's version, 1.64.1 (the version `@playwright/test` already pins, so it finds the browser 1b downloaded), in the lockfile; a `baseline` script.
 - `lib/design/prototype/scripts/baseline.ts`, new. Two modes:
   - `--record`: refuses while `git status --porcelain lib/design/spec` shows anything, naming the files. Otherwise takes the newest commit that touches `lib/design/spec`, runs the 30-tick check on that copy in all three `apogee` modes, and writes `baseline.json`.
   - default (capture): reads `baseline.json`, archives that revision, serves it, and captures:
@@ -77,4 +77,4 @@ A real run is captured twice; the two hash lists must match.
 - [ ] The contact sheet is sent to the user to look through.
 - [ ] `spec/CLAUDE.md`, `spec/README.md` and the design guide say the old prototype is frozen at that revision.
 
-**Scope note.** Earmarked for v0.2.1 (design track 1); gated on 1b ([scaffold-and-layering-check.md](scaffold-and-layering-check.md)), and in practice on the other session's design work being committed. Out of scope: comparing old and new (1s), republishing or resyncing the canvas (retired by 1t), new boards for board-less presets (1s), CI, and any change to the old prototype beyond the frozen banner.
+**Scope note.** Earmarked for v0.2.1 (design track 1); its gate, 1b, shipped 2026-11-18 ([Milestone A](../../../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react)), and in practice on the other session's design work being committed. Out of scope: comparing old and new (1s), republishing or resyncing the canvas (retired by 1t), new boards for board-less presets (1s), CI, and any change to the old prototype beyond the frozen banner.
