@@ -1,5 +1,7 @@
 # Apogee Desktop design
 
+> **Frozen at `b375fac9` (design 1c): fixes only.** The React app at `lib/design/prototype/` replaces this prototype. Its baseline, `lib/design/prototype/parity/baseline.json`, records that revision, and `npm run baseline` there re-makes its images ([the interim rule](../../documentation/assistant/design/CLAUDE.md#the-interim-rule-while-the-port-runs)).
+
 The design of the desktop applications: an interactive prototype of the whole app, a board for every screen and state, the foundations (color tokens, type, components), and the build spec that maps the design to the CLI's machine-mode contract.
 
 It is a reference for building the apps under `lib/src/darwin/`, `linux/` and `windows/` ([GUI docs](../../documentation/CLAUDE.md)), not an input to any build, and CI never reads it. The same files also live in the **Apogee Desktop** design canvas, <https://claude.ai/artifact/HRGyHM1ZkRL3D1bWGXQGk7>, where they are laid out side by side.

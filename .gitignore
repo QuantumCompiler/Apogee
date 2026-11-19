@@ -35,6 +35,9 @@ lib/design/prototype/node_modules/
 lib/design/prototype/dist/
 lib/design/prototype/test-results/
 lib/design/prototype/playwright-report/
+# The old prototype's baseline images (design 1c): re-made by npm run baseline from
+# parity/baseline.json's recorded revision, never committed.
+lib/design/prototype/.parity/
 
 # Superpowers (the repository enables it; see CLI CLAUDE.md -> Superpowers fits the
 # docs-first lifecycle): its plan workspaces and brainstorm mockups, the item

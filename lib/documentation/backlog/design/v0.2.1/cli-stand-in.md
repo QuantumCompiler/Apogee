@@ -14,7 +14,7 @@
   - `tick()` runs every 400 ms (`lib/design/spec/html/main.html:2733` at HEAD) unless `still` is set.
   - The `apogee` prop is `installed`, `missing` or `config-typo` (the `data-props` line, `:2462`; read at `:4287-4290`).
   - Its config-typo refusal (`:4290`) is the recorded `business/reads/Fixtures/agents-list-bad-config.err` word for word, with the verb swapped and "(exited with status 1)" added.
-  - These lines move: another session is editing the file (7,300 lines at HEAD, 7,780 in the working tree). Item [1c](old-prototype-baseline.md)'s baseline fixes them.
+  - These lines move: another session is editing the file (7,300 lines at HEAD, 7,780 in the working tree). Item [1c](../../../assistant/design/DEVELOPER.md#the-old-prototypes-baseline)'s baseline, shipped at `b375fac9`, fixes them.
 
 **Core constraint(s).**
 - **Every answer is the binary's own.** A rule answers with a recorded file, or a slice of one. A state nobody recorded gets a hand-made file in the CLI's exact shape, named `*-handmade*`. Never a shape made up (ADR 0004's rule, [module-schemes-and-previews.md](../../../adrs/darwin/module-schemes-and-previews.md) §3).
@@ -48,7 +48,7 @@
 - The Mac app's services and fakes: [module-schemes-and-previews.md](../../../adrs/darwin/module-schemes-and-previews.md) (ADR 0004), [presentation-mvvm.md](../../../adrs/darwin/presentation-mvvm.md), [assistant/darwin/CLAUDE.md](../../../assistant/darwin/CLAUDE.md).
 - The CLI's documents and streams: [machine-mode.md](../../../reference/cli/machine-mode.md).
 - The old prototype's clock and props: [the design guide](../../../../design/spec/CLAUDE.md) (`tick()`, and the 30-tick check the feature items' per-preset tests succeed).
-- Siblings: [1a](../../../adrs/design/react-design-prototype.md) (the law and module map, the design's ADR 0001), [1b](../../../assistant/design/DEVELOPER.md) (the folders and the layering check, shipped; this item adds its fixture-root exception), [1c](old-prototype-baseline.md) (the frozen line numbers), [1e](styles-shell-and-the-first-screen.md) (the Monitor pilot and preset routing), [1f](session-screen.md) (the chat recordings), [1k](video-and-runtime-consent.md) (`business/media` and the install sequence).
+- Siblings: [1a](../../../adrs/design/react-design-prototype.md) (the law and module map, the design's ADR 0001), [1b](../../../assistant/design/DEVELOPER.md) (the folders and the layering check, shipped; this item adds its fixture-root exception), [1c](../../../assistant/design/DEVELOPER.md#the-old-prototypes-baseline) (the frozen line numbers, at `b375fac9`; shipped), [1e](styles-shell-and-the-first-screen.md) (the Monitor pilot and preset routing), [1f](session-screen.md) (the chat recordings), [1k](video-and-runtime-consent.md) (`business/media` and the install sequence).
 
 **Decisions made** (dated):
 - 2026-11-14: The user's call: rebuild the prototype in React, TypeScript and Vite with the production GUIs' four layers, so a new app ports from it. The stand-in is its lower three layers.

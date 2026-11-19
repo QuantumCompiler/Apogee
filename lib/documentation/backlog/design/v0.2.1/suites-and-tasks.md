@@ -50,7 +50,7 @@
 - The Mac modules: `lib/src/darwin/source/presentation/suites/` and `.../tasks/`, and their tests; [darwin MILESTONES](../../../assistant/darwin/MILESTONES.md) 4i (training and suites parity) and 6g (the Tasks screen).
 - The CLI's documents: [machine-mode.md](../../../reference/cli/machine-mode.md) (`task list`, `task status`, `task run`).
 - The law: [layer enforcement](../../../adrs/gui/layer-enforcement.md), [presentation MVVM](../../../adrs/darwin/presentation-mvvm.md), [module schemes and previews](../../../adrs/darwin/module-schemes-and-previews.md), [the darwin guide](../../../assistant/darwin/CLAUDE.md).
-- Siblings: [`react-design-prototype.md`](../../../adrs/design/react-design-prototype.md) (1a's ADR 0001), [`old-prototype-baseline.md`](old-prototype-baseline.md) (1c), [`cli-stand-in.md`](cli-stand-in.md) (1d), [`styles-shell-and-the-first-screen.md`](styles-shell-and-the-first-screen.md) (1e), [`session-screen.md`](session-screen.md) (1f), [`models-screens.md`](models-screens.md) (1h), [`parity-proof.md`](parity-proof.md) (1s).
+- Siblings: [`react-design-prototype.md`](../../../adrs/design/react-design-prototype.md) (1a's ADR 0001), [`DEVELOPER.md` → the old prototype's baseline](../../../assistant/design/DEVELOPER.md#the-old-prototypes-baseline) (1c's baseline, shipped), [`cli-stand-in.md`](cli-stand-in.md) (1d), [`styles-shell-and-the-first-screen.md`](styles-shell-and-the-first-screen.md) (1e), [`session-screen.md`](session-screen.md) (1f), [`models-screens.md`](models-screens.md) (1h), [`parity-proof.md`](parity-proof.md) (1s).
 
 **Decisions made** (dated):
 - 2026-11-14: The user's call: rebuild the prototype in React, TypeScript and Vite, with the production apps' four layers and MVVM feature modules. The build is one self-contained `lib/design/main.html` that opens with a double-click. This is a design-queue item in v0.2.1.
@@ -59,7 +59,7 @@
 - 2026-11-14: The recorded default: data comes from the Mac app's recorded fixtures, read in place; an unrecorded state gets a `*-handmade*` file. Parity is judged on layout, states, controls and wording, not on pixels or data.
 
 **Open calls:**
-- [default: port every Suites and Tasks preset in 1c's baseline: all 9 if the 5 new `tasks:*` presets are committed before 1c records it, else the 4 at HEAD.]
+- [default: port every Suites and Tasks preset in 1c's baseline: all 9 if the 5 new `tasks:*` presets are committed before 1c records it, else the 4 at HEAD.] (1c recorded all 9 at `b375fac9` on 2026-11-18: `suites`, `tasks`, `tasks:denied`, `tasks:more`, `tasks:resuming`, `tasks:refused`, `tasks:resumerefused`, `newtask`, `newtask:recipe`.)
 - [default: the canned rows give way to recorded ones. The list shows `task-list-*.json`, a task's page its `task-status-*.json`. A live task replays `task-run.jsonl` on the clock, Stop after this round replays `task-run-halted.jsonl`, and Resume replays `task-resume.jsonl`. The suites are the recorded `suites-*` set.]
 - [default: Rerun with more rounds (doubling, at most 32) starts a new run with the same goal and grants, replaying `task-run.jsonl`. It is named as prototype-only in the view-model.]
 - [default: New suite… keeps the prototype's toast. It has no CLI verb behind it yet.]

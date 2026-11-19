@@ -30,9 +30,9 @@ type Layer = (typeof LayeringCheck.layers)[number]
  * - the map is not empty; every entry is one folder at `source/<layer>/<package>/`,
  *   and every folder under `source/<layer>/` is an entry;
  * - nothing comes from outside: a package is one `package.json` lists, a dev
- *   dependency or Node built-in only in tests and config, and no relative
- *   import, Vite glob or `new URL(…, import.meta.url)` leaves
- *   `lib/design/prototype/`;
+ *   dependency or Node built-in only outside source/ (tests, scripts and
+ *   config), and no relative import, Vite glob or `new URL(…, import.meta.url)`
+ *   leaves `lib/design/prototype/`;
  * - a module depends only on its own layer or a lower one; `styles` leans on
  *   no sibling; the shell imports no place; a file imports another module
  *   only when the map declares the dependency;
@@ -165,7 +165,7 @@ export class LayeringCheck {
         }
         if (isBuiltin(bare)) {
           if (inSource) {
-            found.push(`${file} imports ${specifier}, a Node built-in: source/ runs in the browser, and Node stays in tests and config`)
+            found.push(`${file} imports ${specifier}, a Node built-in: source/ runs in the browser, and Node stays in tests, scripts and config`)
           }
           continue
         }
@@ -174,7 +174,7 @@ export class LayeringCheck {
         if (this.map.devDependencies.has(name)) {
           if (inSource) {
             found.push(
-              `${file} imports ${name}, a dev dependency: source/ uses only package.json's dependencies, and dev dependencies stay in tests and config`,
+              `${file} imports ${name}, a dev dependency: source/ uses only package.json's dependencies, and dev dependencies stay in tests, scripts and config`,
             )
           }
           continue

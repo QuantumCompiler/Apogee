@@ -13,7 +13,7 @@
 **Core constraint(s).**
 - **The old side is 1c's baseline,** re-made by its script from the recorded revision. Never the canvas, never a working-tree copy.
 - **The new side is the built file,** opened from disk as the user opens it: `file://…/lib/design/main.html?start=<preset>&still=true`. Not the dev server.
-- **Same frame on both sides:** Chromium, 1440 × 900, the clock stopped, the browser clock fixed and `Math.random` seeded as 1c does, fonts loaded before the picture.
+- **Same frame on both sides:** Chromium, 1440 × 900, the clock stopped, the browser clock fixed and `Math.random` seeded as 1c does, fonts loaded before the picture. 1c, as built (2026-11-18), also needed each image shot in a page of its own on its second load, one raster thread (`--num-raster-threads=1`), and each Google Fonts stylesheet held to the static one `baseline.json` records, before two runs matched hash for hash ([DEVELOPER.md](../../../assistant/design/DEVELOPER.md#the-old-prototypes-baseline)).
 - **Judged on structure, not pixels or data.** A difference in data is intended. A difference in a region, a state, a control or the wording around the data is a defect unless a shipped record names it.
 - **No defect ships.** Each is fixed in the module that owns it, with a test where one fits.
 - **The old prototype stays frozen.** A bug found in it is noted in the report. It is fixed there only under 1c's rule: a fix, then a re-record of the baseline.
@@ -38,7 +38,7 @@
 
 **Reference.**
 - The recon of 2026-11-14: prototype map §5 (presets), boards §0–§3 (the 14 other boards, `canvas.json` rows and titles), critic V3 and its R16.
-- The baseline and its rules: [old-prototype-baseline.md](old-prototype-baseline.md) (1c), its `baseline.json`, its capture and its frozen-revision re-record.
+- The baseline and its rules: [DEVELOPER.md → The old prototype's baseline](../../../assistant/design/DEVELOPER.md#the-old-prototypes-baseline) (1c, shipped 2026-11-18), its `baseline.json`, its capture and its frozen-revision re-record.
 - The old guide's 30-tick check ([`spec/CLAUDE.md` → Checking a change](../../../../design/spec/CLAUDE.md)), whose successors are the feature items' per-preset tests. This item checks how the result looks, not whether it throws.
 - The feature items whose records cite their intended differences: [sessions-inspector-execute-and-console.md](sessions-inspector-execute-and-console.md), [models-screens.md](models-screens.md), [settings-and-appearance.md](settings-and-appearance.md), [training-screens.md](training-screens.md), [compose-screens.md](compose-screens.md), [voice-screen.md](voice-screen.md), [library-and-review.md](library-and-review.md), [knowledge-and-graph.md](knowledge-and-graph.md), [suites-and-tasks.md](suites-and-tasks.md), [gallery-and-foundations.md](gallery-and-foundations.md), [build-boards-as-pages.md](build-boards-as-pages.md).
 
@@ -81,4 +81,4 @@ A real run is made twice; the two outline sets must match.
 - [ ] The user looks through the report and says so, before 1t starts.
 - [ ] The local checks are green, and nothing under `lib/design/spec/` changes in this item.
 
-**Scope note.** Earmarked for v0.2.1 (design track 1); gated on 1c ([old-prototype-baseline.md](old-prototype-baseline.md)), 1g, 1h, 1i, 1j, 1l, 1m, 1n, 1o, 1p, 1q and 1r. Out of scope: deleting or rewriting the old prototype and its guide (1t), the canvas and its comments (1t), new design (it waits for the port to finish), pixel or data identity, CI, and any change to the Mac app.
+**Scope note.** Earmarked for v0.2.1 (design track 1); gated on 1g, 1h, 1i, 1j, 1l, 1m, 1n, 1o, 1p, 1q and 1r; its gate 1c shipped 2026-11-18 ([Milestone A](../../../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react)). Out of scope: deleting or rewriting the old prototype and its guide (1t), the canvas and its comments (1t), new design (it waits for the port to finish), pixel or data identity, CI, and any change to the Mac app.

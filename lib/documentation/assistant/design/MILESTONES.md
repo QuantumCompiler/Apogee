@@ -195,3 +195,127 @@ Decisions taken while building (2026-11-18, an unattended group run), each for v
 - **No ESLint, Prettier or formatter**, as the open call's default said.
 - **No CI job, `changed.sh` line or required check**, by design.
 - **No commit**: the run's owner commits. Another session's version-swap edits were in the same working tree during this run, and it committed them mid-run (44c41826, which took lines of the overview and of two design documents). That commit took none of this item's lines, and this item touched only its own lines in the shared files.
+
+### 2026-11-18 — `old-prototype-baseline` (backlog item 1c): the old prototype's baseline
+
+**Why.** The React app is checked against the old prototype screen by screen (1s), and then the old files are deleted (1t). So the old prototype's look had to be captured first, at one recorded revision, in a form a script can re-make after the files are gone. Measured 2026-11-14: the preset list was moving (57 at HEAD, 70 in the working tree), another session's design work was not yet committed, the `apogee` prop's other modes existed nowhere as a picture, and the canvas was behind the repo (its `App.dc.html` matched `main.html` at `d539f88b`, 2026-10-26). So the baseline comes from the repo at a committed revision, never the canvas or a working tree.
+
+- [x] **The script**, `lib/design/prototype/scripts/baseline.ts` (808 lines), run as `npm run baseline`:
+  - `--record --reason "<why>"` refuses while `git status` shows anything under `lib/design/spec`, naming the files. Otherwise it takes the newest commit touching `lib/design/spec`, runs the 30-tick check there in all three `apogee` modes, shoots it, and writes `parity/baseline.json`, adding the reason to its history;
+  - the default re-makes the recorded revision's images. It refuses a revision the repository does not hold, a tree hash or preset list that is not the revision's, a different Playwright version, any image drawing `support.js`'s error box, and any font that does not load. It fails when the modes kept are not the recorded ones, or when an image differs from the last run's hash list;
+  - git is only read: `git archive` copies the revision into a temp folder, and every git command runs with `--no-optional-locks`. The archived `html/` folder is served by `python3 -m http.server` on a free port of 127.0.0.1;
+  - it shoots every start preset at 1440 × 900 with `still=true`, the same preset at `missing` and `config-typo` (kept only where the hash differs from `installed`), and the 15 other boards full page at their `canvas.json` size, once per value of their prop menus;
+  - it writes `screens/`, `boards/`, `hashes.txt` and an `index.html` contact sheet to `.parity/baseline/<revision>/`.
+- [x] **Its tests**, `scripts/baseline.test.ts` (13 tests, run by `npm run test`). Each runs on a planted case in a temp git repository, with the real `support.js` read from git history, so they keep working after 1t:
+  - the preset reader on a miniature `main.html` with `&amp;` and `&#39;` in `data-props`, decoded once;
+  - a file with no start menu refused; a board's prop menus;
+  - the 30-tick check, clean and with a preset that throws;
+  - `--record` on a dirty `lib/design/spec` refuses and names both files (a changed one and an untracked one), and not a file outside it;
+  - capture against a revision the repository does not hold refuses and names it;
+  - a preset list that is not the revision's `data-props` list fails, naming the difference;
+  - a preset drawing `support.js`'s error box fails, naming the preset and the error;
+  - a failed Google Fonts link refuses the run;
+  - a dynamically subset stylesheet is fetched again in a fresh context, and the static one is pinned;
+  - a stylesheet that changed since the record refuses the capture;
+  - record, then capture with `lib/design/spec` deleted: every preset, the modes that differ, each board per menu value, the same hash list twice, stale images removed, and a run that differs from the last named;
+  - the committed `baseline.json`: its preset list is its revision's `data-props` list, and its tree is the revision's.
+- [x] **The record**, `lib/design/prototype/parity/baseline.json`, committed:
+  - revision `b375fac9de179d3f3b6cf44868c72cd54a1a8d36` (2026-11-18T21:22:58-07:00, the newest commit touching `lib/design/spec`);
+  - tree `48f1f19b609e6015d6861f25f55892924d170d04`;
+  - 78 presets;
+  - the modes kept per preset: 12 presets keep a second or third mode, 19 images in all. `training`, `training:datasets`, `review`, `review:post` and `review:skills` add `missing`. `library`, `library:symphonies`, `library:mcp`, `library:unsaved`, `library:refused`, `library:image` and `review:targets` add `missing` and `config-typo`;
+  - the 30-tick check: "78 start screens, no problems" in each of `installed`, `missing` and `config-typo`;
+  - Playwright 1.64.1, the viewport, the fixed clock, time zone, locale and seed;
+  - the four pinned Google Fonts stylesheets;
+  - one history entry, recorded 2026-11-18.
+- [x] **The freeze:** `lib/design/spec/CLAUDE.md`'s note from 1a now opens "Frozen at `b375fac9` (design 1c): fixes only" and says how a fix re-records. `lib/design/spec/README.md` gains the same banner. The design guide's interim rule names the revision.
+- [x] **The toolchain:** `playwright` 1.64.1 as an exact-pinned dev dependency (one line each in `package.json` and the lock file; nothing downloaded), and the `baseline` script. The lock file is an input to the staleness hash, so `lib/design/main.html` was rebuilt with `npm run build`. Only its source hash changed.
+- [x] **The layering rule's wording:** a dev dependency or Node built-in is refused only in `source/`. The check already allowed one in `scripts/`; its two sentences and `DEVELOPER.md`'s rule 4 now say "tests, scripts and config". A planted test pins it: `scripts/baseline.ts` importing `playwright` and `node:child_process` passes, and an unlisted package there still fails.
+- [x] **The root `.gitignore`:** `lib/design/prototype/.parity/`.
+- [x] **Docs:**
+  - `DEVELOPER.md`: its layout gains `scripts/`, `parity/` and `.parity/`; its commands gain `npm run baseline`; a new section, "The old prototype's baseline";
+  - `assistant/design/CLAUDE.md`: where the design stands, the interim rule and the codebase map;
+  - the queue: this document and its index row deleted; 1s's gate in the index, the overview, the ROADMAP and its Scope note no longer names 1c; the overview's counts (21 to build, 17 of them the design's) and "can start today" (design 1d, mod 1a) updated;
+  - 11 links in 9 sibling documents that named this document now name `DEVELOPER.md`'s section, or Milestone A for 1s's Scope note, so deleting it breaks no link;
+  - 1s's document gains the capture settings its frames must match;
+  - 1p's open call gains the fact it hinged on: all 9 Suites and Tasks presets are in the baseline.
+
+Decisions the item recorded before the build (2026-11-14):
+- **The user's call:** rebuild the prototype in React, TypeScript and Vite, with the production apps' four layers and screen modules; the old one is the reference until then.
+- **The user's call:** the canvas becomes view-only and is retired at the end; the review surface is the built file. So the baseline never comes from the canvas.
+- **The user's call:** parity screenshots by Playwright, downloaded once as a dev dependency, approved by the user when this item builds.
+- **The user's call:** a design queue of its own; this item is design 1c, in v0.2.1.
+- **The recorded default:** images are not committed; a script re-makes them from the recorded frozen revision.
+- **The recorded default:** the old prototype is frozen, fixes only, from this item's revision; new design waits for 1e.
+- **The recorded default:** parity is judged on layout, states, controls and wording, not pixels or data.
+- **The recorded default:** checks run locally, not in CI; `changed.sh` and the workflows are untouched.
+
+The open calls' defaults, taken as stated (2026-11-18):
+- `git archive <revision> lib/design/spec` into a temp folder, not `git worktree add`. It leaves no worktree entry in the shared checkout.
+- The revision is the newest commit touching `lib/design/spec` once it is clean. It was clean when this item built (the other session's work had been committed), so nothing waited.
+- All three `apogee` modes are captured, and a `missing` or `config-typo` image is kept only when its hash differs from `installed`. No hand-picked list of screens.
+- The 15 non-screen boards are captured too (Build, Foundations, Exploration), since 1q and 1r rebuild them and 1s judges them.
+- The browser's clock is fixed to one instant, and `Math.random` is seeded by an init script, so two runs give the same images.
+- The capture waits for the fonts (`document.fonts.ready`). If the Google Fonts link fails, the run is refused, never recorded with fallback fonts.
+- A fix to the frozen prototype re-records the baseline at the fix's commit, with the reason in `baseline.json`'s history.
+- Chromium only; the browser lives in Playwright's own cache outside the repo.
+
+Decisions taken while building (2026-11-18, an unattended group run), each for veto:
+- **The user's answers before the run:** the npm registry may be used; Playwright's Chromium may be downloaded once (it was already there from 1b, so nothing was downloaded); Google Fonts may be fetched during captures of the old prototype. The contact sheet is for you to look through after the run (Not done, below).
+- **The revision is `b375fac9`, not HEAD (`eb2e436d`).** The document says the newest commit touching `lib/design/spec`, and that is 1a's commit. HEAD, 1b's commit, did not touch the spec, and both commits hold the same spec tree, `48f1f19b`. The banners this item adds are a later edit to `lib/design/spec`, made after the record, as `--record` refuses a dirty spec folder. They change no picture, so they need no re-record.
+- **78 presets, read from the revision,** as the document says ("never a number written here"). At HEAD on 2026-11-14 there were 57.
+- **`canvas.json`'s `App.dc.html` is skipped.** It has no file: it is the canvas's alias for `main.html`, whose presets are all captured.
+- **A board is shot at its `canvas.json` width and height as the viewport, full page,** once per value of each enum prop. No board has more than one menu, so 32 board images.
+- **Each image is shot in a page of its own, on its second load.** Two runs did not match without it. A first load fetches the fonts, and an image shot then can draw differently: `chat` kept two extra modes in the first record for that reason alone. One page for the whole run let one shot's glyphs reach the next: Inspector's dark image flipped between runs until each shot had its own page.
+- **Chromium runs with `--num-raster-threads=1`.** With several raster threads, Inspector's Geist Mono (its `.mono` stack, `ui-monospace, 'SF Mono', 'Geist Mono'`, resolves to the web font in Chromium) drew differently in 3 of 12 separate launches, with the same font bytes at the same positions. With one thread, 14 of 14 launches matched. The browser stays Playwright's default headless shell. The full build in new headless mode was tried and dropped: its GPU raster varied the antialiasing on button borders (`chat`, `settings:backends`, `video:install`).
+- **Google Fonts stylesheets are pinned, and `baseline.json` gains a `fonts` field.** The same stylesheet URL was sometimes served with faces from dynamically subset files (`fonts.gstatic.com/l/font?kit=…`) instead of the static versioned ones (`/s/<family>/v<N>/…`): 1 fresh context in 8. That draws different pixels. A shot that gets a subset is taken again in a fresh context, up to 10 times. Each static stylesheet's SHA-256 is recorded, and a capture refuses one that changed. The document's field list did not name this, or the clock, time zone, locale and seed, which are recorded beside the viewport for 1s.
+- **The script routes no request.** Playwright's routing turns the browser's cache off, and with it off the fonts load late on every load. That brought the variance back (`settings:appearance`, Inspector). The tests route the network through the script's `prepareContext` hook, where the cache does not matter.
+- **The fixed settings:** the clock at `2026-11-14T09:41:00Z`, time zone UTC, locale `en-US`, `Math.random` a seeded mulberry32 (seed 1), light color scheme, device scale 1, CSS animations stopped and the caret hidden at the shot. `main.html`'s `nowTime()` reads the clock, so the time zone is fixed too.
+- **A font failure is any of:** a failed request or an HTTP status of 400 or more from `fonts.googleapis.com` or `fonts.gstatic.com`, a stylesheet that never loaded, or a font face in error. The stylesheet wait notes each one that settles from an init script, so one that failed before the wait began is still seen.
+- **`support.js`'s error box is recognized by `fail()`'s own inline style:** a `<pre>` with a `#F2836F` border, a 24px margin and `pre-wrap`. A board's own `<pre>` uses tokens, so it never matches.
+- **`--record` needs `--reason`.** Problems the 30-tick check finds are recorded as it prints them and do not refuse the record. A broken render still refuses, at the capture.
+- **A capture refuses a different Playwright version.** Its Chromium draws differently, so the fix is `npm ci` or a re-record with a reason.
+- **A run compares itself with the last run's `hashes.txt`** in the revision's folder and fails, naming the images, when any differ. It removes any `.png` it no longer writes in its own `screens/` and `boards/` folders. The folder then holds exactly what the hash list names, and nothing else in it is touched.
+- **File names:** `screens/<preset>@<mode>.png` and `boards/<Board>@<prop>=<value>.png`, with `:` written `_` so Finder shows them as written. Two images that would share a name refuse the run.
+- **`npm run baseline` is not part of `npm run check`.** It takes about 70 seconds and needs the network. Its tests are part of `check` and need neither: they run Chromium on planted pages, with Google Fonts routed in the test.
+- **The record was taken five times during the build, each before anything was committed.** The first four were not reproducible, as above. `parity/baseline.json`, this item's own uncommitted file, was deleted and re-recorded each time, so its history holds the one record that stands.
+- **The 1a note in `lib/design/spec/CLAUDE.md` was rewritten, not stacked under a second banner.** It is the same note, now naming the revision.
+- **The images and the contact sheet are not committed** (the document's default). The contact sheet's path is under Not done, for you.
+
+**Verified.**
+- **Test first.** Each test was watched failing before the code that passes it:
+  - the layering sentences failed with the old wording, then passed. The planted `scripts/` test passed on its first run, because the check already refused dev dependencies only in `source/`. It pins the scope rather than changing it;
+  - `scripts/baseline.test.ts` failed with `baseline.ts` missing. Then 10 of 11 passed, and one real bug showed: board file names lost their `@`. The committed-baseline test waited for the record;
+  - the two pinning tests failed (no `fonts` field; a changed stylesheet captured without a word) before the pinning was written;
+  - the stale-image check failed before the pruning was written;
+  - the last-run comparison failed on its message ("1 images differ") before that was fixed.
+- **The guards have teeth.** A scratch mutation pass disabled each of the script's 12 guards in turn: the dirty refusal, the reachable check, the preset equality, the error box, the font failures, the subset retry, the changed-stylesheet refusal, mode keeping, pruning, entity decoding, the 30-tick check's catch, and the last-run comparison. All 12 made a test fail. The last-run comparison survived the first pass, and the test that kills it was added.
+- **`npm run baseline -- --record --reason "design 1c: the first record; …"`**, exit 0, about a minute:
+  - three lines of "78 start screens, no problems";
+  - "recorded b375fac9de179d3f3b6cf44868c72cd54a1a8d36: 129 images". That is 78 presets at `installed`, 19 more in another mode and 32 board images, 25 MB in all.
+- **Two runs match hash for hash.** `npm run baseline` ran four times after that record, in four separate launches. Each exited 0 and printed "the same as the last run, hash for hash: 129 images", in about 68 seconds. All four hash lists are byte-identical to the record's, and `shasum -a 256 -c hashes.txt` passes all 129. A fifth capture, after the script's last edits (a message and its header comment), matched too, in about 63 seconds.
+- **Re-made without `lib/design/spec`.** A local `git clone` into the session scratchpad got this item's prototype files, `node_modules` linked rather than reinstalled, and its `lib/design/spec` deleted. `npm run baseline` there exited 0, and its `hashes.txt` is byte-identical to the checkout's, 129 images.
+- **The determinism findings**, from scratch stress runs against the archived revision:
+  - before the fixes, a second run differed from the first in 1 image of 131 (`boards/ComponentsPrompts@theme=dark.png`, 5 pixels one level apart);
+  - 8 rounds in fresh contexts varied 27 of 37 images;
+  - the same stylesheet URL was served as a subset in 1 of 8 fresh contexts;
+  - Inspector alone varied in 3 of 12 launches, and in 0 of 14 with one raster thread;
+  - the full build in new headless mode varied `chat`, `video:install` and `settings:backends` by up to 16 levels on button-border antialiasing, and `video:install` by up to 2 even with `--disable-gpu`.
+- **`npm run build`** printed `dist/main.html 220.15 kB │ gzip: 68.97 kB`. `git diff` on `lib/design/main.html` is one line: the source hash, `sha256-7048…` to `sha256-90ef…`. `npm run stale` failed before the rebuild, as it should.
+- **`npm run check`**, exit 0, 12.7 seconds:
+  - `tsc --noEmit` clean;
+  - `unit` 32 of 32 in 20 files, 19 of them the module stubs' and 13 this item's;
+  - `layering` 32 passed and 1 to-do;
+  - `bundle` 7 of 7;
+  - Playwright 1 passed.
+- **Nothing downloaded:** `~/Library/Caches/ms-playwright` still holds `chromium-1248`, `chromium_headless_shell-1248` and `ffmpeg-1013` (572 MB). `npm install --save-exact --save-dev playwright@1.64.1` added one line to `package.json` and one to the lock file. No `apogee` binary ran.
+- **The scratch link check** over every Markdown file under `lib/documentation` and `lib/design`: 156 files. No link names the deleted document, and no link this item touched is broken. The 3 flagged are text in the CLI's `MILESTONES.md`, as before.
+- **Unchanged:** `lib/src`, `.github`, `lib/scripts` and the canvas. `lib/src/darwin` was not changed, so the darwin suite was not run. `lib/scripts/cicd.sh` does not build the design.
+
+**Not done.**
+- **Your look at the contact sheet.** Open `/Users/taylor/Data/Development/Projects/Apogee/lib/design/prototype/.parity/baseline/b375fac9de179d3f3b6cf44868c72cd54a1a8d36/index.html` in a browser: 97 start-preset images (78 presets, plus the 19 other-mode images where a preset draws differently) and 32 board images, each linked to its full size. It is not committed, and `npm run baseline` in `lib/design/prototype` re-makes it.
+- **The images are not committed**, by design. A machine without the network cannot re-make them, since the old boards link Google Fonts.
+- **A font change at Google stops the capture.** If Google serves a different static stylesheet for a pinned URL, or stops serving its files, the capture refuses rather than draw a different picture. A re-record then needs `lib/design/spec` at a commit, and `--record` takes the newest commit touching it. After 1t deletes the folder, that commit is the deletion, so a re-record after 1t would need the script to take a named revision. 1t's and 1s's documents do not cover this yet.
+- **The banners are uncommitted edits to `lib/design/spec`.** Once committed, that commit is the newest touching the spec. The baseline stays at `b375fac9`: the banners are docs, not a fix.
+- **No CI job, `changed.sh` line or required check**, by design.
+- **No commit**: the run's owner commits.

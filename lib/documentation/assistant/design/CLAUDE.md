@@ -5,21 +5,21 @@ Context for agents working on **the design prototype**: the reference every Apog
 ## Where the design stands (2026-11-14)
 
 The design is moving to a new form (the user's call, 2026-11-14, track 1 of [the queue](../../backlog/design/README.md#v021)):
-- **Today:** one Design Component file, `lib/design/spec/html/main.html`, plus its `.dc.html` boards and the claude.ai design canvas (7,604 lines and 73 boards when measured the morning of 2026-11-14; both grew that day, and stop growing once 1c freezes them). How to work on it is [`lib/design/spec/CLAUDE.md`](../../../design/spec/CLAUDE.md), which stays the working guide until item 1t replaces it.
+- **Today:** one Design Component file, `lib/design/spec/html/main.html`, plus its `.dc.html` boards and the claude.ai design canvas (7,604 lines and 73 boards when measured the morning of 2026-11-14; both grew that day). 1c froze them at `b375fac9` on 2026-11-18: 78 start presets and 15 other boards. How to work on it is [`lib/design/spec/CLAUDE.md`](../../../design/spec/CLAUDE.md), which stays the working guide until item 1t replaces it.
 - **Where it is going:**
   - a React and TypeScript app at `lib/design/prototype/`, built with the same four layers and screen modules as the Mac app;
   - its view-models plain TypeScript that never imports React;
   - its data the CLI's own recorded documents;
   - built into one self-contained `lib/design/main.html` that opens with a double-click.
   - The canvas is retired once the new app covers every board.
-- **Laid down so far:** the law (1a) and the scaffold (1b, 2026-11-18): the app's empty window, its four layers and 19 Presentation modules as stubs, the module map, the layering check and the one-file build, held by one `npm run check` ([DEVELOPER.md](DEVELOPER.md)).
+- **Laid down so far:** the law (1a) and the scaffold (1b, 2026-11-18): the app's empty window, its four layers and 19 Presentation modules as stubs, the module map, the layering check and the one-file build, held by one `npm run check` ([DEVELOPER.md](DEVELOPER.md)). Then the old prototype's baseline (1c, 2026-11-18): its still frames at one recorded revision, re-made by `npm run baseline` ([DEVELOPER.md](DEVELOPER.md#the-old-prototypes-baseline)), the reference 1s checks the port against.
 
 The law of the new form is [the design's ADR 0001](../../adrs/design/react-design-prototype.md): its layers and modules, its data, its one-file build, its local gates, the five rules and the canvas's retirement.
 
 ## The interim rule, while the port runs
 
 **Decided by 1a** (2026-11-18; the default recorded 2026-11-14, which the user let stand):
-- **The old prototype is frozen** as the port's reference from item 1c's baseline revision on. It takes fixes only: never a new screen, state, start preset or board.
+- **The old prototype is frozen** as the port's reference from item 1c's baseline revision on: `b375fac9` (`b375fac9de179d3f3b6cf44868c72cd54a1a8d36`, recorded 2026-11-18 in `lib/design/prototype/parity/baseline.json`). It takes fixes only: never a new screen, state, start preset or board. A fix, once committed, re-records the baseline at its commit, with the reason in `baseline.json`'s history ([DEVELOPER.md](DEVELOPER.md#the-old-prototypes-baseline)).
 - **New design waits for the React app's first screen** (1e), and is drawn there under [ADR 0001](../../adrs/design/react-design-prototype.md).
 - **An item already queued elsewhere that touches the design** lands wherever the prototype is when it builds, and says so in its record. Those items are the Apple apps' 10a, gated on 1e so it is drawn in the React app, and 10c. (11a landed in the old prototype's files on 2026-11-18, as the logo board.)
 
@@ -42,7 +42,7 @@ The design is not an input to any app's build, and CI never reads it. Its checks
 
 | Path | Contents |
 |---|---|
-| `lib/design/spec/` | The old one-file prototype, its boards and `tokens.json`: the port's reference, frozen from 1c, retired by 1t. Its guide is [`lib/design/spec/CLAUDE.md`](../../../design/spec/CLAUDE.md). |
-| `lib/design/prototype/` | The React and TypeScript app (1b, 2026-11-18): `source/` in four layers with their cards, the module map `modules.json`, the tests (each module's, the layering check in `tests/architecture/layering/`, the built file's in `tests/bundle/`), the smoke test in `e2e/`, the build's own code in `tooling/`, npm with an exact-pinned lock file. [DEVELOPER.md](DEVELOPER.md#layout) has it file by file. |
+| `lib/design/spec/` | The old one-file prototype, its boards and `tokens.json`: the port's reference, frozen at `b375fac9` by 1c, retired by 1t. Its guide is [`lib/design/spec/CLAUDE.md`](../../../design/spec/CLAUDE.md). |
+| `lib/design/prototype/` | The React and TypeScript app (1b, 2026-11-18): `source/` in four layers with their cards, the module map `modules.json`, the tests (each module's, the layering check in `tests/architecture/layering/`, the built file's in `tests/bundle/`), the smoke test in `e2e/`, the build's own code in `tooling/`, npm with an exact-pinned lock file. The old prototype's baseline (1c): the script `scripts/baseline.ts` and its tests beside it, its committed record `parity/baseline.json`, and its images in `.parity/baseline/<revision>/`, which git ignores. [DEVELOPER.md](DEVELOPER.md#layout) has it file by file. |
 | `lib/design/main.html` | The built prototype, committed: one self-contained file that opens by double-click, written only by `npm run build`. |
 | `lib/design/assets/` | The logo, `Logo.png`, the macOS app icon's master. |

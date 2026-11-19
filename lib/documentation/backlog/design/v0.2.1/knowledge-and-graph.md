@@ -6,7 +6,7 @@
   - Markup: `ui.isKnowledge` 1058–1120 (63), with `kno.recOn` 1070–1100 and `kno.colOn` 1101–1119; `ui.isGraph` 1483–1569 (87), with `gr.codeShown` 1503–1539 and `gr.proseShown` 1540–1568.
   - Shared pieces it uses: the generic sheet's `savePanel` (7220–7230) and `dedupe` (7231–7248) kinds, and the confirm's `graphDelete` kind (5467–5471).
   - Canned data: `graphData()` (3718), two hand-placed layouts with fixed x and y (9 nodes and 8 edges for functions, 6 and 5 for files); `knRecs` (6097), `treeFiles` (6149), `gItems` (6157). State: `kn` (2473), `gView` and `gBuilt` (2570–2571), `gNode`, `graphGone`.
-  - The recon measured the working tree, where the same blocks sit at 6389–6434, 6435–6520, 1084–1146 (1096–1126, 1127–1145) and 1509–1595 (1529–1565, 1566–1594). Another session's uncommitted design work keeps moving them; the blocks match HEAD, only their position changes. [1c](old-prototype-baseline.md)'s baseline pins the numbers the port works from.
+  - The recon measured the working tree, where the same blocks sit at 6389–6434, 6435–6520, 1084–1146 (1096–1126, 1127–1145) and 1509–1595 (1529–1565, 1566–1594). Another session's uncommitted design work keeps moving them; the blocks match HEAD, only their position changes. [1c](../../../assistant/design/DEVELOPER.md#the-old-prototypes-baseline)'s baseline (shipped, at `b375fac9`) pins the numbers the port works from.
 - **4 start presets, each with a Screen board** (Build page, row y 2720):
   - `knowledge`: `ScreenKnowledge` (x 18240), a question asked and the rejected record open (`applyStart` 2691).
   - `knowledge:collections`: `ScreenCollections` (x 19760), `notes` searched (2691).

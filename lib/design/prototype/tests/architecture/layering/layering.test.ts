@@ -179,8 +179,23 @@ describe('the layering check, on planted violations', () => {
     planted.files['source/infrastructure/process/ChildCommand.ts'] += "import { readFileSync } from 'node:fs'\n"
     expect(planted.violations()).toEqual([
       'source/business/session/ChatLaunch.ts imports zod, which package.json does not list: nothing comes from outside the prototype but its declared packages',
-      "source/data/protocol/MachineProtocol.ts imports vitest, a dev dependency: source/ uses only package.json's dependencies, and dev dependencies stay in tests and config",
-      'source/infrastructure/process/ChildCommand.ts imports node:fs, a Node built-in: source/ runs in the browser, and Node stays in tests and config',
+      "source/data/protocol/MachineProtocol.ts imports vitest, a dev dependency: source/ uses only package.json's dependencies, and dev dependencies stay in tests, scripts and config",
+      'source/infrastructure/process/ChildCommand.ts imports node:fs, a Node built-in: source/ runs in the browser, and Node stays in tests, scripts and config',
+    ])
+  })
+
+  test('a script beside the app may use dev dependencies and Node, as tests and config may (design 1c)', () => {
+    const planted = new Planted()
+    planted.devDependencies.playwright = '1.64.1'
+    planted.files['scripts/baseline.ts'] =
+      "import { execFileSync } from 'node:child_process'\n" +
+      "import { chromium } from 'playwright'\n\n" +
+      "export const tools = [execFileSync, chromium]\n"
+    planted.files['scripts/baseline.test.ts'] = "import { tools } from './baseline.ts'\n" + stubTest
+    expect(planted.violations()).toEqual([])
+    planted.files['scripts/baseline.ts'] += "import { z } from 'zod'\n"
+    expect(planted.violations()).toEqual([
+      'scripts/baseline.ts imports zod, which package.json does not list: nothing comes from outside the prototype but its declared packages',
     ])
   })
 
