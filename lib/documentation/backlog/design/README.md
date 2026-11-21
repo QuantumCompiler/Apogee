@@ -7,12 +7,12 @@ An item that needs an app or the CLI to change gets a sibling in that queue ([th
 ## Lifecycle
 
 1. A change is **discussed in chat** and gets a line on [ROADMAP.md](../../assistant/design/ROADMAP.md).
-2. Once specced, it gets **its own document here**: a kebab-case filename in its table's folder, listed in the index in build order. The same pass adds it to the [backlog overview](../README.md#keeping-this-page-true).
+2. Once specced, it gets **its own document here**, written as a ticket ([Document format](#document-format)): a kebab-case filename in its table's folder, listed in the index in build order. The same pass adds it to the [backlog overview](../README.md#keeping-this-page-true).
 3. When an agent **takes** it, the document **is** the working spec:
    - confirm scope with the user first (its **Open questions**);
-   - mark its row 🚧;
+   - mark its row 🚧 and its ticket's header Status (🚧 In progress);
    - build. One item at a time.
-4. When it **ships**, it is recorded in [MILESTONES.md](../../assistant/design/MILESTONES.md). The document and its row are **deleted**, and any gate it satisfied is updated in the same pass. Its row leaves the [backlog overview](../README.md#keeping-this-page-true) too, with the counts, "can start today" and any "Waits on" it satisfied updated.
+4. When it **ships**, it is recorded in [MILESTONES.md](../../assistant/design/MILESTONES.md). The document and its row are **deleted**, and every item it gated has its index row and its ticket's header updated in the same pass: **Blocked by** loses the shipped id, **Status** turns 🟢 Ready when that was its last gate, and the shipped id leaves any **Blocks**. Its row leaves the [backlog overview](../README.md#keeping-this-page-true) too, with the counts, "can start today" and any "Waits on" it satisfied updated.
 
 **The standing invariant:** every document here is pending work.
 

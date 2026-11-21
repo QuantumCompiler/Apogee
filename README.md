@@ -84,7 +84,7 @@ Run `apogee` with nothing after it at a terminal and it opens a full-screen shel
 | [`lib/documentation/`](lib/documentation) | One docs directory per application — [CLAUDE.md](lib/documentation/CLAUDE.md) routes an agent to [`cli/`](lib/documentation/CLAUDE.md), [`gui/`](lib/documentation/CLAUDE.md) or [`mod/`](lib/documentation/CLAUDE.md). |
 | [`lib/documentation/reference/cli/`](lib/documentation/reference/cli) | Integrator-facing reference: the [stdio machine mode](lib/documentation/reference/cli/machine-mode.md) for front-ends, the [HTTP API](lib/documentation/reference/cli/http-api.md) for `serve` clients, and [training](lib/documentation/reference/cli/training.md). |
 | [`lib/documentation/assistant/cli/`](lib/documentation/assistant/cli) | Contributor docs — [CLAUDE.md](lib/documentation/assistant/cli/CLAUDE.md) is the entry point; [ROADMAP.md](lib/documentation/assistant/cli/ROADMAP.md) is the release board. |
-| [`lib/documentation/backlog/cli/`](lib/documentation/backlog/cli) | The work queue: one document per pending item, priority-ordered per release. |
+| [`lib/documentation/backlog/cli/`](lib/documentation/backlog/cli) | The work queue: one document per pending item, written as a ticket, priority-ordered per release. |
 | [`lib/scripts/`](lib/scripts) | The installers and `cicd.sh`, the one build entry point local runs and CI share. |
 
 ## Building from source

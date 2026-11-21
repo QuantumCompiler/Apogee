@@ -68,7 +68,7 @@ Apogee/
     │   │                      install stability, backwards compat, tab completion, the module map); per-app directories as apps arrive
     │   ├── assistant/       — Contributor docs (CLAUDE, SPEC, ROADMAP, MILESTONES, this file)
     │   └── backlog/         — The work queue: one folder per product (cli/, darwin/, mod/,
-    │                          design/), each an index README and one document per pending
+    │                          design/), each an index README and one ticket per pending
     │                          item; backlog/README.md is the overview of the release in
     │                          progress across every product, kept in step with each index
     ├── release/             — The release itself, apart from any application's build (2026-09-25)

@@ -4,7 +4,7 @@ Project context for coding agents working on **the Apogee mod** — the Claude p
 
 ## Reading order & the docs system
 
-`lib/documentation/assistant/mod/` is a docs-as-source-of-truth system — the same lifecycle as the CLI's and GUI's: discussed in chat → ROADMAP (and SPEC on shape changes) → a backlog document → built straight from it → MILESTONES, document deleted. The table of documents and their jobs is the CLI guide's, mirrored; the [backlog README](../../backlog/mod/README.md) carries this queue's format and index. **Repo-wide process is the CLI docs' to record** (the router's rule) — this file states the mod's own rules and deltas, never a second copy.
+`lib/documentation/assistant/mod/` is a docs-as-source-of-truth system — the same lifecycle as the CLI's and GUI's: discussed in chat → ROADMAP (and SPEC on shape changes) → a backlog document, written as a ticket (key `MOD`) → built straight from it → MILESTONES, document deleted. The table of documents and their jobs is the CLI guide's, mirrored; the [backlog README](../../backlog/mod/README.md) carries this queue's format (the Apple apps' [ticket format](../../backlog/darwin/README.md#document-format)) and index. **Repo-wide process is the CLI docs' to record** (the router's rule) — this file states the mod's own rules and deltas, never a second copy.
 
 ---
 

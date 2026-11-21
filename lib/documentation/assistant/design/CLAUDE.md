@@ -58,7 +58,7 @@ Retired by item 1t on 2026-11-21, after 1s's parity proof: the old one-file prot
 
 ## Working process
 
-The docs-first lifecycle and its conventions are the CLI's ([`assistant/cli/CLAUDE.md`](../cli/CLAUDE.md)); this home states only its deltas. A change is specced in [the backlog](../../backlog/design/README.md), built from its document, and recorded in [MILESTONES.md](MILESTONES.md). Each step that changes the queue's index changes the [backlog overview](../../backlog/README.md#keeping-this-page-true) in the same pass. The plan is [ROADMAP.md](ROADMAP.md).
+The docs-first lifecycle and its conventions are the CLI's ([`assistant/cli/CLAUDE.md`](../cli/CLAUDE.md)); this home states only its deltas. A change is specced in [the backlog](../../backlog/design/README.md) as a ticket (key `DSN`, its [Document format](../../backlog/design/README.md#document-format)), built from its document, and recorded in [MILESTONES.md](MILESTONES.md). Each step that changes the queue's index changes the [backlog overview](../../backlog/README.md#keeping-this-page-true) in the same pass. The plan is [ROADMAP.md](ROADMAP.md).
 
 The design is not an input to any app's build, and CI never reads it. Its checks run locally before a commit: `npm run check` in `lib/design/prototype/` ([DEVELOPER.md](DEVELOPER.md#develop-build-and-check)). `changed.sh` and the workflows do not name it.
 

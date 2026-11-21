@@ -1,6 +1,6 @@
 # Apogee design — Roadmap
 
-How we work: features get discussed in chat, written up here, given their own document in [`backlog/`](../../backlog/design/README.md) when they're specced, then an agent takes the backlog item and builds it straight from that document. When work ships it's recorded in detail in [MILESTONES.md](MILESTONES.md); this file stays high-level.
+How we work: features get discussed in chat, written up here, given their own document in [`backlog/`](../../backlog/design/README.md) when they're specced, written as a ticket, then an agent takes the backlog item and builds it straight from that document. When work ships it's recorded in detail in [MILESTONES.md](MILESTONES.md); this file stays high-level.
 
 **Version scheme:** repo-wide — the release `lib/release/VERSION` names, published when its branch merges into `stable` (the CLI docs record the law). The design's work rides those releases.
 

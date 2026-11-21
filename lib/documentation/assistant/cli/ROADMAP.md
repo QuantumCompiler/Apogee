@@ -1,6 +1,6 @@
 # Apogee — Roadmap
 
-How we work: features get discussed in chat, written up here (and in [SPEC.md](SPEC.md)), given their own document in [`backlog/`](../../backlog/cli/README.md) when they're specced, then an agent takes the backlog item and builds it straight from that document (there is no separate TODO file — the backlog is the queue). When work ships it's recorded in detail in [MILESTONES.md](MILESTONES.md); this file stays high-level — the running board of themes per release, plus what's next.
+How we work: features get discussed in chat, written up here (and in [SPEC.md](SPEC.md)), given their own document in [`backlog/`](../../backlog/cli/README.md) when they're specced, written as a ticket, then an agent takes the backlog item and builds it straight from that document (there is no separate TODO file — the backlog is the queue). When work ships it's recorded in detail in [MILESTONES.md](MILESTONES.md); this file stays high-level — the running board of themes per release, plus what's next.
 
 **Version scheme:** feature releases are `v0.x.0`, patch releases are `v0.x.y`; development happens on a branch named for the release being built (currently `v0.2.0`) and merges into `stable` — **and that merge is the release** (decided 2026-09-22): the pipeline publishes the version `lib/release/VERSION` names, if it hasn't shipped already (since 2026-09-25; the CLI's own version in `lib/src/cli/CMakeLists.txt` moves only when the CLI changes, and then to the same number). Checked boxes are shipped; the detailed write-up of each is in MILESTONES.md.
 

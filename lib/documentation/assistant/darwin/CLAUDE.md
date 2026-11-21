@@ -11,11 +11,11 @@ Project context for coding agents working on **the Apogee GUI** — the desktop 
 | **CLAUDE.md** (this file) | The contributor entry point: how to work, the hard rules, the codebase map. |
 | [**SPEC.md**](../gui/SPEC.md) | The product spec — what the GUI is, its scope, non-goals, and design principles. |
 | [**ROADMAP.md**](ROADMAP.md) | The high-level running board — each release at the feature/theme level, plus loose ideas and explicit non-goals. |
-| [**backlog/**](../../backlog/darwin/README.md) | **The work queue: one document per pending work item** (a sibling directory of `assistant/`). Its README carries the format, lifecycle, and a **priority-ordered index**; the [backlog overview](../../backlog/README.md) mirrors it for the release in progress and changes in the same pass ([Keeping this page true](../../backlog/README.md#keeping-this-page-true)). |
+| [**backlog/**](../../backlog/darwin/README.md) | **The work queue: one document per pending work item, written as a ticket** (a sibling directory of `assistant/`). Its README carries the ticket format, lifecycle, and a **priority-ordered index**; the [backlog overview](../../backlog/README.md) mirrors it for the release in progress and changes in the same pass ([Keeping this page true](../../backlog/README.md#keeping-this-page-true)). |
 | [**MILESTONES.md**](MILESTONES.md) | The detailed record of finished work — what shipped and how it was built. |
 | [**DEVELOPER.md**](DEVELOPER.md) | The package-by-package architecture reference: directories, files, interfaces, build/test commands. |
 
-**How work flows through the docs:** a feature is discussed in chat → written up in ROADMAP.md (and SPEC.md if it changes product shape) → given its own document in `lib/documentation/backlog/darwin/` once specced → an agent builds it straight from that document → folded into MILESTONES.md when done, and the backlog document deleted. There is no separate TODO file — the backlog document *is* the working spec.
+**How work flows through the docs:** a feature is discussed in chat → written up in ROADMAP.md (and SPEC.md if it changes product shape) → given its own document in `lib/documentation/backlog/darwin/` once specced, written as a ticket (key `APP`, its [Document format](../../backlog/darwin/README.md#document-format)) → an agent builds it straight from that document → folded into MILESTONES.md when done, and the backlog document deleted. There is no separate TODO file — the backlog document *is* the working spec.
 
 **Repo-wide process is the CLI docs' to record** (the router's rule): versioning, the release pipeline, CI, the merge-is-the-release law and the install contract live in [`assistant/cli/CLAUDE.md`](../cli/CLAUDE.md). This file states the GUI's own rules and its deltas, never a second copy.
 
@@ -120,7 +120,7 @@ Every change should satisfy this before merge:
 When a work item ships, in the same change:
 
 1. **Extend [MILESTONES.md](MILESTONES.md)** — fold the work into the matching milestone (or start a new one for a genuinely new area): goal, what was built, trade-offs.
-2. **Delete the backlog document** and its index row — the backlog holds pending work only — and its row in the [backlog overview](../../backlog/README.md#keeping-this-page-true), updating the counts, "can start today" and any "Waits on" it satisfied.
+2. **Delete the backlog document** and its index row — the backlog holds pending work only — and its row in the [backlog overview](../../backlog/README.md#keeping-this-page-true), updating the counts, "can start today" and any "Waits on" it satisfied; every item it gated has its index row and its ticket's header updated in the same pass: **Blocked by** loses the shipped id, **Status** turns 🟢 Ready when that was its last gate, and the shipped id leaves any **Blocks**.
 3. **Update [ROADMAP.md](ROADMAP.md)** — check the box / move the line to shipped.
 4. **Update the [Codebase Map](#codebase-map) and [DEVELOPER.md](DEVELOPER.md)** for any new/moved/deleted files.
 5. **Update [SPEC.md](../gui/SPEC.md)** only if scope, non-goals, or principles actually changed.

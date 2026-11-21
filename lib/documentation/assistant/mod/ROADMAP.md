@@ -1,6 +1,6 @@
 # Apogee Mod — Roadmap
 
-The lifecycle is the house's: chat → here (and [SPEC.md](SPEC.md) on shape changes) → [`backlog/`](../../backlog/mod/README.md) → built from the document → [MILESTONES.md](MILESTONES.md). **Version scheme:** repo-wide (the CLI docs record the law); the mod's themes ride the releases.
+The lifecycle is the house's: chat → here (and [SPEC.md](SPEC.md) on shape changes) → [`backlog/`](../../backlog/mod/README.md), written as a ticket → built from the document → [MILESTONES.md](MILESTONES.md). **Version scheme:** repo-wide (the CLI docs record the law); the mod's themes ride the releases.
 
 ---
 
