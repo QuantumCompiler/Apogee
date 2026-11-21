@@ -1,39 +1,8 @@
 import { describe, expect, test } from 'vitest'
 import { presets } from '../../../source/presentation/app/Previews/Presets'
-import { boardHeadings, boards, boardWidth, galleryPages } from '../../../source/presentation/gallery/Models/Boards'
+import { boards, boardWidth, galleryPages } from '../../../source/presentation/gallery/Models/Boards'
 import type { BoardEntry } from '../../../source/presentation/gallery/Models/Boards'
-import { againstCanvas, boardStart, framesOf, oldFilesExist, readCanvas } from './CanvasTable'
-
-describe("the board table against the canvas, while canvas.json exists (design 1q's guardrail)", () => {
-  test.skipIf(!oldFilesExist)('every Build and Foundations board in canvas.json has its entry, with the same page, row, height and title, and their six headings match', () => {
-    expect(againstCanvas(boards, boardHeadings, readCanvas())).toEqual([])
-  })
-
-  test.skipIf(!oldFilesExist)('a planted missing board fails, naming it', () => {
-    const planted = boards.filter((entry) => entry.id !== 'ScreenModelsStore')
-    expect(againstCanvas(planted, boardHeadings, readCanvas())).toEqual(["ScreenModelsStore is on the canvas's build page but not in the gallery's table"])
-  })
-
-  test.skipIf(!oldFilesExist)('a planted changed title fails, naming the board; so do a moved row, a changed height and a heading lost', () => {
-    const planted = boards.map((entry): BoardEntry => {
-      if (entry.id === 'ScreenConsole') return { ...entry, title: 'Console' }
-      if (entry.id === 'ColorTokens') return { ...entry, row: 1, height: 1500 }
-      return entry
-    })
-    expect(againstCanvas(planted, boardHeadings.slice(1), readCanvas())).toEqual([
-      'ColorTokens is in row 1 in the table, and in row 0 on the canvas',
-      'ColorTokens is 1500 px tall in the table, and 1520 px on the canvas',
-      `ScreenConsole's title is "Console" in the table, and the canvas says "Console · any command, as typed"`,
-      `the canvas's heading "Build — the contract, the measurements, and the app itself" over build row 0 is not in the table`,
-    ])
-  })
-
-  test.skipIf(!oldFilesExist)("each Screen board's entry names the start preset its file names", () => {
-    const screens = boards.filter((entry) => entry.draws === 'screen' && !entry.noOldBoard)
-    expect(screens).toHaveLength(66)
-    for (const entry of screens) expect(entry.start, entry.id).toBe(boardStart(entry.id))
-  })
-})
+import { framesOf } from './CanvasTable'
 
 describe('the board table', () => {
   test('two pages, Build and Foundations: Exploration is not ported', () => {

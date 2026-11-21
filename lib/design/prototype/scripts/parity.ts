@@ -1,6 +1,7 @@
 /**
  * The parity proof (design 1s): the React app against the old prototype,
- * preset by preset, before 1t deletes the old files.
+ * preset by preset: run before 1t deleted the old files, and working after,
+ * since the old side is re-made from git history.
  *
  *   npm run parity        # capture both sides, diff their outlines, judge each difference, write the report
  *

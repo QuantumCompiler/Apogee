@@ -26,7 +26,7 @@ const pageTimers: Timers = {
 
 /**
  * The prototype's clock: the old prototype's `tick()`, every 400 ms unless the
- * page is `still` (`lib/design/spec/html/main.html:2849-2850` at `b375fac9`).
+ * page is `still` (the old prototype's `main.html:2849-2850` at `b375fac9`).
  * Jobs and chats replay their recorded lines on it. It has no Mac module: the
  * Mac app's children run on real time.
  *

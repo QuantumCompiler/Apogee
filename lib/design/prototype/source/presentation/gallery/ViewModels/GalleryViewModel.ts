@@ -110,7 +110,7 @@ const defaultProps: BoardProps = { theme: 'dark', apogee: 'installed' }
 
 /**
  * The gallery (design 1q): the design's review surface, the canvas's job
- * now that the canvas retires (1t) -- not a product screen, so it is in no
+ * since the canvas retired (1t) -- not a product screen, so it is in no
  * place, key map or Settings pane. It holds the page open, the board focused
  * at full size, each board's props, the frames scrolled near enough to be
  * mounted, and the address it reads and writes: `?gallery`,

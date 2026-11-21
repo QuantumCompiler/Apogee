@@ -79,7 +79,7 @@ The GUI is built docs-first, the same lifecycle as the CLI's. Where new work is 
 
 ### Superpowers
 
-The Superpowers skills work inside the lifecycle exactly as the CLI docs map them ([Superpowers fits the docs-first lifecycle](../cli/CLAUDE.md#superpowers-fits-the-docs-first-lifecycle), 2026-11-07). The app's delta: `test-driven-development`'s tests are the hermetic suite (`lib/scripts/cicd.sh --app darwin --test`), over view-models and scripted fakes, never UI automation or a live binary. A look settled in brainstorming's visual companion (run from the scratchpad) lands in `lib/design/spec` and the design canvas, per the design's own law, before an item cites it.
+The Superpowers skills work inside the lifecycle exactly as the CLI docs map them ([Superpowers fits the docs-first lifecycle](../cli/CLAUDE.md#superpowers-fits-the-docs-first-lifecycle), 2026-11-07). The app's delta: `test-driven-development`'s tests are the hermetic suite (`lib/scripts/cicd.sh --app darwin --test`), over view-models and scripted fakes, never UI automation or a live binary. A look settled in brainstorming's visual companion (run from the scratchpad) lands in the design app, `lib/design/prototype/` (a module, a preset and its gallery entry, held by its local gate), per the design's own law, before an item cites it.
 
 ### Development runs on the dev channel
 

@@ -3,8 +3,11 @@ import type { ColorName } from '../../styles/Tokens/Tokens'
 /**
  * The layout page's data (design 1r): the old BuildLayout board, "layout,
  * navigation and native controls", at 1c's frozen revision `b375fac9`,
- * converted once and kept here as data. Its words are the board's; every
- * size and key in them is named, never written: a `{kind:name}` the page's
+ * converted once and kept here as data. Its words are the board's, but for
+ * where the introduction says the numbers are: the board named the canvas's
+ * copy of the tokens, and since the canvas retired (1t) it names
+ * `lib/design/tokens.json`. Every size and key in them is named, never
+ * written: a `{kind:name}` the page's
  * view-model reads from the tokens or the key map --
  *
  * - `{layout:sidebar}`, a layout size by its path in tokens.json's
@@ -28,7 +31,7 @@ export const layoutWords = {
   eyebrow: 'BUILD · 2 OF 2',
   title: 'Layout, navigation and native controls',
   intro:
-    'The measurements behind every screen, how a person moves between them, the states each one draws, and what each piece of the design becomes in SwiftUI first, then Qt Quick and WinUI. The numbers are the prototype’s own; with the tokens they are in `handoff/tokens.json` in this canvas.',
+    'The measurements behind every screen, how a person moves between them, the states each one draws, and what each piece of the design becomes in SwiftUI first, then Qt Quick and WinUI. The numbers are the prototype’s own; with the tokens they are in `lib/design/tokens.json`.',
   window: 'The window',
   windowIntro: 'At three-quarter scale. Every screen keeps the sidebar and the header; what sits under the header is the screen’s own.',
   regions: 'Regions and sizes',

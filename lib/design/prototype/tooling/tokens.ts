@@ -4,9 +4,10 @@ import type { Plugin } from 'vite'
 
 /**
  * `@tokens`, the named root of the design's tokens (design 1e): the one file
- * outside the prototype the build reads besides the recordings,
- * `lib/design/spec/json/tokens.json`, the only place a color, size, font,
- * radius, motion or fixed value is written. Its three forms:
+ * outside the prototype the build reads besides the recordings and the
+ * assets, `lib/design/tokens.json` beside the built file (moved there by
+ * design 1t), the only place a color, size, font, radius, motion or fixed
+ * value is written. Its three forms:
  *
  * - `@tokens`: the typed tokens module, generated from the file at build
  *   time (`tokensModule`), typed by the committed declaration
@@ -16,10 +17,10 @@ import type { Plugin } from 'vite'
  * - `@tokens/tokens.json`: the file itself, which only that declaration names,
  *   for its types (tsconfig.json's `paths`).
  *
- * Nothing generated is written to disk or committed. 1t moves the file
- * beside the built one. `tokensRoot` and `tsconfig.json`'s `paths` entry for
- * `@tokens/tokens.json` are the two lines that say where it is, and a move
- * changes both: JSON cannot compute a path, and with `skipLibCheck` a stale
+ * Nothing generated is written to disk or committed. `tokensRoot` and
+ * `tsconfig.json`'s `paths` entry for `@tokens/tokens.json` are the two
+ * lines that say where the file is, and 1t's move changed both: JSON cannot
+ * compute a path, and with `skipLibCheck` a stale
  * `paths` entry turns the token types into `any` instead of reporting a
  * missing file. Everything else reads the path through `tokensFile` (the
  * Playwright tests too); `Tokens.test.ts` and `stale.test.ts` pin it on
@@ -33,9 +34,9 @@ export const themesCssSpecifier = `${tokensAlias}/themes.css`
 /** The file's specifier, for the declaration's types. */
 export const tokensJsonSpecifier = `${tokensAlias}/tokens.json`
 
-/** Where the tokens live, from the prototype's root (`lib/design/prototype`). */
+/** Where the tokens live, from the prototype's root (`lib/design/prototype`): `lib/design`, beside the built file (design 1t). */
 export function tokensRoot(root: string): string {
-  return resolve(root, '../spec/json')
+  return resolve(root, '..')
 }
 
 /** `tokens.json`, from the prototype's root. */
@@ -156,7 +157,7 @@ function blocks(tokens: TokensJson): Array<[string, Array<[string, string]>]> {
  * person's text size, fonts and edits beside it.
  */
 export function themesCss(tokens: TokensJson): string {
-  const head = '/* Generated from lib/design/spec/json/tokens.json by tooling/tokens.ts at build time: never edited, never committed. */\n'
+  const head = '/* Generated from lib/design/tokens.json by tooling/tokens.ts at build time: never edited, never committed. */\n'
   return (
     head +
     blocks(tokens)
@@ -167,7 +168,7 @@ export function themesCss(tokens: TokensJson): string {
 
 /** The typed tokens module's code: tokens.json as one value, typed by `TokensModule.d.ts`. */
 export function tokensModule(tokens: TokensJson): string {
-  return `// Generated from lib/design/spec/json/tokens.json by tooling/tokens.ts at build time: never edited, never committed.\nexport const tokens = ${JSON.stringify(tokens)}\n`
+  return `// Generated from lib/design/tokens.json by tooling/tokens.ts at build time: never edited, never committed.\nexport const tokens = ${JSON.stringify(tokens)}\n`
 }
 
 /** The declarations of each block in `css`, by selector: what a browser would read. */

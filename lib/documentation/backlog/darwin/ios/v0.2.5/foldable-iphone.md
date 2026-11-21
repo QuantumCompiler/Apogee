@@ -67,7 +67,7 @@ Measured at HEAD (`4f92316d`) on 2026-11-07. Paths are under `lib/src/darwin/sou
 3. **The session's end is tied to a view disappearing.** `.onDisappear { Task { await model.sessions.shutDown() } }` sits on the shell (`app/Views/ApogeeApp.swift:91`). On the Mac that view disappears only when the one window closes. A composition that swapped a compact shell for a regular one at that spot would end the open session on every fold: the turn cancelled, and the child or connection asked to go.
 4. **A whole-tree rebuild is already in use.** `.appearance` gives the tree an `.id` of the theme and text size (`app/Views/ApogeeApp.swift:35`). So a theme change today drops every view's `@State`, which is the same loss a fold built that way would cause.
 5. **The transcript's place is held nowhere.** `SessionWindow` scrolls to the last row only when the transcript's revision changes (`session/Views/SessionWindow.swift:82-86`). A window built anew starts at the top of its `ScrollView` until the next event arrives.
-6. **The device can be tested, but not yet on this Mac.** Xcode 27.1 (`27A9275`) lists an `iPhone Duo` device type: `xcrun simctl list devicetypes -j` reads `com.apple.CoreSimulator.SimDeviceType.iPhone-Duo`, model `iPhone19,4`, minimum runtime iOS 27.1, and its profile marks `com.apple.CoreSimulator.display.resizableScene` as conditional on the runtime. The newest iOS runtime installed here is 27.0 (`xcrun simctl list runtimes`), so the Duo cannot boot until the user installs 27.1. The design draws no foldable: a search for `foldable`, `iPhone Duo` and `size class` in `lib/design/spec` finds 0 matches.
+6. **The device can be tested, but not yet on this Mac.** Xcode 27.1 (`27A9275`) lists an `iPhone Duo` device type: `xcrun simctl list devicetypes -j` reads `com.apple.CoreSimulator.SimDeviceType.iPhone-Duo`, model `iPhone19,4`, minimum runtime iOS 27.1, and its profile marks `com.apple.CoreSimulator.display.resizableScene` as conditional on the runtime. The newest iOS runtime installed here is 27.0 (`xcrun simctl list runtimes`), so the Duo cannot boot until the user installs 27.1. The design draws no foldable: a search for `foldable`, `iPhone Duo` and `size class` in the old one-file prototype found 0 matches, and the design app that replaced it has none either (re-checked 2026-11-21, design 1t).
 
 ## Acceptance criteria
 
@@ -76,7 +76,7 @@ Measured at HEAD (`4f92316d`) on 2026-11-07. Paths are under `lib/src/darwin/sou
 - [ ] **Given** a server job's progress with its log open, and a playing speech, **when** I fold and unfold, **then** both survive.
 - [ ] **Given** an iPad Simulator window in Split View, **when** it is resized across the size-class boundary, **then** it gives the same results.
 - [ ] **Given** the Mac app in local mode, with no server set, **when** it is used and its window resized, **then** it behaves exactly as before: it opens no connection, a window resize follows the same width law, and its suite is unchanged.
-- [ ] Every crossing state has its `#Preview` pair. The design canvas carries the fold boards. The full suite is green.
+- [ ] Every crossing state has its `#Preview` pair. The design app draws the fold boards (presets and gallery entries), its local gate green. The full suite is green.
 - [ ] The user's live pass on a foldable device is optional, and said.
 
 ## Constraints
@@ -113,7 +113,7 @@ Paths under `lib/src/darwin/` (the design row excepted).
 | `models` `ViewModels/` | `DownloadsViewModel` gets the log-open flag. |
 | `voice` `ViewModels/` | `VoiceViewModel` gets playback, over an injected player protocol whose `AVAudioPlayer` adapter lives in Views. |
 | `source/presentation/session/Views/SessionWindow.swift` | The transcript restored to its anchor when it is built. |
-| `lib/design/spec/` | A fold board pair (read `spec/CLAUDE.md` first; every design update lands there). It shows the same conversation folded and unfolded, mid-turn with a draft, and the inspector as a sheet and as a pane. |
+| `lib/design/prototype/` | A fold board pair in the design app, as presets, their documents and gallery entries, checked by its local gate (read [the design's guide](../../../../assistant/design/CLAUDE.md) first). It shows the same conversation folded and unfolded, mid-turn with a draft, and the inspector as a sheet and as a pane. |
 
 Each place's `ViewModels/` takes the state listed in Evidence W11.2 out of its views; the cosmetic `@State` stays where it is.
 
@@ -179,6 +179,8 @@ The guardrails:
 | 2026-11-07 | Placed in v0.2.5 (track 9), after 9a and gated on it. A fold moves between 9a's compact shell and 8b's regular shell, so both must exist first. 9c, v0.2.5 whole, is gated on this item. | the spec |
 | 2026-11-07 | Where the work happens (the user's call C): server tools by default, plus a connected desktop's own files and shell. The foldable offers no device tools of its own (iOS starts no shell), and a fold changes nothing about which tools a session has. | the user |
 | 2026-11-18 | Moved here from v0.3.0, when the releases were merged; the id is unchanged. | the user |
+| 2026-11-21 | Re-worded by design 1t, which retired the old one-file prototype and the claude.ai canvas: this item's design is drawn in the design app (presets, their documents and gallery entries, checked by its local gate), its sizes in `lib/design/tokens.json`, never in `lib/design`'s old folder or on the canvas. | design 1t (default) |
+
 
 ## Out of scope
 

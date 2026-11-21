@@ -2,14 +2,16 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { specPath } from '../../../scripts/baseline.ts'
 
 /**
  * The old prototype at its frozen revision, for the parity tests (design 1e):
- * `lib/design/spec/html/main.html` read from git at the revision 1c recorded in
+ * its `main.html` read from git at the revision 1c recorded in
  * `parity/baseline.json`, never from the working tree -- so the tests outlive
- * 1t's deletion of lib/design/spec, which bans the prototype's source, not
- * its tests, from reading it. Git is only read: `git show`, with no optional
- * locks on the shared index.
+ * 1t's deletion of the old prototype's folder, and the layering check's
+ * retired path holds them to git (a revision's path, `<revision>:…`), the
+ * folder named once, by the baseline's `specPath`. Git is only read: `git
+ * show`, with no optional locks on the shared index.
  */
 
 /** The prototype's root: this file is tests/presentation/styles/Frozen.ts. */
@@ -22,7 +24,7 @@ let cached: string | undefined
 
 /** The frozen `main.html`, as git holds it at `frozenRevision`. */
 export function frozenMainHtml(): string {
-  cached ??= execFileSync('git', ['--no-optional-locks', 'show', `${frozenRevision}:lib/design/spec/html/main.html`], {
+  cached ??= execFileSync('git', ['--no-optional-locks', 'show', `${frozenRevision}:${specPath}/html/main.html`], {
     cwd: root,
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
@@ -44,8 +46,8 @@ export interface FrozenComponent {
 }
 
 /**
- * A fresh instance of the old prototype's `Component`, built as
- * `lib/design/spec/CLAUDE.md`'s 30-tick check builds it: its script run with
+ * A fresh instance of the old prototype's `Component`, built as its guide's
+ * 30-tick check built it (at `b375fac9`): its script run with
  * a stand-in `DCLogic` whose `setState` merges.
  */
 export function frozenComponent(props: Record<string, unknown> = { still: true }): FrozenComponent {

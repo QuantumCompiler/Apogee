@@ -6,7 +6,7 @@
 | **Project** | Apple apps · macOS |
 | **Status** | 🟢 Ready |
 | **Fix version** | v0.2.4 |
-| **Component** | Design · the Apogee Server window (`lib/design/spec` and the Apogee Desktop canvas) |
+| **Component** | Design · the Apogee Server window (the design app, `lib/design/prototype/`) |
 | **Labels** | `design-first` `server-window` `admin-mode` |
 | **Epic** | Track 10 · the server window |
 | **Blocked by** | — |
@@ -18,7 +18,7 @@
 
 ## Summary
 
-The Mac that runs the person's Apogee server gets an admin mode, a separate **"Apogee Server"** window, and nothing of it is drawn yet (A9). This item draws the whole window in the design and on the Apogee Desktop canvas, every part against the CLI words it maps to and every missing word added to the BuildContract board's gap list with its fallback, so [10b](server-window.md) builds the window and [10c](people-screens.md) builds People from boards that already exist.
+The Mac that runs the person's Apogee server gets an admin mode, a separate **"Apogee Server"** window, and nothing of it is drawn yet (A9). This item draws the whole window in the design app, every part against the CLI words it maps to and every missing word added to the contract page's gap list with its fallback, so [10b](server-window.md) builds the window and [10c](people-screens.md) builds People from boards that already exist.
 
 ## Description
 
@@ -32,7 +32,7 @@ The Mac that runs the person's Apogee server gets an admin mode, a separate **"A
 
 The user's call, 2026-11-14, from the admin-mode and people spike: the Mac that runs the person's Apogee server gets an **admin mode**, a separate **"Apogee Server"** window in the macOS app, offered only on that Mac. It administers that Mac's server by driving the **local** CLI over pipes ([GUI SPEC](../../../../assistant/gui/SPEC.md) → Core surfaces, item 3, added the same day). Its places are the server itself (status; installing it as a background service and starting, stopping and restarting it; how clients connect, 62c's settings), devices, apps, activity, the audit trail and people.
 
-The design's own law says nothing is built before it is drawn: "A new screen or state worth its own board" needs a start preset, a `Screen<Name>.dc.html`, a `canvas.json` entry and a README row ([design CLAUDE.md](../../../../../design/spec/CLAUDE.md):27), and "Every part maps to the CLI … If none exists, draw it with its fallback and add the gap to the contract board" (`:37`). This item draws the whole window in `lib/design/spec` and on the Apogee Desktop canvas, every part against the CLI words it maps to and every missing word added to the BuildContract board's gap list, so [10b](server-window.md) builds the window and [10c](people-screens.md) builds People from boards that already exist.
+The design's own law says nothing is built before it is drawn: "A new screen or state worth its own board" needs a start preset, its fixture, its test and its gallery entry ([the design's guide](../../../../assistant/design/CLAUDE.md) → What a change touches), and "Every part maps to the CLI … If none exists, draw it with its fallback and add the gap to the contract board" (→ The design's rules). This item draws the whole window in the design app, every part against the CLI words it maps to and every missing word added to the contract page's gap list, so [10b](server-window.md) builds the window and [10c](people-screens.md) builds People from boards that already exist.
 
 This item delivers:
 
@@ -45,17 +45,17 @@ This item delivers:
 - **Audit** (who changed, approved or used what, and when);
 - **People** (the owner and members, presets, allowances, keys and limits), drawn now and built by 10c later in the same release.
 
-Each part gets its contract-map row, each missing CLI word its gap and fallback, the window gets its layout and keys on BuildLayout, and the service gets its place on BuildProcesses.
+Each part gets its contract-map row, each missing CLI word its gap and fallback, the window gets its layout and keys on the layout page, and the service gets its place on the processes page.
 
-The design prototype is now the React app: design 1e (the gate recorded 2026-11-14) shipped 2026-11-18 (the design's [Milestone A](../../../../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react)), so this window is drawn in the React design app, never in the old format. Where this document names `main.html`, its boards or the canvas, read the React app's server module, its gallery entries and `lib/design/main.html`; design 1t re-words it (Decision log, 2026-11-14).
+The design prototype is the React app: design 1e (the gate recorded 2026-11-14) shipped 2026-11-18, and design 1r, whose data this item's contract, layout and processes additions land in, shipped 2026-11-21 (the design's [Milestone A](../../../../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react)). Design 1t retired the old one-file prototype and the claude.ai canvas on 2026-11-21 and re-worded this document for the design app (Decision log, 2026-11-21): the window is a module, presets and hand-made documents in the CLI's shape there, its boards the gallery's entries, and its check the design's local gate.
 
 ### Evidence
 
 **A9 — no admin screen is designed.** Re-measured 2026-11-14 at `4acf4a2b`:
 
-1. **The canvas has no board for any of it.** At HEAD, `json/canvas.json` holds 71 boards (60 on the Build page) and 56 `html/Screen*.dc.html` files. The working checkout holds three more session boards another session is drawing (74 boards, 59 screen files; the spike counted these). In either count, the only board title matching server, connect, device, pair, admin, people or apps is "Library · MCP servers and presets". The Build page has five rows of boards, at y 0, 1400, 2720, 4040 and 5360; the last four have headings 300 above them (y 1100, 2420, 3740 and 5060), and the Settings row is last, its 900-high boards ending at y 6260. The prototype's `start` options (`html/main.html`'s `data-props`) name no server, device, app or people state, and its only "pair" is a drafter's pairing.
-2. **The contract board has no row or gap about serving.** `html/BuildContract.dc.html` has eleven map sections (Sessions through Settings and system), 80 rows marked ready, and gaps G1–G24 (16 closed, 4 "Before v1", 4 "Later"). None is about a server, a device, an app or a person.
-3. **The client side is undrawn too, and must stay distinct.** GUI 7a's Connections pane, pair sheet and indicator, the side of a Mac that *connects to* a server, are still to be drawn ([7a](../../v0.2.4/app-connection-local-or-server.md) (Technical approach: the Connections pane, the pair sheet, the indicator and the unreachable state drawn first in `lib/design/spec`)). The server window is the other side: the Mac that *is* the server. The two must never be confused in words or in place.
+1. **The canvas has no board for any of it.** At HEAD, the old prototype's canvas index held 71 boards (60 on the Build page) and 56 Screen boards. The working checkout holds three more session boards another session is drawing (74 boards, 59 screen files; the spike counted these). In either count, the only board title matching server, connect, device, pair, admin, people or apps is "Library · MCP servers and presets". The Build page has five rows of boards, at y 0, 1400, 2720, 4040 and 5360; the last four have headings 300 above them (y 1100, 2420, 3740 and 5060), and the Settings row is last, its 900-high boards ending at y 6260. The prototype's `start` options name no server, device, app or people state, and its only "pair" is a drafter's pairing. Re-checked 2026-11-21 in the design app (design 1t): no start preset in `app/Previews/Presets.ts` names a server state, and the gallery's Build page has its five rows under the same headings.
+2. **The contract board has no row or gap about serving.** The old BuildContract board had eleven map sections (Sessions through Settings and system), 80 rows marked ready, and gaps G1–G24 (16 closed, 4 "Before v1", 4 "Later"). None is about a server, a device, an app or a person. Since design 1r the contract page's data (`gallery/Models/contract.ts`) holds the same eleven parts and gaps G1–G32 (G25–G32 handed it by the monitor and the Models place), none about serving.
+3. **The client side is undrawn too, and must stay distinct.** GUI 7a's Connections pane, pair sheet and indicator, the side of a Mac that *connects to* a server, are still to be drawn ([7a](../../v0.2.4/app-connection-local-or-server.md) (Technical approach: the Connections pane, the pair sheet, the indicator and the unreachable state drawn first in the design app)). The server window is the other side: the Mac that *is* the server. The two must never be confused in words or in place.
 4. **The app has nowhere to put it yet.** `ApogeeApp.swift:52-54`: "One window: the app holds one live session" and one `Window(model.title, id: "main")`, plus the `Settings` scene (`:99`). `Destination` has 11 cases (`Destination.swift:8-20`) and the number keys are spent (⌘1–⌘9, ⌘0, Review on ⇧⌘R). `serve` is carved out of the app as "a daemon the app would orphan when it quits" (`Parity.swift:83`). Building the window is 10b's; drawing where it lives is this item's.
 5. **The CLI words the window needs are mostly unshipped.** Probed 2026-11-14 with the branch binary (`apogee 0.2.0 (b37b0a9f, 2026-11-09, macos-arm64)`), a scratch `APOGEE_HOME` under the session scratchpad, the `mock` backend, and `serve --bind 127.0.0.1 --port 0` killed after:
    - `__complete ""` answers 30 words; `devices`, `apps` and `people` are not among them, and `devices list`, `apps list` and `people list` exit 109.
@@ -70,74 +70,74 @@ The design prototype is now the React app: design 1e (the gate recorded 2026-11-
 
 ## Acceptance criteria
 
-- [ ] **Given** `main.html`, **when** it starts at each `server…` preset, **then** it draws the Apogee Server window: the menu entry (present and absent), Server running, stopped (the service installed or not, with Install offered) and with a change pending a restart, Devices, the pairing sheet (code, QR, waiting, paired), Apps, an app's scope beside what it asked for, Activity, Audit, People, a member's page, and the older-apogee fallbacks. The design's node check reports no problems for every start screen.
-- [ ] The thirteen `ScreenServer*.dc.html` boards exist, each on a new Build-page row titled "Screens — the server window, on the Mac that serves" in `canvas.json`, with README's layout table and counts updated.
-- [ ] BuildContract has a SERVER WINDOW section mapping every part to its CLI verb. Each missing verb has a gap row with its "Until then:" fallback and the item that closes it (62a–62h, 59a, 59f, 63a, 63c). The window's decisions are in "Decisions the design makes".
-- [ ] BuildLayout draws the second window's regions, sizes, keys (⌥⌘S into it; ⌘1–⌘6 inside it) and states. Settings › Keyboard lists the way in. BuildProcesses draws launchd's `apogee serve` outside the app's children, and the window reaching the local `apogee` over pipes, never the port.
+- [ ] **Given** the built `lib/design/main.html`, **when** it starts at each `server…` preset, **then** it draws the Apogee Server window: the menu entry (present and absent), Server running, stopped (the service installed or not, with Install offered) and with a change pending a restart, Devices, the pairing sheet (code, QR, waiting, paired), Apps, an app's scope beside what it asked for, Activity, Audit, People, a member's page, and the older-apogee fallbacks. The design's local gate, `npm run check`, passes, its walk over every start preset included.
+- [ ] The thirteen `server…` presets each have a gallery entry (`gallery/Models/Boards.ts`) with `id` equal to its preset and `noOldBoard: true`, titled `Server · <state>`, on a new Build-page row under the heading "Screens — the server window, on the Mac that serves".
+- [ ] The contract page has a SERVER WINDOW part (`contract.ts`) mapping every part to its CLI verb. Each missing verb has a gap row with its "Until then:" fallback and the item that closes it (62a–62h, 59a, 59f, 63a, 63c). The window's decisions are in "Decisions the design makes".
+- [ ] The layout page draws the second window's regions, sizes, keys (⌥⌘S into it; ⌘1–⌘6 inside it) and states, from tokens.json and the key map. Settings › Keyboard lists the way in. The processes page draws launchd's `apogee serve` outside the app's children, and the window reaching the local `apogee` over pipes, never the port.
 - [ ] No board shows a token, code or key outside the pairing sheet. Activity, Audit and People show metadata only and carry the honesty line about the Mac's disk. Billed use is marked. The word "role" appears nowhere in the window.
-- [ ] **Given** the snapshot taken before this item, **when** every pre-existing start preset renders, **then** it renders exactly as before (the snapshot comparison); and on a Mac that doesn't serve, the harness window has no new item.
-- [ ] The changed files are published to the Apogee Desktop canvas and read back identical. Nothing is committed unless the user asks.
+- [ ] **Given** the presets that exist before this item, **when** each renders, **then** it renders exactly as before: `npm run parity` (design 1s) reads no new difference on any screen pair (`<preset>@<mode>`) it judged before, other than Settings › Keyboard's added line for the window's key. The new differences on the BuildContract, BuildLayout and BuildProcesses pairs and on `settings:keyboard@installed` are exactly this item's additions, each classed by a verdict in `parity/verdicts.json`: a `fix` citing `10a`, which the proof accepts only once this item's design record is written in the design's [MILESTONES.md](../../../../assistant/design/MILESTONES.md) under a heading holding "(backlog item 10a)". On a Mac that doesn't serve, the harness window has no new item.
+- [ ] `lib/design/main.html` is rebuilt from the item's sources, and the staleness check passes on it. Nothing is committed unless the user asks.
 
 ## Constraints
 
 - **Nothing makes standalone use need a server or an account (the anti-goal).** The user's standing law: remote use is an add-on, and the CLI alone and the Mac app over pipes stay complete and need no server ([GUI SPEC](../../../../assistant/gui/SPEC.md) → Non-goals, No server requirement). On a Mac that does not serve, the harness window, its places, its keys and every existing board stay exactly as they are. There is no menu item, no sidebar entry, no sign-in and no "people" anywhere in the harness window.
-- **Never listens; serving = server.** The window drives the local `apogee` over pipes: reads and commands, as every place does. It **never connects to the port on its own Mac** ([GUI SPEC](../../../../assistant/gui/SPEC.md):34, No HTTP path for local work; the CLI's Interactive turns never open a listening socket). Only `apogee serve` listens. Under the background service, that process is launchd's child, not the app's, so the design draws it outside the app's children on BuildProcesses. Quitting the app leaves the server running, which answers the carve-out's reason (`Parity.swift:83`).
+- **Never listens; serving = server.** The window drives the local `apogee` over pipes: reads and commands, as every place does. It **never connects to the port on its own Mac** ([GUI SPEC](../../../../assistant/gui/SPEC.md):34, No HTTP path for local work; the CLI's Interactive turns never open a listening socket). Only `apogee serve` listens. Under the background service, that process is launchd's child, not the app's, so the design draws it outside the app's children on the processes page. Quitting the app leaves the server running, which answers the carve-out's reason (`Parity.swift:83`).
 - **One config mutation path.** Every change drawn in the window is the CLI verb that makes it: `config set serve.*` (62c), `apps scope` (59f), `devices revoke` (59a), and the people verbs (63a, 63c). Each change is read back, as Settings' panes are today. The design never draws a field that writes a file.
 - **Secrets are unleakable** (the CLI CLAUDE.md). The pairing code and the QR appear only on the pairing sheet, which is the local caller of `devices pair --json` (59a: "on a local front end over pipes", [`paired-devices.md`](../../../cli/v0.2.3/paired-devices.md) (Open questions: the default that a pairing code is never minted over HTTP, and appears only on the server's own terminal or a local front end over pipes)). No list, activity row, audit row or toast ever shows a token, a hash, a code or a key. A household cloud key is entered through the CLI's own key flow (`auth add --stdin`, the key on standard input, `auth_cmd.cpp:160`; the household grant and its limit are 63c's) and drawn by name and limit only.
-- **Honest by default** ([design CLAUDE.md](../../../../../design/spec/CLAUDE.md) → The design's rules). Every status, count, expiry and usage figure is one the CLI reports, in its words where it has them. Anything billed or sent off the machine is marked, using the `model.api` token ("Cloud API · billed"). The owner sees members' metadata, never their chat contents. The People and Activity boards also say plainly that whoever controls this Mac can still read its disk.
+- **Honest by default** ([the design's guide](../../../../assistant/design/CLAUDE.md) → The design's rules). Every status, count, expiry and usage figure is one the CLI reports, in its words where it has them. Anything billed or sent off the machine is marked, using the `model.api` token ("Cloud API · billed"). The owner sees members' metadata, never their chat contents. The People and Activity boards also say plainly that whoever controls this Mac can still read its disk.
 - **Additive** (the CLI's [ADR 0006](../../../../adrs/cli/backwards-compatibility.md)). The design is drawn for the CLI that will exist, and against an older binary it draws each fallback. A place whose verb the binary lacks says so in one line naming the release that brings it. It never pretends the place is empty.
 - **Parity** (the CLI's [ADR 0002](../../../../adrs/cli/mode-parity.md); the GUI's [ADR 0003](../../../../adrs/gui/parity.md)). Every part maps to a CLI verb that a person can also type. The contract map names each verb, and nothing in the window is a capability of its own.
 - **The design's own rules.** Every color is a token (the existing 25 and nothing new unless a color is genuinely missing). Type sizes are `var(--t-…)`. The design is keyboard first, with real buttons, inputs and labels, an `aria-label` on each icon-only button, and text at 4.5:1 in all three themes. Copy is plain words.
-- **The repo and the canvas move together** ([design CLAUDE.md](../../../../../design/spec/CLAUDE.md) → The repo and the canvas move together). Every changed file is published to <https://claude.ai/artifact/HRGyHM1ZkRL3D1bWGXQGk7> in the same piece of work, after first reading down anything changed on the canvas since its last publish. `support.js` and the two `.md` files stay repo-only, and nothing is committed unless asked.
+- **Drawn in the design app** ([the design's guide](../../../../assistant/design/CLAUDE.md) → What a change touches). The window is a module, its presets, their documents and their gallery entries, checked by the local gate; the claude.ai canvas is retired (design 1t), so nothing is published. Nothing is committed unless asked.
 - **The layers and the dev channel, as drawn.** The window's places are drawn as one future Presentation module (10b's `PresentationServer`). The window's reads go through the same runner as every place. A development build's window drives `apogee-dev` over `~/.apogee-dev` ([GUI CLAUDE.md](../../../../assistant/darwin/CLAUDE.md#development-runs-on-the-dev-channel); [M18](../maintenance/app-dev-channel.md)). Any probe this item runs uses a scratch `APOGEE_HOME`, never `~/.apogee` or `~/.apogee-dev`, and never `launchctl`.
 
 ## Technical approach
 
-Design only. No code, no CLI, no app source changes. Paths under `lib/design/spec/`, plus the canvas. (Since design 1e, these name the React design app's equivalents: its server module, its gallery entries and `lib/design/main.html`; see Background.)
+Design only. No Swift, no CLI, no app source changes. Paths under `lib/design/prototype/` (its `source/presentation/` unless said), and the rebuilt `lib/design/main.html`.
 
 | File | Change |
 |---|---|
-| `html/main.html` | the second window (chrome, sidebar, keys), its markup, canned data, `tick()` motion, `srv` values, the menu entry, thirteen start presets, and the window's key in Settings › Keyboard (detail below) |
-| `html/ScreenServer*.dc.html` (new, 13) | one board per preset, each copied from a sibling and mounting `App` at its `start` (list below) |
-| `json/canvas.json` | a sixth row on the Build page, with the heading note "Screens — the server window, on the Mac that serves" at y 6380 (120 below the Settings row's end, as each heading sits below the row before) and its boards at y 6680, x stepping 1520 from 0 as the Settings row does, page `build`, added to `order` |
-| `html/BuildContract.dc.html` | a SERVER WINDOW map section, the new gaps from G25, and the window's entries in "Decisions the design makes" (detail below) |
-| `html/BuildLayout.dc.html` | the second window's regions and sizes (its sidebar and place), its keys, and its states (running, stopped, older apogee, empty lists), with each piece named in SwiftUI; `json/tokens.json`'s layout values get only sizes that are genuinely new |
-| `html/BuildProcesses.dc.html` | launchd starting `apogee serve` as its own process, with the port its only listener, and the app's server window reaching the local `apogee` over pipes beside the harness window's children; nothing goes from the app to the port |
-| `README.md` | the screen-board count, the gap range, and a row for the server window's boards |
-| The canvas | each changed file at its canvas path (`project/App.dc.html`, `project/<name>.dc.html`, `project/canvas.json`), published from a scratch folder |
+| `source/presentation/server/` (new module) | the second window (chrome, sidebar, keys): its view-models over the stand-in, its views, a preview for each state, its mirroring tests; its entry in `modules.json` (10b's `PresentationServer`, drawn first) and its name on the Presentation layer card |
+| `app/Previews/Presets.ts`, `app/ViewModels/AppViewModel.ts` | the thirteen start presets, each with what it opens, and the menu entry |
+| `fixtures/` | the documents the window reads: a recording where the binary answers, else a hand-made file in the CLI's shape from its item's spec, named `*-handmade*` |
+| `gallery/Models/Boards.ts` | a sixth Build row, under the heading "Screens — the server window, on the Mac that serves", its thirteen entries in order, each keyed by its preset: `{ id: '<preset>', start: '<preset>', title: 'Server · <state>', page: 'build', row, height: 900, draws: 'screen', noOldBoard: true }` |
+| `gallery/Models/contract.ts` | a SERVER WINDOW part, the new gaps from G33, and the window's entries in the decisions (detail below) |
+| `gallery/Models/layout.ts`, `lib/design/tokens.json`, `shell/ViewModels/KeyMap.ts` | the second window's regions and sizes (its sidebar and place), its keys, and its states (running, stopped, older apogee, empty lists), with each piece named in SwiftUI (`gallery/Models/nativeControls.ts`); tokens.json gets only sizes that are genuinely new |
+| `gallery/Models/processes.ts` | launchd starting `apogee serve` as its own process, with the port its only listener, and the app's server window reaching the local `apogee` over pipes beside the harness window's children; nothing goes from the app to the port |
+| `parity/verdicts.json` | the verdicts classing the new differences on the BuildContract, BuildLayout and BuildProcesses pairs and on `settings:keyboard@installed`, each a `fix` citing `10a`, standing on this item's design record in the design's `MILESTONES.md` (a heading holding "(backlog item 10a)") |
+| `lib/design/main.html` | rebuilt by `npm run build` |
 
-**`html/main.html` in detail.**
+**The window in detail.**
 
-- A second window drawn in the prototype, shown when the `start` prop names a `server…` state. It has its own chrome titled "Apogee Server", its own sidebar (Server, Devices, Apps, Activity, Audit, People) and its own key list, beside the harness window's markup, never inside its sidebar.
-- The markup: one `<sc-if value="{{ui.isServer…}}">` block per place, plus the pairing, scope, confirmation and member sheets.
-- The data: canned state in the constructor (this Mac's server, the service, two or three devices with one pending pairing, two apps with one asking for more, a few live connections, audit rows, an owner and two members on presets).
-- What moves: `tick()` drives a pairing redeemed while the sheet is open and the activity rows.
-- The values: a `/* ---------- server ---------- */` section in `renderVals()` exposes `srv`.
+- A second window drawn by the design app, shown when the start preset names a `server…` state. It has its own chrome titled "Apogee Server", its own sidebar (Server, Devices, Apps, Activity, Audit, People) and its own key list, beside the harness window, never inside its sidebar.
+- The views: one per place, plus the pairing, scope, confirmation and member sheets, through the shell's hosts.
+- The data: the documents above (this Mac's server, the service, two or three devices with one pending pairing, two apps with one asking for more, a few live connections, audit rows, an owner and two members on presets), read through the stand-in as every place reads.
+- What moves: the stand-in's clock replays a pairing redeemed while the sheet is open and the activity rows.
 - The entry: the harness window's Apogee menu drawn open, showing "Apogee Server…" with its key. The design has no menu bar today, so this is the one menu drawn.
-- The start presets, added to `applyStart()` and to `data-props`' `start` options: `server:menu`, `server`, `server:stopped`, `server:pending`, `server:devices`, `server:pair`, `server:apps`, `server:scope`, `server:activity`, `server:audit`, `server:people`, `server:member` and `server:older` (the window against an older apogee, each place's fallback).
-- Settings › Keyboard's list (`set.keys`) gains the window's key, marked as on the Mac that serves.
+- The start presets: `server:menu`, `server`, `server:stopped`, `server:pending`, `server:devices`, `server:pair`, `server:apps`, `server:scope`, `server:activity`, `server:audit`, `server:people`, `server:member` and `server:older` (the window against an older apogee, each place's fallback).
+- Settings › Keyboard's list (the shell's `KeyMap.reference`) gains the window's key, marked as on the Mac that serves.
 
-**The boards** (`html/ScreenServer*.dc.html`), one per preset:
+**The boards** (the gallery's entries), one per preset, each keyed by it:
 
-- `ScreenServerMenu`: the way in;
-- `ScreenServer`: running, how clients connect;
-- `ScreenServerStopped`: stopped, or the service not installed;
-- `ScreenServerPending`: a change applied now beside one waiting for a restart;
-- `ScreenServerDevices`;
-- `ScreenServerPair`: the code, the QR, waiting, then paired as a name;
-- `ScreenServerApps`;
-- `ScreenServerScope`: an app's scope beside what it asked for;
-- `ScreenServerActivity`;
-- `ScreenServerAudit`;
-- `ScreenServerPeople`;
-- `ScreenServerMember`: a member's preset, allowance, devices, apps, key and limit;
-- `ScreenServerOlder`.
+- `server:menu`: the way in;
+- `server`: running, how clients connect;
+- `server:stopped`: stopped, or the service not installed;
+- `server:pending`: a change applied now beside one waiting for a restart;
+- `server:devices`;
+- `server:pair`: the code, the QR, waiting, then paired as a name;
+- `server:apps`;
+- `server:scope`: an app's scope beside what it asked for;
+- `server:activity`;
+- `server:audit`;
+- `server:people`;
+- `server:member`: a member's preset, allowance, devices, apps, key and limit;
+- `server:older`.
 
-**`html/BuildContract.dc.html` in detail.**
+**The contract page in detail** (`gallery/Models/contract.ts`).
 
-- A **SERVER WINDOW** section in the contract map: one row per part, naming the verb behind it and its chip (`ready` for what the binary has, `gap` for the rest).
-- The gap list gains the missing words, from the next free number (G25 at HEAD), each with its "Until then:" fallback and the CLI item that closes it (the table below, recorded in the Decision log 2026-11-14).
-- "Decisions the design makes" gains the window's: a second window, offered only on the Mac that serves; pipes, never the port; the service outside the app's children; metadata, never contents; the words people and access, never roles.
+- A **SERVER WINDOW** part in the contract map (`contractParts`, `contractRows`): one row per part, naming the verb behind it and its status (`ready` for what the binary has, `gap` for the rest).
+- The gap list (`contractGaps`) gains the missing words, from the next free number (G33 since design 1r; G25 at the spec), each with its "Until then:" fallback and the CLI item that closes it (the table below, recorded in the Decision log 2026-11-14).
+- "Decisions the design makes" (`contractDecisions`) gains the window's: a second window, offered only on the Mac that serves; pipes, never the port; the service outside the app's children; metadata, never contents; the words people and access, never roles.
 
 **The contract board's new gaps**, each with the item that closes it and its fallback (numbers assigned from the next free one when drawn):
 
@@ -190,17 +190,17 @@ Design only. No code, no CLI, no app source changes. Paths under `lib/design/spe
 
 ## Testing
 
-- **The design's own check** ([design CLAUDE.md](../../../../../design/spec/CLAUDE.md) → Checking a change). The node script runs every start preset, the new `server…` ones included, for 30 ticks and reports "N start screens, no problems".
-- **Before-and-after snapshot.** A snapshot of `renderVals()` for every start preset that exists before this item shows them unchanged. The harness window is untouched on a Mac that doesn't serve (the anti-goal). It is taken in the scratchpad with the same `new Component({ start, still: true })` setup.
-- **Consistency pass.** Every `ScreenServer*.dc.html` mounts a start that `data-props` lists; every new board has its `canvas.json` entry on page `build` and its README row; every `{{hole}}` in the new markup resolves to a name `renderVals()` returns.
-- **Themes and contrast.** Each new board is opened at `main.html?start=…&still=true` in all three themes, and its text is checked at 4.5:1.
-- **Secrets read.** A read of the new markup and canned data finds no token, hash, code or key outside the pairing sheet.
+- **The design's local gate** ([the design's guide](../../../../assistant/design/CLAUDE.md) → Checking a change): `npm run check` in `lib/design/prototype/`, its walk over every start preset (the new `server…` ones included) for 30 ticks with nothing `undefined` or `NaN`, the new module's tests, the layering check over it, the token scan, and the Playwright tests that open the built file from disk.
+- **Before and after, by the parity proof.** `npm run parity` (design 1s) on the item's build reads no new difference on any screen pair it judged before but Settings › Keyboard's added line for the window's key, so every other pre-existing preset is unchanged, and the harness window is untouched on a Mac that doesn't serve (the anti-goal). The new differences on the BuildContract, BuildLayout and BuildProcesses pairs and on `settings:keyboard@installed` are exactly this item's additions, each classed by a `fix` verdict citing `10a` in `parity/verdicts.json`; the proof accepts such a verdict only once the design's MILESTONES.md holds this item's design record, headed "(backlog item 10a)", and it exits 1 on any difference no verdict classes.
+- **Consistency, by the gallery's and the Build pages' tests.** "Every preset has a frame" holds each new preset to its gallery entry; the contract page's gaps test holds every `gap` row to an open gap and every open gap to a row; the layout page's keys test holds the new keys to its key rows.
+- **Themes and contrast.** Each new board is opened at `main.html?gallery&board=server:…&theme=<dark|light|contrast>`, and its text is checked at 4.5:1.
+- **Secrets read.** A read of the new module and its documents finds no token, hash, code or key outside the pairing sheet.
 - **The spike's probe is the gap list's fixture.** When a CLI item ships, the same sandboxed probe (scratch `APOGEE_HOME`, mock backend, `serve --port 0` on loopback, killed after) is re-run, and its gap is marked closed only when the binary answers:
   - `__complete ""` gains `devices` and `apps`;
   - `serve status --output-format json` exits 0;
   - `config get serve` answers;
   - `/v1/admin/status` stops answering 404.
-- **Canvas read-back.** After publishing, the canvas files are read back and match the repo's byte for byte (`support.js` excepted, since it is never sent).
+- **The built file.** `npm run build` rewrites `lib/design/main.html`, and the staleness check passes on it.
 
 ## Open questions
 
@@ -209,7 +209,7 @@ Design only. No code, no CLI, no app source changes. Paths under `lib/design/spe
 | Who owns each CLI word and its JSON shape? | `(consumed decision)` | Its CLI item: [62a](../../../cli/v0.2.4/serve-status-and-runtime-record.md), what "this Mac serves" means, and the status fields; [62b](../../../cli/v0.2.4/serve-reload-and-served-vs-disk.md), which changes reload and which need a restart; [62c](../../../cli/v0.2.4/serve-section-in-config.md), the `serve.*` keys; [62d](../../../cli/v0.2.4/serve-as-a-background-service.md), the service verbs and the LaunchAgent; [62e](../../../cli/v0.2.4/connections-and-activity.md) and [62f](../../../cli/v0.2.4/audit-log.md), the activity and audit records; [62g](../../../cli/v0.2.4/administering-local-and-marked-devices.md), the mark's verb and what a marked device may do; [62h](../../../cli/v0.2.4/local-admin-reads.md), the pairing payload and the pending rows; [63a](../../../cli/v0.2.4/people-on-one-server.md) and [63c](../../../cli/v0.2.4/allowances-keys-and-usage.md), people, presets, allowances, keys and limits. The boards draw the words those documents record. Where a document is not yet written when this item is worked, the board draws the spike's capability wording and the gap row says it is provisional. |
 | Who owns the window's build? | `(consumed decision)` | [10b](server-window.md): the `Window` scene, its composition and module; how `ParityTable` classifies `devices`, `apps` and `serve`'s new verbs while bare `serve` stays carved out; amending 7a's carve-out of `devices` ([7a](../../v0.2.4/app-connection-local-or-server.md), Open questions: `devices` classified as carved out beside `serve`). People's build is [10c](people-screens.md)'s. |
 | Who draws the client side's Connections pane, pair sheet and indicator? | `(consumed decision)` | [7a](../../v0.2.4/app-connection-local-or-server.md). |
-| Where is the window drawn? | `[default]` | Inside `main.html`, as a second window chrome shown by the `server…` start presets, so every board mounts `App` as the others do and the prototype stays one file. A separate prototype file would split the canned data and the tick. |
+| Where is the window drawn? | `[default]` | In the design app, as a second window shown by the `server…` start presets, its places one new Presentation module (`server`), so every gallery frame is the app at its preset and the built file stays one file. A separate prototype would split the documents and the clock. |
 | What is the way in, and when is it shown? | `[default]` | The menu item is "Apogee Server…" in the Apogee menu, on ⌥⌘S (free: the shell's keys are ⌘1–⌘0, ⇧⌘R, ⇧⌘L, ⌥⌘M, ⇧⌘K, ⌃⌘S and ⌘,; `KeyMap.swift:84-91`, `:99-123`). It is drawn present when the local CLI says this Mac serves (62a's meaning, consumed above), and absent otherwise. Because the window is offered only on the Mac that serves (the user's call), the harness window offers no "make this Mac a server" path: the first opt-in to serving (`apogee serve` or 62c's `config set serve.*` at a prompt) stays the CLI's. Once this Mac serves, installing the background service is the window's, by the user's call (Server, below). The menu board draws both the present and absent states. |
 | What are the window's own keys? | `[default]` | Inside the window, ⌘1–⌘6 go to Server, Devices, Apps, Activity, Audit and People, in that order. They are the window's own keys and never collide with the harness's, since only the focused window takes them. |
 | What are the places and their words called? | `[default]` | The place names are Server, Devices, Apps, Activity, Audit and People. "Connections" stays 7a's word for the servers a Mac connects to, so the two sides never share a label. Members are "people", and what they may use is their "access". The word "role" appears nowhere in the window. |
@@ -219,8 +219,8 @@ Design only. No code, no CLI, no app source changes. Paths under `lib/design/spe
 | What does Activity draw? | `[default]` | Who is connected now (device or app, and person once 63a answers), what each is running (sessions, jobs, tasks, with a person's queued tasks shown as queued, 63e), and usage per credential over a chosen period (requests and tokens per backend, billed backends marked). It shows metadata only, with no prompts, answers or file names. The honesty line reads: "Apogee doesn't show anyone's conversations here. Anyone who controls this Mac can still read its disk." |
 | What does Audit draw? | `[default]` | A list, newest first, of who (owner, member, device, app), did what (changed, approved, revoked, used), to what, and when. It is filtered by who and by kind, and says it keeps 90 days and never what was asked. It is read-only, and the window offers no clearing. |
 | What does People draw? | `[default]` | The owner first (this Mac's account, never removable, every right), then the members, each with a preset (Full, Family, Limited), their devices and apps, and their usage against their limit. A member's page shows their allowance in the `AppScope` shape, their personal data as counts only (chats, notes, tasks; never their contents), their shared collections handed out, and the household cloud key: granted or not, with its limit, marked billed. Adding a member starts with pairing their first device at this Mac. A guest is drawn as a member on Limited with "nothing kept". Removing a member is asked first and names their devices and apps. |
-| What do the gap rows' "when" chips say? | `[default]` | They name the release that closes them (v0.2.4) rather than "Before v1". Their text names the CLI item, so a gap is closed by name when its item ships. |
-| Does the window need a new color token? | `[default]` | No new color token. Status uses `status.accent`, `status.warning` and `status.error`, and billed uses `model.api`. A missing color goes through the theme table, `ColorTokens` and `tokens.json` together, as the design's law asks. |
+| What do the gap rows' "when" chips say? | `[default]` | They name the release that closes them (v0.2.4) rather than "Before v1" (a value `contract.ts`' `GapWhen` gains). Their text names the CLI item, so a gap is closed by name when its item ships. |
+| Does the window need a new color token? | `[default]` | No new color token. Status uses `status.accent`, `status.warning` and `status.error`, and billed uses `model.api`. A missing color goes into `lib/design/tokens.json`'s colors in all three themes, whose color page computes its contrast, as the design's law asks. |
 | How is the window drawn against an older apogee? | `[default]` | An older apogee (`server:older`) draws each place's fallback line naming its release, from the CLI's own refusal (exit 109, "The following arguments were not expected"), so the window is honest against 0.2.0 through 0.2.3. |
 
 ## Decision log
@@ -241,6 +241,8 @@ Design only. No code, no CLI, no app source changes. Paths under `lib/design/spe
 | 2026-11-14 | The contract board's new gaps, each with the item that closes it and its fallback, numbers assigned from the next free one when drawn (the gap table in Technical approach). | the spec |
 | 2026-11-18 | The gate, design 1e, shipped (the design's [Milestone A](../../../../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react)), so the window is drawn in the React design app. | — |
 | 2026-11-18 | Moved here from v0.2.6 when the releases were merged; the id is unchanged. | the user |
+| 2026-11-21 | Re-worded by design 1t, which retired the old one-file prototype and the claude.ai canvas: the window is drawn in the design app (a module, its presets, hand-made documents in the CLI's shape, gallery entries) instead of the old prototype's one file, its boards and its canvas index; the canvas read-back is replaced by the design's local gate and 1s's parity proof: every screen pair it judged before unchanged but Settings › Keyboard's added line, the BuildContract, BuildLayout and BuildProcesses pairs and `settings:keyboard@installed` being where this item's intended changes land, each classed by a `fix` verdict citing 10a, which stands on this item's design record in the design's MILESTONES.md; and the contract, layout and processes additions land in design 1r's data (`gallery/Models/contract.ts`, `layout.ts`, `processes.ts`; 1r's default), its gaps numbered from G33. 1r is named as a gate beside 1e; both shipped, so the item stays 🟢. | design 1t (default) |
+| 2026-11-21 | The boards keyed by their presets: the gallery's entries are `server:menu` … `server:older`, each with `id` equal to its `start` and `noOldBoard: true`, titled `Server · <state>`, in place of the old prototype's board names (`ScreenServerMenu` … `ScreenServerOlder`, carried over from its board files), since the gallery's rule for an entry with no old board requires it (`Boards.test.ts`; the design's DEVELOPER.md, the gallery's "a new start preset"). 10b and 10c name the entries the same way. | design 1t (a review's finding) |
 
 ## Out of scope
 
@@ -254,5 +256,5 @@ Design only. No code, no CLI, no app source changes. Paths under `lib/design/spe
 ## Links
 
 - **Blocked by:** — · **Blocks:** [10b](server-window.md)
-- **Relates to:** [10c](people-screens.md) (builds this item's People and member boards); [7a](../../v0.2.4/app-connection-local-or-server.md) (the client side); CLI [62a](../../../cli/v0.2.4/serve-status-and-runtime-record.md)–[62h](../../../cli/v0.2.4/local-admin-reads.md), [59a](../../../cli/v0.2.3/paired-devices.md), [59d](../../../cli/v0.2.3/reads-and-commands-over-the-network.md), [59f](../../../cli/v0.2.3/paired-apps-with-scopes.md), [63a](../../../cli/v0.2.4/people-on-one-server.md), [63c](../../../cli/v0.2.4/allowances-keys-and-usage.md), [63e](../../../cli/v0.2.4/task-slots-per-person.md); design [1e](../../../../assistant/design/DEVELOPER.md#styles-the-shell-and-the-first-screen) and the design's [Milestone A](../../../../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react); [M18](../maintenance/app-dev-channel.md) (the dev channel)
+- **Relates to:** [10c](people-screens.md) (builds this item's People and member boards); [7a](../../v0.2.4/app-connection-local-or-server.md) (the client side); CLI [62a](../../../cli/v0.2.4/serve-status-and-runtime-record.md)–[62h](../../../cli/v0.2.4/local-admin-reads.md), [59a](../../../cli/v0.2.3/paired-devices.md), [59d](../../../cli/v0.2.3/reads-and-commands-over-the-network.md), [59f](../../../cli/v0.2.3/paired-apps-with-scopes.md), [63a](../../../cli/v0.2.4/people-on-one-server.md), [63c](../../../cli/v0.2.4/allowances-keys-and-usage.md), [63e](../../../cli/v0.2.4/task-slots-per-person.md); design [1e](../../../../assistant/design/DEVELOPER.md#styles-the-shell-and-the-first-screen) and [1r](../../../../assistant/design/DEVELOPER.md#the-build-pages) (its gates, both shipped), the design's [guide](../../../../assistant/design/CLAUDE.md) and [Milestone A](../../../../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react); [M18](../maintenance/app-dev-channel.md) (the dev channel)
 - **Follows from:** the admin-mode and people spike (2026-11-14); the [GUI SPEC](../../../../assistant/gui/SPEC.md) → Core surfaces, item 3

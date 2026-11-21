@@ -11,9 +11,8 @@
 #                           every macOS size, 16 to 1024 pixels, committed so
 #                           a build runs no script
 #   lib/design/assets/Logo-320.png
-#                           the reduced copy the root README shows at 160
-#   lib/design/spec/html/Logo.dc.html
-#                           that copy, embedded in the design's logo board
+#                           the reduced copy the root README shows at 160,
+#                           which the design's gallery draws as its logo page
 #
 # The images of 32 pixels or fewer are the rocket alone on black, its outline
 # thickened (scripts/icon-small.swift): measured as macOS draws them, the whole
@@ -58,7 +57,6 @@ master="${repo}/lib/design/assets/Logo.png"
 readme_logo="${repo}/lib/design/assets/Logo-320.png"
 catalog="${app_dir}/source/main/Assets.xcassets"
 icon_set="${catalog}/${ICON}.appiconset"
-board="${repo}/lib/design/spec/html/Logo.dc.html"
 
 sha256() { shasum -a 256 <"$1" | cut -d ' ' -f 1; }
 
@@ -99,22 +97,6 @@ if size != (side, side):
         f"[icon] error: the master is {size[0]}x{size[1]} pixels: "
         f"the icon is square and the rocket's crop is measured on {side}x{side}, so measure it again"
     )
-PYTHON
-}
-
-# The logo board with its one embedded copy replaced, written to <out>.
-board_with_logo() {
-    python3 -I - "$1" "$board" "$2" <<'PYTHON' || die "could not update ${board}"
-import base64, re, sys
-
-logo, board, out = sys.argv[1:]
-text = open(board, encoding="utf-8", newline="").read()
-data = base64.b64encode(open(logo, "rb").read()).decode()
-line = "const LOGO = 'data:image/png;base64," + data + "';"
-text, count = re.subn(r"^const LOGO = '.*';$", lambda _: line, text, flags=re.M)
-if count != 1:
-    sys.exit("[icon] error: the board has no single LOGO line")
-open(out, "w", encoding="utf-8", newline="").write(text)
 PYTHON
 }
 
@@ -173,7 +155,6 @@ ${hashes}
 }
 JSON
     resize "$master" 320 144 "${stage}/Logo-320.png"
-    [[ ! -f "$board" ]] || board_with_logo "${stage}/Logo-320.png" "${stage}/Logo.dc.html"
 
     # Everything was made, so nothing is left half replaced.
     mkdir -p "$catalog"
@@ -190,12 +171,6 @@ JSON
     mv "${stage}/Logo-320.png" "$readme_logo"
     log "${icon_set#"${repo}/"}: ten sizes from ${master#"${repo}/"}"
     log "${readme_logo#"${repo}/"}: the README's copy"
-    if [[ -f "${stage}/Logo.dc.html" ]]; then
-        mv "${stage}/Logo.dc.html" "$board"
-        log "${board#"${repo}/"}: its copy of the logo"
-    else
-        log "${board#"${repo}/"} is gone: no board to update"
-    fi
 }
 
 verify() {

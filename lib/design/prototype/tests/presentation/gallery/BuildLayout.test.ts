@@ -18,7 +18,7 @@ const keyMap: readonly KeyLine[] = keyboardLines(KeyMap.reference, windowKeys)
 
 const layout = (tokens: LayoutTokens = layoutTokens(), keys: readonly KeyLine[] = keyMap) => new BuildLayoutViewModel(keys, tokens)
 
-/** tokens.json read from disk, as the build reads it (`tokensFile`, the one line 1t's move changes). */
+/** tokens.json read from disk, as the build reads it (`tokensFile`, whose root 1t's move changed). */
 const tokensJson = JSON.parse(readFileSync(tokensFile(root), 'utf8')) as { layoutPx: Record<string, number | Record<string, number>> }
 
 /**
@@ -236,5 +236,15 @@ describe("the layout page's states (design 1r)", () => {
   test("the six states every screen draws, in the board's words", () => {
     expect(layout().face().states.map((state) => state.name)).toEqual(['Reading', 'Empty', 'A command failed', 'The CLI is missing or too old', 'Something is running', 'Cloud, billed'])
     expect(layout().face().states[0]?.words).toBe('The screen’s shape with quiet placeholders. No spinner for a read under 300 ms.')
+  })
+})
+
+describe("the layout page's introduction (design 1t)", () => {
+  test('it says the numbers are in lib/design/tokens.json, beside the built file, not in the retired canvas', () => {
+    const intro = layout().face().words.intro
+    expect(intro).toBe(
+      'The measurements behind every screen, how a person moves between them, the states each one draws, and what each piece of the design becomes in SwiftUI first, then Qt Quick and WinUI. The numbers are the prototype’s own; with the tokens they are in `lib/design/tokens.json`.',
+    )
+    expect(intro).not.toContain('canvas')
   })
 })

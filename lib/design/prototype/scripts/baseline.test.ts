@@ -27,10 +27,14 @@ function realGit(...args: string[]): string {
 /**
  * The real support.js, from the newest commit that wrote it, so the planted
  * boards render with the runtime the frozen prototype uses -- before and after
- * 1t deletes lib/design/spec.
+ * 1t deleted lib/design/spec. The pathspec is anchored at the repository's
+ * root (`:/`), since realGit runs in the prototype's folder; and a commit is
+ * required, so the read never falls back to the index, which holds no
+ * support.js once 1t's deletion is staged.
  */
 function realSupport(): string {
-  const commit = realGit('log', '--diff-filter=AM', '-1', '--format=%H', '--', 'lib/design/spec/html/support.js').trim()
+  const commit = realGit('log', '--diff-filter=AM', '-1', '--format=%H', '--', ':/lib/design/spec/html/support.js').trim()
+  if (!commit) throw new Error('no commit wrote lib/design/spec/html/support.js')
   return realGit('show', `${commit}:lib/design/spec/html/support.js`)
 }
 
@@ -350,7 +354,7 @@ describe('capture, in Chromium', () => {
     ])
     expect(readFileSync(join(out, 'index.html'), 'utf8')).toContain('screens/home@missing.png')
 
-    // The spec deleted from the working tree, as 1t will: capture re-makes the same images from history.
+    // The spec deleted from the working tree, as 1t did: capture re-makes the same images from history.
     rmSync(join(repo, 'lib/design/spec'), { recursive: true })
     // An image an earlier run kept and this one does not: the folder ends holding only what the hash list names.
     writeFileSync(join(out, 'screens/home@config-typo.png'), 'stale')

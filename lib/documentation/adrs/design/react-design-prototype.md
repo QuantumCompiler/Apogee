@@ -73,11 +73,11 @@ Every view a module exports has a named preview for each state a person sees dif
 
 ### 6. The gates are local
 
-Typecheck, the unit tests, the layering check and the staleness check run on this machine before a commit, as one local command. No CI job runs them. The prototype is not an input to any build, and CI never reads it ([`lib/design/spec/README.md`](../../../design/spec/README.md), line 5). This is the CLI's own precedent: its lint is a local gate because CI "builds the executable for each platform and nothing else" ([`assistant/cli/CLAUDE.md`](../../assistant/cli/CLAUDE.md)). `lib/scripts/changed.sh` and the workflows do not name the prototype.
+Typecheck, the unit tests, the layering check and the staleness check run on this machine before a commit, as one local command. No CI job runs them. The prototype is not an input to any build, and CI never reads it ([`lib/design/README.md`](../../../design/README.md), which carries the old prototype's README's sentence since 1t). This is the CLI's own precedent: its lint is a local gate because CI "builds the executable for each platform and nothing else" ([`assistant/cli/CLAUDE.md`](../../assistant/cli/CLAUDE.md)). `lib/scripts/changed.sh` and the workflows do not name the prototype.
 
 ### 7. The design's five rules carry over
 
-Word for word, from [`lib/design/spec/CLAUDE.md` → The design's rules](../../../design/spec/CLAUDE.md#the-designs-rules):
+Word for word, from the old prototype's guide, "The design's rules", which [the design's guide → The design's rules](../../assistant/design/CLAUDE.md#the-designs-rules) carries since 1t:
 
 > - **Every part maps to the CLI.** The app drives `apogee` over the machine-mode pipes and through the same commands a person types ([machine-mode.md](../../reference/cli/machine-mode.md)). Before drawing something, find the event or command it comes from in that document or the binary's `--help`. If none exists, draw it with its fallback and add the gap to the contract board; never design as if it existed.
 > - **Honest by default.** Say what the CLI says, in its words where it has them. Never invent a time estimate, a size or a count the CLI doesn't report; mark anything billed or sent off the machine.
@@ -94,7 +94,7 @@ Once the React app covers every board, the claude.ai design canvas is retired, a
 ## Consequences
 
 - **A later app ports module for module.** Each Swift module has one folder here with the same name, and each view-model one class. A Linux or Windows app finds the same split, whatever its language.
-- **New design is drawn in React** once the first screen exists (1e). Until 1t, the old prototype is the port's frozen reference and takes fixes only ([the interim rule](../../assistant/design/CLAUDE.md#the-interim-rule-while-the-port-runs)).
+- **New design is drawn in React** once the first screen exists (1e). Until 1t, the old prototype is the port's frozen reference and takes fixes only (the interim rule, [1a's record](../../assistant/design/MILESTONES.md#2026-11-18--design-app-architecture-and-law-backlog-item-1a-the-design-apps-law)).
 - **A state with no recording is never drawn from invention.** It waits for a recording, or gets a hand-made file named as one.
 - **The Mac app's fixtures become an input to the design's build.** A fixture re-recorded for the Mac app's tests leaves `main.html` stale until it is rebuilt, and the staleness check says so. The Mac app's tests read the same files, unchanged.
 - **The cost:** an npm toolchain under `lib/design/prototype/`, and a built file committed beside its source.
@@ -138,3 +138,5 @@ Accepted 2026-11-18, not yet built: `lib/design/prototype/` does not exist yet. 
 **2026-11-21** (1q, the gallery): `gallery`, the Presentation module the Mac app lacks, joins the map on `styles` alone; `app` hands it the app to mount, the specimens and the logo, and planted imports from it into `app`, the shell or a place each fail, as a React import in its view-models does. The layering check's rule 4 gains **the assets root**, `@assets/<file>`, the one way to `lib/design/assets` (one file by its full name, served by the build as a `data:` URL), reached only from `presentation/app` and the tests; the staleness hash covers each asset the source names. The app's icons are now one set in `styles`, and a test holds that no view draws one of its own.
 
 **2026-11-21** (1r, the Build pages): the Enforcement section's React rule reaches `Models/` too. A Presentation module's `Models/` folder holds plain typed data -- 1r's contract, layout, native-controls and processes tables, 1q's board table -- and the layering check now fails a React import or a `.tsx` file there as it fails one in `ViewModels/`, proven on a planted miniature. No `Models/` file held React before the rule.
+
+**2026-11-21** (1t, the retirement): §8 is done. After 1s's parity proof and the user's word on its report, the old one-file prototype is deleted (kept in git history; 1c's baseline re-makes its pictures from `b375fac9`), `tokens.json` moved beside the built file as `lib/design/tokens.json`, and the claude.ai canvas retired with one last note pointing to `lib/design/main.html`. Three links above named files that went with it and were repointed, their words unchanged: §6's to `lib/design/README.md`, which carries the sentence "not an input to any build, and CI never reads it"; §7's to the design's guide, which carries the five rules word for word; and the Consequences' interim rule to 1a's record in MILESTONES.md, the guide's section having gone with the freeze. The layering check gains the retired path: nothing reads the old prototype's folder but the parity scripts, from git, proven on a planted import of `../spec/json/tokens.json`.

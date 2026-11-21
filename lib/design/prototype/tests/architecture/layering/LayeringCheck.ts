@@ -40,7 +40,7 @@ type Layer = (typeof LayeringCheck.layers)[number]
  *   in a `Fixtures/` folder (or under `fixtures/`) with `?raw`, and never by a
  *   glob;
  * - the tokens root (design 1e): `@tokens` (the typed tokens module the build
- *   generates from lib/design/spec/json/tokens.json), `@tokens/themes.css`
+ *   generates from lib/design/tokens.json), `@tokens/themes.css`
  *   (its CSS) and `@tokens/tokens.json` (the file, for the declaration's
  *   types), and nothing else under it, reached only from `presentation/styles`
  *   and the tests -- the one way to that file from outside the prototype;
@@ -50,6 +50,17 @@ type Layer = (typeof LayeringCheck.layers)[number]
  *   the view that draws it, and from the tests;
  * - a `.css` file is read as code is: each `@import` and `url()` is held to
  *   the same rules (design 1e), and nothing is loaded from the network;
+ * - the retired path (design 1t): nothing imports from, or names a path in,
+ *   the old prototype's folder beside the prototype, `spec/`, which 1t
+ *   deleted -- no import, and no string in code, `.json` or `.html` that
+ *   reaches it by the repository's path or relative to its file or the
+ *   prototype's root, whether written whole, as separate segments to one
+ *   call (`resolve(root, '..', 'spec')`) or after a template's
+ *   interpolation (`${root}/../spec`) -- but the parity scripts
+ *   (`scripts/baseline.ts`, `scripts/parity.ts`, their tests, and
+ *   `parity/`), which read the old
+ *   revision from git. A git revision's path (`<revision>:…`) is history, a
+ *   recording under `fixtures/` is data, and a comment is no read;
  * - a module depends only on its own layer or a lower one; `styles` leans on
  *   no sibling; the shell imports no place; a file imports another module
  *   only when the map declares the dependency;
@@ -105,6 +116,12 @@ export class LayeringCheck {
   /** The stylesheets, whose `@import` and `url()` are read (design 1e). */
   static readonly styleExtensions = ['.css']
 
+  /** The config and pages whose quoted strings the retired path reads (design 1t): `tsconfig.json`'s paths, the entry page. */
+  static readonly configExtensions = ['.json', '.html']
+
+  /** The parity scripts, which read the old prototype from git (design 1t): with `parity/`, the one exception to the retired path. */
+  static readonly retiredReaders = ['scripts/baseline.ts', 'scripts/baseline.test.ts', 'scripts/parity.ts', 'scripts/parity.test.ts']
+
   constructor(
     readonly map: ModuleMap,
     readonly tree: SourceTree,
@@ -123,6 +140,7 @@ export class LayeringCheck {
     const byId = new Map(modules.map((module) => [module.id, module]))
 
     found.push(...this.outside())
+    found.push(...this.retired())
     for (const module of modules) {
       found.push(...this.edges(module, byId))
       found.push(...this.imports(module, byId))
@@ -204,7 +222,9 @@ export class LayeringCheck {
           const resolved = LayeringCheck.resolve(file, bare)
           if (resolved === undefined) {
             found.push(
-              `${file} imports ${specifier}, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages`,
+              LayeringCheck.intoRetired(file, bare)
+                ? `${file} imports ${specifier}, ${LayeringCheck.retiredWhy}`
+                : `${file} imports ${specifier}, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages`,
             )
           } else if (LayeringCheck.inFixtures(resolved)) {
             found.push(...LayeringCheck.recording(file, specifier, LayeringCheck.fixturePathIsWhole(resolved)))
@@ -244,6 +264,90 @@ export class LayeringCheck {
         )
       }
     }
+    return found
+  }
+
+  // MARK: - The retired path
+
+  /** Why the old prototype's folder is read by nothing but the parity scripts (design 1t). */
+  private static readonly retiredWhy = "in lib/design's spec/ folder, which design 1t retired: only the parity scripts read the old prototype, from git"
+
+  /**
+   * Every string naming a path in the old prototype's folder (design 1t), in a
+   * code file (its literals, each template's fixed parts and each call's runs
+   * of string arguments, `stringsIn`'s, its imports left to `outside()`) or a
+   * `.json` or `.html` one, but in the parity scripts and
+   * `parity/`, and the recordings under `fixtures/`, which are data.
+   */
+  private retired(): string[] {
+    const found: string[] = []
+    for (const file of this.tree.files('')) {
+      if (LayeringCheck.retiredReaders.includes(file) || file.startsWith('parity/') || LayeringCheck.inFixtures(file)) continue
+      const text = this.tree.contents(file) ?? ''
+      let strings: string[]
+      if (LayeringCheck.isCode(file)) {
+        const imported = new Set(LayeringCheck.importsIn(text, file))
+        strings = LayeringCheck.stringsIn(text, file).filter((value) => !imported.has(value))
+      } else if (LayeringCheck.configExtensions.includes(posix.extname(file))) {
+        strings = [...text.matchAll(/"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'/g)].map((match) => match[1] ?? match[2] ?? '')
+      } else continue
+      for (const value of new Set(strings)) {
+        if (LayeringCheck.namesRetired(file, value)) found.push(`${file} names ${value}, a path ${LayeringCheck.retiredWhy}`)
+      }
+    }
+    return found
+  }
+
+  /** A path from the prototype's root that is in the old prototype's folder beside it. */
+  private static inRetired(path: string): boolean {
+    return /^\.\.\/spec(\/|$)/.test(posix.normalize(path))
+  }
+
+  /** An import from `file` that resolves into the old prototype's folder. */
+  private static intoRetired(file: string, specifier: string): boolean {
+    return !specifier.startsWith('/') && LayeringCheck.inRetired(posix.join(posix.dirname(file), specifier))
+  }
+
+  /**
+   * Whether a string in `file` names a path in the old prototype's folder: by
+   * the repository's path, at the string's start or after a slash or a space
+   * (never a git revision's, `<revision>:…`, which is history), or a relative
+   * one reaching it from the file or from the prototype's root, as
+   * `resolve(root, …)` does. A template's fixed part after an interpolation
+   * (`${root}/../spec/…`, so starting `/..`) is read as relative too.
+   */
+  static namesRetired(file: string, value: string): boolean {
+    if (/(^|[\s/])lib\/design\/spec(\/|$)/.test(value)) return true
+    const relative = value.startsWith('/..') ? value.slice(1) : value
+    if (!relative.startsWith('.')) return false
+    return LayeringCheck.inRetired(posix.join(posix.dirname(file), relative)) || LayeringCheck.inRetired(relative)
+  }
+
+  /**
+   * Every string a code file writes, in file order: each literal, each
+   * template's fixed parts, and each run of two or more string arguments in a
+   * row to one call, joined as a path (`resolve(root, '..', 'spec')` writes
+   * `../spec`), ahead of the run's own literals.
+   */
+  static stringsIn(source: string, fileName: string): string[] {
+    const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, LayeringCheck.scriptKind(fileName))
+    const found: string[] = []
+    const visit = (node: ts.Node): void => {
+      if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) found.push(node.text)
+      else if (ts.isTemplateExpression(node)) found.push(node.head.text, ...node.templateSpans.map((span) => span.literal.text))
+      if (ts.isCallExpression(node)) {
+        let run: string[] = []
+        for (const argument of [...node.arguments, undefined]) {
+          if (argument && (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument))) run.push(argument.text)
+          else {
+            if (run.length > 1) found.push(posix.join(...run))
+            run = []
+          }
+        }
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(file)
     return found
   }
 

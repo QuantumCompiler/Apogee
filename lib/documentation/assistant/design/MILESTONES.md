@@ -82,7 +82,6 @@ Decisions taken while building (2026-11-18, an unattended group run), each for v
 - **The ADR is accepted, not landed.** `lib/design/prototype/` does not exist yet, and 1b builds the check its Enforcement names.
 - **1b's document still cites the pre-11a figures** for the Mac app's check: 1,229 lines, `ModuleMap.swift` at 250, one test on the real project and 24 planted. They were left alone, since that document is another item's spec. 1b re-measures: 1,247 lines, `ModuleMap.swift` at 268, 5 + 20 tests, 18 of them planting a violation.
 - **`lib/design/spec/CLAUDE.md`'s "What a change touches" table and `README.md`** are as they were, apart from the two-line note (1t rewrites them). The canvas was not touched: these `.md` files never go to it.
-- **No commit**: the run's owner commits.
 
 ### 2026-11-18 — `scaffold-and-layering-check` (backlog item 1b): the scaffold and its layering check
 
@@ -318,7 +317,6 @@ Decisions taken while building (2026-11-18, an unattended group run), each for v
 - **A font change at Google stops the capture.** If Google serves a different static stylesheet for a pinned URL, or stops serving its files, the capture refuses rather than draw a different picture. A re-record then needs `lib/design/spec` at a commit, and `--record` takes the newest commit touching it. After 1t deletes the folder, that commit is the deletion, so a re-record after 1t would need the script to take a named revision. 1t's and 1s's documents do not cover this yet.
 - **The banners are uncommitted edits to `lib/design/spec`.** Once committed, that commit is the newest touching the spec. The baseline stays at `b375fac9`: the banners are docs, not a fix.
 - **No CI job, `changed.sh` line or required check**, by design.
-- **No commit**: the run's owner commits.
 
 ### 2026-11-18 — `cli-stand-in` (backlog item 1d): the CLI stand-in
 
@@ -420,7 +418,6 @@ Decisions taken while building (2026-11-18, an unattended group run), each for v
 - **No `busy` update is made**, and a set, attach, detach or compact changes nothing in a replay, nor does a cancel anywhere but at a standing question whose recording ends the turn there. An item that needs one records a stream that shows it (`set-model.jsonl`, `stopped-turn.jsonl` and their siblings exist).
 - **Monitor's Swift literal is still incomplete** (13 fields short of the CLI's document). It is the Mac app's test data and works as it is; nothing here needed it changed.
 - **`business/media`** is 1k's.
-- **No commit**: the run's owner commits.
 
 ### 2026-11-18 — `styles-shell-and-the-first-screen` (backlog item 1e): styles, the shell, the composition root and the first screen
 
@@ -550,7 +547,6 @@ Decisions taken while building (2026-11-18, an unattended group run), each for v
 - **The monitor stays 268 px from the left in a collapsed window,** as the old panel does.
 - **1k:34 and 1q:27 say `src/`** where the tree uses `source/`; not this item's to change.
 - **No CI job, `changed.sh` line or required check**, by design.
-- **No commit**: the run's owner commits.
 
 ### 2026-11-19 — `session-turn-and-composer` (backlog item 1u): the session's turn and the composer, with the plain states
 
@@ -679,7 +675,6 @@ Decisions from the review's fixes (2026-11-19, the same run), each for veto:
 - **A suite move after a turn** (a restart with `--resume`) is 1v's; Switch is off there.
 - **The code lexer reads quoted strings, comments, numbers, keywords, definitions and calls;** a raw string fenced by `#` and a here-document read as the quoted form they open with (the Mac's lexer reads both).
 - **1k:34 and 1q:27 say `src/`** where the tree uses `source/`; not this item's.
-- **No commit**: the run's owner commits.
 
 ### 2026-11-19 — `session-scenarios-and-states` (backlog item 1v): the session's scenarios and states
 
@@ -826,7 +821,6 @@ Decisions taken while fixing the review's findings (2026-11-19, the same unatten
 - **No recorded stream reports `usage`,** so no scenario's footer or meter shows tokens; the view draws them when a result reports some.
 - **The scenarios' live motion is one recorded line a tick:** past `chat`'s frame Streaming's reasoning ends in 19 lines (7.6 s) and its result comes 120 lines (48 s) in, slower than the old 20 ticks (8 s).
 - **1k:34 and 1q:27 say `src/`** where the tree uses `source/`; not this item's. The eight old presets no item names (`knowledge:mixed`, `graph:refused`, `compose:differs`, `training:stalelock`, `training:unreadable`, `training:cyclepass`, `training:passrunning`, `training:resumeheld`) are left to 1o, 1l and 1j.
-- **No commit**: the run's owner commits.
 
 ### 2026-11-19 — `sessions-inspector-execute-and-console` (backlog item 1g): the session list, the inspector, the execute door and the console
 
@@ -960,7 +954,6 @@ After the review (2026-11-19, the same run), six defects the reviewers confirmed
 - **The inspector's resizing** (the Mac's drag) and **its 360 px** are not ported (1s's list).
 - **1i's:** the `settings:*` presets, over the same Streaming setup at its starting frame. **1h's:** the Models tabs that Open in library and Change helpers name.
 - **1k:34 and 1q:27 say `src/`** where the tree uses `source/`; not this item's. The eight old presets no item names are left to 1o, 1l and 1j.
-- **No commit**: the run's owner commits.
 
 ### 2026-11-19 — `models-screens` (backlog item 1h): the Models place
 
@@ -1087,7 +1080,6 @@ Decisions taken in the review's fixes (2026-11-20, the same run), each for veto:
 - **The monitor's LOADED MODELS** still reads only `system` (1e's); the registry it could list is in place.
 - **Settings' Models & roles and Backends & keys panes are 1i's:** Manage key… and Add an API key… open Settings' placeholder.
 - **1k:34 and 1q:27 say `src/`** where the tree uses `source/`; not this item's. The eight old presets no item names are left to 1o, 1l and 1j.
-- **No commit**: the run's owner commits.
 
 ### 2026-11-20 — `settings-and-appearance` (backlog item 1i): Settings, including Appearance
 
@@ -1198,7 +1190,6 @@ Decisions taken while building (2026-11-20, an unattended group run), each for v
 - **Install peft… and Check** on the runtime rows are 1k's install sheet's, handed to its document.
 - **The voice for new speech** is the window's preference; a shared service for it, which Voice and Compose read, is 1m's and 1l's to promote.
 - **1k:34 and 1q:27 say `src/`** where the tree uses `source/`; not this item's. The eight old presets no item names are left to 1o, 1l and 1j.
-- **No commit**: the run's owner commits.
 
 ### 2026-11-20 — `training-screens` (backlog item 1j): the Training place
 
@@ -1304,7 +1295,6 @@ Decisions taken while fixing the review's defects (2026-11-20, the same unattend
 - **The Mac's run, synthesize and create sheets, its ask-first rollback, a spec's page (`train pipeline show`), an older binary's ways and the student and backend reads** (`models list --all`) are not ported; a later design item can draw them.
 - **`training:regimes` has no old frame;** 1s compares it, and gives it its gallery board.
 - **1k:34 and 1q:27 say `src/`** where the tree uses `source/`; not this item's. The other old presets no item names (`knowledge:mixed`, `graph:refused`, `compose:differs`) are 1o's and 1l's.
-- **No commit**: the run's owner commits.
 
 ### 2026-11-21 — `video-and-runtime-consent` (backlog item 1k): the Video place's clips and the runtime consent
 
@@ -1415,7 +1405,6 @@ Decisions taken while building (2026-11-20 and 2026-11-21, an unattended group r
 - **The stand-in keeps no state but which calls succeeded** (for a rule's `until`): a clip made lands beside the folder's read but a reload or another preset reads the folder as recorded; an install that went in changes no `check` row, only what rain's generate answers; any generate but the recorded ones ends in the stand-in's "no recorded answer", drawn as a failed run.
 - **The previews' later states** are driven by the view-model tests and the walk, not by a browser render of each preview: a preview gallery is 1q's.
 - **1q:27 says `src/`** where the tree uses `source/`; not this item's. The other old presets no item names (`knowledge:mixed`, `graph:refused`, `compose:differs`) are 1o's and 1l's.
-- **No commit**: the run's owner commits.
 
 ### 2026-11-21 — `compose-screens` (backlog item 1l): compositions in the React app
 
@@ -1541,7 +1530,6 @@ Fixed after review (2026-11-21, the same unattended run: reviewers confirmed the
 - **The Mac's extra states stay out** (the document's default): the install door on a refused run, the preview's time limit, and a voice model chosen per project.
 - **The previews' later states** are driven by the view-model tests and the walk, not by a browser render of each preview: a preview gallery is 1q's.
 - **1q:27 says `src/`** where the tree uses `source/`; not this item's. The other old presets no item names (`knowledge:mixed`, `graph:refused`) are 1o's.
-- **No commit**: the run's owner commits.
 
 ### 2026-11-21 — `voice-screen` (backlog item 1m): the Voice place in the React app
 
@@ -1635,7 +1623,6 @@ Decisions taken while building (2026-11-21, an unattended group run), each for v
 - **The side-by-side's verdicts** are 1s's (`npm run parity`, `verdicts.json`), which this item does not build.
 - **The previews' later states** are driven by the view-model tests and the walk, not by a browser render of each preview: a preview gallery is 1q's.
 - **1q:27 says `src/`** where the tree uses `source/`; not this item's. The old presets `knowledge:mixed` and `graph:refused` are 1o's.
-- **No commit**: the run's owner commits.
 
 ### 2026-11-21 — `library-and-review` (backlog item 1n): the Library and Review places in the React app
 
@@ -1730,7 +1717,6 @@ Decisions taken while building (2026-11-21, an unattended group run), each for v
 - **The side-by-side's verdicts** are 1s's (`npm run parity`, `verdicts.json`), which this item does not build.
 - **The previews' later states** are driven by the view-model tests and the walk, not by a browser render of each preview: a preview gallery is 1q's.
 - **1q:27 says `src/`** where the tree uses `source/`; not this item's. The old presets `knowledge:mixed` and `graph:refused` are 1o's.
-- **No commit**: the run's owner commits.
 
 ### 2026-11-21 — `knowledge-and-graph` (backlog item 1o): the Knowledge and Code graph places in the React app
 
@@ -1828,7 +1814,6 @@ Decisions taken while building (2026-11-21, an unattended group run), each for v
 - **The side-by-side's verdicts** are 1s's (`npm run parity`, `verdicts.json`), which this item does not build.
 - **The previews' later states** are driven by the view-model tests and the walk, not by a browser render of each preview: a preview gallery is 1q's.
 - **1q:27 says `src/`** where the tree uses `source/`; not this item's.
-- **No commit**: the run's owner commits.
 
 ### 2026-11-21 — `suites-and-tasks` (backlog item 1p): the Suites and Tasks places in the React app
 
@@ -1935,7 +1920,6 @@ Decisions taken while building (2026-11-21, an unattended group run), each for v
 - **The side-by-side's verdicts** are 1s's, which this item does not build.
 - **The previews' later states** are driven by the view-model tests and the walk, not by a browser render of each preview: a preview gallery is 1q's.
 - **1q:27 says `src/`** where the tree uses `source/`; not this item's.
-- **No commit**: the run's owner commits.
 
 ### 2026-11-21 — `gallery-and-foundations` (backlog item 1q): the gallery and the foundations
 
@@ -2034,7 +2018,6 @@ Decisions taken while building (2026-11-21, an unattended group run), each for v
 - **Your veto, if you want one,** on the decisions above, among them: ⌥⌘G and the gallery replacing the window, the board-less ids and titles, a row showing a board's first 900 px, screens inert at full size, the switcher on the focused board, the theme file's example left out, the type page's copied samples and uses, the icon set's near-duplicates and its two unifications, the two icons now hidden from a screen reader, and the shell's frame mode.
 - **The old Components pieces with no specimen** (above) are 1s's to settle: each is either a state no recording holds or a piece the port draws elsewhere.
 - **1r's pages** replace the three "Not ported yet" cards when 1r lands; 1s's side-by-side and its gallery boards for the board-less presets; 1t's deletion of `canvas.json` and the canvas tests with it.
-- **No commit**: the run's owner commits.
 
 ### 2026-11-21 — `build-boards-as-pages` (backlog item 1r): the build boards as pages
 
@@ -2116,11 +2099,10 @@ Decisions taken while building (2026-11-21, an unattended group run), each for v
 - **Your veto, if you want one,** on the decisions above, among them: the eight handed gaps as new rows and each Later; the gaps card counting open gaps; the gap chips as links and the pages taking the pointer; the three `layoutPx` entries and the app's views reading them; 1q's address form in place of `?page=`; the stale `handoff/tokens.json` sentence kept; rule 6 reaching `Models/`.
 - **1s's side-by-side** of the three pages, and **1t's** rewrite of `spec/CLAUDE.md`'s BuildContract and BuildLayout rows to point at `gallery/Models/`, the canvas's stale `handoff/tokens.json`, and BuildLayout's sentence naming it.
 - **darwin 10a's document** still says its gaps start "from the next free number (G25 at HEAD)"; by its own rule they start at G33. Not edited here.
-- **No commit**: the run's owner commits.
 
-### 2026-11-21 — `parity-proof` (backlog item 1s): the parity proof -- built, waiting for your look
+### 2026-11-21 — `parity-proof` (backlog item 1s): the parity proof
 
-**Built and committed for your look; not closed.** This record is the work; [the item's document](../../backlog/design/v0.2.1/parity-proof.md) and its index row stay open, marked as waiting for your look, and 1t stays gated on it (your answer before the run, 2026-11-18). Its ROADMAP line is not ticked.
+**Shipped 2026-11-21, on your word.** It was built and committed (`858d3ec4`) for your look, its document and index row kept open (your answer before the run, 2026-11-18). After its report (`lib/design/prototype/.parity/report/index.html`) was presented and the commit made, you wrote, on 2026-11-21: "Go ahead and continue". That is recorded as your word on 1s's look, and nothing more is claimed of it. So 1s closed in 1t's change: its document and index row deleted, its ROADMAP line ticked, and 1t's gate open.
 
 **Why.** Before 1t deletes the old prototype, someone has to show that the React app draws everything it drew. The old data is invented and the new data is the CLI's, so pixel or string identity is impossible: the proof is structural (regions, states, controls and the wording around the data), every difference classed as the CLI's data or a change a shipped item records, and every defect fixed first.
 
@@ -2306,7 +2288,68 @@ Decisions taken while building (2026-11-21, an unattended group run), each for v
 - **Unchanged:** nothing under `lib/design/spec` (acceptance), `lib/src`, `lib/scripts` or `.github`; `package-lock.json`. `lib/src/darwin` was not changed, so the Mac suite was not run.
 
 **Not done.**
-- **Your look.** Open `/Users/taylor/Data/Development/Projects/Apogee/lib/design/prototype/.parity/report/index.html` in a browser: 123 pairs side by side, each difference with its class and reason. Then say so, and 1s closes (its document and row deleted, the ROADMAP line ticked) and 1t can start. Double-click `lib/design/main.html` too: the Playwright tests stood in for that look during the run.
+- **Your look** came as your word "Go ahead and continue" (2026-11-21), above. **You try the file afterwards:** double-click `lib/design/main.html`; the Playwright tests stood in for that look during the run.
 - **Your veto, if you want one,** on the decisions above, among them: the accessibility-only differences matched to the old (the `main` landmark, the log and list roles, the longer labels), the Components pages' undrawn pieces, the broad verdicts per region (each now its region's lines), and `training:regimes` over `training`'s run. Review's post sheet is 1n's confirm host again (460 px, `--t-title`, `--t-body`), 1n's flagged decision for your veto, where the old overlay drew 480 px, `--t-h2` and `--t-small`; a veto gives the host the old overlay's size for that sheet.
 - **The Components pages' old pieces with no specimen** wait on recordings (1q's list).
-- **No commit**: the run's owner commits.
+- **The commit** was the run's owner's: `858d3ec4`.
+
+### 2026-11-21 — `retire-the-old-prototype` (backlog item 1t): the old prototype retired, the law rewritten
+
+**Why.** With 1s's proof green and your word on its report, the old one-file prototype had no job left. Keeping it meant two designs that could disagree, a guide telling agents to edit a frozen file, and a canvas behind the repository (its App board the 2026-10-26 `main.html`). This item deletes the old prototype, moves the one file that outlives it, closes the canvas, and makes one guide of the two.
+
+- [x] **1s closed first**, in this same change, on your word after its report was presented: "Go ahead and continue" (2026-11-21). Its document and index row deleted, its ROADMAP line ticked, its record above turned from "waiting for your look" to shipped with that word and the date, and the overview's counts, "can start today" and 1t's gate updated. Nothing more is claimed of the look than that word.
+- [x] **The parity proof, green just before the deletion** (1s's default): `npm run parity` in a `git clone --shared` under the session scratchpad holding this tree before the deletion (no `GIT_*` set; 1c's images and `node_modules` copied in, its `node_modules/node_modules` self-link left out). Its first run read 4,607 differences in 123 pairs, one unjudged -- BuildLayout's introduction, re-worded here (below) -- and failed (exit 1, 2:24.8); with its verdict written (a `fix` citing 1t), the second run passed (exit 0, 2:24.2): 4,607 differences, 1,503 the CLI's `data` and 3,104 `fix`es, none unjudged, every check ok, 1c's 129 images reused, each its hash list's, and the same build reading the same outlines twice. A third run after the deletion, in the same clone, passed the same way (exit 0, 2:24.9), so `npm run parity` keeps working with the old files gone. The checkout's `.parity/` is as you saw it.
+- [x] **The old prototype deleted**, file by file from `git ls-files lib/design/spec` (87 files, none untracked or ignored there): `html/main.html` (8,082 lines, 836,809 bytes at HEAD), `support.js` (469 lines), 81 `.dc.html` boards (66 Screen boards, the Build, Foundations and Components boards, Logo, and the 5 Exploration boards, the default), `json/canvas.json`, its `CLAUDE.md` and `README.md`; `json/tokens.json` moved (below). Then its three empty folders, `rmdir` each. Never `rm -rf`, never `git rm`: the run's owner stages the deletions. `lib/design/` now holds `README.md`, `main.html`, `prototype/`, `tokens.json` and `assets/`.
+- [x] **tokens.json moved** to `lib/design/tokens.json` with a plain `mv` (the owner stages the rename), beside the built file, as the one file other apps copy from. 1e's two lines changed with it: `tooling/tokens.ts`' `tokensRoot` (`resolve(root, '..')`) and `tsconfig.json`'s `paths` entry; every test reads it through `tokensFile` (`Tokens.test.ts` and `stale.test.ts` pin the new path). Its `"source"` field, which named `App.dc.html in the Apogee Desktop canvas`, now says it is written here by hand, first generated from the old prototype's theme table (a decision below).
+- [x] **The byte-identical rebuild**, in the clone: HEAD's build equals HEAD's committed `main.html`; HEAD with the move alone (the file moved, `tokensRoot` and `tsconfig.json`'s `paths`) builds a file of the same 2,245,120 bytes, identical but for one line, `<meta name="apogee-design-sources">`, the hash of the build's inputs, which must change since `tooling/tokens.ts` and `tsconfig.json` are inputs. So the move changes nothing drawn. The deliberate changes after it -- the comments the built file carries, the tokens' `"source"`, BuildLayout's introduction -- each changed only its own words (`main.html` 2,245,124 bytes now, 6 lines differing from HEAD's). The staleness check passes.
+- [x] **The baseline survives the deletion**, in the same clone: `npm run baseline` before the deletion re-made 129 images, "the same as the last run, hash for hash" (1:10.0), its `hashes.txt` equal to 1c's; after the deletion it re-made all 129 again, the same hash for hash (1:08.5), its `hashes.txt` byte-identical to the run before.
+- [x] **The retired path**, the layering check's rule 13 (`LayeringCheck.ts`' `retired()`, `namesRetired`, `stringsIn`; `layering.test.ts`' five tests): nothing under `lib/design/prototype/` imports or names a path in the old folder -- no import, glob, `new URL` or stylesheet path, and no string in a code file or a `.json` or `.html` file, by the repository's path or relative to its file or the prototype's root -- but the parity scripts and `parity/`, which read the old revision from git. Proven on a planted import of `../spec/json/tokens.json` in `vite.config.ts` (and a stylesheet's), `tokensRoot` planted back at `../spec/json`, the same path built from separate segments to one call (`resolve(root, '..', 'spec', 'json', 'tokens.json')`, read as the call's string arguments joined) and from a template's fixed part after an interpolation (`${root}/../spec/json/tokens.json`, read as relative; both a review's finding), a test's folder, `tsconfig.json`'s old `paths`, the repository's path in a string and a command naming it; the parity scripts and records, a git revision's path, a recording and a comment pass; a parity-named file elsewhere fails. Three earlier planted tests that used the old folder only as somewhere outside the prototype now use `elsewhere/`. `tests/presentation/styles/Frozen.ts` names the folder through the baseline's `specPath`, so the scripts name it in one place.
+- [x] **canvas.json's compare test gone with it** (1q's record): `Boards.test.ts`' first describe block (its four tests) and `CanvasTable.ts`' `againstCanvas`, `boardStart`, `readCanvas`, `oldFilesExist`, `specFolder` and `canvasFile`; `framesOf` and the "every preset has a frame" tests stay. The board table, `gallery/Models/Boards.ts`, is the record from here on, its header comment saying so.
+- [x] **The words the canvas left** (1q's and 1r's records): BuildLayout's introduction (`gallery/Models/layout.ts`' `layoutWords.intro`) said the numbers "with the tokens … are in `handoff/tokens.json` in this canvas"; it now says they are in `lib/design/tokens.json` (`BuildLayout.test.ts`' new test, and the parity verdict citing 1t). Comments that named the old files by path now name the old prototype and its boards by name: `Clock.ts`, `Boards.ts`, `layout.ts`, `GalleryViewModel.ts`, `LogoPage.tsx`, `KeyMap.ts`, `Appearance.ts`, `Fonts.css`, `Helmet.css` (both carried into the built file), `IconNames.ts`, `Specimen.ts`, `LayeringCheck.ts`, `Frozen.ts`, `tooling/tokens.ts` and the parity scripts' headers. The specimens' `Previews/Specimens.tsx` comments named the Components boards without a path, and stay.
+- [x] **The one guide**, `assistant/design/CLAUDE.md`: what the design is, the five rules word for word with their counterparts here (the contract board is the contract page), "not an input to any build, and CI never reads it", how to open it (double-click `lib/design/main.html`; `?start=`, `?gallery`, ⌥⌘G), what a change touches in the app's terms (a screen its module's view-model and view; a new state a preset, its fixture, its test and its gallery entry; a color tokens.json; a size or key tokens.json and the key map; the CLI's part the contract data; the logo; a component and its specimen), the local gate as the check, the retirement note naming the canvas, and the codebase map. "Where the design stands" and "The interim rule" are gone; their history is this file. `lib/design/README.md` (new) is the short page the old README became.
+- [x] **The law's links**: ADR 0001's three links into the old files (§6's README, §7's rules, the Consequences' interim rule) repointed to `lib/design/README.md`, the guide's rules and 1a's record, their words unchanged, with a dated note; its Context's measurement of the old file stays as written (a decision below).
+- [x] **The Mac app's text** (`lib/src/darwin`, comments, one test name and the icon script's board step): `icon.sh` no longer writes the logo board (`board`, `board_with_logo` and the step that moved the board gone; its header says the README's copy is the one the gallery draws); `IconSetTests.swift` lost the board fixture and assertions and `boardWithoutItsLine` and `boardGone`; `Destination.swift` and `KeyMap.swift` cite the prototype's shell `Destination` and `KeyMap`; `MarkdownText.swift` the session's answer drawn by `styles`' `MarkdownText`; `CodeLexerTests.swift` the `styles` code colours, comment and test name; `Palette.swift` `lib/design/tokens.json`. `project.pbxproj` did not change.
+- [x] **Docs re-pointed**: darwin `CLAUDE.md` (the brainstorming rule) and `DEVELOPER.md` (`PresentationStyles`' tokens path; The app's icon no longer names the board), the Mac app's Presentation layer card (`lib/src/darwin/source/presentation/CLAUDE.md`, its Depth link "the design" from the deleted old README to `lib/design/README.md`, a review's finding), darwin `ROADMAP.md`'s 10a line and the darwin index's 10a row, cli `CLAUDE.md`'s brainstorming row, and the pending Apple-apps items that drew in the old folder, each with a dated Decision-log row: 10a (`design-the-server-window.md`: drawn in the design app as a module, presets, hand-made documents and gallery entries; its canvas read-back become the local gate and `npm run parity` reading no new difference on the screen pairs it judged before but Settings › Keyboard's added line, the BuildContract, BuildLayout and BuildProcesses pairs and `settings:keyboard@installed` being where its intended changes land, each classed by a `fix` verdict citing 10a, which stands on 10a's design record written in this file; its thirteen gallery entries keyed by their presets, `server:menu` … `server:older`, `noOldBoard: true`, in place of the old `ScreenServer…` board names, as 10b and 10c now name them (both a review's finding); 1r named as a gate beside 1e, both shipped; its additions in 1r's data, gaps from G33), 10b, 10c, 8b, 9a, 9b and 7a; and the maintenance item M19 (`xcode-copy-says-copied.md`), whose link to the guide's removed interim rule would have broken.
+- [x] **The canvas** (<https://claude.ai/artifact/HRGyHM1ZkRL3D1bWGXQGk7>, the run's owner's steps, never this build's): its comment threads, read by the run's owner on 2026-11-21 (version 1795238876-6081): **none**, so nothing was carried into the backlog. Its last publish is the run's owner's, after this build: `project/App.dc.html` replaced by a static note board (tokens only, no logic) saying the canvas is retired as of 2026-11-21 and the design is `lib/design/main.html` in the repository, and the App board retitled in `project/canvas.json`; nothing else sent, the artifact not deleted. Published by the run's owner on 2026-11-21 as version 57 (id `1795302686-c1aa`): only `project/App.dc.html` and `project/canvas.json` sent, App's board retitled "Apogee · retired 2026-11-21: the design is lib/design/main.html" (its other keys and every other board unchanged); `launch` still opens focused on App, so the canvas opens on the note, and the read-back of `project/App.dc.html` matches the file sent. Its other boards stay as last published (2026-10-26), and its `project/handoff/tokens.json` behind by 1e's motion values and 1r's sizes, as history.
+- [x] **The memory note** (`design-lives-in-lib-design.md` and its `MEMORY.md` line, outside the repository): rewritten by the run's owner on 2026-11-21 to the new layout (the design app in `lib/design`, the guide, `lib/design/spec` and the canvas retired); this build wrote nothing there.
+- [x] **The dangling-citation scan** (a throwaway script under the session scratchpad): `git grep --untracked` for `lib/design/spec`, its relative spelling `design/spec/` (widened after a review found a relative link the first scan could not match), `support.js`, `.dc.html` and the canvas's URL returns 143 lines, every one allowed: darwin `MILESTONES.md` (33) and design `MILESTONES.md` (58, this file with this entry), darwin `ROADMAP.md:28` (the shipped spike line), the parity scripts that archive the old revision from git (`scripts/baseline.ts` 17, `baseline.test.ts` 28, `parity.ts` 3, `parity.test.ts` 1), the guide's retirement note (1), and ADR 0001's Context line (`react-design-prototype.md:11`, a decision below). No skill under `.claude/skills/` cites the old files, and no Markdown link in any tracked file resolves into the old folder (a second throwaway script, after the review's finding).
+- [x] **Docs:** this entry; the guide; `lib/design/README.md` (new); `DEVELOPER.md` (its opening, the layout's tokens and README rows and `verdicts.json` kept, the layering check's rule 13, the tokens' path, the board table and the gallery's tests, the baseline section without the old folder's path or links, the parity proof run before the deletion); the design's ADR 0001 (links and a dated note); the queue (this item's document and its row deleted, the emptied v0.2.1 table kept, track 1 complete in development); the overview; ROADMAP ticked.
+
+Decisions the item recorded before the build (its document's, kept here since it is deleted in this pass):
+- 2026-11-14, **the user's calls:** the prototype rebuilt in React, TypeScript and Vite with the production GUIs' layered shape, the design's cross-platform source of truth; "Mostly review there; make the canvas view-only" -- the canvas cannot host a React build, so the built file is the review surface and the canvas is retired here; one self-contained `lib/design/main.html` that opens by double-click; a design queue and home of its own, this item design 1t in v0.2.1.
+- 2026-11-14, **the recorded default:** checks run locally, not in CI; `changed.sh` and the workflows untouched, and "CI never reads it" stays true.
+- 2026-11-21, **from 1q:** the board table is `Boards.ts`, the compare test and its helpers go with `canvas.json`, `framesOf` stays; the Logo page draws `Logo-320.png` through `@assets`, so the icon script's board step goes with no change to the gallery; the specimens cite the Components boards by name.
+- 2026-11-21, **from 1r:** the change table's CLI row means `contract.ts`, its size-and-key row tokens.json and the key map; tokens.json gained `layoutPx.menu`, `place` and `focusRing`, never published to the canvas; BuildLayout's introduction to be re-worded; `Boards.ts`' header to be re-worded; darwin 10a's gaps from G33, its additions in 1r's data.
+
+The open calls' defaults, taken as stated (2026-11-18): the 5 Exploration boards deleted with the rest, kept in git history, their pictures still re-made by 1c's baseline; `tokens.json` moved to `lib/design/tokens.json`, beside the built file; `lib/design/spec/` removed entirely, its guide merged into `assistant/design/CLAUDE.md` and its README become the short `lib/design/README.md`; the canvas's other boards kept as last published, only the App board changed so it opens on the note; open comment threads recorded and carried into the backlog, never replied to or resolved (there were none); Swift comments cite the design by module and name, not by path (`Palette.swift`'s path to `tokens.json` excepted, as the item's table asks); shipped history that names the old files stays as written; `parity/verdicts.json` stays committed as the record of each accepted difference, and `npm run parity` keeps working (run after the deletion to show it).
+
+Decisions taken while building (2026-11-21, an unattended group run), each for veto:
+- **Your answers before the run:** the npm registry, Playwright's Chromium and Google Fonts during captures were allowed; only Google Fonts was fetched (the old side's captures in the clone); nothing installed or downloaded. A Playwright test from `file://` stood in for every look; **you try the file afterwards** (Not done). The canvas's last publish and the memory note are the run's owner's.
+- **A first builder's partial work, checked and kept.** A first builder for this item timed out partway (a request timeout). Its work was checked against this document: 1s's closing, 1t's 🚧 and its defaults in the Decision log, the move and the two path lines, the tests pointed at the new path, the canvas compare test removed, the re-worded comments and BuildLayout's introduction with its test, and the retired-path rule with its four tests, which it had written though its hand-off said it had not. Each test it added was run red in the clone against HEAD's code (the three retired-path tests that plant a violation, the introduction's test, the token path tests) and green on this tree. Its tokens.json `"source"` edit is kept (next). Nothing of it was reverted.
+- **tokens.json's `"source"` re-worded.** It named `App.dc.html in the Apogee Desktop canvas`, false once the canvas retires and a citation the scan finds; it now says the file is written here by hand, first generated from the old prototype's theme table. No code reads the field; the built file carries it, so the byte-identical check was made on the move alone, before this edit.
+- **"Byte-identical" read as "the same but for the sources hash."** The built file's `apogee-design-sources` meta is the hash of the build's inputs, which include `tooling/tokens.ts` and `tsconfig.json`, so no move can leave it unchanged; every other byte was.
+- **ADR 0001's Context line kept.** `react-design-prototype.md:11` measures the old file by its path (2026-11-14 and 11-18). Records are append-only, and the item repoints the ADR's links only, so the line stays and the scan lists it as history beside the MILESTONES files.
+- **The ADR's interim-rule link repointed to 1a's record** in this file, the guide's section having gone; the item named the ADR's links to the old guide, and this third link would have broken.
+- **M19 re-worded though not among the seven:** the maintenance item `xcode-copy-says-copied.md` cited the old files and linked the guide's removed interim rule. Its evidence keeps its 2026-11-14 measurements, naming the old prototype's `main.html` without its folder, and says the design app draws the same toast and names (`XcodeSettings`, 1i).
+- **10a's "1s-style parity"** is `npm run parity` reading no new difference on any screen pair it judged before 10a but Settings › Keyboard's added line for the window's key (its before-and-after criterion and test), beside the local gate. The pairs 10a is meant to change are named: the BuildContract, BuildLayout and BuildProcesses pairs and `settings:keyboard@installed`, their new differences exactly 10a's additions, each classed by a `fix` verdict citing `10a`; since the proof accepts a `fix` only when this file holds the cited item's record, headed in the "(backlog item …)" form, 10a writes its design record in this file, and these words never spell that heading out, so they cannot stand in for it. This is a review's finding: the first wording asked for no difference on pairs 10a must change. 10a names 1r beside 1e as gates in its text and links, both shipped, so its row stays 🟢 and its header's Blocked by stays empty.
+- **The review's fixes, each for veto.** A review of the built tree found five defects, fixed in this same change: the Mac app's Presentation layer card linked the deleted old README (a relative link the first scan could not match), now `lib/design/README.md`, a path in `lib/src/darwin` outside the item's list, taken because the item rewrites every doc that points at the old files; `scripts/baseline.test.ts`' `realSupport()` read `support.js` by a pathspec relative to the prototype's folder, so it matched no commit and fell back to the index, passing only while the deletion was unstaged (8 of 13 failed once 1t was committed), now anchored at the root and refusing an empty commit; the retired-path rule missed a path built from separate segments to one call and a template's part after an interpolation, now both read (rule 13 in DEVELOPER.md says so); 10a's before-and-after criterion asked for no new difference on the pairs 10a itself must change (above); and 10a, 10b and 10c named the server window's gallery entries by the old `ScreenServer…` board names, which the gallery's test refuses for an entry with no old board (`id` must equal its preset), now `server:menu` … `server:older` with `noOldBoard: true`, with a dated row in 10a's Decision log.
+- **The pending items' evidence** keeps what it measured, the old prototype named without its folder's path, with a re-check in the design app dated 2026-11-21 where the claim is about today (no iPad, phone, foldable, people, server or connection board there; `tokens.json`'s `collapseBelow` at `:380`).
+- **The darwin index's `../../cli/…` link** (a770c007) is an illustrative placeholder inside a code span in its format definition, as the CLI MILESTONES' `…/a` is: left.
+- **`npm run baseline -- --record` after the deletion:** there is no frozen prototype left to fix, so the record stays at `b375fac9`; DEVELOPER.md says so, and the script is unchanged.
+- **The emptied `backlog/design/v0.2.1/` folder** is left on disk (git keeps no empty folder); the emptied v0.2.1 table stays in the index until the pre-merge docs pass retires it (the group skill's rule).
+- **The environment carried `GIT_EDITOR=true`** from the session; no `GIT_*` variable was set by this build, in the checkout or the clone.
+
+**Verified.**
+- **Test first, in a `git clone --shared` under the session scratchpad** (sparse: `lib/design`, `lib/src/darwin/tests`, `lib/src/darwin/Apogee.xcodeproj`, `lib/documentation/assistant/design`; no `GIT_*` set; never this checkout): the four retired-path tests against HEAD's `LayeringCheck.ts`, 3 failed (the import sentence, the named paths, a parity-named file elsewhere), green on this tree (78 of 78); BuildLayout's introduction test against HEAD's `layout.ts`, 1 failed, green on this tree (14 of 14); after the review, in a second clone (`git clone --shared`, sparse: `lib/design`, `lib/documentation`, `lib/src/darwin/source/presentation`; this tree copied in and committed there as 1t's, so `lib/design/spec` is gone from its index), the fifth retired-path test (separate segments and a template after an interpolation) failed against the first build's `LayeringCheck.ts` (both sentences missing), green with the fix (79 of 79), and `scripts/baseline.test.ts` failed 8 of 13 on the first build's `realSupport()` (its pathspec read from the prototype's folder, so `git show :…/support.js` read an index without it), 13 of 13 with the pathspec anchored at the root (`:/lib/design/spec/html/support.js`) and an empty commit refused; `Tokens.test.ts` and `stale.test.ts` against HEAD's `tokensRoot`, failing (the file not found; four staleness tests), green on this tree. The icon script: HEAD's and this tree's `icon.sh generate` each run in a planted tree under the scratchpad with a logo board present: HEAD's rewrote the board ("its copy of the logo"), this tree's left it as it was and said nothing of it; both wrote the same icon set and the same `Logo-320.png`, equal to the committed one.
+- **The guard has teeth.** A mutation pass in the same clone ran 9 mutants of the retired path against the layering project: `retired()` never called, no parity-script exception, `parity/` not excepted, `fixtures/` not excepted, the repository's path not read, relative paths not read, `.json` and `.html` not read, the import's own sentence lost, and imported strings counted again as names. 9 of 9 failed a test (1 to 16 each); `LayeringCheck.ts` was put back as it was. The clone stays in the scratchpad. After the review, 3 more in the second clone: the `/..` part not read as relative, the call's runs not joined, and a run of two not counted; 3 of 3 failed the fifth test, and the file was put back.
+- **`npm run check`** on the final tree, after the review's fixes: exit 0, in 5:06: `tsc --noEmit` clean; `unit` 1,915 of 1,915 in 124 files (1,918 after 1s, less the four canvas-compare tests, plus the introduction's); `layering` 79 of 79 in 2 files (74 after 1s, plus the five retired-path tests); `bundle` 19 of 19 in 5 files, the built file current, its staleness test pinning the new tokens path; Playwright 220 passed in 4.2 minutes from `file://`. The gate never rebuilds: `lib/design/main.html` is the first builder's `npm run build` of these sources, and a build of this tree in the clone was byte-identical to it.
+- **The darwin suite** (`lib/scripts/cicd.sh --app darwin --test`), before the Swift edits: exit 0 (13.0 s), `totalTestCount` 1,205, 1,205 passed (the result bundle, `build/macos-arm64/tests.xcresult`); after them: exit 0 (24.7 s), `totalTestCount` 1,203, 1,203 passed -- the count before less the two board tests; after the review's fix to the Presentation layer card's link: exit 0 (13 s), 1,203 of 1,203. Its RealBinaryTests drove the installed binary in a throwaway `APOGEE_HOME`, as the darwin docs say; nothing else used it. The app was not launched.
+- **The scan** (above), on the final tree: 143 lines, 0 not allowed; no Markdown link into the old folder.
+- **Links:** every relative link in the 22 touched Markdown files resolves (865 on the final tree, file and anchor, by a second script that also reads code spans) but two: DEVELOPER.md's `#how-a-job-and-a-chat-replay`, broken at HEAD (1q found it) on a line this change does not touch, left as it is; and the darwin index's `../../cli/…`, the illustrative placeholder in a code span (a decision below).
+- **Unchanged:** `lib/scripts`, `.github`, `package.json`, `package-lock.json`, `project.pbxproj`; `lib/design/prototype/.parity/` in this checkout.
+
+**Not done.**
+- **Deleting the canvas artifact** is only on your word; its last publish (version 57, `1795302686-c1aa`, 2026-11-21) was the run's owner's, above.
+- **You try the file afterwards:** double-click `lib/design/main.html`; the Playwright tests stood in for that look during the run.
+- **Your veto, if you want one,** on the decisions above, among them: the ADR's Context line kept, "byte-identical" but for the sources hash, the tokens' `"source"` words, M19 re-worded, 10a's reading of "1s-style parity" (its Build pairs and Settings › Keyboard named as where its changes land), and the review's fixes (the layer card's link outside the item's list of darwin paths, the server window's entries keyed by preset).
+- **No commit**: the run's owner commits, staging the rename of `tokens.json` and the deletions.

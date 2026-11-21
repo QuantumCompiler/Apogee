@@ -1,7 +1,7 @@
 /**
  * The old prototype's baseline (design 1c): still frames of the frozen
  * lib/design/spec, re-made from one recorded revision, so 1s can compare the
- * React app against it after 1t deletes the old files.
+ * React app against it, and the images outlive 1t's deletion of the old files.
  *
  *   npm run baseline                                 # capture: re-make the images from parity/baseline.json
  *   npm run baseline -- --record --reason "<why>"    # record: take the newest commit touching lib/design/spec

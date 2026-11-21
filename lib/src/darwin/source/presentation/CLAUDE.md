@@ -16,4 +16,4 @@
 
 **Changing this layer:** a new module is a directory `source/presentation/<package>/` with `Views/` and `ViewModels/`, a framework target named `Presentation<Package>` in `Apogee.xcodeproj` building that folder, its test bundle at `tests/presentation/<package>/` in the shared scheme, its own shared scheme `Apogee.xcodeproj/xcshareddata/xcschemes/Presentation<Package>.xcscheme` building the target and running that bundle, a `#Preview` for every view it draws with its fakes and documents in `Previews/`, and its name on this card's **Modules** line.
 
-**Depth:** [the GUI's ADRs](../../../../documentation/adrs/gui/README.md) · [the design](../../../../design/spec/README.md) · [DEVELOPER.md](../../../../documentation/assistant/darwin/DEVELOPER.md).
+**Depth:** [the GUI's ADRs](../../../../documentation/adrs/gui/README.md) · [the design](../../../../design/README.md) · [DEVELOPER.md](../../../../documentation/assistant/darwin/DEVELOPER.md).

@@ -10,8 +10,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 const json = readTokens(root)
 
 describe('the build step reads tokens.json (design 1e)', () => {
-  test('it reads lib/design/spec/json/tokens.json, the one place a token is written', () => {
-    expect(tokensFile(root)).toBe(resolve(root, '../spec/json/tokens.json'))
+  test('it reads lib/design/tokens.json, beside the built file, the one place a token is written (moved there by design 1t)', () => {
+    expect(tokensFile(root)).toBe(resolve(root, '../tokens.json'))
     expect(json).toEqual(JSON.parse(readFileSync(tokensFile(root), 'utf8')))
   })
 

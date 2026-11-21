@@ -1,6 +1,6 @@
 /*
  * The design's web fonts (design 1e): the ten faces the old prototype's
- * Google Fonts link loads (lib/design/spec/html/main.html:11 at b375fac9) --
+ * Google Fonts link loads (its main.html:11 at b375fac9) --
  * IBM Plex Sans 400, 500 and 600, IBM Plex Mono 400, 500 and 600, Atkinson
  * Hyperlegible 400 and 700, JetBrains Mono 400 and 500 -- from the npm font
  * packages package.json pins, latin subset, woff2 only. The build inlines

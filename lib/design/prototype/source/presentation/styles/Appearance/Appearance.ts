@@ -7,7 +7,7 @@ import type { CodeFont, ColorName, TextSize, ThemeId, TypeStep, UiFont } from '.
  * light-uses and dark-uses picks), each theme's edited colors, both fonts and
  * the text size -- and the old prototype's theme machinery as pure functions
  * over it (`themes()`, `colorGroups()`, `lum()`, `ratio()`, `withOverride()`,
- * `rootVars()`, `lib/design/spec/html/main.html` at `b375fac9`), every value
+ * `rootVars()`, the old prototype's `main.html` at `b375fac9`), every value
  * from tokens.json. Settings › Appearance (1i) changes it through the theme
  * service; the gallery's color and type pages (1q) read it.
  */

@@ -3,8 +3,8 @@ import type { ReactNode } from 'react'
 /**
  * The four sections the old Components boards drew (design 1q), in their
  * order: Model, context and sources; The turn; Asking and failing; Making
- * media (`ComponentsModel`, `ComponentsTurn`, `ComponentsPrompts` and
- * `ComponentsMedia.dc.html` at `b375fac9`).
+ * media (the boards `ComponentsModel`, `ComponentsTurn`, `ComponentsPrompts`
+ * and `ComponentsMedia` at `b375fac9`).
  */
 export type SpecimenSection = 'model' | 'turn' | 'asking' | 'media'
 

@@ -158,7 +158,7 @@ Paths under `lib/src/darwin/`.
 **Reference.**
 
 - The track:
-  - [10a](design-the-server-window.md), the boards this builds from (`ScreenServer*.dc.html`, BuildLayout's window and keys, BuildProcesses' launchd child, the contract map's SERVER WINDOW rows and gaps);
+  - [10a](design-the-server-window.md), the boards this builds from (the design app's `server…` gallery entries and `server` module, the layout page's window and keys, the processes page's launchd child, the contract page's SERVER WINDOW rows and gaps);
   - [10c](people-screens.md), People in this window, gated on this item.
 - The CLI words it reads:
   - [62a](../../../cli/v0.2.4/serve-status-and-runtime-record.md), `serve status`;
@@ -266,6 +266,8 @@ Paths under `lib/src/darwin/`.
 | 2026-11-14 | **7a's default is amended.** `devices` (and `apps`, unclassified until now) are screens of the server window, not carve-outs. 59a mints a code for "a local front end over pipes" ([paired-devices.md](../../../cli/v0.2.3/paired-devices.md) (Open questions, the default that a pairing code is never minted over HTTP)), and the server window is that front end. The amendment lands in part (2), with 7a's line marked in the same change. | the spec |
 | 2026-11-14 | **The parity law goes below the top level for a family it splits** (ADR 0003 amended in part (1)). This is the only way `serve status` can be a screen while bare `serve`, the daemon, stays refused with its reason. Every other row stays top-level. | the spec |
 | 2026-11-18 | Moved here from v0.2.6 when the releases were merged; the id is unchanged. | the user |
+| 2026-11-21 | Re-worded by design 1t, which retired the old one-file prototype and the claude.ai canvas: 10a's boards are the design app's (its `server` module, presets and gallery entries; its contract, layout and processes additions in the Build pages' data). | design 1t (default) |
+
 
 ## Out of scope
 

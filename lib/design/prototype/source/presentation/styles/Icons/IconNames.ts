@@ -5,7 +5,7 @@
  * TypeScript, so a view-model can list them; the glyphs are `IconSet.tsx`'s.
  */
 export const iconNames = [
-  // TypeSpace's set, those the app draws (TypeSpace.dc.html's Icons at b375fac9; its website, command, helper, notice and summarized are drawn nowhere).
+  // TypeSpace's set, those the app draws (the old TypeSpace board's Icons at b375fac9; its website, command, helper, notice and summarized are drawn nowhere).
   'local',
   'api',
   'subscription',

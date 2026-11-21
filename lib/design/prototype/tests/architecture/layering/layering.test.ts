@@ -482,27 +482,27 @@ describe('the layering check, on planted violations', () => {
 
   test('an import leaving lib/design/prototype/ fails', () => {
     const planted = new Planted()
-    planted.files['tests/business/session/ChatLaunch.test.ts'] = "import '../../../../spec/html/support.js'\n" + stubTest
+    planted.files['tests/business/session/ChatLaunch.test.ts'] = "import '../../../../elsewhere/html/runtime.js'\n" + stubTest
     expect(planted.violations()).toEqual([
-      'tests/business/session/ChatLaunch.test.ts imports ../../../../spec/html/support.js, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages',
+      'tests/business/session/ChatLaunch.test.ts imports ../../../../elsewhere/html/runtime.js, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages',
     ])
   })
 
   test('a Vite glob leaving lib/design/prototype/ fails', () => {
     const planted = new Planted()
     planted.files['source/business/session/ChatLaunch.ts'] +=
-      "export const outside = import.meta.glob('../../../../spec/html/*.js', { eager: true, query: '?raw' })\n"
+      "export const outside = import.meta.glob('../../../../elsewhere/html/*.js', { eager: true, query: '?raw' })\n"
     expect(planted.violations()).toEqual([
-      'source/business/session/ChatLaunch.ts imports ../../../../spec/html/*.js, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages',
+      'source/business/session/ChatLaunch.ts imports ../../../../elsewhere/html/*.js, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages',
     ])
   })
 
   test('a new URL(…, import.meta.url) leaving lib/design/prototype/ fails', () => {
     const planted = new Planted()
     planted.files['source/data/protocol/MachineProtocol.ts'] +=
-      "export const page = new URL('../../../../spec/html/main.html', import.meta.url)\n"
+      "export const page = new URL('../../../../elsewhere/html/main.html', import.meta.url)\n"
     expect(planted.violations()).toEqual([
-      'source/data/protocol/MachineProtocol.ts imports ../../../../spec/html/main.html, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages',
+      'source/data/protocol/MachineProtocol.ts imports ../../../../elsewhere/html/main.html, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages',
     ])
   })
 
@@ -584,12 +584,12 @@ describe('the layering check, on planted violations', () => {
     planted.files['source/presentation/session/Views/SessionWindow.tsx'] += "import { tokens } from '@tokens'\n"
     planted.files['source/business/session/ChatLaunch.ts'] += "import '@tokens/themes.css'\n"
     planted.files['source/presentation/styles/Palette.ts'] +=
-      "import other from '@tokens/other.json'\nimport raw from '../../../../spec/json/tokens.json'\n"
+      "import other from '@tokens/other.json'\nimport raw from '../../../../tokens.json'\n"
     expect(planted.violations()).toEqual([
       "source/business/session/ChatLaunch.ts imports @tokens/themes.css: only presentation/styles reads the tokens, and every other module takes them from it",
       'source/presentation/session/Views/SessionWindow.tsx imports @tokens: only presentation/styles reads the tokens, and every other module takes them from it',
       'source/presentation/styles/Palette.ts imports @tokens/other.json: the tokens root serves @tokens, @tokens/themes.css and @tokens/tokens.json, and nothing else',
-      'source/presentation/styles/Palette.ts imports ../../../../spec/json/tokens.json, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages',
+      'source/presentation/styles/Palette.ts imports ../../../../tokens.json, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages',
     ])
   })
 
@@ -620,7 +620,7 @@ describe('the layering check, on planted violations', () => {
     const planted = new Planted()
     planted.dependencies['@fontsource/ibm-plex-sans'] = '5.3.0'
     planted.files['source/presentation/styles/Helmet.css'] =
-      "@import './Fonts.css';\n/* @import '../../../../spec/html/commented.css'; */\n.ap .grain { background: url(./grain.png) }\n.ap .dot { background: url('data:image/png;base64,AAAA') }\n"
+      "@import './Fonts.css';\n/* @import '../../../../elsewhere/html/commented.css'; */\n.ap .grain { background: url(./grain.png) }\n.ap .dot { background: url('data:image/png;base64,AAAA') }\n"
     planted.files['source/presentation/styles/Fonts.css'] =
       "@font-face { font-family: 'IBM Plex Sans'; src: url(\"@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2\") format('woff2') }\n"
     planted.files['source/presentation/styles/grain.png'] = ''
@@ -630,7 +630,7 @@ describe('the layering check, on planted violations', () => {
   test('a .css @import or url() leaving lib/design/prototype/ fails with rule 4\'s sentence, as an import does; so do an unlisted package and the network', () => {
     const planted = new Planted()
     planted.files['source/presentation/styles/Helmet.css'] =
-      "@import url('../../../../spec/html/old.css');\n" +
+      "@import url('../../../../elsewhere/html/old.css');\n" +
       '.ap .logo { background: url(../../../../assets/Logo.png) }\n' +
       "@import 'normalize.css';\n" +
       ".ap .x { background: url('vitest/x.png') }\n" +
@@ -638,7 +638,7 @@ describe('the layering check, on planted violations', () => {
     planted.files['source/presentation/shell/Views/Shell.css'] = "@import '../../session/Views/Session.css';\n"
     planted.files['source/presentation/session/Views/Session.css'] = '.ap .s { color: var(--text-primary) }\n'
     expect(planted.violations()).toEqual([
-      'source/presentation/styles/Helmet.css imports ../../../../spec/html/old.css, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages',
+      'source/presentation/styles/Helmet.css imports ../../../../elsewhere/html/old.css, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages',
       'source/presentation/styles/Helmet.css imports ../../../../assets/Logo.png, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages',
       'source/presentation/styles/Helmet.css imports normalize.css, which package.json does not list: nothing comes from outside the prototype but its declared packages',
       "source/presentation/styles/Helmet.css imports vitest, a dev dependency: source/ uses only package.json's dependencies, and dev dependencies stay in tests, scripts and config",
@@ -650,10 +650,10 @@ describe('the layering check, on planted violations', () => {
   test("a .css image-set() leaving lib/design/prototype/ fails with rule 4's sentence, and a remote one with the network's", () => {
     const planted = new Planted()
     planted.files['source/presentation/styles/Helmet.css'] =
-      '.ap .logo { background-image: image-set("../../../../spec/html/x.png" 1x) }\n' +
+      '.ap .logo { background-image: image-set("../../../../elsewhere/html/x.png" 1x) }\n' +
       ".ap .remote { background-image: -webkit-image-set('https://example.com/y.png' 1x) }\n"
     expect(planted.violations()).toEqual([
-      'source/presentation/styles/Helmet.css imports ../../../../spec/html/x.png, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages',
+      'source/presentation/styles/Helmet.css imports ../../../../elsewhere/html/x.png, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages',
       'source/presentation/styles/Helmet.css loads https://example.com/y.png: the built file opens from disk and loads nothing from the network',
     ])
   })
@@ -825,6 +825,77 @@ describe('the layering check, on planted violations', () => {
   })
 })
 
+describe("the retired path: nothing reads the old prototype's folder but the parity scripts, from git (design 1t)", () => {
+  /**
+   * The old prototype's folder, spelled in parts: by the repository's path, and
+   * `ups` folders up from a file. This file is read by the check too, and the
+   * repository's citations of the folder are history alone.
+   */
+  const retired = ['lib', 'design', 'spec'].join('/')
+  const old = (ups: number, path = '') => `${'../'.repeat(ups)}spec${path}`
+  const sentence = (file: string, verb: 'imports' | 'names', path: string) =>
+    verb === 'imports'
+      ? `${file} imports ${path}, in lib/design's spec/ folder, which design 1t retired: only the parity scripts read the old prototype, from git`
+      : `${file} names ${path}, a path in lib/design's spec/ folder, which design 1t retired: only the parity scripts read the old prototype, from git`
+
+  test('a planted import of ../spec/json/tokens.json fails with its own sentence, and so does a stylesheet importing from the folder', () => {
+    const planted = new Planted()
+    planted.files['vite.config.ts'] += "import tokens from '../spec/json/tokens.json'\nexport const old = tokens\n"
+    planted.files['source/presentation/styles/Helmet.css'] = "@import url('../../../../spec/html/old.css');\n"
+    expect(planted.violations()).toEqual([
+      sentence('source/presentation/styles/Helmet.css', 'imports', old(4, '/html/old.css')),
+      sentence('vite.config.ts', 'imports', old(1, '/json/tokens.json')),
+    ])
+  })
+
+  test("a path into the folder that code or config names fails as a read: tooling's root, a test's folder, tsconfig.json's paths, the repository's own path and a command naming it", () => {
+    const planted = new Planted()
+    planted.files['tooling/tokens.ts'] = "import { resolve } from 'node:path'\n\nexport const tokensRoot = (root: string) => resolve(root, '../spec/json')\n"
+    planted.files['tests/presentation/styles/Canvas.test.ts'] =
+      "import { resolve } from 'node:path'\n\nexport const folder = resolve(import.meta.dirname, '../../../../spec')\n" + stubTest
+    planted.files['tsconfig.json'] = '{ "compilerOptions": { "paths": { "@tokens/tokens.json": ["../spec/json/tokens.json"] } } }\n'
+    planted.files['source/presentation/styles/Palette.ts'] += `export const page = '/Users/someone/Apogee/${retired}/html/main.html'\n`
+    planted.files['scripts/fonts.ts'] = `export const read = 'cat ${retired}/json/tokens.json'\n`
+    expect(planted.violations()).toEqual([
+      sentence('scripts/fonts.ts', 'names', `cat ${retired}/json/tokens.json`),
+      sentence('source/presentation/styles/Palette.ts', 'names', `/Users/someone/Apogee/${retired}/html/main.html`),
+      sentence('tests/presentation/styles/Canvas.test.ts', 'names', old(4)),
+      sentence('tooling/tokens.ts', 'names', old(1, '/json')),
+      sentence('tsconfig.json', 'names', old(1, '/json/tokens.json')),
+    ])
+  })
+
+  test("a root-relative path built from separate segments, or from a template's fixed part after an interpolation, fails as a read", () => {
+    const planted = new Planted()
+    planted.files['tooling/tokens.ts'] =
+      "import { resolve } from 'node:path'\n\n" +
+      "export const parts = (root: string) => resolve(root, '..', 'spec', 'json', 'tokens.json')\n" +
+      'export const template = (root: string) => `${root}/../spec/json/tokens.json`\n'
+    expect(planted.violations()).toEqual([
+      sentence('tooling/tokens.ts', 'names', old(1, '/json/tokens.json')),
+      sentence('tooling/tokens.ts', 'names', `/${old(1, '/json/tokens.json')}`),
+    ])
+  })
+
+  test("the parity scripts and their records may name the folder, a git revision's path is history, a recording's words are data and a comment is no read: each passes", () => {
+    const planted = new Planted()
+    planted.files['scripts/baseline.ts'] = `export const specPath = '${retired}'\n`
+    planted.files['scripts/parity.ts'] = `export const canvas = (html: string) => html + '/../json/canvas.json'\nexport const tree = '${retired}/json'\n`
+    planted.files['parity/baseline.json'] = `{ "tree": "${retired}" }\n`
+    planted.files['tests/presentation/styles/Frozen.ts'] =
+      "const revision = 'b375fac9'\n// The old main.html, once ../spec/html/main.html, as git holds it.\n" +
+      `export const show = \`\${revision}:${retired}/html/main.html\`\n`
+    planted.files['fixtures/business/reads/config-path-handmade.json'] = `{ "data": "/Users/someone/Apogee/${retired}" }\n`
+    expect(planted.violations()).toEqual([])
+  })
+
+  test("the same names anywhere else fail: a parity-named file is not a parity script", () => {
+    const planted = new Planted()
+    planted.files['tests/presentation/styles/parity.ts'] = `export const specPath = '${retired}'\n`
+    expect(planted.violations()).toEqual([sentence('tests/presentation/styles/parity.ts', 'names', retired)])
+  })
+})
+
 describe('how the check reads a file', () => {
   test("imports are read with TypeScript's parser, in every form; a computed import() as the glob Vite makes of it", () => {
     const source = [
@@ -889,12 +960,12 @@ describe('how the check reads a file', () => {
 
   test('a new URL(…, import.meta.url) is read as its path; any other URL is not', () => {
     const source = [
-      "const page = new URL('../spec/main.html', import.meta.url)",
+      "const page = new URL('../elsewhere/main.html', import.meta.url)",
       "const site = new URL('https://example.com/page')",
       "const based = new URL('./relative', document.baseURI)",
       "const env = new URL('./mode', import.meta.env)",
     ].join('\n')
-    expect(LayeringCheck.importsIn(source, 'sample.ts')).toEqual(['../spec/main.html'])
+    expect(LayeringCheck.importsIn(source, 'sample.ts')).toEqual(['../elsewhere/main.html'])
   })
 
   test('the components a file exports are found as TypeScript declares them', () => {

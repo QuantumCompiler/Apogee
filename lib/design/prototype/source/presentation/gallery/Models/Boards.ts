@@ -1,13 +1,13 @@
 import type { SpecimenSection } from '../../styles/Specimens/Specimen'
 
 /**
- * The gallery's board table (design 1q): the claude.ai canvas's index,
- * `lib/design/spec/json/canvas.json` (its blob `cf7633cb`, unchanged since
- * 1c's baseline revision `b375fac9`), converted once and committed here, as
- * 1t deletes that file. Its pages and the headings over their rows, and one
- * entry per board, in table order: a page's rows top to bottom, each row's
- * boards by their canvas position, left to right. While canvas.json exists, a
- * test holds this table to it.
+ * The gallery's board table (design 1q): the claude.ai canvas's index, the
+ * old prototype's `canvas.json` (its blob `cf7633cb` at 1c's baseline
+ * revision `b375fac9`), converted once and committed here. Since 1t retired
+ * the old prototype and the canvas, with the test that held this table to
+ * that file, the table is the record. Its pages and the headings over their
+ * rows, and one entry per board, in table order: a page's rows top to
+ * bottom, each row's boards by their canvas position, left to right.
  *
  * Exploration's five boards are not ported (the item's default): they stay in
  * git history and in 1c's baseline pictures. Every start preset the
@@ -38,7 +38,7 @@ export type BoardDraws = 'screen' | 'app' | 'contract' | 'layout' | 'processes' 
 
 /** One board: the canvas's entry for it, as the gallery lays it out. */
 export interface BoardEntry {
-  /** The old board's file name without `.dc.html` (`ScreenModels`), so 1s pairs it with its baseline picture; a board-less preset's own name. */
+  /** The old board's name (`ScreenModels`), so 1s pairs it with its baseline picture; a board-less preset's own name. */
   readonly id: string
   /** A screen board's start preset, the one line its file varies (`<dc-import name="App" start="…">`). */
   readonly start?: string

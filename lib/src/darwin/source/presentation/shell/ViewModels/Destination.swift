@@ -1,7 +1,7 @@
 /// A place in the sidebar: one screen of the app, reached by its key.
 ///
-/// The design's eleven places, in its order (`main.html`'s places bar,
-/// `BuildLayout.dc.html`'s keys): ⌘1 to ⌘9, then ⌘0 -- Knowledge the eighth
+/// The design's eleven places, in its order (the design prototype's shell
+/// `Destination` and `KeyMap`): ⌘1 to ⌘9, then ⌘0 -- Knowledge the eighth
 /// since 2c, Training the ninth since 2d, Library the tenth since 2e -- and
 /// Review the eleventh since 2g, on ⇧⌘R, the number keys spent. Compositions live under Video,
 /// as the design draws them -- its second tab -- not as a place of their own.

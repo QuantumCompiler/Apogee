@@ -4,7 +4,7 @@ const card = { padding: 24, border: '1px solid var(--line-border)', borderRadius
 
 /**
  * The Foundations logo page (design 1q): the old Logo board (the Apple apps'
- * 11a, `html/Logo.dc.html`), its words as it wrote them -- the artwork full
+ * 11a, the board `Logo`), its words as it wrote them -- the artwork full
  * bleed, and its rounded icon form at 128 and 64 points -- drawn from
  * `lib/design/assets/Logo-320.png`, which the build inlines and `app` hands
  * in (`logo`, a `data:` URL), so the built file stays one file.

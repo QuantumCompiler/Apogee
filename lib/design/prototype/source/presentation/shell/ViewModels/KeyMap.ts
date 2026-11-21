@@ -58,7 +58,7 @@ export function keyOf(destination: Destination): KeyChord {
 
 /**
  * The keys, as the design gives them (`main.html`'s `set.keys` at `b375fac9`,
- * `BuildLayout.dc.html`'s keys): the Mac app's `KeyMap`, as data. Settings ›
+ * the old BuildLayout board's keys): the Mac app's `KeyMap`, as data. Settings ›
  * Keyboard (1i) lists `reference`, and `keyboardLines` adds any bound key
  * no line names; the shell answers `shell`.
  */

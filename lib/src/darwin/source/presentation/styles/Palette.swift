@@ -36,7 +36,7 @@ public enum Appearance {
 /// One color token: its value in each of the design's three themes.
 ///
 /// The values are the design's Graphite Light, Graphite Dark and High
-/// Contrast themes (lib/design/spec/json/tokens.json), copied rather than
+/// Contrast themes (lib/design/tokens.json), copied rather than
 /// read: the design is a reference, never an input to the build. The theme is
 /// the person's Appearance setting; following the system picks Light or Dark
 /// by the window's appearance.

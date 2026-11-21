@@ -372,16 +372,15 @@ struct IconGenerateTests {
         var assets: URL { root.appendingPathComponent("lib/design/assets") }
         var master: URL { assets.appendingPathComponent("Logo.png") }
         var readmeLogo: URL { assets.appendingPathComponent("Logo-320.png") }
-        var board: URL { root.appendingPathComponent("lib/design/spec/html/Logo.dc.html") }
         var iconSet: URL { app.appendingPathComponent(IconSetCheck.setPath) }
         var contents: URL { iconSet.appendingPathComponent("Contents.json") }
 
-        /// A tree holding the script, the real master, a board, and an
-        /// earlier run's files for a refusal to leave alone.
+        /// A tree holding the script, the real master, and an earlier run's
+        /// files for a refusal to leave alone.
         init() throws {
             root = try temporaryFolder()
             let manager = FileManager.default
-            for folder in [app.appendingPathComponent("scripts"), assets, board.deletingLastPathComponent(), iconSet] {
+            for folder in [app.appendingPathComponent("scripts"), assets, iconSet] {
                 try manager.createDirectory(at: folder, withIntermediateDirectories: true)
             }
             for script in ["icon.sh", "icon-small.swift"] {
@@ -390,7 +389,6 @@ struct IconGenerateTests {
                     to: app.appendingPathComponent("scripts/\(script)"))
             }
             try manager.copyItem(at: realMaster, to: master)
-            try Data("const LOGO = 'old';\n".utf8).write(to: board)
             try Data("the earlier set".utf8).write(to: contents)
             try Data("the earlier copy".utf8).write(to: readmeLogo)
         }
@@ -408,7 +406,7 @@ struct IconGenerateTests {
         }
     }
 
-    @Test("what it writes holds the check, and the board carries the README's copy")
+    @Test("what it writes holds the check, and the README's copy is 320 pixels")
     func writesAWholeSet() throws {
         let tree = try Tree()
         defer { try? FileManager.default.removeItem(at: tree.root) }
@@ -420,8 +418,6 @@ struct IconGenerateTests {
         #expect(check.violations() == [])
         let copy = try Data(contentsOf: tree.readmeLogo)
         #expect(IconSetCheck.pngSize(copy)?.width == 320)
-        let board = try String(contentsOf: tree.board, encoding: .utf8)
-        #expect(board == "const LOGO = 'data:image/png;base64,\(copy.base64EncodedString())';\n")
     }
 
     /// An image's pixels as 8-bit gray, row by row.
@@ -516,24 +512,5 @@ struct IconGenerateTests {
             "/usr/bin/sips", ["-s", "format", "png", "-z", "1024", "1024", realMaster.path, "--out", tree.master.path])
         #expect(scaled.status == 0, "\(scaled.said)")
         try tree.expectRefused(try tree.generate(), saying: "1024x1024")
-    }
-
-    @Test("a board it cannot update stops it before anything is replaced")
-    func boardWithoutItsLine() throws {
-        let tree = try Tree()
-        defer { try? FileManager.default.removeItem(at: tree.root) }
-        try Data("no line here\n".utf8).write(to: tree.board)
-        try tree.expectRefused(try tree.generate(), saying: "LOGO")
-    }
-
-    @Test("with the board gone it still makes the rest, and says so")
-    func boardGone() throws {
-        let tree = try Tree()
-        defer { try? FileManager.default.removeItem(at: tree.root) }
-        try FileManager.default.removeItem(at: tree.board)
-        let result = try tree.generate()
-        #expect(result.status == 0, "\(result.said)")
-        #expect(result.said.contains("no board to update"), "\(result.said)")
-        #expect(try Data(contentsOf: tree.contents) != Data("the earlier set".utf8))
     }
 }

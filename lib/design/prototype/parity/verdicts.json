@@ -1,5 +1,5 @@
 {
-  "$comment": "The parity proof's verdicts (design 1s): each difference npm run parity finds between the old prototype at 1c's baseline and the built file, classed. A verdict covers the pairs its presets name (a pair `<preset>@<mode>`, a preset in every mode, or a pattern with *), and the differences whose line its `match` pattern matches or its `lines` list exactly, inside `within` where it says one. `data`: the CLI's recorded data in place of the old's invented data, naming the fixture. `fix`: a change a shipped item records, citing the item (its record is in MILESTONES.md). The first verdict that covers a difference classes it. Kept until 1t, which decides whether it stays as history.",
+  "$comment": "The parity proof's verdicts (design 1s): each difference npm run parity finds between the old prototype at 1c's baseline and the built file, classed. A verdict covers the pairs its presets name (a pair `<preset>@<mode>`, a preset in every mode, or a pattern with *), and the differences whose line its `match` pattern matches or its `lines` list exactly, inside `within` where it says one. `data`: the CLI's recorded data in place of the old's invented data, naming the fixture. `fix`: a change a shipped item records, citing the item (its record is in MILESTONES.md). The first verdict that covers a difference classes it. Kept by 1t (2026-11-21) as the record of each accepted difference: npm run parity still runs, its old side re-made from git history.",
   "verdicts": [
     {
       "presets": [
@@ -1561,6 +1561,17 @@
       "class": "fix",
       "item": "1r",
       "reason": "The native controls’ header reads SWIFTUI · MACOS 27, the Xcode project’s floor, where the board said 14 (1r’s record)."
+    },
+    {
+      "presets": [
+        "BuildLayout"
+      ],
+      "lines": [
+        "~ paragraph: …they are in [-handoff/tokens.json in this canvas.-]{+lib/design/tokens.json.+}"
+      ],
+      "class": "fix",
+      "item": "1t",
+      "reason": "The introduction says the numbers are in lib/design/tokens.json, beside the built file, where the board named the canvas’s copy, handoff/tokens.json: the canvas is retired and the tokens moved (1t’s record)."
     },
     {
       "presets": [

@@ -127,9 +127,9 @@ describe('the two fixture roots in the hash (design 1d)', () => {
 })
 
 describe('the tokens in the hash (design 1e)', () => {
-  test('tokens.json is an input, named by its root, read from lib/design/spec/json', () => {
+  test('tokens.json is an input, named by its root, read from lib/design beside the built file (design 1t)', () => {
     expect(inputFiles(root)).toContain('@tokens/tokens.json')
-    expect(inputPath(root, '@tokens/tokens.json')).toBe(resolve(root, '../spec/json/tokens.json'))
+    expect(inputPath(root, '@tokens/tokens.json')).toBe(resolve(root, '../tokens.json'))
   })
 
   test('a token edit marks main.html stale', () => {

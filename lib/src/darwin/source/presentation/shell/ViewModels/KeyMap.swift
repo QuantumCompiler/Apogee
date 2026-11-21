@@ -75,8 +75,8 @@ public struct KeyReference: Equatable, Sendable {
     }
 }
 
-/// The keys, as the design gives them (`main.html`'s `set.keys`,
-/// `BuildLayout.dc.html`'s Navigation and keys).
+/// The keys, as the design gives them (the design prototype's shell
+/// `KeyMap`, which its Build layout page lists under Navigation and keys).
 public enum KeyMap {
     /// The window's own keys: every place, and every overlay the shell opens.
     /// The keys a screen owns -- New session, the inspector, Send -- arrive
