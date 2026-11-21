@@ -31,9 +31,10 @@ describe('the gallery’s views, drawn to markup (design 1q)', () => {
     expect(renderToStaticMarkup(<GalleryView model={gallery('?gallery&board=App')} parts={previewParts} />)).toContain('the default start · live · installed')
   })
 
-  test('the Build row’s Contract, Layout and Processes: the "Not ported yet" card, naming 1r', () => {
+  test('the Build row’s Contract, Layout and Processes: their pages since 1r, no longer the "Not ported yet" card', () => {
     const markup = renderToStaticMarkup(<GalleryView model={gallery('?gallery&board=BuildLayout')} parts={previewParts} />)
-    expect(markup).toContain('Not ported yet: item 1r')
+    expect(markup).toContain('SWIFTUI · MACOS 27')
+    expect(markup).not.toContain('Not ported yet')
   })
 
   test('the color page draws 75 cells: 69 ratios and 6 dashes', () => {

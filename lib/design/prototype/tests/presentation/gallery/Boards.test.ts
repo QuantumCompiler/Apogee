@@ -41,12 +41,12 @@ describe('the board table', () => {
     expect(new Set(boards.map((entry) => entry.page))).toEqual(new Set(['build', 'foundations']))
   })
 
-  test("Build's first row is Contract, Layout, App and Processes; App is the live entry; the three build boards wait on 1r", () => {
+  test("Build's first row is Contract, Layout, App and Processes; App is the live entry; the three build boards draw their pages (1r)", () => {
     expect(boards.filter((entry) => entry.page === 'build' && entry.row === 0).map((entry) => [entry.id, entry.draws, entry.item ?? ''])).toEqual([
-      ['BuildContract', 'notPorted', '1r'],
-      ['BuildLayout', 'notPorted', '1r'],
+      ['BuildContract', 'contract', ''],
+      ['BuildLayout', 'layout', ''],
       ['App', 'app', ''],
-      ['BuildProcesses', 'notPorted', '1r'],
+      ['BuildProcesses', 'processes', ''],
     ])
   })
 

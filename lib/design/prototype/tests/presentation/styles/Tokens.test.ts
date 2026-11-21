@@ -92,3 +92,25 @@ describe('what this item added to tokens.json, from the frozen main.html', () =>
     expect(json.layoutPx.narrowBelow).toBe(600)
   })
 })
+
+describe("the sizes the layout page showed that no token held (design 1r): tokens.json holds them, and the views that draw them read them", () => {
+  const source = (path: string) => readFileSync(resolve(root, 'source/presentation', path), 'utf8')
+
+  test('the two menus, a place in the sidebar and the focus ring are layout sizes, generated as their variables', () => {
+    expect(json.layoutPx).toMatchObject({ menu: { thinking: 380, switchModel: 340 }, place: { width: 40, height: 34 }, focusRing: { width: 2, offset: 1 } })
+    const css = themesCss(json)
+    for (const line of ['--layout-menu-thinking: 380px;', '--layout-menu-switch-model: 340px;', '--layout-place-width: 40px;', '--layout-place-height: 34px;', '--layout-focus-ring-width: 2px;', '--layout-focus-ring-offset: 1px;']) {
+      expect(css).toContain(`  ${line}`)
+    }
+  })
+
+  test('the thinking and switch-model menus, the places and the focus ring are drawn at those variables, never at a number of their own', () => {
+    const session = source('session/Views/SessionWindow.tsx')
+    expect(session).toContain("aria-label=\"Thinking\" style={{ position: 'absolute', top: 38, right: 0, zIndex: 40, width: 'var(--layout-menu-thinking)' }}")
+    expect(session).toContain("aria-label=\"Switch model\" style={{ position: 'absolute', top: 38, right: 0, zIndex: 40, width: 'var(--layout-menu-switch-model)' }}")
+    const sidebar = source('shell/Views/Sidebar.tsx')
+    expect(sidebar).toContain("width: 'var(--layout-place-width)',")
+    expect(sidebar).toContain("height: 'var(--layout-place-height)',")
+    expect(source('styles/Helmet.css')).toContain('{ outline: var(--layout-focus-ring-width) solid var(--status-accent); outline-offset: var(--layout-focus-ring-offset) }')
+  })
+})

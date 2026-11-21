@@ -54,7 +54,7 @@ type Layer = (typeof LayeringCheck.layers)[number]
  *   no sibling; the shell imports no place; a file imports another module
  *   only when the map declares the dependency;
  * - React (`react`, `react-dom`, `react-*`, `@react-*`, any `.tsx`) stays in
- *   Presentation, and never in a `ViewModels/` file;
+ *   Presentation, and never in a `ViewModels/` or (1r) a `Models/` file;
  * - every Presentation module but `styles` has `Views/` and `ViewModels/`,
  *   with its files inside them or in folders of their own;
  * - the entry point is one file, importing only `presentation/app`;
@@ -381,12 +381,15 @@ export class LayeringCheck {
     for (const file of this.tree.files(module.path)) {
       if (!LayeringCheck.isRead(file)) continue
       const inViewModels = file.slice(module.path.length + 1).startsWith('ViewModels/')
+      const inModels = file.slice(module.path.length + 1).startsWith('Models/')
       const extension = posix.extname(file)
       if (extension === '.tsx' || extension === '.jsx') {
         if (module.layer !== 'presentation') {
           found.push(`${file} is a ${extension} file: React stays in Presentation, and ${module.id} is ${module.layer}`)
         } else if (inViewModels) {
           found.push(`${file} is a ${extension} file: a view-model is plain TypeScript, so it tests without a browser`)
+        } else if (inModels) {
+          found.push(`${file} is a ${extension} file: a model is plain typed data, free of React`)
         }
       }
       for (const specifier of LayeringCheck.importsIn(this.tree.contents(file) ?? '', file)) {
@@ -408,6 +411,8 @@ export class LayeringCheck {
           found.push(`${file} imports ${name}: React stays in Presentation, and ${module.id} is ${module.layer}`)
         } else if (inViewModels) {
           found.push(`${file} imports ${name}: a view-model stays free of React, so it tests without a browser`)
+        } else if (inModels) {
+          found.push(`${file} imports ${name}: a model is plain typed data, free of React`)
         }
       }
     }

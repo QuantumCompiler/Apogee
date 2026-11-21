@@ -32,7 +32,7 @@ describe('the address the gallery reads: ?gallery, ?gallery=foundations and &boa
     expect(galleryAddress('?gallery&board=Nope')).toEqual({ page: 'build' })
   })
 
-  test('no gallery without ?gallery: the app opens; ?page= is 1r’s, never the gallery’s', () => {
+  test('no gallery without ?gallery: the app opens; ?page= is never the gallery’s (1r’s pages took &board=)', () => {
     expect(galleryAddress('')).toBeUndefined()
     expect(galleryAddress('?start=models&still=true')).toBeUndefined()
     expect(galleryAddress('?page=foundations')).toBeUndefined()

@@ -17,8 +17,8 @@ function files(folder: string): string[] {
   })
 }
 
-/** Where an <svg> is drawn that is no icon: the Icon component itself, and the code graph's edges, a drawing of the graph. */
-const drawings = ['styles/Components/Icon.tsx', 'graph/Views/GraphScreen.tsx']
+/** Where an <svg> is drawn that is no icon: the Icon component itself, the code graph's edges, a drawing of the graph, and the processes page's connectors, a drawing of the app's children (1r). */
+const drawings = ['styles/Components/Icon.tsx', 'graph/Views/GraphScreen.tsx', 'gallery/Views/BuildProcessesPage.tsx']
 
 describe("the app's icons: one set in styles (design 1q)", () => {
   test('every name has its glyph, each name once', () => {

@@ -27,7 +27,7 @@ a:hover { color: inherit }
 .ap button, .ap select, .ap input, .ap textarea { font-family: inherit }
 .ap button { cursor: pointer; background-color: transparent }
 .ap button:disabled { cursor: default; opacity: .45 }
-.ap button:focus-visible, .ap a:focus-visible, .ap input:focus-visible, .ap select:focus-visible { outline: 2px solid var(--status-accent); outline-offset: 1px }
+.ap button:focus-visible, .ap a:focus-visible, .ap input:focus-visible, .ap select:focus-visible { outline: var(--layout-focus-ring-width) solid var(--status-accent); outline-offset: var(--layout-focus-ring-offset) }
 .ap .hv:hover { background: var(--surface-control) }
 .ap .ap-crow .ap-more { opacity: 0 }
 .ap .ap-crow:hover .ap-more, .ap .ap-crow .ap-more:focus-visible, .ap .ap-crow .ap-more[aria-expanded="true"] { opacity: 1 }

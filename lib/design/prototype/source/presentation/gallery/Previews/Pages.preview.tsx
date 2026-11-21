@@ -37,8 +37,8 @@ export const ComponentsNotPorted = () => themed('dark', <ComponentsPage entry={e
 /** The logo page, the artwork missing (a preview has no logo; `app` hands in the built one). */
 export const Logo = () => themed('light', <LogoPage logo="" />)
 
-/** The card a board shows while its item has not landed. */
-export const NotPorted = () => themed('dark', <NotPortedCard item="1r" title="Build · how the app talks to Apogee" />)
+/** The card a Components section shows while no module draws it, naming the item that first ported it (since 1r, no board waits on one). */
+export const NotPorted = () => themed('dark', <NotPortedCard item="1v" title="Components · Asking and failing" />)
 
 /** A Foundations page's header alone. */
 export const Header = () => themed('dark', <FoundationsHeader label="FOUNDATIONS · COLOR" title="Color tokens">Every color is one of these.</FoundationsHeader>)

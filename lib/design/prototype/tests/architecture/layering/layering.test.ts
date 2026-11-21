@@ -742,6 +742,16 @@ describe('the layering check, on planted violations', () => {
     ])
   })
 
+  test('React in a Models/ file fails, an import or a .tsx file: a model is plain typed data (design 1r)', () => {
+    const planted = new Planted()
+    planted.files['source/presentation/session/Models/Rows.ts'] = "import { useState } from 'react'\nexport const rows = [useState]\n"
+    planted.files['source/presentation/session/Models/Table.tsx'] = 'export const table = 1\n'
+    expect(planted.violations()).toEqual([
+      'source/presentation/session/Models/Rows.ts imports react: a model is plain typed data, free of React',
+      'source/presentation/session/Models/Table.tsx is a .tsx file: a model is plain typed data, free of React',
+    ])
+  })
+
   test('a place missing Views/ or ViewModels/ fails', () => {
     const planted = new Planted()
     delete planted.files['source/presentation/shell/ViewModels/ShellViewModel.ts']

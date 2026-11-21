@@ -2,8 +2,9 @@
  * The plain card a board shows while what it draws has not landed (design
  * 1q's default): "Not ported yet", and the design item that ports it, so a
  * feature item never edits the gallery -- its board goes live when its
- * preset, page or specimen registers. Today the Build row's Contract, Layout
- * and Processes boards show it, for 1r's pages.
+ * preset, page or specimen registers. The Build row's Contract, Layout and
+ * Processes showed it until 1r's pages landed; today only a Components
+ * section with no specimen would.
  */
 export function NotPortedCard({ item, title }: { readonly item: string; readonly title: string }) {
   return (

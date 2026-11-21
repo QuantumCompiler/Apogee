@@ -22,11 +22,18 @@ export const CardNoOldBoard = () => <BoardCard entry={entry('settings:keyboard')
 /** The App board at full size: live, at the app's own start, in High Contrast. */
 export const FocusedApp = () => <FocusedBoard entry={entry('App')} model={useGalleryPreview('?gallery&board=App', contrastApp)} parts={previewParts} />
 
-/** The Contract board at full size: the "Not ported yet" card, for 1r. */
-export const FocusedNotPorted = () => <FocusedBoard entry={entry('BuildContract')} model={useGalleryPreview('?gallery&board=BuildContract')} parts={previewParts} />
+/** The Contract board at full size: its page (1r), with the theme alone on its switcher. */
+export const FocusedContract = () => <FocusedBoard entry={entry('BuildContract')} model={useGalleryPreview('?gallery&board=BuildContract')} parts={previewParts} />
+
+/** The Processes board at full size in Graphite Light: the page follows its board's theme. */
+export const FocusedProcessesLight = () => <FocusedBoard entry={entry('BuildProcesses')} model={useGalleryPreview('?gallery&board=BuildProcesses', lightProcesses)} parts={previewParts} />
 
 function mountModels(gallery: { near(id: string, near: boolean): void }) {
   gallery.near('ScreenModels', true)
+}
+
+function lightProcesses(gallery: { setTheme(id: string, theme: 'light'): void }) {
+  gallery.setTheme('BuildProcesses', 'light')
 }
 
 function contrastApp(gallery: { setTheme(id: string, theme: 'contrast'): void }) {

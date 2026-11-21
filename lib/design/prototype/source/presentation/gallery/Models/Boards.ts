@@ -27,13 +27,14 @@ export const galleryPages: ReadonlyArray<{ readonly id: GalleryPage; readonly na
 
 /**
  * What a board draws: the app mounted at a start preset, still (`screen`);
- * the app live (`app`, the canvas's App board, `main.html` itself); a
+ * the app live (`app`, the canvas's App board, `main.html` itself); a Build
+ * page over its typed data (`contract`, `layout`, `processes`, design 1r); a
  * foundations page generated from the tokens (`colors`, `type`), a
  * Components board's section of the modules' own specimens
- * (`components`), the logo (`logo`); or the card that stands in for a
- * board whose item has not landed (`notPorted`, naming it).
+ * (`components`), or the logo (`logo`). Since 1r no board waits on an item:
+ * the plain "Not ported yet" card is a Components section's with no specimen.
  */
-export type BoardDraws = 'screen' | 'app' | 'colors' | 'type' | 'components' | 'logo' | 'notPorted'
+export type BoardDraws = 'screen' | 'app' | 'contract' | 'layout' | 'processes' | 'colors' | 'type' | 'components' | 'logo'
 
 /** One board: the canvas's entry for it, as the gallery lays it out. */
 export interface BoardEntry {
@@ -51,7 +52,7 @@ export interface BoardEntry {
   readonly draws: BoardDraws
   /** A Components board's section. */
   readonly section?: SpecimenSection
-  /** The design item a `notPorted` board waits on; on a Components board, the item that first ported its section, named on the card a section with no specimen shows. */
+  /** On a Components board, the item that first ported its section, named on the card a section with no specimen shows. */
   readonly item?: string
   /** The old board's prop menu, each prop's choices (1c shot one picture per choice). The gallery's own switcher is the theme everywhere and the `apogee` mode on the app. */
   readonly props?: Readonly<Record<string, readonly string[]>>
@@ -71,10 +72,10 @@ export const boardWidth = 1440
 
 /** The boards, in table order. */
 export const boards: readonly BoardEntry[] = [
-  { id: 'BuildContract', title: 'Build · how the app talks to Apogee', page: 'build', row: 0, height: 5600, draws: 'notPorted', item: '1r' },
-  { id: 'BuildLayout', title: 'Build · layout, navigation and native controls', page: 'build', row: 0, height: 3700, draws: 'notPorted', item: '1r' },
+  { id: 'BuildContract', title: 'Build · how the app talks to Apogee', page: 'build', row: 0, height: 5600, draws: 'contract' },
+  { id: 'BuildLayout', title: 'Build · layout, navigation and native controls', page: 'build', row: 0, height: 3700, draws: 'layout' },
   { id: 'App', title: 'Apogee · the whole app (interactive)', page: 'build', row: 0, height: 900, draws: 'app', props: { apogee: ['installed', 'missing', 'config-typo'] } },
-  { id: 'BuildProcesses', title: 'Build · how the app runs Apogee', page: 'build', row: 0, height: 1040, draws: 'notPorted', item: '1r' },
+  { id: 'BuildProcesses', title: 'Build · how the app runs Apogee', page: 'build', row: 0, height: 1040, draws: 'processes' },
   { id: 'ScreenSessionStreaming', start: 'chat', title: 'Session · streaming, thinking open', page: 'build', row: 1, height: 900, draws: 'screen' },
   { id: 'ScreenSessionPermission', start: 'chat:retry', title: 'Session · asking permission', page: 'build', row: 1, height: 900, draws: 'screen' },
   { id: 'ScreenSessionSources', start: 'chat:wal', title: 'Session · a source opened', page: 'build', row: 1, height: 900, draws: 'screen' },

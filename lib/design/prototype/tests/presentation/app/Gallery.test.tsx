@@ -3,8 +3,8 @@ import { describe, expect, test } from 'vitest'
 import type { Timers } from '../../../source/infrastructure/clock/Clock'
 import { frameApp } from '../../../source/presentation/app/ViewModels/FrameApp'
 import { galleryKey, galleryKeyClashes, opensGallery, WindowChoice, windowShows } from '../../../source/presentation/app/ViewModels/GalleryKey'
-import { AppViewModel } from '../../../source/presentation/app/ViewModels/AppViewModel'
-import { ApogeeApp } from '../../../source/presentation/app/Views/ApogeeApp'
+import { AppViewModel, windowKeys } from '../../../source/presentation/app/ViewModels/AppViewModel'
+import { ApogeeApp, galleryParts } from '../../../source/presentation/app/Views/ApogeeApp'
 import { modeRules } from '../../../source/presentation/app/Previews/ModeRules'
 import { presetFor } from '../../../source/presentation/app/Previews/Presets'
 import { boards } from '../../../source/presentation/gallery/Models/Boards'
@@ -66,6 +66,13 @@ describe("the gallery's key (design 1q): one key app owns, outside the shell's k
   test('it never shows in Settings › Keyboard: no line names it', () => {
     const app = new AppViewModel(presetFor({ still: true, apogee: 'installed' }).preset, modeRules)
     expect(keyboardLines(KeyMap.reference, app.boundKeys).filter((line) => line.keys.includes('⌥⌘G'))).toEqual([])
+  })
+
+  test("the gallery is handed the key map the layout page draws (1r): Settings › Keyboard's lines, from every key the window binds", () => {
+    const app = new AppViewModel(presetFor({ still: true, apogee: 'installed' }).preset, modeRules)
+    expect(app.boundKeys).toBe(windowKeys)
+    expect(galleryParts([]).keys).toEqual(keyboardLines(KeyMap.reference, app.boundKeys))
+    expect(galleryParts([]).keys).toHaveLength(23)
   })
 })
 

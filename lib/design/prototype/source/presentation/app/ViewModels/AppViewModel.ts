@@ -94,6 +94,9 @@ export const executeDoorForm: Partial<ExecuteForm> = { suite: 'coding', folder: 
 /** The console as the `console` preset leaves it: the old `con`'s two runs, then `models ` typed (`main.html:2737-2744` at `b375fac9`). */
 export const consoleLines = { runs: ['models list', 'reset'], typed: 'models ' } as const
 
+/** Every key the window binds: the shell's and the places' (Sessions'), what Settings › Keyboard lists and the gallery's layout page draws (1r). */
+export const windowKeys: readonly BoundKey[] = [...KeyMap.shell, ...SessionKeys.bindings]
+
 /**
  * The application's view-model: the composition root (design 1e, ADR 0001
  * §3), the Mac app's `AppViewModel`. It builds the stand-in's services once
@@ -168,7 +171,7 @@ export class AppViewModel extends Observable {
   /** The Tasks place (1p): the ledger, a task's page, a run followed live from its stream, and the New task sheet. */
   readonly tasks: TasksViewModel
   /** Every key the window binds: the shell's and the places' (Sessions'), what Settings › Keyboard lists. */
-  readonly boundKeys: readonly BoundKey[] = [...KeyMap.shell, ...SessionKeys.bindings]
+  readonly boundKeys: readonly BoundKey[] = windowKeys
 
   /** Each place's view-model, by its destination: the ones built so far. */
   private readonly places: Partial<Record<Destination, Place>>

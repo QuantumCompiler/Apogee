@@ -41,7 +41,7 @@ export interface AddressBar {
   replace(search: string): void
 }
 
-/** The gallery's own words in the address: `gallery`, its page, and `board`. 1r's pages own `page`. */
+/** The gallery's own words in the address: `gallery`, its page, and `board`, which also opens 1r's Build pages (`&board=BuildContract`). */
 const galleryParameter = 'gallery'
 const boardParameter = 'board'
 
@@ -62,8 +62,8 @@ function query(parts: ReadonlyArray<readonly [string, string]>): string {
  * (design 1q): `?gallery` the Build page, `?gallery=foundations` the
  * Foundations page, and `&board=<id>` a board at full size, on its own page
  * whatever the page said. An id the table lacks is passed over. `undefined`
- * with no `gallery` word: the app opens. `?page=` is 1r's pages', never read
- * here.
+ * with no `gallery` word: the app opens. `?page=` is never read: 1r's Build
+ * pages open as boards, `&board=BuildContract`.
  */
 export function galleryAddress(search: string): GalleryAddress | undefined {
   const said = new Map(parameters(search))

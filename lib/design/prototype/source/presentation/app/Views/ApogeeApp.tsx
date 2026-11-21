@@ -43,7 +43,7 @@ import { useObserved } from '../../styles/Observation/useObserved'
 import { VideoScreen } from '../../video/Views/VideoScreen'
 import { VoiceScreen } from '../../voice/Views/VoiceScreen'
 import '../../styles/Stylesheet'
-import { AppViewModel } from '../ViewModels/AppViewModel'
+import { AppViewModel, windowKeys } from '../ViewModels/AppViewModel'
 import { frameApp } from '../ViewModels/FrameApp'
 import { opensGallery, WindowChoice } from '../ViewModels/GalleryKey'
 import { logoArtwork } from '../Models/Logo'
@@ -51,6 +51,7 @@ import { modeRules } from '../Previews/ModeRules'
 import { presetFor } from '../Previews/Presets'
 import { specimens } from '../Previews/Specimens'
 import { sessionSamples } from '../../session/Previews/SessionPresets'
+import { keyboardLines, KeyMap } from '../../shell/ViewModels/KeyMap'
 import { startRequest } from '../../shell/ViewModels/Routing'
 import { GalleryViewModel } from '../../gallery/ViewModels/GalleryViewModel'
 import type { AddressBar, BoardMount } from '../../gallery/ViewModels/GalleryViewModel'
@@ -548,9 +549,14 @@ export function FramedApp({ mount, size }: { readonly mount: BoardMount; readonl
   return <ApogeeApp model={app} frame={{ width: size.width, height: size.height, keys: size.live }} />
 }
 
-/** What the gallery is handed: the app to mount in a frame, the modules' specimens, and the logo the build inlined. */
+/**
+ * What the gallery is handed: the app to mount in a frame, the modules'
+ * specimens, the logo the build inlined, and the key map the layout page
+ * draws (1r) -- the lines Settings › Keyboard lists, from the shell's map and
+ * every key the window binds.
+ */
 export function galleryParts(all: readonly Specimen[] = specimens): GalleryParts {
-  return { mount: (mount, size) => <FramedApp mount={mount} size={size} />, specimens: all, logo: logoArtwork }
+  return { mount: (mount, size) => <FramedApp mount={mount} size={size} />, specimens: all, logo: logoArtwork, keys: keyboardLines(KeyMap.reference, windowKeys) }
 }
 
 /** The gallery, outside the app's frame (design 1q), its address the page's. */

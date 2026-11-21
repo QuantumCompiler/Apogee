@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react'
 
-/** A Foundations page's frame, as the old boards set it: the window's surface, the interface face and size, a 48 px margin. */
+/** A Foundations or Build page's frame, as the old boards set it: the window's surface, the interface face and size, a 48 px margin. */
 export const foundationsPage: CSSProperties = {
   boxSizing: 'border-box',
   maxWidth: 1440,
@@ -18,7 +18,8 @@ export const sectionLabel: CSSProperties = { margin: '0 0 10px', fontFamily: 'va
 
 /**
  * A Foundations page's header (design 1q), as the old boards draw it: the
- * label over the title, and what the page is in a sentence or two.
+ * label over the title, and what the page is in a sentence or two. The Build
+ * pages (1r) draw theirs with it too.
  */
 export function FoundationsHeader({ label, title, children }: { readonly label: string; readonly title: string; readonly children: ReactNode }) {
   return (

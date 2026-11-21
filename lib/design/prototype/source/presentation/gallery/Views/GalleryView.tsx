@@ -4,13 +4,19 @@ import { useObserved } from '../../styles/Observation/useObserved'
 import type { Specimen } from '../../styles/Specimens/Specimen'
 import { boardWidth } from '../Models/Boards'
 import type { BoardEntry } from '../Models/Boards'
+import { BuildContractViewModel } from '../ViewModels/BuildContractViewModel'
+import { BuildLayoutViewModel } from '../ViewModels/BuildLayoutViewModel'
+import type { KeyLine } from '../ViewModels/BuildLayoutViewModel'
+import { BuildProcessesViewModel } from '../ViewModels/BuildProcessesViewModel'
 import { colorPage } from '../ViewModels/ColorPage'
 import type { BoardMount, GalleryViewModel } from '../ViewModels/GalleryViewModel'
 import { typePage } from '../ViewModels/TypePage'
+import { BuildContractPage } from './BuildContractPage'
+import { BuildLayoutPage } from './BuildLayoutPage'
+import { BuildProcessesPage } from './BuildProcessesPage'
 import { ColorTokensPage } from './ColorTokensPage'
 import { ComponentsPage } from './ComponentsPage'
 import { LogoPage } from './LogoPage'
-import { NotPortedCard } from './NotPortedCard'
 import { PropSwitcher } from './PropSwitcher'
 import { TypeSpacePage } from './TypeSpacePage'
 
@@ -24,12 +30,17 @@ export interface MountSize {
 /** The app mounted in a frame: `app` hands it in, so the gallery never imports `app`, the shell or a place. */
 export type MountApp = (mount: BoardMount, size: MountSize) => ReactNode
 
-/** What `app` hands the gallery: the app to mount, the modules' specimens, and the logo the build inlined. */
+/** What `app` hands the gallery: the app to mount, the modules' specimens, the logo the build inlined, and the key map the layout page draws (1r). */
 export interface GalleryParts {
   readonly mount: MountApp
   readonly specimens: readonly Specimen[]
   readonly logo: string
+  /** The shell's key map, as Settings › Keyboard lists it: the gallery never imports the shell. */
+  readonly keys: readonly KeyLine[]
 }
+
+/** The Build pages (1r): documents, not the app, so at full size they take the pointer -- a gap chip is a link -- where a screen stands inert. */
+const buildPages: ReadonlySet<BoardEntry['draws']> = new Set(['contract', 'layout', 'processes'])
 
 /** A frame in a row is a quarter of its board: 360 px wide. */
 const rowScale = 0.25
@@ -37,25 +48,35 @@ const rowScale = 0.25
 /** A frame in a row shows its board's first 900 px, the canvas's screen frame; open at full size it shows the whole board. */
 const rowHeight = 900
 
-/** What a board draws, at its props: the app at its preset, or a page generated from the tokens and the modules. */
+/** A page a board draws: a Build page over its data (1r), or a Foundations page generated from the tokens and the modules. */
+function BoardPage({ entry, parts }: { readonly entry: BoardEntry; readonly parts: GalleryParts }): ReactNode {
+  switch (entry.draws) {
+    case 'contract':
+      return <BuildContractPage model={new BuildContractViewModel()} />
+    case 'layout':
+      return <BuildLayoutPage model={new BuildLayoutViewModel(parts.keys)} />
+    case 'processes':
+      return <BuildProcessesPage model={new BuildProcessesViewModel()} />
+    case 'colors':
+      return <ColorTokensPage face={colorPage()} />
+    case 'type':
+      return <TypeSpacePage face={typePage()} />
+    case 'components':
+      return <ComponentsPage entry={entry} specimens={parts.specimens} />
+    case 'logo':
+      return <LogoPage logo={parts.logo} />
+    case 'screen':
+    case 'app':
+      return null
+  }
+}
+
+/** What a board draws, at its props: the app at its preset, or a page over its data, the tokens and the modules. */
 function BoardBody({ entry, model, parts, live }: { readonly entry: BoardEntry; readonly model: GalleryViewModel; readonly parts: GalleryParts; readonly live: boolean }) {
-  const colors = useMemo(() => colorPage(), [])
-  const type = useMemo(() => typePage(), [])
+  const page = useMemo(() => <BoardPage entry={entry} parts={parts} />, [entry, parts])
   const mount = model.frame(entry.id)
   if (mount) return <>{parts.mount(mount, { width: boardWidth, height: entry.height, live: live && entry.draws === 'app' })}</>
   const theme = model.props(entry.id).theme
-  const page =
-    entry.draws === 'colors' ? (
-      <ColorTokensPage face={colors} />
-    ) : entry.draws === 'type' ? (
-      <TypeSpacePage face={type} />
-    ) : entry.draws === 'components' ? (
-      <ComponentsPage entry={entry} specimens={parts.specimens} />
-    ) : entry.draws === 'logo' ? (
-      <LogoPage logo={parts.logo} />
-    ) : (
-      <NotPortedCard item={entry.item ?? ''} title={entry.title} />
-    )
   return (
     <div className="ap" data-theme={theme} style={{ minHeight: entry.height, background: 'var(--surface-window)' }}>
       {page}
@@ -109,8 +130,9 @@ export function BoardCard({ entry, model, parts }: { readonly entry: BoardEntry;
 /**
  * One board at full size (design 1q), as the canvas's focused launch: its
  * title, its prop switcher, and the board 1440 px wide. The App board runs
- * live and takes the keys; a screen stands still. Esc, or Back, goes back to
- * the rows.
+ * live and takes the keys; a screen stands still, inert, and so does a
+ * Foundations page; a Build page (1r) takes the pointer, its gap chips being
+ * links. Esc, or Back, goes back to the rows.
  */
 export function FocusedBoard({ entry, model, parts }: { readonly entry: BoardEntry; readonly model: GalleryViewModel; readonly parts: GalleryParts }) {
   useObserved(model)
@@ -131,7 +153,7 @@ export function FocusedBoard({ entry, model, parts }: { readonly entry: BoardEnt
       </div>
       <div style={{ overflowX: 'auto' }}>
         <div
-          {...(live ? { 'data-gallery-live': '' } : { inert: true })}
+          {...(live ? { 'data-gallery-live': '' } : buildPages.has(entry.draws) ? {} : { inert: true })}
           style={{ width: boardWidth, minHeight: entry.height, ...(entry.draws === 'screen' || live ? { height: entry.height } : {}), position: 'relative', border: '1px solid var(--line-border)', transform: 'translate(0, 0)' }}
         >
           <BoardBody entry={entry} model={model} parts={parts} live={live} />

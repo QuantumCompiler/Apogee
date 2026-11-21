@@ -41,8 +41,10 @@ test('?gallery opens from disk on the Build page: the canvas’s five headings o
   await expect(page.getByRole('button', { name: 'Session · streaming, thinking open' })).toBeVisible()
   // A board-less preset's frame, at the end of its row, marked.
   await expect(page.getByRole('button', { name: 'Settings · Keyboard NO OLD BOARD' })).toBeAttached()
-  // The Build row's Contract, Layout and Processes wait on 1r.
-  await expect(page.locator('[data-board="BuildContract"]')).toContainText('Not ported yet: item 1r')
+  // The Build row's Contract, Layout and Processes draw their pages (1r).
+  await expect(page.locator('[data-board="BuildContract"]')).toContainText('How the app talks to Apogee')
+  await expect(page.locator('[data-board="BuildLayout"]')).toContainText('Layout, navigation and native controls')
+  await expect(page.locator('[data-board="BuildProcesses"]')).toContainText('How the app runs Apogee')
   // The first rows' frames are the real app, mounted: the Streaming session.
   await expect(page.locator('[data-board="ScreenSessionStreaming"]')).toContainText('Where do fetches start in this repo, and what cancels them?')
   expect(errors).toEqual([])

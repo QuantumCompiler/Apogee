@@ -18,7 +18,7 @@ const chevron = (
 /** The model menu (`main.html:192-212` at `b375fac9`): the chat backends `models list` names, by kind, each with the CLI's own words, then Models library…. */
 export function ModelMenu({ model }: { readonly model: SessionViewModel }) {
   return (
-    <div className="menu" role="menu" aria-label="Switch model" style={{ position: 'absolute', top: 38, right: 0, zIndex: 40, width: 340 }}>
+    <div className="menu" role="menu" aria-label="Switch model" style={{ position: 'absolute', top: 38, right: 0, zIndex: 40, width: 'var(--layout-menu-switch-model)' }}>
       <div style={{ padding: 6, maxHeight: 440, overflowY: 'auto' }}>
         {model.menuGroups.length === 0 ? <p style={{ margin: 0, padding: '8px', fontSize: 'var(--t-small)', color: 'var(--text-tertiary)' }}>apogee has not listed its models.</p> : null}
         {model.menuGroups.map((group) => (
@@ -73,7 +73,7 @@ function ThinkMenu({ model }: { readonly model: SessionViewModel }) {
   const think = model.settings.think
   const effort = model.settings.effort === undefined || model.settings.effort === 'auto' ? 'default' : model.settings.effort
   return (
-    <div className="menu" role="menu" aria-label="Thinking" style={{ position: 'absolute', top: 38, right: 0, zIndex: 40, width: 380 }}>
+    <div className="menu" role="menu" aria-label="Thinking" style={{ position: 'absolute', top: 38, right: 0, zIndex: 40, width: 'var(--layout-menu-thinking)' }}>
       <div className="lbl" style={{ padding: '12px 14px 4px' }}>
         THINKING
       </div>

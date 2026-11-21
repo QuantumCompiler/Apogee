@@ -87,8 +87,8 @@ export function Sidebar({ model, strip, sessions, newSessions, running = {} }: S
                 style={{
                   position: 'relative',
                   flex: '0 0 auto',
-                  width: 40,
-                  height: 34,
+                  width: 'var(--layout-place-width)',
+                  height: 'var(--layout-place-height)',
                   scrollSnapAlign: 'start',
                   background: current ? 'var(--surface-selection)' : undefined,
                   color: current ? 'var(--text-primary)' : 'var(--text-secondary)',

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'vitest'
@@ -103,6 +104,30 @@ describe("the code colors (design 1u): the lexer's five are tokens.json's code.*
     const written = lexer.replace("'var(--code-keyword)'", "'#C792EA'")
     expect(scan.violations(new PlantedTree({ 'source/presentation/styles/Components/CodeLexer.ts': written }))).toEqual([
       'source/presentation/styles/Components/CodeLexer.ts writes the color #C792EA: every color is a var(--…) from tokens.json, and only its fixed values are written as they are',
+    ])
+  })
+})
+
+describe('the Build pages (design 1r): the token scan covers them, so no hex is left in them', () => {
+  const gallery = 'source/presentation/gallery'
+  const processes = `${gallery}/Views/BuildProcessesPage.tsx`
+
+  test('the three pages, their data and their view-models are scanned, and are clean', () => {
+    const tree = new DiskTree(root)
+    const files = tree.files('source')
+    for (const page of ['BuildContractPage', 'BuildLayoutPage', 'BuildProcessesPage']) expect(files).toContain(`${gallery}/Views/${page}.tsx`)
+    for (const model of ['contract', 'layout', 'nativeControls', 'processes']) expect(files).toContain(`${gallery}/Models/${model}.ts`)
+    for (const viewModel of ['BuildContractViewModel', 'BuildLayoutViewModel', 'BuildProcessesViewModel']) expect(files).toContain(`${gallery}/ViewModels/${viewModel}.ts`)
+    expect(scan.violations(tree).filter((found) => found.startsWith(gallery))).toEqual([])
+  })
+
+  test("a planted #938F86, the old board's connector gray, in the processes view fails, naming it", () => {
+    const source = readFileSync(resolve(root, processes), 'utf8')
+    const planted = source.replace('color: paint(face.connector)', "color: '#938F86'")
+    expect(planted).not.toBe(source)
+    expect(scan.violations(new PlantedTree({ [processes]: source }))).toEqual([])
+    expect(scan.violations(new PlantedTree({ [processes]: planted }))).toEqual([
+      `${processes} writes the color #938F86: every color is a var(--…) from tokens.json, and only its fixed values are written as they are`,
     ])
   })
 })
