@@ -17,6 +17,10 @@ import { ExecuteDoorSheet } from '../../sessions/Views/ExecuteDoor'
 import { NewSessionButtons, RenameSheet, SessionList } from '../../sessions/Views/SessionList'
 import { ChatInfoSheet, SessionsScreen } from '../../sessions/Views/SessionsScreen'
 import { placeholderOf } from '../../shell/ViewModels/Destination'
+import { trainingConfirms } from '../../training/ViewModels/TrainingViewModel'
+import type { TrainingConfirm } from '../../training/ViewModels/TrainingViewModel'
+import { TrainingScreen } from '../../training/Views/TrainingScreen'
+import { PromoteSheet, PullSheet } from '../../training/Views/TrainingSheets'
 import { startRequest } from '../../shell/ViewModels/Routing'
 import { ConfirmHost, SheetHost } from '../../shell/Views/Hosts'
 import { PlaceholderScreen } from '../../shell/Views/PlaceholderScreen'
@@ -43,7 +47,9 @@ const settingsConfirms: readonly string[] = ['settingsForget', 'xcodeRemove'] sa
  * the `endPrivate` confirm are the session's; the details, rename and
  * execute sheets and the delete, compact and forget confirms the library's;
  * Settings (1i) is its window, the Models place's roles in its Models &
- * roles slot, with its Register… sheet and its two confirms.
+ * roles slot, with its Register… sheet and its two confirms; Training (1j)
+ * is its screen, with the promote and pull sheets, the five train confirms
+ * and a refused promote's.
  * It starts the app once it is on screen.
  */
 export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
@@ -52,6 +58,7 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
   useObserved(model.library)
   useObserved(model.session)
   useObserved(model.models)
+  useObserved(model.training)
   useEffect(() => {
     void model.start()
     return () => model.stop()
@@ -60,6 +67,7 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
   const session = model.session
   const library = model.library
   const models = model.models
+  const training = model.training
   return (
     <ShellView
       model={shell}
@@ -71,6 +79,7 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
         // Each feature item puts its place's screen here, and takes its placeholder out of Destination.ts.
         if (destination === 'sessions') return <SessionsScreen model={library} />
         if (destination === 'models') return <ModelsScreen model={models} />
+        if (destination === 'training') return <TrainingScreen model={training} />
         const placeholder = placeholderOf(destination)
         return placeholder ? <PlaceholderScreen placeholder={placeholder} /> : null
       }}
@@ -202,6 +211,36 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
             </SheetHost>
           )
         }
+        // Training's sheets (1j): the promote sheet and the pull sheet, the old prototype's.
+        if (kind === 'promote') {
+          const sheet = training.face().promoteSheet
+          return (
+            <SheetHost
+              title={sheet.title}
+              width={560}
+              right={[
+                { label: 'Cancel', run: () => training.cancelPromote() },
+                { label: 'Promote', kind: 'btn-p', run: () => training.promote(), disabled: !sheet.canPromote },
+              ]}
+            >
+              <PromoteSheet model={training} />
+            </SheetHost>
+          )
+        }
+        if (kind === 'pull') {
+          return (
+            <SheetHost
+              title="Pull a dataset"
+              width={560}
+              right={[
+                { label: 'Cancel', run: () => training.cancelPull() },
+                { label: 'Pull', kind: 'btn-p', run: () => training.pull(), disabled: !training.face().pullSheet.canPull },
+              ]}
+            >
+              <PullSheet model={training} />
+            </SheetHost>
+          )
+        }
         // Settings' Register… (1i): the old registerProvider sheet, in the TUI's words.
         if (kind === 'registerProvider' && model.settings.face().register.shown) {
           const register = model.settings.face().register
@@ -249,6 +288,21 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
               cancel={{ label: 'Cancel', run: () => model.dismissModels(confirm) }}
               {...(words.alternative !== '' ? { alternative: { label: words.alternative, run: () => void model.confirmModels(confirm, true) } } : {})}
               confirm={{ label: words.confirm, run: () => void model.confirmModels(confirm, false), destructive: words.destructive }}
+            />
+          )
+        }
+        // Training's (1j): the five train acts, and a promotion the CLI refused, its line word for word.
+        if ((trainingConfirms as readonly string[]).includes(kind)) {
+          const confirm = kind as TrainingConfirm
+          const words = training.confirmWords(confirm)
+          if (!words) return null
+          return (
+            <ConfirmHost
+              title={words.title}
+              body={words.body}
+              {...(words.detail === undefined ? {} : { detail: words.detail })}
+              cancel={{ label: words.cancel, run: () => model.dismissTraining(confirm) }}
+              confirm={{ label: words.confirm, run: () => void model.confirmTraining(confirm) }}
             />
           )
         }

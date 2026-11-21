@@ -326,6 +326,9 @@ describe("every stream's provenance: each file a preset names exists, and is a r
     'source/presentation/models/Previews/ModelsWorlds.ts',
     'source/presentation/models/Previews/ModelsPreview.ts',
     'source/presentation/models/Previews/DeleteNarrationCard.preview.tsx',
+    // The Training place's (design 1j): its recordings (`TrainingWorlds.ts`; its worlds' rules, `TrainingWorldRules.ts`, import none) and its preview's mode recording.
+    'source/presentation/training/Previews/TrainingWorlds.ts',
+    'source/presentation/training/Previews/TrainingPreview.ts',
   ]
   const named = previews.flatMap((file) => [...readFileSync(join(prototype, file), 'utf8').matchAll(/from '((?:@recorded|(?:\.\.\/)+fixtures)\/[^'?]+)\?raw'/g)].map((match) => ({ file, path: match[1] ?? '' })))
   const captured = new Set(Object.values(recipes).flatMap((recipe) => [recipe.output, ...(recipe.chatsShow ? [recipe.chatsShow] : []), ...(recipe.resumes ?? []).map((resume) => resume.output)]))

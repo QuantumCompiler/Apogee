@@ -41,7 +41,6 @@ const portedBy: Readonly<Partial<Record<Destination, string>>> = {
   video: '1k',
   voice: '1m',
   knowledge: '1o',
-  training: '1j',
   library: '1n',
   review: '1n',
 }

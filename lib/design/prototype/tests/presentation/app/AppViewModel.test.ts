@@ -5,6 +5,7 @@ import { modeRules } from '../../../source/presentation/app/Previews/ModeRules'
 import { AppViewModel, scenarioTurns } from '../../../source/presentation/app/ViewModels/AppViewModel'
 import type { ApogeeMode } from '../../../source/infrastructure/process/StandInChild'
 import { kvChat, sessionSamples } from '../../../source/presentation/session/Previews/SessionPresets'
+import { chord } from '../../../source/presentation/shell/ViewModels/KeyMap'
 
 /** Lets every read the start began land. */
 const settled = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -647,16 +648,16 @@ describe('the Models place in the composition (design 1h)', () => {
     const card = app.models.face().jobs.cards[0]
     expect(card?.repo).toBe('Llama3.2-1B-Instruct/safetensors/edaba290ce7f')
     expect(card?.steps.map((step) => step.state)).toEqual(['done', 'running', 'waiting'])
-    expect(app.placeRuns).toEqual({ models: 1 })
+    expect(app.placeRuns).toEqual({ models: 1, training: 0 })
     const chat = await started('chat')
-    expect(chat.placeRuns).toEqual({ models: 0 })
+    expect(chat.placeRuns).toEqual({ models: 0, training: 0 })
   })
 
   test('models:downloads and models:notran with no apogee: nothing starts, so no card stands running and the sidebar counts nothing', async () => {
     for (const start of ['models:downloads', 'models:notran']) {
       const app = await started(start, 'missing')
       expect([start, app.models.face().jobs]).toEqual([start, { cards: [], running: 0 }])
-      expect(app.placeRuns).toEqual({ models: 0 })
+      expect(app.placeRuns).toEqual({ models: 0, training: 0 })
     }
   })
 
@@ -686,10 +687,10 @@ describe('the Models place in the composition (design 1h)', () => {
     expect(app.models.face().downloadSheet.repo).toBe('meta-llama/Llama-3.2-1B-Instruct')
     app.models.startDownload()
     expect(app.shell.sheet).toBeUndefined()
-    expect(app.placeRuns).toEqual({ models: 1 })
+    expect(app.placeRuns).toEqual({ models: 1, training: 0 })
     app.clock.advance(70)
     await settled()
-    expect(app.placeRuns).toEqual({ models: 0 })
+    expect(app.placeRuns).toEqual({ models: 0, training: 0 })
     expect(app.shell.toast?.text, 'the old done toast, from the documents the run reported').toBe('Llama3.2-1B-Instruct · Q4_K_M is ready in the library')
     // The snapshot a conversion of the same chain used folds away, as models list folds it.
     expect(app.models.store.face().groups.find((group) => group.dir === 'Llama3.2-1B-Instruct')?.sets.map((set) => [set.short, set.state])).toEqual([
@@ -864,3 +865,99 @@ describe('Settings in the composition (design 1i)', () => {
     expect(app.shell.toast?.text).toBe('registered claude (claude-cli)')
   })
 })
+
+describe('the Training place in the composition (design 1j)', () => {
+  test('each of the ten presets opens Training on its tab and state, the Streaming session behind it, nothing unanswered', async () => {
+    const opens: ReadonlyArray<readonly [string, string, string]> = [
+      ['training', 'runs', 'bar: [train] iter 2/4 · loss 0.6200 · lr 1.00e-04 · 10.0 it/s'],
+      ['training:datasets', 'datasets', 'dataset: heat-notes'],
+      ['training:pipelines', 'pipelines', 'live: pipe-20261026-074112'],
+      ['training:cycle', 'cycle', 'passes: 2'],
+      ['training:stalelock', 'cycle', 'lock: /Users/someone/.apogee/training/cycle/cycle.lock'],
+      ['training:unreadable', 'cycle', 'error: The cycle history could not be read: /Users/someone/.apogee/training/cycle/history.json: cycle history: runs must be an array'],
+      ['training:cyclepass', 'pipelines', 'page: cycle-20261109-041521'],
+      ['training:passrunning', 'pipelines', 'page: cycle-20261109-041521'],
+      ['training:resumeheld', 'pipelines', 'hold: This pipeline is running now (process 67959); a resume is refused while it runs.'],
+      ['training:regimes', 'regimes', 'regime: foundation'],
+    ]
+    for (const [start, tab, state] of opens) {
+      const app = await started(start)
+      const face = app.training.face()
+      const shown: Record<string, string> = {
+        bar: face.bar.line,
+        dataset: face.datasets.detail.name,
+        live: face.pipelines.live.id,
+        passes: String(face.cycle.passes.length),
+        lock: face.cycle.lock,
+        error: face.cycle.error,
+        page: face.pipelines.page.id,
+        hold: face.pipelines.page.resume.hold,
+        regime: face.regimes.detail.name,
+      }
+      const [key] = state.split(': ')
+      expect([start, app.shell.route, face.tab, `${key}: ${shown[key ?? ''] ?? ''}`]).toEqual([start, 'training', tab, state])
+      expect(app.session.face().empty.launched, `${start}: the Streaming session behind`).toBe(true)
+      expect(app.shell.confirm, start).toBeUndefined()
+      expect(app.child.unanswered, start).toEqual([])
+    }
+  })
+
+  test('training:pipelines and training:passrunning: their pages, the stage at its iteration and the pass that runs elsewhere', async () => {
+    const pipelines = await started('training:pipelines')
+    expect(pipelines.training.face().pipelines.page.stages.map((stage) => stage.line)).toEqual(['passed · cumulative 100%', 'training · iter 2/4 · loss 0.6200 · 10.0 it/s'])
+    const running = await started('training:passrunning')
+    expect(running.training.face().pipelines.page.endLine).toBe('A cycle pass, running now (process 67959): its candidate is the cycle’s, judged by its dual gate when the pass ends -- never from Runs.')
+  })
+
+  test("the sidebar's Training badge: the registry's train runs, pipelines and passes, never a pull or a promote", async () => {
+    const training = await started('training')
+    expect(training.placeRuns).toEqual({ models: 0, training: 1 })
+    const pipelines = await started('training:pipelines')
+    expect(pipelines.placeRuns).toEqual({ models: 0, training: 1 })
+    const cycle = await started('training:cycle')
+    expect(cycle.placeRuns).toEqual({ models: 0, training: 0 })
+    cycle.training.requestPass()
+    expect(cycle.shell.confirm).toBe('train')
+    await cycle.confirmTraining('train')
+    expect(cycle.shell.confirm).toBeUndefined()
+    expect(cycle.placeRuns).toEqual({ models: 0, training: 1 })
+    const datasets = await started('training:datasets')
+    datasets.training.newPull()
+    expect(datasets.shell.sheet).toBe('pull')
+    datasets.training.setPullRef('someone/heat-notes')
+    datasets.training.pull()
+    expect(datasets.shell.sheet).toBeUndefined()
+    expect(datasets.placeRuns).toEqual({ models: 0, training: 0 })
+    expect(datasets.registry.children('job').map((job) => job.label)).toEqual(['apogee datasets pull someone/heat-notes'])
+  })
+
+  test('⌘9 opens Training through the key map, and the place reads as it comes into view', async () => {
+    const app = await started('chat')
+    const before = app.child.calls.filter((call) => call.arguments.join(' ') === 'train status').length
+    expect(app.shell.press(chord('9', 'command'))).toBe(true)
+    await settled()
+    expect(app.shell.route).toBe('training')
+    expect(app.child.calls.filter((call) => call.arguments.join(' ') === 'train status').length).toBe(before + 1)
+  })
+
+  test("a refused promote raises the shell's confirm, Change the promotion… reopens the sheet, OK lets it go", async () => {
+    const app = await started('training')
+    await app.training.stop()
+    await settled()
+    app.training.newPromotion()
+    expect(app.shell.sheet).toBe('promote')
+    app.training.setPromote({ backend: 'based' })
+    app.training.promote()
+    expect(app.shell.sheet).toBeUndefined()
+    app.clock.advance(2)
+    await settled()
+    await settled()
+    expect(app.shell.confirm).toBe('promoteRefused')
+    await app.confirmTraining('promoteRefused')
+    expect([app.shell.confirm, app.shell.sheet]).toEqual([undefined, 'promote'])
+    expect(app.training.face().promoteSheet.error).toMatch(/^apogee train: the eval gate failed for run 20261021-051826/)
+    app.training.cancelPromote()
+    expect(app.shell.sheet).toBeUndefined()
+  })
+})
+

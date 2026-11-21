@@ -105,7 +105,7 @@ test('in the missing and config-typo modes the monitor says why it cannot read, 
   await expect(monitor(page)).toContainText("apogee system: /Users/someone/.apogee/config/config.json: not valid JSON: line 4, column 5: expected ',' or '}' after a member (exited with status 1)")
 })
 
-test('each of the 11 places opens by click: Sessions its session window, Models its tabs (1h), an unported one its placeholder', async ({ page }) => {
+test('each of the 11 places opens by click: Sessions its session window, Models its tabs (1h), Training its tabs (1j), an unported one its placeholder', async ({ page }) => {
   const { errors } = watch(page)
   await page.goto(`${built}?start=monitor&still=true`)
   const models = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Models ⌘2' })
@@ -116,8 +116,15 @@ test('each of the 11 places opens by click: Sessions its session window, Models 
   await expect(page.getByText(/^Models isn’t drawn here yet/)).toHaveCount(0)
   const places: Array<[string, string, string]> = [
     ['Suites', '⌘3', '1p'], ['Tasks', '⌘4', '1p'], ['Code graph', '⌘5', '1o'], ['Video', '⌘6', '1k'],
-    ['Voice', '⌘7', '1m'], ['Knowledge', '⌘8', '1o'], ['Training', '⌘9', '1j'], ['Library', '⌘0', '1n'], ['Review', '⇧⌘R', '1n'],
+    ['Voice', '⌘7', '1m'], ['Knowledge', '⌘8', '1o'], ['Library', '⌘0', '1n'], ['Review', '⇧⌘R', '1n'],
   ]
+  // Training is its place (1j): its five tabs, Runs first, no placeholder.
+  const training = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Training ⌘9' })
+  await training.click()
+  await expect(training).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('heading', { name: 'Training', level: 1 })).toBeVisible()
+  await expect(page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Runs' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByText(/^Training isn’t drawn here yet/)).toHaveCount(0)
   for (const [title, key, item] of [...places].reverse()) {
     const button = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: `${title} ${key}` })
     await button.click()
@@ -813,3 +820,166 @@ test('Backends & keys: Add key… opens the field, a key saved goes and the fiel
   await expect(page.getByRole('status').filter({ hasText: 'registered claude (claude-cli)' })).toBeVisible()
   expect(errors).toEqual([])
 })
+
+// ---- The Training place (design 1j) ----
+
+const trainingTab = (page: Page, name: string) => page.getByRole('group', { name: 'Show' }).getByRole('button', { name, exact: true })
+const toast = (page: Page, text: string | RegExp) => page.getByRole('status').filter({ hasText: text })
+
+const trainingFrames: Array<[string, string, (page: Page) => Promise<void>]> = [
+  ['training', 'Runs', async (page) => {
+    await expect(page.getByText('[train] iter 2/4 · loss 0.6200 · lr 1.00e-04 · 10.0 it/s')).toBeVisible()
+    await expect(page.getByRole('complementary', { name: 'Run' })).toContainText('failed the gate (46%) -- promote refuses it unless forced')
+    await expect(page.getByText('v1 · run 20261026-065638 · adapter · scored on tiny-Q4_K_M.gguf (Q4_K_M) · active')).toBeVisible()
+    // The sidebar's badge: the run going on, counted from the shared job list.
+    await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Training ⌘9 · 1 running', exact: true })).toBeVisible()
+  }],
+  ['training:datasets', 'Datasets', async (page) => {
+    await expect(page.getByRole('heading', { name: 'heat-notes', level: 2 })).toBeVisible()
+    await expect(page.getByText('2 examples · chat · 449 bytes')).toBeVisible()
+    await expect(page.getByText('32 eval items')).toBeVisible()
+  }],
+  ['training:pipelines', 'Pipelines', async (page) => {
+    await expect(page.getByText('running here', { exact: true })).toBeVisible()
+    await expect(page.getByText('training · iter 2/4 · loss 0.6200 · 10.0 it/s')).toBeVisible()
+    await expect(page.getByText('Running skills')).toBeVisible()
+  }],
+  ['training:cycle', 'Cycle', async (page) => {
+    await expect(page.getByText('pass · scored 100% · promoted v1 · 2 examples from directory')).toBeVisible()
+    await expect(page.getByText('v1 (100%)')).toBeVisible()
+  }],
+  ['training:stalelock', 'Cycle', async (page) => {
+    await expect(page.getByText(/^Stopped -- cycle\.lock is left by a process that is not running/)).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Run one pass…' })).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Show in Finder' })).toBeVisible()
+  }],
+  ['training:unreadable', 'Cycle', async (page) => {
+    await expect(page.getByText('The cycle history could not be read: /Users/someone/.apogee/training/cycle/history.json: cycle history: runs must be an array')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Halt…' })).toBeDisabled()
+  }],
+  ['training:cyclepass', 'Pipelines', async (page) => {
+    await expect(page.getByText('A cycle pass: its candidate was discarded, and no other verb resumes it -- Run one pass on the Cycle tab runs the next pass.')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Resume…' })).toHaveCount(0)
+  }],
+  ['training:passrunning', 'Pipelines', async (page) => {
+    await expect(page.getByText('A cycle pass, running now (process 67959): its candidate is the cycle’s, judged by its dual gate when the pass ends -- never from Runs.')).toBeVisible()
+    await expect(page.getByText('cyclic · running · 0 of 1 stage passed')).toBeVisible()
+  }],
+  ['training:resumeheld', 'Pipelines', async (page) => {
+    await expect(page.getByText('This pipeline is running now (process 67959); a resume is refused while it runs.')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Resume…' })).toBeDisabled()
+  }],
+  ['training:regimes', 'Regimes', async (page) => {
+    await expect(page.getByRole('heading', { name: 'foundation', level: 2 })).toBeVisible()
+    await expect(page.getByText('4. reasoning')).toBeVisible()
+  }],
+]
+
+for (const [preset, tab, frame] of trainingFrames) {
+  test(`${preset}: Training on its tab, still, its words visible, with no console error and no request but the file (design 1j)`, async ({ page }) => {
+    const { errors, requests } = watch(page)
+    await page.goto(`${built}?start=${preset}&still=true`)
+    await expect(page.getByRole('heading', { name: 'Training', level: 1 })).toBeVisible()
+    await expect(trainingTab(page, tab)).toHaveAttribute('aria-pressed', 'true')
+    await frame(page)
+    expect(errors).toEqual([])
+    expect(requests).toEqual([`${built}?start=${preset}&still=true`])
+  })
+}
+
+test('training and training:datasets with no apogee: Runs and Datasets say it is not installed, as the old ones do (design 1j)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=training&still=true&apogee=missing`)
+  await expect(page.getByText("Apogee isn't installed, so there is nothing to train.")).toBeVisible()
+  await expect(page.getByText('Choose a run to see what it trained and how it did.')).toBeVisible()
+  await page.goto(`${built}?start=training:datasets&still=true&apogee=missing`)
+  await expect(page.getByText("Apogee isn't installed, so there is nothing to train.")).toBeVisible()
+  await expect(page.getByText('Choose a dataset.')).toBeVisible()
+  expect(errors).toEqual([])
+})
+
+test('the five tabs switch; a pipeline run plays to its abort, Resume… asks and the resume completes, live (design 1j)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=training:pipelines`)
+  for (const tab of ['Runs', 'Cycle', 'Regimes', 'Datasets', 'Pipelines']) {
+    await trainingTab(page, tab).click()
+    await expect(trainingTab(page, tab)).toHaveAttribute('aria-pressed', 'true')
+  }
+  // The recorded run fails its second gate: said in the toast, its page offering the resume.
+  await expect(toast(page, "pipeline aborted -- stage 'refusals' failed the cumulative eval gate (50% (1/2))")).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText('Resume from stage 2, refusals')).toBeVisible()
+  await page.getByRole('button', { name: 'Resume…' }).click()
+  const confirm = page.getByRole('alertdialog', { name: 'Resume pipe-20261026-074112 from stage 2, refusals?' })
+  await expect(confirm).toContainText('apogee train pipeline resume pipe-20261026-074112')
+  await confirm.getByRole('button', { name: 'Resume' }).click()
+  await expect(page.getByText('Resuming pipe-20261026-074112')).toBeVisible()
+  await expect(toast(page, 'Pipeline pipe-20261026-074112: complete')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText('skills · complete · on tiny')).toBeVisible()
+  expect(errors).toEqual([])
+})
+
+test('a cycle pass plays to its failure and halts the cycle; Resume… clears it, live (design 1j)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=training:cycle`)
+  await page.getByRole('button', { name: 'Run one pass…' }).click()
+  const confirm = page.getByRole('alertdialog', { name: 'Run the training cycle once?' })
+  await expect(confirm).toContainText('apogee train cycle run')
+  await confirm.getByRole('button', { name: 'Run one pass' }).click()
+  await expect(page.getByText('THIS PASS, RUNNING HERE')).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Training ⌘9 · 1 running', exact: true })).toBeVisible()
+  await expect(page.getByText(/^Halted: circuit breaker: 1 consecutive failed cycle\(s\) reached circuit_breaker_k 1\./)).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('button', { name: 'Resume…' }).click()
+  await page.getByRole('alertdialog', { name: 'Resume the training cycle?' }).getByRole('button', { name: 'Resume' }).click()
+  await expect(toast(page, 'cycle resumed (was halted: circuit breaker: 1 consecutive failed cycle(s) reached circuit_breaker_k 1); the failure count is reset')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Halt…' })).toBeEnabled()
+  expect(errors).toEqual([])
+})
+
+test('a promote: refused at its gate word for word, Change the promotion… reopens the sheet, forced into the adapter ledger refused in its mode, then a forced merge that plays to its line (design 1j)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=training`)
+  await expect(page.getByRole('button', { name: 'New run…' })).toBeEnabled({ timeout: 10_000 })
+  await page.getByRole('button', { name: 'Promote…' }).click()
+  let sheet = page.getByRole('dialog', { name: 'Promote 20261021-051826' })
+  await expect(sheet).toContainText('This run failed the gate (46%) -- promote refuses it unless forced.')
+  await sheet.getByRole('textbox', { name: 'As backend' }).fill('based')
+  await expect(sheet).toContainText('based holds adapter versions (active v1 of 1)')
+  await sheet.getByRole('button', { name: 'Promote' }).click()
+  const refused = page.getByRole('alertdialog', { name: "That didn't work" })
+  await expect(refused).toContainText('apogee train: the eval gate failed for run 20261021-051826 (46%: 11/24 passed). Fix the training or the suite, then re-run eval, or pass --force to skip the gate')
+  await refused.getByRole('button', { name: 'Change the promotion…' }).click()
+  sheet = page.getByRole('dialog', { name: 'Promote 20261021-051826' })
+  await expect(sheet.getByRole('alert')).toContainText('the eval gate failed for run 20261021-051826')
+  await sheet.getByRole('checkbox', { name: /^Skip the gate/ }).check()
+  await sheet.getByRole('button', { name: 'Promote' }).click()
+  await expect(page.getByRole('alertdialog', { name: "That didn't work" })).toContainText("apogee train: 'based' holds adapter versions (active v1) applied over its base")
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Change the promotion…' }).click()
+  sheet = page.getByRole('dialog', { name: 'Promote 20261021-051826' })
+  await expect(sheet.getByRole('checkbox', { name: /^The adapter alone/ })).toBeChecked()
+  await sheet.getByRole('checkbox', { name: /^The adapter alone/ }).uncheck()
+  await sheet.getByRole('textbox', { name: 'As backend' }).fill('student-tuned')
+  await expect(sheet).toContainText('apogee train promote 20261021-051826 --as student-tuned --force')
+  await sheet.getByRole('button', { name: 'Promote' }).click()
+  await expect(page.getByText('Promoting')).toBeVisible()
+  await expect(toast(page, 'promoted to new backend student-tuned -> v1')).toBeVisible({ timeout: 15_000 })
+  expect(errors).toEqual([])
+})
+
+test('a pull streams into the banner, and Prepare it runs datasets prepare, saying the CLI’s refusal of that folder (design 1j)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=training:datasets`)
+  await page.getByRole('button', { name: 'Pull…' }).click()
+  const sheet = page.getByRole('dialog', { name: 'Pull a dataset' })
+  await expect(sheet.getByRole('button', { name: 'Pull' })).toBeDisabled()
+  await sheet.getByRole('textbox', { name: 'Dataset reference' }).fill('someone/heat-notes')
+  await expect(sheet).toContainText('apogee datasets pull someone/heat-notes')
+  await sheet.getByRole('button', { name: 'Pull' }).click()
+  await expect(page.getByText('Pulling')).toBeVisible()
+  await expect(page.getByText('Pulled: 2 file(s), 136 KiB').first()).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('button', { name: 'Prepare it' }).click()
+  await expect(toast(page, "apogee datasets: No supported data files found in '/Users/someone/.apogee/training/datasets/raw/someone--heat-notes'. Expected Parquet, JSON, JSONL or CSV files.")).toBeVisible({ timeout: 10_000 })
+  await page.getByRole('button', { name: 'Dismiss' }).click()
+  await expect(page.getByRole('button', { name: 'Prepare it' })).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+

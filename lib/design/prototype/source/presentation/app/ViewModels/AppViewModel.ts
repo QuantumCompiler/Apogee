@@ -17,6 +17,9 @@ import { settingsPreferences } from '../../settings/Previews/SettingsWorlds'
 import { SettingsViewModel } from '../../settings/ViewModels/SettingsViewModel'
 import type { SettingsConfirm, SettingsPane } from '../../settings/ViewModels/SettingsViewModel'
 import { SessionKeys } from '../../sessions/ViewModels/SessionKeys'
+import { sweep } from '../../training/Previews/TrainingWorlds'
+import { TrainingViewModel } from '../../training/ViewModels/TrainingViewModel'
+import type { TrainingConfirm } from '../../training/ViewModels/TrainingViewModel'
 import { KeyMap } from '../../shell/ViewModels/KeyMap'
 import type { BoundKey } from '../../shell/ViewModels/KeyMap'
 import type { Compactions } from '../../session/ViewModels/Compactions'
@@ -104,6 +107,8 @@ export class AppViewModel extends Observable {
   readonly library: SessionLibraryViewModel
   /** The console (1g). */
   readonly console: ConsoleViewModel
+  /** The Training place (1j). */
+  readonly training: TrainingViewModel
   /** The Settings window (1i), over the same theme service the window applies. */
   readonly settings: SettingsViewModel
   /** Every key the window binds: the shell's and the places' (Sessions'), what Settings › Keyboard lists. */
@@ -142,7 +147,8 @@ export class AppViewModel extends Observable {
     this.consoleChild = new StandInChild({ rules: AppViewModel.consoleRules(preset), apogee: preset.apogee }, modes)
     this.console = new ConsoleViewModel(new ReadRunner(this.consoleChild), new JobStarter(this.consoleChild, this.clock, this.registry))
     this.settings = new SettingsViewModel(this.reads, this.jobs, this.theme, () => this.boundKeys, settingsPreferences)
-    this.places = { models: this.models }
+    this.training = new TrainingViewModel(this.reads, this.jobs)
+    this.places = { models: this.models, training: this.training }
 
     // The library's doors, as closures: the toast, the shell's hosts, Sessions (an overlay closed, or left open), Models and the scrim.
     this.library.say = (text) => this.shell.say(text)
@@ -183,6 +189,12 @@ export class AppViewModel extends Observable {
     }
     this.models.goTo = (place) => this.shell.go(place)
     this.models.subscribe(() => this.changed())
+    // The Training place's doors (1j): the toast, the shell's sheet and confirm hosts.
+    this.training.say = (text) => this.shell.say(text)
+    this.training.present = (sheet) => this.shell.openSheet(sheet)
+    this.training.dismissSheet = () => this.shell.closeSheet()
+    this.training.ask = (kind) => this.shell.ask(kind)
+    this.training.subscribe(() => this.changed())
     this.registry.onChange(() => this.changed())
 
     // The links between places, as closures: the monitor's two doors.
@@ -254,9 +266,15 @@ export class AppViewModel extends Observable {
    * is every store run going on, a pull, a conversion, a quantization or a
    * check of the files, whoever started it.
    */
-  get placeRuns(): { readonly models: number } {
+  get placeRuns(): { readonly models: number; readonly training: number } {
     const store = ['pull', 'convert', 'quantize', 'repair']
-    return { models: this.registry.children('job').filter((job) => store.some((verb) => job.label.startsWith(`apogee models ${verb} `))).length }
+    const jobs = this.registry.children('job')
+    // Training's (1j) is a run, a pipeline or a cycle pass going on, as the old badge counts `running || live`: never a promote, a pull or a prepare.
+    const trains = ['apogee train run', 'apogee train pipeline run', 'apogee train pipeline resume', 'apogee train cycle run']
+    return {
+      models: jobs.filter((job) => store.some((verb) => job.label.startsWith(`apogee models ${verb} `))).length,
+      training: jobs.filter((job) => trains.some((words) => job.label === words || job.label.startsWith(`${words} `))).length,
+    }
   }
 
   /** Models, on the tab a door names: Backends at a model, or Roles (the inspector's two doors, design 1h). */
@@ -294,6 +312,18 @@ export class AppViewModel extends Observable {
   /** Register…'s sheet: Cancel, or Register. */
   cancelRegister(): void {
     this.settings.cancelRegister()
+  }
+
+  /** A Training confirm answered: the act asked about, or Change the promotion…; the host closed first (1j). */
+  async confirmTraining(kind: TrainingConfirm): Promise<void> {
+    this.shell.dismissConfirm()
+    await this.training.confirm(kind)
+  }
+
+  /** A Training confirm's Cancel, or the refusal's OK. */
+  dismissTraining(kind: TrainingConfirm): void {
+    this.shell.dismissConfirm()
+    this.training.dismissPending(kind)
   }
 
   /** A Models confirm answered: yes, or its second door; the host closed first. */
@@ -384,6 +414,7 @@ export class AppViewModel extends Observable {
     const binary = found.case === 'found' ? found.binary : undefined
     this.monitor.connect(binary)
     this.models.connect(binary)
+    this.training.connect(binary)
     // The console's child shares the preset's mode, so it finds the binary where `child` does.
     this.console.connect(binary)
     // Settings, with the override this launch's discovery passed over, as the app's preferences hold it.
@@ -426,6 +457,10 @@ export class AppViewModel extends Observable {
     }
     if (where === 'settings') {
       await this.openSettingsPreset(sub ?? 'general')
+      return
+    }
+    if (where === 'training') {
+      await this.openTrainingPreset(sub ?? '')
       return
     }
     if (where === 'models' || where === 'download') {
@@ -568,6 +603,43 @@ export class AppViewModel extends Observable {
       case 'download':
         await models.select('Gemma4-E4B-4bit')
         models.openDownload('meta-llama/Llama-3.2-1B-Instruct')
+        return
+    }
+  }
+
+  /**
+   * A Training preset (design 1j), as the old `applyStart('training:…')`
+   * sets it up: the Streaming session at its starting frame behind it, as the
+   * Models and Settings presets keep it, the place read, then its tab and the
+   * old frame's state -- a run training (`training`, New run… pressed, so
+   * the run the CLI recorded), the `skills` pipeline started (its start ticks
+   * stand it at stage 2, iteration 2), Regimes on `foundation`, or one run's
+   * page.
+   */
+  private async openTrainingPreset(sub: string): Promise<void> {
+    await this.openStreaming()
+    const training = this.training
+    this.shell.go('training')
+    await training.refresh()
+    const tab = ({ '': 'runs', datasets: 'datasets', pipelines: 'pipelines', cycle: 'cycle', regimes: 'regimes', stalelock: 'cycle', unreadable: 'cycle', cyclepass: 'pipelines', passrunning: 'pipelines', resumeheld: 'pipelines' } as const)[sub as 'cycle'] ?? 'runs'
+    training.pick(tab)
+    switch (sub) {
+      case '':
+        training.newRun()
+        return
+      case 'pipelines':
+        training.requestRun('skills')
+        await this.confirmTraining('train')
+        return
+      case 'regimes':
+        training.selectRegime('foundation')
+        return
+      case 'cyclepass':
+      case 'passrunning':
+        await training.openPipelineRun(sweep.cyclePass)
+        return
+      case 'resumeheld':
+        await training.openPipelineRun(sweep.held)
         return
     }
   }

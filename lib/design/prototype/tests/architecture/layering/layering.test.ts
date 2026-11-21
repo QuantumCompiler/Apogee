@@ -129,6 +129,26 @@ describe('the layering check, on this prototype', () => {
     ])
   })
 
+  test("violations planted in Training fail, each naming its file: React in TrainingViewModel.ts, the place importing models, and the shell importing training (design 1j)", () => {
+    const disk = new DiskTree(root)
+    const planted: Record<string, string> = {
+      'source/presentation/training/ViewModels/TrainingViewModel.ts': `import React from 'react'\n${disk.contents('source/presentation/training/ViewModels/TrainingViewModel.ts')}`,
+      'source/presentation/training/Views/RunsView.tsx': `import { ModelGlyph } from '../../models/Views/ModelsScreen'\n${disk.contents('source/presentation/training/Views/RunsView.tsx')}`,
+      'source/presentation/shell/Views/Sidebar.tsx': `import { TrainingScreen } from '../../training/Views/TrainingScreen'\n${disk.contents('source/presentation/shell/Views/Sidebar.tsx')}`,
+    }
+    const tree: SourceTree = {
+      files: (directory) => disk.files(directory),
+      folders: (directory) => disk.folders(directory),
+      isDirectory: (path) => disk.isDirectory(path),
+      contents: (path) => planted[path] ?? disk.contents(path),
+    }
+    expect(new LayeringCheck(ModuleMap.read(tree), tree).violations()).toEqual([
+      'source/presentation/shell/Views/Sidebar.tsx imports presentation/training, which presentation/shell does not declare as a dependency',
+      'source/presentation/training/ViewModels/TrainingViewModel.ts imports react: a view-model stays free of React, so it tests without a browser',
+      'source/presentation/training/Views/RunsView.tsx imports presentation/models, which presentation/training does not declare as a dependency',
+    ])
+  })
+
   test('the disk tree reads the prototype, never node_modules, build output or dot files', () => {
     const files = new DiskTree(root).files('')
     expect(files).toContain('modules.json')

@@ -4,6 +4,7 @@ import trainPipelineRun from '@recorded/business/jobs/Fixtures/train-pipeline-ru
 import agentsList from '@recorded/business/reads/Fixtures/agents-list.json?raw'
 import datasetsPull from '@recorded/business/reads/Fixtures/datasets-pull-handmade.txt?raw'
 import chatsCompact from '@recorded/business/reads/Fixtures/chats-compact.txt?raw'
+import trainRun from '@recorded/business/reads/Fixtures/train-run.err?raw'
 import { JobEnd, JobStarter, JobUpdate } from '../../../source/business/jobs/SupervisedJob'
 import { ReadRunner } from '../../../source/business/reads/ReadRunner'
 import type { JobRunning } from '../../../source/business/jobs/SupervisedJob'
@@ -234,5 +235,35 @@ describe('a job that never started', () => {
     ])
     expect(JobEnd.succeeded(JobEnd.of(ChildExit.exited(0), new BoundedTail(), false))).toBe(true)
     expect(JobEnd.succeeded(JobEnd.notStarted('x'))).toBe(false)
+  })
+})
+
+describe("a run that speaks on stderr: its busy line, one a tick (design 1j's `busy` rule)", () => {
+  // `train run` takes no machine stream and prints its progress on stderr, which the Mac samples as the busy line.
+  const run: Rules = { jobs: [{ arguments: ['train', 'run'], answer: { stderr: trainRun, busy: true } }] }
+
+  test('train-run.err plays one line a tick as the busy line, then ends with the whole stderr as its tail', () => {
+    const { jobs, clock } = starter(run)
+    const job = jobs.startJob(binary, ['train', 'run', '/Users/someone/work/student', '--dataset', '/Users/someone/work/data.jsonl'], false)
+    clock.advance(4)
+    expect(said(job)).toEqual(lines(trainRun).slice(0, 4).map((line) => JobUpdate.busy(line)))
+    clock.advance(3)
+    expect(said(job).map((update) => update.case)).toEqual(['busy', 'busy', 'busy', 'busy', 'busy', 'busy', 'busy'])
+    clock.advance(1)
+    expect(said(job).at(-1)).toEqual(JobUpdate.ended(JobEnd.of(ChildExit.exited(0), BoundedTail.of(trainRun), false)))
+  })
+
+  test("its stderr's lines come before its stdout's, as a promote narrates on stderr and says its result on stdout", () => {
+    const { jobs, clock } = starter({ jobs: [{ arguments: ['train', 'promote'], answer: { stderr: '[promote] one\n[promote] two\n', stdout: 'done\n', busy: true } }] })
+    const job = jobs.startJob(binary, ['train', 'promote', 'x', '--as', 'y'], false)
+    clock.advance(4)
+    expect(said(job)).toEqual([JobUpdate.busy('[promote] one'), JobUpdate.busy('[promote] two'), JobUpdate.said('done'), JobUpdate.ended(JobEnd.of(ChildExit.exited(0), BoundedTail.of('[promote] one\n[promote] two\n'), false))])
+  })
+
+  test('without the rule, stderr is only the tail at the end, as before', () => {
+    const { jobs, clock } = starter({ jobs: [{ arguments: ['train', 'run'], answer: { stderr: trainRun } }] })
+    const job = jobs.startJob(binary, ['train', 'run'], false)
+    clock.advance(1)
+    expect(said(job).map((update) => update.case)).toEqual(['ended'])
   })
 })

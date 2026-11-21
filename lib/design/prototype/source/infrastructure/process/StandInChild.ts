@@ -30,6 +30,14 @@ export interface Answer {
    * calls reported `failed` just before it.
    */
   readonly cancelled?: string
+  /**
+   * Its stderr plays as it runs (design 1j): one line a tick as the busy
+   * line, before its stdout's lines, as the Mac samples stderr's last line
+   * while a run goes -- `train run`, which takes no machine stream, says its
+   * progress there, and a promote narrates there before its result. Unless
+   * named, stderr is only the tail its end leaves (1d's).
+   */
+  readonly busy?: boolean
 }
 
 /**
@@ -67,6 +75,7 @@ export interface ReplayRules {
   readonly freeze: Freeze | undefined
   readonly continuations: Continuations | undefined
   readonly cancelled: string | undefined
+  readonly busy: boolean
 }
 
 /**
@@ -199,7 +208,7 @@ export class StandInChild {
 
   /** An answer's replay rules, each as 1d replayed it unless the answer names it. */
   static replay(answer: Answer): ReplayRules {
-    return { exitAfter: answer.exitAfter ?? 0, freeze: answer.freeze, continuations: answer.continuations, cancelled: answer.cancelled }
+    return { exitAfter: answer.exitAfter ?? 0, freeze: answer.freeze, continuations: answer.continuations, cancelled: answer.cancelled, busy: answer.busy ?? false }
   }
 
   /** Logs what nobody recorded, as `<kind>: <what>`: a call, or a chat's turn past its recording. */

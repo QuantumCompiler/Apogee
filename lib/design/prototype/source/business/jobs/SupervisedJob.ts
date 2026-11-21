@@ -85,7 +85,7 @@ export class JobStarter implements JobStarting {
   startJob(_binary: string, args: readonly string[], streaming: boolean, _folder?: string): JobRunning {
     const answer = this.child.run('jobs', args)
     if (!answer.started) return SupervisedJob.notStarted(answer.reason)
-    const job = SupervisedJob.replay(answer.run, streaming, this.clock, answer.replay.exitAfter)
+    const job = SupervisedJob.replay(answer.run, streaming, this.clock, answer.replay.exitAfter, answer.replay.busy)
     if (this.registry && !job.finished) {
       const registration = this.registry.register('job', ChildRegistry.label(args), () => job.stop())
       job.onEnd(() => registration.leave())
@@ -107,7 +107,10 @@ export class SupervisedJob implements JobRunning {
   readonly updates: AsyncStream<JobUpdate>
   private readonly continuation: Continuation<JobUpdate>
   private readonly lines: string[]
+  /** The stderr lines that play first as the busy line, where its rule's `busy` says (design 1j). */
+  private readonly busyLines: string[]
   private next = 0
+  private busyAt = 0
   /** Ticks still to wait after the last line before `.ended`: the rule's `exitAfter`. */
   private held: number
   private leave: () => void = () => {}
@@ -117,8 +120,10 @@ export class SupervisedJob implements JobRunning {
     private readonly run: CapturedRun | undefined,
     private readonly streaming: boolean,
     exitAfter = 0,
+    busy = false,
   ) {
     this.held = exitAfter
+    this.busyLines = run && busy ? LineFramer.lines(run.stderrTail.text) : []
     const { stream, continuation } = AsyncStream.make<JobUpdate>()
     this.updates = stream
     this.continuation = continuation
@@ -132,9 +137,9 @@ export class SupervisedJob implements JobRunning {
     return job
   }
 
-  /** `run`, replayed on `clock`; in a still frame, as many ticks in as the frame, however late it opened. */
-  static replay(run: CapturedRun, streaming: boolean, clock: Clock, exitAfter = 0): SupervisedJob {
-    const job = new SupervisedJob(run, streaming, exitAfter)
+  /** `run`, replayed on `clock`; in a still frame, as many ticks in as the frame, however late it opened. With `busy`, its stderr first, a busy line a tick (design 1j). */
+  static replay(run: CapturedRun, streaming: boolean, clock: Clock, exitAfter = 0, busy = false): SupervisedJob {
+    const job = new SupervisedJob(run, streaming, exitAfter, busy)
     job.leave = clock.onTick(() => job.step(clock.linesPerTick))
     // After `leave` is set, so a recording shorter than the frame's ticks ends, and leaves, once.
     for (let tick = 0; tick < clock.missedTicks && !job.continuation.finished; tick += 1) job.step(clock.linesPerTick)
@@ -158,6 +163,11 @@ export class SupervisedJob implements JobRunning {
   }
 
   private step(pace: number): void {
+    if (this.busyAt < this.busyLines.length) {
+      for (const line of this.busyLines.slice(this.busyAt, this.busyAt + pace)) this.continuation.yield(JobUpdate.busy(line))
+      this.busyAt += pace
+      return
+    }
     if (this.next >= this.lines.length) {
       if (this.held > 0) {
         this.held -= 1

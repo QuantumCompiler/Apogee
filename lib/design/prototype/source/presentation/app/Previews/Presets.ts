@@ -23,6 +23,8 @@ import {
   streamingRules,
 } from '../../session/Previews/SessionPresets'
 import { executePreset } from '../../sessions/Previews/ExecutePreset'
+import { trainingPlaceRules, withTrainingWorld } from '../../training/Previews/TrainingWorlds'
+import type { TrainingWorld } from '../../training/Previews/TrainingWorlds'
 import { withLibraryRules } from '../../sessions/Previews/LibraryRules'
 import type { StartRequest } from '../../shell/ViewModels/Routing'
 
@@ -75,6 +77,18 @@ function settingsPreset(sub: string, world: SettingsWorld = 'default', start = 1
 }
 
 /**
+ * A Training preset (design 1j): the place over its world, the Streaming
+ * session at its starting frame behind it (as the Models and Settings
+ * presets keep it, composed here since `training` may not import
+ * `session`). `start` is how many ticks in a still frame stands: `training`'s
+ * run at `train-run.err`'s fourth line, `training:pipelines`' `skills` run at
+ * stage 2, iteration 2 (its stream's 24th line).
+ */
+function trainingPreset(sub: string, world: TrainingWorld, start = 1): (options: PresetOptions) => Preset {
+  return ({ still, apogee }) => ({ rules: withTrainingWorld(streamingRules('start'), world), route: sub === '' ? 'training' : `training:${sub}`, clock: { start, still }, apogee })
+}
+
+/**
  * A preset with the console's answers (design 1g): the console opens over
  * every screen (⇧⌘K), so every preset answers its lines -- `consoleRules`,
  * on the console's own child (`Preset.console`), a line nobody recorded
@@ -97,22 +111,24 @@ function listing(build: (options: PresetOptions) => Preset): (options: PresetOpt
 }
 
 /**
- * A preset with the Models place's reads (design 1h) and the Settings
- * window's (design 1i) before its own, so a preset's own answer to the same
- * arguments is the one given: both open from every screen.
+ * A preset with the Models place's reads (design 1h), the Settings window's
+ * (design 1i) and the Training place's (design 1j) before its own, so a
+ * preset's own answer to the same arguments is the one given: all three
+ * open from every screen.
  */
 function modelling(build: (options: PresetOptions) => Preset): (options: PresetOptions) => Preset {
   return consoling((options) => {
     const preset = build(options)
     const models = modelsPlaceRules()
     const settings = settingsPlaceRules()
+    const training = trainingPlaceRules()
     return {
       ...preset,
       rules: {
         ...preset.rules,
-        reads: [...(models.reads ?? []), ...settings.reads, ...(preset.rules.reads ?? [])],
-        commands: [...(models.commands ?? []), ...settings.commands, ...(preset.rules.commands ?? [])],
-        jobs: [...settings.jobs, ...(preset.rules.jobs ?? [])],
+        reads: [...(models.reads ?? []), ...settings.reads, ...(training.reads ?? []), ...(preset.rules.reads ?? [])],
+        commands: [...(models.commands ?? []), ...settings.commands, ...(training.commands ?? []), ...(preset.rules.commands ?? [])],
+        jobs: [...settings.jobs, ...(training.jobs ?? []), ...(preset.rules.jobs ?? [])],
       },
     }
   })
@@ -125,7 +141,8 @@ function modelling(build: (options: PresetOptions) => Preset): (options: PresetO
  * session's scenarios and states, in the old `data-props` order; 1g's
  * `execute` and `console`; 1h's the nine Models presets; 1i's the old nine
  * Settings presets in the old order and its four new ones, one a pane that
- * had none; each feature item adds its own here. Every one
+ * had none; 1j's the old nine Training presets in the old order and its new
+ * `training:regimes`; each feature item adds its own here. Every one
  * carries the Sessions place's reads, since the list shows on every screen
  * (`execute`'s own), and the console's answers, since it opens over every one.
  */
@@ -168,6 +185,16 @@ export const presets: Readonly<Record<string, (options: PresetOptions) => Preset
   'settings:web': listing(settingsPreset('web')),
   'settings:memory': listing(settingsPreset('memory')),
   'settings:keyboard': listing(settingsPreset('keyboard')),
+  training: listing(trainingPreset('', 'recorded', 4)),
+  'training:datasets': listing(trainingPreset('datasets', 'recorded')),
+  'training:pipelines': listing(trainingPreset('pipelines', 'pipelines', 24)),
+  'training:cycle': listing(trainingPreset('cycle', 'cycle')),
+  'training:stalelock': listing(trainingPreset('stalelock', 'stalelock')),
+  'training:unreadable': listing(trainingPreset('unreadable', 'unreadable')),
+  'training:cyclepass': listing(trainingPreset('cyclepass', 'stalelock')),
+  'training:passrunning': listing(trainingPreset('passrunning', 'passrunning')),
+  'training:resumeheld': listing(trainingPreset('resumeheld', 'resumeheld')),
+  'training:regimes': listing(trainingPreset('regimes', 'recorded')),
 }
 
 /** The preset opened with no `start`, or an unknown one: `chat`, the old `data-props` default (1v; 1e's interim default was the monitor). */

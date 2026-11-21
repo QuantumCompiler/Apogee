@@ -12,10 +12,32 @@ export type JobStatus =
   | { readonly case: 'failed'; readonly message: string }
   | { readonly case: 'done' }
 
-/** One step of a chain, as the stream named it: `started`, `done`, `failed`, or `stopped` once its run was. */
+/** One step of a chain, as the stream named it: `started`, `done`, `failed`, or `stopped` once its run was -- or a pipeline stage's manifest word (design 1j). */
 export interface JobStage {
   readonly label: string
   readonly state: string
+  /** A pipeline stage's own run, once it has one: what `train eval` and `train promote` take (1j). */
+  readonly runID?: string | undefined
+  /** A pipeline stage's cumulative score as its latest event carried it, read as the gate's only once the stage is past its gate (1j). */
+  readonly cumulativeScore?: number | undefined
+}
+
+/** The trainer's latest iteration, as it reported it (the CLI's 55h, design 1j). */
+export interface JobIteration {
+  readonly iteration: number
+  readonly iterations: number | undefined
+  readonly loss: number | undefined
+  readonly lr: number | undefined
+  /** Iterations a second. */
+  readonly throughput: number | undefined
+  /** The pipeline stage it belongs to, from 1. */
+  readonly stage: number | undefined
+}
+
+/** A line of a cycle pass's narration: where the pass is, in its words (55h, design 1j). */
+export interface JobPassLine {
+  readonly state: string
+  readonly text: string
 }
 
 /** Bytes a run has moved, as it last said; `total` only when known. */
@@ -33,9 +55,11 @@ export interface JobBytes {
  * A job's progress, folded from its updates and nothing else (design 1h): its
  * steps, its bytes, what it said, its documents and how it ended. The Mac
  * app's `JobProgress` (`BusinessJobs`, `JobProgress.swift`), the parts a
- * store job and a pull read -- a pure reducer, so a screen's whole view of a
- * run is a function of what the run said. The training run's iterations and
- * passes, and the media events, are the items that port those places.
+ * store job and a pull read, and a training run's (design 1j): a pipeline's
+ * stages as its manifest moved them, the run they belong to, the trainer's
+ * latest iteration and a cycle pass's narration -- a pure reducer, so a
+ * screen's whole view of a run is a function of what the run said. The media
+ * events are the items that port those places.
  */
 export class JobProgress {
   status: JobStatus = { case: 'running' }
@@ -57,6 +81,12 @@ export class JobProgress {
   stderr = ''
   /** The stream's own `error`, when one came: read before stderr's. */
   error: string | undefined = undefined
+  /** The pipeline run its stages belong to (55h): a pipeline's own, or the one a cycle pass trains (1j). */
+  pipelineRunID: string | undefined = undefined
+  /** The trainer's latest iteration (55h, 1j). */
+  iteration: JobIteration | undefined = undefined
+  /** A cycle pass's narration so far, in order (55h, 1j). */
+  readonly passes: JobPassLine[] = []
 
   apply(update: JobUpdate): void {
     switch (update.case) {
@@ -94,10 +124,20 @@ export class JobProgress {
 
   private applyEvent(event: JobEvent): void {
     switch (event.case) {
-      case 'stage':
+      case 'stage': {
         this.stageCount = event.count
-        this.stages.set(event.index, { label: event.label, state: event.state })
+        const runID = event.runID ?? this.stages.get(event.index)?.runID
+        this.stages.set(event.index, runID === undefined && event.cumulativeScore === undefined ? { label: event.label, state: event.state } : { label: event.label, state: event.state, runID, cumulativeScore: event.cumulativeScore })
+        if (event.pipelineRunID !== undefined) this.pipelineRunID = event.pipelineRunID
         if (event.state === 'started') this.bytes = undefined
+        return
+      }
+      case 'iteration':
+        this.iteration = { iteration: event.iteration, iterations: event.iterations, loss: event.loss, lr: event.lr, throughput: event.throughput, stage: event.stage }
+        return
+      case 'pass':
+        this.passes.push({ state: event.state, text: event.text })
+        if (event.text !== '') this.lastSaid = event.text
         return
       case 'bytes': {
         const fraction = event.total !== undefined && event.total > 0 ? Math.min(1, event.done / event.total) : undefined
@@ -123,6 +163,11 @@ export class JobProgress {
   /** The stages in order, 1 to the count the stream gave. */
   orderedStages(): { readonly index: number; readonly stage: JobStage }[] {
     return [...this.stages.keys()].sort((a, b) => a - b).map((index) => ({ index, stage: this.stages.get(index) as JobStage }))
+  }
+
+  /** The latest pass line of a cycle pass: where it is now (1j). */
+  get pass(): JobPassLine | undefined {
+    return this.passes.at(-1)
   }
 
   /** The first stage that did not finish: the one a resume runs again. */

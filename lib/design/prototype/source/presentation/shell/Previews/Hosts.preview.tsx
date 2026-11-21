@@ -49,7 +49,7 @@ export const Confirm = () => (
 
 /** A place not yet ported. */
 export const Placeholder = () => {
-  const placeholder = placeholderOf('training')
+  const placeholder = placeholderOf('library')
   return (
     <div className="ap" data-theme="dark" style={{ ...frame, display: 'flex', flexDirection: 'column' }}>
       {placeholder ? <PlaceholderScreen placeholder={placeholder} /> : null}

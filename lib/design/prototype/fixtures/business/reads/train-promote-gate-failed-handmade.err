@@ -1,0 +1,1 @@
+apogee train: the eval gate failed for run 20261021-051826 (46%: 11/24 passed). Fix the training or the suite, then re-run eval, or pass --force to skip the gate

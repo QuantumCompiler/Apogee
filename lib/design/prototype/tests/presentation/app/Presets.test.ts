@@ -35,6 +35,9 @@ function whatTheViewsRead(app: AppViewModel) {
     variables: app.theme.variables,
     settings: app.settings.face(),
     settingsConfirms: (['settingsForget', 'xcodeRemove'] as const).map((kind) => app.settings.confirmWords(kind) ?? 'none'),
+    // The Training place (1j): every tab, its sheets and its two confirms' words.
+    training: app.training.face(),
+    trainingConfirms: (['train', 'promoteRefused'] as const).map((kind) => app.training.confirmWords(kind) ?? 'none'),
   }
 }
 
@@ -54,6 +57,8 @@ async function walk(app: AppViewModel, name: string, pressSuite = false): Promis
   await app.library.inspectorAppeared()
   // The Models place's reads too (1h): it opens from every screen.
   await app.models.appeared()
+  // The Training place's too (1j): ⌘9 opens it on every screen.
+  await app.training.appeared()
   // The Settings window's too (1i): ⌘, opens it on every screen; each pane shown, so each one's own reads are made.
   app.openSettings(app.settings.pane)
   for (const [pane] of settingsPanes) app.settings.pick(pane)
@@ -74,7 +79,7 @@ async function walk(app: AppViewModel, name: string, pressSuite = false): Promis
 }
 
 describe("the presets: the old prototype's 30-tick check's successor", () => {
-  test('the table holds the monitor, the session’s thirteen in the old data-props order -- 1u’s four plain ones and 1v’s nine scenarios and states -- 1g’s execute and console, 1h’s nine Models presets, and 1i’s nine Settings presets in the old order and its four new ones', () => {
+  test('the table holds the monitor, the session’s thirteen in the old data-props order -- 1u’s four plain ones and 1v’s nine scenarios and states -- 1g’s execute and console, 1h’s nine Models presets, 1i’s nine Settings presets in the old order and its four new ones, and 1j’s nine Training presets in the old order and its new training:regimes', () => {
     expect(Object.keys(presets)).toEqual([
       'monitor',
       'chat',
@@ -114,6 +119,16 @@ describe("the presets: the old prototype's 30-tick check's successor", () => {
       'settings:web',
       'settings:memory',
       'settings:keyboard',
+      'training',
+      'training:datasets',
+      'training:pipelines',
+      'training:cycle',
+      'training:stalelock',
+      'training:unreadable',
+      'training:cyclepass',
+      'training:passrunning',
+      'training:resumeheld',
+      'training:regimes',
     ])
   })
 
