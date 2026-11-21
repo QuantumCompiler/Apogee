@@ -187,6 +187,26 @@ describe('the layering check, on this prototype', () => {
     ])
   })
 
+  test("violations planted in Voice fail, each naming its file: React in VoiceViewModel.ts, voice importing compose and settings -- the chosen voice is styles' MediaPreferences (design 1m)", () => {
+    const disk = new DiskTree(root)
+    const planted: Record<string, string> = {
+      'source/presentation/voice/ViewModels/VoiceViewModel.ts': `import React from 'react'\n${disk.contents('source/presentation/voice/ViewModels/VoiceViewModel.ts')}`,
+      'source/presentation/voice/Views/SpeakCard.tsx': `import { ComposeView } from '../../compose/Views/ComposeView'\n${disk.contents('source/presentation/voice/Views/SpeakCard.tsx')}`,
+      'source/presentation/voice/ViewModels/VoiceFaces.ts': `import type { SettingsPreferences } from '../../settings/ViewModels/SettingsViewModel'\n${disk.contents('source/presentation/voice/ViewModels/VoiceFaces.ts')}`,
+    }
+    const tree: SourceTree = {
+      files: (directory) => disk.files(directory),
+      folders: (directory) => disk.folders(directory),
+      isDirectory: (path) => disk.isDirectory(path),
+      contents: (path) => planted[path] ?? disk.contents(path),
+    }
+    expect(new LayeringCheck(ModuleMap.read(tree), tree).violations()).toEqual([
+      'source/presentation/voice/ViewModels/VoiceFaces.ts imports presentation/settings, which presentation/voice does not declare as a dependency',
+      'source/presentation/voice/ViewModels/VoiceViewModel.ts imports react: a view-model stays free of React, so it tests without a browser',
+      'source/presentation/voice/Views/SpeakCard.tsx imports presentation/compose, which presentation/voice does not declare as a dependency',
+    ])
+  })
+
   test('the disk tree reads the prototype, never node_modules, build output or dot files', () => {
     const files = new DiskTree(root).files('')
     expect(files).toContain('modules.json')

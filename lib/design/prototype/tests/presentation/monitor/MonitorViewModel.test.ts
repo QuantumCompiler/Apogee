@@ -265,3 +265,24 @@ describe('a clip being made, on the monitor (design 1k): the shared job list’s
     expect([opened, stopped]).toEqual([[9], []])
   })
 })
+
+describe('a speech being spoken, on the monitor (design 1m): the old `vsay` row, its Stop', () => {
+  test('a voice run is said as one, on its device where it said it, with the old row’s Stop, which stops that run', async () => {
+    const { model } = monitor()
+    const stopped: number[] = []
+    model.running = () => [
+      { id: 11, name: 'Kokoro-82M · speaking', runtime: 'cpu', kind: 'voice' },
+      { id: 12, name: 'Kokoro-82M · speaking', kind: 'voice' },
+    ]
+    model.stopRun = (id) => stopped.push(id)
+    model.opened()
+    await settled()
+    const rows = model.face().models.rows
+    expect(rows.slice(-2)).toEqual([
+      { name: 'Kokoro-82M · speaking', detail: 'a voice run this app supervises · cpu · the CLI reports no size for it', size: '', action: 'Stop', run: 11 },
+      { name: 'Kokoro-82M · speaking', detail: 'a voice run this app supervises · the CLI reports no size for it', size: '', action: 'Stop', run: 12 },
+    ])
+    model.act(rows.at(-2) ?? rows[0]!)
+    expect(stopped).toEqual([11])
+  })
+})

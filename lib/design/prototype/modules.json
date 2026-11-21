@@ -23,7 +23,7 @@
     "presentation/suites": ["presentation/shell", "presentation/styles"],
     "presentation/tasks": ["presentation/shell", "presentation/styles"],
     "presentation/video": ["infrastructure/clock", "infrastructure/process", "data/protocol", "business/jobs", "business/media", "business/reads", "presentation/shell", "presentation/styles"],
-    "presentation/voice": ["presentation/shell", "presentation/styles"],
+    "presentation/voice": ["infrastructure/clock", "infrastructure/process", "business/jobs", "business/media", "business/reads", "presentation/shell", "presentation/styles"],
     "presentation/monitor": ["infrastructure/clock", "infrastructure/process", "business/reads", "presentation/shell", "presentation/styles"],
     "presentation/app": [
       "infrastructure/clock",

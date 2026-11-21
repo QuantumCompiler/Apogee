@@ -217,7 +217,8 @@ const subscriptionTypes: readonly string[] = ['claude-cli', 'codex-cli', 'gemini
 /**
  * Whether a runtime's row is the one the Video place installs (design 1k):
  * its remedy the video set's install, as the old "Install peft…" sat on the
- * video row. The voice runtime's is Voice's (1m), which holds its install.
+ * video row. The voice runtime's row gets none: Voice (1m) left the runtime
+ * install Mac-only, so wiring it is new design for a later item.
  */
 function installsVideo(row: CheckRow): boolean {
   return /\bapogee train setup (--rebuild )?--with video\b/.test(row.remedy ?? '')

@@ -38,6 +38,8 @@ import { MediaPreferences } from '../../styles/Media/MediaPreferences'
 import { clipPath, clips, paperBoat } from '../../video/Previews/VideoWorlds'
 import { VideoForm } from '../../video/ViewModels/VideoForm'
 import { VideoViewModel } from '../../video/ViewModels/VideoViewModel'
+import { sampleText, secondSentence, speeches } from '../../voice/Previews/VoiceWorlds'
+import { VoiceViewModel } from '../../voice/ViewModels/VoiceViewModel'
 import { Observable } from '../../styles/Observation/Observable'
 
 /** A place's view-model, as the composition calls it when the place comes into view. */
@@ -124,6 +126,8 @@ export class AppViewModel extends Observable {
   readonly compose: ComposeViewModel
   /** The window's media preferences (1l): the voice new speech and compositions start from, shared by Settings, Compose and Voice. */
   readonly media: MediaPreferences
+  /** The Voice place (1m): the speeches beside their WAVs in `~/Music/Apogee`, the speak card, a speech a job on the shared list, the window's chosen voice its `media`. */
+  readonly voice: VoiceViewModel
   /** Every key the window binds: the shell's and the places' (Sessions'), what Settings › Keyboard lists. */
   readonly boundKeys: readonly BoundKey[] = [...KeyMap.shell, ...SessionKeys.bindings]
 
@@ -165,7 +169,10 @@ export class AppViewModel extends Observable {
     // The folders the CLI writes into are the stand-in's (1k), which its jobs write as they run (1l): Video and Compose read the same.
     this.video = new VideoViewModel(this.reads, this.jobs, this.child.folders, this.clock)
     this.compose = new ComposeViewModel(this.reads, this.jobs, this.child.folders, this.clock, this.video.playback, this.media)
-    this.places = { models: this.models, training: this.training, video: this.video }
+    // Voice (1m) over the same folders, the one player and the window's chosen voice; its card holds the old frame's sample on every preset, as the old `vf` starts.
+    this.voice = new VoiceViewModel(this.reads, this.jobs, this.child.folders, this.clock, this.video.playback, this.media)
+    this.voice.setText(sampleText)
+    this.places = { models: this.models, training: this.training, video: this.video, voice: this.voice }
 
     // The library's doors, as closures: the toast, the shell's hosts, Sessions (an overlay closed, or left open), Models and the scrim.
     this.library.say = (text) => this.shell.say(text)
@@ -234,12 +241,27 @@ export class AppViewModel extends Observable {
     this.compose.passedOver = passedOver
     this.compose.startingBrief = recordedBrief
     this.compose.subscribe(() => this.changed())
+    // The Voice place's doors (1m): the toast, and Models' Stored weights at its voice model (the header's line, the old openStoreFor('kokoro')).
+    this.voice.say = (text) => this.shell.say(text)
+    this.voice.openModels = (handle) => {
+      this.shell.closeOverlay()
+      this.shell.go('models')
+      this.models.showStore()
+      void this.models.store.select(handle)
+    }
+    this.voice.subscribe(() => this.changed())
     this.registry.onChange(() => this.changed())
     // The monitor lists the video runs going now from the shared job list (1k), and its Stop stops that run (a composition's Open shows it, 1l): the place's
     // own clip only once its pipeline has loaded (the old lists `vrun` past `load`), by what it generates on and where;
     // any other -- a generate the console runs, 1l's compositions -- by its label, as the badge counts it.
     this.monitor.running = () =>
       this.registry.children('job').flatMap((child) => {
+        // A speech being spoken (1m), as the old lists `vsay` from its start: the place's own by its voice model speaking and the device it said, any other by its label; its Stop the old row's.
+        if (AppViewModel.isVoiceRun(child)) {
+          const speaking = this.voice.speaking
+          const own = speaking !== undefined && speaking.arguments.length === (child.arguments?.length ?? 0) && speaking.arguments.every((word, index) => child.arguments?.[index] === word)
+          return [{ id: child.id, name: own ? speaking.name : child.label, kind: 'voice' as const, ...(own && speaking.runtime !== undefined ? { runtime: speaking.runtime } : {}) }]
+        }
         if (!AppViewModel.isVideoRun(child)) return []
         const same = (args: readonly string[]) => args.length === (child.arguments?.length ?? 0) && args.every((word, index) => child.arguments?.[index] === word)
         // A composition this place renders, by its video, as the old lists `crender` (1l): `heat-pump-2.mp4 · rendering`, with its Open.
@@ -270,8 +292,8 @@ export class AppViewModel extends Observable {
     // Unload says what the old prototype says: the open session's model is
     // held by its own child, which the CLI unloads with it. A video run
     // (1k) and a composition rendering (1l) are no model held: the monitor
-    // lists them from the shared job list with their own Stop (above);
-    // Voice (1m) adds its own.
+    // lists them from the shared job list with their own Stop (above), and
+    // so does a speech (1m).
     this.monitor.unload = (name) => this.shell.say(`Unloaded ${name}`)
     // The Settings window's doors (1i): the toast, the shell's sheet and confirm hosts, Models' Backends; Models & roles has the Models place read the roles its slot draws.
     this.settings.say = (text) => this.shell.say(text)
@@ -340,6 +362,11 @@ export class AppViewModel extends Observable {
     return (label === 'apogee video compose' || label.startsWith('apogee video compose ')) && !(child.arguments ?? []).includes('--dry-run')
   }
 
+  /** Whether a job is a speech being spoken (1m): what the Voice badge and the monitor count, as the old counts `vsay`. */
+  private static isVoiceRun(child: { readonly label: string }): boolean {
+    return child.label === 'apogee voice say' || child.label.startsWith('apogee voice say ')
+  }
+
   /**
    * The places' running counts, the sidebar's badges (design 1h): read from
    * the shared registry of children, never a place's own list -- Models'
@@ -347,7 +374,7 @@ export class AppViewModel extends Observable {
    * check of the files, whoever started it.
    */
 
-  get placeRuns(): { readonly models: number; readonly training: number; readonly video: number } {
+  get placeRuns(): { readonly models: number; readonly training: number; readonly video: number; readonly voice: number } {
     const store = ['pull', 'convert', 'quantize', 'repair']
     const jobs = this.registry.children('job')
     // Training's (1j) is a run, a pipeline or a cycle pass going on, as the old badge counts `running || live`: never a promote, a pull or a prepare.
@@ -357,6 +384,8 @@ export class AppViewModel extends Observable {
       training: jobs.filter((job) => trains.some((words) => job.label === words || job.label.startsWith(`${words} `))).length,
       // Video's (1k) is a clip being made (and 1l's compositions rendering), as the old badge counts `vrun` and `crender`: never an install.
       video: jobs.filter((job) => AppViewModel.isVideoRun(job)).length,
+      // Voice's (1m) is a speech being spoken, as the old badge counts `vsay`.
+      voice: jobs.filter((job) => AppViewModel.isVoiceRun(job)).length,
     }
   }
 
@@ -500,6 +529,7 @@ export class AppViewModel extends Observable {
     this.training.connect(binary)
     this.video.connect(binary)
     this.compose.connect(binary)
+    this.voice.connect(binary)
     // The console's child shares the preset's mode, so it finds the binary where `child` does.
     this.console.connect(binary)
     // Settings, with the override this launch's discovery passed over, as the app's preferences hold it.
@@ -554,6 +584,10 @@ export class AppViewModel extends Observable {
     }
     if (where === 'compose') {
       await this.openComposePreset(sub ?? '')
+      return
+    }
+    if (where === 'voice') {
+      await this.openVoicePreset()
       return
     }
     if (where === 'models' || where === 'download') {
@@ -831,6 +865,21 @@ export class AppViewModel extends Observable {
         return
       }
     }
+  }
+
+  /**
+   * The Voice preset (design 1m), as the old `applyStart('voice')` sets it
+   * up: the Streaming session at its starting frame behind it, as the Video
+   * presets keep it, the place read and shown, `speech-torch.json` selected
+   * and its player paused on its second sentence (the old one pauses 3.4 s
+   * into its second), the card holding the old sample.
+   */
+  private async openVoicePreset(): Promise<void> {
+    await this.openStreaming()
+    this.shell.go('voice')
+    await this.voice.appeared()
+    this.voice.select(speeches.torch)
+    this.voice.hold(secondSentence)
   }
 
   /**

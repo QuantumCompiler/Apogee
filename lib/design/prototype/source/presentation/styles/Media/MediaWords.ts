@@ -28,3 +28,20 @@ export function secs(seconds: number): string {
 export function tilde(path: string): string {
   return path.startsWith(home) ? `~/${path.slice(home.length)}` : path
 }
+
+const stopWords = ['a', 'an', 'the', 'of', 'on', 'in', 'at', 'and', 'with', 'to', 'for', 'is', 'are', 'it', 'its', 'how', 'what', 'from', 'by', 'into', 'down', 'up']
+
+/**
+ * A file's name stem from its words, the old prototype's `stemOf`: its first
+ * three words that say something (`apogee-runs-every`), `untitled` for none.
+ * Design 1k's clip names, promoted from Video on Voice's speech names (1m).
+ */
+export function stemOf(text: string): string {
+  const words = text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((word) => word !== '' && !stopWords.includes(word))
+    .slice(0, 3)
+  return words.length ? words.join('-') : 'untitled'
+}

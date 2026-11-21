@@ -38,7 +38,6 @@ const portedBy: Readonly<Partial<Record<Destination, string>>> = {
   suites: '1p',
   tasks: '1p',
   graph: '1o',
-  voice: '1m',
   knowledge: '1o',
   library: '1n',
   review: '1n',

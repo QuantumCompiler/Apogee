@@ -41,6 +41,8 @@ function whatTheViewsRead(app: AppViewModel) {
     video: app.video.face(),
     // The compositions (1l): the list, the new composition, a project's page and Make changes.
     compose: app.compose.face(),
+    // The Voice place (1m): the speeches, the speak card and the selected speech.
+    voice: app.voice.face(),
     trainingConfirms: (['train', 'promoteRefused'] as const).map((kind) => app.training.confirmWords(kind) ?? 'none'),
   }
 }
@@ -66,6 +68,8 @@ async function walk(app: AppViewModel, name: string, pressSuite = false): Promis
   // The Video place's too (1k): ⌘6 opens it on every screen; and its Compositions tab's (1l).
   await app.video.appeared()
   await app.compose.appeared()
+  // The Voice place's too (1m): ⌘7 opens it on every screen.
+  await app.voice.appeared()
   // The Settings window's too (1i): ⌘, opens it on every screen; each pane shown, so each one's own reads are made.
   app.openSettings(app.settings.pane)
   for (const [pane] of settingsPanes) app.settings.pick(pane)
@@ -86,7 +90,7 @@ async function walk(app: AppViewModel, name: string, pressSuite = false): Promis
 }
 
 describe("the presets: the old prototype's 30-tick check's successor", () => {
-  test('the table holds the monitor, the session’s thirteen in the old data-props order -- 1u’s four plain ones and 1v’s nine scenarios and states -- 1g’s execute and console, 1h’s nine Models presets, 1i’s nine Settings presets in the old order and its four new ones, 1j’s nine Training presets in the old order and its new training:regimes, 1k’s four Video presets in the old order, and 1l’s five Compose presets in the old order', () => {
+  test('the table holds the monitor, the session’s thirteen in the old data-props order -- 1u’s four plain ones and 1v’s nine scenarios and states -- 1g’s execute and console, 1h’s nine Models presets, 1i’s nine Settings presets in the old order and its four new ones, 1j’s nine Training presets in the old order and its new training:regimes, 1k’s four Video presets in the old order, 1l’s five Compose presets in the old order, and 1m’s voice', () => {
     expect(Object.keys(presets)).toEqual([
       'monitor',
       'chat',
@@ -145,6 +149,7 @@ describe("the presets: the old prototype's 30-tick check's successor", () => {
       'compose:new',
       'compose:tide',
       'compose:differs',
+      'voice',
     ])
   })
 

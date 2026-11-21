@@ -6,6 +6,7 @@ import { InstallCard } from '../../../source/presentation/styles/Components/Inst
 import { InstallConsentSheet } from '../../../source/presentation/styles/Components/InstallConsentSheet'
 import { MediaPlayer } from '../../../source/presentation/styles/Components/MediaPlayer'
 import { PhaseRow } from '../../../source/presentation/styles/Components/PhaseRow'
+import { PlayToggle } from '../../../source/presentation/styles/Components/PlayToggle'
 import { installSheetWords } from '../../../source/presentation/styles/Media/Install'
 import { clockText, Playback } from '../../../source/presentation/styles/Media/Playback'
 
@@ -76,6 +77,20 @@ describe('the shared media components, drawn (design 1k: promoted to styles for 
     expect(markup).toContain('0:02.1 / 0:05.0')
     expect(markup).toContain('width:42%')
     expect(markup).toContain('draft · 16 steps')
+  })
+
+  test('PlayToggle: the player’s own play or pause button, promoted on Voice’s waveform (design 1m), its label the face’s', () => {
+    const playback = new Playback(() => 0)
+    playback.hold('speech:a', 0.06)
+    const paused = renderToStaticMarkup(<PlayToggle face={playback.face('speech:a', 0.1, { width: 1, height: 1 })} toggle={() => {}} />)
+    expect(paused).toContain('aria-label="Play"')
+    expect(paused).toContain('M5 3.2v9.6L13 8z')
+    playback.seek('speech:a', 0.06)
+    const playing = renderToStaticMarkup(<PlayToggle face={playback.face('speech:a', 0.1, { width: 1, height: 1 })} toggle={() => {}} />)
+    expect(playing).toContain('aria-label="Pause"')
+    expect(playing).toContain('M4.5 3h2.5v10H4.5zM9 3h2.5v10H9z')
+    // MediaPlayer's controls draw the same button.
+    expect(renderToStaticMarkup(<MediaPlayer face={playback.face('speech:a', 0.1, { width: 1, height: 1 })} toggle={() => {}} />)).toContain(playing)
   })
 
   test('PhaseRow: done, running with its bar, pending and stopped, each said to a screen reader', () => {

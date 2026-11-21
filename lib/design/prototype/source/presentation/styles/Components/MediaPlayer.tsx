@@ -1,4 +1,5 @@
 import type { MediaPlayerFace } from '../Media/Playback'
+import { PlayToggle } from './PlayToggle'
 
 /**
  * A clip or a composition, played (design 1k: the old prototype's player,
@@ -36,11 +37,7 @@ export function MediaPlayer({ face, toggle }: { readonly face: MediaPlayerFace; 
         )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <button type="button" className="ib" onClick={toggle} aria-label={face.toggleLabel} style={{ width: 28, height: 28, color: 'var(--text-primary)' }}>
-          <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-            <path d={face.playing ? 'M4.5 3h2.5v10H4.5zM9 3h2.5v10H9z' : 'M5 3.2v9.6L13 8z'} fill="currentColor" />
-          </svg>
-        </button>
+        <PlayToggle face={face} toggle={toggle} />
         <span className="mono" style={{ fontSize: 'var(--t-meta)', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
           {face.time}
         </span>

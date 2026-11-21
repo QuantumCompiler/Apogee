@@ -142,6 +142,127 @@ export const ClipRecord = {
   },
 }
 
+/** One sentence of a speech: its words, where it starts in the file and how long it lasts, in seconds -- counted from the samples spoken, never estimated. */
+export interface SpeechSentence {
+  readonly text: string
+  readonly offset: number
+  readonly seconds: number
+}
+
+/**
+ * A speech's record: the `voice.speech` document `voice say` writes beside
+ * its WAV as `<wav>.json`, the one its `--output-format json` prints and its
+ * job stream closes on (the CLI's 50a, 53m). The Mac app's `SpeechRecord`
+ * (`BusinessMedia`, `MediaRecords.swift`), with the fields the design's
+ * speech page draws besides (the sidecar, how many segments, the sample
+ * rate, the device, how long the run took), each `undefined` where the
+ * record states none (design 1m).
+ */
+export interface SpeechRecord {
+  readonly status: string
+  /** The WAV, absolute. */
+  readonly output: string
+  readonly sidecar: string | undefined
+  /** The voice model's name as given: a store handle (`Kokoro-82M/voice/5f3a2c91d0e4`). */
+  readonly model: string
+  readonly voice: string
+  /** The voice's language, by its first letter (Kokoro's convention). */
+  readonly language: string | undefined
+  readonly speed: number | undefined
+  readonly text: string
+  /** How many segments it was spoken in: a speech is one, a composition's narration one a scene. */
+  readonly segments: number
+  /** Each segment's sentences, their offsets laid onto the file's own. */
+  readonly sentences: readonly SpeechSentence[]
+  /** The whole file's seconds, measured from its own WAV header. */
+  readonly seconds: number | undefined
+  readonly sampleRate: number | undefined
+  readonly device: { readonly device: string | undefined; readonly platform: string | undefined }
+  /** The engine it spoke on (the CLI's 53m): the record's word, else `torch`, as a record from before there were two. */
+  readonly engine: string
+  /** The versions that ran, as the record names them (`torch`, `kokoro`; `mlx`, `mlx_audio`; `apogee`), each as written. */
+  readonly versions: Readonly<Record<string, string>>
+  /** How long the run took, in seconds. */
+  readonly runSeconds: number | undefined
+  readonly createdAt: string | undefined
+  readonly error: string | undefined
+  /** The WAV's file name. */
+  readonly name: string
+}
+
+export const SpeechRecord = {
+  /** The record `value` is, or `undefined` when it is not a `voice.speech` document with its output. */
+  read(value: JSONValue): SpeechRecord | undefined {
+    const doc = object(value)
+    const output = string(doc?.output)
+    if (!doc || string(doc.object) !== 'voice.speech' || output === undefined) return undefined
+    const segments = array(doc.segments) ?? []
+    // Each segment's sentences, their offsets laid onto the file's own: a segment's offset, then the sentence's within it (the Mac's rule).
+    const sentences = segments.flatMap((entry) => {
+      const segment = object(entry)
+      const base = number(segment?.offset) ?? 0
+      return (array(segment?.sentences) ?? []).flatMap((item) => {
+        const sentence = object(item)
+        const text = string(sentence?.text)
+        const seconds = number(sentence?.seconds)
+        return text === undefined || seconds === undefined ? [] : [{ text, offset: base + (number(sentence?.offset) ?? 0), seconds }]
+      })
+    })
+    const device = object(doc.device)
+    const versions: Record<string, string> = {}
+    for (const [key, entry] of Object.entries(object(doc.versions) ?? {})) {
+      const text = string(entry)
+      if (text !== undefined) versions[key] = text
+    }
+    return {
+      status: string(doc.status) ?? '',
+      output,
+      sidecar: string(doc.sidecar),
+      model: string(object(doc.model)?.name) ?? '',
+      voice: string(doc.voice) ?? '',
+      language: string(doc.language),
+      speed: number(doc.speed),
+      text: string(doc.text) ?? '',
+      segments: segments.length,
+      sentences,
+      seconds: number(doc.seconds),
+      sampleRate: int(doc.sample_rate),
+      device: { device: string(device?.device), platform: string(device?.platform) },
+      engine: string(doc.engine) ?? 'torch',
+      versions,
+      runSeconds: number(doc.run_seconds),
+      createdAt: string(doc.created_at),
+      error: string(doc.error),
+      name: baseName(output),
+    }
+  },
+
+  /** Why a `voice.speech` document is passed over though it names its output: one without its segments has no sentence timings to play (design 1m). */
+  refusal(value: JSONValue): string | undefined {
+    return array(object(value)?.segments) === undefined ? 'a voice.speech record without its segments' : undefined
+  },
+
+  /** The sentence being spoken at `time`, by the record's own timings (the Mac's `sentence(at:)`); `undefined` between and past them. */
+  sentence(record: SpeechRecord, time: number): number | undefined {
+    for (let index = record.sentences.length - 1; index >= 0; index -= 1) {
+      const sentence = record.sentences[index]
+      if (sentence && sentence.offset <= time + 1e-6 && time < sentence.offset + sentence.seconds + 1e-6) return index
+    }
+    return undefined
+  },
+
+  /** How long it lasts: the file's seconds as its header measured them, else its last sentence's end. */
+  duration(record: SpeechRecord): number {
+    const last = record.sentences.at(-1)
+    return record.seconds ?? (last ? last.offset + last.seconds : 0)
+  },
+
+  /** The record's sidecar: as it names it, else beside its WAV. */
+  sidecarOf(record: SpeechRecord): string {
+    return record.sidecar ?? `${record.output}.json`
+  },
+}
+
 /** A sidecar that was passed over, and why. */
 export interface Skipped {
   readonly file: string
@@ -157,8 +278,13 @@ export interface Skipped {
  * stand-in's table of the files the CLI wrote (design 1k).
  */
 export const MediaLibrary = {
-  /** Every record of `object` in `folders` (a shallow walk for `*.json`), newest first, each whose output is still there; and those skipped. */
-  scan<Record>(folders: readonly string[], reader: FolderReading, object: string, read: (value: JSONValue) => Record | undefined, output: (record: Record) => string, created: (record: Record) => string | undefined): { readonly records: Record[]; readonly skipped: Skipped[] } {
+  /**
+   * Every record of `object` in `folders` (a shallow walk for `*.json`),
+   * newest first, each whose output is still there; and those skipped -- with
+   * `refusal`, also each of the object that it gives a reason to pass over
+   * (a speech without its segments, design 1m).
+   */
+  scan<Record>(folders: readonly string[], reader: FolderReading, object: string, read: (value: JSONValue) => Record | undefined, output: (record: Record) => string, created: (record: Record) => string | undefined, refusal?: (value: JSONValue) => string | undefined): { readonly records: Record[]; readonly skipped: Skipped[] } {
     const records: Record[] = []
     const skipped: Skipped[] = []
     for (const folder of folders) {
@@ -173,6 +299,11 @@ export const MediaLibrary = {
           continue
         }
         if (JSONValue.string(JSONValue.object(value)?.object) !== object) continue
+        const refused = refusal?.(value)
+        if (refused !== undefined) {
+          skipped.push({ file: path, reason: refused })
+          continue
+        }
         const record = read(value)
         if (record === undefined) {
           skipped.push({ file: path, reason: `a ${object} record without its output` })
@@ -194,6 +325,11 @@ export const MediaLibrary = {
 
   clips(folders: readonly string[], reader: FolderReading): { readonly records: ClipRecord[]; readonly skipped: Skipped[] } {
     return MediaLibrary.scan(folders, reader, 'video.generation', ClipRecord.read, (record) => record.output, (record) => record.createdAt)
+  },
+
+  /** The speeches: every `voice.speech` record whose WAV is there, newest first; one without its segments passed over and said (design 1m). */
+  speeches(folders: readonly string[], reader: FolderReading): { readonly records: SpeechRecord[]; readonly skipped: Skipped[] } {
+    return MediaLibrary.scan(folders, reader, 'voice.speech', SpeechRecord.read, (record) => record.output, (record) => record.createdAt, SpeechRecord.refusal)
   },
 
   /** The parent chain of `record`: each clip it came from, back to the first. */

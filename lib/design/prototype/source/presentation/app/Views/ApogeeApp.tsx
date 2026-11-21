@@ -29,6 +29,7 @@ import { ShellView } from '../../shell/Views/ShellView'
 import { InstallConsentSheet } from '../../styles/Components/InstallConsentSheet'
 import { useObserved } from '../../styles/Observation/useObserved'
 import { VideoScreen } from '../../video/Views/VideoScreen'
+import { VoiceScreen } from '../../voice/Views/VoiceScreen'
 import '../../styles/Stylesheet'
 import { modeRules } from '../Previews/ModeRules'
 import { presetFor } from '../Previews/Presets'
@@ -53,7 +54,8 @@ const settingsConfirms: readonly string[] = ['settingsForget', 'xcodeRemove'] sa
  * roles slot, with its Register… sheet and its two confirms; Training (1j)
  * is its screen, with the promote and pull sheets, the five train confirms
  * and a refused promote's; Video (1k) is its screen, with the install
- * consent sheet, its compositions slot the compose module's view (1l).
+ * consent sheet, its compositions slot the compose module's view (1l);
+ * Voice (1m) is its screen.
  * It starts the app once it is on screen.
  */
 export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
@@ -65,6 +67,7 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
   useObserved(model.training)
   useObserved(model.video)
   useObserved(model.compose)
+  useObserved(model.voice)
   useEffect(() => {
     void model.start()
     return () => model.stop()
@@ -90,6 +93,8 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
         if (destination === 'training') return <TrainingScreen model={training} />
         // Video (1k), its compositions slot filled with the compose module's view (1l), so neither imports the other.
         if (destination === 'video') return <VideoScreen model={video} compositions={() => <ComposeView model={compose} />} />
+        // Voice (1m): its speeches, the speak card inline and the selected speech.
+        if (destination === 'voice') return <VoiceScreen model={model.voice} />
         const placeholder = placeholderOf(destination)
         return placeholder ? <PlaceholderScreen placeholder={placeholder} /> : null
       }}

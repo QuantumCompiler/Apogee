@@ -21,13 +21,15 @@ export interface MonitorModelRow {
   readonly opens?: true
 }
 
-/** A run the composition reads from the shared job list (design 1k): its id there, what it is (a clip's pipeline generating, or its label), and where it runs when it said so (`mps · bfloat16`). */
+/** A run the composition reads from the shared job list (design 1k): its id there, what it is (a clip's pipeline generating, a speech's voice model speaking, 1m, or its label), and where it runs when it said so (`mps · bfloat16`). */
 export interface MonitorRun {
   readonly id: number
   readonly name: string
   readonly runtime?: string
   /** Its row's button opens its place rather than stopping it (design 1l: a composition rendering, the old `crender` row's Open). */
   readonly opens?: true
+  /** A speech being spoken (design 1m): said as a voice run, its button the old `vsay` row's Stop. A video run unless named. */
+  readonly kind?: 'voice'
 }
 
 /**
@@ -260,7 +262,7 @@ export class MonitorViewModel extends Observable {
             size: '',
             action: 'Unload',
           })),
-          ...runs.map((run) => ({ name: run.name, detail: ['a video run this app supervises', ...(run.runtime !== undefined ? [run.runtime] : []), 'the CLI reports no size for it'].join(' · '), size: '', action: run.opens === true ? 'Open' : 'Stop the run', run: run.id, ...(run.opens === true ? { opens: true as const } : {}) })),
+          ...runs.map((run) => ({ name: run.name, detail: [`a ${run.kind ?? 'video'} run this app supervises`, ...(run.runtime !== undefined ? [run.runtime] : []), 'the CLI reports no size for it'].join(' · '), size: '', action: run.opens === true ? 'Open' : run.kind === 'voice' ? 'Stop' : 'Stop the run', run: run.id, ...(run.opens === true ? { opens: true as const } : {}) })),
         ],
         empty: (r?.modelsHeld.length ?? 0) === 0 && runs.length === 0,
       },

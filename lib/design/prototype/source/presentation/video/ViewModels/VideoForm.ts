@@ -1,7 +1,7 @@
 import { ClipForm } from '../../../business/media/ClipForm'
 import { MediaModel } from '../../../business/media/MediaEngine'
 import { ClipRecord, MediaLibrary, baseName } from '../../../business/media/MediaRecords'
-import { secs, tilde } from '../../styles/Media/MediaWords'
+import { secs, stemOf, tilde } from '../../styles/Media/MediaWords'
 
 /** A LoRA on the form: its file, its sha256 where a record holds it, its strength as typed. */
 export interface FormLoRA {
@@ -58,8 +58,8 @@ export const moviesFolder = '/Users/someone/Movies/Apogee'
 /** This Mac's platform, as a record names it. */
 export const thisPlatform = 'macos-arm64'
 
-// `tilde` and `secs` are styles' since Compose said a record's paths and seconds too (design 1l).
-export { secs, tilde }
+// `tilde` and `secs` are styles' since Compose said a record's paths and seconds too (design 1l), and `stemOf`, a clip's name stem from its prompt, since Voice names its speeches so (1m).
+export { secs, stemOf, tilde }
 
 /** The old prototype's frame count: `duration` at `fps`, rounded to the pipelines' 4k+1. */
 export function framesOf(duration: number, fps: number): number {
@@ -72,18 +72,6 @@ function secondsText(seconds: number): string {
   return String(Number(seconds.toPrecision(6)))
 }
 
-const stopWords = ['a', 'an', 'the', 'of', 'on', 'in', 'at', 'and', 'with', 'to', 'for', 'is', 'are', 'it', 'its', 'how', 'what', 'from', 'by', 'into', 'down', 'up']
-
-/** A clip's name stem from its prompt, the old prototype's `stemOf`: its first three words that say something. */
-export function stemOf(text: string): string {
-  const words = text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter((word) => word !== '' && !stopWords.includes(word))
-    .slice(0, 3)
-  return words.length ? words.join('-') : 'untitled'
-}
 
 /** A record's settings, or the form's new-clip base: what a flag is passed against. */
 interface Base {

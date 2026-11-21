@@ -105,7 +105,7 @@ test('in the missing and config-typo modes the monitor says why it cannot read, 
   await expect(monitor(page)).toContainText("apogee system: /Users/someone/.apogee/config/config.json: not valid JSON: line 4, column 5: expected ',' or '}' after a member (exited with status 1)")
 })
 
-test('each of the 11 places opens by click: Sessions its session window, Models its tabs (1h), Training its tabs (1j), Video its clips (1k), an unported one its placeholder', async ({ page }) => {
+test('each of the 11 places opens by click: Sessions its session window, Models its tabs (1h), Training its tabs (1j), Video its clips (1k), Voice its speeches (1m), an unported one its placeholder', async ({ page }) => {
   const { errors } = watch(page)
   await page.goto(`${built}?start=monitor&still=true`)
   const models = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Models ⌘2' })
@@ -116,7 +116,7 @@ test('each of the 11 places opens by click: Sessions its session window, Models 
   await expect(page.getByText(/^Models isn’t drawn here yet/)).toHaveCount(0)
   const places: Array<[string, string, string]> = [
     ['Suites', '⌘3', '1p'], ['Tasks', '⌘4', '1p'], ['Code graph', '⌘5', '1o'],
-    ['Voice', '⌘7', '1m'], ['Knowledge', '⌘8', '1o'], ['Library', '⌘0', '1n'], ['Review', '⇧⌘R', '1n'],
+    ['Knowledge', '⌘8', '1o'], ['Library', '⌘0', '1n'], ['Review', '⇧⌘R', '1n'],
   ]
   // Training is its place (1j): its five tabs, Runs first, no placeholder.
   const training = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Training ⌘9' })
@@ -133,6 +133,14 @@ test('each of the 11 places opens by click: Sessions its session window, Models 
   await expect(page.getByRole('tab', { name: /^Clips/ })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('heading', { name: 'lighthouse-dusk-2.mp4', level: 2 })).toBeVisible()
   await expect(page.getByText(/^Video isn’t drawn here yet/)).toHaveCount(0)
+  // Voice is its place (1m): its speeches, the newest record's page, no placeholder.
+  const voice = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Voice ⌘7' })
+  await voice.click()
+  await expect(voice).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('heading', { name: 'Voice', level: 1 })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Speeches' }).getByRole('button', { name: /^hello-mlx\.wav/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'hello-mlx.wav', level: 2 })).toBeVisible()
+  await expect(page.getByText(/^Voice isn’t drawn here yet/)).toHaveCount(0)
   for (const [title, key, item] of [...places].reverse()) {
     const button = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: `${title} ${key}` })
     await button.click()
@@ -1213,5 +1221,121 @@ test('live from the file: an edit previews on paper and renders as a new video, 
   await expect(compositions(page).getByRole('button', { name: /tides-edit\.mp4/ })).toBeVisible({ timeout: 10_000 })
   await expect(toast(page, 'tides-edit.mp4 is ready, its captions beside it as an .srt')).toBeVisible({ timeout: 30_000 })
   await expect(page.getByText('The render planned again, and its changes differ from the preview')).toBeVisible()
+  expect(errors).toEqual([])
+})
+
+const speechesList = (page: Page) => page.getByRole('navigation', { name: 'Speeches' })
+const sample = 'Apogee runs every model on this Mac unless you pick a cloud one. When it does use the cloud, it tells you, every time.'
+
+for (const apogee of ['installed', 'missing', 'config-typo'] as const) {
+  test(`voice at ${apogee}: the Voice place at its frame, still -- the header, the two recorded speeches, the speak card and the selected speech -- with no console error and no request but the file (design 1m)`, async ({ page }) => {
+    const { errors, requests } = watch(page)
+    const url = `${built}?start=voice&still=true&apogee=${apogee}`
+    await page.goto(url)
+    await expect(page.getByRole('heading', { name: 'Voice', level: 1 })).toBeVisible()
+    await expect(page.getByText('Text to speech, on this Mac')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'New speech' })).toBeVisible()
+    await expect(speechesList(page).getByRole('button', { name: /^hello-mlx\.wav/ })).toBeVisible()
+    await expect(speechesList(page).getByRole('button', { name: /^hello-pytorch\.wav/ })).toHaveAttribute('aria-current', 'true')
+    const speak = page.getByRole('region', { name: 'Speak' })
+    await expect(speak.getByRole('textbox').first()).toHaveValue(sample)
+    await expect(speak).toContainText('118 / 4,000')
+    await expect(speak).toContainText('2 sentences · split where . ! or ? meets a space, never by a model')
+    await expect(speak.getByRole('slider', { name: 'Speed' })).toBeVisible()
+    await expect(speak).toContainText('1.0×')
+    await expect(speak).toContainText('Save as')
+    await expect(speak.getByText(`apogee voice say "${sample}" -o ~/Music/Apogee/apogee-runs-every.wav`)).toBeVisible()
+    const speech = page.getByRole('region', { name: 'Speech' })
+    await expect(speech.getByRole('heading', { name: 'hello-pytorch.wav', level: 2 })).toBeVisible()
+    await expect(speech).toContainText('af_heart · 1.0× · 0.1 s · Oct 22')
+    for (const action of ['Use these settings', 'Use this voice for compositions', 'Show in Finder']) await expect(speech.getByRole('button', { name: action })).toBeVisible()
+    await expect(speech.getByText('0:00.1 / 0:00.1')).toBeVisible()
+    await expect(speech.getByRole('button', { name: 'Play', exact: true })).toBeVisible()
+    await expect(speech).toContainText('16-bit mono WAV · 24 kHz · 0.1 s')
+    await expect(speech).toContainText('STARTS')
+    await expect(speech).toContainText('LASTS')
+    await expect(speech.getByRole('button', { name: 'Play from sentence 2' })).toContainText('How are you?0.05 s0.05 s')
+    await expect(speech).toContainText('RECORD · hello-pytorch.wav.json')
+    await expect(speech).toContainText('PyTorch · kokoro 0.0-stub · torch 0.0-stub')
+    if (apogee === 'installed') {
+      // The store's one voice model is the record's: the CLI speaks with it unnamed.
+      await expect(speech.getByText('apogee voice say "Hello there. How are you?" -o ~/Music/Apogee/hello-pytorch.wav')).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Kokoro-82M · PyTorch' })).toBeVisible()
+      await expect(speak.getByRole('button', { name: /^af_heart/ })).toHaveAttribute('aria-pressed', 'true')
+      await expect(speak).toContainText('AMERICAN ENGLISH · 2')
+      await expect(speak).toContainText('BRITISH ENGLISH · 1')
+      await expect(speak.getByRole('button', { name: 'Speak', exact: true })).toBeEnabled()
+      await expect(speak).toContainText('Speaks on PyTorch, through Kokoro: the voice model as Kokoro publishes it. Nothing leaves this Mac.')
+    } else {
+      // With the store unread, the record's model is named.
+      await expect(speech.getByText('apogee voice say "Hello there. How are you?" -m Kokoro-82M/voice/5f3a2c91d0e4 -o ~/Music/Apogee/hello-pytorch.wav')).toBeVisible()
+      if (apogee === 'missing') {
+        await expect(speak.getByRole('button', { name: 'Speak', exact: true })).toBeDisabled()
+        await expect(speak).toContainText('apogee is not installed')
+      } else {
+        // The binary is found: Speak runs, and the CLI refuses, as its store read was refused.
+        await expect(speak.getByRole('button', { name: 'Speak', exact: true })).toBeEnabled()
+        await expect(page.getByRole('button', { name: 'the store could not be read' })).toBeVisible()
+        await expect(speak).toContainText('apogee models: /Users/someone/.apogee/config/config.json: not valid JSON')
+      }
+    }
+    expect(errors).toEqual([])
+    expect(requests).toEqual([url])
+  })
+}
+
+test('live from the file: Speak runs the hand-made stream end to end -- ⌘7 says 1 running while it speaks -- and the new speech ends up selected (design 1m)', async ({ page }) => {
+  test.setTimeout(60_000)
+  const { errors, requests } = watch(page)
+  await page.goto(`${built}?start=voice`)
+  await page.getByRole('button', { name: 'Speak', exact: true }).click()
+  // The running row: its pulse says "speaking" before its file.
+  await expect(speechesList(page).getByRole('button', { name: /^speaking apogee-runs-every\.wav/ })).toContainText('speaking · af_heart')
+  await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Voice ⌘7 · 1 running', exact: true })).toBeVisible()
+  await expect(page.getByText(/^speaking 2 sentences as af_heart/)).toBeVisible()
+  await expect(toast(page, 'apogee-runs-every.wav is ready · 0.1 s, measured from its header')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Voice ⌘7', exact: true })).toBeVisible()
+  await expect(speechesList(page).getByRole('button', { name: /^apogee-runs-every\.wav/ })).toHaveAttribute('aria-current', 'true')
+  const speech = page.getByRole('region', { name: 'Speech' })
+  await expect(speech.getByRole('heading', { name: 'apogee-runs-every.wav', level: 2 })).toBeVisible()
+  await expect(speech).toContainText('af_heart · 1.0× · 0.1 s · Today 12:00')
+  await expect(speech.getByRole('button', { name: 'Play from sentence 1' })).toContainText('Apogee runs every model on this Mac unless you pick a cloud one.')
+  await expect(page.getByRole('region', { name: 'Speak' }).getByRole('textbox').nth(1)).toHaveValue('apogee-runs-every-2.wav')
+  expect(errors).toEqual([])
+  expect(requests).toEqual([`${built}?start=voice`])
+})
+
+test('the speak card refuses text over 4,000 characters and a name that exists, in the old words, Speak off (design 1m)', async ({ page }) => {
+  await page.goto(`${built}?start=voice&still=true`)
+  const speak = page.getByRole('region', { name: 'Speak' })
+  await speak.getByRole('textbox').nth(1).fill('hello-pytorch.wav')
+  await expect(speak.getByRole('alert')).toHaveText('~/Music/Apogee/hello-pytorch.wav exists. A speech never writes over a file; name another.')
+  await expect(speak.getByRole('button', { name: 'Speak', exact: true })).toBeDisabled()
+  await speak.getByRole('textbox').nth(1).fill('fresh.wav')
+  await speak.getByRole('textbox').first().fill('a'.repeat(4001))
+  await expect(speak.getByRole('alert')).toHaveText('The text is 4,000 characters at most; this is 4,001.')
+  await expect(speak).toContainText('4,001 / 4,000')
+  await expect(speak.getByRole('button', { name: 'Speak', exact: true })).toBeDisabled()
+})
+
+test('a sentence plays from its start, lit, and the player pauses; still, it stands still; Use this voice for compositions says so (design 1m)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=voice&still=true`)
+  const speech = page.getByRole('region', { name: 'Speech' })
+  const transparent = 'rgba(0, 0, 0, 0)'
+  const lit = rgb(tokens.colors.themes['dark']?.colors['surface.selection'] ?? '')
+  await speech.getByRole('button', { name: 'Play from sentence 2' }).click()
+  await expect(speech.getByRole('button', { name: 'Pause' })).toBeVisible()
+  await expect(speech.getByText('0:00.1 / 0:00.1')).toBeVisible()
+  await expect(speech.getByRole('button', { name: 'Play from sentence 2' })).toHaveCSS('background-color', lit)
+  await expect(speech.getByRole('button', { name: 'Play from sentence 1' })).toHaveCSS('background-color', transparent)
+  await speech.getByRole('button', { name: 'Pause' }).click()
+  await expect(speech.getByRole('button', { name: 'Play', exact: true })).toBeVisible()
+  await expect(speech.getByRole('button', { name: 'Play from sentence 2' })).toHaveCSS('background-color', transparent)
+  await speech.getByRole('button', { name: 'Use this voice for compositions' }).click()
+  await expect(toast(page, 'af_heart is now the voice for new speech and compositions')).toBeVisible()
+  await page.getByRole('button', { name: 'New speech' }).click()
+  await expect(speech).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Speak' }).getByRole('textbox').first()).toHaveValue('')
   expect(errors).toEqual([])
 })

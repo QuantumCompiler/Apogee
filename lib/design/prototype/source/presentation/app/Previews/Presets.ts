@@ -26,6 +26,7 @@ import {
 import { executePreset } from '../../sessions/Previews/ExecutePreset'
 import { trainingPlaceRules, withTrainingWorld } from '../../training/Previews/TrainingWorlds'
 import { videoFolders, videoPlaceRules, withVideoWorld } from '../../video/Previews/VideoWorlds'
+import { voiceFolders, voicePlaceRules, withVoiceWorld } from '../../voice/Previews/VoiceWorlds'
 import type { TrainingWorld } from '../../training/Previews/TrainingWorlds'
 import { withLibraryRules } from '../../sessions/Previews/LibraryRules'
 import type { StartRequest } from '../../shell/ViewModels/Routing'
@@ -121,6 +122,19 @@ function composePreset(route: string, start = 1, tides = false): (options: Prese
 }
 
 /**
+ * The Voice preset (design 1m): the place over its world -- the store's
+ * `models list` with its one voice model (`models-list-voice-handmade.json`:
+ * `models-stored-list.json`'s media rows beside the sessions' backends) and
+ * that model's `models info`, and `~/Music/Apogee`'s two recorded speeches
+ * beside the other presets' folders -- the Streaming session at its starting
+ * frame behind it, as the Video
+ * presets keep it (composed here, since `voice` may not import `session`).
+ */
+function voicePreset({ still, apogee }: PresetOptions): Preset {
+  return { rules: withVoiceWorld(streamingRules('start')), route: 'voice', clock: { start: 1, still }, apogee, folders: voiceFolders(withComposeFiles(videoFolders())) }
+}
+
+/**
  * A preset with the console's answers (design 1g): the console opens over
  * every screen (⇧⌘K), so every preset answers its lines -- `consoleRules`,
  * on the console's own child (`Preset.console`), a line nobody recorded
@@ -148,8 +162,10 @@ function listing(build: (options: PresetOptions) => Preset): (options: PresetOpt
  * 1k: its runs, the install and `~/Movies/Apogee`'s records, unless the
  * preset names its own folders) and the compositions' (design 1l: their
  * plan, renders and preview, and the old four projects beside the clips)
- * before its own, so a preset's own answer to the same arguments is the one
- * given: all five open from every screen.
+ * and Voice's (design 1m: the sample spoken, and `~/Music/Apogee`'s two
+ * recorded speeches beside the preset's folders) before its own, so a
+ * preset's own answer to the same arguments is the one given: all six open
+ * from every screen.
  */
 function modelling(build: (options: PresetOptions) => Preset): (options: PresetOptions) => Preset {
   return consoling((options) => {
@@ -159,14 +175,15 @@ function modelling(build: (options: PresetOptions) => Preset): (options: PresetO
     const training = trainingPlaceRules()
     const video = videoPlaceRules()
     const compose = composePlaceRules()
+    const voice = voicePlaceRules()
     return {
       ...preset,
-      folders: preset.folders ?? withComposeFiles(videoFolders()),
+      folders: voiceFolders(preset.folders ?? withComposeFiles(videoFolders())),
       rules: {
         ...preset.rules,
         reads: [...(models.reads ?? []), ...settings.reads, ...(training.reads ?? []), ...video.reads, ...(preset.rules.reads ?? [])],
         commands: [...(models.commands ?? []), ...settings.commands, ...(training.commands ?? []), ...video.commands, ...(preset.rules.commands ?? [])],
-        jobs: [...settings.jobs, ...(training.jobs ?? []), ...video.jobs, ...compose.jobs, ...(preset.rules.jobs ?? [])],
+        jobs: [...settings.jobs, ...(training.jobs ?? []), ...video.jobs, ...compose.jobs, ...voice.jobs, ...(preset.rules.jobs ?? [])],
       },
     }
   })
@@ -182,7 +199,7 @@ function modelling(build: (options: PresetOptions) => Preset): (options: PresetO
  * had none; 1j's the old nine Training presets in the old order and its new
  * `training:regimes`; 1k's the four Video presets in the old order; 1l's
  * the five Compose presets in the old order, `compose:differs` among them;
- * each feature item adds its own here. Every one
+ * 1m's `voice`; each feature item adds its own here. Every one
  * carries the Sessions place's reads, since the list shows on every screen
  * (`execute`'s own), and the console's answers, since it opens over every one.
  */
@@ -244,6 +261,7 @@ export const presets: Readonly<Record<string, (options: PresetOptions) => Preset
   'compose:new': listing(composePreset('compose:new', 12)),
   'compose:tide': listing(composePreset('compose:tide')),
   'compose:differs': listing(composePreset('compose:differs', 30, true)),
+  voice: listing(voicePreset),
 }
 
 /** The preset opened with no `start`, or an unknown one: `chat`, the old `data-props` default (1v; 1e's interim default was the monitor). */
