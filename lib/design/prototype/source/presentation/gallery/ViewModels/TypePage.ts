@@ -18,6 +18,8 @@ export interface TypePageFace {
   readonly faces: { readonly ui: readonly Face[]; readonly mono: readonly Face[] }
   /** The text sizes' columns, `S` to `XL`. */
   readonly textSizes: readonly string[]
+  /** The smallest any type size lands at, at any text size. */
+  readonly floor: number
   /** Each type size at each text size, in px, in the columns' order. */
   readonly sizes: ReadonlyArray<{ readonly step: TypeStep; readonly px: readonly number[] }>
   readonly rounding: string
@@ -55,9 +57,11 @@ export function typePage(): TypePageFace {
   const spacing = [...tokens.spacingPx]
   const body = typeSizes('m').body
   return {
-    intro: `Two typefaces, ${body} px interface text by default, and spacing from ${spacing[0] ?? 0} px. Every type size moves with Settings › Appearance › Text size; spacing and shape stay fixed.`,
+    intro: `Two typefaces, ${body} px interface text by default, and spacing from ${spacing[0] ?? 0} px. Every size here moves with Settings › Appearance › Text size; spacing and shape stay fixed.`,
     faces: { ui: uiFonts.map((id) => face('ui', id)), mono: codeFonts.map((id) => face('mono', id)) },
     textSizes: textSizes.map((size) => size.toUpperCase()),
+    // The smallest any size lands at, at any text size: the old board's "Nothing goes below 9 px" (design 1s), read from the tokens.
+    floor: Math.min(...perSize.flatMap((sizes) => typeSteps.map((step) => sizes[step]))),
     sizes: typeSteps.map((step) => ({ step, px: perSize.map((sizes) => sizes[step]) })),
     rounding: tokens.type.rounding,
     lineHeights: Object.entries(tokens.type.lineHeight).map(([name, value]) => ({ name, value })),

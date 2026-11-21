@@ -935,7 +935,9 @@ export class AppViewModel extends Observable {
    * Models and Settings presets keep it, the place read, then its tab and the
    * old frame's state -- a run training (`training`, New run… pressed, so
    * the run the CLI recorded), the `skills` pipeline started (its start ticks
-   * stand it at stage 2, iteration 2), Regimes on `foundation`, or one run's
+   * stand it at stage 2, iteration 2), Regimes on `foundation` over
+   * `training`'s run (the old prototype opens no preset on Regimes, so its
+   * frame is `training`'s with Regimes clicked: design 1s), or one run's
    * page.
    */
   private async openTrainingPreset(sub: string): Promise<void> {
@@ -954,6 +956,7 @@ export class AppViewModel extends Observable {
         await this.confirmTraining('train')
         return
       case 'regimes':
+        training.newRun()
         training.selectRegime('foundation')
         return
       case 'cyclepass':

@@ -188,9 +188,9 @@ export function MemoryPane({ model }: { readonly model: SettingsViewModel }) {
 export function KeyboardPane({ model }: { readonly model: SettingsViewModel }) {
   useObserved(model)
   return (
-    <div role="list" aria-label="Keys" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '0 32px', marginTop: 8 }}>
+    <div data-keys="" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '0 32px', marginTop: 8 }}>
       {model.face().keyboard.map((line) => (
-        <div key={`${line.label} ${line.keys}`} role="listitem" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 12, alignItems: 'center', padding: '9px 0', borderBottom: '1px solid var(--line-border)' }}>
+        <div key={`${line.label} ${line.keys}`} data-key-line="" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 12, alignItems: 'center', padding: '9px 0', borderBottom: '1px solid var(--line-border)' }}>
           <span>{line.label}</span>
           <span className="mono" style={{ padding: '1px 7px', border: '1px solid var(--line-strong)', borderRadius: 'var(--radius-chip)', fontSize: 'var(--t-ui)', color: 'var(--text-secondary)' }}>
             {line.keys}

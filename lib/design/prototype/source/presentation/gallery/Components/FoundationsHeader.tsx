@@ -19,11 +19,13 @@ export const sectionLabel: CSSProperties = { margin: '0 0 10px', fontFamily: 'va
 /**
  * A Foundations page's header (design 1q), as the old boards draw it: the
  * label over the title, and what the page is in a sentence or two. The Build
- * pages (1r) draw theirs with it too.
+ * pages (1r) draw theirs with it too. It is the page's banner, as the old
+ * board's top-level header is, even drawn inside the gallery's focused board
+ * (design 1s).
  */
 export function FoundationsHeader({ label, title, children }: { readonly label: string; readonly title: string; readonly children: ReactNode }) {
   return (
-    <header style={{ maxWidth: 820, marginBottom: 32 }}>
+    <header role="banner" style={{ maxWidth: 820, marginBottom: 32 }}>
       <div className="mono" style={{ fontSize: 'var(--t-meta)', letterSpacing: '.08em', color: 'var(--text-tertiary)' }}>
         {label}
       </div>

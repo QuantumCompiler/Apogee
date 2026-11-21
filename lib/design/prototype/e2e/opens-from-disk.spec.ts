@@ -271,9 +271,9 @@ for (const [preset, words] of sessionFrames) {
     // The inspector (design 1g; 1u reserved its column with a placeholder).
     await expect(page.getByRole('complementary', { name: 'Inspector' })).toContainText('INSPECTOR')
     // Still: nothing moves.
-    const before = await page.locator('main').innerText()
+    const before = await page.locator('[data-place]').innerText()
     await page.waitForTimeout(1500)
-    expect(await page.locator('main').innerText()).toBe(before)
+    expect(await page.locator('[data-place]').innerText()).toBe(before)
     expect(errors).toEqual([])
     expect(requests).toEqual([`${built}?start=${preset}&still=true`])
   })
@@ -298,9 +298,9 @@ for (const [preset, words, inspector] of scenarioFrames) {
     await page.goto(`${built}?start=${preset}&still=true`)
     for (const said of words) await expect(page.getByText(said).first()).toBeVisible()
     await expect(page.getByRole('complementary', { name: 'Inspector' })).toHaveCount(inspector ? 1 : 0)
-    const before = await page.locator('main').innerText()
+    const before = await page.locator('[data-place]').innerText()
     await page.waitForTimeout(1500)
-    expect(await page.locator('main').innerText()).toBe(before)
+    expect(await page.locator('[data-place]').innerText()).toBe(before)
     expect(errors).toEqual([])
     expect(requests).toEqual([`${built}?start=${preset}&still=true`])
   })
@@ -352,7 +352,7 @@ test("the inspector takes its own 304 px column while open and none when closed:
   // The old pane's 304 px column and its 1 px left border (`flex: 0 0 304px`, content-box, `main.html:763` at b375fac9; design 1g).
   expect(await inspector.evaluate((element) => getComputedStyle(element).flexBasis)).toBe('304px')
   expect(await inspector.evaluate((element) => element.getBoundingClientRect().width)).toBe(305)
-  const main = () => page.locator('main > div:nth-child(2) > div:first-child').evaluate((element) => element.getBoundingClientRect().width)
+  const main = () => page.locator('[data-place] > div:nth-child(2) > div:first-child').evaluate((element) => element.getBoundingClientRect().width)
   expect(await main()).toBe(window - sidebar - 305)
   await page.getByRole('button', { name: 'Inspector (Option Command I)' }).click()
   await expect(inspector).toHaveCount(0)
@@ -428,7 +428,7 @@ test('?start=console&still=true: the console with models list’s output, apogee
   await page.goto(`${built}?start=console&still=true`)
   const console = page.getByRole('dialog', { name: 'Console' })
   await expect(console).toBeVisible()
-  const log = console.getByRole('log', { name: 'Console output' })
+  const log = console.locator('[data-console-output]')
   for (const line of ['apogee models list', 'Local backends', 'SafeTensors', '(not configured)  Llama3.2-1B-Instruct/safetensors/edaba290ce7f', '1 snapshot consumed by a conversion is folded -- --all lists it', 'Done.', 'apogee reset']) {
     await expect(log).toContainText(line)
   }
@@ -526,7 +526,7 @@ test('the console answers on every screen: at chat, a line nobody recorded print
   const console = page.getByRole('dialog', { name: 'Console' })
   await console.getByRole('textbox', { name: 'Command' }).fill('doctor')
   await console.getByRole('textbox', { name: 'Command' }).press('Enter')
-  const log = console.getByRole('log', { name: 'Console output' })
+  const log = console.locator('[data-console-output]')
   await expect(log).toContainText('apogee doctor')
   await expect(log).toContainText('Done.')
   await expect(log).not.toContainText('Didn’t start')
@@ -573,6 +573,8 @@ const modelsFrames: ReadonlyArray<readonly [string, string, (page: Page) => Prom
     await expect(details).toContainText('LINEAGE')
     // A row's name begins with its glyph's word, as the session list's does (1g).
     await expect(page.getByRole('button', { name: /^local llama3\.2-1b-Q4KM / })).toHaveAttribute('aria-current', 'true')
+    // The old note, word for word (design 1s).
+    await expect(page.getByText('Memory is the weights plus the attention cache at the model’s default window here, computed from the file; cloud models use none.', { exact: false })).toBeVisible()
   }],
   ['models:downloads', 'Jobs', async (page) => {
     await expect(page.getByText('running · step 2 of 3')).toBeVisible()
@@ -767,6 +769,8 @@ for (const [preset, pane, words] of settingsFrames) {
     await expect(settingsWindow(page).getByRole('heading', { name: pane, level: 2 })).toBeVisible()
     for (const word of words) await expect(settingsWindow(page).getByText(word).first()).toBeVisible()
     if (preset === 'settings:media') await expect(settingsWindow(page).getByRole('combobox', { name: 'Video pipeline' })).toHaveValue('Wan2.2-TI2V-5B/mlx/5e6f708192a3')
+    // Each host's Remove is named Remove, as the old's are (design 1s).
+    if (pane === 'Web access') await expect(settingsWindow(page).getByRole('button', { name: 'Remove', exact: true })).toHaveCount(2)
     // The Streaming session behind it, at its starting frame.
     await expect(page.getByRole('region', { name: 'Conversation' })).toContainText('Where do fetches start in this repo, and what cancels them?')
     expect(errors).toEqual([])
@@ -820,7 +824,7 @@ test('Appearance restyles every screen at once, and its resets put it back: a co
   const places = page.getByRole('navigation', { name: 'Places' })
   for (const place of ['Models ⌘2', 'Suites ⌘3', 'Sessions ⌘1']) {
     await places.getByRole('button', { name: place }).click()
-    await expect(page.locator('main')).toHaveCSS('font-size', '14px')
+    await expect(page.locator('[data-place]')).toHaveCSS('font-size', '14px')
     await expect(window).toHaveCSS('background-color', 'rgb(42, 31, 61)')
   }
   // The resets: the row's, then Reset all, back to the theme's own.
@@ -839,7 +843,7 @@ test('Appearance restyles every screen at once, and its resets put it back: a co
 
 test('Keyboard lists every key the shell binds, and Sessions’ keys, in the design’s words (design 1i)', async ({ page }) => {
   await page.goto(`${built}?start=settings:keyboard&still=true`)
-  const keys = settingsWindow(page).getByRole('list', { name: 'Keys' }).getByRole('listitem')
+  const keys = settingsWindow(page).locator('[data-keys] > [data-key-line]')
   await expect(keys).toHaveCount(23)
   const listed = (await keys.allTextContents()).join('\n')
   for (const chord of ['⌘N', '⇧⌘N', '⌥⌘N', '⌥⌘I', '⇧⌘F', '⌥⌘M', '⇧⌘K', '⌘,', '⇧⌘R', '⇧⌘L', '⌃⌘S', '⌘1 – ⌘9, ⌘0']) expect(listed).toContain(chord)
@@ -1423,6 +1427,9 @@ const libraryFrames: Record<string, (page: Page, apogee: 'installed' | 'missing'
       await expect(page.getByText("Apogee isn't installed, so there are no presets to list.")).toBeVisible()
     } else {
       await expect(definitions(page)).toContainText(`The MCP servers could not be read: apogee mcp: ${typoWords}`)
+      // The presets read no config, so the CLI lists them at a typo too (design 1s).
+      await expect(page.getByText('code-exec', { exact: true })).toBeVisible()
+      await expect(page.getByText('The presets could not be read', { exact: false })).toHaveCount(0)
     }
   },
   'library:unsaved': async (page, apogee) => {
@@ -1490,6 +1497,8 @@ const libraryFrames: Record<string, (page: Page, apogee: 'installed' | 'missing'
     await expect(page.getByRole('heading', { name: 'The last sweep', level: 2 })).toBeVisible()
     await expect(page.getByText('dry run · 1 reviewed · 0 posted · 0 deferred · 0 errors · started 2026-10-21T06:09:25Z')).toBeVisible()
     await expect(page.getByText('widget · repo · grant none')).toBeVisible()
+    // Each target's Remove… names the target it removes (design 1n).
+    if (apogee === 'installed') for (const name of ['acme-all', 'widget']) await expect(page.getByRole('button', { name: `Remove ${name}…`, exact: true })).toBeVisible()
     await expect(page.getByText('watermark none → 2026-10-18T09:00:00Z')).toBeVisible()
     await expect(page.getByText('github.com/acme/widget#12 -- Thumbnails: 1 finding; dry run: nothing posted')).toBeVisible()
     await expect(page.getByText('kept at ~/.apogee/review/sweeps/20261021T060925Z.json')).toBeVisible()
@@ -1641,9 +1650,9 @@ test('live from the file: a symphony row picks; Play runs the recorded play, its
   expect(errors).toEqual([])
 })
 
-const knowledgeRows = (page: Page) => page.getByRole('main').getByRole('button').filter({ hasText: /rejected · ux|shipped · eng|shipped · product/ })
+const knowledgeRows = (page: Page) => page.locator('[data-place]').getByRole('button').filter({ hasText: /rejected · ux|shipped · eng|shipped · product/ })
 const collectionList = (page: Page) => page.getByRole('navigation', { name: 'Collections' })
-const canvas = (page: Page) => page.getByRole('main').locator('button[aria-pressed]').filter({ hasText: /ingest\// })
+const canvas = (page: Page) => page.locator('[data-place]').locator('button[aria-pressed]').filter({ hasText: /ingest\// })
 const symbolPane = (page: Page) => page.getByRole('complementary', { name: 'Symbol' })
 
 /** What each Knowledge and Code graph preset shows at its frame, still, in each mode the old prototype draws it -- its regions, tabs, controls, states and words (design 1o). */
@@ -1668,8 +1677,8 @@ const knowledgeFrames: Record<string, (page: Page, apogee: 'installed' | 'missin
       for (const name of ['Link', 'Move to…', 'Delete…']) await expect(record.getByRole('button', { name, exact: true })).toBeVisible()
     } else {
       // With no apogee the list stands empty with no words, as the old has no missing state; a config typo says the CLI's refusal.
-      if (apogee === 'missing') await expect(page.getByRole('main')).not.toContainText("isn't installed")
-      else await expect(page.getByRole('main')).toContainText(`The records could not be read: apogee knowledge: ${typoWords}`)
+      if (apogee === 'missing') await expect(page.locator('[data-place]')).not.toContainText("isn't installed")
+      else await expect(page.locator('[data-place]')).toContainText(`The records could not be read: apogee knowledge: ${typoWords}`)
       await expect(knowledgeRows(page)).toHaveCount(0)
       await expect(page.getByText('Choose a record to read its reasoning and its decision.')).toBeVisible()
     }
@@ -1688,7 +1697,7 @@ const knowledgeFrames: Record<string, (page: Page, apogee: 'installed' | 'missin
       await expect(page.locator('h3', { hasText: 'SOURCES · 5' })).toBeVisible()
       await expect(page.getByRole('button', { name: 'Remove…' })).toHaveCount(5)
     } else {
-      if (apogee === 'missing') await expect(page.getByRole('main')).not.toContainText("isn't installed")
+      if (apogee === 'missing') await expect(page.locator('[data-place]')).not.toContainText("isn't installed")
       else await expect(collectionList(page)).toContainText(`The collections could not be read: apogee embed: ${typoWords}`)
       await expect(collectionList(page).getByRole('button')).toHaveCount(0)
     }
@@ -1719,8 +1728,8 @@ const knowledgeFrames: Record<string, (page: Page, apogee: 'installed' | 'missin
       await expect(symbolPane(page).getByRole('button', { name: 'Ask about this' })).toBeVisible()
       await expect(symbolPane(page).getByRole('button', { name: 'Open in editor' })).toBeVisible()
     } else {
-      if (apogee === 'missing') await expect(page.getByRole('main')).not.toContainText("isn't installed")
-      else await expect(page.getByRole('main')).toContainText(`apogee graph: ${typoWords}`)
+      if (apogee === 'missing') await expect(page.locator('[data-place]')).not.toContainText("isn't installed")
+      else await expect(page.locator('[data-place]')).toContainText(`apogee graph: ${typoWords}`)
       await expect(canvas(page)).toHaveCount(0)
       await expect(page.getByRole('button', { name: 'More' })).toBeDisabled()
     }
@@ -1926,7 +1935,7 @@ const suitesFrames: Record<string, (page: Page, apogee: 'installed' | 'missing' 
       await expect(page.getByText("apogee's own verdict, from models status --suite fast: the one chat --suite admits a session by, refusing a suite that does not fit unless forced.")).toBeVisible()
     } else {
       await expect(suitesList(page).getByRole('button')).toHaveCount(0)
-      if (apogee === 'missing') await expect(page.getByRole('main')).not.toContainText("isn't installed")
+      if (apogee === 'missing') await expect(page.locator('[data-place]')).not.toContainText("isn't installed")
       else await expect(suitesList(page)).toContainText(`apogee config: ${typoWords}`)
     }
   },
@@ -1947,7 +1956,7 @@ const tasksFrames: Record<string, (page: Page, apogee: 'installed' | 'missing' |
       await expect(tasksList(page).getByRole('button')).toHaveCount(0)
       if (apogee === 'missing') {
         await expect(page.getByRole('heading', { level: 2 })).toHaveCount(0)
-        await expect(page.getByRole('main')).not.toContainText("isn't installed")
+        await expect(page.locator('[data-place]')).not.toContainText("isn't installed")
       } else {
         await expect(tasksList(page)).toContainText(`The tasks could not be read: apogee task: ${typoWords}`)
         // The run the frame starts is refused by the config before it begins: the alert says so, in the CLI's words.

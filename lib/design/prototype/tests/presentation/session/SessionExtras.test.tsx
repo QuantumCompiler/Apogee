@@ -61,10 +61,26 @@ describe("the rows 1v draws: what only the view decides", () => {
     expect(markup).toContain('· paused · waiting for you')
   })
 
-  test("an answer billed per use carries the API's glyph in its footer, in place of the kind's dot", () => {
+  test('a live or waiting activity’s head is the old toggle: a button, open, its summary in it (design 1s)', () => {
+    const live = { id: 0, kind: 'activity', summary: 'thinking · 1 step', live: true, waiting: false, reasoning: 'They want partial-failure tolerance.', lines: [] } as const
+    for (const activity of [live, { ...live, live: false, waiting: true, summary: 'thinking · 2 steps' }]) {
+      const markup = renderToStaticMarkup(<ActivityView activity={activity} />)
+      expect(markup).toMatch(new RegExp(`<button type="button" class="mono" aria-expanded="true"[^>]*>(?:(?!</button>).)*${activity.summary.split(' · ')[0]}`))
+    }
+  })
+
+  test('a play’s activity stands open with its stages, its head plain words as the old’s are: no toggle (design 1s)', () => {
+    const play = { id: 0, kind: 'activity', summary: 'played summarize-verify · 2 stages', live: false, waiting: false, reasoning: '', lines: [{ mark: '1/2', text: 'stage 1/2 summarize' }] } as const
+    const markup = renderToStaticMarkup(<ActivityView activity={play} />)
+    expect(markup).toContain('stage 1/2 summarize')
+    expect(markup).not.toContain('<button')
+  })
+
+  test("an answer billed per use carries the API's glyph in its footer, in place of the kind's dot, named for a screen reader as the old's is (design 1s)", () => {
     const answer = { id: 0, kind: 'answer', text: 'x', finished: true, footer: { model: 'claude', kind: 'api', usage: [] }, sources: [], cited: 0 } as const
     const markup = renderToStaticMarkup(<TranscriptRow row={answer} />)
     expect(markup).toContain('title="billed per use"')
+    expect(markup).toMatch(/<svg[^>]*role="img"[^>]*aria-label="billed per use"|<svg[^>]*aria-label="billed per use"[^>]*role="img"/)
     expect(markup).not.toContain('border-radius:50%')
     const local = renderToStaticMarkup(<TranscriptRow row={{ ...answer, footer: { model: 'root', kind: 'local', usage: [] } }} />)
     expect(local).toContain('border-radius:50%')

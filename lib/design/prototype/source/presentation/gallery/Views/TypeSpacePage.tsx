@@ -1,6 +1,5 @@
 import type { CSSProperties } from 'react'
 import { Icon } from '../../styles/Components/Icon'
-import { iconSet } from '../../styles/Icons/IconSet'
 import type { TypeStep } from '../../styles/Tokens/Tokens'
 import { FoundationsHeader, foundationsPage, sectionLabel } from '../Components/FoundationsHeader'
 import type { Face, TypePageFace } from '../ViewModels/TypePage'
@@ -63,7 +62,7 @@ export function TypeSpacePage({ face }: { readonly face: TypePageFace }) {
         {face.intro}
       </FoundationsHeader>
 
-      <section aria-label="Typefaces">
+      <section>
         <h2 style={sectionLabel}>INTERFACE · {face.faces.ui.length} FACES</h2>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
           {face.faces.ui.map((each) => (
@@ -76,12 +75,13 @@ export function TypeSpacePage({ face }: { readonly face: TypePageFace }) {
             <FaceCard key={each.id} face={each} sample="0O 1lI rn m {}[]() => != -> ~/code/ingest/src 27,612 tok · 1.8 s" />
           ))}
         </div>
+        <p style={{ ...lead, marginTop: 16 }}>IBM Plex Sans and Mono, the defaults, ship inside the app on macOS, Windows and Linux, so a layout measures the same everywhere. Settings › Appearance can swap either for the other faces here.</p>
       </section>
 
-      <section style={section} aria-label="Type scale">
+      <section style={section}>
         <h2 style={h2}>Type scale</h2>
         <p style={lead}>
-          Sizes at Medium, the default, with where each lands at {face.textSizes.filter((size) => size !== 'M').join(', ')}: {face.rounding}. Line heights: {face.lineHeights.map((line) => `${line.name} ${line.value}`).join(', ')}. Labels: {face.labelTracking}.
+          Sizes at Medium, the default. The last column shows where each size lands at Small, Medium, Large and Extra large. Nothing goes below {face.floor} px. Line heights: {face.lineHeights.map((line) => `${line.name} ${line.value}`).join(', ')}.
         </p>
         <div role="table" aria-label="Type sizes">
           <div role="row" className="mono" style={{ ...row, gridTemplateColumns: '90px minmax(0, 1fr) 60px 240px 150px', fontSize: 'var(--t-label)', letterSpacing: '.08em', color: 'var(--text-tertiary)' }}>
@@ -116,7 +116,7 @@ export function TypeSpacePage({ face }: { readonly face: TypePageFace }) {
         </div>
       </section>
 
-      <section style={section} aria-label="Spacing">
+      <section style={section}>
         <h2 style={h2}>Spacing</h2>
         <p style={lead}>
           {face.spacing.length} steps, from {face.spacing[0]} to {face.spacing.at(-1)} px.
@@ -129,9 +129,10 @@ export function TypeSpacePage({ face }: { readonly face: TypePageFace }) {
         ))}
       </section>
 
-      <section style={section} aria-label="Shape">
+      <section style={section}>
         <h2 style={h2}>Shape</h2>
-        <h3 style={{ ...sectionLabel, marginTop: 16 }}>RADIUS</h3>
+        <p style={lead}>Small radii, 1 px borders, and shadows only on things that float above the window.</p>
+        <p style={{ ...sectionLabel, marginTop: 16 }}>RADIUS</p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
           {face.radii.map((radius) => (
             <div key={radius.name} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, width: 88 }}>
@@ -141,7 +142,7 @@ export function TypeSpacePage({ face }: { readonly face: TypePageFace }) {
             </div>
           ))}
         </div>
-        <h3 style={{ ...sectionLabel, marginTop: 28 }}>CONTROL HEIGHT</h3>
+        <p style={{ ...sectionLabel, marginTop: 28 }}>CONTROL HEIGHT</p>
         {face.controls.map((control) => (
           <div key={control.name} style={{ ...row, gridTemplateColumns: '140px 60px minmax(0, 1fr)', alignItems: 'center' }}>
             <span style={mono}>{control.name}</span>
@@ -149,11 +150,11 @@ export function TypeSpacePage({ face }: { readonly face: TypePageFace }) {
             <span aria-hidden="true" style={{ display: 'block', width: 160, height: control.px, boxSizing: 'border-box', border: '1px solid var(--line-strong)', borderRadius: 'var(--radius-control)', background: 'var(--surface-control)' }} />
           </div>
         ))}
-        <h3 style={{ ...sectionLabel, marginTop: 28 }}>ELEVATION</h3>
+        <p style={{ ...sectionLabel, marginTop: 28 }}>ELEVATION</p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
           <div className="card" style={{ flex: '1 1 200px', padding: 14 }}>
             <div style={mono}>flat</div>
-            <div style={{ marginTop: 4, color: 'var(--text-secondary)' }}>A color step and a 1 px border: everything in the window.</div>
+            <div style={{ marginTop: 4, color: 'var(--text-secondary)' }}>Color step plus a 1 px border. Everything in the window.</div>
           </div>
           {face.shadows.map((shadow) => (
             <div key={shadow.name} className="card" style={{ flex: '1 1 200px', padding: 14, boxShadow: `var(--shadow-${shadow.name})` }}>
@@ -164,8 +165,8 @@ export function TypeSpacePage({ face }: { readonly face: TypePageFace }) {
         </div>
       </section>
 
-      <section style={section} aria-label="Layout">
-        <h2 style={h2}>Layout</h2>
+      <section style={section}>
+        <h2 style={h2}>Window layout</h2>
         <p style={lead}>The window's measured sizes, in px.</p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', columnGap: 24 }}>
           {face.layout.map((size) => (
@@ -177,10 +178,10 @@ export function TypeSpacePage({ face }: { readonly face: TypePageFace }) {
         </div>
       </section>
 
-      <section style={section} aria-label="Icons">
+      <section style={section}>
         <h2 style={h2}>Icons</h2>
         <p style={lead}>
-          {face.icons.length} icons, one set: a 16 px grid, a 1.5 px stroke with round caps, in the color of their text; {face.icons.filter((name) => iconSet[name].filled).join(', ')} are filled.
+          One set, drawn for Apogee and shipped on every platform: 16 px grid, 1.5 px stroke, round caps. They take the color of their text.
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 12 }}>
           {face.icons.map((name) => (

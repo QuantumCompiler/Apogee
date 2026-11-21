@@ -20,3 +20,13 @@ describe("the window in a gallery frame (design 1q): the frame's size, not the p
     expect(renderToStaticMarkup(<ShellView model={shell()} screen={() => null} overlay={() => null} />)).toContain('height:100vh')
   })
 })
+
+describe('the place’s landmarks (design 1s): the old prototype’s, so a place’s own header is the page’s banner', () => {
+  test('the shell draws a place in no main landmark of its own, the old having none, its route named on the place’s box', () => {
+    const drawn = renderToStaticMarkup(<ShellView model={shell()} screen={() => <header>Sessions</header>} overlay={() => null} />)
+    expect(drawn).not.toContain('<main')
+    expect(drawn).not.toMatch(/role="(main|region)"/)
+    expect(drawn).toContain('<div data-place="sessions"')
+    expect(drawn).toContain('<header>Sessions</header>')
+  })
+})

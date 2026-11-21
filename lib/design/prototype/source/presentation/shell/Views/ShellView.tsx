@@ -1,7 +1,6 @@
 import { useEffect } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { useObserved } from '../../styles/Observation/useObserved'
-import { titleOf } from '../ViewModels/Destination'
 import type { Destination, Overlay } from '../ViewModels/Destination'
 import { chordOf } from '../ViewModels/KeyMap'
 import type { ShellViewModel } from '../ViewModels/ShellViewModel'
@@ -107,9 +106,10 @@ export function ShellView({ model, screen, overlay, settings, sheet, confirm, se
   return (
     <div className="ap" data-theme={model.theme.theme} data-collapsed={layout.collapsed ? '' : undefined} data-narrow={layout.narrow ? '' : undefined} style={style}>
       {model.sidebarHidden ? null : <Sidebar model={model} strip={strip} sessions={sessions} newSessions={newSessions} running={running} />}
-      <main aria-label={titleOf(model.route)} style={{ flex: '1 1 0', minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+      {/* The place in a plain box, as the old prototype draws it (design 1s): no main landmark, so a place's own header is the page's banner. */}
+      <div data-place={model.route} style={{ flex: '1 1 0', minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
         {screen(model.route)}
-      </main>
+      </div>
       {model.menuOpen ? <MenuScrim onClose={() => model.closeMenus()} /> : null}
       {model.overlay ? overlay(model.overlay) : null}
       {model.settingsOpen ? settings?.() : null}

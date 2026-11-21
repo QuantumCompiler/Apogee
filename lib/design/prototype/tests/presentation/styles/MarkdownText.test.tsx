@@ -45,6 +45,8 @@ describe("the markdown component, drawn: markdown-answer.jsonl's every block, an
   test("a fence's caption names its language, beside copy; its code is coloured by the five code tokens and nothing else", () => {
     expect(markup).toContain('>python<')
     expect(markup).toContain('>copy<')
+    // Named by its word, as the old button is (design 1s): no label of its own.
+    expect(markup).not.toContain('Copy the code')
     const figure = markup.slice(markup.indexOf('<figure'), markup.indexOf('</figure>'))
     const colors = [...figure.matchAll(/color:(var\(--[a-z-]+\))/g)].map((match) => match[1])
     expect(colors.length).toBeGreaterThan(0)

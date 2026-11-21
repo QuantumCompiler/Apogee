@@ -72,7 +72,7 @@ export function WebPane({ model }: { readonly model: SettingsViewModel }) {
           <span className="mono" style={{ fontSize: 'var(--t-ui)' }}>
             {host}
           </span>
-          <button type="button" className="btn-g" onClick={() => void model.removeSite(host)} aria-label={`Remove ${host}`} style={small}>
+          <button type="button" className="btn-g" onClick={() => void model.removeSite(host)} style={small}>
             Remove
           </button>
         </div>

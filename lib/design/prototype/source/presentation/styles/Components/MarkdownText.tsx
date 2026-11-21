@@ -164,7 +164,6 @@ function CodeBlock({ language, text, last }: { readonly language: string | undef
         <button
           type="button"
           className="mono hv"
-          aria-label={copied ? 'Copied' : 'Copy the code'}
           onClick={() => {
             void globalThis.navigator?.clipboard?.writeText(text).catch(() => {})
             setCopied(true)

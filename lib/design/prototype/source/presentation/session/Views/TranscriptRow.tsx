@@ -58,7 +58,11 @@ export function QuietLine({ text, tone = 'quiet' }: { readonly text: string; rea
 export function ActivityView({ activity }: { readonly activity: ActivityFace }) {
   const play = activity.lines.some((line) => line.mark !== '')
   const [expanded, setExpanded] = useState(false)
-  const open = activity.live || activity.waiting || play || expanded
+  // A live or waiting activity opens by itself, and its head closes it, as the old toggle does (`tg.toggleThink`, design 1s); a play's stands open, its head plain words, as the old's.
+  const [shut, setShut] = useState(false)
+  const opensItself = activity.live || activity.waiting
+  const open = play || (opensItself ? !shut : expanded)
+  const toggle = (to: boolean) => (opensItself ? setShut(!to) : setExpanded(to))
   const [lead, ...rest] = activity.summary.split(' · ')
   const detail = activity.reasoning !== '' || activity.lines.length > 0
   if (!open) {
@@ -76,7 +80,7 @@ export function ActivityView({ activity }: { readonly activity: ActivityFace }) 
       )
     }
     return (
-      <button type="button" className="mono" aria-expanded={false} onClick={() => setExpanded(true)} style={line}>
+      <button type="button" className="mono" aria-expanded={false} onClick={() => toggle(true)} style={line}>
         {chevron}
         {activity.summary}
       </button>
@@ -97,12 +101,12 @@ export function ActivityView({ activity }: { readonly activity: ActivityFace }) 
   )
   return (
     <div style={{ border: '1px solid var(--line-border)', borderRadius: 6, background: 'var(--surface-card)' }}>
-      {activity.live || activity.waiting || play ? (
+      {play ? (
         <div className="mono" style={headStyle}>
           {head}
         </div>
       ) : (
-        <button type="button" className="mono" aria-expanded={true} onClick={() => setExpanded(false)} style={headStyle}>
+        <button type="button" className="mono" aria-expanded={true} onClick={() => toggle(false)} style={headStyle}>
           {head}
         </button>
       )}
@@ -169,7 +173,7 @@ function AnswerView({ answer, acts }: { readonly answer: AnswerFace; readonly ac
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               {answer.footer.kind === 'api' ? (
                 <span title="billed per use" style={{ display: 'inline-flex' }}>
-                  {apiGlyph}
+                  <ModelGlyph kind="api" size={12} label="billed per use" />
                 </span>
               ) : dot ? (
                 <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: dot }} />

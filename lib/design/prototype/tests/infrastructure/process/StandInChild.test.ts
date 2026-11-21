@@ -229,7 +229,23 @@ describe('the stand-in child: its three modes', () => {
     expect(printed(stand.run('reads', ['review', 'targets']))).toEqual({ stdout: '', stderr: agentsListBadConfig.replace('apogee agents:', 'apogee review:'), exit: 'exited with status 1', timedOut: false })
     expect(stand.run('reads', ['review', 'skills', 'show', 'invented']), 'a config-free call nobody recorded is unanswered, not refused').toEqual({ started: false, reason: 'no recorded answer for apogee review skills show invented' })
     expect(stand.unanswered).toEqual(['reads: apogee review skills show invented'])
-    expect(StandInChild.configFree).toEqual([['review', 'skills']])
+    expect(StandInChild.configFree).toEqual([['review', 'skills'], ['mcp', 'presets'], ['config', 'path']])
+  })
+
+  test('config-typo answers mcp presets and config path too, which the CLI answers without reading its config (design 1s)', () => {
+    const stand = child(
+      {
+        reads: [
+          { arguments: ['mcp', 'presets'], answer: { stdout: 'code-exec\n' } },
+          { arguments: ['config', 'path'], answer: { stdout: '/Users/someone/.apogee/config/config.json\n' } },
+          { arguments: ['mcp', 'list'], answer: { stdout: '{}' } },
+        ],
+      },
+      'config-typo',
+    )
+    expect(printed(stand.run('reads', ['mcp', 'presets']))).toEqual({ stdout: 'code-exec\n', stderr: '', exit: 'exited with status 0', timedOut: false })
+    expect(printed(stand.run('reads', ['config', 'path']))).toEqual({ stdout: '/Users/someone/.apogee/config/config.json\n', stderr: '', exit: 'exited with status 0', timedOut: false })
+    expect(printed(stand.run('reads', ['mcp', 'list'])).exit).toBe('exited with status 1')
   })
 })
 

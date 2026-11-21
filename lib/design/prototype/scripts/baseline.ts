@@ -244,13 +244,13 @@ const fontHosts = ['fonts.googleapis.com', 'fonts.gstatic.com']
  * draws each edge the same way every time (the full build's GPU raster did
  * not).
  */
-const browserArgs = ['--num-raster-threads=1']
+export const browserArgs = ['--num-raster-threads=1']
 
 /** How many fresh contexts a shot may take before Google Fonts serves its static stylesheet. */
-const pinTries = 10
+export const pinTries = 10
 
 /** `chat:retry` → `chat_retry`: a file name Finder shows as written. */
-function fileName(text: string): string {
+export function fileName(text: string): string {
   return text.replace(/[^A-Za-z0-9._=-]/g, '_')
 }
 
@@ -266,7 +266,7 @@ export function isStaticFonts(css: string): boolean {
 }
 
 /** Google Fonts answered a stylesheet with dynamically subset faces: the shot is taken again in a fresh context. */
-class Unpinned extends Error {
+export class Unpinned extends Error {
   readonly url: string
   constructor(url: string) {
     super(`Google Fonts served a dynamically subset stylesheet for ${url}`)
@@ -275,7 +275,7 @@ class Unpinned extends Error {
 }
 
 /** Serves a folder as spec/README.md does, `python3 -m http.server`, on a free port of 127.0.0.1. */
-async function serve(folder: string): Promise<{ origin: string; stop: () => void }> {
+export async function serve(folder: string): Promise<{ origin: string; stop: () => void }> {
   const server = spawn('python3', ['-u', '-m', 'http.server', '0', '--bind', '127.0.0.1', '--directory', folder], {
     stdio: ['ignore', 'pipe', 'ignore'],
   })
@@ -302,7 +302,7 @@ interface Settled {
  * and each stylesheet that settles noted, so a failure before the wait
  * begins is still seen.
  */
-function prepareWindow(seed: number): void {
+export function prepareWindow(seed: number): void {
   let state = seed
   Math.random = () => {
     state = (state + 0x6d2b79f5) | 0
@@ -320,7 +320,7 @@ function prepareWindow(seed: number): void {
 }
 
 /** A browser context, with what it has seen of the fonts. Each shot opens a page of its own in it. */
-interface Session {
+export interface Session {
   context: BrowserContext
   /** Font requests that failed during the current shot. */
   fontFailures: string[]
@@ -334,7 +334,7 @@ interface Session {
  * the browser's cache off, and the warm second load every shot relies on
  * needs it.
  */
-async function openSession(
+export async function openSession(
   browser: Awaited<ReturnType<typeof chromium.launch>>,
   settings: Pick<Baseline, 'clock' | 'timezone' | 'locale' | 'seed'>,
   prepare: Options['prepareContext'],
@@ -366,7 +366,7 @@ async function openSession(
 }
 
 /** Navigates, waits for support.js to draw, for every stylesheet, font and image, and reports what it found. */
-async function load(page: Page, url: string, what: string): Promise<{ errorBox: string | null; unloaded: string[]; failedFaces: string[]; googleSheets: string[] }> {
+export async function load(page: Page, url: string, what: string): Promise<{ errorBox: string | null; unloaded: string[]; failedFaces: string[]; googleSheets: string[] }> {
   await page.goto(url, { waitUntil: 'load' })
   try {
     await page.waitForFunction(() => !document.querySelector('x-dc'), undefined, { timeout: 30_000 })
@@ -411,7 +411,7 @@ async function load(page: Page, url: string, what: string): Promise<{ errorBox: 
  * context); a static one is recorded when recording, and otherwise must
  * hash to what baseline.json recorded.
  */
-async function checkFonts(session: Session, found: Awaited<ReturnType<typeof load>>, what: string, pins: Pins): Promise<void> {
+export async function checkFonts(session: Session, found: Awaited<ReturnType<typeof load>>, what: string, pins: Pins): Promise<void> {
   const fonts = [
     ...session.fontFailures,
     ...found.unloaded.map((href) => `${href}: the stylesheet did not load`),
@@ -441,7 +441,7 @@ async function checkFonts(session: Session, found: Awaited<ReturnType<typeof loa
 }
 
 /** The stylesheets baseline.json pins by hash, and whether this run records them. */
-interface Pins {
+export interface Pins {
   fonts: Record<string, string>
   recording: boolean
 }
@@ -469,7 +469,7 @@ async function shoot(session: Session, pins: Pins, url: string, what: string, si
   }
 }
 
-function sha256(bytes: Buffer): string {
+export function sha256(bytes: Buffer): string {
   return createHash('sha256').update(bytes).digest('hex')
 }
 
@@ -667,7 +667,7 @@ function writeOutputs(outDir: string, baseline: Baseline, shots: Shot[]): Compar
 // MARK: - The two modes
 
 /** A fresh temp folder for an archive, removed when `use` is done. */
-async function inArchive<T>(repo: string, revision: string, use: (html: string) => Promise<T>): Promise<T> {
+export async function inArchive<T>(repo: string, revision: string, use: (html: string) => Promise<T>): Promise<T> {
   const folder = mkdtempSync(join(tmpdir(), 'apogee-baseline-'))
   try {
     return await use(archiveSpec(repo, revision, folder))

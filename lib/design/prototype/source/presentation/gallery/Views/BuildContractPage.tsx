@@ -77,7 +77,7 @@ export function BuildContractPage({ model }: { readonly model: BuildContractView
         ))}
       </div>
 
-      <section style={section} aria-label={words.startingUp}>
+      <section style={section}>
         <h2 style={h2}>{words.startingUp}</h2>
         <ol style={{ ...list, margin: '12px 0 0', maxWidth: 980, gap: 8, fontSize: 'var(--t-title)' }}>
           {model.startingUp.map((step) => (
@@ -86,7 +86,7 @@ export function BuildContractPage({ model }: { readonly model: BuildContractView
         </ol>
       </section>
 
-      <section style={section} aria-label={words.map}>
+      <section style={section}>
         <h2 style={h2}>{words.map}</h2>
         <p style={intro}>
           {words.mapIntro}
@@ -122,7 +122,7 @@ export function BuildContractPage({ model }: { readonly model: BuildContractView
         ))}
       </section>
 
-      <section style={section} aria-label={words.gaps}>
+      <section style={section}>
         <h2 style={h2}>{words.gaps}</h2>
         <p style={intro}>{words.gapsIntro}</p>
         {model.gapRows().map((gap) => (
@@ -147,7 +147,7 @@ export function BuildContractPage({ model }: { readonly model: BuildContractView
       </section>
 
       <div style={{ ...section, display: 'flex', flexWrap: 'wrap', gap: '40px 64px', alignItems: 'flex-start' }}>
-        <section style={{ flex: '1 1 640px', minWidth: 0 }} aria-label={words.decisions}>
+        <section style={{ flex: '1 1 640px', minWidth: 0 }}>
           <h2 style={h2}>{words.decisions}</h2>
           <p style={intro}>{words.decisionsIntro}</p>
           <ol style={list}>
@@ -156,7 +156,7 @@ export function BuildContractPage({ model }: { readonly model: BuildContractView
             ))}
           </ol>
         </section>
-        <section style={{ flex: '1 1 420px', minWidth: 0 }} aria-label={words.calls}>
+        <section style={{ flex: '1 1 420px', minWidth: 0 }}>
           <h2 style={h2}>{words.calls}</h2>
           <p style={intro}>{words.callsIntro}</p>
           <ol style={list}>

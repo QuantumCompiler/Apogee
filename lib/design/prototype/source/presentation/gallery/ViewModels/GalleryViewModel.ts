@@ -20,10 +20,11 @@ export interface BoardProps {
   readonly apogee: ApogeeMode
 }
 
-/** What the gallery opens at: a page, and a board focused at full size. */
+/** What the gallery opens at: a page, and a board focused at full size, in the theme its address names (design 1s). */
 export interface GalleryAddress {
   readonly page: GalleryPage
   readonly board?: string
+  readonly theme?: ThemeId
 }
 
 /** What a frame mounts: the app at a start preset, still, or live at the app's own start (the App board). */
@@ -41,9 +42,16 @@ export interface AddressBar {
   replace(search: string): void
 }
 
-/** The gallery's own words in the address: `gallery`, its page, and `board`, which also opens 1r's Build pages (`&board=BuildContract`). */
+/**
+ * The gallery's own words in the address: `gallery`, its page, `board`, which
+ * also opens 1r's Build pages (`&board=BuildContract`), and `theme`, the
+ * focused board's theme (design 1s: so each of a board's old pictures has an
+ * address to pair with), written only when it is not dark, the default.
+ */
 const galleryParameter = 'gallery'
 const boardParameter = 'board'
+const themeParameter = 'theme'
+const galleryWords: readonly string[] = [galleryParameter, boardParameter, themeParameter]
 
 /** The query's parameters, in their order, a bare word (`?gallery`) as an empty value. */
 function parameters(search: string): Array<[string, string]> {
@@ -61,27 +69,29 @@ function query(parts: ReadonlyArray<readonly [string, string]>): string {
  * Whether the page at `search` asks for the gallery, and where it opens
  * (design 1q): `?gallery` the Build page, `?gallery=foundations` the
  * Foundations page, and `&board=<id>` a board at full size, on its own page
- * whatever the page said. An id the table lacks is passed over. `undefined`
- * with no `gallery` word: the app opens. `?page=` is never read: 1r's Build
- * pages open as boards, `&board=BuildContract`.
+ * whatever the page said, in the theme `&theme=<id>` names (design 1s). An
+ * id or a theme the gallery lacks is passed over, and so is a theme with no
+ * board. `undefined` with no `gallery` word: the app opens. `?page=` is never
+ * read: 1r's Build pages open as boards, `&board=BuildContract`.
  */
 export function galleryAddress(search: string): GalleryAddress | undefined {
   const said = new Map(parameters(search))
   const page = said.get(galleryParameter)
   if (page === undefined) return undefined
   const board = boards.find((entry) => entry.id === said.get(boardParameter))
-  if (board) return { page: board.page, board: board.id }
+  const theme = themeIds.find((id) => id === said.get(themeParameter))
+  if (board) return theme === undefined ? { page: board.page, board: board.id } : { page: board.page, board: board.id, theme }
   return { page: page === 'foundations' ? 'foundations' : 'build' }
 }
 
 /** The address that opens the gallery from the app's: `gallery` added (its Build page), every other word kept in its place. */
 export function withGallery(search: string): string {
-  return query([...parameters(search).filter(([name]) => name !== galleryParameter && name !== boardParameter), [galleryParameter, '']])
+  return query([...parameters(search).filter(([name]) => !galleryWords.includes(name)), [galleryParameter, '']])
 }
 
 /** The app's own address once the gallery is left: the gallery's words taken out, every other word kept in its place. */
 export function withoutGallery(search: string): string {
-  return query(parameters(search).filter(([name]) => name !== galleryParameter && name !== boardParameter))
+  return query(parameters(search).filter(([name]) => !galleryWords.includes(name)))
 }
 
 /** One row of a page: the heading over it, and its boards in table order. */
@@ -118,9 +128,10 @@ export class GalleryViewModel extends Observable {
     readonly entries: readonly BoardEntry[] = boards,
   ) {
     super()
-    const opened = galleryAddress(address.search) ?? { page: 'build' }
+    const opened: GalleryAddress = galleryAddress(address.search) ?? { page: 'build' }
     this.shown = opened.page
     this.focusedId = opened.board
+    if (opened.board !== undefined && opened.theme !== undefined) this.chosen.set(opened.board, { ...defaultProps, theme: opened.theme })
   }
 
   /** The page open: Build or Foundations. */
@@ -222,15 +233,20 @@ export class GalleryViewModel extends Observable {
   }
 
   private choose(id: string, props: BoardProps): void {
+    const theme = this.props(id).theme
     this.chosen.set(id, props)
+    if (id === this.focusedId && props.theme !== theme) this.write()
     this.changed()
   }
 
-  /** The address for the page and the board shown, the page's other words kept. */
+  /** The address for the page and the board shown, in its theme where that is not dark (design 1s), the page's other words kept. */
   private write(): void {
-    const kept = parameters(this.address.search).filter(([name]) => name !== galleryParameter && name !== boardParameter)
+    const kept = parameters(this.address.search).filter(([name]) => !galleryWords.includes(name))
     const gallery: [string, string] = [galleryParameter, this.shown === 'build' ? '' : this.shown]
-    const board: Array<[string, string]> = this.focusedId === undefined ? [] : [[boardParameter, this.focusedId]]
-    this.address.replace(query([...kept, gallery, ...board]))
+    const focused = this.focusedId
+    const theme = focused === undefined ? defaultProps.theme : this.props(focused).theme
+    const board: Array<[string, string]> = focused === undefined ? [] : [[boardParameter, focused]]
+    const themed: Array<[string, string]> = theme === defaultProps.theme ? [] : [[themeParameter, theme]]
+    this.address.replace(query([...kept, gallery, ...board, ...themed]))
   }
 }

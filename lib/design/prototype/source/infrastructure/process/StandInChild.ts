@@ -255,10 +255,12 @@ export class StandInChild {
    * whose `list` and `show` read only the skills folder
    * (`review_cmd.cpp:74-75,106-107`), as the Mac's `ReviewPreview.badConfig`
    * lists them over a bad config (`ReviewPreviews.swift:22-28`) and the old
-   * prototype draws them. `mcp presets` and `config path` read none either
-   * and are still refused: a stand-in limit, listed for 1s.
+   * prototype draws them; and `mcp presets` and `config path`, which read
+   * none either (`mcp_cmd.cpp`'s `bind_presets` takes only the config's
+   * path; `config path` prints it), refused here until design 1s found them
+   * in Library's MCP tab at `config-typo`.
    */
-  static readonly configFree: readonly (readonly string[])[] = [['review', 'skills']]
+  static readonly configFree: readonly (readonly string[])[] = [['review', 'skills'], ['mcp', 'presets'], ['config', 'path']]
 
   readonly rules: Rules
   readonly apogee: ApogeeMode

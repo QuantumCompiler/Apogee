@@ -7,14 +7,14 @@ The work queue, seen one release at a time. This page is the **overview**: what 
 The branch is `v0.2.1`; the last published release is v0.2.0.
 
 **Still to build: 6 items.**
-- **The design:** 2. The prototype is being rebuilt in React; its law (1a), its scaffold (1b), the old prototype's baseline (1c), the CLI stand-in (1d), its first screen (1e), the session screen's two halves (1u, 1v), the Sessions place around it with the console (1g), the Models place (1h), Settings (1i), the Training place (1j), the Video place with the runtime consent (1k), the compositions (1l), the Voice place (1m), the Library and Review places (1n), the Knowledge and Code graph places (1o), the Suites and Tasks places (1p), the gallery with the foundations pages (1q) and the build boards as pages (1r) have shipped: every place and every Build and Foundations board is ported (the canvas's 5 Exploration boards are not, 1q's default), and the built file is its own review surface.
+- **The design:** 2. The prototype is being rebuilt in React; its law (1a), its scaffold (1b), the old prototype's baseline (1c), the CLI stand-in (1d), its first screen (1e), the session screen's two halves (1u, 1v), the Sessions place around it with the console (1g), the Models place (1h), Settings (1i), the Training place (1j), the Video place with the runtime consent (1k), the compositions (1l), the Voice place (1m), the Library and Review places (1n), the Knowledge and Code graph places (1o), the Suites and Tasks places (1p), the gallery with the foundations pages (1q) and the build boards as pages (1r) have shipped: every place and every Build and Foundations board is ported (the canvas's 5 Exploration boards are not, 1q's default), and the built file is its own review surface. The parity proof (1s) is built and waits for your look; retiring the old files (1t) waits on it.
 - **The mod:** 4. The Claude plugin is born.
 - **The Apple apps:** none; their three tracks for this release have shipped.
 - **The CLI:** none; its three tracks for this release have shipped.
 
-On top of that, 4 maintenance items can be picked up any time. None of the 6 waits on a decision from you.
+On top of that, 4 maintenance items can be picked up any time. None of the 6 waits on a decision from you; one, design 1s, is built (2026-11-21) and waits only for your look at its report.
 
-**Can start today** (nothing gates them): [design 1s](design/v0.2.1/parity-proof.md) and [mod 1a](mod/v0.2.1/mod-scaffold.md).
+**Can start today** (nothing gates them): [mod 1a](mod/v0.2.1/mod-scaffold.md). [Design 1s](design/v0.2.1/parity-proof.md) is built (2026-11-21) and waits for your look at its report before it closes; 1t waits on it.
 
 ### The design ([queue](design/README.md#v021))
 
@@ -23,7 +23,7 @@ On top of that, 4 maintenance items can be picked up any time. None of the 6 wai
 | # | Item | Waits on |
 |---|---|---|
 | **Finish** | | |
-| 1s | [The parity proof](design/v0.2.1/parity-proof.md): you see the side-by-side report before anything is deleted | — |
+| 1s | [The parity proof](design/v0.2.1/parity-proof.md): you see the side-by-side report before anything is deleted -- **built 2026-11-21, waiting for your look** | your look |
 | 1t | [Retire the old prototype and rewrite the law](design/v0.2.1/retire-the-old-prototype.md): the old files and the canvas go | 1s |
 
 ### The mod ([queue](mod/README.md#index))

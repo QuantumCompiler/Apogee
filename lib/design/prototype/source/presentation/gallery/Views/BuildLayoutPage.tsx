@@ -28,7 +28,7 @@ export function BuildLayoutPage({ model }: { readonly model: BuildLayoutViewMode
         <CodeText text={words.intro} />
       </FoundationsHeader>
 
-      <section style={section} aria-label={words.window}>
+      <section style={section}>
         <h2 style={h2}>{words.window}</h2>
         <p style={intro}>{words.windowIntro}</p>
         <div style={{ position: 'relative', width: face.window.width, height: face.window.height, maxWidth: '100%' }}>
@@ -52,7 +52,7 @@ export function BuildLayoutPage({ model }: { readonly model: BuildLayoutViewMode
         </div>
       </section>
 
-      <section style={section} aria-label={words.regions}>
+      <section style={section}>
         <h2 style={h2}>{words.regions}</h2>
         <p style={intro}>{words.regionsIntro}</p>
         {face.regions.map((region) => (
@@ -65,7 +65,7 @@ export function BuildLayoutPage({ model }: { readonly model: BuildLayoutViewMode
       </section>
 
       <div style={twoUp}>
-        <section style={{ flex: '1 1 560px', minWidth: 0 }} aria-label={words.keys}>
+        <section style={{ flex: '1 1 560px', minWidth: 0 }}>
           <h2 style={h2}>{words.keys}</h2>
           <p style={intro}>{words.keysIntro}</p>
           {face.keys.map((row) => (
@@ -75,7 +75,7 @@ export function BuildLayoutPage({ model }: { readonly model: BuildLayoutViewMode
             </div>
           ))}
         </section>
-        <section style={{ flex: '1 1 520px', minWidth: 0 }} aria-label={words.states}>
+        <section style={{ flex: '1 1 520px', minWidth: 0 }}>
           <h2 style={h2}>{words.states}</h2>
           <p style={intro}>{words.statesIntro}</p>
           {face.states.map((state) => (
@@ -87,7 +87,7 @@ export function BuildLayoutPage({ model }: { readonly model: BuildLayoutViewMode
         </section>
       </div>
 
-      <section style={section} aria-label={words.controls}>
+      <section style={section}>
         <h2 style={h2}>{words.controls}</h2>
         <p style={intro}>{words.controlsIntro}</p>
         <div style={{ ...fourColumns, padding: '0 0 8px', borderBottom: '1px solid var(--line-strong)', fontFamily: 'var(--font-mono)', fontSize: 'var(--t-label)', letterSpacing: '.08em', color: 'var(--text-tertiary)' }}>
@@ -107,7 +107,7 @@ export function BuildLayoutPage({ model }: { readonly model: BuildLayoutViewMode
       </section>
 
       <div style={twoUp}>
-        <section style={{ flex: '1 1 520px', minWidth: 0 }} aria-label={words.type}>
+        <section style={{ flex: '1 1 520px', minWidth: 0 }}>
           <h2 style={h2}>{words.type}</h2>
           <p style={intro}>{words.typeIntro}</p>
           {face.type.map((size) => (
@@ -118,7 +118,7 @@ export function BuildLayoutPage({ model }: { readonly model: BuildLayoutViewMode
             </div>
           ))}
         </section>
-        <section style={{ flex: '1 1 520px', minWidth: 0 }} aria-label={words.space}>
+        <section style={{ flex: '1 1 520px', minWidth: 0 }}>
           <h2 style={h2}>{words.space}</h2>
           {face.space.map((row) => (
             <div key={row.name} style={pair}>

@@ -39,8 +39,18 @@ describe('the address the gallery reads: ?gallery, ?gallery=foundations and &boa
     expect(galleryAddress('?gallery&page=foundations')).toEqual({ page: 'build' })
   })
 
+  test('&theme=<id> beside &board= opens the focused board in that theme (design 1s); an unknown theme, or one with no board, is passed over', () => {
+    expect(galleryAddress('?gallery&board=ColorTokens&theme=light')).toEqual({ page: 'foundations', board: 'ColorTokens', theme: 'light' })
+    expect(galleryAddress('?gallery&board=ComponentsTurn&theme=contrast')).toEqual({ page: 'foundations', board: 'ComponentsTurn', theme: 'contrast' })
+    expect(galleryAddress('?gallery&theme=light&board=ScreenModels')).toEqual({ page: 'build', board: 'ScreenModels', theme: 'light' })
+    expect(galleryAddress('?gallery&board=Logo&theme=sepia')).toEqual({ page: 'foundations', board: 'Logo' })
+    expect(galleryAddress('?gallery&theme=light')).toEqual({ page: 'build' })
+    expect(galleryAddress('?gallery&board=Nope&theme=light')).toEqual({ page: 'build' })
+  })
+
   test('the app’s own address once the gallery is left: its words gone, the rest kept', () => {
     expect(withoutGallery('?gallery=foundations&board=ColorTokens')).toBe('')
+    expect(withoutGallery('?gallery&board=Logo&theme=light&start=voice')).toBe('?start=voice')
     expect(withoutGallery('?start=models&gallery&board=ScreenModels&still=true')).toBe('?start=models&still=true')
   })
 })
@@ -71,6 +81,36 @@ describe('the gallery view-model', () => {
   test('opened at a focused board: its page and the board', () => {
     const gallery = new GalleryViewModel(bar('?gallery&board=Logo'))
     expect([gallery.page, gallery.focused?.id]).toEqual(['foundations', 'Logo'])
+  })
+
+  test('opened at a focused board with &theme=: the board in that theme, every other board dark (design 1s)', () => {
+    const gallery = new GalleryViewModel(bar('?gallery&board=Logo&theme=light'))
+    expect([gallery.page, gallery.focused?.id, gallery.props('Logo').theme]).toEqual(['foundations', 'Logo', 'light'])
+    expect(gallery.props('TypeSpace').theme).toBe('dark')
+    expect(gallery.switcher('Logo').themes.find((theme) => theme.chosen)?.id).toBe('light')
+  })
+
+  test('the focused board’s theme is written beside its id, dark (the default) left unsaid; Esc and another board drop it (design 1s)', () => {
+    const address = bar('?gallery')
+    const gallery = new GalleryViewModel(address)
+    gallery.focus('ColorTokens')
+    expect(address.search).toBe('?gallery=foundations&board=ColorTokens')
+    gallery.setTheme('ColorTokens', 'light')
+    expect(address.search).toBe('?gallery=foundations&board=ColorTokens&theme=light')
+    gallery.setTheme('ColorTokens', 'contrast')
+    expect(address.search).toBe('?gallery=foundations&board=ColorTokens&theme=contrast')
+    gallery.setTheme('ColorTokens', 'dark')
+    expect(address.search).toBe('?gallery=foundations&board=ColorTokens')
+    gallery.setTheme('ColorTokens', 'light')
+    gallery.focus('Logo')
+    expect(address.search).toBe('?gallery=foundations&board=Logo')
+    gallery.focus('ColorTokens')
+    expect(address.search).toBe('?gallery=foundations&board=ColorTokens&theme=light')
+    gallery.escape()
+    expect(address.search).toBe('?gallery=foundations')
+    // A board's theme changed in its row, unfocused, leaves the address alone.
+    gallery.setTheme('TypeSpace', 'light')
+    expect(address.search).toBe('?gallery=foundations')
   })
 
   test("a board-less preset's id keeps its colon in the address", () => {

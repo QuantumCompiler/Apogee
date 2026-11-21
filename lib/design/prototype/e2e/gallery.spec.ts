@@ -149,6 +149,17 @@ test('⌥⌘G opens the gallery from the app, outside its frame, and again leave
   expect(requests).toEqual([`${built}?start=models&still=true`])
 })
 
+test('&theme= beside &board= opens the focused board in that theme, so each old picture has an address (design 1s)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?gallery&board=Logo&theme=light`)
+  await expect(page.getByRole('group', { name: 'Theme' }).getByRole('button', { name: 'Graphite Light' })).toHaveAttribute('aria-pressed', 'true')
+  await page.goto(`${built}?gallery&board=ComponentsTurn&theme=contrast`)
+  await expect(page.getByRole('region', { name: 'Components · The turn' }).locator('[data-theme]').first()).toHaveAttribute('data-theme', 'contrast')
+  await page.getByRole('group', { name: 'Theme' }).getByRole('button', { name: 'Graphite Dark' }).click()
+  await expect(page).toHaveURL(`${built}?gallery=foundations&board=ComponentsTurn`)
+  expect(errors).toEqual([])
+})
+
 test('the color page: 25 tokens in three themes, each ratio computed; the type page: spacing from 2 px (design 1q)', async ({ page }) => {
   const { errors } = watch(page)
   await page.goto(`${built}?gallery&board=ColorTokens`)
@@ -160,7 +171,7 @@ test('the color page: 25 tokens in three themes, each ratio computed; the type p
   await page.goto(`${built}?gallery&board=TypeSpace`)
   const type = page.getByRole('region', { name: 'Foundations · Type, space, shape' })
   await expect(type).toContainText('spacing from 2 px')
-  await expect(type.getByRole('region', { name: 'Spacing' })).toContainText('13 steps, from 2 to 32 px.')
+  await expect(type.locator('section').filter({ hasText: 'SPACING' })).toContainText('13 steps, from 2 to 32 px.')
   expect(errors).toEqual([])
 })
 

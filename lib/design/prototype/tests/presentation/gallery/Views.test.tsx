@@ -72,3 +72,44 @@ describe('the gallery’s views, drawn to markup (design 1q)', () => {
     expect(markup).toContain('border-radius:22.4%')
   })
 })
+
+describe('the pages’ landmarks, as the old boards’ (design 1s)', () => {
+  test('each page’s header is its banner, as the old board’s top-level header is, even inside the gallery’s focused board; no section is a named region', async () => {
+    const { BuildContractPage } = await import('../../../source/presentation/gallery/Views/BuildContractPage')
+    const { BuildLayoutPage } = await import('../../../source/presentation/gallery/Views/BuildLayoutPage')
+    const { BuildContractViewModel } = await import('../../../source/presentation/gallery/ViewModels/BuildContractViewModel')
+    const { BuildLayoutViewModel } = await import('../../../source/presentation/gallery/ViewModels/BuildLayoutViewModel')
+    const { previewKeys } = await import('../../../source/presentation/gallery/Previews/GalleryPreview')
+    const pages = [
+      renderToStaticMarkup(<ColorTokensPage face={colorPage()} />),
+      renderToStaticMarkup(<TypeSpacePage face={typePage()} />),
+      renderToStaticMarkup(<ComponentsPage entry={entry('ComponentsModel')} specimens={previewParts.specimens} />),
+      renderToStaticMarkup(<LogoPage logo="data:image/png;base64,AAAA" />),
+      renderToStaticMarkup(<BuildContractPage model={new BuildContractViewModel()} />),
+      renderToStaticMarkup(<BuildLayoutPage model={new BuildLayoutViewModel(previewKeys)} />),
+    ]
+    for (const markup of pages) {
+      expect(markup).toMatch(/<header role="banner"/)
+      expect(markup).not.toMatch(/<section[^>]*aria-label=/)
+    }
+  })
+})
+
+describe('the type page keeps the old board’s own words where they still hold (design 1s)', () => {
+  test('its sentences, labels and headings are the old TypeSpace board’s, beside what 1q computes from the tokens, the two the new page outgrew said of it: its faces and its four text sizes', () => {
+    const markup = renderToStaticMarkup(<TypeSpacePage face={typePage()} />)
+    for (const words of [
+      'Every size here moves with Settings › Appearance › Text size; spacing and shape stay fixed.',
+      'IBM Plex Sans and Mono, the defaults, ship inside the app on macOS, Windows and Linux, so a layout measures the same everywhere. Settings › Appearance can swap either for the other faces here.',
+      'Sizes at Medium, the default. The last column shows where each size lands at Small, Medium, Large and Extra large. Nothing goes below 9 px.',
+      'Small radii, 1 px borders, and shadows only on things that float above the window.',
+      'Color step plus a 1 px border. Everything in the window.',
+      'One set, drawn for Apogee and shipped on every platform: 16 px grid, 1.5 px stroke, round caps. They take the color of their text.',
+    ]) {
+      expect(markup).toContain(words)
+    }
+    expect(markup).toMatch(/<h2[^>]*>Window layout<\/h2>/)
+    for (const label of ['RADIUS', 'CONTROL HEIGHT', 'ELEVATION']) expect(markup).toMatch(new RegExp(`<p[^>]*>${label}</p>`))
+    expect(markup).not.toContain('<h3')
+  })
+})

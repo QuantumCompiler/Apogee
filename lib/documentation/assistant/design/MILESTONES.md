@@ -2117,3 +2117,196 @@ Decisions taken while building (2026-11-21, an unattended group run), each for v
 - **1s's side-by-side** of the three pages, and **1t's** rewrite of `spec/CLAUDE.md`'s BuildContract and BuildLayout rows to point at `gallery/Models/`, the canvas's stale `handoff/tokens.json`, and BuildLayout's sentence naming it.
 - **darwin 10a's document** still says its gaps start "from the next free number (G25 at HEAD)"; by its own rule they start at G33. Not edited here.
 - **No commit**: the run's owner commits.
+
+### 2026-11-21 — `parity-proof` (backlog item 1s): the parity proof -- built, waiting for your look
+
+**Built and committed for your look; not closed.** This record is the work; [the item's document](../../backlog/design/v0.2.1/parity-proof.md) and its index row stay open, marked as waiting for your look, and 1t stays gated on it (your answer before the run, 2026-11-18). Its ROADMAP line is not ticked.
+
+**Why.** Before 1t deletes the old prototype, someone has to show that the React app draws everything it drew. The old data is invented and the new data is the CLI's, so pixel or string identity is impossible: the proof is structural (regions, states, controls and the wording around the data), every difference classed as the CLI's data or a change a shipped item records, and every defect fixed first.
+
+- [x] **The script**, `lib/design/prototype/scripts/parity.ts`, run as `npm run parity` (and `npm run parity -- --rejudge` to judge the last run's outlines again, capturing nothing, that run's capture checks kept in `checks.json` standing as it made them):
+  - the pairs: every preset in `baseline.json` in each `apogee` mode 1c kept (97 pairs), the five presets the new app adds at `installed` (`training:regimes`, `settings:roles`, `:web`, `:memory`, `:keyboard`), and the 10 rebuilt boards at each prop value 1c shot them in (21): 123 pairs. A preset in `baseline.json` the new app cannot open fails, named; Exploration's five boards have no new side (1q's default);
+  - the old side in 1c's own frame, through `baseline.ts`'s capture (its helpers exported, its behaviour unchanged): the revision archived and served, the fixed clock, zone, locale and seed, each picture in a page of its own on its second load, one raster thread, Google Fonts held to the pins. Each old picture 1c shot must hash to 1c's `hashes.txt` (118 of 118 did, in each run), so each outline is read from the baseline's own frame. `training:regimes`' old side is `training`, still, with its Regimes button clicked (`reachedByClick`, a pressed-state button). 1c's images are reused while its folder matches its list, re-made by its capture first when not;
+  - the new side: `lib/design/main.html` from disk in the same frame, `?start=<preset>&still=true&apogee=<mode>` or `?gallery&board=<Board>&theme=<theme>`, on its second load, settled; any console error, or any request but the file, fails the run;
+  - the outline: Playwright's ARIA snapshot, parsed into lines matched depth-free on role, state, words and name (a name a node's own content makes left out, so a row's changed data shows as text); what is left pairs with its like; a node whose whole content went or came is one difference; a long text says the words that changed;
+  - the verdicts: each difference classed by the first verdict in `parity/verdicts.json` that covers it; a difference with none, a `defect`, a verdict that classes nothing, a `fix` citing no item or one MILESTONES.md has no record of, a `data` verdict naming no fixture or one in neither fixture root, a pattern that does not compile, and a `match` that would class a planted lost or added button, a lost tab, a renamed heading or a lost dialog (`canaries`: a verdict lists its lines, or names their words) each fail the run;
+  - two runs: `outlines.txt` holds each outline's hash under the build's source hash, and the same build reading different outlines fails, naming them; a run with nothing to compare (the first, or a new build's first) says "not compared" and why, never yes;
+  - the report: `.parity/report/index.html` with its pictures beside it (`old/`, `new/`), the outlines and `summary.md`, never committed.
+- [x] **Its tests**, `scripts/parity.test.ts` (39, run by `npm run test`), each on a planted case: the outline reader; the differ (a missing button, a renamed tab, a changed state, a lost dialog as one difference, a changed fixture name inside a row as text, a landmark around the same lines, a long text's words, three likeness cases); the verdicts (an unjudged difference naming its pair and line, a `defect`, a `fix` with no item or an unknown one, a `data` verdict's fixture, a bad pattern and the rest, a verdict that classes nothing, presets, `within`, exact lines, a `match` that would class a planted lost control); a preset with no counterpart; the pairs; two runs, and a run with nothing to compare saying so; the report, its table and a skipped check's words; a rejudge keeping a failed capture check, and refusing a run that left no checks; an outline after a click in Chromium; and the committed `verdicts.json` against the real MILESTONES.md and fixture roots, a planted lost New task… on `tasks` and Jobs tab on `models` coming back unjudged by it.
+- [x] **The verdicts**, `lib/design/prototype/parity/verdicts.json`, committed: 82 verdicts classing 4,606 differences in 123 pairs, 1,503 as the CLI's `data` and 3,103 as `fix`es citing 1e, 1g, 1h, 1i, 1j, 1k, 1l, 1n, 1p, 1q, 1r, 1u and 1v; none open.
+- [x] **The defects found, each fixed in its module and test first** (the decisions below say why each counted):
+  - the shell drew each place in a `main` landmark the old never drew, so a place's header was no banner: a plain box now (`ShellView`, `data-place`; `ShellFrame.test.tsx`);
+  - the live or waiting activity's head was no toggle, where the old's is a button that closes it; a play's head stays plain words, as the old's (`TranscriptRow`; `SessionExtras.test.tsx`);
+  - an API answer's footer glyph had no name; the old's says "billed per use" (`TranscriptRow`);
+  - the console's output was a named `log` and Settings › Keyboard's keys a named `list`; plain, as the old's (`ConsoleView`, `GeneralPanes`; `ConsoleView.test.tsx`, `KeyboardPane.test.tsx`);
+  - the code block's copy button and Web access' Remove carried labels of their own; each is named by its word now, as the old's (`MarkdownText`, `AccessPanes`; `MarkdownText.test.tsx` and e2e, watched failing on the unfixed build);
+  - the Models note said "as its files state them" where the old says "computed from the file" (`ModelsScreen`; e2e);
+  - `config-typo` refused `mcp presets` and `config path`, which the CLI answers without reading its config (1n's stand-in limit): both now in `StandInChild.configFree`, so the Library's MCP tab lists the presets at a typo (`StandInChild.test.ts`; e2e);
+  - `training:regimes` opened on a Training with no run, where its old pair (`training` with Regimes clicked) keeps `training`'s run training: now New run…'s run, its bar and Stop, under Regimes (`AppViewModel.openTrainingPreset`; `AppViewModel.test.ts`);
+  - the Build and Foundations pages' headers were no banner inside the gallery's focused board, and their sections named regions the old never drew: `role="banner"`, sections unnamed (`FoundationsHeader`, the Build pages, `TypeSpacePage`, `ComponentsPage`; `Views.test.tsx`);
+  - the type page had dropped sentences, labels and a heading of the old board that still hold: restored (`TypeSpacePage`, `TypePage`'s `floor`; `Views.test.tsx`); two that no longer hold of the new page are said of it, a `fix` citing 1q -- "IBM Plex Sans and Mono, the defaults, ship inside the app … Settings › Appearance can swap either for the other faces here." where the old's "Both ship …" offered "any installed font" (the unported Appearance exploration's "Other installed font…"), and the last column "at Small, Medium, Large and Extra large", the four it computes, where the old's showed three.
+- [x] **The gallery's address carries a board's theme**: `&theme=<dark|light|contrast>` beside `&board=` (`GalleryViewModel`; its tests and an e2e test), so each of a board's old pictures has an address.
+- [x] **The board-less frames** (the twelve at `b375fac9` and `training:regimes`) are 1q's, each judged against its old pair here; none added or renamed.
+- [x] **`package.json`**: the `parity` script, outside `npm run check`. No package added; nothing downloaded.
+- [x] **Docs:** this entry; `DEVELOPER.md` (a new section, "The parity proof"; the layout's three rows, the commands, the stand-in's `config-typo`, the shell's box, the Training presets, the gallery's `&theme=`, the e2e rows); `assistant/design/CLAUDE.md` (where the design stands, the codebase map); the Infrastructure layer card's `configFree`; the item's document (its Decisions made and status, kept open), the index row and the overview marked as waiting for your look; the ROADMAP line says so, unticked.
+
+Decisions the item recorded before the build: the user's calls of 2026-11-14 (the React rebuild, the built file as the review surface opened from disk, Playwright, the design queue), and the recorded defaults (parity on layout, states, controls and wording; the old prototype frozen; checks local, not in CI); and from 1e, 1g, 1h, 1i, 1m, 1n, 1o, 1p, 1q and 1r, the intended differences each listed preset by preset, which the verdicts cite.
+
+The open calls' defaults, taken as stated (2026-11-18): the report a page outside git beside its pictures, never published; the outline diff the measure and the pictures for the eye; a difference neither data nor named in a shipped record a defect, matched to the old prototype rather than asked at the look (your answer before the run); text from a document `data` naming its fixture; a new preset the old opens by the same start compared the same way, and one it cannot open reached by a scripted click written in `parity.ts`; `npm run parity` out of `check`; `verdicts.json` committed until 1t.
+
+Decisions taken while building (2026-11-21, an unattended group run), each for veto:
+- **Your answers before the run:** the npm registry, Playwright's Chromium and Google Fonts during captures were allowed; only Google Fonts was fetched (the old side's captures), nothing installed or downloaded. A Playwright test from `file://` stood in for every look; **you try the file afterwards** (Not done). 1s is built and left open for your look; 1t did not start.
+- **The measure** (above): depth-free lines, a content-made name left out of a line's identity, likeness pairing, whole lost nodes as one difference, long texts by their changed words.
+- **`verdicts.json`'s form:** presets as pairs, presets or patterns; a `match` pattern or exact `lines`; `within`; the first verdict that covers a difference classes it; a verdict that classes nothing fails. A broad verdict classes a whole region only where its item's record names the region's every difference preset by preset (1h's store worlds, 1i's panes, 1l's compositions, 1o's graph, 1p's tasks), or where the record names the restructure (1q's Components pages); each was written against the full list of that region's differences, and since the review lists it line by line (`lines`), so a control lost from such a region comes back unjudged.
+- **What counts as named:** a record that describes the new side's structure or words names that difference; a difference only in the accessibility tree that no record names -- a landmark, a role, a longer label -- is a defect like any other, and was matched to the old even where the new markup was the more accessible. A label a record names is that record's `fix`: the Library's two Edit and Review's Remove… name what they act on, as 1n's record says.
+- **The SYSTEM strip's missing memory line** (carried from 1m) is `fix` citing 1e's record: "The monitor reads while it or the strip is open … Before any reading the strip's summary is blank."
+- **The Components pages' old pieces with no specimen** (1q's list, for this item to settle) stay undrawn, classed `fix` citing 1q's record, which names each: no recording holds them, and a specimen is never drawn from typed props (1q's rule). The old boards' per-piece headings and notes gave way with their static copies (1q). **Flagged for your look.**
+- **`training:regimes` is `training`'s frame on Regimes**, so its old pair, reached by a click, has the same state.
+- **The new presets are compared at `installed` alone;** 1c kept no other mode of them.
+- **Old-prototype bugs, noted in the report and not fixed:** it ignores the `apogee` mode in the session list, Training's canned run, the Library's lists and editors, and Review's dry run and post sheet.
+- **1p's carried stand-in limits** (Resume on an unrecorded Tasks row; a cancel at a turn boundary dropping the next round's start line) show in no frame or board, and stay 1p's record, noted in the report.
+- **`baseline.ts`'s helpers are exported** for `parity.ts` to share its frame; its behaviour and its 13 tests are unchanged.
+
+**The summary table** (`.parity/report/summary.md`, the final run): each pair, its differences, how many are the CLI's data and how many fixes (with the items they cite), and none unjudged.
+
+| Pair | Differences | data | fix | Unjudged |
+|---|---|---|---|---|
+| `chat@installed` | 43 | 14 | 29 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `chat:retry@installed` | 39 | 6 | 33 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `chat:wal@installed` | 51 | 36 | 15 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `chat:crash@installed` | 27 | 13 | 14 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `chat:pr@installed` | 26 | 5 | 21 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `chat:new@installed` | 16 | 5 | 11 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `chat:private@installed` | 17 | 6 | 11 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `chat:play@installed` | 26 | 10 | 16 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `chat:suite@installed` | 23 | 12 | 11 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `chat:restarting@installed` | 12 | 4 | 8 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `chat:notsent@installed` | 10 | 1 | 9 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `chat:ended@installed` | 13 | 1 | 12 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `chat:compacting@installed` | 43 | 14 | 29 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `monitor@installed` | 53 | 25 | 28 (1g, 1p, 1u, 1v) | 0 |
+| `console@installed` | 43 | 14 | 29 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `knowledge@installed` | 5 | 1 | 4 (1e, 1g, 1p) | 0 |
+| `knowledge:collections@installed` | 4 | 0 | 4 (1e, 1g, 1p) | 0 |
+| `knowledge:mixed@installed` | 4 | 0 | 4 (1e, 1g, 1p) | 0 |
+| `graph:prose@installed` | 4 | 0 | 4 (1e, 1g, 1p) | 0 |
+| `graph:refused@installed` | 24 | 20 | 4 (1e, 1g, 1p) | 0 |
+| `training@installed` | 6 | 0 | 6 (1e, 1g, 1j, 1p) | 0 |
+| `training@missing` | 27 | 0 | 27 (1e, 1g, 1j, 1p) | 0 |
+| `training:datasets@installed` | 5 | 1 | 4 (1e, 1g, 1p) | 0 |
+| `training:datasets@missing` | 24 | 0 | 24 (1e, 1g, 1p) | 0 |
+| `training:pipelines@installed` | 4 | 0 | 4 (1e, 1g, 1p) | 0 |
+| `training:cycle@installed` | 4 | 0 | 4 (1e, 1g, 1p) | 0 |
+| `training:stalelock@installed` | 4 | 0 | 4 (1e, 1g, 1p) | 0 |
+| `training:unreadable@installed` | 4 | 0 | 4 (1e, 1g, 1p) | 0 |
+| `training:cyclepass@installed` | 4 | 0 | 4 (1e, 1g, 1p) | 0 |
+| `training:passrunning@installed` | 4 | 0 | 4 (1e, 1g, 1p) | 0 |
+| `training:resumeheld@installed` | 4 | 0 | 4 (1e, 1g, 1p) | 0 |
+| `library@installed` | 12 | 6 | 6 (1e, 1g, 1n, 1p) | 0 |
+| `library@missing` | 24 | 0 | 24 (1e, 1g, 1p) | 0 |
+| `library@config-typo` | 38 | 0 | 38 (1e, 1g, 1n, 1p) | 0 |
+| `library:symphonies@installed` | 7 | 3 | 4 (1e, 1g, 1p) | 0 |
+| `library:symphonies@missing` | 24 | 0 | 24 (1e, 1g, 1p) | 0 |
+| `library:symphonies@config-typo` | 41 | 0 | 41 (1e, 1g, 1n, 1p) | 0 |
+| `library:mcp@installed` | 5 | 1 | 4 (1e, 1g, 1p) | 0 |
+| `library:mcp@missing` | 24 | 0 | 24 (1e, 1g, 1p) | 0 |
+| `library:mcp@config-typo` | 30 | 0 | 30 (1e, 1g, 1n, 1p) | 0 |
+| `library:unsaved@installed` | 12 | 6 | 6 (1e, 1g, 1n, 1p) | 0 |
+| `library:unsaved@missing` | 26 | 0 | 26 (1e, 1g, 1n, 1p) | 0 |
+| `library:unsaved@config-typo` | 40 | 0 | 40 (1e, 1g, 1n, 1p) | 0 |
+| `library:refused@installed` | 7 | 3 | 4 (1e, 1g, 1p) | 0 |
+| `library:refused@missing` | 26 | 0 | 26 (1e, 1g, 1n, 1p) | 0 |
+| `library:refused@config-typo` | 41 | 0 | 41 (1e, 1g, 1n, 1p) | 0 |
+| `library:image@installed` | 7 | 3 | 4 (1e, 1g, 1p) | 0 |
+| `library:image@missing` | 24 | 0 | 24 (1e, 1g, 1p) | 0 |
+| `library:image@config-typo` | 41 | 0 | 41 (1e, 1g, 1n, 1p) | 0 |
+| `review@installed` | 4 | 0 | 4 (1e, 1g, 1p) | 0 |
+| `review@missing` | 31 | 0 | 31 (1e, 1g, 1n, 1p) | 0 |
+| `review:post@installed` | 4 | 0 | 4 (1e, 1g, 1p) | 0 |
+| `review:post@missing` | 32 | 0 | 32 (1e, 1g, 1n, 1p) | 0 |
+| `review:targets@installed` | 6 | 0 | 6 (1e, 1g, 1n, 1p) | 0 |
+| `review:targets@missing` | 24 | 0 | 24 (1e, 1g, 1p) | 0 |
+| `review:targets@config-typo` | 24 | 0 | 24 (1e, 1g, 1p) | 0 |
+| `review:skills@installed` | 5 | 1 | 4 (1e, 1g, 1p) | 0 |
+| `review:skills@missing` | 24 | 0 | 24 (1e, 1g, 1p) | 0 |
+| `models@installed` | 37 | 31 | 6 (1e, 1g, 1h, 1p) | 0 |
+| `models:downloads@installed` | 15 | 3 | 12 (1e, 1g, 1h, 1p) | 0 |
+| `models:store@installed` | 48 | 41 | 7 (1e, 1g, 1h, 1p) | 0 |
+| `models:convert@installed` | 59 | 51 | 8 (1e, 1g, 1h, 1p) | 0 |
+| `models:register@installed` | 55 | 50 | 5 (1e, 1g, 1h, 1p) | 0 |
+| `models:roles@installed` | 108 | 91 | 17 (1e, 1g, 1h, 1p) | 0 |
+| `models:delete@installed` | 54 | 49 | 5 (1e, 1g, 1h, 1p) | 0 |
+| `models:notran@installed` | 15 | 3 | 12 (1e, 1g, 1h, 1p) | 0 |
+| `download@installed` | 57 | 36 | 21 (1e, 1g, 1h, 1p) | 0 |
+| `suites@installed` | 14 | 10 | 4 (1e, 1g, 1p) | 0 |
+| `tasks@installed` | 27 | 19 | 8 (1e, 1g, 1p) | 0 |
+| `tasks:denied@installed` | 9 | 4 | 5 (1e, 1g, 1p) | 0 |
+| `tasks:more@installed` | 28 | 20 | 8 (1e, 1g, 1p) | 0 |
+| `tasks:resuming@installed` | 17 | 13 | 4 (1e, 1g, 1p) | 0 |
+| `tasks:refused@installed` | 27 | 19 | 8 (1e, 1g, 1p) | 0 |
+| `tasks:resumerefused@installed` | 27 | 21 | 6 (1e, 1g, 1p) | 0 |
+| `newtask@installed` | 34 | 26 | 8 (1e, 1g, 1p) | 0 |
+| `newtask:recipe@installed` | 34 | 26 | 8 (1e, 1g, 1p) | 0 |
+| `execute@installed` | 42 | 26 | 16 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `graph@installed` | 33 | 29 | 4 (1e, 1g, 1p) | 0 |
+| `video@installed` | 17 | 1 | 16 (1e, 1g, 1k, 1p) | 0 |
+| `video:run@installed` | 14 | 3 | 11 (1e, 1g, 1k, 1p) | 0 |
+| `video:install@installed` | 17 | 2 | 15 (1e, 1g, 1k, 1p) | 0 |
+| `consent@installed` | 18 | 2 | 16 (1e, 1g, 1k, 1p) | 0 |
+| `compose@installed` | 38 | 30 | 8 (1e, 1g, 1k, 1l, 1p) | 0 |
+| `compose:edit@installed` | 79 | 63 | 16 (1e, 1g, 1k, 1l, 1p) | 0 |
+| `compose:new@installed` | 68 | 60 | 8 (1e, 1g, 1k, 1l, 1p) | 0 |
+| `compose:tide@installed` | 39 | 30 | 9 (1e, 1g, 1k, 1l, 1p) | 0 |
+| `compose:differs@installed` | 80 | 63 | 17 (1e, 1g, 1k, 1l, 1p) | 0 |
+| `voice@installed` | 45 | 41 | 4 (1e, 1g, 1p) | 0 |
+| `settings:general@installed` | 61 | 32 | 29 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `settings:appearance@installed` | 44 | 15 | 29 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `settings:media@installed` | 73 | 44 | 29 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `settings:backends@installed` | 74 | 45 | 29 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `settings:fixing@installed` | 76 | 46 | 30 (1e, 1g, 1i, 1p, 1u, 1v) | 0 |
+| `settings:fixfailed@installed` | 74 | 45 | 29 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `settings:permissions@installed` | 48 | 15 | 33 (1e, 1g, 1i, 1p, 1u, 1v) | 0 |
+| `settings:nosearch@installed` | 49 | 20 | 29 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `settings:xcode@installed` | 44 | 15 | 29 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `training:regimes@installed` | 4 | 0 | 4 (1e, 1g, 1p) | 0 |
+| `settings:roles@installed` | 136 | 95 | 41 (1e, 1g, 1h, 1p, 1u, 1v) | 0 |
+| `settings:web@installed` | 49 | 20 | 29 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `settings:memory@installed` | 45 | 16 | 29 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `settings:keyboard@installed` | 44 | 15 | 29 (1e, 1g, 1p, 1u, 1v) | 0 |
+| `BuildContract` | 37 | 0 | 37 (1r) | 0 |
+| `BuildLayout` | 1 | 0 | 1 (1r) | 0 |
+| `BuildProcesses` | 13 | 0 | 13 (1r) | 0 |
+| `ColorTokens@chrome=dark` | 5 | 0 | 5 (1q) | 0 |
+| `ColorTokens@chrome=light` | 5 | 0 | 5 (1q) | 0 |
+| `TypeSpace@theme=dark` | 24 | 0 | 24 (1q) | 0 |
+| `TypeSpace@theme=light` | 24 | 0 | 24 (1q) | 0 |
+| `ComponentsModel@theme=dark` | 134 | 2 | 132 (1q) | 0 |
+| `ComponentsModel@theme=light` | 134 | 2 | 132 (1q) | 0 |
+| `ComponentsModel@theme=contrast` | 134 | 2 | 132 (1q) | 0 |
+| `ComponentsTurn@theme=dark` | 112 | 0 | 112 (1q) | 0 |
+| `ComponentsTurn@theme=light` | 112 | 0 | 112 (1q) | 0 |
+| `ComponentsTurn@theme=contrast` | 112 | 0 | 112 (1q) | 0 |
+| `ComponentsPrompts@theme=dark` | 56 | 0 | 56 (1q) | 0 |
+| `ComponentsPrompts@theme=light` | 56 | 0 | 56 (1q) | 0 |
+| `ComponentsPrompts@theme=contrast` | 56 | 0 | 56 (1q) | 0 |
+| `ComponentsMedia@theme=dark` | 153 | 0 | 153 (1q) | 0 |
+| `ComponentsMedia@theme=light` | 153 | 0 | 153 (1q) | 0 |
+| `ComponentsMedia@theme=contrast` | 153 | 0 | 153 (1q) | 0 |
+| `Logo@theme=dark` | 0 | 0 | 0 | 0 |
+| `Logo@theme=light` | 0 | 0 | 0 | 0 |
+| **All 123** | 4606 | 1503 | 3103 | 0 |
+
+**Verified.**
+- **Test first.** `scripts/parity.test.ts` was written before `parity.ts` and failed on its missing module; each later case (a long text's words, exact lines, likeness pairing, sharing more words) was watched failing before its code. Each defect's test was watched failing before its fix: `ShellFrame.test.tsx`' landmark, `SessionExtras.test.tsx`' toggle, footer glyph and play head, `ConsoleView.test.tsx`, `KeyboardPane.test.tsx`, `MarkdownText.test.tsx`' copy, `StandInChild.test.ts`' config-free verbs, `AppViewModel.test.ts`' `training:regimes`, `Views.test.tsx`' banner and the type page's words, `GalleryViewModel.test.ts`' theme address; and four e2e checks (the Models note, Web access' Remove, the MCP presets at a typo, the console's output) were run against the unfixed build first and failed.
+- **The guards have teeth.** A mutation pass in a `git clone --shared` under the session scratchpad (sparse: `lib/design`, `lib/src/darwin/tests`, `lib/documentation/assistant/design`; this tree's script, tests and verdicts copied over it, `node_modules` linked, no `GIT_*` set) ran 18 mutants against `parity.test.ts`: the unjudged and defect reports, the unused-verdict check, a fix's item and its record, a data verdict's fixture and its existence, the counterpart check, two runs, a content-made name in a line's identity, whole lost nodes, landmark pairing, text pairing with no shared word, long texts, preset names, `within`, a bad pattern, and likeness. 17 failed a test at once; the likeness mutant survived, and two tests (Thinking with Thinking; the one that shares more words) now kill it: 18 of 18. The clone was removed.
+- **The review's fixes (2026-11-21).** Reviewers confirmed eight defects in the built item (two of them reported twice), each fixed in this working tree, test first where it was code, the red step of each run in a `git clone --shared` under the session scratchpad (sparse, no `GIT_*` set), never this checkout: Review's post sheet had been matched to the old overlay as a defect, though 1n's record names the confirm host's 460 px as its flagged decision, so `look="post"`, its test and its e2e line are gone and the sheet is 1n's again; the Library's two Edit and Review's Remove… had lost the names 1n's record gives them, restored with a `fix` verdict citing 1n (the e2e checks of `Edit prompts/triage.txt`, `Edit schemas/triage-output.json` and `Remove acme-all…`/`Remove widget…` watched failing on the unfixed build); `--rejudge` dropped the capture's checks, which `checks.json` now keeps; the two-runs check said yes with nothing compared, and now says "not compared"; eleven verdicts took any line of a role in their region (a lost New task…, Jobs tab, dialog or Rebuild passed), so each now lists its lines (1,035 in all, generated once from the last run's judged lines, classing exactly what they classed: the same 4,598 differences by the same verdicts), and `verdictProblems` fails a `match` that classes a planted lost control; two type-page sentences that no longer held were said of the page (`Views.test.tsx` first); the item document lost its taken defaults from Open calls and gained the broad verdicts. Six new `parity.test.ts` cases were each watched failing first. A scratch probe over the run's outlines (the reviewers' fourteen planted losses: Download from Hugging Face…, the Jobs tab, Models and FACTS renamed, the delete alertdialog, Settings' Memory, New task…, New composition, New suite…, New speech, Rebuild, New agent…, a Components heading, New session) now fails on every one, where eleven had passed.
+- **`npm run parity`**, twice on the final build (`sha256-09da7d08…`), in a `git clone --shared` under the session scratchpad holding this tree (its `node_modules` and 1c's images copied in), in 2:24.1 and 2:24.4: the first read 4,606 differences, ten unjudged -- the restored names and the two reworded sentences -- (exit 1), its checks otherwise ok and the two-runs check "not compared" (another build's outlines before it); with their verdicts written, `--rejudge` passed; the second, exit 0: "123 pairs, 4606 differences", every check ok -- every verdict stands, every preset has a counterpart, every old frame is 1c's hash for hash, the built file logs no error and asks for nothing but itself, every difference has a verdict, no defect is open, every verdict classes a difference, and the same build reads the same outlines twice. 1c's images were reused, every one its list's (129). The two runs' `outlines.txt` (246 outlines) are byte-identical. The built file here is byte-identical to the clone's, and the clone's report is the one in this checkout's `.parity/report/`. (The build before the review, `sha256-ee157922…`, ran twice the same way here: 4,598 differences, exit 0 each, its outlines identical.)
+- **`npm run check`** on the final tree, exit 0, in 4:53: `tsc --noEmit` clean; `unit` 1,918 of 1,918 in 124 files (was 1,867 in 121 after 1r: `parity.test.ts`' 39, `ConsoleView.test.tsx`, `KeyboardPane.test.tsx` and the defects' tests), the per-preset walk green in all three modes; `layering` 74 of 74 in 2 files; `bundle` 19 of 19 in 5 files, the built file current; Playwright 220 passed in 4.3 minutes (`gallery.spec.ts` gaining the `&theme=` test).
+- **`npm run build`**: the built file rewritten by the build alone; `npm run stale` passes on it.
+- **Unchanged:** nothing under `lib/design/spec` (acceptance), `lib/src`, `lib/scripts` or `.github`; `package-lock.json`. `lib/src/darwin` was not changed, so the Mac suite was not run.
+
+**Not done.**
+- **Your look.** Open `/Users/taylor/Data/Development/Projects/Apogee/lib/design/prototype/.parity/report/index.html` in a browser: 123 pairs side by side, each difference with its class and reason. Then say so, and 1s closes (its document and row deleted, the ROADMAP line ticked) and 1t can start. Double-click `lib/design/main.html` too: the Playwright tests stood in for that look during the run.
+- **Your veto, if you want one,** on the decisions above, among them: the accessibility-only differences matched to the old (the `main` landmark, the log and list roles, the longer labels), the Components pages' undrawn pieces, the broad verdicts per region (each now its region's lines), and `training:regimes` over `training`'s run. Review's post sheet is 1n's confirm host again (460 px, `--t-title`, `--t-body`), 1n's flagged decision for your veto, where the old overlay drew 480 px, `--t-h2` and `--t-small`; a veto gives the host the old overlay's size for that sheet.
+- **The Components pages' old pieces with no specimen** wait on recordings (1q's list).
+- **No commit**: the run's owner commits.

@@ -139,7 +139,7 @@ export function BackendsTab({ model }: { readonly model: ModelsViewModel }) {
         ))}
         {face.empty !== '' ? <p style={{ margin: '24px 0', color: 'var(--text-tertiary)' }}>{face.empty}</p> : null}
         <p style={{ margin: '18px 0 0', maxWidth: 760, fontSize: 'var(--t-small)', color: 'var(--text-tertiary)' }}>
-          A backend is a model sessions, suites and roles can use: weights on this Mac registered from the store, or a cloud service. Memory is the weights plus the attention cache at the model’s default window here, as its files state them; cloud models use none. Weights that aren’t a backend yet are under Stored weights.
+          A backend is a model sessions, suites and roles can use: weights on this Mac registered from the store, or a cloud service. Memory is the weights plus the attention cache at the model’s default window here, computed from the file; cloud models use none. Weights that aren’t a backend yet are under Stored weights.
         </p>
       </div>
       {detail.shown ? (

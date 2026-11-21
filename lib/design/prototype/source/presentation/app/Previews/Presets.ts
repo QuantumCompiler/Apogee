@@ -338,7 +338,7 @@ export const presets: Readonly<Record<string, (options: PresetOptions) => Preset
   'training:cyclepass': listing(trainingPreset('cyclepass', 'stalelock')),
   'training:passrunning': listing(trainingPreset('passrunning', 'passrunning')),
   'training:resumeheld': listing(trainingPreset('resumeheld', 'resumeheld')),
-  'training:regimes': listing(trainingPreset('regimes', 'recorded')),
+  'training:regimes': listing(trainingPreset('regimes', 'recorded', 4)),
   video: listing(videoPreset('video')),
   'video:run': listing(videoPreset('video:run', 43)),
   'video:install': listing(videoPreset('video:install', 4)),

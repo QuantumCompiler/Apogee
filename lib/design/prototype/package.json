@@ -16,6 +16,7 @@
     "e2e": "playwright test",
     "check": "npm run typecheck && npm run test && npm run layering && npm run stale && npm run e2e",
     "baseline": "node scripts/baseline.ts",
+    "parity": "node scripts/parity.ts",
     "capture": "node scripts/capture.ts"
   },
   "dependencies": {

@@ -902,6 +902,14 @@ describe('the Training place in the composition (design 1j)', () => {
     }
   })
 
+  test('training:regimes is training’s frame on Regimes: the run New run… started, training, its bar and Stop, as the old reaches it by clicking Regimes on training (design 1s)', async () => {
+    const regimes = (await started('training:regimes')).training.face()
+    const runs = (await started('training')).training.face()
+    expect([regimes.tab, regimes.regimes.detail.name]).toEqual(['regimes', 'foundation'])
+    expect(regimes.bar).toEqual(runs.bar)
+    expect(regimes.bar.line).toBe('[train] iter 2/4 · loss 0.6200 · lr 1.00e-04 · 10.0 it/s')
+  })
+
   test('training:pipelines and training:passrunning: their pages, the stage at its iteration and the pass that runs elsewhere', async () => {
     const pipelines = await started('training:pipelines')
     expect(pipelines.training.face().pipelines.page.stages.map((stage) => stage.line)).toEqual(['passed · cumulative 100%', 'training · iter 2/4 · loss 0.6200 · 10.0 it/s'])

@@ -57,7 +57,7 @@ export function ComponentsPage({ entry, specimens }: { readonly entry: BoardEntr
       {modules.map((module) => {
         const own = mine.filter((specimen) => specimen.module === module)
         return (
-          <section key={module} aria-label={module} style={{ marginTop: 32 }}>
+          <section key={module} style={{ marginTop: 32 }}>
             <h2 style={sectionLabel}>
               {module.toUpperCase()} · {own.length} {own.length === 1 ? 'COMPONENT' : 'COMPONENTS'}
             </h2>

@@ -72,7 +72,7 @@ export function ConsoleView({ model, close }: { readonly model: ConsoleViewModel
           <Icon name="close" size={13} />
         </button>
       </div>
-      <div role="log" aria-label="Console output" className="mono" style={{ flex: '1 1 auto', minHeight: 240, overflow: 'auto', padding: '12px 18px', fontSize: 'var(--t-meta)', lineHeight: 1.6 }}>
+      <div data-console-output="" className="mono" style={{ flex: '1 1 auto', minHeight: 240, overflow: 'auto', padding: '12px 18px', fontSize: 'var(--t-meta)', lineHeight: 1.6 }}>
         {face.empty ? (
           <p style={{ margin: 0, fontFamily: 'var(--font-ui)', color: 'var(--text-tertiary)' }}>
             Any apogee command runs here, as you’d type it at a prompt. Tab asks apogee what can come next; serve, reset and uninstall stay at the prompt.
