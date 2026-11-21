@@ -12,7 +12,7 @@ The branch is `v0.2.1`; the last published release is v0.2.0.
 - **The Apple apps:** none; their three tracks for this release have shipped.
 - **The CLI:** none; its three tracks for this release have shipped.
 
-On top of that, 4 maintenance items can be picked up any time. None of the 4 waits on a decision from you.
+On top of that, 5 maintenance items can be picked up any time. None of the 5 waits on a decision from you.
 
 **Can start today** (nothing gates them): [mod 1a](mod/v0.2.1/mod-scaffold.md).
 
@@ -60,6 +60,7 @@ Maintenance items aren't tied to a release; any one can be picked up by name.
 | CLI | M35 | [The code server's write guard holds for deletes, folders and permissions](cli/maintenance/code-exec-write-guard-holds.md) | — |
 | Apple apps (macOS) | M18 | [A development build of the app runs on the dev channel](darwin/macos/maintenance/app-dev-channel.md) | — |
 | Apple apps (macOS) | M19 | [Copy in Settings › Xcode says it copied](darwin/macos/maintenance/xcode-copy-says-copied.md) | — |
+| Apple apps (macOS) | M20 | [A confirmed action runs: every dialog's button acts on the answer it showed](darwin/macos/maintenance/confirmations-act-on-their-answer.md) | — |
 
 ## Later releases
 
