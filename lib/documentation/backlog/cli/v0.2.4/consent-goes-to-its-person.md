@@ -1,20 +1,69 @@
-# Consent goes to the session's person
+# CLI-63d · Consent goes to the session's person
 
-**What / why.** The user's calls, 2026-11-14: one Apogee server serves **people**, not just devices: an owner (the OS account that owns `APOGEE_HOME` on the server Mac) and members, in a household or a small team ([SPEC.md](../../../assistant/cli/SPEC.md) → Core surfaces 4, "Revised again 2026-11-14"). [63a](people-on-one-server.md) makes every credential belong to a person. This item makes **consent** belong to one. A permission card or a model's question in a session goes only to devices of that session's person, and only they can answer it. The controls of a task (halt, cancel, resume) are taken from that task's person, and the owner may also halt or cancel it. An `always` answer from a member is kept in **that person's own grants**, under the owner's install-wide ceiling, and never rewrites the shared config. Every answer and every control records who gave it. With none of the person's devices attached, today's rules hold: a session's question waits, a served request with nobody to ask is denied, and a task runs on what it was handed at start.
+| Field | Value |
+|---|---|
+| **Type** | ✨ Feature |
+| **Project** | CLI |
+| **Status** | 🔒 Blocked |
+| **Fix version** | v0.2.4 |
+| **Component** | Consent: the permission gate and its answer path, `serve`'s machine-session relay, task controls, `people grants` |
+| **Labels** | `people-and-access` `permissions` `remote-mode` |
+| **Epic** | Track 63 · people and access |
+| **Blocked by** | [63a](people-on-one-server.md) |
+| **Blocks** | — |
+| **Reporter** | The admin-mode and people spike (2026-11-14), finding P3 |
+| **Created** | 2026-11-14 |
+
+---
+
+## Summary
+
+On a server with more than one person, consent belongs to nobody: one person's `always` rewrites the shared config for everyone, and any attached device can answer another person's question or halt their task. This item makes consent belong to one person: questions and task controls reach only the session's or task's person (halt and cancel also the owner), answers are accepted only from them and recorded with the person and device, and a member's `always` is kept in their own grants under the owner's config ceiling, never rewriting the shared config.
+
+## Description
+
+### User story
+
+**As** a member of a household or small team sharing one Apogee server,
+**I want** the permission questions and task controls of my sessions and tasks to reach only my devices, and my `always` answers kept as my own,
+**so that** nobody else can approve my tool calls or halt my tasks, and my standing answers never turn an allow on for everyone.
+
+### Background
+
+The user's calls, 2026-11-14: one Apogee server serves **people**, not just devices: an owner (the OS account that owns `APOGEE_HOME` on the server Mac) and members, in a household or a small team ([SPEC.md](../../../assistant/cli/SPEC.md) → Core surfaces 4, "Revised again 2026-11-14"). [63a](people-on-one-server.md) makes every credential belong to a person. This item makes **consent** belong to one.
+
+- A permission card or a model's question in a session goes only to devices of that session's person, and only they can answer it.
+- The controls of a task (halt, cancel, resume) are taken from that task's person, and the owner may also halt or cancel it.
+- An `always` answer from a member is kept in **that person's own grants**, under the owner's install-wide ceiling, and never rewrites the shared config.
+- Every answer and every control records who gave it.
+- With none of the person's devices attached, today's rules hold: a session's question waits, a served request with nobody to ask is denied, and a task runs on what it was handed at start.
+
+### Evidence
 
 **P3 — consent belongs to nobody.** Measured in the admin-mode and people spike (2026-11-14, branch binary `b37b0a9f`, scratch `APOGEE_HOME`s, the mock backend, `serve` on loopback). Re-verified at HEAD (`4acf4a2b`) with a fresh probe of the same binary, `apogee 0.2.0 (b37b0a9f)`:
 
 1. **`always` rewrites the one shared config.** `apply_answer`'s `Always` branch writes `permissions.<tool> = allow` through `set_permission`, or adds the host through `add_allowed_host`, to the install's config file (`presentation/cli/permissions.cpp:79-98`). Every prompt answers through that one function: the terminal, the full-screen shell (`tui_session.cpp:154`), `review` (`review_cmd.cpp:233`) and machine mode (`permissions.cpp:390-416`). The `permissions:` section is one level per tool name for the whole install (`data/contracts/config.h:946-951`). Probe: in a scratch home with a scripted mock that calls `write_file`, a machine-mode `chat --tools` session answered its `question` (`kind: permission`, `tool: write_file`) with `always`. `config.json` then read `"write_file": "allow"` where it had read `"ask"`. A second session in the same home, a stand-in for a second person, received **no question** and wrote the file.
 2. **A driver is never told where its `always` went.** Machine mode's confirm function computes the note ("permissions.write_file = allow written to …") and drops it (`permissions.cpp:411-413`). In the probe, the stream after the answer was `tool_status`, `tool_call` running and done, then the answer, with no `notice`. The only hint is the option's description, "Allow, and remember it in the config" (`presentation/machine/json_reporter.cpp:305-313`; [machine-mode.md](../../../reference/cli/machine-mode.md):967-970). A phone answering over the network would turn a standing allow on for everyone without being told.
 3. **On a served request, the config's `allow` is everyone's.** "On a served request nobody can answer a prompt, so `ask` means deny there: `allow` in the config is the only way a destructive tool runs under `serve`" ([http-api.md](../../../reference/cli/http-api.md):1487-1488; `permissions.h:30`, `:188`). Once one person's `always` lands, it is the allow every caller of the port runs under.
-4. **Questions and controls go to whichever device answers first.** 59b's recorded default: "several of the person's devices may attach at once. Every attached device gets every event … A question takes the first `answer`" ([machine-mode-over-the-network.md](../v0.2.3/machine-mode-over-the-network.md):56). 59e: "any of them may attach to, halt, cancel or resume any task. A per-device owner adds nothing when every device belongs to one person" ([tasks-outlive-the-connection.md](../v0.2.3/tasks-outlive-the-connection.md):77). 59f narrows controls for apps only: an app reaches only what it started, and never answers a card ([paired-apps-with-scopes.md](../v0.2.3/paired-apps-with-scopes.md):141, :143). Both defaults were right for one person. With two, one person's device can approve the other's tool call, or halt the other's task.
-5. **Who answered is an anonymous word.** A task's ledger records authority as `config`, `grant`, `person`, `nobody` or `declared` (`business/tasks/task.h:150-161`). `person` means "the person at the terminal" (`:155-157`), set wherever an attended prompt answers (`business/tasks/unattended.cpp:100`, `:128-130`, `:153`). 59b's `net_answered` names the device only (`:56`). A halt is recorded as "halted by 'apogee task halt'" (`business/tasks/runner.cpp:416`), with no requester.
+4. **Questions and controls go to whichever device answers first.** 59b's recorded default: "several of the person's devices may attach at once. Every attached device gets every event … A question takes the first `answer`" ([`machine-mode-over-the-network.md`](../v0.2.3/machine-mode-over-the-network.md), Open questions: the default that several of the person's devices may attach and a question takes the first `answer`). 59e: "any of them may attach to, halt, cancel or resume any task. A per-device owner adds nothing when every device belongs to one person" ([`tasks-outlive-the-connection.md`](../v0.2.3/tasks-outlive-the-connection.md), Open questions: the default that any paired device may attach to, halt, cancel or resume any task). 59f narrows controls for apps only: an app reaches only what it started, and never answers a card ([`paired-apps-with-scopes.md`](../v0.2.3/paired-apps-with-scopes.md), Open questions: the defaults that a scope's tool class is a standing grant, so an app never answers a permission card, and that an app sees only what it started). Both defaults were right for one person. With two, one person's device can approve the other's tool call, or halt the other's task.
+5. **Who answered is an anonymous word.** A task's ledger records authority as `config`, `grant`, `person`, `nobody` or `declared` (`business/tasks/task.h:150-161`). `person` means "the person at the terminal" (`:155-157`), set wherever an attended prompt answers (`business/tasks/unattended.cpp:100`, `:128-130`, `:153`). 59b's `net_answered` names the device only ([`machine-mode-over-the-network.md`](../v0.2.3/machine-mode-over-the-network.md), Open questions: the same default, where the other devices get `net_answered` with the question's `seq` and the device name). A halt is recorded as "halted by 'apogee task halt'" (`business/tasks/runner.cpp:416`), with no requester.
+6. **The spike's measurement.** `GET /v1/admin/permissions` returned the single shared table (`write_file`, `edit_file`, `delete_file`, `run_command`, `write_note`, `delete_note`, all `ask`). There is no layer between that table and a session's in-memory answers (`SessionApprovals`, `permissions.h:77-97`).
+7. **Already works, and is kept.** The checker's order already puts every *no* ahead of every *yes*: the config's `deny`, then the session's `/deny`, then plan mode, then the allows (`permissions.cpp:226-306`; the tool branch `:286-305`). A session's `session` answers live in memory for that run only. With nobody to ask, `ask` resolves to deny (`permissions.h:23-30`). A task's authority is decided at start and held to the config by `grant_refusal` (`AutonomyPolicy`, `business/tasks/policy.h:48-59`; `:93-100`; [`tasks-outlive-the-connection.md`](../v0.2.3/tasks-outlive-the-connection.md), Constraints: grants are decided at start, and the ceiling holds). This item adds one layer to that order and routes the questions. It does not rebuild the gate.
 
-The spike's measurement: `GET /v1/admin/permissions` returned the single shared table (`write_file`, `edit_file`, `delete_file`, `run_command`, `write_note`, `delete_note`, all `ask`). There is no layer between that table and a session's in-memory answers (`SessionApprovals`, `permissions.h:77-97`).
+## Acceptance criteria
 
-**Already works, and is kept.** The checker's order already puts every *no* ahead of every *yes*: the config's `deny`, then the session's `/deny`, then plan mode, then the allows (`permissions.cpp:226-306`; the tool branch `:286-305`). A session's `session` answers live in memory for that run only. With nobody to ask, `ask` resolves to deny (`permissions.h:23-30`). A task's authority is decided at start and held to the config by `grant_refusal` (`AutonomyPolicy`, `business/tasks/policy.h:48-59`; `:93-100`; [tasks-outlive-the-connection.md](../v0.2.3/tasks-outlive-the-connection.md):19). This item adds one layer to that order and routes the questions. It does not rebuild the gate.
+- [ ] **Given** a sandbox home with the mock backend and one member, **when** the member's network session answers `always` to `write_file`, **then** `config.json` is unchanged and `<config dir>/grants/<member>.json` is written (`0600`); the member's next session does not ask, and the other member's session does.
+- [ ] **Given** a local `apogee chat --tools` on the server Mac, **when** it answers `always`, **then** `permissions.write_file: allow` is written to the config, exactly as before this item; over machine mode, a `notice` names where it landed.
+- [ ] **Given** a member's session has a waiting question, **when** devices are attached, **then** it reaches only that member's attached devices; an `answer` from another person's link gets `net_refused` and never reaches the child; `net_answered` names the person and the device.
+- [ ] **Given** a member's session is waiting, **when** the owner lists sessions, **then** it shows as `waiting` with no tool, target or header; the owner can end it and cannot answer it.
+- [ ] **Given** a member's task, **when** someone halts, cancels or resumes it, **then** it is halted or cancelled by that member or the owner, and resumed only by that member; another member is refused in the same words for a real or a made-up id; the ledger's `stopped_by` and the halt reason name who did it, and an attended answer's ledger entry carries `answered_by`.
+- [ ] **Given** a member with grants, **when** the owner runs `apogee people grants NAME --json`, **then** it shows the member's tools and a website count; `--forget-all` clears them, and the member's next session asks again; each answer and each clearing appears in the audit with the person, the device, the tool and the answer word, and no target.
+- [ ] **Given** no members and no grants files, **when** any local surface runs, **then** it behaves as today.
+- [ ] The full suite is green on all five targets.
+- [ ] Optional live pass, said when skipped: the user runs `apogee-dev serve` on the dev channel, with a member's device and the owner's both paired. The member's card appears on the member's device only, and an `always` from it leaves the dev config unchanged.
 
-**Core constraint(s).**
+## Constraints
+
 - **Remote mode is an add-on (the anti-goal).** Nothing here may make standalone use need a server, an account or a people registry. On a host with no members, and for every local surface (`chat`, `complete`, `execute`, `task`, `review`, `acp`, the shell and the Mac app over pipes), every answer behaves exactly as it does today: the owner's `always` at the terminal or over pipes still writes the config through the one editor. The one visible change on stdio is an additive `notice` naming where an `always` landed (below). The grants files do not exist until a member answers `always`, and nothing local reads them for the owner.
 - **One config mutation path** ([CLAUDE.md](../../../assistant/cli/CLAUDE.md) → One config mutation path). The config is still written only through `contracts/config_edit.h`, and only for the owner's own answer on the server Mac. A person's grants are not config. They have their own file with one writer (below), and no answer ever loads the config into structs to change it.
 - **The ceiling holds.** A grant only turns an `ask` into an allow for its person. It never outranks the config's `deny`, a session's `/deny` or plan mode, and it never offers a tool that the person's access (63c) does not offer. A grant that outlives a narrowed access stays on file but reaches nothing.
@@ -26,48 +75,98 @@ The spike's measurement: `GET /v1/admin/permissions` returned the single shared 
 - **The layers** ([ADR 0001](../../../adrs/cli/layer-enforcement.md), [ADR 0008](../../../adrs/cli/module-map.md)). The grants store sits in Data, beside 63a's registry. The checker and the answer path stay in `cli`, and the routing sits in `httpserver`. Links point down.
 - **The dev channel** ([CLAUDE.md](../../../assistant/cli/CLAUDE.md#development-runs-on-the-dev-channel)). A live pass runs `apogee-dev serve` over `~/.apogee-dev`, and never the release `apogee` or `~/.apogee`. Probes and tests use a temporary `APOGEE_HOME`.
 
-**Seam + files.**
-- `source/data/people/grants.h/.cpp` (in 63a's Data module): `PersonGrants { tools, hosts }`, kept per person in `<config dir>/grants/<person-id>.json` (`0600`). It has load, `add`, `forget` and `forget_all`. Every write holds an advisory lock beside the file (as `lock_config_file` does, `data/contracts/config_edit.h:500`) and lands through `write_file_atomically(…, true)`. Reads are fresh by mtime, so a grant made in one session reaches the person's next gate check in any other process, as 59a's revocation does. A corrupt file reads as empty, with a warning, and is never overwritten. Removing a person (63a) removes their file.
-- `source/presentation/cli/permissions.h/.cpp`:
-  - `make_permission_checker` gains the person's grants as one layer: config `deny`, session `/deny`, plan mode, config `allow`, **the person's grants**, the session's answers, accept-edits, the mode, then `ask`. For a host, the order is the listed hosts, then the person's hosts, then the session's. The layer is null for the owner, so the owner's checker is today's.
-  - `answer_permission` and `apply_answer` take a `ConsentHome`: either the config (the owner over a local terminal or pipe) or a person's grants (anyone over the network). The `Always` branch writes to whichever it is given. Both note texts name the place: "permissions.write_file = allow written to <config>", or "write_file: always allowed for you on this server".
-  - `make_driver_confirm_fn` emits the note as a `notice` instead of dropping it (`:411-413`).
-  - `describe_permissions` (`/permissions`) names the new source, "yours (always)".
-- `source/presentation/machine/json_reporter.cpp`: the `always` option's description says where it lands, per the `ConsentHome` (`:305-313`): "Allow, and remember it in the config", or "Allow, and remember it for you on this server".
-- The child's person. A served session's child learns its person and its `ConsentHome` from 63a's handoff (consumed), the way 59f's `--scope-file` hands over a scope ([paired-apps-with-scopes.md](../v0.2.3/paired-apps-with-scopes.md):55). `chat_session.cpp:2053-2054` passes that home to `make_driver_confirm_fn`.
-- `source/presentation/httpserver/machine_sessions.h/.cpp` (59b's relay):
-  - Each live session records its person, taken from the link that started it (resolved by 63a's gate). A resumed saved chat takes the person from the transcript once 63b stamps one.
-  - A `question` event is relayed only to attached links of that person. An `answer` line from any other link is refused with `net_refused` ("not your session") and never written to the child. The relay checks the answering link's person itself. It does not rely on 63b's attach filter alone.
-  - `net_answered` gains `person` (display name) beside the device.
-  - The waiting-session listing shows a question's `kind`, `tool`, `target` and header only to the session's person. Any other caller with the right to list, which is the owner (62e, 63b), sees `waiting` and nothing more.
-- Task controls (59e's served task, through 59d's command door; the stop path `request_task_stop`, `presentation/cli/task_cmd.cpp:1460`):
-  - Halt and cancel are taken from the task's person (`started_by`, 59f's field, a person since 63a) or the owner. Resume is taken from the task's person only. Anyone else is refused in the CLI's words, the same whether or not the task exists ("no task <id> of yours").
-  - Wherever a ledger records the `person` authority word (`business/tasks/unattended.cpp:100`, `:128-130`, `:153`), the entry gains `answered_by` (person, device), additive. 63e consumes it.
-  - The request file and the ledger gain `stopped_by` (person, device), additive, and the halt reason names them ("halted by Alice on Alice's iPhone after the plan"). A local `task halt` on the server Mac is the owner's, "on this Mac".
-- The audit (62f, consumed format): each answer emits one entry with the person, the device, the session or task id, the tool, and the answer word (`yes`, `no`, `session`, `always`). It never holds the target, the detail or a host. A grant forgotten or cleared is an entry too.
-- `source/presentation/cli/people_cmd.cpp` (63a's verb family): `apogee people grants [NAME] [--forget TOOL|HOST]… [--forget-all] [--json]`. With no `NAME`, it means the caller's own grants. Over 59d's door that is the member, and on the server Mac it is the owner, who has none. Help and completion as [ADR 0007](../../../adrs/cli/tab-completion.md) requires.
-- Docs:
-  - [machine-mode.md](../../../reference/cli/machine-mode.md): the permission prompt paragraph (`:967-970`) says where `always` lands on each transport, and "Two transports" says who receives a question and whose answer counts.
-  - [http-api.md](../../../reference/cli/http-api.md) and the commands reference get `people grants`.
-  - CLI CLAUDE.md's "One config mutation path" gains a sub-rule: "a person's standing answer is not config: it lands in their grants through its one writer, and only the owner's answer on the server Mac edits the config".
-- Tests (hermetic: a temp `APOGEE_HOME`, the mock backend with a script that calls `write_file` and `fetch_url`, handlers through `Mux::dispatch` and 59b's in-memory links wherever a port is not the point):
-  - `tests/data/people/grants_test.cpp`: round trip, `0600` after every write, a grant seen by a second reader by mtime, `forget` and `forget_all`, and a corrupt file read as empty and left alone.
-  - `tests/presentation/cli/permissions_test.cpp` (extended): the layer order as a table. A grant never outranks a config `deny`, a session `/deny` or plan mode. A grant of a tool outside the person's access reaches nothing. Every answer word goes to both homes. The owner's `always` over a pipe still edits the config byte for byte as today. A member's `always` leaves `config.json` byte-identical. A `keeps: false` person's `always` writes no grants file and holds for the session only.
-  - `tests/presentation/httpserver/machine_sessions_test.cpp` (extended): two people and three links. A question reaches only its person's links, another person's `answer` is refused and never reaches the child, the first answer among the person's links wins, `net_answered` carries the person, and the owner's listing shows `waiting` with no tool or target.
-  - `tests/presentation/httpserver/` (beside 59e's task tests): halt and cancel by the task's person and by the owner, resume by the owner refused, another member refused with the same words for a real and a made-up id, and `stopped_by` recorded.
-  - `tests/presentation/cli/people_cmd_test.cpp` (extended): `people grants` text and `--json`, with no name and with a name, `--forget` and `--forget-all`.
-  - A script case, `cli.consent_per_person` (`tests/scripts/py/consent_per_person_check.py`), which is the spike's probe turned around (Guardrails).
+## Technical approach
+
+| File | Change |
+|---|---|
+| `source/data/people/grants.h/.cpp` (new, in 63a's Data module) | `PersonGrants { tools, hosts }`, kept per person in `<config dir>/grants/<person-id>.json` (`0600`). It has load, `add`, `forget` and `forget_all`. Every write holds an advisory lock beside the file (as `lock_config_file` does, `data/contracts/config_edit.h:500`) and lands through `write_file_atomically(…, true)`. Reads are fresh by mtime, so a grant made in one session reaches the person's next gate check in any other process, as 59a's revocation does. A corrupt file reads as empty, with a warning, and is never overwritten. Removing a person (63a) removes their file. |
+| `source/presentation/cli/permissions.h/.cpp` | `make_permission_checker` gains the person's grants as one layer: config `deny`, session `/deny`, plan mode, config `allow`, **the person's grants**, the session's answers, accept-edits, the mode, then `ask`. For a host, the order is the listed hosts, then the person's hosts, then the session's. The layer is null for the owner, so the owner's checker is today's. `answer_permission` and `apply_answer` take a `ConsentHome`: either the config (the owner over a local terminal or pipe) or a person's grants (anyone over the network). The `Always` branch writes to whichever it is given. Both note texts name the place: "permissions.write_file = allow written to <config>", or "write_file: always allowed for you on this server". `make_driver_confirm_fn` emits the note as a `notice` instead of dropping it (`:411-413`). `describe_permissions` (`/permissions`) names the new source, "yours (always)". |
+| `source/presentation/machine/json_reporter.cpp` | The `always` option's description says where it lands, per the `ConsentHome` (`:305-313`): "Allow, and remember it in the config", or "Allow, and remember it for you on this server". |
+| The child's person (`chat_session.cpp`) | A served session's child learns its person and its `ConsentHome` from 63a's handoff (consumed), the way 59f's `--scope-file` hands over a scope ([`paired-apps-with-scopes.md`](../v0.2.3/paired-apps-with-scopes.md), Technical approach, the 59b `machine_sessions` entry: the child is started with the hidden root flag `--scope-file PATH`). `chat_session.cpp:2053-2054` passes that home to `make_driver_confirm_fn`. |
+| `source/presentation/httpserver/machine_sessions.h/.cpp` (59b's relay) | Each live session records its person, taken from the link that started it (resolved by 63a's gate); a resumed saved chat takes the person from the transcript once 63b stamps one. A `question` event is relayed only to attached links of that person. An `answer` line from any other link is refused with `net_refused` ("not your session") and never written to the child; the relay checks the answering link's person itself and does not rely on 63b's attach filter alone. `net_answered` gains `person` (display name) beside the device. The waiting-session listing shows a question's `kind`, `tool`, `target` and header only to the session's person; any other caller with the right to list, which is the owner (62e, 63b), sees `waiting` and nothing more. |
+| Task controls: 59e's served task, through 59d's command door; the stop path `request_task_stop` (`presentation/cli/task_cmd.cpp:1460`) | Halt and cancel are taken from the task's person (`started_by`, 59f's field, a person since 63a) or the owner. Resume is taken from the task's person only. Anyone else is refused in the CLI's words, the same whether or not the task exists ("no task <id> of yours"). Wherever a ledger records the `person` authority word (`business/tasks/unattended.cpp:100`, `:128-130`, `:153`), the entry gains `answered_by` (person, device), additive; 63e consumes it. The request file and the ledger gain `stopped_by` (person, device), additive, and the halt reason names them ("halted by Alice on Alice's iPhone after the plan"). A local `task halt` on the server Mac is the owner's, "on this Mac". |
+| The audit (62f, consumed format) | Each answer emits one entry with the person, the device, the session or task id, the tool, and the answer word (`yes`, `no`, `session`, `always`). It never holds the target, the detail or a host. A grant forgotten or cleared is an entry too. |
+| `source/presentation/cli/people_cmd.cpp` (63a's verb family) | `apogee people grants [NAME] [--forget TOOL\|HOST]… [--forget-all] [--json]`. With no `NAME`, it means the caller's own grants. Over 59d's door that is the member, and on the server Mac it is the owner, who has none. Help and completion as [ADR 0007](../../../adrs/cli/tab-completion.md) requires. |
 
 **Reference.**
+
 - In-house precedents:
   - The one answer path (`answer_permission`, `permissions.h:198-208`), which already serves the terminal, the shell, `review` and machine mode. This item gives it one more parameter, never a second path.
   - The session's own answers (`SessionApprovals`, 26o), the model for a person's layer, kept across runs.
   - The task's grants and their ceiling (27i, `grant_refusal`): a standing allow that is never wider than the config. 59f made the same shape a per-app scope.
   - 59a's registry discipline: a lock beside the file, an atomic `0600` write, reads fresh by mtime, a corrupt file never overwritten.
-  - 59f's per-credential ownership: an app sees, controls and answers only its own ([paired-apps-with-scopes.md](../v0.2.3/paired-apps-with-scopes.md):141-147). This item extends it from an app to a person, for consent.
+  - 59f's per-credential ownership: an app sees, controls and answers only its own ([`paired-apps-with-scopes.md`](../v0.2.3/paired-apps-with-scopes.md), Open questions: the defaults on what a scope grants, from a tool class as a standing grant, through an app seeing only what it started, to a scope change applying at the next request). This item extends it from an app to a person, for consent.
 - Prior art (official docs, gathered in the spike): Plex keeps each managed or home member's own restrictions beside the owner's server settings, and a member never changes the owner's. Home Assistant's owner, admin and user split keeps settings owner-side. Open WebUI and LibreChat keep a user's preferences per user under the admin's defaults. The shared shape is that a person's standing choices live in that person's own layer, beneath what the server's owner sets. Apogee departs from them in that no member can raise anything the owner set: a member's grant only answers an `ask` in advance.
-- Siblings:
-  - [63a](people-on-one-server.md), people on one server: the person behind each credential, and the child's handoff. This item is gated on it.
+
+**Docs when it ships:**
+
+- [machine-mode.md](../../../reference/cli/machine-mode.md): the permission prompt paragraph (`:967-970`) says where `always` lands on each transport, and "Two transports" says who receives a question and whose answer counts.
+- [http-api.md](../../../reference/cli/http-api.md) and the commands reference get `people grants`.
+- CLI CLAUDE.md's "One config mutation path" gains a sub-rule: "a person's standing answer is not config: it lands in their grants through its one writer, and only the owner's answer on the server Mac edits the config".
+
+## Testing
+
+All hermetic: a temp `APOGEE_HOME`, the mock backend with a script that calls `write_file` and `fetch_url`, handlers through `Mux::dispatch` and 59b's in-memory links wherever a port is not the point.
+
+- **`tests/data/people/grants_test.cpp`** — round trip, `0600` after every write, a grant seen by a second reader by mtime, `forget` and `forget_all`, and a corrupt file read as empty and left alone.
+- **`tests/presentation/cli/permissions_test.cpp` (extended)** — the layer order as a table. A grant never outranks a config `deny`, a session `/deny` or plan mode. A grant of a tool outside the person's access reaches nothing. Every answer word goes to both homes. The owner's `always` over a pipe still edits the config byte for byte as today. A member's `always` leaves `config.json` byte-identical. A `keeps: false` person's `always` writes no grants file and holds for the session only. This layer-order table test pins that no grant outranks a `deny`, a `/deny`, plan mode or the person's access.
+- **`tests/presentation/httpserver/machine_sessions_test.cpp` (extended)** — two people and three links. A question reaches only its person's links, another person's `answer` is refused and never reaches the child, the first answer among the person's links wins, `net_answered` carries the person, and the owner's listing shows `waiting` with no tool or target. This relay test pins routing and refusal without a port.
+- **`tests/presentation/httpserver/` (beside 59e's task tests)** — halt and cancel by the task's person and by the owner, resume by the owner refused, another member refused with the same words for a real and a made-up id, and `stopped_by` recorded.
+- **`tests/presentation/cli/people_cmd_test.cpp` (extended)** — `people grants` text and `--json`, with no name and with a name, `--forget` and `--forget-all`.
+- **`cli.consent_per_person`** (`tests/scripts/py/consent_per_person_check.py`), a script case: the spike's probe turned around into the regression fixture. It uses a scratch home, a scripted mock calling `write_file`, an owner and two members (63a's test fixture), `serve --port 0` on loopback with test credentials, and the server killed after.
+  - A member's device answers `always`: `config.json` is byte-identical before and after, the member's grants hold `write_file`, and the stream carries the `notice`.
+  - The same member's next session runs `write_file` without a question.
+  - The other member's session still asks.
+  - The owner's link never receives either member's question, and an `answer` from it is refused.
+  - A local owner `chat --tools` over stdio answering `always` still writes `permissions.write_file: allow`, which is today's behavior and the probe's original result.
+- **`leak_test.cpp`** — gains a member's question target and a planted website grant. It searches the owner's listings, the audit, `people grants NAME --json` for another person, and the log with `-v`, and none of them may hold either.
+- **The anti-goal** — a test drives `chat`, `execute`, `task run` and `review` with no `grants/` directory and with an unreadable one. Each answers as today, and the owner's `always` edits the config.
+- **`cli.install_parity`** — stays green. No grants file is seeded.
+
+## Open questions
+
+| Question | Status | Answer |
+|---|---|---|
+| Where does an `always` land? | `[default]` | **By where it was given.** The owner's answer at the server Mac's terminal or over its pipes writes the config, as today. That is the local administering the user kept, and it is what keeps a single-person install unchanged. Any answer over the network, the owner's included, lands in the answering person's own grants. Writing the config is administering, and administering is local (62g). A device the owner marked for remote administering still answers `always` into the owner's grants. Changing the config from it is `config set-permission`, run on purpose. |
+| What is the layer order, and where do a person's grants sit in it? | `[default]` | Config `deny`, then session `/deny`, then plan mode, then the config's `allow`, then the person's grants, then the session's answers, then accept-edits, then the mode, then `ask`. The config's `allow` stays install-wide: it is the owner's setting for everyone whose access offers the tool, and the server window says so beside each `allow` (10c). Hosts follow the same order. |
+| Where are grants kept, and what do they hold? | `[default]` | Per person in `<config dir>/grants/<person-id>.json`, beside 63a's registry and not inside it, so a member's answer never writes the file that decides who may connect. The file holds tools and canonical hosts only, with no target, path or time beyond `granted_at`. |
+| What does the owner see of a member's grants, and who can clear them? | `[default]` | The owner sees a member's grants as tool names and a **count** of websites, never the website names, because those read as contents. The owner can clear them all (`people grants NAME --forget-all`) or forget one tool. A member sees and forgets their own in full (`people grants` with no name, through 59d's door). |
+| Where does a member's question go when none of their devices is attached? | `[default]` | A member's question never reaches the owner's devices, and the owner never answers it. With none of the member's devices attached, the question waits as 59b's does: no clock, exempt from the TTL, and resolved by the member's next attach, a cancel, an end, or `serve` stopping. The owner may end the session. On the OpenAI-compatible door, `ask` stays deny for everyone. A task's questions stay as 59e decided them at start. |
+| Who may halt, cancel and resume a task? | `[default]` | Halt and cancel are taken from the task's person or the owner. Resume is taken from the task's person only, because resuming runs on that person's grants. A refusal says the same thing whether or not the task exists. A queued task (63e) follows the cancel rule. |
+| How does a driver learn where its `always` landed? | `[default]` | The `always` note becomes a `notice` on every machine-mode transport, stdio included. It is an additive event a tolerant driver already shows, and it is the only way a driver learns its answer outlived the session. The terminal and the shell keep printing the note as they do. |
+| Does a `session` answer change? | `[default]` | No: a `session` answer is unchanged, in memory for the run, since a session belongs to one person. |
+| What happens to an `always` from a person whose access keeps nothing? | `[default]` | A person whose access keeps nothing (63a's `keeps: false`, the Limited preset, the guest) never gets a grants file. An `always` from them is held as `session`, and the `notice` says so ("remembered for this session only"). |
+| How does a credential resolve to a person, who is the owner, and how does a served child learn its person? | `(consumed decision)` | [63a](people-on-one-server.md)'s. |
+| Which person is stamped on a saved session and a task on disk, and who may list, read and attach? | `(consumed decision)` | [63b](personal-data-has-an-owner.md)'s. |
+| Which tool classes and hosts is a person offered at all? | `(consumed decision)` | [63c](allowances-keys-and-usage.md)'s. A grant never widens it. |
+| What are the audit's file, retention (90 days) and format? | `(consumed decision)` | [62f](audit-log.md)'s. This item supplies its entries. |
+
+## Decision log
+
+| Date | Decision | Whose call |
+|---|---|---|
+| 2026-11-14 | Specced from the admin-mode and people spike (P3). The user's calls that shape it: (1) the server serves an owner and members, in a household or a small team, and the design is for both; (2) the owner sees members' metadata (devices, apps, activity, which model, when), never their chat contents, and whoever controls the server Mac can still read its disk, and the docs say so; (3) the words are **people** and **access** (Owner, Member), never "roles"; (4) administering is local by default, and the owner may mark chosen paired devices as allowed to administer remotely (62g); (5) remote use is an add-on, and the CLI alone and the Mac app over pipes stay complete and need no server; (6) the admin mode is a separate **Apogee Server** window in the macOS app, offered only on the Mac that serves, driving the local CLI over pipes, which installs the server as a background service (launchd) and starts, stops and restarts it; (7) members use the server's local models only, unless the owner grants a household cloud key with a limit (63c); (8) the model: the owner (implicitly the OS account that owns `APOGEE_HOME` on the server Mac) and members, each with an allowance in 59f's `AppScope` shape, with presets (Full, Family, Limited) used instead of groups, and a guest is a member on the Limited preset with nothing kept; (9) the defaults the user took: live changes applied on the spot (reload), with what still needs a restart said; an audit kept 90 days of who, what and when, without request contents; collections as shared libraries handed out per person, plus a member's own private ones; notes and saved decisions personal by default; a member's apps paired by the owner at the server Mac, capped at that member's allowance; a per-person task queue, not a refusal; (10) placement: both before v0.2.5, both in v0.2.4: the server console (CLI track 62, darwin/macos track 10's 10a-10b) and people and access (CLI track 63, darwin/macos 10c), and nothing already queued is renumbered; (11) the SPEC amendments are already written (CLI SPEC Core surfaces 4, "Revised again 2026-11-14"; GUI SPEC Core surfaces 3, the server window). | the user |
+| 2026-11-14 | Placed in v0.2.4, track 63, gated on 63a only. It needs to know whose a credential is, and nothing more. A live session's person comes from the link that started it, so it does not wait on 63b's stamp on disk. A resumed chat uses 63b's stamp once that ships. It sits beside 63b and 63c, after the server console (track 62) in the same release, and before v0.2.5. | the spec |
+| 2026-11-14 | A member's question is never shown to the owner, following from the user's call. Its path, command or diff is chat content. The owner's power over a member's session is administrative: seeing that it waits, and ending it (62e, 63b), never answering it. | the spec |
+| 2026-11-14 | This revises two recorded defaults for people. 59b's "a question takes the first `answer`" becomes the first answer among the session's person's devices. 59e's "any of them may attach to, halt, cancel or resume any task" becomes the task's person, plus the owner for halt and cancel. With one person on a server, both read exactly as before. | the spec |
+| 2026-11-18 | Moved here from v0.2.7 when the releases were merged; the id is unchanged. | the user |
+
+## Out of scope
+
+- The people registry and credential resolution (63a).
+- Stamping and filtering personal data on disk (63b).
+- What each person may use at all, and whose keys pay (63c).
+- The task queue (63e).
+- The audit's storage (62f).
+- The server window's people screens, including showing and clearing grants (darwin 10c).
+- Push notifications for a waiting question (they need the Apple Developer Program, GUI 8c).
+- Per-person `deny` lists. A member's `no` stays an answer for that call, or `/deny` for that session.
+- Changing who may edit `permissions:` in the config. That stays the owner's, locally or from a marked device (62g).
+
+## Links
+
+- **Blocked by:** [63a](people-on-one-server.md), people on one server: the person behind each credential, and the child's handoff · **Blocks:** —
+- **Relates to:**
   - [63b](personal-data-has-an-owner.md), personal data at every door: the session's and task's person on disk, and who may list and attach.
   - [63c](allowances-keys-and-usage.md), allowances: the tool classes a person is offered, which bound every grant.
   - [63e](task-slots-per-person.md), a task queue per person: a queued task's cancel follows the same rule as a running one's.
@@ -78,69 +177,4 @@ The spike's measurement: `GET /v1/admin/permissions` returned the single shared 
   - [62g](administering-local-and-marked-devices.md), administering locally plus marked devices.
   - GUI [7a](../../darwin/v0.2.4/app-connection-local-or-server.md), the app's permission card, which draws the option description it is given.
   - darwin [10c](../../darwin/macos/v0.2.4/people-screens.md), people in the server window, where the owner sees and clears a member's grants.
-
-**Decisions made** (dated):
-- 2026-11-14: Specced from the admin-mode and people spike (P3). The user's calls that shape it:
-  - The server serves an owner and members, in a household or a small team, and the design is for both.
-  - The owner sees members' metadata (devices, apps, activity, which model, when), never their chat contents. Whoever controls the server Mac can still read its disk, and the docs say so.
-  - The words are **people** and **access** (Owner, Member), never "roles".
-  - Administering is local by default. The owner may mark chosen paired devices as allowed to administer remotely (62g).
-  - Remote use is an add-on. The CLI alone and the Mac app over pipes stay complete and need no server.
-  - The admin mode is a separate **Apogee Server** window in the macOS app, offered only on the Mac that serves, driving the local CLI over pipes. It installs the server as a background service (launchd) and starts, stops and restarts it.
-  - Members use the server's local models only, unless the owner grants a household cloud key with a limit (63c).
-  - The model: the owner (implicitly the OS account that owns `APOGEE_HOME` on the server Mac) and members, each with an allowance in 59f's `AppScope` shape. Presets (Full, Family, Limited) are used instead of groups, and a guest is a member on the Limited preset with nothing kept.
-  - The defaults the user took: live changes applied on the spot (reload), with what still needs a restart said; an audit kept 90 days of who, what and when, without request contents; collections as shared libraries handed out per person, plus a member's own private ones; notes and saved decisions personal by default; a member's apps paired by the owner at the server Mac, capped at that member's allowance; a per-person task queue, not a refusal.
-  - Placement: both before v0.2.5, both in v0.2.4: the server console (CLI track 62, darwin/macos track 10's 10a-10b) and people and access (CLI track 63, darwin/macos 10c). Nothing already queued is renumbered.
-  - The SPEC amendments are already written (CLI SPEC Core surfaces 4, "Revised again 2026-11-14"; GUI SPEC Core surfaces 3, the server window).
-- 2026-11-14: Placed in v0.2.4, track 63, gated on 63a only. It needs to know whose a credential is, and nothing more. A live session's person comes from the link that started it, so it does not wait on 63b's stamp on disk. A resumed chat uses 63b's stamp once that ships. It sits beside 63b and 63c, after the server console (track 62) in the same release, and before v0.2.5.
-- 2026-11-14: A member's question is never shown to the owner, follows from the user's call. Its path, command or diff is chat content. The owner's power over a member's session is administrative: seeing that it waits, and ending it (62e, 63b), never answering it.
-- 2026-11-14: This revises two recorded defaults for people. 59b's "a question takes the first `answer`" becomes the first answer among the session's person's devices. 59e's "any of them may attach to, halt, cancel or resume any task" becomes the task's person, plus the owner for halt and cancel. With one person on a server, both read exactly as before.
-
-**Open calls:**
-- [default: **an `always` lands by where it was given.** The owner's answer at the server Mac's terminal or over its pipes writes the config, as today. That is the local administering the user kept, and it is what keeps a single-person install unchanged. Any answer over the network, the owner's included, lands in the answering person's own grants. Writing the config is administering, and administering is local (62g). A device the owner marked for remote administering still answers `always` into the owner's grants. Changing the config from it is `config set-permission`, run on purpose.]
-- [default: the layer order is config `deny`, then session `/deny`, then plan mode, then the config's `allow`, then the person's grants, then the session's answers, then accept-edits, then the mode, then `ask`. The config's `allow` stays install-wide: it is the owner's setting for everyone whose access offers the tool, and the server window says so beside each `allow` (10c). Hosts follow the same order.]
-- [default: grants are kept per person in `<config dir>/grants/<person-id>.json`, beside 63a's registry and not inside it, so a member's answer never writes the file that decides who may connect. The file holds tools and canonical hosts only, with no target, path or time beyond `granted_at`.]
-- [default: the owner sees a member's grants as tool names and a **count** of websites, never the website names, because those read as contents. The owner can clear them all (`people grants NAME --forget-all`) or forget one tool. A member sees and forgets their own in full (`people grants` with no name, through 59d's door).]
-- [default: a member's question never reaches the owner's devices, and the owner never answers it. With none of the member's devices attached, the question waits as 59b's does: no clock, exempt from the TTL, and resolved by the member's next attach, a cancel, an end, or `serve` stopping. The owner may end the session. On the OpenAI-compatible door, `ask` stays deny for everyone. A task's questions stay as 59e decided them at start.]
-- [default: halt and cancel are taken from the task's person or the owner. Resume is taken from the task's person only, because resuming runs on that person's grants. A refusal says the same thing whether or not the task exists. A queued task (63e) follows the cancel rule.]
-- [default: the `always` note becomes a `notice` on every machine-mode transport, stdio included. It is an additive event a tolerant driver already shows, and it is the only way a driver learns its answer outlived the session. The terminal and the shell keep printing the note as they do.]
-- [default: a `session` answer is unchanged, in memory for the run, since a session belongs to one person.]
-- [default: a person whose access keeps nothing (63a's `keeps: false`, the Limited preset, the guest) never gets a grants file. An `always` from them is held as `session`, and the `notice` says so ("remembered for this session only").]
-- (consumed decision) How a credential resolves to a person, the owner's identity, and how a served child learns its person are [63a](people-on-one-server.md)'s.
-- (consumed decision) The person stamped on a saved session and a task on disk, and who may list, read and attach, are [63b](personal-data-has-an-owner.md)'s.
-- (consumed decision) Which tool classes and hosts a person is offered at all is [63c](allowances-keys-and-usage.md)'s. A grant never widens it.
-- (consumed decision) The audit's file, retention (90 days) and format are [62f](audit-log.md)'s. This item supplies its entries.
-
-**Guardrail(s).**
-- `cli.consent_per_person` turns the spike's probe into the regression fixture. It uses a scratch home, a scripted mock calling `write_file`, an owner and two members (63a's test fixture), `serve --port 0` on loopback with test credentials, and the server killed after.
-  - A member's device answers `always`: `config.json` is byte-identical before and after, the member's grants hold `write_file`, and the stream carries the `notice`.
-  - The same member's next session runs `write_file` without a question.
-  - The other member's session still asks.
-  - The owner's link never receives either member's question, and an `answer` from it is refused.
-  - A local owner `chat --tools` over stdio answering `always` still writes `permissions.write_file: allow`, which is today's behavior and the probe's original result.
-- The layer-order table test pins that no grant outranks a `deny`, a `/deny`, plan mode or the person's access.
-- The relay test pins routing and refusal without a port.
-- `leak_test.cpp` gains a member's question target and a planted website grant. It searches the owner's listings, the audit, `people grants NAME --json` for another person, and the log with `-v`, and none of them may hold either.
-- The anti-goal: a test drives `chat`, `execute`, `task run` and `review` with no `grants/` directory and with an unreadable one. Each answers as today, and the owner's `always` edits the config.
-- `cli.install_parity` stays green. No grants file is seeded.
-
-**Acceptance criteria:**
-- [ ] In a sandbox home with the mock backend and one member, a member's network session answering `always` to `write_file` leaves `config.json` unchanged and writes `<config dir>/grants/<member>.json` (`0600`). The member's next session does not ask. The other member's session does.
-- [ ] A local `apogee chat --tools` on the server Mac answering `always` writes `permissions.write_file: allow` to the config, exactly as before this item. Over machine mode, a `notice` names where it landed.
-- [ ] A member's waiting question reaches only that member's attached devices. An `answer` from another person's link gets `net_refused` and never reaches the child. `net_answered` names the person and the device.
-- [ ] The owner's listing shows a member's session as `waiting` with no tool, target or header. The owner can end it and cannot answer it.
-- [ ] A member's task is halted or cancelled by that member or the owner, and resumed only by that member. Another member is refused in the same words for a real or a made-up id. The ledger's `stopped_by` and the halt reason name who did it, and an attended answer's ledger entry carries `answered_by`.
-- [ ] `apogee people grants NAME --json` shows the member's tools and a website count. `--forget-all` clears them, and the member's next session asks again. Each answer and each clearing appears in the audit with the person, the device, the tool and the answer word, and no target.
-- [ ] With no members and no grants files, every local surface behaves as today. The full suite is green on all five targets.
-- [ ] Optional live pass, said when skipped: the user runs `apogee-dev serve` on the dev channel, with a member's device and the owner's both paired. The member's card appears on the member's device only, and an `always` from it leaves the dev config unchanged.
-
-**Scope note.** Earmarked for v0.2.4 (track 63), gated on 63a. Out of scope: Moved here from v0.2.7 on 2026-11-18, when the releases were merged (the user's call); the id is unchanged.
-- The people registry and credential resolution (63a).
-- Stamping and filtering personal data on disk (63b).
-- What each person may use at all, and whose keys pay (63c).
-- The task queue (63e).
-- The audit's storage (62f).
-- The server window's people screens, including showing and clearing grants (darwin 10c).
-- Push notifications for a waiting question (they need the Apple Developer Program, GUI 8c).
-- Per-person `deny` lists. A member's `no` stays an answer for that call, or `/deny` for that session.
-- Changing who may edit `permissions:` in the config. That stays the owner's, locally or from a marked device (62g).
+- **Revises:** 59b's first-answer default and 59e's any-device control default, for people (Decision log, 2026-11-14).

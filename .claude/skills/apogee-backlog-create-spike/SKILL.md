@@ -38,11 +38,11 @@ Either way, extract before writing: the wall list with each wall's evidence, eve
 
 Every document follows the backlog README's format and `/apogee-backlog-create-item`'s per-section bar (ground in README/CLAUDE/SPEC/ROADMAP first; kebab-case filename in the target table's subdirectory; link depths per the standing rules). On top of that:
 
-- **Evidence is baked in, with its numbers.** Each document's What/why cites the spike's concrete measurements and `file:line` evidence for the walls *it* closes — "measured, not guessed (date, method)" — so the item builds without this conversation. A measurement that shaped the design appears where it did the shaping.
+- **Evidence is baked in, with its numbers.** Each document's **Evidence** cites the spike's concrete measurements and `file:line` evidence for the walls *it* closes — "measured, not guessed (date, method)" — so the item builds without this conversation. A measurement that shaped the design appears where it did the shaping.
 - **Walls map to items, visibly.** Each document says which walls it removes; a wall one root-cause fix collapses is claimed by exactly one document, and siblings reference it rather than re-owning it.
-- **The user's answers become dated decisions**; recommendations they let stand become `[default: …]` with the recommendation recorded; genuinely user-owned questions still open become `[user]` calls that block that item's build. Nothing the spike settled is reopened — mark it `(consumed decision)` where a sibling owns it.
-- **Gates wire the siblings**: the split's build order becomes 🔒 gates among the new items (name real items, no cycles); an item useful on its own carries no gate just to mirror the narrative.
-- **One Reference pass for the set** — the spike usually found the precedents already (in-house items and seams, external prior art); cite what it found per document, and leave the section out where there is none.
+- **The user's answers become dated Decision-log rows**; recommendations they let stand become `[default]` rows in Open questions with the recommendation in the Answer; genuinely user-owned questions still open become `[user]` rows that block that item's build. Nothing the spike settled is reopened — mark it `(consumed decision)` where a sibling owns it.
+- **Gates wire the siblings**: the split's build order becomes 🔒 gates among the new items (name real items, no cycles), restated in each header's **Blocked by** and **Blocks**; an item useful on its own carries no gate just to mirror the narrative.
+- **One Reference pass for the set** — the spike usually found the precedents already (in-house items and seams, external prior art); cite what it found per document in Technical approach's **Reference.** paragraph, and leave it out where there is none.
 
 ## 4. Place the set and update the docs
 
@@ -54,8 +54,8 @@ Every document follows the backlog README's format and `/apogee-backlog-create-i
 
 ## 5. Validate before reporting
 
-The standard scripted routine, never by eye: rows ↔ documents both ways; the release overview's rows (or its Later releases line) match the index; Version cells match directories where the table carries them; every sequence ascends; every gate (including the new sibling gates) names a real pending id; the full relative-link sweep (the two illustrative MILESTONES lines are known false positives); every measurement quoted in a document appears with the same number the report gave.
+The standard scripted routine, never by eye: rows ↔ documents both ways; the release overview's rows (or its Later releases line) match the index; Version cells match directories where the table carries them; each document's header (KEY-id H1, Status, Fix version, Blocked by, Blocks, Epic) agrees with its row; every sequence ascends; every gate (including the new sibling gates) names a real pending id; the full relative-link sweep (the two illustrative MILESTONES lines are known false positives); every measurement quoted in a document appears with the same number the report gave.
 
 ## 6. Report
 
-Tell the user: every document's path, id, table position and gate; which walls each one closes; which answers were recorded as decisions, which as defaults; **every `[user]` call across the set** — those are the questions that will block builds later; which docs were updated (index, ROADMAP, SPEC if revised); and the validation results.
+Tell the user: every document's path, id, table position and gate; which walls each one closes; which answers were recorded as decisions, which as defaults; **every `[user]` question across the set** — those are the questions that will block builds later; which docs were updated (index, ROADMAP, SPEC if revised); and the validation results.

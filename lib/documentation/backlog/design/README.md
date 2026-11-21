@@ -9,7 +9,7 @@ An item that needs an app or the CLI to change gets a sibling in that queue ([th
 1. A change is **discussed in chat** and gets a line on [ROADMAP.md](../../assistant/design/ROADMAP.md).
 2. Once specced, it gets **its own document here**: a kebab-case filename in its table's folder, listed in the index in build order. The same pass adds it to the [backlog overview](../README.md#keeping-this-page-true).
 3. When an agent **takes** it, the document **is** the working spec:
-   - confirm scope with the user first (its **Open calls**);
+   - confirm scope with the user first (its **Open questions**);
    - mark its row 🚧;
    - build. One item at a time.
 4. When it **ships**, it is recorded in [MILESTONES.md](../../assistant/design/MILESTONES.md). The document and its row are **deleted**, and any gate it satisfied is updated in the same pass. Its row leaves the [backlog overview](../README.md#keeping-this-page-true) too, with the counts, "can start today" and any "Waits on" it satisfied updated.
@@ -17,13 +17,13 @@ An item that needs an app or the CLI to change gets a sibling in that queue ([th
 **The standing invariant:** every document here is pending work.
 
 **Tags, gates and numbering** follow the Apple apps' queue ([its README](../darwin/README.md)):
-- Open calls are tagged `[user]` (blocks the build), `[default: …]` (agent-decidable, recommendation recorded) or `(consumed decision)` (owned by another item).
+- An open question's Status cell is `[user]` (blocks the build), `[default]` (the Answer is the recorded default: the agent takes it, records it in the Decision log, the user may veto) or `(consumed decision)` (owned by another item).
 - A row's Status is 🟢 workable, 🔒 gated on named real items (no cycles), or 🚧 in progress. Items marked **split first** are groomed into their listed sub-documents before anyone builds them. A changed gate, a split, or a row moved to another table changes the [backlog overview](../README.md#keeping-this-page-true) in the same pass.
 - Ids are a track number and a letter (`1a`), ever-assigned. An item joining a track takes the track's next letter, wherever it sits in the build order, and a vacated id stays spent, as the CLI's M5 and M6 do (1f, split on 2026-11-19 into 1u and 1v).
 
 ## Document format
 
-The Apple apps' format ([its README → Document format](../darwin/README.md#document-format)), with a **Reference.** section after **Seam + files** when there are precedents to cite.
+The ticket format ([the Apple apps' README → Document format](../darwin/README.md#document-format)), with the key `DSN` (`DSN-1e`) and the Project `Design`; precedents to cite go in the **Reference.** paragraph of its Technical approach. The header restates the index row, the index staying the authority.
 
 ## Index
 

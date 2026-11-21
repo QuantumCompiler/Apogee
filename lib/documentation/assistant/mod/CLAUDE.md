@@ -57,7 +57,7 @@ The CLI docs' lifecycle, mirrored — read [Working process](../cli/CLAUDE.md#wo
 
 ## Implementing a Feature
 
-- [ ] `tsc` clean and `claude plugin validate` passing; tests per the item's guardrails (hermetic: scripted process output, no live binary required).
+- [ ] `tsc` clean and `claude plugin validate` passing; tests per the item's Testing section (hermetic: scripted process output, no live binary required).
 - [ ] The client invariant holds (no ports, no reimplementation, tolerant reads); the four-layer law holds (ADR 0001).
 - [ ] The affected docs updated in the same change (the CLI guide's Documentation and Status flow, this home's files).
 

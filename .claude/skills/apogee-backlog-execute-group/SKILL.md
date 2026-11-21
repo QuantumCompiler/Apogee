@@ -5,7 +5,7 @@ description: Execute an entire backlog table unsupervised — given a group (a C
 
 # Execute a Backlog Group
 
-The group is one home's index table: a version, `maintenance`, `architecture`, the GUI index, or a named track within it. This skill runs **every item in that table, serially, without supervision** — the user states the group and walks away. Each item individually gets the full `/apogee-backlog-execute-item` treatment (that skill's process is the per-item law: docs loaded, open calls resolved, built to the guardrails, verified, shipped through the Documentation and Status flow). What this skill adds is the batch contract: all reading and all questions **up front**, autonomous problem-solving **in the middle**, and a **commit per shipped item** at each boundary.
+The group is one home's index table: a version, `maintenance`, `architecture`, the GUI index, or a named track within it. This skill runs **every item in that table, serially, without supervision** — the user states the group and walks away. Each item individually gets the full `/apogee-backlog-execute-item` treatment (that skill's process is the per-item law: docs loaded, open questions resolved, built to its Testing and acceptance criteria, verified, shipped through the Documentation and Status flow). What this skill adds is the batch contract: all reading and all questions **up front**, autonomous problem-solving **in the middle**, and a **commit per shipped item** at each boundary.
 
 ## 0. Which application?
 
@@ -21,15 +21,15 @@ Everything below reads from the chosen application's folders, written `<app>`: i
 
 1. Load the working process per `/apogee-backlog-execute-item` step 1 (CLAUDE.md fully, SPEC, ROADMAP, DEVELOPER as needed) and the backlog README (`lib/documentation/backlog/<app>/README.md`).
 2. **Read every document in the group's table before building anything.** The run's order is the table's build order with gates honored; an item whose gate chain leaves the group and is not shipped is marked out of the run at the start, and said.
-3. **Resolve every blocking call now.** Collect the `[user]` open calls across *all* the group's documents and ask them together (AskUserQuestion), before the first line of code — mid-run there is no user. `[default: …]` calls are taken as stated and recorded as dated decisions in their documents. An unanswered `[user]` call drops only its own item (and its dependents) from the run, and the drop is announced in the plan, not discovered at item seven.
+3. **Resolve every blocking call now.** Collect the `[user]` rows of every Open questions table across *all* the group's documents and ask them together (AskUserQuestion), before the first line of code — mid-run there is no user. `[default]` rows are taken as their Answer states and recorded as dated Decision-log rows in their documents. An unanswered `[user]` call drops only its own item (and its dependents) from the run, and the drop is announced in the plan, not discovered at item seven.
 4. Check `git status` and the index's 🚧 marks: this skill assumes it owns the checkout — commits punctuate the run — so another session mid-item on the same checkout means stop and tell the user before starting.
 
 ## 2. The serial loop
 
 For each item, in order:
 
-1. Mark its row 🚧, build **per its document** — constraints, seam, guardrails, acceptance criteria, real-weights rules where they apply — and verify (`lib/scripts/cicd.sh --test` before anything is called done).
-2. Ship it through the Documentation and Status flow: MILESTONES entry; the document deleted with its index row (and any other item's gate this satisfied, updated); ROADMAP line checked/moved; codebase maps updated; SPEC only on a real shape change.
+1. Mark its row 🚧 (and its header's Status), build **per its document** — constraints, technical approach, testing, acceptance criteria, real-weights rules where they apply — and verify (`lib/scripts/cicd.sh --test` before anything is called done).
+2. Ship it through the Documentation and Status flow: MILESTONES entry; the document deleted with its index row (and any other item's gate this satisfied, updated in its row and its header's Blocked by); ROADMAP line checked/moved; codebase maps updated; SPEC only on a real shape change.
    The row leaves [the release overview](../../../lib/documentation/backlog/README.md#keeping-this-page-true) in the same change, with its counts, "can start today" and the gates it satisfied.
    Superpowers works inside each item exactly as `/apogee-backlog-execute-item` step 5 says ([Superpowers fits the docs-first lifecycle](../../../lib/documentation/assistant/cli/CLAUDE.md#superpowers-fits-the-docs-first-lifecycle)). The group command answers its waits in advance:
    - The plan is self-reviewed, and the method is `subagent-driven-development` (or `executing-plans` without a subagent tool).

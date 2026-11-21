@@ -57,7 +57,7 @@ Deliver everything in the final chat message:
 1. **The question**, as asked.
 2. **Method** — what was probed and how (one short paragraph; name the sandbox).
 3. **Walls** — numbered, each with its evidence and the capability that removes it; plus the already-works list.
-4. **The documents that would need to be created** — the walls grouped into right-sized backlog items (one focused session each), presented as the concrete document list: a working title per item, its target table (release / Architecture / Maintenance), its gate, and which walls it closes. Note which walls one root-cause fix collapses. This list is the handoff: when the user says "execute", each entry becomes one document with nothing left to decide but the open calls.
+4. **The documents that would need to be created** — the walls grouped into right-sized backlog items (one focused session each), presented as the concrete document list: a working title per item, its target table (release / Architecture / Maintenance), its gate, and which walls it closes. Note which walls one root-cause fix collapses. This list is the handoff: when the user says "execute", each entry becomes one document with nothing left to decide but its open questions.
 5. **Questions for the user** — only the genuinely user-owned calls, phrased in plain architecture language (no ML jargon); everything agent-decidable gets a stated default instead. If the user asks to be interviewed, use AskUserQuestion; otherwise list the questions and stop.
 
 Then **wait**. Do not create documents, items, or code until the user says what to execute.

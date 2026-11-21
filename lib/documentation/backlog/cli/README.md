@@ -5,8 +5,8 @@
 ## Lifecycle
 
 1. A feature is **discussed in chat** and gets a line on [ROADMAP.md](../../assistant/cli/ROADMAP.md) (and a [SPEC.md](../../assistant/cli/SPEC.md) update if it changes product shape).
-2. Once specced — seam, files, decisions, open calls — it gets **its own document in its table's subdirectory** (the directory tree mirrors the index: `architecture/`, `maintenance/`, `v0.1.<x>/` — kebab-case filename, listed in the index below in priority order; the subdirectory is created with a table's first item). The same pass adds it to the [backlog overview](../README.md#keeping-this-page-true): its release's section, or its track's line under Later releases.
-3. When an agent **takes** it (told explicitly, or via the bare-"Continue" convention: the topmost item whose gate is satisfied), the document **is** the working spec — confirm scope with the user first (the document's **Open calls** are the natural questions), mark its index row **in progress**, and build. One item at a time.
+2. Once specced — files, decisions, open questions — it gets **its own document in its table's subdirectory** (the directory tree mirrors the index: `architecture/`, `maintenance/`, `v0.1.<x>/` — kebab-case filename, listed in the index below in priority order; the subdirectory is created with a table's first item). The same pass adds it to the [backlog overview](../README.md#keeping-this-page-true): its release's section, or its track's line under Later releases.
+3. When an agent **takes** it (told explicitly, or via the bare-"Continue" convention: the topmost item whose gate is satisfied), the document **is** the working spec — confirm scope with the user first (the document's **Open questions** are the natural questions), mark its index row **in progress**, and build. One item at a time.
 4. When it **ships**, the work is recorded in [MILESTONES.md](../../assistant/cli/MILESTONES.md) per the docs flow in [CLAUDE.md](../../assistant/cli/CLAUDE.md), and the document is **deleted, along with its index row** — **a completed item must never remain in the backlog**. On the same pass, update any other document whose gate the shipped work just satisfied (e.g. a "gated on X shipping" status line). Its row leaves the [backlog overview](../README.md#keeping-this-page-true) too, with the counts, "can start today" and any "Waits on" it satisfied updated.
 5. When a **version's table empties** — every item it held shipped or moved — the table is retired at the pre-merge docs pass (`/apogee-maintenance-update-documents`): its heading, track preambles and empty table leave the index, and the shipped-tracks paragraph above the tables says where its tracks went. The merge is the release, so a release's table never outlives its pull request (the user's call, 2026-10-16). The standing Architecture and Maintenance tables are never retired. The CLI's section of the [backlog overview](../README.md#keeping-this-page-true) then says its tracks shipped; when the release ships, the overview moves on to the next release.
 
@@ -14,34 +14,118 @@
 
 ## Document format
 
-Every item document follows this shape (sections in order; omit one only when it's genuinely empty):
+Every item document reads like a ticket written in markdown (the user's call, 2026-11-21): a header of fields, then a story, the evidence, and tables for the files, the open questions and the decisions. It is still the **working spec** an agent builds from without asking anyone. Sections in this order; omit one only when it's genuinely empty (the Open questions table instead holds one row, `None open`):
 
 ```markdown
-# <Item title>
+# <KEY>-<id> · <Item title>
 
-**What / why.** <The feature or fix in a paragraph: what it does for the user, and why it's worth building.>
+| Field | Value |
+|---|---|
+| **Type** | <🐞 Bug · ✨ Feature · 🛠️ Task> |
+| **Project** | CLI |
+| **Status** | <the index row's Status: 🟢 Ready · 🔒 Blocked · 🚧 In progress · ❌ Cancelled> |
+| **Fix version** | <vX.Y.Z · Maintenance (any time) · Architecture> |
+| **Component** | <the area it changes: a command family, a module, a screen> |
+| **Labels** | <2–4 kebab-case labels in backticks; `split-first` when the item is split first> |
+| **Epic** | <Track N · <the track's name>, or — for a table with no track> |
+| **Blocked by** | <each gate, linked> or — |
+| **Blocks** | <each item gated on this one, linked> or — |
+| **Reporter** | <who or what raised it: the user, a spike (dated), a design pass, an audit, a bug report> |
+| **Created** | <YYYY-MM-DD: the earliest date the document records> |
 
-**Core constraint(s).** <The rules the design must not violate — invariants it touches, compatibility it must keep.>
+---
 
-**Seam + files.** <Where the change plugs into the codebase: the interfaces/functions it extends and the files it touches.>
+## Summary
 
-**Reference.** <Optional — the in-house precedents this item builds on and any external prior art, with each deliberate divergence from it.>
+<One to three sentences: what is wrong or missing, and what the item delivers.>
 
-**Decisions made** (dated):
-- <YYYY-MM-DD> — <a design decision and its rationale>
+## Description
 
-**Open calls:**
-- <a question to resolve before building — tagged [user] (a genuinely user-owned decision: BLOCKS the build until answered) or [default: …] (the agent takes the stated default, records it as a dated decision, and the user may veto)>
+### User story
 
-**Guardrail(s).** <What must be tested or checked so the change can't regress silently.>
+**As** <who>, **I want** <the capability>, **so that** <the outcome>.
 
-**Acceptance criteria:**
-- [ ] <observable outcome that means "done">
+### Steps to reproduce
 
-**Scope note.** <Status: unscheduled / earmarked for <version> / gated on <prerequisite> — and anything explicitly out of scope.>
+<🐞 Bug only, from what was actually seen: 1. … 2. …>
+
+### Actual result
+
+<🐞 Bug only.>
+
+### Expected result
+
+<🐞 Bug only.>
+
+### Background
+
+<The context that is not evidence: history, how the item came about, the design's shape in prose.>
+
+### Evidence
+
+<Numbered: every measurement, probe, quote and `file:line`, each dated with its method. Root cause, blast radius, what already works and a spike's walls (**W3 — …**) are bold-led items here.>
+
+### Split first
+
+<Only when the item is marked split first: the sub-documents the grooming must produce.>
+
+## Acceptance criteria
+
+- [ ] **Given** <state>, **when** <action>, **then** <observable outcome that means "done">.
+
+## Constraints
+
+- **<Short name.>** <A rule the design must not violate: an invariant it touches, compatibility it must keep, with its ADR or source.>
+
+## Technical approach
+
+Paths under `<common root>`. <one line, when the paths share one>
+
+| File | Change |
+|---|---|
+| `path/to/file` | <what changes there> |
+
+<Prose the table cannot hold: an interface sketch, a protocol shape, a worked example.>
+
+**Reference.** <Optional: the in-house precedents this item builds on and any external prior art, with each deliberate divergence from it.>
+
+**Docs when it ships:** <Optional: the documents the build updates.>
+
+## Testing
+
+<One line on the hermetic rule, when one applies.>
+
+- **<Test suite or check.>** <What must be tested or checked so the change can't regress silently.>
+- **Gate:** <the command that proves it, when the item names one.>
+
+## Open questions
+
+| Question | Status | Answer |
+|---|---|---|
+| <a question to resolve before building> | `[user]` · `[default]` · `(consumed decision)` | <the recommendation, the default in full, or the item that owns it> |
+
+## Decision log
+
+| Date | Decision | Whose call |
+|---|---|---|
+| <YYYY-MM-DD> | <a design decision and its rationale> | <the user · default · the spec · the spike · the item's build · —> |
+
+## Out of scope
+
+- <each exclusion>
+
+## Links
+
+- **Blocked by:** … · **Blocks:** … · **Sibling:** … · **Relates to:** … · **Reverses / Follows from / Follow-on:** …
 ```
 
-**On real weights.** A guardrail or acceptance criterion that runs on real models names the capability and the measure, not the models: it runs on [the model families](../../assistant/cli/DEVELOPER.md#on-real-weights-the-model-families) — Meta, Qwen, Google and OpenAI, one installed model each (its Q4_K_M build when there is one), never the excluded ones, one family at a time with its model loaded once (the user's calls, 2026-10-03). It is optional: a family with no local model is skipped and said. Where an older document names its acceptance models, the families replace them.
+- **The key** names the queue: `CLI` here (`APP` for the Apple apps, `DSN` for the design, `MOD` for the mod), followed by the item's id from the index (`CLI-59d`, `CLI-M12`). The title words are the index row's.
+- **The header restates the index row.** Status, Fix version, Blocked by and Blocks say what the item's row in the index says; **the index stays the authority**, so any change to a row (a status, a move to another table, a gate added or satisfied) changes the document's header in the same pass, along with the Epic and the key-id H1 when the move changes them.
+- **The Status cell of an open question** is one of three tags: `[user]` (a genuinely user-owned decision: **blocks the build** until answered); `[default]` (the Answer is the recorded default: the agent takes it, records it as a dated row in the Decision log, and the user may veto); `(consumed decision)` (owned by another item, named in the Answer). An answered question leaves the table and becomes a Decision-log row.
+- **Type** is 🐞 Bug for behaviour that is wrong today, ✨ Feature for a new capability, 🛠️ Task for upkeep with no user-visible change. A bug's Steps to reproduce come only from what was actually seen.
+- **Line references into other backlog documents** name the document and its section, never a line number, since documents are re-shaped; line references into source code stay.
+
+**On real weights.** A Testing line or acceptance criterion that runs on real models names the capability and the measure, not the models: it runs on [the model families](../../assistant/cli/DEVELOPER.md#on-real-weights-the-model-families) — Meta, Qwen, Google and OpenAI, one installed model each (its Q4_K_M build when there is one), never the excluded ones, one family at a time with its model loaded once (the user's calls, 2026-10-03). It is optional: a family with no local model is skipped and said. Where an older document names its acceptance models, the families replace them.
 
 ## Index
 
@@ -57,7 +141,7 @@ Every item document follows this shape (sections in order; omit one only when it
 
 Within a table, rows are in the **suggested build order**; the topmost 🟢 row of the earliest **version** table is the next item to take — the bare-"Continue" convention skips the standing queues (Architecture, Maintenance), whose items are claimable at any time *by name*. Moving an item to another version (or into a standing queue) means moving its row to that table, updating its Version cell, **and `git mv`-ing its document into that table's directory** (fixing the handful of relative links that cross directories), and moving its row on the [backlog overview](../README.md#keeping-this-page-true) to match — creating the table and the directory if it is the first item there. Same-table links are bare filenames; cross-table links are `../<table-dir>/<file>`; links out of the backlog climb to `lib/documentation/` and back down (`../../../assistant/<app>/…` from a version folder; one level more from a platform's own folder, `darwin/macos/v0.2.1/`).
 
-**Gate convention:** every pending item builds on top of everything already shipped; a gate — the "build after" in a scope note, the 🔒 cell in a table — names only the ordering among the pending items here, and an item is buildable from its transitive gate chain alone. Items marked **split first** must be groomed into their listed sub-documents before an agent takes them; do not build from the guard document directly. A changed gate, or a split, changes the item's row on the [backlog overview](../README.md#keeping-this-page-true) in the same pass.
+**Gate convention:** every pending item builds on top of everything already shipped; a gate — the 🔒 cell in a table, restated in the document header's **Blocked by** — names only the ordering among the pending items here, and an item is buildable from its transitive gate chain alone. Items marked **split first** must be groomed into their listed sub-documents before an agent takes them; do not build from the guard document directly. A changed gate, or a split, changes the item's row on the [backlog overview](../README.md#keeping-this-page-true) in the same pass.
 
 Tracks **24** (chat input completion), **25** (local agent tools) and **26** (small-model depth) have shipped: 24 on 2026-09-25 ([MILESTONES.md](../../assistant/cli/MILESTONES.md#milestone-h--apogee-chat) → Milestone H), 25 and 26 complete in [v0.1.3](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.3), released 2026-10-04. So have **27** (MLX inference, suites, tasks and graphs), complete in [v0.1.4](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.4), released 2026-10-07; **28** (provider detection and machine-mode integrations) in [v0.1.5](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.5), released 2026-10-08; **32** (system insight and the full-screen TUI, with **37** and **38**, the full-surface TUI, beside it), **39** (effort and permission modes) and **43** (thinking summaries), complete in [v0.1.6](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.6), released 2026-10-12; **40** (the pre-shipped library), **41** (execute as the coding mode) and **42** (training suites in the box), complete in [v0.1.7](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.7), released 2026-10-14; **44** (the doors made law), **45** (completion presented well) and **46** (names and fields editable), complete in [v0.1.8](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.8), released 2026-10-16; **47** (desktop-parity capabilities), **48** (the review agent), **49** (video generation), **50** (the composer) and **51** (install bootstrap), complete in [v0.1.9](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.1.9), released 2026-10-20; and **52** (the desktop client's CLI growths), **53** (runtime LoRA adapters, with **53e–53m**, MLX for every kind) and **55** (the CLI/GUI audit's CLI findings), complete in **v0.2.0** — in development on its branch, released when it merges into `stable`. Their story is [ROADMAP.md](../../assistant/cli/ROADMAP.md), and each item's record is in [MILESTONES.md](../../assistant/cli/MILESTONES.md). The earliest table still open is **v0.2.1**'s, the mod's CLI siblings and Apogee in Xcode.
 

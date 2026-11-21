@@ -35,31 +35,31 @@ Read `lib/documentation/backlog/<app>/README.md` (`lib/documentation/backlog/<ap
 
 ## 3. Read the item's document — it IS the working spec
 
-Read the whole document: What/why, Core constraints, Seam + files, **Reference**, Decisions made, Open calls, Guardrails, Acceptance criteria, Scope note.
+Read the whole document: the header fields, Summary, Description (User story; Steps to reproduce for a bug; Background; Evidence; Split first), Acceptance criteria, Constraints, Technical approach with its **Reference.**, Testing, Open questions, Decision log, Out of scope, Links.
 
-- **Split-first rule:** if the item is marked **split first** (in its Scope note or index row), do NOT build from it. The work is to groom it into its listed sub-documents (confirm the split with the user), add them to the index and to [the release overview](../../../lib/documentation/backlog/README.md#keeping-this-page-true) in place of the parent's row, and stop.
-- **Reference:** read the in-house precedents and external prior art the section names before designing — the item docs cite them because they carry proven behavior and recorded lessons.
+- **Split-first rule:** if the item is marked **split first** (its `split-first` label and **Split first** subsection, or its index row), do NOT build from it. The work is to groom it into its listed sub-documents (confirm the split with the user), add them to the index and to [the release overview](../../../lib/documentation/backlog/README.md#keeping-this-page-true) in place of the parent's row, and stop.
+- **Reference:** read the in-house precedents and external prior art Technical approach's **Reference.** paragraph names before designing — the item docs cite them because they carry proven behavior and recorded lessons.
 
-## 4. Resolve the Open calls before writing code
+## 4. Resolve the Open questions before writing code
 
-Open calls are tagged:
+Each row of the Open questions table carries one Status tag:
 
-- `[user]` — a user-owned decision that **blocks the build**. Ask the user (AskUserQuestion) and wait. Do not start implementation until every `[user]` call on the item is answered.
-- `[default: …]` — take the stated default, and record it as a new dated entry under **Decisions made** in the item document. The user may veto later.
+- `[user]` — a user-owned decision that **blocks the build**. Ask the user (AskUserQuestion) and wait. Do not start implementation until every `[user]` row on the item is answered; each answer leaves the table as a dated Decision-log row.
+- `[default]` — take the default its Answer states, and record it as a new dated row in the item document's **Decision log** (Whose call: `default`), removing it from the table. The user may veto later.
 - `(consumed decision)` — already decided in another item; do not reopen it.
 
 ## 5. Build
 
-- Mark the item's index row **in progress** in the backlog README so parallel sessions see it's taken.
-- One item at a time. Honor the item's Core constraints and the repo-wide rules (CLAUDE.md → Invariants and Code Style).
+- Mark the item's index row **in progress** in the backlog README so parallel sessions see it's taken, and its header's **Status** (🚧 In progress) in the same pass: the header restates the row.
+- One item at a time. Honor the item's Constraints and the repo-wide rules (CLAUDE.md → Invariants and Code Style).
 - **Superpowers at this step** ([Superpowers fits the docs-first lifecycle](../../../lib/documentation/assistant/cli/CLAUDE.md#superpowers-fits-the-docs-first-lifecycle), the user's call, 2026-11-07). The item's document is the approved design, so `superpowers:brainstorming` does not run again, and the request to build is the approval. Use `superpowers:test-driven-development` for each change. For an item of several tasks, `superpowers:writing-plans`, then `superpowers:subagent-driven-development` (or `executing-plans` where no subagent tool exists), in a worktree from `superpowers:using-git-worktrees`. Its defaults give way here:
   - The plan restates nothing the document decides, and it is a session-only file in the scratchpad (with none, a `mktemp -d` directory outside the repository), **never committed**. writing-plans' hand-off is self-review against the document, with no wait.
   - The worktree is under `.claude/worktrees/`, made while on the release branch (`worktree.baseRef` is `head`). Before the first task, `git merge-base --is-ancestor <release-branch> HEAD`. Task commits stay on its branch.
-  - Every ledger `Ruling:` becomes a dated **Decisions made** entry in the item's document before it ships. A ruling that would reverse a `[user]` decision is not made: stop and ask.
+  - Every ledger `Ruling:` becomes a dated **Decision log** row in the item's document before it ships. A ruling that would reverse a `[user]` decision is not made: stop and ask.
   - Before calling it done, run `superpowers:verification-before-completion` and `superpowers:requesting-code-review`. The review's range is `git merge-base <release-branch> HEAD`..`HEAD` for a worktree item, or the working tree against `HEAD` for an uncommitted one, never from `main` or `stable`.
 - **Development runs on [the dev channel](../../../lib/documentation/assistant/cli/CLAUDE.md#development-runs-on-the-dev-channel)** (the user's call, 2026-10-31): a build installed for the user to try is `make -C lib/src/cli install MODE=dev` (or `update MODE=dev`), and a live pass names `apogee-dev` over `~/.apogee-dev`. Never a bare `make install`/`make update`, and never a write to `~/.apogee`, the user's production install, which only a release's installers and updaters change. Until GUI M18 lands, don't launch a development build of the macOS app for a live pass (it would drive production and share the installed app's settings) — ask the user.
-- Tests per the item's Guardrails; verify with `lib/scripts/cicd.sh --test` before calling anything done.
-- For a **CLI item**, a check on real weights names the capability and the measure, not the models, per the model families rules (`lib/documentation/assistant/cli/DEVELOPER.md` → On real weights). A **GUI item**'s guardrails are hermetic — scripted fakes and fixture event streams, no network, no binary required — with any live pass against the installed binary optional and said; real models are always the user's run. A GUI probe may drive the installed `apogee` binary against a sandboxed `APOGEE_HOME` with the scripted mock backend — never the real `~/.apogee`.
+- Tests per the item's Testing section; verify with `lib/scripts/cicd.sh --test` before calling anything done.
+- For a **CLI item**, a check on real weights names the capability and the measure, not the models, per the model families rules (`lib/documentation/assistant/cli/DEVELOPER.md` → On real weights). A **GUI item**'s tests are hermetic — scripted fakes and fixture event streams, no network, no binary required — with any live pass against the installed binary optional and said; real models are always the user's run. A GUI probe may drive the installed `apogee` binary against a sandboxed `APOGEE_HOME` with the scripted mock backend — never the real `~/.apogee`.
 - If the item changes the pipeline — a CI job added, removed or renamed, a matrix row, a new workflow, or what the CLI is built from — follow DEVELOPER.md → Changing the pipeline (`lib/documentation/assistant/cli/DEVELOPER.md#changing-the-pipeline`). Its required-checks step comes after the pull request's run passes and before the merge, and `--apply` changes repository settings: tell the user it is needed, and run it only when they say so. Whether the "Stable: CI must pass" ruleset is in force is `lib/scripts/required-checks.py --verify`'s to say (read-only): run it and report what it printed when the item touches the pipeline, when the item shipped is the last in its release's table (the release pull request is next), and whenever the user asks about the branch's pull request or its merge -- so every release pull request is checked, not only the ones whose jobs changed. A missing ruleset is a "needs the user" line, never "re-apply".
 
 ## 6. Ship — the Documentation and Status flow
@@ -69,7 +69,7 @@ Open calls are tagged:
 When the acceptance criteria pass, in the same change (per CLAUDE.md):
 
 1. Record the work in `MILESTONES.md` (`lib/documentation/assistant/<app>/MILESTONES.md`) (fold into the matching milestone, or start a new lettered one).
-2. **Delete the item's backlog document and its index row** — the backlog holds pending work only. Update any other document whose gate this satisfied.
+2. **Delete the item's backlog document and its index row** — the backlog holds pending work only. Update any other document whose gate this satisfied: its index row and its header's **Blocked by** (and **Status**, when the gate was its last), and this item's mention in any header's **Blocks**.
    - Take the row out of [the release overview](../../../lib/documentation/backlog/README.md#keeping-this-page-true) too, updating its counts, "can start today" and any gate it satisfied.
 3. Check the box / move the line in ROADMAP.md.
 4. Update the Codebase Map in CLAUDE.md and DEVELOPER.md for new/moved files.

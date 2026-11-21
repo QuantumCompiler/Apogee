@@ -1,8 +1,51 @@
-# The app's code builds for iPhone and iPad
+# APP-8a · The app's code builds for iPhone and iPad
 
-**What / why.** The user's vision, 2026-11-07: Apogee is a private, self-hosted harness that feels like Claude on every device the person owns. A strong machine of theirs serves their own desktops and phones. The iPhone and the iPad are clients of that server only (GUI SPEC → [Core surfaces](../../../assistant/gui/SPEC.md#core-surfaces)), "built from the macOS app's Swift code". Today that code builds for the Mac and nothing else. This item makes the same code, one codebase, build and test for iOS and iPadOS, with the Mac app unchanged. Measured at HEAD `4f92316d` on 2026-11-07. Paths are under `lib/src/darwin/`.
+| Field | Value |
+|---|---|
+| **Type** | ✨ Feature |
+| **Project** | Apple apps |
+| **Status** | 🔒 Blocked |
+| **Fix version** | v0.2.5 |
+| **Component** | The Xcode project and every module's platform split: the Mac's code in platform files, the layering check, the schemes, the suite and the iOS app's composition |
+| **Labels** | `ios` `ipados` `platform-files` `layering` |
+| **Epic** | Track 8 · the iPad and getting the app onto iPhone and iPad |
+| **Blocked by** | [7a](../v0.2.4/app-connection-local-or-server.md) |
+| **Blocks** | [8b](../ipados/v0.2.5/ipad-app.md), [8c](iphone-and-ipad-distribution.md) |
+| **Reporter** | The Apple-platforms spike and brainstorm (2026-11-07), on the user's vision |
+| **Created** | 2026-11-07 |
+
+---
+
+## Summary
+
+The iPhone and the iPad are to be clients of the person's own Apogee server, "built from the macOS app's Swift code", but today that code builds for the Mac and nothing else. This item makes the same code, one codebase, build and test for iOS and iPadOS, with the Mac app unchanged: the Mac's code isolated in platform files, the layering check per platform, every scheme and the hermetic suite on the iOS simulator, and an iOS app that launches to the shell over 7a's connection only.
+
+## Description
+
+### User story
+
+**As** a person using Apogee who runs it on their own strong machine,
+**I want** the app's one codebase to build and run on my iPhone and iPad as well as my Mac, with the Mac app exactly as it is,
+**so that** the iPhone and iPad apps can be built on it as clients of my own server, while the Mac stays complete on its own.
+
+### Background
+
+The user's vision, 2026-11-07: Apogee is a private, self-hosted harness that feels like Claude on every device the person owns. A strong machine of theirs serves their own desktops and phones. The iPhone and the iPad are clients of that server only (GUI SPEC → [Core surfaces](../../../assistant/gui/SPEC.md#core-surfaces)), "built from the macOS app's Swift code". Today that code builds for the Mac and nothing else. This item makes the same code, one codebase, build and test for iOS and iPadOS, with the Mac app unchanged.
+
+**What this item delivers.**
+- **Every framework, its test bundle and the app target building for macOS, iOS and iPadOS** from one codebase. The child-process transport stays macOS-only. 7a's network transport is present everywhere.
+- **The Mac's code isolated in platform files inside its modules.** Every AppKit use and every Mac-only SwiftUI call goes into such a file, with an iOS counterpart where the iOS app needs the piece to exist.
+- **The layering check, per platform**, and a new ADR that records the rule.
+- **Each Presentation module's scheme building for both** the Mac and the iOS Simulator (ADR 0004).
+- **The hermetic suite running on an iPhone and an iPad simulator.**
+- **An iOS app that launches** to the shell, composed over 7a's connection only. It is not yet a product: its layouts are 8b's and 9a's, and getting it onto a device is 8c's.
+
+### Evidence
+
+Measured at HEAD `4f92316d` on 2026-11-07. Paths are under `lib/src/darwin/`.
 
 **W9 — the app's code is the Mac's alone.**
+
 1. **Every target is a Mac target.** The project's two configurations set `SDKROOT = macosx`, `MACOSX_DEPLOYMENT_TARGET = 27.0` and `ARCHS = arm64` (`Apogee.xcodeproj/project.pbxproj:7874-7889` Release, `:8727-8744` Debug), and no target overrides them. That covers all 56 native targets. `xcodebuild -target InfrastructureProcess -showBuildSettings` resolves `SUPPORTED_PLATFORMS = macosx`. `xcodebuild -scheme PresentationStyles -showdestinations` lists "My Mac" and "Any Mac", and rejects every iOS Simulator with "iPad (A16)'s iOS Simulator platform doesn't match PresentationStyles.framework's supported platforms". The 20 shared schemes (`Apogee` and one per Presentation module, ADR 0004) build Mac frameworks only.
 2. **The layers below Presentation are free of AppKit, but not of the Mac.** The SPEC's "already free of AppKit" is true. It is not enough. The probe compiled each module whole with the iPhoneSimulator 27.1 SDK (`swiftc -swift-version 6 -target arm64-apple-ios27.0-simulator -wmo`, a scratch copy under the session's scratchpad, nothing in the tree touched):
    - `DataProtocol` and `DataPreferences` build as they are.
@@ -23,28 +66,30 @@
    - `openSettings`: `shell/Views/Sidebar.swift:10`, `:41`.
    - `onExitCommand`: `session/Views/SessionWindow.swift:29`.
    - The `Window` scene (`app/Views/ApogeeApp.swift:54`) and the `Settings` scene (`:99`).
-   
+
    Three view-models default to the Mac:
    - `AppViewModel.swift:72` and `SessionViewModel.swift:79` default to `homeDirectoryForCurrentUser`.
    - `MonitorViewModel.swift:32` defaults to `ProcessMemory.resident`.
-   
+
    With every site above stubbed in the scratch copy, all 19 Presentation modules built for iOS. Console, Library, Monitor, Review, Suites, Tasks and Training needed nothing of their own.
 5. **The tests are the Mac's too.** The last local run's result bundle counts 981 tests (`build/macos-arm64/tests.xcresult`, `totalTestCount`). Of them, 123 sit in 14 files that name the Mac:
    - 11 files spawn real children through `ProcessSpawner`, or read `ProcessMemory`, in `tests/infrastructure/process/`, `data/discovery/BinaryDiscoveryTests.swift`, `business/jobs/JobGroupTests.swift`, `business/session/` (`ChatLaunchTests`, `MachineSessionTests`, `RealBinaryTests`), `presentation/app/ChildrenSeenTests.swift` and `presentation/sessions/OverrideSkippedTests.swift`.
    - 3 styles files import AppKit or use `NSPasteboard` (`CodeLexerTests`, `MarkdownTests`, `StylesTests`).
-   
+
    The layering check reads the repository from disk (`tests/architecture/layering/SourceTree.swift:13-14`, `DiskTree`).
 6. **The layering check knows no platform.** It holds every target to one folder "with no membership exceptions" (`LayeringCheck.swift:15-16`, `ModuleMap.swift:189`). It also holds the UI frameworks, which already include `UIKit` (`LayeringCheck.swift:41-43`), to Presentation and out of view-models. It reads no `SUPPORTED_PLATFORMS`. So nothing stops a module from going Mac-only, or a cross-platform file from reaching AppKit. ADR 0004's scope is "The macOS application" ([module-schemes-and-previews.md](../../../adrs/darwin/module-schemes-and-previews.md)).
 
-This item delivers:
-- **Every framework, its test bundle and the app target building for macOS, iOS and iPadOS** from one codebase. The child-process transport stays macOS-only. 7a's network transport is present everywhere.
-- **The Mac's code isolated in platform files inside its modules.** Every AppKit use and every Mac-only SwiftUI call goes into such a file, with an iOS counterpart where the iOS app needs the piece to exist.
-- **The layering check, per platform**, and a new ADR that records the rule.
-- **Each Presentation module's scheme building for both** the Mac and the iOS Simulator (ADR 0004).
-- **The hermetic suite running on an iPhone and an iPad simulator.**
-- **An iOS app that launches** to the shell, composed over 7a's connection only. It is not yet a product: its layouts are 8b's and 9a's, and getting it onto a device is 8c's.
+## Acceptance criteria
 
-**Core constraint(s).**
+- [ ] **Given** the multiplatform project, **when** `xcodebuild -scheme Apogee` builds for an iPhone and an iPad simulator and for `generic/platform=iOS` with signing off, **then** it builds, warning-free.
+- [ ] The hermetic suite passes on an iPhone and an iPad simulator. `DEVELOPER.md` names the Mac-only tests and their count.
+- [ ] **Given** any of the 19 Presentation schemes, **when** `-showdestinations` lists its destinations, **then** the iOS Simulators are eligible, and the scheme builds for them.
+- [ ] No file outside a `+macOS` file imports AppKit or names an AppKit type. No file outside a `+iOS` file imports UIKit.
+- [ ] On the Mac, `build.sh build`, `test` and `package` pass, the app is the same app, and the full suite is green.
+- [ ] **Given** the iOS app, **when** it launches in the simulator, **then** it reaches the shell and starts no process; and with nothing paired, it says so in 7a's words.
+
+## Constraints
+
 - **The anti-goal: nothing here may make standalone use need a server** (the user's call, 2026-11-07; SPEC → Non-goals, No server requirement). The Mac app over pipes to its local CLI stays complete and the default.
   - Every Mac code path moves verbatim into a `+macOS` file. None is routed, wrapped or removed.
   - The Mac's composition still builds every place over `ProcessSpawner`, discovery and the login-shell `PATH`.
@@ -63,44 +108,42 @@ This item delivers:
 - **The dev channel** ([CLAUDE.md → Development runs on the dev channel](../../../assistant/darwin/CLAUDE.md#development-runs-on-the-dev-channel); M18 [`app-dev-channel.md`](../macos/maintenance/app-dev-channel.md)). An iOS development build carries the dev identity ("Apogee Dev", M18's identifier), never the release one. On the Mac, a development build still drives `apogee-dev` only.
 - **Swift 6, strict concurrency, warning-free on both platforms** (CLAUDE.md → Code Style).
 
-**Seam + files.**
-- `Apogee.xcodeproj`:
-  - Every framework target and test bundle: `SUPPORTED_PLATFORMS = "macosx iphoneos iphonesimulator"`, `SDKROOT = auto`, `IPHONEOS_DEPLOYMENT_TARGET = 27.0` beside the Mac's 27.0, `TARGETED_DEVICE_FAMILY = "1,2"` (iPhone and iPad), `SUPPORTS_MACCATALYST = NO`.
-  - The app target `Apogee`: the same, with its iOS keys under `[sdk=iphone*]` conditions so the Mac's resolve unchanged. Those keys are the generated Info.plist's launch screen, scene manifest and orientations, `SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO` and `SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO`.
-  - The app embeds the same frameworks on both.
-  - The app's icon: `AppIcon.appiconset` holds only `mac` images, so this item adds the single 1024-pixel iOS image from the same master through `scripts/icon.sh generate`, and widens `IconSetCheck`, whose `slot(of:)` accepts only `mac` (handed on by 11a, [Milestone H](../../../assistant/darwin/MILESTONES.md#milestone-h--the-apps-logo)).
-  - No new target and no membership exceptions.
-- `source/infrastructure/process/`:
-  - `ProcessSpawner.swift`, `LoginShell.swift` and `ProcessMemory.swift` become `+macOS` files, unchanged inside.
-  - `ShellPath.swift` keeps its values (`ShellPath`, `Resolution`, `wellKnownDirectories`, `launchdPath`) everywhere. Its run of the login shell, `.app` and `answer()` move to `ShellPath+macOS.swift`.
-  - The infrastructure layer card names the platform files in its prose, outside the backticked **Modules** line, which the check reads as module names.
-- `source/data/discovery/BinaryDiscovery.swift`: the `home:` default moves to a `BinaryDiscovery+macOS.swift` overload. Discovery stays a Mac fact, and the iOS composition never calls it.
-- `source/business/reads/ReadRunner.swift`, `business/jobs/SupervisedJob.swift` and `business/session/ApogeeClient.swift`: the convenience initializers that name `ProcessSpawner()` and `homeDirectoryForCurrentUser` move to `+macOS` files. The injected initializers stay everywhere, and the iOS composition hands them 7a's `RemoteSpawner` (through 7a's `RoutingSpawner`, whose local branch exists only on the Mac).
-- `source/business/device/` and 7b's Presentation pieces ([7b](../macos/v0.2.4/mac-offers-its-files-and-shell.md), queued before this item): the Mac offering its own files and shell is Mac code. `DeviceToolHost`'s injected initializer stays everywhere, and anything that starts the device child over `ProcessSpawner` moves to `+macOS` files. The grant sheet, the **On this Mac** card and Settings' **This Mac** pane are `+macOS` files. The iOS composition never builds the host, so the iOS build offers no device tools. If 7b has not shipped when this item is built, the rule applies to it when it lands.
-- `source/presentation/styles/`:
-  - `Palette+macOS.swift` (`NSColor`) and `Palette+iOS.swift` (`UIColor`'s dynamic provider on `userInterfaceStyle`), both feeding the one public `Palette.color`.
-  - `MarkdownText`'s link opener and code copy as `+macOS` (`NSWorkspace`, `NSPasteboard`) and `+iOS` (the system's URL opener, `UIPasteboard`). `MarkdownDocument.swift:618`'s comment follows.
-  - `MediaPlayer+macOS.swift` (`AVPlayerView`, as today) and `MediaPlayer+iOS.swift`, a `UIViewControllerRepresentable` over `AVPlayerViewController`. It names AVKit's type, for the reason `MediaPlayer.swift:5-10` records.
-  - Two shared components that every place uses in place of the Mac-only styles: `Components/LinkButtonStyle` (`.link` on the Mac, a plain tinted button on iOS) for the 11 `.link` sites, and `Components/ChoicePicker` (`.radioGroup` on the Mac, `.inline` on iOS) for the 3 `.radioGroup` sites.
-- `source/presentation/shell/`: the divider's `pointerStyle` and the sidebar's `openSettings` row go to `+macOS` files. On iOS the divider is not drawn and the Settings row is absent until 8b gives iOS its Settings place.
-- `source/presentation/session/Views/SessionWindow+macOS.swift`: `onExitCommand`. Esc on iOS is 8b's.
-- `source/presentation/sessions/`: the inspector divider's `pointerStyle`, as the shell's.
-- `models/`, `graph/`, `knowledge/`, `video/`, `voice/`, `compose/`: the Show in Finder buttons (5) and the save panels (graph 2, knowledge 1) move into each module's `Views/…+macOS.swift`. The iOS build draws neither.
-- `source/presentation/app/`:
-  - `ApogeeApp+macOS.swift` keeps the `Window` and `Settings` scenes and the delegate adaptor, and `AppDelegate+macOS.swift` keeps ⌘Q's wait.
-  - `ApogeeApp+iOS.swift` has one `WindowGroup` mounting the same `ShellView`.
-  - `AppViewModel`'s `home:` default goes to the Mac file. The iOS composition builds the places over 7a's server routing only: no discovery, no login shell and no monitor memory by process id (`MonitorViewModel.residentBytes` handed `{ _ in nil }`).
-  - With nothing paired, the iOS app shows 7a's not-paired state. Pairing on iOS is 8b's.
-  - `SessionViewModel.folder`'s default becomes the composition's to hand in.
-  - `source/main/ApogeeMain.swift` is unchanged (`ApogeeApp.main()` on both).
-- `tests/`:
-  - The 123 Mac-bound tests move into `+macOS` test files in their bundles, so they compile and run on the Mac only. The rest of each file runs on both. The styles tests split by what they touch: the pasteboard on the Mac, everything else everywhere.
-  - `architecture/layering`: its suite runs on the Mac, because it checks the project and reads it from disk. It gains the per-platform rules (Guardrails), each pinned on a planted miniature as the existing ones are (`LayeringTests.swift`, `planted.change`).
-- Docs, in the same change:
-  - a new GUI ADR 0005, `apple-platforms.md`: one codebase for three Apple platforms; platform files; the per-platform check; each Presentation scheme built per platform, extending ADR 0004's scope, which is append-only and is named, not edited;
-  - GUI `CLAUDE.md`: Stack & environment's platforms, the platform-file rule under Code Style, the Codebase Map's platform files, and the checklist line;
-  - `DEVELOPER.md`: the `xcodebuild` lines that build for and test on the iOS Simulator, and which tests are the Mac's;
-  - the four layer cards (`source/<layer>/CLAUDE.md`).
+## Technical approach
+
+Paths under `lib/src/darwin/`.
+
+| File | Change |
+|---|---|
+| `Apogee.xcodeproj` (every framework target and test bundle) | `SUPPORTED_PLATFORMS = "macosx iphoneos iphonesimulator"`, `SDKROOT = auto`, `IPHONEOS_DEPLOYMENT_TARGET = 27.0` beside the Mac's 27.0, `TARGETED_DEVICE_FAMILY = "1,2"` (iPhone and iPad), `SUPPORTS_MACCATALYST = NO` |
+| `Apogee.xcodeproj` (the app target `Apogee`) | the same, with its iOS keys under `[sdk=iphone*]` conditions so the Mac's resolve unchanged: the generated Info.plist's launch screen, scene manifest and orientations, `SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO` and `SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO`; the app embeds the same frameworks on both |
+| `AppIcon.appiconset`, `IconSetCheck` | the set holds only `mac` images, so this item adds the single 1024-pixel iOS image from the same master through `scripts/icon.sh generate`, and widens `IconSetCheck`, whose `slot(of:)` accepts only `mac` (handed on by 11a, [Milestone H](../../../assistant/darwin/MILESTONES.md#milestone-h--the-apps-logo)) |
+| `Apogee.xcodeproj` (the whole project) | no new target and no membership exceptions |
+| `source/infrastructure/process/ProcessSpawner.swift`, `LoginShell.swift`, `ProcessMemory.swift` | become `+macOS` files, unchanged inside |
+| `source/infrastructure/process/ShellPath.swift` | keeps its values (`ShellPath`, `Resolution`, `wellKnownDirectories`, `launchdPath`) everywhere; its run of the login shell, `.app` and `answer()` move to `ShellPath+macOS.swift` |
+| the infrastructure layer card | names the platform files in its prose, outside the backticked **Modules** line, which the check reads as module names |
+| `source/data/discovery/BinaryDiscovery.swift` | the `home:` default moves to a `BinaryDiscovery+macOS.swift` overload; discovery stays a Mac fact, and the iOS composition never calls it |
+| `source/business/reads/ReadRunner.swift`, `business/jobs/SupervisedJob.swift`, `business/session/ApogeeClient.swift` | the convenience initializers that name `ProcessSpawner()` and `homeDirectoryForCurrentUser` move to `+macOS` files; the injected initializers stay everywhere, and the iOS composition hands them 7a's `RemoteSpawner` (through 7a's `RoutingSpawner`, whose local branch exists only on the Mac) |
+| `source/business/device/` and [7b](../macos/v0.2.4/mac-offers-its-files-and-shell.md)'s Presentation pieces (7b is queued before this item) | the Mac offering its own files and shell is Mac code: `DeviceToolHost`'s injected initializer stays everywhere, and anything that starts the device child over `ProcessSpawner` moves to `+macOS` files; the grant sheet, the **On this Mac** card and Settings' **This Mac** pane are `+macOS` files; the iOS composition never builds the host, so the iOS build offers no device tools; if 7b has not shipped when this item is built, the rule applies to it when it lands |
+| `source/presentation/styles/Palette+macOS.swift`, `Palette+iOS.swift` | `NSColor` on the Mac, and `UIColor`'s dynamic provider on `userInterfaceStyle` on iOS, both feeding the one public `Palette.color` |
+| `source/presentation/styles/` `MarkdownText` | its link opener and code copy as `+macOS` (`NSWorkspace`, `NSPasteboard`) and `+iOS` (the system's URL opener, `UIPasteboard`); `MarkdownDocument.swift:618`'s comment follows |
+| `source/presentation/styles/MediaPlayer+macOS.swift`, `MediaPlayer+iOS.swift` | `AVPlayerView`, as today, on the Mac; on iOS a `UIViewControllerRepresentable` over `AVPlayerViewController`, which names AVKit's type for the reason `MediaPlayer.swift:5-10` records |
+| `source/presentation/styles/Components/LinkButtonStyle` (new) | `.link` on the Mac, a plain tinted button on iOS; every place uses it for the 11 `.link` sites in place of the Mac-only style |
+| `source/presentation/styles/Components/ChoicePicker` (new) | `.radioGroup` on the Mac, `.inline` on iOS; every place uses it for the 3 `.radioGroup` sites |
+| `source/presentation/shell/` | the divider's `pointerStyle` and the sidebar's `openSettings` row go to `+macOS` files; on iOS the divider is not drawn and the Settings row is absent until 8b gives iOS its Settings place |
+| `source/presentation/session/Views/SessionWindow+macOS.swift` | `onExitCommand`; Esc on iOS is 8b's |
+| `source/presentation/sessions/` | the inspector divider's `pointerStyle`, as the shell's |
+| `models/`, `graph/`, `knowledge/`, `video/`, `voice/`, `compose/` | the Show in Finder buttons (5) and the save panels (graph 2, knowledge 1) move into each module's `Views/…+macOS.swift`; the iOS build draws neither |
+| `source/presentation/app/ApogeeApp+macOS.swift`, `AppDelegate+macOS.swift` | `ApogeeApp+macOS.swift` keeps the `Window` and `Settings` scenes and the delegate adaptor; `AppDelegate+macOS.swift` keeps ⌘Q's wait |
+| `source/presentation/app/ApogeeApp+iOS.swift` | one `WindowGroup` mounting the same `ShellView` |
+| `source/presentation/app/` composition, `AppViewModel`, `SessionViewModel` | `AppViewModel`'s `home:` default goes to the Mac file; the iOS composition builds the places over 7a's server routing only: no discovery, no login shell and no monitor memory by process id (`MonitorViewModel.residentBytes` handed `{ _ in nil }`); with nothing paired, the iOS app shows 7a's not-paired state, and pairing on iOS is 8b's; `SessionViewModel.folder`'s default becomes the composition's to hand in |
+| `source/main/ApogeeMain.swift` | unchanged (`ApogeeApp.main()` on both) |
+| `tests/` | the Mac-bound tests split into `+macOS` test files, and the layering suite gains the per-platform rules (see Testing) |
+
+**Docs, in the same change:**
+- a new GUI ADR 0005, `apple-platforms.md`: one codebase for three Apple platforms; platform files; the per-platform check; each Presentation scheme built per platform, extending ADR 0004's scope, which is append-only and is named, not edited;
+- GUI `CLAUDE.md`: Stack & environment's platforms, the platform-file rule under Code Style, the Codebase Map's platform files, and the checklist line;
+- `DEVELOPER.md`: the `xcodebuild` lines that build for and test on the iOS Simulator, and which tests are the Mac's;
+- the four layer cards (`source/<layer>/CLAUDE.md`).
 
 **Reference.**
 - [7a](../v0.2.4/app-connection-local-or-server.md), this item's gate. Its `RemoteSpawner`/`RoutingSpawner` is the only transport the iOS build has. Its constraint "No UI framework is used below Presentation, which 8a relies on" is the one this item extends to the Mac's non-UI APIs.
@@ -114,59 +157,64 @@ This item delivers:
   - ADR 0004, the per-module schemes.
   - M18, the dev identity.
 
-**Decisions made** (dated):
-- 2026-11-07: Specced from the Apple-platforms spike and brainstorm. The user's calls that shape this item:
-  - Apogee is a private, self-hosted harness that feels like Claude on every device the person owns, a strong machine of theirs serving their own desktops and phones. Paid features are a someday: no customer accounts, billing or metering, so this item adds no account of any kind.
-  - Where the work happens: server tools by default, and a connected desktop offers its own files and shell. Device tools touch the device's own files, so they are the Mac's (7b), and the iOS build carries none.
-  - iPhone and iPad are clients of the person's Apogee server only, with no core on the device. The Mac and the CLI stay standalone.
-  - Remote mode is an add-on, never the only way the application runs. Anything that makes the Mac app need a server, a network or an account is a failure.
-  - The "iPhone duo" is the foldable iPhone, whose two screens are 9b's. This item builds its device family.
-  - v0.2.5 is the target where macOS, iPadOS and iOS fully work, in successive versions up to it.
-- 2026-11-07: In v0.2.5 (track 8), gated on 7a. Without 7a's connection the iOS build would have no transport at all, and an app with nothing to drive. With it, the iOS composition reaches the server through the same seam every place already uses. 8b and 8c are gated on this item, because both need code that builds for iOS.
-- 2026-11-07: One codebase, not a fork. This is the SPEC's "built from the macOS app's Swift code". The probe shows the cost is bounded: 4 files and 7 lines below Presentation, and in Presentation 7 AppKit imports and about 35 Mac-only call sites (W9.2–W9.4).
+## Testing
 
-**Open calls:**
-- [default: a platform file is named `<Name>+macOS.swift` or `<Name>+iOS.swift` and is wholly inside `#if os(macOS)` or `#if os(iOS)`. iPadOS is `os(iOS)`. Nowhere else does `#if os(` or a `canImport` choose a platform. The one-folder, no-exceptions rule stands, so no per-file platform filters are used.]
-- [default: `InfrastructureProcess` stays one module, with its Mac files guarded, rather than splitting into a protocol module and a Mac module. Every importer already reaches it, and the protocols it declares are what 7a's transport implements.]
-- [default: one multiplatform app target, plain `Apogee` (the repository's naming), with its iOS keys under `[sdk=iphone*]` conditions, not a second app target. The layering check keeps its one application path (`LayeringCheck.swift:46-47`). This is what 8c's "the iOS configurations of 8a's iOS app target" edits.]
-- [default: iOS and iPadOS 27.0, arm64, iPhone and iPad device families. No Mac Catalyst, no "Designed for iPad" on the Mac or Vision Pro: the Mac's app is the native one.]
-- [default: Mac-only affordances with no iOS meaning yet (Show in Finder ×5, the three save panels, the divider drags, Esc) are absent from the iOS build. They are never stubbed to do nothing visibly. Their iOS forms are 7c's, 8b's and 9a's.]
-- [default: the suite runs on one iPhone and one iPad simulator of the iOS 27.0 runtime, the newest of each the runtime carries. This Mac has the iOS 27.0 runtime and the 27.1 SDKs (`xcrun simctl list runtimes`, `xcrun --sdk iphonesimulator --show-sdk-path`).]
-- [default: the layering check also refuses the AppKit names found here (`NSWorkspace`, `NSPasteboard`, `NSSavePanel`, `NSOpenPanel`, `NSApplication`, `NSColor`, `NSView`, `NSButton`) outside a `+macOS` file, because three files reach `NSWorkspace` with no AppKit import (W9.3).]
-- (consumed decision) `build.sh`'s iOS targets, CI's iOS build and test steps, and signing are 8c's. Until 8c lands, the iOS build and suite are the `xcodebuild` lines in `DEVELOPER.md`.
-- (consumed decision) The transport, pairing and the not-paired state are 7a's (and CLI 59a's). The iPad's shell, Settings, pairing, Esc and keys are 8b's. The iPhone's compact shell is 9a's, and the foldable's two screens are 9b's.
-- (consumed decision) iPhone and iPad offer no device tools: no shell, and their files sit in the app's container. That is 7b's default, and this item builds it by keeping the device-tool host and its sheets in `+macOS` files.
-- (consumed decision) The dev identity's identifier and suffix are M18's, and the iOS configurations inherit them. [default: if M18 has not shipped when this item is built, M18 is built first (it is ungated), so no iOS Debug build ever carries the release identity.]
-- No [user] call blocks this item. The Apple Developer Program call is 8c's.
-
-**Guardrail(s).**
+- **The Mac-bound tests.** The 123 Mac-bound tests move into `+macOS` test files in their bundles, so they compile and run on the Mac only. The rest of each file runs on both. The styles tests split by what they touch: the pasteboard on the Mac, everything else everywhere.
 - **The Mac is unchanged.**
   - Every target's resolved macOS build settings (`-showBuildSettings -destination 'platform=macOS'`) are compared before and after. Only `SDKROOT`, `SUPPORTED_PLATFORMS` and the iOS-only keys this item sets (`IPHONEOS_DEPLOYMENT_TARGET`, `TARGETED_DEVICE_FAMILY`, `SUPPORTS_MACCATALYST` and the `[sdk=iphone*]` keys) may differ.
   - The Mac suite still runs every one of its tests. The count from `totalTestCount` (981 at HEAD) may only grow, and none is lost to a guard.
   - `build.sh build`'s ad-hoc signature check and `package` pass unchanged.
-- **The layering check's new rules**, each pinned on a planted miniature:
+- **The layering check's new rules** (`tests/architecture/layering`). Its suite runs on the Mac, because it checks the project and reads it from disk. It gains the per-platform rules, each pinned on a planted miniature as the existing ones are (`LayeringTests.swift`, `planted.change`):
   - every target supports exactly macOS, iOS and the iOS Simulator;
   - AppKit is imported only in a `+macOS` file, and UIKit only in a `+iOS` file, both still in Presentation and never in a `ViewModels/` file;
   - a platform file is wholly guarded by its platform;
   - no `#if os(` or platform `canImport` sits outside a platform file;
-  - the AppKit names above appear only in `+macOS` files;
+  - the AppKit names (`NSWorkspace`, `NSPasteboard`, `NSSavePanel`, `NSOpenPanel`, `NSApplication`, `NSColor`, `NSView`, `NSButton`) appear only in `+macOS` files;
   - every Presentation scheme's target supports both platforms (ADR 0004 per platform).
 - **The iOS build compiles and its suite passes**, by the `DEVELOPER.md` lines, warning-free. Until 8c puts it in CI, a compile break on iOS that the check's textual rules miss (a Mac-only SwiftUI call in a shared file) is caught only by that local run. The build's record says so.
 
-**Acceptance criteria:**
-- [ ] `xcodebuild -scheme Apogee` builds for an iPhone and an iPad simulator and for `generic/platform=iOS` with signing off, warning-free.
-- [ ] The hermetic suite passes on an iPhone and an iPad simulator. `DEVELOPER.md` names the Mac-only tests and their count.
-- [ ] Each of the 19 Presentation schemes lists the iOS Simulators as eligible in `-showdestinations` and builds for them.
-- [ ] No file outside a `+macOS` file imports AppKit or names an AppKit type. No file outside a `+iOS` file imports UIKit.
-- [ ] On the Mac, `build.sh build`, `test` and `package` pass, the app is the same app, and the full suite is green.
-- [ ] The iOS app launches in the simulator to the shell and starts no process. With nothing paired, it says so in 7a's words.
+## Open questions
 
-**Scope note.** Earmarked for v0.2.5 (track 8); 🔒 gated on [7a](../v0.2.4/app-connection-local-or-server.md). Out of scope:
-- the iPad's layouts, Settings, pairing and keys (8b);
-- getting the app onto a device, the `build.sh` targets and CI (8c);
-- the iPhone (9a) and the foldable (9b);
-- what each place does against a server (7c);
-- device tools on iPhone and iPad, which offer none (7b's default);
-- any new design board, since this item draws no new screen and the not-paired state is 7a's;
-- Mac Catalyst, watchOS and visionOS;
+No `[user]` call blocks this item.
+
+| Question | Status | Answer |
+|---|---|---|
+| How is a platform file named and guarded? | `[default]` | A platform file is named `<Name>+macOS.swift` or `<Name>+iOS.swift` and is wholly inside `#if os(macOS)` or `#if os(iOS)`. iPadOS is `os(iOS)`. Nowhere else does `#if os(` or a `canImport` choose a platform. The one-folder, no-exceptions rule stands, so no per-file platform filters are used. |
+| Does `InfrastructureProcess` stay one module, or split into a protocol module and a Mac module? | `[default]` | `InfrastructureProcess` stays one module, with its Mac files guarded, rather than splitting into a protocol module and a Mac module. Every importer already reaches it, and the protocols it declares are what 7a's transport implements. |
+| One multiplatform app target, or a second app target for iOS? | `[default]` | One multiplatform app target, plain `Apogee` (the repository's naming), with its iOS keys under `[sdk=iphone*]` conditions, not a second app target. The layering check keeps its one application path (`LayeringCheck.swift:46-47`). This is what 8c's "the iOS configurations of 8a's iOS app target" edits. |
+| Which iOS versions, architectures and device families, and does the Mac get Catalyst or "Designed for iPad"? | `[default]` | iOS and iPadOS 27.0, arm64, iPhone and iPad device families. No Mac Catalyst, no "Designed for iPad" on the Mac or Vision Pro: the Mac's app is the native one. |
+| What happens on iOS to Mac-only affordances with no iOS meaning yet? | `[default]` | Mac-only affordances with no iOS meaning yet (Show in Finder ×5, the three save panels, the divider drags, Esc) are absent from the iOS build. They are never stubbed to do nothing visibly. Their iOS forms are 7c's, 8b's and 9a's. |
+| Which simulators does the suite run on? | `[default]` | One iPhone and one iPad simulator of the iOS 27.0 runtime, the newest of each the runtime carries. This Mac has the iOS 27.0 runtime and the 27.1 SDKs (`xcrun simctl list runtimes`, `xcrun --sdk iphonesimulator --show-sdk-path`). |
+| Does the layering check refuse AppKit names as well as AppKit imports? | `[default]` | Yes: the layering check also refuses the AppKit names found here (`NSWorkspace`, `NSPasteboard`, `NSSavePanel`, `NSOpenPanel`, `NSApplication`, `NSColor`, `NSView`, `NSButton`) outside a `+macOS` file, because three files reach `NSWorkspace` with no AppKit import (W9.3). |
+| What if M18 has not shipped when this item is built? | `[default]` | M18 is built first (it is ungated), so no iOS Debug build ever carries the release identity. |
+| `build.sh`'s iOS targets, CI's iOS build and test steps, and signing | `(consumed decision)` | 8c's. Until 8c lands, the iOS build and suite are the `xcodebuild` lines in `DEVELOPER.md`. |
+| The transport, pairing and the not-paired state; the iPad's and iPhone's shells | `(consumed decision)` | The transport, pairing and the not-paired state are 7a's (and CLI 59a's). The iPad's shell, Settings, pairing, Esc and keys are 8b's. The iPhone's compact shell is 9a's, and the foldable's two screens are 9b's. |
+| Do iPhone and iPad offer device tools? | `(consumed decision)` | No: no shell, and their files sit in the app's container. That is 7b's default, and this item builds it by keeping the device-tool host and its sheets in `+macOS` files. |
+| The dev identity's identifier and suffix | `(consumed decision)` | M18's; the iOS configurations inherit them. |
+| The Apple Developer Program call | `(consumed decision)` | 8c's. |
+
+## Decision log
+
+| Date | Decision | Whose call |
+|---|---|---|
+| 2026-11-07 | Specced from the Apple-platforms spike and brainstorm. The user's calls that shape this item: Apogee is a private, self-hosted harness that feels like Claude on every device the person owns, a strong machine of theirs serving their own desktops and phones; paid features are a someday: no customer accounts, billing or metering, so this item adds no account of any kind. Where the work happens: server tools by default, and a connected desktop offers its own files and shell; device tools touch the device's own files, so they are the Mac's (7b), and the iOS build carries none. iPhone and iPad are clients of the person's Apogee server only, with no core on the device; the Mac and the CLI stay standalone. Remote mode is an add-on, never the only way the application runs; anything that makes the Mac app need a server, a network or an account is a failure. The "iPhone duo" is the foldable iPhone, whose two screens are 9b's; this item builds its device family. v0.2.5 is the target where macOS, iPadOS and iOS fully work, in successive versions up to it. | the user |
+| 2026-11-07 | In v0.2.5 (track 8), gated on 7a. Without 7a's connection the iOS build would have no transport at all, and an app with nothing to drive. With it, the iOS composition reaches the server through the same seam every place already uses. 8b and 8c are gated on this item, because both need code that builds for iOS. | the spec |
+| 2026-11-07 | One codebase, not a fork. This is the SPEC's "built from the macOS app's Swift code". The probe shows the cost is bounded: 4 files and 7 lines below Presentation, and in Presentation 7 AppKit imports and about 35 Mac-only call sites (W9.2–W9.4). | the spec |
+
+## Out of scope
+
+- The iPad's layouts, Settings, pairing and keys (8b).
+- Getting the app onto a device, the `build.sh` targets and CI (8c).
+- The iPhone (9a) and the foldable (9b).
+- What each place does against a server (7c).
+- Device tools on iPhone and iPad, which offer none (7b's default).
+- Any new design board, since this item draws no new screen and the not-paired state is 7a's.
+- Mac Catalyst, watchOS and visionOS.
 - Windows and Android, which follow v0.2.5 (a recorded default).
+
+## Links
+
+- **Blocked by:** [7a](../v0.2.4/app-connection-local-or-server.md) · **Blocks:** [8b](../ipados/v0.2.5/ipad-app.md), [8c](iphone-and-ipad-distribution.md)
+- **Relates to:** [7b](../macos/v0.2.4/mac-offers-its-files-and-shell.md) (the Mac's device tools), [7c](../v0.2.4/every-place-against-a-server.md) (every place against a server), [9a](../ios/v0.2.5/iphone-app.md) (the iPhone's compact shell), 9b (the foldable), M18 [`app-dev-channel.md`](../macos/maintenance/app-dev-channel.md) (the dev identity), CLI 59a (pairing), 11a and [Milestone H](../../../assistant/darwin/MILESTONES.md#milestone-h--the-apps-logo) (the icon check), [ADR 0004](../../../adrs/darwin/module-schemes-and-previews.md) (per-module schemes), GUI SPEC → [Core surfaces](../../../assistant/gui/SPEC.md#core-surfaces)
+- **Follows from:** the Apple-platforms spike and brainstorm, 2026-11-07
+- **Follow-on:** a new GUI ADR 0005, `apple-platforms.md`, written in the same change

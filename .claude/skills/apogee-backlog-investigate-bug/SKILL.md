@@ -37,10 +37,10 @@ Evidence, not inference; the probing rules are the spike skill's:
 
 One document in `maintenance/`, kebab-case, to `/apogee-backlog-create-item`'s full quality bar, with the bug's specifics:
 
-- **What / why** opens with the motivating evidence verbatim-where-it-matters (the transcript's bytes, the measured numbers, the probe's output) and the root cause with its `file:line` — "measured, not guessed (date, method)".
-- **Guardrail(s): the bug becomes a fixture.** The reproduction is replayed as a regression test — recorded bytes, a scripted store, a golden — so the bug cannot return silently. This is the section that distinguishes a bug item; a fix without the pinned reproduction is half an item.
+- **Type** 🐞 Bug, with **Steps to reproduce**, **Actual result** and **Expected result** taken from what was actually seen. **Evidence** carries the motivating evidence verbatim-where-it-matters (the transcript's bytes, the measured numbers, the probe's output) and the root cause with its `file:line` — "measured, not guessed (date, method)" — with the blast radius and what already works as bold-led items.
+- **Testing: the bug becomes a fixture.** The reproduction is replayed as a regression test — recorded bytes, a scripted store, a golden — so the bug cannot return silently. This is the section that distinguishes a bug item; a fix without the pinned reproduction is half an item.
 - **Acceptance criteria** include the inverted symptom: the exact failing case from the evidence, now passing, stated observably.
-- Open calls tagged as ever — `[user]` only for genuinely user-owned calls, `[default: …]` elsewhere; the diagnosis itself is recorded as dated **Decisions made** entries.
+- Open questions tagged as ever — `[user]` only for genuinely user-owned calls, `[default]` (the default in the Answer) elsewhere; the diagnosis itself is recorded as dated **Decision log** rows.
 - If the investigation reveals something **bigger than one focused session or not release-agnostic** — product shape, a feature gap, a SPEC collision — stop and say so with the evidence: that is spike/`/apogee-backlog-create-item` territory and the user decides where it goes. Split-first is also available for a genuinely two-session fix.
 
 ## 4. Place it and update the docs
@@ -53,4 +53,4 @@ One document in `maintenance/`, kebab-case, to `/apogee-backlog-create-item`'s f
 
 ## 5. Report
 
-Tell the user: the symptom → root cause chain with the evidence (file:line, numbers, the probe); the new item's id, path and position; the regression fixture the guardrail pins; every `[user]` call; and anything the investigation found that is deliberately *not* in this item (bigger-than-maintenance findings, adjacent oddities worth their own look).
+Tell the user: the symptom → root cause chain with the evidence (file:line, numbers, the probe); the new item's id, path and position; the regression fixture the Testing section pins; every `[user]` question; and anything the investigation found that is deliberately *not* in this item (bigger-than-maintenance findings, adjacent oddities worth their own look).

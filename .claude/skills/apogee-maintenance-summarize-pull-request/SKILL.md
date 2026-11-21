@@ -29,7 +29,7 @@ Plus `git status` — warn if uncommitted work would be missing from the MR. The
 
 - **Backlog documents deleted** on this branch + their new `MILESTONES.md` (`lib/documentation/assistant/<app>/MILESTONES.md`) entries → the items this MR **ships** (pull each item's goal and acceptance criteria from the milestone entry).
 - **Index rows marked in progress** → items **advanced but not finished**; say what state they're left in.
-- **New dated entries** in item documents' Decisions made → the decisions this branch settled (including exercised `[default:]` calls).
+- **New dated rows** in item documents' Decision log → the decisions this branch settled (including exercised `[default]` questions).
 - `ROADMAP.md` (`lib/documentation/assistant/<app>/ROADMAP.md`) checkbox/section changes → release-level framing.
 - New/changed files under `lib/src/`, `lib/scripts/`, `.claude/skills/` → the implementation surface.
 - Changes under `.github/workflows/` that add, remove or rename a job or change a matrix → the merge needs the required checks re-applied first (DEVELOPER.md → Changing the pipeline (`lib/documentation/assistant/cli/DEVELOPER.md#changing-the-pipeline`)); it goes under **Before merging**.
@@ -63,7 +63,7 @@ Structure (omit empty sections; keep it readable — a reviewer who knows nothin
 <Steps the merge depends on that CI does not do. Always: what `lib/scripts/required-checks.py --verify` printed -- in force, or what the user must fix. When the pipeline's jobs changed, or the ruleset is missing: once this PR's run passes, `lib/scripts/required-checks.py --pr <this PR> --apply` (the user's to run), or the required checks still name the old jobs -- or require nothing at all.>
 
 ## Open questions
-<Any [user] open calls surfaced or deliberately deferred by this branch.>
+<Any `[user]` open questions surfaced or deliberately deferred by this branch.>
 ```
 
 Suggest an MR **title** in the repo's style: short, imperative, naming the shipped item(s) (e.g. `v0.1.0: config engine — comment-preserving loader + apogee config`).

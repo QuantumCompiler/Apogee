@@ -5,40 +5,126 @@
 ## Lifecycle
 
 1. A feature is **discussed in chat** and gets a line on [ROADMAP.md](../../assistant/darwin/ROADMAP.md) (and a [SPEC.md](../../assistant/gui/SPEC.md) update if it changes product shape).
-2. Once specced — seam, files, decisions, open calls — it gets **its own document here** (kebab-case filename, listed in the index below in priority order). The same pass adds it to the [backlog overview](../README.md#keeping-this-page-true): its release's section, or its track's line under Later releases.
-3. When an agent **takes** it (told explicitly, or via the bare-"Continue" convention: the topmost item whose gate is satisfied), the document **is** the working spec — confirm scope with the user first (the document's **Open calls** are the natural questions), mark its index row **in progress** (🚧), and build. One item at a time.
+2. Once specced — files, decisions, open questions — it gets **its own document here** (kebab-case filename, listed in the index below in priority order). The same pass adds it to the [backlog overview](../README.md#keeping-this-page-true): its release's section, or its track's line under Later releases.
+3. When an agent **takes** it (told explicitly, or via the bare-"Continue" convention: the topmost item whose gate is satisfied), the document **is** the working spec — confirm scope with the user first (the document's **Open questions** are the natural questions), mark its index row **in progress** (🚧), and build. One item at a time.
 4. When it **ships**, the work is recorded in [MILESTONES.md](../../assistant/darwin/MILESTONES.md) per the docs flow in [CLAUDE.md](../../assistant/darwin/CLAUDE.md), and the document is **deleted, along with its index row** — a completed item must never remain in the backlog. On the same pass, update any gate the shipped work just satisfied. Its row leaves the [backlog overview](../README.md#keeping-this-page-true) too, with the counts, "can start today" and any "Waits on" it satisfied updated.
 
 **The standing invariant:** every document in this directory is pending work. If it's shipped (in MILESTONES.md), it's not here.
 
-**Tags and gates** follow the CLI backlog's conventions: an open call is `[user]` (genuinely user-owned; blocks the build) or `[default: …]` (agent-decidable, with the recommendation recorded); a decision owned by another item is `(consumed decision)`; a row's Status is 🟢 workable, 🔒 gated on a named real item (no cycles), or 🚧 in progress. A changed gate, a split, or a row moved to another table changes the [backlog overview](../README.md#keeping-this-page-true) in the same pass.
+**Tags and gates** follow the CLI backlog's conventions: an open question's Status cell is `[user]` (genuinely user-owned; blocks the build), `[default]` (the Answer is the recorded default: the agent takes it, records it in the Decision log, and the user may veto) or `(consumed decision)` (owned by another item); a row's Status is 🟢 workable, 🔒 gated on a named real item (no cycles), or 🚧 in progress. A changed gate, a split, or a row moved to another table changes the [backlog overview](../README.md#keeping-this-page-true) in the same pass.
 
 ## Document format
 
-Every item document follows this shape (sections in order; omit one only when it's genuinely empty):
+Every item document reads like a ticket written in markdown (the user's call, 2026-11-21): a header of fields, then a story, the evidence, and tables for the files, the open questions and the decisions — the CLI's [document format](../cli/README.md#document-format), with this queue's key and project. It is still the **working spec** an agent builds from without asking anyone. Sections in this order; omit one only when it's genuinely empty (the Open questions table instead holds one row, `None open`):
 
 ```markdown
-# <Item title>
+# <KEY>-<id> · <Item title>
 
-**What / why.** <The feature or fix in a paragraph: what it does for the user, and why it's worth building — evidence baked in.>
+| Field | Value |
+|---|---|
+| **Type** | <🐞 Bug · ✨ Feature · 🛠️ Task> |
+| **Project** | <Apple apps, or Apple apps · macOS · Apple apps · iPadOS · Apple apps · iOS for one OS's item> |
+| **Status** | <the index row's Status: 🟢 Ready · 🔒 Blocked · 🚧 In progress · ❌ Cancelled> |
+| **Fix version** | <vX.Y.Z · Maintenance (any time)> |
+| **Component** | <the area it changes: a command family, a module, a screen> |
+| **Labels** | <2–4 kebab-case labels in backticks; `split-first` when the item is split first> |
+| **Epic** | <Track N · <the track's name>, or — for a table with no track> |
+| **Blocked by** | <each gate, linked> or — |
+| **Blocks** | <each item gated on this one, linked> or — |
+| **Reporter** | <who or what raised it: the user, a spike (dated), a design pass, an audit, a bug report> |
+| **Created** | <YYYY-MM-DD: the earliest date the document records> |
 
-**Core constraint(s).** <The rules the design must not violate — invariants it touches, compatibility it must keep.>
+---
 
-**Seam + files.** <Where the change plugs into the codebase: the interfaces it extends and the files it touches.>
+## Summary
 
-**Decisions made** (dated):
-- <YYYY-MM-DD> — <a design decision and its rationale>
+<One to three sentences: what is wrong or missing, and what the item delivers.>
 
-**Open calls:**
-- <tagged questions, per the conventions above>
+## Description
 
-**Guardrail(s).** <What must be tested or checked so the change can't regress silently.>
+### User story
 
-**Acceptance criteria:**
-- [ ] <observable outcome that means "done">
+**As** <who>, **I want** <the capability>, **so that** <the outcome>.
 
-**Scope note.** <Status: unscheduled / earmarked for <version> / gated on <item> — and anything explicitly out of scope.>
+### Steps to reproduce
+
+<🐞 Bug only, from what was actually seen: 1. … 2. …>
+
+### Actual result
+
+<🐞 Bug only.>
+
+### Expected result
+
+<🐞 Bug only.>
+
+### Background
+
+<The context that is not evidence: history, how the item came about, the design's shape in prose.>
+
+### Evidence
+
+<Numbered: every measurement, probe, quote and `file:line`, each dated with its method. Root cause, blast radius, what already works and a spike's walls (**W3 — …**) are bold-led items here.>
+
+### Split first
+
+<Only when the item is marked split first: the sub-documents the grooming must produce.>
+
+## Acceptance criteria
+
+- [ ] **Given** <state>, **when** <action>, **then** <observable outcome that means "done">.
+
+## Constraints
+
+- **<Short name.>** <A rule the design must not violate: an invariant it touches, compatibility it must keep, with its ADR or source.>
+
+## Technical approach
+
+Paths under `<common root>`. <one line, when the paths share one>
+
+| File | Change |
+|---|---|
+| `path/to/file` | <what changes there> |
+
+<Prose the table cannot hold: an interface sketch, a protocol shape, a worked example.>
+
+**Reference.** <Optional: the in-house precedents this item builds on and any external prior art, with each deliberate divergence from it.>
+
+**Docs when it ships:** <Optional: the documents the build updates.>
+
+## Testing
+
+<One line on the hermetic rule, when one applies.>
+
+- **<Test suite or check.>** <What must be tested or checked so the change can't regress silently.>
+- **Gate:** <the command that proves it, when the item names one.>
+
+## Open questions
+
+| Question | Status | Answer |
+|---|---|---|
+| <a question to resolve before building> | `[user]` · `[default]` · `(consumed decision)` | <the recommendation, the default in full, or the item that owns it> |
+
+## Decision log
+
+| Date | Decision | Whose call |
+|---|---|---|
+| <YYYY-MM-DD> | <a design decision and its rationale> | <the user · default · the spec · the spike · the item's build · —> |
+
+## Out of scope
+
+- <each exclusion>
+
+## Links
+
+- **Blocked by:** … · **Blocks:** … · **Sibling:** … · **Relates to:** … · **Reverses / Follows from / Follow-on:** …
 ```
+
+- **The key** is `APP` for this queue, followed by the item's id from the index (`APP-7d`, `APP-M19`); the **Project** is `Apple apps`, or `Apple apps · macOS` / `· iPadOS` / `· iOS` for an item in one OS's folder. The title words are the index row's.
+- **The header restates the index row.** Status, Fix version, Blocked by and Blocks say what the item's row in the index says; **the index stays the authority**, so any change to a row (a status, a move to another table, a gate added or satisfied) changes the document's header in the same pass, along with the Epic and the key-id H1 when the move changes them. A cross-queue gate is linked with the queue's name (`[CLI 59b](../../cli/…)`).
+- **The Status cell of an open question** is one of the tags above: `[user]`, `[default]` or `(consumed decision)`. An answered question leaves the table and becomes a Decision-log row.
+- **Type** is 🐞 Bug for behaviour that is wrong today, ✨ Feature for a new capability, 🛠️ Task for upkeep with no user-visible change. A bug's Steps to reproduce come only from what was actually seen; its evidence is baked in.
+- **Line references into other backlog documents** name the document and its section, never a line number, since documents are re-shaped; line references into source code stay.
 
 ## Index
 

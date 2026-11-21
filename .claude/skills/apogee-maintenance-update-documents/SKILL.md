@@ -28,9 +28,9 @@ Work through the system in this order (read `CLAUDE.md` (`lib/documentation/assi
 1. **Backlog** (`lib/documentation/backlog/<app>/` (`lib/documentation/backlog/<app>/README.md`)):
    - Any item this branch **completed** → its work is recorded in MILESTONES.md, its document is **deleted**, its index row removed, and the track preamble above the index tables updated. A completed item still sitting in the backlog is the system's cardinal violation.
    - [the release overview](../../../lib/documentation/backlog/README.md#keeping-this-page-true) matches the product indexes: every pending row of the release in progress listed with its gate, no shipped row left, the counts and "can start today" true, Later releases naming every queued track.
-   - Any item this branch **started** → index row marked in progress.
-   - Any **gate the branch satisfied** → downstream items' status lines updated.
-   - Any decision made while building → a dated entry in the affected item's **Decisions made** (and `[default:]` calls that were exercised recorded as decisions).
+   - Any item this branch **started** → index row marked in progress, and its document's header Status with it.
+   - Any **gate the branch satisfied** → downstream items' rows and their headers' Status and Blocked by updated.
+   - Any decision made while building → a dated row in the affected item's **Decision log** (and `[default]` open questions that were exercised moved out of the Open questions table and recorded there).
    - **The in-development version's table, once empty, is retired here** — every item it held shipped or moved (the version is `lib/release/VERSION`, the branch's name). The merge *is* the release (CLAUDE.md (`lib/documentation/assistant/<app>/CLAUDE.md`) → Versioning), so a release's table never outlives its pull request (the user's call, 2026-10-16).
      - Remove its `### v<x.y.z>` heading, its track preambles and the empty table from the index; its directory is gone with its last document.
      - The shipped-tracks paragraph above the tables then names its tracks as complete in that version — in development on its branch, released when the branch merges into `stable` — and names the earliest table still open. The release roll later adds the release's link and date (`/apogee-maintenance-update-release`).
@@ -58,9 +58,9 @@ After the edits, verify the whole system (script it — don't eyeball):
 - the backlog index rows exactly match the documents on disk, numbering is sequential, and every gate names an existing item earlier in the order;
 - the release overview's rows match the product indexes: the same ids, links and gates for the release in progress and maintenance, the counts adding up, one Later releases line per queued track;
 - no version table is left empty — the in-development version's emptied table was retired above — and every version table's directory matches its rows;
-- every open call in every item is tagged `[user]` / `[default: …]` / `(consumed decision)`;
+- every row of every item's Open questions table has a Status of `[user]` / `[default]` / `(consumed decision)`, and every item's header (KEY-id H1, Status, Fix version, Blocked by, Blocks) agrees with its index row;
 - no template markers or `_TODO:_` placeholders were newly introduced without being deliberate.
 
 ## 4. Report
 
-Summarize for the MR description: which docs changed and why, which backlog items were completed/started/re-gated, whether the in-development version's table was retired (or why not), any decisions recorded, and — explicitly — anything found that needs the **user** (an unanswered `[user]` call the branch stepped around, a SPEC-shape change made without a recorded decision, what `lib/scripts/required-checks.py --verify` printed, and — when it failed, or the branch changed the pipeline's jobs — that `lib/scripts/required-checks.py --pr <N> --apply` must run after the pull request's CI passes and before it merges, which only they should run). Remind that `lib/scripts/cicd.sh --test` should be green before the MR is opened — this skill covers the docs half of "done", not the build half.
+Summarize for the MR description: which docs changed and why, which backlog items were completed/started/re-gated, whether the in-development version's table was retired (or why not), any decisions recorded, and — explicitly — anything found that needs the **user** (an unanswered `[user]` question the branch stepped around, a SPEC-shape change made without a recorded decision, what `lib/scripts/required-checks.py --verify` printed, and — when it failed, or the branch changed the pipeline's jobs — that `lib/scripts/required-checks.py --pr <N> --apply` must run after the pull request's CI passes and before it merges, which only they should run). Remind that `lib/scripts/cicd.sh --test` should be green before the MR is opened — this skill covers the docs half of "done", not the build half.
