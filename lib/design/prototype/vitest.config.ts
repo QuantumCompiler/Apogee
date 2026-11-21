@@ -1,6 +1,7 @@
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { configDefaults, defineConfig } from 'vitest/config'
+import { assets } from './tooling/assets.ts'
 import { recordedAlias, recordedRoot } from './tooling/sources.ts'
 import { tokens } from './tooling/tokens.ts'
 
@@ -12,9 +13,10 @@ const root = dirname(fileURLToPath(import.meta.url))
 // script's tests beside it), `layering` the architecture check, and `stale`
 // the built file's checks. A test imports a recording as a preset does,
 // through vite.config.ts's `@recorded` alias (design 1d), and the styles read
-// the tokens through its `@tokens` plugin (design 1e).
+// the tokens through its `@tokens` plugin (design 1e), and the app its logo
+// through `@assets` (design 1q).
 export default defineConfig({
-  plugins: [tokens({ root })],
+  plugins: [tokens({ root }), assets({ root })],
   resolve: { alias: { [recordedAlias]: recordedRoot(root) } },
   test: {
     environment: 'node',

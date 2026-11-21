@@ -5,6 +5,7 @@ import { SessionWindow } from '../../session/Views/SessionWindow'
 import { useObserved } from '../../styles/Observation/useObserved'
 import type { InspectorFace, InspectorSection, Tone } from '../ViewModels/Inspector'
 import type { SessionLibraryViewModel } from '../ViewModels/SessionLibraryViewModel'
+import { Icon } from '../../styles/Components/Icon'
 
 /** A tone as the old prototype colors it. */
 const toneColor: Readonly<Record<Tone, string>> = {
@@ -29,9 +30,7 @@ function Section({ title, open, toggle, aside, children }: { readonly title: str
         aria-expanded={open}
         style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, height: 38, padding: '0 16px 0 12px', border: 0, background: 'transparent', color: 'var(--text-tertiary)', textAlign: 'left' }}
       >
-        <svg className="i" width="10" height="10" viewBox="0 0 16 16" aria-hidden="true" style={{ transform: `rotate(${open ? 0 : -90}deg)`, transition: 'transform var(--motion-chevron)' }}>
-          <path d="M4 6l4 4 4-4" />
-        </svg>
+        <Icon name="disclosure" size={10} style={{ transform: `rotate(${open ? 0 : -90}deg)`, transition: 'transform var(--motion-chevron)' }} />
         <span className="lbl" style={{ flex: '1 1 auto' }}>
           {title}
         </span>
@@ -57,9 +56,7 @@ export function RecallSummaries({ summaries, choose }: { readonly summaries: Ins
             title={summary.chosen ? 'Hide its summary' : 'Show its summary'}
             style={{ width: '100%', display: 'flex', alignItems: 'baseline', gap: 8, padding: '2px 4px', border: 0, borderRadius: 'var(--radius-row)', background: 'transparent', color: 'var(--text-primary)', textAlign: 'left', fontSize: 'var(--t-small)' }}
           >
-            <svg className="i" width="9" height="9" viewBox="0 0 16 16" aria-hidden="true" style={{ color: 'var(--text-tertiary)', transform: `rotate(${summary.chosen ? 0 : -90}deg)`, transition: 'transform var(--motion-chevron)' }}>
-              <path d="M4 6l4 4 4-4" />
-            </svg>
+            <Icon name="disclosure" size={9} style={{ color: 'var(--text-tertiary)', transform: `rotate(${summary.chosen ? 0 : -90}deg)`, transition: 'transform var(--motion-chevron)' }} />
             <span style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{summary.title}</span>
             <span className="mono" style={{ fontSize: 'var(--t-meta)', color: 'var(--text-tertiary)' }}>
               {summary.updated.slice(0, 10)}

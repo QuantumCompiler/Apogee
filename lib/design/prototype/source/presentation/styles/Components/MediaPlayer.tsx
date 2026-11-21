@@ -1,5 +1,6 @@
 import type { MediaPlayerFace } from '../Media/Playback'
 import { PlayToggle } from './PlayToggle'
+import { Icon } from '../Components/Icon'
 
 /**
  * A clip or a composition, played (design 1k: the old prototype's player,
@@ -22,9 +23,7 @@ export function MediaPlayer({ face, toggle }: { readonly face: MediaPlayerFace; 
         </span>
         {face.playing ? null : (
           <button type="button" onClick={toggle} aria-label="Play" style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 56, height: 56, display: 'grid', placeItems: 'center', padding: 0, border: '1px solid var(--line-strong)', borderRadius: '50%', background: 'var(--surface-card)', color: 'var(--text-primary)' }}>
-            <svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M5.5 3.2v9.6L13 8z" fill="currentColor" />
-            </svg>
+            <Icon name="play" size={18} />
           </button>
         )}
         <span className="mono" style={{ position: 'absolute', left: 16, right: 16, top: 'calc(50% + 40px)', textAlign: 'center', fontSize: 'var(--t-meta)', color: 'var(--text-tertiary)' }}>

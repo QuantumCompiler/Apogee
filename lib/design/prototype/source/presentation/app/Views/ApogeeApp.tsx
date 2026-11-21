@@ -1,5 +1,5 @@
 import { ComposeView } from '../../compose/Views/ComposeView'
-import { StrictMode, useEffect } from 'react'
+import { StrictMode, useEffect, useMemo } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ConsoleView } from '../../console/Views/ConsoleView'
 import type { GraphConfirm } from '../../graph/ViewModels/GraphFaces'
@@ -17,7 +17,6 @@ import { StoreSheet } from '../../models/Views/StoreView'
 import { MonitorView } from '../../monitor/Views/MonitorView'
 import { ReviewScreen } from '../../review/Views/ReviewScreen'
 import { TargetSheet } from '../../review/Views/TargetSheet'
-import { sessionSamples } from '../../session/Previews/SessionPresets'
 import { SuiteSheet } from '../../session/Views/SuiteSheet'
 import type { SettingsConfirm } from '../../settings/ViewModels/SettingsViewModel'
 import { RegisterProviderSheet } from '../../settings/Views/BackendsPane'
@@ -35,18 +34,29 @@ import { trainingConfirms } from '../../training/ViewModels/TrainingViewModel'
 import type { TrainingConfirm } from '../../training/ViewModels/TrainingViewModel'
 import { TrainingScreen } from '../../training/Views/TrainingScreen'
 import { PromoteSheet, PullSheet } from '../../training/Views/TrainingSheets'
-import { startRequest } from '../../shell/ViewModels/Routing'
 import { ConfirmHost, SheetHost } from '../../shell/Views/Hosts'
 import { PlaceholderScreen } from '../../shell/Views/PlaceholderScreen'
 import { ShellView } from '../../shell/Views/ShellView'
+import type { ShellFrame } from '../../shell/Views/ShellView'
 import { InstallConsentSheet } from '../../styles/Components/InstallConsentSheet'
 import { useObserved } from '../../styles/Observation/useObserved'
 import { VideoScreen } from '../../video/Views/VideoScreen'
 import { VoiceScreen } from '../../voice/Views/VoiceScreen'
 import '../../styles/Stylesheet'
+import { AppViewModel } from '../ViewModels/AppViewModel'
+import { frameApp } from '../ViewModels/FrameApp'
+import { opensGallery, WindowChoice } from '../ViewModels/GalleryKey'
+import { logoArtwork } from '../Models/Logo'
 import { modeRules } from '../Previews/ModeRules'
 import { presetFor } from '../Previews/Presets'
-import { AppViewModel } from '../ViewModels/AppViewModel'
+import { specimens } from '../Previews/Specimens'
+import { sessionSamples } from '../../session/Previews/SessionPresets'
+import { startRequest } from '../../shell/ViewModels/Routing'
+import { GalleryViewModel } from '../../gallery/ViewModels/GalleryViewModel'
+import type { AddressBar, BoardMount } from '../../gallery/ViewModels/GalleryViewModel'
+import { GalleryView } from '../../gallery/Views/GalleryView'
+import type { GalleryParts, MountSize } from '../../gallery/Views/GalleryView'
+import type { Specimen } from '../../styles/Specimens/Specimen'
 
 const libraryConfirms: readonly string[] = ['deleteChat', 'compactChat', 'forget'] satisfies readonly LibraryConfirm[]
 const modelsConfirms: readonly string[] = ['model', 'storeDelete', 'storeModelDelete', 'unregister', 'registerAll'] satisfies readonly ModelsConfirm[]
@@ -76,9 +86,10 @@ const graphConfirms: readonly string[] = ['graphDelete', 'explainRefused'] satis
  * their screens, the Knowledge tab the composition's, with the graph's save
  * panel and dedupe sheet, its delete and a refused explain's alert; Suites
  * and Tasks (1p) are their screens, with the New task sheet and a refusal's
- * alert. It starts the app once it is on screen.
+ * alert. It starts the app once it is on screen. In one of the gallery's
+ * frames (1q) it is drawn at the frame's size (`frame`).
  */
-export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
+export function ApogeeApp({ model, frame }: { readonly model: AppViewModel; readonly frame?: ShellFrame }) {
   useObserved(model)
   useObserved(model.monitor)
   useObserved(model.library)
@@ -107,6 +118,7 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
   return (
     <ShellView
       model={shell}
+      frame={frame}
       strip={model.strip}
       running={model.placeRuns}
       sessions={() => <SessionList model={library} />}
@@ -520,17 +532,94 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
   )
 }
 
+/** The page's address as the window reads it: its query and its hash. */
+export interface PageAddress extends AddressBar {
+  readonly hash: string
+}
+
 /**
- * Mounts the app in `element`: what the entry point, source/main.tsx, calls
- * and nothing else. The start preset is the page's to ask for, in its query
- * or its hash, as a double-clicked file keeps both.
+ * The app in one of the gallery's frames (design 1q): its own composition at
+ * the board's preset and props, drawn at the frame's size, taking the
+ * page's keys only when it is live.
+ */
+export function FramedApp({ mount, size }: { readonly mount: BoardMount; readonly size: MountSize }) {
+  const { start, still, theme, apogee } = mount
+  const app = useMemo(() => frameApp({ ...(start === undefined ? {} : { start }), still, theme, apogee }), [start, still, theme, apogee])
+  return <ApogeeApp model={app} frame={{ width: size.width, height: size.height, keys: size.live }} />
+}
+
+/** What the gallery is handed: the app to mount in a frame, the modules' specimens, and the logo the build inlined. */
+export function galleryParts(all: readonly Specimen[] = specimens): GalleryParts {
+  return { mount: (mount, size) => <FramedApp mount={mount} size={size} />, specimens: all, logo: logoArtwork }
+}
+
+/** The gallery, outside the app's frame (design 1q), its address the page's. */
+export function GalleryWindow({ address }: { readonly address: AddressBar }) {
+  const model = useMemo(() => new GalleryViewModel(address), [address])
+  const parts = useMemo(() => galleryParts(), [])
+  return <GalleryView model={model} parts={parts} />
+}
+
+/** The app at the start preset the page asks for, in its query or its hash. */
+export function AppWindow({ address }: { readonly address: PageAddress }) {
+  const model = useMemo(() => new AppViewModel(presetFor(startRequest(address)).preset, modeRules, undefined, sessionSamples), [address])
+  return <ApogeeApp model={model} />
+}
+
+/**
+ * The page's window (design 1q): the app, or the gallery on `?gallery`. The
+ * gallery's key, ⌥⌘G, turns it from one to the other; app handles it here,
+ * outside the shell's key map, which never names it.
+ */
+export function ApogeeWindow({ choice, address }: { readonly choice: WindowChoice; readonly address: PageAddress }) {
+  useObserved(choice)
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!opensGallery(event)) return
+      event.preventDefault()
+      choice.toggle()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [choice])
+  return choice.shows === 'gallery' ? <GalleryWindow address={address} /> : <AppWindow address={address} />
+}
+
+/**
+ * The page's own address: its query and hash as the window has them, and a
+ * new query put in place without a history entry. A browser that refuses the
+ * change leaves the address as it was: it is a convenience, never the state.
+ */
+function pageAddress(): PageAddress {
+  return {
+    get search() {
+      return window.location.search
+    },
+    get hash() {
+      return window.location.hash
+    },
+    replace(search: string) {
+      try {
+        window.history.replaceState(null, '', `${window.location.pathname}${search}${window.location.hash}`)
+      } catch {
+        // A page opened from disk may not be let rewrite its address.
+      }
+    },
+  }
+}
+
+/**
+ * Mounts the window in `element`: what the entry point, source/main.tsx,
+ * calls and nothing else. The start preset is the page's to ask for, in its
+ * query or its hash, as a double-clicked file keeps both; `?gallery` opens
+ * the gallery in its place (design 1q).
  */
 export function start(element: HTMLElement | null): void {
   if (!element) throw new Error('main.html has no #root element to mount the app in')
-  const { preset } = presetFor(startRequest(window.location))
+  const address = pageAddress()
   createRoot(element).render(
     <StrictMode>
-      <ApogeeApp model={new AppViewModel(preset, modeRules, undefined, sessionSamples)} />
+      <ApogeeWindow choice={new WindowChoice(address)} address={address} />
     </StrictMode>,
   )
 }

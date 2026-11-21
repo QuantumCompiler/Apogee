@@ -4,6 +4,7 @@ import type { VideoViewModel } from '../ViewModels/VideoViewModel'
 import { ClipPage, RunCard } from './ClipPage'
 import { ClipsList } from './ClipsList'
 import { GenerateForm } from './GenerateForm'
+import { Icon } from '../../styles/Components/Icon'
 
 /**
  * The Video place (design 1k): the old prototype's screen (`main.html` at
@@ -34,16 +35,11 @@ export function VideoScreen({ model, compositions }: { readonly model: VideoView
         </div>
         <span style={{ flex: '1 1 auto' }} />
         <button type="button" className="hv" onClick={() => model.openDefault()} title="models.default_video — show it in the library" style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 28, padding: '0 8px', border: 0, borderRadius: 6, background: 'transparent', color: 'var(--text-tertiary)', fontSize: 'var(--t-small)', whiteSpace: 'nowrap' }}>
-          <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" style={{ color: 'var(--model-local)' }}>
-            <rect x="4" y="4" width="8" height="8" rx="1.5" />
-            <path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2" />
-          </svg>
+          <Icon name="local" size={13} style={{ color: 'var(--model-local)' }} />
           {face.pipelineLine}
         </button>
         <button type="button" className="btn-p" onClick={() => model.newPrimary()} disabled={!face.canNew}>
-          <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M8 3.5v9M3.5 8h9" />
-          </svg>
+          <Icon name="add" size={13} />
           {face.newLabel}
         </button>
       </header>

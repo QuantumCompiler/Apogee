@@ -1,7 +1,8 @@
-import type { ReactNode } from 'react'
 import { kindColor } from '../../styles/Components/ModelGlyph'
 import { AttachmentKind } from '../ViewModels/SessionActions'
 import type { FolderFile, ModelFace, SessionFace, SlashItem } from '../ViewModels/SessionViewModel'
+import { Icon } from '../../styles/Components/Icon'
+import type { IconName } from '../../styles/Icons/IconNames'
 
 /** The glyph and its color, promoted to `styles` by design 1h (its second user, the Models place): re-exported, so the session's views keep their imports. */
 export { kindColor, ModelGlyph } from '../../styles/Components/ModelGlyph'
@@ -15,14 +16,6 @@ export function ModelTag({ model }: { readonly model: ModelFace }) {
     </span>
   )
 }
-
-const privateEye = (
-  <>
-    <path d="M2 8s2.2-4 6-4c1 0 1.9.3 2.7.7M14 8s-2.2 4-6 4c-1 0-1.9-.3-2.7-.7" />
-    <path d="M6.6 9.4a2 2 0 0 1 2.8-2.8" />
-    <path d="M3 13L13 3" />
-  </>
-)
 
 export interface EmptySessionActions {
   readonly attachFolder: () => void
@@ -44,9 +37,7 @@ export function EmptySessionView({ face, model, acts }: { readonly face: Session
       {face.privateWords !== '' ? (
         <>
           <span aria-hidden="true" style={{ width: 44, height: 44, display: 'grid', placeItems: 'center', borderRadius: 10, background: 'var(--surface-control)', color: 'var(--text-secondary)' }}>
-            <svg className="i" width="22" height="22" viewBox="0 0 16 16">
-              {privateEye}
-            </svg>
+            <Icon name="private" size={22} />
           </span>
           <h2 style={{ margin: 0, fontSize: 'var(--t-display)', lineHeight: 1.25, fontWeight: 600 }}>{face.heading}</h2>
           <p style={{ margin: 0, maxWidth: 460, fontSize: 'var(--t-prose)', color: 'var(--text-secondary)' }}>{face.privateWords}</p>
@@ -62,31 +53,20 @@ export function EmptySessionView({ face, model, acts }: { readonly face: Session
       ) : null}
       <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: 4 }}>
         <button type="button" className="btn-g" onClick={acts.attachFolder} disabled={!face.launched}>
-          <svg className="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.8l1.5 1.5h4.7A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" />
-          </svg>
+          <Icon name="folder" size={14} />
           Attach a folder
         </button>
         <button type="button" className="btn-g" onClick={acts.chooseModel} disabled={!face.launched}>
-          <svg className="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M8 2l5.5 3v6L8 14l-5.5-3V5z" />
-            <path d="M2.5 5L8 8l5.5-3M8 8v6" />
-          </svg>
+          <Icon name="models" size={14} />
           Choose a model
         </button>
         <button type="button" className="btn-g" onClick={acts.chooseSuite} disabled={!face.chooseSuite}>
-          <svg className="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M8 2.5l5.5 3L8 8.5l-5.5-3z" />
-            <path d="M2.5 8.5L8 11.5l5.5-3" />
-            <path d="M2.5 11L8 14l5.5-3" />
-          </svg>
+          <Icon name="suites" size={14} />
           Choose a suite
         </button>
         {face.privateInstead ? (
           <button type="button" className="btn-g" onClick={acts.privateInstead}>
-            <svg className="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-              {privateEye}
-            </svg>
+            <Icon name="private" size={14} />
             Private session instead
           </button>
         ) : null}
@@ -146,35 +126,8 @@ export function MeterView({ meter, open }: { readonly meter: SessionFace['header
 }
 
 /** Each attachment kind's glyph: the old chips' own, copied as drawn (`main.html:731-736` at `b375fac9`). */
-const attachmentGlyphs: Readonly<Record<AttachmentKind, ReactNode>> = {
-  folder: <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.8l1.5 1.5h4.7A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" />,
-  file: (
-    <>
-      <path d="M9 2H4.5A1.5 1.5 0 0 0 3 3.5v9A1.5 1.5 0 0 0 4.5 14h7a1.5 1.5 0 0 0 1.5-1.5V6z" />
-      <path d="M9 2v4h4" />
-    </>
-  ),
-  pdf: (
-    <>
-      <path d="M9 2H4.5A1.5 1.5 0 0 0 3 3.5v9A1.5 1.5 0 0 0 4.5 14h7a1.5 1.5 0 0 0 1.5-1.5V6z" />
-      <path d="M9 2v4h4M5.5 9h5M5.5 11.5h3" />
-    </>
-  ),
-  image: (
-    <>
-      <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
-      <circle cx="6" cy="6.5" r="1.2" />
-      <path d="M13.5 10.5L10 7l-6 6" />
-    </>
-  ),
-  audio: <path d="M2.5 8h1M5 5.5v5M7.5 3.5v9M10 6v4M12.5 7v2" />,
-  video: (
-    <>
-      <rect x="2" y="3.5" width="9" height="9" rx="1.5" />
-      <path d="M11 7l3-2v6l-3-2" />
-    </>
-  ),
-}
+/** Each attachment kind's icon, from `styles`' set (design 1q): the old prototype's glyphs, the TypeSpace board's names. */
+const attachmentIcons: Readonly<Record<AttachmentKind, IconName>> = { folder: 'folder', file: 'file', pdf: 'document', image: 'image', audio: 'audio', video: 'video' }
 
 /** What the session holds attached, each with its kind's glyph (read from the path) and its remove where the session takes `detach` (`main.html:728-743` at `b375fac9`). The Mac app's `AttachmentChips`. */
 export function AttachmentChips({ paths, detach }: { readonly paths: readonly string[]; readonly detach: ((path: string) => void) | undefined }) {
@@ -183,17 +136,13 @@ export function AttachmentChips({ paths, detach }: { readonly paths: readonly st
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '10px 12px 0' }}>
       {paths.map((path) => (
         <span key={path} className="chip" style={detach ? undefined : { paddingRight: 10 }}>
-          <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" style={{ color: 'var(--text-secondary)' }}>
-            {attachmentGlyphs[AttachmentKind.of(path)]}
-          </svg>
+          <Icon name={attachmentIcons[AttachmentKind.of(path)]} size={13} style={{ color: 'var(--text-secondary)' }} />
           <span className="mono" style={{ fontSize: 'var(--t-ui)' }}>
             {path}
           </span>
           {detach ? (
             <button type="button" onClick={() => detach(path)} aria-label={`Remove ${path}`} className="ib" style={{ width: 22, height: 22, color: 'var(--text-tertiary)' }}>
-              <svg className="i" width="11" height="11" viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
-              </svg>
+              <Icon name="close" size={11} />
             </button>
           ) : null}
         </span>
@@ -266,10 +215,7 @@ export function SuggestionList({ suggestions, active, pickCommand, pickFile }: {
             className="hv"
             style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, height: 30, padding: '0 10px', border: 0, borderRadius: 6, background: background(index), color: 'var(--text-secondary)', textAlign: 'left' }}
           >
-            <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M9 2H4.5A1.5 1.5 0 0 0 3 3.5v9A1.5 1.5 0 0 0 4.5 14h7a1.5 1.5 0 0 0 1.5-1.5V6z" />
-              <path d="M9 2v4h4" />
-            </svg>
+            <Icon name="file" size={13} />
             <span className="mono" style={{ flex: '1 1 auto', minWidth: 0, fontSize: 'var(--t-ui)', color: 'var(--text-primary)' }}>
               {file.path}
             </span>
@@ -298,11 +244,7 @@ export function HeldLines({ held }: { readonly held: { readonly shown: boolean; 
   if (!held.shown) return null
   return (
     <div className="mono" title={held.help} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px 0', fontSize: 'var(--t-meta)', color: 'var(--text-tertiary)', overflowWrap: 'anywhere' }}>
-      <svg className="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9" />
-        <path d="M2.5 2.5v2.5H5" />
-        <path d="M8 5v3l2 1.5" />
-      </svg>
+      <Icon name="held" size={12} />
       <span>{held.words}</span>
     </div>
   )

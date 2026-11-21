@@ -4,6 +4,7 @@ import type { BackendRow, ModelsViewModel } from '../ViewModels/ModelsViewModel'
 import { DeleteNarrationCard } from './DeleteNarrationCard'
 import { DownloadsView } from './DownloadsView'
 import { StoreView } from './StoreView'
+import { Icon } from '../../styles/Components/Icon'
 
 /**
  * The Models place (design 1h): the old prototype's screen (`main.html`
@@ -42,9 +43,7 @@ export function ModelsScreen({ model }: { readonly model: ModelsViewModel }) {
           {face.storeLine}
         </span>
         <button type="button" className="btn-p" onClick={() => model.openDownload()}>
-          <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M8 2.5v8M4.5 7L8 10.5 11.5 7M3 13.5h10" />
-          </svg>
+          <Icon name="download" size={13} />
           Download from Hugging Face…
         </button>
       </header>
@@ -75,11 +74,7 @@ function Row({ row, onSelect }: { readonly row: BackendRow; readonly onSelect: (
             <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.name}</span>
             {row.draft.shown ? (
               <span role="img" aria-label={row.draft.aria} title={row.draft.tip} style={{ display: 'inline-flex', flex: '0 0 auto', color: row.draft.ok ? 'var(--text-tertiary)' : 'var(--status-warning)' }}>
-                <svg className="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
-                  <path d="M2.5 12.5c0-2.4 2-4 4.6-4h2.3c2 0 3.6 1.2 3.6 3v1h-1.6" />
-                  <path d="M9.3 8.5L7.8 3M11.2 8.6l.6-5.1" />
-                  <path d="M2.5 12.5h7" />
-                </svg>
+                <Icon name="drafter" size={12} />
               </span>
             ) : null}
           </span>
@@ -112,9 +107,7 @@ function Row({ row, onSelect }: { readonly row: BackendRow; readonly onSelect: (
 }
 
 const close = (
-  <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-    <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
-  </svg>
+  <Icon name="close" size={13} />
 )
 
 /** Backends: the configured backends under the prototype's two sections, and one's details beside them. */
@@ -207,10 +200,7 @@ export function BackendsTab({ model }: { readonly model: ModelsViewModel }) {
                     </>
                   ) : (
                     <p style={{ display: 'flex', alignItems: 'flex-start', gap: 6, margin: '6px 0 0', color: 'var(--status-warning)', overflowWrap: 'anywhere' }}>
-                      <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" style={{ marginTop: 2 }}>
-                        <path d="M8 2.5l6 10.5H2z" />
-                        <path d="M8 6.5v3M8 11.2v.1" />
-                      </svg>
+                      <Icon name="error" size={13} style={{ marginTop: 2 }} />
                       <span>{detail.drafter.said}</span>
                     </p>
                   )}

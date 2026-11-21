@@ -2,6 +2,7 @@ import { MediaPlayer } from '../../styles/Components/MediaPlayer'
 import { PhaseRow } from '../../styles/Components/PhaseRow'
 import { useObserved } from '../../styles/Observation/useObserved'
 import type { ComposeViewModel } from '../ViewModels/ComposeViewModel'
+import { Icon } from '../../styles/Components/Icon'
 
 const mono = { fontSize: 'var(--t-meta)', color: 'var(--text-tertiary)' } as const
 
@@ -68,10 +69,7 @@ export function ProjectPage({ model }: { readonly model: ComposeViewModel }) {
         <section aria-label="Changes">
           {p.differs === '' ? null : (
             <p style={{ display: 'flex', alignItems: 'flex-start', gap: 6, margin: '0 0 10px', fontSize: 'var(--t-small)', color: 'var(--status-warning)' }}>
-              <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" style={{ flex: '0 0 auto', marginTop: 2 }}>
-                <path d="M8 2.5l6 10.5H2z" />
-                <path d="M8 6.5v3M8 11.2v.1" />
-              </svg>
+              <Icon name="error" size={13} style={{ flex: '0 0 auto', marginTop: 2 }} />
               <span>{p.differs}</span>
             </p>
           )}

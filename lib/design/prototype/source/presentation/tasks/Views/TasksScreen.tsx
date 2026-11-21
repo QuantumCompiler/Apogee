@@ -2,6 +2,7 @@ import { useObserved } from '../../styles/Observation/useObserved'
 import type { TasksViewModel } from '../ViewModels/TasksViewModel'
 import { TaskDetail } from './TaskDetail'
 import { TaskList } from './TaskList'
+import { Icon } from '../../styles/Components/Icon'
 
 /**
  * The Tasks place (design 1p, ⌘4): the old prototype's screen (`main.html`
@@ -19,9 +20,7 @@ export function TasksScreen({ model }: { readonly model: TasksViewModel }) {
         <span style={{ fontSize: 'var(--t-small)', color: 'var(--text-tertiary)' }}>State a goal and what done looks like; watch the rounds and the checks</span>
         <span style={{ flex: '1 1 auto' }} />
         <button type="button" className="btn-p" onClick={() => void model.openNew()}>
-          <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M8 3.5v9M3.5 8h9" />
-          </svg>
+          <Icon name="add" size={13} />
           New task…
         </button>
       </header>

@@ -3,6 +3,7 @@ import { useObserved } from '../../styles/Observation/useObserved'
 import type { CodeFace, ProseFace } from '../ViewModels/GraphFaces'
 import { GraphLayout } from '../ViewModels/GraphLayout'
 import type { GraphViewModel } from '../ViewModels/GraphViewModel'
+import { Icon } from '../../styles/Components/Icon'
 
 const mono = { fontSize: 'var(--t-meta)', color: 'var(--text-tertiary)' } as const
 const accent = { color: 'var(--status-accent)' } as const
@@ -47,9 +48,7 @@ export function GraphScreen({ model }: { readonly model: GraphViewModel }) {
         <div style={{ position: 'relative' }}>
           <button type="button" className="btn-g" onClick={() => model.toggleMore()} disabled={!face.more.enabled} aria-haspopup="menu" aria-expanded={face.more.open}>
             More
-            <svg className="i" width={11} height={11} viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M4.5 6.5L8 10l3.5-3.5" />
-            </svg>
+            <Icon name="chevronDown" size={11} />
           </button>
           {face.more.open ? (
             <div className="menu" role="menu" aria-label="More" style={{ position: 'absolute', top: 34, right: 0, zIndex: 40, width: 240, padding: 4 }}>

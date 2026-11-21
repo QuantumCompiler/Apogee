@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { assetsAlias, assetsRoot } from './assets.ts'
 import { tokensAlias, tokensRoot } from './tokens.ts'
 
 /**
@@ -21,7 +22,8 @@ export function recordedRoot(root: string): string {
  * pins every package, and the design's own fixture root, `fixtures/` (design
  * 1d). A folder stands for every file under it. The recordings `@recorded`
  * reaches are inputs too, but only those `source/` names (`recordingsNamed`),
- * and so is tokens.json, as `@tokens/tokens.json` (`tokenInputs`, design 1e).
+ * and so is tokens.json, as `@tokens/tokens.json` (`tokenInputs`, design 1e),
+ * and each asset `source/` names, as `@assets/<file>` (`assetsNamed`, 1q).
  */
 export const buildInputs = [
   'fixtures',
@@ -78,22 +80,46 @@ export function recordingsNamed(root: string): string[] {
 }
 
 /**
+ * The design's assets `source/` names (design 1q), as `@assets/<file>`,
+ * sorted: each `@assets/…` string in a file under it that is a file in
+ * lib/design/assets. Only what the build inlines is an input: the logo the
+ * gallery draws, never the master `Logo.png` beside it.
+ */
+export function assetsNamed(root: string): string[] {
+  const named = new Set<string>()
+  for (const file of filesUnder(root, 'source')) {
+    const text = readFileSync(join(root, file), 'utf8')
+    for (const match of text.matchAll(/['"`](@assets\/[^'"`?\s]+)/g)) {
+      const name = match[1]
+      if (name === undefined) continue
+      try {
+        if (statSync(inputPath(root, name)).isFile()) named.add(name)
+      } catch {
+        // not a file: the build would refuse it first
+      }
+    }
+  }
+  return [...named].sort()
+}
+
+/**
  * The tokens the build generates CSS and the typed module from (design 1e):
  * tokens.json, the one file outside the prototype the build reads besides
  * the recordings, named by its root.
  */
 export const tokenInputs = [`${tokensAlias}/tokens.json`] as const
 
-/** Where an input is on disk: a recording under `@recorded`'s root, the tokens under `@tokens`', anything else under the prototype's. */
+/** Where an input is on disk: a recording under `@recorded`'s root, the tokens under `@tokens`', an asset under `@assets`' (1q), anything else under the prototype's. */
 export function inputPath(root: string, file: string): string {
   if (file.startsWith(`${recordedAlias}/`)) return join(recordedRoot(root), file.slice(recordedAlias.length + 1))
   if (file.startsWith(`${tokensAlias}/`)) return join(tokensRoot(root), file.slice(tokensAlias.length + 1))
+  if (file.startsWith(`${assetsAlias}/`)) return join(assetsRoot(root), file.slice(assetsAlias.length + 1))
   return join(root, file)
 }
 
-/** Every input, by path (a recording as `@recorded/<path>`, the tokens as `@tokens/tokens.json`), sorted. */
+/** Every input, by path (a recording as `@recorded/<path>`, the tokens as `@tokens/tokens.json`, an asset as `@assets/<file>`), sorted. */
 export function inputFiles(root: string): string[] {
-  return [...buildInputs.flatMap((input) => filesUnder(root, input)), ...recordingsNamed(root), ...tokenInputs].sort()
+  return [...buildInputs.flatMap((input) => filesUnder(root, input)), ...recordingsNamed(root), ...tokenInputs, ...assetsNamed(root)].sort()
 }
 
 /** A SHA-256 over every input file -- its path, its length and its bytes -- in path order: `sha256-<hex>`. */

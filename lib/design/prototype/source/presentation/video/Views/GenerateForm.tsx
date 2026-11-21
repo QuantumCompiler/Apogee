@@ -1,14 +1,13 @@
 import { useObserved } from '../../styles/Observation/useObserved'
 import type { FormPreset, SeedMode } from '../ViewModels/VideoForm'
 import type { VideoViewModel } from '../ViewModels/VideoViewModel'
+import { Icon } from '../../styles/Components/Icon'
 
 const label = { display: 'flex', flexDirection: 'column', gap: 6, color: 'var(--text-secondary)' } as const
 const segment = (current: boolean) => ({ background: current ? 'var(--surface-control)' : 'transparent', color: current ? 'var(--text-primary)' : 'var(--text-secondary)', fontWeight: current ? 600 : 400 })
 const small = { height: 26, fontSize: 'var(--t-small)' } as const
 const close = (
-  <svg className="i" width="11" height="11" viewBox="0 0 16 16" aria-hidden="true">
-    <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
-  </svg>
+  <Icon name="close" size={11} />
 )
 
 /**
@@ -44,10 +43,7 @@ export function GenerateForm({ model }: { readonly model: VideoViewModel }) {
         <div style={{ marginBottom: 6, color: 'var(--text-secondary)' }}>Start from</div>
         {form.continuing ? (
           <span className="chip" style={{ paddingRight: 10 }}>
-            <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" style={{ color: 'var(--text-secondary)' }}>
-              <rect x="1.75" y="4" width="9" height="8" rx="1.5" />
-              <path d="M10.75 7.2L14.25 5v6l-3.5-2.2" />
-            </svg>
+            <Icon name="camera" size={13} style={{ color: 'var(--text-secondary)' }} />
             <span className="mono" style={{ fontSize: 'var(--t-ui)' }}>
               the last frame of {form.continues}
             </span>
@@ -55,11 +51,7 @@ export function GenerateForm({ model }: { readonly model: VideoViewModel }) {
         ) : null}
         {form.image === '' ? null : (
           <span className="chip">
-            <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" style={{ color: 'var(--text-secondary)' }}>
-              <rect x="2" y="3" width="12" height="10" rx="1.5" />
-              <circle cx="6" cy="6.5" r="1.2" />
-              <path d="M2.5 12l3.5-3.5 2.5 2.5 2-2 3 3" />
-            </svg>
+            <Icon name="picture" size={13} style={{ color: 'var(--text-secondary)' }} />
             <span className="mono" style={{ fontSize: 'var(--t-ui)' }}>
               {form.image}
             </span>

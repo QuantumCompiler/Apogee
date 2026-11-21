@@ -5,6 +5,7 @@ import type { RowFace, SourceFace } from '../ViewModels/SessionViewModel'
 import { PermissionCardView } from './PermissionCardView'
 import { QuestionCardView } from './QuestionCardView'
 import { kindColor, ModelGlyph } from './SessionExtras'
+import { Icon } from '../../styles/Components/Icon'
 
 type ActivityFace = Extract<RowFace, { kind: 'activity' }>
 type AnswerFace = Extract<RowFace, { kind: 'answer' }>
@@ -29,8 +30,6 @@ export const noActs: RowActs = { answer: nothing, skip: nothing, openCitation: n
 
 const apiGlyph = <ModelGlyph kind="api" size={12} />
 
-const chevronDown = <path d="M4.5 6.5L8 10l3.5-3.5" />
-const chevronRight = <path d="M6.5 4.5L10 8l-3.5 3.5" />
 
 /**
  * A line the session said for the person, or what this app does not draw
@@ -65,9 +64,7 @@ export function ActivityView({ activity }: { readonly activity: ActivityFace }) 
   if (!open) {
     const line = { display: 'flex', alignItems: 'center', gap: 6, height: 22, padding: 0, border: 0, fontSize: 'var(--t-ui)', color: 'var(--text-tertiary)', textAlign: 'left' } as const
     const chevron = (
-      <svg className="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
-        {chevronRight}
-      </svg>
+      <Icon name="chevronRight" size={12} />
     )
     // A turn that thought and said nothing of it has nothing to open.
     if (!detail) {
@@ -91,9 +88,7 @@ export function ActivityView({ activity }: { readonly activity: ActivityFace }) 
       {activity.live ? (
         <span className="pulse" aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--status-accent)' }} />
       ) : (
-        <svg className="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" style={{ color: 'var(--text-tertiary)' }}>
-          {chevronDown}
-        </svg>
+        <Icon name="chevronDown" size={12} style={{ color: 'var(--text-tertiary)' }} />
       )}
       <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{lead}</span>
       {rest.length > 0 ? <span>· {rest.join(' · ')}</span> : null}
@@ -142,9 +137,7 @@ function CitationCard({ source, close, open }: { readonly source: SourceFace; re
         </span>
         <span style={{ fontSize: 'var(--t-small)', color: 'var(--text-tertiary)' }}>{source.place}</span>
         <button type="button" className="ib" onClick={close} aria-label="Close source" style={{ width: 24, height: 24 }}>
-          <svg className="i" width="11" height="11" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
-          </svg>
+          <Icon name="close" size={11} />
         </button>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 8px 8px 14px', fontSize: 'var(--t-small)', color: 'var(--text-secondary)' }}>
@@ -257,9 +250,7 @@ export function EndedCard({ text, details, canStartAgain, startAgain, open: init
               aria-expanded={open}
               style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 24, padding: '0 8px 0 4px', marginLeft: -4, border: 0, borderRadius: 4, fontSize: 'var(--t-meta)', color: 'var(--text-secondary)' }}
             >
-              <svg className="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" style={{ transform: `rotate(${open ? 90 : 0}deg)` }}>
-                {chevronRight}
-              </svg>
+              <Icon name="chevronRight" size={12} style={{ transform: `rotate(${open ? 90 : 0}deg)` }} />
               Details
             </button>
             {open ? (
@@ -321,10 +312,7 @@ function ErrorCard({ row, acts, open: initial = false }: { readonly row: Extract
   return (
     <Card role="alert">
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '14px 14px 10px' }}>
-        <svg className="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" style={{ marginTop: 2, color: 'var(--status-error)' }}>
-          <path d="M8 2.5l6 10.5H2z" />
-          <path d="M8 6.5v3M8 11.2v.1" />
-        </svg>
+        <Icon name="error" size={16} style={{ marginTop: 2, color: 'var(--status-error)' }} />
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 'var(--t-title)', fontWeight: 600 }}>{row.title}</div>
           <div style={{ marginTop: 2, fontSize: 'var(--t-dense)', color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>{row.message}</div>
@@ -380,11 +368,7 @@ function NoticeRow({ row }: { readonly row: Extract<RowFace, { kind: 'notice' }>
 function RecallRow({ row, open }: { readonly row: Extract<RowFace, { kind: 'recalled' }>; readonly open: (id: string) => void }) {
   return (
     <div className="mono" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, fontSize: 'var(--t-ui)', color: 'var(--text-secondary)' }}>
-      <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" style={{ color: 'var(--text-tertiary)' }}>
-        <path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9" />
-        <path d="M2.5 2.5v2.2h2.2" />
-        <path d="M8 5.5V8l1.8 1.2" />
-      </svg>
+      <Icon name="memory" size={13} style={{ color: 'var(--text-tertiary)' }} />
       <span>{row.summary}</span>
       {row.chats.map((chat) => (
         <span key={chat.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -422,10 +406,7 @@ export function TranscriptRow({ row, acts = noActs }: { readonly row: RowFace; r
     case 'warning':
       return (
         <div role="note" className="mono" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--t-meta)', color: 'var(--status-warning)', overflowWrap: 'anywhere' }}>
-          <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M8 2.5l6 10.5H2z" />
-            <path d="M8 6.5v3M8 11.2v.1" />
-          </svg>
+          <Icon name="error" size={13} />
           <span>{row.text}</span>
         </div>
       )
@@ -433,9 +414,7 @@ export function TranscriptRow({ row, acts = noActs }: { readonly row: RowFace; r
       return (
         <div role="note" className="note">
           <span className="rule" />
-          <svg className="i" width="11" height="11" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M8 13V3.5M4 7.5l4-4 4 4" />
-          </svg>
+          <Icon name="send" size={11} />
           <span>{row.text}</span>
           <span className="rule" />
         </div>

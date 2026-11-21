@@ -1,36 +1,19 @@
 import { useObserved } from '../../styles/Observation/useObserved'
 import { SectionHeading } from '../Components/SettingRow'
 import type { BackendRowFace, KeyRowFace, SettingsViewModel } from '../ViewModels/SettingsViewModel'
+import { Icon } from '../../styles/Components/Icon'
 
 const small = { height: 26, fontSize: 'var(--t-small)' } as const
 
 /** A row's glyph by where it runs: a chip on this Mac, a stack for an API, the loop of a subscription -- the old pane's three. */
 function Glyph({ kind }: { readonly kind: BackendRowFace['kind'] }) {
   if (kind === 'api') {
-    return (
-      <svg className="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style={{ color: 'var(--model-api)' }}>
-        <ellipse cx="8" cy="4.5" rx="5" ry="2" />
-        <path d="M3 4.5V8c0 1.1 2.2 2 5 2s5-.9 5-2V4.5" />
-        <path d="M3 8v3.5c0 1.1 2.2 2 5 2s5-.9 5-2V8" />
-      </svg>
-    )
+    return <Icon name="api" size={14} style={{ color: 'var(--model-api)' }} />
   }
   if (kind === 'subscription') {
-    return (
-      <svg className="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style={{ color: 'var(--model-subscription)' }}>
-        <path d="M12.5 6A4.75 4.75 0 0 0 3.6 5.2" />
-        <path d="M3.5 10a4.75 4.75 0 0 0 8.9.8" />
-        <path d="M3.3 2.6v2.8h2.8" />
-        <path d="M12.7 13.4v-2.8H9.9" />
-      </svg>
-    )
+    return <Icon name="subscription" size={14} style={{ color: 'var(--model-subscription)' }} />
   }
-  return (
-    <svg className="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style={{ color: 'var(--model-local)' }}>
-      <rect x="4" y="4" width="8" height="8" rx="1.5" />
-      <path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2" />
-    </svg>
-  )
+  return <Icon name="local" size={14} style={{ color: 'var(--model-local)' }} />
 }
 
 /** One row: its glyph, its name and status, its detail and the lines under it, its buttons, and -- a key row being edited -- the key's field. */

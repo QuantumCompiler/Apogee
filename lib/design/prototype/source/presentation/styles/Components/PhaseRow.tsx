@@ -1,4 +1,5 @@
 import type { PhaseFace } from '../Media/Phase'
+import { Icon } from '../Components/Icon'
 
 /**
  * One phase of a run (design 1k: the old prototype's `phaseRow`, promoted to
@@ -13,9 +14,7 @@ export function PhaseRow({ phase }: { readonly phase: PhaseFace }) {
     <div style={{ display: 'grid', gridTemplateColumns: '18px minmax(0, 1fr) auto', gap: 10, alignItems: 'center', padding: '8px 0' }}>
       <span style={{ display: 'grid', placeItems: 'center', width: 16, height: 16 }}>
         {status === 'done' ? (
-          <svg className="i" width="14" height="14" viewBox="0 0 16 16" aria-label="done" style={{ color: 'var(--status-accent)' }}>
-            <path d="M3.5 8.5l3 3 6-7" />
-          </svg>
+          <Icon name="check" size={14} label="done" style={{ color: 'var(--status-accent)' }} />
         ) : status === 'running' ? (
           <span className="pulse" aria-label="running" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--status-accent)' }} />
         ) : status === 'pending' ? (

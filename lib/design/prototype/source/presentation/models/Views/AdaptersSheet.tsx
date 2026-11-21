@@ -1,5 +1,6 @@
 import { useObserved } from '../../styles/Observation/useObserved'
 import type { ModelsViewModel } from '../ViewModels/ModelsViewModel'
+import { Icon } from '../../styles/Components/Icon'
 
 /**
  * The adapters sheet's content (design 1h): the old prototype's generic
@@ -21,10 +22,7 @@ export function AdaptersSheet({ model }: { readonly model: ModelsViewModel }) {
               <input type="text" className="inp mono" value={row.path} onChange={(event) => model.editAdaptersForm((form) => form.edit(index, { path: event.target.value }))} placeholder="Path" aria-label="Path" style={{ flex: '1 1 auto', minWidth: 0 }} />
               {sheet.scaled ? <input type="text" className="inp mono" value={row.scale} onChange={(event) => model.editAdaptersForm((form) => form.edit(index, { scale: event.target.value }))} placeholder="1" aria-label="Scale" style={{ width: 60 }} /> : null}
               <button type="button" className="ib" onClick={() => model.editAdaptersForm((form) => form.remove(index))} aria-label="Take it off" title="Take it off" style={{ width: 26, height: 26 }}>
-                <svg className="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-                  <circle cx="8" cy="8" r="5.5" />
-                  <path d="M5.5 8h5" />
-                </svg>
+                <Icon name="remove" size={14} />
               </button>
             </div>
           ))}

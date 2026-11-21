@@ -29,6 +29,25 @@ export interface ShellViewProps {
   readonly strip?: SystemStrip | undefined
   /** Runs going on, by place: the places' badges. */
   readonly running?: Readonly<Partial<Record<Destination, number>>>
+  /** Drawn in one of the gallery's frames (design 1q) rather than as the page's window. */
+  readonly frame?: ShellFrame | undefined
+}
+
+/**
+ * A gallery frame the window is drawn in (design 1q): its size, which the
+ * window takes in place of the page's, and whether it takes the page's keys
+ * -- only the App board at full size does, so the gallery's other frames
+ * never answer a key pressed in the gallery.
+ */
+export interface ShellFrame {
+  readonly width: number
+  readonly height: number
+  readonly keys: boolean
+}
+
+/** The window's height: the page's, or its frame's. */
+export function windowHeight(frame: ShellFrame | undefined): number | '100vh' {
+  return frame ? frame.height : '100vh'
 }
 
 /**
@@ -39,36 +58,41 @@ export interface ShellViewProps {
  * menu scrim, the overlay, Settings, the sheet and confirm hosts and the
  * toast. It hands every key the browser passes to the shell's key map,
  * tells the shell its width, which collapses the sidebar at 900 px, and
- * tells the theme the viewer's light or dark setting (1i).
+ * tells the theme the viewer's light or dark setting (1i). In one of the
+ * gallery's frames (1q) it is the frame's size, and takes no key unless the
+ * frame is live.
  */
-export function ShellView({ model, screen, overlay, settings, sheet, confirm, sessions, newSessions, strip, running }: ShellViewProps) {
+export function ShellView({ model, screen, overlay, settings, sheet, confirm, sessions, newSessions, strip, running, frame }: ShellViewProps) {
   useObserved(model)
   useObserved(model.theme)
 
+  const width = frame?.width
+  const keys = frame?.keys ?? true
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (model.press(chordOf(event))) event.preventDefault()
     }
-    const onResize = () => model.windowResized(window.innerWidth)
+    // A gallery frame is its own width (1q); the window, the page's.
+    const onResize = () => model.windowResized(width ?? window.innerWidth)
     onResize()
     // The viewer's light or dark setting, which Automatic follows unless a preset pins it (1i).
     const scheme = window.matchMedia?.('(prefers-color-scheme: light)')
     const onScheme = () => model.theme.systemChanged(scheme?.matches ? 'light' : 'dark')
     if (scheme) onScheme()
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('resize', onResize)
+    if (keys) window.addEventListener('keydown', onKey)
+    if (width === undefined) window.addEventListener('resize', onResize)
     scheme?.addEventListener('change', onScheme)
     return () => {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('resize', onResize)
       scheme?.removeEventListener('change', onScheme)
     }
-  }, [model])
+  }, [model, width, keys])
 
   const layout = model.layout
   const style = {
     ...model.theme.style,
-    height: '100vh',
+    height: windowHeight(frame),
     minHeight: 'var(--layout-window-min-height)',
     display: 'flex',
     position: 'relative',

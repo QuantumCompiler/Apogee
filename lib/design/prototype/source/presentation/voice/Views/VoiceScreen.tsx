@@ -3,6 +3,7 @@ import type { VoiceViewModel } from '../ViewModels/VoiceViewModel'
 import { SpeakCard } from './SpeakCard'
 import { SpeechList } from './SpeechList'
 import { SpeechPage } from './SpeechPage'
+import { Icon } from '../../styles/Components/Icon'
 
 /**
  * The Voice place (design 1m): the old prototype's screen (`main.html` at
@@ -25,9 +26,7 @@ export function VoiceScreen({ model }: { readonly model: VoiceViewModel }) {
           {face.modelLine}
         </button>
         <button type="button" className="btn-p" onClick={() => model.newSpeech()}>
-          <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M8 3.5v9M3.5 8h9" />
-          </svg>
+          <Icon name="add" size={13} />
           New speech
         </button>
       </header>

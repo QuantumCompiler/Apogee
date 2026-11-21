@@ -1,5 +1,6 @@
 import { useObserved } from '../../styles/Observation/useObserved'
 import type { ComposeViewModel } from '../ViewModels/ComposeViewModel'
+import { Icon } from '../../styles/Components/Icon'
 
 const label = { display: 'flex', flexDirection: 'column', gap: 6, color: 'var(--text-secondary)' } as const
 
@@ -108,10 +109,7 @@ export function EditPane({ model }: { readonly model: ComposeViewModel }) {
           </div>
           {ed.replans.text === '' ? null : (
             <p style={{ display: 'flex', alignItems: 'flex-start', gap: 6, margin: '10px 0 0', color: ed.replans.color }}>
-              <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" style={{ flex: '0 0 auto', marginTop: 2 }}>
-                <path d="M13 8a5 5 0 0 1-9 3M3 8a5 5 0 0 1 9-3" />
-                <path d="M12 2.5V5H9.5M4 13.5V11h2.5" />
-              </svg>
+              <Icon name="replan" size={13} style={{ flex: '0 0 auto', marginTop: 2 }} />
               <span>{ed.replans.text}</span>
             </p>
           )}

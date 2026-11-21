@@ -1,4 +1,5 @@
 import type { Placeholder } from '../ViewModels/Destination'
+import { Icon } from '../../styles/Components/Icon'
 
 /**
  * A place not yet ported (design 1e): its header, as every screen's is, and a
@@ -38,9 +39,7 @@ export function PlaceholderPanel({ title, says, onClose }: { readonly title: str
         <h2 style={{ margin: 0, fontSize: 'var(--t-title)', fontWeight: 600 }}>{title}</h2>
         <span style={{ flex: '1 1 auto' }} />
         <button type="button" className="ib" onClick={onClose} aria-label={`Close ${title.toLowerCase()}`}>
-          <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
-          </svg>
+          <Icon name="close" size={13} />
         </button>
       </div>
       <p style={{ margin: 0, padding: '14px 18px', color: 'var(--text-secondary)' }}>{says}</p>

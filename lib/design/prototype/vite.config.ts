@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { viteSingleFile } from 'vite-plugin-singlefile'
+import { assets } from './tooling/assets.ts'
 import { oneFile } from './tooling/oneFile.ts'
 import { recordedAlias, recordedRoot } from './tooling/sources.ts'
 import { tokens } from './tooling/tokens.ts'
@@ -21,6 +22,8 @@ const root = dirname(fileURLToPath(import.meta.url))
 // (design 1e). CSS is not minified, so the built file carries the generated
 // custom properties as tokens.json writes them (a minifier rewrites #FFFFFF as
 // #fff and rgba() as hex), and the token check reads it value for value.
+// `@assets/<file>` is one of the design's own assets beside the prototype,
+// lib/design/assets, inlined as a data: URL (design 1q: the gallery's logo).
 export default defineConfig({
   root,
   publicDir: false,
@@ -28,6 +31,7 @@ export default defineConfig({
   server: { fs: { allow: [root, recordedRoot(root)] } },
   plugins: [
     tokens({ root }),
+    assets({ root }),
     react(),
     viteSingleFile(),
     oneFile({ root, destination: process.env.APOGEE_DESIGN_OUT ?? resolve(root, '../main.html') }),

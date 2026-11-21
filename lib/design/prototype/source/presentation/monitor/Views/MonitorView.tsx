@@ -1,5 +1,6 @@
 import { useObserved } from '../../styles/Observation/useObserved'
 import type { MonitorViewModel } from '../ViewModels/MonitorViewModel'
+import { Icon } from '../../styles/Components/Icon'
 
 const label = { color: 'var(--text-secondary)' } as const
 const unknownValue = { color: 'var(--text-tertiary)', opacity: 0.75 } as const
@@ -31,9 +32,7 @@ export function MonitorView({ model, close }: { readonly model: MonitorViewModel
         </span>
         <span style={{ flex: '1 1 auto' }} />
         <button type="button" className="ib" onClick={close} aria-label="Close system monitor">
-          <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
-          </svg>
+          <Icon name="close" size={13} />
         </button>
       </div>
 

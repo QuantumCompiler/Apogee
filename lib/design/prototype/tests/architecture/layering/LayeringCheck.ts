@@ -44,6 +44,10 @@ type Layer = (typeof LayeringCheck.layers)[number]
  *   (its CSS) and `@tokens/tokens.json` (the file, for the declaration's
  *   types), and nothing else under it, reached only from `presentation/styles`
  *   and the tests -- the one way to that file from outside the prototype;
+ * - the assets root (design 1q): `@assets/<file>`, one file of
+ *   lib/design/assets named in full (the logo the gallery draws, which the
+ *   build inlines), reached only from `presentation/app`, which hands it to
+ *   the view that draws it, and from the tests;
  * - a `.css` file is read as code is: each `@import` and `url()` is held to
  *   the same rules (design 1e), and nothing is loaded from the network;
  * - a module depends only on its own layer or a lower one; `styles` leans on
@@ -88,6 +92,12 @@ export class LayeringCheck {
 
   /** The one module that reads the tokens; every other takes them from it. */
   static readonly tokensReader = 'source/presentation/styles/'
+
+  /** The design's own assets beside the prototype, lib/design/assets: the logo the gallery draws (design 1q), inlined by the build. */
+  static readonly assetsAlias = '@assets'
+
+  /** The one module that reads the assets, handing each to the view that draws it (design 1q). */
+  static readonly assetsReader = 'source/presentation/app/'
 
   /** The files whose imports are read with TypeScript's parser. */
   static readonly codeExtensions = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs']
@@ -209,6 +219,10 @@ export class LayeringCheck {
           found.push(...LayeringCheck.tokensRead(file, specifier))
           continue
         }
+        if (bare === LayeringCheck.assetsAlias || bare.startsWith(`${LayeringCheck.assetsAlias}/`)) {
+          found.push(...LayeringCheck.assetRead(file, specifier))
+          continue
+        }
         if (isBuiltin(bare)) {
           if (inSource) {
             found.push(`${file} imports ${specifier}, a Node built-in: source/ runs in the browser, and Node stays in tests, scripts and config`)
@@ -267,6 +281,23 @@ export class LayeringCheck {
     }
     if (!file.startsWith(LayeringCheck.tokensReader) && !LayeringCheck.isTest(file)) {
       return [`${file} imports ${specifier}: only presentation/styles reads the tokens, and every other module takes them from it`]
+    }
+    return []
+  }
+
+  /**
+   * The assets root reached from `file` by `specifier` (design 1q): one file
+   * of lib/design/assets by its name, never the root, a folder or a glob,
+   * from `presentation/app` or a test.
+   */
+  private static assetRead(file: string, specifier: string): string[] {
+    const bare = LayeringCheck.withoutQuery(specifier)
+    const name = bare.slice(LayeringCheck.assetsAlias.length + 1)
+    if (bare === LayeringCheck.assetsAlias || name === '' || name === '.' || name === '..' || /[/*{}]/.test(name)) {
+      return [`${file} imports ${specifier}: an asset is one file of lib/design/assets, named in full as ${LayeringCheck.assetsAlias}/<file>`]
+    }
+    if (!file.startsWith(LayeringCheck.assetsReader) && !LayeringCheck.isTest(file)) {
+      return [`${file} imports ${specifier}: only presentation/app reads the design’s assets, and hands each to the view that draws it`]
     }
     return []
   }

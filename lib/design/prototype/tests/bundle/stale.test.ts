@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, test } from 'vitest'
-import { builtHash, inputFiles, inputPath, recordingsNamed, sourcesHash, staleness } from '../../tooling/sources'
+import { assetsNamed, builtHash, inputFiles, inputPath, recordingsNamed, sourcesHash, staleness } from '../../tooling/sources'
 
 /** The prototype's root: this file is tests/bundle/stale.test.ts. */
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -138,6 +138,24 @@ describe('the tokens in the hash (design 1e)', () => {
     expect(staleness(html, copy)).toBeUndefined()
     const file = inputPath(copy, '@tokens/tokens.json')
     writeFileSync(file, readFileSync(file, 'utf8').replace('"surface.window": "#131415"', '"surface.window": "#131416"'))
+    expect(staleness(html, copy)).toMatch(/^lib\/design\/main\.html is stale: /)
+  })
+})
+
+describe('the design’s assets in the hash (design 1q)', () => {
+  test('the logo app names is an input, by its root, read from lib/design/assets; an asset no source names is not', () => {
+    expect(inputFiles(root)).toContain('@assets/Logo-320.png')
+    expect(inputFiles(root)).not.toContain('@assets/Logo.png')
+    expect(assetsNamed(root)).toEqual(['@assets/Logo-320.png'])
+    expect(inputPath(root, '@assets/Logo-320.png')).toBe(resolve(root, '../assets/Logo-320.png'))
+  })
+
+  test('the logo re-made marks main.html stale', () => {
+    const copy = copyOfInputs()
+    const html = `<!doctype html><html><head><meta name="apogee-design-sources" content="${sourcesHash(copy)}"></head></html>`
+    expect(staleness(html, copy)).toBeUndefined()
+    const file = inputPath(copy, '@assets/Logo-320.png')
+    writeFileSync(file, Buffer.concat([readFileSync(file), Buffer.from([0])]))
     expect(staleness(html, copy)).toMatch(/^lib\/design\/main\.html is stale: /)
   })
 })

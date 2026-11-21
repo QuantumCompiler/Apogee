@@ -1,13 +1,12 @@
 import { useObserved } from '../../styles/Observation/useObserved'
 import type { ComposeViewModel } from '../ViewModels/ComposeViewModel'
+import { Icon } from '../../styles/Components/Icon'
 
 const label = { display: 'flex', flexDirection: 'column', gap: 6, color: 'var(--text-secondary)' } as const
 const note = { marginTop: 6, color: 'var(--text-tertiary)' } as const
 const small = { height: 26, fontSize: 'var(--t-small)' } as const
 const remove = (
-  <svg className="i" width="11" height="11" viewBox="0 0 16 16" aria-hidden="true">
-    <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
-  </svg>
+  <Icon name="close" size={11} />
 )
 
 /** The new composition (design 1l, the old `comp.isNew` middle): the brief, Plan, and the plan with what rendering it takes, Render and Plan again. */
@@ -150,11 +149,7 @@ export function CompositionSettings({ model }: { readonly model: ComposeViewMode
           </button>
         ) : (
           <span className="chip">
-            <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" style={{ color: 'var(--text-secondary)' }}>
-              <path d="M6 12.5V3.5l7-1.5v9" />
-              <circle cx="4.5" cy="12.5" r="1.5" />
-              <circle cx="11.5" cy="11" r="1.5" />
-            </svg>
+            <Icon name="music" size={13} style={{ color: 'var(--text-secondary)' }} />
             <span className="mono" style={{ fontSize: 'var(--t-ui)' }}>
               {fresh.music}
             </span>
@@ -173,9 +168,7 @@ export function CompositionSettings({ model }: { readonly model: ComposeViewMode
           </button>
         ) : (
           <span className="chip">
-            <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" style={{ color: 'var(--text-secondary)' }}>
-              <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.8l1.5 1.5h4.7A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" />
-            </svg>
+            <Icon name="folder" size={13} style={{ color: 'var(--text-secondary)' }} />
             <span className="mono" style={{ fontSize: 'var(--t-ui)' }}>
               {fresh.assets}
             </span>
@@ -194,10 +187,7 @@ export function CompositionSettings({ model }: { readonly model: ComposeViewMode
       {fresh.captions ? (
         <>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 6, color: 'var(--text-secondary)' }}>
-            <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" style={{ marginTop: 2 }}>
-              <rect x="2" y="3.5" width="12" height="9" rx="1.5" />
-              <path d="M4.5 9.5h3M9 9.5h2.5M4.5 7h7" />
-            </svg>
+            <Icon name="captions" size={13} style={{ marginTop: 2 }} />
             <span>{fresh.captionsLine}</span>
           </div>
           <div className="mono" style={{ marginTop: 4, fontSize: 'var(--t-meta)', color: 'var(--text-tertiary)', overflowWrap: 'anywhere' }}>

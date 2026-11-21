@@ -2,6 +2,7 @@ import type { KeyboardEvent } from 'react'
 import { useObserved } from '../../styles/Observation/useObserved'
 import type { SessionViewModel } from '../ViewModels/SessionViewModel'
 import { AttachmentChips, HeldLines, SuggestionList } from './SessionExtras'
+import { Icon } from '../../styles/Components/Icon'
 
 /**
  * The composer (`main.html:693-759` at `b375fac9`): the `/`, `@` and attach
@@ -106,9 +107,7 @@ export function InputBar({ model }: { readonly model: SessionViewModel }) {
               aria-label="Attach files, folders, images, audio or video"
               style={{ width: 28, height: 28 }}
             >
-              <svg className="i" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M13 7.5l-5.2 5.2a3 3 0 0 1-4.3-4.3l5.6-5.6a2 2 0 0 1 2.9 2.9l-5.5 5.5a1 1 0 0 1-1.4-1.4l5-5" />
-              </svg>
+              <Icon name="attach" size={15} />
             </button>
             <span className="ap-hints mono" style={{ display: 'flex', gap: 14, marginLeft: 4, fontSize: 'var(--t-meta)', color: 'var(--text-tertiary)' }}>
               <span>
@@ -149,9 +148,7 @@ export function InputBar({ model }: { readonly model: SessionViewModel }) {
                 aria-label="Send (Return)"
                 style={{ display: 'flex', alignItems: 'center', gap: 8, height: 28, padding: '0 10px', background: 'var(--text-primary)', color: 'var(--surface-window)', border: 0, borderRadius: 5, fontSize: 'var(--t-ui)', fontWeight: 600 }}
               >
-                <svg className="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
-                  <path d="M8 13V3.5M4 7.5l4-4 4 4" />
-                </svg>
+                <Icon name="send" size={12} />
                 send<span style={{ fontWeight: 400, opacity: 0.7 }}>⏎</span>
               </button>
             )}

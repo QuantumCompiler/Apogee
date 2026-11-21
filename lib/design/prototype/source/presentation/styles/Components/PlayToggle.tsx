@@ -1,4 +1,5 @@
 import type { MediaPlayerFace } from '../Media/Playback'
+import { Icon } from './Icon'
 
 /**
  * The player's play or pause button: the 28 px control the old prototype's
@@ -11,9 +12,7 @@ import type { MediaPlayerFace } from '../Media/Playback'
 export function PlayToggle({ face, toggle }: { readonly face: Pick<MediaPlayerFace, 'playing' | 'toggleLabel'>; readonly toggle: () => void }) {
   return (
     <button type="button" className="ib" onClick={toggle} aria-label={face.toggleLabel} style={{ width: 28, height: 28, color: 'var(--text-primary)' }}>
-      <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-        <path d={face.playing ? 'M4.5 3h2.5v10H4.5zM9 3h2.5v10H9z' : 'M5 3.2v9.6L13 8z'} fill="currentColor" />
-      </svg>
+      <Icon name={face.playing ? 'pause' : 'play'} size={14} />
     </button>
   )
 }

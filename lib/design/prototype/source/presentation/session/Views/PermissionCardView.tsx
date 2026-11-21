@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Card } from '../Components/Card'
 import type { RowFace } from '../ViewModels/SessionViewModel'
 import { QuietLine } from './TranscriptRow'
+import { Icon } from '../../styles/Components/Icon'
 
 type PermissionFace = Extract<RowFace, { kind: 'permission' }>
 
@@ -64,9 +65,7 @@ export function PermissionCardView({ card, answer, shown = false }: { readonly c
     <Card label={`Permission request: ${card.title.replace(/\?$/, '').toLowerCase()}`}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px 10px' }}>
         <span aria-hidden="true" style={{ width: 28, height: 28, display: 'grid', placeItems: 'center', borderRadius: 6, background: 'var(--surface-control)' }}>
-          <svg className="i" width="15" height="15" viewBox="0 0 16 16">
-            <path d="M10.5 3l2.5 2.5L6 12.5H3.5V10z" />
-          </svg>
+          <Icon name="write" size={15} />
         </span>
         <div style={{ flex: '1 1 auto', minWidth: 0 }}>
           <div style={{ fontSize: 'var(--t-title)', fontWeight: 600 }}>{card.title}</div>

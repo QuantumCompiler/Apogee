@@ -3,6 +3,7 @@ import { useObserved } from '../../styles/Observation/useObserved'
 import type { CodeFont, ColorName, TextSize, ThemeId, UiFont } from '../../styles/Tokens/Tokens'
 import { SectionHeading } from '../Components/SettingRow'
 import type { ThemeSettings } from '../ViewModels/ThemeSettings'
+import { Icon } from '../../styles/Components/Icon'
 
 const label = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--t-small)', color: 'var(--text-secondary)' } as const
 const quiet = { fontSize: 'var(--t-small)', color: 'var(--text-tertiary)' } as const
@@ -146,10 +147,7 @@ export function AppearancePane({ model }: { readonly model: ThemeSettings }) {
               </span>
               {row.edited ? (
                 <button type="button" className="ib" onClick={() => model.reset(row.key as ColorName)} aria-label={`Reset ${row.label} to ${row.baseHex}`} title={`Reset to ${row.baseHex}`} style={{ width: 28, height: 26 }}>
-                  <svg className="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-                    <path d="M3 8a5 5 0 1 0 1.5-3.5" />
-                    <path d="M3 2.5V5h2.5" />
-                  </svg>
+                  <Icon name="reset" size={14} />
                 </button>
               ) : (
                 <span />

@@ -2,6 +2,7 @@ import { PickColumn, PickRow } from '../../styles/Components/PickList'
 import { useObserved } from '../../styles/Observation/useObserved'
 import type { AgentPageFace, MCPPageFace, SymphonyPageFace } from '../ViewModels/LibraryFaces'
 import type { LibraryViewModel } from '../ViewModels/LibraryViewModel'
+import { Icon } from '../../styles/Components/Icon'
 
 const heading = { flex: '1 1 auto', margin: 0, fontSize: 'var(--t-h2)', fontWeight: 600 } as const
 const label = { margin: '20px 0 6px' } as const
@@ -120,10 +121,7 @@ function SymphonyPage({ model, symphony }: { readonly model: LibraryViewModel; r
           {symphony.image.chosen !== '' ? (
             <>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 'var(--t-small)' }}>
-                <svg className="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-                  <rect x="2.5" y="3.5" width="11" height="9" rx="1.5" />
-                  <path d="M4.5 10.5l2.5-3 2 2 1.5-1.5 1.5 2.5" />
-                </svg>
+                <Icon name="photo" size={14} />
                 {symphony.image.chosen}
               </span>
               <button type="button" className="btn-g" onClick={() => symphonies.removeImage()} style={small}>

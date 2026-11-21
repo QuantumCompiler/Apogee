@@ -25,6 +25,7 @@
     "presentation/video": ["infrastructure/clock", "infrastructure/process", "data/protocol", "business/jobs", "business/media", "business/reads", "presentation/shell", "presentation/styles"],
     "presentation/voice": ["infrastructure/clock", "infrastructure/process", "business/jobs", "business/media", "business/reads", "presentation/shell", "presentation/styles"],
     "presentation/monitor": ["infrastructure/clock", "infrastructure/process", "business/reads", "presentation/shell", "presentation/styles"],
+    "presentation/gallery": ["presentation/styles"],
     "presentation/app": [
       "infrastructure/clock",
       "infrastructure/process",
@@ -49,7 +50,8 @@
       "presentation/tasks",
       "presentation/video",
       "presentation/voice",
-      "presentation/monitor"
+      "presentation/monitor",
+      "presentation/gallery"
     ]
   }
 }

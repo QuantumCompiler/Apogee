@@ -281,6 +281,34 @@ describe('the layering check, on this prototype', () => {
     ])
   })
 
+  test("violations planted in the gallery fail, each naming its file: the gallery importing the app root, the shell and a place, and React in its view-model -- app hands it what it shows (design 1q)", () => {
+    const disk = new DiskTree(root)
+    const planted: Record<string, string> = {
+      'source/presentation/gallery/ViewModels/GalleryViewModel.ts': `import { useState } from 'react'\n${disk.contents('source/presentation/gallery/ViewModels/GalleryViewModel.ts')}`,
+      'source/presentation/gallery/Views/GalleryView.tsx': `import { AppViewModel } from '../../app/ViewModels/AppViewModel'\n${disk.contents('source/presentation/gallery/Views/GalleryView.tsx')}`,
+      'source/presentation/gallery/Views/PropSwitcher.tsx': `import { ShellView } from '../../shell/Views/ShellView'\n${disk.contents('source/presentation/gallery/Views/PropSwitcher.tsx')}`,
+      'source/presentation/gallery/Views/ComponentsPage.tsx': `import { SuitesScreen } from '../../suites/Views/SuitesScreen'\n${disk.contents('source/presentation/gallery/Views/ComponentsPage.tsx')}`,
+    }
+    const tree: SourceTree = {
+      files: (directory) => disk.files(directory),
+      folders: (directory) => disk.folders(directory),
+      isDirectory: (path) => disk.isDirectory(path),
+      contents: (path) => planted[path] ?? disk.contents(path),
+    }
+    expect(new LayeringCheck(ModuleMap.read(tree), tree).violations()).toEqual([
+      'source/presentation/gallery/ViewModels/GalleryViewModel.ts imports react: a view-model stays free of React, so it tests without a browser',
+      'source/presentation/gallery/Views/ComponentsPage.tsx imports presentation/suites, which presentation/gallery does not declare as a dependency',
+      'source/presentation/gallery/Views/GalleryView.tsx imports presentation/app, which presentation/gallery does not declare as a dependency',
+      'source/presentation/gallery/Views/PropSwitcher.tsx imports presentation/shell, which presentation/gallery does not declare as a dependency',
+    ])
+  })
+
+  test('the gallery depends on styles alone, and app on the gallery (design 1q)', () => {
+    const map = ModuleMap.read(new DiskTree(root))
+    expect(map.modules.find((module) => module.id === 'presentation/gallery')?.dependsOn).toEqual(['presentation/styles'])
+    expect(map.modules.find((module) => module.id === 'presentation/app')?.dependsOn).toContain('presentation/gallery')
+  })
+
   test('the disk tree reads the prototype, never node_modules, build output or dot files', () => {
     const files = new DiskTree(root).files('')
     expect(files).toContain('modules.json')
@@ -562,6 +590,29 @@ describe('the layering check, on planted violations', () => {
       'source/presentation/session/Views/SessionWindow.tsx imports @tokens: only presentation/styles reads the tokens, and every other module takes them from it',
       'source/presentation/styles/Palette.ts imports @tokens/other.json: the tokens root serves @tokens, @tokens/themes.css and @tokens/tokens.json, and nothing else',
       'source/presentation/styles/Palette.ts imports ../../../../spec/json/tokens.json, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages',
+    ])
+  })
+
+  test("the assets root, from app: one file of lib/design/assets by its name, @assets/<file>, passes, and a test may read it too (design 1q's logo)", () => {
+    const planted = new Planted()
+    planted.files['source/presentation/app/Models/Logo.ts'] = "import logo from '@assets/Logo-320.png'\n\nexport const artwork = logo\n"
+    planted.files['tests/presentation/app/AppViewModel.test.ts'] = "import logo from '@assets/Logo-320.png'\n" + stubTest
+    expect(planted.violations()).toEqual([])
+  })
+
+  test('the assets root from anywhere but app fails, and so does the root alone, a folder under it, a glob or the file by its path (design 1q)', () => {
+    const planted = new Planted()
+    planted.files['source/presentation/styles/Palette.ts'] += "import logo from '@assets/Logo-320.png'\n"
+    planted.files['source/presentation/session/Views/SessionWindow.tsx'] += "import logo from '@assets/Logo-320.png'\n"
+    planted.files['source/presentation/app/Views/ApogeeApp.tsx'] +=
+      "import all from '@assets'\nimport icon from '@assets/icons/Logo-16.png'\nconst many = import.meta.glob('@assets/*.png')\nimport raw from '../../../../../assets/Logo-320.png'\n"
+    expect(planted.violations()).toEqual([
+      'source/presentation/app/Views/ApogeeApp.tsx imports @assets: an asset is one file of lib/design/assets, named in full as @assets/<file>',
+      'source/presentation/app/Views/ApogeeApp.tsx imports @assets/icons/Logo-16.png: an asset is one file of lib/design/assets, named in full as @assets/<file>',
+      'source/presentation/app/Views/ApogeeApp.tsx imports @assets/*.png: an asset is one file of lib/design/assets, named in full as @assets/<file>',
+      'source/presentation/app/Views/ApogeeApp.tsx imports ../../../../../assets/Logo-320.png, which leaves lib/design/prototype/: nothing comes from outside the prototype but its declared packages',
+      'source/presentation/session/Views/SessionWindow.tsx imports @assets/Logo-320.png: only presentation/app reads the design’s assets, and hands each to the view that draws it',
+      'source/presentation/styles/Palette.ts imports @assets/Logo-320.png: only presentation/app reads the design’s assets, and hands each to the view that draws it',
     ])
   })
 

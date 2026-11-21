@@ -4,6 +4,7 @@ import { ConvertForm, QuantizeForm, RegisterForm } from '../ViewModels/StoreForm
 import { Estimate } from '../ViewModels/StoreForms'
 import type { StoreViewModel } from '../ViewModels/StoreViewModel'
 import { DeleteNarrationCard } from './DeleteNarrationCard'
+import { Icon } from '../../styles/Components/Icon'
 
 const columns = 'minmax(190px, 1fr) 100px 92px 72px minmax(170px, 210px)'
 const link = { padding: 0, border: 0, background: 'transparent', fontSize: 'var(--t-ui)', color: 'var(--status-accent)', textAlign: 'left', textDecoration: 'underline', textDecorationColor: 'var(--line-strong)', textUnderlineOffset: 3, overflowWrap: 'anywhere' } as const
@@ -117,9 +118,7 @@ export function StoreView({ model }: { readonly model: StoreViewModel }) {
               </div>
             </div>
             <button type="button" className="ib" onClick={() => model.close()} aria-label="Close details">
-              <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
-              </svg>
+              <Icon name="close" size={13} />
             </button>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '16px 0 6px' }}>

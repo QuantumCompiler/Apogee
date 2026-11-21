@@ -2,6 +2,7 @@ import { MediaPlayer } from '../../styles/Components/MediaPlayer'
 import { PhaseRow } from '../../styles/Components/PhaseRow'
 import { useObserved } from '../../styles/Observation/useObserved'
 import type { VideoViewModel } from '../ViewModels/VideoViewModel'
+import { Icon } from '../../styles/Components/Icon'
 
 const codeBlock = { padding: '10px 12px', borderRadius: 6, background: 'var(--surface-code)', fontSize: 'var(--t-meta)', lineHeight: 1.7, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } as const
 
@@ -88,10 +89,7 @@ export function ClipPage({ model }: { readonly model: VideoViewModel }) {
       </div>
       {clip.note === '' ? null : (
         <div role="note" style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '10px 12px', border: '1px solid var(--line-strong)', borderRadius: 8, fontSize: 'var(--t-small)', color: 'var(--text-secondary)' }}>
-          <svg className="i" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style={{ marginTop: 2, color: 'var(--status-warning)' }}>
-            <path d="M8 2.5l6 10.5H2z" />
-            <path d="M8 6.5v3M8 11.3v.2" />
-          </svg>
+          <Icon name="error" size={14} style={{ marginTop: 2, color: 'var(--status-warning)' }} />
           <span>{clip.note}</span>
         </div>
       )}

@@ -3,19 +3,10 @@ import { ModelGlyph } from '../../session/Views/SessionExtras'
 import { useObserved } from '../../styles/Observation/useObserved'
 import type { ChatRowFace } from '../ViewModels/LibraryFaces'
 import type { SessionLibraryViewModel } from '../ViewModels/SessionLibraryViewModel'
+import { Icon } from '../../styles/Components/Icon'
 
 const chevron = (open: boolean, color?: string) => (
-  <svg className="i" width="10" height="10" viewBox="0 0 16 16" aria-hidden="true" style={{ color, transform: `rotate(${open ? 0 : -90}deg)`, transition: 'transform var(--motion-chevron)' }}>
-    <path d="M4 6l4 4 4-4" />
-  </svg>
-)
-
-const eye = (
-  <>
-    <path d="M2 8s2.2-4 6-4c1 0 1.9.3 2.7.7M14 8s-2.2 4-6 4c-1 0-1.9-.3-2.7-.7" />
-    <path d="M6.6 9.4a2 2 0 0 1 2.8-2.8" />
-    <path d="M3 13L13 3" />
-  </>
+  <Icon name="disclosure" size={10} style={{ color, transform: `rotate(${open ? 0 : -90}deg)`, transition: 'transform var(--motion-chevron)' }} />
 )
 
 /** What each glyph says to a screen reader, as the old list names it. */
@@ -32,21 +23,13 @@ export function NewSessionButtons({ model }: { readonly model: SessionLibraryVie
   return (
     <>
       <button type="button" className="ib ap-lab" onClick={() => model.current.leave({ type: 'execute' })} aria-label="New execute session (Option Command N)" title="New execute session ⌥⌘N">
-        <svg className="i" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M2.5 13.5l6-6" />
-          <path d="M7.5 3.5l3-1.5 3.5 3.5-1.5 3-1.5-1.5-2 2-2.5-2.5 2-2z" />
-        </svg>
+        <Icon name="execute" size={15} />
       </button>
       <button type="button" className="ib ap-lab" onClick={() => model.newPrivateSession()} aria-label="New private session (Shift Command N)" title="New private session ⇧⌘N">
-        <svg className="i" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
-          {eye}
-        </svg>
+        <Icon name="private" size={15} />
       </button>
       <button type="button" className="ib" onClick={() => model.newSession()} aria-label="New session (Command N)" title="New session ⌘N">
-        <svg className="i" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M8 3H4.5A1.5 1.5 0 0 0 3 4.5v7A1.5 1.5 0 0 0 4.5 13h7a1.5 1.5 0 0 0 1.5-1.5V8" />
-          <path d="M11.5 2.5l2 2L8 10H6V8z" />
-        </svg>
+        <Icon name="newSession" size={15} />
       </button>
     </>
   )
@@ -87,9 +70,7 @@ function ChatRow({ model, row }: { readonly model: SessionLibraryViewModel; read
         aria-label={`Actions for ${row.title}`}
         style={{ position: 'absolute', top: 2, right: 4, width: 24, height: 24, background: 'var(--surface-control)', color: 'var(--text-secondary)' }}
       >
-        <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M3.5 8h.1M8 8h.1M12.5 8h.1" strokeWidth="2.4" />
-        </svg>
+        <Icon name="more" size={13} />
       </button>
       {row.menuOpen ? (
         <div className="menu" role="menu" aria-label={row.title} style={{ position: 'absolute', top: 28, right: 0, zIndex: 41, width: 170, padding: 4 }}>
@@ -149,17 +130,12 @@ export function SessionList({ model }: { readonly model: SessionLibraryViewModel
             </span>
           </button>
           <button type="button" className="ib" onClick={() => model.toggleDates()} aria-label={face.datesLabel} title={face.datesLabel} style={{ width: 26, height: 26, color: 'var(--text-tertiary)' }}>
-            <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-              <path d={face.anyDateOpen ? 'M4.5 6.5L8 3l3.5 3.5M4.5 9.5L8 13l3.5-3.5' : 'M4.5 3.5L8 7l3.5-3.5M4.5 12.5L8 9l3.5 3.5'} />
-            </svg>
+            <Icon name={face.anyDateOpen ? 'collapseAll' : 'expandAll'} size={13} />
           </button>
         </div>
         {face.open ? (
           <label className="ap-search" style={{ margin: '4px 4px 2px', display: 'flex', alignItems: 'center', gap: 8, height: 28, padding: '0 8px', border: '1px solid var(--line-border)', borderRadius: 'var(--radius-control)', color: 'var(--text-tertiary)' }}>
-            <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-              <circle cx="7" cy="7" r="4.25" />
-              <path d="M10.2 10.2L13.5 13.5" />
-            </svg>
+            <Icon name="search" size={13} />
             <input
               ref={search}
               type="search"
@@ -186,9 +162,7 @@ export function SessionList({ model }: { readonly model: SessionLibraryViewModel
                 onClick={() => model.showPrivate()}
                 style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, height: 28, padding: '0 8px 0 24px', border: 0, borderRadius: 'var(--radius-row)', background: face.privateRow.current ? 'var(--surface-selection)' : undefined, color: 'var(--text-primary)', fontSize: 'var(--t-dense)', textAlign: 'left' }}
               >
-                <svg className="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" style={{ color: 'var(--text-tertiary)' }}>
-                  {eye}
-                </svg>
+                <Icon name="private" size={12} style={{ color: 'var(--text-tertiary)' }} />
                 <span style={{ flex: '1 1 auto' }}>Private session</span>
                 <span className="mono" style={{ fontSize: 'var(--t-meta)', color: 'var(--text-tertiary)' }}>
                   deleted on close

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { useObserved } from '../../styles/Observation/useObserved'
 import type { ConsoleLineKind, ConsoleViewModel } from '../ViewModels/ConsoleViewModel'
+import { Icon } from '../../styles/Components/Icon'
 
 /** Each line's color, as the old prototype's `conColor` draws it. */
 const colors: Readonly<Record<ConsoleLineKind, string>> = {
@@ -68,9 +69,7 @@ export function ConsoleView({ model, close }: { readonly model: ConsoleViewModel
           Clear
         </button>
         <button type="button" className="ib" onClick={close} aria-label="Close the console">
-          <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
-          </svg>
+          <Icon name="close" size={13} />
         </button>
       </div>
       <div role="log" aria-label="Console output" className="mono" style={{ flex: '1 1 auto', minHeight: 240, overflow: 'auto', padding: '12px 18px', fontSize: 'var(--t-meta)', lineHeight: 1.6 }}>

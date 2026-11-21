@@ -6,20 +6,17 @@ import { InputBar } from './InputBar'
 import { EmptySessionView, kindColor, MeterView, ModelGlyph, ModelTag } from './SessionExtras'
 import { TranscriptRow } from './TranscriptRow'
 import type { RowActs } from './TranscriptRow'
+import { Icon } from '../../styles/Components/Icon'
 
 const check = (
-  <svg className="i" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-    <path d="M3.5 8.5l3 3 6-7" />
-  </svg>
+  <Icon name="check" size={13} />
 )
 const chevron = (
-  <svg className="i" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" style={{ color: 'var(--text-tertiary)' }}>
-    <path d="M4.5 6.5L8 10l3.5-3.5" />
-  </svg>
+  <Icon name="chevronDown" size={12} style={{ color: 'var(--text-tertiary)' }} />
 )
 
 /** The model menu (`main.html:192-212` at `b375fac9`): the chat backends `models list` names, by kind, each with the CLI's own words, then Models library…. */
-function ModelMenu({ model }: { readonly model: SessionViewModel }) {
+export function ModelMenu({ model }: { readonly model: SessionViewModel }) {
   return (
     <div className="menu" role="menu" aria-label="Switch model" style={{ position: 'absolute', top: 38, right: 0, zIndex: 40, width: 340 }}>
       <div style={{ padding: 6, maxHeight: 440, overflowY: 'auto' }}>
@@ -131,11 +128,7 @@ function Header({ model, face }: { readonly model: SessionViewModel; readonly fa
       <div style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
         {face.privateBadge ? (
           <span className="mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 20, padding: '0 7px', border: '1px solid var(--line-strong)', borderRadius: 4, fontSize: 'var(--t-tag)', fontWeight: 600, letterSpacing: '.08em', color: 'var(--text-secondary)' }}>
-            <svg className="i" width="11" height="11" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M2 8s2.2-4 6-4c1 0 1.9.3 2.7.7M14 8s-2.2 4-6 4c-1 0-1.9-.3-2.7-.7" />
-              <path d="M6.6 9.4a2 2 0 0 1 2.8-2.8" />
-              <path d="M3 13L13 3" />
-            </svg>
+            <Icon name="private" size={11} />
             PRIVATE
           </span>
         ) : null}
@@ -206,10 +199,7 @@ function Header({ model, face }: { readonly model: SessionViewModel; readonly fa
         title="Inspector ⌥⌘I"
         style={{ background: face.inspectorOpen ? 'var(--surface-control)' : undefined, color: 'var(--text-primary)' }}
       >
-        <svg className="i" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-          <rect x="2" y="3" width="12" height="10" rx="2" />
-          <path d="M10 3v10" />
-        </svg>
+        <Icon name="inspector" size={16} />
       </button>
     </header>
   )
