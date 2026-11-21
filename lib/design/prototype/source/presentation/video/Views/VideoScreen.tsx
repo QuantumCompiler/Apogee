@@ -65,11 +65,11 @@ export function VideoScreen({ model, compositions }: { readonly model: VideoView
   )
 }
 
-/** The compositions slot until 1l fills it: a plain placeholder, as the Mac's previews draw "The compositions". */
+/** The compositions slot in Video's own previews, which may not import `compose`: a plain placeholder, as the Mac's previews draw "The compositions". The app root fills the slot with the compose module's view (1l). */
 export function CompositionsPlaceholder() {
   return (
     <div style={{ flex: '1 1 0', minHeight: 0, display: 'grid', placeItems: 'center', padding: 24, color: 'var(--text-tertiary)', fontSize: 'var(--t-small)' }}>
-      <p style={{ margin: 0 }}>The compositions. Design item 1l draws them here.</p>
+      <p style={{ margin: 0 }}>The compositions. The app draws them here.</p>
     </div>
   )
 }

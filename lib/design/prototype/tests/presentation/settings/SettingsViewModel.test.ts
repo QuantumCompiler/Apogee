@@ -9,6 +9,7 @@ import { chord, KeyMap } from '../../../source/presentation/shell/ViewModels/Key
 import type { BoundKey } from '../../../source/presentation/shell/ViewModels/KeyMap'
 import { SessionKeys } from '../../../source/presentation/sessions/ViewModels/SessionKeys'
 import { ThemeService } from '../../../source/presentation/styles/Appearance/ThemeService'
+import { MediaPreferences } from '../../../source/presentation/styles/Media/MediaPreferences'
 import { frozenComponent } from '../styles/Frozen'
 import { settled, standIn } from './SettingsHarness'
 
@@ -143,6 +144,29 @@ describe('General', () => {
 })
 
 describe('Video & voice', () => {
+  test("the voice for new speech is the shared media preference (design 1l): Settings shows and changes the one Compose and Voice read", async () => {
+    const stand = standIn('default', { still: true }, 'installed')
+    const media = new MediaPreferences('bm_george')
+    const model = new SettingsViewModel(stand.reads, stand.jobs, new ThemeService(), () => bound, settingsPreferences, media)
+    expect(model.face().media.voice).toBe('bm_george')
+    model.setVoice('bf_emma')
+    expect(media.voice).toBe('bf_emma')
+    media.chooseVoice('am_adam')
+    expect(model.face().media.voice).toBe('am_adam')
+  })
+
+  test('Caption new compositions is the shared media preference too (design 1l, 2026-11-21): its toggle reaches the one handed in, and a change there is drawn here', async () => {
+    const stand = standIn('default', { still: true }, 'installed')
+    const media = new MediaPreferences('af_heart', true)
+    const model = new SettingsViewModel(stand.reads, stand.jobs, new ThemeService(), () => bound, settingsPreferences, media)
+    expect(model.face().media.captions).toBe(true)
+    model.toggleCaptions()
+    expect(media.captions).toBe(false)
+    expect(model.face().media.captions).toBe(false)
+    media.toggleCaptions()
+    expect(model.face().media.captions).toBe(true)
+  })
+
   test('the video pipelines and MLX video models the list names, the config\'s default chosen, and None; a pick runs config set-default-video', async () => {
     // The settings world's list names one: the MLX video set config get models.default_video names.
     const { model, said, child } = await settings()

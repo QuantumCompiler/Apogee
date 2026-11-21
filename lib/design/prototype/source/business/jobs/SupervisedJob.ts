@@ -5,6 +5,7 @@ import type { Continuation } from '../../infrastructure/process/AsyncStream'
 import { BoundedTail } from '../../infrastructure/process/BoundedTail'
 import { ChildExit } from '../../infrastructure/process/ChildExit'
 import type { CapturedRun, StandInChild } from '../../infrastructure/process/StandInChild'
+import type { FolderFile, FolderWrite } from '../../infrastructure/process/StandInFolders'
 import { LineFramer } from '../../infrastructure/process/LineFramer'
 import { ChildRegistry } from './ChildRegistry'
 
@@ -85,17 +86,29 @@ export class JobStarter implements JobStarting {
   startJob(_binary: string, args: readonly string[], streaming: boolean, _folder?: string): JobRunning {
     const answer = this.child.run('jobs', args)
     if (!answer.started) return SupervisedJob.notStarted(answer.reason)
-    const job = SupervisedJob.replay(answer.run, streaming, this.clock, answer.replay.exitAfter, answer.replay.busy, answer.replay.holdAt)
+    const folders = this.child.folders
+    const job = SupervisedJob.replay(answer.run, streaming, this.clock, answer.replay.exitAfter, answer.replay.busy, answer.replay.holdAt, {
+      writes: answer.replay.writes,
+      resumeFrom: answer.replay.resumeFrom,
+      write: (folder, file) => folders.write(folder, file),
+    })
     if (this.registry && !job.finished) {
       const registration = this.registry.register('job', ChildRegistry.label(args), () => job.stop(), args)
       job.onEnd(() => registration.leave())
     }
-    // Stopped before its end, what it was answered never finished: the stand-in hears so (design 1k), as a rule may wait on its success.
+    // Stopped before its end, what it was answered never finished: the stand-in hears so (design 1k), as a rule may wait on its success -- and where it last wrote, which the same command resumes from (1l).
     job.onEnd(() => {
-      if (job.interrupted) this.child.stopped('jobs', args)
+      if (job.interrupted) this.child.stopped('jobs', args, job.lastWrite)
     })
     return job
   }
+}
+
+/** The files a replayed job writes as it plays, and where they go (design 1l): its rule's `writes`, the folders' writer, and the write a resumed run goes on from. */
+export interface JobFiles {
+  readonly writes?: readonly FolderWrite[]
+  readonly write?: (folder: string, file: FolderFile) => void
+  readonly resumeFrom?: FolderWrite | undefined
 }
 
 /**
@@ -125,6 +138,14 @@ export class SupervisedJob implements JobRunning {
   private ending: JobEnd | undefined = undefined
   private leave: () => void = () => {}
   private ends: Array<() => void> = []
+  /** The files it writes as it plays, and where they go (design 1l). */
+  private readonly writes: readonly FolderWrite[]
+  private readonly write: (folder: string, file: FolderFile) => void
+  private written = 0
+  /** The last file it wrote: what its Stop leaves, and where the same command resumes (design 1l). */
+  lastWrite: FolderWrite | undefined = undefined
+  /** Resumed: once its first line has played, on from this write's line, its file written again first. */
+  private resumeFrom: FolderWrite | undefined
 
   private constructor(
     private readonly run: CapturedRun | undefined,
@@ -132,7 +153,11 @@ export class SupervisedJob implements JobRunning {
     exitAfter = 0,
     busy = false,
     holdAt?: number,
+    files: JobFiles = {},
   ) {
+    this.writes = files.writes ?? []
+    this.write = files.write ?? (() => {})
+    this.resumeFrom = files.resumeFrom
     this.held = exitAfter
     this.busyLines = run && busy ? LineFramer.lines(run.stderrTail.text) : []
     const { stream, continuation } = AsyncStream.make<JobUpdate>()
@@ -150,8 +175,10 @@ export class SupervisedJob implements JobRunning {
   }
 
   /** `run`, replayed on `clock`; in a still frame, as many ticks in as the frame, however late it opened. With `busy`, its stderr first, a busy line a tick (design 1j); with `holdAt`, its `exitAfter` ticks waited after that many lines (design 1k). */
-  static replay(run: CapturedRun, streaming: boolean, clock: Clock, exitAfter = 0, busy = false, holdAt?: number): SupervisedJob {
-    const job = new SupervisedJob(run, streaming, exitAfter, busy, holdAt)
+  static replay(run: CapturedRun, streaming: boolean, clock: Clock, exitAfter = 0, busy = false, holdAt?: number, files: JobFiles = {}): SupervisedJob {
+    const job = new SupervisedJob(run, streaming, exitAfter, busy, holdAt, files)
+    // What it has written before its first line (design 1l: the composer's project, beside the video from Render on), there as it starts -- never on a resume, whose own write comes after its first line.
+    if (files.resumeFrom === undefined) job.writeThrough()
     job.leave = clock.onTick(() => job.step(clock.linesPerTick))
     // After `leave` is set, so a recording shorter than the frame's ticks ends, and leaves, once.
     for (let tick = 0; tick < clock.missedTicks && !job.continuation.finished; tick += 1) job.step(clock.linesPerTick)
@@ -176,6 +203,9 @@ export class SupervisedJob implements JobRunning {
 
   async stop(_grace?: number): Promise<void> {
     if (this.continuation.finished) return
+    // What a stop leaves where it last wrote: the composer's project saved cancelled, its finished scenes kept (design 1l).
+    const last = this.lastWrite
+    if (last?.stopped !== undefined) this.write(last.folder, last.stopped)
     this.end(JobEnd.of(ChildExit.exited(130), new BoundedTail(), true))
   }
 
@@ -199,6 +229,31 @@ export class SupervisedJob implements JobRunning {
       this.continuation.yield(this.streaming ? JobUpdate.event(JobEvent.decode(line)) : JobUpdate.said(line))
     }
     this.next = stop
+    this.writeThrough()
+  }
+
+  /**
+   * The files due once `next` lines have played, each once, in order (design
+   * 1l) -- a write after no line as the job starts. Resumed, once its first line has played it goes on from the write
+   * its Stop left -- that file written again, as the composer saves its
+   * project `rendering` again before it resumes -- every write up to it done.
+   */
+  private writeThrough(): void {
+    const resume = this.resumeFrom
+    if (resume !== undefined && this.next >= 1) {
+      this.resumeFrom = undefined
+      this.next = Math.max(this.next, resume.after)
+      this.written = this.writes.indexOf(resume) + 1
+      this.lastWrite = resume
+      this.write(resume.folder, resume.file)
+    }
+    while (this.written < this.writes.length && (this.writes[this.written]?.after ?? Infinity) <= this.next) {
+      const due = this.writes[this.written]
+      this.written += 1
+      if (due === undefined) continue
+      this.lastWrite = due
+      this.write(due.folder, due.file)
+    }
   }
 
   private end(end: JobEnd): void {

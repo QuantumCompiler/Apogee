@@ -53,6 +53,13 @@ export interface JobReady {
   readonly mode: string | undefined
 }
 
+/** A composition's scene and what it is doing, as its `scene` event said it: `speaking`, `rendering` or `asset` (design 1l). */
+export interface JobScene {
+  readonly scene: number
+  readonly scenes: number
+  readonly state: string
+}
+
 /** The frames a clip's driver wrote (design 1k). */
 export interface JobFrames {
   readonly frames: number
@@ -80,8 +87,8 @@ export interface JobBytes {
  * latest iteration and a cycle pass's narration -- a pure reducer, so a
  * screen's whole view of a run is a function of what the run said. A clip's
  * media events (design 1k): the runtime that loaded, the denoising step, the
- * frames written and their assembly; a speech's segments and a
- * composition's scenes are 1m's and 1l's.
+ * frames written and their assembly; a composition's scenes and a
+ * speech's segments (design 1l).
  */
 export class JobProgress {
   status: JobStatus = { case: 'running' }
@@ -115,6 +122,9 @@ export class JobProgress {
   step: JobCount | undefined = undefined
   frames: JobFrames | undefined = undefined
   assembling: number | undefined = undefined
+  /** A composition's scene and what it is doing, and its speech's latest segment (design 1l, the Mac's). */
+  scene: JobScene | undefined = undefined
+  segment: JobCount | undefined = undefined
 
   apply(update: JobUpdate): void {
     switch (update.case) {
@@ -184,6 +194,14 @@ export class JobProgress {
         return
       case 'assembling':
         this.assembling = event.frames
+        return
+      case 'segment':
+        this.segment = { done: event.index, of: event.of }
+        return
+      case 'scene':
+        // A scene begun: the last one's step is no longer this one's (the Mac's).
+        this.scene = { scene: event.scene, scenes: event.scenes, state: event.state }
+        this.step = undefined
         return
       case 'notice':
         this.notices.push(event.text)

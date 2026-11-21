@@ -215,13 +215,15 @@ export const MediaLibrary = {
   /**
    * A name for `base`.`ext` among `taken` (the folder's file names) that
    * names nothing yet: a taken name gets a number (`lighthouse-2.mp4`) --
-   * nothing is ever written over, a clip's record taking its name too.
+   * nothing is ever written over, a clip's record taking its name too, and
+   * any file of the extensions `besides` kept beside it.
    */
-  freeName(taken: readonly string[], base: string, ext: string): string {
+  freeName(taken: readonly string[], base: string, ext: string, besides: readonly string[] = []): string {
     const clean = base.replaceAll('/', '-').trim()
     const stem = clean === '' ? 'untitled' : clean
     const names = new Set(taken)
-    const free = (name: string) => !names.has(`${name}.${ext}`) && !names.has(`${name}.${ext}.json`)
+    // Free of a file kept beside it too: a composition's `.srt` while it has captions (the Mac's `freePath(besides:)`, design 1l).
+    const free = (name: string) => !names.has(`${name}.${ext}`) && !names.has(`${name}.${ext}.json`) && besides.every((other) => !names.has(`${name}.${other}`))
     let name = stem
     let n = 2
     while (!free(name)) {

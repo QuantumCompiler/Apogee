@@ -13,6 +13,7 @@ import { ReadOutcome } from '../../../business/reads/ReadRunner'
 import { keyboardLines, KeyMap } from '../../shell/ViewModels/KeyMap'
 import type { BoundKey, KeyReference } from '../../shell/ViewModels/KeyMap'
 import type { ThemeService } from '../../styles/Appearance/ThemeService'
+import { MediaPreferences } from '../../styles/Media/MediaPreferences'
 import { Observable } from '../../styles/Observation/Observable'
 import { ThemeSettings } from './ThemeSettings'
 import type { AppearanceFace, Choice } from './ThemeSettings'
@@ -60,6 +61,9 @@ export interface AllowedEntry {
  * saved), and its Settings draws none of the others -- they are the old
  * prototype's, kept because it is the source of truth (1i). Nothing persists
  * across a reload (1i's default), so these are the start, changed in memory.
+ * The voice and captions are the start of the shared `MediaPreferences`
+ * since Compose read them too (1l): the window shows and changes that
+ * service, not these fields.
  */
 export interface SettingsPreferences {
   readonly thinking: 'off' | 'on' | 'auto'
@@ -298,9 +302,12 @@ export class SettingsViewModel extends Observable {
     /** Every key the window binds, the shell's and the places': what Keyboard lists. */
     private readonly keys: () => readonly BoundKey[],
     preferences: SettingsPreferences,
+    /** The voice new speech and compositions start from, and whether new compositions are captioned, shared with Compose and Voice (design 1l): the composition root's, else one of its own from `preferences.voice` and `.captions`. */
+    private readonly media: MediaPreferences = new MediaPreferences(preferences.voice, preferences.captions),
   ) {
     super()
     this.preferences = preferences
+    this.media.subscribe(() => this.changed())
     this.binaryOverride = preferences.binaryOverride
     this.theme = new ThemeSettings(themeService)
     this.xcode = new XcodeSettings(runner)
@@ -497,11 +504,12 @@ export class SettingsViewModel extends Observable {
   }
 
   setVoice(voice: string): void {
-    this.prefer({ voice })
+    this.media.chooseVoice(voice)
   }
 
+  /** Caption new compositions: the shared preference a fresh composition starts from (design 1l). */
   toggleCaptions(): void {
-    this.prefer({ captions: !this.preferences.captions })
+    this.media.toggleCaptions()
   }
 
   /** Save to's Change…: a page opens no folder picker, said as the old pane says it. */
@@ -790,9 +798,9 @@ export class SettingsViewModel extends Observable {
       media: {
         video: this.videoFace(),
         voiceModel: this.voiceModels().length ? this.voiceModels().join(', ') : 'none in the library',
-        voice: this.preferences.voice,
-        voices: (this.voices.includes(this.preferences.voice) || this.voices.length === 0 ? this.voices : [this.preferences.voice, ...this.voices]).map((voice) => ({ value: voice, label: voice === defaultVoice ? `${voice} · default` : voice })),
-        captions: this.preferences.captions,
+        voice: this.media.voice,
+        voices: (this.voices.includes(this.media.voice) || this.voices.length === 0 ? this.voices : [this.media.voice, ...this.voices]).map((voice) => ({ value: voice, label: voice === defaultVoice ? `${voice} · default` : voice })),
+        captions: this.media.captions,
         captionsNote: report?.rows.find((row) => row.section === 'Video' && row.name === 'ffmpeg captions')?.detail ?? '',
         saveTo: [`video · ${this.preferences.saveTo.video}`, `speech · ${this.preferences.saveTo.speech}`],
         runtimes: runtimes.map((row) => ({ name: runtimeName(row), status: runtimeStatus(row), color: statusColor(row.status) })),

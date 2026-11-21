@@ -1,3 +1,4 @@
+import { ComposeView } from '../../compose/Views/ComposeView'
 import { StrictMode, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ConsoleView } from '../../console/Views/ConsoleView'
@@ -27,7 +28,7 @@ import { PlaceholderScreen } from '../../shell/Views/PlaceholderScreen'
 import { ShellView } from '../../shell/Views/ShellView'
 import { InstallConsentSheet } from '../../styles/Components/InstallConsentSheet'
 import { useObserved } from '../../styles/Observation/useObserved'
-import { CompositionsPlaceholder, VideoScreen } from '../../video/Views/VideoScreen'
+import { VideoScreen } from '../../video/Views/VideoScreen'
 import '../../styles/Stylesheet'
 import { modeRules } from '../Previews/ModeRules'
 import { presetFor } from '../Previews/Presets'
@@ -51,8 +52,8 @@ const settingsConfirms: readonly string[] = ['settingsForget', 'xcodeRemove'] sa
  * Settings (1i) is its window, the Models place's roles in its Models &
  * roles slot, with its Register… sheet and its two confirms; Training (1j)
  * is its screen, with the promote and pull sheets, the five train confirms
- * and a refused promote's; Video (1k) is its screen, its compositions slot a
- * plain placeholder until 1l, with the install consent sheet.
+ * and a refused promote's; Video (1k) is its screen, with the install
+ * consent sheet, its compositions slot the compose module's view (1l).
  * It starts the app once it is on screen.
  */
 export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
@@ -63,6 +64,7 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
   useObserved(model.models)
   useObserved(model.training)
   useObserved(model.video)
+  useObserved(model.compose)
   useEffect(() => {
     void model.start()
     return () => model.stop()
@@ -73,6 +75,7 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
   const models = model.models
   const training = model.training
   const video = model.video
+  const compose = model.compose
   return (
     <ShellView
       model={shell}
@@ -85,8 +88,8 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
         if (destination === 'sessions') return <SessionsScreen model={library} />
         if (destination === 'models') return <ModelsScreen model={models} />
         if (destination === 'training') return <TrainingScreen model={training} />
-        // Video (1k), its compositions slot filled with a plain placeholder until 1l lands.
-        if (destination === 'video') return <VideoScreen model={video} compositions={() => <CompositionsPlaceholder />} />
+        // Video (1k), its compositions slot filled with the compose module's view (1l), so neither imports the other.
+        if (destination === 'video') return <VideoScreen model={video} compositions={() => <ComposeView model={compose} />} />
         const placeholder = placeholderOf(destination)
         return placeholder ? <PlaceholderScreen placeholder={placeholder} /> : null
       }}

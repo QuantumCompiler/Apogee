@@ -302,3 +302,98 @@ describe("a run that speaks on stderr: its busy line, one a tick (design 1j's `b
     expect(said(job).map((update) => update.case)).toEqual(['ended'])
   })
 })
+
+describe("a job that writes a folder's file as it runs, and is resumed by the same command (design 1l's `writes`)", () => {
+  const folder = '/Users/someone/Movies/Apogee'
+  const saved = (made: number, status = 'rendering') => ({ name: 'tides.mp4.json', text: `{"object":"video.project","output":"${folder}/tides.mp4","status":"${status}","made":${made}}` })
+  const render: Rules = {
+    jobs: [
+      {
+        arguments: ['video', 'compose', '-o', `${folder}/tides.mp4`],
+        answer: {
+          stdout: 'job\nscene 1\nstep 1\nscene 2\nstep 2\ndone\n',
+          writes: [
+            { after: 1, folder, file: saved(0), stopped: saved(0, 'cancelled') },
+            { after: 3, folder, file: saved(1), stopped: saved(1, 'cancelled') },
+            { after: 5, folder, file: saved(2), stopped: saved(2, 'cancelled') },
+            { after: 6, folder, file: saved(2, 'done') },
+          ],
+        },
+      },
+    ],
+  }
+  const args = ['video', 'compose', '-o', `${folder}/tides.mp4`]
+  const lines = (job: JobRunning) => said(job).flatMap((update) => (update.case === 'said' ? [update.line] : []))
+  const project = (child: StandInChild) => child.folders.files(folder).find((file) => file.name === 'tides.mp4.json')?.text ?? 'none'
+
+  test('each file is written once its line has played -- the project the composer saves after every step -- and the last, done, before its end', async () => {
+    const { jobs, clock, child } = starter(render)
+    const job = jobs.startJob(binary, args, false)
+    expect(project(child)).toBe('none')
+    clock.advance(1)
+    expect(project(child)).toContain('"status":"rendering","made":0')
+    clock.advance(2)
+    expect(project(child)).toContain('"made":1')
+    clock.advance(3)
+    expect(project(child)).toContain('"status":"done","made":2')
+    clock.advance(1)
+    expect(said(job).at(-1)?.case).toBe('ended')
+  })
+
+  test('Stop writes what its last write says a stop leaves -- the project cancelled, its finished scenes kept -- and the same command resumes from that write, its first line then the rest', async () => {
+    const { jobs, clock, child } = starter(render)
+    const job = jobs.startJob(binary, args, false)
+    clock.advance(4)
+    await job.stop()
+    expect(project(child)).toContain('"status":"cancelled","made":1')
+    const resumed = jobs.startJob(binary, args, false)
+    clock.advance(1)
+    expect(lines(resumed)).toEqual(['job'])
+    expect(project(child)).toContain('"status":"rendering","made":1')
+    clock.advance(3)
+    expect(lines(resumed)).toEqual(['job', 'scene 2', 'step 2', 'done'])
+    expect(project(child)).toContain('"status":"done","made":2')
+  })
+
+  test('a job stopped before its first write leaves the folder as it was and resumes nothing; one that ends of itself leaves nothing to resume', async () => {
+    const { jobs, clock, child } = starter(render)
+    await jobs.startJob(binary, args, false).stop()
+    expect(project(child)).toBe('none')
+    const whole = jobs.startJob(binary, args, false)
+    clock.advance(7)
+    expect(said(whole).at(-1)?.case).toBe('ended')
+    const again = jobs.startJob(binary, args, false)
+    clock.advance(2)
+    expect(lines(again)).toEqual(['job', 'scene 1'])
+  })
+
+  test('a write after no line is there as the job starts -- what the composer has beside the video before its first line -- so a Stop at once leaves its stopped twin, and a resume is never written over by it', async () => {
+    const early: Rules = { jobs: [{ arguments: args, answer: { stdout: 'job\nscene 1\nstep 1\ndone\n', writes: [{ after: 0, folder, file: saved(0), stopped: saved(0, 'cancelled') }, { after: 3, folder, file: saved(1), stopped: saved(1, 'cancelled') }, { after: 4, folder, file: saved(1, 'done') }] } }] }
+    const { jobs, clock, child } = starter(early)
+    const job = jobs.startJob(binary, args, false)
+    expect(project(child)).toContain('"status":"rendering","made":0')
+    await job.stop()
+    expect(project(child)).toContain('"status":"cancelled","made":0')
+    jobs.startJob(binary, args, false)
+    expect(project(child)).toContain('"status":"cancelled","made":0')
+    clock.advance(1)
+    expect(project(child)).toContain('"status":"rendering","made":0')
+    clock.advance(3)
+    expect(project(child)).toContain('"status":"done","made":1')
+    // Stopped after a later write, the resume starts without the first write laid over it.
+    const { jobs: later, clock: laterClock, child: laterChild } = starter(early)
+    const first = later.startJob(binary, args, false)
+    laterClock.advance(3)
+    await first.stop()
+    later.startJob(binary, args, false)
+    expect(project(laterChild)).toContain('"status":"cancelled","made":1')
+  })
+
+  test('the folders start as the preset says, and a write replaces the file of its name', () => {
+    const child = new StandInChild({ rules: render, apogee: 'installed', folders: { [folder]: [{ name: 'tides.mp4' }, saved(7, 'planned')] } }, { configTypoRefusal: agentsListBadConfig })
+    expect(child.folders.files(folder).map((file) => file.name)).toEqual(['tides.mp4', 'tides.mp4.json'])
+    child.folders.write(folder, saved(0))
+    expect(child.folders.files(folder).map((file) => file.text ?? file.name)).toEqual(['tides.mp4', saved(0).text])
+    expect(child.folders.files('/elsewhere')).toEqual([])
+  })
+})

@@ -1,4 +1,5 @@
 import type { Preset } from '../../../infrastructure/process/Preset'
+import { composeFiles, composePlaceRules, tidesFiles, withComposeFiles } from '../../compose/Previews/ComposeWorlds'
 import { consoleRules } from '../../console/Previews/ConsolePreset'
 import { modelsPlaceRules, withModelsWorld } from '../../models/Previews/ModelsWorlds'
 import type { ModelsWorld } from '../../models/Previews/ModelsWorlds'
@@ -100,7 +101,23 @@ function trainingPreset(sub: string, world: TrainingWorld, start = 1): (options:
  * (three lines), `video:install`'s install four ticks in.
  */
 function videoPreset(route: string, start = 1): (options: PresetOptions) => Preset {
-  return ({ still, apogee }) => ({ rules: withVideoWorld(streamingRules('start')), route, clock: { start, still }, apogee, folders: videoFolders() })
+  // Its compositions beside its clips (1l), so the Compositions tab counts them, as the old tab says 4.
+  return ({ still, apogee }) => ({ rules: withVideoWorld(streamingRules('start')), route, clock: { start, still }, apogee, folders: withComposeFiles(videoFolders()) })
+}
+
+/**
+ * A Compose preset (design 1l): Video's Compositions tab over the video
+ * world, the Streaming session at its starting frame behind it, as the Video
+ * presets keep it (composed here, since neither `compose` nor `video` may
+ * import `session`), and `~/Movies/Apogee`'s clips and compositions --
+ * with the recorded Tides, made, where an edit of it is previewed
+ * (`compose:edit`) or rendered (`compose:differs`). `start` is how many
+ * ticks in a still frame stands: `compose:edit`'s preview landed (4),
+ * `compose:new`'s plan (its stream's ten lines and its end),
+ * `compose:differs`' preview and then its render (19 lines and its end).
+ */
+function composePreset(route: string, start = 1, tides = false): (options: PresetOptions) => Preset {
+  return ({ still, apogee }) => ({ rules: withVideoWorld(streamingRules('start')), route, clock: { start, still }, apogee, folders: withComposeFiles(videoFolders(), tides ? [...composeFiles(), ...tidesFiles()] : composeFiles()) })
 }
 
 /**
@@ -127,10 +144,12 @@ function listing(build: (options: PresetOptions) => Preset): (options: PresetOpt
 
 /**
  * A preset with the Models place's reads (design 1h), the Settings window's
- * (design 1i), the Training place's (design 1j) and the Video place's
- * (design 1k: its runs, the install and `~/Movies/Apogee`'s records, unless
- * the preset names its own folders) before its own, so a preset's own answer
- * to the same arguments is the one given: all four open from every screen.
+ * (design 1i), the Training place's (design 1j), the Video place's (design
+ * 1k: its runs, the install and `~/Movies/Apogee`'s records, unless the
+ * preset names its own folders) and the compositions' (design 1l: their
+ * plan, renders and preview, and the old four projects beside the clips)
+ * before its own, so a preset's own answer to the same arguments is the one
+ * given: all five open from every screen.
  */
 function modelling(build: (options: PresetOptions) => Preset): (options: PresetOptions) => Preset {
   return consoling((options) => {
@@ -139,14 +158,15 @@ function modelling(build: (options: PresetOptions) => Preset): (options: PresetO
     const settings = settingsPlaceRules()
     const training = trainingPlaceRules()
     const video = videoPlaceRules()
+    const compose = composePlaceRules()
     return {
       ...preset,
-      folders: preset.folders ?? videoFolders(),
+      folders: preset.folders ?? withComposeFiles(videoFolders()),
       rules: {
         ...preset.rules,
         reads: [...(models.reads ?? []), ...settings.reads, ...(training.reads ?? []), ...video.reads, ...(preset.rules.reads ?? [])],
         commands: [...(models.commands ?? []), ...settings.commands, ...(training.commands ?? []), ...video.commands, ...(preset.rules.commands ?? [])],
-        jobs: [...settings.jobs, ...(training.jobs ?? []), ...video.jobs, ...(preset.rules.jobs ?? [])],
+        jobs: [...settings.jobs, ...(training.jobs ?? []), ...video.jobs, ...compose.jobs, ...(preset.rules.jobs ?? [])],
       },
     }
   })
@@ -160,8 +180,9 @@ function modelling(build: (options: PresetOptions) => Preset): (options: PresetO
  * `execute` and `console`; 1h's the nine Models presets; 1i's the old nine
  * Settings presets in the old order and its four new ones, one a pane that
  * had none; 1j's the old nine Training presets in the old order and its new
- * `training:regimes`; 1k's the four Video presets in the old order; each
- * feature item adds its own here. Every one
+ * `training:regimes`; 1k's the four Video presets in the old order; 1l's
+ * the five Compose presets in the old order, `compose:differs` among them;
+ * each feature item adds its own here. Every one
  * carries the Sessions place's reads, since the list shows on every screen
  * (`execute`'s own), and the console's answers, since it opens over every one.
  */
@@ -218,6 +239,11 @@ export const presets: Readonly<Record<string, (options: PresetOptions) => Preset
   'video:run': listing(videoPreset('video:run', 43)),
   'video:install': listing(videoPreset('video:install', 4)),
   consent: listing(videoPreset('consent', 4)),
+  compose: listing(composePreset('compose')),
+  'compose:edit': listing(composePreset('compose:edit', 5, true)),
+  'compose:new': listing(composePreset('compose:new', 12)),
+  'compose:tide': listing(composePreset('compose:tide')),
+  'compose:differs': listing(composePreset('compose:differs', 30, true)),
 }
 
 /** The preset opened with no `start`, or an unknown one: `chat`, the old `data-props` default (1v; 1e's interim default was the monitor). */

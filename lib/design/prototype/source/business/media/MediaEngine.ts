@@ -21,6 +21,13 @@ export const MediaEngine = {
     if (format === 'mlx' && kind === 'video') return 'mlx'
     return undefined
   },
+
+  /** The engine a store's voice model runs on (the CLI's 53m): a `voice` directory on PyTorch, an MLX directory of kind `voice` on MLX; `undefined` for anything else (design 1l). */
+  voice(format: string | undefined, kind: string | undefined): MediaEngine | undefined {
+    if (format === 'voice') return 'torch'
+    if (format === 'mlx' && kind === 'voice') return 'mlx'
+    return undefined
+  },
 }
 
 /** One of the store's video models: its store handle, the engine its directory runs on, and its bytes where the list says. */
@@ -29,6 +36,19 @@ export interface MediaModel {
   readonly handle: string
   readonly engine: MediaEngine
   readonly bytes: number | undefined
+}
+
+/** The rows of `list` whose format and kind `engineOf` reads as an engine, as models. */
+function rowsOf(list: ReadDocument, engineOf: (format: string | undefined, kind: string | undefined) => MediaEngine | undefined): MediaModel[] {
+  const found: MediaModel[] = []
+  for (const entry of list.entries ?? []) {
+    const row = JSONValue.object(entry)
+    const handle = JSONValue.string(row?.model)
+    const engine = engineOf(JSONValue.string(row?.format), JSONValue.string(row?.kind))
+    if (handle === undefined || engine === undefined) continue
+    found.push({ handle, engine, bytes: JSONValue.int(row?.bytes) })
+  }
+  return found
 }
 
 function folderOf(model: MediaModel): string {
@@ -43,15 +63,17 @@ export const MediaModel = {
 
   /** The store's video models a `models list` document names, in the order a form offers them (`offered`). */
   videoModels(list: ReadDocument): MediaModel[] {
-    const found: MediaModel[] = []
-    for (const entry of list.entries ?? []) {
-      const row = JSONValue.object(entry)
-      const handle = JSONValue.string(row?.model)
-      const engine = MediaEngine.video(JSONValue.string(row?.format), JSONValue.string(row?.kind))
-      if (handle === undefined || engine === undefined) continue
-      found.push({ handle, engine, bytes: JSONValue.int(row?.bytes) })
-    }
-    return MediaModel.offered(found)
+    return MediaModel.offered(rowsOf(list, MediaEngine.video))
+  },
+
+  /**
+   * The store's voice models a `models list` document names, in the order the
+   * say form and the new composition offer them, PyTorch first (the Mac's
+   * `MediaModel.readVoiceModels`; design 1l): with two or more, the CLI asks
+   * which, so the form names one with `--voice-model`.
+   */
+  voiceModels(list: ReadDocument): MediaModel[] {
+    return MediaModel.offered(rowsOf(list, MediaEngine.voice))
   },
 
   /** Each folder where the store first lists it, and PyTorch before MLX within a folder: the CLI's `auto` picks neither, so PyTorch comes first (the GUI's 3b). */

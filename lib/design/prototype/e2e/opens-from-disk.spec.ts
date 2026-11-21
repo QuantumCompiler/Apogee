@@ -1100,3 +1100,118 @@ test("Settings' Install… on the video runtime's row opens the same consent she
   await expect(sheet).toHaveCount(0)
   expect(errors).toEqual([])
 })
+
+// The compositions (design 1l): each Compose preset at its frame, the tabs, and live from the file a plan, a render scene by scene, Stop and Resume, and an edit previewed and rendered as a new video.
+const compositions = (page: Page) => page.getByRole('navigation', { name: 'Compositions' })
+const composeFrames: Array<[string, (page: Page) => Promise<void>]> = [
+  ['compose', async (page) => {
+    await expect(page.getByRole('heading', { name: 'How a heat pump works', level: 2 })).toBeVisible()
+    await expect(page.getByText('0:09.6 / 0:33.5')).toBeVisible()
+    await expect(page.getByText('A heat pump gathers it with a refrigerant that runs colder than the air itself.').first()).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Make changes', level: 2 })).toBeVisible()
+    await expect(page.getByText('apogee video compose --from ~/Movies/Apogee/heat-pump.mp4 --dry-run -o ~/Movies/Apogee/heat-pump-edit.mp4')).toBeVisible()
+    await expect(compositions(page).getByText('stopped at scene 5 · resumable')).toBeVisible()
+    await expect(compositions(page).getByText('cut-short.mp4.json: not a JSON document')).toBeVisible()
+    await expect(page.getByRole('tab', { name: /^Compositions/ })).toContainText('4')
+  }],
+  ['compose:edit', async (page) => {
+    await expect(page.getByRole('heading', { name: 'Tides', level: 2 })).toBeVisible()
+    await expect(page.getByText('the edit: 2 scenes, were 2')).toBeVisible()
+    await expect(page.getByText('scene 2; its prompt changed')).toBeVisible()
+    await expect(page.getByText('Render plans the edit again with planner: what renders can differ from this preview, and the planner is called a second time.')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Render as a new video' })).toBeVisible()
+  }],
+  ['compose:new', async (page) => {
+    await expect(page.getByRole('heading', { name: 'New composition', level: 2 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Tides', level: 3 })).toBeVisible()
+    await expect(page.getByText('2 scenes · about 6 s of video')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Render the-tides-twice-a-day.mp4' })).toBeVisible()
+    await expect(page.locator('label', { hasText: 'Voice model' })).toBeVisible()
+    await expect(compositions(page).getByText('planned · nothing rendered')).toBeVisible()
+  }],
+  ['compose:tide', async (page) => {
+    await expect(page.getByRole('heading', { name: 'Tide pools for kids', level: 2 })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible()
+    await expect(page.getByText('4 of 7 made')).toBeVisible()
+    await expect(page.getByText('Stopped at scene 5’s clip. Every finished scene is kept, and resuming renders only what’s missing.', { exact: false })).toBeVisible()
+    await expect(page.getByText('Resume it first: a stopped composition picks up where it stopped, and then it can be changed.')).toBeVisible()
+  }],
+  ['compose:differs', async (page) => {
+    await expect(page.getByRole('heading', { name: 'Tides', level: 2 })).toBeVisible()
+    await expect(page.getByText('The render planned again, and its changes differ from the preview')).toBeVisible()
+    await expect(page.getByText('changed: narration')).toBeVisible()
+    await expect(page.getByRole('tab', { name: /^Compositions/ })).toContainText('6')
+  }],
+]
+
+for (const [preset, frame] of composeFrames) {
+  test(`${preset}: the compositions at their frame, still, their words visible, with no console error and no request but the file (design 1l)`, async ({ page }) => {
+    const { errors, requests } = watch(page)
+    await page.goto(`${built}?start=${preset}&still=true`)
+    await expect(page.getByRole('heading', { name: 'Video', level: 1 })).toBeVisible()
+    await expect(page.getByRole('tab', { name: /^Compositions/ })).toHaveAttribute('aria-selected', 'true')
+    await frame(page)
+    expect(errors).toEqual([])
+    expect(requests).toEqual([`${built}?start=${preset}&still=true`])
+  })
+}
+
+test('Video’s Clips and Compositions tabs switch between the two modules, each counted from its own records (design 1l)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=video&still=true`)
+  await expect(page.getByRole('tab', { name: /^Clips/ })).toContainText('5')
+  await expect(page.getByRole('tab', { name: /^Compositions/ })).toContainText('4')
+  await page.getByRole('tab', { name: /^Compositions/ }).click()
+  await expect(compositions(page).getByRole('button', { name: /How a heat pump works/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'New composition' })).toBeEnabled()
+  await page.getByRole('tab', { name: /^Clips/ }).click()
+  await expect(page.getByRole('navigation', { name: 'Clips' })).toBeVisible()
+  expect(errors).toEqual([])
+})
+
+test('live from the file: a new brief plans, its plan renders scene by scene, and the video is ready (design 1l)', async ({ page }) => {
+  test.setTimeout(120_000)
+  const { errors, requests } = watch(page)
+  await page.goto(`${built}?start=compose`)
+  await page.getByRole('button', { name: 'New composition' }).click()
+  await page.getByRole('button', { name: 'Plan', exact: true }).click()
+  await expect(page.getByText('planning the scenes with fastroot · one structured call, thinking off')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Tides', level: 3 })).toBeVisible({ timeout: 15_000 })
+  await expect(toast(page, 'Planned the-tides-twice-a-day.mp4: nothing is rendered yet')).toBeVisible()
+  await page.getByRole('button', { name: 'Render the-tides-twice-a-day.mp4' }).click()
+  await expect(page.getByText(/^speaking scene [12]$/)).toBeVisible({ timeout: 10_000 })
+  await expect(videoPlace(page).getByRole('button', { name: 'Video ⌘6 · 1 running', exact: true })).toBeVisible()
+  await expect(page.getByText(/^rendering scene 1 · step \d+ of 50$/)).toBeVisible({ timeout: 15_000 })
+  await expect(toast(page, 'the-tides-twice-a-day.mp4 is ready, its captions beside it as an .srt')).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText('0:00.0 / 0:05.5')).toBeVisible()
+  expect(errors).toEqual([])
+  expect(requests).toEqual([`${built}?start=compose`])
+})
+
+test('live from the file: the tide resumes, stops with its finished scenes kept, and resumes again to the end (design 1l)', async ({ page }) => {
+  test.setTimeout(120_000)
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=compose:tide`)
+  await page.getByRole('button', { name: 'Resume' }).click()
+  await expect(page.getByText(/^rendering scene 6 · step \d+ of 50$/)).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('button', { name: 'Stop', exact: true }).click()
+  await expect(page.getByText(/^Stopped at scene 6’s clip, step \d+ of 50\./)).toBeVisible()
+  await expect(page.getByText('5 of 7 made')).toBeVisible()
+  await page.getByRole('button', { name: 'Resume' }).click()
+  await expect(page.getByText(/^rendering scene 6 · step \d+ of 50$/)).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText('5 of 7 made · scene 6', { exact: false })).toBeVisible()
+  await expect(toast(page, 'tide-pools.mp4 is ready, its captions beside it as an .srt')).toBeVisible({ timeout: 30_000 })
+  expect(errors).toEqual([])
+})
+
+test('live from the file: an edit previews on paper and renders as a new video, the page saying its render came out otherwise (design 1l)', async ({ page }) => {
+  test.setTimeout(120_000)
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=compose:edit`)
+  await expect(page.getByText('scene 2; its prompt changed')).toBeVisible()
+  await page.getByRole('button', { name: 'Render as a new video' }).click()
+  await expect(compositions(page).getByRole('button', { name: /tides-edit\.mp4/ })).toBeVisible({ timeout: 10_000 })
+  await expect(toast(page, 'tides-edit.mp4 is ready, its captions beside it as an .srt')).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText('The render planned again, and its changes differ from the preview')).toBeVisible()
+  expect(errors).toEqual([])
+})

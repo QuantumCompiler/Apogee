@@ -13,6 +13,7 @@ import { installSheetWords } from '../../styles/Media/Install'
 import type { InstallCardFace } from '../../styles/Media/Install'
 import { phaseStatus } from '../../styles/Media/Phase'
 import { Playback } from '../../styles/Media/Playback'
+import { when } from '../../styles/Media/MediaWords'
 import { Observable } from '../../styles/Observation/Observable'
 import type { ClipAction, ClipFace, ClipRowFace, FormFace, RunFace, VideoFace, VideoTab } from './VideoFaces'
 import { VideoForm, framesOf, moviesFolder, secs, thisPlatform, tilde } from './VideoForm'
@@ -79,20 +80,6 @@ function took(seconds: number | undefined): string {
   const whole = Math.round(seconds)
   const minutes = Math.floor(whole / 60)
   return minutes > 0 ? `${minutes} min ${whole - minutes * 60} s` : `${whole} s`
-}
-
-const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-/** When a record was made, against the clock's now, in UTC as the stand-in's now is: `Today 12:58`, `Yesterday 18:20`, `Oct 16`. */
-function when(createdAt: string | undefined, now: Date): string {
-  const at = createdAt === undefined ? undefined : new Date(createdAt)
-  if (at === undefined || Number.isNaN(at.getTime())) return 'when it was made is not recorded'
-  const day = (date: Date) => Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
-  const time = `${String(at.getUTCHours()).padStart(2, '0')}:${String(at.getUTCMinutes()).padStart(2, '0')}`
-  const days = Math.round((day(now) - day(at)) / 86_400_000)
-  if (days === 0) return `Today ${time}`
-  if (days === 1) return `Yesterday ${time}`
-  return `${months[at.getUTCMonth()]} ${at.getUTCDate()}`
 }
 
 /** `-- prompt` moved last: the 52b stream asked for before `--`, as the Mac's `Argv.adding` puts it. */

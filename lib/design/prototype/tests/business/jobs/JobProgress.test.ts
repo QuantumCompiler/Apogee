@@ -140,4 +140,26 @@ describe("a job's progress, folded from what it said (the Mac's JobProgress)", (
     expect(done.documents).toHaveLength(1)
     expect(done.status).toEqual({ case: 'done' })
   })
+
+  test("a composition's scene and its speech (design 1l, the Mac's media parts): the scene and what it is doing, a new scene forgetting the last one's step, and the speech's segments", () => {
+    const lines = events(
+      [
+        '{"type":"job","verb":"video compose","protocol_version":1,"schema":"2026-11-01"}',
+        '{"type":"scene","scene":1,"scenes":2,"state":"speaking"}',
+        '{"type":"segment","index":1,"of":1,"seconds":1.42,"scene":1}',
+        '{"type":"scene","scene":1,"scenes":2,"state":"rendering"}',
+        '{"type":"step","step":25,"steps":50,"scene":1}',
+        '{"type":"scene","scene":2,"scenes":2,"state":"asset"}',
+      ].join('\n'),
+    )
+    const speaking = folded(lines.slice(0, 3))
+    expect(speaking.scene).toEqual({ scene: 1, scenes: 2, state: 'speaking' })
+    expect(speaking.segment).toEqual({ done: 1, of: 1 })
+    const rendering = folded(lines.slice(0, 5))
+    expect(rendering.scene).toEqual({ scene: 1, scenes: 2, state: 'rendering' })
+    expect(rendering.step).toEqual({ done: 25, of: 50 })
+    const next = folded(lines)
+    expect(next.scene).toEqual({ scene: 2, scenes: 2, state: 'asset' })
+    expect(next.step).toBeUndefined()
+  })
 })

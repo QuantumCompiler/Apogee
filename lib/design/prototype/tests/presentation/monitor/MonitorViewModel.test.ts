@@ -249,4 +249,19 @@ describe('a clip being made, on the monitor (design 1k): the shared job list’s
     model.act(rows.at(-2) ?? rows[0]!)
     expect(stopped).toEqual([7])
   })
+
+  test('a run that opens its place (a composition rendering, design 1l, the old crender row): Open, which opens it and never stops it', async () => {
+    const { model } = monitor()
+    const stopped: number[] = []
+    const opened: number[] = []
+    model.running = () => [{ id: 9, name: 'tide-pools.mp4 · rendering', opens: true }]
+    model.stopRun = (id) => stopped.push(id)
+    model.openRun = (id) => opened.push(id)
+    model.opened()
+    await settled()
+    const row = model.face().models.rows.at(-1)!
+    expect(row).toEqual({ name: 'tide-pools.mp4 · rendering', detail: 'a video run this app supervises · the CLI reports no size for it', size: '', action: 'Open', run: 9, opens: true })
+    model.act(row)
+    expect([opened, stopped]).toEqual([[9], []])
+  })
 })

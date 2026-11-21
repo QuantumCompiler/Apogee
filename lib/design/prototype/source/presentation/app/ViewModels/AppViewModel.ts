@@ -7,8 +7,9 @@ import { Clock } from '../../../infrastructure/clock/Clock'
 import type { Timers } from '../../../infrastructure/clock/Clock'
 import type { Preset } from '../../../infrastructure/process/Preset'
 import { StandInChild } from '../../../infrastructure/process/StandInChild'
-import { StandInFolders } from '../../../infrastructure/process/StandInFolders'
 import type { ModeRules, Rules } from '../../../infrastructure/process/StandInChild'
+import { heatPumpFrame, moviesFolder, passedOver, projects, recordedBrief, recordedEdit } from '../../compose/Previews/ComposeWorlds'
+import { ComposeViewModel } from '../../compose/ViewModels/ComposeViewModel'
 import { ConsoleViewModel } from '../../console/ViewModels/ConsoleViewModel'
 import { handles } from '../../models/Previews/ModelsWorlds'
 import { ModelsViewModel } from '../../models/ViewModels/ModelsViewModel'
@@ -33,6 +34,7 @@ import type { Destination } from '../../shell/ViewModels/Destination'
 import { ShellViewModel } from '../../shell/ViewModels/ShellViewModel'
 import type { SystemStrip } from '../../shell/ViewModels/SystemStrip'
 import { ThemeService } from '../../styles/Appearance/ThemeService'
+import { MediaPreferences } from '../../styles/Media/MediaPreferences'
 import { clipPath, clips, paperBoat } from '../../video/Previews/VideoWorlds'
 import { VideoForm } from '../../video/ViewModels/VideoForm'
 import { VideoViewModel } from '../../video/ViewModels/VideoViewModel'
@@ -118,6 +120,10 @@ export class AppViewModel extends Observable {
   readonly settings: SettingsViewModel
   /** The Video place's clips (1k): the library over the folders the CLI writes into, a run and the install, each a job on the shared list. */
   readonly video: VideoViewModel
+  /** The compositions (1l): Video's second tab, the projects beside their videos in the same folders, each render a job on the shared list. */
+  readonly compose: ComposeViewModel
+  /** The window's media preferences (1l): the voice new speech and compositions start from, shared by Settings, Compose and Voice. */
+  readonly media: MediaPreferences
   /** Every key the window binds: the shell's and the places' (Sessions'), what Settings › Keyboard lists. */
   readonly boundKeys: readonly BoundKey[] = [...KeyMap.shell, ...SessionKeys.bindings]
 
@@ -153,9 +159,12 @@ export class AppViewModel extends Observable {
     this.library = new SessionLibraryViewModel(this.chats, this.reads, this.jobs, this.clock, samples)
     this.consoleChild = new StandInChild({ rules: AppViewModel.consoleRules(preset), apogee: preset.apogee }, modes)
     this.console = new ConsoleViewModel(new ReadRunner(this.consoleChild), new JobStarter(this.consoleChild, this.clock, this.registry))
-    this.settings = new SettingsViewModel(this.reads, this.jobs, this.theme, () => this.boundKeys, settingsPreferences)
+    this.media = new MediaPreferences(settingsPreferences.voice, settingsPreferences.captions)
+    this.settings = new SettingsViewModel(this.reads, this.jobs, this.theme, () => this.boundKeys, settingsPreferences, this.media)
     this.training = new TrainingViewModel(this.reads, this.jobs)
-    this.video = new VideoViewModel(this.reads, this.jobs, new StandInFolders({ folders: preset.folders ?? {}, apogee: preset.apogee }), this.clock)
+    // The folders the CLI writes into are the stand-in's (1k), which its jobs write as they run (1l): Video and Compose read the same.
+    this.video = new VideoViewModel(this.reads, this.jobs, this.child.folders, this.clock)
+    this.compose = new ComposeViewModel(this.reads, this.jobs, this.child.folders, this.clock, this.video.playback, this.media)
     this.places = { models: this.models, training: this.training, video: this.video }
 
     // The library's doors, as closures: the toast, the shell's hosts, Sessions (an overlay closed, or left open), Models and the scrim.
@@ -215,21 +224,42 @@ export class AppViewModel extends Observable {
     }
     this.video.showPlace = () => this.shell.go('video')
     this.video.registry = this.registry
+    // Video's second tab (1l): its count the compositions' own, its New composition theirs.
+    this.video.compositionsCount = () => this.compose.projects.length
+    this.video.newComposition = () => this.compose.newComposition()
     this.video.subscribe(() => this.changed())
+    // The compositions' doors (1l): the toast, the folders they are written to and read from, the scan's passed-over list the stand-in serves, and the brief the recorded plan was made from.
+    this.compose.say = (text) => this.shell.say(text)
+    this.compose.folders = () => [moviesFolder]
+    this.compose.passedOver = passedOver
+    this.compose.startingBrief = recordedBrief
+    this.compose.subscribe(() => this.changed())
     this.registry.onChange(() => this.changed())
-    // The monitor lists the video runs going now from the shared job list (1k), and its Stop stops that run: the place's
+    // The monitor lists the video runs going now from the shared job list (1k), and its Stop stops that run (a composition's Open shows it, 1l): the place's
     // own clip only once its pipeline has loaded (the old lists `vrun` past `load`), by what it generates on and where;
     // any other -- a generate the console runs, 1l's compositions -- by its label, as the badge counts it.
     this.monitor.running = () =>
       this.registry.children('job').flatMap((child) => {
-        if (!AppViewModel.isVideoRun(child.label)) return []
+        if (!AppViewModel.isVideoRun(child)) return []
+        const same = (args: readonly string[]) => args.length === (child.arguments?.length ?? 0) && args.every((word, index) => child.arguments?.[index] === word)
+        // A composition this place renders, by its video, as the old lists `crender` (1l): `heat-pump-2.mp4 · rendering`, with its Open.
+        const render = this.compose.rendering
+        if (render !== undefined && same(render.arguments)) return [{ id: child.id, name: render.name, opens: true as const, ...(render.runtime !== undefined ? { runtime: render.runtime } : {}) }]
         const clip = this.video.generating
-        const own = clip !== undefined && clip.arguments.length === (child.arguments?.length ?? 0) && clip.arguments.every((word, index) => child.arguments?.[index] === word)
+        const own = clip !== undefined && same(clip.arguments)
         if (!own) return [{ id: child.id, name: child.label }]
         const loaded = clip.loaded
         return loaded === undefined ? [] : [{ id: child.id, name: loaded.name, ...(loaded.runtime !== undefined ? { runtime: loaded.runtime } : {}) }]
       })
     this.monitor.stopRun = (id) => void this.registry.stopChild(id)
+    // A composition's Open (1l): the monitor closed onto Video's Compositions at the render, as the old crender row's `monitor: false, screen: 'video', mediaTab: 'compose', projSel`.
+    this.monitor.openRun = () => {
+      const output = this.compose.rendering?.output
+      this.shell.closeOverlay()
+      this.shell.go('video')
+      this.video.pick('compositions')
+      if (output !== undefined) this.compose.select(output)
+    }
 
     // The links between places, as closures: the monitor's two doors.
     this.monitor.openLibrary = () => {
@@ -239,8 +269,9 @@ export class AppViewModel extends Observable {
     }
     // Unload says what the old prototype says: the open session's model is
     // held by its own child, which the CLI unloads with it. A video run
-    // (1k) is no model held: the monitor lists it from the shared job list
-    // with its own Stop (below); Compose (1l) and Voice (1m) add theirs.
+    // (1k) and a composition rendering (1l) are no model held: the monitor
+    // lists them from the shared job list with their own Stop (above);
+    // Voice (1m) adds its own.
     this.monitor.unload = (name) => this.shell.say(`Unloaded ${name}`)
     // The Settings window's doors (1i): the toast, the shell's sheet and confirm hosts, Models' Backends; Models & roles has the Models place read the roles its slot draws.
     this.settings.say = (text) => this.shell.say(text)
@@ -262,6 +293,8 @@ export class AppViewModel extends Observable {
     this.shell.routeChanged = (destination) => {
       this.library.showing(destination === 'sessions')
       this.places[destination]?.appeared?.()
+      // Video's second tab reads its projects with the place (1l), so its count is theirs.
+      if (destination === 'video') void this.compose.appeared()
     }
     // The monitor reads while it, or the strip that shows its numbers, is open;
     // the scrim the shell draws over an open menu closes the session's and the list's too.
@@ -300,9 +333,11 @@ export class AppViewModel extends Observable {
     return this.library.compactions
   }
 
-  /** Whether a job's label is a video run: a clip, or (1l's) a composition -- what the Video badge and the monitor count. */
-  private static isVideoRun(label: string): boolean {
-    return label === 'apogee video generate' || label.startsWith('apogee video generate ') || label === 'apogee video compose' || label.startsWith('apogee video compose ')
+  /** Whether a job is a video run: a clip, or a composition rendering (1l) -- what the Video badge and the monitor count, as the old counts `vrun` and `crender`: never a plan or an edit's preview on paper (`--dry-run`), nor an install. */
+  private static isVideoRun(child: { readonly label: string; readonly arguments?: readonly string[] }): boolean {
+    const { label } = child
+    if (label === 'apogee video generate' || label.startsWith('apogee video generate ')) return true
+    return (label === 'apogee video compose' || label.startsWith('apogee video compose ')) && !(child.arguments ?? []).includes('--dry-run')
   }
 
   /**
@@ -321,7 +356,7 @@ export class AppViewModel extends Observable {
       models: jobs.filter((job) => store.some((verb) => job.label.startsWith(`apogee models ${verb} `))).length,
       training: jobs.filter((job) => trains.some((words) => job.label === words || job.label.startsWith(`${words} `))).length,
       // Video's (1k) is a clip being made (and 1l's compositions rendering), as the old badge counts `vrun` and `crender`: never an install.
-      video: jobs.filter((job) => AppViewModel.isVideoRun(job.label)).length,
+      video: jobs.filter((job) => AppViewModel.isVideoRun(job)).length,
     }
   }
 
@@ -464,6 +499,7 @@ export class AppViewModel extends Observable {
     this.models.connect(binary)
     this.training.connect(binary)
     this.video.connect(binary)
+    this.compose.connect(binary)
     // The console's child shares the preset's mode, so it finds the binary where `child` does.
     this.console.connect(binary)
     // Settings, with the override this launch's discovery passed over, as the app's preferences hold it.
@@ -514,6 +550,10 @@ export class AppViewModel extends Observable {
     }
     if (where === 'video' || where === 'consent') {
       await this.openVideoPreset(where === 'consent' ? 'consent' : (sub ?? ''))
+      return
+    }
+    if (where === 'compose') {
+      await this.openComposePreset(sub ?? '')
       return
     }
     if (where === 'models' || where === 'download') {
@@ -743,6 +783,53 @@ export class AppViewModel extends Observable {
           }
         }
         return
+    }
+  }
+
+  /**
+   * A Compose preset (design 1l), as the old `applyStart('compose…')` sets
+   * it up: the Streaming session at its starting frame behind it, Video read
+   * and shown on Compositions, read, then the preset's state -- `compose`
+   * the heat pump paused 9.6 s in; `compose:edit` Tides, made, its recorded
+   * edit typed and previewed (the dry run the CLI recorded); `compose:new`
+   * a new composition, the recorded brief planned; `compose:tide` the tide
+   * project, stopped; `compose:differs` the Tides edit previewed and then
+   * rendered, once its preview has landed, its render's own plan come out
+   * otherwise. Each is the CLI's own run through the stand-in, never a
+   * state set by hand.
+   */
+  private async openComposePreset(sub: string): Promise<void> {
+    await this.openStreaming()
+    const compose = this.compose
+    this.shell.go('video')
+    await this.video.appeared()
+    this.video.pick('compositions')
+    await compose.appeared()
+    switch (sub) {
+      case '':
+        compose.select(projects.heatPump)
+        compose.hold(heatPumpFrame)
+        return
+      case 'tide':
+        compose.select(projects.tidePools)
+        return
+      case 'new':
+        compose.newComposition()
+        compose.compose(true)
+        return
+      case 'edit':
+      case 'differs': {
+        compose.select(projects.tides)
+        compose.editForm({ instruction: recordedEdit })
+        const previewed = compose.previewEdit()
+        // The render, once the preview has landed: its frame's ticks catch it up to its end.
+        if (sub === 'differs')
+          this.afterStart = async () => {
+            await previewed
+            compose.renderEdit()
+          }
+        return
+      }
     }
   }
 

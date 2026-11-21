@@ -1,5 +1,7 @@
 import { BoundedTail } from './BoundedTail'
 import { ChildExit } from './ChildExit'
+import { StandInFolders } from './StandInFolders'
+import type { FolderWrite, Folders } from './StandInFolders'
 
 /** What one recorded call printed. Each part is the binary's own: a recording, or a slice of one. */
 export interface Answer {
@@ -46,6 +48,14 @@ export interface Answer {
    * named, stderr is only the tail its end leaves (1d's).
    */
   readonly busy?: boolean
+  /**
+   * The files a job writes into the stand-in's folders as it plays (design
+   * 1l): the composer's project, saved after every step, so a screen reads
+   * its progress where the Mac reads it, beside the video. A job its Stop
+   * ends leaves its last write's `stopped` file, and the same command again
+   * resumes from that write, as the CLI resumes a stopped composition.
+   */
+  readonly writes?: readonly FolderWrite[]
 }
 
 /**
@@ -86,6 +96,10 @@ export interface ReplayRules {
   readonly continuations: Continuations | undefined
   readonly cancelled: string | undefined
   readonly busy: boolean
+  /** The files the job writes as it plays (design 1l); none unless named. */
+  readonly writes: readonly FolderWrite[]
+  /** Resumed (design 1l): its first line, then on from the write its last Stop left, that write's file written again first. */
+  readonly resumeFrom: FolderWrite | undefined
 }
 
 /**
@@ -176,7 +190,9 @@ export function recordedExit(text: string): number {
  *
  * - The longest prefix wins; of two as long, the later rule (`PreviewStore`'s rule).
  * - A rule with `until` answers its refusal until the call it names has
- *   succeeded (design 1k): the one thing the child remembers between calls.
+ *   succeeded (design 1k); a job stopped after it wrote a file is resumed
+ *   from that write by the same command (design 1l): what the child
+ *   remembers between calls, beside the folders its jobs write.
  * - `missing`: no binary is found, and nothing runs.
  * - `config-typo`: every call exits 1 with the recorded refusal, its verb
  *   swapped, as the old prototype's `cfgRefusal` does (`main.html:4820` at `b375fac9`).
@@ -194,13 +210,18 @@ export class StandInChild {
   private readonly answered = new Map<Rule, number>()
   /** The calls answered with a success, as `<kind> <arguments>`, and not stopped since: what a rule's `until` waits on (design 1k). */
   private readonly succeeded = new Set<string>()
+  /** Each stopped job's last write, by `<kind> <arguments>`: where the same command resumes it (design 1l). */
+  private readonly resumes = new Map<string, FolderWrite>()
+  /** The folders the CLI writes into (design 1k): the preset's files, and what the jobs it replays write as they run (1l). */
+  readonly folders: StandInFolders
 
   constructor(
-    settings: { readonly rules: Rules; readonly apogee: ApogeeMode },
+    settings: { readonly rules: Rules; readonly apogee: ApogeeMode; readonly folders?: Folders },
     readonly modes: ModeRules,
   ) {
     this.rules = settings.rules
     this.apogee = settings.apogee
+    this.folders = new StandInFolders(settings.folders === undefined ? { apogee: settings.apogee } : { folders: settings.folders, apogee: settings.apogee })
   }
 
   /** Where the binary is: found, unless the mode is `missing`. */
@@ -230,15 +251,22 @@ export class StandInChild {
     this.answered.set(rule, count + 1)
     const answer = answers[Math.min(count, answers.length - 1)] ?? {}
     if ((answer.exit ?? 0) === 0 && answer.timedOut !== true) this.succeeded.add(StandInChild.key(kind, args))
-    return { started: true, run: StandInChild.captured(answer), replay: StandInChild.replay(answer) }
+    // Stopped before: the same command resumes from the write its Stop left (design 1l).
+    const resumeFrom = this.resumes.get(StandInChild.key(kind, args))
+    this.resumes.delete(StandInChild.key(kind, args))
+    const replay = StandInChild.replay(answer)
+    return { started: true, run: StandInChild.captured(answer), replay: resumeFrom && replay.writes.includes(resumeFrom) ? { ...replay, resumeFrom } : replay }
   }
 
   /**
    * A call stopped before its end (its Stop, design 1k): what it was answered
    * never finished, so it is no success, and a rule waiting on it waits again.
+   * A job that had written a file (design 1l) is resumed from that write by
+   * the same command.
    */
-  stopped(kind: RuleKind, args: readonly string[]): void {
+  stopped(kind: RuleKind, args: readonly string[], lastWrite?: FolderWrite): void {
     this.succeeded.delete(StandInChild.key(kind, args))
+    if (lastWrite !== undefined) this.resumes.set(StandInChild.key(kind, args), lastWrite)
   }
 
   private static key(kind: RuleKind, args: readonly string[]): string {
@@ -247,7 +275,7 @@ export class StandInChild {
 
   /** An answer's replay rules, each as 1d replayed it unless the answer names it. */
   static replay(answer: Answer): ReplayRules {
-    return { exitAfter: answer.exitAfter ?? 0, holdAt: answer.holdAt, freeze: answer.freeze, continuations: answer.continuations, cancelled: answer.cancelled, busy: answer.busy ?? false }
+    return { exitAfter: answer.exitAfter ?? 0, holdAt: answer.holdAt, freeze: answer.freeze, continuations: answer.continuations, cancelled: answer.cancelled, busy: answer.busy ?? false, writes: answer.writes ?? [], resumeFrom: undefined }
   }
 
   /** Logs what nobody recorded, as `<kind>: <what>`: a call, or a chat's turn past its recording. */

@@ -1,6 +1,7 @@
 import { ClipForm } from '../../../business/media/ClipForm'
 import { MediaModel } from '../../../business/media/MediaEngine'
 import { ClipRecord, MediaLibrary, baseName } from '../../../business/media/MediaRecords'
+import { secs, tilde } from '../../styles/Media/MediaWords'
 
 /** A LoRA on the form: its file, its sha256 where a record holds it, its strength as typed. */
 export interface FormLoRA {
@@ -54,25 +55,16 @@ export interface FormContext {
 
 /** Where clips are made: `~/Movies/Apogee`, as the Mac's `outputFolder` (the stand-in's home). */
 export const moviesFolder = '/Users/someone/Movies/Apogee'
-/** The home a path is written under, and how a person reads it: `~/`. */
-const home = '/Users/someone/'
 /** This Mac's platform, as a record names it. */
 export const thisPlatform = 'macos-arm64'
 
-/** `path` as a person reads it: `~/Movies/Apogee/x.mp4`. */
-export function tilde(path: string): string {
-  return path.startsWith(home) ? `~/${path.slice(home.length)}` : path
-}
+// `tilde` and `secs` are styles' since Compose said a record's paths and seconds too (design 1l).
+export { secs, tilde }
 
 /** The old prototype's frame count: `duration` at `fps`, rounded to the pipelines' 4k+1. */
 export function framesOf(duration: number, fps: number): number {
   const n = Math.round(duration * fps)
   return 4 * Math.max(0, Math.round((n - 1) / 4)) + 1
-}
-
-/** Seconds as the old prototype says them: 5 is `5`, 2.25 is `2.25`. */
-export function secs(seconds: number): string {
-  return String(Math.round(seconds * 100) / 100)
 }
 
 /** Seconds as `%g` writes them, the CLI's `seconds_text`. */

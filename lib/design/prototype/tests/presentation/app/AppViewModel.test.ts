@@ -1064,3 +1064,109 @@ describe('the Video place in the composition (design 1k)', () => {
     expect(app.models.tab).toBe('store')
   })
 })
+
+describe('the compositions in the composition (design 1l)', () => {
+  const runRows = (app: AppViewModel) => app.monitor.face().models.rows.filter((row) => row.run !== undefined)
+
+  test('compose: Video on Compositions, counted from its projects; the heat pump paused 9.6 s in on its caption, Make changes beside it, nothing said', async () => {
+    const app = await started('compose')
+    expect(app.shell.route).toBe('video')
+    expect(app.video.face().tabs.map((tab) => `${tab.label} ${tab.count}`)).toEqual(['Clips 5', 'Compositions 4'])
+    expect(app.video.face().tab).toBe('compositions')
+    const page = app.compose.face().page
+    expect([page.title, page.status, page.player.time, page.player.caption]).toEqual(['How a heat pump works', 'rendered', '0:09.6 / 0:33.5', 'A heat pump gathers it with a refrigerant that runs colder than the air itself.'])
+    expect(app.compose.face().edit.locked).toBe(false)
+    expect(app.shell.toast).toBeUndefined()
+    expect(app.child.unanswered).toEqual([])
+  })
+
+  test('compose:edit: Tides, made, its recorded edit previewed by the dry run the CLI recorded; the list five', async () => {
+    const app = await started('compose:edit')
+    const edit = app.compose.face().edit
+    expect([edit.shown, edit.text, edit.head]).toEqual([true, 'make the second scene the moon', 'the edit: 2 scenes, were 2'])
+    expect(edit.diff.map((row) => row.text)).toEqual(['scene 1, untouched', 'scene 2; its prompt changed'])
+    expect(app.video.face().tabs[1]?.count).toBe('5')
+    expect(app.placeRuns.video).toBe(0)
+  })
+
+  test('compose:new: a new composition, the recorded brief planned, nothing rendered -- a plan on paper is no run the badge counts', async () => {
+    const app = await started('compose:new')
+    const face = app.compose.face()
+    expect([face.isNew, face.draft.meta, face.fresh.title, face.fresh.planLabel, face.paneLabel]).toEqual([true, 'planned · nothing rendered', 'Tides', 'Plan again', 'Composition settings'])
+    expect(app.shell.toast?.text).toBe('Planned the-tides-twice-a-day.mp4: nothing is rendered yet -- Render it, on its page, renders the plan')
+    expect(app.video.face().tabs[1]?.count).toBe('4')
+    // A plan on paper running (its job registered as the job starter registers it): no run of the badge's, nor the monitor's; a render is.
+    const plan = app.registry.register('job', 'apogee video compose the tides, twice a day', async () => {}, ['video', 'compose', '-o', '/Users/someone/Movies/Apogee/the-tides-twice-a-day.mp4', '--dry-run', '--output-format', 'stream-json', '--', 'the tides, twice a day'])
+    expect(app.placeRuns.video).toBe(0)
+    expect(runRows(app)).toEqual([])
+    plan.leave()
+    app.registry.register('job', 'apogee video compose the tides, twice a day', async () => {}, ['video', 'compose', '-o', '/Users/someone/Movies/Apogee/the-tides-twice-a-day.mp4', '--output-format', 'stream-json', '--', 'the tides, twice a day'])
+    expect(app.placeRuns.video).toBe(1)
+  })
+
+  test('compose:tide: the tide project, stopped at scene 5 -- Resume renders it as a job on the shared list: the sidebar counts it, the monitor names it, its Open there shows it on Compositions, and its page’s Stop stops it, the finished scenes kept', async () => {
+    const app = await started('compose:tide')
+    expect(app.compose.face().page).toMatchObject({ title: 'Tide pools for kids', status: 'stopped', stopped: true })
+    const tide = app.compose.selectedProject
+    if (tide) app.compose.resume(tide)
+    expect(app.placeRuns.video).toBe(1)
+    // The monitor open over another place, another project shown: its Open goes to the render, as the old crender row does.
+    app.compose.select('/Users/someone/Movies/Apogee/heat-pump.mp4')
+    app.video.pick('clips')
+    app.shell.go('sessions')
+    app.shell.open('monitor')
+    const row = runRows(app)[0]
+    expect(row).toMatchObject({ name: 'tide-pools.mp4 · rendering', action: 'Open' })
+    if (row) app.monitor.act(row)
+    expect([app.shell.overlay, app.shell.route, app.video.face().tab, app.compose.selected]).toEqual([undefined, 'video', 'compositions', '/Users/someone/Movies/Apogee/tide-pools.mp4'])
+    expect(app.placeRuns.video).toBe(1)
+    await app.compose.stop()
+    await settled()
+    expect(app.placeRuns.video).toBe(0)
+    expect(app.compose.face().page).toMatchObject({ status: 'stopped', stopped: true })
+    expect(app.compose.selectedProject?.status).toBe('cancelled')
+  })
+
+  test('compose:differs: the Tides edit previewed, then rendered: its render planned again and came out otherwise, said above its changes', async () => {
+    const app = await started('compose:differs')
+    await settled()
+    const page = app.compose.face().page
+    expect([page.title, page.tag, page.status, page.differs]).toEqual(['Tides', 'EDIT 1', 'rendered', 'The render planned again, and its changes differ from the preview'])
+    expect(app.compose.face().list.map((row) => row.file)).toEqual(['tides-edit.mp4', 'heat-pump.mp4', 'night-market-2.mp4', 'tide-pools.mp4', 'night-market.mp4', 'tides.mp4'])
+    expect(app.video.face().tabs[1]?.count).toBe('6')
+    expect(app.child.unanswered).toEqual([])
+  })
+
+  test('Video’s tabs switch between the clips and the compositions; New composition there opens the draft, and the window’s chosen voice is where it starts', async () => {
+    const app = await started('video')
+    expect(app.video.face().newLabel).toBe('New clip')
+    app.video.pick('compositions')
+    expect(app.video.face()).toMatchObject({ tab: 'compositions', newLabel: 'New composition', canNew: true })
+    app.settings.setVoice('bm_george')
+    app.video.newPrimary()
+    expect(app.compose.face().isNew).toBe(true)
+    expect(app.compose.face().fresh.voice).toBe('bm_george')
+    app.video.pick('clips')
+    expect(app.video.face().tab).toBe('clips')
+  })
+
+  test('Settings’ Caption new compositions reaches a new composition: unticked there, the draft starts with captions off and --no-captions (the old freshCompose’s mediaCaptions)', async () => {
+    const app = await started('settings:media')
+    app.settings.toggleCaptions()
+    expect(app.settings.face().media.captions).toBe(false)
+    app.video.pick('compositions')
+    app.video.newPrimary()
+    expect(app.compose.face().fresh.captions).toBe(false)
+    expect(app.compose.face().fresh.command).toMatch(/ --no-captions /)
+  })
+
+  test('a voice chosen in Settings leaves an open new composition its own voice; the next fresh one starts from it (the old 6256 sets the default alone)', async () => {
+    const app = await started('video')
+    app.video.pick('compositions')
+    app.video.newPrimary()
+    expect(app.compose.face().fresh.voice).toBe('af_heart')
+    app.settings.setVoice('bm_george')
+    expect(app.compose.face().fresh.voice).toBe('af_heart')
+    expect(app.compose.face().fresh.command).not.toContain('--voice bm_george')
+  })
+})

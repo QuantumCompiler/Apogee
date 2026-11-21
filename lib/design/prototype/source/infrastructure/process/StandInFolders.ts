@@ -10,6 +10,20 @@ export interface FolderFile {
 export type Folders = Readonly<Record<string, readonly FolderFile[]>>
 
 /**
+ * A file a job writes into a folder as it runs (design 1l): once `after` of
+ * its stdout lines have played -- the project the composer saves beside its
+ * video after every step -- and `stopped`, what it leaves instead when its
+ * Stop ends the job while this is the last file it wrote: the project saved
+ * `cancelled`, its finished scenes kept.
+ */
+export interface FolderWrite {
+  readonly after: number
+  readonly folder: string
+  readonly file: FolderFile
+  readonly stopped?: FolderFile
+}
+
+/**
  * What the app reads of a folder: its files, as the Mac's `MediaLibrary`
  * lists `~/Movies/Apogee` with `FileManager` (design 1k). A later port
  * reads the disk under the same shape.
@@ -25,16 +39,34 @@ export interface FolderReading {
  * app reads those files -- so a preset hands the stand-in the folders' files,
  * each record the CLI's own document (recorded, or hand-made in its shape),
  * as it hands `StandInChild` its rules. It reads no disk at run time. The
- * folders are the person's files, so they read the same in every mode.
+ * folders are the person's files, so they read the same in every mode; a
+ * job the stand-in replays may write into them as it runs (`write`, 1l).
  */
 export class StandInFolders implements FolderReading {
-  readonly folders: Folders
+  private held: Record<string, readonly FolderFile[]>
 
   constructor(settings: { readonly folders?: Folders; readonly apogee: ApogeeMode }) {
-    this.folders = settings.folders ?? {}
+    this.held = { ...(settings.folders ?? {}) }
+  }
+
+  /** The folders as they stand now: the preset's, and what the jobs have written since. */
+  get folders(): Folders {
+    return this.held
   }
 
   files(folder: string): readonly FolderFile[] {
-    return this.folders[folder] ?? []
+    return this.held[folder] ?? []
+  }
+
+  /**
+   * A file written into `folder` (design 1l): the one of its name replaced,
+   * else added -- what a job the stand-in replays writes as it runs, as the
+   * composer saves its project after every step. The one state the folders
+   * keep, beside the preset's files.
+   */
+  write(folder: string, file: FolderFile): void {
+    const files = this.held[folder] ?? []
+    const at = files.findIndex((entry) => entry.name === file.name)
+    this.held = { ...this.held, [folder]: at < 0 ? [...files, file] : files.map((entry, index) => (index === at ? file : entry)) }
   }
 }

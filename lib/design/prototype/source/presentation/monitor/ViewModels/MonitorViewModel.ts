@@ -17,6 +17,8 @@ export interface MonitorModelRow {
   readonly action: string
   /** A run's row (design 1k): its id on the shared job list, which its button stops; absent on a model's row. */
   readonly run?: number
+  /** A run whose button opens its place instead (design 1l): a composition rendering, as the old `crender` row's Open. */
+  readonly opens?: true
 }
 
 /** A run the composition reads from the shared job list (design 1k): its id there, what it is (a clip's pipeline generating, or its label), and where it runs when it said so (`mps · bfloat16`). */
@@ -24,6 +26,8 @@ export interface MonitorRun {
   readonly id: number
   readonly name: string
   readonly runtime?: string
+  /** Its row's button opens its place rather than stopping it (design 1l: a composition rendering, the old `crender` row's Open). */
+  readonly opens?: true
 }
 
 /**
@@ -95,6 +99,8 @@ export class MonitorViewModel extends Observable {
    */
   running: () => readonly MonitorRun[] = () => []
   stopRun: (id: number) => void = () => {}
+  /** What Open on a run that opens its place does (design 1l): the composition's. */
+  openRun: (id: number) => void = () => {}
 
   private binary: string | undefined = undefined
   private openedAt = 0
@@ -164,10 +170,12 @@ export class MonitorViewModel extends Observable {
     this.unload(name)
   }
 
-  /** A row's button: a run's Stop the run, a model's Unload. */
+  /** A row's button: a run's Stop the run, or its Open where it opens its place (1l); a model's Unload. */
   act(row: MonitorModelRow): void {
-    if (row.run !== undefined) this.stopRun(row.run)
-    else this.unloadModel(row.name)
+    if (row.run !== undefined) {
+      if (row.opens === true) this.openRun(row.run)
+      else this.stopRun(row.run)
+    } else this.unloadModel(row.name)
   }
 
   /** What "Open models library" does. */
@@ -252,7 +260,7 @@ export class MonitorViewModel extends Observable {
             size: '',
             action: 'Unload',
           })),
-          ...runs.map((run) => ({ name: run.name, detail: ['a video run this app supervises', ...(run.runtime !== undefined ? [run.runtime] : []), 'the CLI reports no size for it'].join(' · '), size: '', action: 'Stop the run', run: run.id })),
+          ...runs.map((run) => ({ name: run.name, detail: ['a video run this app supervises', ...(run.runtime !== undefined ? [run.runtime] : []), 'the CLI reports no size for it'].join(' · '), size: '', action: run.opens === true ? 'Open' : 'Stop the run', run: run.id, ...(run.opens === true ? { opens: true as const } : {}) })),
         ],
         empty: (r?.modelsHeld.length ?? 0) === 0 && runs.length === 0,
       },
