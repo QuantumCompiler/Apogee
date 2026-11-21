@@ -33,6 +33,16 @@ export interface FolderReading {
 }
 
 /**
+ * What the app reads of a folder and writes into it (design 1n): the Library's
+ * editor saves a definition file the CLI reads -- the person's own agent
+ * prompt or symphony spec -- as the Mac's view-models write it with
+ * Foundation. A later port writes the disk under the same shape.
+ */
+export interface FolderWriting extends FolderReading {
+  write(folder: string, file: FolderFile): void
+}
+
+/**
  * The stand-in for the folders the CLI writes into (design 1k): the CLI has
  * no verb that lists the clips it made -- `video generate` writes each
  * clip's `video.generation` record beside it as `<clip>.json`, and the Mac
@@ -42,7 +52,7 @@ export interface FolderReading {
  * folders are the person's files, so they read the same in every mode; a
  * job the stand-in replays may write into them as it runs (`write`, 1l).
  */
-export class StandInFolders implements FolderReading {
+export class StandInFolders implements FolderWriting {
   private held: Record<string, readonly FolderFile[]>
 
   constructor(settings: { readonly folders?: Folders; readonly apogee: ApogeeMode }) {

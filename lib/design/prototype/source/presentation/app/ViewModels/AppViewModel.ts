@@ -11,11 +11,16 @@ import type { ModeRules, Rules } from '../../../infrastructure/process/StandInCh
 import { heatPumpFrame, moviesFolder, passedOver, projects, recordedBrief, recordedEdit } from '../../compose/Previews/ComposeWorlds'
 import { ComposeViewModel } from '../../compose/ViewModels/ComposeViewModel'
 import { ConsoleViewModel } from '../../console/ViewModels/ConsoleViewModel'
+import { editorFiles, refusedSpec, sampleImage, sampleInputs, typedLine } from '../../library/Previews/LibraryWorlds'
+import { LibraryViewModel } from '../../library/ViewModels/LibraryViewModel'
+import type { LibraryConfirm } from '../../library/ViewModels/LibraryFaces'
 import { handles } from '../../models/Previews/ModelsWorlds'
 import { ModelsViewModel } from '../../models/ViewModels/ModelsViewModel'
 import type { ModelsConfirm, ModelsTab } from '../../models/ViewModels/ModelsViewModel'
 import { ConvertForm, QuantizeForm } from '../../models/ViewModels/StoreForms'
 import { MonitorViewModel } from '../../monitor/ViewModels/MonitorViewModel'
+import { reviewForm, sweepsFolder } from '../../review/Previews/ReviewWorlds'
+import { ReviewViewModel } from '../../review/ViewModels/ReviewViewModel'
 import { settingsPreferences } from '../../settings/Previews/SettingsWorlds'
 import { SettingsViewModel } from '../../settings/ViewModels/SettingsViewModel'
 import type { SettingsConfirm, SettingsPane } from '../../settings/ViewModels/SettingsViewModel'
@@ -128,6 +133,14 @@ export class AppViewModel extends Observable {
   readonly media: MediaPreferences
   /** The Voice place (1m): the speeches beside their WAVs in `~/Music/Apogee`, the speak card, a speech a job on the shared list, the window's chosen voice its `media`. */
   readonly voice: VoiceViewModel
+  /**
+   * The Library place (1n): the agents, symphonies and MCP servers, the
+   * editor and its close prompt, as the Mac's three view-models -- named
+   * for the nav it draws, since `library` is the Sessions place's (1g).
+   */
+  readonly definitions: LibraryViewModel
+  /** The Review place (1n): the merge request reviewed dry run first, the targets and the last sweep, the skills. */
+  readonly review: ReviewViewModel
   /** Every key the window binds: the shell's and the places' (Sessions'), what Settings › Keyboard lists. */
   readonly boundKeys: readonly BoundKey[] = [...KeyMap.shell, ...SessionKeys.bindings]
 
@@ -172,7 +185,13 @@ export class AppViewModel extends Observable {
     // Voice (1m) over the same folders, the one player and the window's chosen voice; its card holds the old frame's sample on every preset, as the old `vf` starts.
     this.voice = new VoiceViewModel(this.reads, this.jobs, this.child.folders, this.clock, this.video.playback, this.media)
     this.voice.setText(sampleText)
-    this.places = { models: this.models, training: this.training, video: this.video, voice: this.voice }
+    // Library and Review (1n) over the same reads, jobs, clock and folders; the old pages' samples and the old Reviews tab's form handed in, as Voice's card is.
+    this.definitions = new LibraryViewModel(this.reads, this.jobs, this.child.folders, this.clock)
+    this.definitions.useSamples(sampleInputs, sampleImage)
+    this.review = new ReviewViewModel(this.reads, this.jobs, this.child.folders)
+    this.review.setForm(reviewForm)
+    this.review.sweeps = () => [sweepsFolder]
+    this.places = { models: this.models, training: this.training, video: this.video, voice: this.voice, library: this.definitions, review: this.review }
 
     // The library's doors, as closures: the toast, the shell's hosts, Sessions (an overlay closed, or left open), Models and the scrim.
     this.library.say = (text) => this.shell.say(text)
@@ -250,6 +269,14 @@ export class AppViewModel extends Observable {
       void this.models.store.select(handle)
     }
     this.voice.subscribe(() => this.changed())
+    // Library's and Review's doors (1n): the toast, and the shell's sheet and confirm hosts -- the editor, the add-target sheet, the close prompt, a server's removal, the post.
+    for (const place of [this.definitions, this.review]) {
+      place.say = (text) => this.shell.say(text)
+      place.present = (sheet) => this.shell.openSheet(sheet)
+      place.dismissSheet = () => this.shell.closeSheet()
+      place.ask = (kind) => this.shell.ask(kind)
+      place.subscribe(() => this.changed())
+    }
     this.registry.onChange(() => this.changed())
     // The monitor lists the video runs going now from the shared job list (1k), and its Stop stops that run (a composition's Open shows it, 1l): the place's
     // own clip only once its pipeline has loaded (the old lists `vrun` past `load`), by what it generates on and where;
@@ -438,6 +465,30 @@ export class AppViewModel extends Observable {
     this.training.dismissPending(kind)
   }
 
+  /** A Library confirm answered (1n): the close prompt's Discard, Put it back as it was or Leave it (`alternative`), or a server's removal; the host closed first. */
+  async confirmDefinitions(kind: LibraryConfirm, alternative: boolean): Promise<void> {
+    this.shell.dismissConfirm()
+    await this.definitions.confirm(kind, alternative)
+  }
+
+  /** A Library confirm's Cancel: Keep editing, or the removal not made. */
+  dismissDefinitions(kind: LibraryConfirm): void {
+    this.shell.dismissConfirm()
+    this.definitions.dismissPending(kind)
+  }
+
+  /** The post sheet's Post (1n): it closes, as the old one does, running nothing. */
+  confirmReviewPost(): void {
+    this.shell.dismissConfirm()
+    this.review.confirmPost()
+  }
+
+  /** The post sheet's Cancel. */
+  dismissReviewPost(): void {
+    this.shell.dismissConfirm()
+    this.review.dismissPost()
+  }
+
   /** A Models confirm answered: yes, or its second door; the host closed first. */
   async confirmModels(kind: ModelsConfirm, alternative: boolean): Promise<void> {
     this.shell.dismissConfirm()
@@ -530,6 +581,8 @@ export class AppViewModel extends Observable {
     this.video.connect(binary)
     this.compose.connect(binary)
     this.voice.connect(binary)
+    this.definitions.connect(binary)
+    this.review.connect(binary)
     // The console's child shares the preset's mode, so it finds the binary where `child` does.
     this.console.connect(binary)
     // Settings, with the override this launch's discovery passed over, as the app's preferences hold it.
@@ -588,6 +641,14 @@ export class AppViewModel extends Observable {
     }
     if (where === 'voice') {
       await this.openVoicePreset()
+      return
+    }
+    if (where === 'library') {
+      await this.openLibraryPreset(sub ?? '')
+      return
+    }
+    if (where === 'review') {
+      await this.openReviewPreset(sub ?? '')
       return
     }
     if (where === 'models' || where === 'download') {
@@ -880,6 +941,89 @@ export class AppViewModel extends Observable {
     await this.voice.appeared()
     this.voice.select(speeches.torch)
     this.voice.hold(secondSentence)
+  }
+
+  /**
+   * A Library preset (1n), as the old `applyStart('library…')` sets it up:
+   * the Streaming session at its starting frame behind it, as the Voice
+   * preset keeps it, the place read and shown, then its tab and state --
+   * `library` the agents, triage's page; `library:symphonies` critique-revise
+   * played, the recorded play within the frame's ticks; `library:mcp` the
+   * server; `library:unsaved` the triage prompt open with the old line
+   * typed, Close asked; `library:refused` notes-digest saved with the
+   * unknown key, apogee's refusal after the save's 4 ticks, then Close asked;
+   * `library:image` describe-answer, no image chosen. Each is the CLI's own
+   * answer through the stand-in, never a state set by hand.
+   */
+  private async openLibraryPreset(sub: string): Promise<void> {
+    await this.openStreaming()
+    const library = this.definitions
+    this.shell.go('library')
+    await library.appeared()
+    switch (sub) {
+      case 'symphonies':
+        library.pick('symphonies')
+        library.symphonies.play()
+        return
+      case 'mcp':
+        library.pick('mcp')
+        return
+      case 'unsaved':
+        library.agents.edit('prompts/triage.txt')
+        library.setEditorText(editorFiles.triage + typedLine)
+        library.requestClose()
+        return
+      case 'refused': {
+        library.pick('symphonies')
+        library.pickRow('notes-digest')
+        library.symphonies.edit()
+        library.setEditorText(refusedSpec(editorFiles.notesDigest))
+        // The save waits out its 4 ticks, which the frame's start ticks play; then Close asks.
+        const saved = library.save()
+        this.afterStart = async () => {
+          await saved
+          library.requestClose()
+        }
+        return
+      }
+      case 'image':
+        library.pick('symphonies')
+        library.pickRow('describe-answer')
+        return
+    }
+  }
+
+  /**
+   * A Review preset (1n), as the old `applyStart('review…')` sets it up: the
+   * Streaming session at its starting frame behind it, the place read and
+   * shown, then its tab -- `review` and `review:post` the recorded dry run of
+   * the old form's merge request, run as the Mac's `review()` runs it (the
+   * tab's own Review button stays dead, the document's default), and
+   * `review:post`'s post sheet asked once the run has landed.
+   */
+  private async openReviewPreset(sub: string): Promise<void> {
+    await this.openStreaming()
+    const review = this.review
+    this.shell.go('review')
+    await review.appeared()
+    switch (sub) {
+      case '':
+        review.review()
+        return
+      case 'post':
+        review.review()
+        this.afterStart = async () => {
+          await review.ran
+          review.askToPost()
+        }
+        return
+      case 'targets':
+        review.pick('targets')
+        return
+      case 'skills':
+        review.pick('skills')
+        return
+    }
   }
 
   /**

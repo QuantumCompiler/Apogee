@@ -126,6 +126,15 @@ export interface Rule {
    * video` has gone in, however often it is pressed.
    */
   readonly until?: { readonly ran: readonly string[]; readonly answer: Answer }
+  /**
+   * It judges a file by what it holds (design 1n): while the stand-in's
+   * folder file `name` in `folder` holds the text `holds`, every call is
+   * answered by `answer` -- the CLI's refusal, uncounted -- and the rule's
+   * own answers play once it does not. `symphonies show` refuses a spec with
+   * an unknown key however often it is saved, as the old prototype's save
+   * judges the text it saved (`main.html:3011-3019` at `b375fac9`).
+   */
+  readonly refusedWhile?: { readonly folder: string; readonly name: string; readonly holds: string; readonly answer: Answer }
   readonly answer: Answer | readonly [Answer, ...Answer[]]
 }
 
@@ -193,13 +202,27 @@ export function recordedExit(text: string): number {
  *   succeeded (design 1k); a job stopped after it wrote a file is resumed
  *   from that write by the same command (design 1l): what the child
  *   remembers between calls, beside the folders its jobs write.
+ * - A rule with `refusedWhile` answers its refusal while a folder file holds
+ *   its text (design 1n).
  * - `missing`: no binary is found, and nothing runs.
  * - `config-typo`: every call exits 1 with the recorded refusal, its verb
- *   swapped, as the old prototype's `cfgRefusal` does (`main.html:4820` at `b375fac9`).
+ *   swapped, as the old prototype's `cfgRefusal` does (`main.html:4820` at
+ *   `b375fac9`) -- but a call `configFree` names, which the rules answer.
  */
 export class StandInChild {
   /** Where the binary is said to be, as the Mac app's previews say it (`previewBinary`); never run. */
   static readonly binary = '/Users/someone/.local/bin/apogee'
+
+  /**
+   * The argument prefixes the CLI answers without reading its config, so
+   * `config-typo` passes them to the rules (design 1n): `review skills`,
+   * whose `list` and `show` read only the skills folder
+   * (`review_cmd.cpp:74-75,106-107`), as the Mac's `ReviewPreview.badConfig`
+   * lists them over a bad config (`ReviewPreviews.swift:22-28`) and the old
+   * prototype draws them. `mcp presets` and `config path` read none either
+   * and are still refused: a stand-in limit, listed for 1s.
+   */
+  static readonly configFree: readonly (readonly string[])[] = [['review', 'skills']]
 
   readonly rules: Rules
   readonly apogee: ApogeeMode
@@ -234,7 +257,7 @@ export class StandInChild {
     if (this.apogee === 'missing') return { started: false, reason: 'apogee is not installed' }
     const said = `apogee ${args.join(' ')}`
     this.calls.push(StandInChild.call(kind, args, input))
-    if (this.apogee === 'config-typo') {
+    if (this.apogee === 'config-typo' && !StandInChild.configFree.some((prefix) => prefix.every((word, index) => args[index] === word))) {
       const verb = args[0]
       const refusal = verb === undefined ? this.modes.configTypoRefusal : this.modes.configTypoRefusal.replace(/^apogee [^:\s]+:/, `apogee ${verb}:`)
       return { started: true, run: StandInChild.captured({ stderr: refusal, exit: 1 }), replay: StandInChild.replay({}) }
@@ -246,6 +269,9 @@ export class StandInChild {
     }
     // Still waiting on the call it names: the refusal, and nothing counted.
     if (rule.until && !this.succeeded.has(StandInChild.key(kind, rule.until.ran))) return { started: true, run: StandInChild.captured(rule.until.answer), replay: StandInChild.replay(rule.until.answer) }
+    // The file it judges holds the refused text: the refusal, and nothing counted (design 1n).
+    const judged = rule.refusedWhile
+    if (judged && this.folders.files(judged.folder).find((file) => file.name === judged.name)?.text?.includes(judged.holds) === true) return { started: true, run: StandInChild.captured(judged.answer), replay: StandInChild.replay(judged.answer) }
     const answers: readonly Answer[] = Array.isArray(rule.answer) ? rule.answer : [rule.answer as Answer]
     const count = this.answered.get(rule) ?? 0
     this.answered.set(rule, count + 1)

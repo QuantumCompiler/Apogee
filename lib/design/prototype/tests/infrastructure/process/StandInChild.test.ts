@@ -89,6 +89,24 @@ describe('the stand-in child: its rule table', () => {
     expect([generate(), generate(), generate()].map((run) => run.stdout)).toEqual([storeList, storeListAll, storeListAll])
   })
 
+  test('a rule refused while a file holds a text (design 1n): its refusal, uncounted, while the stand-in’s folder file holds it; its own answers once it does not', () => {
+    const refusal = { stderr: 'unknown key', exit: 1 }
+    const stand = new StandInChild(
+      {
+        rules: { reads: [{ arguments: ['symphonies', 'show', 'notes'], refusedWhile: { folder: '/data/symphonies', name: 'notes.yaml', holds: 'temprature:', answer: refusal }, answer: [{ stdout: 'first' }, { stdout: 'second' }, { stdout: 'third' }] }] },
+        apogee: 'installed',
+        folders: { '/data/symphonies': [{ name: 'notes.yaml', text: 'role: chat\n' }] },
+      },
+      modes,
+    )
+    const show = () => printed(stand.run('reads', ['symphonies', 'show', 'notes']))
+    expect(show().stdout).toBe('first')
+    stand.folders.write('/data/symphonies', { name: 'notes.yaml', text: 'role: chat\ntemprature: 0.2\n' })
+    for (let call = 0; call < 2; call += 1) expect(show(), 'refused as often as it is asked').toEqual({ stdout: '', stderr: 'unknown key', exit: 'exited with status 1', timedOut: false })
+    stand.folders.write('/data/symphonies', { name: 'notes.yaml', text: 'role: chat\n' })
+    expect(show().stdout, 'the refusals were not counted: its second answer, not its third').toBe('second')
+  })
+
   test('a call stopped before its end (its Stop, design 1k) did not succeed: a rule waiting on it waits again', () => {
     const stand = child({
       jobs: [
@@ -175,7 +193,7 @@ describe('the stand-in child: its three modes', () => {
     expect(stand.unanswered).toEqual([])
   })
 
-  test('config-typo: every call exits 1 with the recorded refusal, its verb swapped', () => {
+  test('config-typo: every call the CLI reads its config for exits 1 with the recorded refusal, its verb swapped', () => {
     const stand = child(rules, 'config-typo')
     expect(stand.locateBinary()).toEqual({ case: 'found', binary: '/Users/someone/.local/bin/apogee' })
     for (const [kind, args] of [
@@ -191,6 +209,27 @@ describe('the stand-in child: its three modes', () => {
       })
     }
     expect(stand.calls.map((call) => call.arguments[0])).toEqual(['agents', 'review', 'models'])
+  })
+
+  test('config-typo: what the CLI answers without reading its config -- `review skills list` and `show` -- is answered by its rules; `review targets` is still refused', () => {
+    const skills = '{"object":"list","data":[]}\n'
+    const security = '{"object":"review.skill","name":"security"}\n'
+    const stand = child(
+      {
+        reads: [
+          { arguments: ['review', 'skills', 'list'], answer: { stdout: skills } },
+          { arguments: ['review', 'skills', 'show', 'security'], answer: { stdout: security } },
+          { arguments: ['review', 'targets'], answer: { stdout: '{}' } },
+        ],
+      },
+      'config-typo',
+    )
+    expect(printed(stand.run('reads', ['review', 'skills', 'list']))).toEqual({ stdout: skills, stderr: '', exit: 'exited with status 0', timedOut: false })
+    expect(printed(stand.run('reads', ['review', 'skills', 'show', 'security']))).toEqual({ stdout: security, stderr: '', exit: 'exited with status 0', timedOut: false })
+    expect(printed(stand.run('reads', ['review', 'targets']))).toEqual({ stdout: '', stderr: agentsListBadConfig.replace('apogee agents:', 'apogee review:'), exit: 'exited with status 1', timedOut: false })
+    expect(stand.run('reads', ['review', 'skills', 'show', 'invented']), 'a config-free call nobody recorded is unanswered, not refused').toEqual({ started: false, reason: 'no recorded answer for apogee review skills show invented' })
+    expect(stand.unanswered).toEqual(['reads: apogee review skills show invented'])
+    expect(StandInChild.configFree).toEqual([['review', 'skills']])
   })
 })
 

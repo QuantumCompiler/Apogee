@@ -39,8 +39,6 @@ const portedBy: Readonly<Partial<Record<Destination, string>>> = {
   tasks: '1p',
   graph: '1o',
   knowledge: '1o',
-  library: '1n',
-  review: '1n',
 }
 
 /** What a place not yet ported says: its name, and the item that ports it. */

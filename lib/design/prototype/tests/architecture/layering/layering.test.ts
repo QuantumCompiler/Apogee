@@ -207,6 +207,28 @@ describe('the layering check, on this prototype', () => {
     ])
   })
 
+  test("violations planted in Library and Review fail, each naming its file: React in library's and review's view-models, library importing review, and review importing settings -- the two places share only styles' pick list (design 1n)", () => {
+    const disk = new DiskTree(root)
+    const planted: Record<string, string> = {
+      'source/presentation/library/ViewModels/AgentsViewModel.ts': `import React from 'react'\n${disk.contents('source/presentation/library/ViewModels/AgentsViewModel.ts')}`,
+      'source/presentation/review/ViewModels/ReviewViewModel.ts': `import { useState } from 'react'\n${disk.contents('source/presentation/review/ViewModels/ReviewViewModel.ts')}`,
+      'source/presentation/library/Views/LibraryScreen.tsx': `import { ReviewScreen } from '../../review/Views/ReviewScreen'\n${disk.contents('source/presentation/library/Views/LibraryScreen.tsx')}`,
+      'source/presentation/review/ViewModels/ReviewFaces.ts': `import type { SettingsPreferences } from '../../settings/ViewModels/SettingsViewModel'\n${disk.contents('source/presentation/review/ViewModels/ReviewFaces.ts')}`,
+    }
+    const tree: SourceTree = {
+      files: (directory) => disk.files(directory),
+      folders: (directory) => disk.folders(directory),
+      isDirectory: (path) => disk.isDirectory(path),
+      contents: (path) => planted[path] ?? disk.contents(path),
+    }
+    expect(new LayeringCheck(ModuleMap.read(tree), tree).violations()).toEqual([
+      'source/presentation/library/ViewModels/AgentsViewModel.ts imports react: a view-model stays free of React, so it tests without a browser',
+      'source/presentation/library/Views/LibraryScreen.tsx imports presentation/review, which presentation/library does not declare as a dependency',
+      'source/presentation/review/ViewModels/ReviewFaces.ts imports presentation/settings, which presentation/review does not declare as a dependency',
+      'source/presentation/review/ViewModels/ReviewViewModel.ts imports react: a view-model stays free of React, so it tests without a browser',
+    ])
+  })
+
   test('the disk tree reads the prototype, never node_modules, build output or dot files', () => {
     const files = new DiskTree(root).files('')
     expect(files).toContain('modules.json')

@@ -62,6 +62,8 @@ function Buttons({ buttons }: { readonly buttons: readonly HostButton[] }) {
 export interface SheetHostProps {
   readonly title: string
   readonly subtitle?: string
+  /** The subtitle in the code font, as the old sheet's `subFont` draws a file's path (design 1n's editor). */
+  readonly subtitleMono?: boolean
   /** Its width in px: each kind's own, from tokens.json's dialog sizes where it has one. */
   readonly width: number
   /** What the sheet says and asks: its place's. */
@@ -71,7 +73,7 @@ export interface SheetHostProps {
 }
 
 /** The sheet host: a dialog over the scrim, its title, its place's content and its buttons. */
-export function SheetHost({ title, subtitle, width, children, left = [], right }: SheetHostProps) {
+export function SheetHost({ title, subtitle, subtitleMono = false, width, children, left = [], right }: SheetHostProps) {
   return (
     <div style={{ position: 'absolute', inset: 0, zIndex: 66, display: 'grid', placeItems: 'center', padding: 24, background: 'var(--scrim-modal)' }}>
       <div
@@ -84,7 +86,7 @@ export function SheetHost({ title, subtitle, width, children, left = [], right }
           <h2 id="gs-h" style={{ margin: 0, fontSize: 'var(--t-h2)', fontWeight: 600, overflowWrap: 'anywhere' }}>
             {title}
           </h2>
-          {subtitle ? <p style={{ margin: '6px 0 0', fontSize: 'var(--t-small)', color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>{subtitle}</p> : null}
+          {subtitle ? <p style={{ margin: '6px 0 0', fontSize: 'var(--t-small)', color: 'var(--text-secondary)', fontFamily: subtitleMono ? 'var(--font-mono)' : 'inherit', overflowWrap: 'anywhere' }}>{subtitle}</p> : null}
         </div>
         <div style={{ padding: '10px 20px', display: 'flex', flexDirection: 'column', gap: 12, fontSize: 'var(--t-small)' }}>{children}</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, padding: '12px 20px 18px' }}>

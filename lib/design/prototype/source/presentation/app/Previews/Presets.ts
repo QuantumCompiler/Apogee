@@ -1,9 +1,13 @@
 import type { Preset } from '../../../infrastructure/process/Preset'
 import { composeFiles, composePlaceRules, tidesFiles, withComposeFiles } from '../../compose/Previews/ComposeWorlds'
 import { consoleRules } from '../../console/Previews/ConsolePreset'
+import { libraryPlaceRules, playTicks, withLibraryFolders, withLibraryWorld } from '../../library/Previews/LibraryWorlds'
+import type { LibraryPreset } from '../../library/Previews/LibraryWorlds'
+import { saveTicks } from '../../library/ViewModels/DefinitionEditor'
 import { modelsPlaceRules, withModelsWorld } from '../../models/Previews/ModelsWorlds'
 import type { ModelsWorld } from '../../models/Previews/ModelsWorlds'
 import { monitorPreset } from '../../monitor/Previews/MonitorPreset'
+import { reviewPlaceRules, withReviewFolders } from '../../review/Previews/ReviewWorlds'
 import { fixLines, settingsPlaceRules, withSettingsWorld } from '../../settings/Previews/SettingsWorlds'
 import type { SettingsWorld } from '../../settings/Previews/SettingsWorlds'
 import type { PresetOptions } from '../../monitor/Previews/MonitorPreset'
@@ -135,6 +139,29 @@ function voicePreset({ still, apogee }: PresetOptions): Preset {
 }
 
 /**
+ * A Library preset (design 1n): the place over its world -- every preset's
+ * Library answers (`symphonies show` refusing notes-digest while it holds
+ * the unknown key: `library:refused`'s save) and the preset's own `mcp
+ * presets` (the old frames' two) -- the Streaming session at
+ * its starting frame behind it, as the Voice preset keeps it (composed here,
+ * since `library` may not import `session`). `start` is how many ticks in a
+ * still frame stands: `library:symphonies`' recorded play to its end
+ * (`playTicks`), `library:refused`'s save to apogee's word (`saveTicks`).
+ */
+function libraryPreset(route: LibraryPreset, start = 1): (options: PresetOptions) => Preset {
+  return ({ still, apogee }) => ({ rules: withLibraryWorld(streamingRules('start'), route), route, clock: { start, still }, apogee })
+}
+
+/**
+ * A Review preset (design 1n): the place over every preset's Review answers,
+ * the Streaming session at its starting frame behind it. `start` is how many
+ * ticks in a still frame stands: the dry run's one line and its end.
+ */
+function reviewPreset(route: string, start = 1): (options: PresetOptions) => Preset {
+  return ({ still, apogee }) => ({ rules: streamingRules('start'), route, clock: { start, still }, apogee })
+}
+
+/**
  * A preset with the console's answers (design 1g): the console opens over
  * every screen (⇧⌘K), so every preset answers its lines -- `consoleRules`,
  * on the console's own child (`Preset.console`), a line nobody recorded
@@ -163,9 +190,12 @@ function listing(build: (options: PresetOptions) => Preset): (options: PresetOpt
  * preset names its own folders) and the compositions' (design 1l: their
  * plan, renders and preview, and the old four projects beside the clips)
  * and Voice's (design 1m: the sample spoken, and `~/Music/Apogee`'s two
- * recorded speeches beside the preset's folders) before its own, so a
- * preset's own answer to the same arguments is the one given: all six open
- * from every screen.
+ * recorded speeches beside the preset's folders), Library's (design 1n: its
+ * lists, `config path`, the recorded play, the removal of `code`, and the
+ * data directory's two editor files) and Review's (design 1n: the targets,
+ * the skills, the recorded dry run, the starting target added, and the
+ * sweep the CLI kept) before its own, so a preset's own answer to the same
+ * arguments is the one given: all eight open from every screen.
  */
 function modelling(build: (options: PresetOptions) => Preset): (options: PresetOptions) => Preset {
   return consoling((options) => {
@@ -176,14 +206,16 @@ function modelling(build: (options: PresetOptions) => Preset): (options: PresetO
     const video = videoPlaceRules()
     const compose = composePlaceRules()
     const voice = voicePlaceRules()
+    const library = libraryPlaceRules()
+    const review = reviewPlaceRules()
     return {
       ...preset,
-      folders: voiceFolders(preset.folders ?? withComposeFiles(videoFolders())),
+      folders: withReviewFolders(withLibraryFolders(voiceFolders(preset.folders ?? withComposeFiles(videoFolders())))),
       rules: {
         ...preset.rules,
-        reads: [...(models.reads ?? []), ...settings.reads, ...(training.reads ?? []), ...video.reads, ...(preset.rules.reads ?? [])],
-        commands: [...(models.commands ?? []), ...settings.commands, ...(training.commands ?? []), ...video.commands, ...(preset.rules.commands ?? [])],
-        jobs: [...settings.jobs, ...(training.jobs ?? []), ...video.jobs, ...compose.jobs, ...voice.jobs, ...(preset.rules.jobs ?? [])],
+        reads: [...(models.reads ?? []), ...settings.reads, ...(training.reads ?? []), ...video.reads, ...library.reads, ...review.reads, ...(preset.rules.reads ?? [])],
+        commands: [...(models.commands ?? []), ...settings.commands, ...(training.commands ?? []), ...video.commands, ...library.commands, ...review.commands, ...(preset.rules.commands ?? [])],
+        jobs: [...settings.jobs, ...(training.jobs ?? []), ...video.jobs, ...compose.jobs, ...voice.jobs, ...library.jobs, ...review.jobs, ...(preset.rules.jobs ?? [])],
       },
     }
   })
@@ -199,7 +231,8 @@ function modelling(build: (options: PresetOptions) => Preset): (options: PresetO
  * had none; 1j's the old nine Training presets in the old order and its new
  * `training:regimes`; 1k's the four Video presets in the old order; 1l's
  * the five Compose presets in the old order, `compose:differs` among them;
- * 1m's `voice`; each feature item adds its own here. Every one
+ * 1m's `voice`; 1n's six Library and four Review presets in the old
+ * order; each feature item adds its own here. Every one
  * carries the Sessions place's reads, since the list shows on every screen
  * (`execute`'s own), and the console's answers, since it opens over every one.
  */
@@ -262,6 +295,16 @@ export const presets: Readonly<Record<string, (options: PresetOptions) => Preset
   'compose:tide': listing(composePreset('compose:tide')),
   'compose:differs': listing(composePreset('compose:differs', 30, true)),
   voice: listing(voicePreset),
+  library: listing(libraryPreset('library')),
+  'library:symphonies': listing(libraryPreset('library:symphonies', playTicks)),
+  'library:mcp': listing(libraryPreset('library:mcp')),
+  'library:unsaved': listing(libraryPreset('library:unsaved')),
+  'library:refused': listing(libraryPreset('library:refused', saveTicks)),
+  'library:image': listing(libraryPreset('library:image')),
+  review: listing(reviewPreset('review', 2)),
+  'review:post': listing(reviewPreset('review:post', 2)),
+  'review:targets': listing(reviewPreset('review:targets')),
+  'review:skills': listing(reviewPreset('review:skills')),
 }
 
 /** The preset opened with no `start`, or an unknown one: `chat`, the old `data-props` default (1v; 1e's interim default was the monitor). */

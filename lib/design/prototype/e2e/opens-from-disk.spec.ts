@@ -105,7 +105,7 @@ test('in the missing and config-typo modes the monitor says why it cannot read, 
   await expect(monitor(page)).toContainText("apogee system: /Users/someone/.apogee/config/config.json: not valid JSON: line 4, column 5: expected ',' or '}' after a member (exited with status 1)")
 })
 
-test('each of the 11 places opens by click: Sessions its session window, Models its tabs (1h), Training its tabs (1j), Video its clips (1k), Voice its speeches (1m), an unported one its placeholder', async ({ page }) => {
+test('each of the 11 places opens by click: Sessions its session window, Models its tabs (1h), Training its tabs (1j), Video its clips (1k), Voice its speeches (1m), Library and Review theirs (1n), an unported one its placeholder', async ({ page }) => {
   const { errors } = watch(page)
   await page.goto(`${built}?start=monitor&still=true`)
   const models = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Models ⌘2' })
@@ -116,8 +116,21 @@ test('each of the 11 places opens by click: Sessions its session window, Models 
   await expect(page.getByText(/^Models isn’t drawn here yet/)).toHaveCount(0)
   const places: Array<[string, string, string]> = [
     ['Suites', '⌘3', '1p'], ['Tasks', '⌘4', '1p'], ['Code graph', '⌘5', '1o'],
-    ['Knowledge', '⌘8', '1o'], ['Library', '⌘0', '1n'], ['Review', '⇧⌘R', '1n'],
+    ['Knowledge', '⌘8', '1o'],
   ]
+  // Library and Review are their places (1n): the agents with triage's page, the Reviews tab, no placeholder.
+  const library = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Library ⌘0' })
+  await library.click()
+  await expect(library).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('heading', { name: 'Library', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'triage', level: 2 })).toBeVisible()
+  await expect(page.getByText(/^Library isn’t drawn here yet/)).toHaveCount(0)
+  const review = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Review ⇧⌘R' })
+  await review.click()
+  await expect(review).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('heading', { name: 'Review', level: 1 })).toBeVisible()
+  await expect(page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Reviews' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByText(/^Review isn’t drawn here yet/)).toHaveCount(0)
   // Training is its place (1j): its five tabs, Runs first, no placeholder.
   const training = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Training ⌘9' })
   await training.click()
@@ -1337,5 +1350,278 @@ test('a sentence plays from its start, lit, and the player pauses; still, it sta
   await page.getByRole('button', { name: 'New speech' }).click()
   await expect(speech).toHaveCount(0)
   await expect(page.getByRole('region', { name: 'Speak' }).getByRole('textbox').first()).toHaveValue('')
+  expect(errors).toEqual([])
+})
+
+const definitions = (page: Page) => page.getByRole('navigation', { name: 'Definitions' })
+const editorSheet = (page: Page) => page.getByRole('dialog')
+const confirmHost = (page: Page) => page.getByRole('alertdialog')
+const typoWords = "/Users/someone/.apogee/config/config.json: not valid JSON: line 4, column 5: expected ',' or '}' after a member (exited with status 1)"
+
+/** What each Library and Review preset shows at its frame, still, in each mode the old prototype draws it -- its regions, tabs, controls, states and words (design 1n). */
+const libraryFrames: Record<string, (page: Page, apogee: 'installed' | 'missing' | 'config-typo') => Promise<void>> = {
+  library: async (page, apogee) => {
+    await expect(page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Agents' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByRole('button', { name: 'New agent…' })).toBeVisible()
+    if (apogee === 'installed') {
+      await expect(definitions(page).getByRole('button', { name: /^triage/ })).toHaveAttribute('aria-current', 'true')
+      await expect(definitions(page).getByRole('button')).toHaveCount(8)
+      await expect(page.getByRole('heading', { name: 'triage', level: 2 })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Delete…' })).toBeVisible()
+      await expect(page.getByText('Sort incoming issues by area', { exact: true })).toBeVisible()
+      await expect(page.getByText('Model: the default · tools: read-only')).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Edit prompts/triage.txt' })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Edit schemas/triage-output.json' })).toBeVisible()
+      await expect(page.getByText('apogee analyze --agent triage runs it.')).toBeVisible()
+    } else {
+      await expect(definitions(page)).toContainText(apogee === 'missing' ? "Apogee isn't installed, so there are no agents to list." : `The agents could not be read: apogee agents: ${typoWords}`)
+      await expect(page.getByText('Choose an agent.')).toBeVisible()
+    }
+  },
+  'library:symphonies': async (page, apogee) => {
+    await expect(page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Symphonies' })).toHaveAttribute('aria-pressed', 'true')
+    if (apogee === 'installed') {
+      await expect(definitions(page).getByRole('button')).toHaveCount(9)
+      await expect(page.getByRole('heading', { name: 'critique-revise', level: 2 })).toBeVisible()
+      await expect(page.getByText('1. critique · asks utility')).toBeVisible()
+      await expect(page.getByText('A shipped starter: apogee symphonies edit critique-revise makes it yours, at a prompt.')).toBeVisible()
+      await expect(page.getByRole('textbox', { name: 'Its input' })).toHaveValue('A draft README for the tool.')
+      await expect(page.getByText('critique · utility (writer)')).toBeVisible()
+      await expect(page.getByText('revise · chat (writer)')).toBeVisible()
+      await expect(page.getByText('OUTPUT')).toBeVisible()
+    } else {
+      await expect(definitions(page)).toContainText(apogee === 'missing' ? "Apogee isn't installed, so there are no symphonies to list." : `The symphonies could not be read: apogee symphonies: ${typoWords}`)
+      await expect(page.getByText('Choose a symphony.')).toBeVisible()
+    }
+  },
+  'library:mcp': async (page, apogee) => {
+    await expect(page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'MCP servers' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByText('PRESETS APOGEE SHIPS')).toBeVisible()
+    if (apogee === 'installed') {
+      await expect(page.getByRole('heading', { name: 'code', level: 2 })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Disable' })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Remove…' })).toBeVisible()
+      await expect(page.getByText('connected · 2 tools: run_python, write_input · environment: none')).toBeVisible()
+      await expect(page.getByText('code-exec', { exact: true })).toBeVisible()
+      await expect(page.getByText("'self' is Apogee's own tools, served for another MCP host", { exact: false })).toBeVisible()
+    } else if (apogee === 'missing') {
+      await expect(page.getByText("Apogee isn't installed, so there are no presets to list.")).toBeVisible()
+    } else {
+      await expect(definitions(page)).toContainText(`The MCP servers could not be read: apogee mcp: ${typoWords}`)
+    }
+  },
+  'library:unsaved': async (page, apogee) => {
+    if (apogee !== 'installed') return
+    await expect(editorSheet(page).getByRole('heading', { name: 'triage · prompts/triage.txt' })).toBeVisible()
+    await expect(editorSheet(page).getByText('/Users/someone/.apogee/prompts/triage.txt')).toBeVisible()
+    await expect(editorSheet(page).getByRole('textbox', { name: 'The file' })).toHaveValue(/File each issue under one area\.\n$/)
+    await expect(confirmHost(page).getByRole('heading', { name: 'Discard your changes to triage.txt?' })).toBeVisible()
+    await expect(confirmHost(page)).toContainText("What you typed isn't saved, and closing loses it.")
+    await expect(confirmHost(page).getByRole('button', { name: 'Keep editing' })).toBeVisible()
+    await expect(confirmHost(page).getByRole('button', { name: 'Discard' })).toBeVisible()
+  },
+  'library:refused': async (page, apogee) => {
+    if (apogee !== 'installed') return
+    await expect(editorSheet(page).getByRole('heading', { name: 'notes-digest' })).toBeVisible()
+    await expect(editorSheet(page).getByText("apogee symphonies: /Users/someone/.apogee/symphonies/notes-digest.yaml: stages[1]: unknown key 'temprature'", { exact: false })).toBeVisible()
+    await expect(editorSheet(page).getByRole('button', { name: 'Put it back as it was' })).toBeVisible()
+    await expect(confirmHost(page).getByRole('heading', { name: 'notes-digest.yaml holds the text apogee refused' })).toBeVisible()
+    for (const name of ['Keep editing', 'Leave it', 'Put it back as it was']) await expect(confirmHost(page).getByRole('button', { name })).toBeVisible()
+  },
+  'library:image': async (page, apogee) => {
+    if (apogee !== 'installed') return
+    await expect(page.getByRole('heading', { name: 'describe-answer', level: 2 })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Choose an image…' })).toBeVisible()
+    await expect(page.getByText('png, jpg, gif, webp or bmp')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeDisabled()
+    await expect(page.getByText('describe-answer takes an image with its input: choose one to play it.')).toBeVisible()
+  },
+  review: async (page, apogee) => {
+    await expect(page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Reviews' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByRole('textbox', { name: 'A merge request' })).toHaveValue('acme/widget#12')
+    await expect(page.getByRole('button', { name: 'Review', exact: true })).toBeVisible()
+    await expect(page.getByText('Lenses: security', { exact: true })).toBeVisible()
+    await expect(page.getByText('Model: the chat role')).toBeVisible()
+    await expect(page.getByText('apogee review mr acme/widget#12 --skills security --dry-run --output-format json')).toBeVisible()
+    if (apogee === 'installed') {
+      await expect(page.getByRole('heading', { name: 'Thumbnails', level: 2 })).toBeVisible()
+      await expect(page.getByText('github.com/acme/widget#12 · head cafe2222 · full')).toBeVisible()
+      await expect(page.getByText('lenses: security (named) · reviewer')).toBeVisible()
+      await expect(page.getByText('dry run: nothing posted')).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Post…' })).toBeVisible()
+      await expect(page.getByText('The file name from the request reaches a shell command.')).toBeVisible()
+      await expect(page.getByText('candidates 1 · off change 0 · not new 0 · known 0 · duplicates 0 · dismissed 0 · tightened 0')).toBeVisible()
+    } else if (apogee === 'missing') {
+      await expect(page.getByText("Apogee isn't installed, so there is nothing to review with.")).toBeVisible()
+    }
+  },
+  'review:post': async (page, apogee) => {
+    if (apogee !== 'installed') return
+    await expect(confirmHost(page).getByRole('heading', { name: 'Post the review to github.com/acme/widget#12?' })).toBeVisible()
+    await expect(confirmHost(page)).toContainText('The dry run found 1 finding to post inline. Posting runs the review again with --yes')
+    await expect(confirmHost(page)).toContainText('apogee review mr acme/widget#12 --skills security --yes --output-format json')
+    await expect(confirmHost(page).getByRole('button', { name: 'Cancel' })).toBeVisible()
+    await expect(confirmHost(page).getByRole('button', { name: 'Post', exact: true })).toBeVisible()
+  },
+  'review:targets': async (page, apogee) => {
+    await expect(page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Targets and sweeps' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByRole('button', { name: 'Add target…' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Sweep…' })).toBeVisible()
+    if (apogee === 'missing') {
+      await expect(page.getByRole('button', { name: 'Add target…' })).toBeDisabled()
+      await expect(page.getByText("Apogee isn't installed, so there is nothing to review with.")).toBeVisible()
+      return
+    }
+    await expect(page.getByRole('heading', { name: 'The last sweep', level: 2 })).toBeVisible()
+    await expect(page.getByText('dry run · 1 reviewed · 0 posted · 0 deferred · 0 errors · started 2026-10-21T06:09:25Z')).toBeVisible()
+    await expect(page.getByText('widget · repo · grant none')).toBeVisible()
+    await expect(page.getByText('watermark none → 2026-10-18T09:00:00Z')).toBeVisible()
+    await expect(page.getByText('github.com/acme/widget#12 -- Thumbnails: 1 finding; dry run: nothing posted')).toBeVisible()
+    await expect(page.getByText('kept at ~/.apogee/review/sweeps/20261021T060925Z.json')).toBeVisible()
+    if (apogee === 'installed') {
+      await expect(page.getByText('github · owner acme · lenses by the change')).toBeVisible()
+      await expect(page.getByText('posts when swept')).toBeVisible()
+      await expect(page.getByText('github · repository acme/widget · lenses security')).toBeVisible()
+      await expect(page.getByText('documents only')).toBeVisible()
+      await expect(page.getByRole('button', { name: /^Remove/ })).toHaveCount(2)
+    } else {
+      await expect(page.getByText(`The targets could not be read: apogee review: ${typoWords}`)).toBeVisible()
+    }
+  },
+  'review:skills': async (page, apogee) => {
+    await expect(page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Skills' })).toHaveAttribute('aria-pressed', 'true')
+    // The CLI reads no config for its skills, so a config typo lists them as installed does, as the old prototype draws it.
+    if (apogee !== 'missing') {
+      await expect(page.getByRole('navigation', { name: 'Skills' }).getByRole('button')).toHaveCount(7)
+      await expect(page.getByRole('navigation', { name: 'Skills' }).getByRole('button', { name: /^security/ })).toHaveAttribute('aria-current', 'true')
+      await expect(page.getByRole('heading', { name: 'security', level: 2 })).toBeVisible()
+      await expect(page.getByText('Applies to every file.')).toBeVisible()
+      await expect(page.getByText('apogee review skills show security')).toBeVisible()
+      await expect(page.getByText(/^You are reviewing one change through one lens: security\./)).toBeVisible()
+    } else {
+      await expect(page.getByText('Every lens a review can run, shipped and your own. Choose one to read its prompt.')).toBeVisible()
+    }
+  },
+}
+
+for (const [preset, frame] of Object.entries(libraryFrames)) {
+  for (const apogee of ['installed', 'missing', 'config-typo'] as const) {
+    test(`${preset} at ${apogee}: its frame, still, its regions, tabs, controls and words, with no console error and no request but the file (design 1n)`, async ({ page }) => {
+      const { errors, requests } = watch(page)
+      const url = `${built}?start=${preset}&still=true&apogee=${apogee}`
+      await page.goto(url)
+      const place = preset.startsWith('library') ? 'Library' : 'Review'
+      await expect(page.getByRole('heading', { name: place, level: 1 })).toBeVisible()
+      await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: place === 'Library' ? 'Library ⌘0' : 'Review ⇧⌘R' })).toHaveAttribute('aria-current', 'page')
+      await frame(page, apogee)
+      expect(errors).toEqual([])
+      expect(requests).toEqual([url])
+    })
+  }
+}
+
+test('live from the file: Close over typing asks; Keep editing keeps it; Close again and Discard closes the editor (design 1n)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=library:unsaved`)
+  await confirmHost(page).getByRole('button', { name: 'Keep editing' }).click()
+  await expect(confirmHost(page)).toHaveCount(0)
+  const file = editorSheet(page).getByRole('textbox', { name: 'The file' })
+  await expect(file).toHaveValue(/File each issue under one area\.\n$/)
+  await file.press('End')
+  await file.pressSequentially('More.')
+  await editorSheet(page).getByRole('button', { name: 'Close' }).click()
+  await confirmHost(page).getByRole('button', { name: 'Discard' }).click()
+  await expect(editorSheet(page)).toHaveCount(0)
+  // Edit opens the prompt the binary scaffolded again, as the file still holds it.
+  await page.getByRole('button', { name: 'Edit prompts/triage.txt' }).click()
+  await expect(editorSheet(page).getByRole('textbox', { name: 'The file' })).toHaveValue(/^You are triage -- Sort incoming issues by area\.\n/)
+  await expect(editorSheet(page).getByRole('button', { name: 'Save' })).toBeDisabled()
+  expect(errors).toEqual([])
+})
+
+test('live from the file: a save holds the editor read-only until apogee’s word, 4 ticks later; after a refused save, Put it back as it was closes once apogee has read the original (design 1n)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=library`)
+  await page.getByRole('button', { name: 'Edit prompts/triage.txt' }).click()
+  const file = editorSheet(page).getByRole('textbox', { name: 'The file' })
+  await file.press('End')
+  await file.pressSequentially('X')
+  await editorSheet(page).getByRole('button', { name: 'Save' }).click()
+  await expect(file).toBeDisabled()
+  await expect(editorSheet(page).getByText("Saving: the editor waits for apogee's word on the file, then takes your typing again.")).toBeVisible()
+  await expect(editorSheet(page).getByText("Saved. Apogee checks an agent's prompt and schema when it runs -- its first run says what is wrong, if anything.")).toBeVisible({ timeout: 5_000 })
+  await expect(file).toBeEnabled()
+  await editorSheet(page).getByRole('button', { name: 'Close' }).click()
+  await expect(editorSheet(page)).toHaveCount(0)
+  await expect(confirmHost(page)).toHaveCount(0)
+  await page.goto(`${built}?start=library:refused`)
+  await confirmHost(page).getByRole('button', { name: 'Put it back as it was' }).click()
+  await expect(confirmHost(page)).toHaveCount(0)
+  await expect(editorSheet(page).getByText("Saving: the editor waits for apogee's word on the file, then takes your typing again.")).toBeVisible()
+  await expect(editorSheet(page)).toHaveCount(0, { timeout: 5_000 })
+  expect(errors).toEqual([])
+})
+
+test('live from the file: after a refused save, Keep editing and Save the same text -- refused again 4 ticks later, as the old save judges the text -- and Close asks again (design 1n)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=library:refused`)
+  await confirmHost(page).getByRole('button', { name: 'Keep editing' }).click()
+  await expect(confirmHost(page)).toHaveCount(0)
+  await editorSheet(page).getByRole('button', { name: 'Save' }).click()
+  const saving = editorSheet(page).getByText("Saving: the editor waits for apogee's word on the file, then takes your typing again.")
+  await expect(saving).toBeVisible()
+  await expect(saving).toHaveCount(0, { timeout: 5_000 })
+  await expect(editorSheet(page).getByText(/^apogee symphonies: .*unknown key 'temprature'/)).toBeVisible()
+  await expect(editorSheet(page).getByText('Saved, and apogee reads it.')).toHaveCount(0)
+  await editorSheet(page).getByRole('button', { name: 'Close' }).click()
+  await expect(confirmHost(page).getByRole('button', { name: 'Put it back as it was' })).toBeVisible()
+  expect(errors).toEqual([])
+})
+
+test('the add-target sheet shows its `apogee review targets add …` line live, the lenses sorted, Add off without a name; Add puts the row on the targets tab (design 1n)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=review:targets&still=true`)
+  await page.getByRole('button', { name: 'Add target…' }).click()
+  const sheet = editorSheet(page)
+  await expect(sheet.getByRole('heading', { name: 'Add a sweep target' })).toBeVisible()
+  await expect(sheet.getByText('apogee review targets add gadget --repo acme/gadget', { exact: true })).toBeVisible()
+  await sheet.getByRole('button', { name: "Lenses: as each change's files say" }).click()
+  await sheet.getByRole('menuitemcheckbox', { name: 'security' }).click()
+  await sheet.getByRole('menuitemcheckbox', { name: 'ai-ml' }).click()
+  await expect(sheet.getByText('apogee review targets add gadget --repo acme/gadget --skills ai-ml,security', { exact: true })).toBeVisible()
+  await sheet.getByRole('textbox', { name: 'Name' }).fill('')
+  await expect(sheet.getByText('apogee review targets add <name> --repo acme/gadget --skills ai-ml,security', { exact: true })).toBeVisible()
+  await expect(sheet.getByRole('button', { name: 'Add', exact: true })).toBeDisabled()
+  await sheet.getByRole('textbox', { name: 'Name' }).fill('gadget')
+  await sheet.getByRole('menuitemcheckbox', { name: 'security' }).click()
+  await sheet.getByRole('menuitemcheckbox', { name: 'ai-ml' }).click()
+  await sheet.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(sheet).toHaveCount(0)
+  await expect(page.getByText('github · repository acme/gadget · lenses by the change')).toBeVisible()
+  await expect(toast(page, "added review target 'gadget' to /Users/someone/.apogee/config/config.json")).toBeVisible()
+  expect(errors).toEqual([])
+})
+
+test('live from the file: a symphony row picks; Play runs the recorded play, its stage line while it plays, then its answers (design 1n)', async ({ page }) => {
+  test.setTimeout(60_000)
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=library`)
+  await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Symphonies' }).click()
+  await definitions(page).getByRole('button', { name: /^describe-answer/ }).click()
+  await expect(page.getByRole('heading', { name: 'describe-answer', level: 2 })).toBeVisible()
+  await page.getByRole('button', { name: 'Choose an image…' }).click()
+  await expect(page.getByText('storefront.png')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeEnabled()
+  await definitions(page).getByRole('button', { name: /^critique-revise/ }).click()
+  await page.getByRole('button', { name: 'Play', exact: true }).click()
+  await expect(page.getByText(/^stage 1\/2 critique — asking utility \(writer\)/)).toBeVisible()
+  await expect(page.getByText('revise · chat (writer)')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText('A tighter draft, for new contributors: what the tool does, then how to run it.').first()).toBeVisible()
+  // Another symphony picked clears the play, as the old pick does: critique-revise comes back with no answers until Play.
+  await definitions(page).getByRole('button', { name: /^digest/ }).click()
+  await definitions(page).getByRole('button', { name: /^critique-revise/ }).click()
+  await expect(page.getByRole('heading', { name: 'critique-revise', level: 2 })).toBeVisible()
+  await expect(page.getByText('revise · chat (writer)')).toHaveCount(0)
+  await expect(page.getByText('OUTPUT')).toHaveCount(0)
   expect(errors).toEqual([])
 })

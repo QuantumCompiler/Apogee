@@ -88,7 +88,9 @@ describe('the keyboard list Settings › Keyboard draws (design 1i)', () => {
 
 describe('a place not yet ported', () => {
   test('names the place and the design item that ports it', () => {
-    expect(destinations.map((destination) => placeholderOf(destination)?.item)).toEqual([undefined, undefined, '1p', '1p', '1o', undefined, undefined, '1o', undefined, '1n', '1n'])
+    expect(destinations.map((destination) => placeholderOf(destination)?.item)).toEqual([undefined, undefined, '1p', '1p', '1o', undefined, undefined, '1o', undefined, undefined, undefined])
+    expect(placeholderOf('library'), 'Library is its place (1n): no placeholder').toBeUndefined()
+    expect(placeholderOf('review'), 'Review is its place (1n): no placeholder').toBeUndefined()
     expect(placeholderOf('voice'), 'Voice is its place (1m): no placeholder').toBeUndefined()
     expect(placeholderOf('training'), 'Training is its place (1j): no placeholder').toBeUndefined()
     expect(placeholderOf('sessions'), 'Sessions is the session window (1u): no placeholder').toBeUndefined()

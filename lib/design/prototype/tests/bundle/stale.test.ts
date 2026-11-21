@@ -106,14 +106,14 @@ describe('the two fixture roots in the hash (design 1d)', () => {
   test('a recording a source starts naming joins the inputs', () => {
     const copy = copyOfInputs()
     const before = inputFiles(copy)
-    // A recording no source names yet (1e's monitor preset already names suites-system.json).
-    expect(before).not.toContain('@recorded/business/reads/Fixtures/agents-list.json')
+    // A recording no source names yet (1e's monitor preset already names suites-system.json, and 1n's Library its agents-list.json).
+    expect(before).not.toContain('@recorded/business/reads/Fixtures/mcp-create-taken.err')
     mkdirSync(join(copy, 'source/presentation/library/Previews'), { recursive: true })
     const preview = join(copy, 'source/presentation/library/Previews/LibraryPreset.ts')
-    writeFileSync(preview, "import agents from '@recorded/business/reads/Fixtures/agents-list.json?raw'\nexport const rules = [agents]\n")
+    writeFileSync(preview, "import taken from '@recorded/business/reads/Fixtures/mcp-create-taken.err?raw'\nexport const rules = [taken]\n")
     const tests = resolve(copy, '../../src/darwin/tests/business/reads/Fixtures')
-    writeFileSync(join(tests, 'agents-list.json'), readFileSync(resolve(recordedRootOf(root), 'business/reads/Fixtures/agents-list.json')))
-    expect(inputFiles(copy)).toEqual([...before, '@recorded/business/reads/Fixtures/agents-list.json', 'source/presentation/library/Previews/LibraryPreset.ts'].sort())
+    writeFileSync(join(tests, 'mcp-create-taken.err'), readFileSync(resolve(recordedRootOf(root), 'business/reads/Fixtures/mcp-create-taken.err')))
+    expect(inputFiles(copy)).toEqual([...before, '@recorded/business/reads/Fixtures/mcp-create-taken.err', 'source/presentation/library/Previews/LibraryPreset.ts'].sort())
   })
 
   test("every file under the design's own fixtures/ is an input", () => {

@@ -1254,3 +1254,133 @@ describe('the Voice place in the composition (design 1m)', () => {
     expect(app.models.tab).toBe('store')
   })
 })
+
+describe('Library and Review in the composition (design 1n)', () => {
+  test('library: the agents tab, the CLI’s eight agents, triage’s page by its name; the Streaming session behind it, nothing said or unanswered', async () => {
+    const app = await started('library')
+    expect(app.shell.route).toBe('library')
+    const face = app.definitions.face()
+    expect([face.tabs.find((tab) => tab.current)?.tab, face.rows.length, face.agent.name, face.agent.files]).toEqual(['agents', 8, 'triage', ['prompts/triage.txt', 'schemas/triage-output.json']])
+    expect([app.shell.sheet, app.shell.confirm, app.shell.toast]).toEqual([undefined, undefined, undefined])
+    expect(app.session.face().empty.launched).toBe(true)
+    expect([...app.child.unanswered, ...app.consoleChild.unanswered]).toEqual([])
+  })
+
+  test('library:symphonies: critique-revise played by the recorded play within the frame’s ticks, its answers under Play', async () => {
+    const app = await started('library:symphonies')
+    const page = app.definitions.face().symphony
+    expect([page.name, page.playing.shown, page.played.shown, page.played.output]).toEqual(['critique-revise', false, true, 'A tighter draft, for new contributors: what the tool does, then how to run it.'])
+    expect(app.child.calls.filter((call) => call.kind === 'jobs').map((call) => call.arguments.slice(0, 3).join(' '))).toEqual(['symphonies play critique-revise'])
+  })
+
+  test('library:mcp: the server code and the presets the old page lists, from mcp-presets.json', async () => {
+    const app = await started('library:mcp')
+    const page = app.definitions.face().mcp
+    expect([page.name, page.presets.map((preset) => preset.name)]).toEqual(['code', ['code-exec', 'self']])
+  })
+
+  test('library:unsaved: the triage prompt open in the shell’s sheet host with a line typed, Close asked in the confirm host; Keep editing keeps it, Discard closes both', async () => {
+    const app = await started('library:unsaved')
+    expect([app.shell.sheet, app.shell.confirm]).toEqual(['editor', 'editorClose'])
+    expect(app.definitions.confirmWords('editorClose')?.title).toBe('Discard your changes to triage.txt?')
+    expect(app.definitions.editorFace().text.endsWith('\nFile each issue under one area.\n')).toBe(true)
+    app.dismissDefinitions('editorClose')
+    expect([app.shell.sheet, app.shell.confirm, app.definitions.editorFace().shown]).toEqual(['editor', undefined, true])
+    app.definitions.requestClose()
+    expect(app.shell.confirm).toBe('editorClose')
+    await app.confirmDefinitions('editorClose', false)
+    expect([app.shell.sheet, app.shell.confirm, app.definitions.editorFace().shown]).toEqual([undefined, undefined, false])
+  })
+
+  test('library:refused: notes-digest saved with the unknown key -- 4 ticks, then apogee’s refusal -- Close asked with its three ways; Put it back as it was closes once apogee has read the original', async () => {
+    const app = await started('library:refused')
+    expect([app.shell.sheet, app.shell.confirm]).toEqual(['editor', 'editorClose'])
+    expect(app.definitions.editorFace().verdict).toEqual({ text: "apogee symphonies: /Users/someone/.apogee/symphonies/notes-digest.yaml: stages[1]: unknown key 'temprature' (accepted: name, role, play, prompt, input, schema, image, brief_tokens, answer_tokens) (exited with status 1)", refused: true })
+    expect(app.definitions.confirmWords('editorClose')).toMatchObject({ title: 'notes-digest.yaml holds the text apogee refused', cancel: 'Keep editing', alternative: 'Leave it', confirm: 'Put it back as it was' })
+    const putBack = app.confirmDefinitions('editorClose', false)
+    await settled()
+    expect([app.shell.confirm, app.definitions.editorFace().saving]).toEqual([undefined, true])
+    app.clock.advance(4)
+    await putBack
+    await settled()
+    expect([app.shell.sheet, app.definitions.editorFace().shown]).toEqual([undefined, false])
+    expect([...app.child.unanswered, ...app.consoleChild.unanswered]).toEqual([])
+  })
+
+  test('library:refused: Keep editing, then Save the same text -- 4 ticks, refused again, as the old save judges the text -- and Close asks again', async () => {
+    const app = await started('library:refused')
+    const refusal = app.definitions.editorFace().verdict
+    app.dismissDefinitions('editorClose')
+    const saved = app.definitions.save()
+    app.clock.advance(4)
+    await saved
+    await settled()
+    expect([app.definitions.editorFace().verdict, refusal.refused]).toEqual([refusal, true])
+    app.definitions.requestClose()
+    expect([app.shell.sheet, app.shell.confirm]).toEqual(['editor', 'editorClose'])
+    expect([...app.child.unanswered, ...app.consoleChild.unanswered]).toEqual([])
+  })
+
+  test('library:image: describe-answer shown, no image chosen: Play waits and says why', async () => {
+    const app = await started('library:image')
+    const page = app.definitions.face().symphony
+    expect([page.name, page.image.chosen, page.canPlay, page.needsImage]).toEqual(['describe-answer', '', false, 'describe-answer takes an image with its input: choose one to play it.'])
+  })
+
+  test('review: the recorded dry run of acme/widget#12 on the Reviews tab, played within the frame’s ticks; review:post asks to post in the shell’s confirm host, and Post closes it, running nothing', async () => {
+    const review = await started('review')
+    expect([review.shell.route, review.review.face().runs.run.title, review.shell.confirm]).toEqual(['review', 'Thumbnails', undefined])
+    const app = await started('review:post')
+    expect(app.shell.confirm).toBe('reviewPost')
+    expect(app.review.postWords?.title).toBe('Post the review to github.com/acme/widget#12?')
+    const jobs = app.child.calls.filter((call) => call.kind === 'jobs').length
+    app.confirmReviewPost()
+    expect([app.shell.confirm, app.review.postWords, app.child.calls.filter((call) => call.kind === 'jobs').length]).toEqual([undefined, undefined, jobs])
+    expect([...app.child.unanswered, ...app.consoleChild.unanswered]).toEqual([])
+  })
+
+  test('review:targets and review:skills: their tabs, the targets with the kept sweep, the lenses with security shown; Add target… opens the sheet host, and Add puts the row on the tab', async () => {
+    const skills = await started('review:skills')
+    expect([skills.review.face().skills.skill.name, skills.review.face().skills.rows.length]).toEqual(['security', 7])
+    const app = await started('review:targets')
+    expect([app.review.face().targets.rows.length, app.review.face().targets.sweep.shown]).toEqual([2, true])
+    app.review.newTarget()
+    expect(app.shell.sheet).toBe('target')
+    await app.review.addTarget()
+    expect([app.shell.sheet, app.review.face().targets.rows.map((row) => row.name), app.shell.toast?.text]).toEqual([undefined, ['acme-all', 'widget', 'gadget'], "added review target 'gadget' to /Users/someone/.apogee/config/config.json"])
+  })
+
+  test('the no-apogee and config-typo notes on both screens, in the recorded words', async () => {
+    const missing = await started('library', 'missing')
+    expect(missing.definitions.face().note).toBe("Apogee isn't installed, so there are no agents to list.")
+    const missingReview = await started('review:targets', 'missing')
+    expect(missingReview.review.face().targets.note).toBe("Apogee isn't installed, so there is nothing to review with.")
+    const typo = await started('library:mcp', 'config-typo')
+    expect(typo.definitions.face().note.startsWith('The MCP servers could not be read: apogee mcp: /Users/someone/.apogee/config/config.json: not valid JSON')).toBe(true)
+    const typoReview = await started('review:targets', 'config-typo')
+    expect(typoReview.review.face().targets.note.startsWith('The targets could not be read: apogee review: /Users/someone/.apogee/config/config.json: not valid JSON')).toBe(true)
+  })
+
+  test('⌘0 opens Library and ⇧⌘R Review through the key map, each read as it comes into view (the browser may keep ⌘0 for itself)', async () => {
+    const app = await started('chat:new')
+    app.shell.press(chord('0', 'command'))
+    expect(app.shell.route).toBe('library')
+    await settled()
+    expect(app.definitions.face().agent.name).toBe('triage')
+    app.shell.press(chord('r', 'shift', 'command'))
+    expect(app.shell.route).toBe('review')
+    await settled()
+    await settled()
+    expect(app.review.face().skills.rows.length).toBe(7)
+    expect([...app.child.unanswered, ...app.consoleChild.unanswered]).toEqual([])
+  })
+
+  test('MCP Remove… from the confirm host: the CLI’s line in the toast, the server gone from the list', async () => {
+    const app = await started('library:mcp')
+    app.definitions.mcp.askToRemove()
+    expect(app.shell.confirm).toBe('mcpRemove')
+    await app.confirmDefinitions('mcpRemove', false)
+    await settled()
+    expect([app.shell.confirm, app.definitions.face().rows, app.shell.toast?.text]).toEqual([undefined, [], "removed MCP server 'code' from /Users/someone/.apogee/config/config.json"])
+  })
+})

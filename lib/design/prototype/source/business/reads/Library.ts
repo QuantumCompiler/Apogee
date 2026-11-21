@@ -2,6 +2,89 @@ import { JSONValue } from '../../data/protocol/JSONValue'
 import type { ReadDocument } from '../../data/protocol/ReadDocument'
 
 /**
+ * One agent, as `agents list --output-format json` lists it: the Mac app's
+ * `AgentEntry` (`Library.swift`), its prompt and schema files (relative to
+ * the data directory), its model and tool policy (design 1n).
+ */
+export interface AgentEntry {
+  readonly name: string
+  readonly description: string
+  /** Shipped with Apogee rather than the person's own. */
+  readonly bundled: boolean
+  /** The backend override; empty for `models.default`. */
+  readonly model: string
+  /** `read-only`, `all` or `none`. */
+  readonly tools: string
+  readonly prompts: readonly string[]
+  readonly schemas: readonly string[]
+  readonly collection: string
+}
+
+const strings = (value: JSONValue | undefined): string[] => (JSONValue.array(value) ?? []).flatMap((item) => (typeof item === 'string' ? [item] : []))
+
+export const AgentEntry = {
+  read(value: JSONValue): AgentEntry | undefined {
+    const row = JSONValue.object(value)
+    const name = JSONValue.string(row?.name)
+    if (!row || name === undefined) return undefined
+    return {
+      name,
+      description: JSONValue.string(row.description) ?? '',
+      bundled: JSONValue.bool(row.bundled) ?? false,
+      model: JSONValue.string(row.model) ?? '',
+      tools: JSONValue.string(row.tools) ?? '',
+      prompts: strings(row.prompts),
+      schemas: strings(row.schemas),
+      collection: JSONValue.string(row.collection) ?? '',
+    }
+  },
+
+  list(document: ReadDocument): AgentEntry[] {
+    return (document.entries ?? []).flatMap((entry) => AgentEntry.read(entry) ?? [])
+  },
+}
+
+/**
+ * A configured MCP server, as `mcp list --output-format json` connects to it:
+ * the Mac app's `MCPServer` (`Library.swift`), its state and the tools it
+ * offers. Its environment is said only as set or not -- never its values
+ * (design 1n).
+ */
+export interface MCPServer {
+  readonly name: string
+  readonly command: string
+  readonly args: readonly string[]
+  readonly enabled: boolean
+  readonly envSet: boolean
+  /** `connected`, or how connecting failed, in the CLI's words. */
+  readonly state: string
+  readonly tools: readonly string[]
+  readonly error: string | undefined
+}
+
+export const MCPServer = {
+  read(value: JSONValue): MCPServer | undefined {
+    const row = JSONValue.object(value)
+    const name = JSONValue.string(row?.name)
+    if (!row || name === undefined) return undefined
+    return {
+      name,
+      command: JSONValue.string(row.command) ?? '',
+      args: strings(row.args),
+      enabled: JSONValue.bool(row.enabled) ?? true,
+      envSet: JSONValue.bool(row.env_set) ?? false,
+      state: JSONValue.string(row.state) ?? '',
+      tools: strings(row.tools),
+      error: JSONValue.string(row.error),
+    }
+  },
+
+  list(document: ReadDocument): MCPServer[] {
+    return (document.entries ?? []).flatMap((entry) => MCPServer.read(entry) ?? [])
+  },
+}
+
+/**
  * One row of `mcp presets`: the Mac app's `MCPPreset` (`BusinessReads`,
  * `Library.swift`), the fields Settings › Xcode reads (design 1i); the
  * Library place (1n) reads the same rows.

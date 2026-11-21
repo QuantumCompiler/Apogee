@@ -2,12 +2,17 @@ import { ComposeView } from '../../compose/Views/ComposeView'
 import { StrictMode, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ConsoleView } from '../../console/Views/ConsoleView'
+import type { LibraryConfirm as DefinitionsConfirm } from '../../library/ViewModels/LibraryFaces'
+import { EditorSheet } from '../../library/Views/EditorSheet'
+import { LibraryScreen } from '../../library/Views/LibraryScreen'
 import type { ModelsConfirm } from '../../models/ViewModels/ModelsViewModel'
 import { AdaptersSheet } from '../../models/Views/AdaptersSheet'
 import { DownloadSheet } from '../../models/Views/DownloadsView'
 import { ModelsScreen, PairDrafterSheet, RoleRows, RolesNotes } from '../../models/Views/ModelsScreen'
 import { StoreSheet } from '../../models/Views/StoreView'
 import { MonitorView } from '../../monitor/Views/MonitorView'
+import { ReviewScreen } from '../../review/Views/ReviewScreen'
+import { TargetSheet } from '../../review/Views/TargetSheet'
 import { sessionSamples } from '../../session/Previews/SessionPresets'
 import { SuiteSheet } from '../../session/Views/SuiteSheet'
 import type { SettingsConfirm } from '../../settings/ViewModels/SettingsViewModel'
@@ -39,6 +44,7 @@ const libraryConfirms: readonly string[] = ['deleteChat', 'compactChat', 'forget
 const modelsConfirms: readonly string[] = ['model', 'storeDelete', 'storeModelDelete', 'unregister', 'registerAll'] satisfies readonly ModelsConfirm[]
 const storeSheets: readonly string[] = ['storeConvert', 'storeQuantize', 'storeRegister', 'storeRename']
 const settingsConfirms: readonly string[] = ['settingsForget', 'xcodeRemove'] satisfies readonly SettingsConfirm[]
+const definitionsConfirms: readonly string[] = ['editorClose', 'mcpRemove'] satisfies readonly DefinitionsConfirm[]
 
 /**
  * The application's window (design 1e): the shell, handed each place's screen,
@@ -55,7 +61,9 @@ const settingsConfirms: readonly string[] = ['settingsForget', 'xcodeRemove'] sa
  * is its screen, with the promote and pull sheets, the five train confirms
  * and a refused promote's; Video (1k) is its screen, with the install
  * consent sheet, its compositions slot the compose module's view (1l);
- * Voice (1m) is its screen.
+ * Voice (1m) is its screen; Library and Review (1n) are their screens, with
+ * the editor and the add-target sheet, the editor's close prompt, a
+ * server's removal and the post sheet.
  * It starts the app once it is on screen.
  */
 export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
@@ -68,6 +76,8 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
   useObserved(model.video)
   useObserved(model.compose)
   useObserved(model.voice)
+  useObserved(model.definitions)
+  useObserved(model.review)
   useEffect(() => {
     void model.start()
     return () => model.stop()
@@ -95,6 +105,9 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
         if (destination === 'video') return <VideoScreen model={video} compositions={() => <ComposeView model={compose} />} />
         // Voice (1m): its speeches, the speak card inline and the selected speech.
         if (destination === 'voice') return <VoiceScreen model={model.voice} />
+        // Library and Review (1n).
+        if (destination === 'library') return <LibraryScreen model={model.definitions} />
+        if (destination === 'review') return <ReviewScreen model={model.review} />
         const placeholder = placeholderOf(destination)
         return placeholder ? <PlaceholderScreen placeholder={placeholder} /> : null
       }}
@@ -290,6 +303,41 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
             </SheetHost>
           )
         }
+        // Library's editor (1n): the file's path under its title in the code font, Put it back as it was on the left once offered, Close and Save.
+        if (kind === 'editor') {
+          const editor = model.definitions.editorFace()
+          if (!editor.shown) return null
+          return (
+            <SheetHost
+              title={editor.title}
+              subtitle={editor.path}
+              subtitleMono
+              width={720}
+              left={editor.restore.shown ? [{ label: 'Put it back as it was', run: () => void model.definitions.restore(), disabled: !editor.restore.enabled }] : []}
+              right={[
+                { label: 'Close', run: () => model.definitions.requestClose() },
+                { label: 'Save', kind: 'btn-p', run: () => void model.definitions.save(), disabled: !editor.canSave },
+              ]}
+            >
+              <EditorSheet model={model.definitions} />
+            </SheetHost>
+          )
+        }
+        // Review's add-target sheet (1n): its command live, Add on once it names a target and where.
+        if (kind === 'target' && model.review.targetSheet().shown) {
+          return (
+            <SheetHost
+              title="Add a sweep target"
+              width={520}
+              right={[
+                { label: 'Cancel', run: () => model.review.cancelTarget() },
+                { label: 'Add', kind: 'btn-p', run: () => void model.review.addTarget(), disabled: !model.review.targetSheet().canAdd },
+              ]}
+            >
+              <TargetSheet model={model.review} />
+            </SheetHost>
+          )
+        }
         if (kind === 'execute' && library.executeDoorOpen) {
           return (
             <SheetHost
@@ -343,6 +391,27 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
           const words = model.settings.confirmWords(confirm)
           if (!words) return null
           return <ConfirmHost title={words.title} body={words.body} cancel={{ label: 'Cancel', run: () => model.dismissSettings(confirm) }} confirm={{ label: words.confirm, run: () => void model.confirmSettings(confirm), destructive: true }} />
+        }
+        // Library's (1n): the editor's close prompt -- Discard, or after a refused save Put it back as it was and Leave it -- and a server's removal.
+        if (definitionsConfirms.includes(kind)) {
+          const confirm = kind as DefinitionsConfirm
+          const words = model.definitions.confirmWords(confirm)
+          if (!words) return null
+          return (
+            <ConfirmHost
+              title={words.title}
+              body={words.body}
+              cancel={{ label: words.cancel, run: () => model.dismissDefinitions(confirm) }}
+              {...(words.alternative !== '' ? { alternative: { label: words.alternative, run: () => void model.confirmDefinitions(confirm, true) } } : {})}
+              confirm={{ label: words.confirm, run: () => void model.confirmDefinitions(confirm, false), destructive: words.destructive }}
+            />
+          )
+        }
+        // Review's post sheet (1n): the batch said, the command that posts it, and Post closing it as the old one does.
+        if (kind === 'reviewPost') {
+          const words = model.review.postWords
+          if (!words) return null
+          return <ConfirmHost title={words.title} body={words.body} detail={words.command} cancel={{ label: 'Cancel', run: () => model.dismissReviewPost() }} confirm={{ label: 'Post', run: () => model.confirmReviewPost() }} />
         }
         if (libraryConfirms.includes(kind)) {
           const words = library.confirmWords(kind as LibraryConfirm)
