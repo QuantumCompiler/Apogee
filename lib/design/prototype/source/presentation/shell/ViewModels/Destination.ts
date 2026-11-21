@@ -37,8 +37,6 @@ export function titleOf(destination: Destination): string {
 const portedBy: Readonly<Partial<Record<Destination, string>>> = {
   suites: '1p',
   tasks: '1p',
-  graph: '1o',
-  knowledge: '1o',
 }
 
 /** What a place not yet ported says: its name, and the item that ports it. */

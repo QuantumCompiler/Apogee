@@ -27,7 +27,8 @@ export type Connection =
 
 /** Where the person goes when this session is left: what the old `leaveFor(then)` carries, and the Sessions place's `SessionLibraryViewModel.pending` on the Mac. */
 export type SessionLeave =
-  | { readonly type: 'new'; readonly suite?: string; readonly force?: boolean }
+  /** A new chat: under a suite (Suites' Open a chat under it, 1p), or with a file attached and a draft written (the Code graph's Ask about this, 1o). */
+  | { readonly type: 'new'; readonly suite?: string; readonly force?: boolean; readonly attach?: string; readonly draft?: string }
   | { readonly type: 'private' }
   | { readonly type: 'open'; readonly id: string }
   | { readonly type: 'execute' }

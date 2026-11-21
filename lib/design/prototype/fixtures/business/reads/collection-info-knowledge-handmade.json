@@ -1,0 +1,13 @@
+{
+ "chunks": 3,
+ "collection": "knowledge",
+ "index": "ok",
+ "path": "/Users/someone/.apogee/embeddings/knowledge.db",
+ "schema": 6,
+ "sources": [
+  "kr-20261021T045944Z-1e2354",
+  "kr-20261021T045944Z-3346a9",
+  "kr-20261021T045954Z-0084c5"
+ ],
+ "vectors": null
+}

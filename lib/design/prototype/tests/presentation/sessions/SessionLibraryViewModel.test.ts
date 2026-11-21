@@ -392,3 +392,19 @@ test('the compact jobs are the library’s: retry’s and kv’s side by side (G
   await settled()
   expect(model.listFace().groups.flatMap((group) => group.rows).filter((row) => row.busy).map((row) => row.id)).toEqual([retryChat, kvChat])
 })
+
+describe('a leave that lands with a file and a draft (design 1o: the Code graph’s Ask about this)', () => {
+  test('a new session opens on Sessions with the file attached as a chip and the draft in the composer; nothing sent', async () => {
+    const { model, child } = await library()
+    let shown = 0
+    model.showSessions = () => (shown += 1)
+    const before = model.current
+    await model.carryOut({ type: 'new', attach: '/Users/someone/src/ingest/runner.py', draft: 'Explain Runner.run_batch and what depends on it.' })
+    await settled()
+    expect(model.current).not.toBe(before)
+    const composer = model.current.face().composer
+    expect([shown, composer.draft, composer.attachments]).toEqual([1, 'Explain Runner.run_batch and what depends on it.', ['/Users/someone/src/ingest/runner.py']])
+    expect(model.current.face().rows.filter((row) => row.kind === 'user')).toEqual([])
+    expect(child.unanswered).toEqual([])
+  })
+})

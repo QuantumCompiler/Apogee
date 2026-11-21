@@ -305,6 +305,9 @@ export class SessionLibraryViewModel extends Observable {
     switch (then.type) {
       case 'new':
         await this.replace(then.suite === undefined ? {} : { suite: then.suite, forceSuite: then.force ?? false })
+        // Ask about this (1o): the file attached as its chip, the draft in the composer, nothing sent -- the old `ask`'s `chipsBy` and `draftBy`.
+        if (then.attach !== undefined) this.current.attach(then.attach)
+        if (then.draft !== undefined) this.current.setDraft(then.draft)
         return
       case 'private':
         await this.replace({ privately: true })

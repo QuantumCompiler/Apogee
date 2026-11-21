@@ -52,6 +52,13 @@ function whatTheViewsRead(app: AppViewModel) {
     review: app.review.face(),
     targetSheet: app.review.targetSheet(),
     post: app.review.postWords ?? 'none',
+    // Knowledge and the Code graph (1o): both tabs, the graph's every view part, its save panel, dedupe sheet and two confirms' words.
+    records: app.records.face(),
+    collections: app.collections.face(),
+    graph: app.graph.face(),
+    savePanel: app.graph.savePanel(),
+    dedupe: app.graph.dedupeSheet(),
+    graphConfirms: (['graphDelete', 'explainRefused'] as const).map((kind) => app.graph.confirmWords(kind) ?? 'none'),
   }
 }
 
@@ -81,6 +88,12 @@ async function walk(app: AppViewModel, name: string, pressSuite = false): Promis
   // Library's and Review's too (1n): ⌘0 and ⇧⌘R open them on every screen.
   await app.definitions.appeared()
   await app.review.appeared()
+  // Knowledge's and the Code graph's too (1o): ⌘8 and ⌘5 open them on every screen, the graph in each of its views.
+  await app.records.appeared()
+  await app.collections.appeared()
+  const view = app.graph.view
+  for (const each of ['functions', 'files', 'prose'] as const) await app.graph.show(each)
+  await app.graph.show(view)
   // The Settings window's too (1i): ⌘, opens it on every screen; each pane shown, so each one's own reads are made.
   app.openSettings(app.settings.pane)
   for (const [pane] of settingsPanes) app.settings.pick(pane)
@@ -101,7 +114,7 @@ async function walk(app: AppViewModel, name: string, pressSuite = false): Promis
 }
 
 describe("the presets: the old prototype's 30-tick check's successor", () => {
-  test('the table holds the monitor, the session’s thirteen in the old data-props order -- 1u’s four plain ones and 1v’s nine scenarios and states -- 1g’s execute and console, 1h’s nine Models presets, 1i’s nine Settings presets in the old order and its four new ones, 1j’s nine Training presets in the old order and its new training:regimes, 1k’s four Video presets in the old order, 1l’s five Compose presets in the old order, 1m’s voice, and 1n’s six Library and four Review presets in the old order', () => {
+  test('the table holds the monitor, the session’s thirteen in the old data-props order -- 1u’s four plain ones and 1v’s nine scenarios and states -- 1g’s execute and console, 1h’s nine Models presets, 1i’s nine Settings presets in the old order and its four new ones, 1j’s nine Training presets in the old order and its new training:regimes, 1k’s four Video presets in the old order, 1l’s five Compose presets in the old order, 1m’s voice, 1n’s six Library and four Review presets in the old order, and 1o’s three Knowledge and three Code graph presets in the old order', () => {
     expect(Object.keys(presets)).toEqual([
       'monitor',
       'chat',
@@ -171,6 +184,12 @@ describe("the presets: the old prototype's 30-tick check's successor", () => {
       'review:post',
       'review:targets',
       'review:skills',
+      'knowledge',
+      'knowledge:collections',
+      'knowledge:mixed',
+      'graph',
+      'graph:prose',
+      'graph:refused',
     ])
   })
 
@@ -251,6 +270,36 @@ describe("the presets: the old prototype's 30-tick check's successor", () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(unread(whatTheViewsRead(app), 'video')).toEqual([])
     expect(app.video.face().clip.facts.find((fact) => fact.label === 'Seed')?.value).toBe('not recorded · held')
+  })
+
+  test('a planted record missing its fields, and a graph node missing its file and line, draw their absence in words, never undefined (design 1o)', async () => {
+    const { preset } = presetFor({ start: 'knowledge', still: true, apogee: 'installed' })
+    const planted = (rules: readonly { arguments: readonly string[]; answer: unknown }[] | undefined, command: string, change: (document: Record<string, unknown>) => unknown) =>
+      (rules ?? []).map((rule) => {
+        if (rule.arguments.join(' ') !== command) return rule
+        const answer = rule.answer as { stdout: string }
+        return { ...rule, answer: { stdout: JSON.stringify(change(JSON.parse(answer.stdout) as Record<string, unknown>)) } }
+      })
+    const reads = planted(preset.rules.reads as never, 'knowledge list', (document) => ({ ...document, data: [{ id: 'kr-planted' }] }))
+    const pictured = planted(reads as never, 'graph query --graph demo -- runner fetch', (document) => ({ ...document, entities: [{ name: 'ingest.planted', type: 'function' }] }))
+    const app = new AppViewModel({ ...preset, rules: { ...preset.rules, reads: pictured as never } }, modeRules)
+    expect(await walk(app, 'planted')).toEqual([])
+    app.records.select('kr-planted')
+    await app.graph.show('functions')
+    await app.graph.select('ingest.planted')
+    expect(unread(whatTheViewsRead(app), 'planted')).toEqual([])
+    expect(app.records.face().record.facts.find((fact) => fact.label === 'LINKED TO')?.value).toBe('nothing yet')
+    expect([app.graph.face().code.card.label, app.graph.face().code.card.where]).toEqual(['ingest.planted', ''])
+  })
+
+  test('a planted undefined in a node’s card fails the walk, naming its path (design 1o)', async () => {
+    const app = new AppViewModel(presetFor({ start: 'graph', still: true, apogee: 'installed' }).preset, modeRules)
+    await app.start()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(unread(whatTheViewsRead(app), 'graph')).toEqual([])
+    const face = app.graph.face()
+    app.graph.face = () => ({ ...face, code: { ...face.code, card: { ...face.code.card, sig: undefined } } }) as unknown as ReturnType<typeof app.graph.face>
+    expect(unread(whatTheViewsRead(app), 'graph')).toEqual(['graph.graph.code.card.sig'])
   })
 
   test('the walk finds what it looks for', () => {

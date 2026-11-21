@@ -2,6 +2,10 @@ import { ComposeView } from '../../compose/Views/ComposeView'
 import { StrictMode, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ConsoleView } from '../../console/Views/ConsoleView'
+import type { GraphConfirm } from '../../graph/ViewModels/GraphFaces'
+import { GraphScreen } from '../../graph/Views/GraphScreen'
+import { DedupeSheet, SavePanel } from '../../graph/Views/GraphSheets'
+import { KnowledgeScreen } from '../../knowledge/Views/KnowledgeScreen'
 import type { LibraryConfirm as DefinitionsConfirm } from '../../library/ViewModels/LibraryFaces'
 import { EditorSheet } from '../../library/Views/EditorSheet'
 import { LibraryScreen } from '../../library/Views/LibraryScreen'
@@ -45,6 +49,7 @@ const modelsConfirms: readonly string[] = ['model', 'storeDelete', 'storeModelDe
 const storeSheets: readonly string[] = ['storeConvert', 'storeQuantize', 'storeRegister', 'storeRename']
 const settingsConfirms: readonly string[] = ['settingsForget', 'xcodeRemove'] satisfies readonly SettingsConfirm[]
 const definitionsConfirms: readonly string[] = ['editorClose', 'mcpRemove'] satisfies readonly DefinitionsConfirm[]
+const graphConfirms: readonly string[] = ['graphDelete', 'explainRefused'] satisfies readonly GraphConfirm[]
 
 /**
  * The application's window (design 1e): the shell, handed each place's screen,
@@ -63,7 +68,9 @@ const definitionsConfirms: readonly string[] = ['editorClose', 'mcpRemove'] sati
  * consent sheet, its compositions slot the compose module's view (1l);
  * Voice (1m) is its screen; Library and Review (1n) are their screens, with
  * the editor and the add-target sheet, the editor's close prompt, a
- * server's removal and the post sheet.
+ * server's removal and the post sheet; Knowledge and the Code graph (1o) are
+ * their screens, the Knowledge tab the composition's, with the graph's save
+ * panel and dedupe sheet, its delete and a refused explain's alert.
  * It starts the app once it is on screen.
  */
 export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
@@ -78,6 +85,7 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
   useObserved(model.voice)
   useObserved(model.definitions)
   useObserved(model.review)
+  useObserved(model.graph)
   useEffect(() => {
     void model.start()
     return () => model.stop()
@@ -108,6 +116,9 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
         // Library and Review (1n).
         if (destination === 'library') return <LibraryScreen model={model.definitions} />
         if (destination === 'review') return <ReviewScreen model={model.review} />
+        // Knowledge and the Code graph (1o): the tab shown is the composition's, as the Mac's screen keeps it.
+        if (destination === 'knowledge') return <KnowledgeScreen records={model.records} collections={model.collections} tab={model.knowledgeTab} pickTab={(tab) => model.pickKnowledgeTab(tab)} />
+        if (destination === 'graph') return <GraphScreen model={model.graph} />
         const placeholder = placeholderOf(destination)
         return placeholder ? <PlaceholderScreen placeholder={placeholder} /> : null
       }}
@@ -338,6 +349,40 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
             </SheetHost>
           )
         }
+        // The Code graph's save panel and dedupe sheet (1o): the old generic sheet's savePanel and dedupe kinds.
+        if (kind === 'savePanel' && model.graph.savePanel().shown) {
+          return (
+            <SheetHost
+              title="Save As"
+              width={460}
+              right={[
+                { label: 'Cancel', run: () => model.graph.cancelSave() },
+                { label: 'Save', kind: 'btn-p', run: () => void model.graph.save(), disabled: !model.graph.savePanel().canSave },
+              ]}
+            >
+              <SavePanel model={model.graph} />
+            </SheetHost>
+          )
+        }
+        if (kind === 'dedupe' && model.graph.dedupeSheet().shown) {
+          const dedupe = model.graph.dedupeSheet()
+          return (
+            <SheetHost
+              title={dedupe.title}
+              width={560}
+              right={
+                dedupe.merges
+                  ? [
+                      { label: 'Cancel', run: () => model.graph.dismissDedupe() },
+                      { label: 'Merge them', kind: 'btn-p', run: () => model.graph.confirmDedupe(), destructive: true },
+                    ]
+                  : [{ label: 'Done', kind: 'btn-p', run: () => model.graph.dismissDedupe(), disabled: !dedupe.done }]
+              }
+            >
+              <DedupeSheet model={model.graph} />
+            </SheetHost>
+          )
+        }
         if (kind === 'execute' && library.executeDoorOpen) {
           return (
             <SheetHost
@@ -404,6 +449,20 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
               cancel={{ label: words.cancel, run: () => model.dismissDefinitions(confirm) }}
               {...(words.alternative !== '' ? { alternative: { label: words.alternative, run: () => void model.confirmDefinitions(confirm, true) } } : {})}
               confirm={{ label: words.confirm, run: () => void model.confirmDefinitions(confirm, false), destructive: words.destructive }}
+            />
+          )
+        }
+        // The Code graph's (1o): Delete the graph in the CLI's words, and a node's explain refused -- OK alone, the refusal's Clear.
+        if (graphConfirms.includes(kind)) {
+          const confirm = kind as GraphConfirm
+          const words = model.graph.confirmWords(confirm)
+          if (!words) return null
+          return (
+            <ConfirmHost
+              title={words.title}
+              body={words.body}
+              {...(words.cancel === '' ? {} : { cancel: { label: words.cancel, run: () => model.dismissGraph(confirm) } })}
+              confirm={{ label: words.confirm, run: () => void model.confirmGraph(confirm), destructive: words.destructive }}
             />
           )
         }

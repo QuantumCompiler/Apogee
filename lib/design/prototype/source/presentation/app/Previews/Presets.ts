@@ -1,6 +1,8 @@
 import type { Preset } from '../../../infrastructure/process/Preset'
 import { composeFiles, composePlaceRules, tidesFiles, withComposeFiles } from '../../compose/Previews/ComposeWorlds'
 import { consoleRules } from '../../console/Previews/ConsolePreset'
+import { graphPlaceRules } from '../../graph/Previews/GraphWorlds'
+import { knowledgePlaceRules } from '../../knowledge/Previews/KnowledgeWorlds'
 import { libraryPlaceRules, playTicks, withLibraryFolders, withLibraryWorld } from '../../library/Previews/LibraryWorlds'
 import type { LibraryPreset } from '../../library/Previews/LibraryWorlds'
 import { saveTicks } from '../../library/ViewModels/DefinitionEditor'
@@ -162,6 +164,16 @@ function reviewPreset(route: string, start = 1): (options: PresetOptions) => Pre
 }
 
 /**
+ * A Knowledge or Code graph preset (design 1o): the place over every preset's
+ * answers, the Streaming session at its starting frame behind it, as the
+ * Review presets keep it (composed here, since neither may import
+ * `session`). Nothing in either plays on the clock: one start tick.
+ */
+function placePreset(route: string): (options: PresetOptions) => Preset {
+  return ({ still, apogee }) => ({ rules: streamingRules('start'), route, clock: { start: 1, still }, apogee })
+}
+
+/**
  * A preset with the console's answers (design 1g): the console opens over
  * every screen (⇧⌘K), so every preset answers its lines -- `consoleRules`,
  * on the console's own child (`Preset.console`), a line nobody recorded
@@ -194,8 +206,12 @@ function listing(build: (options: PresetOptions) => Preset): (options: PresetOpt
  * lists, `config path`, the recorded play, the removal of `code`, and the
  * data directory's two editor files) and Review's (design 1n: the targets,
  * the skills, the recorded dry run, the starting target added, and the
- * sweep the CLI kept) before its own, so a preset's own answer to the same
- * arguments is the one given: all eight open from every screen.
+ * sweep the CLI kept), Knowledge's (design 1o: the records, the old
+ * question, the rejected record's raw conversation, the collections, their
+ * pages and notes' search) and the Code graph's (design 1o: the demo and
+ * notes graphs, their pictures, report and explain, and the More menu's
+ * commands) before its own, so a preset's own answer to the same arguments
+ * is the one given: all ten open from every screen.
  */
 function modelling(build: (options: PresetOptions) => Preset): (options: PresetOptions) => Preset {
   return consoling((options) => {
@@ -208,14 +224,17 @@ function modelling(build: (options: PresetOptions) => Preset): (options: PresetO
     const voice = voicePlaceRules()
     const library = libraryPlaceRules()
     const review = reviewPlaceRules()
+    // Knowledge's and the Code graph's (1o): ⌘8 and ⌘5 open them from every screen.
+    const knowledge = knowledgePlaceRules()
+    const graph = graphPlaceRules()
     return {
       ...preset,
       folders: withReviewFolders(withLibraryFolders(voiceFolders(preset.folders ?? withComposeFiles(videoFolders())))),
       rules: {
         ...preset.rules,
-        reads: [...(models.reads ?? []), ...settings.reads, ...(training.reads ?? []), ...video.reads, ...library.reads, ...review.reads, ...(preset.rules.reads ?? [])],
-        commands: [...(models.commands ?? []), ...settings.commands, ...(training.commands ?? []), ...video.commands, ...library.commands, ...review.commands, ...(preset.rules.commands ?? [])],
-        jobs: [...settings.jobs, ...(training.jobs ?? []), ...video.jobs, ...compose.jobs, ...voice.jobs, ...library.jobs, ...review.jobs, ...(preset.rules.jobs ?? [])],
+        reads: [...(models.reads ?? []), ...settings.reads, ...(training.reads ?? []), ...video.reads, ...library.reads, ...review.reads, ...knowledge.reads, ...graph.reads, ...(preset.rules.reads ?? [])],
+        commands: [...(models.commands ?? []), ...settings.commands, ...(training.commands ?? []), ...video.commands, ...library.commands, ...review.commands, ...knowledge.commands, ...graph.commands, ...(preset.rules.commands ?? [])],
+        jobs: [...settings.jobs, ...(training.jobs ?? []), ...video.jobs, ...compose.jobs, ...voice.jobs, ...library.jobs, ...review.jobs, ...graph.jobs, ...(preset.rules.jobs ?? [])],
       },
     }
   })
@@ -232,7 +251,9 @@ function modelling(build: (options: PresetOptions) => Preset): (options: PresetO
  * `training:regimes`; 1k's the four Video presets in the old order; 1l's
  * the five Compose presets in the old order, `compose:differs` among them;
  * 1m's `voice`; 1n's six Library and four Review presets in the old
- * order; each feature item adds its own here. Every one
+ * order; 1o's three Knowledge and three Code graph presets in the old order,
+ * `knowledge:mixed` and `graph:refused` among them; each feature item adds
+ * its own here. Every one
  * carries the Sessions place's reads, since the list shows on every screen
  * (`execute`'s own), and the console's answers, since it opens over every one.
  */
@@ -305,6 +326,12 @@ export const presets: Readonly<Record<string, (options: PresetOptions) => Preset
   'review:post': listing(reviewPreset('review:post', 2)),
   'review:targets': listing(reviewPreset('review:targets')),
   'review:skills': listing(reviewPreset('review:skills')),
+  knowledge: listing(placePreset('knowledge')),
+  'knowledge:collections': listing(placePreset('knowledge:collections')),
+  'knowledge:mixed': listing(placePreset('knowledge:mixed')),
+  graph: listing(placePreset('graph')),
+  'graph:prose': listing(placePreset('graph:prose')),
+  'graph:refused': listing(placePreset('graph:refused')),
 }
 
 /** The preset opened with no `start`, or an unknown one: `chat`, the old `data-props` default (1v; 1e's interim default was the monitor). */

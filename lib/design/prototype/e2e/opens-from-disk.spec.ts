@@ -105,7 +105,7 @@ test('in the missing and config-typo modes the monitor says why it cannot read, 
   await expect(monitor(page)).toContainText("apogee system: /Users/someone/.apogee/config/config.json: not valid JSON: line 4, column 5: expected ',' or '}' after a member (exited with status 1)")
 })
 
-test('each of the 11 places opens by click: Sessions its session window, Models its tabs (1h), Training its tabs (1j), Video its clips (1k), Voice its speeches (1m), Library and Review theirs (1n), an unported one its placeholder', async ({ page }) => {
+test('each of the 11 places opens by click: Sessions its session window, Models its tabs (1h), Training its tabs (1j), Video its clips (1k), Voice its speeches (1m), Library and Review theirs (1n), the Code graph and Knowledge theirs (1o), an unported one its placeholder', async ({ page }) => {
   const { errors } = watch(page)
   await page.goto(`${built}?start=monitor&still=true`)
   const models = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Models ⌘2' })
@@ -115,9 +115,21 @@ test('each of the 11 places opens by click: Sessions its session window, Models 
   await expect(page.getByRole('tab', { name: /^Backends/ })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByText(/^Models isn’t drawn here yet/)).toHaveCount(0)
   const places: Array<[string, string, string]> = [
-    ['Suites', '⌘3', '1p'], ['Tasks', '⌘4', '1p'], ['Code graph', '⌘5', '1o'],
-    ['Knowledge', '⌘8', '1o'],
+    ['Suites', '⌘3', '1p'], ['Tasks', '⌘4', '1p'],
   ]
+  // Knowledge and the Code graph are their places (1o): Records, and the Functions view, no placeholder.
+  const graph = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Code graph ⌘5' })
+  await graph.click()
+  await expect(graph).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('heading', { name: 'Code graph', level: 1 })).toBeVisible()
+  await expect(page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Functions' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByText(/^Code graph isn’t drawn here yet/)).toHaveCount(0)
+  const knowledge = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Knowledge ⌘8' })
+  await knowledge.click()
+  await expect(knowledge).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('heading', { name: 'Knowledge', level: 1 })).toBeVisible()
+  await expect(page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Records' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByText(/^Knowledge isn’t drawn here yet/)).toHaveCount(0)
   // Library and Review are their places (1n): the agents with triage's page, the Reviews tab, no placeholder.
   const library = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Library ⌘0' })
   await library.click()
@@ -1623,5 +1635,261 @@ test('live from the file: a symphony row picks; Play runs the recorded play, its
   await expect(page.getByRole('heading', { name: 'critique-revise', level: 2 })).toBeVisible()
   await expect(page.getByText('revise · chat (writer)')).toHaveCount(0)
   await expect(page.getByText('OUTPUT')).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+const knowledgeRows = (page: Page) => page.getByRole('main').getByRole('button').filter({ hasText: /rejected · ux|shipped · eng|shipped · product/ })
+const collectionList = (page: Page) => page.getByRole('navigation', { name: 'Collections' })
+const canvas = (page: Page) => page.getByRole('main').locator('button[aria-pressed]').filter({ hasText: /ingest\// })
+const symbolPane = (page: Page) => page.getByRole('complementary', { name: 'Symbol' })
+
+/** What each Knowledge and Code graph preset shows at its frame, still, in each mode the old prototype draws it -- its regions, tabs, controls, states and words (design 1o). */
+const knowledgeFrames: Record<string, (page: Page, apogee: 'installed' | 'missing' | 'config-typo') => Promise<void>> = {
+  knowledge: async (page, apogee) => {
+    await expect(page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Records' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByRole('button', { name: 'Capture…' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Export…' })).toBeVisible()
+    await expect(page.getByRole('textbox', { name: 'Ask the records' })).toBeVisible()
+    await expect(page.getByRole('combobox', { name: 'Branch' })).toHaveValue('')
+    if (apogee === 'installed') {
+      await expect(page.getByRole('textbox', { name: 'Ask the records' })).toHaveValue('why was the cancel button removed')
+      await expect(page.getByText('3 found · lexical')).toBeVisible()
+      await expect(knowledgeRows(page)).toHaveCount(3)
+      await expect(knowledgeRows(page).first()).toContainText('0.596')
+      await expect(knowledgeRows(page).first()).toHaveAttribute('aria-current', 'true')
+      const record = page.getByRole('complementary', { name: 'Record' })
+      await expect(record.getByRole('heading', { name: 'Remove the cancel button from checkout.', level: 2 })).toBeVisible()
+      for (const label of ['WHY', 'BRANCH', 'DISCIPLINE', 'FROM', 'LINKED TO', 'CAPTURED', 'RAW CONVERSATION']) await expect(record.getByRole('heading', { name: label, level: 3 })).toBeVisible()
+      await expect(record.getByText('meeting · Ada Lovelace')).toBeVisible()
+      await expect(record.getByRole('button', { name: 'Show the conversation it was distilled from' })).toHaveAttribute('title', 'apogee knowledge info kr-20261021T045944Z-1e2354 --raw')
+      for (const name of ['Link', 'Move to…', 'Delete…']) await expect(record.getByRole('button', { name, exact: true })).toBeVisible()
+    } else {
+      // With no apogee the list stands empty with no words, as the old has no missing state; a config typo says the CLI's refusal.
+      if (apogee === 'missing') await expect(page.getByRole('main')).not.toContainText("isn't installed")
+      else await expect(page.getByRole('main')).toContainText(`The records could not be read: apogee knowledge: ${typoWords}`)
+      await expect(knowledgeRows(page)).toHaveCount(0)
+      await expect(page.getByText('Choose a record to read its reasoning and its decision.')).toBeVisible()
+    }
+  },
+  'knowledge:collections': async (page, apogee) => {
+    await expect(page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Collections' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByRole('button', { name: 'Ingest…' })).toBeVisible()
+    if (apogee === 'installed') {
+      await expect(collectionList(page).getByRole('button')).toHaveCount(3)
+      await expect(collectionList(page).getByRole('button', { name: /^notes/ })).toHaveAttribute('aria-current', 'true')
+      await expect(page.getByRole('heading', { name: 'notes', level: 2 })).toBeVisible()
+      for (const label of ['CHUNKS', 'TEXT INDEX', 'VECTORS']) await expect(page.getByText(label, { exact: true })).toBeVisible()
+      await expect(page.getByText('none -- a text index only')).toBeVisible()
+      await expect(page.getByRole('textbox', { name: 'Search notes' })).toHaveValue('how does a heat pump work')
+      await expect(page.getByText('0.000  [lexical]  heat-pumps.md#0')).toBeVisible()
+      await expect(page.locator('h3', { hasText: 'SOURCES · 5' })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Remove…' })).toHaveCount(5)
+    } else {
+      if (apogee === 'missing') await expect(page.getByRole('main')).not.toContainText("isn't installed")
+      else await expect(collectionList(page)).toContainText(`The collections could not be read: apogee embed: ${typoWords}`)
+      await expect(collectionList(page).getByRole('button')).toHaveCount(0)
+    }
+  },
+  'knowledge:mixed': async (page, apogee) => {
+    await expect(page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Collections' })).toHaveAttribute('aria-pressed', 'true')
+    if (apogee === 'installed') {
+      await expect(collectionList(page).getByRole('button', { name: /^mixed/ })).toHaveAttribute('aria-current', 'true')
+      await expect(page.getByRole('heading', { name: 'mixed', level: 2 })).toBeVisible()
+      await expect(page.getByText("4 of 4 chunks, 8-d [mixed: 'mock-embed' and 'mock-embed-b' -- re-ingest every source with one model]")).toBeVisible()
+      await expect(page.getByRole('textbox', { name: 'Search mixed' })).toHaveValue('')
+      await expect(page.locator('h3', { hasText: 'SOURCES · 4' })).toBeVisible()
+    } else await expect(collectionList(page).getByRole('button')).toHaveCount(0)
+  },
+  graph: async (page, apogee) => {
+    await expect(page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Functions' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Collection · notes' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Rebuild' })).toBeVisible()
+    if (apogee === 'installed') {
+      await expect(page.getByText('~/src · 4 files · 16 symbols')).toBeVisible()
+      await expect(page.getByRole('button', { name: 'More' })).toBeEnabled()
+      await expect(page.getByRole('navigation', { name: 'Files' }).getByRole('button', { name: 'runner.py' })).toBeVisible()
+      await expect(canvas(page)).toHaveCount(6)
+      await expect(symbolPane(page).getByRole('heading', { name: 'Runner.run_batch', level: 2 })).toBeVisible()
+      await expect(symbolPane(page).getByText('def run_batch(self, batch)')).toBeVisible()
+      await expect(symbolPane(page).getByRole('heading', { name: 'CALLED BY · 0' })).toBeVisible()
+      await expect(symbolPane(page).getByRole('heading', { name: 'CALLS · 1' })).toBeVisible()
+      await expect(symbolPane(page).getByRole('button', { name: 'Ask about this' })).toBeVisible()
+      await expect(symbolPane(page).getByRole('button', { name: 'Open in editor' })).toBeVisible()
+    } else {
+      if (apogee === 'missing') await expect(page.getByRole('main')).not.toContainText("isn't installed")
+      else await expect(page.getByRole('main')).toContainText(`apogee graph: ${typoWords}`)
+      await expect(canvas(page)).toHaveCount(0)
+      await expect(page.getByRole('button', { name: 'More' })).toBeDisabled()
+    }
+  },
+  'graph:prose': async (page, apogee) => {
+    await expect(page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Collection · notes' })).toHaveAttribute('aria-pressed', 'true')
+    if (apogee === 'installed') {
+      await expect(page.getByText('notes · 4 entities · 5 relations · 1 community')).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Find communities' })).toBeVisible()
+      await expect(page.getByText(/^Graph "notes" holds 4 entities and 5 relations\./)).toBeVisible()
+      for (const label of ['COMMUNITIES · 1', 'DECISIONS · 1', 'BUSIEST']) await expect(page.getByRole('heading', { name: label })).toBeVisible()
+      const entity = page.getByRole('complementary', { name: 'Entity' })
+      await expect(entity.getByRole('heading', { name: 'Heat pump', level: 2 })).toBeVisible()
+      await expect(entity.getByText('1 in · 2 out')).toBeVisible()
+      for (const label of ['COMMUNITIES', 'DECISIONS', 'CONCERNS (IN)', 'CONTAINS']) await expect(entity.getByRole('heading', { name: label, exact: true })).toBeVisible()
+    } else await expect(page.getByRole('button', { name: 'Find communities' })).toHaveCount(0)
+  },
+  'graph:refused': async (page, apogee) => {
+    if (apogee === 'installed') {
+      await expect(confirmHost(page).getByRole('heading', { name: "That didn't work" })).toBeVisible()
+      await expect(confirmHost(page)).toContainText("apogee graph: no node named 'ingest.runner.Runner._fetch' in graph 'demo' -- near matches: function:ingest.runner.Runner._fetch_one (ingest/runner.py:12)")
+      await expect(confirmHost(page).getByRole('button')).toHaveCount(1)
+      await expect(canvas(page).filter({ hasText: 'Runner._fetch' })).toHaveAttribute('aria-pressed', 'true')
+      await expect(symbolPane(page)).toHaveCount(0)
+    } else await expect(confirmHost(page)).toHaveCount(0)
+  },
+}
+
+for (const [preset, frame] of Object.entries(knowledgeFrames)) {
+  for (const apogee of ['installed', 'missing', 'config-typo'] as const) {
+    test(`${preset} at ${apogee}: its frame, still, its regions, tabs, controls and words, with no console error and no request but the file (design 1o)`, async ({ page }) => {
+      const { errors, requests } = watch(page)
+      const url = `${built}?start=${preset}&still=true&apogee=${apogee}`
+      await page.goto(url)
+      const place = preset.startsWith('knowledge') ? 'Knowledge' : 'Code graph'
+      await expect(page.getByRole('heading', { name: place, level: 1 })).toBeVisible()
+      await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: place === 'Knowledge' ? 'Knowledge ⌘8' : 'Code graph ⌘5' })).toHaveAttribute('aria-current', 'page')
+      await frame(page, apogee)
+      expect(errors).toEqual([])
+      expect(requests).toEqual([url])
+    })
+  }
+}
+
+test('live from the file: the Knowledge tabs switch; a branch filters and clears the question; Ask with nothing typed asks the old question; the raw conversation shows and hides; notes current, searched with nothing typed; another collection’s search the old toast (design 1o)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=knowledge`)
+  const record = page.getByRole('complementary', { name: 'Record' })
+  await record.getByRole('button', { name: 'Show the conversation it was distilled from' }).click()
+  await expect(record.getByText('Ada: testers keep hitting cancel when they mean back. Grace: then we drop the cancel button from checkout. Ada: agreed, ship it.')).toBeVisible()
+  await record.getByRole('button', { name: 'Hide' }).click()
+  await expect(record.getByRole('button', { name: 'Show the conversation it was distilled from' })).toBeVisible()
+  await page.getByRole('combobox', { name: 'Branch' }).selectOption('rejected')
+  await expect(knowledgeRows(page)).toHaveCount(1)
+  await expect(page.getByText('3 found · lexical')).toHaveCount(0)
+  await page.getByRole('combobox', { name: 'Branch' }).selectOption('superseded')
+  await expect(page.getByText('No superseded records.')).toBeVisible()
+  await page.getByRole('combobox', { name: 'Branch' }).selectOption('')
+  // Ask with nothing typed asks the old question, filling the field, as the old kno.ask does.
+  await expect(page.getByRole('textbox', { name: 'Ask the records' })).toHaveValue('')
+  await page.getByRole('button', { name: 'Ask', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: 'Ask the records' })).toHaveValue('why was the cancel button removed')
+  await expect(page.getByText('3 found · lexical')).toBeVisible()
+  await record.getByRole('button', { name: 'Link', exact: true }).click()
+  await expect(toast(page, 'apogee knowledge link (prototype)')).toBeVisible()
+  await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Collections' }).click()
+  await expect(page.getByRole('button', { name: 'Ingest…' })).toBeVisible()
+  // With none chosen notes' page is shown and its row current, as the old kn.coll starts at notes.
+  await expect(collectionList(page).getByRole('button', { name: /^notes/ })).toHaveAttribute('aria-current', 'true')
+  await collectionList(page).getByRole('button', { name: /^notes/ }).click()
+  // Search with nothing typed searches the old question, filling the field, as the old kno.search does.
+  await page.getByRole('button', { name: 'Search', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: 'Search notes' })).toHaveValue('how does a heat pump work')
+  await expect(page.getByText('0.000  [lexical]  solar.md#0')).toBeVisible()
+  await collectionList(page).getByRole('button', { name: /^knowledge/ }).click()
+  await expect(page.getByText('kr-20261021T045954Z-0084c5')).toBeVisible()
+  await page.getByRole('button', { name: 'Search', exact: true }).click()
+  await expect(toast(page, 'apogee embed query knowledge: its lines, as printed (prototype)')).toBeVisible()
+  // The tab is kept across a visit elsewhere, as the old kn.tab is.
+  await page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Code graph ⌘5' }).click()
+  await page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Knowledge ⌘8' }).click()
+  await expect(page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Collections' })).toHaveAttribute('aria-pressed', 'true')
+  expect(errors).toEqual([])
+})
+
+test('live from the file: Files switches to IMPORTED BY and IMPORTS; a neighbour walks; the tree picks a file; the prose graph; Ask about this lands in a new session with the file and the draft (design 1o)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=graph`)
+  await symbolPane(page).getByRole('button', { name: 'Runner._fetch' }).click()
+  await expect(symbolPane(page).getByRole('heading', { name: 'Runner._fetch', level: 2 })).toBeVisible()
+  await expect(symbolPane(page).getByRole('heading', { name: 'CALLED BY · 1' })).toBeVisible()
+  await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Files' }).click()
+  await expect(canvas(page)).toHaveCount(4)
+  await expect(symbolPane(page).getByRole('heading', { name: 'IMPORTED BY · 1' })).toBeVisible()
+  await expect(symbolPane(page).getByRole('heading', { name: 'IMPORTS · 1' })).toBeVisible()
+  await expect(symbolPane(page).getByText('ingest/runner.py · 17 lines')).toBeVisible()
+  await page.getByRole('navigation', { name: 'Files' }).getByRole('button', { name: 'cli.py' }).click()
+  await expect(symbolPane(page).getByRole('heading', { name: 'IMPORTS · 2' })).toBeVisible()
+  await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Collection · notes' }).click()
+  await expect(page.getByText('notes · 4 entities · 5 relations · 1 community')).toBeVisible()
+  await page.getByRole('button', { name: 'Find communities' }).click()
+  await expect(toast(page, 'apogee graph communities notes: the utility model summarises each group (prototype)')).toBeVisible()
+  await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Functions' }).click()
+  await symbolPane(page).getByRole('button', { name: 'Ask about this' }).click()
+  await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Sessions ⌘1' })).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('textbox', { name: /Message/ })).toHaveValue('Explain Runner.run_batch and what depends on it.')
+  await expect(page.getByText('/Users/someone/src/ingest/runner.py').first()).toBeVisible()
+  expect(errors).toEqual([])
+})
+
+test('live from the file: the More menu through the scrim; the save panel refusing an empty name and Save saying the CLI’s line; dedupe Done on demo, Merge them on notes to its merged note; delete asked, the graph gone, Rebuild bringing it back (design 1o)', async ({ page }) => {
+  test.setTimeout(60_000)
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=graph`)
+  await page.getByRole('button', { name: 'More' }).click()
+  await expect(page.getByRole('menu', { name: 'More' }).getByRole('menuitem')).toHaveText(['Export as HTML page…', 'Export as GraphML…', 'Export as Mermaid diagram…', 'Save the report…', 'Dedupe…', 'Delete the graph…'])
+  await page.getByRole('button', { name: 'Close menu' }).click()
+  await expect(page.getByRole('menu', { name: 'More' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'More' }).click()
+  await page.getByRole('menuitem', { name: 'Export as HTML page…' }).click()
+  const save = page.getByRole('dialog', { name: 'Save As' })
+  await expect(save.getByText('apogee graph export html --graph demo -o /Users/someone/Documents/demo.html')).toBeVisible()
+  await save.getByRole('textbox', { name: 'Save As' }).fill('')
+  await expect(save.getByRole('button', { name: 'Save' })).toBeDisabled()
+  await save.getByRole('textbox', { name: 'Save As' }).fill('demo.html')
+  await save.getByRole('button', { name: 'Save' }).click()
+  await expect(save).toHaveCount(0)
+  await expect(toast(page, 'Exported graph "demo" to /Users/someone/Documents/demo.html: 9 entities and 12 relations drawn, 41 KB.')).toBeVisible()
+  await page.getByRole('button', { name: 'More' }).click()
+  await page.getByRole('menuitem', { name: 'Dedupe…' }).click()
+  let dedupe = page.getByRole('dialog', { name: 'Dedupe demo' })
+  await expect(dedupe.getByText(/^Code entities: 9 -- merged by exact qualified name/)).toBeVisible()
+  await expect(dedupe.getByRole('button', { name: 'Merge them' })).toHaveCount(0)
+  await dedupe.getByRole('button', { name: 'Done' }).click()
+  await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Collection · notes' }).click()
+  await page.getByRole('button', { name: 'More' }).click()
+  await page.getByRole('menuitem', { name: 'Dedupe…' }).click()
+  dedupe = page.getByRole('dialog', { name: 'Dedupe notes' })
+  await expect(dedupe.getByText('Would merge into Compressor (component): compressor unit', { exact: false })).toBeVisible()
+  await dedupe.getByRole('button', { name: 'Merge them' }).click()
+  await expect(dedupe.getByText('merging')).toBeVisible()
+  await expect(dedupe.getByText(/^Merged into Compressor \(component\): compressor unit/)).toBeVisible({ timeout: 10_000 })
+  await dedupe.getByRole('button', { name: 'Done' }).click()
+  await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Functions' }).click()
+  await page.getByRole('button', { name: 'More' }).click()
+  await page.getByRole('menuitem', { name: 'Delete the graph…' }).click()
+  await expect(confirmHost(page).getByRole('heading', { name: 'Delete the graph demo?' })).toBeVisible()
+  await confirmHost(page).getByRole('button', { name: 'Delete the graph' }).click()
+  await expect(page.getByText('demo has no graph built. Rebuild parses its sources again -- no model, no key, no network.')).toBeVisible()
+  await expect(page.getByText('0 nodes · 0 edges · 0 files')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'More' })).toBeDisabled()
+  await page.getByRole('button', { name: 'Rebuild' }).click()
+  await expect(page.getByText('~/src · 4 files · 16 symbols')).toBeVisible({ timeout: 10_000 })
+  await expect(canvas(page)).toHaveCount(6)
+  expect(errors).toEqual([])
+})
+
+test('live from the file: graph:refused’s OK clears the selection, the picture kept; a click on Runner, Runner.run_batch or a file asks the CLI and shows its card (design 1o)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=graph:refused`)
+  await confirmHost(page).getByRole('button', { name: 'OK' }).click()
+  await expect(confirmHost(page)).toHaveCount(0)
+  await expect(canvas(page)).toHaveCount(6)
+  await expect(canvas(page).and(page.locator('[aria-pressed="true"]'))).toHaveCount(0)
+  await canvas(page).filter({ hasText: 'ingest/runner.py:4' }).click()
+  await expect(symbolPane(page).getByRole('heading', { name: 'Runner', level: 2 })).toBeVisible()
+  // Only Runner._fetch is refused, as the old pickNode refuses it alone: every other click shows its card, in Functions and in Files.
+  await canvas(page).filter({ hasText: 'ingest/runner.py:8' }).click()
+  await expect(symbolPane(page).getByRole('heading', { name: 'Runner.run_batch', level: 2 })).toBeVisible()
+  await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Files' }).click()
+  await page.getByRole('navigation', { name: 'Files' }).getByRole('button', { name: 'cli.py' }).click()
+  await expect(symbolPane(page).getByRole('heading', { name: 'ingest/cli.py', level: 2 })).toBeVisible()
+  await expect(confirmHost(page)).toHaveCount(0)
   expect(errors).toEqual([])
 })

@@ -11,6 +11,13 @@ import type { ModeRules, Rules } from '../../../infrastructure/process/StandInCh
 import { heatPumpFrame, moviesFolder, passedOver, projects, recordedBrief, recordedEdit } from '../../compose/Previews/ComposeWorlds'
 import { ComposeViewModel } from '../../compose/ViewModels/ComposeViewModel'
 import { ConsoleViewModel } from '../../console/ViewModels/ConsoleViewModel'
+import { graphWorld, overtakenNode } from '../../graph/Previews/GraphWorlds'
+import type { GraphConfirm } from '../../graph/ViewModels/GraphFaces'
+import { GraphViewModel } from '../../graph/ViewModels/GraphViewModel'
+import { collectionQuestion, recordedSearches, recordsQuestion, rejectedRecord } from '../../knowledge/Previews/KnowledgeWorlds'
+import { CollectionsViewModel } from '../../knowledge/ViewModels/CollectionsViewModel'
+import type { KnowledgeTab } from '../../knowledge/ViewModels/KnowledgeFaces'
+import { RecordsViewModel } from '../../knowledge/ViewModels/RecordsViewModel'
 import { editorFiles, refusedSpec, sampleImage, sampleInputs, typedLine } from '../../library/Previews/LibraryWorlds'
 import { LibraryViewModel } from '../../library/ViewModels/LibraryViewModel'
 import type { LibraryConfirm } from '../../library/ViewModels/LibraryFaces'
@@ -141,6 +148,18 @@ export class AppViewModel extends Observable {
   readonly definitions: LibraryViewModel
   /** The Review place (1n): the merge request reviewed dry run first, the targets and the last sweep, the skills. */
   readonly review: ReviewViewModel
+  /** The Knowledge place's decision records (1o): the list, a question answered, a record and its raw conversation. */
+  readonly records: RecordsViewModel
+  /** The Knowledge place's collections (1o): the list, a collection's page, its search. */
+  readonly collections: CollectionsViewModel
+  /**
+   * The Knowledge tab shown (1o), the route's: the Mac's screen keeps it as
+   * its `@State tab`, so no third view-model holds it, and the composition
+   * keeps it across visits as the old `kn.tab` stays.
+   */
+  knowledgeTab: KnowledgeTab = 'records'
+  /** The Code graph place (1o): the recorded demo graph's Functions and Files views, the notes prose graph, the More menu. */
+  readonly graph: GraphViewModel
   /** Every key the window binds: the shell's and the places' (Sessions'), what Settings › Keyboard lists. */
   readonly boundKeys: readonly BoundKey[] = [...KeyMap.shell, ...SessionKeys.bindings]
 
@@ -191,7 +210,22 @@ export class AppViewModel extends Observable {
     this.review = new ReviewViewModel(this.reads, this.jobs, this.child.folders)
     this.review.setForm(reviewForm)
     this.review.sweeps = () => [sweepsFolder]
-    this.places = { models: this.models, training: this.training, video: this.video, voice: this.voice, library: this.definitions, review: this.review }
+    // Knowledge and the Code graph (1o) over the same reads and jobs; the graph's world -- the recorded graphs, the questions whose pictures it shows, where a save goes -- handed in, as Review's form is.
+    this.records = new RecordsViewModel(this.reads)
+    this.collections = new CollectionsViewModel(this.reads)
+    this.collections.recordedSearches = recordedSearches
+    // What an empty field asks: the old kno.ask's and kno.search's questions, filled in, as the old always shows them asked.
+    this.records.emptyQuestion = recordsQuestion
+    this.collections.emptyQuestions = { notes: collectionQuestion }
+    this.graph = new GraphViewModel(this.reads, this.jobs)
+    this.graph.useWorld(graphWorld)
+    const knowledge: Place = {
+      appeared: () => {
+        void this.records.appeared()
+        void this.collections.appeared()
+      },
+    }
+    this.places = { models: this.models, training: this.training, video: this.video, voice: this.voice, library: this.definitions, review: this.review, knowledge, graph: this.graph }
 
     // The library's doors, as closures: the toast, the shell's hosts, Sessions (an overlay closed, or left open), Models and the scrim.
     this.library.say = (text) => this.shell.say(text)
@@ -277,6 +311,19 @@ export class AppViewModel extends Observable {
       place.ask = (kind) => this.shell.ask(kind)
       place.subscribe(() => this.changed())
     }
+    // Knowledge's and the Code graph's doors (1o): the toast; the graph's More menu through the shell's scrim, its save panel and dedupe sheet through the sheet host, Delete and a refused explain through the confirm host,
+    // and Ask about this a new session on Sessions with the node's file attached and the old draft, through the open session's own leave -- asked first where a private conversation would be lost -- never an import of `session`.
+    for (const place of [this.records, this.collections]) {
+      place.say = (text) => this.shell.say(text)
+      place.subscribe(() => this.changed())
+    }
+    this.graph.say = (text) => this.shell.say(text)
+    this.graph.present = (sheet) => this.shell.openSheet(sheet)
+    this.graph.dismissSheet = () => this.shell.closeSheet()
+    this.graph.ask = (kind) => this.shell.ask(kind)
+    this.graph.menuChanged = (owner) => (owner === undefined ? this.shell.closeMenus() : this.shell.openMenu(owner))
+    this.graph.askAbout = (file, draft) => this.session.leave({ type: 'new', attach: file, draft })
+    this.graph.subscribe(() => this.changed())
     this.registry.onChange(() => this.changed())
     // The monitor lists the video runs going now from the shared job list (1k), and its Stop stops that run (a composition's Open shows it, 1l): the place's
     // own clip only once its pipeline has loaded (the old lists `vrun` past `load`), by what it generates on and where;
@@ -354,6 +401,7 @@ export class AppViewModel extends Observable {
       this.settingsWasOpen = this.shell.settingsOpen
       if (this.shell.menu === undefined && this.session.menu !== undefined) this.session.closeMenus()
       if (this.shell.menu === undefined && this.library.rowMenu !== undefined) this.library.closeRowMenu()
+      if (this.shell.menu === undefined && this.graph.moreOpen) this.graph.closeMore()
     })
   }
 
@@ -477,6 +525,26 @@ export class AppViewModel extends Observable {
     this.definitions.dismissPending(kind)
   }
 
+  /** A Knowledge tab picked (1o): Records or Collections, kept as the old `kn.tab` is. */
+  pickKnowledgeTab(tab: KnowledgeTab): void {
+    this.knowledgeTab = tab
+    this.changed()
+  }
+
+  /** A Code graph confirm answered (1o): Delete the graph, or a refused explain's OK; the host closed first. */
+  async confirmGraph(kind: GraphConfirm): Promise<void> {
+    this.shell.dismissConfirm()
+    if (kind === 'graphDelete') await this.graph.confirmDelete()
+    else this.graph.dismissProblem()
+  }
+
+  /** A Code graph confirm's Cancel: the delete not made, or the refusal's alert gone, which is its Clear. */
+  dismissGraph(kind: GraphConfirm): void {
+    this.shell.dismissConfirm()
+    if (kind === 'graphDelete') this.graph.dismissDelete()
+    else this.graph.dismissProblem()
+  }
+
   /** The post sheet's Post (1n): it closes, as the old one does, running nothing. */
   confirmReviewPost(): void {
     this.shell.dismissConfirm()
@@ -583,6 +651,9 @@ export class AppViewModel extends Observable {
     this.voice.connect(binary)
     this.definitions.connect(binary)
     this.review.connect(binary)
+    this.records.connect(binary)
+    this.collections.connect(binary)
+    this.graph.connect(binary)
     // The console's child shares the preset's mode, so it finds the binary where `child` does.
     this.console.connect(binary)
     // Settings, with the override this launch's discovery passed over, as the app's preferences hold it.
@@ -649,6 +720,14 @@ export class AppViewModel extends Observable {
     }
     if (where === 'review') {
       await this.openReviewPreset(sub ?? '')
+      return
+    }
+    if (where === 'knowledge') {
+      await this.openKnowledgePreset(sub ?? '')
+      return
+    }
+    if (where === 'graph') {
+      await this.openGraphPreset(sub ?? '')
       return
     }
     if (where === 'models' || where === 'download') {
@@ -1023,6 +1102,61 @@ export class AppViewModel extends Observable {
       case 'skills':
         review.pick('skills')
         return
+    }
+  }
+
+  /**
+   * A Knowledge preset (1o), as the old `applyStart('knowledge…')` sets it
+   * up: the Streaming session at its starting frame behind it, as the Review
+   * presets keep it, the place read and shown, then its tab and state --
+   * `knowledge` Records, the old question asked (knowledge-query.json) and
+   * the rejected record open; `knowledge:collections` notes searched
+   * (collection-query.txt); `knowledge:mixed` mixed, its Vectors line, nothing
+   * searched. Each is the CLI's own answer through the stand-in.
+   */
+  private async openKnowledgePreset(sub: string): Promise<void> {
+    await this.openStreaming()
+    this.knowledgeTab = sub === 'collections' || sub === 'mixed' ? 'collections' : 'records'
+    this.shell.go('knowledge')
+    await this.records.appeared()
+    await this.collections.appeared()
+    switch (sub) {
+      case '':
+        this.records.setQuestion(recordsQuestion)
+        await this.records.ask()
+        this.records.select(rejectedRecord)
+        return
+      case 'collections':
+        await this.collections.select('notes')
+        this.collections.setQuestion(collectionQuestion)
+        await this.collections.search()
+        return
+      case 'mixed':
+        await this.collections.select('mixed')
+        return
+    }
+  }
+
+  /**
+   * A Code graph preset (1o), as the old `applyStart('graph…')` sets it up:
+   * the Streaming session at its starting frame behind it, the place read
+   * and shown -- `graph` the Functions view of the recorded demo graph,
+   * Runner.run_batch open; `graph:prose` the notes prose graph;
+   * `graph:refused` a picture an update elsewhere overtook (the old
+   * `gStale`), Runner._fetch clicked and its explain refused by the CLI, the
+   * alert up over the canvas.
+   */
+  private async openGraphPreset(sub: string): Promise<void> {
+    await this.openStreaming()
+    this.shell.go('graph')
+    if (sub === 'prose') {
+      await this.graph.show('prose')
+      return
+    }
+    await this.graph.appeared()
+    if (sub === 'refused') {
+      this.graph.overtaken()
+      await this.graph.select(overtakenNode)
     }
   }
 
