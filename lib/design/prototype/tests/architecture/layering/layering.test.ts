@@ -149,6 +149,26 @@ describe('the layering check, on this prototype', () => {
     ])
   })
 
+  test("violations planted in Video fail, each naming its file: React in VideoViewModel.ts, video importing compose, and business/media importing a view-model (design 1k)", () => {
+    const disk = new DiskTree(root)
+    const planted: Record<string, string> = {
+      'source/presentation/video/ViewModels/VideoViewModel.ts': `import React from 'react'\n${disk.contents('source/presentation/video/ViewModels/VideoViewModel.ts')}`,
+      'source/presentation/video/Views/VideoScreen.tsx': `import { ComposeScreen } from '../../compose/Views/ComposeScreen'\n${disk.contents('source/presentation/video/Views/VideoScreen.tsx')}`,
+      'source/business/media/ClipForm.ts': `import { VideoForm } from '../../presentation/video/ViewModels/VideoForm'\n${disk.contents('source/business/media/ClipForm.ts')}`,
+    }
+    const tree: SourceTree = {
+      files: (directory) => disk.files(directory),
+      folders: (directory) => disk.folders(directory),
+      isDirectory: (path) => disk.isDirectory(path),
+      contents: (path) => planted[path] ?? disk.contents(path),
+    }
+    expect(new LayeringCheck(ModuleMap.read(tree), tree).violations()).toEqual([
+      'source/business/media/ClipForm.ts imports presentation/video, which business/media does not declare as a dependency',
+      'source/presentation/video/ViewModels/VideoViewModel.ts imports react: a view-model stays free of React, so it tests without a browser',
+      'source/presentation/video/Views/VideoScreen.tsx imports presentation/compose, which presentation/video does not declare as a dependency',
+    ])
+  })
+
   test('the disk tree reads the prototype, never node_modules, build output or dot files', () => {
     const files = new DiskTree(root).files('')
     expect(files).toContain('modules.json')

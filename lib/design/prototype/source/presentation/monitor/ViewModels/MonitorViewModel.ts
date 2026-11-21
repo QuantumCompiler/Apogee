@@ -15,6 +15,15 @@ export interface MonitorModelRow {
   /** Empty: the CLI reports no size for a model held. */
   readonly size: string
   readonly action: string
+  /** A run's row (design 1k): its id on the shared job list, which its button stops; absent on a model's row. */
+  readonly run?: number
+}
+
+/** A run the composition reads from the shared job list (design 1k): its id there, what it is (a clip's pipeline generating, or its label), and where it runs when it said so (`mps · bfloat16`). */
+export interface MonitorRun {
+  readonly id: number
+  readonly name: string
+  readonly runtime?: string
 }
 
 /**
@@ -75,10 +84,17 @@ export class MonitorViewModel extends Observable {
   isOpen = false
   /** The CPU's percent in each of the last 30 good readings, oldest first. */
   history: number[] = []
-  /** What Unload on a model's row does: the composition's (1k, 1l and 1m fill it; the open session's model is held by its own child, which 1g's library ends with it: the CLI has no unload). */
+  /** What Unload on a model's row does: the composition's (the open session's model is held by its own child, which 1g's library ends with it: the CLI has no unload; a run's row has its own Stop, 1k). */
   unload: (name: string) => void = () => {}
   /** What "Open models library" does: the composition's. */
   openLibrary: () => void = () => {}
+  /**
+   * The video runs going now (design 1k), as the composition reads them from
+   * the shared job list, so a clip being made is seen here as the old
+   * monitor lists it; and what its Stop does.
+   */
+  running: () => readonly MonitorRun[] = () => []
+  stopRun: (id: number) => void = () => {}
 
   private binary: string | undefined = undefined
   private openedAt = 0
@@ -148,6 +164,12 @@ export class MonitorViewModel extends Observable {
     this.unload(name)
   }
 
+  /** A row's button: a run's Stop the run, a model's Unload. */
+  act(row: MonitorModelRow): void {
+    if (row.run !== undefined) this.stopRun(row.run)
+    else this.unloadModel(row.name)
+  }
+
   /** What "Open models library" does. */
   showLibrary(): void {
     this.openLibrary()
@@ -199,6 +221,7 @@ export class MonitorViewModel extends Observable {
     const budget = r?.modelBudget !== undefined ? `models may use ${MonitorViewModel.size(r.modelBudget)}` : `models may use: unknown${r?.modelBudgetUnknown ? ` (${r.modelBudgetUnknown})` : ''}`
     const gpuDetail = r?.gpuName === undefined && r?.gpuUnknown ? `${r.gpuUnknown} · ${budget}` : budget
     const stale = this.stale
+    const runs = this.running()
     return {
       state: r ? 'reading' : this.failure !== undefined ? 'failed' : 'waiting',
       ...(this.failure !== undefined ? { failure: this.failure } : {}),
@@ -222,13 +245,16 @@ export class MonitorViewModel extends Observable {
       },
       models: {
         total: MonitorViewModel.size(r?.apogeeBytes),
-        rows: (r?.modelsHeld ?? []).map((name) => ({
-          name,
-          detail: 'held by apogee’s reading process · the CLI reports no size for it',
-          size: '',
-          action: 'Unload',
-        })),
-        empty: (r?.modelsHeld.length ?? 0) === 0,
+        rows: [
+          ...(r?.modelsHeld ?? []).map((name) => ({
+            name,
+            detail: 'held by apogee’s reading process · the CLI reports no size for it',
+            size: '',
+            action: 'Unload',
+          })),
+          ...runs.map((run) => ({ name: run.name, detail: ['a video run this app supervises', ...(run.runtime !== undefined ? [run.runtime] : []), 'the CLI reports no size for it'].join(' · '), size: '', action: 'Stop the run', run: run.id })),
+        ],
+        empty: (r?.modelsHeld.length ?? 0) === 0 && runs.length === 0,
       },
       store: {
         heading: `MODEL STORE · ${r?.store ?? 'unknown'}`,

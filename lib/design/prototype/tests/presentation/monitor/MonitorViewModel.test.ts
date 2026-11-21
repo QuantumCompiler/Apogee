@@ -228,3 +228,25 @@ describe('sizes, as the old monitor says them, in the unit that shows them', () 
     expect(MonitorViewModel.percent(5, 0)).toBeUndefined()
   })
 })
+
+describe('a clip being made, on the monitor (design 1k): the shared job list’s run, its Stop the run’s', () => {
+  test('each run the composition hands in is a row after the models held, named as it hands it, on its device where it says one, with no size the CLI never reports; its Stop stops that run', async () => {
+    const { model } = monitor()
+    const stopped: number[] = []
+    model.running = () => [
+      { id: 7, name: 'Wan2.2-TI2V-5B · generating', runtime: 'mps · bfloat16' },
+      { id: 8, name: 'apogee video compose' },
+    ]
+    model.stopRun = (id) => stopped.push(id)
+    model.opened()
+    await settled()
+    const rows = model.face().models.rows
+    expect(rows.slice(-2)).toEqual([
+      { name: 'Wan2.2-TI2V-5B · generating', detail: 'a video run this app supervises · mps · bfloat16 · the CLI reports no size for it', size: '', action: 'Stop the run', run: 7 },
+      { name: 'apogee video compose', detail: 'a video run this app supervises · the CLI reports no size for it', size: '', action: 'Stop the run', run: 8 },
+    ])
+    expect(model.face().models.empty).toBe(false)
+    model.act(rows.at(-2) ?? rows[0]!)
+    expect(stopped).toEqual([7])
+  })
+})

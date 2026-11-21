@@ -119,7 +119,7 @@ export function MonitorView({ model, close }: { readonly model: MonitorViewModel
               LOADED MODELS<span style={{ letterSpacing: 0 }}>{face.models.total}</span>
             </h3>
             {face.models.rows.map((row) => (
-              <div key={row.name} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', gap: 12, alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--line-border)' }}>
+              <div key={row.run === undefined ? row.name : `run:${row.run}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', gap: 12, alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--line-border)' }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 'var(--t-body)' }}>{row.name}</div>
                   <div className="mono" style={{ fontSize: 'var(--t-meta)', color: 'var(--text-tertiary)' }}>
@@ -129,7 +129,7 @@ export function MonitorView({ model, close }: { readonly model: MonitorViewModel
                 <span className="mono" style={{ fontSize: 'var(--t-ui)' }}>
                   {row.size}
                 </span>
-                <button type="button" className="btn-g" onClick={() => model.unloadModel(row.name)} style={{ height: 26, fontSize: 'var(--t-small)' }}>
+                <button type="button" className="btn-g" onClick={() => model.act(row)} style={{ height: 26, fontSize: 'var(--t-small)' }}>
                   {row.action}
                 </button>
               </div>

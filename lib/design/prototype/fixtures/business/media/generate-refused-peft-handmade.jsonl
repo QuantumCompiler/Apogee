@@ -1,0 +1,2 @@
+{"protocol_version":1,"schema":"2026-10-26","type":"job","verb":"video generate"}
+{"message":"a LoRA loads through peft, which the video runtime does not have yet -- apogee train setup --with video","type":"error"}

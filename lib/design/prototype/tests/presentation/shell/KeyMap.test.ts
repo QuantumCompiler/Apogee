@@ -88,10 +88,11 @@ describe('the keyboard list Settings › Keyboard draws (design 1i)', () => {
 
 describe('a place not yet ported', () => {
   test('names the place and the design item that ports it', () => {
-    expect(destinations.map((destination) => placeholderOf(destination)?.item)).toEqual([undefined, undefined, '1p', '1p', '1o', '1k', '1m', '1o', undefined, '1n', '1n'])
+    expect(destinations.map((destination) => placeholderOf(destination)?.item)).toEqual([undefined, undefined, '1p', '1p', '1o', undefined, '1m', '1o', undefined, '1n', '1n'])
     expect(placeholderOf('training'), 'Training is its place (1j): no placeholder').toBeUndefined()
     expect(placeholderOf('sessions'), 'Sessions is the session window (1u): no placeholder').toBeUndefined()
     expect(placeholderOf('models'), 'Models is its place (1h): no placeholder').toBeUndefined()
+    expect(placeholderOf('video'), 'Video is its place (1k): no placeholder').toBeUndefined()
     expect(placeholderOf('suites')).toEqual({ title: 'Suites', item: '1p', says: 'Suites isn’t drawn here yet. Design item 1p ports it.' })
   })
 })

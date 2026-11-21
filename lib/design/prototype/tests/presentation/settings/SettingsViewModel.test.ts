@@ -197,6 +197,23 @@ describe('Backends & keys', () => {
     expect(backends.keys[0]?.detail).toBe('claude · claude-sonnet-4-5')
   })
 
+  test("the video runtime's row offers Install…, which asks the shared consent sheet in check's words, its remedy the install (design 1k: the old Install peft…)", async () => {
+    const { model } = await settings()
+    const asked: Array<readonly [string, string]> = []
+    model.askInstall = (said, remedy) => asked.push([said, remedy])
+    const rows = model.face().backends.sections[1]?.rows ?? []
+    expect(rows.map((row) => [row.name, row.actions.map((action) => action.label)])).toEqual([
+      ['Video · runtime', ['Install…']],
+      ['Video · voice runtime', []],
+      ['Video · ffmpeg captions', []],
+      ['Video · ffmpeg h264', []],
+    ])
+    const install = rows[0]?.actions[0]
+    if (install?.act.case !== 'installRuntime') throw new Error('no install action')
+    model.installRuntime(install.act.row)
+    expect(asked).toEqual([['Video · runtime: not set up -- torch is not installed in the Python environment at /Users/someone/.apogee/training/venv', 'apogee train setup --with video']])
+  })
+
   test('with a key stored (auth list names it), Replace key… and Remove; Remove runs auth clear', async () => {
     const world = settingsWorld('default')
     const rules: Rules = { ...world, reads: [...world.reads, { arguments: ['auth', 'list'], answer: { stdout: authListAnthropic } }] }

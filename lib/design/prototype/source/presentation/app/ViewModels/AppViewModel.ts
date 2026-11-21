@@ -1,11 +1,13 @@
 import { ChildRegistry } from '../../../business/jobs/ChildRegistry'
 import { JobStarter } from '../../../business/jobs/SupervisedJob'
+import { MediaLibrary } from '../../../business/media/MediaRecords'
 import { ReadRunner } from '../../../business/reads/ReadRunner'
 import { ApogeeClient } from '../../../business/session/ApogeeClient'
 import { Clock } from '../../../infrastructure/clock/Clock'
 import type { Timers } from '../../../infrastructure/clock/Clock'
 import type { Preset } from '../../../infrastructure/process/Preset'
 import { StandInChild } from '../../../infrastructure/process/StandInChild'
+import { StandInFolders } from '../../../infrastructure/process/StandInFolders'
 import type { ModeRules, Rules } from '../../../infrastructure/process/StandInChild'
 import { ConsoleViewModel } from '../../console/ViewModels/ConsoleViewModel'
 import { handles } from '../../models/Previews/ModelsWorlds'
@@ -31,6 +33,9 @@ import type { Destination } from '../../shell/ViewModels/Destination'
 import { ShellViewModel } from '../../shell/ViewModels/ShellViewModel'
 import type { SystemStrip } from '../../shell/ViewModels/SystemStrip'
 import { ThemeService } from '../../styles/Appearance/ThemeService'
+import { clipPath, clips, paperBoat } from '../../video/Previews/VideoWorlds'
+import { VideoForm } from '../../video/ViewModels/VideoForm'
+import { VideoViewModel } from '../../video/ViewModels/VideoViewModel'
 import { Observable } from '../../styles/Observation/Observable'
 
 /** A place's view-model, as the composition calls it when the place comes into view. */
@@ -111,6 +116,8 @@ export class AppViewModel extends Observable {
   readonly training: TrainingViewModel
   /** The Settings window (1i), over the same theme service the window applies. */
   readonly settings: SettingsViewModel
+  /** The Video place's clips (1k): the library over the folders the CLI writes into, a run and the install, each a job on the shared list. */
+  readonly video: VideoViewModel
   /** Every key the window binds: the shell's and the places' (Sessions'), what Settings › Keyboard lists. */
   readonly boundKeys: readonly BoundKey[] = [...KeyMap.shell, ...SessionKeys.bindings]
 
@@ -148,7 +155,8 @@ export class AppViewModel extends Observable {
     this.console = new ConsoleViewModel(new ReadRunner(this.consoleChild), new JobStarter(this.consoleChild, this.clock, this.registry))
     this.settings = new SettingsViewModel(this.reads, this.jobs, this.theme, () => this.boundKeys, settingsPreferences)
     this.training = new TrainingViewModel(this.reads, this.jobs)
-    this.places = { models: this.models, training: this.training }
+    this.video = new VideoViewModel(this.reads, this.jobs, new StandInFolders({ folders: preset.folders ?? {}, apogee: preset.apogee }), this.clock)
+    this.places = { models: this.models, training: this.training, video: this.video }
 
     // The library's doors, as closures: the toast, the shell's hosts, Sessions (an overlay closed, or left open), Models and the scrim.
     this.library.say = (text) => this.shell.say(text)
@@ -195,7 +203,33 @@ export class AppViewModel extends Observable {
     this.training.dismissSheet = () => this.shell.closeSheet()
     this.training.ask = (kind) => this.shell.ask(kind)
     this.training.subscribe(() => this.changed())
+    // The Video place's doors (1k): the toast, the consent sheet's host, Models' Stored weights at the default, the place itself (where an install from Settings draws its card), and the shared job list its installs wait on.
+    this.video.say = (text) => this.shell.say(text)
+    this.video.present = (sheet) => this.shell.openSheet(sheet)
+    this.video.dismissSheet = () => this.shell.closeSheet()
+    this.video.openModels = (handle) => {
+      this.shell.closeOverlay()
+      this.shell.go('models')
+      this.models.showStore()
+      void this.models.store.select(handle)
+    }
+    this.video.showPlace = () => this.shell.go('video')
+    this.video.registry = this.registry
+    this.video.subscribe(() => this.changed())
     this.registry.onChange(() => this.changed())
+    // The monitor lists the video runs going now from the shared job list (1k), and its Stop stops that run: the place's
+    // own clip only once its pipeline has loaded (the old lists `vrun` past `load`), by what it generates on and where;
+    // any other -- a generate the console runs, 1l's compositions -- by its label, as the badge counts it.
+    this.monitor.running = () =>
+      this.registry.children('job').flatMap((child) => {
+        if (!AppViewModel.isVideoRun(child.label)) return []
+        const clip = this.video.generating
+        const own = clip !== undefined && clip.arguments.length === (child.arguments?.length ?? 0) && clip.arguments.every((word, index) => child.arguments?.[index] === word)
+        if (!own) return [{ id: child.id, name: child.label }]
+        const loaded = clip.loaded
+        return loaded === undefined ? [] : [{ id: child.id, name: loaded.name, ...(loaded.runtime !== undefined ? { runtime: loaded.runtime } : {}) }]
+      })
+    this.monitor.stopRun = (id) => void this.registry.stopChild(id)
 
     // The links between places, as closures: the monitor's two doors.
     this.monitor.openLibrary = () => {
@@ -203,9 +237,10 @@ export class AppViewModel extends Observable {
       this.shell.go('models')
       this.models.showStore()
     }
-    // Until Video (1k), Compose (1l) and Voice (1m) hold what a row unloads
-    // or stops, Unload says what the old prototype says: the open session's
-    // model is held by its own child, which the CLI unloads with it.
+    // Unload says what the old prototype says: the open session's model is
+    // held by its own child, which the CLI unloads with it. A video run
+    // (1k) is no model held: the monitor lists it from the shared job list
+    // with its own Stop (below); Compose (1l) and Voice (1m) add theirs.
     this.monitor.unload = (name) => this.shell.say(`Unloaded ${name}`)
     // The Settings window's doors (1i): the toast, the shell's sheet and confirm hosts, Models' Backends; Models & roles has the Models place read the roles its slot draws.
     this.settings.say = (text) => this.shell.say(text)
@@ -218,6 +253,11 @@ export class AppViewModel extends Observable {
     }
     this.settings.showing = (pane) => {
       if (pane === 'roles') void this.models.refresh()
+    }
+    // Install… on the video runtime's row (1k, the old "Install peft…"): the shared consent sheet, over the install its remedy names, held by the Video place.
+    this.settings.askInstall = (said, remedy) => {
+      const args = MediaLibrary.installCommand(remedy)
+      if (args) this.video.ask({ arguments: args, said })
     }
     this.shell.routeChanged = (destination) => {
       this.library.showing(destination === 'sessions')
@@ -260,13 +300,19 @@ export class AppViewModel extends Observable {
     return this.library.compactions
   }
 
+  /** Whether a job's label is a video run: a clip, or (1l's) a composition -- what the Video badge and the monitor count. */
+  private static isVideoRun(label: string): boolean {
+    return label === 'apogee video generate' || label.startsWith('apogee video generate ') || label === 'apogee video compose' || label.startsWith('apogee video compose ')
+  }
+
   /**
    * The places' running counts, the sidebar's badges (design 1h): read from
    * the shared registry of children, never a place's own list -- Models'
    * is every store run going on, a pull, a conversion, a quantization or a
    * check of the files, whoever started it.
    */
-  get placeRuns(): { readonly models: number; readonly training: number } {
+
+  get placeRuns(): { readonly models: number; readonly training: number; readonly video: number } {
     const store = ['pull', 'convert', 'quantize', 'repair']
     const jobs = this.registry.children('job')
     // Training's (1j) is a run, a pipeline or a cycle pass going on, as the old badge counts `running || live`: never a promote, a pull or a prepare.
@@ -274,6 +320,8 @@ export class AppViewModel extends Observable {
     return {
       models: jobs.filter((job) => store.some((verb) => job.label.startsWith(`apogee models ${verb} `))).length,
       training: jobs.filter((job) => trains.some((words) => job.label === words || job.label.startsWith(`${words} `))).length,
+      // Video's (1k) is a clip being made (and 1l's compositions rendering), as the old badge counts `vrun` and `crender`: never an install.
+      video: jobs.filter((job) => AppViewModel.isVideoRun(job.label)).length,
     }
   }
 
@@ -415,6 +463,7 @@ export class AppViewModel extends Observable {
     this.monitor.connect(binary)
     this.models.connect(binary)
     this.training.connect(binary)
+    this.video.connect(binary)
     // The console's child shares the preset's mode, so it finds the binary where `child` does.
     this.console.connect(binary)
     // Settings, with the override this launch's discovery passed over, as the app's preferences hold it.
@@ -461,6 +510,10 @@ export class AppViewModel extends Observable {
     }
     if (where === 'training') {
       await this.openTrainingPreset(sub ?? '')
+      return
+    }
+    if (where === 'video' || where === 'consent') {
+      await this.openVideoPreset(where === 'consent' ? 'consent' : (sub ?? ''))
       return
     }
     if (where === 'models' || where === 'download') {
@@ -640,6 +693,55 @@ export class AppViewModel extends Observable {
         return
       case 'resumeheld':
         await training.openPipelineRun(sweep.held)
+        return
+    }
+  }
+
+  /**
+   * A Video preset (design 1k), as the old `applyStart('video…' | 'consent')`
+   * sets it up: the Streaming session at its starting frame behind it, the
+   * place read and shown on Clips, the new-clip form holding the old frame's
+   * paper boat, then the preset's state -- `video` the final made from its
+   * draft, paused 2.1 s in; `video:run` that draft made final, running, its
+   * start ticks standing it at step 38 of 50; `consent` rain run again,
+   * refused for peft, the sheet asking; `video:install` the same, and once
+   * the refusal has played, Install pressed, its start ticks standing it 4
+   * ticks in. Each is the CLI's own run through the stand-in, never a state
+   * set by hand.
+   */
+  private async openVideoPreset(sub: string): Promise<void> {
+    await this.openStreaming()
+    const video = this.video
+    this.shell.go('video')
+    await video.appeared()
+    video.pick('clips')
+    video.edit({ prompt: paperBoat })
+    const record = (file: string) => video.clips.find((clip) => clip.output === clipPath(file))
+    const rain = record(clips.rain)
+    switch (sub) {
+      case '':
+        video.select(clipPath(clips.final))
+        video.playback.hold(`clip:${clipPath(clips.final)}`, 2.1)
+        return
+      case 'run': {
+        const draft = record(clips.draft)
+        if (draft) video.setForm({ ...VideoForm.from(draft, 'from'), preset: 'final', steps: '50' })
+        video.generate()
+        return
+      }
+      case 'consent':
+      case 'install':
+        if (!rain) return
+        video.select(rain.output)
+        video.setForm(VideoForm.from(rain, 'from'))
+        video.generate()
+        if (sub === 'install') {
+          // The refusal plays within the start ticks; once its consent asks, Install, which the frame's ticks catch up to 4 ticks in.
+          this.afterStart = async () => {
+            for (let round = 0; round < 20 && video.consent === undefined; round += 1) await new Promise((resolve) => setTimeout(resolve, 0))
+            video.install()
+          }
+        }
         return
     }
   }

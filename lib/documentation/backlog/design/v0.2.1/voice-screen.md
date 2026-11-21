@@ -48,7 +48,7 @@
 - The law mirrored: [layer enforcement](../../../adrs/gui/layer-enforcement.md), [presentation MVVM](../../../adrs/darwin/presentation-mvvm.md), [module schemes and previews](../../../adrs/darwin/module-schemes-and-previews.md) (canned documents are "the binary's own").
 - The record's shape: [machine-mode reference](../../../reference/cli/machine-mode.md), `voice.speech` at 1209–1239, the `segment` event at 418 and 448, the `document` event at 450.
 - The Mac module: `lib/src/darwin/source/presentation/voice/`, and its tests in `lib/src/darwin/tests/presentation/voice/`.
-- The shared player and the runtime-consent sheet: [`video-and-runtime-consent.md`](video-and-runtime-consent.md).
+- The shared player and the runtime-consent sheet: [DEVELOPER.md → the Video place and the runtime consent](../../../assistant/design/DEVELOPER.md#the-video-place-and-the-runtime-consent) (1k, shipped 2026-11-21: `MediaPlayer` and `Playback`, `InstallCard`, `InstallConsentSheet`, `business/media` and the clip-record source: the stand-in's preset `folders` table, which can serve `~/Music/Apogee`'s `voice.speech` records the same way. That table is how the stand-in hands a place the files the CLI wrote, not the Mac's folder scan, which this item keeps Mac-only. `InstallCard` and `InstallConsentSheet` are there for a later item: this one draws no install).
 
 **Decisions made** (dated):
 - 2026-11-14: The user's call: the prototype is rebuilt in React, TypeScript and Vite with the production GUIs' four layers and MVVM modules. The prototype, not the Mac app, is the source of truth.
@@ -88,7 +88,7 @@
 - [ ] Every voice view-model test and the `voice` preset test pass in the local gate. The layering check is green.
 - [ ] 1s's side-by-side for `voice` lists each difference as intended (real data, named Mac differences) or as a defect, and has no defects left.
 
-**Scope note.** Earmarked for v0.2.1 (design track 1); gated on 1k (the shared player). Out of scope:
+**Scope note.** Earmarked for v0.2.1 (design track 1); its gate, 1k (the shared player), shipped 2026-11-21 ([Milestone A](../../../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react)). Out of scope:
 - the Mac-only parts named above: the say sheet, the model picker, the folder scan, the runtime install;
 - any change to the old prototype, which is frozen;
 - recording new CLI output, which the user runs.

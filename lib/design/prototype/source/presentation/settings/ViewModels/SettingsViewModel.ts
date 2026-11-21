@@ -91,7 +91,7 @@ export type SettingsSheet = 'registerProvider'
 export interface RowAction {
   readonly label: string
   readonly kind: 'btn' | 'btn-g'
-  readonly act: { readonly case: 'editKey' | 'removeKey'; readonly provider: string }
+  readonly act: { readonly case: 'editKey' | 'removeKey'; readonly provider: string } | { readonly case: 'installRuntime'; readonly row: string }
 }
 
 /** One row of Backends & keys: the old `backendRow`. */
@@ -210,6 +210,15 @@ const defaultVoice = 'af_heart'
 /** The vendor CLIs' backend types: a subscription, through the vendor's app. */
 const subscriptionTypes: readonly string[] = ['claude-cli', 'codex-cli', 'gemini-cli', 'ollama-cli']
 
+/**
+ * Whether a runtime's row is the one the Video place installs (design 1k):
+ * its remedy the video set's install, as the old "Install peft…" sat on the
+ * video row. The voice runtime's is Voice's (1m), which holds its install.
+ */
+function installsVideo(row: CheckRow): boolean {
+  return /\bapogee train setup (--rebuild )?--with video\b/.test(row.remedy ?? '')
+}
+
 /** The runtimes the Python environment holds, as `check`'s Video section names its rows: what Backends & keys and Video & voice list. */
 const runtimeRows: readonly string[] = ['runtime', 'voice runtime', 'ffmpeg captions', 'ffmpeg h264']
 
@@ -241,6 +250,13 @@ export class SettingsViewModel extends Observable {
   openLibrary: (() => void) | undefined = undefined
   /** Told each time a pane is shown: how Models & roles' slot has its place read the roles (the app root wires it). */
   showing: ((pane: SettingsPane) => void) | undefined = undefined
+  /**
+   * Install… on the video runtime's row (design 1k, the old "Install
+   * peft…"): the shared consent sheet asked, with `check`'s words for the row
+   * and its remedy, the install; the composition hands it to the Video place,
+   * which holds the install.
+   */
+  askInstall: ((said: string, remedy: string) => void) | undefined = undefined
 
   private binary: string | undefined = undefined
   private passedOver: PassedOver | undefined = undefined
@@ -631,6 +647,13 @@ export class SettingsViewModel extends Observable {
     })()
   }
 
+  /** Install… on a runtime's row: the consent asked with the row in `check`'s words, its remedy the install (design 1k). */
+  installRuntime(name: string): void {
+    const row = this.report?.rows.find((candidate) => candidate.section === 'Video' && candidate.name === name)
+    if (row?.remedy === undefined) return
+    this.askInstall?.(`${row.section} · ${row.name}: ${row.detail}`, row.remedy)
+  }
+
   /** Stop: the running fix ended as Ctrl-C does. */
   async stopFix(): Promise<void> {
     await this.fixJob?.stop(10_000)
@@ -779,7 +802,7 @@ export class SettingsViewModel extends Observable {
           { title: 'ON THIS MAC', rows: this.backendRows().filter((row) => row.section === 'local').map((row) => this.backendFace(row, 'local')) },
           {
             title: 'VIDEO AND VOICE · IN THE SAME PYTHON ENVIRONMENT',
-            rows: runtimes.map((row) => ({ kind: 'local' as const, name: runtimeName(row), status: runtimeStatus(row), statusColor: statusColor(row.status), detail: runtimeDetail(row), consent: row.remedy ? [row.remedy] : [], consentColor: 'var(--text-tertiary)', actions: [] })),
+            rows: runtimes.map((row) => ({ kind: 'local' as const, name: runtimeName(row), status: runtimeStatus(row), statusColor: statusColor(row.status), detail: runtimeDetail(row), consent: row.remedy ? [row.remedy] : [], consentColor: 'var(--text-tertiary)', actions: installsVideo(row) ? [{ label: 'Install…', kind: 'btn' as const, act: { case: 'installRuntime' as const, row: row.name } }] : [] })),
           },
         ].filter((section) => section.rows.length > 0),
         keys: KeyedProviders.providers.map((provider) => this.keyFace(provider)),

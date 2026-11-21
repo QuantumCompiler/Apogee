@@ -58,7 +58,12 @@ function BackendRow({ model, row, draft = '', empty = true }: { readonly model: 
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'flex-end' }}>
         {row.actions.map((action) => (
-          <button key={action.label} type="button" className={action.kind} onClick={() => (action.act.case === 'editKey' ? model.editKey(action.act.provider) : void model.removeKey(action.act.provider))} style={small}>
+          <button key={action.label} type="button" className={action.kind} onClick={() => {
+              const act = action.act
+              if (act.case === 'installRuntime') model.installRuntime(act.row)
+              else if (act.case === 'editKey') model.editKey(act.provider)
+              else void model.removeKey(act.provider)
+            }} style={small}>
             {action.label}
           </button>
         ))}

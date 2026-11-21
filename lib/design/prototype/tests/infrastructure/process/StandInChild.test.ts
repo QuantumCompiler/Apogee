@@ -70,6 +70,47 @@ describe('the stand-in child: its rule table', () => {
     ])
   })
 
+  test('a rule that waits on another call (design 1k): refused, uncounted, until that call is answered with a success; then its own answers, in order', () => {
+    const refused = { stderr: 'apogee video generate: a LoRA loads through peft -- apogee train setup --with video', exit: 1 }
+    const stand = child({
+      jobs: [
+        { arguments: ['video', 'generate'], until: { ran: ['train', 'setup', '--with', 'video'], answer: refused }, answer: [{ stdout: storeList }, { stdout: storeListAll }] },
+        { arguments: ['train', 'setup', '--with', 'video'], answer: [{ stderr: 'pip failed', exit: 1 }, { stdout: 'installed' }] },
+      ],
+    })
+    const generate = () => printed(stand.run('jobs', ['video', 'generate', '-o', 'x.mp4']))
+    // However often it is pressed, nothing went in, so the CLI refuses.
+    expect([generate(), generate()].map((run) => run.exit)).toEqual(['exited with status 1', 'exited with status 1'])
+    // An install that failed is no success.
+    expect(printed(stand.run('jobs', ['train', 'setup', '--with', 'video'])).exit).toBe('exited with status 1')
+    expect(generate()).toEqual({ stdout: '', stderr: refused.stderr, exit: 'exited with status 1', timedOut: false })
+    // One that went in: the rule's own answers play, from its first, as if never called before.
+    expect(printed(stand.run('jobs', ['train', 'setup', '--with', 'video'])).stdout).toBe('installed')
+    expect([generate(), generate(), generate()].map((run) => run.stdout)).toEqual([storeList, storeListAll, storeListAll])
+  })
+
+  test('a call stopped before its end (its Stop, design 1k) did not succeed: a rule waiting on it waits again', () => {
+    const stand = child({
+      jobs: [
+        { arguments: ['video', 'generate'], until: { ran: ['train', 'setup'], answer: { exit: 1 } }, answer: { stdout: storeList } },
+        { arguments: ['train', 'setup'], answer: { stdout: 'installed' } },
+      ],
+    })
+    stand.run('jobs', ['train', 'setup'])
+    stand.stopped('jobs', ['train', 'setup'])
+    expect(printed(stand.run('jobs', ['video', 'generate'])).exit).toBe('exited with status 1')
+    stand.run('jobs', ['train', 'setup'])
+    expect(printed(stand.run('jobs', ['video', 'generate'])).stdout).toBe(storeList)
+  })
+
+  test('an answer’s replay rules: where its end is held (design 1k’s `holdAt`), all its lines unless it names a line count', () => {
+    const stand = child({ jobs: [{ arguments: ['train', 'setup'], answer: [{ stdout: 'a\nb\nc\n', exitAfter: 3, holdAt: 1 }, { stdout: 'a\n' }] }] })
+    const first = stand.run('jobs', ['train', 'setup'])
+    const second = stand.run('jobs', ['train', 'setup'])
+    expect(first.started && first.replay).toMatchObject({ exitAfter: 3, holdAt: 1 })
+    expect(second.started && second.replay.holdAt).toBeUndefined()
+  })
+
   test('it answers with what the CLI printed: stdout, stderr and an exit, or a timeout', () => {
     const stand = child({
       chats: [{ arguments: ['chat'], answer: { stderr: launchRefusedModel, exit: recordedExit(launchRefusedModelExit) } }],

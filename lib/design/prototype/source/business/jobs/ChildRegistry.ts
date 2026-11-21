@@ -8,6 +8,8 @@ export interface Child {
   readonly kind: ChildKind
   /** What it is, in a few words: `apogee models pull Qwen/Qwen3-8B`. */
   readonly label: string
+  /** The arguments it runs, after `apogee`, when its supervisor gave them (design 1k): what another place reads of it -- a generate's `-m`. */
+  readonly arguments?: readonly string[]
 }
 
 /** One child's place, held by its supervisor: renamed as it learns more, left at its end. */
@@ -42,10 +44,10 @@ export class ChildRegistry {
   private readonly watchers = new Set<() => void>()
 
   /** Lists a child that has just started; `stop` is its supervisor's Stop. */
-  register(kind: ChildKind, label: string, stop: () => Promise<void>): Registration {
+  register(kind: ChildKind, label: string, stop: () => Promise<void>, args?: readonly string[]): Registration {
     const id = this.next
     this.next += 1
-    this.entries.push({ child: { id, kind, label }, stop })
+    this.entries.push({ child: args === undefined ? { id, kind, label } : { id, kind, label, arguments: [...args] }, stop })
     this.tell()
     return {
       id,
@@ -74,6 +76,14 @@ export class ChildRegistry {
     await Promise.all(stopping.map((entry) => entry.stop()))
     const ids = new Set(stopping.map((entry) => entry.child.id))
     return !this.entries.some((entry) => ids.has(entry.child.id))
+  }
+
+  /** Stops the one child `id`, by its supervisor's Stop (design 1k: the monitor's Stop on a run); whether it was running and has left. */
+  async stopChild(id: number): Promise<boolean> {
+    const entry = this.entries.find((candidate) => candidate.child.id === id)
+    if (!entry) return false
+    await entry.stop()
+    return !this.entries.some((candidate) => candidate.child.id === id)
   }
 
   /** Tells `watcher` of every change from now on; the returned function stops it. */

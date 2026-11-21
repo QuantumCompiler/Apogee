@@ -24,6 +24,7 @@ import {
 } from '../../session/Previews/SessionPresets'
 import { executePreset } from '../../sessions/Previews/ExecutePreset'
 import { trainingPlaceRules, withTrainingWorld } from '../../training/Previews/TrainingWorlds'
+import { videoFolders, videoPlaceRules, withVideoWorld } from '../../video/Previews/VideoWorlds'
 import type { TrainingWorld } from '../../training/Previews/TrainingWorlds'
 import { withLibraryRules } from '../../sessions/Previews/LibraryRules'
 import type { StartRequest } from '../../shell/ViewModels/Routing'
@@ -89,6 +90,20 @@ function trainingPreset(sub: string, world: TrainingWorld, start = 1): (options:
 }
 
 /**
+ * A Video preset (design 1k): the place over its world -- the store's
+ * `models list` with the Wan 2.2 pipeline beside its MLX conversion, and
+ * `~/Movies/Apogee`'s five records -- the Streaming session at its starting
+ * frame behind it (as the Models, Settings and Training presets keep it,
+ * composed here since `video` may not import `session`). `start` is how many
+ * ticks in a still frame stands: `video:run`'s run at step 38 of 50 (its
+ * stream's 43rd line), and `consent`'s and `video:install`'s refusal played
+ * (three lines), `video:install`'s install four ticks in.
+ */
+function videoPreset(route: string, start = 1): (options: PresetOptions) => Preset {
+  return ({ still, apogee }) => ({ rules: withVideoWorld(streamingRules('start')), route, clock: { start, still }, apogee, folders: videoFolders() })
+}
+
+/**
  * A preset with the console's answers (design 1g): the console opens over
  * every screen (⇧⌘K), so every preset answers its lines -- `consoleRules`,
  * on the console's own child (`Preset.console`), a line nobody recorded
@@ -112,9 +127,10 @@ function listing(build: (options: PresetOptions) => Preset): (options: PresetOpt
 
 /**
  * A preset with the Models place's reads (design 1h), the Settings window's
- * (design 1i) and the Training place's (design 1j) before its own, so a
- * preset's own answer to the same arguments is the one given: all three
- * open from every screen.
+ * (design 1i), the Training place's (design 1j) and the Video place's
+ * (design 1k: its runs, the install and `~/Movies/Apogee`'s records, unless
+ * the preset names its own folders) before its own, so a preset's own answer
+ * to the same arguments is the one given: all four open from every screen.
  */
 function modelling(build: (options: PresetOptions) => Preset): (options: PresetOptions) => Preset {
   return consoling((options) => {
@@ -122,13 +138,15 @@ function modelling(build: (options: PresetOptions) => Preset): (options: PresetO
     const models = modelsPlaceRules()
     const settings = settingsPlaceRules()
     const training = trainingPlaceRules()
+    const video = videoPlaceRules()
     return {
       ...preset,
+      folders: preset.folders ?? videoFolders(),
       rules: {
         ...preset.rules,
-        reads: [...(models.reads ?? []), ...settings.reads, ...(training.reads ?? []), ...(preset.rules.reads ?? [])],
-        commands: [...(models.commands ?? []), ...settings.commands, ...(training.commands ?? []), ...(preset.rules.commands ?? [])],
-        jobs: [...settings.jobs, ...(training.jobs ?? []), ...(preset.rules.jobs ?? [])],
+        reads: [...(models.reads ?? []), ...settings.reads, ...(training.reads ?? []), ...video.reads, ...(preset.rules.reads ?? [])],
+        commands: [...(models.commands ?? []), ...settings.commands, ...(training.commands ?? []), ...video.commands, ...(preset.rules.commands ?? [])],
+        jobs: [...settings.jobs, ...(training.jobs ?? []), ...video.jobs, ...(preset.rules.jobs ?? [])],
       },
     }
   })
@@ -142,7 +160,8 @@ function modelling(build: (options: PresetOptions) => Preset): (options: PresetO
  * `execute` and `console`; 1h's the nine Models presets; 1i's the old nine
  * Settings presets in the old order and its four new ones, one a pane that
  * had none; 1j's the old nine Training presets in the old order and its new
- * `training:regimes`; each feature item adds its own here. Every one
+ * `training:regimes`; 1k's the four Video presets in the old order; each
+ * feature item adds its own here. Every one
  * carries the Sessions place's reads, since the list shows on every screen
  * (`execute`'s own), and the console's answers, since it opens over every one.
  */
@@ -195,6 +214,10 @@ export const presets: Readonly<Record<string, (options: PresetOptions) => Preset
   'training:passrunning': listing(trainingPreset('passrunning', 'passrunning')),
   'training:resumeheld': listing(trainingPreset('resumeheld', 'resumeheld')),
   'training:regimes': listing(trainingPreset('regimes', 'recorded')),
+  video: listing(videoPreset('video')),
+  'video:run': listing(videoPreset('video:run', 43)),
+  'video:install': listing(videoPreset('video:install', 4)),
+  consent: listing(videoPreset('consent', 4)),
 }
 
 /** The preset opened with no `start`, or an unknown one: `chat`, the old `data-props` default (1v; 1e's interim default was the monitor). */

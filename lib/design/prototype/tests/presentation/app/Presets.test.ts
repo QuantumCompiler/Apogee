@@ -37,6 +37,8 @@ function whatTheViewsRead(app: AppViewModel) {
     settingsConfirms: (['settingsForget', 'xcodeRemove'] as const).map((kind) => app.settings.confirmWords(kind) ?? 'none'),
     // The Training place (1j): every tab, its sheets and its two confirms' words.
     training: app.training.face(),
+    // The Video place (1k): the clips, the run, the clip page, the form, the install card and the consent.
+    video: app.video.face(),
     trainingConfirms: (['train', 'promoteRefused'] as const).map((kind) => app.training.confirmWords(kind) ?? 'none'),
   }
 }
@@ -59,6 +61,8 @@ async function walk(app: AppViewModel, name: string, pressSuite = false): Promis
   await app.models.appeared()
   // The Training place's too (1j): ⌘9 opens it on every screen.
   await app.training.appeared()
+  // The Video place's too (1k): ⌘6 opens it on every screen.
+  await app.video.appeared()
   // The Settings window's too (1i): ⌘, opens it on every screen; each pane shown, so each one's own reads are made.
   app.openSettings(app.settings.pane)
   for (const [pane] of settingsPanes) app.settings.pick(pane)
@@ -79,7 +83,7 @@ async function walk(app: AppViewModel, name: string, pressSuite = false): Promis
 }
 
 describe("the presets: the old prototype's 30-tick check's successor", () => {
-  test('the table holds the monitor, the session’s thirteen in the old data-props order -- 1u’s four plain ones and 1v’s nine scenarios and states -- 1g’s execute and console, 1h’s nine Models presets, 1i’s nine Settings presets in the old order and its four new ones, and 1j’s nine Training presets in the old order and its new training:regimes', () => {
+  test('the table holds the monitor, the session’s thirteen in the old data-props order -- 1u’s four plain ones and 1v’s nine scenarios and states -- 1g’s execute and console, 1h’s nine Models presets, 1i’s nine Settings presets in the old order and its four new ones, 1j’s nine Training presets in the old order and its new training:regimes, and 1k’s four Video presets in the old order', () => {
     expect(Object.keys(presets)).toEqual([
       'monitor',
       'chat',
@@ -129,6 +133,10 @@ describe("the presets: the old prototype's 30-tick check's successor", () => {
       'training:passrunning',
       'training:resumeheld',
       'training:regimes',
+      'video',
+      'video:run',
+      'video:install',
+      'consent',
     ])
   })
 
@@ -177,6 +185,38 @@ describe("the presets: the old prototype's 30-tick check's successor", () => {
     const detail = app.models.face().backends.detail
     expect(detail.facts.map((fact) => fact.label)).not.toContain('Path')
     expect(detail.files).toEqual([])
+  })
+
+  test('a planted undefined in a clip’s facts fails the walk, naming its path (design 1k)', async () => {
+    const app = new AppViewModel(presetFor({ start: 'video', still: true, apogee: 'installed' }).preset, modeRules)
+    await app.start()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(unread(whatTheViewsRead(app), 'video')).toEqual([])
+    const face = app.video.face()
+    const planted = { ...face, clip: { ...face.clip, facts: [{ label: 'Seed', value: undefined, mono: true }, ...face.clip.facts.slice(1)] } }
+    app.video.face = () => planted as unknown as ReturnType<typeof app.video.face>
+    expect(unread(whatTheViewsRead(app), 'video')).toEqual(['video.video.clip.facts.0.value'])
+  })
+
+  test('a record missing its seed and its device draws their absence in words, never undefined (design 1k)', async () => {
+    const { preset } = presetFor({ start: 'video', still: true, apogee: 'installed' })
+    const folders = Object.fromEntries(
+      Object.entries(preset.folders ?? {}).map(([folder, files]) => [
+        folder,
+        files.map((file) => {
+          if (file.text === undefined || !file.name.startsWith('lighthouse-dusk.mp4')) return file
+          const record = JSON.parse(file.text) as Record<string, unknown>
+          delete record.seed
+          delete record.device
+          return { ...file, text: JSON.stringify(record) }
+        }),
+      ]),
+    )
+    const app = new AppViewModel({ ...preset, folders }, modeRules)
+    await app.start()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(unread(whatTheViewsRead(app), 'video')).toEqual([])
+    expect(app.video.face().clip.facts.find((fact) => fact.label === 'Seed')?.value).toBe('not recorded · held')
   })
 
   test('the walk finds what it looks for', () => {

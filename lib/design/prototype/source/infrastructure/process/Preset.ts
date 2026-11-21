@@ -1,5 +1,6 @@
 import type { ClockSettings } from '../clock/Clock'
 import type { ApogeeMode, Rules } from './StandInChild'
+import type { Folders } from './StandInFolders'
 
 /**
  * One start screen of the prototype, as the stand-in serves it (design 1d): the
@@ -17,6 +18,13 @@ export interface Preset {
    * call. Absent, the console is answered by `rules` alone.
    */
   readonly console?: Rules
+  /**
+   * The folders the CLI wrote into (design 1k): each folder's files, a
+   * record's text beside its clip's name, as `StandInFolders` answers them --
+   * `~/Movies/Apogee`'s clips and their `video.generation` records. Absent,
+   * every folder is empty.
+   */
+  readonly folders?: Folders
   /** Where the app opens: a plain string, the old prototype's `start` (`monitor`, `chat:wal`). How the page picks it is 1e's. */
   readonly route: string
   /** Its start tick and `still`, its fixed "now" and its pace. */

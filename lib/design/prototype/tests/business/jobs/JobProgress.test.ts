@@ -4,6 +4,7 @@ import datasetsPull from '@recorded/business/jobs/Fixtures/datasets-pull-handmad
 import trainPipelineRun from '@recorded/business/jobs/Fixtures/train-pipeline-run.jsonl?raw'
 import trainPipelineResume from '@recorded/business/jobs/Fixtures/train-pipeline-resume.jsonl?raw'
 import trainCyclePassed from '@recorded/business/jobs/Fixtures/train-cycle-run-passed.jsonl?raw'
+import generateRun from '../../../fixtures/business/media/video-generate-run-handmade.jsonl?raw'
 import { JobProgress } from '../../../source/business/jobs/JobProgress'
 import { JobEnd, JobUpdate } from '../../../source/business/jobs/SupervisedJob'
 import { JobEvent } from '../../../source/data/protocol/JobEvent'
@@ -115,5 +116,28 @@ describe("a job's progress, folded from what it said (the Mac's JobProgress)", (
     expect(progress.pass).toEqual({ state: 'passed', text: '[cycle] complete -- nightly-model promoted to v1 (/Users/someone/.apogee/models/tiny/gguf/052b295c3e9b/nightly-model-v1.gguf)' })
     expect(progress.lastSaid).toBe(progress.pass?.text)
     expect(progress.pipelineRunID).toBe('cycle-20261026-074119')
+  })
+
+  test("video-generate-run-handmade.jsonl (design 1k, the Mac's media parts): the device that loaded, the latest step, the frames written and the assembly, then the record", () => {
+    const lines = events(generateRun)
+    const loading = folded(lines.slice(0, 4))
+    expect(loading.device).toBeUndefined()
+    expect(loading.step).toBeUndefined()
+    expect(loading.notices).toEqual([
+      'from /Users/someone/Movies/Apogee/lighthouse-dusk-draft.mp4.json: model Wan2.2-TI2V-5B/pipeline/9b1e47c0a2f6, the prompt, 1280x704, 24 fps, 5 s, 16 steps, seed 4242 (held)',
+      'changed: 50 steps (--final)',
+      'Wan2.2-TI2V-5B/pipeline/9b1e47c0a2f6 (the record): 1280x704, 121 frames (5 s at 24 fps), 50 steps, seed 4242',
+    ])
+    const denoising = folded(lines.slice(0, 43))
+    expect(denoising.ready).toEqual({ device: 'mps', dtype: 'bfloat16', mode: 't2v' })
+    expect(denoising.device).toBe('mps')
+    expect(denoising.step).toEqual({ done: 38, of: 50 })
+    expect(denoising.frames).toBeUndefined()
+    expect(denoising.assembling).toBeUndefined()
+    const done = folded([...lines, ended(0)])
+    expect(done.frames).toEqual({ frames: 121, width: 1280, height: 704 })
+    expect(done.assembling).toBe(121)
+    expect(done.documents).toHaveLength(1)
+    expect(done.status).toEqual({ case: 'done' })
   })
 })

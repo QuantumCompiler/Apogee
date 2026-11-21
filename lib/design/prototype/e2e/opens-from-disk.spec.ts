@@ -105,7 +105,7 @@ test('in the missing and config-typo modes the monitor says why it cannot read, 
   await expect(monitor(page)).toContainText("apogee system: /Users/someone/.apogee/config/config.json: not valid JSON: line 4, column 5: expected ',' or '}' after a member (exited with status 1)")
 })
 
-test('each of the 11 places opens by click: Sessions its session window, Models its tabs (1h), Training its tabs (1j), an unported one its placeholder', async ({ page }) => {
+test('each of the 11 places opens by click: Sessions its session window, Models its tabs (1h), Training its tabs (1j), Video its clips (1k), an unported one its placeholder', async ({ page }) => {
   const { errors } = watch(page)
   await page.goto(`${built}?start=monitor&still=true`)
   const models = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Models ⌘2' })
@@ -115,7 +115,7 @@ test('each of the 11 places opens by click: Sessions its session window, Models 
   await expect(page.getByRole('tab', { name: /^Backends/ })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByText(/^Models isn’t drawn here yet/)).toHaveCount(0)
   const places: Array<[string, string, string]> = [
-    ['Suites', '⌘3', '1p'], ['Tasks', '⌘4', '1p'], ['Code graph', '⌘5', '1o'], ['Video', '⌘6', '1k'],
+    ['Suites', '⌘3', '1p'], ['Tasks', '⌘4', '1p'], ['Code graph', '⌘5', '1o'],
     ['Voice', '⌘7', '1m'], ['Knowledge', '⌘8', '1o'], ['Library', '⌘0', '1n'], ['Review', '⇧⌘R', '1n'],
   ]
   // Training is its place (1j): its five tabs, Runs first, no placeholder.
@@ -125,6 +125,14 @@ test('each of the 11 places opens by click: Sessions its session window, Models 
   await expect(page.getByRole('heading', { name: 'Training', level: 1 })).toBeVisible()
   await expect(page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Runs' })).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByText(/^Training isn’t drawn here yet/)).toHaveCount(0)
+  // Video is its place (1k): its clips, the newest record's page, no placeholder.
+  const video = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Video ⌘6' })
+  await video.click()
+  await expect(video).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('heading', { name: 'Video', level: 1 })).toBeVisible()
+  await expect(page.getByRole('tab', { name: /^Clips/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('heading', { name: 'lighthouse-dusk-2.mp4', level: 2 })).toBeVisible()
+  await expect(page.getByText(/^Video isn’t drawn here yet/)).toHaveCount(0)
   for (const [title, key, item] of [...places].reverse()) {
     const button = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: `${title} ${key}` })
     await button.click()
@@ -983,3 +991,112 @@ test('a pull streams into the banner, and Prepare it runs datasets prepare, sayi
   expect(errors).toEqual([])
 })
 
+// The Video place and the runtime consent (design 1k): each preset at its frame, the click-through on rain, Stop on a run, and Settings' Install….
+const videoPlace = (page: Page) => page.getByRole('navigation', { name: 'Places' })
+const videoFrames: Array<[string, (page: Page) => Promise<void>]> = [
+  ['video', async (page) => {
+    await expect(page.getByRole('heading', { name: 'lighthouse-dusk.mp4', level: 2 })).toBeVisible()
+    await expect(page.getByText('0:02.1 / 0:05.0')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Run again…' })).toBeVisible()
+    await expect(page.getByText('run again from lighthouse-dusk-draft.mp4.json, seed held, 50 steps · Today 10:58')).toBeVisible()
+    await expect(page.getByText('apogee video generate "A paper boat drifting down a rain-filled gutter, low angle, shallow depth of field" --draft -o ~/Movies/Apogee/paper-boat-drifting-draft.mp4')).toBeVisible()
+  }],
+  ['video:run', async (page) => {
+    await expect(page.getByRole('heading', { name: 'lighthouse-dusk-3.mp4', level: 2 })).toBeVisible()
+    await expect(page.getByText('step 38 of 50').first()).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible()
+    await expect(page.getByText('WHAT THE RUN SAYS')).toBeVisible()
+    await expect(page.getByText('changed: 50 steps (--final)').first()).toBeVisible()
+    await expect(videoPlace(page).getByRole('button', { name: 'Video ⌘6 · 1 running', exact: true })).toBeVisible()
+  }],
+  ['video:install', async (page) => {
+    await expect(page.getByText('Installing the video set')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'rain-window.mp4', level: 2, exact: true })).toBeVisible()
+    await expect(page.getByText('Recorded on linux-x86_64 (cuda · bfloat16). This is macos-arm64, so run here, the same seed may not make the same clip.')).toBeVisible()
+  }],
+  ['consent', async (page) => {
+    const sheet = page.getByRole('dialog', { name: 'Install what video needs?' })
+    await expect(sheet).toContainText('a LoRA loads through peft, which the video runtime does not have yet -- apogee train setup --with video')
+    await expect(sheet).toContainText('apogee train setup --with video')
+    await expect(sheet.getByRole('button', { name: 'Not now' })).toBeVisible()
+    await expect(sheet.getByRole('button', { name: 'Install' })).toBeVisible()
+  }],
+]
+
+for (const [preset, frame] of videoFrames) {
+  test(`${preset}: the Video place at its frame, still, its words visible, with no console error and no request but the file (design 1k)`, async ({ page }) => {
+    const { errors, requests } = watch(page)
+    await page.goto(`${built}?start=${preset}&still=true`)
+    await expect(page.getByRole('heading', { name: 'Video', level: 1 })).toBeVisible()
+    await expect(page.getByRole('tab', { name: /^Clips/ })).toHaveAttribute('aria-selected', 'true')
+    await frame(page)
+    expect(errors).toEqual([])
+    expect(requests).toEqual([`${built}?start=${preset}&still=true`])
+  })
+}
+
+test('the click-through on rain, live: Generate opens the consent, Install fails in the CLI’s words, Install again goes in, and the refused clip is made (design 1k)', async ({ page }) => {
+  test.setTimeout(120_000)
+  const { errors, requests } = watch(page)
+  await page.goto(`${built}?start=video`)
+  await page.getByRole('navigation', { name: 'Clips' }).getByRole('button', { name: /^rain-window\.mp4/ }).click()
+  await page.getByRole('button', { name: 'Run again…' }).click()
+  await expect(page.getByRole('heading', { name: 'From rain-window.mp4', level: 2 })).toBeVisible()
+  await page.getByRole('button', { name: 'Generate', exact: true }).click()
+  let sheet = page.getByRole('dialog', { name: 'Install what video needs?' })
+  await expect(sheet).toContainText('a LoRA loads through peft, which the video runtime does not have yet -- apogee train setup --with video', { timeout: 10_000 })
+  await sheet.getByRole('button', { name: 'Install' }).click()
+  await expect(page.getByText('Installing the video set')).toBeVisible()
+  await expect(page.getByText('The video set did not install')).toBeVisible({ timeout: 15_000 })
+  await expect(toast(page, "Not installed: apogee train: pip install for the 'video' set failed (exit code 1):")).toBeVisible()
+  await page.getByRole('button', { name: 'Dismiss' }).click()
+  await page.getByRole('button', { name: 'Generate', exact: true }).click()
+  sheet = page.getByRole('dialog', { name: 'Install what video needs?' })
+  await sheet.getByRole('button', { name: 'Install' }).click({ timeout: 10_000 })
+  await expect(page.getByText('Installed the video set')).toBeVisible({ timeout: 15_000 })
+  await expect(toast(page, 'Installed: apogee train setup --with video -- making the clip again')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'rain-window-2.mp4', level: 2 })).toBeVisible()
+  await expect(toast(page, 'rain-window-2.mp4 is ready, with its record beside it')).toBeVisible({ timeout: 40_000 })
+  await expect(page.getByRole('navigation', { name: 'Clips' }).getByRole('button', { name: /^rain-window-2\.mp4/ })).toBeVisible()
+  await expect(page.getByText('diffusers 0.35.1 · peft 0.17.1 · torch 2.8.0')).toBeVisible()
+  expect(errors).toEqual([])
+  expect(requests).toEqual([`${built}?start=video`])
+})
+
+test('Stop on a run, live, leaves nothing behind: no clip, no record; Dismiss puts the run away (design 1k)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=video:run`)
+  await page.getByRole('button', { name: 'Stop', exact: true }).click()
+  await expect(page.getByText('stopped by you')).toBeVisible()
+  await expect(page.getByText('Nothing was left behind: no clip, no record, and the working folder is gone.')).toBeVisible()
+  await expect(page.getByText('cancelled -- nothing was written (/Users/someone/Movies/Apogee/lighthouse-dusk-3.mp4 untouched)')).toBeVisible()
+  await expect(videoPlace(page).getByRole('button', { name: 'Video ⌘6', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Dismiss' }).click()
+  await expect(page.getByRole('navigation', { name: 'Clips' }).getByRole('button', { name: /lighthouse-dusk-3\.mp4/ })).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('the player plays off the clock and pauses; still, it stands still (design 1k)', async ({ page }) => {
+  await page.goto(`${built}?start=video`)
+  const player = page.getByRole('button', { name: 'Play', exact: true }).first()
+  await player.click()
+  await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible()
+  await expect(page.getByText(/^0:0[3-5]\.\d \/ 0:05\.0$/)).toBeVisible({ timeout: 5_000 })
+  await page.getByRole('button', { name: 'Pause' }).click()
+  await page.goto(`${built}?start=video&still=true`)
+  await page.getByRole('button', { name: 'Play', exact: true }).first().click()
+  await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible()
+  await expect(page.getByText('0:02.1 / 0:05.0')).toBeVisible()
+})
+
+test("Settings' Install… on the video runtime's row opens the same consent sheet, in check's words (design 1k: the old Install peft…)", async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=settings:backends&still=true`)
+  await page.getByRole('button', { name: 'Install…' }).click()
+  const sheet = page.getByRole('dialog', { name: 'Install what video needs?' })
+  await expect(sheet).toContainText('Video · runtime: not set up -- torch is not installed in the Python environment at /Users/someone/.apogee/training/venv')
+  await sheet.getByRole('button', { name: 'Not now' }).click()
+  await expect(sheet).toHaveCount(0)
+  expect(errors).toEqual([])
+})

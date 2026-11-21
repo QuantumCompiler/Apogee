@@ -648,16 +648,16 @@ describe('the Models place in the composition (design 1h)', () => {
     const card = app.models.face().jobs.cards[0]
     expect(card?.repo).toBe('Llama3.2-1B-Instruct/safetensors/edaba290ce7f')
     expect(card?.steps.map((step) => step.state)).toEqual(['done', 'running', 'waiting'])
-    expect(app.placeRuns).toEqual({ models: 1, training: 0 })
+    expect(app.placeRuns).toEqual({ models: 1, training: 0, video: 0 })
     const chat = await started('chat')
-    expect(chat.placeRuns).toEqual({ models: 0, training: 0 })
+    expect(chat.placeRuns).toEqual({ models: 0, training: 0, video: 0 })
   })
 
   test('models:downloads and models:notran with no apogee: nothing starts, so no card stands running and the sidebar counts nothing', async () => {
     for (const start of ['models:downloads', 'models:notran']) {
       const app = await started(start, 'missing')
       expect([start, app.models.face().jobs]).toEqual([start, { cards: [], running: 0 }])
-      expect(app.placeRuns).toEqual({ models: 0, training: 0 })
+      expect(app.placeRuns).toEqual({ models: 0, training: 0, video: 0 })
     }
   })
 
@@ -687,10 +687,10 @@ describe('the Models place in the composition (design 1h)', () => {
     expect(app.models.face().downloadSheet.repo).toBe('meta-llama/Llama-3.2-1B-Instruct')
     app.models.startDownload()
     expect(app.shell.sheet).toBeUndefined()
-    expect(app.placeRuns).toEqual({ models: 1, training: 0 })
+    expect(app.placeRuns).toEqual({ models: 1, training: 0, video: 0 })
     app.clock.advance(70)
     await settled()
-    expect(app.placeRuns).toEqual({ models: 0, training: 0 })
+    expect(app.placeRuns).toEqual({ models: 0, training: 0, video: 0 })
     expect(app.shell.toast?.text, 'the old done toast, from the documents the run reported').toBe('Llama3.2-1B-Instruct · Q4_K_M is ready in the library')
     // The snapshot a conversion of the same chain used folds away, as models list folds it.
     expect(app.models.store.face().groups.find((group) => group.dir === 'Llama3.2-1B-Instruct')?.sets.map((set) => [set.short, set.state])).toEqual([
@@ -911,23 +911,23 @@ describe('the Training place in the composition (design 1j)', () => {
 
   test("the sidebar's Training badge: the registry's train runs, pipelines and passes, never a pull or a promote", async () => {
     const training = await started('training')
-    expect(training.placeRuns).toEqual({ models: 0, training: 1 })
+    expect(training.placeRuns).toEqual({ models: 0, training: 1, video: 0 })
     const pipelines = await started('training:pipelines')
-    expect(pipelines.placeRuns).toEqual({ models: 0, training: 1 })
+    expect(pipelines.placeRuns).toEqual({ models: 0, training: 1, video: 0 })
     const cycle = await started('training:cycle')
-    expect(cycle.placeRuns).toEqual({ models: 0, training: 0 })
+    expect(cycle.placeRuns).toEqual({ models: 0, training: 0, video: 0 })
     cycle.training.requestPass()
     expect(cycle.shell.confirm).toBe('train')
     await cycle.confirmTraining('train')
     expect(cycle.shell.confirm).toBeUndefined()
-    expect(cycle.placeRuns).toEqual({ models: 0, training: 1 })
+    expect(cycle.placeRuns).toEqual({ models: 0, training: 1, video: 0 })
     const datasets = await started('training:datasets')
     datasets.training.newPull()
     expect(datasets.shell.sheet).toBe('pull')
     datasets.training.setPullRef('someone/heat-notes')
     datasets.training.pull()
     expect(datasets.shell.sheet).toBeUndefined()
-    expect(datasets.placeRuns).toEqual({ models: 0, training: 0 })
+    expect(datasets.placeRuns).toEqual({ models: 0, training: 0, video: 0 })
     expect(datasets.registry.children('job').map((job) => job.label)).toEqual(['apogee datasets pull someone/heat-notes'])
   })
 
@@ -961,3 +961,106 @@ describe('the Training place in the composition (design 1j)', () => {
   })
 })
 
+describe('the Video place in the composition (design 1k)', () => {
+  test('video: Clips, the final made from its draft shown, paused 2.1 s in, the paper boat’s draft on the right, nothing said', async () => {
+    const app = await started('video')
+    expect(app.shell.route).toBe('video')
+    const face = app.video.face()
+    expect(face.clip).toMatchObject({ shown: true, file: 'lighthouse-dusk.mp4', preset: 'FINAL', modeText: 'from text' })
+    expect(face.clip.player).toMatchObject({ playing: false, time: '0:02.1 / 0:05.0', pct: 42 })
+    expect(face.form).toMatchObject({ heading: 'New clip', out: 'paper-boat-drifting-draft.mp4', preset: 'draft' })
+    expect(face.list).toHaveLength(5)
+    expect(app.shell.toast).toBeUndefined()
+    expect(app.child.unanswered).toEqual([])
+  })
+
+  test('video:run: the draft made final, its run a job on the shared list at step 38 of 50 -- the sidebar counts it, the monitor lists it, and its Stop there stops it', async () => {
+    const app = await started('video:run')
+    const face = app.video.face()
+    expect(face.showRun).toBe(true)
+    expect(face.run).toMatchObject({ shown: true, file: 'lighthouse-dusk-3.mp4', status: 'step 38 of 50', live: true })
+    expect(face.form.heading).toBe('From lighthouse-dusk-draft.mp4')
+    expect(app.placeRuns).toEqual({ models: 0, training: 0, video: 1 })
+    const run = app.monitor.face().models.rows.find((row) => row.run !== undefined)
+    expect(run).toMatchObject({ name: 'Wan2.2-TI2V-5B · generating', detail: 'a video run this app supervises · mps · bfloat16 · the CLI reports no size for it', action: 'Stop the run' })
+    if (run) app.monitor.act(run)
+    await settled()
+    expect(app.video.face().run.status).toBe('stopped by you')
+    expect(app.placeRuns.video).toBe(0)
+  })
+
+  test('consent: rain run again, refused for peft by the CLI, the shared sheet asking in its words; Not now closes it and starts nothing', async () => {
+    const app = await started('consent')
+    expect(app.shell.sheet).toBe('runtimeConsent')
+    expect(app.video.face().consent).toMatchObject({ shown: true, title: 'Install what video needs?', said: 'a LoRA loads through peft, which the video runtime does not have yet -- apogee train setup --with video' })
+    expect(app.video.face().clip.file).toBe('rain-window.mp4')
+    expect(app.video.face().run.shown).toBe(false)
+    app.video.decline()
+    expect(app.shell.sheet).toBeUndefined()
+    expect(app.shell.toast?.text).toBe('Not installed. apogee train setup --with video installs it whenever you want it')
+    expect(app.registry.children()).toEqual([])
+  })
+
+  test('video:install: the refusal played, Install pressed: its card running four ticks in, the sheet closed, the badge not counting an install', async () => {
+    const app = await started('video:install')
+    expect(app.shell.sheet).toBeUndefined()
+    expect(app.video.face().install).toMatchObject({ shown: true, state: 'running', headline: 'Installing the video set' })
+    expect(app.registry.children('job').map((job) => job.label)).toEqual(['apogee train setup'])
+    expect(app.placeRuns.video).toBe(0)
+  })
+
+  test("Settings' Install… on the video runtime's row opens the same sheet over the Video place, in check's words; Install from there runs the install and shows Video", async () => {
+    const app = await started('chat')
+    app.openSettings('backends')
+    await settled()
+    app.settings.installRuntime('runtime')
+    expect(app.shell.sheet).toBe('runtimeConsent')
+    expect(app.video.face().consent.said).toBe('Video · runtime: not set up -- torch is not installed in the Python environment at /Users/someone/.apogee/training/venv')
+    app.video.install()
+    expect(app.shell.sheet).toBeUndefined()
+    expect(app.shell.route).toBe('video')
+    expect(app.registry.children('job').map((job) => job.label)).toEqual(['apogee train setup'])
+  })
+
+  test('the monitor lists the place’s clip only once its pipeline has loaded, as the old lists `vrun` past `load`: not while it loads, nor while a refusal plays; another’s generate by its label', async () => {
+    const loading = await started('video')
+    loading.video.act('final', '/Users/someone/Movies/Apogee/lighthouse-dusk-draft.mp4')
+    loading.video.generate()
+    expect(loading.registry.children('job').map((job) => job.label)).toEqual(['apogee video generate'])
+    expect(loading.monitor.face().models.rows.filter((row) => row.run !== undefined)).toEqual([])
+    // A generate another supervisor runs (the console's, typed) is listed by its label, as the badge counts it.
+    loading.registry.register('job', 'apogee video generate', async () => {}, ['video', 'generate', '-o', '/Users/someone/Movies/Apogee/x.mp4', '--', 'x'])
+    expect(loading.monitor.face().models.rows.filter((row) => row.run !== undefined).map((row) => row.name)).toEqual(['apogee video generate'])
+    const refused = await started('video')
+    refused.video.act('again', '/Users/someone/Movies/Apogee/rain-window.mp4')
+    refused.video.generate()
+    expect(refused.registry.children('job').map((job) => job.label)).toEqual(['apogee video generate'])
+    expect(refused.monitor.face().models.rows.filter((row) => row.run !== undefined)).toEqual([])
+  })
+
+  test("Settings' Install… while a clip is made: Install starts the install beside the run, as the old one checks only for a bootstrap", async () => {
+    const app = await started('video:run')
+    app.openSettings('backends')
+    await settled()
+    app.settings.installRuntime('runtime')
+    expect(app.shell.sheet).toBe('runtimeConsent')
+    app.video.install()
+    expect(app.shell.sheet).toBeUndefined()
+    // The still frame's 43 ticks play the install whole at once: it ran, and its card shows beside the run, still going.
+    expect(app.child.calls.filter((call) => call.kind === 'jobs').map((call) => call.arguments.slice(0, 2).join(' '))).toEqual(['video generate', 'train setup'])
+    expect(app.video.face().install.shown).toBe(true)
+    expect(app.video.face().run).toMatchObject({ shown: true, live: true })
+    expect(app.placeRuns.video).toBe(1)
+  })
+
+  test('⌘6 opens Video through the key map, which reads the folder and the store as it comes into view; the pipeline line opens Models’ Stored weights at the default', async () => {
+    const app = await started('chat')
+    app.shell.press(chord('6', 'command'))
+    expect(app.shell.route).toBe('video')
+    await settled()
+    expect(app.video.face().list.map((row) => row.file)).toEqual(['lighthouse-dusk-2.mp4', 'lighthouse-dusk.mp4', 'lighthouse-dusk-draft.mp4', 'harbor-first-light.mp4', 'rain-window.mp4'])
+    app.video.openDefault()
+    expect(app.shell.route).toBe('models')
+    expect(app.models.tab).toBe('store')
+  })
+})

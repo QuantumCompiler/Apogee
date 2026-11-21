@@ -18,6 +18,14 @@ export interface Answer {
    * once (1d's), unless named.
    */
   readonly exitAfter?: number
+  /**
+   * Where a job's `exitAfter` ticks stand (design 1k): after this many of its
+   * stdout lines, the rest played after them, so a run can rest on a line
+   * mid-way -- an install on its `installing …` line while pip runs, its
+   * `installed` and where it went said only at its end. All of them unless
+   * named.
+   */
+  readonly holdAt?: number
   /** Where a chat's still frame stands, and where its live replay starts (design 1v). */
   readonly freeze?: Freeze
   /** A chat's choice point: the recording each line the person can write there plays from then on (design 1v). */
@@ -72,6 +80,8 @@ export interface Continuations {
 /** How a recorded child's replay moves, past what it printed: its rule's (design 1v). */
 export interface ReplayRules {
   readonly exitAfter: number
+  /** The stdout line count the `exitAfter` ticks stand after (design 1k); `undefined`, after the last. */
+  readonly holdAt: number | undefined
   readonly freeze: Freeze | undefined
   readonly continuations: Continuations | undefined
   readonly cancelled: string | undefined
@@ -81,7 +91,8 @@ export interface ReplayRules {
 /**
  * One rule of the table: an argument prefix, and what the binary printed for
  * it. Several answers come in order, one a call, the last repeating: an
- * install that fails, then succeeds.
+ * install that fails, then succeeds. A rule may wait on another call's
+ * success first (`until`, design 1k).
  */
 export interface Rule {
   /** The arguments after `apogee`, as the caller gives them (a read without its `--output-format`). */
@@ -92,6 +103,15 @@ export interface Rule {
    * `models quantize <h> -t Q8_0`, which printed something else.
    */
   readonly exact?: boolean
+  /**
+   * It waits on another call (design 1k): until a call of `ran`, of the same
+   * kind, has been answered with a success (exit 0, in time) and not stopped
+   * before its end, every call is answered by `answer` -- the CLI's refusal,
+   * uncounted -- and the rule's own answers play only after it, from its
+   * first. A generate the CLI refuses for peft until `train setup --with
+   * video` has gone in, however often it is pressed.
+   */
+  readonly until?: { readonly ran: readonly string[]; readonly answer: Answer }
   readonly answer: Answer | readonly [Answer, ...Answer[]]
 }
 
@@ -155,6 +175,8 @@ export function recordedExit(text: string): number {
  * rules are handed to it, each answer a bundled recording.
  *
  * - The longest prefix wins; of two as long, the later rule (`PreviewStore`'s rule).
+ * - A rule with `until` answers its refusal until the call it names has
+ *   succeeded (design 1k): the one thing the child remembers between calls.
  * - `missing`: no binary is found, and nothing runs.
  * - `config-typo`: every call exits 1 with the recorded refusal, its verb
  *   swapped, as the old prototype's `cfgRefusal` does (`main.html:4820` at `b375fac9`).
@@ -170,6 +192,8 @@ export class StandInChild {
   /** Each call no rule answered, as `<kind>: apogee <arguments>`: what a per-preset test holds empty. */
   readonly unanswered: string[] = []
   private readonly answered = new Map<Rule, number>()
+  /** The calls answered with a success, as `<kind> <arguments>`, and not stopped since: what a rule's `until` waits on (design 1k). */
+  private readonly succeeded = new Set<string>()
 
   constructor(
     settings: { readonly rules: Rules; readonly apogee: ApogeeMode },
@@ -199,16 +223,31 @@ export class StandInChild {
       this.note(kind, said)
       return { started: false, reason: `no recorded answer for ${said}` }
     }
+    // Still waiting on the call it names: the refusal, and nothing counted.
+    if (rule.until && !this.succeeded.has(StandInChild.key(kind, rule.until.ran))) return { started: true, run: StandInChild.captured(rule.until.answer), replay: StandInChild.replay(rule.until.answer) }
     const answers: readonly Answer[] = Array.isArray(rule.answer) ? rule.answer : [rule.answer as Answer]
     const count = this.answered.get(rule) ?? 0
     this.answered.set(rule, count + 1)
     const answer = answers[Math.min(count, answers.length - 1)] ?? {}
+    if ((answer.exit ?? 0) === 0 && answer.timedOut !== true) this.succeeded.add(StandInChild.key(kind, args))
     return { started: true, run: StandInChild.captured(answer), replay: StandInChild.replay(answer) }
+  }
+
+  /**
+   * A call stopped before its end (its Stop, design 1k): what it was answered
+   * never finished, so it is no success, and a rule waiting on it waits again.
+   */
+  stopped(kind: RuleKind, args: readonly string[]): void {
+    this.succeeded.delete(StandInChild.key(kind, args))
+  }
+
+  private static key(kind: RuleKind, args: readonly string[]): string {
+    return `${kind} ${args.join(' ')}`
   }
 
   /** An answer's replay rules, each as 1d replayed it unless the answer names it. */
   static replay(answer: Answer): ReplayRules {
-    return { exitAfter: answer.exitAfter ?? 0, freeze: answer.freeze, continuations: answer.continuations, cancelled: answer.cancelled, busy: answer.busy ?? false }
+    return { exitAfter: answer.exitAfter ?? 0, holdAt: answer.holdAt, freeze: answer.freeze, continuations: answer.continuations, cancelled: answer.cancelled, busy: answer.busy ?? false }
   }
 
   /** Logs what nobody recorded, as `<kind>: <what>`: a call, or a chat's turn past its recording. */

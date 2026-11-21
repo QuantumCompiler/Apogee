@@ -59,6 +59,41 @@ describe("a job's end held back by its rule's delay (design 1v)", () => {
     expect(said(job).at(-1)).toEqual(JobUpdate.ended(JobEnd.of(ChildExit.exited(0), new BoundedTail(), false)))
   })
 
+  test('held at a line (design 1k’s `holdAt`): its lines up to there, the delay, then the rest and its end -- at the pace, never past the hold in one tick', () => {
+    const rules: Rules = { jobs: [{ arguments: ['train', 'setup'], answer: { stdout: 'one\ntwo\nthree\nfour\nfive\n', holdAt: 3, exitAfter: 2 } }] }
+    const { jobs, clock } = starter(rules, { pace: 2 })
+    const job = jobs.startJob(binary, ['train', 'setup'], false)
+    const lines = () => said(job).flatMap((update) => (update.case === 'said' ? [update.line] : []))
+    clock.advance(1)
+    expect(lines()).toEqual(['one', 'two'])
+    clock.advance(1)
+    // Two lines a tick, but the hold is at the third.
+    expect(lines()).toEqual(['one', 'two', 'three'])
+    clock.advance(2)
+    expect(lines()).toEqual(['one', 'two', 'three'])
+    clock.advance(1)
+    expect(lines()).toEqual(['one', 'two', 'three', 'four', 'five'])
+    expect(said(job).at(-1)?.case).toBe('said')
+    clock.advance(1)
+    expect(said(job).at(-1)?.case).toBe('ended')
+  })
+
+  test('a Stop tells the stand-in the job did not run to its end (design 1k): a rule waiting on its success waits again; an end of its own does not', async () => {
+    const rules: Rules = {
+      jobs: [
+        { arguments: ['train', 'setup'], answer: { stdout: 'installed\n' } },
+        { arguments: ['video', 'generate'], until: { ran: ['train', 'setup'], answer: { exit: 1 } }, answer: { stdout: 'made\n' } },
+      ],
+    }
+    const { jobs, clock, child } = starter(rules)
+    const install = jobs.startJob(binary, ['train', 'setup'], false)
+    await install.stop()
+    expect(child.run('jobs', ['video', 'generate'])).toMatchObject({ started: true, run: { stdout: '' } })
+    jobs.startJob(binary, ['train', 'setup'], false)
+    clock.advance(2)
+    expect(child.run('jobs', ['video', 'generate'])).toMatchObject({ started: true, run: { stdout: 'made\n' } })
+  })
+
   test('a still frame stands mid-job: its start ticks short of the delay leave it running, and Stop still ends it at once', async () => {
     vi.useFakeTimers()
     try {

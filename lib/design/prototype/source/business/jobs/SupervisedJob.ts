@@ -85,11 +85,15 @@ export class JobStarter implements JobStarting {
   startJob(_binary: string, args: readonly string[], streaming: boolean, _folder?: string): JobRunning {
     const answer = this.child.run('jobs', args)
     if (!answer.started) return SupervisedJob.notStarted(answer.reason)
-    const job = SupervisedJob.replay(answer.run, streaming, this.clock, answer.replay.exitAfter, answer.replay.busy)
+    const job = SupervisedJob.replay(answer.run, streaming, this.clock, answer.replay.exitAfter, answer.replay.busy, answer.replay.holdAt)
     if (this.registry && !job.finished) {
-      const registration = this.registry.register('job', ChildRegistry.label(args), () => job.stop())
+      const registration = this.registry.register('job', ChildRegistry.label(args), () => job.stop(), args)
       job.onEnd(() => registration.leave())
     }
+    // Stopped before its end, what it was answered never finished: the stand-in hears so (design 1k), as a rule may wait on its success.
+    job.onEnd(() => {
+      if (job.interrupted) this.child.stopped('jobs', args)
+    })
     return job
   }
 }
@@ -100,8 +104,10 @@ export class JobStarter implements JobStarting {
  * people -- then `.ended` with its exit. Here the run is a recording, one
  * line a tick (or the preset's pace), its end on the tick after its last
  * line -- held back that many ticks more where its rule's `exitAfter` says
- * (design 1v), so a still frame can stand mid-job. Stop ends it at once, as
- * an interrupted run's stream ends (`PreviewJob`'s 130).
+ * (design 1v), so a still frame can stand mid-job, after its last line or,
+ * where its `holdAt` says, after that many (design 1k), the rest played
+ * after the wait. Stop ends it at once, as an interrupted run's stream ends
+ * (`PreviewJob`'s 130).
  */
 export class SupervisedJob implements JobRunning {
   readonly updates: AsyncStream<JobUpdate>
@@ -111,8 +117,12 @@ export class SupervisedJob implements JobRunning {
   private readonly busyLines: string[]
   private next = 0
   private busyAt = 0
-  /** Ticks still to wait after the last line before `.ended`: the rule's `exitAfter`. */
+  /** Ticks still to wait before `.ended`: the rule's `exitAfter`. */
   private held: number
+  /** The stdout line count those ticks are waited after: the rule's `holdAt`, else all of them (design 1k). */
+  private readonly holdAt: number
+  /** Its end, once said. */
+  private ending: JobEnd | undefined = undefined
   private leave: () => void = () => {}
   private ends: Array<() => void> = []
 
@@ -121,6 +131,7 @@ export class SupervisedJob implements JobRunning {
     private readonly streaming: boolean,
     exitAfter = 0,
     busy = false,
+    holdAt?: number,
   ) {
     this.held = exitAfter
     this.busyLines = run && busy ? LineFramer.lines(run.stderrTail.text) : []
@@ -128,6 +139,7 @@ export class SupervisedJob implements JobRunning {
     this.updates = stream
     this.continuation = continuation
     this.lines = run ? LineFramer.lines(run.stdout) : []
+    this.holdAt = Math.min(holdAt ?? this.lines.length, this.lines.length)
   }
 
   /** A run that never started: it ends at once, `detail` saying why. */
@@ -137,9 +149,9 @@ export class SupervisedJob implements JobRunning {
     return job
   }
 
-  /** `run`, replayed on `clock`; in a still frame, as many ticks in as the frame, however late it opened. With `busy`, its stderr first, a busy line a tick (design 1j). */
-  static replay(run: CapturedRun, streaming: boolean, clock: Clock, exitAfter = 0, busy = false): SupervisedJob {
-    const job = new SupervisedJob(run, streaming, exitAfter, busy)
+  /** `run`, replayed on `clock`; in a still frame, as many ticks in as the frame, however late it opened. With `busy`, its stderr first, a busy line a tick (design 1j); with `holdAt`, its `exitAfter` ticks waited after that many lines (design 1k). */
+  static replay(run: CapturedRun, streaming: boolean, clock: Clock, exitAfter = 0, busy = false, holdAt?: number): SupervisedJob {
+    const job = new SupervisedJob(run, streaming, exitAfter, busy, holdAt)
     job.leave = clock.onTick(() => job.step(clock.linesPerTick))
     // After `leave` is set, so a recording shorter than the frame's ticks ends, and leaves, once.
     for (let tick = 0; tick < clock.missedTicks && !job.continuation.finished; tick += 1) job.step(clock.linesPerTick)
@@ -149,6 +161,11 @@ export class SupervisedJob implements JobRunning {
   /** Whether its end has been said. */
   get finished(): boolean {
     return this.continuation.finished
+  }
+
+  /** Whether it ended by its Stop, before its recording's own end. */
+  get interrupted(): boolean {
+    return this.ending?.interrupted ?? false
   }
 
   /** Tells `then` once its end is said: how the registry hears a job leave. */
@@ -168,21 +185,24 @@ export class SupervisedJob implements JobRunning {
       this.busyAt += pace
       return
     }
+    if (this.next >= this.holdAt && this.held > 0) {
+      this.held -= 1
+      return
+    }
     if (this.next >= this.lines.length) {
-      if (this.held > 0) {
-        this.held -= 1
-        return
-      }
       if (this.run) this.end(JobEnd.of(this.run.exit, this.run.stderrTail, false))
       return
     }
-    for (const line of this.lines.slice(this.next, this.next + pace)) {
+    // Never past the hold in one tick: the wait stands right after its line.
+    const stop = this.next < this.holdAt ? Math.min(this.holdAt, this.next + pace) : this.next + pace
+    for (const line of this.lines.slice(this.next, stop)) {
       this.continuation.yield(this.streaming ? JobUpdate.event(JobEvent.decode(line)) : JobUpdate.said(line))
     }
-    this.next += pace
+    this.next = stop
   }
 
   private end(end: JobEnd): void {
+    this.ending = end
     this.leave()
     this.continuation.yield(JobUpdate.ended(end))
     this.continuation.finish()

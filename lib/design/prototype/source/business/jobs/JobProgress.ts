@@ -40,6 +40,26 @@ export interface JobPassLine {
   readonly text: string
 }
 
+/** A count of a whole, as a media run last said it: a denoising step of its steps (design 1k). */
+export interface JobCount {
+  readonly done: number
+  readonly of: number
+}
+
+/** The runtime a media run loaded, as its `ready` event said it (design 1k). */
+export interface JobReady {
+  readonly device: string | undefined
+  readonly dtype: string | undefined
+  readonly mode: string | undefined
+}
+
+/** The frames a clip's driver wrote (design 1k). */
+export interface JobFrames {
+  readonly frames: number
+  readonly width: number | undefined
+  readonly height: number | undefined
+}
+
 /** Bytes a run has moved, as it last said; `total` only when known. */
 export interface JobBytes {
   readonly done: number
@@ -58,8 +78,10 @@ export interface JobBytes {
  * store job and a pull read, and a training run's (design 1j): a pipeline's
  * stages as its manifest moved them, the run they belong to, the trainer's
  * latest iteration and a cycle pass's narration -- a pure reducer, so a
- * screen's whole view of a run is a function of what the run said. The media
- * events are the items that port those places.
+ * screen's whole view of a run is a function of what the run said. A clip's
+ * media events (design 1k): the runtime that loaded, the denoising step, the
+ * frames written and their assembly; a speech's segments and a
+ * composition's scenes are 1m's and 1l's.
  */
 export class JobProgress {
   status: JobStatus = { case: 'running' }
@@ -87,6 +109,12 @@ export class JobProgress {
   iteration: JobIteration | undefined = undefined
   /** A cycle pass's narration so far, in order (55h, 1j). */
   readonly passes: JobPassLine[] = []
+  /** The media events' latest (design 1k, the Mac's): the runtime loaded and its device, the denoising step, the frames written, and the frames going into the clip. */
+  ready: JobReady | undefined = undefined
+  device: string | undefined = undefined
+  step: JobCount | undefined = undefined
+  frames: JobFrames | undefined = undefined
+  assembling: number | undefined = undefined
 
   apply(update: JobUpdate): void {
     switch (update.case) {
@@ -144,6 +172,19 @@ export class JobProgress {
         this.bytes = { done: event.done, total: event.total, file: event.file, index: event.index, count: event.count, fraction }
         return
       }
+      case 'ready':
+        this.ready = { device: event.device, dtype: event.dtype, mode: event.mode }
+        this.device = event.device
+        return
+      case 'step':
+        this.step = { done: event.step, of: event.steps }
+        return
+      case 'frames':
+        this.frames = { frames: event.frames, width: event.width, height: event.height }
+        return
+      case 'assembling':
+        this.assembling = event.frames
+        return
       case 'notice':
         this.notices.push(event.text)
         this.lastSaid = event.text
