@@ -1,6 +1,5 @@
 import { useEffect } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import { rootStyle } from '../../styles/Appearance/Appearance'
 import { useObserved } from '../../styles/Observation/useObserved'
 import { titleOf } from '../ViewModels/Destination'
 import type { Destination, Overlay } from '../ViewModels/Destination'
@@ -38,8 +37,9 @@ export interface ShellViewProps {
  * from the theme service -- `data-theme` for the generated theme block,
  * `rootVars()` inline -- the sidebar, the place shown, and over them the
  * menu scrim, the overlay, Settings, the sheet and confirm hosts and the
- * toast. It hands every key the browser passes to the shell's key map, and
- * tells the shell its width, which collapses the sidebar at 900 px.
+ * toast. It hands every key the browser passes to the shell's key map,
+ * tells the shell its width, which collapses the sidebar at 900 px, and
+ * tells the theme the viewer's light or dark setting (1i).
  */
 export function ShellView({ model, screen, overlay, settings, sheet, confirm, sessions, newSessions, strip, running }: ShellViewProps) {
   useObserved(model)
@@ -51,17 +51,23 @@ export function ShellView({ model, screen, overlay, settings, sheet, confirm, se
     }
     const onResize = () => model.windowResized(window.innerWidth)
     onResize()
+    // The viewer's light or dark setting, which Automatic follows unless a preset pins it (1i).
+    const scheme = window.matchMedia?.('(prefers-color-scheme: light)')
+    const onScheme = () => model.theme.systemChanged(scheme?.matches ? 'light' : 'dark')
+    if (scheme) onScheme()
     window.addEventListener('keydown', onKey)
     window.addEventListener('resize', onResize)
+    scheme?.addEventListener('change', onScheme)
     return () => {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('resize', onResize)
+      scheme?.removeEventListener('change', onScheme)
     }
   }, [model])
 
   const layout = model.layout
   const style = {
-    ...rootStyle(model.theme.appearance),
+    ...model.theme.style,
     height: '100vh',
     minHeight: 'var(--layout-window-min-height)',
     display: 'flex',

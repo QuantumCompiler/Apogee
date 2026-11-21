@@ -109,6 +109,26 @@ describe('the layering check, on this prototype', () => {
     ])
   })
 
+  test("violations planted in Settings fail, each naming its file: React in a settings view-model, and settings importing models -- Models & roles draws its roles through the app root's slot (design 1i)", () => {
+    const disk = new DiskTree(root)
+    const planted: Record<string, string> = {
+      'source/presentation/settings/ViewModels/ThemeSettings.ts': `import { useState } from 'react'\n${disk.contents('source/presentation/settings/ViewModels/ThemeSettings.ts')}`,
+      'source/presentation/settings/Views/GeneralPanes.tsx': `import { RoleRows } from '../../models/Views/ModelsScreen'\n${disk.contents('source/presentation/settings/Views/GeneralPanes.tsx')}`,
+      'source/presentation/settings/ViewModels/SettingsViewModel.ts': `import { ModelsViewModel } from '../../models/ViewModels/ModelsViewModel'\n${disk.contents('source/presentation/settings/ViewModels/SettingsViewModel.ts')}`,
+    }
+    const tree: SourceTree = {
+      files: (directory) => disk.files(directory),
+      folders: (directory) => disk.folders(directory),
+      isDirectory: (path) => disk.isDirectory(path),
+      contents: (path) => planted[path] ?? disk.contents(path),
+    }
+    expect(new LayeringCheck(ModuleMap.read(tree), tree).violations()).toEqual([
+      'source/presentation/settings/ViewModels/SettingsViewModel.ts imports presentation/models, which presentation/settings does not declare as a dependency',
+      'source/presentation/settings/ViewModels/ThemeSettings.ts imports react: a view-model stays free of React, so it tests without a browser',
+      'source/presentation/settings/Views/GeneralPanes.tsx imports presentation/models, which presentation/settings does not declare as a dependency',
+    ])
+  })
+
   test('the disk tree reads the prototype, never node_modules, build output or dot files', () => {
     const files = new DiskTree(root).files('')
     expect(files).toContain('modules.json')

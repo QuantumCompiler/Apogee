@@ -17,6 +17,11 @@
  * lib/src/cli/build/macos-arm64/source/apogee, with `APOGEE_HOME` and `HOME`
  * both the throwaway home; it writes nothing but the recipe's outputs under
  * fixtures/ and its own temp folder. Not part of `npm run check`.
+ *
+ * A command recipe (design 1i, `commandRecipes`) records one plain read the
+ * same way -- `config init`, its setup commands, then the command, its stdout
+ * written under fixtures/ as printed -- for a screen's read beside no
+ * session: Settings' web search address, set and unset, and recall's flag.
  */
 import { spawn, spawnSync } from 'node:child_process'
 import { accessSync, constants, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -289,6 +294,46 @@ function scenarioRecipes(): Record<string, Recipe> {
   return recipes
 }
 
+/**
+ * A command recipe (design 1i): one plain read recorded in a throwaway home
+ * -- `config init`, its setup commands, then the command it records, its
+ * stdout written under fixtures/ byte for byte. A read a screen makes beside
+ * a session, where no stream is involved.
+ */
+export interface CommandRecipe {
+  readonly name: string
+  /** Where its stdout goes, under fixtures/. */
+  readonly output: string
+  /** What runs first, after `config init`, each exiting 0. */
+  readonly setup?: ReadonlyArray<readonly string[]>
+  /** The command recorded. */
+  readonly command: readonly string[]
+}
+
+/**
+ * Settings' reads (design 1i): the web search address as `config get` reads
+ * it, set to the old prototype's address and on a fresh config (unset), and
+ * recall's flag on a fresh config.
+ */
+export const commandRecipes: Readonly<Record<string, CommandRecipe>> = {
+  'config-get-search-url': {
+    name: 'config-get-search-url',
+    output: 'business/reads/config-get-search-url.txt',
+    setup: [['config', 'set', 'tools.search.url', 'http://searx.home.arpa:8080']],
+    command: ['config', 'get', 'tools.search.url'],
+  },
+  'config-get-search-url-unset': {
+    name: 'config-get-search-url-unset',
+    output: 'business/reads/config-get-search-url-unset.txt',
+    command: ['config', 'get', 'tools.search.url'],
+  },
+  'config-get-memory-recall': {
+    name: 'config-get-memory-recall',
+    output: 'business/reads/config-get-memory-recall.txt',
+    command: ['config', 'get', 'memory.recall'],
+  },
+}
+
 /** A capture refused before or while it ran: one sentence saying why. */
 export class CaptureRefusal extends Error {
   constructor(message: string) {
@@ -404,6 +449,35 @@ export async function capture(recipe: Recipe, options: CaptureOptions): Promise<
   }
 }
 
+/** Runs a command recipe; returns the file it wrote, under fixtures/. */
+export async function captureCommand(recipe: CommandRecipe, options: CaptureOptions): Promise<string[]> {
+  try {
+    accessSync(options.binary, constants.X_OK)
+  } catch {
+    throw new CaptureRefusal(`capture: no executable apogee at ${options.binary}`)
+  }
+  const output = under(options.fixturesRoot, recipe.output)
+  const sandbox = mkdtempSync(join(options.tempRoot ?? tmpdir(), 'apogee-capture-'))
+  try {
+    const home = join(sandbox, 'home')
+    mkdirSync(home, { recursive: true })
+    const env = { ...process.env, APOGEE_HOME: home, HOME: home }
+    const run = (args: readonly string[]): string => {
+      const result = spawnSync(options.binary, args, { cwd: home, env, encoding: 'utf8', input: '' })
+      if (result.status !== 0) throw new CaptureRefusal(`capture: apogee ${args.join(' ')} exited ${result.status ?? result.signal}: ${(result.stderr ?? '').trim()}`)
+      return result.stdout
+    }
+    run(['config', 'init'])
+    for (const step of recipe.setup ?? []) run(step)
+    const stdout = run(recipe.command)
+    mkdirSync(dirname(output), { recursive: true })
+    writeFileSync(output, stdout)
+    return [output]
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true })
+  }
+}
+
 /** The chat the stream's `session` line names. */
 function chatIdOf(stream: string): string | undefined {
   for (const line of stream.split('\n')) {
@@ -481,11 +555,13 @@ if (import.meta.main) {
   const binaryAt = args.indexOf('--binary')
   const binary = binaryAt >= 0 ? resolve(args[binaryAt + 1] ?? '') : branchBinary(prototype)
   const recipe = named === undefined ? undefined : recipes[named]
-  if (!recipe) {
-    console.error(`capture: name a recipe: ${Object.keys(recipes).join(', ')}`)
+  const commandRecipe = named === undefined ? undefined : commandRecipes[named]
+  if (!recipe && !commandRecipe) {
+    console.error(`capture: name a recipe: ${[...Object.keys(recipes), ...Object.keys(commandRecipes)].join(', ')}`)
     process.exit(2)
   }
-  capture(recipe, { binary, fixturesRoot: join(prototype, 'fixtures') }).then(
+  const options = { binary, fixturesRoot: join(prototype, 'fixtures') }
+  ;(recipe ? capture(recipe, options) : captureCommand(commandRecipe as CommandRecipe, options)).then(
     (files) => {
       const home = mkdtempSync(join(tmpdir(), 'apogee-capture-'))
       const version = spawnSync(binary, ['version'], { encoding: 'utf8', input: '', env: { ...process.env, APOGEE_HOME: home, HOME: home } }).stdout.split('\n')[0]

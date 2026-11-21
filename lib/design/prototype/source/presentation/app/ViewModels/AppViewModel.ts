@@ -13,6 +13,12 @@ import { ModelsViewModel } from '../../models/ViewModels/ModelsViewModel'
 import type { ModelsConfirm, ModelsTab } from '../../models/ViewModels/ModelsViewModel'
 import { ConvertForm, QuantizeForm } from '../../models/ViewModels/StoreForms'
 import { MonitorViewModel } from '../../monitor/ViewModels/MonitorViewModel'
+import { settingsPreferences } from '../../settings/Previews/SettingsWorlds'
+import { SettingsViewModel } from '../../settings/ViewModels/SettingsViewModel'
+import type { SettingsConfirm, SettingsPane } from '../../settings/ViewModels/SettingsViewModel'
+import { SessionKeys } from '../../sessions/ViewModels/SessionKeys'
+import { KeyMap } from '../../shell/ViewModels/KeyMap'
+import type { BoundKey } from '../../shell/ViewModels/KeyMap'
 import type { Compactions } from '../../session/ViewModels/Compactions'
 import type { SessionViewModel } from '../../session/ViewModels/SessionViewModel'
 import type { AttachChoice, FolderListing, SessionLeave } from '../../session/ViewModels/SessionViewModel'
@@ -98,6 +104,10 @@ export class AppViewModel extends Observable {
   readonly library: SessionLibraryViewModel
   /** The console (1g). */
   readonly console: ConsoleViewModel
+  /** The Settings window (1i), over the same theme service the window applies. */
+  readonly settings: SettingsViewModel
+  /** Every key the window binds: the shell's and the places' (Sessions'), what Settings › Keyboard lists. */
+  readonly boundKeys: readonly BoundKey[] = [...KeyMap.shell, ...SessionKeys.bindings]
 
   /** Each place's view-model, by its destination: the ones built so far. */
   private readonly places: Partial<Record<Destination, Place>>
@@ -106,6 +116,9 @@ export class AppViewModel extends Observable {
   private afterStart: (() => Promise<void>) | undefined = undefined
   /** Whether the app is wanted running: a stop before its setup has finished keeps the clock stopped. */
   private running = false
+  /** The Settings window's reads since it last opened, so a preset waits for them before its frame. */
+  private settingsReading: Promise<void> | undefined = undefined
+  private settingsWasOpen = false
 
   constructor(
     readonly preset: Preset,
@@ -120,12 +133,15 @@ export class AppViewModel extends Observable {
     this.jobs = new JobStarter(this.child, this.clock, this.registry)
     this.chats = new ApogeeClient(this.child, this.clock)
     this.theme = new ThemeService()
+    // Every start preset pins Automatic to dark, as the old prototype draws it (effTheme()), so frames match the baseline (1i's default).
+    this.theme.pin('dark')
     this.shell = new ShellViewModel(this.clock, this.theme)
     this.monitor = new MonitorViewModel(this.reads, this.clock)
     this.models = new ModelsViewModel(this.reads, this.jobs, this.clock)
     this.library = new SessionLibraryViewModel(this.chats, this.reads, this.jobs, this.clock, samples)
     this.consoleChild = new StandInChild({ rules: AppViewModel.consoleRules(preset), apogee: preset.apogee }, modes)
     this.console = new ConsoleViewModel(new ReadRunner(this.consoleChild), new JobStarter(this.consoleChild, this.clock, this.registry))
+    this.settings = new SettingsViewModel(this.reads, this.jobs, this.theme, () => this.boundKeys, settingsPreferences)
     this.places = { models: this.models }
 
     // The library's doors, as closures: the toast, the shell's hosts, Sessions (an overlay closed, or left open), Models and the scrim.
@@ -160,7 +176,11 @@ export class AppViewModel extends Observable {
       this.session.pickModel(backend)
       this.library.showSessions?.()
     }
-    this.models.openSettings = () => this.shell.perform({ kind: 'openSettings' })
+    // Manage key… opens Settings on Backends & keys; Add an API key… opens it with that provider's key editor open, as the old one sets `keyEdit: sm.key` (1i).
+    this.models.openSettings = (provider) => {
+      this.openSettings('backends')
+      if (provider !== undefined) this.settings.editKey(provider)
+    }
     this.models.goTo = (place) => this.shell.go(place)
     this.models.subscribe(() => this.changed())
     this.registry.onChange(() => this.changed())
@@ -175,6 +195,18 @@ export class AppViewModel extends Observable {
     // or stops, Unload says what the old prototype says: the open session's
     // model is held by its own child, which the CLI unloads with it.
     this.monitor.unload = (name) => this.shell.say(`Unloaded ${name}`)
+    // The Settings window's doors (1i): the toast, the shell's sheet and confirm hosts, Models' Backends; Models & roles has the Models place read the roles its slot draws.
+    this.settings.say = (text) => this.shell.say(text)
+    this.settings.present = (kind) => this.shell.openSheet(kind)
+    this.settings.dismissSheet = () => this.shell.closeSheet()
+    this.settings.ask = (kind) => this.shell.ask(kind)
+    this.settings.openLibrary = () => {
+      this.closeSettings()
+      this.openModels('backends')
+    }
+    this.settings.showing = (pane) => {
+      if (pane === 'roles') void this.models.refresh()
+    }
     this.shell.routeChanged = (destination) => {
       this.library.showing(destination === 'sessions')
       this.places[destination]?.appeared?.()
@@ -183,6 +215,9 @@ export class AppViewModel extends Observable {
     // the scrim the shell draws over an open menu closes the session's and the list's too.
     this.shell.subscribe(() => {
       this.watch()
+      // The window opened, by ⌘, or a door: every pane's reads.
+      if (this.shell.settingsOpen && !this.settingsWasOpen) this.settingsReading = this.settings.appeared()
+      this.settingsWasOpen = this.shell.settingsOpen
       if (this.shell.menu === undefined && this.session.menu !== undefined) this.session.closeMenus()
       if (this.shell.menu === undefined && this.library.rowMenu !== undefined) this.library.closeRowMenu()
     })
@@ -230,6 +265,35 @@ export class AppViewModel extends Observable {
     this.shell.go('models')
     if (tab === 'backends') void this.models.openBackend(model)
     else this.models.pick(tab)
+  }
+
+  /** Settings open on `pane`: the pane shown, then the window opened, which reads it. */
+  openSettings(pane: SettingsPane): void {
+    this.settings.pick(pane)
+    this.shell.perform({ kind: 'openSettings' })
+  }
+
+  /** Done: the window closed, the key being typed and its failure line with it. */
+  closeSettings(): void {
+    this.shell.closeSettings()
+    this.settings.closed()
+  }
+
+  /** A Settings confirm answered yes; the host closed first. */
+  async confirmSettings(kind: SettingsConfirm): Promise<void> {
+    this.shell.dismissConfirm()
+    await this.settings.confirm(kind)
+  }
+
+  /** A Settings confirm's Cancel. */
+  dismissSettings(kind: SettingsConfirm): void {
+    this.shell.dismissConfirm()
+    this.settings.dismissPending(kind)
+  }
+
+  /** Register…'s sheet: Cancel, or Register. */
+  cancelRegister(): void {
+    this.settings.cancelRegister()
   }
 
   /** A Models confirm answered: yes, or its second door; the host closed first. */
@@ -322,6 +386,8 @@ export class AppViewModel extends Observable {
     this.models.connect(binary)
     // The console's child shares the preset's mode, so it finds the binary where `child` does.
     this.console.connect(binary)
+    // Settings, with the override this launch's discovery passed over, as the app's preferences hold it.
+    this.settings.connect(binary, settingsPreferences.passedOver)
     await this.library.start()
     await this.applyStart(this.preset.route)
     this.watch()
@@ -356,6 +422,10 @@ export class AppViewModel extends Observable {
         this.console.setInput(consoleLines.typed)
         await this.console.complete()
       }
+      return
+    }
+    if (where === 'settings') {
+      await this.openSettingsPreset(sub ?? 'general')
       return
     }
     if (where === 'models' || where === 'download') {
@@ -500,6 +570,22 @@ export class AppViewModel extends Observable {
         models.openDownload('meta-llama/Llama-3.2-1B-Instruct')
         return
     }
+  }
+
+  /**
+   * A Settings preset (1i), as the old `applyStart('settings:…')` sets it up:
+   * the Streaming session at its starting frame behind it (1v's setup, as
+   * `chat:compacting` opens it), the window open on the pane its name says,
+   * read; `fixing` and `fixfailed` run `check --fix`, the one still running
+   * at the frame, the other ended failed within the preset's start ticks;
+   * `nosearch` is the Web access pane over the unset address.
+   */
+  private async openSettingsPreset(sub: string): Promise<void> {
+    await this.openStreaming()
+    const pane: SettingsPane = sub === 'fixing' || sub === 'fixfailed' ? 'backends' : sub === 'nosearch' ? 'web' : (sub as SettingsPane)
+    this.openSettings(pane)
+    await this.settingsReading
+    if (sub === 'fixing' || sub === 'fixfailed') this.settings.fix(['check', '--fix'])
   }
 
   /**

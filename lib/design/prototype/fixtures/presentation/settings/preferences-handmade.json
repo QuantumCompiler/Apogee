@@ -1,0 +1,19 @@
+{
+ "always": [],
+ "binaryOverride": "/Users/someone/tools/apogee",
+ "captions": true,
+ "effort": "default",
+ "newSessions": "saved",
+ "onLaunch": "last",
+ "passedOver": {
+  "path": "/Users/someone/tools/apogee",
+  "reason": "`version` exited with status 1: error: broken install"
+ },
+ "saveTo": {
+  "speech": "~/Music/Apogee",
+  "video": "~/Movies/Apogee"
+ },
+ "session": [],
+ "thinking": "auto",
+ "voice": "af_heart"
+}

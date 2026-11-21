@@ -4,11 +4,14 @@ import { ConsoleView } from '../../console/Views/ConsoleView'
 import type { ModelsConfirm } from '../../models/ViewModels/ModelsViewModel'
 import { AdaptersSheet } from '../../models/Views/AdaptersSheet'
 import { DownloadSheet } from '../../models/Views/DownloadsView'
-import { ModelsScreen, PairDrafterSheet } from '../../models/Views/ModelsScreen'
+import { ModelsScreen, PairDrafterSheet, RoleRows, RolesNotes } from '../../models/Views/ModelsScreen'
 import { StoreSheet } from '../../models/Views/StoreView'
 import { MonitorView } from '../../monitor/Views/MonitorView'
 import { sessionSamples } from '../../session/Previews/SessionPresets'
 import { SuiteSheet } from '../../session/Views/SuiteSheet'
+import type { SettingsConfirm } from '../../settings/ViewModels/SettingsViewModel'
+import { RegisterProviderSheet } from '../../settings/Views/BackendsPane'
+import { SettingsView } from '../../settings/Views/SettingsView'
 import type { LibraryConfirm } from '../../sessions/ViewModels/LibraryFaces'
 import { ExecuteDoorSheet } from '../../sessions/Views/ExecuteDoor'
 import { NewSessionButtons, RenameSheet, SessionList } from '../../sessions/Views/SessionList'
@@ -20,7 +23,6 @@ import { PlaceholderScreen } from '../../shell/Views/PlaceholderScreen'
 import { ShellView } from '../../shell/Views/ShellView'
 import { useObserved } from '../../styles/Observation/useObserved'
 import '../../styles/Stylesheet'
-import { layout } from '../../styles/Tokens/Tokens'
 import { modeRules } from '../Previews/ModeRules'
 import { presetFor } from '../Previews/Presets'
 import { AppViewModel } from '../ViewModels/AppViewModel'
@@ -28,6 +30,7 @@ import { AppViewModel } from '../ViewModels/AppViewModel'
 const libraryConfirms: readonly string[] = ['deleteChat', 'compactChat', 'forget'] satisfies readonly LibraryConfirm[]
 const modelsConfirms: readonly string[] = ['model', 'storeDelete', 'storeModelDelete', 'unregister', 'registerAll'] satisfies readonly ModelsConfirm[]
 const storeSheets: readonly string[] = ['storeConvert', 'storeQuantize', 'storeRegister', 'storeRename']
+const settingsConfirms: readonly string[] = ['settingsForget', 'xcodeRemove'] satisfies readonly SettingsConfirm[]
 
 /**
  * The application's window (design 1e): the shell, handed each place's screen,
@@ -38,7 +41,9 @@ const storeSheets: readonly string[] = ['storeConvert', 'storeQuantize', 'storeR
  * is its placeholder; the monitor and the console are their own views. The
  * sheet and confirm hosts get their content by kind: the suite chooser and
  * the `endPrivate` confirm are the session's; the details, rename and
- * execute sheets and the delete, compact and forget confirms the library's.
+ * execute sheets and the delete, compact and forget confirms the library's;
+ * Settings (1i) is its window, the Models place's roles in its Models &
+ * roles slot, with its Register… sheet and its two confirms.
  * It starts the app once it is on screen.
  */
 export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
@@ -71,9 +76,17 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
       }}
       overlay={(overlay) => (overlay === 'monitor' ? <MonitorView model={model.monitor} close={() => shell.closeOverlay()} /> : <ConsoleView model={model.console} close={() => shell.closeOverlay()} />)}
       settings={() => (
-        <SheetHost title="Settings" width={layout.dialog.confirm} right={[{ label: 'Close', kind: 'btn', run: () => shell.closeSettings() }]}>
-          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>Settings isn’t drawn here yet. Design item 1i ports it.</p>
-        </SheetHost>
+        <SettingsView
+          model={model.settings}
+          close={() => model.closeSettings()}
+          // Models & roles: the Models place's roles, so settings never imports models (1i).
+          roles={() => (
+            <>
+              <RolesNotes model={models} margin="0 0 6px" />
+              <RoleRows model={models} picker={240} />
+            </>
+          )}
+        />
       )}
       sheet={(kind) => {
         if (kind === 'suite') {
@@ -189,6 +202,23 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
             </SheetHost>
           )
         }
+        // Settings' Register… (1i): the old registerProvider sheet, in the TUI's words.
+        if (kind === 'registerProvider' && model.settings.face().register.shown) {
+          const register = model.settings.face().register
+          return (
+            <SheetHost
+              title={register.title}
+              subtitle={register.subtitle}
+              width={520}
+              right={[
+                { label: 'Cancel', run: () => model.cancelRegister() },
+                { label: 'Register', kind: 'btn-p', run: () => void model.settings.register(), disabled: !register.canRegister },
+              ]}
+            >
+              <RegisterProviderSheet model={model.settings} />
+            </SheetHost>
+          )
+        }
         if (kind === 'execute' && library.executeDoorOpen) {
           return (
             <SheetHost
@@ -221,6 +251,12 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
               confirm={{ label: words.confirm, run: () => void model.confirmModels(confirm, false), destructive: words.destructive }}
             />
           )
+        }
+        if (settingsConfirms.includes(kind)) {
+          const confirm = kind as SettingsConfirm
+          const words = model.settings.confirmWords(confirm)
+          if (!words) return null
+          return <ConfirmHost title={words.title} body={words.body} cancel={{ label: 'Cancel', run: () => model.dismissSettings(confirm) }} confirm={{ label: words.confirm, run: () => void model.confirmSettings(confirm), destructive: true }} />
         }
         if (libraryConfirms.includes(kind)) {
           const words = library.confirmWords(kind as LibraryConfirm)

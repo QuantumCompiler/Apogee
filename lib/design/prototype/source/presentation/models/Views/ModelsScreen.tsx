@@ -307,40 +307,60 @@ export function BackendsTab({ model }: { readonly model: ModelsViewModel }) {
 
 /** Roles: which model does which job, the six the CLI resolves, each picker moving its role through its verb. */
 export function RolesTab({ model }: { readonly model: ModelsViewModel }) {
-  useObserved(model)
-  const face = model.face().roles
   return (
     <div style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto', padding: '20px 24px 28px' }}>
       <div style={{ maxWidth: 820 }}>
         <div style={{ margin: '0 0 16px' }}>
           <p style={{ margin: 0, fontSize: 'var(--t-body)', color: 'var(--text-secondary)' }}>Which model does which job. Helpers run beside the chat model; an unset role falls back as shown, and the turn says when a helper did the work.</p>
-          {face.suiteLine !== '' ? <p style={{ margin: '6px 0 0', fontSize: 'var(--t-small)', color: 'var(--text-secondary)' }}>{face.suiteLine}</p> : null}
-          {face.failure !== '' ? <p style={{ margin: '6px 0 0', fontSize: 'var(--t-small)', color: 'var(--status-error)' }}>{`The roles could not be read: ${face.failure}`}</p> : null}
+          <RolesNotes model={model} />
         </div>
-        {face.rows.map((row) => (
-          <div key={row.key} style={{ display: 'grid', gridTemplateColumns: '150px minmax(0, 1fr) 250px', gap: '12px 20px', alignItems: 'center', padding: '14px 0', borderBottom: '1px solid var(--line-border)' }}>
-            <div>
-              <div style={{ fontSize: 'var(--t-body)', fontWeight: 600 }}>{row.label}</div>
-              <div className="mono" style={{ fontSize: 'var(--t-label)', color: 'var(--text-tertiary)' }}>
-                {row.key}
-              </div>
-            </div>
-            <div style={{ fontSize: 'var(--t-small)', color: 'var(--text-secondary)' }}>
-              {row.desc}
-              <div style={{ marginTop: 2, color: row.noteColor }}>{row.note}</div>
-            </div>
-            <select className="inp" value={row.value} onChange={(event) => void model.assign(row.key, event.target.value)} aria-label={`Model for ${row.label}`} style={{ width: '100%' }}>
-              {row.options.map((option) => (
-                <option key={option.value} value={option.value} disabled={option.value === ''}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        ))}
+        <RoleRows model={model} />
       </div>
     </div>
   )
+}
+
+/**
+ * The roles' notes: the suite they resolve under, and why they could not be
+ * read -- what Roles draws under its intro, and Settings › Models & roles
+ * under its own (design 1i, through the slot the app root fills).
+ */
+export function RolesNotes({ model, margin = '6px 0 0' }: { readonly model: ModelsViewModel; readonly margin?: string }) {
+  useObserved(model)
+  const face = model.face().roles
+  return (
+    <>
+      {face.suiteLine !== '' ? <p style={{ margin, fontSize: 'var(--t-small)', color: 'var(--text-secondary)' }}>{face.suiteLine}</p> : null}
+      {face.failure !== '' ? <p style={{ margin, fontSize: 'var(--t-small)', color: 'var(--status-error)' }}>{`The roles could not be read: ${face.failure}`}</p> : null}
+    </>
+  )
+}
+
+/** The six roles' rows, each picker moving its role through its verb: Roles', and Settings › Models & roles' (design 1i), its picker a little narrower there, as the old pane draws it. */
+export function RoleRows({ model, picker = 250 }: { readonly model: ModelsViewModel; readonly picker?: number }) {
+  useObserved(model)
+  const face = model.face().roles
+  return face.rows.map((row) => (
+    <div key={row.key} style={{ display: 'grid', gridTemplateColumns: `150px minmax(0, 1fr) ${picker}px`, gap: '12px 20px', alignItems: 'center', padding: '14px 0', borderBottom: '1px solid var(--line-border)' }}>
+      <div>
+        <div style={{ fontSize: 'var(--t-body)', fontWeight: 600 }}>{row.label}</div>
+        <div className="mono" style={{ fontSize: 'var(--t-label)', color: 'var(--text-tertiary)' }}>
+          {row.key}
+        </div>
+      </div>
+      <div style={{ fontSize: 'var(--t-small)', color: 'var(--text-secondary)' }}>
+        {row.desc}
+        <div style={{ marginTop: 2, color: row.noteColor }}>{row.note}</div>
+      </div>
+      <select className="inp" value={row.value} onChange={(event) => void model.assign(row.key, event.target.value)} aria-label={`Model for ${row.label}`} style={{ width: '100%' }}>
+        {row.options.map((option) => (
+          <option key={option.value} value={option.value} disabled={option.value === ''}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  ))
 }
 
 /** The pair sheet's content: exactly what the binary's completion offers, the drafter's own line, the command as typed. */

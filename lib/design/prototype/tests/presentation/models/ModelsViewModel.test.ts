@@ -123,6 +123,18 @@ describe('the Models place: its tabs, its Backends and its Roles (the Mac’s Mo
     expect(said.at(-1)).toBe('Removed the backend llama3.2-1b-Q4KM; its weights stay')
   })
 
+  test('Add an API key… opens Settings with its provider, as the old one sets keyEdit; Manage key… opens it bare', async () => {
+    const { model } = await place()
+    const opened: Array<string | undefined> = []
+    model.openSettings = (provider) => opened.push(provider)
+    await model.select('claude')
+    expect(model.face().backends.detail.actions.map((action) => action.label)).toEqual(['Add an API key…'])
+    await model.act('addKey')
+    // The worlds keep no keyed API backend, so Manage key… is pressed on the same row: the act's switch, not the offer.
+    await model.act('manageKey')
+    expect(opened).toEqual(['anthropic', undefined])
+  })
+
   test('a vision MLX backend with no drafter offers Pair a drafter…: the binary’s own completion, the drafter’s line, then config set-backend --draft', async () => {
     const { model, presented, said } = await place()
     await model.select('Gemma4-E4B-4bit')

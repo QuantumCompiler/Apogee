@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'vitest'
 import { destinations, placeholderOf, titleOf } from '../../../source/presentation/shell/ViewModels/Destination'
-import { chordOf, commandFor, keyOf, KeyMap, symbols } from '../../../source/presentation/shell/ViewModels/KeyMap'
+import { chord, chordOf, chordsNamed, commandFor, keyboardLines, keyOf, KeyMap, symbols } from '../../../source/presentation/shell/ViewModels/KeyMap'
+import { SessionKeys } from '../../../source/presentation/sessions/ViewModels/SessionKeys'
+import { frozenComponent } from '../styles/Frozen'
 
 describe('the places and their keys, as Destination.swift and KeyMap.swift hold them', () => {
   test("the design's eleven, in its order and names, on ⌘1 to ⌘9, ⌘0 and ⇧⌘R", () => {
@@ -50,6 +52,37 @@ describe('the places and their keys, as Destination.swift and KeyMap.swift hold 
   test("a keydown with no key and no code, as Chrome's autofill dispatches, is no chord the shell owns, and does not throw", () => {
     expect(() => chordOf({ metaKey: false, ctrlKey: false, altKey: false, shiftKey: false })).not.toThrow()
     expect(commandFor(chordOf({ metaKey: false, ctrlKey: false, altKey: false, shiftKey: false }))).toBeUndefined()
+  })
+})
+
+describe('the keyboard list Settings › Keyboard draws (design 1i)', () => {
+  test('a line names its chords: one, a range of digits with its modifiers, or a list', () => {
+    expect(chordsNamed('⌘N')).toEqual(['⌘N'])
+    expect(chordsNamed('⌘,')).toEqual(['⌘,'])
+    expect(chordsNamed('⌘1 – ⌘9, ⌘0')).toEqual(['⌘1', '⌘2', '⌘3', '⌘4', '⌘5', '⌘6', '⌘7', '⌘8', '⌘9', '⌘0'])
+    expect(chordsNamed('1 – 4')).toEqual(['1', '2', '3', '4'])
+  })
+
+  test("checked once against the frozen prototype: its 23 rows are the map's lines, in its order and words", () => {
+    const old = (frozenComponent({ start: 'settings:keyboard', still: true }) as unknown as { renderVals(): { set: { keys: Array<{ label: string; keys: string }> } } }).renderVals().set.keys
+    expect(old).toHaveLength(23)
+    expect(KeyMap.reference.map((line) => ({ label: line.label, keys: line.keys }))).toEqual(old)
+  })
+
+  test("every key the shell binds, and every key the places bind (Sessions' five), is named by a line: nothing is added", () => {
+    const bound = [...KeyMap.shell, ...SessionKeys.bindings]
+    const named = new Set(KeyMap.reference.flatMap((line) => chordsNamed(line.keys)))
+    for (const binding of bound) expect(named.has(symbols(binding.chord)), binding.label).toBe(true)
+    expect(keyboardLines(KeyMap.reference, bound)).toEqual(KeyMap.reference)
+  })
+
+  test('a key bound that no line names gets its own line, in its words, after the design\'s', () => {
+    const planted = [...KeyMap.shell, { chord: chord('p', 'shift', 'command'), label: 'Print the transcript' }]
+    expect(keyboardLines(KeyMap.reference, planted).slice(-2)).toEqual([KeyMap.reference.at(-1), { label: 'Print the transcript', keys: '⇧⌘P' }])
+  })
+
+  test("Sessions' keys carry the keyboard list's words", () => {
+    expect(SessionKeys.bindings.map((binding) => binding.label)).toEqual(['New session', 'New private session', 'New execute session', 'Show or hide the inspector', 'Search sessions'])
   })
 })
 

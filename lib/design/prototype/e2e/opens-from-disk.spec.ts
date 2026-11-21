@@ -685,3 +685,131 @@ test('the inspector’s Open in library lands on Backends at the session’s mod
   await inspectorPane(page).getByRole('button', { name: 'Change helpers' }).click()
   await expect(modelsTab(page, 'Roles')).toHaveAttribute('aria-selected', 'true')
 })
+
+/** The Settings window (design 1i). */
+const settingsWindow = (page: Page) => page.getByRole('dialog', { name: 'Settings' })
+const settingsPane = (page: Page, label: string) => settingsWindow(page).getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: label, exact: true })
+
+/** The 13 Settings presets: the pane each opens, and words its frame shows, from the CLI's recordings and the old pane's copy. */
+const settingsFrames: ReadonlyArray<readonly [string, string, ReadonlyArray<string | RegExp>]> = [
+  ['settings:general', 'General', ['Model for new sessions', '/Users/someone/.local/bin/apogee · 0.2.0 · release channel', 'Not using /Users/someone/tools/apogee: `version` exited with status 1: error: broken install. This launch runs the one above.']],
+  ['settings:appearance', 'Appearance', ['Graphite Dark', 'Answers 14 px · interface 13 px · code 12 px.', 'ELEMENT COLORS · GRAPHITE DARK', 'all text meets 4.5:1', '10.6:1']],
+  ['settings:media', 'Video & voice', ['Kokoro-82M/mlx/6f708192a3b4, Kokoro-82M/voice/5f3a2c91d0e4', 'Caption new compositions', 'Video · ffmpeg h264']],
+  ['settings:backends', 'Backends & keys', ['ON THIS MAC', 'CLOUD APIS · BILLED PER USE', 'Vendor-run tools consented: web_search, code_execution -- the vendor runs them under your key', 'PROVIDERS ON THIS MACHINE', '0 failing, 2 to look at']],
+  ['settings:fixing', 'Backends & keys', ['nothing to fix', 'Fix what can be fixed (check --fix)']],
+  ['settings:fixfailed', 'Backends & keys', ['it exited with status 1', '1 failing, 2 to look at', 'MCP · server: github: command not found on PATH: npx']],
+  ['settings:permissions', 'Permissions', ['write_file', 'Read a web page. Ask means the first time for each website.', 'Nothing yet. Choosing “Always allow” on a permission card adds it here.']],
+  ['settings:nosearch', 'Web access', ['docs.python.org', 'not set', 'Off until an address is set. web_search never pretends to succeed.']],
+  ['settings:xcode', 'Xcode', ['xcode: Xcode 27.1 (27A9275), /Applications/Xcode.app/Contents/Developer', "Not in Apogee's config.", 'apogee mcp create xcode --from xcode', 'Add Apogee (dev) to Xcode 26.6 or later: Settings › Intelligence › Agents › Add an Agent']],
+  ['settings:roles', 'Models & roles', ['The same roles as Models › Roles.', 'Roles resolve under suite fast (Suites changes it)', 'Open models library']],
+  ['settings:web', 'Web access', ['developer.apple.com', 'http://searx.home.arpa:8080', 'On. Searches go to this address and nowhere else.']],
+  ['settings:memory', 'Memory', ['Recall earlier sessions', '8 sessions summarized · in /Users/someone/.apogee/memory/chats.db', 'Forget all summaries…']],
+  ['settings:keyboard', 'Keyboard', ['New session', '⌘1 – ⌘9, ⌘0', 'Hide the sidebar']],
+]
+
+for (const [preset, pane, words] of settingsFrames) {
+  test(`${preset}: the Settings window on ${pane}, still, with no console error and no request but the file (design 1i)`, async ({ page }) => {
+    const { errors, requests } = watch(page)
+    await page.goto(`${built}?start=${preset}&still=true`)
+    await expect(settingsWindow(page)).toBeVisible()
+    await expect(settingsPane(page, pane)).toHaveAttribute('aria-current', 'page')
+    await expect(settingsWindow(page).getByRole('heading', { name: pane, level: 2 })).toBeVisible()
+    for (const word of words) await expect(settingsWindow(page).getByText(word).first()).toBeVisible()
+    if (preset === 'settings:media') await expect(settingsWindow(page).getByRole('combobox', { name: 'Video pipeline' })).toHaveValue('Wan2.2-TI2V-5B/mlx/5e6f708192a3')
+    // The Streaming session behind it, at its starting frame.
+    await expect(page.getByRole('region', { name: 'Conversation' })).toContainText('Where do fetches start in this repo, and what cancels them?')
+    expect(errors).toEqual([])
+    expect(requests).toEqual([`${built}?start=${preset}&still=true`])
+  })
+}
+
+test('settings:fixfailed: the run’s failure in the toast, as the old frame shows it (design 1i)', async ({ page }) => {
+  await page.goto(`${built}?start=settings:fixfailed&still=true`)
+  await expect(page.getByRole('status').filter({ hasText: 'check --fix failed: it exited with status 1' })).toBeVisible()
+})
+
+test('⌘, opens Settings over any screen; all ten panes open from its sidebar; Done closes it (design 1i)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=models&still=true`)
+  await expect(page.getByRole('heading', { name: 'Models', level: 1 })).toBeVisible()
+  await expect(settingsWindow(page)).toHaveCount(0)
+  await page.keyboard.press('Meta+Comma')
+  await expect(settingsWindow(page)).toBeVisible()
+  for (const pane of ['General', 'Appearance', 'Models & roles', 'Video & voice', 'Backends & keys', 'Permissions', 'Web access', 'Memory', 'Keyboard', 'Xcode']) {
+    await settingsPane(page, pane).click()
+    await expect(settingsPane(page, pane)).toHaveAttribute('aria-current', 'page')
+    await expect(settingsWindow(page).getByRole('heading', { name: pane, level: 2 })).toBeVisible()
+  }
+  await expect(settingsWindow(page).getByText('Add Apogee (dev) to Xcode 26.6 or later: Settings › Intelligence › Agents › Add an Agent')).toBeVisible()
+  await settingsWindow(page).getByRole('button', { name: 'Done' }).click()
+  await expect(settingsWindow(page)).toHaveCount(0)
+  // The sidebar's Settings button opens it too.
+  await page.getByRole('button', { name: /^Settings/ }).click()
+  await expect(settingsWindow(page)).toBeVisible()
+  expect(errors).toEqual([])
+})
+
+test('Appearance restyles every screen at once, and its resets put it back: a color, the fonts and the text size (design 1i)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=settings:appearance&still=true`)
+  const window = page.locator('#root > .ap')
+  const variable = (name: string) => window.evaluate((element, wanted) => getComputedStyle(element).getPropertyValue(wanted).trim(), name)
+  // A color, by its hex field: the window's variable, and what every screen paints with it.
+  const hex = settingsWindow(page).getByRole('textbox', { name: 'Window hex value' })
+  await hex.fill('#2a1f3d')
+  await expect.poll(() => variable('--surface-window')).toBe('#2a1f3d')
+  await expect(settingsWindow(page).getByText('1 change', { exact: true }).first()).toBeVisible()
+  // The fonts and the text size.
+  await settingsWindow(page).getByRole('combobox').filter({ hasText: 'IBM Plex Sans' }).selectOption('atkinson')
+  await settingsWindow(page).getByRole('group', { name: 'Text size' }).getByRole('button', { name: 'Large', exact: true }).click()
+  await expect.poll(() => variable('--t-body')).toBe('14px')
+  expect(await variable('--font-ui')).toBe("'Atkinson Hyperlegible', system-ui, sans-serif")
+  // Every screen: close the window and walk the places.
+  await settingsWindow(page).getByRole('button', { name: 'Done' }).click()
+  const places = page.getByRole('navigation', { name: 'Places' })
+  for (const place of ['Models ⌘2', 'Suites ⌘3', 'Sessions ⌘1']) {
+    await places.getByRole('button', { name: place }).click()
+    await expect(page.locator('main')).toHaveCSS('font-size', '14px')
+    await expect(window).toHaveCSS('background-color', 'rgb(42, 31, 61)')
+  }
+  // The resets: the row's, then Reset all, back to the theme's own.
+  await page.keyboard.press('Meta+Comma')
+  await settingsPane(page, 'Appearance').click()
+  await settingsWindow(page).getByRole('button', { name: 'Reset Window to #131415' }).click()
+  await expect.poll(() => variable('--surface-window')).toBe('#131415')
+  await settingsWindow(page).getByRole('textbox', { name: 'Accent hex value' }).fill('#ff8800')
+  await expect(settingsWindow(page).getByRole('button', { name: 'Reset all changes' })).toBeEnabled()
+  await settingsWindow(page).getByRole('button', { name: 'Reset all changes' }).click()
+  await expect.poll(() => variable('--status-accent')).toBe('#7FD4C1')
+  await settingsWindow(page).getByRole('group', { name: 'Text size' }).getByRole('button', { name: 'Medium' }).click()
+  await expect.poll(() => variable('--t-body')).toBe('13px')
+  expect(errors).toEqual([])
+})
+
+test('Keyboard lists every key the shell binds, and Sessions’ keys, in the design’s words (design 1i)', async ({ page }) => {
+  await page.goto(`${built}?start=settings:keyboard&still=true`)
+  const keys = settingsWindow(page).getByRole('list', { name: 'Keys' }).getByRole('listitem')
+  await expect(keys).toHaveCount(23)
+  const listed = (await keys.allTextContents()).join('\n')
+  for (const chord of ['⌘N', '⇧⌘N', '⌥⌘N', '⌥⌘I', '⇧⌘F', '⌥⌘M', '⇧⌘K', '⌘,', '⇧⌘R', '⇧⌘L', '⌃⌘S', '⌘1 – ⌘9, ⌘0']) expect(listed).toContain(chord)
+})
+
+test('Backends & keys: Add key… opens the field, a key saved goes and the field closes; Register… opens the sheet in the TUI’s words (design 1i)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=settings:backends&still=true`)
+  const settings = settingsWindow(page)
+  await settings.getByRole('button', { name: 'Add key…' }).first().click()
+  const field = settings.getByLabel('Anthropic API key')
+  await expect(field).toHaveAttribute('type', 'password')
+  await expect(settings.getByRole('button', { name: 'Save key' })).toBeDisabled()
+  await field.fill('sk-ant-typed-in-the-test')
+  await settings.getByRole('button', { name: 'Save key' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'stored a key for anthropic in /Users/someone/.apogee/config/credentials.json' })).toBeVisible()
+  await expect(settings.getByLabel('Anthropic API key')).toHaveCount(0)
+  await settings.getByRole('button', { name: 'Register…' }).first().click()
+  const sheet = page.getByRole('dialog', { name: 'Found claude -- register it as a backend?' })
+  await expect(sheet).toContainText('apogee providers register claude')
+  await sheet.getByRole('button', { name: 'Register' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'registered claude (claude-cli)' })).toBeVisible()
+  expect(errors).toEqual([])
+})

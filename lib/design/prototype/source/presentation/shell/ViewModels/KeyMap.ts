@@ -32,11 +32,15 @@ export type ShellCommand =
   | { readonly kind: 'toggleSidebar' }
   | { readonly kind: 'openSettings' }
 
-/** A command, its key and its words. */
-export interface KeyBinding {
-  readonly command: ShellCommand
+/** A key something binds, and its words: the shell's, or a place's (Sessions' ⌘N …), as Settings › Keyboard lists it (design 1i). */
+export interface BoundKey {
   readonly chord: KeyChord
   readonly label: string
+}
+
+/** A command, its key and its words. */
+export interface KeyBinding extends BoundKey {
+  readonly command: ShellCommand
 }
 
 /** One line of the design's keyboard list (Settings › Keyboard). */
@@ -55,7 +59,8 @@ export function keyOf(destination: Destination): KeyChord {
 /**
  * The keys, as the design gives them (`main.html`'s `set.keys` at `b375fac9`,
  * `BuildLayout.dc.html`'s keys): the Mac app's `KeyMap`, as data. Settings ›
- * Keyboard (1i) lists `reference`; the shell answers `shell`.
+ * Keyboard (1i) lists `reference`, and `keyboardLines` adds any bound key
+ * no line names; the shell answers `shell`.
  */
 export const KeyMap = {
   /** The window's own keys: every place, and every overlay the shell opens. A screen's own keys arrive with it. */
@@ -94,6 +99,38 @@ export const KeyMap = {
     ['Generate, Speak, Plan or Render, from its form', '⌘⏎'],
     ['Hide the sidebar', '⌃⌘S'],
   ].map(([label, keys]): KeyReference => ({ label: label ?? '', keys: keys ?? '' })) as readonly KeyReference[],
+}
+
+/**
+ * The chords a keyboard line names, as `symbols` writes them: `⌘N`; a list,
+ * `⌘1 – ⌘9, ⌘0`; a range of digits under one set of modifiers, `⌘1 – ⌘9`
+ * or `1 – 4`, each digit in it.
+ */
+export function chordsNamed(keys: string): string[] {
+  return keys.split(', ').flatMap((part) => {
+    const range = /^(\D*)(\d) – (\D*)(\d)$/.exec(part)
+    if (!range || range[1] !== range[3]) return [part]
+    const from = Number(range[2])
+    const to = Number(range[4])
+    return Array.from({ length: to - from + 1 }, (_, index) => `${range[1] ?? ''}${from + index}`)
+  })
+}
+
+/**
+ * The keyboard list Settings › Keyboard draws (design 1i): the design's
+ * lines, then a line in its own words for each bound key no line names, so
+ * a key added to the map shows there with no edit to Settings.
+ */
+export function keyboardLines(reference: readonly KeyReference[], bound: readonly BoundKey[]): KeyReference[] {
+  const named = new Set(reference.flatMap((line) => chordsNamed(line.keys)))
+  const added: KeyReference[] = []
+  for (const key of bound) {
+    const keys = symbols(key.chord)
+    if (named.has(keys)) continue
+    named.add(keys)
+    added.push({ label: key.label, keys })
+  }
+  return [...reference, ...added]
 }
 
 /** What a browser's key event says, as far as a chord needs it. */

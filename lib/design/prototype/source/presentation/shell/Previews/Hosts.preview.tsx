@@ -26,11 +26,11 @@ export const Scrim = () => (
   </div>
 )
 
-/** A sheet: Settings' place until 1i ports it. */
+/** A sheet: its title, the content its place hands in by kind, and its buttons (Settings, which stood here until 1i, is its own window). */
 export const Sheet = () => (
   <div className="ap" data-theme="dark" style={frame}>
-    <SheetHost title="Settings" width={460} right={[{ label: 'Close', kind: 'btn', run: () => {} }]}>
-      <p style={{ margin: 0, color: 'var(--text-secondary)' }}>Settings isn’t drawn here yet. Design item 1i ports it.</p>
+    <SheetHost title="Rename session" width={460} right={[{ label: 'Cancel', run: () => {} }, { label: 'Rename', kind: 'btn-p', run: () => {} }]}>
+      <p style={{ margin: 0, color: 'var(--text-secondary)' }}>What the sheet asks is its place’s, handed in by kind.</p>
     </SheetHost>
   </div>
 )

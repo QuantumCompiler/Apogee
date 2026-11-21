@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 import {
   colorGroups,
   colorsOf,
+  contrastBadge,
   contrastOf,
   defaultAppearance,
   effectiveTheme,
@@ -91,6 +92,16 @@ describe('rootVars(), as the frozen one writes it', () => {
     }
   })
 
+  test("automatic follows the viewer's light or dark setting (design 1i): light draws its light-uses pick, dark its dark-uses pick", () => {
+    const appearance: Appearance = { ...defaultAppearance, themeChoice: 'auto', autoLight: 'contrast', autoDark: 'light' }
+    expect(effectiveTheme(appearance, 'light')).toBe('contrast')
+    expect(effectiveTheme(appearance, 'dark')).toBe('light')
+    expect(effectiveTheme(appearance), 'unsaid, the old effTheme()’s dark').toBe('light')
+    expect(rootVars(appearance, 'light')).toBe(rootVars({ ...appearance, themeChoice: 'contrast' }))
+    expect(rootStyle(appearance, 'light')).toEqual(rootStyle({ ...appearance, themeChoice: 'contrast' }))
+    expect(effectiveTheme({ ...appearance, themeChoice: 'dark' }, 'light'), 'a theme picked is drawn whatever the viewer’s setting').toBe('dark')
+  })
+
   test("a theme's edits are kept per theme, as withOverride() keeps them, and rootVars() draws them", () => {
     const old = frozenComponent()
     let appearance = defaultAppearance
@@ -171,6 +182,15 @@ describe('the contrast math, as the old lum() and ratio() compute it', () => {
       }
     }
     expect(ratio('#FFFFFF', '#000000')).toBe(21)
+  })
+
+  test('the contrast badge, as the old Appearance pane marks a row (design 1i): under 3:1 too low, under 4.5:1 low, a border none', () => {
+    expect(contrastBadge(2.99)).toEqual({ level: 'tooLow', note: 'too low', text: '3.0:1' })
+    expect(contrastBadge(3)).toEqual({ level: 'low', note: 'low', text: '3.0:1' })
+    expect(contrastBadge(4.49)).toEqual({ level: 'low', note: 'low', text: '4.5:1' })
+    expect(contrastBadge(4.5)).toEqual({ level: 'ok', note: '', text: '4.5:1' })
+    expect(contrastBadge(10.56)).toEqual({ level: 'ok', note: '', text: '10.6:1' })
+    expect(contrastBadge(null)).toEqual({ level: 'none', note: '', text: '—' })
   })
 })
 

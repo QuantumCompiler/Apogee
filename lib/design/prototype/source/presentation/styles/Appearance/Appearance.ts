@@ -27,6 +27,13 @@ export interface Appearance {
 /** A theme, or automatic. */
 export type ThemeChoice = ThemeId | 'auto'
 
+/**
+ * The viewer's light or dark setting, which automatic follows (design 1i):
+ * what `prefers-color-scheme` says. Unsaid, it is dark, as the old
+ * prototype's `effTheme()` always drew automatic.
+ */
+export type SystemScheme = 'light' | 'dark'
+
 /** The old prototype's starting state: Graphite Dark, IBM Plex for both fonts, medium text, nothing edited. */
 export const defaultAppearance: Appearance = {
   themeChoice: 'dark',
@@ -106,9 +113,14 @@ export function contrastOf(row: ColorRow, colors: Readonly<Record<ColorName, str
   return null
 }
 
-/** The theme drawn: the choice, or for automatic its dark-uses pick, as the old `effTheme()` draws it. */
-export function effectiveTheme(appearance: Appearance): ThemeId {
-  return appearance.themeChoice === 'auto' ? appearance.autoDark : appearance.themeChoice
+/**
+ * The theme drawn: the choice, or for automatic the pick for the viewer's
+ * setting -- light uses, or dark uses (design 1i). Unsaid, the setting is
+ * dark, so automatic draws its dark-uses pick, as the old `effTheme()` does.
+ */
+export function effectiveTheme(appearance: Appearance, system: SystemScheme = 'dark'): ThemeId {
+  if (appearance.themeChoice !== 'auto') return appearance.themeChoice
+  return system === 'light' ? appearance.autoLight : appearance.autoDark
 }
 
 /** A theme's colors with the person's edits: the old `colorsOf()`. */
@@ -151,9 +163,29 @@ export function themeName(choice: ThemeChoice): string {
   return choice === 'auto' ? 'Automatic' : themes()[choice].name
 }
 
+/**
+ * A row's contrast as the old Appearance pane badges it (design 1i, shared
+ * with 1q's color page): under 3:1 `too low`, under 4.5:1 `low` -- text needs
+ * 4.5:1 -- and a border, which no minimum applies to, none; its ratio to one
+ * decimal, as `ratio.toFixed(1) + ':1'`.
+ */
+export interface ContrastBadge {
+  readonly level: 'none' | 'ok' | 'low' | 'tooLow'
+  readonly note: '' | 'low' | 'too low'
+  readonly text: string
+}
+
+export function contrastBadge(ratio: number | null): ContrastBadge {
+  if (ratio === null) return { level: 'none', note: '', text: '—' }
+  const text = `${ratio.toFixed(1)}:1`
+  if (ratio < 3) return { level: 'tooLow', note: 'too low', text }
+  if (ratio < 4.5) return { level: 'low', note: 'low', text }
+  return { level: 'ok', note: '', text }
+}
+
 /** What `rootVars` writes, in its order: the 25 colors, the 14 type sizes, both fonts, the color scheme. */
-function rootDeclarations(appearance: Appearance): Array<[string, string]> {
-  const id = effectiveTheme(appearance)
+function rootDeclarations(appearance: Appearance, system: SystemScheme): Array<[string, string]> {
+  const id = effectiveTheme(appearance, system)
   const colors = colorsOf(appearance, id)
   const out: Array<[string, string]> = colorNames.map((name) => [`--${name.replace('.', '-')}`, colors[name]])
   for (const [step, px] of Object.entries(typeSizes(appearance.textSize))) out.push([`--t-${step}`, `${px}px`])
@@ -168,15 +200,15 @@ function rootDeclarations(appearance: Appearance): Array<[string, string]> {
  * `rootVars()`, word for word but for the hex's letter case. Every color, type
  * size and font the views use is one of these.
  */
-export function rootVars(appearance: Appearance): string {
-  return rootDeclarations(appearance)
+export function rootVars(appearance: Appearance, system: SystemScheme = 'dark'): string {
+  return rootDeclarations(appearance, system)
     .map(([name, value]) => `${name}: ${value}`)
     .join('; ')
 }
 
 /** `rootVars()` as a React style object: the variables by name, and `colorScheme`. */
-export function rootStyle(appearance: Appearance): Record<string, string> {
+export function rootStyle(appearance: Appearance, system: SystemScheme = 'dark'): Record<string, string> {
   const out: Record<string, string> = {}
-  for (const [name, value] of rootDeclarations(appearance)) out[name === 'color-scheme' ? 'colorScheme' : name] = value
+  for (const [name, value] of rootDeclarations(appearance, system)) out[name === 'color-scheme' ? 'colorScheme' : name] = value
   return out
 }

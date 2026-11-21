@@ -1,0 +1,4 @@
+tools.search.url = http://searx.home.arpa:8080
+tools.search.url = http://localhost:8888
+memory.recall = false
+memory.recall = true

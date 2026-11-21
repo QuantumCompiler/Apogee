@@ -1,0 +1,12 @@
+permissions.write_file = ask
+permissions.write_file = allow
+permissions.write_file = deny
+permissions.run_command = ask
+permissions.run_command = allow
+permissions.run_command = deny
+permissions.fetch_url = ask
+permissions.fetch_url = allow
+permissions.fetch_url = deny
+permissions.web_search = ask
+permissions.web_search = allow
+permissions.web_search = deny

@@ -3,6 +3,7 @@ import { presetFor, presets } from '../../../source/presentation/app/Previews/Pr
 import { modeRules } from '../../../source/presentation/app/Previews/ModeRules'
 import { AppViewModel } from '../../../source/presentation/app/ViewModels/AppViewModel'
 import { destinations, placeholderOf } from '../../../source/presentation/shell/ViewModels/Destination'
+import { settingsPanes } from '../../../source/presentation/settings/ViewModels/SettingsViewModel'
 import type { ApogeeMode } from '../../../source/infrastructure/process/StandInChild'
 
 /** Every path in `value` that reads `undefined`, `null` or `NaN`, or a string that says so: the old 30-tick check's walk. */
@@ -15,7 +16,7 @@ function unread(value: unknown, at: string, depth = 0): string[] {
   return []
 }
 
-/** What the views read of the app: the monitor's face and strip, the shell's state, every place's placeholder, the session's view state (its header, transcript and composer, design 1u), the Sessions place's list, inspector and door and the console (1g), and the Models place's every tab, sheet and confirm and the sidebar's running counts (1h). */
+/** What the views read of the app: the monitor's face and strip, the shell's state, every place's placeholder, the session's view state (its header, transcript and composer, design 1u), the Sessions place's list, inspector and door and the console (1g), the Models place's every tab, sheet and confirm and the sidebar's running counts (1h), and the Settings window's every pane and its two confirms' words (1i). */
 function whatTheViewsRead(app: AppViewModel) {
   const shell = app.shell
   return {
@@ -32,6 +33,8 @@ function whatTheViewsRead(app: AppViewModel) {
     modelsConfirms: (['model', 'storeDelete', 'storeModelDelete', 'unregister', 'registerAll'] as const).map((kind) => app.models.confirmWords(kind) ?? 'none'),
     running: app.placeRuns,
     variables: app.theme.variables,
+    settings: app.settings.face(),
+    settingsConfirms: (['settingsForget', 'xcodeRemove'] as const).map((kind) => app.settings.confirmWords(kind) ?? 'none'),
   }
 }
 
@@ -51,6 +54,11 @@ async function walk(app: AppViewModel, name: string, pressSuite = false): Promis
   await app.library.inspectorAppeared()
   // The Models place's reads too (1h): it opens from every screen.
   await app.models.appeared()
+  // The Settings window's too (1i): ⌘, opens it on every screen; each pane shown, so each one's own reads are made.
+  app.openSettings(app.settings.pane)
+  for (const [pane] of settingsPanes) app.settings.pick(pane)
+  await app.settings.appeared()
+  await new Promise((resolve) => setTimeout(resolve, 0))
   expect(unread(whatTheViewsRead(app), name)).toEqual([])
   const face = app.session.face()
   if (pressSuite && (face.empty.chooseSuite || face.header.canSwitchSuite)) {
@@ -66,7 +74,7 @@ async function walk(app: AppViewModel, name: string, pressSuite = false): Promis
 }
 
 describe("the presets: the old prototype's 30-tick check's successor", () => {
-  test('the table holds the monitor, the session’s thirteen in the old data-props order -- 1u’s four plain ones and 1v’s nine scenarios and states -- 1g’s execute and console, and 1h’s nine Models presets', () => {
+  test('the table holds the monitor, the session’s thirteen in the old data-props order -- 1u’s four plain ones and 1v’s nine scenarios and states -- 1g’s execute and console, 1h’s nine Models presets, and 1i’s nine Settings presets in the old order and its four new ones', () => {
     expect(Object.keys(presets)).toEqual([
       'monitor',
       'chat',
@@ -93,6 +101,19 @@ describe("the presets: the old prototype's 30-tick check's successor", () => {
       'models:delete',
       'models:notran',
       'download',
+      'settings:general',
+      'settings:appearance',
+      'settings:media',
+      'settings:backends',
+      'settings:fixing',
+      'settings:fixfailed',
+      'settings:permissions',
+      'settings:nosearch',
+      'settings:xcode',
+      'settings:roles',
+      'settings:web',
+      'settings:memory',
+      'settings:keyboard',
     ])
   })
 

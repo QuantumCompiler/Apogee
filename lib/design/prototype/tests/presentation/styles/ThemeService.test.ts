@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { defaultAppearance, rootVars } from '../../../source/presentation/styles/Appearance/Appearance'
+import { defaultAppearance, rootStyle, rootVars } from '../../../source/presentation/styles/Appearance/Appearance'
 import { ThemeService } from '../../../source/presentation/styles/Appearance/ThemeService'
 import { Observable } from '../../../source/presentation/styles/Observation/Observable'
 
@@ -33,6 +33,24 @@ describe('the theme service', () => {
     stop()
     service.cycleTheme()
     expect(heard).toEqual([1, 2])
+  })
+
+  test("automatic follows the viewer's setting as the window reports it, unless pinned; a preset pins it to dark (design 1i)", () => {
+    const service = new ThemeService({ ...defaultAppearance, themeChoice: 'auto', autoLight: 'light', autoDark: 'contrast' })
+    expect(service.system, 'until the window says, dark: the old effTheme()').toBe('dark')
+    expect(service.theme).toBe('contrast')
+    const heard: string[] = []
+    service.subscribe(() => heard.push(service.theme))
+    service.systemChanged('light')
+    expect(service.theme).toBe('light')
+    expect(service.variables).toBe(rootVars(service.appearance, 'light'))
+    expect(service.style).toEqual(rootStyle(service.appearance, 'light'))
+    service.pin('dark')
+    expect(service.pinned).toBe(true)
+    expect(service.theme).toBe('contrast')
+    service.systemChanged('light')
+    expect(service.system, 'pinned: the viewer\'s setting is not followed').toBe('dark')
+    expect(heard).toEqual(['light', 'contrast'])
   })
 
   test('it can start from another appearance, as a preview does', () => {

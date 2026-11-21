@@ -1,7 +1,7 @@
 import { useObserved } from '../../styles/Observation/useObserved'
 import { ConvertForm } from '../ViewModels/StoreForms'
 import type { ModelsViewModel } from '../ViewModels/ModelsViewModel'
-import { BackendsTab, ModelsScreen, PairDrafterSheet, RolesTab } from '../Views/ModelsScreen'
+import { BackendsTab, ModelsScreen, PairDrafterSheet, RoleRows, RolesNotes, RolesTab } from '../Views/ModelsScreen'
 import { handles } from './ModelsWorlds'
 import { useModelsPreview } from './ModelsPreview'
 
@@ -85,6 +85,17 @@ export const RolesTabAlone = () => {
   return (
     <div className="ap" data-theme="dark" style={frame}>
       <RolesTab model={model} />
+    </div>
+  )
+}
+
+/** The roles alone, as Settings › Models & roles shows them through its slot (design 1i): the suite line, then the six rows, the picker 240 px. */
+export const RolesInSettings = () => {
+  const model = useModelsPreview()
+  return (
+    <div className="ap" data-theme="dark" style={frame}>
+      <RolesNotes model={model} margin="0 0 6px" />
+      <RoleRows model={model} picker={240} />
     </div>
   )
 }

@@ -117,8 +117,8 @@ export class ModelsViewModel extends Observable {
   ask: ((kind: ModelsConfirm) => void) | undefined = undefined
   /** The open session on a backend: the composition's way to Sessions. */
   useInSession: ((backend: string) => void) | undefined = undefined
-  /** Settings, where a key is added (1i's Backends & keys). */
-  openSettings: (() => void) | undefined = undefined
+  /** Settings, where a key is added (1i's Backends & keys): with a provider, its key editor open, as the old Add an API key… opens it. */
+  openSettings: ((provider?: string) => void) | undefined = undefined
   /** Another place: Video, Voice. */
   goTo: ((place: 'video' | 'voice') => void) | undefined = undefined
 
@@ -364,8 +364,11 @@ export class ModelsViewModel extends Observable {
         await this.askToDelete(row)
         return
       case 'manageKey':
-      case 'addKey':
         this.openSettings?.()
+        return
+      // An API backend's type is the provider `auth add` takes: anthropic, openai or google.
+      case 'addKey':
+        this.openSettings?.(row.backendType)
         return
     }
   }

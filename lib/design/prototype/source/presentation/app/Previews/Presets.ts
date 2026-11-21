@@ -3,6 +3,8 @@ import { consoleRules } from '../../console/Previews/ConsolePreset'
 import { modelsPlaceRules, withModelsWorld } from '../../models/Previews/ModelsWorlds'
 import type { ModelsWorld } from '../../models/Previews/ModelsWorlds'
 import { monitorPreset } from '../../monitor/Previews/MonitorPreset'
+import { fixLines, settingsPlaceRules, withSettingsWorld } from '../../settings/Previews/SettingsWorlds'
+import type { SettingsWorld } from '../../settings/Previews/SettingsWorlds'
 import type { PresetOptions } from '../../monitor/Previews/MonitorPreset'
 import {
   chatCompactingPreset,
@@ -61,6 +63,18 @@ function modelsPreset(route: string, world: ModelsWorld, start = 1): (options: P
 }
 
 /**
+ * A Settings preset (design 1i): the window over the Streaming session at its
+ * starting frame, as the old frames keep `taskgroup` at its `progress: 15`
+ * (1v's setup, `streamingRules('start')`, composed here since `settings`
+ * may not import `session`), the window's world beside it. `start` is how
+ * many ticks in a still frame stands: `fixfailed`'s run of `check --fix` has
+ * ended by then, its toast still showing.
+ */
+function settingsPreset(sub: string, world: SettingsWorld = 'default', start = 1): (options: PresetOptions) => Preset {
+  return ({ still, apogee }) => ({ rules: withSettingsWorld(streamingRules('start'), world), route: `settings:${sub}`, clock: { start, still }, apogee })
+}
+
+/**
  * A preset with the console's answers (design 1g): the console opens over
  * every screen (⇧⌘K), so every preset answers its lines -- `consoleRules`,
  * on the console's own child (`Preset.console`), a line nobody recorded
@@ -82,12 +96,25 @@ function listing(build: (options: PresetOptions) => Preset): (options: PresetOpt
   })
 }
 
-/** A preset with the Models place's reads before its own (design 1h), so a preset's own answer to the same arguments is the one given. */
+/**
+ * A preset with the Models place's reads (design 1h) and the Settings
+ * window's (design 1i) before its own, so a preset's own answer to the same
+ * arguments is the one given: both open from every screen.
+ */
 function modelling(build: (options: PresetOptions) => Preset): (options: PresetOptions) => Preset {
   return consoling((options) => {
     const preset = build(options)
     const models = modelsPlaceRules()
-    return { ...preset, rules: { ...preset.rules, reads: [...(models.reads ?? []), ...(preset.rules.reads ?? [])], commands: [...(models.commands ?? []), ...(preset.rules.commands ?? [])] } }
+    const settings = settingsPlaceRules()
+    return {
+      ...preset,
+      rules: {
+        ...preset.rules,
+        reads: [...(models.reads ?? []), ...settings.reads, ...(preset.rules.reads ?? [])],
+        commands: [...(models.commands ?? []), ...settings.commands, ...(preset.rules.commands ?? [])],
+        jobs: [...settings.jobs, ...(preset.rules.jobs ?? [])],
+      },
+    }
   })
 }
 
@@ -96,7 +123,9 @@ function modelling(build: (options: PresetOptions) => Preset): (options: PresetO
  * `start` options, each rebuilt on recordings by the item that ports its
  * place. 1e's is `monitor`; 1u's are the session's four plain ones; 1v's the
  * session's scenarios and states, in the old `data-props` order; 1g's
- * `execute` and `console`; 1h's the nine Models presets; each feature item adds its own here. Every one
+ * `execute` and `console`; 1h's the nine Models presets; 1i's the old nine
+ * Settings presets in the old order and its four new ones, one a pane that
+ * had none; each feature item adds its own here. Every one
  * carries the Sessions place's reads, since the list shows on every screen
  * (`execute`'s own), and the console's answers, since it opens over every one.
  */
@@ -126,6 +155,19 @@ export const presets: Readonly<Record<string, (options: PresetOptions) => Preset
   'models:delete': listing(modelsPreset('models:delete', 'store')),
   'models:notran': listing(modelsPreset('models:notran', 'store')),
   download: listing(modelsPreset('download', 'fresh')),
+  'settings:general': listing(settingsPreset('general')),
+  'settings:appearance': listing(settingsPreset('appearance')),
+  'settings:media': listing(settingsPreset('media')),
+  'settings:backends': listing(settingsPreset('backends')),
+  'settings:fixing': listing(settingsPreset('fixing')),
+  'settings:fixfailed': listing(settingsPreset('fixfailed', 'fixfailed', fixLines('fixfailed') + 2)),
+  'settings:permissions': listing(settingsPreset('permissions')),
+  'settings:nosearch': listing(settingsPreset('nosearch', 'nosearch')),
+  'settings:xcode': listing(settingsPreset('xcode', 'xcode')),
+  'settings:roles': listing(settingsPreset('roles')),
+  'settings:web': listing(settingsPreset('web')),
+  'settings:memory': listing(settingsPreset('memory')),
+  'settings:keyboard': listing(settingsPreset('keyboard')),
 }
 
 /** The preset opened with no `start`, or an unknown one: `chat`, the old `data-props` default (1v; 1e's interim default was the monitor). */

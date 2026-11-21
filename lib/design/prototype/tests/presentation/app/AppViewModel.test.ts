@@ -728,3 +728,139 @@ describe('the Models place in the composition (design 1h)', () => {
     expect(app.shell.toast?.text).toBe('Deleted Llama3.2-1B-Instruct/gguf/8d51e6c04a27')
   })
 })
+
+describe('Settings in the composition (design 1i)', () => {
+  const panes: Readonly<Record<string, string>> = {
+    'settings:general': 'general',
+    'settings:appearance': 'appearance',
+    'settings:media': 'media',
+    'settings:backends': 'backends',
+    'settings:fixing': 'backends',
+    'settings:fixfailed': 'backends',
+    'settings:permissions': 'permissions',
+    'settings:nosearch': 'web',
+    'settings:xcode': 'xcode',
+    'settings:roles': 'roles',
+    'settings:web': 'web',
+    'settings:memory': 'memory',
+    'settings:keyboard': 'keyboard',
+  }
+
+  for (const [preset, pane] of Object.entries(panes)) {
+    test(`${preset} opens the Settings window on ${pane}, over the Streaming session at its starting frame, every read answered`, async () => {
+      const app = await started(preset)
+      expect(app.shell.settingsOpen).toBe(true)
+      expect(app.settings.pane).toBe(pane)
+      expect(app.shell.route).toBe('sessions')
+      expect(app.session.transcript.status.case, 'the Streaming session behind it, mid-reasoning (the old progress 15)').toBe('thinking')
+      expect(app.settings.face().foot).not.toEqual([])
+      expect(app.child.unanswered).toEqual([])
+    })
+  }
+
+  test('every preset pins Automatic to dark, as the old prototype draws it', async () => {
+    const app = await started('settings:appearance')
+    expect(app.theme.pinned).toBe(true)
+    app.settings.theme.pick('auto')
+    app.theme.systemChanged('light')
+    expect(app.theme.theme).toBe('dark')
+  })
+
+  test('⌘, opens the window on any screen and reads it; Done closes it, the key being typed with it', async () => {
+    const app = await started('chat')
+    expect(app.shell.settingsOpen).toBe(false)
+    app.shell.press({ key: ',', modifiers: ['command'] })
+    await settled()
+    expect(app.shell.settingsOpen).toBe(true)
+    expect(app.settings.face().backends.health.summary).toBe('0 failing, 2 to look at')
+    app.settings.editKey('anthropic')
+    app.closeSettings()
+    expect(app.shell.settingsOpen).toBe(false)
+    expect(app.settings.face().backends.keys[0]?.editing).toBe(false)
+    expect(app.child.unanswered).toEqual([])
+  })
+
+  test('an Appearance change restyles the whole window at once: the window\'s theme service is the pane\'s', async () => {
+    const app = await started('settings:appearance')
+    app.settings.theme.pickColor('surface.window', '#202020')
+    expect(app.theme.style['--surface-window']).toBe('#202020')
+    app.settings.theme.setTextSize('xl')
+    expect(app.theme.style['--t-body']).toBe('15px')
+    app.settings.theme.resetAll()
+    app.settings.theme.setTextSize('m')
+    expect(app.theme.style['--surface-window']).toBe('#131415')
+    expect(app.theme.style['--t-body']).toBe('13px')
+  })
+
+  test("settings:fixing: check --fix running, working, Stop on; settings:fixfailed: the run ended failed, its words the red line and the toast", async () => {
+    const fixing = await started('settings:fixing')
+    // One tick in, the run has printed its first line, which the busy line shows, as the Mac's does.
+    expect(fixing.settings.face().backends.health).toMatchObject({ fixing: true, busy: 'nothing to fix', canStop: true })
+    const failed = await started('settings:fixfailed')
+    expect(failed.settings.face().failure).toBe('it exited with status 1')
+    expect(failed.settings.face().backends.health).toMatchObject({ fixing: false, summary: '1 failing, 2 to look at' })
+    expect(failed.shell.toast?.text).toBe('check --fix failed: it exited with status 1')
+  })
+
+  test('settings:nosearch: the web search address unset, said not set', async () => {
+    const app = await started('settings:nosearch')
+    expect(app.settings.face().web.search).toBe('not set')
+  })
+
+  test('settings:xcode: check\'s Xcode section, the preset unregistered, the registration\'s fields', async () => {
+    const app = await started('settings:xcode')
+    const xcode = app.settings.face().xcode
+    expect(xcode.rows).toHaveLength(4)
+    expect(xcode.tools.canRegister).toBe(true)
+    expect(xcode.agent.fields[0]).toMatchObject({ label: 'Name', value: 'Apogee (dev)' })
+  })
+
+  test("Models & roles: the Models place reads its roles for the slot, and Open models library goes to Models' Backends, the window closed", async () => {
+    const app = await started('settings:roles')
+    expect(app.models.face().roles.rows.map((row) => row.key)).toEqual(['chat', 'embedding', 'extraction', 'vision', 'transcription', 'utility'])
+    app.settings.showLibrary()
+    expect(app.shell.settingsOpen).toBe(false)
+    expect(app.shell.route).toBe('models')
+    expect(app.models.tab).toBe('backends')
+  })
+
+  test("Keyboard: the shell's keys and Sessions' five, every one named by the design's list", async () => {
+    const app = await started('settings:keyboard')
+    expect(app.settings.face().keyboard).toHaveLength(23)
+  })
+
+  test("Models' Add an API key… opens Settings on Backends & keys with that provider's key field open, as the old one sets keyEdit; Manage key… opens the bare pane (1h's hand-off)", async () => {
+    const app = await started('models')
+    await app.models.openBackend('claude')
+    await app.models.act('addKey')
+    await settled()
+    expect(app.shell.settingsOpen).toBe(true)
+    expect(app.settings.pane).toBe('backends')
+    expect(app.settings.face().backends.keys.filter((row) => row.editing).map((row) => row.provider)).toEqual(['anthropic'])
+    app.closeSettings()
+    // The worlds keep no keyed API backend, so Manage key… is pressed on the same row: the act's switch, not the offer.
+    await app.models.act('manageKey')
+    await settled()
+    expect(app.shell.settingsOpen).toBe(true)
+    expect(app.settings.pane).toBe('backends')
+    expect(app.settings.face().backends.keys.filter((row) => row.editing)).toEqual([])
+  })
+
+  test('Forget all summaries… asks in the shell\'s confirm host; yes runs the forget and closes it', async () => {
+    const app = await started('settings:memory')
+    await app.settings.askToForget()
+    expect(app.shell.confirm).toBe('settingsForget')
+    await app.confirmSettings('settingsForget')
+    expect(app.shell.confirm).toBeUndefined()
+    expect(app.shell.toast?.text).toMatch(/^forgot 8 chat summaries/)
+  })
+
+  test("Register… opens the shell's sheet; Register closes it and runs the provider's register", async () => {
+    const app = await started('settings:backends')
+    app.settings.askToRegister('claude')
+    expect(app.shell.sheet).toBe('registerProvider')
+    await app.settings.register()
+    expect(app.shell.sheet).toBeUndefined()
+    expect(app.shell.toast?.text).toBe('registered claude (claude-cli)')
+  })
+})

@@ -1,3 +1,4 @@
+import { Segments } from '../../styles/Components/Segments'
 import { useObserved } from '../../styles/Observation/useObserved'
 import { ConvertForm, QuantizeForm, RegisterForm } from '../ViewModels/StoreForms'
 import { Estimate } from '../ViewModels/StoreForms'
@@ -207,19 +208,6 @@ export function StoreView({ model }: { readonly model: StoreViewModel }) {
           </div>
         </aside>
       ) : null}
-    </div>
-  )
-}
-
-/** A segmented choice, as the old prototype's `seg`. */
-function Segments({ label, options, current, pick }: { readonly label: string; readonly options: ReadonlyArray<readonly [string, string]>; readonly current: string; readonly pick: (value: string) => void }) {
-  return (
-    <div role="group" aria-label={label} className="seg" style={{ display: 'inline-flex' }}>
-      {options.map(([value, words]) => (
-        <button key={value} type="button" aria-pressed={current === value} onClick={() => pick(value)} style={{ background: current === value ? 'var(--surface-control)' : 'transparent', color: current === value ? 'var(--text-primary)' : 'var(--text-secondary)', fontWeight: current === value ? 600 : 400 }}>
-          {words}
-        </button>
-      ))}
     </div>
   )
 }

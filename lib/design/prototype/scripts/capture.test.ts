@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, test } from 'vitest'
-import { branchBinary, capture, CaptureRefusal, minimalPdf, recipes } from './capture.ts'
-import type { Recipe } from './capture.ts'
+import { branchBinary, capture, captureCommand, CaptureRefusal, commandRecipes, minimalPdf, recipes } from './capture.ts'
+import type { CommandRecipe, Recipe } from './capture.ts'
 
 /** The prototype's root: this file is scripts/capture.test.ts. */
 const prototype = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -266,5 +266,92 @@ describe('the capture script: a stream recorded from the branch build, in a thro
         expect(Array.isArray(actor.turns), backend.actor).toBe(true)
       }
     }
+  })
+})
+
+/**
+ * A fake `apogee` for a command recipe: it logs each call's arguments and
+ * homes, remembers what `config set` set in its home, and prints it back on
+ * `config get` -- an empty line for a key never set, as the CLI does.
+ */
+function fakeConfig(folder: string): { binary: string; log: string } {
+  const log = join(folder, 'calls.log')
+  const binary = join(folder, 'apogee')
+  writeFileSync(
+    binary,
+    `#!/usr/bin/env node
+const fs = require('node:fs')
+const args = process.argv.slice(2)
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, home: process.env.APOGEE_HOME, userHome: process.env.HOME }) + '\\n')
+const store = process.env.APOGEE_HOME + '/set.json'
+const set = fs.existsSync(store) ? JSON.parse(fs.readFileSync(store, 'utf8')) : {}
+if (args[0] === 'config' && args[1] === 'set') { set[args[2]] = args[3]; fs.writeFileSync(store, JSON.stringify(set)); process.stdout.write(args[2] + ' = ' + args[3] + '\\n') }
+if (args[0] === 'config' && args[1] === 'get') process.stdout.write((set[args[2]] ?? '') + '\\n')
+process.exit(0)
+`,
+  )
+  chmodSync(binary, 0o755)
+  return { binary, log }
+}
+
+const command: CommandRecipe = {
+  name: 'fake-get',
+  output: 'business/reads/fake-get.txt',
+  setup: [['config', 'set', 'tools.search.url', 'http://searx.home.arpa:8080']],
+  command: ['config', 'get', 'tools.search.url'],
+}
+
+describe('a command recipe: one plain read recorded from the branch build, in a throwaway home (design 1i)', () => {
+  test('it runs config init, the setup and the command in a throwaway home, writes only its stdout under fixtures/, and leaves no temp folder', async () => {
+    const fixtures = scratch()
+    const temp = scratch()
+    const fake = fakeConfig(scratch())
+    const written = await captureCommand(command, { binary: fake.binary, fixturesRoot: fixtures, tempRoot: temp })
+    expect(written.map((path) => relative(fixtures, path))).toEqual(['business/reads/fake-get.txt'])
+    expect(filesUnder(fixtures)).toEqual(['business/reads/fake-get.txt'])
+    expect(readFileSync(join(fixtures, 'business/reads/fake-get.txt'), 'utf8')).toBe('http://searx.home.arpa:8080\n')
+    const calls = readFileSync(fake.log, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { args: string[]; home: string; userHome: string })
+    expect(calls.map((call) => call.args.join(' '))).toEqual(['config init', 'config set tools.search.url http://searx.home.arpa:8080', 'config get tools.search.url'])
+    for (const call of calls) {
+      expect(call.home.startsWith(temp), 'APOGEE_HOME is the throwaway home').toBe(true)
+      expect(call.userHome.startsWith(temp), 'HOME is the throwaway home too').toBe(true)
+    }
+    expect(readdirSync(temp), 'the throwaway home is gone').toEqual([])
+  })
+
+  test('with no setup, what a fresh config answers: an unset key is an empty line', async () => {
+    const fixtures = scratch()
+    const fake = fakeConfig(scratch())
+    await captureCommand({ ...command, setup: [] }, { binary: fake.binary, fixturesRoot: fixtures, tempRoot: scratch() })
+    expect(readFileSync(join(fixtures, 'business/reads/fake-get.txt'), 'utf8')).toBe('\n')
+  })
+
+  test('it refuses a missing binary, an output outside fixtures/ and a command that exits badly, and writes nothing', async () => {
+    const base = scratch()
+    const fixtures = join(base, 'fixtures')
+    mkdirSync(fixtures)
+    await expect(captureCommand(command, { binary: join(base, 'no-such-apogee'), fixturesRoot: fixtures, tempRoot: scratch() })).rejects.toThrow(/no executable apogee/)
+    const fake = fakeConfig(scratch())
+    await expect(captureCommand({ ...command, output: '../escaped.txt' }, { binary: fake.binary, fixturesRoot: fixtures, tempRoot: scratch() })).rejects.toThrow(/outside fixtures/)
+    const folder = scratch()
+    const failing = join(folder, 'apogee')
+    writeFileSync(failing, '#!/bin/sh\nif [ "$1 $2" = "config get" ]; then echo "apogee config: no such config key" >&2; exit 1; fi\nexit 0\n')
+    chmodSync(failing, 0o755)
+    await expect(captureCommand(command, { binary: failing, fixturesRoot: fixtures, tempRoot: scratch() })).rejects.toThrow(/no such config key/)
+    expect(filesUnder(fixtures)).toEqual([])
+    expect(existsSync(join(base, 'escaped.txt'))).toBe(false)
+  })
+
+  test("its recipes: the web search address set and unset, and recall's flag on a fresh config, each under fixtures/business/reads/", () => {
+    expect(Object.keys(commandRecipes)).toEqual(['config-get-search-url', 'config-get-search-url-unset', 'config-get-memory-recall'])
+    for (const [name, entry] of Object.entries(commandRecipes)) {
+      expect(entry.name).toBe(name)
+      expect(entry.output).toBe(`business/reads/${name}.txt`)
+      expect(entry.command.slice(0, 2)).toEqual(['config', 'get'])
+    }
+    expect(commandRecipes['config-get-search-url']?.setup).toEqual([['config', 'set', 'tools.search.url', 'http://searx.home.arpa:8080']])
   })
 })

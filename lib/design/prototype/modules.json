@@ -13,7 +13,7 @@
     "presentation/sessions": ["infrastructure/clock", "infrastructure/process", "data/protocol", "business/jobs", "business/reads", "business/session", "presentation/session", "presentation/shell", "presentation/styles"],
     "presentation/models": ["infrastructure/clock", "infrastructure/process", "data/protocol", "business/jobs", "business/reads", "presentation/shell", "presentation/styles"],
     "presentation/training": ["presentation/shell", "presentation/styles"],
-    "presentation/settings": ["presentation/shell", "presentation/styles"],
+    "presentation/settings": ["infrastructure/clock", "infrastructure/process", "business/jobs", "business/reads", "presentation/shell", "presentation/styles"],
     "presentation/graph": ["presentation/shell", "presentation/styles"],
     "presentation/knowledge": ["presentation/shell", "presentation/styles"],
     "presentation/console": ["infrastructure/clock", "infrastructure/process", "business/jobs", "business/reads", "presentation/shell", "presentation/styles"],
