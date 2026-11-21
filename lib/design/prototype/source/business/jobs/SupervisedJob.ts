@@ -4,7 +4,7 @@ import { AsyncStream } from '../../infrastructure/process/AsyncStream'
 import type { Continuation } from '../../infrastructure/process/AsyncStream'
 import { BoundedTail } from '../../infrastructure/process/BoundedTail'
 import { ChildExit } from '../../infrastructure/process/ChildExit'
-import type { CapturedRun, StandInChild } from '../../infrastructure/process/StandInChild'
+import type { AskedStop, CapturedRun, StandInChild } from '../../infrastructure/process/StandInChild'
 import type { FolderFile, FolderWrite } from '../../infrastructure/process/StandInFolders'
 import { LineFramer } from '../../infrastructure/process/LineFramer'
 import { ChildRegistry } from './ChildRegistry'
@@ -92,6 +92,12 @@ export class JobStarter implements JobStarting {
       resumeFrom: answer.replay.resumeFrom,
       write: (folder, file) => folders.write(folder, file),
     })
+    // The stops another call may ask of it while it runs (design 1p): `task halt` and `task cancel`.
+    for (const stop of answer.replay.asked) {
+      if (job.finished) break
+      const leave = this.child.hearing(stop.by, () => job.ask(stop))
+      job.onEnd(leave)
+    }
     if (this.registry && !job.finished) {
       const registration = this.registry.register('job', ChildRegistry.label(args), () => job.stop(), args)
       job.onEnd(() => registration.leave())
@@ -125,15 +131,17 @@ export interface JobFiles {
 export class SupervisedJob implements JobRunning {
   readonly updates: AsyncStream<JobUpdate>
   private readonly continuation: Continuation<JobUpdate>
-  private readonly lines: string[]
+  private lines: string[]
   /** The stderr lines that play first as the busy line, where its rule's `busy` says (design 1j). */
   private readonly busyLines: string[]
   private next = 0
   private busyAt = 0
   /** Ticks still to wait before `.ended`: the rule's `exitAfter`. */
   private held: number
-  /** The stdout line count those ticks are waited after: the rule's `holdAt`, else all of them (design 1k). */
-  private readonly holdAt: number
+  /** The stdout line count those ticks are waited after: the rule's `holdAt` (design 1k); undefined, all of them. */
+  private readonly holdAtRule: number | undefined
+  /** How it exits once asked to stop (design 1p): the ending's, in place of its recording's. */
+  private askedExit: ChildExit | undefined = undefined
   /** Its end, once said. */
   private ending: JobEnd | undefined = undefined
   private leave: () => void = () => {}
@@ -164,7 +172,12 @@ export class SupervisedJob implements JobRunning {
     this.updates = stream
     this.continuation = continuation
     this.lines = run ? LineFramer.lines(run.stdout) : []
-    this.holdAt = Math.min(holdAt ?? this.lines.length, this.lines.length)
+    this.holdAtRule = holdAt
+  }
+
+  /** The stdout line count its `exitAfter` ticks stand after: the rule's `holdAt`, else all of them -- however many an asked stop leaves. */
+  private get holdAt(): number {
+    return Math.min(this.holdAtRule ?? this.lines.length, this.lines.length)
   }
 
   /** A run that never started: it ends at once, `detail` saying why. */
@@ -209,6 +222,21 @@ export class SupervisedJob implements JobRunning {
     this.end(JobEnd.of(ChildExit.exited(130), new BoundedTail(), true))
   }
 
+  /**
+   * A stop another call asked of it (design 1p): the first ending past the
+   * lines played -- its own lines through the ending's `through`, then the
+   * ending in place of the rest, and the ending's exit. Past every ending, or
+   * ended, nothing changes.
+   */
+  ask(stop: AskedStop): void {
+    if (this.continuation.finished) return
+    const ending = stop.endings.find((each) => this.next < each.before)
+    if (ending === undefined) return
+    const keep = Math.max(this.next, ending.through ?? this.next)
+    this.lines = [...this.lines.slice(0, keep), ...LineFramer.lines(ending.stdout)]
+    this.askedExit = ChildExit.exited(ending.exit ?? 0)
+  }
+
   private step(pace: number): void {
     if (this.busyAt < this.busyLines.length) {
       for (const line of this.busyLines.slice(this.busyAt, this.busyAt + pace)) this.continuation.yield(JobUpdate.busy(line))
@@ -220,7 +248,7 @@ export class SupervisedJob implements JobRunning {
       return
     }
     if (this.next >= this.lines.length) {
-      if (this.run) this.end(JobEnd.of(this.run.exit, this.run.stderrTail, false))
+      if (this.run) this.end(JobEnd.of(this.askedExit ?? this.run.exit, this.run.stderrTail, false))
       return
     }
     // Never past the hold in one tick: the wait stands right after its line.

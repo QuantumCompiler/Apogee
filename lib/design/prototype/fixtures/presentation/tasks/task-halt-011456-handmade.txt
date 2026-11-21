@@ -1,0 +1,1 @@
+asked task task-20261021-011456 to halt: it stops when its round ends

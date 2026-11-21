@@ -30,6 +30,8 @@ import {
   streamingRules,
 } from '../../session/Previews/SessionPresets'
 import { executePreset } from '../../sessions/Previews/ExecutePreset'
+import { suitesPlaceRules } from '../../suites/Previews/SuitesWorlds'
+import { tasksPlaceRules, tasksPresets, withTasksWorld } from '../../tasks/Previews/TasksWorlds'
 import { trainingPlaceRules, withTrainingWorld } from '../../training/Previews/TrainingWorlds'
 import { videoFolders, videoPlaceRules, withVideoWorld } from '../../video/Previews/VideoWorlds'
 import { voiceFolders, voicePlaceRules, withVoiceWorld } from '../../voice/Previews/VoiceWorlds'
@@ -174,6 +176,30 @@ function placePreset(route: string): (options: PresetOptions) => Preset {
 }
 
 /**
+ * The Suites preset (design 1p): the place over every preset's answers, the
+ * Streaming session at its starting frame behind it, as the Knowledge and
+ * Code graph presets keep it (composed here, since `suites` may not import
+ * `session`). Nothing plays on the clock: one start tick.
+ */
+function suitesPreset({ still, apogee }: PresetOptions): Preset {
+  return { rules: streamingRules('start'), route: 'suites', clock: { start: 1, still }, apogee }
+}
+
+/**
+ * A Tasks or New task preset (design 1p): the place over its world -- its
+ * ledger, the hand-made `task list` of recorded tasks, or the recorded
+ * ledger of 60 -- the Streaming session at its starting frame behind it,
+ * composed here since `tasks` may not import `session`. `start` is how many
+ * ticks in a still frame stands: the recorded say hello run 16 lines in, in
+ * round 1, its answer streaming (`task-run.jsonl`); the recorded uses run
+ * played to its end (34 lines and its end); a resume one tick in, starting up.
+ */
+function tasksPreset(route: string, start = 16): (options: PresetOptions) => Preset {
+  const world = tasksPresets[route] ?? 'ledger'
+  return ({ still, apogee }) => ({ rules: withTasksWorld(streamingRules('start'), world), route, clock: { start, still }, apogee })
+}
+
+/**
  * A preset with the console's answers (design 1g): the console opens over
  * every screen (⇧⌘K), so every preset answers its lines -- `consoleRules`,
  * on the console's own child (`Preset.console`), a line nobody recorded
@@ -210,8 +236,11 @@ function listing(build: (options: PresetOptions) => Preset): (options: PresetOpt
  * question, the rejected record's raw conversation, the collections, their
  * pages and notes' search) and the Code graph's (design 1o: the demo and
  * notes graphs, their pictures, report and explain, and the More menu's
- * commands) before its own, so a preset's own answer to the same arguments
- * is the one given: all ten open from every screen.
+ * commands), Suites' (design 1p: the recorded suites, their footprints and
+ * the default's verb) and Tasks' (design 1p: the ledger, every recorded
+ * task's page, the recorded runs and resume with their stops, the two
+ * refusals and the recipes) before its own, so a preset's own answer to the
+ * same arguments is the one given: all twelve open from every screen.
  */
 function modelling(build: (options: PresetOptions) => Preset): (options: PresetOptions) => Preset {
   return consoling((options) => {
@@ -227,14 +256,17 @@ function modelling(build: (options: PresetOptions) => Preset): (options: PresetO
     // Knowledge's and the Code graph's (1o): ⌘8 and ⌘5 open them from every screen.
     const knowledge = knowledgePlaceRules()
     const graph = graphPlaceRules()
+    // Suites' and Tasks' (1p): ⌘3 and ⌘4 open them from every screen, Tasks over the ledger.
+    const suites = suitesPlaceRules()
+    const tasks = tasksPlaceRules()
     return {
       ...preset,
       folders: withReviewFolders(withLibraryFolders(voiceFolders(preset.folders ?? withComposeFiles(videoFolders())))),
       rules: {
         ...preset.rules,
-        reads: [...(models.reads ?? []), ...settings.reads, ...(training.reads ?? []), ...video.reads, ...library.reads, ...review.reads, ...knowledge.reads, ...graph.reads, ...(preset.rules.reads ?? [])],
-        commands: [...(models.commands ?? []), ...settings.commands, ...(training.commands ?? []), ...video.commands, ...library.commands, ...review.commands, ...knowledge.commands, ...graph.commands, ...(preset.rules.commands ?? [])],
-        jobs: [...settings.jobs, ...(training.jobs ?? []), ...video.jobs, ...compose.jobs, ...voice.jobs, ...library.jobs, ...review.jobs, ...graph.jobs, ...(preset.rules.jobs ?? [])],
+        reads: [...(models.reads ?? []), ...settings.reads, ...(training.reads ?? []), ...video.reads, ...library.reads, ...review.reads, ...knowledge.reads, ...graph.reads, ...suites.reads, ...tasks.reads, ...(preset.rules.reads ?? [])],
+        commands: [...(models.commands ?? []), ...settings.commands, ...(training.commands ?? []), ...video.commands, ...library.commands, ...review.commands, ...knowledge.commands, ...graph.commands, ...suites.commands, ...tasks.commands, ...(preset.rules.commands ?? [])],
+        jobs: [...settings.jobs, ...(training.jobs ?? []), ...video.jobs, ...compose.jobs, ...voice.jobs, ...library.jobs, ...review.jobs, ...graph.jobs, ...tasks.jobs, ...(preset.rules.jobs ?? [])],
       },
     }
   })
@@ -252,8 +284,9 @@ function modelling(build: (options: PresetOptions) => Preset): (options: PresetO
  * the five Compose presets in the old order, `compose:differs` among them;
  * 1m's `voice`; 1n's six Library and four Review presets in the old
  * order; 1o's three Knowledge and three Code graph presets in the old order,
- * `knowledge:mixed` and `graph:refused` among them; each feature item adds
- * its own here. Every one
+ * `knowledge:mixed` and `graph:refused` among them; 1p's Suites preset and
+ * its eight Tasks and New task presets in the old order; each feature item
+ * adds its own here. Every one
  * carries the Sessions place's reads, since the list shows on every screen
  * (`execute`'s own), and the console's answers, since it opens over every one.
  */
@@ -332,6 +365,15 @@ export const presets: Readonly<Record<string, (options: PresetOptions) => Preset
   graph: listing(placePreset('graph')),
   'graph:prose': listing(placePreset('graph:prose')),
   'graph:refused': listing(placePreset('graph:refused')),
+  suites: listing(suitesPreset),
+  tasks: listing(tasksPreset('tasks')),
+  'tasks:denied': listing(tasksPreset('tasks:denied', 36)),
+  'tasks:more': listing(tasksPreset('tasks:more')),
+  'tasks:resuming': listing(tasksPreset('tasks:resuming', 1)),
+  'tasks:refused': listing(tasksPreset('tasks:refused')),
+  'tasks:resumerefused': listing(tasksPreset('tasks:resumerefused', 1)),
+  newtask: listing(tasksPreset('newtask')),
+  'newtask:recipe': listing(tasksPreset('newtask:recipe')),
 }
 
 /** The preset opened with no `start`, or an unknown one: `chat`, the old `data-props` default (1v; 1e's interim default was the monitor). */

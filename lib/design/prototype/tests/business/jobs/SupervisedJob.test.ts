@@ -5,6 +5,8 @@ import agentsList from '@recorded/business/reads/Fixtures/agents-list.json?raw'
 import datasetsPull from '@recorded/business/reads/Fixtures/datasets-pull-handmade.txt?raw'
 import chatsCompact from '@recorded/business/reads/Fixtures/chats-compact.txt?raw'
 import trainRun from '@recorded/business/reads/Fixtures/train-run.err?raw'
+import taskRun from '@recorded/presentation/tasks/Fixtures/task-run.jsonl?raw'
+import taskRunHalted from '@recorded/presentation/tasks/Fixtures/task-run-halted.jsonl?raw'
 import { JobEnd, JobStarter, JobUpdate } from '../../../source/business/jobs/SupervisedJob'
 import { ReadRunner } from '../../../source/business/reads/ReadRunner'
 import type { JobRunning } from '../../../source/business/jobs/SupervisedJob'
@@ -395,5 +397,95 @@ describe("a job that writes a folder's file as it runs, and is resumed by the sa
     child.folders.write(folder, saved(0))
     expect(child.folders.files(folder).map((file) => file.text ?? file.name)).toEqual(['tides.mp4', saved(0).text])
     expect(child.folders.files('/elsewhere')).toEqual([])
+  })
+})
+
+describe('a stop another call asks of a running job (design 1p’s `asked`): `task halt` and `task cancel` reach the run they name', () => {
+  // task-run.jsonl: 30 lines -- the plan through line 11, round 1 from line 12 to its end at 20, round 2 to 29, then task_finished. The endings here are slices of recordings, so only the mechanism is under test.
+  const run = lines(taskRun)
+  const halted = lines(taskRunHalted).at(-1) ?? ''
+  const id = 'task-20261021-011456'
+  const rules = (exit = 1): Rules => ({
+    jobs: [
+      {
+        arguments: ['task', 'run', 'say hello'],
+        answer: {
+          stdout: taskRun,
+          exit,
+          asked: [
+            { by: ['task', 'halt', id], endings: [{ before: 12, through: 11, stdout: `${halted}\n`, exit: 1 }, { before: 21, through: 20, stdout: `${halted}\n`, exit: 1 }] },
+            { by: ['task', 'cancel', id], endings: [{ before: 30, stdout: `${run[29] ?? ''}\n`, exit: 130 }] },
+          ],
+        },
+      },
+    ],
+    commands: [
+      { arguments: ['task', 'halt', id], answer: { stdout: 'asked\n' } },
+      { arguments: ['task', 'cancel', id], answer: { stdout: 'asked\n' } },
+    ],
+  })
+  const typed = (texts: readonly string[]) => texts.map((text) => JobUpdate.event(JobEvent.decode(text)))
+
+  test('a halt asked mid-round plays the run on through the round’s end, then its ending, and the ending’s exit', async () => {
+    const { jobs, clock, child } = starter(rules())
+    const job = jobs.startJob(binary, ['task', 'run', 'say hello', '--require', 'mock', '--rounds', '2', '--output-format', 'stream-json'], true)
+    clock.advance(14)
+    expect(await new ReadRunner(child).command(binary, ['task', 'halt', id])).toEqual({ case: 'done', stdout: 'asked\n' })
+    clock.advance(40)
+    expect(said(job)).toEqual([...typed([...run.slice(0, 20), halted]), JobUpdate.ended(JobEnd.of(ChildExit.exited(1), new BoundedTail(), false))])
+  })
+
+  test('asked during the plan, it ends after the plan', async () => {
+    const { jobs, clock, child } = starter(rules())
+    const job = jobs.startJob(binary, ['task', 'run', 'say hello'], true)
+    clock.advance(4)
+    await new ReadRunner(child).command(binary, ['task', 'halt', id])
+    clock.advance(40)
+    expect(said(job).slice(0, -1)).toEqual(typed([...run.slice(0, 11), halted]))
+  })
+
+  test('a cancel plays its ending at once, the run’s unplayed lines dropped, and its exit', async () => {
+    const { jobs, clock, child } = starter(rules())
+    const job = jobs.startJob(binary, ['task', 'run', 'say hello'], true)
+    clock.advance(14)
+    await new ReadRunner(child).command(binary, ['task', 'cancel', id])
+    clock.advance(40)
+    expect(said(job)).toEqual([...typed([...run.slice(0, 14), run[29] ?? '']), JobUpdate.ended(JobEnd.of(ChildExit.exited(130), new BoundedTail(), false))])
+  })
+
+  test('asked past every ending -- the last round, whose own end decides first -- it plays on as recorded', async () => {
+    const { jobs, clock, child } = starter(rules())
+    const job = jobs.startJob(binary, ['task', 'run', 'say hello'], true)
+    clock.advance(24)
+    await new ReadRunner(child).command(binary, ['task', 'halt', id])
+    clock.advance(40)
+    expect(said(job).slice(0, -1)).toEqual(typed(run))
+  })
+
+  test('a command for another task, one nobody answered, or one after the run ended asks nothing', async () => {
+    const { jobs, clock, child } = starter(rules())
+    const reads = new ReadRunner(child)
+    const job = jobs.startJob(binary, ['task', 'run', 'say hello'], true)
+    clock.advance(14)
+    await reads.command(binary, ['task', 'halt', 'task-20261109-021308'])
+    clock.advance(40)
+    expect(said(job).slice(0, -1)).toEqual(typed(run))
+    await reads.command(binary, ['task', 'halt', id])
+    expect(said(job).length).toBe(run.length + 1)
+    expect(child.unanswered).toEqual(['commands: apogee task halt task-20261109-021308'])
+  })
+
+  test('a halt asked while the run is held starting up lands as it begins: its own lines through the ending’s, then the ending, after the hold', async () => {
+    const held: Rules = { ...rules(), jobs: [{ arguments: ['task', 'run', 'say hello'], answer: { stdout: taskRun, holdAt: 1, exitAfter: 3, asked: [{ by: ['task', 'halt', id], endings: [{ before: 2, through: 2, stdout: `${halted}\n`, exit: 1 }] }] } }] }
+    const { jobs, clock, child } = starter(held)
+    const job = jobs.startJob(binary, ['task', 'run', 'say hello'], true)
+    clock.advance(2)
+    await new ReadRunner(child).command(binary, ['task', 'halt', id])
+    expect(said(job)).toEqual(typed(run.slice(0, 1)))
+    // Held three ticks after its first line, ticks 2 to 4: the fifth plays on.
+    clock.advance(2)
+    expect(said(job)).toEqual(typed(run.slice(0, 1)))
+    clock.advance(10)
+    expect(said(job)).toEqual([...typed([...run.slice(0, 2), halted]), JobUpdate.ended(JobEnd.of(ChildExit.exited(1), new BoundedTail(), false))])
   })
 })

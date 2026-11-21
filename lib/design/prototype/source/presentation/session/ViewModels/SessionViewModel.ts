@@ -1261,11 +1261,20 @@ export class SessionViewModel extends Observable {
     if (!chooser || !this.canSwitch) return
     const forced = chooser.force && this.chosenOverBudget
     this.update(() => (this.suiteChooser = undefined))
+    await this.switchTo(chooser.chosen, forced)
+  }
+
+  /**
+   * The session moved under `suite`, `--force` where `forced`: the chooser's
+   * Switch, and Suites' Switch the session to it (design 1p, through the
+   * composition), as the old `switchSession` sends its suite line -- held
+   * behind a turn still running. Nothing moves a session that cannot.
+   */
+  async switchTo(suite: string, forced: boolean): Promise<void> {
+    if (!this.canSwitchSuite) return
     if (!this.hasTurns) {
       const old = this.session
-      this.launch = this.launch.execute
-        ? { ...this.launch, execute: { ...this.launch.execute, suite: chooser.chosen }, forceSuite: forced }
-        : { ...this.launch, suite: chooser.chosen, forceSuite: forced }
+      this.launch = this.launch.execute ? { ...this.launch, execute: { ...this.launch.execute, suite }, forceSuite: forced } : { ...this.launch, suite, forceSuite: forced }
       this.session = undefined
       this.connection = { case: 'idle' }
       await old?.close().catch(() => {})
@@ -1274,10 +1283,10 @@ export class SessionViewModel extends Observable {
     }
     this.update(() => (this.held = this.held.filter((line) => line.case !== 'suite')))
     if (this.midTurn) {
-      this.update(() => (this.held = [...this.held, { case: 'suite', suite: chooser.chosen, force: forced }]))
+      this.update(() => (this.held = [...this.held, { case: 'suite', suite, force: forced }]))
       return
     }
-    await this.moveSuite(chooser.chosen, forced)
+    await this.moveSuite(suite, forced)
   }
 
   /** A turn runs, is stopping or written ahead, a card waits on the person, or the child is already going: a restart now would end what the turn is doing. */

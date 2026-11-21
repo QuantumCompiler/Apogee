@@ -34,10 +34,7 @@ export function titleOf(destination: Destination): string {
  * feature item takes its own line out when it ports its place, and 1s checks
  * none is left.
  */
-const portedBy: Readonly<Partial<Record<Destination, string>>> = {
-  suites: '1p',
-  tasks: '1p',
-}
+const portedBy: Readonly<Partial<Record<Destination, string>>> = {}
 
 /** What a place not yet ported says: its name, and the item that ports it. */
 export interface Placeholder {

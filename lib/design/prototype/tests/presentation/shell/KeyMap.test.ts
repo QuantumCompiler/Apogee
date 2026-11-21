@@ -87,8 +87,10 @@ describe('the keyboard list Settings › Keyboard draws (design 1i)', () => {
 })
 
 describe('a place not yet ported', () => {
-  test('names the place and the design item that ports it', () => {
-    expect(destinations.map((destination) => placeholderOf(destination)?.item)).toEqual([undefined, undefined, '1p', '1p', undefined, undefined, undefined, undefined, undefined, undefined, undefined])
+  test('none is left: every place is drawn (1p ported the last two, Suites and Tasks)', () => {
+    expect(destinations.map((destination) => placeholderOf(destination)?.item)).toEqual([undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined])
+    expect(placeholderOf('suites'), 'Suites is its place (1p): no placeholder').toBeUndefined()
+    expect(placeholderOf('tasks'), 'Tasks is its place (1p): no placeholder').toBeUndefined()
     expect(placeholderOf('graph'), 'the Code graph is its place (1o): no placeholder').toBeUndefined()
     expect(placeholderOf('knowledge'), 'Knowledge is its place (1o): no placeholder').toBeUndefined()
     expect(placeholderOf('library'), 'Library is its place (1n): no placeholder').toBeUndefined()
@@ -98,6 +100,5 @@ describe('a place not yet ported', () => {
     expect(placeholderOf('sessions'), 'Sessions is the session window (1u): no placeholder').toBeUndefined()
     expect(placeholderOf('models'), 'Models is its place (1h): no placeholder').toBeUndefined()
     expect(placeholderOf('video'), 'Video is its place (1k): no placeholder').toBeUndefined()
-    expect(placeholderOf('suites')).toEqual({ title: 'Suites', item: '1p', says: 'Suites isn’t drawn here yet. Design item 1p ports it.' })
   })
 })

@@ -648,16 +648,16 @@ describe('the Models place in the composition (design 1h)', () => {
     const card = app.models.face().jobs.cards[0]
     expect(card?.repo).toBe('Llama3.2-1B-Instruct/safetensors/edaba290ce7f')
     expect(card?.steps.map((step) => step.state)).toEqual(['done', 'running', 'waiting'])
-    expect(app.placeRuns).toEqual({ models: 1, training: 0, video: 0, voice: 0 })
+    expect(app.placeRuns).toEqual({ models: 1, tasks: 0, training: 0, video: 0, voice: 0 })
     const chat = await started('chat')
-    expect(chat.placeRuns).toEqual({ models: 0, training: 0, video: 0, voice: 0 })
+    expect(chat.placeRuns).toEqual({ models: 0, tasks: 0, training: 0, video: 0, voice: 0 })
   })
 
   test('models:downloads and models:notran with no apogee: nothing starts, so no card stands running and the sidebar counts nothing', async () => {
     for (const start of ['models:downloads', 'models:notran']) {
       const app = await started(start, 'missing')
       expect([start, app.models.face().jobs]).toEqual([start, { cards: [], running: 0 }])
-      expect(app.placeRuns).toEqual({ models: 0, training: 0, video: 0, voice: 0 })
+      expect(app.placeRuns).toEqual({ models: 0, tasks: 0, training: 0, video: 0, voice: 0 })
     }
   })
 
@@ -687,10 +687,10 @@ describe('the Models place in the composition (design 1h)', () => {
     expect(app.models.face().downloadSheet.repo).toBe('meta-llama/Llama-3.2-1B-Instruct')
     app.models.startDownload()
     expect(app.shell.sheet).toBeUndefined()
-    expect(app.placeRuns).toEqual({ models: 1, training: 0, video: 0, voice: 0 })
+    expect(app.placeRuns).toEqual({ models: 1, tasks: 0, training: 0, video: 0, voice: 0 })
     app.clock.advance(70)
     await settled()
-    expect(app.placeRuns).toEqual({ models: 0, training: 0, video: 0, voice: 0 })
+    expect(app.placeRuns).toEqual({ models: 0, tasks: 0, training: 0, video: 0, voice: 0 })
     expect(app.shell.toast?.text, 'the old done toast, from the documents the run reported').toBe('Llama3.2-1B-Instruct · Q4_K_M is ready in the library')
     // The snapshot a conversion of the same chain used folds away, as models list folds it.
     expect(app.models.store.face().groups.find((group) => group.dir === 'Llama3.2-1B-Instruct')?.sets.map((set) => [set.short, set.state])).toEqual([
@@ -911,23 +911,23 @@ describe('the Training place in the composition (design 1j)', () => {
 
   test("the sidebar's Training badge: the registry's train runs, pipelines and passes, never a pull or a promote", async () => {
     const training = await started('training')
-    expect(training.placeRuns).toEqual({ models: 0, training: 1, video: 0, voice: 0 })
+    expect(training.placeRuns).toEqual({ models: 0, tasks: 0, training: 1, video: 0, voice: 0 })
     const pipelines = await started('training:pipelines')
-    expect(pipelines.placeRuns).toEqual({ models: 0, training: 1, video: 0, voice: 0 })
+    expect(pipelines.placeRuns).toEqual({ models: 0, tasks: 0, training: 1, video: 0, voice: 0 })
     const cycle = await started('training:cycle')
-    expect(cycle.placeRuns).toEqual({ models: 0, training: 0, video: 0, voice: 0 })
+    expect(cycle.placeRuns).toEqual({ models: 0, tasks: 0, training: 0, video: 0, voice: 0 })
     cycle.training.requestPass()
     expect(cycle.shell.confirm).toBe('train')
     await cycle.confirmTraining('train')
     expect(cycle.shell.confirm).toBeUndefined()
-    expect(cycle.placeRuns).toEqual({ models: 0, training: 1, video: 0, voice: 0 })
+    expect(cycle.placeRuns).toEqual({ models: 0, tasks: 0, training: 1, video: 0, voice: 0 })
     const datasets = await started('training:datasets')
     datasets.training.newPull()
     expect(datasets.shell.sheet).toBe('pull')
     datasets.training.setPullRef('someone/heat-notes')
     datasets.training.pull()
     expect(datasets.shell.sheet).toBeUndefined()
-    expect(datasets.placeRuns).toEqual({ models: 0, training: 0, video: 0, voice: 0 })
+    expect(datasets.placeRuns).toEqual({ models: 0, tasks: 0, training: 0, video: 0, voice: 0 })
     expect(datasets.registry.children('job').map((job) => job.label)).toEqual(['apogee datasets pull someone/heat-notes'])
   })
 
@@ -980,7 +980,7 @@ describe('the Video place in the composition (design 1k)', () => {
     expect(face.showRun).toBe(true)
     expect(face.run).toMatchObject({ shown: true, file: 'lighthouse-dusk-3.mp4', status: 'step 38 of 50', live: true })
     expect(face.form.heading).toBe('From lighthouse-dusk-draft.mp4')
-    expect(app.placeRuns).toEqual({ models: 0, training: 0, video: 1, voice: 0 })
+    expect(app.placeRuns).toEqual({ models: 0, tasks: 0, training: 0, video: 1, voice: 0 })
     const run = app.monitor.face().models.rows.find((row) => row.run !== undefined)
     expect(run).toMatchObject({ name: 'Wan2.2-TI2V-5B · generating', detail: 'a video run this app supervises · mps · bfloat16 · the CLI reports no size for it', action: 'Stop the run' })
     if (run) app.monitor.act(run)
@@ -1193,7 +1193,7 @@ describe('the Voice place in the composition (design 1m)', () => {
     await settled()
     app.stop()
     app.voice.speak()
-    expect(app.placeRuns).toEqual({ models: 0, training: 0, video: 0, voice: 1 })
+    expect(app.placeRuns).toEqual({ models: 0, tasks: 0, training: 0, video: 0, voice: 1 })
     for (let tick = 0; tick < 3; tick += 1) {
       app.clock.advance(1)
       await settled()
@@ -1489,5 +1489,179 @@ describe('Knowledge and the Code graph in the composition (design 1o)', () => {
     expect([knowledge.records.face().empty, knowledge.records.face().rows, knowledge.collections.face().note, knowledge.collections.face().rows]).toEqual(['', [], '', []])
     const typo = await started('knowledge', 'config-typo')
     expect(typo.records.face().empty.startsWith('The records could not be read: apogee knowledge: ')).toBe(true)
+  })
+})
+
+describe('Suites and Tasks in the composition (design 1p)', () => {
+  test('suites: the recorded five, the default (fast) chosen; the Streaming session behind it, nothing said or unanswered', async () => {
+    const app = await started('suites')
+    expect(app.shell.route).toBe('suites')
+    expect(app.suites.face().list.map((row) => row.name)).toEqual(['cloud', 'fast', 'pair', 'shared', 'vast'])
+    expect(app.suites.face().detail.name).toBe('fast')
+    expect(app.shell.toast).toBeUndefined()
+    expect([...app.child.unanswered, ...app.consoleChild.unanswered]).toEqual([])
+  })
+
+  test('Open a chat under a suite opens a new chat under it on Sessions, forced where it does not fit, through the app root’s leave', async () => {
+    const app = await started('suites')
+    app.suites.select('vast')
+    app.suites.openChatUnderIt()
+    await settled()
+    await settled()
+    expect(app.shell.route).toBe('sessions')
+    expect(app.child.calls.filter((call) => call.kind === 'chats').at(-1)?.arguments).toEqual(expect.arrayContaining(['--suite', 'vast', '--force']))
+  })
+
+  test('Open a chat under a suite asks the endPrivate confirm while a private session has a turn sent, and goes on once End it and switch is pressed', async () => {
+    const app = await started('chat:private')
+    app.session.setDraft('a secret')
+    app.session.submit()
+    app.shell.go('suites')
+    await app.suites.appeared()
+    expect(app.suites.face().detail.canSwitch, 'a private session with a turn sent cannot move').toBe(false)
+    app.suites.openChatUnderIt()
+    expect(app.shell.confirm).toBe('endPrivate')
+    expect(app.shell.route).toBe('suites')
+    app.endPrivateAndLeave()
+    await settled()
+    await settled()
+    expect(app.shell.route).toBe('sessions')
+    expect(app.child.calls.filter((call) => call.kind === 'chats').at(-1)?.arguments).toEqual(expect.arrayContaining(['--suite', 'fast']))
+  })
+
+  test('Switch the session to it moves the open session under the suite and shows Sessions', async () => {
+    const app = await started('chat:new')
+    app.shell.go('suites')
+    await app.suites.appeared()
+    app.suites.select('pair')
+    app.suites.switchSessionToIt()
+    await settled()
+    await settled()
+    expect(app.shell.route).toBe('sessions')
+    expect(app.child.calls.filter((call) => call.kind === 'chats').at(-1)?.arguments).toEqual(expect.arrayContaining(['--suite', 'pair']))
+  })
+
+  test('Switch the session to it anyway moves the open session under a suite that does not fit, forced', async () => {
+    const app = await started('chat:new')
+    app.shell.go('suites')
+    await app.suites.appeared()
+    app.suites.select('vast')
+    app.suites.switchSessionToIt()
+    await settled()
+    await settled()
+    expect(app.shell.route).toBe('sessions')
+    expect(app.child.calls.filter((call) => call.kind === 'chats').at(-1)?.arguments).toEqual(expect.arrayContaining(['--suite', 'vast', '--force']))
+  })
+
+  test('Use for new sessions runs config set-default-suite and has the Models place read its roles again', async () => {
+    const app = await started('suites')
+    app.suites.select('cloud')
+    const before = app.child.calls.length
+    await app.suites.makeDefault()
+    await settled()
+    const after = app.child.calls.slice(before).map((call) => call.arguments.join(' '))
+    expect(after).toContain('config set-default-suite cloud')
+    expect(after.filter((call) => call === 'models status').length).toBeGreaterThanOrEqual(2)
+    expect(app.shell.toast?.text).toBe('cloud is the default suite')
+  })
+
+  test('tasks: the live recorded run in round 1, shown, the sidebar’s Tasks badge 1 while it runs; the badge empty once it ends', async () => {
+    const app = await started('tasks')
+    expect(app.shell.route).toBe('tasks')
+    expect(app.tasks.face().detail).toMatchObject({ goal: 'say hello', status: 'running · round 1 of 2', canPause: true, canStop: true })
+    expect(app.placeRuns.tasks).toBe(1)
+    app.clock.advance(20)
+    await settled()
+    await settled()
+    expect(app.placeRuns.tasks).toBe(0)
+    expect([...app.child.unanswered, ...app.consoleChild.unanswered]).toEqual([])
+  })
+
+  test('tasks: Stop after this round and Stop now reach the live run through the app’s one stand-in -- the job its reads’ command names hears it -- halted after round 1, or cancelled in it', async () => {
+    const halted = await started('tasks')
+    await halted.tasks.halt()
+    expect(halted.tasks.face().detail.status).toBe('running · halts when round 1 ends')
+    halted.clock.advance(10)
+    await settled()
+    await settled()
+    expect(halted.tasks.face().detail).toMatchObject({ status: 'halted · resumes from its ledger', canResume: true })
+    expect(halted.tasks.face().detail.rounds.map((each) => each.n)).toEqual(['Plan', 'Round 1'])
+    const cancelled = await started('tasks')
+    await cancelled.tasks.cancel()
+    cancelled.clock.advance(4)
+    await settled()
+    await settled()
+    expect(cancelled.tasks.face().detail.status).toBe('cancelled by you')
+    expect([...halted.child.unanswered, ...cancelled.child.unanswered]).toEqual([])
+  })
+
+  test('no other preset runs a task: the Tasks badge reads the shared job list, and nothing there is a task', async () => {
+    for (const start of ['chat', 'models', 'suites', 'tasks:resumerefused']) expect((await started(start)).placeRuns.tasks, start).toBe(0)
+  })
+
+  test('tasks:denied: the recorded uses run played to its end, shown: Allowed and Denied, and Run again', async () => {
+    const app = await started('tasks:denied')
+    const detail = app.tasks.face().detail
+    expect([detail.goal, detail.status, detail.allowed, detail.denied, detail.rerunLabel]).toEqual([
+      'Write the report',
+      'exhausted · 1 of 1 rounds used',
+      ["round 1: run_command on ls -- this task's grant"],
+      ['round 1: write_file on report.txt -- nobody present to allow it'],
+      'Run again with 2 rounds',
+    ])
+  })
+
+  test('tasks:more: the newest 50 of the ledger of 60 and Show all, the live run above them', async () => {
+    const app = await started('tasks:more')
+    expect([app.tasks.face().list.length, app.tasks.face().truncation]).toEqual([51, 'The newest 50 of 60 tasks'])
+  })
+
+  test('tasks:resuming: the stalled task’s resume starting up -- Resuming… and the stops; tasks:resumerefused: the refusal in the shell’s confirm host, its line kept on the page, OK clearing the alert', async () => {
+    const resuming = await started('tasks:resuming')
+    expect(resuming.tasks.face().detail).toMatchObject({ goal: 'Find the word', isResuming: true, canPause: true, canStop: true })
+    const refused = await started('tasks:resumerefused')
+    expect(refused.shell.confirm).toBe('taskRefused')
+    expect(refused.tasks.face().detail.refused.startsWith('apogee task: task task-20261109-021236 cannot resume')).toBe(true)
+    refused.confirmTasks()
+    expect([refused.shell.confirm, refused.tasks.failure]).toEqual([undefined, undefined])
+  })
+
+  test('tasks:refused: the sheet’s start refused, no row left, the alert and the toast; newtask and newtask:recipe: the sheet open in the shell’s host, filled as the old frames fill it', async () => {
+    const refused = await started('tasks:refused')
+    expect(refused.shell.confirm).toBe('taskRefused')
+    expect(refused.shell.sheet).toBeUndefined()
+    expect(refused.shell.toast?.text.startsWith("That didn't work: apogee task: --allow write_file")).toBe(true)
+    expect(refused.tasks.face().list.length).toBe(4)
+    const goal = await started('newtask')
+    expect(goal.shell.sheet).toBe('newtask')
+    expect(goal.tasks.sheetFace().command).toBe('apogee task run "Make tests/test_parsers.py pass on Python 3.12" --tools --allow write_file --allow run_command --suite fast --output-format stream-json')
+    const recipe = await started('newtask:recipe')
+    expect(recipe.tasks.sheetFace().command).toBe('apogee task run --recipe digest-folder --input docs --allow write_file --suite fast --output-format stream-json')
+    recipe.tasks.cancelNew()
+    expect(recipe.shell.sheet).toBeUndefined()
+  })
+
+  test('⌘3 opens Suites and ⌘4 Tasks through the key map, each read as it comes into view (the browser may keep ⌘1-⌘9 for its tabs)', async () => {
+    const app = await started('chat:new')
+    app.shell.press(chord('3', 'command'))
+    expect(app.shell.route).toBe('suites')
+    await settled()
+    await settled()
+    expect(app.suites.face().list.length).toBe(5)
+    app.shell.press(chord('4', 'command'))
+    expect(app.shell.route).toBe('tasks')
+    await settled()
+    await settled()
+    expect(app.tasks.face().list.map((row) => row.goal)).toEqual(['Answer when asked', 'say hello', 'say hello'])
+    expect([...app.child.unanswered, ...app.consoleChild.unanswered]).toEqual([])
+  })
+
+  test('the no-apogee state of both places draws no words, as the old has none; config-typo says the CLI’s refusal', async () => {
+    const missing = await started('tasks', 'missing')
+    expect([missing.tasks.face().list, missing.tasks.face().empty, missing.tasks.face().detail.shown]).toEqual([[], '', false])
+    const suites = await started('suites', 'missing')
+    expect([suites.suites.face().list, suites.suites.face().empty]).toEqual([[], ''])
+    const typo = await started('tasks', 'config-typo')
+    expect(typo.tasks.face().empty.startsWith('The tasks could not be read: apogee task: ')).toBe(true)
   })
 })

@@ -32,6 +32,9 @@ import { settingsPreferences } from '../../settings/Previews/SettingsWorlds'
 import { SettingsViewModel } from '../../settings/ViewModels/SettingsViewModel'
 import type { SettingsConfirm, SettingsPane } from '../../settings/ViewModels/SettingsViewModel'
 import { SessionKeys } from '../../sessions/ViewModels/SessionKeys'
+import { SuitesViewModel } from '../../suites/ViewModels/SuitesViewModel'
+import { newTaskGoal, recipeFrame, recordedRun, reportRun, taskFolder, tasks as recordedTasks } from '../../tasks/Previews/TasksWorlds'
+import { TasksViewModel } from '../../tasks/ViewModels/TasksViewModel'
 import { sweep } from '../../training/Previews/TrainingWorlds'
 import { TrainingViewModel } from '../../training/ViewModels/TrainingViewModel'
 import type { TrainingConfirm } from '../../training/ViewModels/TrainingViewModel'
@@ -160,6 +163,10 @@ export class AppViewModel extends Observable {
   knowledgeTab: KnowledgeTab = 'records'
   /** The Code graph place (1o): the recorded demo graph's Functions and Files views, the notes prose graph, the More menu. */
   readonly graph: GraphViewModel
+  /** The Suites place (1p): the recorded suites, each one's members and the CLI's verdict; its session doors through this composition. */
+  readonly suites: SuitesViewModel
+  /** The Tasks place (1p): the ledger, a task's page, a run followed live from its stream, and the New task sheet. */
+  readonly tasks: TasksViewModel
   /** Every key the window binds: the shell's and the places' (Sessions'), what Settings › Keyboard lists. */
   readonly boundKeys: readonly BoundKey[] = [...KeyMap.shell, ...SessionKeys.bindings]
 
@@ -225,7 +232,11 @@ export class AppViewModel extends Observable {
         void this.collections.appeared()
       },
     }
-    this.places = { models: this.models, training: this.training, video: this.video, voice: this.voice, library: this.definitions, review: this.review, knowledge, graph: this.graph }
+    // Suites and Tasks (1p) over the same reads and jobs; the Tasks sheet's folder the recorded runs' own, handed in as the preset's.
+    this.suites = new SuitesViewModel(this.reads)
+    this.tasks = new TasksViewModel(this.reads, this.jobs, () => this.clock.now)
+    this.tasks.folder = taskFolder
+    this.places = { models: this.models, training: this.training, video: this.video, voice: this.voice, library: this.definitions, review: this.review, knowledge, graph: this.graph, suites: this.suites, tasks: this.tasks }
 
     // The library's doors, as closures: the toast, the shell's hosts, Sessions (an overlay closed, or left open), Models and the scrim.
     this.library.say = (text) => this.shell.say(text)
@@ -324,6 +335,20 @@ export class AppViewModel extends Observable {
     this.graph.menuChanged = (owner) => (owner === undefined ? this.shell.closeMenus() : this.shell.openMenu(owner))
     this.graph.askAbout = (file, draft) => this.session.leave({ type: 'new', attach: file, draft })
     this.graph.subscribe(() => this.changed())
+    // Suites' doors (1p): the toast; Open a chat under it a new chat under the suite on Sessions through the open session's own leave -- asked first where a private conversation would be lost --
+    // Switch the session to it the open session moved under the suite on Sessions, and the default suite told to Models, whose Roles read it: never an import of session, sessions or models.
+    this.suites.say = (text) => this.shell.say(text)
+    this.suites.openChat = (suite, force) => this.leave({ type: 'new', suite, force })
+    this.suites.switchSession = (suite, force) => void this.switchSessionTo(suite, force)
+    this.suites.sessionSwitchable = () => this.session.canSwitchSuite
+    this.suites.defaultChanged = () => void this.models.refresh()
+    this.suites.subscribe(() => this.changed())
+    // Tasks' doors (1p): the toast, the New task sheet in the sheet host, and a refusal's alert in the confirm host.
+    this.tasks.say = (text) => this.shell.say(text)
+    this.tasks.present = (kind) => this.shell.openSheet(kind)
+    this.tasks.dismissSheet = () => this.shell.closeSheet()
+    this.tasks.ask = (kind) => this.shell.ask(kind)
+    this.tasks.subscribe(() => this.changed())
     this.registry.onChange(() => this.changed())
     // The monitor lists the video runs going now from the shared job list (1k), and its Stop stops that run (a composition's Open shows it, 1l): the place's
     // own clip only once its pipeline has loaded (the old lists `vrun` past `load`), by what it generates on and where;
@@ -449,13 +474,15 @@ export class AppViewModel extends Observable {
    * check of the files, whoever started it.
    */
 
-  get placeRuns(): { readonly models: number; readonly training: number; readonly video: number; readonly voice: number } {
+  get placeRuns(): { readonly models: number; readonly tasks: number; readonly training: number; readonly video: number; readonly voice: number } {
     const store = ['pull', 'convert', 'quantize', 'repair']
     const jobs = this.registry.children('job')
     // Training's (1j) is a run, a pipeline or a cycle pass going on, as the old badge counts `running || live`: never a promote, a pull or a prepare.
     const trains = ['apogee train run', 'apogee train pipeline run', 'apogee train pipeline resume', 'apogee train cycle run']
     return {
       models: jobs.filter((job) => store.some((verb) => job.label.startsWith(`apogee models ${verb} `))).length,
+      // Tasks' (1p) is a task run or resumed going on, as the old badge counts its running tasks: the app's own, from the shared list.
+      tasks: jobs.filter((job) => ['apogee task run', 'apogee task resume'].some((words) => job.label === words || job.label.startsWith(`${words} `))).length,
       training: jobs.filter((job) => trains.some((words) => job.label === words || job.label.startsWith(`${words} `))).length,
       // Video's (1k) is a clip being made (and 1l's compositions rendering), as the old badge counts `vrun` and `crender`: never an install.
       video: jobs.filter((job) => AppViewModel.isVideoRun(job)).length,
@@ -604,6 +631,19 @@ export class AppViewModel extends Observable {
     this.session.leave(then)
   }
 
+  /** Suites' Switch the session to it (1p): Sessions shown, the open session moved under the suite, as the old `switchSession` sets `screen: 'chat'` and sends its suite line. */
+  async switchSessionTo(suite: string, force: boolean): Promise<void> {
+    this.shell.closeOverlay()
+    this.shell.go('sessions')
+    await this.session.switchTo(suite, force)
+  }
+
+  /** A Tasks alert's OK (1p): the refusal dismissed, the host closed. */
+  confirmTasks(): void {
+    this.shell.dismissConfirm()
+    this.tasks.dismissFailure()
+  }
+
   /** The suite chooser closed: Cancel, or the sheet dismissed. */
   closeSuites(): void {
     this.session.dismissSuites()
@@ -654,6 +694,8 @@ export class AppViewModel extends Observable {
     this.records.connect(binary)
     this.collections.connect(binary)
     this.graph.connect(binary)
+    this.suites.connect(binary)
+    this.tasks.connect(binary)
     // The console's child shares the preset's mode, so it finds the binary where `child` does.
     this.console.connect(binary)
     // Settings, with the override this launch's discovery passed over, as the app's preferences hold it.
@@ -728,6 +770,16 @@ export class AppViewModel extends Observable {
     }
     if (where === 'graph') {
       await this.openGraphPreset(sub ?? '')
+      return
+    }
+    if (where === 'suites') {
+      await this.openStreaming()
+      this.shell.go('suites')
+      await this.suites.appeared()
+      return
+    }
+    if (where === 'tasks' || where === 'newtask') {
+      await this.openTasksPreset(where === 'newtask' ? `new${sub === undefined ? '' : `:${sub}`}` : (sub ?? ''))
       return
     }
     if (where === 'models' || where === 'download') {
@@ -1157,6 +1209,55 @@ export class AppViewModel extends Observable {
     if (sub === 'refused') {
       this.graph.overtaken()
       await this.graph.select(overtakenNode)
+    }
+  }
+
+  /**
+   * A Tasks preset (1p), as the old `applyStart('tasks…' | 'newtask…')` and
+   * `tasksStart` set it up: the Streaming session at its starting frame
+   * behind it, the place read and shown, then the old frame's state, each
+   * the CLI's own run through the stand-in -- `tasks`, `tasks:more`,
+   * `tasks:refused` and the two `newtask` frames with the recorded say hello
+   * run started as it was typed (its start ticks standing it in round 1, as
+   * the old frames' canned task runs); `tasks:denied` the recorded uses run
+   * played to its end; `tasks:resuming` the stalled task's resume starting
+   * up; `tasks:refused` the sheet filled as the `newtask` frame fills it and
+   * started, the config refusing it; `tasks:resumerefused` the stalled task
+   * granted write_file resumed and refused; `newtask` and `newtask:recipe`
+   * the sheet open and filled as the old frames fill it.
+   */
+  private async openTasksPreset(sub: string): Promise<void> {
+    await this.openStreaming()
+    const tasks = this.tasks
+    this.shell.go('tasks')
+    // The run the old frame shows running, started before the place reads, so its task is the one shown once its stream names it.
+    const run = { '': recordedRun, more: recordedRun, refused: recordedRun, new: recordedRun, 'new:recipe': recordedRun, denied: reportRun }[sub]
+    if (run) tasks.startRun(run)
+    await tasks.appeared()
+    switch (sub) {
+      case 'resuming':
+        await tasks.select(recordedTasks.stalled)
+        tasks.resume()
+        return
+      case 'resumerefused':
+        await tasks.select(recordedTasks.stalledGranted)
+        tasks.resume()
+        return
+      case 'refused':
+        await tasks.openNew()
+        tasks.setForm({ goal: newTaskGoal, writes: 'allow', cmds: 'allow' })
+        tasks.start()
+        return
+      case 'new':
+        await tasks.openNew()
+        tasks.setForm({ goal: newTaskGoal, writes: 'allow', cmds: 'allow' })
+        return
+      case 'new:recipe':
+        await tasks.openNew()
+        tasks.setForm({ writes: 'none', cmds: 'none' })
+        await tasks.pickRecipe(recipeFrame.recipe)
+        tasks.setForm({ input: recipeFrame.input, grants: [...recipeFrame.grants] })
+        return
     }
   }
 

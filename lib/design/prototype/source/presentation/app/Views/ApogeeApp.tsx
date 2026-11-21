@@ -27,6 +27,10 @@ import { ExecuteDoorSheet } from '../../sessions/Views/ExecuteDoor'
 import { NewSessionButtons, RenameSheet, SessionList } from '../../sessions/Views/SessionList'
 import { ChatInfoSheet, SessionsScreen } from '../../sessions/Views/SessionsScreen'
 import { placeholderOf } from '../../shell/ViewModels/Destination'
+import { SuitesScreen } from '../../suites/Views/SuitesScreen'
+import { NewTaskSheet } from '../../tasks/Views/NewTaskSheet'
+import { TaskRefusedAlert } from '../../tasks/Views/TaskRefusedAlert'
+import { TasksScreen } from '../../tasks/Views/TasksScreen'
 import { trainingConfirms } from '../../training/ViewModels/TrainingViewModel'
 import type { TrainingConfirm } from '../../training/ViewModels/TrainingViewModel'
 import { TrainingScreen } from '../../training/Views/TrainingScreen'
@@ -70,8 +74,9 @@ const graphConfirms: readonly string[] = ['graphDelete', 'explainRefused'] satis
  * the editor and the add-target sheet, the editor's close prompt, a
  * server's removal and the post sheet; Knowledge and the Code graph (1o) are
  * their screens, the Knowledge tab the composition's, with the graph's save
- * panel and dedupe sheet, its delete and a refused explain's alert.
- * It starts the app once it is on screen.
+ * panel and dedupe sheet, its delete and a refused explain's alert; Suites
+ * and Tasks (1p) are their screens, with the New task sheet and a refusal's
+ * alert. It starts the app once it is on screen.
  */
 export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
   useObserved(model)
@@ -86,6 +91,8 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
   useObserved(model.definitions)
   useObserved(model.review)
   useObserved(model.graph)
+  useObserved(model.suites)
+  useObserved(model.tasks)
   useEffect(() => {
     void model.start()
     return () => model.stop()
@@ -119,6 +126,9 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
         // Knowledge and the Code graph (1o): the tab shown is the composition's, as the Mac's screen keeps it.
         if (destination === 'knowledge') return <KnowledgeScreen records={model.records} collections={model.collections} tab={model.knowledgeTab} pickTab={(tab) => model.pickKnowledgeTab(tab)} />
         if (destination === 'graph') return <GraphScreen model={model.graph} />
+        // Suites and Tasks (1p): a chat under a suite, the session's switch and the default through the composition's doors.
+        if (destination === 'suites') return <SuitesScreen model={model.suites} />
+        if (destination === 'tasks') return <TasksScreen model={model.tasks} />
         const placeholder = placeholderOf(destination)
         return placeholder ? <PlaceholderScreen placeholder={placeholder} /> : null
       }}
@@ -383,6 +393,22 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
             </SheetHost>
           )
         }
+        // Tasks' New task sheet (1p): the old one's, its Start task off until it has a goal, or a recipe's input.
+        if (kind === 'newtask' && model.tasks.sheetFace().shown) {
+          return (
+            <SheetHost
+              title="New task"
+              subtitle="Say what done looks like. The task plans, then works in rounds, checking itself after each, until its checks pass or its rounds run out."
+              width={600}
+              right={[
+                { label: 'Cancel', run: () => model.tasks.cancelNew() },
+                { label: 'Start task', kind: 'btn-p', run: () => model.tasks.start(), disabled: model.tasks.sheetFace().cantStart },
+              ]}
+            >
+              <NewTaskSheet model={model.tasks} />
+            </SheetHost>
+          )
+        }
         if (kind === 'execute' && library.executeDoorOpen) {
           return (
             <SheetHost
@@ -466,6 +492,8 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
             />
           )
         }
+        // Tasks' alert (1p): a start or resume the CLI refused before it began, its line word for word, OK alone.
+        if (kind === 'taskRefused') return <TaskRefusedAlert model={model.tasks} ok={() => model.confirmTasks()} />
         // Review's post sheet (1n): the batch said, the command that posts it, and Post closing it as the old one does.
         if (kind === 'reviewPost') {
           const words = model.review.postWords

@@ -79,6 +79,57 @@ export class SuiteFootprint {
   }
 }
 
+/** One member of a suite as `config get suites.<name>` prints it: the role, its backend, and the window the suite pins on it. */
+export interface SuiteRole {
+  readonly role: string
+  readonly backend: string
+  /** The window the suite pins, when it pins one. */
+  readonly window: number | undefined
+}
+
+/**
+ * A suite as `config get suites.<name>` prints it (design 1p): one member a
+ * role, `chat: root` or `utility: helper (window 4096)`; a line that does not
+ * read as a role and its backend kept as said. The Mac app's `Suite`
+ * (`System.swift`).
+ */
+export interface Suite {
+  readonly name: string
+  readonly members: readonly SuiteRole[]
+  readonly unread: readonly string[]
+}
+
+/** The roles a suite speaks for. */
+const suiteRoles: readonly string[] = ['chat', 'embedding', 'extraction', 'vision', 'transcription', 'utility']
+
+export const Suite = {
+  read(name: string, text: string): Suite {
+    const members: SuiteRole[] = []
+    const unread: string[] = []
+    for (const raw of text.split(/\r?\n/)) {
+      const line = raw.trim()
+      if (line === '') continue
+      const colon = line.indexOf(':')
+      const role = colon < 0 ? '' : line.slice(0, colon)
+      const rest = colon < 0 ? '' : line.slice(colon + 1).trim()
+      const backend = rest.split(' ')[0] ?? ''
+      if (!suiteRoles.includes(role) || backend === '') {
+        unread.push(line)
+        continue
+      }
+      const pinned = /\(window (\d+)/.exec(rest)
+      members.push({ role, backend, window: pinned ? Number(pinned[1]) : undefined })
+    }
+    return { name, members, unread }
+  },
+
+  /** The window the suite pins on `backend`, in the place's words: `4096 pinned`, or `its own`. */
+  windowOf(suite: Suite | undefined, backend: string): string {
+    const window = suite?.members.find((member) => member.backend === backend)?.window
+    return window === undefined ? 'its own' : `${window} pinned`
+  },
+}
+
 /** `config get suites`: the configured suites, one name a line. */
 export const Suites = {
   names(text: string): string[] {

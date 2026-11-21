@@ -251,6 +251,36 @@ describe('the layering check, on this prototype', () => {
     ])
   })
 
+  test("violations planted in Suites and Tasks fail, each naming its file: React in their view-models, each importing session, sessions and models -- a chat under a suite, the session's switch and the default are the app root's doors (design 1p)", () => {
+    const disk = new DiskTree(root)
+    const planted: Record<string, string> = {
+      'source/presentation/suites/ViewModels/SuitesViewModel.ts': `import React from 'react'\n${disk.contents('source/presentation/suites/ViewModels/SuitesViewModel.ts')}`,
+      'source/presentation/tasks/ViewModels/TasksViewModel.ts': `import { useState } from 'react'\n${disk.contents('source/presentation/tasks/ViewModels/TasksViewModel.ts')}`,
+      'source/presentation/suites/ViewModels/SuitesFaces.ts': `import type { SessionLeave } from '../../session/ViewModels/SessionViewModel'\n${disk.contents('source/presentation/suites/ViewModels/SuitesFaces.ts')}`,
+      'source/presentation/suites/Views/SuitesScreen.tsx': `import { SessionList } from '../../sessions/Views/SessionList'\n${disk.contents('source/presentation/suites/Views/SuitesScreen.tsx')}`,
+      'source/presentation/suites/Previews/SuitesPreview.ts': `import { ModelsViewModel } from '../../models/ViewModels/ModelsViewModel'\n${disk.contents('source/presentation/suites/Previews/SuitesPreview.ts')}`,
+      'source/presentation/tasks/ViewModels/TasksFaces.ts': `import type { SessionLeave } from '../../session/ViewModels/SessionViewModel'\n${disk.contents('source/presentation/tasks/ViewModels/TasksFaces.ts')}`,
+      'source/presentation/tasks/Views/TasksScreen.tsx': `import { SessionsScreen } from '../../sessions/Views/SessionsScreen'\n${disk.contents('source/presentation/tasks/Views/TasksScreen.tsx')}`,
+      'source/presentation/tasks/ViewModels/TaskWords.ts': `import type { ModelsTab } from '../../models/ViewModels/ModelsViewModel'\n${disk.contents('source/presentation/tasks/ViewModels/TaskWords.ts')}`,
+    }
+    const tree: SourceTree = {
+      files: (directory) => disk.files(directory),
+      folders: (directory) => disk.folders(directory),
+      isDirectory: (path) => disk.isDirectory(path),
+      contents: (path) => planted[path] ?? disk.contents(path),
+    }
+    expect(new LayeringCheck(ModuleMap.read(tree), tree).violations()).toEqual([
+      'source/presentation/suites/Previews/SuitesPreview.ts imports presentation/models, which presentation/suites does not declare as a dependency',
+      'source/presentation/suites/ViewModels/SuitesFaces.ts imports presentation/session, which presentation/suites does not declare as a dependency',
+      'source/presentation/suites/ViewModels/SuitesViewModel.ts imports react: a view-model stays free of React, so it tests without a browser',
+      'source/presentation/suites/Views/SuitesScreen.tsx imports presentation/sessions, which presentation/suites does not declare as a dependency',
+      'source/presentation/tasks/ViewModels/TaskWords.ts imports presentation/models, which presentation/tasks does not declare as a dependency',
+      'source/presentation/tasks/ViewModels/TasksFaces.ts imports presentation/session, which presentation/tasks does not declare as a dependency',
+      'source/presentation/tasks/ViewModels/TasksViewModel.ts imports react: a view-model stays free of React, so it tests without a browser',
+      'source/presentation/tasks/Views/TasksScreen.tsx imports presentation/sessions, which presentation/tasks does not declare as a dependency',
+    ])
+  })
+
   test('the disk tree reads the prototype, never node_modules, build output or dot files', () => {
     const files = new DiskTree(root).files('')
     expect(files).toContain('modules.json')

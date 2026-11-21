@@ -59,6 +59,11 @@ function whatTheViewsRead(app: AppViewModel) {
     savePanel: app.graph.savePanel(),
     dedupe: app.graph.dedupeSheet(),
     graphConfirms: (['graphDelete', 'explainRefused'] as const).map((kind) => app.graph.confirmWords(kind) ?? 'none'),
+    // Suites and Tasks (1p): the list and a suite's page; the ledger, a task's page, the New task sheet and the refusal's words.
+    suites: app.suites.face(),
+    tasks: app.tasks.face(),
+    newTask: app.tasks.sheetFace(),
+    tasksConfirm: app.tasks.confirmWords('taskRefused') ?? 'none',
   }
 }
 
@@ -94,6 +99,13 @@ async function walk(app: AppViewModel, name: string, pressSuite = false): Promis
   const view = app.graph.view
   for (const each of ['functions', 'files', 'prose'] as const) await app.graph.show(each)
   await app.graph.show(view)
+  // Suites' and Tasks' too (1p): ⌘3 and ⌘4 open them on every screen; the New task sheet's pickers read, each recipe picked, then the sheet as it was.
+  await app.suites.appeared()
+  await app.tasks.appeared()
+  const sheetOpen = app.tasks.form !== undefined
+  if (!sheetOpen) await app.tasks.openNew()
+  for (const recipe of ['capture-decisions', 'changelog-draft', 'digest-folder']) await app.tasks.pickRecipe(recipe)
+  if (!sheetOpen) app.tasks.cancelNew()
   // The Settings window's too (1i): ⌘, opens it on every screen; each pane shown, so each one's own reads are made.
   app.openSettings(app.settings.pane)
   for (const [pane] of settingsPanes) app.settings.pick(pane)
@@ -114,7 +126,7 @@ async function walk(app: AppViewModel, name: string, pressSuite = false): Promis
 }
 
 describe("the presets: the old prototype's 30-tick check's successor", () => {
-  test('the table holds the monitor, the session’s thirteen in the old data-props order -- 1u’s four plain ones and 1v’s nine scenarios and states -- 1g’s execute and console, 1h’s nine Models presets, 1i’s nine Settings presets in the old order and its four new ones, 1j’s nine Training presets in the old order and its new training:regimes, 1k’s four Video presets in the old order, 1l’s five Compose presets in the old order, 1m’s voice, 1n’s six Library and four Review presets in the old order, and 1o’s three Knowledge and three Code graph presets in the old order', () => {
+  test('the table holds the monitor, the session’s thirteen in the old data-props order -- 1u’s four plain ones and 1v’s nine scenarios and states -- 1g’s execute and console, 1h’s nine Models presets, 1i’s nine Settings presets in the old order and its four new ones, 1j’s nine Training presets in the old order and its new training:regimes, 1k’s four Video presets in the old order, 1l’s five Compose presets in the old order, 1m’s voice, 1n’s six Library and four Review presets in the old order, 1o’s three Knowledge and three Code graph presets in the old order, and 1p’s Suites preset and eight Tasks and New task presets in the old order', () => {
     expect(Object.keys(presets)).toEqual([
       'monitor',
       'chat',
@@ -190,6 +202,15 @@ describe("the presets: the old prototype's 30-tick check's successor", () => {
       'graph',
       'graph:prose',
       'graph:refused',
+      'suites',
+      'tasks',
+      'tasks:denied',
+      'tasks:more',
+      'tasks:resuming',
+      'tasks:refused',
+      'tasks:resumerefused',
+      'newtask',
+      'newtask:recipe',
     ])
   })
 

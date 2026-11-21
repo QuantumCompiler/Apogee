@@ -105,7 +105,7 @@ test('in the missing and config-typo modes the monitor says why it cannot read, 
   await expect(monitor(page)).toContainText("apogee system: /Users/someone/.apogee/config/config.json: not valid JSON: line 4, column 5: expected ',' or '}' after a member (exited with status 1)")
 })
 
-test('each of the 11 places opens by click: Sessions its session window, Models its tabs (1h), Training its tabs (1j), Video its clips (1k), Voice its speeches (1m), Library and Review theirs (1n), the Code graph and Knowledge theirs (1o), an unported one its placeholder', async ({ page }) => {
+test('each of the 11 places opens by click: Sessions its session window, Models its tabs (1h), Training its tabs (1j), Video its clips (1k), Voice its speeches (1m), Library and Review theirs (1n), the Code graph and Knowledge theirs (1o), Suites and Tasks theirs (1p); no placeholder is left', async ({ page }) => {
   const { errors } = watch(page)
   await page.goto(`${built}?start=monitor&still=true`)
   const models = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Models ⌘2' })
@@ -114,9 +114,19 @@ test('each of the 11 places opens by click: Sessions its session window, Models 
   await expect(page.getByRole('heading', { name: 'Models', level: 1 })).toBeVisible()
   await expect(page.getByRole('tab', { name: /^Backends/ })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByText(/^Models isn’t drawn here yet/)).toHaveCount(0)
-  const places: Array<[string, string, string]> = [
-    ['Suites', '⌘3', '1p'], ['Tasks', '⌘4', '1p'],
-  ]
+  // Suites and Tasks are their places (1p): the recorded suites, the ledger's tasks, no placeholder.
+  const suites = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Suites ⌘3' })
+  await suites.click()
+  await expect(suites).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('heading', { name: 'Suites', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'fast', level: 2 })).toBeVisible()
+  await expect(page.getByText(/^Suites isn’t drawn here yet/)).toHaveCount(0)
+  const tasks = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: /^Tasks ⌘4/ })
+  await tasks.click()
+  await expect(tasks).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('heading', { name: 'Tasks', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Answer when asked', level: 2 })).toBeVisible()
+  await expect(page.getByText(/^Tasks isn’t drawn here yet/)).toHaveCount(0)
   // Knowledge and the Code graph are their places (1o): Records, and the Functions view, no placeholder.
   const graph = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Code graph ⌘5' })
   await graph.click()
@@ -166,13 +176,6 @@ test('each of the 11 places opens by click: Sessions its session window, Models 
   await expect(page.getByRole('navigation', { name: 'Speeches' }).getByRole('button', { name: /^hello-mlx\.wav/ })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'hello-mlx.wav', level: 2 })).toBeVisible()
   await expect(page.getByText(/^Voice isn’t drawn here yet/)).toHaveCount(0)
-  for (const [title, key, item] of [...places].reverse()) {
-    const button = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: `${title} ${key}` })
-    await button.click()
-    await expect(button).toHaveAttribute('aria-current', 'page')
-    await expect(page.getByRole('heading', { name: title, level: 1 })).toBeVisible()
-    await expect(page.getByText(`${title} isn’t drawn here yet. Design item ${item} ports it.`)).toBeVisible()
-  }
   // Sessions is ported (design 1u): the session window, no placeholder -- under the monitor, the Streaming session (1v).
   const sessions = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Sessions ⌘1' })
   await sessions.click()
@@ -1890,6 +1893,235 @@ test('live from the file: graph:refused’s OK clears the selection, the picture
   await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Files' }).click()
   await page.getByRole('navigation', { name: 'Files' }).getByRole('button', { name: 'cli.py' }).click()
   await expect(symbolPane(page).getByRole('heading', { name: 'ingest/cli.py', level: 2 })).toBeVisible()
+  await expect(confirmHost(page)).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+// Design 1p: Suites and Tasks.
+const suitesList = (page: Page) => page.getByRole('navigation', { name: 'Suites' })
+const tasksList = (page: Page) => page.getByRole('navigation', { name: 'Tasks' })
+const sheetHost = (page: Page) => page.getByRole('dialog')
+const refusedStart = "apogee task: --allow write_file: the config says permissions.write_file: deny -- a task's grant is never wider than the config"
+const refusedResume = "apogee task: task task-20261109-021236 cannot resume: --allow write_file: the config says permissions.write_file: deny -- a task's grant is never wider than the config (its grants are held to the config and its agent as they are now)"
+
+/** What a Tasks page shows at every frame that draws one: its sections, in the old words. */
+async function taskSections(page: Page): Promise<void> {
+  for (const label of ['BUDGET', 'PLAN · FROM THE PLAN TURN', 'ROUNDS', 'CHECKS · WHAT DONE MEANS', 'RECENT ACTIVITY']) await expect(page.getByRole('heading', { name: label, exact: true })).toBeVisible()
+  for (const label of ['Rounds', 'Time so far', 'Tokens · local, no charge']) await expect(page.getByText(label, { exact: true })).toBeVisible()
+}
+
+const suitesFrames: Record<string, (page: Page, apogee: 'installed' | 'missing' | 'config-typo') => Promise<void>> = {
+  suites: async (page, apogee) => {
+    await expect(page.getByRole('button', { name: 'New suite…' })).toBeVisible()
+    if (apogee === 'installed') {
+      await expect(suitesList(page).getByRole('button')).toHaveCount(5)
+      await expect(suitesList(page).getByRole('button', { name: /^fast/ })).toHaveAttribute('aria-current', 'true')
+      await expect(suitesList(page).getByRole('button', { name: /^fast/ })).toContainText('default')
+      await expect(suitesList(page).getByRole('button', { name: /^vast/ })).toContainText('it does not fit')
+      await expect(page.getByRole('heading', { name: 'fast', level: 2 })).toBeVisible()
+      for (const label of ['Stop using it by default', 'Open a chat under it', 'Switch the session to it']) await expect(page.getByRole('button', { name: label, exact: true })).toBeVisible()
+      await expect(page.getByText('suite fast: no member holds memory on this machine')).toBeVisible()
+      for (const label of ['ROLE', 'MODEL', 'WINDOW', 'HOLDS']) await expect(page.getByText(label, { exact: true })).toBeVisible()
+      await expect(page.getByText('fastroot', { exact: true })).toBeVisible()
+      await expect(page.getByText("apogee's own verdict, from models status --suite fast: the one chat --suite admits a session by, refusing a suite that does not fit unless forced.")).toBeVisible()
+    } else {
+      await expect(suitesList(page).getByRole('button')).toHaveCount(0)
+      if (apogee === 'missing') await expect(page.getByRole('main')).not.toContainText("isn't installed")
+      else await expect(suitesList(page)).toContainText(`apogee config: ${typoWords}`)
+    }
+  },
+}
+
+const tasksFrames: Record<string, (page: Page, apogee: 'installed' | 'missing' | 'config-typo') => Promise<void>> = {
+  tasks: async (page, apogee) => {
+    if (apogee === 'installed') {
+      await expect(tasksList(page).getByRole('button')).toHaveCount(4)
+      await expect(tasksList(page).getByRole('button').first()).toHaveAttribute('aria-current', 'true')
+      await expect(page.getByRole('heading', { name: 'say hello', level: 2 })).toBeVisible()
+      await expect(page.getByText('running · round 1 of 2').first()).toBeVisible()
+      for (const label of ['Stop after this round', 'Stop now']) await expect(page.getByRole('button', { name: label })).toBeVisible()
+      await expect(page.getByText('in /Users/someone/work · started Oct 21 01:14 · nothing that writes granted · task-20261021-011456')).toBeVisible()
+      await taskSections(page)
+      await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Tasks ⌘4 · 1 running' })).toBeVisible()
+    } else {
+      await expect(tasksList(page).getByRole('button')).toHaveCount(0)
+      if (apogee === 'missing') {
+        await expect(page.getByRole('heading', { level: 2 })).toHaveCount(0)
+        await expect(page.getByRole('main')).not.toContainText("isn't installed")
+      } else {
+        await expect(tasksList(page)).toContainText(`The tasks could not be read: apogee task: ${typoWords}`)
+        // The run the frame starts is refused by the config before it begins: the alert says so, in the CLI's words.
+        await expect(confirmHost(page)).toContainText(`apogee task: ${typoWords.replace(' (exited with status 1)', '')}`)
+      }
+    }
+  },
+  'tasks:denied': async (page, apogee) => {
+    if (apogee !== 'installed') return
+    await expect(page.getByRole('heading', { name: 'Write the report', level: 2 })).toBeVisible()
+    await expect(page.getByText('exhausted · 1 of 1 rounds used').first()).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Run again with 2 rounds' })).toBeVisible()
+    for (const label of ['GRANTS', 'ALLOWED', 'DENIED']) await expect(page.getByRole('heading', { name: label, exact: true })).toBeVisible()
+    await expect(page.getByText("round 1: run_command on ls -- this task's grant")).toBeVisible()
+    await expect(page.getByText('round 1: write_file on report.txt -- nobody present to allow it')).toBeVisible()
+    await expect(page.getByText('denied: write_file on report.txt -- nobody present to allow it')).toBeVisible()
+    await taskSections(page)
+  },
+  'tasks:more': async (page, apogee) => {
+    if (apogee !== 'installed') return
+    await expect(tasksList(page).getByRole('button', { name: /say hello|Say done|Answer|Find|Write/ })).toHaveCount(51)
+    await expect(tasksList(page)).toContainText('The newest 50 of 60 tasks ·')
+    await expect(tasksList(page).getByRole('button', { name: 'Show all' })).toBeVisible()
+  },
+  'tasks:resuming': async (page, apogee) => {
+    if (apogee !== 'installed') return
+    await expect(page.getByRole('heading', { name: 'Find the word', level: 2 })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Resuming…' })).toBeDisabled()
+    for (const label of ['Stop after this round', 'Stop now']) await expect(page.getByRole('button', { name: label })).toBeVisible()
+    await expect(page.getByText('in /Users/someone/work, where it was started')).toBeVisible()
+  },
+  'tasks:refused': async (page, apogee) => {
+    if (apogee === 'missing') return expect(confirmHost(page)).toHaveCount(0)
+    if (apogee === 'config-typo') return expect(confirmHost(page)).toContainText(`apogee task: ${typoWords.replace(' (exited with status 1)', '')}`)
+    await expect(confirmHost(page).getByRole('heading', { name: "That didn't work" })).toBeVisible()
+    await expect(confirmHost(page)).toContainText(refusedStart)
+    await expect(confirmHost(page).getByRole('button')).toHaveCount(1)
+    await expect(sheetHost(page)).toHaveCount(0)
+    await expect(tasksList(page).getByRole('button')).toHaveCount(4)
+  },
+  'tasks:resumerefused': async (page, apogee) => {
+    // No ledger read, no task to resume: nothing is asked of the CLI, so nothing is refused.
+    if (apogee !== 'installed') return expect(confirmHost(page)).toHaveCount(0)
+    await expect(confirmHost(page)).toContainText(refusedResume)
+    await expect(page.getByRole('heading', { name: 'Find the word, writing notes', level: 2 })).toBeVisible()
+    await expect(page.locator('.card').getByText(refusedResume)).toBeVisible()
+  },
+  newtask: async (page) => {
+    await expect(sheetHost(page).getByRole('heading', { name: 'New task' })).toBeVisible()
+    await expect(sheetHost(page).getByRole('button', { name: 'Cancel' })).toBeVisible()
+    if ((await page.evaluate(() => location.search)).includes('apogee=installed')) {
+      await expect(sheetHost(page).getByRole('textbox', { name: 'Goal' })).toHaveValue('Make tests/test_parsers.py pass on Python 3.12')
+      await expect(sheetHost(page).getByText('apogee task run "Make tests/test_parsers.py pass on Python 3.12" --tools --allow write_file --allow run_command --suite fast --output-format stream-json')).toBeVisible()
+      await expect(sheetHost(page).getByRole('button', { name: 'Start task' })).toBeEnabled()
+      for (const group of ['Writing files', 'Running commands']) await expect(sheetHost(page).getByRole('group', { name: group }).getByRole('button', { name: 'Granted' })).toHaveAttribute('aria-pressed', 'true')
+    }
+  },
+  'newtask:recipe': async (page) => {
+    await expect(sheetHost(page).getByRole('heading', { name: 'New task' })).toBeVisible()
+    if ((await page.evaluate(() => location.search)).includes('apogee=installed')) {
+      await expect(sheetHost(page).getByRole('combobox', { name: 'Recipe' })).toHaveValue('digest-folder')
+      await expect(sheetHost(page).getByRole('textbox', { name: 'Input' })).toHaveValue('docs')
+      await expect(sheetHost(page).getByRole('checkbox', { name: 'Allow write_file' })).toBeChecked()
+      await expect(sheetHost(page).getByText('The same run as typing')).toBeVisible()
+      await expect(sheetHost(page).getByText('apogee task run --recipe digest-folder --input docs --allow write_file --suite fast --output-format stream-json')).toBeVisible()
+    }
+  },
+}
+
+for (const [preset, frame] of Object.entries({ ...suitesFrames, ...tasksFrames })) {
+  for (const apogee of ['installed', 'missing', 'config-typo'] as const) {
+    test(`${preset} at ${apogee}: its frame, still, its regions, controls and words, with no console error and no request but the file (design 1p)`, async ({ page }) => {
+      const { errors, requests } = watch(page)
+      const url = `${built}?start=${preset}&still=true&apogee=${apogee}`
+      await page.goto(url)
+      const place = preset === 'suites' ? 'Suites' : 'Tasks'
+      await expect(page.getByRole('heading', { name: place, level: 1 })).toBeVisible()
+      await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: new RegExp(`^${place} ⌘${place === 'Suites' ? 3 : 4}`) })).toHaveAttribute('aria-current', 'page')
+      await frame(page, apogee)
+      expect(errors).toEqual([])
+      expect(requests).toEqual([url])
+    })
+  }
+}
+
+test('Suites and Tasks open by their sidebar buttons from any screen (design 1p; the browser may keep ⌘3 and ⌘4)', async ({ page }) => {
+  await page.goto(`${built}?start=chat:new&still=true`)
+  await page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Suites ⌘3' }).click()
+  await expect(suitesList(page).getByRole('button')).toHaveCount(5)
+  await page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: /^Tasks ⌘4/ }).click()
+  await expect(tasksList(page).getByRole('button')).toHaveCount(3)
+  await expect(page.getByRole('heading', { name: 'Answer when asked', level: 2 })).toBeVisible()
+})
+
+test('live from the file: a suite picked; over budget both actions say anyway; Use for new sessions moves the default and says so; New suite… the old toast; Open a chat under it lands on Sessions (design 1p)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=suites`)
+  await suitesList(page).getByRole('button', { name: /^vast/ }).click()
+  await expect(page.getByRole('button', { name: 'Open a chat under it anyway' })).toHaveAttribute('title', "apogee chat --suite vast --force: run it over this machine's memory")
+  await expect(page.getByRole('button', { name: 'Switch the session to it anyway' })).toBeVisible()
+  await expect(page.getByText(/^suite vast needs 247056 MiB/)).toBeVisible()
+  await suitesList(page).getByRole('button', { name: /^cloud/ }).click()
+  await page.getByRole('button', { name: 'Use for new sessions' }).click()
+  await expect(toast(page, 'cloud is the default suite')).toBeVisible()
+  await expect(suitesList(page).getByRole('button', { name: /^cloud/ })).toContainText('default')
+  await expect(suitesList(page).getByRole('button', { name: /^fast/ })).not.toContainText('default')
+  await expect(page.getByRole('button', { name: 'Stop using it by default' })).toBeVisible()
+  await page.getByRole('button', { name: 'New suite…' }).click()
+  await expect(toast(page, 'New suite: pick a main model and helpers (prototype)')).toBeVisible()
+  await page.getByRole('button', { name: 'Open a chat under it', exact: true }).click()
+  await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Sessions ⌘1' })).toHaveAttribute('aria-current', 'page')
+  expect(errors).toEqual([])
+})
+
+test('live from the file: the recorded run plays through its rounds to exhausted, the sidebar’s Tasks badge gone; Run again on another exhausted task starts a run shown at once (design 1p)', async ({ page }) => {
+  test.setTimeout(60_000)
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=tasks`)
+  await expect(page.getByText('exhausted · 2 of 2 rounds used').first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole('button', { name: 'Run again with 4 rounds' })).toBeVisible()
+  await expect(page.getByText('Round 2', { exact: true })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Tasks ⌘4' })).toBeVisible()
+  await tasksList(page).getByRole('button', { name: /exhausted · 1 of 1 rounds used/ }).click()
+  await page.getByRole('button', { name: 'Run again with 2 rounds' }).click()
+  await expect(page.getByRole('button', { name: 'Stop now' })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Tasks ⌘4 · 1 running' })).toBeVisible()
+  expect(errors).toEqual([])
+})
+
+test('live from the file: Stop after this round says so until its round ends, then halted with Resume -- exhausted where that round is the budget’s last; Stop now on another run ends it cancelled (design 1p)', async ({ page }) => {
+  test.setTimeout(60_000)
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=tasks`)
+  await page.getByRole('button', { name: 'Stop after this round' }).click()
+  const halting = page.getByText(/running · halts when (the plan|round [12]) ends/).first()
+  await expect(halting).toBeVisible()
+  // A halt that lands as round 2 ends, the last of the budget, ends exhausted (the record's "Where a stop lands"); one landing earlier ends halted.
+  const last = (await halting.innerText()).includes('round 2')
+  await expect(page.getByText(last ? 'exhausted · 2 of 2 rounds used' : 'halted · resumes from its ledger').first()).toBeVisible({ timeout: 20_000 })
+  if (!last) await expect(page.getByRole('button', { name: 'Resume', exact: true })).toBeVisible()
+  await page.goto(`${built}?start=tasks`)
+  await page.getByRole('button', { name: 'Stop now' }).click()
+  await expect(page.getByText('cancelled by you').first()).toBeVisible({ timeout: 10_000 })
+  expect(errors).toEqual([])
+})
+
+test('live from the file: the stalled task’s resume starts up, then runs round 3 to done (design 1p)', async ({ page }) => {
+  test.setTimeout(60_000)
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=tasks:resuming`)
+  await expect(page.getByText('done · every check passed').first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText('Round 3', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Resume' })).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('Show all lists every task of the 60; the New task sheet: the goal turns Start on, a recipe shows the same run as typing, Cancel closes it; the refused start’s alert closes on OK (design 1p)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=tasks:more&still=true`)
+  await tasksList(page).getByRole('button', { name: 'Show all' }).click()
+  await expect(tasksList(page).getByRole('button', { name: /say hello|Say done|Answer|Find|Write/ })).toHaveCount(61)
+  await expect(tasksList(page).getByRole('button', { name: 'Show all' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'New task…' }).click()
+  await expect(sheetHost(page).getByRole('button', { name: 'Start task' })).toBeDisabled()
+  await sheetHost(page).getByRole('textbox', { name: 'Goal' }).fill('Tidy the README')
+  await expect(sheetHost(page).getByRole('button', { name: 'Start task' })).toBeEnabled()
+  await expect(sheetHost(page).getByText('apogee task run "Tidy the README" --tools --allow write_file --suite fast --output-format stream-json')).toBeVisible()
+  await sheetHost(page).getByRole('combobox', { name: 'Recipe' }).selectOption('changelog-draft')
+  await expect(sheetHost(page).getByText('The same run as typing')).toBeVisible()
+  await expect(sheetHost(page).getByRole('button', { name: 'Start task' })).toBeDisabled()
+  await sheetHost(page).getByRole('button', { name: 'Cancel' }).click()
+  await expect(sheetHost(page)).toHaveCount(0)
+  await page.goto(`${built}?start=tasks:refused&still=true`)
+  await confirmHost(page).getByRole('button', { name: 'OK' }).click()
   await expect(confirmHost(page)).toHaveCount(0)
   expect(errors).toEqual([])
 })

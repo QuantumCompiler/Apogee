@@ -56,6 +56,40 @@ export interface Answer {
    * resumes from that write, as the CLI resumes a stopped composition.
    */
   readonly writes?: readonly FolderWrite[]
+  /**
+   * The stops another call asks of this job while it runs (design 1p): `task
+   * halt <id>` and `task cancel <id>`, each a command the CLI answers at
+   * once while the running process stops on its own -- a halt when the round
+   * in flight ends, a cancel now -- so the job plays the ending of its own
+   * run stopped there.
+   */
+  readonly asked?: readonly AskedStop[]
+}
+
+/**
+ * A stop another call asks of a running job (design 1p): once a call of `by`
+ * has been answered with a success while the job runs, the job ends as
+ * `endings` says from the line it has reached -- the first ending whose
+ * `before` is past the stdout lines played. Past them all, it plays on as
+ * recorded: the run's own end comes first, as a task's last round decides
+ * done or exhausted before a halt is read.
+ */
+export interface AskedStop {
+  /** The call that asks it, whole: `['task', 'halt', '<id>']`. */
+  readonly by: readonly string[]
+  readonly endings: readonly AskedEnding[]
+}
+
+/** How a job asked to stop ends, by where its replay stands (design 1p). */
+export interface AskedEnding {
+  /** It applies while fewer than this many stdout lines have played. */
+  readonly before: number
+  /** The job plays its own lines through this many first -- the end of the turn it lands at, for a halt; none, for a cancel, which ends it now. */
+  readonly through?: number
+  /** Then this in place of the rest: the closing lines the CLI writes for the run stopped there. */
+  readonly stdout: string
+  /** How it then exits: 0 unless named. */
+  readonly exit?: number
 }
 
 /**
@@ -100,6 +134,8 @@ export interface ReplayRules {
   readonly writes: readonly FolderWrite[]
   /** Resumed (design 1l): its first line, then on from the write its last Stop left, that write's file written again first. */
   readonly resumeFrom: FolderWrite | undefined
+  /** The stops another call may ask of it (design 1p); none unless named. */
+  readonly asked: readonly AskedStop[]
 }
 
 /**
@@ -237,6 +273,8 @@ export class StandInChild {
   private readonly resumes = new Map<string, FolderWrite>()
   /** The folders the CLI writes into (design 1k): the preset's files, and what the jobs it replays write as they run (1l). */
   readonly folders: StandInFolders
+  /** Who hears a call answered with a success (design 1p): a running job a stop is asked of. */
+  private readonly hearers = new Set<{ readonly by: readonly string[]; readonly hear: () => void }>()
 
   constructor(
     settings: { readonly rules: Rules; readonly apogee: ApogeeMode; readonly folders?: Folders },
@@ -276,12 +314,27 @@ export class StandInChild {
     const count = this.answered.get(rule) ?? 0
     this.answered.set(rule, count + 1)
     const answer = answers[Math.min(count, answers.length - 1)] ?? {}
-    if ((answer.exit ?? 0) === 0 && answer.timedOut !== true) this.succeeded.add(StandInChild.key(kind, args))
+    if ((answer.exit ?? 0) === 0 && answer.timedOut !== true) {
+      this.succeeded.add(StandInChild.key(kind, args))
+      // A stop it asks of a running job reaches it once the CLI has answered (design 1p).
+      for (const hearer of [...this.hearers]) if (hearer.by.length === args.length && hearer.by.every((word, index) => word === args[index])) hearer.hear()
+    }
     // Stopped before: the same command resumes from the write its Stop left (design 1l).
     const resumeFrom = this.resumes.get(StandInChild.key(kind, args))
     this.resumes.delete(StandInChild.key(kind, args))
     const replay = StandInChild.replay(answer)
     return { started: true, run: StandInChild.captured(answer), replay: resumeFrom && replay.writes.includes(resumeFrom) ? { ...replay, resumeFrom } : replay }
+  }
+
+  /**
+   * Hears every call of exactly `by` answered with a success from now on
+   * (design 1p): how a running job hears a stop asked of it. Returns its
+   * leave.
+   */
+  hearing(by: readonly string[], hear: () => void): () => void {
+    const hearer = { by, hear }
+    this.hearers.add(hearer)
+    return () => this.hearers.delete(hearer)
   }
 
   /**
@@ -301,7 +354,7 @@ export class StandInChild {
 
   /** An answer's replay rules, each as 1d replayed it unless the answer names it. */
   static replay(answer: Answer): ReplayRules {
-    return { exitAfter: answer.exitAfter ?? 0, holdAt: answer.holdAt, freeze: answer.freeze, continuations: answer.continuations, cancelled: answer.cancelled, busy: answer.busy ?? false, writes: answer.writes ?? [], resumeFrom: undefined }
+    return { exitAfter: answer.exitAfter ?? 0, holdAt: answer.holdAt, freeze: answer.freeze, continuations: answer.continuations, cancelled: answer.cancelled, busy: answer.busy ?? false, writes: answer.writes ?? [], resumeFrom: undefined, asked: answer.asked ?? [] }
   }
 
   /** Logs what nobody recorded, as `<kind>: <what>`: a call, or a chat's turn past its recording. */
