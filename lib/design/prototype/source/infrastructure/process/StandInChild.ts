@@ -77,6 +77,12 @@ export interface ReplayRules {
 export interface Rule {
   /** The arguments after `apogee`, as the caller gives them (a read without its `--output-format`). */
   readonly arguments: readonly string[]
+  /**
+   * Its arguments answer a call only whole (design 1h): no longer line is
+   * answered by it, so a recording of `models quantize <h>` never answers
+   * `models quantize <h> -t Q8_0`, which printed something else.
+   */
+  readonly exact?: boolean
   readonly answer: Answer | readonly [Answer, ...Answer[]]
 }
 
@@ -207,6 +213,7 @@ export class StandInChild {
     for (const rule of rules) {
       const prefix = rule.arguments
       if (prefix.length > args.length || prefix.some((word, index) => word !== args[index])) continue
+      if (rule.exact === true && prefix.length !== args.length) continue
       if (!best || prefix.length >= best.arguments.length) best = rule
     }
     return best

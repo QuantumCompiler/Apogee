@@ -95,7 +95,8 @@ export class SessionLibraryViewModel extends Observable {
   /** Shows Sessions, an open overlay (the console, the monitor) left as it is, as the old row menu's `act` does. */
   goToSessions: (() => void) | undefined = undefined
   /** The Models place, from the inspector and the session's model menu. */
-  openModels: (() => void) | undefined = undefined
+  /** Models, on the tab a door names: Backends at a model (Open in library), or Roles (Change helpers) (design 1h). */
+  openModels: ((tab?: 'backends' | 'roles', model?: string) => void) | undefined = undefined
   /** Told when a row menu opens or closes, so the shell's scrim covers the window while it is open. */
   menuChanged: ((owner: string | undefined) => void) | undefined = undefined
 
@@ -276,7 +277,7 @@ export class SessionLibraryViewModel extends Observable {
         void this.chooseSuite()
         return
       case 'openLibrary':
-        this.openModels?.()
+        this.openModels?.('backends', this.current.face().header.model.name)
         return
       case 'say':
         this.say?.(action.text)

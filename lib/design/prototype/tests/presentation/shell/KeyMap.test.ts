@@ -55,8 +55,9 @@ describe('the places and their keys, as Destination.swift and KeyMap.swift hold 
 
 describe('a place not yet ported', () => {
   test('names the place and the design item that ports it', () => {
-    expect(destinations.map((destination) => placeholderOf(destination)?.item)).toEqual([undefined, '1h', '1p', '1p', '1o', '1k', '1m', '1o', '1j', '1n', '1n'])
+    expect(destinations.map((destination) => placeholderOf(destination)?.item)).toEqual([undefined, undefined, '1p', '1p', '1o', '1k', '1m', '1o', '1j', '1n', '1n'])
     expect(placeholderOf('sessions'), 'Sessions is the session window (1u): no placeholder').toBeUndefined()
-    expect(placeholderOf('models')).toEqual({ title: 'Models', item: '1h', says: 'Models isn’t drawn here yet. Design item 1h ports it.' })
+    expect(placeholderOf('models'), 'Models is its place (1h): no placeholder').toBeUndefined()
+    expect(placeholderOf('suites')).toEqual({ title: 'Suites', item: '1p', says: 'Suites isn’t drawn here yet. Design item 1p ports it.' })
   })
 })

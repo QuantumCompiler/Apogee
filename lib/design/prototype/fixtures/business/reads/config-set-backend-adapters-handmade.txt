@@ -1,0 +1,16 @@
+edited backend 'Gemma4-12B-4bit' in /Users/someone/.apogee/config/config.json: set adapters; adapters pinned to /Users/someone/.apogee/models/Gemma4-12B/mlx/7a8b9c0d1e2f (sha256 7a8b9c0d1e2f)
+edited backend 'Gemma4-12B-4bit' in /Users/someone/.apogee/config/config.json: cleared adapters
+edited backend 'Gemma4-E4B-4bit' in /Users/someone/.apogee/config/config.json: set adapters; adapters pinned to /Users/someone/.apogee/models/Gemma4-E4B/mlx/2b3c4d5e6f70 (sha256 2b3c4d5e6f70)
+edited backend 'Gemma4-E4B-4bit' in /Users/someone/.apogee/config/config.json: cleared adapters
+edited backend 'Qwen3-8B-4bit' in /Users/someone/.apogee/config/config.json: set adapters; adapters pinned to /Users/someone/.apogee/models/Qwen3-8B/mlx/1a2b3c4d5e6f (sha256 1a2b3c4d5e6f)
+edited backend 'Qwen3-8B-4bit' in /Users/someone/.apogee/config/config.json: cleared adapters
+edited backend 'helper' in /Users/someone/.apogee/config/config.json: set adapters; adapters pinned to /Users/someone/.apogee/models/base/gguf/dddddddddddd/base-Q4_K_M.gguf (sha256 dddddddddddd)
+edited backend 'helper' in /Users/someone/.apogee/config/config.json: cleared adapters
+edited backend 'llama3.2-1b-Q4KM' in /Users/someone/.apogee/config/config.json: set adapters; adapters pinned to /Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/8d51e6c04a27/Llama3.2-1B-Instruct-Q4KM.gguf (sha256 8d51e6c04a27)
+edited backend 'llama3.2-1b-Q4KM' in /Users/someone/.apogee/config/config.json: cleared adapters
+edited backend 'root' in /Users/someone/.apogee/config/config.json: set adapters; adapters pinned to /Users/someone/.apogee/models/base/gguf/dddddddddddd/base-Q4_K_M.gguf (sha256 dddddddddddd)
+edited backend 'root' in /Users/someone/.apogee/config/config.json: cleared adapters
+edited backend 'scribe' in /Users/someone/.apogee/config/config.json: set adapters; adapters pinned to /Users/someone/.apogee/models/base/gguf/dddddddddddd/base-Q4_K_M.gguf (sha256 dddddddddddd)
+edited backend 'scribe' in /Users/someone/.apogee/config/config.json: cleared adapters
+edited backend 'vast' in /Users/someone/.apogee/config/config.json: set adapters; adapters pinned to /Users/someone/.apogee/models/vast/gguf/eeeeeeeeeeee/vast-F16.gguf (sha256 eeeeeeeeeeee)
+edited backend 'vast' in /Users/someone/.apogee/config/config.json: cleared adapters

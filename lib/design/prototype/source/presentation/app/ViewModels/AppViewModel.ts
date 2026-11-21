@@ -1,3 +1,4 @@
+import { ChildRegistry } from '../../../business/jobs/ChildRegistry'
 import { JobStarter } from '../../../business/jobs/SupervisedJob'
 import { ReadRunner } from '../../../business/reads/ReadRunner'
 import { ApogeeClient } from '../../../business/session/ApogeeClient'
@@ -7,7 +8,10 @@ import type { Preset } from '../../../infrastructure/process/Preset'
 import { StandInChild } from '../../../infrastructure/process/StandInChild'
 import type { ModeRules, Rules } from '../../../infrastructure/process/StandInChild'
 import { ConsoleViewModel } from '../../console/ViewModels/ConsoleViewModel'
+import { handles } from '../../models/Previews/ModelsWorlds'
 import { ModelsViewModel } from '../../models/ViewModels/ModelsViewModel'
+import type { ModelsConfirm, ModelsTab } from '../../models/ViewModels/ModelsViewModel'
+import { ConvertForm, QuantizeForm } from '../../models/ViewModels/StoreForms'
 import { MonitorViewModel } from '../../monitor/ViewModels/MonitorViewModel'
 import type { Compactions } from '../../session/ViewModels/Compactions'
 import type { SessionViewModel } from '../../session/ViewModels/SessionViewModel'
@@ -82,6 +86,8 @@ export class AppViewModel extends Observable {
    */
   readonly consoleChild: StandInChild
   readonly reads: ReadRunner
+  /** Every child the app runs, in one place (design 1h): what the sidebar's running counts read, without importing a place. */
+  readonly registry = new ChildRegistry()
   readonly jobs: JobStarter
   readonly chats: ApogeeClient
   readonly theme: ThemeService
@@ -111,15 +117,15 @@ export class AppViewModel extends Observable {
     this.child = new StandInChild(preset, modes)
     this.clock = new Clock(preset.clock, timers)
     this.reads = new ReadRunner(this.child)
-    this.jobs = new JobStarter(this.child, this.clock)
+    this.jobs = new JobStarter(this.child, this.clock, this.registry)
     this.chats = new ApogeeClient(this.child, this.clock)
     this.theme = new ThemeService()
     this.shell = new ShellViewModel(this.clock, this.theme)
     this.monitor = new MonitorViewModel(this.reads, this.clock)
-    this.models = new ModelsViewModel()
+    this.models = new ModelsViewModel(this.reads, this.jobs, this.clock)
     this.library = new SessionLibraryViewModel(this.chats, this.reads, this.jobs, this.clock, samples)
     this.consoleChild = new StandInChild({ rules: AppViewModel.consoleRules(preset), apogee: preset.apogee }, modes)
-    this.console = new ConsoleViewModel(new ReadRunner(this.consoleChild), new JobStarter(this.consoleChild, this.clock))
+    this.console = new ConsoleViewModel(new ReadRunner(this.consoleChild), new JobStarter(this.consoleChild, this.clock, this.registry))
     this.places = { models: this.models }
 
     // The library's doors, as closures: the toast, the shell's hosts, Sessions (an overlay closed, or left open), Models and the scrim.
@@ -132,7 +138,8 @@ export class AppViewModel extends Observable {
       this.shell.go('sessions')
     }
     this.library.goToSessions = () => this.shell.go('sessions')
-    this.library.openModels = () => this.shell.go('models')
+    // Open in library lands on Backends at the session's model, Change helpers on Roles (design 1h).
+    this.library.openModels = (tab, model) => this.openModels(tab, model)
     // The list draws the open session's row current only on Sessions, as the old list does.
     this.library.showing(this.shell.route === 'sessions')
     this.library.menuChanged = (owner) => (owner === undefined ? this.shell.closeMenus() : this.shell.openMenu(owner))
@@ -143,6 +150,20 @@ export class AppViewModel extends Observable {
     this.watchSession()
     // The places' own keys: Sessions' ⌘N, ⇧⌘N, ⌥⌘N, ⌥⌘I and ⇧⌘F.
     this.shell.placeKeys = (keys) => this.library.press(keys)
+
+    // The Models place's doors (design 1h): the toast, the shell's hosts, the open session, Settings, the places.
+    this.models.say = (text) => this.shell.say(text)
+    this.models.present = (sheet) => this.shell.openSheet(sheet)
+    this.models.dismissSheet = () => this.shell.closeSheet()
+    this.models.ask = (kind) => this.shell.ask(kind)
+    this.models.useInSession = (backend) => {
+      this.session.pickModel(backend)
+      this.library.showSessions?.()
+    }
+    this.models.openSettings = () => this.shell.perform({ kind: 'openSettings' })
+    this.models.goTo = (place) => this.shell.go(place)
+    this.models.subscribe(() => this.changed())
+    this.registry.onChange(() => this.changed())
 
     // The links between places, as closures: the monitor's two doors.
     this.monitor.openLibrary = () => {
@@ -190,6 +211,37 @@ export class AppViewModel extends Observable {
   /** Saved chats compacting as jobs (GUI 6b): the library's. */
   get compactions(): Compactions {
     return this.library.compactions
+  }
+
+  /**
+   * The places' running counts, the sidebar's badges (design 1h): read from
+   * the shared registry of children, never a place's own list -- Models'
+   * is every store run going on, a pull, a conversion, a quantization or a
+   * check of the files, whoever started it.
+   */
+  get placeRuns(): { readonly models: number } {
+    const store = ['pull', 'convert', 'quantize', 'repair']
+    return { models: this.registry.children('job').filter((job) => store.some((verb) => job.label.startsWith(`apogee models ${verb} `))).length }
+  }
+
+  /** Models, on the tab a door names: Backends at a model, or Roles (the inspector's two doors, design 1h). */
+  openModels(tab: ModelsTab = 'backends', model?: string): void {
+    this.shell.closeOverlay()
+    this.shell.go('models')
+    if (tab === 'backends') void this.models.openBackend(model)
+    else this.models.pick(tab)
+  }
+
+  /** A Models confirm answered: yes, or its second door; the host closed first. */
+  async confirmModels(kind: ModelsConfirm, alternative: boolean): Promise<void> {
+    this.shell.dismissConfirm()
+    await this.models.confirm(kind, alternative)
+  }
+
+  /** A Models confirm's Cancel. */
+  dismissModels(kind: ModelsConfirm): void {
+    this.shell.dismissConfirm()
+    this.models.dismissPending(kind)
   }
 
   /** The sidebar strip's numbers: the monitor's. */
@@ -267,6 +319,7 @@ export class AppViewModel extends Observable {
     const found = this.child.locateBinary()
     const binary = found.case === 'found' ? found.binary : undefined
     this.monitor.connect(binary)
+    this.models.connect(binary)
     // The console's child shares the preset's mode, so it finds the binary where `child` does.
     this.console.connect(binary)
     await this.library.start()
@@ -303,6 +356,10 @@ export class AppViewModel extends Observable {
         this.console.setInput(consoleLines.typed)
         await this.console.complete()
       }
+      return
+    }
+    if (where === 'models' || where === 'download') {
+      await this.openModelsPreset(where === 'download' ? 'download' : (sub ?? ''))
       return
     }
     if (where === 'execute') {
@@ -391,6 +448,57 @@ export class AppViewModel extends Observable {
         if (last !== undefined) library.toggleRowMenu(last)
         return
       }
+    }
+  }
+
+  /**
+   * A Models preset (design 1h), as the old `applyStart('models:…')` sets it
+   * up: the Streaming session at its starting frame behind it, the place
+   * read, then its tab, its selection, and the sheet, confirm or job the old
+   * frame shows.
+   */
+  private async openModelsPreset(sub: string): Promise<void> {
+    await this.openStreaming()
+    const models = this.models
+    const store = models.store
+    this.shell.go('models')
+    await models.refresh()
+    const tab: Readonly<Record<string, ModelsTab>> = { downloads: 'jobs', store: 'store', convert: 'store', register: 'store', roles: 'roles', delete: 'store', notran: 'jobs' }
+    models.pick(tab[sub] ?? 'backends')
+    const bytes = (handle: string) => store.infos.get(handle)?.data?.bytes
+    switch (sub) {
+      case '':
+        await models.select('llama3.2-1b-Q4KM')
+        return
+      case 'downloads':
+        // The Llama conversion with --register-with Q4_K_M, its store read first, standing where the preset's ticks leave it.
+        await models.downloads.convert(ConvertForm.gguf(handles.llamaSnapshot, bytes(handles.llamaSnapshot)))?.ready
+        return
+      case 'store':
+        await store.select(handles.llamaSnapshot)
+        return
+      case 'convert':
+        await store.select(handles.llamaSnapshot)
+        await store.actAsync('convertToGGUF')
+        return
+      case 'register':
+        await store.select(handles.gemmaMlx)
+        await store.actAsync('register')
+        return
+      case 'delete':
+        await store.select(handles.llamaQ4)
+        await store.actAsync('delete')
+        return
+      case 'notran': {
+        // GUI 6d: a quantization stopped while its first store read ran; no child ever started.
+        const download = models.downloads.quantize(new QuantizeForm(handles.llamaF16, 'Llama3.2-1B-Instruct', bytes(handles.llamaF16)))
+        if (download) await models.downloads.stop(download)
+        return
+      }
+      case 'download':
+        await models.select('Gemma4-E4B-4bit')
+        models.openDownload('meta-llama/Llama-3.2-1B-Instruct')
+        return
     }
   }
 

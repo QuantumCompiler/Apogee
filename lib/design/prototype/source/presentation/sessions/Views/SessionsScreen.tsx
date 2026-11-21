@@ -237,7 +237,7 @@ export function InspectorPane({ model }: { readonly model: SessionLibraryViewMod
             </span>,
           ])}
         </div>
-        <button type="button" className="btn-g" onClick={() => model.openModels?.()} style={small}>
+        <button type="button" className="btn-g" onClick={() => model.openModels?.('backends', face.model.summary.name)} style={small}>
           Open in library
         </button>
       </Section>
@@ -263,7 +263,7 @@ export function InspectorPane({ model }: { readonly model: SessionLibraryViewMod
           ])}
         </div>
         {face.helpers.failure !== '' ? <p style={{ margin: '8px 0 0', fontSize: 'var(--t-meta)', color: 'var(--status-error)', overflowWrap: 'anywhere' }}>{face.helpers.failure}</p> : null}
-        <button type="button" className="btn-g" onClick={() => model.openModels?.()} style={small}>
+        <button type="button" className="btn-g" onClick={() => model.openModels?.('roles')} style={small}>
           Change helpers
         </button>
       </Section>

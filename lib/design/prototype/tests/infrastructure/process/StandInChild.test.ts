@@ -41,6 +41,13 @@ describe('the stand-in child: its rule table', () => {
     expect(printed(stand.run('reads', ['store', 'info'])).stdout).toBe(storeListKinds)
   })
 
+  test('an exact rule answers its arguments whole and no longer line (design 1h): `models quantize <h>` is not `models quantize <h> -t Q8_0`', () => {
+    const stand = child({ jobs: [{ arguments: ['models', 'quantize', 'x/gguf/1'], exact: true, answer: { stdout: storeList } }] })
+    expect(printed(stand.run('jobs', ['models', 'quantize', 'x/gguf/1'])).stdout).toBe(storeList)
+    expect(stand.run('jobs', ['models', 'quantize', 'x/gguf/1', '-t', 'Q8_0'])).toEqual({ started: false, reason: 'no recorded answer for apogee models quantize x/gguf/1 -t Q8_0' })
+    expect(stand.unanswered).toEqual(['jobs: apogee models quantize x/gguf/1 -t Q8_0'])
+  })
+
   test('of two equally long prefixes, the later rule wins (PreviewStore\'s rule)', () => {
     const stand = child({
       reads: [

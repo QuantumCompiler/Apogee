@@ -317,7 +317,16 @@ describe('no counter remains: every line of the transcript is a replayed eventâ€
 describe("every stream's provenance: each file a preset names exists, and is a recording or named *-handmade*", () => {
   const here = dirname(fileURLToPath(import.meta.url))
   const prototype = resolve(here, '..', '..', '..')
-  const previews = ['source/presentation/session/Previews/SessionPresets.ts', 'source/presentation/session/Previews/ScenarioStreams.ts', 'source/presentation/monitor/Previews/MonitorPreset.ts', 'source/presentation/app/Previews/ModeRules.ts']
+  // The Models place's too (design 1h): its worlds, its preview's mode recording and the narration card's.
+  const previews = [
+    'source/presentation/session/Previews/SessionPresets.ts',
+    'source/presentation/session/Previews/ScenarioStreams.ts',
+    'source/presentation/monitor/Previews/MonitorPreset.ts',
+    'source/presentation/app/Previews/ModeRules.ts',
+    'source/presentation/models/Previews/ModelsWorlds.ts',
+    'source/presentation/models/Previews/ModelsPreview.ts',
+    'source/presentation/models/Previews/DeleteNarrationCard.preview.tsx',
+  ]
   const named = previews.flatMap((file) => [...readFileSync(join(prototype, file), 'utf8').matchAll(/from '((?:@recorded|(?:\.\.\/)+fixtures)\/[^'?]+)\?raw'/g)].map((match) => ({ file, path: match[1] ?? '' })))
   const captured = new Set(Object.values(recipes).flatMap((recipe) => [recipe.output, ...(recipe.chatsShow ? [recipe.chatsShow] : []), ...(recipe.resumes ?? []).map((resume) => resume.output)]))
 

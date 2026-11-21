@@ -6,6 +6,7 @@ import { BoundedTail } from '../../infrastructure/process/BoundedTail'
 import { ChildExit } from '../../infrastructure/process/ChildExit'
 import type { CapturedRun, StandInChild } from '../../infrastructure/process/StandInChild'
 import { LineFramer } from '../../infrastructure/process/LineFramer'
+import { ChildRegistry } from './ChildRegistry'
 
 /** How a job ended: the Mac app's `JobEnd` (`SupervisedJob.swift:140-176`). */
 export interface JobEnd {
@@ -70,18 +71,26 @@ export interface JobStarting {
 /**
  * The prototype's job starter (design 1d): each job is its rule's recording,
  * replayed on the clock by a `SupervisedJob`. The Mac app's `JobStarter`
- * starts real children; this one starts none.
+ * starts real children; this one starts none. Given the app's registry
+ * (design 1h, the Mac's `JobStarter(registry:)`), it lists each job it
+ * starts there, labelled by its command, until its end is said.
  */
 export class JobStarter implements JobStarting {
   constructor(
     readonly child: StandInChild,
     readonly clock: Clock,
+    readonly registry?: ChildRegistry,
   ) {}
 
   startJob(_binary: string, args: readonly string[], streaming: boolean, _folder?: string): JobRunning {
     const answer = this.child.run('jobs', args)
     if (!answer.started) return SupervisedJob.notStarted(answer.reason)
-    return SupervisedJob.replay(answer.run, streaming, this.clock, answer.replay.exitAfter)
+    const job = SupervisedJob.replay(answer.run, streaming, this.clock, answer.replay.exitAfter)
+    if (this.registry && !job.finished) {
+      const registration = this.registry.register('job', ChildRegistry.label(args), () => job.stop())
+      job.onEnd(() => registration.leave())
+    }
+    return job
   }
 }
 
@@ -102,6 +111,7 @@ export class SupervisedJob implements JobRunning {
   /** Ticks still to wait after the last line before `.ended`: the rule's `exitAfter`. */
   private held: number
   private leave: () => void = () => {}
+  private ends: Array<() => void> = []
 
   private constructor(
     private readonly run: CapturedRun | undefined,
@@ -131,6 +141,17 @@ export class SupervisedJob implements JobRunning {
     return job
   }
 
+  /** Whether its end has been said. */
+  get finished(): boolean {
+    return this.continuation.finished
+  }
+
+  /** Tells `then` once its end is said: how the registry hears a job leave. */
+  onEnd(then: () => void): void {
+    if (this.continuation.finished) then()
+    else this.ends.push(then)
+  }
+
   async stop(_grace?: number): Promise<void> {
     if (this.continuation.finished) return
     this.end(JobEnd.of(ChildExit.exited(130), new BoundedTail(), true))
@@ -155,5 +176,8 @@ export class SupervisedJob implements JobRunning {
     this.leave()
     this.continuation.yield(JobUpdate.ended(end))
     this.continuation.finish()
+    const ends = this.ends
+    this.ends = []
+    for (const then of ends) then()
   }
 }

@@ -15,7 +15,7 @@ function unread(value: unknown, at: string, depth = 0): string[] {
   return []
 }
 
-/** What the views read of the app: the monitor's face and strip, the shell's state, every place's placeholder, the session's view state (its header, transcript and composer, design 1u), and the Sessions place's list, inspector and door and the console (1g). */
+/** What the views read of the app: the monitor's face and strip, the shell's state, every place's placeholder, the session's view state (its header, transcript and composer, design 1u), the Sessions place's list, inspector and door and the console (1g), and the Models place's every tab, sheet and confirm and the sidebar's running counts (1h). */
 function whatTheViewsRead(app: AppViewModel) {
   const shell = app.shell
   return {
@@ -26,6 +26,11 @@ function whatTheViewsRead(app: AppViewModel) {
     session: app.session.face(),
     sessions: { list: app.library.listFace(), inspector: app.library.inspector(), door: app.library.door(), info: app.library.info ?? 'none', renaming: app.library.renaming ?? 'none' },
     console: app.console.face(),
+    // The Models place (1h): its tabs, Backends, Stored weights, Jobs, Roles and its sheets, and its confirms' words and the open store sheet.
+    models: app.models.face(),
+    modelsSheet: app.models.store.sheet() ?? 'none',
+    modelsConfirms: (['model', 'storeDelete', 'storeModelDelete', 'unregister', 'registerAll'] as const).map((kind) => app.models.confirmWords(kind) ?? 'none'),
+    running: app.placeRuns,
     variables: app.theme.variables,
   }
 }
@@ -44,6 +49,8 @@ async function walk(app: AppViewModel, name: string, pressSuite = false): Promis
   await new Promise((resolve) => setTimeout(resolve, 0))
   // The inspector's reads, made whether or not the preset opens it (⌥⌘I opens it on every one).
   await app.library.inspectorAppeared()
+  // The Models place's reads too (1h): it opens from every screen.
+  await app.models.appeared()
   expect(unread(whatTheViewsRead(app), name)).toEqual([])
   const face = app.session.face()
   if (pressSuite && (face.empty.chooseSuite || face.header.canSwitchSuite)) {
@@ -59,7 +66,7 @@ async function walk(app: AppViewModel, name: string, pressSuite = false): Promis
 }
 
 describe("the presets: the old prototype's 30-tick check's successor", () => {
-  test('the table holds the monitor, the session’s thirteen in the old data-props order -- 1u’s four plain ones and 1v’s nine scenarios and states -- and 1g’s execute and console', () => {
+  test('the table holds the monitor, the session’s thirteen in the old data-props order -- 1u’s four plain ones and 1v’s nine scenarios and states -- 1g’s execute and console, and 1h’s nine Models presets', () => {
     expect(Object.keys(presets)).toEqual([
       'monitor',
       'chat',
@@ -77,6 +84,15 @@ describe("the presets: the old prototype's 30-tick check's successor", () => {
       'chat:compacting',
       'execute',
       'console',
+      'models',
+      'models:downloads',
+      'models:store',
+      'models:convert',
+      'models:register',
+      'models:roles',
+      'models:delete',
+      'models:notran',
+      'download',
     ])
   })
 
@@ -103,6 +119,28 @@ describe("the presets: the old prototype's 30-tick check's successor", () => {
     const planted = { ...preset, rules: { ...preset.rules, chats: [] } }
     const app = new AppViewModel(planted, modeRules)
     expect(await walk(app, 'planted')).toEqual(['chats: apogee chat --output-format stream-json --input-format stream-json --tools'])
+  })
+
+  test('a planted Models preset missing the selected backend’s models info fails, naming the unanswered read (1h)', async () => {
+    const { preset } = presetFor({ start: 'models', still: true, apogee: 'installed' })
+    const reads = (preset.rules.reads ?? []).filter((rule) => rule.arguments.join(' ') !== 'models info llama3.2-1b-Q4KM')
+    const app = new AppViewModel({ ...preset, rules: { ...preset.rules, reads } }, modeRules)
+    expect(new Set(await walk(app, 'planted'))).toEqual(new Set(['reads: apogee models info llama3.2-1b-Q4KM']))
+  })
+
+  test('a planted models info with a missing field draws its absence, never undefined: no model_path, so no Path, Weights or Files (1h)', async () => {
+    const { preset } = presetFor({ start: 'models', still: true, apogee: 'installed' })
+    const planted = (preset.rules.reads ?? []).map((rule) => {
+      if (rule.arguments.join(' ') !== 'models info llama3.2-1b-Q4KM') return rule
+      const answer = Array.isArray(rule.answer) ? rule.answer[0] : rule.answer
+      const document = JSON.parse((answer as { stdout: string }).stdout) as { fields: Array<{ field: string }> }
+      return { ...rule, answer: { stdout: JSON.stringify({ ...document, fields: document.fields.filter((field) => field.field !== 'model_path') }) } }
+    })
+    const app = new AppViewModel({ ...preset, rules: { ...preset.rules, reads: planted } }, modeRules)
+    expect(await walk(app, 'planted')).toEqual([])
+    const detail = app.models.face().backends.detail
+    expect(detail.facts.map((fact) => fact.label)).not.toContain('Path')
+    expect(detail.files).toEqual([])
   })
 
   test('the walk finds what it looks for', () => {

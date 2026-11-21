@@ -613,3 +613,118 @@ test("chat:crash: the inspector's turn failed -- vast, in the error color, the C
   expect(face.rows.map((row) => [row.label, row.value, row.tone])).toEqual([['Model', 'vast', 'error']])
   expect(face.rows[0]?.sub).toMatch(/^vast: could not load the model at /)
 })
+
+describe('the Models place in the composition (design 1h)', () => {
+  test('models: Backends over the store world, llama3.2-1b-Q4KM’s details open, the Streaming session behind it, nothing unanswered', async () => {
+    const app = await started('models')
+    expect(app.shell.route).toBe('models')
+    expect(app.models.tab).toBe('backends')
+    expect(app.models.face().backends.detail.name).toBe('llama3.2-1b-Q4KM')
+    expect(app.session.connection.case).toBe('connected')
+    expect(app.child.unanswered).toEqual([])
+  })
+
+  test('each Models preset opens on its tab, sheet or confirm, as the old applyStart sets it', async () => {
+    const expectations: ReadonlyArray<readonly [string, string, string, string]> = [
+      ['models:downloads', 'jobs', 'none', 'none'],
+      ['models:store', 'store', 'none', 'none'],
+      ['models:convert', 'store', 'storeConvert', 'none'],
+      ['models:register', 'store', 'storeRegister', 'none'],
+      ['models:roles', 'roles', 'none', 'none'],
+      ['models:delete', 'store', 'none', 'storeDelete'],
+      ['models:notran', 'jobs', 'none', 'none'],
+      ['download', 'backends', 'download', 'none'],
+    ]
+    for (const [start, tab, sheet, confirm] of expectations) {
+      const app = await started(start)
+      expect([start, app.shell.route, app.models.tab, app.shell.sheet ?? 'none', app.shell.confirm ?? 'none']).toEqual([start, 'models', tab, sheet, confirm])
+      expect(app.child.unanswered, start).toEqual([])
+    }
+  })
+
+  test('models:downloads: the Llama conversion stands mid-run, its F16 named and its quantization running; the sidebar counts it on Models', async () => {
+    const app = await started('models:downloads')
+    const card = app.models.face().jobs.cards[0]
+    expect(card?.repo).toBe('Llama3.2-1B-Instruct/safetensors/edaba290ce7f')
+    expect(card?.steps.map((step) => step.state)).toEqual(['done', 'running', 'waiting'])
+    expect(app.placeRuns).toEqual({ models: 1 })
+    const chat = await started('chat')
+    expect(chat.placeRuns).toEqual({ models: 0 })
+  })
+
+  test('models:downloads and models:notran with no apogee: nothing starts, so no card stands running and the sidebar counts nothing', async () => {
+    for (const start of ['models:downloads', 'models:notran']) {
+      const app = await started(start, 'missing')
+      expect([start, app.models.face().jobs]).toEqual([start, { cards: [], running: 0 }])
+      expect(app.placeRuns).toEqual({ models: 0 })
+    }
+  })
+
+  test('models:convert: the convert sheet on the Llama snapshot -- GGUF f16, then Q4_K_M, registered; Convert runs it, and it lands in Stored weights', async () => {
+    const app = new AppViewModel(presetFor({ start: 'models:convert', still: false, apogee: 'installed' }).preset, modeRules, undefined, sessionSamples)
+    await app.start()
+    await settled()
+    expect(app.models.store.sheet()?.command).toBe('apogee models convert Llama3.2-1B-Instruct/safetensors/edaba290ce7f --register-with Q4_K_M')
+    app.stop()
+    await app.models.store.goAsync()
+    expect(app.shell.sheet).toBeUndefined()
+    expect(app.models.tab).toBe('jobs')
+    await settled()
+    app.clock.advance(40)
+    await settled()
+    expect(app.models.face().jobs.cards[0]?.status).toMatch(/^done/)
+    const llama = app.models.store.face().groups.find((group) => group.dir === 'Llama3.2-1B-Instruct')
+    expect(llama?.sets.map((set) => set.state)).toEqual(['backend Llama3.2-1B-Instruct-F16', 'backend Llama3.2-1B-Instruct-Q4KM', 'used by a conversion'])
+    expect(app.child.unanswered).toEqual([])
+  })
+
+  test('download: the sheet on the recorded pull; Start download runs it on Jobs, the sidebar counts it, and its three sets land', async () => {
+    const app = new AppViewModel(presetFor({ start: 'download', still: false, apogee: 'installed' }).preset, modeRules, undefined, sessionSamples)
+    await app.start()
+    await settled()
+    app.stop()
+    expect(app.models.face().downloadSheet.repo).toBe('meta-llama/Llama-3.2-1B-Instruct')
+    app.models.startDownload()
+    expect(app.shell.sheet).toBeUndefined()
+    expect(app.placeRuns).toEqual({ models: 1 })
+    app.clock.advance(70)
+    await settled()
+    expect(app.placeRuns).toEqual({ models: 0 })
+    expect(app.shell.toast?.text, 'the old done toast, from the documents the run reported').toBe('Llama3.2-1B-Instruct · Q4_K_M is ready in the library')
+    // The snapshot a conversion of the same chain used folds away, as models list folds it.
+    expect(app.models.store.face().groups.find((group) => group.dir === 'Llama3.2-1B-Instruct')?.sets.map((set) => [set.short, set.state])).toEqual([
+      ['gguf/3f0c2a9b7e41', 'backend Llama3.2-1B-Instruct-F16'],
+      ['gguf/8d51e6c04a27', 'backend Llama3.2-1B-Instruct-Q4KM'],
+    ])
+    expect(app.models.store.face().fold.text).toBe('1 SafeTensors set a conversion has used is folded away, as models list folds it.')
+    expect(app.child.unanswered).toEqual([])
+  })
+
+  test('the inspector’s Open in library lands on Backends at the session’s model, and Change helpers on Roles (1g’s hand-off)', async () => {
+    const app = await started('chat')
+    app.library.openModels?.('backends', 'root')
+    await settled()
+    expect(app.shell.route).toBe('models')
+    expect(app.models.tab).toBe('backends')
+    expect(app.models.selected).toBe('root')
+    app.shell.go('sessions')
+    app.library.openModels?.('roles')
+    expect(app.shell.route).toBe('models')
+    expect(app.models.tab).toBe('roles')
+  })
+
+  test('Use in the open session: the session’s model set, Sessions shown, as the old pickModelFor does', async () => {
+    const app = await started('models')
+    await app.models.act('useInSession')
+    expect(app.shell.route).toBe('sessions')
+    expect(JSON.stringify(app.session.face()), 'the set written, or held while the turn runs').toContain('llama3.2-1b-Q4KM')
+  })
+
+  test('a Models confirm answered in the composition closes the host: models:delete’s second door runs --and-backends', async () => {
+    const app = await started('models:delete')
+    await app.confirmModels('storeDelete', true)
+    expect(app.shell.confirm).toBeUndefined()
+    expect(app.child.calls.find((call) => call.arguments.includes('--and-backends'))?.arguments).toEqual(['models', 'delete', 'Llama3.2-1B-Instruct/gguf/8d51e6c04a27', '--yes', '--and-backends'])
+    expect(app.shell.toast?.text).toBe('Deleted Llama3.2-1B-Instruct/gguf/8d51e6c04a27')
+  })
+})

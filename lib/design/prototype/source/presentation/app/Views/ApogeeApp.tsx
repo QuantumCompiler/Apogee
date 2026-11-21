@@ -1,6 +1,11 @@
 import { StrictMode, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ConsoleView } from '../../console/Views/ConsoleView'
+import type { ModelsConfirm } from '../../models/ViewModels/ModelsViewModel'
+import { AdaptersSheet } from '../../models/Views/AdaptersSheet'
+import { DownloadSheet } from '../../models/Views/DownloadsView'
+import { ModelsScreen, PairDrafterSheet } from '../../models/Views/ModelsScreen'
+import { StoreSheet } from '../../models/Views/StoreView'
 import { MonitorView } from '../../monitor/Views/MonitorView'
 import { sessionSamples } from '../../session/Previews/SessionPresets'
 import { SuiteSheet } from '../../session/Views/SuiteSheet'
@@ -21,6 +26,8 @@ import { presetFor } from '../Previews/Presets'
 import { AppViewModel } from '../ViewModels/AppViewModel'
 
 const libraryConfirms: readonly string[] = ['deleteChat', 'compactChat', 'forget'] satisfies readonly LibraryConfirm[]
+const modelsConfirms: readonly string[] = ['model', 'storeDelete', 'storeModelDelete', 'unregister', 'registerAll'] satisfies readonly ModelsConfirm[]
+const storeSheets: readonly string[] = ['storeConvert', 'storeQuantize', 'storeRegister', 'storeRename']
 
 /**
  * The application's window (design 1e): the shell, handed each place's screen,
@@ -39,6 +46,7 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
   useObserved(model.monitor)
   useObserved(model.library)
   useObserved(model.session)
+  useObserved(model.models)
   useEffect(() => {
     void model.start()
     return () => model.stop()
@@ -46,15 +54,18 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
   const shell = model.shell
   const session = model.session
   const library = model.library
+  const models = model.models
   return (
     <ShellView
       model={shell}
       strip={model.strip}
+      running={model.placeRuns}
       sessions={() => <SessionList model={library} />}
       newSessions={() => <NewSessionButtons model={library} />}
       screen={(destination) => {
         // Each feature item puts its place's screen here, and takes its placeholder out of Destination.ts.
         if (destination === 'sessions') return <SessionsScreen model={library} />
+        if (destination === 'models') return <ModelsScreen model={models} />
         const placeholder = placeholderOf(destination)
         return placeholder ? <PlaceholderScreen placeholder={placeholder} /> : null
       }}
@@ -117,6 +128,67 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
             </SheetHost>
           )
         }
+        // The Models place's sheets (1h): the four store sheets, the download sheet, the adapters and the pair sheets.
+        const store = models.store.sheet()
+        if (storeSheets.includes(kind) && store) {
+          return (
+            <SheetHost
+              title={store.title}
+              width={600}
+              right={[
+                { label: 'Cancel', run: () => models.store.cancelSheet() },
+                { label: store.goLabel, kind: 'btn-p', run: () => models.store.go(), disabled: !store.canGo },
+              ]}
+            >
+              <StoreSheet model={models.store} />
+            </SheetHost>
+          )
+        }
+        if (kind === 'download' && models.downloadForm) {
+          return (
+            <SheetHost
+              title="Download from Hugging Face"
+              subtitle={models.face().downloadSheet.intro}
+              width={580}
+              right={[
+                { label: 'Cancel', run: () => models.cancelDownload() },
+                { label: 'Start download', kind: 'btn-p', run: () => models.startDownload(), disabled: !models.canStartDownload },
+              ]}
+            >
+              <DownloadSheet model={models} />
+            </SheetHost>
+          )
+        }
+        if (kind === 'adapters' && models.editingAdapters) {
+          const sheet = models.face().adaptersSheet
+          return (
+            <SheetHost
+              title={sheet.title}
+              width={560}
+              right={[
+                { label: 'Cancel', run: () => models.closeAdapters() },
+                { label: sheet.applyLabel, kind: 'btn-p', run: () => void models.applyAdapters() },
+              ]}
+            >
+              <AdaptersSheet model={models} />
+            </SheetHost>
+          )
+        }
+        if (kind === 'pairDrafter' && models.pairingDrafter) {
+          const sheet = models.face().pairSheet
+          return (
+            <SheetHost
+              title={sheet.title}
+              width={560}
+              right={[
+                { label: 'Cancel', run: () => models.closePairing() },
+                { label: 'Pair', kind: 'btn-p', run: () => void models.pairDrafter(), disabled: !sheet.canPair },
+              ]}
+            >
+              <PairDrafterSheet model={models} />
+            </SheetHost>
+          )
+        }
         if (kind === 'execute' && library.executeDoorOpen) {
           return (
             <SheetHost
@@ -135,6 +207,21 @@ export function ApogeeApp({ model }: { readonly model: AppViewModel }) {
         return null
       }}
       confirm={(kind) => {
+        if (modelsConfirms.includes(kind)) {
+          const confirm = kind as ModelsConfirm
+          const words = models.confirmWords(confirm)
+          if (!words) return null
+          return (
+            <ConfirmHost
+              title={words.title}
+              body={words.body}
+              detail={words.detail}
+              cancel={{ label: 'Cancel', run: () => model.dismissModels(confirm) }}
+              {...(words.alternative !== '' ? { alternative: { label: words.alternative, run: () => void model.confirmModels(confirm, true) } } : {})}
+              confirm={{ label: words.confirm, run: () => void model.confirmModels(confirm, false), destructive: words.destructive }}
+            />
+          )
+        }
         if (libraryConfirms.includes(kind)) {
           const words = library.confirmWords(kind as LibraryConfirm)
           if (!words) return null

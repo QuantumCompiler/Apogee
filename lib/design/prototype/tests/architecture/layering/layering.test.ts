@@ -89,6 +89,26 @@ describe('the layering check, on this prototype', () => {
     ])
   })
 
+  test("violations planted in the Models place fail, each naming its file: React in a models view-model, the place importing another place's module, and another place importing models (design 1h)", () => {
+    const disk = new DiskTree(root)
+    const planted: Record<string, string> = {
+      'source/presentation/models/ViewModels/StoreViewModel.ts': `import { useState } from 'react'\n${disk.contents('source/presentation/models/ViewModels/StoreViewModel.ts')}`,
+      'source/presentation/models/Views/ModelsScreen.tsx': `import { SessionList } from '../../sessions/Views/SessionList'\n${disk.contents('source/presentation/models/Views/ModelsScreen.tsx')}`,
+      'source/presentation/monitor/ViewModels/MonitorViewModel.ts': `import { ModelsViewModel } from '../../models/ViewModels/ModelsViewModel'\n${disk.contents('source/presentation/monitor/ViewModels/MonitorViewModel.ts')}`,
+    }
+    const tree: SourceTree = {
+      files: (directory) => disk.files(directory),
+      folders: (directory) => disk.folders(directory),
+      isDirectory: (path) => disk.isDirectory(path),
+      contents: (path) => planted[path] ?? disk.contents(path),
+    }
+    expect(new LayeringCheck(ModuleMap.read(tree), tree).violations()).toEqual([
+      'source/presentation/models/ViewModels/StoreViewModel.ts imports react: a view-model stays free of React, so it tests without a browser',
+      'source/presentation/models/Views/ModelsScreen.tsx imports presentation/sessions, which presentation/models does not declare as a dependency',
+      'source/presentation/monitor/ViewModels/MonitorViewModel.ts imports presentation/models, which presentation/monitor does not declare as a dependency',
+    ])
+  })
+
   test('the disk tree reads the prototype, never node_modules, build output or dot files', () => {
     const files = new DiskTree(root).files('')
     expect(files).toContain('modules.json')

@@ -1,5 +1,7 @@
 import type { Preset } from '../../../infrastructure/process/Preset'
 import { consoleRules } from '../../console/Previews/ConsolePreset'
+import { modelsPlaceRules, withModelsWorld } from '../../models/Previews/ModelsWorlds'
+import type { ModelsWorld } from '../../models/Previews/ModelsWorlds'
 import { monitorPreset } from '../../monitor/Previews/MonitorPreset'
 import type { PresetOptions } from '../../monitor/Previews/MonitorPreset'
 import {
@@ -47,6 +49,18 @@ function consolePreset({ still, apogee }: PresetOptions): Preset {
 }
 
 /**
+ * A Models preset (design 1h): the place over its world -- the store, the
+ * snapshots before conversion, or the fresh store a pull lands in -- with
+ * the Streaming session at its starting frame behind it, as the old frames
+ * keep `taskgroup` open there, composed here since `models` may not import
+ * `session`. `start` is how many ticks in a still frame stands:
+ * `models:downloads`' conversion mid-run at 10.
+ */
+function modelsPreset(route: string, world: ModelsWorld, start = 1): (options: PresetOptions) => Preset {
+  return ({ still, apogee }) => ({ rules: withModelsWorld(streamingRules('start'), world), route, clock: { start, still }, apogee })
+}
+
+/**
  * A preset with the console's answers (design 1g): the console opens over
  * every screen (⇧⌘K), so every preset answers its lines -- `consoleRules`,
  * on the console's own child (`Preset.console`), a line nobody recorded
@@ -56,11 +70,24 @@ function consoling(build: (options: PresetOptions) => Preset): (options: PresetO
   return (options) => ({ ...build(options), console: consoleRules() })
 }
 
-/** A preset with the Sessions place's reads beside its own (design 1g), since every screen's sidebar lists the recorded chats, and the console's answers. */
+/**
+ * A preset with the Sessions place's reads beside its own (design 1g), since
+ * every screen's sidebar lists the recorded chats, the Models place's
+ * (design 1h), since it opens from every screen, and the console's answers.
+ */
 function listing(build: (options: PresetOptions) => Preset): (options: PresetOptions) => Preset {
-  return consoling((options) => {
+  return modelling((options) => {
     const preset = build(options)
     return { ...preset, rules: withLibraryRules(preset.rules) }
+  })
+}
+
+/** A preset with the Models place's reads before its own (design 1h), so a preset's own answer to the same arguments is the one given. */
+function modelling(build: (options: PresetOptions) => Preset): (options: PresetOptions) => Preset {
+  return consoling((options) => {
+    const preset = build(options)
+    const models = modelsPlaceRules()
+    return { ...preset, rules: { ...preset.rules, reads: [...(models.reads ?? []), ...(preset.rules.reads ?? [])], commands: [...(models.commands ?? []), ...(preset.rules.commands ?? [])] } }
   })
 }
 
@@ -69,7 +96,7 @@ function listing(build: (options: PresetOptions) => Preset): (options: PresetOpt
  * `start` options, each rebuilt on recordings by the item that ports its
  * place. 1e's is `monitor`; 1u's are the session's four plain ones; 1v's the
  * session's scenarios and states, in the old `data-props` order; 1g's
- * `execute` and `console`; each feature item adds its own here. Every one
+ * `execute` and `console`; 1h's the nine Models presets; each feature item adds its own here. Every one
  * carries the Sessions place's reads, since the list shows on every screen
  * (`execute`'s own), and the console's answers, since it opens over every one.
  */
@@ -88,8 +115,17 @@ export const presets: Readonly<Record<string, (options: PresetOptions) => Preset
   'chat:notsent': listing(chatNotSentPreset),
   'chat:ended': listing(chatEndedPreset),
   'chat:compacting': listing(chatCompactingPreset),
-  execute: consoling(executePreset),
+  execute: modelling(executePreset),
   console: listing(consolePreset),
+  models: listing(modelsPreset('models', 'store')),
+  'models:downloads': listing(modelsPreset('models:downloads', 'conversions', 10)),
+  'models:store': listing(modelsPreset('models:store', 'conversions')),
+  'models:convert': listing(modelsPreset('models:convert', 'conversions')),
+  'models:register': listing(modelsPreset('models:register', 'store')),
+  'models:roles': listing(modelsPreset('models:roles', 'store')),
+  'models:delete': listing(modelsPreset('models:delete', 'store')),
+  'models:notran': listing(modelsPreset('models:notran', 'store')),
+  download: listing(modelsPreset('download', 'fresh')),
 }
 
 /** The preset opened with no `start`, or an unknown one: `chat`, the old `data-props` default (1v; 1e's interim default was the monitor). */

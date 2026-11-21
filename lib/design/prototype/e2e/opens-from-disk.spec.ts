@@ -105,11 +105,17 @@ test('in the missing and config-typo modes the monitor says why it cannot read, 
   await expect(monitor(page)).toContainText("apogee system: /Users/someone/.apogee/config/config.json: not valid JSON: line 4, column 5: expected ',' or '}' after a member (exited with status 1)")
 })
 
-test('each of the 11 places opens by click: Sessions its session window, an unported one its placeholder', async ({ page }) => {
+test('each of the 11 places opens by click: Sessions its session window, Models its tabs (1h), an unported one its placeholder', async ({ page }) => {
   const { errors } = watch(page)
   await page.goto(`${built}?start=monitor&still=true`)
+  const models = page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Models ⌘2' })
+  await models.click()
+  await expect(models).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('heading', { name: 'Models', level: 1 })).toBeVisible()
+  await expect(page.getByRole('tab', { name: /^Backends/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByText(/^Models isn’t drawn here yet/)).toHaveCount(0)
   const places: Array<[string, string, string]> = [
-    ['Models', '⌘2', '1h'], ['Suites', '⌘3', '1p'], ['Tasks', '⌘4', '1p'], ['Code graph', '⌘5', '1o'], ['Video', '⌘6', '1k'],
+    ['Suites', '⌘3', '1p'], ['Tasks', '⌘4', '1p'], ['Code graph', '⌘5', '1o'], ['Video', '⌘6', '1k'],
     ['Voice', '⌘7', '1m'], ['Knowledge', '⌘8', '1o'], ['Training', '⌘9', '1j'], ['Library', '⌘0', '1n'], ['Review', '⇧⌘R', '1n'],
   ]
   for (const [title, key, item] of [...places].reverse()) {
@@ -463,6 +469,8 @@ test('off Sessions no row is current, as the old list draws it: press Models and
 test('the console answers on every screen: at chat, a line nobody recorded prints the old "Done.", and a row’s Details… leaves the console open (design 1g)', async ({ page }) => {
   const { errors } = watch(page)
   await page.goto(`${built}?start=chat&still=true`)
+  // The window drawn first, so React has its key listener (1e's lesson; under 1h's longer live runs the press could land before it).
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
   await page.keyboard.press('Shift+Meta+KeyK')
   const console = page.getByRole('dialog', { name: 'Console' })
   await console.getByRole('textbox', { name: 'Command' }).fill('doctor')
@@ -501,3 +509,179 @@ for (const preset of chatPresets) {
     expect(errors).toEqual([])
   })
 }
+
+// MARK: - The Models place (design 1h)
+
+const modelsTab = (page: Page, name: string) => page.getByRole('tab', { name: new RegExp(`^${name}`) })
+
+const modelsFrames: ReadonlyArray<readonly [string, string, (page: Page) => Promise<void>]> = [
+  ['models', 'Backends', async (page) => {
+    const details = page.getByRole('complementary', { name: 'Model details' })
+    await expect(details.getByRole('heading', { name: 'llama3.2-1b-Q4KM' })).toBeVisible()
+    await expect(details).toContainText('weights 770 MiB + cache 544 MiB = 1.2 GiB')
+    await expect(details).toContainText('LINEAGE')
+    // A row's name begins with its glyph's word, as the session list's does (1g).
+    await expect(page.getByRole('button', { name: /^local llama3\.2-1b-Q4KM / })).toHaveAttribute('aria-current', 'true')
+  }],
+  ['models:downloads', 'Jobs', async (page) => {
+    await expect(page.getByText('running · step 2 of 3')).toBeVisible()
+    await expect(page.getByText('GGUF F16, Q4_K_M, registered')).toBeVisible()
+    await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Models ⌘2 · 1 running' })).toBeVisible()
+  }],
+  ['models:store', 'Stored weights', async (page) => {
+    const set = page.getByRole('complementary', { name: 'Stored set' })
+    await expect(set).toContainText('Llama3.2-1B-Instruct/safetensors/edaba290ce7f')
+    await expect(set).toContainText('weights only · convert to run')
+    await expect(set.getByRole('button', { name: 'Convert to GGUF…' })).toBeVisible()
+  }],
+  ['models:convert', 'Stored weights', async (page) => {
+    const sheet = page.getByRole('dialog', { name: 'Convert Llama3.2-1B-Instruct' })
+    await expect(sheet).toContainText('apogee models convert Llama3.2-1B-Instruct/safetensors/edaba290ce7f --register-with Q4_K_M')
+    await expect(sheet.getByRole('button', { name: 'Q4_K_M' })).toHaveAttribute('aria-pressed', 'true')
+  }],
+  ['models:register', 'Stored weights', async (page) => {
+    const sheet = page.getByRole('dialog', { name: 'Register Gemma4-26B-Instruct · mixed 4/8-bit (group 64)' })
+    await expect(sheet.getByRole('textbox').first()).toHaveValue('Gemma4-26B-Instruct-mixed_4_8')
+  }],
+  ['models:roles', 'Roles', async (page) => {
+    await expect(page.getByText('Roles resolve under suite fast (Suites changes it)')).toBeVisible()
+    await expect(page.getByRole('combobox', { name: 'Model for Chat' })).toBeVisible()
+  }],
+  ['models:delete', 'Stored weights', async (page) => {
+    const confirm = page.getByRole('alertdialog', { name: 'Delete Llama3.2-1B-Instruct/gguf/8d51e6c04a27?' })
+    await expect(confirm).toContainText("backend 'llama3.2-1b-Q4KM' points into this")
+    await expect(confirm.getByRole('button', { name: 'Delete it and the backends that run from it' })).toBeVisible()
+  }],
+  ['models:notran', 'Jobs', async (page) => {
+    await expect(page.getByText('Stopped before it ran: nothing ran')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Run again' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Dismiss' })).toBeVisible()
+  }],
+  ['download', 'Backends', async (page) => {
+    const sheet = page.getByRole('dialog', { name: 'Download from Hugging Face' })
+    await expect(sheet.getByRole('textbox', { name: 'Hugging Face repository' })).toHaveValue('meta-llama/Llama-3.2-1B-Instruct')
+    await expect(sheet.getByRole('button', { name: 'Start download' })).toBeEnabled()
+  }],
+]
+
+for (const [preset, tab, frame] of modelsFrames) {
+  test(`${preset}: Models on its tab, sheet or confirm, still, with no console error and no request but the file (design 1h)`, async ({ page }) => {
+    const { errors, requests } = watch(page)
+    await page.goto(`${built}?start=${preset}&still=true`)
+    await expect(page.getByRole('heading', { name: 'Models', level: 1 })).toBeVisible()
+    await expect(modelsTab(page, tab)).toHaveAttribute('aria-selected', 'true')
+    await frame(page)
+    expect(errors).toEqual([])
+    expect(requests).toEqual([`${built}?start=${preset}&still=true`])
+  })
+}
+
+test('the four tabs switch live; the store sheets, the adapters and pair sheets and the five confirms open from their buttons (design 1h)', async ({ page }) => {
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=models&still=true`)
+  const details = page.getByRole('complementary', { name: 'Model details' })
+  // Backends: the adapters sheet, its Apply saying the CLI's line.
+  await details.getByRole('button', { name: 'Edit adapters…' }).click()
+  const adapters = page.getByRole('dialog', { name: 'Adapters on llama3.2-1b-Q4KM' })
+  await adapters.getByRole('button', { name: 'Add a file…' }).click()
+  await expect(adapters).toContainText('apogee config set-backend llama3.2-1b-Q4KM --adapters /Users/someone/Downloads/house-style.lora.gguf')
+  await adapters.getByRole('button', { name: 'Apply' }).click()
+  await expect(page.getByRole('status').filter({ hasText: "edited backend 'llama3.2-1b-Q4KM'" })).toBeVisible()
+  // The two Backends confirms.
+  await details.getByRole('button', { name: 'Delete with its weights…' }).click()
+  await expect(page.getByRole('alertdialog', { name: 'Delete llama3.2-1b-Q4KM?' }).getByRole('button', { name: 'Delete its files and the backends that use them' })).toBeVisible()
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click()
+  await details.getByRole('button', { name: 'Remove the backend…' }).click()
+  await expect(page.getByRole('alertdialog', { name: 'Remove the backend llama3.2-1b-Q4KM?' })).toContainText('apogee config delete-backend llama3.2-1b-Q4KM')
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click()
+  // The pair sheet on the vision MLX backend: the binary's offer, then Pair.
+  await page.getByRole('button', { name: /^local Gemma4-E4B-4bit / }).click()
+  await expect(details.getByText('there is no Python environment at /Users/someone/.apogee/training/venv -- the mlx backend runs mlx-lm there, never the system Python -- apogee train setup --with mlx')).toBeVisible()
+  await details.getByRole('button', { name: 'Pair a drafter…' }).click()
+  const pair = page.getByRole('dialog', { name: 'Pair a drafter with Gemma4-E4B-4bit' })
+  await expect(pair.getByRole('radio', { name: 'Gemma4-E4B-Assistant/mlx/4d5e6f708192' })).toHaveAttribute('aria-checked', 'true')
+  await pair.getByRole('button', { name: 'Pair' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Gemma4-E4B-4bit drafts with Gemma4-E4B-Assistant/mlx/4d5e6f708192' })).toBeVisible()
+  // Stored weights: Register all, the F16's quantize and register sheets, the rename sheet, the set's and the model's deletes.
+  await modelsTab(page, 'Stored weights').click()
+  await page.getByRole('button', { name: 'Register the 2 not registered…' }).click()
+  await expect(page.getByRole('alertdialog', { name: 'Register 2 stored models?' })).toContainText('apogee config scan --register')
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click()
+  await page.getByRole('button', { name: /^gguf\/3f0c2a9b7e41/ }).click()
+  const set = page.getByRole('complementary', { name: 'Stored set' })
+  await set.getByRole('button', { name: 'Quantize…' }).click()
+  await expect(page.getByRole('dialog', { name: 'Quantize Llama3.2-1B-Instruct' })).toContainText('then  apogee config add-backend Llama3.2-1B-Instruct-Q4KM --type llamacpp --model-path <the new file>')
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
+  await set.getByRole('button', { name: 'Register…' }).click()
+  await expect(page.getByRole('dialog', { name: 'Register Llama3.2-1B-Instruct' }).getByRole('textbox').first()).toHaveValue('Llama3.2-1B-Instruct-F16')
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
+  await set.getByRole('button', { name: 'Rename…' }).click()
+  const rename = page.getByRole('dialog', { name: 'Rename Llama3.2-1B-Instruct' })
+  await expect(rename.getByRole('button', { name: 'Rename' })).toBeDisabled()
+  await rename.getByRole('textbox').fill('Llama-1B')
+  await expect(rename).toContainText('apogee models rename Llama3.2-1B-Instruct Llama-1B')
+  await rename.getByRole('button', { name: 'Cancel' }).click()
+  await set.getByRole('button', { name: 'Delete all of it…' }).click()
+  await expect(page.getByRole('alertdialog', { name: 'Delete all of Llama3.2-1B-Instruct?' })).toBeVisible()
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click()
+  await page.getByRole('button', { name: /^gguf\/8d51e6c04a27/ }).click()
+  await set.getByRole('button', { name: 'Delete…' }).click()
+  await page.getByRole('alertdialog', { name: 'Delete Llama3.2-1B-Instruct/gguf/8d51e6c04a27?' }).getByRole('button', { name: 'Delete', exact: true }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Deleted Llama3.2-1B-Instruct/gguf/8d51e6c04a27' }).first()).toBeVisible()
+  await expect(page.getByText("kept backend 'llama3.2-1b-Q4KM', which points at nothing now")).toBeVisible()
+  // Jobs and Roles.
+  await modelsTab(page, 'Jobs').click()
+  await expect(page.getByText('Nothing has run here yet.')).toBeVisible()
+  await modelsTab(page, 'Roles').click()
+  await expect(page.getByRole('combobox', { name: 'Model for Utility' })).toBeVisible()
+  expect(errors).toEqual([])
+})
+
+test('a conversion runs live and lands in Stored weights: the Llama snapshot to F16 and Q4_K_M, each with the backend its run registered (design 1h)', async ({ page }) => {
+  test.setTimeout(60_000)
+  const { errors } = watch(page)
+  await page.goto(`${built}?start=models:convert`)
+  await page.getByRole('dialog', { name: 'Convert Llama3.2-1B-Instruct' }).getByRole('button', { name: 'Convert' }).click()
+  await expect(modelsTab(page, 'Jobs')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByText(/^done · /)).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('status').filter({ hasText: 'Llama3.2-1B-Instruct: 2 sets made, 2 registered' }).first()).toBeVisible()
+  await expect(page.getByText('Llama3.2-1B-Instruct-F16, Llama3.2-1B-Instruct-Q4KM')).toBeVisible()
+  await page.getByRole('button', { name: 'Show the weights' }).click()
+  await expect(modelsTab(page, 'Stored weights')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('button', { name: /^gguf\/3f0c2a9b7e41/ })).toContainText('backend Llama3.2-1B-Instruct-F16')
+  await expect(page.getByRole('button', { name: /^gguf\/8d51e6c04a27/ })).toContainText('backend Llama3.2-1B-Instruct-Q4KM')
+  expect(errors).toEqual([])
+})
+
+test('a pull runs live and lands in Stored weights from its own documents: Start download, its bytes, its stages, its three sets (design 1h)', async ({ page }) => {
+  test.setTimeout(90_000)
+  const { errors, requests } = watch(page)
+  await page.goto(`${built}?start=download`)
+  await page.getByRole('dialog', { name: 'Download from Hugging Face' }).getByRole('button', { name: 'Start download' }).click()
+  await expect(modelsTab(page, 'Jobs')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Models ⌘2 · 1 running' })).toBeVisible()
+  await expect(page.getByText(/^file \d of 9 · /)).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText(/^done · /)).toBeVisible({ timeout: 40_000 })
+  await expect(page.getByRole('status').filter({ hasText: 'Llama3.2-1B-Instruct · Q4_K_M is ready in the library' }).first()).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Models ⌘2', exact: true })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Models ⌘2 · 1 running' })).toHaveCount(0)
+  await modelsTab(page, 'Stored weights').click()
+  await expect(page.getByRole('button', { name: /^gguf\/3f0c2a9b7e41/ })).toContainText('backend Llama3.2-1B-Instruct-F16')
+  await expect(page.getByRole('button', { name: /^gguf\/8d51e6c04a27/ })).toContainText('backend Llama3.2-1B-Instruct-Q4KM')
+  await expect(page.getByText('1 SafeTensors set a conversion has used is folded away, as models list folds it.')).toBeVisible()
+  expect(errors).toEqual([])
+  expect(requests).toEqual([`${built}?start=download`])
+})
+
+test('the inspector’s Open in library lands on Backends at the session’s model, and Change helpers on Roles (design 1h)', async ({ page }) => {
+  await page.goto(`${built}?start=chat&still=true`)
+  const pane = inspectorPane(page)
+  await pane.getByRole('button', { name: 'Expand all' }).click()
+  await pane.getByRole('button', { name: 'Open in library' }).click()
+  await expect(page.getByRole('heading', { name: 'Models', level: 1 })).toBeVisible()
+  await expect(modelsTab(page, 'Backends')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('complementary', { name: 'Model details' }).getByRole('heading', { name: 'root' })).toBeVisible()
+  await page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Sessions ⌘1' }).click()
+  await inspectorPane(page).getByRole('button', { name: 'Change helpers' }).click()
+  await expect(modelsTab(page, 'Roles')).toHaveAttribute('aria-selected', 'true')
+})
