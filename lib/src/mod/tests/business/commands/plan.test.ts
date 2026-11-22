@@ -3,7 +3,7 @@
 // confirmable, never run by the plan; anything else refused with the usage.
 import { expect, test } from 'claude-code/testing'
 
-import { planApogee, shownCommand } from '../../../src/business/commands/plan'
+import { USAGE, planApogee, promotePlan, rollbackPlan, shownCommand } from '../../../src/business/commands/plan'
 
 test('the reads run the real commands, each with --output-format json', () => {
   expect(planApogee('check')).toEqual({ kind: 'read', read: 'check', args: ['check', '--output-format', 'json'] })
@@ -68,4 +68,30 @@ test('the command shown before a confirmation is the one that runs, quoted for a
   expect(shownCommand('/Users/some one/bin/apogee', ['train', 'rollback', "it's"])).toBe(
     "'/Users/some one/bin/apogee' train rollback 'it'\\''s'",
   )
+})
+
+test('pane is the pane, and nothing after it', () => {
+  expect(planApogee('pane')).toEqual({ kind: 'pane' })
+  expect(planApogee('  pane ')).toEqual({ kind: 'pane' })
+  expect(planApogee('pane open').kind).toBe('refused')
+  expect(USAGE.map(one => one.words)).toEqual(['check', 'models', 'train status', 'promote <run> --as <backend>', 'rollback <backend>', 'pane'])
+})
+
+test("the pane's buttons plan the slash command's argv: a run and a backend each one word, never a flag", () => {
+  expect(promotePlan('20261026-065637', 'q4')).toEqual(planApogee('promote 20261026-065637 --as q4'))
+  expect(rollbackPlan('tuned')).toEqual(planApogee('rollback tuned'))
+  for (const [run, backend] of [
+    ['-x', 'q4'],
+    ['r1', '--yes'],
+    ['r1', ''],
+    ['', 'q4'],
+    ['a b', 'q4'],
+    ['r1', 'q 4'],
+    [undefined, 'q4'],
+  ] as const) {
+    expect([run, backend, promotePlan(run, backend).kind]).toEqual([run, backend, 'refused'])
+  }
+  for (const backend of ['--yes', '-y', '', 'two words', undefined]) {
+    expect([backend, rollbackPlan(backend).kind]).toEqual([backend, 'refused'])
+  }
 })

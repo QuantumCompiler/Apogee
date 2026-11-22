@@ -1,6 +1,6 @@
 // What the session's start sets up, in order: the binary found (its absence
 // said once), then the mod's surfaces registered over it, all awaited so they
-// stand by the first turn.
+// stand by the first turn, and a pane the engine kept open read again.
 import type { EngineInterface } from 'claude-code'
 
 import { forgetLostJobs } from '../../business/jobs/jobs'
@@ -8,6 +8,7 @@ import { offerSurfaces } from '../../business/surfaces/surfaces'
 import type { DiscoveryOptions } from '../../infrastructure/discovery/discovery'
 import { registerApogee } from '../commands/apogee'
 import { findAndSayAbsence } from '../notices/absence'
+import { resumePane } from '../pane/open'
 import { startStatusLine } from '../status/line'
 import { registerTools } from '../tools/tools'
 
@@ -40,6 +41,7 @@ export async function startSession($: EngineInterface, discovery: DiscoveryOptio
     $.ui.toast(`Apogee's tools could not be registered: ${reasonOf(error)}`, { timeoutMs: REFUSAL_TOAST_MS })
   }
   startStatusLine($, binary)
+  await resumePane($, binary)
 }
 
 function reasonOf(error: unknown): string {

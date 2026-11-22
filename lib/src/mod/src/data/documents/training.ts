@@ -1,43 +1,24 @@
 // `apogee train status --output-format json` (machine-mode.md, "train
 // status"): the runs, each backend's versions headline, the pipelines and
 // the cycle -- byte for byte the control plane's training status body.
+import type { ApogeeCycleHeadline, ApogeePipelineHeadline, ApogeeRunSummary, ApogeeTrainStatus, ApogeeVersionHeadline } from '../../../types'
 import { decode } from './document'
 import type { Decoded, Reader } from './document'
 
-/** One training run, as the status lists it. */
-export type RunSummary = {
-  id: string
-  /** `running`, `complete`, `failed`, `cancelled`, ... */
-  status: string
-  method?: string
-  startedAt?: string
-  finishedAt?: string
-}
+/** One training run, as the status lists it (the contract's). */
+export type RunSummary = ApogeeRunSummary
 
 /** One backend's versions headline: which promoted version it runs. */
-export type VersionHeadline = { backend: string; activeVersion?: number; kept?: number; total?: number }
+export type VersionHeadline = ApogeeVersionHeadline
 
 /** The newest pipeline run. */
-export type PipelineHeadline = { id: string; specName?: string; status?: string; stages?: number; passed?: number }
+export type PipelineHeadline = ApogeePipelineHeadline
 
 /** The cycle's headline, once a pass has written its history. */
-export type CycleHeadline = { backend?: string; isHalted?: boolean; haltReason?: string }
+export type CycleHeadline = ApogeeCycleHeadline
 
 /** The training status. */
-export type TrainStatus = {
-  /** The ids of the runs running now. */
-  running: string[]
-  recentRuns: RunSummary[]
-  versions: VersionHeadline[]
-  /** The pipeline a live process runs now, if any. */
-  activePipeline?: string
-  /** Whether a running cycle pass holds the cycle's lock. */
-  isCycleActive?: boolean
-  runs?: number
-  pipelines?: number
-  latestPipeline?: PipelineHeadline
-  cycle?: CycleHeadline
-}
+export type TrainStatus = ApogeeTrainStatus
 
 /** The training status's document, read tolerantly. */
 export function decodeTrainStatus(text: string): Decoded<TrainStatus> {
@@ -63,6 +44,10 @@ export function decodeTrainStatus(text: string): Decoded<TrainStatus> {
     const pipelines = top.optionalNumber('pipelines')
     const latestPipeline = top.optionalObject('latest_pipeline', pipelineOf)
     const cycle = top.optionalObject('cycle', cycleOf)
+    // Optional, not nullable: a binary from before 57g and 57h answers neither,
+    // and its document lacks nothing it was meant to carry.
+    const cycleError = top.optionalText('cycle_error')
+    const staleLock = top.optionalText('stale_lock')
 
     return {
       running,
@@ -74,6 +59,8 @@ export function decodeTrainStatus(text: string): Decoded<TrainStatus> {
       ...(pipelines === undefined ? {} : { pipelines }),
       ...(latestPipeline === undefined ? {} : { latestPipeline }),
       ...(cycle === undefined ? {} : { cycle }),
+      ...(cycleError === undefined ? {} : { cycleError }),
+      ...(staleLock === undefined ? {} : { staleLock }),
     }
   })
 }
@@ -83,12 +70,16 @@ function runOf(run: Reader): RunSummary {
   const method = run.optionalText('method')
   const startedAt = run.optionalText('started_at')
   const finishedAt = run.optionalText('finished_at')
+  const evalPassed = run.optionalFlag('eval_passed')
+  const evalScore = run.optionalNumber('eval_score')
 
   return {
     ...one,
     ...(method === undefined ? {} : { method }),
     ...(startedAt === undefined ? {} : { startedAt }),
     ...(finishedAt === undefined ? {} : { finishedAt }),
+    ...(evalPassed === undefined ? {} : { evalPassed }),
+    ...(evalScore === undefined ? {} : { evalScore }),
   }
 }
 

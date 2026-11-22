@@ -68,7 +68,8 @@ function lacked(missing: readonly string[]): string {
     .join(', ')
 }
 
-function ageText(ms: number): string {
+/** An age as the person reads it: `12 s`, `3 min`, `2 h`. */
+export function ageText(ms: number): string {
   const seconds = Math.round(ms / 1000)
   if (seconds < 60) return `${seconds} s`
   const minutes = Math.round(seconds / 60)

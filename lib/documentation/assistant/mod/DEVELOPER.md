@@ -6,7 +6,7 @@ The architecture reference for the Claude plugin. The contributor entry point is
 
 ## Layout
 
-As built by the scaffold (1a, 2026-11-21) and grown by the tools, slash commands and status line (1b, 2026-11-21; [MILESTONES](MILESTONES.md#milestone-a--the-mod-is-born)), per [ADR 0001](../../adrs/mod/layer-enforcement.md) (four layers, dependencies down; a package is a folder `src/<layer>/<package>/`, its tests at `tests/<layer>/<package>/`):
+As built by the scaffold (1a, 2026-11-21) and grown by the tools, slash commands and status line (1b, 2026-11-21) and the pane (1c, 2026-11-21; [MILESTONES](MILESTONES.md#milestone-a--the-mod-is-born)), per [ADR 0001](../../adrs/mod/layer-enforcement.md) (four layers, dependencies down; a package is a folder `src/<layer>/<package>/`, its tests at `tests/<layer>/<package>/`):
 
 ```
 lib/src/mod/
@@ -14,14 +14,17 @@ lib/src/mod/
                                       types, and the options binary and channel
   hooks/hooks.json                    names the hooks module: ./register.tsx
   hooks/register.tsx                  the composition root: every on(...) (session.start, command.run for
-                                      /apogee, tool.run for mcp__apogee__*), the options read once, $ handed down
-  types/index.d.ts                    the contract: the $.state values (apogee.binary, .tools, .jobs, .status)
+                                      /apogee, ui.render for the pane, tool.run for mcp__apogee__*), the options
+                                      read once, $ handed down
+  types/index.d.ts                    the contract: the $.state values (apogee.binary, .tools, .jobs, .status,
+                                      .pane) and the document shapes the pane keeps
   src/infrastructure/discovery/       finding the binary: candidates, locate, the install hints
   src/infrastructure/runner/          the process runner: runBinary (process.run), superviseBinary (process.spawn)
   src/infrastructure/timer/           $.clock wrapped: now, after, every
-  src/data/documents/                 the documents, tolerant: check, models list|status, train status, the
-                                      MCP server's frames, config get's one value
-  src/data/state/                     the atoms: binary (binary-1), tools (tools-2), jobs (jobs-1), status (status-1)
+  src/data/documents/                 the documents, tolerant: check, models list|status, train status, train
+                                      versions, the MCP server's frames, config get's one value
+  src/data/state/                     the atoms: binary (binary-1), tools (tools-2), jobs (jobs-1), status (status-1),
+                                      pane (pane-1)
   src/business/binary/                findBinary: the answer kept, the absence said once a session
   src/business/client/                the session's binary; readDocument, a command's document through the runner
   src/business/commands/              the /apogee set: plan (argv per word), reads, the confirmed actions
@@ -33,13 +36,19 @@ lib/src/mod/
   src/business/jobs/                  the async law: launchJob (a 30 s window, then a job), detachJob (a job
                                       from its start, begun from a timer), the lost jobs
   src/business/status/                the status line's reads and its poll
+  src/business/pane/                  the pane's reads (serialized, kept), its visibility-scoped poll, and what it
+                                      offers: Promote's runs and backends, Roll back's ledgers
   src/presentation/notices/           the not-installed toast
   src/presentation/session/           the session start, in order
-  src/presentation/commands/          /apogee: registered, confirmed, its documents formatted
+  src/presentation/commands/          /apogee: registered, its documents formatted; confirm.ts, the one shown-command
+                                      confirmation, shared with the pane
   src/presentation/tools/             the served tools, apogee_complete and apogee_job: registered, answered
   src/presentation/status/            the status line's words
-  tests/support/                      machine.ts (the scripted machine: commands, answers, the mocked clock),
-                                      state.ts (the state, watched), apogee.ts (/apogee and the tools driven),
+  src/presentation/pane/              the pane: opened and looked at (open.ts), its words (words.ts), its drawing
+                                      and its presses (pane.tsx)
+  tests/support/                      machine.ts (the scripted machine: commands, answers, the panes, the mocked
+                                      clock), state.ts (the state, watched), apogee.ts (/apogee and the tools
+                                      driven), pane.ts (the pane mounted on each surface, its words and buttons),
                                       recorded.ts (recorded documents), handmade.ts (hand-made ones)
   tests/<layer>/<package>/*.test.ts   claude plugin test's hermetic tests
   tests/architecture/layering/        the layering check (check.mjs) and its planted violations, run by node
@@ -86,6 +95,7 @@ The listing is read once a session start (10 s); the names the mod registered ar
 | `/apogee train status` | `train status --output-format json` | what runs, the newest pipeline, the cycle, each active version, the recent runs |
 | `/apogee promote <run> --as <backend>` | `train promote <run> --as <backend>`, after the yes | what it printed, or its status and last words |
 | `/apogee rollback <backend>` | `train rollback <backend>`, after the yes | the same |
+| `/apogee pane` | nothing itself: opens the pane (below), which reads | `Apogee's pane is open.`, or why it is not drawn yet or could not be opened |
 
 A field a document lacked is said under what is shown. Promote and rollback ask first (`$.ui.ask`: the exact command, `Run it` or `Cancel`); anything but `Run it`, a dismissed dialog included, runs nothing and says so. Neither CLI command has a `--yes`, so the confirmation is the one gate, and no `--yes` is ever passed. They run supervised (`$.process.spawn`), with no time of their own, each a job from its start: the command answers the job's id at once, and the run is begun from a `$.clock` timer, outside the command's dispatch, since the API ends a spawn when the dispatch that started it is abandoned. A toast says its end, and the status line is read back then. With no binary every word says where the mod looked and the install line.
 
@@ -93,9 +103,30 @@ A field a document lacked is said under what is shown. Promote and rollback ask 
 
 **The status line** (`$.ui.status`): `Apogee: <backend> v<version> · <run state>`, `Apogee (dev)` on the dev channel. The backend is `models status`'s `chat` role (`no chat backend` when it reads `(unset …)`), the version that backend's `active_version` in `train status`'s `versions` (`(no promoted version)` without one), the run state `idle` or `training: <n> runs, pipeline <spec>, cycle pass` from `running`, `active_pipeline` and `cycle_active`. Read at the start, then once a minute (two read-only runs), and after a confirmed command ends; never two at once, each read waiting for the one before it, so a read-back lands after any poll read begun before the command wrote. When the latest read failed, or the reading is two minutes old, the line keeps what it last read and adds `· stale: read <age> ago; <why>`; before any reading it says `status unread: <why>`. Fields the documents lacked are said (`· lacked: …`). With no binary there is no line.
 
+## The pane (1c)
+
+`/apogee pane` opens it: `$.ui.open({ id: 'apogee', title: 'Apogee' })`, the person's command, so it is placed at any width (docked beside the transcript in the desktop app and the fullscreen terminal, inline otherwise); nothing opens it unasked. The root's `ui.render` hook on `{ component: 'Pane', requestId: 'apogee' }` draws it (`drawPane`), its `.catch` drawing the fault in its place. It opens whatever discovery found: with no binary it shows the absence toast's words and reads nothing.
+
+**What it shows**, every value from a document, a line of text a row with its buttons after it (`words.ts`):
+
+| Section | From | Lines |
+|---|---|---|
+| The heading | the binary found, `apogee.jobs` | `Apogee <version> · <channel> channel` and **Read again**; each confirmed command still running |
+| Backends and models | `models status`, `models list` | the roles, `field: value`; the rows by section (`backend · type · model · state`, an MLX row's kind beside its type), each note under its row |
+| Training | `train status` | what runs, the newest pipeline, the cycle (the lines `/apogee train status` says: a history it could not read as `Cycle: history unreadable -- <path>: <reason>`, a dead pass's lock as `stopped -- cycle.lock is left; remove <path> to run again`, said once as the cycle's state or on a `Cycle lock:` line of its own); the recent runs, each with its gate where gated, **Promote** on a `complete` one |
+| Version ledger | `train versions` | the document as-is: each ledger and its active version, **Roll back** where a version below it is listed; each version with every field it carries |
+
+Each document not read yet is `Reading <document>…`; one that failed is the command and why; one that failed after a good read keeps it, `Shown as read <age> ago; the latest read failed: …`; a field it lacked is `<document> lacked: <fields>`. Empty is said: `No backends configured and no models stored.`, `No backend is configured.`, `Nothing trained yet: no runs, no pipeline, no cycle.` (only when the document names no cycle history, readable or not, and no lock), `No version promoted yet.` As a widget (the desktop app's minimized form) it is one line, `Apogee: <what runs> · <each active version>`, with no buttons: a document not read yet is `training unread` or `ledger unread`, one that failed with no good read before it is `training read failed` or `ledger read failed`, and a good read kept past a later failure carries its age, `(read 10 min ago; the latest read failed)`.
+
+**Its buttons.** **Promote** opens a pick of the configured `llamacpp` and `mlx` backends `models list` names, each once, and **Cancel**; a backend not listed is `/apogee promote <run> --as <backend>`, said under the pick. With no `models list` to pick from, the pick says which: `models list is still being read, so no backend can be picked yet` or `models list gave no document, so no backend can be picked`, never that it names none; a good read kept past a later failure still offers its backends. A backend picked, or **Roll back**, asks as `/apogee` does (`src/presentation/commands/confirm.ts`, shared): `$.ui.ask` with the exact command, `Run it` or `Cancel`, the argv `plan.ts`'s `promotePlan` and `rollbackPlan` make. Only `Run it` runs it, supervised, as a job from its start; its answer is toasted, and its end too.
+
+**Its reads** (`src/business/pane/`): all four documents when it opens (begun from a `$.clock` timer, outside the command's dispatch), on Read again, and after every confirmed command ends while it is open, the pane's and `/apogee`'s alike (read back, never mirrored). Every read of the pane waits for the one before it. **The poll**: `train status` every 15 s, one read-only run, only while the pane is shown: before each tick's read `$.ui.panes()` must list it open, placed and the tab in front. A hidden tick reads nothing; a closed pane ends the poll; a read still running is not started twice; one poll a copy. A session start resumes a pane the engine kept open across a reload. The state is `apogee.pane` (shape `pane-1`): each document as last read, and the run whose backend is being picked.
+
+**Its tests** loop over `terminal` and `desktop` (`tests/support/pane.ts`'s `SURFACES`, as reference.md advises), the machine answering `$.ui.open` and `$.ui.panes()`; a test hides the pane by its row or closes it by emptying the list.
+
 ## The contracts the mod builds against
 
-- The `--output-format json` documents (models, train status/versions, check, …) — measured live by the mod spike (2026-10-21); the tests read the recordings (`lib/src/darwin/tests/business/reads/Fixtures/`, copied into `tests/support/recorded.ts`).
+- The `--output-format json` documents (models list|status, train status, train versions, check, …) — measured live by the mod spike (2026-10-21); `train versions` is the ledger shape http-api.md's `GET /v1/admin/training/versions` documents, read by the pane since 1c; the tests read the recordings (`lib/src/darwin/tests/business/reads/Fixtures/`, copied into `tests/support/recorded.ts`).
 - `train promote <run> --as <backend>` and `train rollback <backend>` — text out, no `--yes` and no question of their own (`train.cpp`).
 - Machine mode, for anything session-grade later.
 - `apogee mcp serve` (the hidden `__mcp-tools` its alias) — the MCP server, reached one exchange a run (above): 22 read-only tools since the CLI's 54a, the spike's 17 plus the five status reads (`models_list`, `models_status`, `train_status`, `train_versions`, `check`), each answering with its command's JSON document byte for byte; since the CLI's 54b also `complete`, the one tool not read-only, listed only where the person's config lists it under a local backend's `mcp_serve:` (absent otherwise -- the mod's fallback is the CLI path); the registration JSON printed by `apogee mcp presets`.

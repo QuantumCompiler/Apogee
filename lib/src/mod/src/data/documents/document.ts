@@ -60,6 +60,8 @@ export type Reader = {
   texts: (key: string) => string[]
   /** An object field, read by `read`; undefined when absent or null, never said. */
   optionalObject: <T>(key: string, read: (one: Reader) => T) => T | undefined
+  /** Says a field lacking that no one read could: one of several, none there (`gguf_path|mlx_path`). */
+  lack: (key: string) => void
 }
 
 /** A reader over `fields`, at `at`, noting what it lacks in `missing`. */
@@ -126,6 +128,9 @@ export function readerOf(fields: Fields, at: string, missing: string[]): Reader 
       const value = fields[key]
 
       return isFields(value) ? read(readerOf(value, path(key), missing)) : undefined
+    },
+    lack: key => {
+      lacking(key, undefined)
     },
   }
 }

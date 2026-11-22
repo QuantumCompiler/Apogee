@@ -4,7 +4,7 @@
 // registered, the questions asked and the clock. Every test of the mod runs
 // over this, never a real binary (the item's Testing: hermetic, over scripted
 // $.process results).
-import type { CommandSpec, On, ProcessRunInit, ToolSpec } from 'claude-code'
+import type { CommandSpec, On, PaneOpenArgs, ProcessRunInit, ToolSpec, UiPane } from 'claude-code'
 import { mock } from 'claude-code/testing'
 import type { MockClock } from 'claude-code/testing'
 
@@ -65,6 +65,16 @@ export type Machine = {
   asks: { question: string; labels: string[] }[]
   /** The clock beneath the plugin: it moves only when the test moves it. */
   clock: MockClock
+  /** Every pane opened (`$.ui.open`), as asked. */
+  opens: PaneOpenArgs[]
+  /**
+   * The panes the engine says are open (`$.ui.panes()`): an open adds one,
+   * shown and placed unless the world says otherwise; a test changes a row
+   * to hide the pane, or empties the list to close it.
+   */
+  panes: UiPane[]
+  /** How many times the mod asked which panes are open. */
+  paneLooks: () => number
 }
 
 /**
@@ -72,7 +82,17 @@ export type Machine = {
  * the clock's start, and an engine that refuses every tool (`toolRefusal`) or
  * the tools named, each with its reason (`toolRefusals`).
  */
-export type World = { script?: Script; ask?: Asker; now?: number; toolRefusal?: string; toolRefusals?: Readonly<Record<string, string>> }
+export type World = {
+  script?: Script
+  ask?: Asker
+  now?: number
+  toolRefusal?: string
+  toolRefusals?: Readonly<Record<string, string>>
+  /** Why an open waits undrawn (`isPlaced: false`), when it does; a pane is placed at once otherwise. */
+  paneWaits?: string
+  /** Why `$.ui.open` is refused (another plugin holds the id), when it is. */
+  paneRefusal?: string
+}
 
 /**
  * Scripts the machine. `binaries` maps a path to what it answers to
@@ -89,7 +109,11 @@ export function machine(on: On, binaries: Readonly<Record<string, Answer>>, home
     commands: [],
     asks: [],
     clock,
+    opens: [],
+    panes: [],
+    paneLooks: () => looks,
   }
+  let looks = 0
   mock.env(on, home === null ? {} : { HOME: home })
   on('fs.exists', (_, e) => {
     const answer = Object.hasOwn(binaries, e.path) ? binaries[e.path] : undefined
@@ -173,6 +197,21 @@ export function machine(on: On, binaries: Readonly<Record<string, Answer>>, home
     const answer = world.ask?.(question, labels)
 
     return { result: { questions: e.questions, answers: answer === undefined ? {} : { [question]: answer } } }
+  })
+  on('ui.open', (_, e) => {
+    made.opens.push({ ...e })
+    if (world.paneRefusal !== undefined) {
+      return { deny: world.paneRefusal }
+    }
+    const isPlaced = world.paneWaits === undefined
+    made.panes = [...made.panes.filter(pane => pane.id !== e.id), { id: e.id, title: e.title ?? e.id, isShown: isPlaced, isFocused: false, isPlaced }]
+
+    return { value: world.paneWaits === undefined ? { isPlaced: true } : { isPlaced: false, reason: world.paneWaits } }
+  })
+  on('ui.panes', () => {
+    looks += 1
+
+    return { value: made.panes.map(pane => ({ ...pane })) }
   })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
 

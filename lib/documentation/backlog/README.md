@@ -6,15 +6,15 @@ The work queue, seen one release at a time. This page is the **overview**: what 
 
 The branch is `v0.2.1`; the last published release is v0.2.0.
 
-**Still to build: 2 items.**
+**Still to build: 1 item.**
 - **The design:** none; track 1 is complete in development (2026-11-21). The prototype is rebuilt in React; its law (1a), its scaffold (1b), the old prototype's baseline (1c), the CLI stand-in (1d), its first screen (1e), the session screen's two halves (1u, 1v), the Sessions place around it with the console (1g), the Models place (1h), Settings (1i), the Training place (1j), the Video place with the runtime consent (1k), the compositions (1l), the Voice place (1m), the Library and Review places (1n), the Knowledge and Code graph places (1o), the Suites and Tasks places (1p), the gallery with the foundations pages (1q), the build boards as pages (1r), the parity proof (1s) and retiring the old prototype (1t) have shipped: every place and every Build and Foundations board is ported (the canvas's 5 Exploration boards are not, 1q's default), the built file is the one review surface, after 1s's report was presented you wrote "Go ahead and continue" (2026-11-21), and the old one-file prototype and the claude.ai canvas are retired.
-- **The mod:** 2. The Claude plugin is born: its scaffold, 1a, and its tools, slash commands and status line, 1b, have shipped (2026-11-21).
+- **The mod:** 1. The Claude plugin is born: its scaffold, 1a, its tools, slash commands and status line, 1b, and its pane, 1c, have shipped (2026-11-21).
 - **The Apple apps:** none; their three tracks for this release have shipped.
 - **The CLI:** none; its three tracks for this release have shipped.
 
 On top of that, 5 maintenance items can be picked up any time. None of the 5 waits on a decision from you.
 
-**Can start today** (nothing gates them): [mod 1c](mod/v0.2.1/mod-pane.md), [mod 1d](mod/v0.2.1/mod-pipeline.md).
+**Can start today** (nothing gates it): [mod 1d](mod/v0.2.1/mod-pipeline.md).
 
 ### The design ([queue](design/README.md#v021))
 
@@ -24,11 +24,10 @@ Nothing is left to build.
 
 ### The mod ([queue](mod/README.md#index))
 
-**Track 1, the mod is born:** the Claude plugin, driving the same `apogee` binary through its MCP server and JSON documents. The scaffold, 1a, has shipped ([Milestone A](../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born)): the plugin at `lib/src/mod/` with its four layers under the layering check, binary discovery and the not-installed guard, and `changed.sh mod`. So have its working surfaces, 1b: Apogee's served tools and `apogee_complete` for Claude, the `/apogee` set with promote and rollback confirmed, and the status line. Your live look (`claude --plugin-dir lib/src/mod`, on Claude Code 2.1.326 or newer) is still to come.
+**Track 1, the mod is born:** the Claude plugin, driving the same `apogee` binary through its MCP server and JSON documents. The scaffold, 1a, has shipped ([Milestone A](../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born)): the plugin at `lib/src/mod/` with its four layers under the layering check, binary discovery and the not-installed guard, and `changed.sh mod`. So have its working surfaces, 1b: Apogee's served tools and `apogee_complete` for Claude, the `/apogee` set with promote and rollback confirmed, and the status line. So has its pane, 1c: backends and models, training and the version ledger beside the chat, read back after every confirmed command, polled only while shown, with promote and rollback as confirmed buttons. Your live look (`claude --plugin-dir lib/src/mod`, on Claude Code 2.1.326 or newer) is still to come.
 
 | # | Item | Waits on |
 |---|---|---|
-| 1c | [The pane](mod/v0.2.1/mod-pane.md): backends, models, training and the ledger | — |
 | 1d | [The mod's pipeline](mod/v0.2.1/mod-pipeline.md) | — |
 
 ### The Apple apps ([queue](darwin/README.md#v021))
@@ -46,7 +45,7 @@ Nothing is left to build. This release's three CLI tracks have shipped:
 
 ### Ties to later releases
 
-- **[Mod 2b](mod/v0.2.2/mod-graphs-and-knowledge.md)** (v0.2.2) waits on mod 1c.
+None now: [mod 2b](mod/v0.2.2/mod-graphs-and-knowledge.md)'s gate on mod 1c was satisfied when 1c shipped (2026-11-21); it waits on CLI 58b alone, in v0.2.2.
 
 ## Any time: maintenance
 

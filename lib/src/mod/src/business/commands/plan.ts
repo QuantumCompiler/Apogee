@@ -14,6 +14,7 @@ export type ActionName = 'promote' | 'rollback'
 /** What the words ask for. */
 export type Plan =
   | { kind: 'overview' }
+  | { kind: 'pane' }
   | { kind: 'read'; read: ReadName; args: string[] }
   | { kind: 'action'; action: ActionName; args: string[] }
   | { kind: 'refused'; reason: string }
@@ -32,6 +33,7 @@ export const USAGE: readonly { words: string; does: string }[] = [
   { words: 'train status', does: 'the runs, the pipeline, the cycle and each active version' },
   { words: 'promote <run> --as <backend>', does: "registers a run as the backend's next version; asks first" },
   { words: 'rollback <backend>', does: 'repoints the backend at its previous version; asks first' },
+  { words: 'pane', does: 'opens the pane beside the chat: backends and models, training, the version ledger' },
 ]
 
 /** The plan for the words typed after `/apogee`. */
@@ -44,24 +46,48 @@ export function planApogee(typed: string): Plan {
   if (said === 'check') return read('check')
   if (said === 'models' || said === 'models list') return read('models')
   if (said === 'train status') return read('train status')
+  if (said === 'pane') return { kind: 'pane' }
   if (words[0] === 'promote') {
     const [, run, as, backend, ...rest] = words
-    if (run === undefined || as !== '--as' || backend === undefined || rest.length > 0 || isFlag(run) || isFlag(backend)) {
-      return { kind: 'refused', reason: 'promote takes a run and the backend: /apogee promote <run> --as <backend>' }
+    if (as !== '--as' || rest.length > 0) {
+      return { kind: 'refused', reason: PROMOTE_USAGE }
     }
 
-    return { kind: 'action', action: 'promote', args: ['train', 'promote', run, '--as', backend] }
+    return promotePlan(run, backend)
   }
   if (words[0] === 'rollback') {
     const [, backend, ...rest] = words
-    if (backend === undefined || rest.length > 0 || isFlag(backend)) {
-      return { kind: 'refused', reason: 'rollback takes the backend: /apogee rollback <backend>' }
-    }
 
-    return { kind: 'action', action: 'rollback', args: ['train', 'rollback', backend] }
+    return rest.length > 0 ? { kind: 'refused', reason: ROLLBACK_USAGE } : rollbackPlan(backend)
   }
 
   return { kind: 'refused', reason: `'${said}' is not one of /apogee's commands` }
+}
+
+/** `train promote <run> --as <backend>`, planned: what the slash command and the pane's Promote both run. */
+export function promotePlan(run: string | undefined, backend: string | undefined): Plan {
+  if (run === undefined || backend === undefined || isWordless(run) || isWordless(backend)) {
+    return { kind: 'refused', reason: PROMOTE_USAGE }
+  }
+
+  return { kind: 'action', action: 'promote', args: ['train', 'promote', run, '--as', backend] }
+}
+
+/** `train rollback <backend>`, planned: what the slash command and the pane's Roll back both run. */
+export function rollbackPlan(backend: string | undefined): Plan {
+  if (backend === undefined || isWordless(backend)) {
+    return { kind: 'refused', reason: ROLLBACK_USAGE }
+  }
+
+  return { kind: 'action', action: 'rollback', args: ['train', 'rollback', backend] }
+}
+
+const PROMOTE_USAGE = 'promote takes a run and the backend: /apogee promote <run> --as <backend>'
+const ROLLBACK_USAGE = 'rollback takes the backend: /apogee rollback <backend>'
+
+/** A name that is no one word the CLI reads as a name: empty, holding a space, or a flag. */
+function isWordless(word: string): boolean {
+  return word === '' || /\s/.test(word) || isFlag(word)
 }
 
 /** The command as the person would type it in a shell: what runs, word for word. */

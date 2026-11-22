@@ -53,6 +53,11 @@ export async function markJobsLost($: EngineInterface, reason: string, kept: Rea
   )
 }
 
+/** Every job kept, oldest first. */
+export async function readJobs($: EngineInterface): Promise<ApogeeJob[]> {
+  return (await read($, JOBS)).jobs
+}
+
 /** One job by its id, as kept. */
 export async function readJob($: EngineInterface, id: string): Promise<ApogeeJob | undefined> {
   return (await read($, JOBS)).jobs.find(job => job.id === id)

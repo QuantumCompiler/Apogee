@@ -8,6 +8,7 @@ import type { Decoded } from '../../data/documents/document'
 import { readBinary } from '../../data/state/binary'
 import { lastLine, runBinary } from '../../infrastructure/runner/runner'
 import type { RunInit } from '../../infrastructure/runner/runner'
+import { shownCommand } from '../commands/plan'
 
 /** The binary as discovery found it. */
 export type FoundBinary = Extract<ApogeeBinary, { kind: 'found' }>
@@ -48,4 +49,11 @@ export async function readDocument<T>(
   const cut = ran.isTruncated ? ' (its output passed 4 MiB and was cut)' : ''
 
   return { kind: 'failed', stage: 'document', reason: `${decoded.reason}${cut}` }
+}
+
+/** Why a read gave no document, with the command as typed: it could not run, or answered none; undefined for a read. */
+export function failureOf<T>(binary: FoundBinary, args: readonly string[], read: Read<T>): string | undefined {
+  if (read.kind === 'read') return undefined
+
+  return `${shownCommand(binary.path, args)} ${read.stage === 'run' ? 'could not run' : 'answered no document'}: ${read.reason}`
 }

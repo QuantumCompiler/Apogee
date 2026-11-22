@@ -107,3 +107,61 @@ export function trainStatusHandmade(backend: string, version: number, running: r
     versions: [{ active_version: version, backend, kept: version, total: version }],
   })
 }
+
+/**
+ * `train versions --output-format json` with two ledgers of more than one
+ * version, hand-made in the recorded document's shape
+ * (train-versions-adapters.json) with the fields http-api.md's
+ * `GET /v1/admin/training/versions` lists: tuned's GGUF v1 (the recorded
+ * one) and v2, v2 active; helper's MLX v1, pruned by retain_versions, and
+ * v2, active, scored on its quantized base.
+ */
+export const TRAIN_VERSIONS_TWO_HANDMADE = JSON.stringify({
+  data: [
+    {
+      active_version: 2,
+      backend_name: 'tuned',
+      versions: [
+        {
+          eval_passed: true,
+          eval_score: 1.0,
+          gguf_path: '/Users/someone/.apogee/models/tiny/gguf/cf368ccf9b45/tuned-v1.gguf',
+          promoted_at: '2026-10-26T06:56:37Z',
+          run_id: '20261026-065637',
+          version: 1,
+        },
+        {
+          eval_passed: true,
+          eval_score: 0.75,
+          gguf_path: '/Users/someone/.apogee/models/tiny/gguf/0d1e2f3a4b5c/tuned-v2.gguf',
+          promoted_at: '2026-10-27T09:15:00Z',
+          run_id: '20261027-091500',
+          version: 2,
+        },
+      ],
+    },
+    {
+      active_version: 2,
+      backend_name: 'helper',
+      versions: [
+        { mlx_path: '/Users/someone/.apogee/models/helper/mlx/1a2b3c4d5e6f', promoted_at: '2026-10-19T10:30:00Z', pruned_at: '2026-10-20T09:00:00Z', run_id: '20261019-101500', version: 1 },
+        {
+          eval_passed: false,
+          eval_score: 0.5,
+          eval_scored_on: 'helper-Q4_K_M.gguf (Q4_K_M)',
+          mlx_path: '/Users/someone/.apogee/models/helper/mlx/6f5e4d3c2b1a',
+          promoted_at: '2026-10-20T11:30:00Z',
+          run_id: '20261020-111500',
+          version: 2,
+        },
+      ],
+    },
+  ],
+  object: 'list',
+})
+
+/** `train versions --output-format json` with no ledger: http-api.md's `{"object": "list", "data": [...]}`, data `[]`. */
+export const TRAIN_VERSIONS_EMPTY_HANDMADE = '{"data":[],"object":"list"}\n'
+
+/** `models list --output-format json` with nothing configured and nothing stored: the recorded shape (models-list-adapters.json), data `[]`. */
+export const MODELS_LIST_EMPTY_HANDMADE = '{"data":[],"folded":0,"object":"list"}\n'

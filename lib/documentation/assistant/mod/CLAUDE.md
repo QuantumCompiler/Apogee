@@ -10,7 +10,7 @@ Project context for coding agents working on **the Apogee mod** — the Claude p
 
 ## What this is
 
-The Apogee mod: a **TypeScript plugin running inside Claude** (the desktop app or Claude Code) on the user's own machine — Apogee's local models offered to Claude as tools, `/apogee` slash commands, a pane beside the chat showing backends, models and training state, and a status line. It drives the same `apogee` binary the GUI drives, reading its `--output-format json` documents and machine mode. See [SPEC.md](SPEC.md) for scope and the hard limits. The scaffold has shipped ([MILESTONES.md](MILESTONES.md) → Milestone A): the plugin, its four layers under the layering check, and binary discovery with the not-installed guard. So have its working surfaces (1b): Apogee's served tools and `apogee_complete` for Claude, the `/apogee` set and the status line. The pane is track 1's next item.
+The Apogee mod: a **TypeScript plugin running inside Claude** (the desktop app or Claude Code) on the user's own machine — Apogee's local models offered to Claude as tools, `/apogee` slash commands, a pane beside the chat showing backends, models and training state, and a status line. It drives the same `apogee` binary the GUI drives, reading its `--output-format json` documents and machine mode. See [SPEC.md](SPEC.md) for scope and the hard limits. The scaffold has shipped ([MILESTONES.md](MILESTONES.md) → Milestone A): the plugin, its four layers under the layering check, and binary discovery with the not-installed guard. So have its working surfaces (1b): Apogee's served tools and `apogee_complete` for Claude, the `/apogee` set and the status line. So has its pane (1c): backends and models, training and the version ledger beside the chat (`/apogee pane`), with promote and rollback as confirmed buttons. The pipeline (1d) is track 1's last item.
 
 ## Stack & environment
 
@@ -37,32 +37,34 @@ Enforced by: the CLI's conformance suites on the contract side; mod-side, the la
 
 ## Codebase Map
 
-The plugin at `lib/src/mod/` ([ADR 0001](../../adrs/mod/layer-enforcement.md): four layers, dependencies down, each package at `src/<layer>/<package>/`, its tests at `tests/<layer>/<package>/`). As built by 1a; the planned growth is in the last column.
+The plugin at `lib/src/mod/` ([ADR 0001](../../adrs/mod/layer-enforcement.md): four layers, dependencies down, each package at `src/<layer>/<package>/`, its tests at `tests/<layer>/<package>/`). As built by 1a, 1b and 1c; the planned growth is in the last column.
 
 | Path | Contents | Planned |
 |------|----------|---------|
 | `.claude-plugin/plugin.json` | The manifest: `name` `apogee`, version, `engines` (`claude-code >=2.1.326`), `types`, and the `binary` and `channel` options. | |
-| `hooks/hooks.json`, `hooks/register.tsx` | The hooks module, the composition root and the folder's one code file: reads the options and wires `session.start`, `command.run` (`/apogee`) and `tool.run` (`mcp__apogee__*`) to Presentation, holding nothing itself. | Every `on(...)` registration lives here. |
-| `types/index.d.ts` | The contract, declarations only: the `$.state` values (`apogee.binary`, `apogee.tools`, `apogee.jobs`, `apogee.status`) and their types, the floor every layer takes its types from. | |
+| `hooks/hooks.json`, `hooks/register.tsx` | The hooks module, the composition root and the folder's one code file: reads the options and wires `session.start`, `command.run` (`/apogee`), `ui.render` (the pane, `requestId: 'apogee'`) and `tool.run` (`mcp__apogee__*`) to Presentation, holding nothing itself. | Every `on(...)` registration lives here. |
+| `types/index.d.ts` | The contract, declarations only: the `$.state` values (`apogee.binary`, `apogee.tools`, `apogee.jobs`, `apogee.status`, `apogee.pane`) and their types, the document shapes the pane keeps among them (Data's names alias them), the floor every layer takes its types from. | |
 | `src/infrastructure/discovery/` | Binary discovery: the override, then the channel's places in `~/.local/bin`, each verified by `version`; the install hints. | |
 | `src/infrastructure/runner/` | The process runner, the one door to the binary: `runBinary` (`$.process.run`, within its time, stdin written and closed) and `superviseBinary` (`$.process.spawn`, read to its end, no time of its own). | |
 | `src/infrastructure/timer/` | `$.clock` wrapped: `now`, `after`, `every`. | |
-| `src/data/documents/` | The CLI's documents as tolerant types: `check`, `models list`, `models status`, `train status`, `apogee mcp serve`'s frames (the handshake, `tools/list`, `tools/call`), and `config get`'s one value, its bare line (no document holds one). | `train versions` for the pane. |
-| `src/data/state/` | The `$.state` atoms: the binary found, the tools offered, the jobs, the status line's reading. | The pane's atoms. |
+| `src/data/documents/` | The CLI's documents as tolerant types: `check`, `models list`, `models status`, `train status`, `train versions` (since 1c), `apogee mcp serve`'s frames (the handshake, `tools/list`, `tools/call`), and `config get`'s one value, its bare line (no document holds one). | |
+| `src/data/state/` | The `$.state` atoms: the binary found, the tools offered, the jobs, the status line's reading, the pane's documents as last read and its promotion pick. | |
 | `src/business/binary/` | `findBinary`: discovery's answer kept, and the absence said once a session. | |
-| `src/business/client/` | The Apogee client: the session's binary, and `readDocument`, a command's document read through the runner. | The pane's reads. |
+| `src/business/client/` | The Apogee client: the session's binary, `readDocument`, a command's document read through the runner, and `failureOf`, why a read gave none. | |
 | `src/business/commands/` | The `/apogee` set: the plan (each word's real argv, promote and rollback confirmable), its reads, and the confirmed commands run supervised. | |
 | `src/business/served/` | Apogee's MCP server, one exchange a run: the listing and each call. | |
 | `src/business/surfaces/` | What the session is offered at its start: the served tools, and `apogee_complete`'s offer or why not; then what the engine took of it, kept. | |
 | `src/business/complete/` | `apogee_complete`'s decisions: the local, unmetered backends that chat, each backend's bound, the spend checks (no active suite, a utility model that bills nothing), the one-shot's argv, the served path. | |
 | `src/business/jobs/` | The async law: a completion's 30 s window, then a job; a confirmed command a job from its start, begun from a timer; each kept for its poll. | |
 | `src/business/status/` | The status line's reads: once at the start, then once a minute, and after a confirmed command. | |
+| `src/business/pane/` | The pane's reads (at its open, on Read again, after a confirmed command; each waiting for the one before), its poll (the training view every 15 s, only while shown), and what it offers: Promote on a complete run, into the configured `llamacpp` and `mlx` backends; Roll back where a version below the active one is listed. | |
 | `src/presentation/notices/` | The not-installed toast. | |
 | `src/presentation/session/` | The session start, in order: the binary found, `/apogee` registered, the tools registered, the status line started. | |
-| `src/presentation/commands/` | `/apogee`: registered, its confirmation asked (`$.ui.ask`), its documents formatted. | |
+| `src/presentation/commands/` | `/apogee`: registered, its documents formatted; `confirm.ts`, the one shown-command confirmation (`$.ui.ask`), shared with the pane. | |
 | `src/presentation/tools/` | The tools Claude is given: the served tools, `apogee_complete` and `apogee_job`, registered and answered. | |
-| `src/presentation/status/` | The status line's words, staleness said. | The pane (`src/presentation/pane/`, 1c). |
-| `tests/<layer>/<package>/`, `tests/support/` | `claude plugin test`'s hermetic tests over the scripted machine (`support/machine.ts`); `support/apogee.ts` drives `/apogee` and the tools, `support/recorded.ts` holds the recorded documents, `support/handmade.ts` the hand-made ones. | |
+| `src/presentation/status/` | The status line's words, staleness said. | |
+| `src/presentation/pane/` | The pane: opened (`/apogee pane`) and looked at (`$.ui.panes()`), its words line by line, its drawing from the surface's elements and its presses. | The adapters column (the track 53 follow-on). |
+| `tests/<layer>/<package>/`, `tests/support/` | `claude plugin test`'s hermetic tests over the scripted machine (`support/machine.ts`, the panes included); `support/apogee.ts` drives `/apogee` and the tools, `support/pane.ts` mounts the pane on each surface, `support/recorded.ts` holds the recorded documents, `support/handmade.ts` the hand-made ones. | |
 | `tests/architecture/layering/` | The layering check (node, the TypeScript compiler API) and its planted violations. | |
 | `tests/pipeline/changed.test.mjs` | `changed.sh mod`'s proof over throwaway commits in a shared clone. | |
 | `vendor/claude-code/index.d.ts` | The 2.1.326 API declarations, vendored unmodified for `tsc`. | Replaced whole when the engine floor moves. |
@@ -98,7 +100,10 @@ The first rules, earned by 1a (2026-11-21); more accrete with each item.
 - **A command that changes the store runs only on the person's yes, the exact command shown** (since 1b): the CLI's `train promote` and `train rollback` take no `--yes`, so the confirmation is the one gate, and the mod never passes `--yes`.
 - **Anything long goes on as a job** (the async law, since 1b): `launchJob` waits up to its window and answers there, or keeps a job, answers its id, toasts its end and keeps its outcome for `apogee_job`; a command that writes the store is a job from its start (`detachJob`, above). Work that outlives its call catches its own end (a module unloading under it has nobody to tell).
 - **The surfaces are registered at the session's start and answered by the root's hooks** (since 1b): `$.tool.register` and `$.command.register` with literal names, each registration on its own so one refused never drops the rest, what the engine took kept and said (never what was offered), a `tool.run` hook that answers only the names the mod registered and passes on the rest, and a `.catch` on each.
-- **Tests are hermetic and mirror the layers:** a plugin test (`*.test.ts`, under `claude plugin test`) scripts the machine through `tests/support/machine.ts` (its commands, the person's answers and the mocked clock) and reads the state through `tests/support/state.ts`; a document comes from `tests/support/recorded.ts` (copied whole from a recording, its source cited) or `tests/support/handmade.ts` (`*_HANDMADE`, in the CLI's exact shape, its source named); a check that reads files (`*.test.mjs`) runs under node, never under `claude plugin test`.
+- **A drawing reads its state and writes none** (since 1c): a `ui.render` hook reads `$.state` through Data, which subscribes it, so a write draws it again; its buttons' presses write, and run what they run outside the drawing. What a press needs from the person (a confirmation, a pick) is kept in `$.state`, never in a module variable, which a reload loses.
+- **A poll of something on screen asks whether it is shown before each read** (since 1c): Presentation hands Business the look (`$.ui.panes()`); a hidden tick reads nothing, and one that finds it closed ends the poll.
+- **A command that changes the store is read back by every surface showing it** (since 1c): the status line and the pane, after the job ends, whichever surface confirmed it.
+- **Tests are hermetic and mirror the layers:** a plugin test (`*.test.ts`, under `claude plugin test`) scripts the machine through `tests/support/machine.ts` (its commands, the person's answers and the mocked clock) and reads the state through `tests/support/state.ts`; a document comes from `tests/support/recorded.ts` (copied whole from a recording, its source cited) or `tests/support/handmade.ts` (`*_HANDMADE`, in the CLI's exact shape, its source named); a check that reads files (`*.test.mjs`) runs under node, never under `claude plugin test`. A drawing's tests loop over the surfaces (`tests/support/pane.ts`'s `SURFACES`: `terminal` and `desktop`), so it never depends on one (since 1c).
 
 ## Release and Install Infrastructure
 

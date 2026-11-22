@@ -12,7 +12,7 @@ The lifecycle is the house's: chat → here (and [SPEC.md](SPEC.md) on shape cha
 
 ## In progress
 
-*(Nothing in progress. v0.2.1, the release in development, carries track 1 below; its scaffold, 1a, and its tools, commands and status line, 1b, shipped 2026-11-21.)*
+*(Nothing in progress. v0.2.1, the release in development, carries track 1 below; its scaffold, 1a, its tools, commands and status line, 1b, and its pane, 1c, shipped 2026-11-21.)*
 
 ## Up next
 
@@ -22,7 +22,7 @@ Opened 2026-10-21 (the user's call, from that day's mod spike; home, layers and 
 
 - [x] **The mod scaffold** *(1a, shipped 2026-11-21 — [Milestone A](MILESTONES.md#milestone-a--the-mod-is-born), [DEVELOPER.md](DEVELOPER.md))* — the plugin skeleton, the four layers with the layering check at birth, binary discovery and the not-installed guard, tsc/validate wiring, `changed.sh mod`. Your live look (`claude --plugin-dir lib/src/mod` on Claude Code 2.1.326 or newer) is still to come.
 - [x] **Tools, slash commands, the status line** *(1b, shipped 2026-11-21 — [Milestone A](MILESTONES.md#milestone-a--the-mod-is-born), [DEVELOPER.md](DEVELOPER.md#the-surfaces-1b))* — Apogee's served tools registered into the session (one `apogee mcp serve` exchange a call), `apogee_complete` (the CLI's one-shot, or 54b's served tool where the person lists it), `apogee_job`, the `/apogee` set over the JSON documents with promote and rollback confirmed, the status line, and the async long-run pattern. Your live look (`claude --plugin-dir lib/src/mod` on Claude Code 2.1.326 or newer) is still to come.
-- [ ] **The pane** *([1c](../../backlog/mod/v0.2.1/mod-pane.md))* — backends, models, training and the ledger over the documents; promote/rollback with confirmation; the adapters column the follow-on (the CLI's track 53 shipped in v0.2.0).
+- [x] **The pane** *(1c, shipped 2026-11-21 — [Milestone A](MILESTONES.md#2026-11-21--mod-pane-backlog-item-1c-the-pane-beside-the-chat), [DEVELOPER.md](DEVELOPER.md#the-pane-1c))* — backends, models, training and the ledger over the documents beside the chat (`/apogee pane`), read back after every confirmed command and polled only while shown; promote/rollback as buttons with the exact command confirmed; the adapters column the follow-on (the CLI's track 53 shipped in v0.2.0). Your live look (`claude --plugin-dir lib/src/mod` on Claude Code 2.1.326 or newer) is still to come.
 - [ ] **The mod pipeline** *([1d](../../backlog/mod/v0.2.1/mod-pipeline.md))* — its own workflow: `changed.sh`-gated, `tsc` the runner gate (validate where the CLI installs headlessly), validate/test the dev-host gates, the plugin folder the artifact.
 
 ### v0.2.2 — Track 2, Claude aware of Apogee
@@ -30,7 +30,7 @@ Opened 2026-10-21 (the user's call, from that day's mod spike; home, layers and 
 Opened 2026-11-07 from that day's spike (the CLI's track 58 carries the walls and the server's half). The user's call **both hosts**: Claude Code gets a plugin, and the desktop mod picks up the new reads.
 
 - [ ] **Apogee as a Claude Code plugin** *([2a](../../backlog/mod/v0.2.2/claude-code-plugin.md), gated on CLI 58a and 58c)* — the server registered with the coding-host profile and a skill saying when to use Apogee, installed from this repository's marketplace.
-- [ ] **The desktop mod shows graphs and knowledge records** *([2b](../../backlog/mod/v0.2.2/mod-graphs-and-knowledge.md), gated on 1c and CLI 58b)* — `/apogee graphs`, `/apogee knowledge` and the pane's Knowledge section.
+- [ ] **The desktop mod shows graphs and knowledge records** *([2b](../../backlog/mod/v0.2.2/mod-graphs-and-knowledge.md), gated on CLI 58b; its 1c gate satisfied 2026-11-21)* — `/apogee graphs`, `/apogee knowledge` and the pane's Knowledge section.
 
 ## Fast follow
 

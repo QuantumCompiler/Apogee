@@ -16,6 +16,9 @@ import {
   MODELS_STATUS_CHAT,
   MODELS_STATUS_UNSET,
   TRAIN_STATUS_CYCLE_ACTIVE,
+  TRAIN_STATUS_CYCLE_STALE_LOCK,
+  TRAIN_STATUS_CYCLE_UNREADABLE,
+  TRAIN_STATUS_GATE_FAILED,
   TRAIN_STATUS_NONE,
   TRAIN_STATUS_PIPELINE_RUNNING,
 } from '../../support/recorded'
@@ -144,6 +147,46 @@ test('train status with nothing trained reads as nothing, and a running pipeline
     ['pipe-20261026-074116-s1'],
     'running',
   ])
+})
+
+test("train status keeps why the cycle history could not be read, and the lock a dead pass left; neither said where it is absent", () => {
+  const unreadable = decodeTrainStatus(TRAIN_STATUS_CYCLE_UNREADABLE)
+  expect(unreadable.kind === 'read' && [unreadable.value.cycle, unreadable.value.cycleError, unreadable.value.staleLock, unreadable.missing]).toEqual([
+    undefined,
+    '/Users/someone/.apogee/training/cycle/history.json: cycle history: runs must be an array',
+    undefined,
+    [],
+  ])
+  const stale = decodeTrainStatus(TRAIN_STATUS_CYCLE_STALE_LOCK)
+  expect(stale.kind === 'read' && [stale.value.cycle?.backend, stale.value.cycleError, stale.value.staleLock, stale.value.isCycleActive, stale.missing]).toEqual([
+    'nightly-model',
+    undefined,
+    '/Users/someone/.apogee/training/cycle/cycle.lock',
+    false,
+    [],
+  ])
+  // A binary from before the two fields (57g, 57h) answers neither: nothing is said lacking.
+  const older = decodeTrainStatus(TRAIN_STATUS_PIPELINE_RUNNING)
+  expect(older.kind === 'read' && ['cycleError' in older.value, 'staleLock' in older.value, older.missing]).toEqual([false, false, []])
+})
+
+test("train status keeps a run's gate where it was gated, and none where it was not", () => {
+  const pipeline = decodeTrainStatus(TRAIN_STATUS_PIPELINE_RUNNING)
+
+  expect(pipeline.kind === 'read' && pipeline.value.recentRuns.slice(0, 2)).toEqual([
+    { id: 'pipe-20261026-074116-s1', status: 'running', method: 'lora', startedAt: '2026-10-26T07:41:16Z' },
+    {
+      id: 'pipe-20261026-074116-s0',
+      status: 'complete',
+      method: 'lora',
+      startedAt: '2026-10-26T07:41:16Z',
+      finishedAt: '2026-10-26T07:41:16Z',
+      evalPassed: true,
+      evalScore: 1,
+    },
+  ])
+  const failed = decodeTrainStatus(TRAIN_STATUS_GATE_FAILED)
+  expect(failed.kind === 'read' && [failed.value.recentRuns[0]?.evalPassed, failed.value.recentRuns[0]?.evalScore]).toEqual([false, 0.4583333333333333])
 })
 
 test('train status missing its fields says which, and reads them as unknown', () => {

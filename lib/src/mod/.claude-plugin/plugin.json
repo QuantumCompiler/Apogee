@@ -1,7 +1,7 @@
 {
   "name": "apogee",
   "version": "0.2.1",
-  "description": "Apogee inside Claude, driving the apogee binary on this machine: Apogee's read tools and a local completion for Claude, the /apogee commands and a status line. Says so once when Apogee is not installed.",
+  "description": "Apogee inside Claude, driving the apogee binary on this machine: Apogee's read tools and a local completion for Claude, the /apogee commands, a pane beside the chat with its backends, training and version ledger, and a status line. Says so once when Apogee is not installed.",
   "author": { "name": "QuantumCompiler" },
   "license": "MIT",
   "engines": {

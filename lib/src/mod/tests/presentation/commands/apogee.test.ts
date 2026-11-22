@@ -5,7 +5,15 @@ import { expect, test } from 'claude-code/testing'
 
 import { apogee, scripted } from '../../support/apogee'
 import { BIN, DEV_VERSION, RELEASE_VERSION, START, machine } from '../../support/machine'
-import { CHECK_ADAPTERS, MODELS_LIST_ADAPTERS, MODELS_LIST_SERVER_TOOLS, TRAIN_STATUS_CYCLE_ACTIVE } from '../../support/recorded'
+import {
+  CHECK_ADAPTERS,
+  MODELS_LIST_ADAPTERS,
+  MODELS_LIST_SERVER_TOOLS,
+  TRAIN_STATUS_CYCLE_ACTIVE,
+  TRAIN_STATUS_CYCLE_STALE_LOCK,
+  TRAIN_STATUS_CYCLE_UNREADABLE,
+  TRAIN_STATUS_STALE_LOCK_NO_HISTORY,
+} from '../../support/recorded'
 
 const FOUND = { [`${BIN}/apogee`]: { stdout: RELEASE_VERSION } }
 
@@ -17,8 +25,8 @@ test('the session start registers /apogee with its set in the hint', async ($, o
   expect(made.commands).toEqual([
     {
       name: 'apogee',
-      description: "Apogee on this machine: the install check, the models, training's status; promote and rollback ask first",
-      argumentHint: 'check | models | train status | promote <run> --as <backend> | rollback <backend>',
+      description: "Apogee on this machine: the install check, the models, training's status, the pane; promote and rollback ask first",
+      argumentHint: 'check | models | train status | promote <run> --as <backend> | rollback <backend> | pane',
     },
   ])
 })
@@ -119,6 +127,26 @@ test('/apogee train status shows what runs, the pipeline, the cycle and each act
   expect(text).toContain('Cycle: nightly-model, a pass running')
   expect(text).toContain('Versions: nightly-model v1 (1 kept of 1)')
   expect(text).toContain('  pipe-20261026-074117-s1  cancelled  lora')
+})
+
+test("/apogee train status says a cycle history it could not read in the CLI's words, and a dead pass's lock as the cycle's state", async ($, on) => {
+  let document = TRAIN_STATUS_CYCLE_UNREADABLE
+  machine(on, FOUND, undefined, { script: args => (args.join(' ') === 'train status --output-format json' ? { stdout: document } : undefined) })
+  await $.session.start(START)
+  const cycle = async (): Promise<string[]> => ((await apogee($, 'train status')).text ?? '').split('\n').filter(line => line.startsWith('Cycle'))
+
+  expect(await cycle()).toEqual(['Cycle: history unreadable -- /Users/someone/.apogee/training/cycle/history.json: cycle history: runs must be an array'])
+  document = TRAIN_STATUS_CYCLE_STALE_LOCK
+  expect(await cycle()).toEqual(['Cycle: nightly-model, stopped -- cycle.lock is left; remove /Users/someone/.apogee/training/cycle/cycle.lock to run again'])
+  document = TRAIN_STATUS_STALE_LOCK_NO_HISTORY
+  expect(await cycle()).toEqual(['Cycle: stopped -- cycle.lock is left; remove /Users/someone/.apogee/training/cycle/cycle.lock to run again'])
+  // Halted, the lock is said on a line of its own, as the CLI says it (train.cpp).
+  document = TRAIN_STATUS_CYCLE_STALE_LOCK.replace('"halt_reason":"","halted":false', '"halt_reason":"2 consecutive failures","halted":true')
+  expect(document).not.toBe(TRAIN_STATUS_CYCLE_STALE_LOCK)
+  expect(await cycle()).toEqual([
+    'Cycle: nightly-model, halted: 2 consecutive failures',
+    'Cycle lock: stopped -- cycle.lock is left; remove /Users/someone/.apogee/training/cycle/cycle.lock to run again',
+  ])
 })
 
 test('a read the binary refuses, or answers with no document, is said with the command and why', async ($, on) => {

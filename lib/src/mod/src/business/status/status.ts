@@ -12,9 +12,9 @@ import { decodeTrainStatus } from '../../data/documents/training'
 import type { TrainStatus } from '../../data/documents/training'
 import { readStatus, recordFailure, recordReading } from '../../data/state/status'
 import { after, every, now } from '../../infrastructure/timer/timer'
-import { readDocument } from '../client/client'
-import type { FoundBinary, Read } from '../client/client'
-import { READ_ARGS, shownCommand } from '../commands/plan'
+import { failureOf, readDocument } from '../client/client'
+import type { FoundBinary } from '../client/client'
+import { READ_ARGS } from '../commands/plan'
 
 /** How often the line is read: once a minute. */
 export const POLL_MS = 60_000
@@ -125,10 +125,4 @@ function runOf(training: TrainStatus): string {
   if (training.isCycleActive === true) parts.push('cycle pass')
 
   return parts.length === 0 ? 'idle' : `training: ${parts.join(', ')}`
-}
-
-function failureOf<T>(binary: FoundBinary, args: readonly string[], read: Read<T>): string | undefined {
-  if (read.kind === 'read') return undefined
-
-  return `${shownCommand(binary.path, args)} ${read.stage === 'run' ? 'could not run' : 'answered no document'}: ${read.reason}`
 }

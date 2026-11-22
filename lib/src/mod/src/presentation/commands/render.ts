@@ -113,18 +113,47 @@ function modelsText(list: ModelsList): string {
   return [header, ...order.map(title => [title, ...(sections.get(title) ?? [])].join('\n'))].join('\n\n')
 }
 
-function trainText(status: TrainStatus): string {
-  const lines = ['apogee train status']
-  lines.push(status.running.length === 0 ? 'Running: none' : `Running: ${count(status.running.length, 'run')} (${status.running.join(', ')})`)
+/**
+ * The training status's headline lines, as `/apogee train status` and the
+ * pane both say them: what runs, the newest pipeline, the cycle (each only
+ * where the document has it). A history that could not be read is said in
+ * the CLI's words, never drawn as none; a lock a dead pass left is said once,
+ * as the cycle's state or on its own line, as `train status` says it
+ * (train.cpp), less the process id the document does not carry.
+ */
+export function trainingLines(status: TrainStatus): string[] {
+  const lines = [status.running.length === 0 ? 'Running: none' : `Running: ${count(status.running.length, 'run')} (${status.running.join(', ')})`]
   const pipeline = status.latestPipeline
   if (pipeline !== undefined) {
     const of = pipeline.stages === undefined ? '' : `, ${pipeline.passed ?? 0} of ${pipeline.stages} stages passed`
     lines.push(`Pipeline: ${pipeline.id} ${pipeline.status ?? '(status not said)'} (${pipeline.specName ?? 'unnamed'}${of})`)
   }
+  const lock = status.staleLock === undefined ? undefined : `stopped -- cycle.lock is left; remove ${status.staleLock} to run again`
+  let isLockSaid = false
   if (status.cycle !== undefined) {
-    const state = status.cycle.isHalted === true ? `halted${status.cycle.haltReason ? `: ${status.cycle.haltReason}` : ''}` : status.isCycleActive === true ? 'a pass running' : 'at rest'
+    const state =
+      status.cycle.isHalted === true
+        ? `halted${status.cycle.haltReason ? `: ${status.cycle.haltReason}` : ''}`
+        : status.isCycleActive === true
+          ? 'a pass running'
+          : (lock ?? 'at rest')
+    isLockSaid = state === lock
     lines.push(`Cycle: ${status.cycle.backend ?? '(backend not said)'}, ${state}`)
+  } else if (status.cycleError !== undefined) {
+    lines.push(`Cycle: history unreadable -- ${status.cycleError}`)
+  } else if (lock !== undefined) {
+    lines.push(`Cycle: ${lock}`)
+    isLockSaid = true
   }
+  if (lock !== undefined && !isLockSaid) {
+    lines.push(`Cycle lock: ${lock}`)
+  }
+
+  return lines
+}
+
+function trainText(status: TrainStatus): string {
+  const lines = ['apogee train status', ...trainingLines(status)]
   lines.push(
     status.versions.length === 0
       ? 'Versions: none promoted'
@@ -142,6 +171,7 @@ function trainText(status: TrainStatus): string {
   return lines.join('\n')
 }
 
-function count(n: number, noun: string): string {
+/** `n` and its noun, plural past one: `1 run`, `3 runs`. */
+export function count(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`
 }

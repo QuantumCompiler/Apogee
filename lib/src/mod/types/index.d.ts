@@ -115,6 +115,132 @@ export type ApogeeStatusState = {
   attemptAt?: number
 }
 
+/** One row of `models list`: a backend, or a stored model with what runs it. */
+export type ApogeeModelRow = {
+  /** The backend's name, `(not configured)` for a stored set no backend runs. */
+  backend: string
+  /** `llamacpp`, `mlx`, `anthropic`, ... or `-`. */
+  backendType: string
+  model: string
+  /** `local` or `cloud`: the table's section the row sits in. */
+  section: string
+  /** Where the row stands: `ok`, `unreadable`, `no key`, ... */
+  state: string
+  note?: string
+  /**
+   * What an MLX model is (`chat`, `vision`, `embedding`, `drafter`, `voice`,
+   * `video`, ...), where the CLI says (since its 53e); absent on every other row.
+   */
+  kind?: string
+}
+
+/** `models list`: every row. */
+export type ApogeeModelsList = { rows: ApogeeModelRow[] }
+
+/** One `label: value` line of `models status`. */
+export type ApogeeRoleField = { field: string; value: string }
+
+/** `models status`: which backend each role resolves to, in order. */
+export type ApogeeModelsStatus = { fields: ApogeeRoleField[] }
+
+/** One training run, as `train status` lists it. */
+export type ApogeeRunSummary = {
+  id: string
+  /** `running`, `complete`, `failed`, `cancelled`, ... */
+  status: string
+  method?: string
+  startedAt?: string
+  finishedAt?: string
+  /** Whether its eval gate passed, where it was gated. */
+  evalPassed?: boolean
+  /** The gate's score, where it was gated. */
+  evalScore?: number
+}
+
+/** One backend's versions headline in `train status`: which promoted version it runs. */
+export type ApogeeVersionHeadline = { backend: string; activeVersion?: number; kept?: number; total?: number }
+
+/** The newest pipeline run. */
+export type ApogeePipelineHeadline = { id: string; specName?: string; status?: string; stages?: number; passed?: number }
+
+/** The cycle's headline, once a pass has written its history. */
+export type ApogeeCycleHeadline = { backend?: string; isHalted?: boolean; haltReason?: string }
+
+/** `train status`: the runs, each backend's versions headline, the pipelines and the cycle. */
+export type ApogeeTrainStatus = {
+  /** The ids of the runs running now. */
+  running: string[]
+  recentRuns: ApogeeRunSummary[]
+  versions: ApogeeVersionHeadline[]
+  /** The pipeline a live process runs now, if any. */
+  activePipeline?: string
+  /** Whether a running cycle pass holds the cycle's lock. */
+  isCycleActive?: boolean
+  runs?: number
+  pipelines?: number
+  latestPipeline?: ApogeePipelineHeadline
+  cycle?: ApogeeCycleHeadline
+  /** Why the cycle's history could not be read (`cycle_error`, 57h): `cycle` is then absent though a history exists. */
+  cycleError?: string
+  /** The path of the lock a dead pass left (`stale_lock`, 57g): `train cycle run` refuses until it is removed. */
+  staleLock?: string
+}
+
+/**
+ * One promoted version of a ledger (`train versions`), with the fields it
+ * carries and none it does not: what it is (a GGUF file, an MLX directory, or
+ * an adapter over the pinned base), when, its gate, and whether retention
+ * pruned it.
+ */
+export type ApogeeVersionEntry = {
+  version?: number
+  runId: string
+  /** Its weights: `gguf_path`, `mlx_path` or `adapter_path`, whichever it names. */
+  weights?: { kind: 'gguf' | 'mlx' | 'adapter'; path: string }
+  /** The base an adapter version was pinned to. */
+  baseSha256?: string
+  promotedAt: string
+  evalScore?: number
+  evalPassed?: boolean
+  /** Where its gate scored it, when that was the quantized base it serves on. */
+  evalScoredOn?: string
+  /** When retention removed its weights; the entry stays as history. */
+  prunedAt?: string
+  fusedPath?: string
+}
+
+/** One backend's version ledger: its active version and every version promoted, in the document's order. */
+export type ApogeeLedger = { backend: string; activeVersion?: number; versions: ApogeeVersionEntry[] }
+
+/** `train versions`: every ledger, in the document's order. */
+export type ApogeeTrainVersions = { ledgers: ApogeeLedger[] }
+
+/**
+ * One document the pane shows, as last read: the last good read and what it
+ * lacked, when, and why the latest attempt failed when it did (the last good
+ * read is kept beside it, its age said).
+ */
+export type ApogeePaneRead<T> = {
+  value?: T
+  missing: string[]
+  readAt?: number
+  failure?: string
+  attemptAt?: number
+}
+
+/**
+ * The pane's documents as last read (read back, never mirrored), and the run
+ * whose promotion target the person is picking, when they are.
+ */
+export type ApogeePaneState = {
+  models?: ApogeePaneRead<ApogeeModelsList>
+  roles?: ApogeePaneRead<ApogeeModelsStatus>
+  training?: ApogeePaneRead<ApogeeTrainStatus>
+  ledger?: ApogeePaneRead<ApogeeTrainVersions>
+  /** The run Promote was pressed on, its backend still to pick. */
+  promoting?: string
+}
+
 declare module 'claude-code' {
   interface PluginState {
     apogee: {
@@ -122,6 +248,7 @@ declare module 'claude-code' {
       tools: Shaped<ApogeeToolsState>
       jobs: Shaped<ApogeeJobsState>
       status: Shaped<ApogeeStatusState>
+      pane: Shaped<ApogeePaneState>
     }
   }
 }
