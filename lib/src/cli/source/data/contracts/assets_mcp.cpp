@@ -25,7 +25,7 @@ namespace {
     return out;
 }
 
-constexpr std::array<std::string_view, 2> kMcpCodeExecServerPy{{
+constexpr std::array<std::string_view, 3> kMcpCodeExecServerPy{{
     R"PY(#!/usr/bin/env python3
 """Apogee's code-execution server: an MCP server on stdio that runs Python.
 
@@ -131,17 +131,49 @@ import os
 _WORK = os.path.realpath(os.getcwd())
 _DEVNULL = os.path.realpath(os.devnull)
 _WRITING = os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC
+# The events whose last argument is the call's directory descriptor: CPython
+# passes -1 for a call made without one, never None.
+_AT = ("os.remove", "os.rmdir", "os.mkdir", "os.chmod", "os.chown", "os.utime")
+# Of those, the ones that act on the entry itself, never on where a link leads.
+_ENTRY = ("os.remove", "os.rmdir", "os.mkdir")
 
 
-def _inside(path):
+def _text(path):
     if isinstance(path, int):
-        return True
+        return None
     try:
-        text = os.fsdecode(os.fspath(path))
+        return os.fsdecode(os.fspath(path))
     except TypeError:
+        return None
+
+
+def _inside(path, entry=False, devnull=False):
+    # A descriptor, or anything that is not a path, is taken for inside.
+    text = _text(path)
+    if text is None:
         return True
-    real = os.path.realpath(text)
-    return real == _WORK or real.startswith(_WORK + os.sep) or real == _DEVNULL
+    head, tail = os.path.split(text)
+    if entry and tail not in ("", os.curdir, os.pardir):
+        # The entry itself: its folder resolved, its own last name kept, so a
+        # link inside that points out is judged where it sits. A path ending
+        # in a separator, "." or ".." is judged whole, since the system may
+        # follow a final link written that way: never strip the separator.
+        real = os.path.join(os.path.realpath(head or os.curdir), tail)
+    else:
+        real = os.path.realpath(text)
+    if devnull and real == _DEVNULL:
+        return True
+    return real == _WORK or real.startswith(_WORK + os.sep)
+
+
+def _judged(path, dir_fd):
+    # A call relative to a real directory descriptor is not resolved. An
+    # absolute path is judged whatever descriptor it carries, since the system
+    # call ignores the descriptor then.
+    if dir_fd is None or dir_fd == -1:
+        return True
+    text = _text(path)
+    return text is not None and os.path.isabs(text)
 
 
 def _refuse(path):
@@ -160,22 +192,36 @@ def _guard(event, args):
         writing = isinstance(flags, int) and (flags & _WRITING) != 0
         if not writing and isinstance(mode, str):
             writing = any(c in mode for c in "wax+")
-        if writing and not _inside(path):
+        # /dev/null is inside for open alone: subprocess's DEVNULL writes it.
+        if writing and not _inside(path, devnull=True):
             _refuse(path)
-    elif event in ("os.remove", "os.rmdir", "os.mkdir", "os.chmod", "os.chown", "os.utime"):
-        # A call relative to a directory descriptor (the last argument) is
-        # not resolved here: the guard is best effort, said so.
-        if args[-1] is None and not _inside(args[0]):
+    elif event in _AT:
+        # Not judged, the guard being best effort, said so: a call relative
+        # to a real directory descriptor, or made on an open descriptor
+        # (os.chmod(fd, ...)). chmod, chown and utime are judged by where the
+        # path leads even when they do not follow a link: the event does not
+        # say which. Nor does anything here see os.mkfifo or os.mknod, which
+        # raise no event, or what sqlite3 and dbm write through their own C.
+        if _judged(args[0], args[-1]) and not _inside(args[0], entry=event in _ENTRY):
             _refuse(args[0])
-    elif event in ("os.truncate", "os.chflags", "os.lchflags", "shutil.rmtree"):
+    elif event in ("os.truncate", "os.chflags", "os.setxattr", "os.removexattr"):
         if not _inside(args[0]):
             _refuse(args[0])
-    elif event in ("os.rename", "os.link"):
+    elif event == "shutil.rmtree":
+        # (path,) before 3.11, (path, dir_fd) from 3.11: the path is first.
+        if not _inside(args[0], entry=True):
+            _refuse(args[0])
+    elif event == "os.rename":
         for path in args[:2]:
-            if not _inside(path):
+            if not _inside(path, entry=True):
                 _refuse(path)
+    elif event == "os.link":
+        if not _inside(args[0]):
+            _refuse(args[0])
+        if not _inside(args[1], entry=True):
+            _refuse(args[1])
     elif event == "os.symlink":
-        if not _inside(args[1]):
+        if not _inside(args[1], entry=True):
             _refuse(args[1])
 
 
@@ -385,7 +431,8 @@ class Capture(object):
     def _read(self, stream):
         while True:
             try:
-                chunk = stream.read1(65536) if hasattr(stream, "read1") else stream.read(65536)
+)PY",
+    R"PY(                chunk = stream.read1(65536) if hasattr(stream, "read1") else stream.read(65536)
             except (OSError, ValueError):
                 break
             if not chunk:
@@ -446,8 +493,7 @@ class Rendering(object):
         return (head.decode("utf-8", "replace")
                 + "\n[... " + str(omitted) + " bytes omitted: run_python keeps the first and "
                 "last " + str(keep // 1024) + " KB of output (OUTPUT_KEEP). Write large "
-)PY",
-    R"PY(                "output to a file in the working directory instead, and print what matters "
+                "output to a file in the working directory instead, and print what matters "
                 "...]\n" + tail.decode("utf-8", "replace"))
 
 
@@ -755,7 +801,8 @@ def serve(server):
                 "content": [{"type": "text", "text": text}], "isError": is_error}})
         elif ident is not None:
             send({"jsonrpc": "2.0", "id": ident, "error": {
-                "code": -32601, "message": "method not found: " + str(method)}})
+)PY",
+    R"PY(                "code": -32601, "message": "method not found: " + str(method)}})
 
 
 def main():

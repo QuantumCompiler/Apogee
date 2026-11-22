@@ -563,16 +563,21 @@ process, so code that the next call builds on saves to a file.
 | Output | The first and last 8 KB, like `run_command`, with how much was cut between them. |
 | Disk | 256 MiB in the working directory. A run that goes past it has what it wrote removed, and is told; a `write_input` that would is refused. |
 | Network | The code cannot import `socket`, so Python's own networking (urllib, http.client, requests) fails with a message saying the network is off. |
-| Writes | Code that writes outside the working directory is refused, naming the path. |
+| Writes | Code that writes, deletes, makes a folder, changes a mode, owner, date or extended attribute, renames or links outside the working directory is refused, naming the path. A link inside the working directory that points outside can be removed or renamed, since that changes only the link. Its mode, owner and dates cannot be changed, even without following it, so copying one with its metadata (`shutil.copytree(..., symlinks=True)`, `copystat`, `copy2(..., follow_symlinks=False)`) reports an error, though the copy is made. |
 | Environment | An allow-list: `PATH`, the locale, the time zone. `HOME` and the temporary directory point at the working directory, so no key in Apogee's environment reaches the code. |
 
 The network and write guards are **best effort, not a boundary**: a
-subprocess or a C extension can get around them. The boundary is the
-permission gate. Both tools declare that they write, so each call is asked
-like `run_command`, or allowed for a run with `--allow
-mcp__code__run_python`, or for good with `permissions:` in the config. The
-session's permission mode governs them too: plan and dont-ask refuse them,
-and accept-edits does not pass them unasked.
+subprocess or a C extension can get around them. The write guard does not
+judge a call relative to a directory descriptor or made on an open one
+(`os.chmod(fd, ...)`), `os.mkfifo` or `os.mknod` (Python raises no audit
+event for them), or what standard-library modules write through their own C
+code (`sqlite3`, `dbm`); and on Python 3.8.0 or 3.8.1, which raise almost
+none of the os module's filesystem audit events, it judges little but `open`
+and `os.truncate`. The boundary is the permission gate. Both tools declare
+that they write, so each call is asked like `run_command`, or allowed for a
+run with `--allow mcp__code__run_python`, or for good with `permissions:` in
+the config. The session's permission mode governs them too: plan and dont-ask
+refuse them, and accept-edits does not pass them unasked.
 
 The server speaks MCP over pipes, never a port, and its stderr is captured
 like any server's. The limits are constants at the top of the script, and

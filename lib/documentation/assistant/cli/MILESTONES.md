@@ -5233,6 +5233,114 @@ Decisions taken while building, for veto:
 
 **Not run: a cloud backend.** Its code-running half needs your API key and spends money, and this run had nobody to approve that. The server is the same child for any provider, since MCP tools reach every backend through the one registry, but the cloud half of that acceptance line is still yours to see.
 
+### 2026-11-21 — `code-exec-write-guard-holds` (maintenance item M35): the write guard holds for deletes, folders and permissions
+
+**Why.** 47b's write guard, an audit hook in the run's bootstrap, is what tools.md means by "code that writes outside the working directory is refused, naming the path". A probe made while looking into 57o's link gap (57y, 2026-11-15) found that for `os.remove` and `os.unlink`, `os.rmdir`, `os.mkdir` (and so `os.makedirs` and `tempfile.mkdtemp`), `os.chmod`, `os.chown` and `os.utime` it had never refused anything, on any Python. Its branch for those events judged a path only when the event's last argument, the call's directory descriptor, `is None`, and CPython passes **-1** for a call made without one. So it took every call for a descriptor-relative one and let it through. 47b's test pinned the guard only for `open`, so nothing ever ran the broken branch: the guarantee was recorded but never tested. The same seam also refused, wrongly, `os.rename` of a link inside that points outside, because it judged every path by where it leads. The severity is moderate, since the permission gate is the boundary, but the reference promised a refusal that never came.
+
+- [x] **The six descriptor-last events are judged** (`assets/mcp/code_exec_server.py`, inside `BOOTSTRAP`). `os.remove`, `os.rmdir`, `os.mkdir`, `os.chmod`, `os.chown` and `os.utime` now go through a new `_judged(path, dir_fd)`. A call is judged when its descriptor is -1 or `None`, or when its path is absolute, since a system call ignores `dir_fd` then.
+- [x] **The entry itself, where the call acts on the entry.** `_inside` gains an entry judgment: the path's folder is resolved and its own last name kept, so a link inside is judged where it sits, not where it leads. It applies to `os.remove`, `os.rmdir`, `os.mkdir`, both ends of `os.rename` (and so `os.replace`), `os.link`'s new name, `os.symlink`'s new name and `shutil.rmtree`'s path (`args[0]`, which is `(path,)` before 3.11 and `(path, dir_fd)` from 3.11). A path that ends in a separator, or whose last name is `.` or `..`, is judged whole, because the system may follow a final link written that way. The separator is never stripped: the document's first prototype did, and `shutil.rmtree('link/')` then deleted an outside tree. `chmod`, `chown`, `utime`, `truncate`, `chflags`, `os.link`'s source and `open` are still judged by where the path leads.
+- [x] **`/dev/null` is inside for `open` alone.** Writing to it still works, as subprocess's `DEVNULL` needs. Deleting it, or changing its mode or owner, is refused by the guard, where before only the system's own permissions stopped it (and as root they would not).
+- [x] **The event set's edges.** `os.setxattr` and `os.removexattr` (Linux) are judged by where the path leads. The guard's dead `os.lchflags` name is gone: CPython raises `os.chflags` for it. The old comment that said descriptor calls go unjudged is now the six events' comment, which names everything still not judged.
+- [x] **The refusal's wording is unchanged**: `PermissionError: Apogee's code-exec sandbox writes only inside its working directory (<work>): '<path>' is outside it`. The script is still standard library only, for Python 3.8 or later, and the bootstrap is still one string run with `-c`.
+- [x] **The fix reaches existing installs.** `scripts/generate_training_assets.py` was run after the edit, with HEAD still at the pre-fix script (`git show HEAD:… | shasum -a 256` gave `c23c9734…0631a`). It appended exactly `code_exec_server.py c23c9734926f4e8315c18a437632002a2488df01a69b7cb82bae4d8741d0631a` to `assets/retired-scripts.txt`, the bytes every release from v0.1.9 through v0.2.0 seeded. It also rewrote `assets_mcp.cpp`, and `assets_training.cpp`'s `bundled_scripts_retired()` went from 14 entries to 15. Neither unit was written by hand. So `refresh_seeded_scripts` replaces an install's unedited copy at its next seeding, and an edited copy stays the user's.
+- [x] **The reference** (tools.md, *The sandbox, said plainly*):
+  - **The Writes row** says what is refused: writing, deleting, making a folder, changing a mode, owner, date or extended attribute, renaming and linking. It adds that a link inside that points outside can be removed or renamed, and it says the cost.
+  - **The best-effort paragraph** names what is not judged: a call relative to a directory descriptor or made on an open one, `os.mkfifo` and `os.mknod`, what `sqlite3` and `dbm` write through their own C code, and on 3.8.0 or 3.8.1 little but `open` and `os.truncate`. It still calls both guards best effort, with the gate as the boundary.
+- [x] **The tests**: five `[M35]` cases in `mcp/code_exec_server_test` (beside `[mcp][code-exec][python]`), driving the real compiled-in script through the shipped client on the host's `python3`. Each case plants its targets outside the session's directory, in the test's own temporary directory, and asserts the refusal's text before what is on disk, since the hook runs before the system call.
+  - **Refused outside:** a delete three ways (`os.remove`, `os.unlink`, `pathlib.Path.unlink`); an empty folder removed; a new folder three ways (`mkdir` through `..`, `makedirs` refused at its first level, `mkdtemp` at its random child), with nothing made; a mode, a date and an owner; a hard link's source, a mode and an owner through a link inside, judged by where the link leads; and `os.remove(os.devnull)`.
+  - **Refused through a link inside, or by its spelling:** a link written with a trailing separator, for `rmdir`, both ends of `rename` and `rmtree`; a last name of `..`; an absolute path with a `dir_fd` on the working directory.
+  - **Still working inside:** nested `makedirs` and `rmtree`; trailing separators; the run's own file by `./name`; `tempfile.TemporaryDirectory`; writing to `/dev/null`. A link that points out is renamed and removed as an entry, and `rmtree` of it ends in Python's own `OSError`.
+  - **The cost, pinned:** a no-follow `utime` of such a link is refused naming it, and `copytree(symlinks=True)` makes the copy, link included, and raises `shutil.Error`.
+  - **Extended attributes:** `os.setxattr` and `os.removexattr` are refused where `os` has them, and the case is skipped by name elsewhere.
+
+  `assets_test`'s "every version an earlier Apogee seeded" list gains the shipped digest.
+
+**What the guard judges now**, from CPython's audit table and the probe:
+
+| Event | Judged |
+|---|---|
+| `os.remove`, `os.rmdir`, `os.mkdir` | the entry itself, through `_judged` |
+| `os.chmod`, `os.chown`, `os.utime` | where the path leads, through `_judged` |
+| `os.rename` (also `os.replace`) | both ends as entries |
+| `os.link` | the source where it leads, the new name as an entry |
+| `os.symlink` | the new name as an entry |
+| `shutil.rmtree` | `args[0]` as an entry |
+| `os.truncate`, `os.chflags` (also `os.lchflags`), `os.setxattr`, `os.removexattr` | where the path leads |
+| `open` | where the path leads, `/dev/null` allowed |
+
+**The cost**, recorded and pinned on purpose. A link inside that points outside cannot have its mode, owner or dates changed, even without following it, because the event does not say whether the call follows the link and the guard takes the reading that refuses:
+- **On every platform**, a no-follow `chmod`, `chown` or `utime` of such a link is newly refused.
+- **On macOS**, `shutil.copymode` and `shutil.copy(..., follow_symlinks=False)` on one are newly refused (they reach `os.lchmod`). `copy2(follow_symlinks=False)`, `copystat` and `copytree(symlinks=True)` already failed, through `os.chflags`, and now fail earlier, at `os.utime`.
+- **On Linux**, from CPython's source (not run here), those three and 3.14's `Path.copy(..., follow_symlinks=False, preserve_metadata=True)` newly end in an error, though the copy is made.
+
+**Decisions made while building** (2026-11-21, each recorded for veto):
+- **The open calls' defaults, taken** (dated rows in the item's Decision log before it was deleted):
+  - A call relative to a real directory descriptor, or made on an open one (`os.chmod(fd, …)`), stays unjudged, and the comment and tools.md say so. `shutil.rmtree`'s own descriptor walk issues such calls inside a top the guard already judged.
+  - `os.mkfifo` and `os.mknod` are named in tools.md as not judged, with no wrapper: neither raises an audit event, and a wrapper on `os` would leave `posix.mkfifo` open.
+  - What `sqlite3` and `dbm` write through their own C code is named as not judged. `sqlite3.connect` is not judged, since it fires for reading too.
+  - `chmod`, `chown` and `utime` are judged by the file they lead to, even with `follow_symlinks=False` or as `lchmod`/`lchown`. The guard does not read the caller's frame; the cost above is recorded.
+  - The 3.8 floor stays. tools.md says in one clause that 3.8.0 and 3.8.1 are judged on little but `open` and `os.truncate`.
+- **Build-time judgments** (the most conservative reading; for the user's veto):
+  - **`rmtree` of a link is checked by Python's own `OSError` line, not its words**, because the words changed at 3.12. Up to 3.11 they are "Cannot call rmtree on a symbolic link"; from 3.12 they are `[Errno None] None: '<path>'` (probed on all six versions). The document's Testing section asked only that it be Python's own `OSError`, not the guard's `PermissionError`.
+  - **Three checks the Testing section did not list**, each pinning a rule its Technical approach states:
+    - `os.rmdir('..')` is refused naming `..`, because a last name of `..` is judged whole. Read as an entry, it would be judged inside. It fails on today's guard.
+    - `os.link('file_link', 'hard')` is refused naming the link, where `file_link` is a link inside pointing to a file outside, because the source is judged by where it leads. Judged as an entry, it would give the outside file a second name inside. It is a control: today's guard refuses it too.
+    - `os.chmod('file_link', 0o777)` and `os.chown('file_link', -1, -1)` are refused naming the link, and the outside file keeps its mode, because `chmod` and `chown` are judged by where the path leads. Judged as entries (to cut the recorded cost, say), they would change the file outside, and no other check would notice. Added after review; they fail on today's guard and on a mutant that adds the two to `_ENTRY`.
+  - **The working directory itself stays inside for an entry call**, the same answer the whole-path judgment gave every call before. Nothing was added for it.
+  - **The targets sit in the test's own temporary directory**, beside the data directory's `cache/` (`<temp>/home/outside`), as the existing jail case's `outside.txt` does. A case that passed with the guard wrong could delete only those.
+  - **The extended-attribute case is a case of its own**, so its skip on macOS hides nothing else.
+  - **`_text`** factors a path's text out of `_inside`, so `_judged` can read it too. The event names sit in two tuples: `_AT` holds the six descriptor-last events, and `_ENTRY` the three of them that act on the entry.
+  - **The probe matrix is a scratch client**, not committed, like the document's own probe.
+
+**Verified.**
+- **Test-first.** With the cases in and today's compiled-in script, four of the five `[M35]` cases failed (31 of 93 assertions, before the later checks below were added). The extended-attribute case was skipped by name ("this Python's os has no setxattr (Linux's)"). Every † case in the document was seen failing, the `rmtree`-of-a-link case among them once it had a link of its own. The two checks added later were watched in the mutation clone: `os.rmdir('..')` failed on today's script and the `os.link` control passed. So were the review's `chmod` and `chown` through a link inside: on today's script both ran and the outside file's mode changed (a scratch file), and they failed again on the mutant below that adds the two to `_ENTRY`. The assets case failed on the missing digest (1 of 62 assertions). After the fix and the generator, `[M35]` gave 4 passed and 1 skipped, all 13 `[code-exec]` cases passed or were skipped by name (12 passed, 1 skipped), and all 28 `[assets]` cases passed. The build had no warning.
+- **A mutation pass**, in a shared local clone under the session scratchpad. It was built without llama.cpp from the dependency sources M34's clone had cached, with nothing fetched. Each mutant edited the clone's script, its generator rewrote the compiled-in copy, and `[code-exec]` ran. The pass was run again after the review's `chmod` and `chown` checks, on the final test file, with one mutant added; these are that run's counts:
+  - today's script (HEAD's bytes): 4 cases failed;
+  - `_judged` waiting for `None` again: 3 failed;
+  - no absolute-path rule with a `dir_fd`: 1 failed;
+  - the separator stripped for an entry: 1 failed (`rmdir`, both `rename`s and `rmtree` through `link/`);
+  - `.` and `..` judged as entries: 1 failed (`rmdir('..')`);
+  - `rename` judged whole: 1 failed (the link's rename);
+  - `rmtree` judged whole: 1 failed (the guard's text instead of Python's `OSError`);
+  - `remove`, `rmdir` and `mkdir` judged whole: 1 failed (the link's removal);
+  - `chmod`, `chown` and `utime` judged as entries: 2 failed (the cost's no-follow `utime`, and `chmod` and `chown` through a link inside);
+  - `chmod` and `chown` judged as entries, `utime` left: 1 failed (both through a link inside, the outside file's mode changed);
+  - `/dev/null` inside for every event: 1 failed (`os.remove(os.devnull)`);
+  - `/dev/null` not inside for `open`: 2 failed (47b's `DEVNULL` case and the inside case's write);
+  - `os.link`'s source judged as an entry: 1 failed.
+
+  One mutant survived on this host: dropping `os.setxattr` and `os.removexattr`. Their case is Linux's and is skipped here, so CI's Linux rows are what catch it. The restored script passed all 13 cases (12 passed, 1 skipped).
+- **The probe matrix, per version.** A scratch MCP client drove the server over stdio with `--python` on each interpreter. Everything was under the session scratchpad: the data directory the script was seeded in, `HOME`, `TMPDIR` and every outside target. Each of 36 cases got a fresh outside folder, with its state compared before and after. The cases:
+  - 7 controls (`open`, `os.open` with `O_CREAT`, `truncate`, `chflags`, an outside `rename` and `symlink`, an outside `rmtree`);
+  - the 15 calls that used to run (the document's "not refused, and done", plus the two `/dev/null` calls, `os.remove(os.devnull)` and `os.chmod(os.devnull)`);
+  - 3 trailing-separator cases;
+  - a link inside renamed, removed and `rmtree`'d;
+  - one run of everything inside that must keep working;
+  - the cost three ways (the no-follow `utime`, `copytree(symlinks=True)`, and macOS's `copymode` on a link);
+  - the 4 calls tools.md names as not judged: `os.remove(name, dir_fd=<a descriptor on the outside folder>)`, `os.chmod(<a descriptor>)`, `os.mkfifo`, and `sqlite3.connect`. Each runs, as recorded.
+
+  | Python | Today's script (`c23c9734…`) | The fix |
+  |---|---|---|
+  | 3.8 | not on this Mac: skipped by name | not on this Mac: skipped by name (its grammar checked with `ast.parse(…, feature_version=(3, 8))` on 3.9, script and bootstrap alike) |
+  | 3.9.6 (`/usr/bin/python3`, Apple's) | 17 of 36 as expected | 36 of 36 |
+  | 3.10.20 (Homebrew) | 17 of 36 | 36 of 36 |
+  | 3.11.15 | 17 of 36 | 36 of 36 |
+  | 3.12.13 | 17 of 36 | 36 of 36 |
+  | 3.13.13 | 17 of 36 | 36 of 36 |
+  | 3.14.5 (`python3`) | 17 of 36 | 36 of 36 |
+
+  Today's script missed the same 19 rows on every version: all 15 calls that used to run went through, including the two on `/dev/null`, which ended in the system's own `PermissionError`. The other four misses were the link's rename refused, `rmtree` of the link refused by the guard, and the two costs not yet paid.
+- **No warning.** Homebrew clang 22.1.3 (`-fsyntax-only` with the macOS tree's flags) and MinGW g++ 16.2.0 (the windows-x64 tree's flags) gave no diagnostic on the two changed tests or the two generated units, nor on `code_exec_server_test.cpp` again after the review's `chmod` and `chown` checks. clang-format 22 leaves all four as they are.
+- **The refresh, on the real binary**: the build tree's `apogee` (`0.2.0 (da251c88)`, carrying the fixed script), run in a throwaway `APOGEE_HOME`, with `HOME` and `TMPDIR` under the session scratchpad and no model. `check --fix` seeded this build's copy (`8e8333a468f6…`). HEAD's bytes planted over it (`c23c9734…`) made `check` say `warn  code-exec  code_exec_server.py is an earlier Apogee's copy, unedited -- 'apogee check --fix' brings it up to this build's`. The next `check --fix` said `fixed: updated …/training/scripts/code_exec_server.py`, and the copy was this build's again. A copy edited after that (`# mine` appended) was left as it was by a third `check --fix`.
+- **The gate**, `lib/scripts/cicd.sh --app cli --test` from the repository root, with nothing else running, on the final tree after the review's fixes: exit 0 in 685 s. **4,570 ctest cases**: 4,568 passed, and 2 were skipped by name, the `pdftotext` case and the new extended-attribute case. That is M34's 4,565 plus these five. The review's `chmod` and `chown` checks sit in an existing case, so the count is the same. `cli.machine_mode`, `cli.code_exec_server`, the PTY and no-listen checks and the assets cases all passed. No compiler warning appeared in the log. Run alone afterwards, `[M35]` gave 4 passed and 1 skipped (109 assertions), and all 13 `[code-exec]` cases passed or were skipped by name (12 passed, 1 skipped; 226 assertions). The gate before the review passed the same 4,570 cases, in 694 s. After this gate, only this entry changed. Every relative `.md` link in `lib/documentation/`, `.claude/skills/` and the layer cards resolves, anchors included (157 files, every application's cards among them).
+
+**Not done:**
+- **CI has not run this.** The Linux and Windows rows wait on the user's push. Linux is where the extended-attribute case runs and where `os.rmdir('link/')` would fail natively. No Linux was run here: neither `make pr-ci`, GCC 13 in the container, nor the whole-tree `make lint`.
+- **No Python 3.8 on this Mac.** What 3.8.0 and 3.8.1 judge is as the document read from CPython's source.
+- **Windows never runs the server** (`supports_child_processes`), so the suite skips by name there, and the separator rule is revisited when Windows gains child processes.
+- **A live pass is the user's**: a `run_python` turn on `apogee-dev` after its next seeding. No model was run here.
+- **Out of scope, as the document set it:** descriptor calls, `mkfifo`, `mknod`, what `sqlite3` and `dbm` write, and anything a subprocess or a C extension does. The guard is best effort, said so.
+
 ### 2026-10-18 — `mcp-presets` (backlog item 47c): the box says what it holds
 
 **Why.** A fresh install configured no MCP server, and its only guidance was one line pointing at the scaffold (the parity spike's W1, 2026-10-16). Meanwhile the box now ships a server worth registering (47b). This makes the built-ins discoverable and one command away, without a second registration path.
