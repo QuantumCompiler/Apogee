@@ -94,7 +94,8 @@ struct SavedChatActsTests {
         #expect(library.pending == .compact(chat))
         #expect(jobs.starts.isEmpty, "nothing runs before the person's word")
         let reads = runner.calls.filter { $0 == "read chats list" }.count
-        let confirmed = Task { await library.confirm() }
+        let confirmedAnswer = try #require(library.pending)
+        let confirmed = Task { await library.confirm(confirmedAnswer) }
         #expect(await eventually { jobs.starts.count == 1 })
         #expect(
             jobs.starts == [ScriptedJobs.Start(binary: ScriptedStarter.binary.url, arguments: ["chats", "compact", Self.first, "--yes"], streaming: false)],
@@ -126,12 +127,43 @@ struct SavedChatActsTests {
         library.dismissPending()
         #expect(jobs.starts.isEmpty)
         library.askToCompact(chat)
-        let confirmed = Task { await library.confirm() }
+        let confirmedAnswer = try #require(library.pending)
+        let confirmed = Task { await library.confirm(confirmedAnswer) }
         #expect(await eventually { jobs.starts.count == 1 })
         say(printed("chats-compact-again.txt"), on: jobs.jobs[0])
         jobs.jobs[0].end()
         await confirmed.value
         #expect(said.last == "nothing to compact in \(Self.first) -- no exchange to fold yet")
+    }
+
+    @Test("Compact it and Forget every summary, in the dialog's order: the question cleared as the dialog closes, then its answer handed in -- each runs with --yes (GUI M20)")
+    func compactAndForgetInTheDialogsOrder() async throws {
+        let runner = ScriptedRunner()
+        runner.commanding(["chats", "recall"], .done(stdout: printed("chats-recall.txt")))
+        let jobs = ScriptedJobs()
+        let (library, _) = await library(runner, jobs: jobs)
+        var said: [String] = []
+        library.say = { said.append($0) }
+        let chat = try #require(library.chats.first)
+        library.askToCompact(chat)
+        let compact = try #require(library.pending)
+        library.dismissPending()
+        let compacting = Task { await library.confirm(compact) }
+        #expect(await eventually { jobs.starts.count == 1 })
+        let job = try #require(jobs.jobs.first)
+        #expect(jobs.starts.first?.arguments == ["chats", "compact", Self.first, "--yes"])
+        say(printed("chats-compact.txt"), on: job)
+        job.end()
+        await compacting.value
+        #expect(said.last == "compacted \(Self.first): 4 messages into 2, by compactor")
+        await library.askToForgetRecall()
+        let forget = try #require(library.pending)
+        #expect(forget == .forgetRecall)
+        library.dismissPending()
+        runner.commanding(["chats", "recall", "--forget"], .done(stdout: printed("chats-recall-forget.txt")))
+        await library.confirm(forget)
+        #expect(runner.calls.contains("run chats recall --forget --yes"))
+        #expect(said.last?.hasPrefix("forgot 2 chat summaries -- every transcript stays") == true)
     }
 
     @Test("Stop interrupts a saved chat's compaction; stopped or refused, it says Not compacted -- a refusal in the CLI's words (GUI 6b)")
@@ -143,7 +175,8 @@ struct SavedChatActsTests {
         library.say = { said.append($0) }
         let chat = try #require(library.chats.first)
         library.askToCompact(chat)
-        let stopped = Task { await library.confirm() }
+        let stoppedAnswer = try #require(library.pending)
+        let stopped = Task { await library.confirm(stoppedAnswer) }
         #expect(await eventually { library.isCompacting(chat) })
         await library.stopCompacting(chat)
         await stopped.value
@@ -151,7 +184,8 @@ struct SavedChatActsTests {
         #expect(said.last == "Not compacted: stopped")
         #expect(!library.isCompacting(chat) && library.canCompact(chat))
         library.askToCompact(chat)
-        let refused = Task { await library.confirm() }
+        let refusedAnswer = try #require(library.pending)
+        let refused = Task { await library.confirm(refusedAnswer) }
         #expect(await eventually { jobs.starts.count == 2 })
         jobs.jobs[1].end(status: 1, stderr: printed("chats-compact-missing.err"))
         await refused.value
@@ -169,7 +203,7 @@ struct SavedChatActsTests {
         let chat = try #require(library.chats.first { $0.id == Self.first })
         #expect(library.canCompact(chat))
         library.askToCompact(chat)
-        await library.confirm()
+        try await library.confirm(#require(library.pending))
         #expect(await eventually { child.calls.contains("compact") }, "the session's own compact line")
         #expect(!runner.calls.contains { $0.hasPrefix("run chats compact") })
     }
@@ -202,7 +236,7 @@ struct SavedChatActsTests {
         #expect(library.pending == .forgetRecall)
         #expect(!runner.calls.contains { $0.hasPrefix("run chats recall --forget") })
         runner.commanding(["chats", "recall", "--forget"], .done(stdout: printed("chats-recall-forget.txt")))
-        await library.confirm()
+        try await library.confirm(#require(library.pending))
         #expect(runner.calls.contains("run chats recall --forget --yes"))
         #expect(said.last?.hasPrefix("forgot 2 chat summaries -- every transcript stays") == true)
         #expect(runner.calls.last == "run chats recall", "read back")

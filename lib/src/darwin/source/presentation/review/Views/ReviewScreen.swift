@@ -48,11 +48,14 @@ public struct ReviewScreen: View {
             pendingTitle, isPresented: Binding(get: { model.pending != nil }, set: { if !$0 { model.dismissPending() } }),
             titleVisibility: .visible
         ) {
-            switch model.pending {
-            case .post: Button("Post") { Task { await model.confirm() } }
-            case .sweep: Button("Sweep and post") { Task { await model.confirm() } }
-            case .deleteTarget: Button("Remove", role: .destructive) { Task { await model.confirm() } }
-            case nil: EmptyView()
+            // The answer is captured where the button is built: the dialog's
+            // closing clears the question before the Task runs (GUI M20).
+            if let answer = model.pending {
+                switch answer {
+                case .post: Button("Post") { Task { await model.confirm(answer) } }
+                case .sweep: Button("Sweep and post") { Task { await model.confirm(answer) } }
+                case .deleteTarget: Button("Remove", role: .destructive) { Task { await model.confirm(answer) } }
+                }
             }
             Button("Cancel", role: .cancel) { model.dismissPending() }
         } message: {

@@ -96,8 +96,35 @@ struct TrainingViewModelTests {
         regime.end()
     }
 
+    @Test("its one confirming button, in the dialog's order: the question cleared as the dialog closes, then its answer handed in -- a change runs, a pipeline or a pass starts supervised (GUI M20)")
+    func confirmsInTheDialogsOrder() async throws {
+        let pipeline = ScriptedJob()
+        let pass = ScriptedJob()
+        let (model, runner, starter) = await training([pipeline, pass])
+        let changes: [TrainingViewModel.Pending] = [.deleteDataset("heat-notes"), .rollback(backend: "helper"), .haltCycle, .resumeCycle]
+        for answer in changes {
+            model.pending = answer
+            model.pending = nil
+            await model.confirm(answer)
+            #expect(runner.calls.contains("run " + answer.arguments.joined(separator: "|")), "\(answer)")
+        }
+        let run = TrainingViewModel.Pending.runPipeline("skills")
+        model.pending = run
+        model.pending = nil
+        await model.confirm(run)
+        #expect(starter.starts.first == ["train", "pipeline", "run", "--pipeline", "skills", "--output-format", "stream-json"])
+        pipeline.end()
+        #expect(await eventually { !model.isRunning })
+        model.pending = .runCycle
+        model.pending = nil
+        await model.confirm(.runCycle)
+        #expect(starter.starts.last == ["train", "cycle", "run", "--output-format", "stream-json"])
+        pass.end()
+        #expect(await eventually { !model.isRunning })
+    }
+
     @Test("datasets: created and deleted as their verbs, the delete only after the person's word; synthesis supervised")
-    func datasets() async {
+    func datasets() async throws {
         let synth = ScriptedJob()
         let (model, runner, starter) = await training([synth])
         model.newDataset()
@@ -106,7 +133,7 @@ struct TrainingViewModelTests {
         await model.createDataset()
         #expect(runner.calls.contains("run datasets|create|notes|--from|sessions"))
         model.pending = .deleteDataset("heat-notes")
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         #expect(runner.calls.contains("run datasets|delete|heat-notes|--yes"))
         #expect(TrainingViewModel.Pending.rollback(backend: "helper").arguments == ["train", "rollback", "helper"])
         model.newSynthesis()

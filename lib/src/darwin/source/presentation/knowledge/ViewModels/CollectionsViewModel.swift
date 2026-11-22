@@ -178,9 +178,16 @@ public final class CollectionsViewModel {
 
     // MARK: - Changing
 
-    public func confirmDelete() async {
-        guard let binary, let pending = pendingDelete, working == nil else { return }
-        pendingDelete = nil
+    /// `embed delete` once the person said yes to `answer`, the delete the
+    /// dialog showed -- a whole collection's with `--yes`, or one source's --
+    /// read back, the CLI's last line said. The dialog's closing clears
+    /// `pendingDelete` before its button's action runs, so the answer is
+    /// handed in (GUI M20); `pendingDelete` is cleared only while it is still
+    /// `answer`.
+    public func confirmDelete(_ answer: PendingDelete) async {
+        guard let binary, working == nil else { return }
+        let pending = answer
+        if pendingDelete == answer { pendingDelete = nil }
         working = "Deleting"
         let outcome = await runner.command(binary: binary, pending.arguments)
         working = nil

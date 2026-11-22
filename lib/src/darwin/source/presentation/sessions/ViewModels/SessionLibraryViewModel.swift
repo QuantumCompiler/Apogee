@@ -227,6 +227,11 @@ public final class SessionLibraryViewModel {
     /// The suite the next new session starts under, once, and whether forced
     /// past the CLI's memory refusal.
     private var nextSuite: (name: String, force: Bool)?
+    /// The suite a switch to a new chat was asked under, with the question it
+    /// waited on: the dialog's closing clears `nextSuite` with the question
+    /// (`dismissPending()`) before its yes runs, so the yes takes the suite
+    /// back from here (GUI M20).
+    private var suiteAsked: (question: Pending, suite: (name: String, force: Bool))?
     private var inView = false
     /// The open session leaves view mid-turn: pause it when the turn ends.
     private var pauseWhenIdle = false
@@ -658,11 +663,11 @@ public final class SessionLibraryViewModel {
     public func open(_ target: Target) async {
         if case .chat(let id) = target, current.chatID == id { return }
         if current.isLostIfEnded {
-            pending = .endPrivate(for: target)
+            askToSwitch(.endPrivate(for: target))
             return
         }
         if current.transcript.turnInFlight {
-            pending = .stopTurn(for: target)
+            askToSwitch(.stopTurn(for: target))
             return
         }
         await switchTo(target)
@@ -812,10 +817,34 @@ public final class SessionLibraryViewModel {
         searchRequests += 1
     }
 
-    public func confirm() async {
-        guard let pending else { return }
-        self.pending = nil
-        switch pending {
+    /// Asks before a switch, keeping the suite a new chat was asked under
+    /// with the question, for its yes. Only a question that opens a new chat
+    /// takes the suite: a newer one for another chat, asked while it waits,
+    /// leaves the suite with the question it was asked with, so that
+    /// question's yes still opens under it and the newer one's never carries
+    /// it to a later new chat.
+    private func askToSwitch(_ question: Pending) {
+        pending = question
+        switch question {
+        case .stopTurn(for: .new), .endPrivate(for: .new): suiteAsked = nextSuite.map { (question, $0) }
+        default: break
+        }
+    }
+
+    /// The person's yes to `answer`, the question the dialog showed: the
+    /// switch, the delete, the compaction or the forgetting it asked about.
+    /// The dialog's own closing clears `pending` (`dismissPending()`) before
+    /// its button's action runs, so the answer is handed in, never read back
+    /// (GUI M20); `pending` is cleared only while it is still `answer`, so a
+    /// newer question stays to be answered, and a new chat asked under a
+    /// suite opens under it.
+    public func confirm(_ answer: Pending) async {
+        if pending == answer { pending = nil }
+        if let asked = suiteAsked, asked.question == answer {
+            nextSuite = asked.suite
+            suiteAsked = nil
+        }
+        switch answer {
         case .stopTurn(let target), .endPrivate(let target): await switchTo(target)
         case .delete(let chat): await delete(chat)
         case .compact(let chat): await compact(chat)

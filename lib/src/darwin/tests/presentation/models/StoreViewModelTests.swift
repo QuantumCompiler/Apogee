@@ -113,7 +113,7 @@ struct StoreViewModelTests {
     }
 
     @Test("register all shows config scan's own report first, then runs --register")
-    func registerAll() async {
+    func registerAll() async throws {
         let (store, runner) = await store()
         await store.askToRegisterAll()
         guard case .registerAll(let report)? = store.pending else {
@@ -122,7 +122,27 @@ struct StoreViewModelTests {
         }
         #expect(report.contains("Gemma4-26B-Instruct-mixed_4_8  not registered"))
         #expect(!runner.calls.contains("run config scan --register"))
-        await store.confirm()
+        try await store.confirm(#require(store.pending))
+        #expect(runner.calls.contains("run config scan --register"))
+    }
+
+    @Test("Delete a model, Remove the backend and Register them, in the dialog's order: the question cleared as the dialog closes, then its answer handed in -- each runs (GUI M20)")
+    func confirmsInTheDialogsOrder() async throws {
+        let (store, runner) = await store()
+        await store.askToDeleteModel("Llama3.2-1B-Instruct")
+        let model = try #require(store.pending)
+        store.dismissPending()
+        await store.confirm(model)
+        #expect(runner.calls.contains("run models delete Llama3.2-1B-Instruct --yes"))
+        store.askToRemoveBackend("llama3.2-1b-Q4KM")
+        let backend = try #require(store.pending)
+        store.dismissPending()
+        await store.confirm(backend)
+        #expect(runner.calls.contains("run config delete-backend llama3.2-1b-Q4KM"))
+        await store.askToRegisterAll()
+        let registration = try #require(store.pending)
+        store.dismissPending()
+        await store.confirm(registration)
         #expect(runner.calls.contains("run config scan --register"))
     }
 
@@ -132,20 +152,19 @@ struct StoreViewModelTests {
         let q4 = try #require(store.sets.first { $0.backend != nil })
         await store.askToDelete(q4)
         #expect(runner.calls.contains("run models delete Llama3.2-1B-Instruct/gguf/8d51e6c04a27"), "its plan read first")
-        await store.confirm()
+        try await store.confirm(#require(store.pending))
         #expect(runner.calls.contains("run models delete Llama3.2-1B-Instruct/gguf/8d51e6c04a27 --yes"))
         // The scripted plan says nothing, so it names no backend: the
         // choice is not offered, and not passed (StoreDeleteTests has the
         // CLI's own plans).
         await store.askToDeleteModel("Llama3.2-1B-Instruct")
         #expect(!store.offersAndBackends)
-        store.andBackends = true
-        await store.confirm()
+        try await store.confirm(#require(store.pending), andBackends: true)
         #expect(runner.calls.contains("run models delete Llama3.2-1B-Instruct --yes"))
         #expect(!runner.calls.contains { $0.contains("--and-backends") })
         store.askToRemoveBackend("llama3.2-1b-Q4KM")
         #expect(!runner.calls.contains("run config delete-backend llama3.2-1b-Q4KM"), "asked first")
-        await store.confirm()
+        try await store.confirm(#require(store.pending))
         #expect(runner.calls.contains("run config delete-backend llama3.2-1b-Q4KM"))
         await store.rename("Llama3.2-1B-Instruct", to: "Llama3.2-1B")
         #expect(runner.calls.contains("run models rename Llama3.2-1B-Instruct Llama3.2-1B"))

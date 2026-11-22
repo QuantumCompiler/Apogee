@@ -316,7 +316,7 @@ struct StageList: View {
         .task {
             await training.connect(binary: previewBinary)
             training.pending = .runPipeline("skills")
-            await training.confirm()
+            await training.confirm(.runPipeline("skills"))
         }
 }
 

@@ -158,8 +158,12 @@ struct AgentsView: View {
             isPresented: Binding(get: { model.pendingDelete != nil }, set: { if !$0 { model.pendingDelete = nil } }),
             titleVisibility: .visible
         ) {
-            Button("Delete it and its files", role: .destructive) { Task { await model.confirmDelete(purge: true) } }
-            Button("Delete it, keep its files") { Task { await model.confirmDelete(purge: false) } }
+            // The agent is captured where the button is built: the dialog's
+            // closing clears the question before the Task runs (GUI M20).
+            if let answer = model.pendingDelete {
+                Button("Delete it and its files", role: .destructive) { Task { await model.confirmDelete(answer, purge: true) } }
+                Button("Delete it, keep its files") { Task { await model.confirmDelete(answer, purge: false) } }
+            }
             Button("Cancel", role: .cancel) { model.pendingDelete = nil }
         }
     }
@@ -251,7 +255,9 @@ struct SymphoniesView: View {
             isPresented: Binding(get: { model.pendingDelete != nil }, set: { if !$0 { model.pendingDelete = nil } }),
             titleVisibility: .visible
         ) {
-            Button("Delete its config entry", role: .destructive) { Task { await model.confirmDelete() } }
+            if let answer = model.pendingDelete {
+                Button("Delete its config entry", role: .destructive) { Task { await model.confirmDelete(answer) } }
+            }
             Button("Cancel", role: .cancel) { model.pendingDelete = nil }
         }
         .fileImporter(isPresented: $choosingImage, allowedContentTypes: SymphoniesViewModel.imageTypes.compactMap { UTType(filenameExtension: $0) }) { result in
@@ -353,7 +359,9 @@ struct MCPView: View {
             isPresented: Binding(get: { model.pendingRemove != nil }, set: { if !$0 { model.pendingRemove = nil } }),
             titleVisibility: .visible
         ) {
-            Button("Remove its entry", role: .destructive) { Task { await model.confirmRemove() } }
+            if let answer = model.pendingRemove {
+                Button("Remove its entry", role: .destructive) { Task { await model.confirmRemove(answer) } }
+            }
             Button("Cancel", role: .cancel) { model.pendingRemove = nil }
         } message: {
             Text("apogee config delete-mcp-server \(model.pendingRemove?.name ?? "") -- its entry leaves the config, so no session connects to it; its files are left alone.")

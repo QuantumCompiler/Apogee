@@ -106,7 +106,7 @@ struct SessionRenameTests {
     // MARK: - 6a, finding 7: a rename made while a close is in flight
 
     @Test("an older binary: a rename waiting on a turn, then a switch confirmed -- chats title runs only once the closing child has gone, after its exit save")
-    func renameWaitingWhenASwitchCloses() async {
+    func renameWaitingWhenASwitchCloses() async throws {
         let ledger = Ledger()
         let (library, _, starter) = await opened(Self.older, listed: Self.listedOlder, ledger: ledger, children: 2, firstStopping: .whenReleased)
         let id = Self.chatID(Self.older)
@@ -115,7 +115,8 @@ struct SessionRenameTests {
         await library.rename(library.chats[0], to: "Renamed From Outside")
         await library.open(.chat("c-other"))
         #expect(library.pending == .stopTurn(for: .chat("c-other")))
-        let switching = Task { await library.confirm() }
+        let switchingAnswer = try #require(library.pending)
+        let switching = Task { await library.confirm(switchingAnswer) }
         #expect(await eventually { ledger.all == ["child 1: stop"] })
         // The stopped turn's own result: the rename that waited for it is made.
         starter.handed[0].emit(Self.older.first { JSONValue.parse($0)?["type"]?.stringValue == "result" }!)

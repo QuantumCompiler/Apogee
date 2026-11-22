@@ -234,7 +234,7 @@ private struct LivePass: View {
             await training.connect(binary: previewBinary)
             training.tab = .cycle
             training.pending = .runCycle
-            await training.confirm()
+            await training.confirm(.runCycle)
         }
 }
 
@@ -248,7 +248,7 @@ private struct LivePass: View {
             await training.connect(binary: previewBinary)
             training.tab = .cycle
             training.pending = .runCycle
-            await training.confirm()
+            await training.confirm(.runCycle)
         }
 }
 
@@ -281,7 +281,7 @@ private struct LivePass: View {
             await training.connect(binary: previewBinary)
             training.tab = .cycle
             training.pending = .runCycle
-            await training.confirm()
+            await training.confirm(.runCycle)
         }
 }
 

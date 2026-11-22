@@ -143,7 +143,7 @@ struct ReadsAsDocumentsTests {
         }
         #expect(!runner.calls.contains { $0.hasPrefix("run chats recall --forget") }, "nothing runs before the person's word")
         runner.reading(["chats", "recall"], printed("chats-recall-empty.json"))
-        await library.confirm()
+        try await library.confirm(#require(library.pending))
         #expect(runner.calls.contains("run chats recall --forget --yes"), "the CLI refuses --forget with --output-format: it answers in text")
         #expect(!runner.calls.contains { $0.hasPrefix("read chats recall --forget") })
         #expect(runner.calls.last == "read chats recall", "read back as the document")

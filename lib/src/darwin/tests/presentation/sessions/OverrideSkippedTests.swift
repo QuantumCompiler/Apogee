@@ -198,7 +198,7 @@ struct TryAgainAdoptsTests {
         await library.rename(chat, to: "Ports")
         #expect(runner.calls.contains("run chats title \(chat.id) -- Ports"))
         library.askToDelete(chat)
-        await library.confirm()
+        try await library.confirm(#require(library.pending))
         #expect(runner.calls.contains("run chats delete \(chat.id)"))
         // The session says its own suite: the roles follow it, read once by
         // the adoption.

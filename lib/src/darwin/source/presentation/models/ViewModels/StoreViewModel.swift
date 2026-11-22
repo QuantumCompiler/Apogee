@@ -242,9 +242,6 @@ public final class StoreViewModel {
     public var pending: Pending?
     /// The pair sheet, open (the GUI's 3b).
     public var pairing: PairForm?
-    /// Whether a delete takes the backends that run from it too: the
-    /// person's choice, never implied.
-    public var andBackends = false
     public var renaming: String?
     public private(set) var working: String?
     public private(set) var failure: String?
@@ -667,7 +664,6 @@ public final class StoreViewModel {
     /// failure, and nothing is asked.
     public func askToDelete(_ set: StoredSet) async {
         guard let plan = await plan(set.handle) else { return }
-        andBackends = false
         pending = .deleteSet(set, plan: plan)
     }
 
@@ -675,7 +671,6 @@ public final class StoreViewModel {
     /// first as a set's is.
     public func askToDeleteModel(_ model: String) async {
         guard let plan = await plan(model) else { return }
-        andBackends = false
         pending = .deleteModel(model, plan: plan)
     }
 
@@ -707,15 +702,22 @@ public final class StoreViewModel {
         pending = .removeBackend(name)
     }
 
-    /// The person's yes: the delete (with `--and-backends` only when chosen,
-    /// and only where its plan named a backend), its words kept; the removal;
-    /// or the scan's registration -- each read back.
-    public func confirm() async {
-        guard let pending else { return }
+    /// The person's yes to `answer`, the question the dialog showed: the
+    /// delete (with `--and-backends` only when `andBackends`, the person's
+    /// choice, never implied, and only where its plan named a backend), its
+    /// words kept; the removal; or the scan's registration -- each read back.
+    /// The dialog's closing clears `pending` before its button's action runs,
+    /// so the answer, and the choice with it, are handed in (GUI M20);
+    /// `pending` is cleared only while it is still `answer`.
+    public func confirm(_ answer: Pending, andBackends: Bool = false) async {
         // The backends go only where the plan named one and the person chose it.
-        let withBackends = andBackends && offersAndBackends
-        self.pending = nil
-        switch pending {
+        let withBackends: Bool
+        switch answer {
+        case .deleteSet(_, let plan), .deleteModel(_, let plan): withBackends = andBackends && !plan.backends.isEmpty
+        case .removeBackend, .registerAll: withBackends = false
+        }
+        if pending == answer { pending = nil }
+        switch answer {
         case .deleteSet(let set, _):
             await run(
                 ["models", "delete", set.handle, "--yes"] + (withBackends ? ["--and-backends"] : []), doing: "Deleting",

@@ -75,11 +75,15 @@ public struct ModelsScreen<Downloads: View>: View {
             isPresented: Binding(get: { model.pendingDelete != nil }, set: { if !$0 { model.pendingDelete = nil } }),
             titleVisibility: .visible
         ) {
-            Button("Delete its files", role: .destructive) { Task { await model.confirmDelete(andBackends: false) } }
-            // Only where the CLI's plan names a backend pointing in.
-            if model.offersAndBackends {
-                Button("Delete its files and the backends that use them", role: .destructive) {
-                    Task { await model.confirmDelete(andBackends: true) }
+            // The answer is captured where the button is built: the dialog's
+            // closing clears the question before the Task runs (GUI M20).
+            if let answer = model.pendingDelete {
+                Button("Delete its files", role: .destructive) { Task { await model.confirmDelete(answer, andBackends: false) } }
+                // Only where the CLI's plan names a backend pointing in.
+                if model.offersAndBackends {
+                    Button("Delete its files and the backends that use them", role: .destructive) {
+                        Task { await model.confirmDelete(answer, andBackends: true) }
+                    }
                 }
             }
             Button("Cancel", role: .cancel) { model.pendingDelete = nil }
@@ -91,7 +95,9 @@ public struct ModelsScreen<Downloads: View>: View {
             isPresented: Binding(get: { model.removing != nil }, set: { if !$0 { model.removing = nil } }),
             titleVisibility: .visible
         ) {
-            Button("Remove the backend", role: .destructive) { Task { await model.confirmRemove() } }
+            if let answer = model.removing {
+                Button("Remove the backend", role: .destructive) { Task { await model.confirmRemove(answer) } }
+            }
             Button("Cancel", role: .cancel) { model.removing = nil }
         } message: {
             Text("apogee config delete-backend \(model.removing ?? "") -- its config entry goes; the weights stay under Stored weights, ready to register again.")

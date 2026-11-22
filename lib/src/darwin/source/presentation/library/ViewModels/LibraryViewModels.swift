@@ -293,10 +293,12 @@ public final class AgentsViewModel {
     }
 
     /// `agents delete <name>`, its files kept (`--keep-files`) or removed
-    /// (`--purge`) as the person chose -- the CLI never asks on a pipe.
-    public func confirmDelete(purge: Bool) async {
-        guard let agent = pendingDelete else { return }
-        pendingDelete = nil
+    /// (`--purge`) as the person chose -- the CLI never asks on a pipe -- for
+    /// `agent`, the one the dialog showed. Its closing clears `pendingDelete`
+    /// before its button's action runs, so the agent is handed in (GUI M20);
+    /// `pendingDelete` is cleared only while it is still `agent`.
+    public func confirmDelete(_ agent: AgentEntry, purge: Bool) async {
+        if pendingDelete == agent { pendingDelete = nil }
         _ = await change(["agents", "delete", agent.name, purge ? "--purge" : "--keep-files"])
     }
 
@@ -585,10 +587,14 @@ public final class SymphoniesViewModel {
         }
     }
 
-    /// `symphonies delete <name>`: a config entry, after the person's word.
-    public func confirmDelete() async {
-        guard let binary, let symphony = pendingDelete else { return }
-        pendingDelete = nil
+    /// `symphonies delete <name>`: a config entry, after the person's word on
+    /// `symphony`, the one the dialog showed. Its closing clears
+    /// `pendingDelete` before its button's action runs, so the symphony is
+    /// handed in (GUI M20); `pendingDelete` is cleared only while it is still
+    /// `symphony`.
+    public func confirmDelete(_ symphony: Symphony) async {
+        guard let binary else { return }
+        if pendingDelete == symphony { pendingDelete = nil }
         let outcome = await runner.command(binary: binary, ["symphonies", "delete", symphony.name])
         await refresh()
         if let failure = outcome.failure { self.failure = failure }
@@ -691,12 +697,15 @@ public final class MCPViewModel {
         pendingRemove = server
     }
 
-    /// `config delete-mcp-server <name>` once the person said yes -- its
-    /// config entry removed, its files left alone, as the CLI says -- read
-    /// back by `mcp list`; the selection goes with a server that went.
-    public func confirmRemove() async {
-        guard let server = pendingRemove else { return }
-        pendingRemove = nil
+    /// `config delete-mcp-server <name>` once the person said yes to
+    /// `server`, the one the dialog showed -- its config entry removed, its
+    /// files left alone, as the CLI says -- read back by `mcp list`; the
+    /// selection goes with a server that went. The dialog's closing clears
+    /// `pendingRemove` before its button's action runs, so the server is
+    /// handed in (GUI M20); `pendingRemove` is cleared only while it is still
+    /// `server`.
+    public func confirmRemove(_ server: MCPServer) async {
+        if pendingRemove == server { pendingRemove = nil }
         let removed = await change(["config", "delete-mcp-server", server.name])
         if removed, selected == server.name, !servers.contains(where: { $0.name == server.name }) {
             selected = nil

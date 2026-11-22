@@ -47,13 +47,46 @@ struct LibraryViewModelTests {
         await model.connect(binary: Self.binary)
         let triage = try #require(model.agents.first { $0.name == "triage" })
         model.pendingDelete = triage
-        await model.confirmDelete(purge: false)
+        try await model.confirmDelete(#require(model.pendingDelete), purge: false)
         #expect(runner.calls.contains("run agents|delete|triage|--keep-files"))
         model.pendingDelete = triage
-        await model.confirmDelete(purge: true)
+        try await model.confirmDelete(#require(model.pendingDelete), purge: true)
         #expect(runner.calls.contains("run agents|delete|triage|--purge"))
         model.edit(model.agents.first { $0.bundled }!, file: "prompts/security-review.txt")
         #expect(model.editor == nil, "a shipped agent's files are Apogee's")
+    }
+
+    @Test("an agent's Delete it and its files, and Delete it, keep its files, in the dialog's order: the question cleared as the dialog closes, then the agent handed in (GUI M20)")
+    func agentDeleteInTheDialogsOrder() async throws {
+        let runner = ScriptedRunner()
+        runner.reading(["agents", "list"], fixture("agents-list"))
+        runner.answering(["agents"], .done(stdout: "done\n"))
+        let model = AgentsViewModel(runner: runner)
+        await model.connect(binary: Self.binary)
+        let triage = try #require(model.agents.first { $0.name == "triage" })
+        for purge in [true, false] {
+            model.pendingDelete = triage
+            let answer = try #require(model.pendingDelete)
+            model.pendingDelete = nil
+            await model.confirmDelete(answer, purge: purge)
+            #expect(runner.calls.contains("run agents|delete|triage|\(purge ? "--purge" : "--keep-files")"))
+        }
+    }
+
+    @Test("a symphony's Delete its config entry, in the dialog's order: the question cleared as the dialog closes, then the symphony handed in -- symphonies delete runs, read back (GUI M20)")
+    func symphonyDeleteInTheDialogsOrder() async throws {
+        let runner = ScriptedRunner()
+        runner.reading(["symphonies", "list"], fixture("symphonies-list"))
+        let model = SymphoniesViewModel(runner: runner, starter: ScriptedJobs([]))
+        await model.connect(binary: Self.binary)
+        let symphony = try #require(model.symphonies.first { $0.name == "notes-digest" })
+        model.pendingDelete = symphony
+        let answer = try #require(model.pendingDelete)
+        model.pendingDelete = nil
+        let lists = runner.calls.filter { $0 == "read symphonies|list" }.count
+        await model.confirmDelete(answer)
+        #expect(runner.calls.contains("run symphonies|delete|notes-digest"))
+        #expect(runner.calls.filter { $0 == "read symphonies|list" }.count == lists + 1, "read back")
     }
 
     @Test("an agent's own file edits in place: written where the CLI reads it, read back, its check said honestly")

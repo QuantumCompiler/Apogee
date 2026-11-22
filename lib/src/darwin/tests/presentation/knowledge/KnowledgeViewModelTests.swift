@@ -55,7 +55,7 @@ struct RecordsViewModelTests {
     }
 
     @Test("link, move and delete are their verbs, each read back; the export writes where the person chose")
-    func changes() async {
+    func changes() async throws {
         let (model, runner, _) = await records()
         let record = model.records[0]
         await model.link(record, to: "  PROJ-7 ")
@@ -65,11 +65,22 @@ struct RecordsViewModelTests {
         await model.move(record, to: "shipped")
         #expect(!runner.calls.contains("run knowledge|status|\(record.id)|shipped"), "already shipped: nothing runs")
         model.pendingDelete = record
-        await model.confirmDelete()
+        try await model.confirmDelete(#require(model.pendingDelete))
         #expect(runner.calls.contains("run knowledge|delete|\(record.id)"))
         await model.export(to: URL(fileURLWithPath: "/Users/someone/knowledge.md"), markdown: true, anonymize: true)
         #expect(runner.calls.contains("run knowledge|export|--format|markdown|--anonymize|-o|/Users/someone/knowledge.md"))
         #expect(runner.calls.filter { $0 == "read knowledge|list" }.count >= 5, "every change read back")
+    }
+
+    @Test("a record's Delete, in the dialog's order: the question cleared as the dialog closes, then the record handed in -- knowledge delete runs (GUI M20)")
+    func recordDeleteInTheDialogsOrder() async throws {
+        let (model, runner, _) = await records()
+        let record = try #require(model.records.first)
+        model.pendingDelete = record
+        let answer = try #require(model.pendingDelete)
+        model.pendingDelete = nil
+        await model.confirmDelete(answer)
+        #expect(runner.calls.contains("run knowledge|delete|\(record.id)"))
     }
 
     @Test("a capture is the clerk's run, supervised: its command as typed, overrides only where set")
@@ -156,14 +167,25 @@ struct CollectionsViewModelTests {
         #expect(model.results?.hasPrefix("0.000  [lexical]  heat-pumps.md#0") == true)
     }
 
+    @Test("a collection's Delete, and a source's, in the dialog's order: the question cleared as the dialog closes, then its answer handed in -- embed delete runs (GUI M20)")
+    func collectionDeleteInTheDialogsOrder() async throws {
+        let (model, runner, _) = await collections()
+        for answer in [CollectionsViewModel.PendingDelete(collection: "notes", source: "solar.md"), .init(collection: "notes", source: nil)] {
+            model.pendingDelete = answer
+            model.pendingDelete = nil
+            await model.confirmDelete(answer)
+            #expect(runner.calls.contains("run " + answer.arguments.joined(separator: "|")), "\(answer)")
+        }
+    }
+
     @Test("a whole collection's delete passes --yes only after the person's word; a source's, as the CLI takes it")
-    func deletes() async {
+    func deletes() async throws {
         let (model, runner, _) = await collections()
         model.pendingDelete = .init(collection: "notes", source: "solar.md")
-        await model.confirmDelete()
+        try await model.confirmDelete(#require(model.pendingDelete))
         #expect(runner.calls.contains("run embed|delete|notes|--source|solar.md"))
         model.pendingDelete = .init(collection: "notes", source: nil)
-        await model.confirmDelete()
+        try await model.confirmDelete(#require(model.pendingDelete))
         #expect(runner.calls.contains("run embed|delete|notes|--yes"))
     }
 

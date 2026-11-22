@@ -567,7 +567,7 @@ enum ModelsPreview {
             (["models", "list"], ModelsDocuments.removeListAfter),
             (["models", "status"], ModelsDocuments.removeStatusAfter),
         ])
-        await models.confirmRemove()
+        if let answer = models.removing { await models.confirmRemove(answer) }
     }
 
     /// The same bases, Qwen3 the default and the utility role; its weights
@@ -594,7 +594,7 @@ enum ModelsPreview {
             (["models", "list"], ModelsDocuments.deleteRolesListAfter),
             (["models", "status"], ModelsDocuments.deleteRolesStatusAfter),
         ])
-        await models.confirmDelete(andBackends: true)
+        if let answer = models.pendingDelete { await models.confirmDelete(answer, andBackends: true) }
     }
 
     static let addChat = "Qwen3-8B/mlx/1a2b3c4d5e6f"
@@ -688,7 +688,7 @@ enum ModelsPreview {
             (["models", "info", "Gemma3-1B-Instruct-Q4KM"], ModelsDocuments.deleteInfoBackendGemmaAfterKept),
             (["models", "info", deleteGemmaPath], nil),
         ])
-        await store.confirm()
+        if let answer = store.pending { await store.confirm(answer) }
     }
 
     // MARK: - The Backends tab's Delete with its weights (GUI 4e)
@@ -724,7 +724,7 @@ enum ModelsPreview {
     static func deleteBackendKept(_ models: ModelsViewModel, _ runner: PreviewStore) async {
         await askToDeleteBackend(models, "Gemma3-1B-Instruct-Q4KM")
         runner.change([(["models", "list"], ModelsDocuments.deleteListAfterKept)])
-        await models.confirmDelete(andBackends: false)
+        if let answer = models.pendingDelete { await models.confirmDelete(answer, andBackends: false) }
     }
 
     /// Then Llama's, with the backend that uses its files.
@@ -732,19 +732,18 @@ enum ModelsPreview {
         await deleteBackendKept(models, runner)
         if let row = models.rows.first(where: { $0.backend == "Llama3.2-1B-Instruct-Q4KM" }) { await models.askToDelete(row) }
         runner.change([(["models", "list"], ModelsDocuments.deleteListAfterRemoved)])
-        await models.confirmDelete(andBackends: true)
+        if let answer = models.pendingDelete { await models.confirmDelete(answer, andBackends: true) }
     }
 
     /// Then Llama's, with the backend that runs from it.
     static func deleteWithBackends(_ store: StoreViewModel, _ runner: PreviewStore) async {
         await deleteKept(store, runner)
         if let set = store.sets.first(where: { $0.handle == deleteLlamaQ4 }) { await store.askToDelete(set) }
-        store.andBackends = true
         runner.change([
             (["models", "list"], ModelsDocuments.deleteListAfterRemoved),
             (["models", "list", "--all"], ModelsDocuments.deleteListAllAfterRemoved),
         ])
-        await store.confirm()
+        if let answer = store.pending { await store.confirm(answer, andBackends: true) }
     }
 }
 #endif

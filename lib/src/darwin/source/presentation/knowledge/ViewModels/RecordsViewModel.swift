@@ -278,10 +278,12 @@ public final class RecordsViewModel {
     }
 
     /// `knowledge delete <id>` -- the record and its raw archive -- after the
-    /// person said yes here (the CLI asks nothing on a pipe).
-    public func confirmDelete() async {
-        guard let record = pendingDelete else { return }
-        pendingDelete = nil
+    /// person said yes here (the CLI asks nothing on a pipe) to `record`, the
+    /// one the dialog showed. Its closing clears `pendingDelete` before its
+    /// button's action runs, so the record is handed in (GUI M20);
+    /// `pendingDelete` is cleared only while it is still `record`.
+    public func confirmDelete(_ record: KnowledgeRecord) async {
+        if pendingDelete == record { pendingDelete = nil }
         await change(["knowledge", "delete", record.id], doing: "Deleting")
     }
 

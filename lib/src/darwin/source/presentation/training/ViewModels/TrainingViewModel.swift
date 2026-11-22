@@ -1293,11 +1293,14 @@ public final class TrainingViewModel {
         if await change(["datasets", "create", name, "--from", createFrom]) { selectedDataset = name }
     }
 
-    /// The person said yes: a run started supervised, its stream asked for;
-    /// any other act run and read back.
-    public func confirm() async {
-        guard let pending else { return }
-        self.pending = nil
+    /// The person said yes to `answer`, the question the dialog showed: a run
+    /// started supervised, its stream asked for; any other act run and read
+    /// back. The dialog's closing clears `pending` before its button's action
+    /// runs, so the answer is handed in (GUI M20); `pending` is cleared only
+    /// while it is still `answer`.
+    public func confirm(_ answer: Pending) async {
+        let pending = answer
+        if self.pending == answer { self.pending = nil }
         switch pending {
         case .runPipeline(let name):
             selectedPipelineRun = nil

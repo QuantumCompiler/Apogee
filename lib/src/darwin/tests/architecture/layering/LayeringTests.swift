@@ -418,6 +418,90 @@ struct LayeringPlantedTests {
         #expect(!LayeringCheck.constructs("Row", in: "#Preview { RowLabel() }"))
     }
 
+    @Test("a confirmation dialog's Task that reads its question back fails, by file and line: the dialog's closing clears the question before the Task runs (GUI M20)")
+    func dialogsReadingTheirQuestionBack() {
+        var planted = Planted()
+        let file = "source/presentation/app/Views/Screen.swift"
+        planted.files[file] = """
+            import SwiftUI
+            struct Screen: View {
+                @Bindable var model: AppModel
+                var body: some View {
+                    Text("a").confirmationDialog("Delete?", isPresented: Binding(get: { model.pending != nil }, set: { if !$0 { model.dismissPending() } })) {
+                        Button("Delete", role: .destructive) { Task { await model.confirm() } }
+                        Button("Delete it and its files") { Task { await model.confirmDelete(purge: true) } }
+                        Button("Remove") { Task { await model.confirmRemove(model.pending!) } }
+                        Button("Compact it") { Task { await model.confirm(shown) } }
+                        Button("Cancel", role: .cancel) { model.dismissPending() }
+                    }
+                    .confirmationDialog("Forget?", isPresented: $model.forgetting) {
+                        Button("Forget every summary") { Task { await model.forget(everything: model.forgetting) } }
+                    }
+                }
+            }
+            #if DEBUG
+            #Preview { Screen(model: AppModel()) }
+            #endif
+            """
+        let unanswered = { (line: Int, call: String) in
+            "\(file):\(line): \(call)(…) in a confirmation dialog's Task is not handed the answer the dialog showed -- its closing clears the question before the Task runs; capture the answer where the button is built (if let answer = …) and hand it in"
+        }
+        let readBack = { (line: Int, question: String) in
+            "\(file):\(line): a confirmation dialog's Task reads \(question) back -- the dialog's closing clears it before the Task runs; hand the Task the answer captured where the button is built"
+        }
+        #expect(planted.violations() == [
+            unanswered(6, "confirm"),
+            unanswered(7, "confirmDelete"),
+            readBack(8, "pending"),
+            unanswered(9, "confirm"),
+            readBack(13, "forgetting"),
+        ])
+    }
+
+    @Test("a dialog whose buttons hand in the answer it was built with holds; so do actions that never read their question, a Task outside any dialog, and code in strings and comments (GUI M20)")
+    func dialogsHandingInTheirAnswer() {
+        var planted = Planted()
+        planted.files["source/presentation/app/Views/Screen.swift"] = """
+            import SwiftUI
+            struct Screen: View {
+                @Bindable var model: AppModel
+                var body: some View {
+                    VStack {
+                        Button("Go { on") { Task { await model.confirm() } }
+                    }
+                    .confirmationDialog(
+                        "Delete \\(model.pending.map { "“\\($0)”" } ?? "")?",
+                        isPresented: Binding(get: { model.pending != nil }, set: { if !$0 { model.dismissPending() } }),
+                        titleVisibility: .visible
+                    ) {
+                        if let answer = model.pending {
+                            switch answer {
+                            case .delete: Button("Delete } it", role: .destructive) { Task { await model.confirm(answer) } }
+                            case .purge: Button("Delete it and its files") { Task { await model.confirmDelete(answer, purge: true) } }
+                            }
+                        }
+                        // Not code: Task { await model.confirm() }
+                        /* Nor this: Task { await model.confirmDelete() } */
+                        Button("Cancel", role: .cancel) { model.dismissPending() }
+                    } message: {
+                        Text("apogee \\(model.pending?.name ?? "") -- // a string, not a comment")
+                    }
+                    .confirmationDialog("Forget?", isPresented: $model.forgetting) {
+                        Button("Forget every summary", role: .destructive) { Task { await model.forgetRecall() } }
+                        Button("Cancel", role: .cancel) { model.forgetting = false }
+                    }
+                    .confirmationDialog("Remove?", isPresented: .constant(true), presenting: model.removing) { name in
+                        Button(#"Remove "\\#(name)""#) { Task { await model.confirmRemove(name) } }
+                    }
+                }
+            }
+            #if DEBUG
+            #Preview { Screen(model: AppModel()) }
+            #endif
+            """
+        #expect(planted.violations() == [])
+    }
+
     @Test("a layer card that misses a module, or is missing, fails")
     func layerCards() {
         var planted = Planted()

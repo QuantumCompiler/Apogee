@@ -103,7 +103,7 @@ struct PipelinesHaltPullTests {
         #expect(spec.stages.map(TrainingViewModel.tuningWords) == ["lora · 4 iterations", "lora · 4 iterations"])
         #expect(!model.showsLivePipeline && model.openPipeline == nil)
         model.pending = .runPipeline(spec.name)
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         #expect(starter.starts == [["train", "pipeline", "run", "--pipeline", "skills", "--output-format", "stream-json"]])
         #expect(model.openedSpec == nil && model.showsLivePipeline, "the run going now takes the page")
         job.end()
@@ -135,7 +135,7 @@ struct PipelinesHaltPullTests {
     // MARK: - A halt taken while a pass runs
 
     @Test("on a binary that keeps it, Halt is offered while another's pass holds the cycle, asked in the CLI's words, run and read back")
-    func haltOfferedWhileHeld() async {
+    func haltOfferedWhileHeld() async throws {
         let (model, runner, _) = await training(vocabulary: Self.m30, status: "train-status-cycle-held", cycle: "train-cycle-status-held")
         var said: [String] = []
         model.say = { said.append($0) }
@@ -149,7 +149,7 @@ struct PipelinesHaltPullTests {
         runner.answering(["train", "cycle", "halt"], .done(stdout: fixture("train-cycle-halt-during-pass", "txt")))
         runner.reading(["train", "status"], fixture("train-status-cycle-held-halted"))
         runner.reading(["train", "cycle", "status"], fixture("train-cycle-status-held-halted"))
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         #expect(runner.calls.contains("run train|cycle|halt"))
         #expect(said == ["the pass running now finishes, and keeps the halt"], "the CLI's answer, its last line")
         #expect(model.cycleHeld && model.cycleHalted && model.canResumeCycle && !model.canHaltCycle && !model.canRunCycle)
@@ -170,13 +170,13 @@ struct PipelinesHaltPullTests {
     }
 
     @Test("a pass run here and halted while it runs finishes; its halt notice is drawn live, then kept on the tab and said; the next pass waits for Resume")
-    func passHaltNotice() async {
+    func passHaltNotice() async throws {
         let job = ScriptedJob()
         let (model, runner, starter) = await training(vocabulary: Self.m30, status: "train-status-cycle", cycle: "train-cycle-status-passed", jobs: [job])
         var said: [String] = []
         model.say = { said.append($0) }
         model.pending = .runCycle
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         #expect(starter.starts == [["train", "cycle", "run", "--output-format", "stream-json"]])
         #expect(model.live == .cycle && model.cycleHeld && model.canHaltCycle, "Halt is offered while the pass runs here")
         let lines = jobStream("train-cycle-run-halted")
@@ -186,7 +186,7 @@ struct PipelinesHaltPullTests {
         runner.reading(["train", "status"], fixture("train-status-cycle-held-halted"))
         runner.reading(["train", "cycle", "status"], fixture("train-cycle-status-held-halted"))
         model.pending = .haltCycle
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         #expect(model.isRunning && model.cycleHalted && model.canResumeCycle)
         #expect(model.liveHaltNotice == nil, "said only once the pass has finished")
         say(lines.drop { !$0.contains(#""iteration":3,"#) }.prefix { !$0.contains(#""type":"document""#) }, on: job)
@@ -204,7 +204,7 @@ struct PipelinesHaltPullTests {
         runner.reading(["train", "status"], fixture("train-status-cycle-resumed"))
         runner.reading(["train", "cycle", "status"], fixture("train-cycle-status-resumed"))
         model.pending = .resumeCycle
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         #expect(said.last == "cycle resumed (was halted: halted by 'apogee train cycle halt'); the failure count is reset")
         #expect(model.keptHalt == nil && !model.cycleHalted && model.canRunCycle, "Resume clears the halt and its notice")
     }

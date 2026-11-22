@@ -377,12 +377,14 @@ public final class GraphViewModel {
         pendingDelete = graph
     }
 
-    /// `graph delete <graph>` once the person said yes -- a named graph's
-    /// database removed, its config entry kept; a collection's graph cleared,
-    /// its chunks kept -- read back, the CLI's own sentence said.
-    public func confirmDelete() async {
-        guard let name = pendingDelete else { return }
-        pendingDelete = nil
+    /// `graph delete <graph>` once the person said yes to `name`, the graph
+    /// the dialog showed -- a named graph's database removed, its config entry
+    /// kept; a collection's graph cleared, its chunks kept -- read back, the
+    /// CLI's own sentence said. The dialog's closing clears `pendingDelete`
+    /// before its button's action runs, so the name is handed in (GUI M20);
+    /// `pendingDelete` is cleared only while it is still `name`.
+    public func confirmDelete(_ name: String) async {
+        if pendingDelete == name { pendingDelete = nil }
         result = nil
         selected = nil
         explain = nil

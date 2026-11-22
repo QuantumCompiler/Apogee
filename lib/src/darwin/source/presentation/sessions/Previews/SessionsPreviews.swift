@@ -193,7 +193,8 @@ enum SessionsPreview {
     static func compactFirst(_ library: SessionLibraryViewModel) async {
         guard let chat = library.chats.first else { return }
         library.askToCompact(chat)
-        Task { await library.confirm() }
+        guard let answer = library.pending else { return }
+        Task { await library.confirm(answer) }
         await until { library.isCompacting(chat) }
     }
 

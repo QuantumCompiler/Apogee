@@ -274,11 +274,11 @@ struct TrainingFollowsCLITests {
     }
 
     @Test("a pass this place runs is no other process's: no remedy beside it, whatever the binary")
-    func ownPassNoRemedy() async {
+    func ownPassNoRemedy() async throws {
         let job = ScriptedJob()
         let (model, _, _) = await training(vocabulary: "2026-10-25", status: "train-status-cycle", cycle: "train-cycle-status-passed", jobs: [job])
         model.pending = .runCycle
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         #expect(model.live == .cycle && model.cycleHeld)
         #expect(model.cycleHoldText == TrainingViewModel.heldWords)
         job.end()
@@ -303,7 +303,7 @@ struct TrainingFollowsCLITests {
         #expect(model.pendingTitle == "Resume \(Self.namedID) from stage 2, b?")
         #expect(model.pendingConsequence?.hasPrefix("What passed stays") == true)
         #expect(starter.starts.isEmpty, "nothing trains before the person's word")
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         #expect(starter.starts == [["train", "pipeline", "resume", Self.namedID, "--pipeline", "nightly", "--output-format", "stream-json"]])
         #expect(starter.streamed == [true] && model.showsLivePipeline)
         job.end()
@@ -321,7 +321,7 @@ struct TrainingFollowsCLITests {
         model.requestResume(kept)
         #expect(model.pendingTitle == "Resume \(Self.keptFailedID) from stage 3, c?")
         #expect(model.pendingConsequence?.hasPrefix("Stage 1, a, failed its gate and stays as it is. What passed stays") == true)
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         #expect(starter.starts == [["train", "pipeline", "resume", Self.keptFailedID, "--pipeline", "three", "--output-format", "stream-json"]])
         job.end()
         #expect(await eventually { !model.isRunning })

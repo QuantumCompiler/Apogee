@@ -105,7 +105,7 @@ struct SessionLibraryTests {
     }
 
     @Test("opening another while a turn runs asks first; yes stops the turn, no leaves it")
-    func midTurnAsks() async {
+    func midTurnAsks() async throws {
         let runner = ScriptedRunner()
         runner.reading(["chats", "list"], Self.twoChats)
         let first = ScriptedSession()
@@ -123,7 +123,7 @@ struct SessionLibraryTests {
         #expect(library.pending == nil)
         #expect(starter.openedCount == 1)
         await library.open(.chat("c1"))
-        await library.confirm()
+        try await library.confirm(#require(library.pending))
         #expect(await eventually { starter.openedCount == 2 })
         #expect(first.calls.contains("stop"))
     }
@@ -223,7 +223,7 @@ struct SessionLibraryTests {
     }
 
     @Test("a delete asks, runs, reads back; deleting the open session ends it and opens a new one")
-    func delete() async {
+    func delete() async throws {
         let runner = ScriptedRunner()
         runner.reading(["chats", "list"], Self.twoChats)
         let first = ScriptedSession()
@@ -239,7 +239,7 @@ struct SessionLibraryTests {
         #expect(!runner.calls.contains { $0.hasPrefix("run") && $0 != "run __machine-schema" }, "nothing runs without the person's word -- the vocabulary is a read")
         library.askToDelete(library.chats[0])
         runner.reading(["chats", "list"], #"{"object":"list","data":[{"id":"c1","name":"Recipes","turns":1,"updated":"2026-10-12T09:00:00Z"}]}"#)
-        await library.confirm()
+        try await library.confirm(#require(library.pending))
         #expect(first.calls == ["stop"])
         #expect(runner.calls.contains("run chats delete c2"))
         #expect(library.chats.map(\.id) == ["c1"])

@@ -135,7 +135,7 @@ struct SessionIdentityTests {
         library.current.onAction?(.delete)
         let asked = try #require(library.pending)
         #expect(asked == .delete(try #require(library.chats.first { $0.id == Self.switchedOlderID })))
-        await library.confirm()
+        try await library.confirm(#require(library.pending))
         #expect(runner.calls.contains("run chats delete \(Self.switchedOlderID)"))
         #expect(!runner.calls.contains("run chats delete \(Self.emptyID)"))
     }
@@ -288,7 +288,7 @@ struct SessionIdentityTests {
 
         library.current.onAction?(.delete)
         #expect(library.pending == .delete(try #require(library.chats.first { $0.id == Self.switchedID })))
-        await library.confirm()
+        try await library.confirm(#require(library.pending))
         #expect(runner.calls.contains("run chats delete \(Self.switchedID)"))
         #expect(!runner.calls.contains { $0.hasPrefix("run chats delete") && !$0.hasSuffix(Self.switchedID) })
     }

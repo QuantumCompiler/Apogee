@@ -499,14 +499,17 @@ public final class ModelsViewModel {
     /// backends that use its files: only where its plan names one.
     public var offersAndBackends: Bool { pendingDelete?.plan.backends.isEmpty == false }
 
-    /// `models delete <name> --yes` -- the person said yes here -- with
-    /// `--and-backends` only when they chose it too (the CLI's `--yes` never
-    /// implies it), and only where its plan named a backend; read back, its
-    /// words kept.
-    public func confirmDelete(andBackends: Bool) async {
-        guard let pending = pendingDelete else { return }
-        let withBackends = andBackends && offersAndBackends
-        pendingDelete = nil
+    /// `models delete <name> --yes` -- the person said yes here, to `answer`,
+    /// the delete the dialog showed -- with `--and-backends` only when they
+    /// chose it too (the CLI's `--yes` never implies it), and only where its
+    /// plan named a backend; read back, its words kept. The dialog's closing
+    /// clears `pendingDelete` before its button's action runs, so the answer
+    /// is handed in (GUI M20); `pendingDelete` is cleared only while it is
+    /// still `answer`.
+    public func confirmDelete(_ answer: PendingDelete, andBackends: Bool) async {
+        let pending = answer
+        let withBackends = andBackends && !pending.plan.backends.isEmpty
+        if pendingDelete == answer { pendingDelete = nil }
         var arguments = ["models", "delete", pending.row.name, "--yes"]
         if withBackends { arguments.append("--and-backends") }
         await run(arguments, doing: "Deleting \(pending.row.name)", done: "Deleted \(pending.row.name)", narrated: true)
@@ -520,10 +523,12 @@ public final class ModelsViewModel {
 
     /// `config delete-backend <name>`: the entry goes; its weights stay under
     /// Stored weights, ready to register again. Read back, a role the CLI
-    /// cleared with it said in its words (the CLI's M33).
-    public func confirmRemove() async {
-        guard let name = removing else { return }
-        removing = nil
+    /// cleared with it said in its words (the CLI's M33). `name` is the
+    /// backend the dialog showed, handed in because its closing clears
+    /// `removing` first (GUI M20); `removing` is cleared only while it is
+    /// still `name`.
+    public func confirmRemove(_ name: String) async {
+        if removing == name { removing = nil }
         await run(["config", "delete-backend", name], doing: "Removing \(name)", done: "Removed the backend \(name)")
         if selected == name { close() }
     }

@@ -103,7 +103,11 @@ public struct TrainingScreen: View {
             isPresented: Binding(get: { model.pending != nil }, set: { if !$0 { model.pending = nil } }),
             titleVisibility: .visible
         ) {
-            Button(model.pendingAction, role: model.pending?.isDestructive == true ? .destructive : nil) { Task { await model.confirm() } }
+            // The answer is captured where the button is built: the dialog's
+            // closing clears the question before the Task runs (GUI M20).
+            if let answer = model.pending {
+                Button(model.pendingAction, role: answer.isDestructive ? .destructive : nil) { Task { await model.confirm(answer) } }
+            }
             Button("Cancel", role: .cancel) { model.pending = nil }
         } message: {
             Text(

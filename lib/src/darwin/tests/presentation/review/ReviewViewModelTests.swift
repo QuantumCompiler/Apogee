@@ -77,12 +77,46 @@ struct ReviewViewModelTests {
         model.dismissPending()
         #expect(starter.starts.count == 1, "cancelled: nothing ran")
         model.askToPost()
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         #expect(starter.starts.last == ["review", "mr", "acme/widget#12", "--yes", "--output-format", "json"])
         finish(post, fixture("review-run-posted"))
         #expect(await eventually { !model.isRunning })
         #expect(model.run?.posted == .posted(comments: 1, summary: true, batched: true))
         #expect(starter.starts.filter { $0.contains("--yes") }.count == 1, "--yes appears once, on the consented run")
+    }
+
+    @Test("Post, Sweep and post and Remove, in the dialog's order: the question cleared as the dialog closes, then its answer handed in -- each runs (GUI M20)")
+    func confirmsInTheDialogsOrder() async throws {
+        let dry = ScriptedJob()
+        let post = ScriptedJob()
+        let posting = ScriptedJob()
+        let (model, runner, starter) = await model([dry, post, posting])
+        model.form.ref = "acme/widget#12"
+        model.review()
+        finish(dry, fixture("review-run-dry"))
+        #expect(await eventually { model.run != nil && !model.isRunning })
+        model.askToPost()
+        let shown = try #require(model.pending, "the dialog is built from the question")
+        model.dismissPending()
+        await model.confirm(shown)
+        #expect(starter.starts.last == ["review", "mr", "acme/widget#12", "--yes", "--output-format", "json"])
+        finish(post, fixture("review-run-posted"))
+        #expect(await eventually { !model.isRunning })
+        model.newSweep()
+        model.sweepForm.targets = ["widget"]
+        model.sweepForm.since = "2026-10-01"
+        model.askToSweep(allowPost: true)
+        let sweep = try #require(model.pending)
+        model.dismissPending()
+        await model.confirm(sweep)
+        #expect(starter.starts.last == ["review", "sweep", "--target", "widget", "--since", "2026-10-01", "--allow-post", "--output-format", "json"])
+        posting.end()
+        #expect(await eventually { !model.isRunning })
+        model.askToDelete(target: "widget")
+        let removal = try #require(model.pending)
+        model.dismissPending()
+        await model.confirm(removal)
+        #expect(runner.calls.contains("run review|targets|delete|widget"))
     }
 
     @Test("silence is a complete review: shown as one, and nothing to post is offered")
@@ -122,7 +156,7 @@ struct ReviewViewModelTests {
     }
 
     @Test("targets: listed with their grants; added and removed as typed, removal asked first")
-    func targets() async {
+    func targets() async throws {
         let (model, runner, _) = await model()
         #expect(model.targets.map(\.name) == ["acme-all", "widget"])
         #expect(model.targets[0].owner == "acme" && model.targets[0].post)
@@ -143,7 +177,7 @@ struct ReviewViewModelTests {
         #expect(runner.calls.contains("run review|targets|add|gadget|--owner|acme|--forge|gitlab|--host|git.example.com|--post|--drafts"))
         model.askToDelete(target: "widget")
         #expect(!runner.calls.contains { $0.hasPrefix("run review|targets|delete") }, "asked first")
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         #expect(runner.calls.contains("run review|targets|delete|widget"))
         #expect(runner.calls.filter { $0 == "read review|targets" }.count >= 3, "read back after each change")
     }
@@ -173,7 +207,7 @@ struct ReviewViewModelTests {
         #expect(model.postingTargets(allowPost: true) == ["widget"])
         model.askToSweep(allowPost: true)
         #expect(starter.starts.count == 1, "asked first")
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         #expect(starter.starts.last == ["review", "sweep", "--target", "widget", "--since", "2026-10-01", "--allow-post", "--output-format", "json"])
         posting.end()
     }

@@ -37,10 +37,27 @@ struct MCPRemoveTests {
         #expect(!runner.calls.contains { $0.hasPrefix("run config|delete-mcp-server") }, "nothing runs before the person's word")
         let lists = runner.calls.filter { $0 == "read mcp|list" }.count
         runner.reading(["mcp", "list"], #"{"data":[],"object":"list"}"#)
-        await model.confirmRemove()
+        try await model.confirmRemove(#require(model.pendingRemove))
         #expect(model.pendingRemove == nil)
         #expect(runner.calls.contains("run config|delete-mcp-server|\(server.name)"))
         #expect(runner.calls.filter { $0 == "read mcp|list" }.count == lists + 1, "read back")
+        #expect(model.servers.isEmpty && model.selected == nil)
+        #expect(said == ["removed MCP server 'notes' from /Users/someone/.apogee/config/config.json"], "the CLI's own line")
+    }
+
+    @Test("Remove its entry, in the dialog's order: the question cleared as the dialog closes, then the server handed in -- config delete-mcp-server runs, read back (GUI M20)")
+    func removeInTheDialogsOrder() async throws {
+        let runner = ScriptedRunner()
+        runner.answering(["config", "delete-mcp-server"], .done(stdout: fixture("mcp-delete", "txt")))
+        var said: [String] = []
+        let (model, server) = try await model(runner)
+        model.say = { said.append($0) }
+        model.askToRemove(server)
+        let answer = try #require(model.pendingRemove, "the dialog is built from the question")
+        model.pendingRemove = nil
+        runner.reading(["mcp", "list"], #"{"data":[],"object":"list"}"#)
+        await model.confirmRemove(answer)
+        #expect(runner.calls.contains("run config|delete-mcp-server|\(server.name)"))
         #expect(model.servers.isEmpty && model.selected == nil)
         #expect(said == ["removed MCP server 'notes' from /Users/someone/.apogee/config/config.json"], "the CLI's own line")
     }
@@ -52,11 +69,12 @@ struct MCPRemoveTests {
         runner.answering(["config", "delete-mcp-server"], .failed(exit: missing.exit, stderrTail: missing.tail))
         let (model, server) = try await model(runner)
         model.askToRemove(server)
+        // Cancel, or Esc: the dialog's closing clears the question, and no
+        // button hands an answer in.
         model.pendingRemove = nil
-        await model.confirmRemove()
         #expect(!runner.calls.contains { $0.hasPrefix("run config|delete-mcp-server") })
         model.askToRemove(server)
-        await model.confirmRemove()
+        try await model.confirmRemove(#require(model.pendingRemove))
         #expect(model.failure == "apogee config: MCP server 'notes' not found in config (exited with status 1)")
         #expect(model.selected == server.name, "nothing went: the page stays")
     }

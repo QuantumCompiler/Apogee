@@ -82,7 +82,7 @@ struct BackendsDeleteTests {
         let gemma = try #require(model.rows.first { $0.backend == Self.gemma })
         await model.askToDelete(gemma)
         runner.reading(["models", "list"], recorded("delete-list-after-kept"))
-        await model.confirmDelete(andBackends: false)
+        try await model.confirmDelete(#require(model.pendingDelete), andBackends: false)
         #expect(runner.calls.contains("run models delete \(Self.gemma) --yes"))
         #expect(said == ["Deleted \(Self.gemma)"])
         let kept = try #require(model.narration, "the CLI's warning and doors, kept after the delete")
@@ -94,7 +94,7 @@ struct BackendsDeleteTests {
         let llama = try #require(model.rows.first { $0.backend == Self.llama })
         await model.askToDelete(llama)
         runner.reading(["models", "list"], recorded("delete-list-after-removed"))
-        await model.confirmDelete(andBackends: true)
+        try await model.confirmDelete(#require(model.pendingDelete), andBackends: true)
         #expect(runner.calls.contains("run models delete \(Self.llama) --yes --and-backends"))
         let removed = try #require(model.narration)
         #expect(removed.title == "Deleted \(Self.llama)")
@@ -102,5 +102,28 @@ struct BackendsDeleteTests {
         #expect(!model.rows.contains { $0.backend == Self.llama }, "read back")
         model.dismissNarration()
         #expect(model.narration == nil)
+    }
+
+    @Test("Delete its files, and Delete its files and the backends that use them, in the dialog's order: the question cleared as the dialog closes, then its answer handed in -- each runs with its flags (GUI M20)")
+    func deletesInTheDialogsOrder() async throws {
+        let (model, runner) = await models()
+        var said: [String] = []
+        model.say = { said.append($0) }
+        let gemma = try #require(model.rows.first { $0.backend == Self.gemma })
+        await model.askToDelete(gemma)
+        let kept = try #require(model.pendingDelete, "the dialog is built from the question")
+        model.pendingDelete = nil
+        await model.confirmDelete(kept, andBackends: false)
+        #expect(runner.calls.contains("run models delete \(Self.gemma) --yes"))
+        #expect(!runner.calls.contains("run models delete \(Self.gemma) --yes --and-backends"))
+        #expect(said == ["Deleted \(Self.gemma)"])
+        let llama = try #require(model.rows.first { $0.backend == Self.llama })
+        await model.askToDelete(llama)
+        let removed = try #require(model.pendingDelete)
+        #expect(model.offersAndBackends, "its plan names a backend")
+        model.pendingDelete = nil
+        await model.confirmDelete(removed, andBackends: true)
+        #expect(runner.calls.contains("run models delete \(Self.llama) --yes --and-backends"))
+        #expect(said.last == "Deleted \(Self.llama)")
     }
 }

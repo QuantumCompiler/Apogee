@@ -109,7 +109,7 @@ struct PrivateSessionsSurviveTests {
     }
 
     @Test("a switch away from a private conversation asks first: Keep keeps it, End ends it")
-    func switchAsks() async {
+    func switchAsks() async throws {
         let runner = ScriptedRunner()
         let next = ScriptedSession("next")
         let (library, starter, secret) = await Lifecycle.privateConversation(runner, children: [next, ScriptedSession()])
@@ -123,7 +123,7 @@ struct PrivateSessionsSurviveTests {
         #expect(secret.isLive)
         await library.newSession()
         #expect(library.pending == .endPrivate(for: .new), "a new session asks too")
-        await library.confirm()
+        try await library.confirm(#require(library.pending))
         await Lifecycle.law(starter, "ending it")
         #expect(secret.calls.contains("stop"))
         #expect(await eventually { starter.openedCount == 3 })
@@ -411,7 +411,7 @@ final class Flag {
 @MainActor
 struct OneLiveChildMatrixTests {
     @Test("after every step of the lifecycle, at most one child lives")
-    func everyStep() async {
+    func everyStep() async throws {
         let runner = ScriptedRunner()
         runner.reading(["chats", "list"], Lifecycle.list)
         let starter = ScriptedStarter(sessions: (0..<12).map { ScriptedSession("child \($0)") })
@@ -456,7 +456,7 @@ struct OneLiveChildMatrixTests {
         await Lifecycle.law(starter, "keeping it")
         #expect(secret?.isLive == true)
         await library.newSession()
-        await library.confirm()
+        try await library.confirm(#require(library.pending))
         await Lifecycle.law(starter, "ending it for a new session")
         #expect(secret?.isLive == false)
         _ = await speak()

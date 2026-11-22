@@ -102,7 +102,11 @@ public struct GraphScreen: View {
             isPresented: Binding(get: { model.pendingDelete != nil }, set: { if !$0 { model.pendingDelete = nil } }),
             titleVisibility: .visible
         ) {
-            Button("Delete the graph", role: .destructive) { Task { await model.confirmDelete() } }
+            // The graph's name is captured where the button is built: the
+            // dialog's closing clears the question before the Task runs (GUI M20).
+            if let answer = model.pendingDelete {
+                Button("Delete the graph", role: .destructive) { Task { await model.confirmDelete(answer) } }
+            }
             Button("Cancel", role: .cancel) { model.pendingDelete = nil }
         } message: {
             Text(deleteMessage)

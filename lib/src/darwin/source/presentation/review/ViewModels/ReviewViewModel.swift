@@ -344,12 +344,14 @@ public final class ReviewViewModel {
 
     // MARK: - Consent
 
-    /// The person's yes: the one place `--yes`, `--allow-post` and a delete
-    /// are passed.
-    public func confirm() async {
-        guard let pending else { return }
-        self.pending = nil
-        switch pending {
+    /// The person's yes to `answer`, the question the dialog showed: the one
+    /// place `--yes`, `--allow-post` and a delete are passed. The dialog's
+    /// closing clears `pending` before its button's action runs, so the
+    /// answer is handed in (GUI M20); `pending` is cleared only while it is
+    /// still `answer`.
+    public func confirm(_ answer: Pending) async {
+        if pending == answer { pending = nil }
+        switch answer {
         case .post(let shown):
             guard let arguments = runArguments else { return }
             let posting = arguments.map { $0 == "--dry-run" ? "--yes" : $0 }

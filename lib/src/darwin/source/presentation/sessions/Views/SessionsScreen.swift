@@ -66,19 +66,22 @@ public struct SessionsScreen: View {
             pendingTitle, isPresented: Binding(get: { library.pending != nil }, set: { if !$0 { library.dismissPending() } }),
             titleVisibility: .visible
         ) {
-            switch library.pending {
-            case .stopTurn:
-                Button("Stop the turn and switch", role: .destructive) { Task { await library.confirm() } }
-            case .endPrivate:
-                Button("End it and switch", role: .destructive) { Task { await library.confirm() } }
-            case .delete:
-                Button("Delete", role: .destructive) { Task { await library.confirm() } }
-            case .compact:
-                Button("Compact it", role: .destructive) { Task { await library.confirm() } }
-            case .forgetRecall:
-                Button("Forget every summary", role: .destructive) { Task { await library.confirm() } }
-            case nil:
-                EmptyView()
+            // The answer is captured here, where the button is built: the
+            // dialog's closing clears the question before the Task runs
+            // (GUI M20).
+            if let answer = library.pending {
+                switch answer {
+                case .stopTurn:
+                    Button("Stop the turn and switch", role: .destructive) { Task { await library.confirm(answer) } }
+                case .endPrivate:
+                    Button("End it and switch", role: .destructive) { Task { await library.confirm(answer) } }
+                case .delete:
+                    Button("Delete", role: .destructive) { Task { await library.confirm(answer) } }
+                case .compact:
+                    Button("Compact it", role: .destructive) { Task { await library.confirm(answer) } }
+                case .forgetRecall:
+                    Button("Forget every summary", role: .destructive) { Task { await library.confirm(answer) } }
+                }
             }
             Button(keepTitle, role: .cancel) { library.dismissPending() }
         } message: {

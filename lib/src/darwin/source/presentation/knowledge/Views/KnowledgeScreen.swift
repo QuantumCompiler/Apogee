@@ -145,7 +145,11 @@ struct RecordsView: View {
             isPresented: Binding(get: { model.pendingDelete != nil }, set: { if !$0 { model.pendingDelete = nil } }),
             titleVisibility: .visible
         ) {
-            Button("Delete the record and its archive", role: .destructive) { Task { await model.confirmDelete() } }
+            // The record is captured where the button is built: the dialog's
+            // closing clears the question before the Task runs (GUI M20).
+            if let answer = model.pendingDelete {
+                Button("Delete the record and its archive", role: .destructive) { Task { await model.confirmDelete(answer) } }
+            }
             Button("Cancel", role: .cancel) { model.pendingDelete = nil }
         } message: {
             Text("apogee knowledge delete \(model.pendingDelete?.id ?? "") -- the record and its raw conversation are removed; this can't be undone.")
@@ -324,7 +328,9 @@ struct CollectionsView: View {
             isPresented: Binding(get: { model.pendingDelete != nil }, set: { if !$0 { model.pendingDelete = nil } }),
             titleVisibility: .visible
         ) {
-            Button("Delete", role: .destructive) { Task { await model.confirmDelete() } }
+            if let answer = model.pendingDelete {
+                Button("Delete", role: .destructive) { Task { await model.confirmDelete(answer) } }
+            }
             Button("Cancel", role: .cancel) { model.pendingDelete = nil }
         } message: {
             Text("apogee " + (model.pendingDelete?.arguments.joined(separator: " ") ?? "") + " -- this can't be undone.")
