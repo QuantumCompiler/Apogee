@@ -294,7 +294,7 @@ When applicable, also update the root `README.md` if the change affects how some
 - **`~/.apogee` is read-only to development.** Reading a log, a session or a store record there to diagnose what the user reports from production is fine; writing, migrating, registering into or deleting from it is not, through any door (the release binary's own verbs included).
 - **Probes and tests stay hermetic, as before**: a temporary `APOGEE_HOME` under the scratchpad -- neither `~/.apogee` nor `~/.apogee-dev`, which is the user's testing install.
 - **The dev channel's backends, keys and models are its own.** A real-weights check needing a model `~/.apogee-dev` lacks asks the user, who registers or pulls it there; it never points the dev channel at the release store.
-- **The macOS app follows the same law**: a development build drives `apogee-dev` and keeps its own settings, never the installed app's -- [the GUI's CLAUDE.md](../darwin/CLAUDE.md#development-runs-on-the-dev-channel) has its state of play.
+- **The macOS app follows the same law**: a development build -- "Apogee Dev", Xcode's Run or `lib/src/darwin/scripts/build.sh open` -- drives `apogee-dev` alone and keeps its own settings, never the installed app's (GUI M18) -- [the GUI's CLAUDE.md](../darwin/CLAUDE.md#development-runs-on-the-dev-channel) has how.
 
 ### Superpowers fits the docs-first lifecycle
 

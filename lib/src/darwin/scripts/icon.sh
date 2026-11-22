@@ -2,14 +2,19 @@
 # icon.sh -- the app's icon, made from the one master.
 #
 #   icon.sh generate        every copy, from lib/design/assets/Logo.png
-#   icon.sh verify <app>    a built bundle names the icon and carries it
+#   icon.sh verify <app>    a built bundle names its channel's icon and carries it
 #
 # lib/design/assets/Logo.png is the single source (GUI 11a). `generate` writes
 # what is made from it:
 #
 #   source/main/Assets.xcassets/AppIcon.appiconset
 #                           every macOS size, 16 to 1024 pixels, committed so
-#                           a build runs no script
+#                           a build runs no script: the release app's icon
+#   source/main/Assets.xcassets/AppIcon-Dev.appiconset
+#                           the same ten images drawn in amber, the design's
+#                           warning colour (scripts/icon-dev.swift): the dev
+#                           channel's, so "Apogee Dev" is told apart from the
+#                           installed app in the Dock (GUI M18)
 #   lib/design/assets/Logo-320.png
 #                           the reduced copy the root README shows at 160,
 #                           which the design's gallery draws as its logo page
@@ -19,12 +24,14 @@
 # artwork at those sizes is a gray smear, and so is a plain crop of it. Every
 # other size is the whole artwork, as drawn.
 #
-# The set's Contents.json records the master's SHA-256 and each image's. The
+# Each set's Contents.json records the master's SHA-256 and each image's. The
 # architecture tests' icon-set check reads them back, so a master changed
-# without running this fails the suite, naming the stale set.
+# without running this fails the suite, naming the stale sets.
 #
-# `verify` is what build.sh asks of the bundle it built or is about to package.
-# Neither of its callers regenerates anything.
+# `verify` is what build.sh asks of the bundle it built or is about to package:
+# the icon its Info.plist's ApogeeChannel names -- AppIcon for the release
+# channel (or a bundle naming none), AppIcon-Dev for the dev channel. Neither
+# of its callers regenerates anything.
 set -euo pipefail
 
 log() { printf '[icon] %s\n' "$*"; }
@@ -40,6 +47,11 @@ usage() {
 }
 
 ICON=AppIcon
+DEV_ICON=AppIcon-Dev
+# The dev icon's tint, red green blue: the design's warning colour on its dark
+# theme (lib/design/tokens.json, colors.themes.dark.colors.status.warning,
+# #E9A23B), so the rocket's white is drawn amber on the same black.
+DEV_TINT=(233 162 59)
 
 # The master's side, and the square around its rocket, in its pixels. A new
 # master whose rocket moved or changed size needs this square measured again.
@@ -57,6 +69,7 @@ master="${repo}/lib/design/assets/Logo.png"
 readme_logo="${repo}/lib/design/assets/Logo-320.png"
 catalog="${app_dir}/source/main/Assets.xcassets"
 icon_set="${catalog}/${ICON}.appiconset"
+dev_icon_set="${catalog}/${DEV_ICON}.appiconset"
 
 sha256() { shasum -a 256 <"$1" | cut -d ' ' -f 1; }
 
@@ -100,17 +113,43 @@ if size != (side, side):
 PYTHON
 }
 
+# contents_json <images> <hashes>: a set's Contents.json, its images declared
+# and the master's hash and each image's recorded.
+contents_json() {
+    cat <<JSON
+{
+  "images" : [
+${1}
+  ],
+  "info" : {
+    "author" : "xcode",
+    "files-sha256" : {
+${2}
+    },
+    "generated-by" : "lib/src/darwin/scripts/icon.sh",
+    "master-sha256" : "$(sha256 "$master")",
+    "version" : 1
+  }
+}
+JSON
+}
+
 generate() {
     [[ -f "$master" ]] || die "no master at ${master}"
     check_master
-    local set_stage small source radius images="" hashes="" points scale pixels name separator=""
+    local set_stage dev_stage small dev source radius images="" hashes="" dev_hashes="" points scale pixels name
+    local separator=""
     stage="$(mktemp -d "${TMPDIR:-/tmp}/apogee-icon.XXXXXX")"
     trap 'rm -rf "$stage"' EXIT
     set_stage="${stage}/${ICON}.appiconset"
-    mkdir "$set_stage"
+    dev_stage="${stage}/${DEV_ICON}.appiconset"
+    mkdir "$set_stage" "$dev_stage"
     small="${stage}/icon-small"
     xcrun swiftc -O -o "$small" "${app_dir}/scripts/icon-small.swift" ||
         die "could not compile scripts/icon-small.swift"
+    dev="${stage}/icon-dev"
+    xcrun swiftc -O -o "$dev" "${app_dir}/scripts/icon-dev.swift" ||
+        die "could not compile scripts/icon-dev.swift"
 
     for points in 16 32 128 256 512; do
         for scale in 1 2; do
@@ -127,6 +166,8 @@ generate() {
                     die "could not make the ${pixels}-pixel rocket"
             fi
             resize "$source" "$pixels" $((72 * scale)) "${set_stage}/${name}"
+            "$dev" "${set_stage}/${name}" "${dev_stage}/${name}" $((72 * scale)) "${DEV_TINT[@]}" ||
+                die "could not make the dev icon's ${name}"
             images+="${separator}    {
       \"filename\" : \"${name}\",
       \"idiom\" : \"mac\",
@@ -134,26 +175,13 @@ generate() {
       \"size\" : \"${points}x${points}\"
     }"
             hashes+="${separator}      \"${name}\" : \"$(sha256 "${set_stage}/${name}")\""
+            dev_hashes+="${separator}      \"${name}\" : \"$(sha256 "${dev_stage}/${name}")\""
             separator=$',\n'
         done
     done
 
-    cat >"${set_stage}/Contents.json" <<JSON
-{
-  "images" : [
-${images}
-  ],
-  "info" : {
-    "author" : "xcode",
-    "files-sha256" : {
-${hashes}
-    },
-    "generated-by" : "lib/src/darwin/scripts/icon.sh",
-    "master-sha256" : "$(sha256 "$master")",
-    "version" : 1
-  }
-}
-JSON
+    contents_json "$images" "$hashes" >"${set_stage}/Contents.json"
+    contents_json "$images" "$dev_hashes" >"${dev_stage}/Contents.json"
     resize "$master" 320 144 "${stage}/Logo-320.png"
 
     # Everything was made, so nothing is left half replaced.
@@ -166,21 +194,31 @@ JSON
   }
 }
 JSON
-    rm -rf "$icon_set"
+    rm -rf "$icon_set" "$dev_icon_set"
     mv "$set_stage" "$icon_set"
+    mv "$dev_stage" "$dev_icon_set"
     mv "${stage}/Logo-320.png" "$readme_logo"
     log "${icon_set#"${repo}/"}: ten sizes from ${master#"${repo}/"}"
+    log "${dev_icon_set#"${repo}/"}: the same ten, in the dev channel's amber"
     log "${readme_logo#"${repo}/"}: the README's copy"
 }
 
 verify() {
-    local app="$1" plist="${1}/Contents/Info.plist" car="${1}/Contents/Resources/Assets.car" named said
+    local app="$1" plist="${1}/Contents/Info.plist" car="${1}/Contents/Resources/Assets.car" named said channel icon
     [[ -f "$plist" ]] || die "${app} has no Contents/Info.plist"
+    # The channel the bundle was built for names its icon; a bundle naming
+    # none was built before channels existed, and is the release app.
+    channel="$(plutil -extract ApogeeChannel raw "$plist" 2>/dev/null)" || channel=release
+    case "$channel" in
+        release) icon="$ICON" ;;
+        dev) icon="$DEV_ICON" ;;
+        *) die "${app} names the channel ${channel}: it is release or dev" ;;
+    esac
     named="$(plutil -extract CFBundleIconName raw "$plist" 2>/dev/null)" ||
         die "${app} names no icon: its Info.plist has no CFBundleIconName"
-    [[ "$named" == "$ICON" ]] || die "${app} names the icon ${named}: it is ${ICON}"
-    [[ -f "$car" ]] || die "${app} names ${ICON} but has no Contents/Resources/Assets.car"
-    said="$(xcrun assetutil --info "$car" 2>/dev/null)" || die "${car} does not hold ${ICON}: it cannot be read"
+    [[ "$named" == "$icon" ]] || die "${app} names the icon ${named}: it is ${icon}"
+    [[ -f "$car" ]] || die "${app} names ${icon} but has no Contents/Resources/Assets.car"
+    said="$(xcrun assetutil --info "$car" 2>/dev/null)" || die "${car} does not hold ${icon}: it cannot be read"
     python3 -I -c '
 import json, sys
 
@@ -193,11 +231,11 @@ held = {
     if entry.get("Name") == icon and entry.get("AssetType") == "Icon Image"
 }
 sys.exit(0 if not wanted - held else 2 if held else 3)
-' "$ICON" <<<"$said" || case $? in
-        2) die "${car} does not hold ${ICON} at every size" ;;
-        *) die "${car} does not hold ${ICON}" ;;
+' "$icon" <<<"$said" || case $? in
+        2) die "${car} does not hold ${icon} at every size" ;;
+        *) die "${car} does not hold ${icon}" ;;
     esac
-    log "${app##*/}: names ${ICON}, and its compiled catalog holds it at every size"
+    log "${app##*/}: names ${icon}, and its compiled catalog holds it at every size"
 }
 
 [[ $# -ge 1 ]] || usage

@@ -19,6 +19,10 @@ public struct ClientIdentity: Sendable, Equatable {
 /// The client core's front door: find the binary, start a session on it.
 public struct ApogeeClient: Sendable {
     public let identity: ClientIdentity
+    /// The CLI's install channel this client drives (GUI M18): the build's,
+    /// handed down by the composition root. A client named none is the
+    /// release channel's.
+    public let channel: InstallChannel
     private let spawner: any ChildSpawner
     private let preferences: Preferences
     private let home: URL
@@ -40,9 +44,18 @@ public struct ApogeeClient: Sendable {
 
     /// The app's client, its sessions listed in `children`.
     public init(identity: ClientIdentity, children: ChildRegistry) {
+        self.init(identity: identity, children: children, channel: .release)
+    }
+
+    /// The app's client on `channel` -- the build's, read once from its bundle
+    /// by the composition root -- its sessions listed in `children`. Its
+    /// preferences are the app's own `UserDefaults`, whose domain is the
+    /// bundle's identifier: a dev build's are its own, never the installed
+    /// app's.
+    public init(identity: ClientIdentity, children: ChildRegistry, channel: InstallChannel) {
         self.init(
             identity: identity, spawner: ProcessSpawner(), preferences: .standard(),
-            home: FileManager.default.homeDirectoryForCurrentUser, children: children)
+            home: FileManager.default.homeDirectoryForCurrentUser, children: children, channel: channel)
     }
 
     /// A client over `spawner`, its sessions listed nowhere.
@@ -55,17 +68,31 @@ public struct ApogeeClient: Sendable {
         identity: ClientIdentity, spawner: any ChildSpawner, preferences: Preferences, home: URL,
         children: ChildRegistry?
     ) {
+        self.init(
+            identity: identity, spawner: spawner, preferences: preferences, home: home, children: children,
+            channel: .release)
+    }
+
+    /// A client over `spawner` on `channel`, its sessions listed in
+    /// `children` while they run.
+    public init(
+        identity: ClientIdentity, spawner: any ChildSpawner, preferences: Preferences, home: URL,
+        children: ChildRegistry?, channel: InstallChannel
+    ) {
         self.identity = identity
         self.spawner = spawner
         self.preferences = preferences
         self.home = home
         self.children = children
+        self.channel = channel
     }
 
-    /// The binary to drive: the user's override first, then the install
-    /// channels' places -- or the typed condition that none answered.
+    /// The binary to drive: the user's override first, then the client's
+    /// channel's places -- or the typed condition that none answered, with
+    /// that channel's install line.
     public func locateBinary() async -> DiscoveryOutcome {
-        await BinaryDiscovery(spawner: spawner, home: home).locate(override: preferences.binaryOverride)
+        await BinaryDiscovery(spawner: spawner, home: home).locate(
+            override: preferences.binaryOverride, channel: channel)
     }
 
     /// A chat session on `binary`, working in `folder` -- the user's home

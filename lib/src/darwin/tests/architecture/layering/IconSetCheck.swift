@@ -1,21 +1,36 @@
 import CryptoKit
 import Foundation
 
-/// GUI 11a, mechanically: the app's icon set is complete and was made from the
-/// one master, `lib/design/assets/Logo.png`, by `scripts/icon.sh`.
+/// GUI 11a, mechanically: the app's icon sets are complete and were made from
+/// the one master, `lib/design/assets/Logo.png`, by `scripts/icon.sh` -- the
+/// release channel's `AppIcon` and, since GUI M18, the dev channel's
+/// `AppIcon-Dev`, the same images drawn in amber so "Apogee Dev" is told apart
+/// in the Dock.
 ///
-/// The set is committed, so a build needs no script run, which is why it can
-/// go stale. `icon.sh generate` records the master's SHA-256 and each image's
-/// in the set's `Contents.json`, and the rules read those back, each a
+/// The sets are committed, so a build needs no script run, which is why they
+/// can go stale. `icon.sh generate` records the master's SHA-256 and each
+/// image's in each set's `Contents.json`, and the rules read those back, each a
 /// violation naming what broke it. The records catch a set that has drifted
 /// from its master, not one whose records were edited to match:
 ///
-/// - every size macOS asks for is declared, and every size declared is a PNG of
-///   exactly its pixels;
+/// - in each set, every size macOS asks for is declared, and every size
+///   declared is a PNG of exactly its pixels;
 /// - the recorded master is the master on disk;
 /// - each image matches the hash the script recorded;
-/// - the application target names the icon in every configuration.
+/// - the application target names its channel's icon in each configuration:
+///   Debug, the dev channel, `AppIcon-Dev`; Release `AppIcon`.
 struct IconSetCheck {
+    /// One channel's icon set in the asset catalog.
+    struct IconSet: Equatable {
+        /// What the target and a bundle's `CFBundleIconName` call it.
+        let name: String
+        /// The channel whose app shows it.
+        let channel: String
+
+        /// Relative to the app's directory, lib/src/darwin.
+        var path: String { "source/main/Assets.xcassets/\(name).appiconset" }
+    }
+
     /// One image macOS asks for: a size in points at a scale.
     struct Slot: Equatable {
         let points: Int
@@ -33,10 +48,11 @@ struct IconSetCheck {
         [1, 2].map { Slot(points: points, scale: $0) }
     }
 
-    static let iconName = "AppIcon"
-    static let configurations = ["Debug", "Release"]
-    /// Relative to the app's directory, lib/src/darwin.
-    static let setPath = "source/main/Assets.xcassets/AppIcon.appiconset"
+    static let release = IconSet(name: "AppIcon", channel: "release")
+    static let dev = IconSet(name: "AppIcon-Dev", channel: "dev")
+    static let sets = [release, dev]
+    /// The icon each build configuration names: its channel's (ChannelCheck).
+    static let configurations = ["Debug": dev, "Release": release]
     static let masterPath = "../../design/assets/Logo.png"
     static let masterName = "lib/design/assets/Logo.png"
     static let remedy = "run lib/src/darwin/scripts/icon.sh generate"
@@ -46,58 +62,58 @@ struct IconSetCheck {
     /// The application target's icon, by build configuration.
     let iconNames: [String: String]
 
-    /// Every violation, in a stable order; empty when the set holds.
+    /// Every violation, in a stable order; empty when the sets hold.
     func violations() -> [String] {
-        target() + set()
+        guard let master = read(Self.masterPath) else {
+            return target() + ["the master \(Self.masterName) is missing: the icon set is made from it"]
+        }
+        return target() + Self.sets.flatMap { set($0, master: master) }
     }
 
     private func target() -> [String] {
-        Self.configurations.compactMap { configuration in
-            iconNames[configuration] == Self.iconName
+        Self.configurations.sorted { $0.key < $1.key }.compactMap { configuration, set in
+            iconNames[configuration] == set.name
                 ? nil
-                : "the application target's \(configuration) configuration does not name \(Self.iconName) "
-                    + "(ASSETCATALOG_COMPILER_APPICON_NAME): the app would show the generic icon"
+                : "the application target's \(configuration) configuration does not name \(set.name) "
+                    + "(ASSETCATALOG_COMPILER_APPICON_NAME), the \(set.channel) channel's icon"
         }
     }
 
-    private func set() -> [String] {
-        guard let master = read(Self.masterPath) else {
-            return ["the master \(Self.masterName) is missing: the icon set is made from it"]
-        }
-        guard let data = read(Self.setPath + "/Contents.json"),
+    private func set(_ iconSet: IconSet, master: Data) -> [String] {
+        let setName = "\(iconSet.name).appiconset"
+        guard let data = read(iconSet.path + "/Contents.json"),
             let contents = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
             let images = contents["images"] as? [[String: Any]],
             let info = contents["info"] as? [String: Any]
         else {
-            return ["\(Self.iconName).appiconset has no readable Contents.json: \(Self.remedy)"]
+            return ["\(setName) has no readable Contents.json: \(Self.remedy)"]
         }
 
         var found: [String] = []
         let recorded = info["master-sha256"] as? String
         if recorded != Self.sha256(master) {
-            found.append(
-                "\(Self.iconName).appiconset is stale: it was not made from the current \(Self.masterName): \(Self.remedy)")
+            found.append("\(setName) is stale: it was not made from the current \(Self.masterName): \(Self.remedy)")
         }
 
         let hashes = info["files-sha256"] as? [String: String] ?? [:]
         var declared: [Slot] = []
         for image in images {
             guard let slot = Self.slot(of: image), let filename = image["filename"] as? String else {
-                found.append("\(Self.iconName).appiconset declares an image it does not fully name: \(Self.remedy)")
+                found.append("\(setName) declares an image it does not fully name: \(Self.remedy)")
                 continue
             }
             declared.append(slot)
-            found += problems(with: filename, for: slot, recorded: hashes[filename])
+            found += problems(with: filename, in: iconSet, for: slot, recorded: hashes[filename])
         }
         for slot in Self.slots where !declared.contains(slot) {
-            found.append("\(Self.iconName).appiconset does not declare \(slot.label), which macOS asks for: \(Self.remedy)")
+            found.append("\(setName) does not declare \(slot.label), which macOS asks for: \(Self.remedy)")
         }
         return found
     }
 
-    private func problems(with filename: String, for slot: Slot, recorded: String?) -> [String] {
-        let name = "\(Self.iconName).appiconset/\(filename)"
-        guard let image = read(Self.setPath + "/" + filename) else {
+    private func problems(with filename: String, in iconSet: IconSet, for slot: Slot, recorded: String?) -> [String] {
+        let name = "\(iconSet.name).appiconset/\(filename)"
+        guard let image = read(iconSet.path + "/" + filename) else {
             return ["\(name) is missing, for \(slot.label): \(Self.remedy)"]
         }
         var found: [String] = []

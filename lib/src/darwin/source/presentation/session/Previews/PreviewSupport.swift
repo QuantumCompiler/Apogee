@@ -129,13 +129,16 @@ actor PreviewChat: ChatSession {
 }
 
 /// Where a preview's chats come from: the binary found where the release
-/// installs it -- or, given `missing`, none, every place looked passed over --
-/// and each chat opened on it saying `lines`, then ending as `ending` says.
+/// installs it -- or, given `missing`, none on `channel`, every place looked
+/// passed over -- and each chat opened on it saying `lines`, then ending as
+/// `ending` says.
 struct PreviewChats: ChatStarting {
     var lines: [String] = []
     var silentFrom: String?
     var ending: SessionEnd?
     var missing: [SkippedCandidate]?
+    /// The channel none was found on: its install line is the screen's.
+    var channel = InstallChannel.release
     /// Each turn said up to its `result`, and a `set` answered (`PreviewChat`).
     var byTurn = false
     /// A stop never ends a chat, and a turn's line is refused (`PreviewChat`).
@@ -149,7 +152,7 @@ struct PreviewChats: ChatStarting {
         versionLine: "apogee 0.1.9 (7072bdf, 2026-10-19, macos-arm64)")
 
     func locateBinary() async -> DiscoveryOutcome {
-        missing.map { .notFound(skipped: $0) } ?? .found(Self.found, skipped: [])
+        missing.map { .notFound(skipped: $0, channel: channel) } ?? .found(Self.found, skipped: [])
     }
 
     func openChat(binary: URL, launch: ChatLaunch) -> any ChatSession {

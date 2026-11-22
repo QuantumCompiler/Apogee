@@ -23,12 +23,14 @@ struct IconSetOnThisProjectTests {
     }
 }
 
-/// A set that holds, as `icon.sh` would write it, for one test to break.
+/// The two sets that hold, as `icon.sh` would write them, for one test to
+/// break: the release channel's `AppIcon` and the dev channel's `AppIcon-Dev`.
 private struct PlantedSet {
     var files: [String: Data] = [:]
-    var iconNames = ["Debug": "AppIcon", "Release": "AppIcon"]
+    var iconNames = ["Debug": "AppIcon-Dev", "Release": "AppIcon"]
 
-    static let set = IconSetCheck.setPath
+    static let set = IconSetCheck.release.path
+    static let devSet = IconSetCheck.dev.path
 
     static func png(_ width: Int, _ height: Int) -> Data {
         var bytes: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13]
@@ -42,25 +44,30 @@ private struct PlantedSet {
     init() throws {
         let master = Data("the master".utf8)
         files[IconSetCheck.masterPath] = master
-        var images: [[String: String]] = []
-        var hashes: [String: String] = [:]
-        for slot in IconSetCheck.slots {
-            let image = Self.png(slot.pixels, slot.pixels)
-            files[Self.set + "/" + slot.filename] = image
-            hashes[slot.filename] = IconSetCheck.sha256(image)
-            images.append([
-                "idiom": "mac", "size": "\(slot.points)x\(slot.points)", "scale": "\(slot.scale)x",
-                "filename": slot.filename,
-            ])
+        for (set, marker) in [(Self.set, UInt8(0)), (Self.devSet, UInt8(1))] {
+            var images: [[String: String]] = []
+            var hashes: [String: String] = [:]
+            for slot in IconSetCheck.slots {
+                // Each set's own bytes, as the dev set's tinted images are.
+                let image = Self.png(slot.pixels, slot.pixels) + Data([marker])
+                files[set + "/" + slot.filename] = image
+                hashes[slot.filename] = IconSetCheck.sha256(image)
+                images.append([
+                    "idiom": "mac", "size": "\(slot.points)x\(slot.points)", "scale": "\(slot.scale)x",
+                    "filename": slot.filename,
+                ])
+            }
+            try write(images: images, master: IconSetCheck.sha256(master), hashes: hashes, to: set)
         }
-        try write(images: images, master: IconSetCheck.sha256(master), hashes: hashes)
     }
 
-    mutating func write(images: [[String: String]], master: String, hashes: [String: String]) throws {
+    mutating func write(
+        images: [[String: String]], master: String, hashes: [String: String], to set: String = PlantedSet.set
+    ) throws {
         let info: [String: Any] = [
             "author": "xcode", "version": 1, "master-sha256": master, "files-sha256": hashes,
         ]
-        files[Self.set + "/Contents.json"] = try JSONSerialization.data(
+        files[set + "/Contents.json"] = try JSONSerialization.data(
             withJSONObject: ["images": images, "info": info] as [String: Any])
     }
 
@@ -102,13 +109,42 @@ struct IconSetPlantedTests {
         #expect(IconSetCheck.Slot(points: 16, scale: 1).filename == "icon_16x16.png")
     }
 
-    @Test("a master changed without re-running icon.sh fails, naming the stale set")
+    @Test("a master changed without re-running icon.sh fails, naming both stale sets")
     func staleMaster() throws {
         var set = try PlantedSet()
         set.files[IconSetCheck.masterPath] = Data("a new master".utf8)
         #expect(set.violations == [
             "AppIcon.appiconset is stale: it was not made from the current lib/design/assets/Logo.png: "
-                + "run lib/src/darwin/scripts/icon.sh generate"
+                + "run lib/src/darwin/scripts/icon.sh generate",
+            "AppIcon-Dev.appiconset is stale: it was not made from the current lib/design/assets/Logo.png: "
+                + "run lib/src/darwin/scripts/icon.sh generate",
+        ])
+    }
+
+    @Test("the dev channel's set is held as the release one is: one image gone fails, naming it (GUI M18)")
+    func devImageMissing() throws {
+        var set = try PlantedSet()
+        set.files[PlantedSet.devSet + "/" + small.filename] = nil
+        #expect(set.violations == [
+            "AppIcon-Dev.appiconset/icon_16x16@2x.png is missing, for 16x16@2x: run lib/src/darwin/scripts/icon.sh generate"
+        ])
+    }
+
+    @Test("a dev set never generated fails, and says what to run (GUI M18)")
+    func devSetAbsent() throws {
+        var set = try PlantedSet()
+        set.files = set.files.filter { !$0.key.hasPrefix(PlantedSet.devSet + "/") }
+        #expect(set.violations == [
+            "AppIcon-Dev.appiconset has no readable Contents.json: run lib/src/darwin/scripts/icon.sh generate"
+        ])
+    }
+
+    @Test("a dev image hand-replaced fails against the hash icon.sh recorded (GUI M18)")
+    func devImageReplaced() throws {
+        var set = try PlantedSet()
+        set.files[PlantedSet.devSet + "/" + small.filename] = PlantedSet.png(32, 32)
+        #expect(set.violations == [
+            "AppIcon-Dev.appiconset/icon_16x16@2x.png does not match the hash icon.sh recorded: run lib/src/darwin/scripts/icon.sh generate"
         ])
     }
 
@@ -137,9 +173,10 @@ struct IconSetPlantedTests {
                 "filename": slot.filename,
             ]
         }
+        let planted = set.files
         let hashes = Dictionary(
             uniqueKeysWithValues: IconSetCheck.slots.map {
-                ($0.filename, IconSetCheck.sha256(PlantedSet.png($0.pixels, $0.pixels)))
+                ($0.filename, IconSetCheck.sha256(planted[PlantedSet.set + "/" + $0.filename] ?? Data()))
             })
         try set.write(images: images, master: IconSetCheck.sha256(Data("the master".utf8)), hashes: hashes)
         #expect(set.violations == [
@@ -164,7 +201,7 @@ struct IconSetPlantedTests {
     @Test("an image of the right size that differs from its recorded hash fails")
     func handReplacedImage() throws {
         var set = try PlantedSet()
-        set.files[PlantedSet.set + "/" + small.filename] = PlantedSet.png(32, 32) + Data([0])
+        set.files[PlantedSet.set + "/" + small.filename] = PlantedSet.png(32, 32) + Data([9])
         #expect(set.violations == [
             "AppIcon.appiconset/icon_16x16@2x.png does not match the hash icon.sh recorded: run lib/src/darwin/scripts/icon.sh generate"
         ])
@@ -188,8 +225,19 @@ struct IconSetPlantedTests {
     }
 
     private static func targetViolation(_ configuration: String) -> String {
-        "the application target's \(configuration) configuration does not name AppIcon "
-            + "(ASSETCATALOG_COMPILER_APPICON_NAME): the app would show the generic icon"
+        configuration == "Debug"
+            ? "the application target's Debug configuration does not name AppIcon-Dev "
+                + "(ASSETCATALOG_COMPILER_APPICON_NAME), the dev channel's icon"
+            : "the application target's Release configuration does not name AppIcon "
+                + "(ASSETCATALOG_COMPILER_APPICON_NAME), the release channel's icon"
+    }
+
+    @Test("each configuration names its channel's icon: Debug the dev set, Release the release set (GUI M18)")
+    func theIconsByConfiguration() {
+        #expect(IconSetCheck.configurations == ["Debug": IconSetCheck.dev, "Release": IconSetCheck.release])
+        #expect(IconSetCheck.release.name == "AppIcon")
+        #expect(IconSetCheck.dev.name == "AppIcon-Dev")
+        #expect(IconSetCheck.dev.path == "source/main/Assets.xcassets/AppIcon-Dev.appiconset")
     }
 
     @Test("an app target that stops naming the icon fails, by configuration", arguments: ["Debug", "Release"])
@@ -204,6 +252,13 @@ struct IconSetPlantedTests {
         var set = try PlantedSet()
         set.iconNames[configuration] = "Other"
         #expect(set.violations == [Self.targetViolation(configuration)])
+    }
+
+    @Test("a configuration naming the other channel's icon fails: Apogee Dev would look like the release app")
+    func targetNamesTheOtherChannelsIcon() throws {
+        var set = try PlantedSet()
+        set.iconNames["Debug"] = "AppIcon"
+        #expect(set.violations == [Self.targetViolation("Debug")])
     }
 }
 
@@ -233,7 +288,8 @@ private func temporaryFolder() throws -> URL {
     return folder
 }
 
-private let realSet = appRoot.appendingPathComponent(IconSetCheck.setPath)
+private let realSet = appRoot.appendingPathComponent(IconSetCheck.release.path)
+private let realDevSet = appRoot.appendingPathComponent(IconSetCheck.dev.path)
 private let realMaster = appRoot.appendingPathComponent(IconSetCheck.masterPath)
 
 @Suite("icon.sh verify, on planted bundles")
@@ -241,8 +297,9 @@ struct IconVerifyTests {
     /// What a planted bundle's Assets.car is compiled from.
     private enum Catalog {
         case none, notACatalog
-        /// The real set under `name`, cut to its first `sizes` images when given.
-        case iconSet(name: String, sizes: Int?)
+        /// The real set at `source` under `name`, cut to its first `sizes`
+        /// images when given.
+        case iconSet(name: String, sizes: Int?, source: URL = realSet)
         /// An ordinary image that happens to be called AppIcon.
         case imageNamedAppIcon
     }
@@ -263,9 +320,9 @@ struct IconVerifyTests {
         case .notACatalog:
             try Data("not a catalog".utf8).write(to: resources.appendingPathComponent("Assets.car"))
             return
-        case .iconSet(let name, let sizes):
+        case .iconSet(let name, let sizes, let source):
             let set = assets.appendingPathComponent("\(name).appiconset")
-            try FileManager.default.copyItem(at: realSet, to: set)
+            try FileManager.default.copyItem(at: source, to: set)
             if let sizes {
                 let contents = set.appendingPathComponent("Contents.json")
                 var json = try #require(
@@ -361,6 +418,55 @@ struct IconVerifyTests {
         #expect(result.status != 0)
         #expect(result.said.contains("does not hold AppIcon at every size"), "\(result.said)")
     }
+
+    private let devNamesIcon = ["CFBundleIconName": "AppIcon-Dev", "ApogeeChannel": "dev"]
+
+    @Test("a dev bundle whose catalog holds the whole dev icon passes (GUI M18)")
+    func wholeDevIcon() throws {
+        let result = try verify(plist: devNamesIcon, catalog: .iconSet(name: "AppIcon-Dev", sizes: nil, source: realDevSet))
+        #expect(result.status == 0, "\(result.said)")
+        #expect(result.said.contains("names AppIcon-Dev"), "\(result.said)")
+    }
+
+    @Test("a release bundle naming its channel passes, as one naming none does")
+    func releaseNamingItsChannel() throws {
+        let result = try verify(
+            plist: ["CFBundleIconName": "AppIcon", "ApogeeChannel": "release"],
+            catalog: .iconSet(name: "AppIcon", sizes: nil))
+        #expect(result.status == 0, "\(result.said)")
+    }
+
+    @Test("a dev bundle naming the release icon is refused: Apogee Dev would look like the release app")
+    func devNamingTheReleaseIcon() throws {
+        let result = try verify(
+            plist: ["CFBundleIconName": "AppIcon", "ApogeeChannel": "dev"], catalog: .iconSet(name: "AppIcon", sizes: nil))
+        #expect(result.status != 0)
+        #expect(result.said.contains("names the icon AppIcon: it is AppIcon-Dev"), "\(result.said)")
+    }
+
+    @Test("a release bundle naming the dev icon is refused")
+    func releaseNamingTheDevIcon() throws {
+        let result = try verify(
+            plist: ["CFBundleIconName": "AppIcon-Dev", "ApogeeChannel": "release"],
+            catalog: .iconSet(name: "AppIcon-Dev", sizes: nil, source: realDevSet))
+        #expect(result.status != 0)
+        #expect(result.said.contains("names the icon AppIcon-Dev: it is AppIcon"), "\(result.said)")
+    }
+
+    @Test("a dev bundle whose catalog holds only the release icon is refused")
+    func devCatalogHoldsTheReleaseIcon() throws {
+        let result = try verify(plist: devNamesIcon, catalog: .iconSet(name: "AppIcon", sizes: nil))
+        #expect(result.status != 0)
+        #expect(result.said.contains("does not hold AppIcon-Dev"), "\(result.said)")
+    }
+
+    @Test("a bundle naming a channel the app has not is refused")
+    func unknownChannel() throws {
+        let result = try verify(
+            plist: ["CFBundleIconName": "AppIcon", "ApogeeChannel": "test"], catalog: .iconSet(name: "AppIcon", sizes: nil))
+        #expect(result.status != 0)
+        #expect(result.said.contains("names the channel test: it is release or dev"), "\(result.said)")
+    }
 }
 
 /// `icon.sh generate` in a copy of the tree it writes to, the real tree untouched.
@@ -372,24 +478,27 @@ struct IconGenerateTests {
         var assets: URL { root.appendingPathComponent("lib/design/assets") }
         var master: URL { assets.appendingPathComponent("Logo.png") }
         var readmeLogo: URL { assets.appendingPathComponent("Logo-320.png") }
-        var iconSet: URL { app.appendingPathComponent(IconSetCheck.setPath) }
+        var iconSet: URL { app.appendingPathComponent(IconSetCheck.release.path) }
+        var devIconSet: URL { app.appendingPathComponent(IconSetCheck.dev.path) }
         var contents: URL { iconSet.appendingPathComponent("Contents.json") }
+        var devContents: URL { devIconSet.appendingPathComponent("Contents.json") }
 
         /// A tree holding the script, the real master, and an earlier run's
         /// files for a refusal to leave alone.
         init() throws {
             root = try temporaryFolder()
             let manager = FileManager.default
-            for folder in [app.appendingPathComponent("scripts"), assets, iconSet] {
+            for folder in [app.appendingPathComponent("scripts"), assets, iconSet, devIconSet] {
                 try manager.createDirectory(at: folder, withIntermediateDirectories: true)
             }
-            for script in ["icon.sh", "icon-small.swift"] {
+            for script in ["icon.sh", "icon-small.swift", "icon-dev.swift"] {
                 try manager.copyItem(
                     at: appRoot.appendingPathComponent("scripts/\(script)"),
                     to: app.appendingPathComponent("scripts/\(script)"))
             }
             try manager.copyItem(at: realMaster, to: master)
             try Data("the earlier set".utf8).write(to: contents)
+            try Data("the earlier dev set".utf8).write(to: devContents)
             try Data("the earlier copy".utf8).write(to: readmeLogo)
         }
 
@@ -402,6 +511,7 @@ struct IconGenerateTests {
             #expect(result.status != 0)
             #expect(result.said.contains(words), "\(result.said)")
             #expect(try Data(contentsOf: contents) == Data("the earlier set".utf8))
+            #expect(try Data(contentsOf: devContents) == Data("the earlier dev set".utf8))
             #expect(try Data(contentsOf: readmeLogo) == Data("the earlier copy".utf8))
         }
     }
@@ -414,7 +524,7 @@ struct IconGenerateTests {
         #expect(result.status == 0, "\(result.said)")
         let check = IconSetCheck(
             read: { try? Data(contentsOf: tree.app.appendingPathComponent($0)) },
-            iconNames: ["Debug": "AppIcon", "Release": "AppIcon"])
+            iconNames: ["Debug": "AppIcon-Dev", "Release": "AppIcon"])
         #expect(check.violations() == [])
         let copy = try Data(contentsOf: tree.readmeLogo)
         #expect(IconSetCheck.pngSize(copy)?.width == 320)
@@ -465,6 +575,57 @@ struct IconGenerateTests {
                 #expect(made.status == 0, "\(made.said)")
                 #expect(try Data(contentsOf: written) == (try Data(contentsOf: out)), "\(slot.label)")
             }
+        }
+    }
+
+    /// An image's pixels as 8-bit sRGB red, green, blue and alpha, row by row,
+    /// and the density it records.
+    private func rgbaPixels(of url: URL) throws -> (side: Int, pixels: [UInt8], dpi: Double?) {
+        let source = try #require(CGImageSourceCreateWithURL(url as CFURL, nil))
+        let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let side = image.width
+        var pixels = [UInt8](repeating: 0, count: side * side * 4)
+        let space = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        let drawn = pixels.withUnsafeMutableBytes { bytes -> Bool in
+            guard
+                let context = CGContext(
+                    data: bytes.baseAddress, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                    space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+            return true
+        }
+        #expect(drawn)
+        return (side, pixels, (properties?[kCGImagePropertyDPIWidth] as? NSNumber)?.doubleValue)
+    }
+
+    @Test("the dev icon is the release icon in the design's amber, size by size: its white #E9A23B, its black kept (GUI M18)")
+    func devIconIsTheReleaseIconInAmber() throws {
+        let tree = try Tree()
+        defer { try? FileManager.default.removeItem(at: tree.root) }
+        let result = try tree.generate()
+        #expect(result.status == 0, "\(result.said)")
+        for slot in IconSetCheck.slots {
+            let release = try rgbaPixels(of: tree.iconSet.appendingPathComponent(slot.filename))
+            let dev = try rgbaPixels(of: tree.devIconSet.appendingPathComponent(slot.filename))
+            #expect(dev.side == slot.pixels && release.side == slot.pixels, "\(slot.label)")
+            #expect(dev.dpi == Double(72 * slot.scale), "\(slot.label): density \(String(describing: dev.dpi))")
+            var off = 0
+            var brightest = 0
+            for pixel in stride(from: 0, to: release.pixels.count, by: 4) {
+                for (channel, tint) in [(0, 233), (1, 162), (2, 59)] {
+                    let wanted = (Int(release.pixels[pixel + channel]) * tint + 127) / 255
+                    if abs(Int(dev.pixels[pixel + channel]) - wanted) > 2 { off += 1 }
+                }
+                if dev.pixels[pixel + 3] != release.pixels[pixel + 3] { off += 1 }
+                if release.pixels[pixel] > release.pixels[brightest] { brightest = pixel }
+            }
+            #expect(off == 0, "\(slot.label): \(off) channels off the release image tinted")
+            // The outline's brightest pixel, white or light gray, is amber.
+            let (red, green, blue) = (dev.pixels[brightest], dev.pixels[brightest + 1], dev.pixels[brightest + 2])
+            #expect(release.pixels[brightest] >= 128, "\(slot.label): the release image has no outline")
+            #expect(red > green && green > blue, "\(slot.label): the outline is \(red),\(green),\(blue), not amber")
         }
     }
 

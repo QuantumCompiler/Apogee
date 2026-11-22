@@ -167,6 +167,13 @@ struct MissingBinaryView: View {
         .task { model.start() }
 }
 
+#Preview("Apogee Dev, apogee-dev isn't installed") {
+    let model = SessionPreview.missingDev()
+    SessionWindow(model: model)
+        .frame(width: 900, height: 640)
+        .task { model.start() }
+}
+
 #Preview("A chat under a suite") {
     let session = SessionPreview.underSuite()
     SessionWindow(model: session)

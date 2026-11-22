@@ -133,6 +133,13 @@ enum SessionPreview {
         SessionViewModel(starter: PreviewChats(missing: passedOver))
     }
 
+    /// "Apogee Dev" with no `apogee-dev` installed (GUI M18): the dev
+    /// channel's one place passed over, its install line the CLI's dev
+    /// install; not started.
+    static func missingDev() -> SessionViewModel {
+        SessionViewModel(starter: PreviewChats(missing: [passedOver[1]], channel: .dev))
+    }
+
     /// Every place the app looks, on a Mac with no apogee installed: each
     /// candidate discovery names for the home, passed over as it says of a
     /// file that is not there (`BinaryDiscovery.candidates`, `locate`).

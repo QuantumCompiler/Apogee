@@ -213,6 +213,7 @@
 		AEB804BE835690A98E46C7E6 /* DataPreferences.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9AAF1BEBA81AEA84C1E437D7 /* DataPreferences.framework */; };
 		B0510F9CD6D549BC4389C81B /* PresentationTasks.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EB18FED239A5A1D1917FC282 /* PresentationTasks.framework */; };
 		B12B379407D4EE0776AB6EDC /* InfrastructureProcess.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C52D031291F6BA58AC5185B /* InfrastructureProcess.framework */; };
+		B1ADF6055D9B15FD416D3268 /* DataDiscovery.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 73C632E8F0C9A83C4012869A /* DataDiscovery.framework */; };
 		B22E2532B5B647E66366B8D5 /* BusinessReads.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4E1D41E0FC717FE88B6A4A12 /* BusinessReads.framework */; };
 		B2B7CC48ECA91ED53A8E53AA /* DataProtocol.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFA5A0ABACC1F719CFE66357 /* DataProtocol.framework */; };
 		B2E8289BA3D0270B3BB5AFA5 /* BusinessReads.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4E1D41E0FC717FE88B6A4A12 /* BusinessReads.framework */; };
@@ -1558,6 +1559,13 @@
 			remoteGlobalIDString = 1AB331A7B5D7306B66E496BE;
 			remoteInfo = DataDiscovery;
 		};
+		A6E200C39A5A7A4B375F6881 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1AB331A7B5D7306B66E496BE;
+			remoteInfo = DataDiscovery;
+		};
 		A76D6312B5E5724403893334 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
@@ -2752,6 +2760,7 @@
 				6CB726A3B39E1A9021CDDF45 /* PresentationLibrary.framework in Frameworks */,
 				50B9A4FC1DDECD58A5E00795 /* PresentationReview.framework in Frameworks */,
 				673986B5036AB939737F8D2F /* InfrastructureProcess.framework in Frameworks */,
+				B1ADF6055D9B15FD416D3268 /* DataDiscovery.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -4437,6 +4446,7 @@
 				F5D2CA381DD38C0B392A07DD /* PBXTargetDependency */,
 				482EB8E0315F53FCC45F0641 /* PBXTargetDependency */,
 				4628E9ECB032AB6202D52992 /* PBXTargetDependency */,
+				DCA20168E5FFC8D6E77B7447 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				BDEA87836A45381328177836 /* app */,
@@ -7205,6 +7215,11 @@
 			target = 803C8DECC6DEDF286C3AF3BF /* PresentationShell */;
 			targetProxy = 65031F922AB54EDE53B4558C /* PBXContainerItemProxy */;
 		};
+		DCA20168E5FFC8D6E77B7447 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1AB331A7B5D7306B66E496BE /* DataDiscovery */;
+			targetProxy = A6E200C39A5A7A4B375F6881 /* PBXContainerItemProxy */;
+		};
 		DD52CD3164D95BA0786371FC /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 566EF84A99783309FC98BF91 /* DataProtocol */;
@@ -7646,9 +7661,12 @@
 		309515B939EB4289D518BD1B /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APOGEE_CHANNEL = release;
+				APOGEE_CHANNEL_SUFFIX = "";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Apogee;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -7656,7 +7674,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.quantumcompiler.apogee$(APOGEE_CHANNEL_SUFFIX)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 			};
@@ -9174,18 +9192,21 @@
 		D7E1F7706BFFB01384F8B4F5 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				APOGEE_CHANNEL = dev;
+				APOGEE_CHANNEL_SUFFIX = .dev;
+				ASSETCATALOG_COMPILER_APPICON_NAME = "AppIcon-Dev";
 				COMBINE_HIDPI_IMAGES = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Apogee;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Apogee Dev";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.quantumcompiler.apogee;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.quantumcompiler.apogee$(APOGEE_CHANNEL_SUFFIX)";
+				PRODUCT_NAME = "Apogee Dev";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 			};
 			name = Debug;

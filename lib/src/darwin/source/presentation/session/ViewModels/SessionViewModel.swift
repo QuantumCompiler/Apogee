@@ -423,9 +423,11 @@ public final class SessionViewModel {
         let readsEarlier = self.readsEarlier
         self.readsEarlier = false
         switch located {
-        case .notFound(let skipped):
+        case .notFound(let skipped, let channel):
+            // The channel's own install line: on the dev channel, the CLI's
+            // dev install, never the release installer (GUI M18).
             connection = .missing(
-                hint: DiscoveryOutcome.installHint,
+                hint: channel.installHint,
                 places: skipped.map { "\($0.candidate.url.path): \($0.reason)" })
         case .found(let found, _):
             connection = .connected(binary: found.url.path, version: found.version)

@@ -46,7 +46,7 @@ Pressing the confirming button of a "Delete …?" (or any other "…?") dialog c
 
 ### Background
 
-The user reported it on 2026-11-21 from the development build of the app, which drives the release `apogee` 0.2.0 over `~/.apogee` until M18 ([`app-dev-channel.md`](app-dev-channel.md)) ships. They thought the old CLI might be the cause. It is not: the CLI deletes correctly (Evidence 1), and the fault is in the app's dialogs, the same in every build since v0.2.0.
+The user reported it on 2026-11-21 from the development build of the app, which drove the release `apogee` 0.2.0 over `~/.apogee`, as every development build did until M18 ([Milestone A](../../../../assistant/darwin/MILESTONES.md#2026-11-21--app-dev-channel-maintenance-item-m18-a-development-build-of-the-app-runs-on-the-dev-channel)) shipped later the same day. They thought the old CLI might be the cause. It is not: the CLI deletes correctly (Evidence 1), and the fault is in the app's dialogs, the same in every build since v0.2.0.
 
 Every confirmation in the app keeps its question in its view-model (`pending`, `pendingDelete`, `pendingRemove`, `removing`) and presents a SwiftUI `confirmationDialog` whose `isPresented` is a binding over it: `get` is "the question is set", and `set(false)` clears it. The confirming button starts a `Task` that calls the view-model's `confirm…()`, which reads the question back from the view-model. The probe below shows SwiftUI's order on a press: the button's action runs, then the dialog closes and calls the binding's `set(false)`, which clears the question, and only then does the `Task` run, so `confirm…()` finds nothing and returns. The view-model tests never press a dialog: they call `askToDelete` and then `confirm()` directly, an order the dialog never produces, so every one passes.
 
@@ -151,7 +151,7 @@ All hermetic: scripted runners, no window, no binary.
 - **Existing tests.** Every existing test that calls `confirm()` (`OverrideSkippedTests.swift:201`, `SavedChatActsTests.swift:97-205`, `SessionLifecycleTests.swift:126`, `ReadsAsDocumentsTests.swift:146`, the training and store suites) moves to the answer-taking form and keeps its checks.
 - **The dialog check** (`LayeringCheck`): every `.confirmationDialog` in `source/presentation/**/Views/` whose button starts a `Task` hands that `Task` a value captured outside it; a `Task { await model.confirm() }` or `confirmDelete()` with no argument inside a dialog fails, naming the file and line. Verified against a planted violation (today's `SessionsScreen.swift:75`).
 - **Gate:** `lib/scripts/cicd.sh --app darwin --test`, the layering check included.
-- **A live look** is optional and the user's to take, on a development build once M18 ([`app-dev-channel.md`](app-dev-channel.md)) has shipped: right-click a throwaway session, Delete…, Delete.
+- **A live look** is optional and the user's to take, on a development build, "Apogee Dev", which drives `apogee-dev` since M18 shipped (2026-11-21, [Milestone A](../../../../assistant/darwin/MILESTONES.md#2026-11-21--app-dev-channel-maintenance-item-m18-a-development-build-of-the-app-runs-on-the-dev-channel)): right-click a throwaway session, Delete…, Delete.
 
 ## Open questions
 
@@ -161,7 +161,7 @@ All hermetic: scripted runners, no window, no binary.
 | What keeps a new dialog from repeating it? | `[default]` | A source check in the layering check (Testing), because the view-model tests cannot see SwiftUI's order. The probe stays a scratch tool, not a test: it needs a window, and the suite runs none. |
 | Is the probe kept in the repository? | `[default]` | No. Its method and output are recorded in Evidence 2; it can be rebuilt from them. |
 | Does the CLI change? | `(consumed decision)` | No: `apogee chats delete` and every other verb here already work (Evidence 1). |
-| Does the development app drive `apogee-dev`? | `(consumed decision)` | M18's ([`app-dev-channel.md`](app-dev-channel.md)); not this item's. |
+| Does the development app drive `apogee-dev`? | `(consumed decision)` | M18's, shipped 2026-11-21 ([Milestone A](../../../../assistant/darwin/MILESTONES.md#2026-11-21--app-dev-channel-maintenance-item-m18-a-development-build-of-the-app-runs-on-the-dev-channel)); not this item's. |
 
 ## Decision log
 
@@ -182,4 +182,4 @@ All hermetic: scripted runners, no window, no binary.
 ## Links
 
 - **Blocked by:** — · **Blocks:** —
-- **Relates to:** M18 ([`app-dev-channel.md`](app-dev-channel.md), the development build for the live look); [ADR 0002](../../../../adrs/darwin/presentation-mvvm.md); [ADR 0004](../../../../adrs/darwin/module-schemes-and-previews.md); the session library and the models library (v0.2.0, 2026-10-20, [MILESTONES](../../../../assistant/darwin/MILESTONES.md)), where the shape began.
+- **Relates to:** M18 ([Milestone A](../../../../assistant/darwin/MILESTONES.md#2026-11-21--app-dev-channel-maintenance-item-m18-a-development-build-of-the-app-runs-on-the-dev-channel), the development build for the live look); [ADR 0002](../../../../adrs/darwin/presentation-mvvm.md); [ADR 0004](../../../../adrs/darwin/module-schemes-and-previews.md); the session library and the models library (v0.2.0, 2026-10-20, [MILESTONES](../../../../assistant/darwin/MILESTONES.md)), where the shape began.

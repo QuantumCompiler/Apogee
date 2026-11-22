@@ -1,6 +1,7 @@
 import BusinessJobs
 import BusinessReads
 import BusinessSession
+import DataDiscovery
 import DataPreferences
 import Foundation
 import InfrastructureProcess
@@ -31,8 +32,17 @@ import PresentationVoice
 @MainActor
 @Observable
 final class AppViewModel {
-    let title = "Apogee"
+    /// The CLI's install channel this build drives (GUI M18): the bundle's
+    /// `ApogeeChannel`, read here once and handed down -- nothing below the
+    /// composition root reads a build setting (ADR 0001).
+    let channel: InstallChannel
+    /// The window's name: "Apogee Dev" on the dev channel, so a development
+    /// build is never taken for the installed app.
+    let title: String
     let versionLine: String
+    /// Where every session is opened: the client on the build's channel,
+    /// unless a test hands in its own.
+    let starter: any ChatStarting
     let shell: ShellViewModel
     let sessions: SessionLibraryViewModel
     let models: ModelsViewModel
@@ -74,16 +84,23 @@ final class AppViewModel {
         home: URL = FileManager.default.homeDirectoryForCurrentUser
     ) {
         let version = (info?["CFBundleShortVersionString"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        // Only the release build (scripts/build.sh) stamps the version; a
-        // build from Xcode leaves it empty.
+        // Only scripts/build.sh stamps the version; a build from Xcode leaves
+        // it empty.
         versionLine = version.map { "Version \($0)" } ?? "Development build"
+        let channel = InstallChannel(bundleValue: info?["ApogeeChannel"])
+        self.channel = channel
+        title = channel == .dev ? "Apogee Dev" : "Apogee"
+        let starter =
+            starter
+            ?? ApogeeClient(
+                identity: ClientIdentity(version: version ?? "development"), children: children, channel: channel)
+        self.starter = starter
         // One starter for every place, so every run any of them starts is
         // listed with the session's child, in one registry.
         let jobs = jobs ?? JobStarter(registry: children)
         let shell = ShellViewModel(preferences: preferences)
         let sessions = SessionLibraryViewModel(
-            starter: starter ?? ApogeeClient(identity: ClientIdentity(version: version ?? "development"), children: children),
-            runner: runner ?? ReadRunner(), preferences: preferences, jobs: jobs)
+            starter: starter, runner: runner ?? ReadRunner(), preferences: preferences, jobs: jobs)
         let models = ModelsViewModel(runner: runner ?? ReadRunner())
         let store = StoreViewModel(runner: runner ?? ReadRunner())
         let downloads = DownloadsViewModel(starter: jobs)

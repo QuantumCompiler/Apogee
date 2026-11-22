@@ -45,11 +45,15 @@ struct ModuleMap {
         /// The icon its asset catalog is compiled to name
         /// (`ASSETCATALOG_COMPILER_APPICON_NAME`), by build configuration.
         let appIconNames: [String: String]
+        /// The build settings it sets to a single value, as written, by build
+        /// configuration (GUI M18: the channel check reads the application's).
+        let settings: [String: [String: String]]
 
         init(
             name: String, kind: Kind, paths: [String], dependencies: [Dependency] = [],
             linked: [String] = [], embedded: [String] = [], outsideSettings: [String] = [],
-            hasMembershipExceptions: Bool = false, appIconNames: [String: String] = [:]
+            hasMembershipExceptions: Bool = false, appIconNames: [String: String] = [:],
+            settings: [String: [String: String]] = [:]
         ) {
             self.name = name
             self.kind = kind
@@ -60,6 +64,7 @@ struct ModuleMap {
             self.outsideSettings = outsideSettings
             self.hasMembershipExceptions = hasMembershipExceptions
             self.appIconNames = appIconNames
+            self.settings = settings
         }
 
         /// The one folder it builds, when it builds exactly one.
@@ -170,17 +175,18 @@ struct ModuleMap {
             return Self.outsideSettingNames.filter { keys.contains($0) }
         }
 
-        func appIconNames(_ configurationList: Any?) -> [String: String] {
-            var names: [String: String] = [:]
+        func settings(_ configurationList: Any?) -> [String: [String: String]] {
+            var byConfiguration: [String: [String: String]] = [:]
             for configuration in ids(object(configurationList)?["buildConfigurations"]).compactMap({ objects[$0] }) {
-                let settings = configuration["buildSettings"] as? [String: Any]
-                if let name = configuration["name"] as? String,
-                    let icon = settings?["ASSETCATALOG_COMPILER_APPICON_NAME"] as? String
-                {
-                    names[name] = icon
-                }
+                guard let name = configuration["name"] as? String else { continue }
+                let settings = configuration["buildSettings"] as? [String: Any] ?? [:]
+                byConfiguration[name] = settings.compactMapValues { $0 as? String }
             }
-            return names
+            return byConfiguration
+        }
+
+        func appIconNames(_ configurationList: Any?) -> [String: String] {
+            settings(configurationList).compactMapValues { $0["ASSETCATALOG_COMPILER_APPICON_NAME"] }
         }
 
         // Which target makes which product file.
@@ -244,7 +250,8 @@ struct ModuleMap {
                     name: name, kind: kind, paths: groups.map(fullPath(of:)), dependencies: dependencies,
                     linked: linked, embedded: embedded, outsideSettings: outside(target["buildConfigurationList"]),
                     hasMembershipExceptions: exceptions,
-                    appIconNames: appIconNames(target["buildConfigurationList"])))
+                    appIconNames: appIconNames(target["buildConfigurationList"]),
+                    settings: settings(target["buildConfigurationList"])))
         }
 
         self.init(

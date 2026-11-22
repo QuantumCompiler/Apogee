@@ -32,9 +32,11 @@ public final class Preferences: Sendable {
     }
 
     /// The app's own preferences: its standard defaults, whose domain in the
-    /// app is its bundle identifier, `com.quantumcompiler.apogee`. (A suite
-    /// named for the app's own identifier is refused by `UserDefaults`, and
-    /// would keep nothing.)
+    /// app is its bundle identifier -- `com.quantumcompiler.apogee`, or the dev
+    /// channel's `com.quantumcompiler.apogee.dev`, so a development build never
+    /// reads or writes the installed app's (GUI M18). (A suite named for the
+    /// app's own identifier is refused by `UserDefaults`, and would keep
+    /// nothing.)
     public static func standard() -> Preferences {
         Preferences(store: DefaultsStore(.standard))
     }

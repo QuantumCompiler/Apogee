@@ -123,7 +123,7 @@ All hermetic: no window, no binary, and never the person's own pasteboard.
 - **Existing toast tests.** Every existing Settings toast test passes unchanged, because the window starts closed and not active, as at launch. That includes `XcodeSettingsTests`' `Said`, `RegisterAndHostsTests`' `Toasts` (`:35-37`) and the rest.
 - **The layering check** stays green: the toast view sits in `styles` with its preview, `styles` depends on no other Presentation module, and every view has its preview.
 - **Gate:** `lib/scripts/cicd.sh --app darwin --test`.
-- **A live look** is optional and the user's to take, on a development build once M18 ([`app-dev-channel.md`](app-dev-channel.md)) has shipped ([darwin CLAUDE.md → Development runs on the dev channel](../../../../assistant/darwin/CLAUDE.md#development-runs-on-the-dev-channel)).
+- **A live look** is optional and the user's to take, on a development build, "Apogee Dev", which drives `apogee-dev` since M18 shipped (2026-11-21, [Milestone A](../../../../assistant/darwin/MILESTONES.md#2026-11-21--app-dev-channel-maintenance-item-m18-a-development-build-of-the-app-runs-on-the-dev-channel); [darwin CLAUDE.md → Development runs on the dev channel](../../../../assistant/darwin/CLAUDE.md#development-runs-on-the-dev-channel)).
 
 ## Open questions
 
@@ -161,4 +161,4 @@ All hermetic: no window, no binary, and never the person's own pasteboard.
 
 - **Blocked by:** — · **Blocks:** —
 - **Reverses:** GUI 5a's decision that "Copy says nothing in the app" ([MILESTONES → Milestone F](../../../../assistant/darwin/MILESTONES.md#milestone-f--apogee-in-xcode-the-apps-side), 2026-11-08).
-- **Relates to:** M8 (a code block's Copy, the app's other Copy); M18 ([`app-dev-channel.md`](app-dev-channel.md), a development build for the optional live look); [ADR 0002](../../../../adrs/darwin/presentation-mvvm.md); [ADR 0004](../../../../adrs/darwin/module-schemes-and-previews.md); [the design's guide](../../../../assistant/design/CLAUDE.md); MILESTONES, Milestone B ("Settings is a `Settings` scene").
+- **Relates to:** M8 (a code block's Copy, the app's other Copy); M18 ([Milestone A](../../../../assistant/darwin/MILESTONES.md#2026-11-21--app-dev-channel-maintenance-item-m18-a-development-build-of-the-app-runs-on-the-dev-channel), a development build for the optional live look); [ADR 0002](../../../../adrs/darwin/presentation-mvvm.md); [ADR 0004](../../../../adrs/darwin/module-schemes-and-previews.md); [the design's guide](../../../../assistant/design/CLAUDE.md); MILESTONES, Milestone B ("Settings is a `Settings` scene").

@@ -5,11 +5,20 @@ import Foundation
 import InfrastructureProcess
 import Testing
 
-/// The installed binary, when this machine has one: the release channel's,
-/// else the dev or test channel's.
-private let installed: URL? = ["apogee", "apogee-dev", "apogee-test"]
-    .map { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/\($0)") }
-    .first { FileManager.default.isExecutableFile(atPath: $0.path) }
+/// The installed binary, when this machine has one -- the release channel's,
+/// else the dev or test channel's -- with the channel whose discovery finds it
+/// (GUI M18): `apogee-dev` the dev channel's, the others the release channel's,
+/// whose places reach `apogee-test` too. Named as a value, so the pass never
+/// depends on the channel the test host itself was built for.
+private let installedWithChannel: (url: URL, channel: InstallChannel)? = [
+    ("apogee", InstallChannel.release), ("apogee-dev", .dev), ("apogee-test", .release),
+]
+.map { name, channel in
+    (url: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/\(name)"), channel: channel)
+}
+.first { FileManager.default.isExecutableFile(atPath: $0.url.path) }
+
+private let installed: URL? = installedWithChannel?.url
 
 /// The one pass against a real `apogee`: the mock-actor conversation -- an
 /// ask, a gated write, a streamed answer -- on the CLI's scripted mock
@@ -22,8 +31,11 @@ private let installed: URL? = ["apogee", "apogee-dev", "apogee-test"]
 struct RealBinaryTests {
     @Test("discovery finds the installed binary on this machine, verified by its version line")
     func discoveryOnThisMachine() async throws {
-        let binary = try #require(installed)
-        guard case .found(let found, _) = await BinaryDiscovery(spawner: ProcessSpawner()).locate(override: nil) else {
+        let (binary, channel) = try #require(installedWithChannel)
+        guard
+            case .found(let found, _) = await BinaryDiscovery(spawner: ProcessSpawner()).locate(
+                override: nil, channel: channel)
+        else {
             Issue.record("discovery did not find \(binary.path)")
             return
         }
