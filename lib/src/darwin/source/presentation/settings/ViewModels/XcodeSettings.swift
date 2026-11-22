@@ -45,6 +45,8 @@ public final class XcodeSettings {
     /// Asks `check` again, after a change, so this pane and Health both
     /// follow the config.
     var rereadCheck: @MainActor () async -> Void = {}
+    /// Where the pane's lines are said: Settings' one route, to its own
+    /// window's toast while it is in front, else the main window's (GUI M19).
     public var say: (@MainActor (String) -> Void)?
 
     /// `mcp presets`' `xcode` row: `nil` inside `.read` where this binary
@@ -65,6 +67,10 @@ public final class XcodeSettings {
 
     /// The preset's name in `mcp presets` (the CLI's 56d).
     public static let presetName = "xcode"
+
+    /// What a Copy says once the pasteboard took its value: the design's
+    /// words, the same for every field (GUI M19).
+    public static let copiedLine = "Copied to the clipboard"
 
     /// The binary's path the pane reads from: a new one reads it afresh.
     public private(set) var binaryPath: String?
@@ -240,6 +246,15 @@ public final class XcodeSettings {
         removing = false
         guard let arguments = removes else { return }
         await change(arguments, title: "Removed from Apogee's agents")
+    }
+
+    /// Says a field's Copy worked, in the design's words (GUI M19): the
+    /// view writes the pasteboard -- never this view-model -- and calls this
+    /// only once the pasteboard took the value. It runs nothing and reaches
+    /// nothing; the value stays drawn in its row, so the toast is never the
+    /// only place it is said.
+    public func copied() {
+        say?(Self.copiedLine)
     }
 
     /// Takes the last change's words away, once read.

@@ -193,15 +193,49 @@ struct XcodeSettingsTests {
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("apogee-xcode-tests-\(UUID().uuidString)"))
         defer { pasteboard.releaseGlobally() }
         for field in fields where field.copies {
-            field.copy(to: pasteboard)
+            #expect(field.copy(to: pasteboard), "\(field.label): the pasteboard took it, so Copy may say so (M19)")
             #expect(pasteboard.string(forType: .string) == field.value, "\(field.label)")
         }
         let interpreter = try #require(fields.first { $0.label == "Interpreter" })
         #expect(!interpreter.copies && interpreter.shown == "(leave empty)")
         pasteboard.clearContents()
         pasteboard.setString("before", forType: .string)
-        interpreter.copy(to: pasteboard)
+        #expect(!interpreter.copy(to: pasteboard), "nothing to copy reports nothing copied (M19)")
         #expect(pasteboard.string(forType: .string) == "before", "nothing to copy, nothing written")
+    }
+
+    // MARK: - M19: Copy says it copied, and every Copy is named
+
+    @Test("copied() says exactly the design's words, Copied to the clipboard, once per Copy -- the window not active, as the suite's model starts, so through Settings' say")
+    func copiedSays() async {
+        let (model, said) = await settings(home())
+        let before = said.lines.count
+        model.xcode.copied()
+        #expect(Array(said.lines.dropFirst(before)) == ["Copied to the clipboard"])
+        model.xcode.copied()
+        #expect(Array(said.lines.dropFirst(before)) == ["Copied to the clipboard", "Copied to the clipboard"], "once per Copy")
+    }
+
+    @Test("every Copy is named for what it copies -- Copy Name through Copy Environment Variables, Copy the next entry for a row with no label -- and none is Copy with nothing after it")
+    func copyNames() async throws {
+        let (model, _) = await settings(home())
+        let fields = RegistrationField.fields(of: try #require(model.xcode.fields))
+        #expect(fields.filter(\.copies).map(\.copyLabel) == [
+            "Copy Name", "Copy Executable", "Copy Arguments", "Copy Environment Variables", "Copy the next entry",
+        ])
+        #expect(fields.last?.copyLabel == "Copy the next entry", "the PATH row")
+        // The same registration with a second argument: that row has no label either.
+        let printed = recordedText("xcode-acp-registration.json")
+            .replacingOccurrences(of: #""arguments":["acp"]"#, with: #""arguments":["acp","second-argument"]"#)
+        let document = try #require(ReadDocument(text: printed))
+        let two = try #require(AgentRegistration(document: document))
+        #expect(two.arguments == ["acp", "second-argument"])
+        let twoFields = RegistrationField.fields(of: two)
+        #expect(twoFields.filter(\.copies).map(\.copyLabel) == [
+            "Copy Name", "Copy Executable", "Copy Arguments", "Copy the next entry", "Copy Environment Variables",
+            "Copy the next entry",
+        ])
+        #expect(!(fields + twoFields).contains { $0.copyLabel.hasSuffix(" ") || $0.copyLabel == "Copy" })
     }
 
     // MARK: - Changing
@@ -276,6 +310,9 @@ struct XcodeSettingsTests {
         await model.connect(binary: Self.binary, version: "0.2.0")
         let settingsReads = runner.calls.count
         await model.xcode.read()
+        let beforeCopy = runner.calls.count
+        model.xcode.copied()
+        #expect(runner.calls.count == beforeCopy, "Copy's word runs no command (M19)")
         runner.when(["mcp", "create", "xcode", "--from", "xcode"], .done(stdout: recordedText("xcode-mcp-create.txt")))
         runner.when(["config", "get", "mcp_servers.xcode"], .done(stdout: recordedText("xcode-config-get.txt")))
         await model.xcode.register()

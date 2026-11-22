@@ -3,9 +3,14 @@ import PresentationShell
 import PresentationStyles
 import SwiftUI
 
-/// The Settings window: its panes beside their list.
+/// The Settings window: its panes beside their list, and its own toast
+/// (GUI M19) -- every line Settings says while this window is in front.
 public struct SettingsView: View {
     @Bindable private var model: SettingsViewModel
+    /// Whether this window is the active one, the window in front that takes
+    /// the keyboard: told to the view-model on every change, the first
+    /// included, so its lines show here only while the person is here.
+    @Environment(\.appearsActive) private var appearsActive
 
     public init(model: SettingsViewModel) {
         self.model = model
@@ -57,6 +62,18 @@ public struct SettingsView: View {
             .background(Palette.window)
         }
         .frame(minWidth: 860, minHeight: 600)
+        .overlay(alignment: .bottom) {
+            if let toast = model.toast {
+                ToastView(text: toast.text)
+                    .padding(.bottom, Spacing.xl)
+                    .task(id: toast.id) {
+                        try? await Task.sleep(for: Toast.lifetime)
+                        model.dismissToast(toast.id)
+                    }
+            }
+        }
+        .onChange(of: appearsActive, initial: true) { _, active in model.windowActive(active) }
+        .onDisappear { model.windowClosed() }
         .task { await model.refresh() }
         .task { await model.readChildPath() }
     }
@@ -553,6 +570,20 @@ struct RecalledList: View {
     let model = SettingsPreview.settings(.backends)
     SettingsView(model: model)
         .task { await SettingsPreview.read(model) }
+}
+
+#Preview("Settings › Xcode after Copy: Copied to the clipboard at the bottom of the window") {
+    let model = SettingsPreview.settings(.xcode, runner: SettingsPreview.xcodeRunner())
+    SettingsView(model: model)
+        .frame(width: 980, height: 760)
+        .task {
+            await SettingsPreview.read(model)
+            await model.xcode.read()
+            // A canvas may not appear active: the preview says it is, as the
+            // window in front would, before the Copy's word.
+            model.windowActive(true)
+            model.xcode.copied()
+        }
 }
 
 #Preview("Apogee not installed") {

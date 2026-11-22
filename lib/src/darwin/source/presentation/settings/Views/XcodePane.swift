@@ -159,8 +159,10 @@ struct XcodeAgentFields: View {
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                         if field.copies {
-                            Button("Copy") { field.copy() }
-                                .accessibilityLabel("Copy \(field.label)")
+                            Button("Copy") {
+                                if field.copy() { xcode.copied() }
+                            }
+                            .accessibilityLabel(field.copyLabel)
                         } else {
                             Color.clear.frame(width: 1, height: 1)
                         }
@@ -210,13 +212,23 @@ struct RegistrationField: Equatable {
             }
     }
 
+    /// What its Copy is named, for VoiceOver: "Copy" and the field's label,
+    /// or the design's "Copy the next entry" for a row with no label -- a
+    /// second argument or environment variable (GUI M19).
+    var copyLabel: String {
+        label.isEmpty ? "Copy the next entry" : "Copy \(label)"
+    }
+
     /// Puts the value on `pasteboard` -- the person's, unless a test names
-    /// its own.
+    /// its own -- and says whether the pasteboard took it: `false` for a
+    /// field with nothing to copy, which writes nothing. Copy says it copied
+    /// only on `true` (GUI M19).
     @MainActor
-    func copy(to pasteboard: NSPasteboard = .general) {
-        guard let value else { return }
+    @discardableResult
+    func copy(to pasteboard: NSPasteboard = .general) -> Bool {
+        guard let value else { return false }
         pasteboard.clearContents()
-        pasteboard.setString(value, forType: .string)
+        return pasteboard.setString(value, forType: .string)
     }
 }
 

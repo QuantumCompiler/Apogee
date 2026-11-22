@@ -12,9 +12,9 @@ The branch is `v0.2.1`; the last published release is v0.2.0.
 - **The Apple apps:** none; their three tracks for this release have shipped.
 - **The CLI:** none; its three tracks for this release have shipped.
 
-Outside the release, 2 maintenance items can be picked up any time. Neither waits on a decision from you.
+Outside the release, 1 maintenance item can be picked up any time. It waits on no decision from you.
 
-**Can start today** (nothing gates it): no release item; any of the maintenance items below.
+**Can start today** (nothing gates it): no release item; the maintenance item below.
 
 ### The design ([queue](design/README.md#v021))
 
@@ -51,7 +51,6 @@ Maintenance items aren't tied to a release; any one can be picked up by name.
 
 | Product | # | Item | Waits on |
 |---|---|---|---|
-| Apple apps (macOS) | M19 | [Copy in Settings › Xcode says it copied](darwin/macos/maintenance/xcode-copy-says-copied.md) | — |
 | Apple apps (macOS) | M20 | [A confirmed action runs: every dialog's button acts on the answer it showed](darwin/macos/maintenance/confirmations-act-on-their-answer.md) | — |
 
 ## Later releases

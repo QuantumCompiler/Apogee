@@ -4,6 +4,7 @@ import DataPreferences
 import Foundation
 import InfrastructureProcess
 import Observation
+import PresentationShell
 
 /// Settings: General, Appearance, Backends & keys, Video & voice,
 /// Permissions, Xcode -- each over the verbs a person types, each change read
@@ -178,6 +179,9 @@ public final class SettingsViewModel {
     /// A long fix running now: `check --fix`, `bootstrap`.
     public private(set) var fixing: JobProgress?
     public private(set) var failure: String?
+    /// The main window's toast, which the composition sets: where a line
+    /// goes while the Settings window is not the active one (`tell`, GUI
+    /// M19).
     public var say: (@MainActor (String) -> Void)?
     /// The install another place runs now, as the children registry labels
     /// it, or `nil`: `bootstrap` runs `train setup`, so it starts only when
@@ -240,7 +244,7 @@ public final class SettingsViewModel {
         binaryOverride = preferences.binaryOverride?.path
         xcode.checkRows = { [weak self] in self?.checkRead == true ? self?.checks : nil }
         xcode.rereadCheck = { [weak self] in await self?.rereadCheck() }
-        xcode.say = { [weak self] in self?.say?($0) }
+        xcode.say = { [weak self] in self?.tell($0) }
     }
 
     /// The binary this launch found, and -- when discovery passed the
@@ -282,7 +286,7 @@ public final class SettingsViewModel {
     public func setBinaryOverride(_ url: URL?) {
         preferences.binaryOverride = url
         binaryOverride = url?.path
-        say?(url == nil ? "The app looks for apogee where it is installed, from its next launch" : "The app uses \(url!.path) from its next launch")
+        tell(url == nil ? "The app looks for apogee where it is installed, from its next launch" : "The app uses \(url!.path) from its next launch")
     }
 
     // MARK: - General: the children's PATH (M6)
@@ -648,12 +652,12 @@ public final class SettingsViewModel {
         guard let document = outcome.document, let done = ProviderRegistration(document: document) else {
             let failure = outcome.failure ?? "apogee printed no registration"
             self.failure = failure
-            say?("That didn't work: \(failure)")
+            tell("That didn't work: \(failure)")
             return
         }
         failure = nil
         registered = done.lines.count > 1 ? Said(title: title, lines: done.lines) : nil
-        say?(done.lines.first ?? title)
+        tell(done.lines.first ?? title)
     }
 
     /// Takes the last registration's words away, once read.
@@ -691,12 +695,12 @@ public final class SettingsViewModel {
         await refresh()
         if let failure = outcome.failure {
             self.failure = failure
-            say?("That didn't work: \(failure)")
+            tell("That didn't work: \(failure)")
             return nil
         } else if let done {
-            say?(done)
+            tell(done)
         } else if case .done(let stdout) = outcome {
-            say?(stdout.split(separator: "\n").last.map(String.init) ?? "Done")
+            tell(stdout.split(separator: "\n").last.map(String.init) ?? "Done")
         }
         if case .done(let stdout) = outcome { return stdout }
         return nil
@@ -712,7 +716,7 @@ public final class SettingsViewModel {
         guard let binary = binaryURL, fixing == nil else { return }
         let command = arguments.joined(separator: " ")
         if arguments.first == "bootstrap", let running = installElsewhere() {
-            say?("\(running) is already running: run \(command) again once it has finished")
+            tell("\(running) is already running: run \(command) again once it has finished")
             return
         }
         fixing = JobProgress()
@@ -726,14 +730,14 @@ public final class SettingsViewModel {
             fixing = nil
             switch status {
             case .done?:
-                say?("\(command) finished")
+                tell("\(command) finished")
             case .failed(let message)?:
                 failure = message
-                say?("\(command) failed: \(message)")
+                tell("\(command) failed: \(message)")
             case .stopped?:
-                say?("\(command) stopped")
+                tell("\(command) stopped")
             case .running?, nil:
-                say?("\(command) ended without saying how")
+                tell("\(command) ended without saying how")
             }
         }
     }
@@ -750,6 +754,54 @@ public final class SettingsViewModel {
 
     public func dismissFailure() {
         failure = nil
+    }
+
+    // MARK: - The Settings window's own toast (GUI M19)
+
+    /// Whether the Settings window is the active one -- in front, taking the
+    /// keyboard -- as its view last said; `false` until it says, and once it
+    /// closes, as at launch.
+    public private(set) var windowIsActive = false
+
+    /// The one line at the bottom of the Settings window, if one is showing:
+    /// the shell's `Toast`, kept as the shell keeps its own.
+    public private(set) var toast: Toast?
+
+    private var nextToast = 0
+
+    /// The window says whether it is the active one, on every change, the
+    /// first included. A toast showing when it stops being active stays for
+    /// its own time: the window still draws it.
+    public func windowActive(_ active: Bool) {
+        windowIsActive = active
+    }
+
+    /// The window closed: not active, and a toast showing is dropped with it.
+    public func windowClosed() {
+        windowIsActive = false
+        toast = nil
+    }
+
+    /// The window's toast `id` has had its time; a newer one stays.
+    public func dismissToast(_ id: Int) {
+        if toast?.id == id {
+            toast = nil
+        }
+    }
+
+    /// The one route for every line Settings says -- its own and the Xcode
+    /// pane's: the window's toast while the window is active, where the
+    /// person pressed what said it; otherwise the main window's, through
+    /// `say`, so a line said with Settings closed or behind is still seen.
+    /// Never the only place something is said: the pane that did it shows
+    /// it too.
+    func tell(_ text: String) {
+        guard windowIsActive else {
+            say?(text)
+            return
+        }
+        nextToast += 1
+        toast = Toast(id: nextToast, text: text)
     }
 }
 

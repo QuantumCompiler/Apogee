@@ -60,7 +60,7 @@ public struct ShellView<Screen: View, Sessions: View, OverlayContent: View>: Vie
         }
         .overlay(alignment: .bottom) {
             if let toast = model.toast {
-                ToastView(toast: toast)
+                ToastView(text: toast.text)
                     .padding(.bottom, Spacing.xl)
                     .task(id: toast.id) {
                         try? await Task.sleep(for: Toast.lifetime)
@@ -148,23 +148,6 @@ public struct PlaceholderView: View {
     }
 }
 
-/// The toast: one line at the bottom centre.
-struct ToastView: View {
-    let toast: Toast
-
-    var body: some View {
-        Text(toast.text)
-            .font(.apogeeBody)
-            .foregroundStyle(Palette.textPrimary)
-            .padding(.horizontal, Spacing.l)
-            .padding(.vertical, Spacing.s)
-            .background(Palette.card, in: Capsule())
-            .overlay(Capsule().strokeBorder(Palette.border))
-            .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
-            .accessibilityAddTraits(.updatesFrequently)
-    }
-}
-
 #if DEBUG
 #Preview("The window, on Models") {
     ShellView(model: ShellPreview.shell(at: .models)) {
@@ -192,10 +175,5 @@ struct ToastView: View {
 #Preview("A place not built yet") {
     PlaceholderView(symbol: Destination.models.symbol, placeholder: ShellPreview.placeholder)
         .frame(width: 800, height: 500)
-}
-
-#Preview("The toast") {
-    ToastView(toast: Toast(id: 1, text: "Renamed to qwen3-8b-chat"))
-        .padding(Spacing.xl)
 }
 #endif

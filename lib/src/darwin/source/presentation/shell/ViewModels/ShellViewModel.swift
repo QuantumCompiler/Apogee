@@ -106,6 +106,14 @@ public struct Toast: Equatable, Identifiable, Sendable {
 
     /// How long it shows.
     public static let lifetime: Duration = .seconds(5)
+
+    /// A toast saying `text`, `id` telling it from the one before so only
+    /// its own time ends it -- public so a window of its own, Settings
+    /// (GUI M19), keeps its toast as the shell keeps this one.
+    public init(id: Int, text: String) {
+        self.id = id
+        self.text = text
+    }
 }
 
 /// The window law (the design's decision 10): below 900 points wide the

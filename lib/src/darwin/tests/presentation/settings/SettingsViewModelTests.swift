@@ -292,6 +292,96 @@ struct SettingsViewModelTests {
         await model.setConfig("tools.search.url", "http://localhost:8888")
         #expect(runner.calls.contains("run config set tools.search.url http://localhost:8888"))
     }
+
+    // MARK: - GUI M19: the Settings window says its own lines while it is in front
+
+    /// Settings over the suite's runner, the shell's toast a recorder: the
+    /// window closed and not active, as at launch.
+    func windowed() async -> (SettingsViewModel, SettingsToasts) {
+        let model = SettingsViewModel(runner: runner(), starter: NoJobs(), preferences: Preferences(store: MemoryStore()))
+        let shell = SettingsToasts()
+        model.say = { shell.say($0) }
+        await model.connect(binary: Self.binary, version: nil)
+        return (model, shell)
+    }
+
+    @Test("while the window is active, Copy's line and Settings' own lines -- the override's, a change's, a fix's -- are the window's toast, and the shell hears none")
+    func activeWindowSaysEveryLine() async {
+        let (model, shell) = await windowed()
+        let before = shell.said
+        #expect(model.toast == nil, "the window starts with no toast")
+        model.windowActive(true)
+        model.xcode.copied()
+        #expect(model.toast?.text == "Copied to the clipboard", "xcode.say goes through the window's route")
+        model.setBinaryOverride(URL(fileURLWithPath: "/Users/someone/tools/apogee"))
+        #expect(model.toast?.text == "The app uses /Users/someone/tools/apogee from its next launch")
+        await model.setPermission("run_command", "deny")
+        #expect(model.toast?.text == "run_command: deny")
+        model.fix(["check", "--fix"])
+        #expect(await settingsEventually { model.toast?.text == "check --fix finished" })
+        #expect(shell.said == before, "the main window's toast heard nothing")
+    }
+
+    @Test("a line said while the window is active is a new toast, one at a time, its id newer than the last")
+    func activeWindowToastIsOneLine() async throws {
+        let (model, shell) = await windowed()
+        model.windowActive(true)
+        model.setBinaryOverride(nil)
+        let first = try #require(model.toast)
+        #expect(first.text == "The app looks for apogee where it is installed, from its next launch")
+        model.xcode.copied()
+        let second = try #require(model.toast)
+        #expect(second.text == "Copied to the clipboard" && second.id != first.id)
+        #expect(!shell.said.contains("Copied to the clipboard"))
+    }
+
+    @Test("a line said while the window is open but not active goes to the main window's toast, and no toast is kept")
+    func inactiveWindowSendsToTheShell() async {
+        let (model, shell) = await windowed()
+        model.windowActive(true)
+        model.windowActive(false)
+        model.xcode.copied()
+        #expect(shell.said.last == "Copied to the clipboard")
+        model.setBinaryOverride(nil)
+        #expect(shell.said.last == "The app looks for apogee where it is installed, from its next launch")
+        #expect(model.toast == nil)
+    }
+
+    @Test("while the window is closed -- never opened, or closed after it was in front -- the main window hears the line and no toast is kept")
+    func closedWindowSendsToTheShell() async {
+        let (model, shell) = await windowed()
+        model.xcode.copied()
+        #expect(shell.said.last == "Copied to the clipboard", "never opened: as at launch")
+        model.windowActive(true)
+        model.windowClosed()
+        model.setBinaryOverride(nil)
+        #expect(shell.said.last == "The app looks for apogee where it is installed, from its next launch")
+        #expect(model.toast == nil)
+    }
+
+    @Test("closing the window drops a toast that is showing; the window going inactive leaves it for its own time")
+    func closingDropsTheToast() async {
+        let (model, _) = await windowed()
+        model.windowActive(true)
+        model.xcode.copied()
+        model.windowActive(false)
+        #expect(model.toast?.text == "Copied to the clipboard", "the window still draws it")
+        model.windowClosed()
+        #expect(model.toast == nil)
+    }
+
+    @Test("each toast ends only on its own time, and a newer one stays")
+    func windowToastEndsOnItsOwnTime() async throws {
+        let (model, _) = await windowed()
+        model.windowActive(true)
+        model.xcode.copied()
+        let first = try #require(model.toast)
+        model.setBinaryOverride(nil)
+        model.dismissToast(first.id)
+        #expect(model.toast?.text == "The app looks for apogee where it is installed, from its next launch", "an older toast's time leaves the newer one")
+        model.dismissToast(try #require(model.toast).id)
+        #expect(model.toast == nil)
+    }
 }
 
 /// A runner that holds one command until released -- a change slow to
