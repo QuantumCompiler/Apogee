@@ -6,15 +6,15 @@ The work queue, seen one release at a time. This page is the **overview**: what 
 
 The branch is `v0.2.1`; the last published release is v0.2.0.
 
-**Still to build: 1 item.**
+**Still to build: nothing.** Every queue's v0.2.1 tracks have shipped in development (2026-11-21).
 - **The design:** none; track 1 is complete in development (2026-11-21). The prototype is rebuilt in React; its law (1a), its scaffold (1b), the old prototype's baseline (1c), the CLI stand-in (1d), its first screen (1e), the session screen's two halves (1u, 1v), the Sessions place around it with the console (1g), the Models place (1h), Settings (1i), the Training place (1j), the Video place with the runtime consent (1k), the compositions (1l), the Voice place (1m), the Library and Review places (1n), the Knowledge and Code graph places (1o), the Suites and Tasks places (1p), the gallery with the foundations pages (1q), the build boards as pages (1r), the parity proof (1s) and retiring the old prototype (1t) have shipped: every place and every Build and Foundations board is ported (the canvas's 5 Exploration boards are not, 1q's default), the built file is the one review surface, after 1s's report was presented you wrote "Go ahead and continue" (2026-11-21), and the old one-file prototype and the claude.ai canvas are retired.
-- **The mod:** 1. The Claude plugin is born: its scaffold, 1a, its tools, slash commands and status line, 1b, and its pane, 1c, have shipped (2026-11-21).
+- **The mod:** none; track 1 is complete in development (2026-11-21). The Claude plugin is born: its scaffold, 1a, its tools, slash commands and status line, 1b, its pane, 1c, and its pipeline, 1d, have shipped.
 - **The Apple apps:** none; their three tracks for this release have shipped.
 - **The CLI:** none; its three tracks for this release have shipped.
 
-On top of that, 5 maintenance items can be picked up any time. None of the 5 waits on a decision from you.
+Outside the release, 5 maintenance items can be picked up any time. None of the 5 waits on a decision from you.
 
-**Can start today** (nothing gates it): [mod 1d](mod/v0.2.1/mod-pipeline.md).
+**Can start today** (nothing gates it): no release item; any of the maintenance items below.
 
 ### The design ([queue](design/README.md#v021))
 
@@ -24,11 +24,9 @@ Nothing is left to build.
 
 ### The mod ([queue](mod/README.md#index))
 
-**Track 1, the mod is born:** the Claude plugin, driving the same `apogee` binary through its MCP server and JSON documents. The scaffold, 1a, has shipped ([Milestone A](../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born)): the plugin at `lib/src/mod/` with its four layers under the layering check, binary discovery and the not-installed guard, and `changed.sh mod`. So have its working surfaces, 1b: Apogee's served tools and `apogee_complete` for Claude, the `/apogee` set with promote and rollback confirmed, and the status line. So has its pane, 1c: backends and models, training and the version ledger beside the chat, read back after every confirmed command, polled only while shown, with promote and rollback as confirmed buttons. Your live look (`claude --plugin-dir lib/src/mod`, on Claude Code 2.1.326 or newer) is still to come.
+**Track 1, the mod is born:** the Claude plugin, driving the same `apogee` binary through its MCP server and JSON documents. The scaffold, 1a, has shipped ([Milestone A](../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born)): the plugin at `lib/src/mod/` with its four layers under the layering check, binary discovery and the not-installed guard, and `changed.sh mod`. So have its working surfaces, 1b: Apogee's served tools and `apogee_complete` for Claude, the `/apogee` set with promote and rollback confirmed, and the status line. So has its pane, 1c: backends and models, training and the version ledger beside the chat, read back after every confirmed command, polled only while shown, with promote and rollback as confirmed buttons. So has its pipeline, 1d: its own workflow, `mod.yml`, gated by `changed.sh mod`, with `tsc` on every runner, validate where the `claude` CLI installs headlessly (the skip said otherwise), `claude plugin test` a dev-host gate, and the plugin zipped as the artifact `apogee-mod`. All four are in [Milestone A](../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born); **track 1 is complete in development.** Your live look (`claude --plugin-dir lib/src/mod`, on Claude Code 2.1.326 or newer) is still to come.
 
-| # | Item | Waits on |
-|---|---|---|
-| 1d | [The mod's pipeline](mod/v0.2.1/mod-pipeline.md) | — |
+Nothing is left to build.
 
 ### The Apple apps ([queue](darwin/README.md#v021))
 
@@ -41,7 +39,7 @@ Nothing is left to build. This release's three CLI tracks have shipped:
 - Apogee in Xcode (track 56, [Milestone AS](../assistant/cli/MILESTONES.md#milestone-as--apogee-in-xcode));
 - the second bug sweep's CLI findings (track 57, [Milestone AT](../assistant/cli/MILESTONES.md#milestone-at--the-second-sweeps-cli-findings)).
 
-**One step is yours.** After the release's build, you turn on the merge ruleset so CI gates merges into `stable` (57m, [the ROADMAP line](../assistant/cli/ROADMAP.md#v021--the-mods-cli-siblings-track-54-apogee-in-xcode-track-56-and-the-second-bug-sweep-track-57)).
+**One step is yours.** After the release's build, you turn on the merge ruleset so CI gates merges into `stable` (57m, [the ROADMAP line](../assistant/cli/ROADMAP.md#v021--the-mods-cli-siblings-track-54-apogee-in-xcode-track-56-and-the-second-bug-sweep-track-57)). Run it against the release pull request after its first green run (`required-checks.py --pr <N> --apply`), so the mod's two new jobs, `what changed (mod)` and `build mod` (mod 1d), are required beside the CLI's and the app's.
 
 ### Ties to later releases
 

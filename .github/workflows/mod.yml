@@ -1,0 +1,184 @@
+# Apogee Mod -- the Claude plugin's PIPELINE.
+#
+# WHEN YOU CHANGE THIS FILE -- a job added, removed or renamed -- the same
+# list as the CLI pipeline's applies (DEVELOPER.md -> Changing the pipeline):
+#
+#   - the required checks. Once the pull request's run passes, and BEFORE it
+#     merges: lib/scripts/required-checks.py --pr <N>, then --apply (it
+#     changes the repository's settings, so it is the user's to run). It
+#     reads every workflow's passing jobs, this one's included;
+#   - a required job never gets a job-level `if:`: it would report skipped
+#     under its name and never pass. Skip its steps instead (see `build`);
+#   - lib/src/mod/tests/pipeline/workflow.test.mjs holds this file's shape
+#     (`npm run test:node`): change the two together.
+#
+# The CLI pipeline is ci.yml and the macOS app's darwin.yml; this is the
+# mod's own, beside them (the mod's 1d; the user's call of 2026-10-21, with
+# the mod spike: the mod gets its own specced CI/CD). It builds, checks and
+# packages ONE deliverable, the Claude plugin at lib/src/mod, and it runs
+# only when what the plugin is built from has changed --
+# lib/scripts/changed.sh mod declares that, once. When it has not, the job
+# runs under its required name with every step skipped, and passes.
+#
+# One build path: every step is one of the mod's npm scripts in lib/src/mod,
+# the same entries a developer runs (DEVELOPER.md -> Build & test). Nothing
+# here builds or checks anything itself.
+#
+# The gates, as the spike measured them (2026-10-21) and the user called
+# them: `tsc` gates on every runner -- the 2.1.326 API declarations are
+# vendored, so it needs no engine -- with the layering check and the node
+# tests beside it. `claude plugin validate` needs the `claude` CLI, which no
+# runner image carries: this job tries to install it headlessly (npm's
+# @anthropic-ai/claude-code, into the runner's temp folder) and validates the
+# zipped plugin with it only where it installed and reports the mod's engine
+# floor (plugin.json's engines, 2.1.326) or newer; anywhere else the step
+# says the skip in fixed words, as a notice and in the run's summary, and
+# passes -- never silent, never a pass it did not earn. `claude plugin test`
+# stays a dev-host gate either way (`npm run check` with Claude Code 2.1.326
+# or newer).
+#
+# The artifact: the plugin a person loads, zipped by `npm run package` --
+# .claude-plugin/plugin.json, hooks/, src/ and types/ at its top, as the
+# engine's own plugin files have them -- kept as `apogee-mod`. It is the zip
+# validate unpacked, wherever validate ran. No release carries it yet:
+# release attachment and distribution are later items.
+
+name: Mod
+
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+  && format('{0} Mod Manual Checks', github.ref_name)
+  || format('{0} Mod Pull Request Checks', github.head_ref) }}
+
+# A pull request into `stable`, or on request. No `closed`: a merge releases
+# nothing of the mod.
+on:
+  pull_request:
+    branches: [stable]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mod-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    # Has what the plugin is built from changed since the latest release? The
+    # same comparison as the CLI's and the app's pipelines: against the latest
+    # RELEASE, judged on the pull request's whole test merge. On request,
+    # everything runs. If this fails, `build mod` is skipped and its required
+    # check never reports: fail closed.
+    name: what changed (mod)
+    runs-on: ubuntu-24.04
+    outputs:
+      mod: ${{ steps.diff.outputs.mod }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Has the mod changed since the latest release?
+        id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          found="$(lib/scripts/latest-release.sh)"
+          commit=""
+          [ -z "$found" ] || read -r _ commit <<<"$found"
+          case "$EVENT" in
+            pull_request)
+              lib/scripts/changed.sh mod "$commit" HEAD
+              ;;
+            *)
+              echo "on request: everything runs"
+              echo "mod=true" | tee -a "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+  build:
+    # Check, package, validate where it can: when the mod changed, and with
+    # every step skipped when it did not -- the job still reports, under its
+    # required name. One Linux runner either way: nothing here needs a Mac.
+    name: build mod
+    needs: changes
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        if: needs.changes.outputs.mod == 'true'
+
+      # The node package.json's engines name (26.x).
+      - uses: actions/setup-node@v6
+        if: needs.changes.outputs.mod == 'true'
+        with:
+          node-version-file: lib/src/mod/package.json
+
+      # TypeScript 6.0.3, from the committed lock file.
+      - name: Install the checks' toolchain
+        if: needs.changes.outputs.mod == 'true'
+        working-directory: lib/src/mod
+        run: npm ci
+
+      # The runner's unconditional gate: against the vendored declarations.
+      - name: Type-check
+        if: needs.changes.outputs.mod == 'true'
+        working-directory: lib/src/mod
+        run: npm run typecheck
+
+      - name: The layering check
+        if: needs.changes.outputs.mod == 'true'
+        working-directory: lib/src/mod
+        run: npm run layering
+
+      # The layering check's planted violations, changed.sh mod's proof, the
+      # package's, the stated skip's wording and this file's shape.
+      - name: The node tests
+        if: needs.changes.outputs.mod == 'true'
+        working-directory: lib/src/mod
+        run: npm run test:node
+
+      # build/apogee-mod.zip: the plugin a person loads.
+      - name: Package
+        if: needs.changes.outputs.mod == 'true'
+        working-directory: lib/src/mod
+        run: npm run package
+
+      # The registry's claude CLI, into the runner's temp folder, never the
+      # mod's own toolchain. An install that fails is said here and skipped
+      # by the next step in its words, never a failure of the job.
+      - name: Install the claude CLI, where it installs headlessly
+        id: claude
+        if: needs.changes.outputs.mod == 'true'
+        run: |
+          if npm install --prefix "$RUNNER_TEMP/claude-code" --no-audit --no-fund @anthropic-ai/claude-code@latest; then
+            echo "the claude CLI installed into $RUNNER_TEMP/claude-code"
+          else
+            echo "the claude CLI did not install headlessly (npm exited $?): validate below says the skip"
+          fi
+
+      # claude plugin validate --strict over the zip, unpacked, with that
+      # claude when it reports the engine floor or newer; else the skip, said.
+      - name: Validate the zipped plugin, or say why it cannot
+        if: needs.changes.outputs.mod == 'true'
+        working-directory: lib/src/mod
+        env:
+          CLAUDE: ${{ runner.temp }}/claude-code/node_modules/.bin/claude
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+        run: npm run validate:package
+
+      # The zip validate unpacked, kept as an artifact of the run.
+      - name: Keep the plugin as an artifact of the run
+        if: needs.changes.outputs.mod == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: apogee-mod
+          path: lib/src/mod/build/apogee-mod.zip
+          if-no-files-found: error
+
+      - name: Unchanged
+        if: needs.changes.outputs.mod != 'true'
+        run: echo "the mod is unchanged since the latest release -- nothing to build"

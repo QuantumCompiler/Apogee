@@ -20,9 +20,9 @@ Requirements: CMake ≥ 3.25, a C++20 compiler, and git. `format` / `lint` addit
 
 **Each application under `lib/src/<app>/` is a self-contained project that owns its build.** Its build files, pinned third-party code, style config, and build output all live beside its source. Nothing above `lib/src/<app>/` needs to know how that application compiles.
 
-Two exist: `lib/src/cli`, a CMake project, and since 2026-10-20 `lib/src/darwin`, the macOS application, an Xcode project whose one entry point from outside is its `scripts/build.sh` (the [GUI docs](../darwin/DEVELOPER.md) describe it). Both are in the `APPS` list in `lib/scripts/cicd.sh` (`cli darwin`), which knows each one's targets -- the CLI all five, darwin macos-arm64 alone -- and builds every application unless `--app` names some. **Each pipeline names its deliverable**: the CLI's calls `cicd.sh --app cli`, so its macOS jobs never build the app. The Linux and Windows GUI applications join the list the same way.
+Three exist. Two are `lib/src/cli`, a CMake project, and since 2026-10-20 `lib/src/darwin`, the macOS application, an Xcode project whose one entry point from outside is its `scripts/build.sh` (the [GUI docs](../darwin/DEVELOPER.md) describe it). Both are in the `APPS` list in `lib/scripts/cicd.sh` (`cli darwin`), which knows each one's targets -- the CLI all five, darwin macos-arm64 alone -- and builds every application in it unless `--app` names some. **Each pipeline names its deliverable**: the CLI's calls `cicd.sh --app cli`, so its macOS jobs never build the app. The Linux and Windows GUI applications join the list the same way. The third, `lib/src/mod` (the Claude plugin, since 2026-11-21), is an npm project outside `cicd.sh`'s `APPS`; its pipeline `mod.yml` calls its npm scripts directly (the [mod docs](../mod/DEVELOPER.md#build--test) describe it).
 
-The build-related files outside an app directory are the two workflows and the one packaging action under `.github/`, because GitHub requires them there: `ci.yml`, the CLI's pipeline and the only one that releases, and since 2026-10-20 `darwin.yml`, the macOS application's. They are deliberately thin callers into `lib/scripts/` — `cicd.sh` to build, `release-from-pr.sh` to release — for exactly that reason.
+The build-related files outside an app directory are the three workflows and the one packaging action under `.github/`, because GitHub requires them there: `ci.yml`, the CLI's pipeline and the only one that releases, since 2026-10-20 `darwin.yml`, the macOS application's, and since 2026-11-21 `mod.yml`, the mod's (the Claude plugin at `lib/src/mod`; the [mod docs](../mod/DEVELOPER.md#build--test) describe it). They are deliberately thin callers -- into `lib/scripts/` (`cicd.sh` to build, `release-from-pr.sh` to release), and `mod.yml` into the mod's own npm scripts -- for exactly that reason.
 
 ---
 
@@ -33,6 +33,9 @@ Apogee/
 ├── .github/
 │   ├── workflows/darwin.yml — The macOS app's pipeline (2026-10-20): what changed (darwin), then build darwin on the
 │   │                          xcode-27 image through cicd.sh --app darwin, packaged as the artifact apogee-gui-darwin
+│   ├── workflows/mod.yml    — The mod's pipeline (2026-11-21): what changed (mod), then build mod on ubuntu-24.04 through
+│   │                          the mod's npm scripts (tsc, layering, node tests, package; validate where the claude CLI
+│   │                          installs and meets the floor, the skip said otherwise), the zipped plugin kept as apogee-mod
 │   ├── workflows/ci.yml     — The CLI pipeline, and the only workflow that releases (M8): clone llama.cpp + unit tests per platform
 │   │                          (parallel), then build + package per platform; the PR-only `version bump` check; after a
 │   │                          merge, `tag and release`; dispatched with `publish`, the re-cut -- the same job, on this
@@ -1378,7 +1381,7 @@ It uses the newest open pull request into `stable`, else the last merged one; `-
 
 ### The re-cut
 
-**One pipeline** (user decision, 2026-10-04, M8): `ci.yml` is the only workflow that releases (the macOS app's `darwin.yml`, since 2026-10-20, builds, tests and packages it on pull requests and publishes nothing). The separate manual release workflow is gone, and with it its `v*` tag trigger and its second copy of the matrix, so a release is published only by a merge — or by the re-cut, `ci.yml` itself dispatched on `stable` with `publish`. **A hand-pushed `v*` tag starts no workflow**: a tag is what a release makes, never how one is asked for. The escape hatch, for a merge whose own archives cannot be released (the tree check refused them, or the artifacts expired) or a deleted release cut again:
+**One pipeline** (user decision, 2026-10-04, M8): `ci.yml` is the only workflow that releases (the macOS app's `darwin.yml`, since 2026-10-20, builds, tests and packages it on pull requests and publishes nothing, and so does the mod's `mod.yml`, since 2026-11-21, for the Claude plugin). The separate manual release workflow is gone, and with it its `v*` tag trigger and its second copy of the matrix, so a release is published only by a merge — or by the re-cut, `ci.yml` itself dispatched on `stable` with `publish`. **A hand-pushed `v*` tag starts no workflow**: a tag is what a release makes, never how one is asked for. The escape hatch, for a merge whose own archives cannot be released (the tree check refused them, or the artifacts expired) or a deleted release cut again:
 
 ```sh
 make -C lib/src/cli release VERSION=x.y.z

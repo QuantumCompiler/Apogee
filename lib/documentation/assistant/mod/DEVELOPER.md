@@ -6,7 +6,7 @@ The architecture reference for the Claude plugin. The contributor entry point is
 
 ## Layout
 
-As built by the scaffold (1a, 2026-11-21) and grown by the tools, slash commands and status line (1b, 2026-11-21) and the pane (1c, 2026-11-21; [MILESTONES](MILESTONES.md#milestone-a--the-mod-is-born)), per [ADR 0001](../../adrs/mod/layer-enforcement.md) (four layers, dependencies down; a package is a folder `src/<layer>/<package>/`, its tests at `tests/<layer>/<package>/`):
+As built by the scaffold (1a, 2026-11-21) and grown by the tools, slash commands and status line (1b, 2026-11-21), the pane (1c, 2026-11-21) and the pipeline (1d, 2026-11-21; [MILESTONES](MILESTONES.md#milestone-a--the-mod-is-born)), per [ADR 0001](../../adrs/mod/layer-enforcement.md) (four layers, dependencies down; a package is a folder `src/<layer>/<package>/`, its tests at `tests/<layer>/<package>/`):
 
 ```
 lib/src/mod/
@@ -52,13 +52,18 @@ lib/src/mod/
                                       recorded.ts (recorded documents), handmade.ts (hand-made ones)
   tests/<layer>/<package>/*.test.ts   claude plugin test's hermetic tests
   tests/architecture/layering/        the layering check (check.mjs) and its planted violations, run by node
-  tests/pipeline/changed.test.mjs     changed.sh mod's proof, run by node
+  tests/pipeline/                     the pipeline's proofs, run by node: changed.test.mjs (changed.sh mod),
+                                      workflow.test.mjs (mod.yml parsed and held to its shape, its gate and
+                                      install steps run), package.test.mjs (the zip read back by unzip),
+                                      validate-package.test.mjs (the stated skip's wording goldens); support.mjs
+  scripts/package.mjs                 npm run package: the plugin zipped to build/apogee-mod.zip
+  scripts/validate-package.mjs        npm run validate:package: that zip validated unpacked, or the skip said
   vendor/claude-code/index.d.ts       the 2.1.326 API declarations, vendored unmodified for tsc
   package.json, package-lock.json     the checks' toolchain: typescript 6.0.3 and the npm scripts
   tsconfig.json                       the API header's options; includes vendor/claude-code, hooks, src, types, tests
 ```
 
-Not in git: `node_modules/`, and `.claude-plugin/types/`, the declarations the engine lays beside the mod each time it loads it from a folder. The mod's tsconfig never includes that folder, so a loaded mod's two copies do not collide.
+Not in git: `node_modules/`; `build/`, where `npm run package` writes the zip; and `.claude-plugin/types/`, the declarations the engine lays beside the mod each time it loads it from a folder. The mod's tsconfig never includes that folder, so a loaded mod's two copies do not collide.
 
 **The layers' nouns.** The layering check holds each `$` noun to one layer: `process`, `fs`, `env` and `clock` (since 1b) to Infrastructure; `state`, `store` and the atom library (`atom`, `derive`, `memberOf`, `read`, `update` from `'claude-code'`) to Data; `ui`, `command`, `tool` to Presentation. `http` is refused everywhere (the client invariant), and the composition root and the contract reach none. The atom library counts however it is taken outside Data: imported or re-exported by name, or `'claude-code'` whole (`import * as`, `export *`). Its other rules: an upward or undeclared edge fails by name, nothing comes from outside the mod but `'claude-code'`, no `import()`, every file at `src/<layer>/<package>/`, every layer with a package and every package with its tests, and an empty graph refused. Outside `src/`, `hooks/` holds `register.tsx` alone and `types/` holds `.d.ts` files alone, importing nothing of the mod but each other; a JavaScript file in a layer is refused, since the engine loads it and the check cannot read it (ADR 0001's Landed note has the full list).
 
@@ -140,16 +145,40 @@ npm ci                                   # TypeScript 6.0.3 into node_modules/, 
 npm run check                            # the five below, in order; exit 0 when the mod is sound
 npm run typecheck                        # tsc -p . (against vendor/claude-code, no engine needed)
 npm run layering                         # the layering check over the tree: "layering: N files and M imports hold ADR 0001"
-npm run test:node                        # node --test "tests/**/*.test.mjs": the check's planted violations, changed.sh mod's proof
+npm run test:node                        # node --test "tests/**/*.test.mjs": the check's planted violations, the pipeline's proofs
 npm run validate                         # claude plugin validate --strict .
 npm run test:plugin                      # claude plugin test .: every tests/**/*.test.ts(x), hermetic
+npm run package                          # build/apogee-mod.zip: the plugin a person loads, zipped (the pipeline's artifact)
+npm run validate:package                 # that zip, unpacked, through claude plugin validate --strict -- or the skip, said
 ```
 
 `validate` and `test:plugin` run `$CLAUDE`, or `claude` on PATH when it is unset, and need **Claude Code 2.1.326 or newer**: an older CLI refuses the layered module (2.1.289: `$ is followed only into a function declared in this same file, never across an import`). Point `CLAUDE` at a newer binary when the one on PATH is older, for example the desktop app's engine: `CLAUDE="$HOME/Library/Application Support/Claude/claude-code/<version>/<build>/claude.app/Contents/MacOS/claude" npm run check`. `test:node` builds throwaway commits in a `git clone --shared` under `$TMPDIR`, never in this checkout, and removes it after.
 
 Adding a package to the toolchain: `npm install --save-exact <name>` (only what the mod's checks need; the plugin itself imports nothing from npm). Moving the engine floor: replace `vendor/claude-code/index.d.ts` whole with the new build's `claude-code.d.ts` (its first line names the build), raise `engines` in plugin.json, and run `npm run check`.
 
-**The pipeline** is 1d's: `changed.sh mod` (`lib/src/mod/`, `lib/scripts/changed.sh`, `.github/workflows/mod.yml`) answers whether a change needs it, and its workflow will call these same scripts (`npm ci && npm run typecheck` on runners, which need no engine; validate where the `claude` CLI installs headlessly; `claude plugin test` a dev-host gate).
+`check` is the dev-host gate and stays the five above; `package` and `validate:package` are the pipeline's last two steps, and a developer can run them too.
+
+**The zip** (`scripts/package.mjs`): `.claude-plugin/plugin.json`, `hooks/`, `src/` and `types/`, at its top, as the engine's own plugin files have `.claude-plugin/` at theirs, so the folder it unzips into is the plugin (`claude --plugin-dir <folder>`). Left out: what the engine lays beside a loaded mod (`.claude-plugin/types/`), the checks' own files (`tests/`, `vendor/`, `scripts/`, `package.json` and its lock, `tsconfig.json`, `node_modules/`), and what editors and hosts leave behind (a name starting with a dot, `*~`, `*.swp`, `*.log`); a symbolic link is refused by name, a top folder that is one included. The same tree packs to the same bytes (path order, every entry dated 1980-01-01, `rw-r--r--`, deflated by node's zlib, so no zip tool is needed). `--root` and `--out` pack another tree or write elsewhere.
+
+**`validate:package`** (`scripts/validate-package.mjs`) unpacks the zip into a folder under `$TMPDIR`, reads the floor from the zipped manifest (`engines["claude-code"]`, `>=2.1.326`), asks `$CLAUDE --version` (or `claude`'s on PATH), and runs `$CLAUDE plugin validate --strict` on the folder only at the floor or newer, its exit status the step's. Otherwise it prints the skip in fixed words and exits 0:
+
+```
+validate: skipped -- <why>.
+validate: the zipped plugin is not validated on this host; claude plugin validate and claude plugin test stay dev-host gates (npm run check in lib/src/mod, with Claude Code 2.1.326 or newer).
+```
+
+`<why>` is one of `<claude> could not be run (<error>)`, `<claude> --version exited with status <n>`, `<claude> --version printed no version` and `<claude> is Claude Code <version>, older than the mod's engine floor <floor>` (versions compared by number). On a runner (`GITHUB_ACTIONS=true`) it adds a `::notice` and a line of the run's summary, for a skip and for a validate that ran. The folder is removed however it ends. `tests/pipeline/validate-package.test.mjs` holds these words exactly.
+
+### The pipeline
+
+`.github/workflows/mod.yml` (1d, 2026-11-21), the macOS app's `darwin.yml` mirrored, runs on a pull request into `stable` or on request:
+
+| Job | Runs |
+|---|---|
+| `what changed (mod)` | `ubuntu-24.04`, the whole history: `lib/scripts/latest-release.sh`'s commit, then `lib/scripts/changed.sh mod "$commit" HEAD` on the test merge (`lib/src/mod/`, `lib/scripts/changed.sh`, `.github/workflows/mod.yml`); on request, `mod=true` |
+| `build mod` | `ubuntu-24.04` either way, no job-level `if:`: when the mod changed, node from `package.json`'s `engines` (`actions/setup-node`), then in `lib/src/mod` `npm ci`, `npm run typecheck`, `npm run layering`, `npm run test:node`, `npm run package`; the `claude` CLI installed headlessly (`npm install --prefix "$RUNNER_TEMP/claude-code" @anthropic-ai/claude-code@latest`, never into the mod's toolchain, a failed install said and never a failure); `npm run validate:package` with `CLAUDE` that binary; the zip kept as the artifact `apogee-mod`. When it did not, every step is skipped but `Unchanged`, and the job passes under its name |
+
+So `tsc`, the layering check and the node tests gate on every runner; `claude plugin validate` gates where the CLI installs at the floor, the skip said wherever it does not; and **`claude plugin test` is a dev-host gate always**, as is validate wherever the runner skipped it (the dev-host gates, [CLAUDE.md](CLAUDE.md#release-and-install-infrastructure)). `tests/pipeline/workflow.test.mjs` holds the file's shape (its triggers, the two names, no job-level `if:`, every step the gate's but `Unchanged`, the npm scripts in order, the artifact) and runs its gate step over throwaway commits and its install step over a stand-in npm, so a change to the workflow changes that test with it. The release pull request's run is the first on GitHub; its two jobs join the required checks by the user's `required-checks.py --pr <N> --apply` after it passes. No release carries the zip yet.
 
 ### A development load drives apogee-dev
 

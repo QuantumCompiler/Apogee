@@ -12,6 +12,8 @@
     "test:node": "node --test \"tests/**/*.test.mjs\"",
     "validate": "\"${CLAUDE:-claude}\" plugin validate --strict .",
     "test:plugin": "\"${CLAUDE:-claude}\" plugin test .",
+    "package": "node scripts/package.mjs",
+    "validate:package": "node scripts/validate-package.mjs",
     "check": "npm run typecheck && npm run layering && npm run test:node && npm run validate && npm run test:plugin"
   },
   "devDependencies": {
