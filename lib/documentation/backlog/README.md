@@ -6,15 +6,15 @@ The work queue, seen one release at a time. This page is the **overview**: what 
 
 The branch is `v0.2.1`; the last published release is v0.2.0.
 
-**Still to build: 4 items.**
+**Still to build: 3 items.**
 - **The design:** none; track 1 is complete in development (2026-11-21). The prototype is rebuilt in React; its law (1a), its scaffold (1b), the old prototype's baseline (1c), the CLI stand-in (1d), its first screen (1e), the session screen's two halves (1u, 1v), the Sessions place around it with the console (1g), the Models place (1h), Settings (1i), the Training place (1j), the Video place with the runtime consent (1k), the compositions (1l), the Voice place (1m), the Library and Review places (1n), the Knowledge and Code graph places (1o), the Suites and Tasks places (1p), the gallery with the foundations pages (1q), the build boards as pages (1r), the parity proof (1s) and retiring the old prototype (1t) have shipped: every place and every Build and Foundations board is ported (the canvas's 5 Exploration boards are not, 1q's default), the built file is the one review surface, after 1s's report was presented you wrote "Go ahead and continue" (2026-11-21), and the old one-file prototype and the claude.ai canvas are retired.
-- **The mod:** 4. The Claude plugin is born.
+- **The mod:** 3. The Claude plugin is born: its scaffold, 1a, has shipped (2026-11-21).
 - **The Apple apps:** none; their three tracks for this release have shipped.
 - **The CLI:** none; its three tracks for this release have shipped.
 
 On top of that, 5 maintenance items can be picked up any time. None of the 5 waits on a decision from you.
 
-**Can start today** (nothing gates them): [mod 1a](mod/v0.2.1/mod-scaffold.md).
+**Can start today** (nothing gates them): [mod 1b](mod/v0.2.1/mod-tools-and-commands.md), [mod 1d](mod/v0.2.1/mod-pipeline.md).
 
 ### The design ([queue](design/README.md#v021))
 
@@ -24,14 +24,13 @@ Nothing is left to build.
 
 ### The mod ([queue](mod/README.md#index))
 
-**Track 1, the mod is born:** the Claude plugin, driving the same `apogee` binary through its MCP server and JSON documents.
+**Track 1, the mod is born:** the Claude plugin, driving the same `apogee` binary through its MCP server and JSON documents. The scaffold, 1a, has shipped ([Milestone A](../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born)): the plugin at `lib/src/mod/` with its four layers under the layering check, binary discovery and the not-installed guard, and `changed.sh mod`. Your live look (`claude --plugin-dir lib/src/mod`, on Claude Code 2.1.326 or newer) is still to come.
 
 | # | Item | Waits on |
 |---|---|---|
-| 1a | [The mod scaffold](mod/v0.2.1/mod-scaffold.md): the plugin skeleton, its layers and finding the binary | — |
-| 1b | [Tools, slash commands and the status line](mod/v0.2.1/mod-tools-and-commands.md) | 1a |
+| 1b | [Tools, slash commands and the status line](mod/v0.2.1/mod-tools-and-commands.md) | — |
 | 1c | [The pane](mod/v0.2.1/mod-pane.md): backends, models, training and the ledger | 1b |
-| 1d | [The mod's pipeline](mod/v0.2.1/mod-pipeline.md) | 1a |
+| 1d | [The mod's pipeline](mod/v0.2.1/mod-pipeline.md) | — |
 
 ### The Apple apps ([queue](darwin/README.md#v021))
 

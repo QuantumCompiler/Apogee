@@ -4,12 +4,12 @@
 |---|---|
 | **Type** | 🛠️ Task |
 | **Project** | Claude plugin (mod) |
-| **Status** | 🔒 Blocked |
+| **Status** | 🟢 Ready |
 | **Fix version** | v0.2.1 |
 | **Component** | CI/CD pipeline (`mod.yml`) |
 | **Labels** | `ci` `changed-gate` `honest-skips` |
 | **Epic** | Track 1 · the mod is born |
-| **Blocked by** | [1a](mod-scaffold.md) |
+| **Blocked by** | — |
 | **Blocks** | — |
 | **Reporter** | The mod spike (2026-10-21) |
 | **Created** | 2026-10-21 |
@@ -86,6 +86,7 @@ The honesty the mod spike recorded (2026-10-21):
 | Date | Decision | Whose call |
 |---|---|---|
 | 2026-10-21 | The user's call (with the spike's placement answers): the mod gets its own specced CI/CD; `tsc` is the unconditional runner gate, validate conditional on the CLI installing headlessly, test dev-host. | the user |
+| 2026-11-21 | 1a shipped ([Milestone A](../../../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born)), and this item inherits its shape: `changed.sh mod` already declares `lib/src/mod/`, `lib/scripts/changed.sh` and `.github/workflows/mod.yml`; the one build path is `lib/src/mod`'s npm scripts (`npm ci`, then `npm run typecheck`, which needs no engine because the 2.1.326 API declarations are vendored at `vendor/claude-code/index.d.ts`; `validate` and `test:plugin` run `$CLAUDE`); the plugin's engine floor is Claude Code 2.1.326, so a runner's `claude`, where it installs, must be that or newer; plugin.json states version 0.2.1, and whether `version bump` holds it is this item's call; the mod is not yet in `cicd.sh`'s `APPS`. Flagged for veto with 1a's decisions | 1a (the run) |
 
 ## Out of scope
 
@@ -95,5 +96,5 @@ The honesty the mod spike recorded (2026-10-21):
 
 ## Links
 
-- **Blocked by:** [1a](mod-scaffold.md) (`mod-scaffold.md`) · **Blocks:** —
+- **Blocked by:** — (1a shipped 2026-11-21, [Milestone A](../../../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born)) · **Blocks:** —
 - **Relates to:** the GUI's 1d (the darwin pipeline, the pattern mirrored); the mod spike (2026-10-21)

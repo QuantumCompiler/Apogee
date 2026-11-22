@@ -4,12 +4,12 @@
 |---|---|
 | **Type** | ✨ Feature |
 | **Project** | Claude plugin (mod) |
-| **Status** | 🔒 Blocked |
+| **Status** | 🟢 Ready |
 | **Fix version** | v0.2.1 |
 | **Component** | The mod's working surfaces: tools, the `/apogee` set, the status line (`src/business/`, `src/presentation/`) |
 | **Labels** | `mcp-tools` `slash-commands` `status-line` `async` |
 | **Epic** | Track 1 · the mod is born |
-| **Blocked by** | [1a](mod-scaffold.md) |
+| **Blocked by** | — |
 | **Blocks** | [1c](mod-pane.md) |
 | **Reporter** | The mod spike (2026-10-21) |
 | **Created** | 2026-10-21 |
@@ -94,6 +94,7 @@ Hermetic, over scripted process output: no live binary required by any test.
 |---|---|---|
 | 2026-10-21 | `apogee_complete` ships on the CLI path first; 54b's served tool replaces the plumbing, not the surface. | the spec |
 | 2026-11-01 | The CLI's 54a and 54b shipped: `complete` on the server, offered only where the person lists it under a local backend's `mcp_serve:`; `apogee_complete` switches to 54b's served tool — cross-referenced, never gated. | — |
+| 2026-11-21 | 1a shipped ([Milestone A](../../../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born)), and this item builds on its shape: the found binary is in `$.state` (`apogee.binary`: path, place, version, reported channel and the places passed over), kept by `src/business/binary/findBinary` at `session.start`; every `on(...)` lives in `hooks/register.tsx`, the only code file of `hooks/` (a handler it grows goes into a layer's package, never a second file beside it, and `types/` holds `.d.ts` files alone); each `$` noun is held to its layer by the layering check (`command` and `tool` registration are Presentation's, `process` Infrastructure's); a function taking `$` from another file is a `function` declaration (the 2.1.326 engine's rule); tests script the machine through `tests/support/machine.ts`. Flagged for veto with 1a's decisions | 1a (the run) |
 
 ## Out of scope
 
@@ -103,5 +104,5 @@ Hermetic, over scripted process output: no live binary required by any test.
 
 ## Links
 
-- **Blocked by:** [`mod-scaffold.md`](mod-scaffold.md) (1a) · **Blocks:** [`mod-pane.md`](mod-pane.md) (1c)
+- **Blocked by:** — (1a shipped 2026-11-21, [Milestone A](../../../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born)) · **Blocks:** [`mod-pane.md`](mod-pane.md) (1c)
 - **Relates to:** the mod spike (2026-10-21, W4); the CLI's 54a and 54b ([Milestone W — the MCP client](../../../assistant/cli/MILESTONES.md#milestone-w--the-mcp-client)), referenced with fallbacks, never gated; [tools.md](../../../reference/cli/tools.md#calling-a-local-model-complete); the GUI's jobs/read-back disciplines; [ADR 0001](../../../adrs/mod/layer-enforcement.md)

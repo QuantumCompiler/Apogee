@@ -39,6 +39,13 @@ lib/design/prototype/playwright-report/
 # parity/baseline.json's recorded revision, never committed.
 lib/design/prototype/.parity/
 
+# The mod's npm install (its checks' TypeScript, pinned in package-lock.json), and
+# the API declarations the engine lays beside the mod each time it loads it from a
+# folder (lib/documentation/assistant/mod/DEVELOPER.md). tsc never emits: the
+# engine loads the TypeScript itself, so the mod has no build output.
+lib/src/mod/node_modules/
+lib/src/mod/.claude-plugin/types/
+
 # Superpowers (the repository enables it; see CLI CLAUDE.md -> Superpowers fits the
 # docs-first lifecycle): its plan workspaces and brainstorm mockups, the item
 # worktrees under .claude/worktrees/, and each machine's own settings.

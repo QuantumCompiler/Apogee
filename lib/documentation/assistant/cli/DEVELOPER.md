@@ -100,7 +100,7 @@ Apogee/
     │   ├── cross-windows.sh — `make cross-windows`: CI's Windows x64 build, cross-compiled with MinGW-w64
     │   │                      GCC on a Mac or Linux machine -- compiled, linked, image size checked
     │   ├── changed.sh       — What each deliverable is built from, declared once, and whether that
-    │   │                      changed between two commits (`changed.sh cli|gui-darwin <from> <to>`), for CI and pr-ci
+    │   │                      changed between two commits (`changed.sh cli|gui-darwin|mod <from> <to>`), for CI and pr-ci
     │   ├── latest-release.sh — The newest published release: its tag, and its commit as origin has it
     │   ├── required-checks.py — The checks stable requires, read from a PR's passing run (every job that ran
     │   │                      and passed); shows the difference, and --apply sets the "Stable: CI must pass" ruleset;
