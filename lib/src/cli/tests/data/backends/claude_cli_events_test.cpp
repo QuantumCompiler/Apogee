@@ -76,7 +76,7 @@ using apogee::backends::claude_cli::parse_stream;
         "thinking_redacted.jsonl", "structured_output.jsonl",
         "tool_use.jsonl",          "api_retry.jsonl",
         "error_max_turns.jsonl",   "truncated_mid_object.jsonl",
-        "noise_before_json.jsonl",
+        "noise_before_json.jsonl", "expired_login.jsonl",
     };
     return kFixtures;
 }
@@ -241,6 +241,63 @@ TEST_CASE("an error result names its subtype", "[backends][claude_cli][replay]")
     REQUIRE(complete != nullptr);
     CHECK(complete->is_error);
     CHECK(complete->error_subtype == "error_max_turns");
+    CHECK(describe(events.back()) == "result:error_max_turns");
+}
+
+// --- M34: a failed Claude CLI turn says why ----------------------------------
+
+TEST_CASE("an expired login names its error on the message, and its result never reads success",
+          "[backends][claude_cli][replay][errors]") {
+    // The user's probe (2026-10-31, Claude Code 2.1.289): a synthetic
+    // assistant message naming the failure's kind, then a result that is an
+    // error under subtype "success", its reason in `result`.
+    const std::vector<CliEvent> events = parse_stream(read_fixture("expired_login.jsonl"));
+    REQUIRE(events.size() == 2);
+
+    const auto* named = std::get_if<apogee::backends::MessageError>(&events.front());
+    REQUIRE(named != nullptr);
+    CHECK(named->kind == "authentication_failed");
+
+    const auto* complete = std::get_if<apogee::backends::TurnComplete>(&events.back());
+    REQUIRE(complete != nullptr);
+    CHECK(complete->is_error);
+    CHECK(complete->final_text ==
+          "Failed to authenticate: OAuth session expired and could not be refreshed");
+
+    // The labels name the error; the message's text is not an answer.
+    CHECK(described(events) ==
+          std::vector<std::string>{"error:authentication_failed", "result:error"});
+}
+
+TEST_CASE("an error result's label names the error, never the subtype 'success'",
+          "[backends][claude_cli][errors]") {
+    using apogee::backends::TurnComplete;
+
+    CHECK(describe(CliEvent{TurnComplete{.is_error = true, .error_subtype = "success"}}) ==
+          "result:error");
+    CHECK(describe(CliEvent{TurnComplete{.is_error = true}}) == "result:error");
+    CHECK(describe(CliEvent{TurnComplete{.is_error = true,
+                                         .error_subtype = "success",
+                                         .error_type = "authentication_failed"}}) ==
+          "result:authentication_failed");
+    CHECK(describe(CliEvent{TurnComplete{}}) == "result:success");
+}
+
+TEST_CASE("an assistant message's error is read only as a string",
+          "[backends][claude_cli][errors]") {
+    using apogee::backends::claude_cli::parse_line;
+
+    // No error, or one in a shape never seen: the message is what it was.
+    CHECK_FALSE(parse_line(R"({"type":"assistant","message":{"content":[]}})").has_value());
+    CHECK_FALSE(
+        parse_line(R"({"type":"assistant","message":{"content":[]},"error":{"a":1}})").has_value());
+    CHECK_FALSE(
+        parse_line(R"({"type":"assistant","message":{"content":[]},"error":""})").has_value());
+
+    // A message that names one carries it, even with no content to speak of.
+    const auto named = parse_line(R"({"type":"assistant","error":"rate_limit"})");
+    REQUIRE(named.has_value());
+    CHECK(describe(*named) == "error:rate_limit");
 }
 
 TEST_CASE("a truncated final object costs one event, not the stream",

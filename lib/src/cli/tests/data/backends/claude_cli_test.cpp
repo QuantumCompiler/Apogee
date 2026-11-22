@@ -53,11 +53,13 @@ struct Fixture {
     std::unique_ptr<ClaudeCliProvider> provider;
 
     explicit Fixture(std::vector<std::string> scripts = {},
-                     std::chrono::milliseconds turn_timeout = std::chrono::milliseconds{600000}) {
+                     std::chrono::milliseconds turn_timeout = std::chrono::milliseconds{600000},
+                     ClaudeCliMode mode = ClaudeCliMode::Subscription) {
         spawner->stdout_scripts = std::move(scripts);
 
         ClaudeCliProvider::Options options;
         options.backend_name = "claude-cli";
+        options.mode = mode;
         options.model = "claude-sonnet-5";
         options.turn_timeout = turn_timeout;
         auto spawner_copy = spawner;
@@ -106,6 +108,41 @@ constexpr std::string_view kExpiredLogin =
     out += "\n";
     return out;
 }
+
+/// The user's probe whole (M34, Claude Code 2.1.289): before the result, a
+/// synthetic assistant message carrying the reason as its text and the
+/// failure's kind as its `error`.
+[[nodiscard]] std::string expired_login_probe_script(
+    std::string_view session = "conv-1", std::string_view kind = "authentication_failed",
+    bool is_error = true, std::string_view reason = kExpiredLogin) {
+    std::string out;
+    out += R"({"type":"system","subtype":"init","session_id":")";
+    out += session;
+    out += R"(","model":"claude-sonnet-5"})";
+    out += "\n";
+    out +=
+        R"({"type":"assistant","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":")";
+    out += reason;
+    out += R"("}]},"error":")";
+    out += kind;
+    out += R"(","session_id":")";
+    out += session;
+    out += R"("})";
+    out += "\n";
+    out += R"({"type":"result","subtype":"success","is_error":)";
+    out += is_error ? "true" : "false";
+    out += R"(,"session_id":")";
+    out += session;
+    out += R"(","result":")";
+    out += reason;
+    out += R"(","num_turns":1,"terminal_reason":"api_error"})";
+    out += "\n";
+    return out;
+}
+
+/// The way back in after an expired login (M34), as the message ends.
+constexpr std::string_view kLoginHint =
+    " -- run claude in a terminal and sign in again with /login";
 
 /// A one-shot that streams half an answer and never finishes.
 [[nodiscard]] std::string stalled_script(std::string_view session = "stall-sess") {
@@ -764,4 +801,156 @@ TEST_CASE("the failure wording names a real subtype and never 'success'",
     CHECK(claude_cli_failure(TurnComplete{.is_error = true, .error_subtype = "success"}) ==
           "the Claude CLI reported an error");
     CHECK(claude_cli_failure(TurnComplete{.is_error = true}) == "the Claude CLI reported an error");
+}
+
+// --- M34: a failed Claude CLI turn says why ----------------------------------
+
+TEST_CASE("the user's expired login reads Claude Code's words and the way back in",
+          "[backends][claude_cli][errors]") {
+    // The probe's lines replayed on the conversation's turn: the reason from
+    // `result`, then -- keyed on the message's `authentication_failed` --
+    // how to sign in again. Never "reported success".
+    Fixture fixture{{expired_login_probe_script()}};
+
+    const std::string message = thrown_by(
+        [&fixture] { return fixture.provider->chat(turn({ChatMessage::user("hi")}), {}); });
+    CHECK(message == "claude-cli: the Claude CLI reported an error: " + std::string{kExpiredLogin} +
+                         std::string{kLoginHint});
+    CHECK(message.find("reported success") == std::string::npos);
+}
+
+TEST_CASE("only an authentication failure gets the /login hint", "[backends][claude_cli][errors]") {
+    // Other kinds show Claude Code's text with no added advice.
+    Fixture fixture{{expired_login_probe_script("conv-1", "rate_limit")}};
+
+    const std::string message = thrown_by(
+        [&fixture] { return fixture.provider->chat(turn({ChatMessage::user("hi")}), {}); });
+    CHECK(message == "claude-cli: the Claude CLI reported an error: " + std::string{kExpiredLogin});
+    CHECK(message.find("/login") == std::string::npos);
+}
+
+TEST_CASE("a message's error is not a failure when the result succeeds",
+          "[backends][claude_cli][errors]") {
+    // `is_error` stays authoritative: the kind is kept for a failed turn only,
+    // and never carried into the next one.
+    Fixture fixture{{expired_login_probe_script("conv-1", "authentication_failed", false) +
+                     expired_login_script("conv-1")}};
+
+    const auto first = fixture.provider->chat(turn({ChatMessage::user("one")}), {});
+    CHECK(first.message.content.plain_text() == kExpiredLogin);
+
+    const std::string message = thrown_by([&fixture] {
+        return fixture.provider->chat(
+            turn({ChatMessage::user("one"), ChatMessage::assistant(std::string{kExpiredLogin}),
+                  ChatMessage::user("two")}),
+            {});
+    });
+    CHECK(message.find(std::string{"reported an error: "} + std::string{kExpiredLogin}) !=
+          std::string::npos);
+    CHECK(message.find("/login") == std::string::npos);
+}
+
+TEST_CASE("the failure wording adds the /login hint for authentication_failed alone",
+          "[backends][claude_cli][errors]") {
+    using apogee::backends::claude_cli_failure;
+    using apogee::backends::TurnComplete;
+
+    CHECK(claude_cli_failure(TurnComplete{.final_text = std::string{kExpiredLogin},
+                                          .is_error = true,
+                                          .error_subtype = "success",
+                                          .error_type = "authentication_failed"}) ==
+          "the Claude CLI reported an error: " + std::string{kExpiredLogin} +
+              std::string{kLoginHint});
+    // With no words of its own, the kind Claude Code named is what it said.
+    CHECK(
+        claude_cli_failure(TurnComplete{
+            .is_error = true, .error_subtype = "success", .error_type = "authentication_failed"}) ==
+        "the Claude CLI reported an error: authentication_failed" + std::string{kLoginHint});
+    CHECK(claude_cli_failure(TurnComplete{.final_text = "Server is overloaded",
+                                          .is_error = true,
+                                          .error_subtype = "success",
+                                          .error_type = "server_error"}) ==
+          "the Claude CLI reported an error: Server is overloaded");
+    CHECK(claude_cli_failure(TurnComplete{.is_error = true, .error_type = "billing_error"}) ==
+          "the Claude CLI reported an error: billing_error");
+}
+
+/// Claude Code's answer to a bad `ANTHROPIC_API_KEY` under `--bare`: the
+/// same `authentication_failed` kind, with words of its own about the key.
+constexpr std::string_view kInvalidKey = "Invalid API key · Fix external API key";
+
+TEST_CASE("a bare-mode authentication failure gets no /login hint",
+          "[backends][claude_cli][errors][auth]") {
+    // `--bare` never reads the Claude login, so signing in again with /login
+    // cannot fix it: Claude Code's own words about the key stand alone.
+    Fixture fixture{
+        {expired_login_probe_script("conv-1", "authentication_failed", true, kInvalidKey)},
+        std::chrono::milliseconds{600000},
+        ClaudeCliMode::Bare};
+
+    const std::string message = thrown_by(
+        [&fixture] { return fixture.provider->chat(turn({ChatMessage::user("hi")}), {}); });
+    CHECK(message == "claude-cli: the Claude CLI reported an error: " + std::string{kInvalidKey});
+    CHECK(message.find("/login") == std::string::npos);
+}
+
+TEST_CASE("a bare-mode side request and schema call get no /login hint either",
+          "[backends][claude_cli][errors][auth]") {
+    // The one wording's three paths share `throw_if_failed`, so the mode
+    // reaches each of them.
+    Fixture fixture{
+        {turn_script("Real.", "conv-1"),
+         expired_login_probe_script("side-sess", "authentication_failed", true, kInvalidKey),
+         expired_login_probe_script("schema-sess", "authentication_failed", true, kInvalidKey)},
+        std::chrono::milliseconds{600000},
+        ClaudeCliMode::Bare};
+    (void)fixture.provider->chat(turn({ChatMessage::user("one")}), {});
+
+    const std::string side_message =
+        thrown_by([&fixture] { return fixture.provider->chat(side("title this"), {}); });
+    CHECK(side_message ==
+          "claude-cli: the Claude CLI reported an error: " + std::string{kInvalidKey});
+
+    const std::string schema_message = thrown_by([&fixture] {
+        return fixture.provider->complete_structured("classify", R"({"type":"object"})", {});
+    });
+    CHECK(schema_message ==
+          "claude-cli: the Claude CLI reported an error: " + std::string{kInvalidKey});
+}
+
+TEST_CASE("a subscription-mode authentication failure keeps the /login hint",
+          "[backends][claude_cli][errors][auth]") {
+    // The same lines in the mode that does use the login: the hint stays.
+    Fixture fixture{
+        {expired_login_probe_script("conv-1", "authentication_failed", true, kInvalidKey)},
+        std::chrono::milliseconds{600000},
+        ClaudeCliMode::Subscription};
+
+    const std::string message = thrown_by(
+        [&fixture] { return fixture.provider->chat(turn({ChatMessage::user("hi")}), {}); });
+    CHECK(message == "claude-cli: the Claude CLI reported an error: " + std::string{kInvalidKey} +
+                         std::string{kLoginHint});
+}
+
+TEST_CASE("the failure wording leaves the /login hint out when asked to",
+          "[backends][claude_cli][errors][auth]") {
+    using apogee::backends::claude_cli_failure;
+    using apogee::backends::TurnComplete;
+
+    const TurnComplete failed{.final_text = std::string{kInvalidKey},
+                              .is_error = true,
+                              .error_subtype = "success",
+                              .error_type = "authentication_failed"};
+    CHECK(claude_cli_failure(failed, false) ==
+          "the Claude CLI reported an error: " + std::string{kInvalidKey});
+    CHECK(claude_cli_failure(failed, true) ==
+          "the Claude CLI reported an error: " + std::string{kInvalidKey} +
+              std::string{kLoginHint});
+    // The default is the hint, so every existing caller keeps its meaning.
+    CHECK(claude_cli_failure(failed) == claude_cli_failure(failed, true));
+    // Without the hint, the kind's words are still said when there are no others.
+    CHECK(claude_cli_failure(TurnComplete{.is_error = true,
+                                          .error_subtype = "success",
+                                          .error_type = "authentication_failed"},
+                             false) == "the Claude CLI reported an error: authentication_failed");
 }

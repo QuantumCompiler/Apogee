@@ -12,7 +12,7 @@ The branch is `v0.2.1`; the last published release is v0.2.0.
 - **The Apple apps:** none; their three tracks for this release have shipped.
 - **The CLI:** none; its three tracks for this release have shipped.
 
-Outside the release, 5 maintenance items can be picked up any time. None of the 5 waits on a decision from you.
+Outside the release, 4 maintenance items can be picked up any time. None of the 4 waits on a decision from you.
 
 **Can start today** (nothing gates it): no release item; any of the maintenance items below.
 
@@ -51,7 +51,6 @@ Maintenance items aren't tied to a release; any one can be picked up by name.
 
 | Product | # | Item | Waits on |
 |---|---|---|---|
-| CLI | M34 | [A failed Claude CLI turn says why](cli/maintenance/claude-cli-says-why.md) | — |
 | CLI | M35 | [The code server's write guard holds for deletes, folders and permissions](cli/maintenance/code-exec-write-guard-holds.md) | — |
 | Apple apps (macOS) | M18 | [A development build of the app runs on the dev channel](darwin/macos/maintenance/app-dev-channel.md) | — |
 | Apple apps (macOS) | M19 | [Copy in Settings › Xcode says it copied](darwin/macos/maintenance/xcode-copy-says-copied.md) | — |

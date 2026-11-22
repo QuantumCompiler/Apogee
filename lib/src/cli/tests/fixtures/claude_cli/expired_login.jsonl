@@ -1,0 +1,2 @@
+{"type":"assistant","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"Failed to authenticate: OAuth session expired and could not be refreshed"}]},"error":"authentication_failed","session_id":"expired-session"}
+{"type":"result","subtype":"success","is_error":true,"session_id":"expired-session","result":"Failed to authenticate: OAuth session expired and could not be refreshed","num_turns":1,"terminal_reason":"api_error"}

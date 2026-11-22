@@ -968,7 +968,8 @@ assert code != 0, stream
 said = errors(stream)
 assert len(said) == 1, stream
 assert ("the Claude CLI reported an error: Failed to authenticate: OAuth session expired and "
-        "could not be refreshed") in said[0], said
+        "could not be refreshed -- run claude in a terminal and sign in again with /login") \
+    in said[0], said
 assert "reported success" not in said[0], said
 
 # ...and as a title: no title, and the sentence nowhere in the chats list.

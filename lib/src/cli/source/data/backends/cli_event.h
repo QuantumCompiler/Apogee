@@ -75,10 +75,22 @@ struct TurnComplete {
     bool is_error = false;
     std::string error_subtype{};
     /// The vendor's own name for the failure's kind, when it gives one beside
-    /// its message (Gemini's `error.type`, `QuotaError`, 57b): in the message
-    /// only where the vendor gave no words, and in `describe`'s test label.
-    /// Nothing logs it: the vendor-CLI backends write no operational log line.
+    /// its message (Gemini's `error.type`, `QuotaError`, 57b; Claude Code's
+    /// `authentication_failed`, M34, named on a message before the result and
+    /// kept here by the provider): in the message only where the vendor gave
+    /// no words, and in `describe`'s test label. Nothing logs it: the
+    /// vendor-CLI backends write no operational log line.
     std::string error_type{};
+};
+
+/// A failure's kind the vendor names on a message before the turn's terminal
+/// event (M34): Claude Code answers an expired login with a synthetic
+/// `assistant` message whose `error` is `authentication_failed`, then a
+/// result that is an error under subtype `success`. Not a failure by itself
+/// -- the terminal event's `is_error` decides that -- but kept on the turn's
+/// outcome (`TurnComplete::error_type`), so the failure can say what to do.
+struct MessageError {
+    std::string kind{};
 };
 
 /// Something worth telling the user that is not part of the answer: session
@@ -89,6 +101,6 @@ struct Notice {
 };
 
 using CliEvent = std::variant<TextDelta, ThinkingDelta, ThinkingTokens, ToolUseStart, ToolOutcome,
-                              TurnComplete, Notice>;
+                              TurnComplete, MessageError, Notice>;
 
 }  // namespace apogee::backends

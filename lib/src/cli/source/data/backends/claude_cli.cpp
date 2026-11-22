@@ -72,13 +72,21 @@ std::string claude_effort(const harness::Thinking& thinking) {
     return std::string{harness::to_string(*thinking.effort)};
 }
 
-std::string claude_cli_failure(const TurnComplete& complete) {
+std::string claude_cli_failure(const TurnComplete& complete, bool login_hint) {
     std::string message = "the Claude CLI reported ";
     message += complete.error_subtype.empty() || complete.error_subtype == "success"
                    ? std::string{"an error"}
                    : complete.error_subtype;
-    if (!complete.final_text.empty()) {
-        message += ": " + complete.final_text;
+    // Claude Code's words: its result, else the kind it named (M34).
+    const std::string& words =
+        complete.final_text.empty() ? complete.error_type : complete.final_text;
+    if (!words.empty()) {
+        message += ": " + words;
+    }
+    // The way back in, for the one kind whose way out is outside Apogee --
+    // and only where the Claude login is what failed: never under `--bare`.
+    if (login_hint && complete.error_type == "authentication_failed") {
+        message += " -- run claude in a terminal and sign in again with /login";
     }
     return message;
 }
@@ -271,6 +279,8 @@ ClaudeCliProvider::TurnOutcome ClaudeCliProvider::pump_turn(platform::ChildProce
 
     std::string chunk;
     bool done = false;
+    // A failure's kind named on a message before the result (M34), this turn's.
+    std::string message_error;
 
     // Parsing only. Consumption happens below, so a feed that carries past the
     // terminal event leaves the remainder queued instead of misattributing it.
@@ -315,10 +325,17 @@ ClaudeCliProvider::TurnOutcome ClaudeCliProvider::pump_turn(platform::ChildProce
                     }
                 } else if constexpr (std::is_same_v<T, TurnComplete>) {
                     outcome.complete = event;
+                    // The kind a message named this turn, kept on a failed
+                    // outcome (M34): the result says why, the message what.
+                    if (outcome.complete.is_error && outcome.complete.error_type.empty()) {
+                        outcome.complete.error_type = message_error;
+                    }
                     if (!event.session_id.empty()) {
                         session_id_ = event.session_id;
                     }
                     done = true;
+                } else if constexpr (std::is_same_v<T, MessageError>) {
+                    message_error = event.kind;
                 } else if constexpr (std::is_same_v<T, Notice>) {
                     if (options.on_status) {
                         harness::StatusEvent status;
@@ -424,7 +441,10 @@ void ClaudeCliProvider::throw_if_failed(const TurnOutcome& outcome) const {
                                      "the Claude CLI did not finish in time");
     }
     if (outcome.complete.is_error) {
-        throw harness::ProviderError(options_.backend_name, claude_cli_failure(outcome.complete));
+        // `--bare` never reads the Claude login, so /login cannot mend it there.
+        throw harness::ProviderError(
+            options_.backend_name,
+            claude_cli_failure(outcome.complete, options_.mode == ClaudeCliMode::Subscription));
     }
 }
 

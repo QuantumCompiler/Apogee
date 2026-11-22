@@ -84,15 +84,19 @@ struct ClaudeCliInvocation {
 /// What a failed Claude CLI turn says, in Claude Code's own words (57b): the
 /// one wording every path shares -- the conversation's turn, a side request
 /// and `complete_structured` -- so Claude has one failure message, and M34
-/// (the main turn's `/login` hint) extends this function rather than writing
-/// a second.
+/// extended this function rather than writing a second.
 ///
 /// Claude Code reports a failed request with `is_error: true`, often under
 /// `subtype: "success"`, and its reason in `result`. So the subtype is named
 /// only when it is not `success` (`error_max_turns`), the reason follows when
-/// there is one, and "success" is never said: `the Claude CLI reported an
-/// error: Failed to authenticate: …`.
-[[nodiscard]] std::string claude_cli_failure(const TurnComplete& complete);
+/// there is one -- else the kind Claude Code named on the turn's message
+/// (`error_type`) -- and "success" is never said: `the Claude CLI reported an
+/// error: Failed to authenticate: …`. When that kind is
+/// `authentication_failed`, and only then, the way back in ends it (M34):
+/// `-- run claude in a terminal and sign in again with /login`. `login_hint`
+/// false leaves it out: the provider passes false in Bare mode, where
+/// `--bare` never reads the Claude login and /login cannot mend it.
+[[nodiscard]] std::string claude_cli_failure(const TurnComplete& complete, bool login_hint = true);
 
 class ClaudeCliProvider final : public harness::LLMProvider,
                                 public harness::StatusReporting,
