@@ -1,6 +1,6 @@
 // The binary as the session knows it: one $.state value, declared in the
 // contract (types/index.d.ts). Atoms are Data's (ADR 0001).
-import { atom, update } from 'claude-code'
+import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
 import type { ApogeeBinary } from '../../../types'
@@ -27,4 +27,9 @@ export async function markAbsenceSaid($: EngineInterface): Promise<boolean> {
   })
 
   return isFirst
+}
+
+/** What discovery found when it last looked this session; undefined before it has. */
+export async function readBinary($: EngineInterface): Promise<ApogeeBinary | undefined> {
+  return (await read($, BINARY)).binary
 }

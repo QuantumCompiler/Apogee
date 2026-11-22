@@ -6,20 +6,41 @@ The architecture reference for the Claude plugin. The contributor entry point is
 
 ## Layout
 
-As built by the scaffold (1a, 2026-11-21; [MILESTONES](MILESTONES.md#milestone-a--the-mod-is-born)), per [ADR 0001](../../adrs/mod/layer-enforcement.md) (four layers, dependencies down; a package is a folder `src/<layer>/<package>/`, its tests at `tests/<layer>/<package>/`):
+As built by the scaffold (1a, 2026-11-21) and grown by the tools, slash commands and status line (1b, 2026-11-21; [MILESTONES](MILESTONES.md#milestone-a--the-mod-is-born)), per [ADR 0001](../../adrs/mod/layer-enforcement.md) (four layers, dependencies down; a package is a folder `src/<layer>/<package>/`, its tests at `tests/<layer>/<package>/`):
 
 ```
 lib/src/mod/
   .claude-plugin/plugin.json          the manifest: name apogee, version, engines (claude-code >=2.1.326),
                                       types, and the options binary and channel
   hooks/hooks.json                    names the hooks module: ./register.tsx
-  hooks/register.tsx                  the composition root: every on(...), the options read once, $ handed down
-  types/index.d.ts                    the contract: the $.state values (apogee.binary) and their types
+  hooks/register.tsx                  the composition root: every on(...) (session.start, command.run for
+                                      /apogee, tool.run for mcp__apogee__*), the options read once, $ handed down
+  types/index.d.ts                    the contract: the $.state values (apogee.binary, .tools, .jobs, .status)
   src/infrastructure/discovery/       finding the binary: candidates, locate, the install hints
-  src/data/state/                     the apogee.binary atom (shape binary-1)
+  src/infrastructure/runner/          the process runner: runBinary (process.run), superviseBinary (process.spawn)
+  src/infrastructure/timer/           $.clock wrapped: now, after, every
+  src/data/documents/                 the documents, tolerant: check, models list|status, train status, the
+                                      MCP server's frames, config get's one value
+  src/data/state/                     the atoms: binary (binary-1), tools (tools-2), jobs (jobs-1), status (status-1)
   src/business/binary/                findBinary: the answer kept, the absence said once a session
+  src/business/client/                the session's binary; readDocument, a command's document through the runner
+  src/business/commands/              the /apogee set: plan (argv per word), reads, the confirmed actions
+  src/business/served/                apogee mcp serve, one exchange a run: listServed, callServed
+  src/business/surfaces/              what the session start offers: the served tools, apogee_complete's offer;
+                                      keepRegistered, what the engine took
+  src/business/complete/              apogee_complete: the offer, each backend's bound, the spend checks, the
+                                      one-shot's argv, the served path
+  src/business/jobs/                  the async law: launchJob (a 30 s window, then a job), detachJob (a job
+                                      from its start, begun from a timer), the lost jobs
+  src/business/status/                the status line's reads and its poll
   src/presentation/notices/           the not-installed toast
-  tests/support/                      machine.ts (the scripted machine), state.ts (the state, watched)
+  src/presentation/session/           the session start, in order
+  src/presentation/commands/          /apogee: registered, confirmed, its documents formatted
+  src/presentation/tools/             the served tools, apogee_complete and apogee_job: registered, answered
+  src/presentation/status/            the status line's words
+  tests/support/                      machine.ts (the scripted machine: commands, answers, the mocked clock),
+                                      state.ts (the state, watched), apogee.ts (/apogee and the tools driven),
+                                      recorded.ts (recorded documents), handmade.ts (hand-made ones)
   tests/<layer>/<package>/*.test.ts   claude plugin test's hermetic tests
   tests/architecture/layering/        the layering check (check.mjs) and its planted violations, run by node
   tests/pipeline/changed.test.mjs     changed.sh mod's proof, run by node
@@ -30,7 +51,7 @@ lib/src/mod/
 
 Not in git: `node_modules/`, and `.claude-plugin/types/`, the declarations the engine lays beside the mod each time it loads it from a folder. The mod's tsconfig never includes that folder, so a loaded mod's two copies do not collide.
 
-**The layers' nouns.** The layering check holds each `$` noun to one layer: `process`, `fs`, `env` to Infrastructure; `state`, `store` and the atom library (`atom`, `derive`, `memberOf`, `read`, `update` from `'claude-code'`) to Data; `ui`, `command`, `tool` to Presentation. `http` is refused everywhere (the client invariant), and the composition root and the contract reach none. The atom library counts however it is taken outside Data: imported or re-exported by name, or `'claude-code'` whole (`import * as`, `export *`). Its other rules: an upward or undeclared edge fails by name, nothing comes from outside the mod but `'claude-code'`, no `import()`, every file at `src/<layer>/<package>/`, every layer with a package and every package with its tests, and an empty graph refused. Outside `src/`, `hooks/` holds `register.tsx` alone and `types/` holds `.d.ts` files alone, importing nothing of the mod but each other; a JavaScript file in a layer is refused, since the engine loads it and the check cannot read it (ADR 0001's Landed note has the full list).
+**The layers' nouns.** The layering check holds each `$` noun to one layer: `process`, `fs`, `env` and `clock` (since 1b) to Infrastructure; `state`, `store` and the atom library (`atom`, `derive`, `memberOf`, `read`, `update` from `'claude-code'`) to Data; `ui`, `command`, `tool` to Presentation. `http` is refused everywhere (the client invariant), and the composition root and the contract reach none. The atom library counts however it is taken outside Data: imported or re-exported by name, or `'claude-code'` whole (`import * as`, `export *`). Its other rules: an upward or undeclared edge fails by name, nothing comes from outside the mod but `'claude-code'`, no `import()`, every file at `src/<layer>/<package>/`, every layer with a package and every package with its tests, and an empty graph refused. Outside `src/`, `hooks/` holds `register.tsx` alone and `types/` holds `.d.ts` files alone, importing nothing of the mod but each other; a JavaScript file in a layer is refused, since the engine loads it and the check cannot read it (ADR 0001's Landed note has the full list).
 
 **Discovery** (`src/infrastructure/discovery/`), the macOS app's ladder mirrored (`lib/src/darwin/source/data/discovery/BinaryDiscovery.swift`):
 
@@ -41,11 +62,43 @@ Not in git: `node_modules/`, and `.claude-plugin/types/`, the declarations the e
 
 A leading `~/` in the override is the home folder (`$.env.get('HOME')`). A place that does not exist is `not installed` and is not run; one that cannot be looked at (`$.fs.exists` rejects, as it does for a network location) is passed over with why, and the ladder goes on. Each one that exists is run as `<candidate> version` (10 s) and must print `apogee <version> …` first; a `channel:` line is kept as the binary's reported channel. Every place passed over keeps its reason. None answering is `{ kind: 'not-found', skipped }`, said once a session as a 10-second toast naming every place and why, then the install line: the README's `curl … install.sh | bash`, or `make -C lib/src/cli install MODE=dev` on the dev channel. Discovery runs awaited in `session.start`, after the engine's own start.
 
+## The surfaces (1b)
+
+Set up at `session.start`, awaited, after discovery: `/apogee` is registered whatever discovery found; with a binary, the server is listed, `apogee_complete` offered or not, the tools registered, and the status line's poll started. Each tool is registered on its own: one the engine refuses is toasted once and said by `/apogee`, the rest are registered all the same, and the session starts regardless. Every run is the binary discovery found, so a development load on the `dev` channel drives `apogee-dev` alone.
+
+**The tools** (`mcp__apogee__<name>`, behind ToolSearch as an MCP server's are):
+
+| Tool | What answers it |
+|---|---|
+| Every tool `apogee mcp serve` lists but `complete` (22 on 0.2.0: the native reads and the five status reads), by its own name, description and schema | One run of `<binary> mcp serve` a call: the handshake (`initialize`, `notifications/initialized`) and one `tools/call` on its stdin, the reply read back from its stdout (the CLI's own client's way, `lib/src/cli/tests/scripts/py/mcp_serve_client.py`), within 120 s. The server's error result is the call's error, in its words. |
+| `apogee_complete` (`prompt`, `backend`, `max_tokens`), offered only for a local, unmetered backend and saying so | Where the listing names the served `complete` (the person's config lists it under a backend's `mcp_serve:`): that tool, its backends its schema's `enum`, each at the bound the server's description says (`<name> (at most N tokens)`; the schema's `maximum` is only the widest), a bound left out never sent so the server holds each backend to its own. Otherwise the configured `llamacpp` and `mlx` backends of `models list` that chat (no `kind`, or `chat` or `vision`), only where `models status` names no active suite and a utility model that is unset or local and unmetered (the one-shot calls those, the served `complete` never does). Each is held to 1024 tokens a call, or its entry's own `max_tokens` when lower (`config get backends.<name>.max_tokens`): `<binary> complete -m <backend> -n <bound> --rag "" -- <prompt>` (retrieval off as the served complete has it; the prompt after `--`). A call runs within ten minutes on either path. With neither, it is not registered and `/apogee` says why. |
+| `apogee_job` (`id`) | The job kept in `apogee.jobs`: still running and for how long, its answer or what it printed, why it failed, or lost (a copy of the mod that is gone left it running). Runs nothing. |
+
+The listing is read once a session start (10 s); the names the mod registered are kept in `apogee.tools`, and the root's `tool.run` hook answers those alone, passing on any other `mcp__apogee__` name.
+
+**The `/apogee` set** (`lib/src/cli/source/presentation/cli/` for each argv):
+
+| Typed | Runs | Shows |
+|---|---|---|
+| `/apogee` (or `help`) | nothing | the binary driven (path, version, channel), the places passed over, the served tools and `apogee_complete` as offered, the set |
+| `/apogee check` | `check --output-format json` | every row by section with its status and remedy, and the counts (the report is read whatever the exit status) |
+| `/apogee models` | `models list --output-format json` | each backend and stored model by section, with its type, model, state and note |
+| `/apogee train status` | `train status --output-format json` | what runs, the newest pipeline, the cycle, each active version, the recent runs |
+| `/apogee promote <run> --as <backend>` | `train promote <run> --as <backend>`, after the yes | what it printed, or its status and last words |
+| `/apogee rollback <backend>` | `train rollback <backend>`, after the yes | the same |
+
+A field a document lacked is said under what is shown. Promote and rollback ask first (`$.ui.ask`: the exact command, `Run it` or `Cancel`); anything but `Run it`, a dismissed dialog included, runs nothing and says so. Neither CLI command has a `--yes`, so the confirmation is the one gate, and no `--yes` is ever passed. They run supervised (`$.process.spawn`), with no time of their own, each a job from its start: the command answers the job's id at once, and the run is begun from a `$.clock` timer, outside the command's dispatch, since the API ends a spawn when the dispatch that started it is abandoned. A toast says its end, and the status line is read back then. With no binary every word says where the mod looked and the install line.
+
+**The async law** (`src/business/jobs/`): a completion gets a 30-second window on `$.clock`. Ended inside it, it answers there. Otherwise it goes on as a job (`complete-1`): the call answers the id at once, a 10-second toast says when it ends, and its outcome is kept for `apogee_job`. A confirmed promote or rollback is a job from its start (`promote-2`, `detachJob`, above). The newest 20 jobs are kept, the running ones always. A session start in a fresh copy of the mod marks the jobs an earlier copy left running lost, since their ends can no longer be heard.
+
+**The status line** (`$.ui.status`): `Apogee: <backend> v<version> · <run state>`, `Apogee (dev)` on the dev channel. The backend is `models status`'s `chat` role (`no chat backend` when it reads `(unset …)`), the version that backend's `active_version` in `train status`'s `versions` (`(no promoted version)` without one), the run state `idle` or `training: <n> runs, pipeline <spec>, cycle pass` from `running`, `active_pipeline` and `cycle_active`. Read at the start, then once a minute (two read-only runs), and after a confirmed command ends; never two at once, each read waiting for the one before it, so a read-back lands after any poll read begun before the command wrote. When the latest read failed, or the reading is two minutes old, the line keeps what it last read and adds `· stale: read <age> ago; <why>`; before any reading it says `status unread: <why>`. Fields the documents lacked are said (`· lacked: …`). With no binary there is no line.
+
 ## The contracts the mod builds against
 
-- The `--output-format json` documents (models, train status/versions, check, …) — measured live by the mod spike (2026-10-21).
+- The `--output-format json` documents (models, train status/versions, check, …) — measured live by the mod spike (2026-10-21); the tests read the recordings (`lib/src/darwin/tests/business/reads/Fixtures/`, copied into `tests/support/recorded.ts`).
+- `train promote <run> --as <backend>` and `train rollback <backend>` — text out, no `--yes` and no question of their own (`train.cpp`).
 - Machine mode, for anything session-grade later.
-- `apogee mcp serve` (the hidden `__mcp-tools` its alias) — the MCP server: 22 read-only tools since the CLI's 54a, the spike's 17 plus the five status reads (`models_list`, `models_status`, `train_status`, `train_versions`, `check`), each answering with its command's JSON document byte for byte; since the CLI's 54b also `complete`, the one tool not read-only, listed only where the person's config lists it under a local backend's `mcp_serve:` (absent otherwise -- the mod's fallback is the CLI path); the registration JSON printed by `apogee mcp presets`.
+- `apogee mcp serve` (the hidden `__mcp-tools` its alias) — the MCP server, reached one exchange a run (above): 22 read-only tools since the CLI's 54a, the spike's 17 plus the five status reads (`models_list`, `models_status`, `train_status`, `train_versions`, `check`), each answering with its command's JSON document byte for byte; since the CLI's 54b also `complete`, the one tool not read-only, listed only where the person's config lists it under a local backend's `mcp_serve:` (absent otherwise -- the mod's fallback is the CLI path); the registration JSON printed by `apogee mcp presets`.
 
 ## Build & test
 

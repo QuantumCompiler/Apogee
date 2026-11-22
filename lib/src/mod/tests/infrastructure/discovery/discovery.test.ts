@@ -50,7 +50,7 @@ test("the release channel's binary is found, verified by its version line", asyn
 
   await $.session.start(START)
 
-  expect(made.runs).toEqual([{ argv: [`${BIN}/apogee`, 'version'], init: { timeoutMs: 10_000 } }])
+  expect(made.versions()).toEqual([{ argv: [`${BIN}/apogee`, 'version'], init: { timeoutMs: 10_000 } }])
   expect(kept.binary()?.binary).toEqual({
     kind: 'found',
     path: `${BIN}/apogee`,
@@ -127,7 +127,7 @@ test('a place that cannot be looked at is skipped with why, and the ladder goes 
 
   await $.session.start(START)
 
-  expect(made.runs.map(run => run.argv[0])).toEqual([`${BIN}/apogee`])
+  expect(made.versions().map(run => run.argv[0])).toEqual([`${BIN}/apogee`])
   const binary = kept.binary()?.binary
   expect(binary?.kind === 'found' && [binary.source, binary.path]).toEqual(['release', `${BIN}/apogee`])
   expect(binary?.skipped).toEqual([
@@ -144,7 +144,7 @@ test('the dev channel drives apogee-dev, and says the channel it reported', { op
 
   await $.session.start(START)
 
-  expect(made.runs.map(run => run.argv[0])).toEqual([`${BIN}/apogee-dev`])
+  expect(made.versions().map(run => run.argv[0])).toEqual([`${BIN}/apogee-dev`])
   const binary = kept.binary()?.binary
   expect(binary?.kind === 'found' && [binary.source, binary.version, binary.channel]).toEqual(['dev', '0.2.0', 'dev'])
 })

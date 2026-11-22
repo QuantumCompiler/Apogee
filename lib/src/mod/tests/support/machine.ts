@@ -1,9 +1,12 @@
 // A scripted machine beneath the plugin: the home folder, the files that
-// exist, what each binary answers to `version`, and the toasts raised. Every
-// test of the mod runs over this, never a real binary (the item's Testing:
-// hermetic, over scripted $.process results).
-import type { On, ProcessRunInit } from 'claude-code'
+// exist, what each binary answers to `version` and to the commands the mod
+// runs, the toasts raised, the status line, the tools and commands
+// registered, the questions asked and the clock. Every test of the mod runs
+// over this, never a real binary (the item's Testing: hermetic, over scripted
+// $.process results).
+import type { CommandSpec, On, ProcessRunInit, ToolSpec } from 'claude-code'
 import { mock } from 'claude-code/testing'
+import type { MockClock } from 'claude-code/testing'
 
 export const HOME = '/Users/someone'
 export const BIN = `${HOME}/.local/bin`
@@ -29,19 +32,64 @@ export const DEV_VERSION =
  */
 export type Answer = { exitCode?: number; stdout?: string; stderr?: string } | { refuses: string } | { unreadable: string }
 
+/**
+ * What the binary answers to a command other than `version`: by its
+ * arguments (the path left off), late when the script awaits the clock;
+ * undefined is a command nobody scripted, refused as one.
+ */
+export type Script = (args: readonly string[], init: ProcessRunInit | undefined) => Answer | undefined | Promise<Answer | undefined>
+
+/**
+ * How the person answers a question the mod asks (`$.ui.ask`): the label
+ * picked, or undefined for a dialog dismissed.
+ */
+export type Asker = (question: string, labels: readonly string[]) => string | undefined
+
+/** One command run: by `$.process.run` with its init, or spawned (`$.process.spawn`). */
+export type Run = { argv: string[]; init: ProcessRunInit | undefined; isSpawned?: true }
+
 export type Machine = {
   /** Every command run, with what it was run with. */
-  runs: { argv: string[]; init: ProcessRunInit | undefined }[]
+  runs: Run[]
+  /** The `version` runs alone: discovery's. */
+  versions: () => { argv: string[]; init: ProcessRunInit | undefined }[]
   /** Every toast's text and how long it was asked to stay. */
   toasts: { text: string; timeoutMs: number | undefined }[]
+  /** Every status line set, in order; undefined for a line taken off. */
+  statuses: (string | undefined)[]
+  /** Every tool registered, as registered. */
+  tools: ToolSpec[]
+  /** Every slash command registered. */
+  commands: CommandSpec[]
+  /** Every question asked, with its labels. */
+  asks: { question: string; labels: string[] }[]
+  /** The clock beneath the plugin: it moves only when the test moves it. */
+  clock: MockClock
 }
 
 /**
- * Scripts the machine. `binaries` maps a path to what it answers; a path not
- * there does not exist. `home: null` leaves HOME unset.
+ * How the scripted world answers beyond `version`: the commands, the person,
+ * the clock's start, and an engine that refuses every tool (`toolRefusal`) or
+ * the tools named, each with its reason (`toolRefusals`).
  */
-export function machine(on: On, binaries: Readonly<Record<string, Answer>>, home: string | null = HOME): Machine {
-  const made: Machine = { runs: [], toasts: [] }
+export type World = { script?: Script; ask?: Asker; now?: number; toolRefusal?: string; toolRefusals?: Readonly<Record<string, string>> }
+
+/**
+ * Scripts the machine. `binaries` maps a path to what it answers to
+ * `version`; a path not there does not exist. `home: null` leaves HOME unset.
+ */
+export function machine(on: On, binaries: Readonly<Record<string, Answer>>, home: string | null = HOME, world: World = {}): Machine {
+  const clock = mock.clock(on, { now: world.now ?? 1_800_000_000_000 })
+  const made: Machine = {
+    runs: [],
+    versions: () => made.runs.filter(run => run.argv[1] === 'version'),
+    toasts: [],
+    statuses: [],
+    tools: [],
+    commands: [],
+    asks: [],
+    clock,
+  }
   mock.env(on, home === null ? {} : { HOME: home })
   on('fs.exists', (_, e) => {
     const answer = Object.hasOwn(binaries, e.path) ? binaries[e.path] : undefined
@@ -51,11 +99,13 @@ export function machine(on: On, binaries: Readonly<Record<string, Answer>>, home
 
     return { value: answer !== undefined }
   })
-  on('process.run', (_, e) => {
+  on('process.run', async (_, e) => {
     made.runs.push({ argv: [...e.argv], init: e.init })
-    const answer = binaries[e.argv[0] ?? '']
+    const path = e.argv[0] ?? ''
+    const args = e.argv.slice(1)
+    const answer = args.length === 1 && args[0] === 'version' ? binaries[path] : Object.hasOwn(binaries, path) ? await world.script?.(args, e.init) : undefined
     if (answer === undefined) {
-      return { deny: `${e.argv[0]}: no such file` }
+      return { deny: `${e.argv.join(' ')}: not scripted` }
     }
     if ('refuses' in answer) {
       return { deny: answer.refuses }
@@ -74,10 +124,55 @@ export function machine(on: On, binaries: Readonly<Record<string, Answer>>, home
       },
     }
   })
+  // A supervised run streams what the script answers, stdout then stderr, then how it ended.
+  on('process.spawn', async function* (_, e) {
+    made.runs.push({ argv: [...e.argv], init: undefined, isSpawned: true })
+    const path = e.argv[0] ?? ''
+    const answer = Object.hasOwn(binaries, path) ? await world.script?.(e.argv.slice(1), undefined) : undefined
+    if (answer === undefined || 'refuses' in answer || 'unreadable' in answer) {
+      return { deny: answer === undefined ? `${e.argv.join(' ')}: not scripted` : 'refuses' in answer ? answer.refuses : answer.unreadable }
+    }
+    if (answer.stdout !== undefined && answer.stdout !== '') yield { stream: 'stdout' as const, text: answer.stdout }
+    if (answer.stderr !== undefined && answer.stderr !== '') yield { stream: 'stderr' as const, text: answer.stderr }
+
+    return { value: { code: answer.exitCode ?? 0, signal: null } }
+  })
   on('ui.toast', (_, e) => {
     made.toasts.push({ text: e.text, timeoutMs: e.timeoutMs })
 
     return { value: undefined }
+  })
+  on('ui.status', (_, e) => {
+    made.statuses.push(e.text)
+
+    return { value: undefined }
+  })
+  on('tool.register', (_, e) => {
+    if (world.toolRefusal !== undefined) {
+      return { deny: world.toolRefusal }
+    }
+    const refusal = world.toolRefusals !== undefined && Object.hasOwn(world.toolRefusals, e.name) ? world.toolRefusals[e.name] : undefined
+    if (refusal !== undefined) {
+      return { deny: refusal }
+    }
+    made.tools = [...made.tools.filter(one => one.name !== e.name), { ...e }]
+
+    return { value: { tool: `mcp__apogee__${e.name}` } }
+  })
+  on('command.register', (_, e) => {
+    made.commands.push({ ...e })
+
+    return { value: { command: e.name } }
+  })
+  // `$.ui.ask` is a call of the AskUserQuestion tool beneath the plugin.
+  on('tool.call', { tool: 'AskUserQuestion' }, (_, e) => {
+    const asked = e.questions[0]
+    const question = asked?.question ?? ''
+    const labels = (asked?.options ?? []).map(option => option.label)
+    made.asks.push({ question, labels })
+    const answer = world.ask?.(question, labels)
+
+    return { result: { questions: e.questions, answers: answer === undefined ? {} : { [question]: answer } } }
   })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
 

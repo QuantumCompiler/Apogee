@@ -4,12 +4,12 @@
 |---|---|
 | **Type** | ✨ Feature |
 | **Project** | Claude plugin (mod) |
-| **Status** | 🔒 Blocked |
+| **Status** | 🟢 Ready |
 | **Fix version** | v0.2.1 |
 | **Component** | The pane (`src/presentation/pane/`) |
 | **Labels** | `pane` `read-back` `confirmed-actions` |
 | **Epic** | Track 1 · the mod is born |
-| **Blocked by** | [1b](mod-tools-and-commands.md) |
+| **Blocked by** | — (1b shipped 2026-11-21, [Milestone A](../../../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born)) |
 | **Blocks** | [2b](../v0.2.2/mod-graphs-and-knowledge.md) |
 | **Reporter** | The mod spike (2026-10-21) |
 | **Created** | 2026-10-21 |
@@ -92,6 +92,7 @@ Hermetic.
 | Date | Decision | Whose call |
 |---|---|---|
 | 2026-10-21 | The pane is reads plus two confirmed actions; anything session-grade (a chat in the pane) is explicitly out (the SPEC's non-goal). | the spec |
+| 2026-11-21 | 1b shipped ([Milestone A](../../../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born)), and this item builds on its shape: every run of the binary goes through `src/infrastructure/runner/`, discovery's included (`runBinary` for a read, `superviseBinary` for a command that writes the store); `src/business/client/readDocument` reads a command's document tolerantly, `src/data/documents/` holds the decoders (`check`, `models list`, `models status`, `train status`; `train versions` is this item's to add); `src/business/commands/` plans promote and rollback with the CLI's argv (neither takes `--yes`, so the confirmation is the one gate) and runs each as a job from its start (`src/business/jobs/detachJob`: answered at once, the run begun from a timer outside the dispatch, since the API ends a spawn when the dispatch that started it is abandoned; its end toasted), while a completion keeps `launchJob`'s 30 s window; `src/presentation/commands/apogee.ts` asks with `$.ui.ask`, the exact command shown; the status line is read back after a command ends (`refreshStatusLineLater`), every read waiting for the one before it; `$.clock` is Infrastructure's noun (`src/infrastructure/timer/`), which visibility-scoped polling stands on; tests script the machine through `tests/support/machine.ts` (commands, answers, the mocked clock) with documents from `tests/support/recorded.ts` and `handmade.ts`. Flagged for veto with 1b's decisions | 1b (the run) |
 
 ## Out of scope
 
@@ -101,6 +102,6 @@ Hermetic.
 
 ## Links
 
-- **Blocked by:** [`mod-tools-and-commands.md`](mod-tools-and-commands.md) (1b) · **Blocks:** [2b](../v0.2.2/mod-graphs-and-knowledge.md)
+- **Blocked by:** — (1b shipped 2026-11-21, [Milestone A](../../../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born)) · **Blocks:** [2b](../v0.2.2/mod-graphs-and-knowledge.md)
 - **Follow-on:** the adapters column (per backend, with switching), its CLI side track 53 (shipped v0.2.0) — noted, not gated
 - **Relates to:** the mod spike (2026-10-21); the GUI's monitor/read-back patterns and shown-batch pattern; [ADR 0001](../../../adrs/mod/layer-enforcement.md)

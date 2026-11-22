@@ -13,6 +13,7 @@
 import type { EngineInterface, PluginOptions } from 'claude-code'
 
 import type { ApogeeBinary, ApogeeSkipped, ApogeeSource } from '../../../types'
+import { lastLine, runBinary } from '../runner/runner'
 
 /** Which places discovery looks at beside the override. */
 export type Channel = 'release' | 'dev'
@@ -113,11 +114,10 @@ async function verify($: EngineInterface, path: string): Promise<Verified | stri
   if (!isThere) {
     return 'not installed'
   }
-  let ran
-  try {
-    ran = await $.process.run([path, 'version'], { timeoutMs: VERSION_TIMEOUT_MS })
-  } catch (error) {
-    return `could not run \`version\`: ${error instanceof Error ? error.message : String(error)}`
+  // Through the runner, as every run of the binary goes.
+  const ran = await runBinary($, path, ['version'], { timeoutMs: VERSION_TIMEOUT_MS })
+  if (ran.kind === 'refused') {
+    return `could not run \`version\`: ${ran.reason}`
   }
   if (ran.exitCode !== 0) {
     const said = lastLine(ran.stderr)
@@ -143,13 +143,4 @@ function versionOf(stdout: string): Verified | string {
   const channel = lines.find(line => line.startsWith('channel: '))?.slice('channel: '.length)
 
   return channel === undefined || channel === '' ? { version, versionLine: first } : { version, versionLine: first, channel }
-}
-
-/** The last non-empty line of `text`, if any. */
-function lastLine(text: string): string | undefined {
-  return text
-    .split('\n')
-    .map(line => line.trim())
-    .filter(line => line !== '')
-    .at(-1)
 }

@@ -61,7 +61,7 @@ From the MCP-awareness spike (2026-11-07), two capabilities Claude cannot reach 
 | `src/business/` | the reads (`apogee graph list --output-format json`, …) |
 | `src/presentation/` | `/apogee graphs` (each graph with its kind and size), `/apogee knowledge <question>` (the records that answer it); the pane's Knowledge section (graphs and the newest records) |
 
-**Reference.** Mod 1b ([`mod-tools-and-commands.md`](../v0.2.1/mod-tools-and-commands.md)) and 1c ([`mod-pane.md`](../v0.2.1/mod-pane.md)), whose surfaces this extends; CLI 58b ([`mcp-serve-graphs-and-knowledge.md`](../../cli/v0.2.2/mcp-serve-graphs-and-knowledge.md)).
+**Reference.** Mod 1b ([shipped 2026-11-21](../../../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born)) and 1c ([`mod-pane.md`](../v0.2.1/mod-pane.md)), whose surfaces this extends; CLI 58b ([`mcp-serve-graphs-and-knowledge.md`](../../cli/v0.2.2/mcp-serve-graphs-and-knowledge.md)).
 
 ## Testing
 
@@ -89,6 +89,6 @@ From the MCP-awareness spike (2026-11-07), two capabilities Claude cannot reach 
 
 ## Links
 
-- **Blocked by:** [1c](../v0.2.1/mod-pane.md), [CLI 58b](../../cli/v0.2.2/mcp-serve-graphs-and-knowledge.md) (1c already waits on 1b) · **Blocks:** —
-- **Relates to:** Mod 1b ([`mod-tools-and-commands.md`](../v0.2.1/mod-tools-and-commands.md)), whose registration carries the tools and whose `/apogee` commands this extends; CLI 58d (the served refresh call); ADR 0001 (the four layers).
+- **Blocked by:** [1c](../v0.2.1/mod-pane.md), [CLI 58b](../../cli/v0.2.2/mcp-serve-graphs-and-knowledge.md) · **Blocks:** —
+- **Relates to:** Mod 1b ([shipped 2026-11-21](../../../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born)), whose registration carries the tools and whose `/apogee` commands this extends; CLI 58d (the served refresh call); ADR 0001 (the four layers).
 - **Follows from:** the MCP-awareness spike (2026-11-07), walls W2 and W3.
