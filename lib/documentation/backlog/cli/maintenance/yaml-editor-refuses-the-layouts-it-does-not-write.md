@@ -190,4 +190,6 @@ Hermetic and in process. Each refused case fails on today's binary (measured 202
   - [CLI-M36](grant-and-deny-flags-offer-what-they-take.md): its offers come from the loader, and they stay so on a refused layout (the open question above).
   - [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md), whose dry run asks this item's refusals before an ingest writes anything.
   - [CLI-M47](config-migrate-carries-every-line-or-names-it.md), the way out these refusals name, made to carry what it refuses today.
+  - [CLI-M52](a-refused-scaffold-writes-nothing.md): `agents create` and `mcp create` dry-run their entry before the first file, so this item's layout refusals leave no scaffold behind once it ships.
+  - [CLI-M53](a-symphony-the-cli-writes-is-one-it-can-delete.md) and [CLI-M54](rename-and-get-find-an-entry-by-its-folded-name.md), which edit the same `find_entry_line`, `entry_name` and `rename_backend` key lookup: either order works, and whichever lands second merges the other's change.
   - 57e, "a printed success is a landed change" and its refusals; 28i, JSONC and `config migrate`; 55f and 27f, the compact-list rule.

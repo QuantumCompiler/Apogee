@@ -198,17 +198,19 @@ All hermetic: scripted runners and jobs, recorded documents, no window, no binar
 | 2026-11-26 | Specced from CLI-M45's and CLI-M46's Out of scope, a sandboxed investigation, two skeptics and a critic (Evidence). Placed in **Maintenance** as M21. | the spec |
 | 2026-11-26 | **Split three ways, not one item.** The brief asked for one item for the names and the done note. The investigation found different seams (argv in Presentation, against the jobs core), and an argv move of about 95 sites in 24 files. So: this item for the seam and the rows where a person meets harm today; APP-M22 for the done note, which draws design first; APP-M23 for every other site, gated on this one. | the spec |
 | 2026-11-26 | **No CLI change.** `--` reads the same on every shipped binary (CLI11 v2.4.2 since v0.1.0), and `graph build --graph` exists since v0.1.4, so the app needs no version check. | the spec |
+| 2026-11-26 | **The CLI asides are specced** as CLI-M48 (with M49–M51 beside it), M52, M53, M55 and M56. None gates this item, and this item gates none: the app's `--` and the CLI's own printed commands are separate seams. The aside that datasets have no name rule is corrected: `valid_dataset_name` exists, and it admits a leading `-`. | the spec |
 
 ## Out of scope
 
 - **Every other site** (Store, Downloads, Library, Review, Tasks, Sessions, Suites, Voice, Settings, Xcode, Records, ClipForm's `--lora`), the previews' prefixes, the layering rule and the full verdict sweep: [APP-M23](every-name-the-app-passes-is-read-as-a-name.md).
 - **A job's non-fatal notes on done**: [APP-M22](a-jobs-notes-reach-the-person.md). It also edits `CollectionsViewModel.ingest()`, so the two are built one after the other.
 - **The design prototype's mirrors** of the Collections argv and the ClipForm order (`CollectionsViewModel.ts`, `KnowledgeWorldRules.ts:49-56`, `ClipForm.ts:77`). No screen or state is new, so nothing is drawn first; a design follow-up may bring the mirrors up to date.
-- **CLI asides the probes found**, for the CLI queue:
-  - remedies that print a dash name without `--` (`graph.cpp:1535`, `:1638`; `models delete` suggests `config delete-backend -x`);
-  - `agents create` leaving `prompts/-x.txt` behind on a refused name;
-  - `symphonies delete -- -x` saying `not found in config` while `show` finds it;
-  - datasets having no name rule.
+- **CLI asides the probes found**, specced in the CLI queue on 2026-11-26:
+  - remedies that print a dash name without `--` (`graph.cpp:1535`, `:1638`; `models delete` suggests `config delete-backend -x`): [CLI-M48](../../../cli/maintenance/a-suggested-command-runs-as-printed.md);
+  - `agents create` leaving `prompts/-x.txt` behind on a refused name: [CLI-M52](../../../cli/maintenance/a-refused-scaffold-writes-nothing.md);
+  - `symphonies delete -- -x` saying `not found in config` while `show` finds it: [CLI-M53](../../../cli/maintenance/a-symphony-the-cli-writes-is-one-it-can-delete.md);
+  - datasets having no name rule: there is one (`valid_dataset_name`), and it admits a leading `-`; [CLI-M55](../../../cli/maintenance/a-dataset-is-named-not-pathed-at-every-reader.md) and [CLI-M56](../../../cli/maintenance/a-new-dataset-name-is-one-every-verb-reads.md);
+  - the CLI's own full-screen shell passing a listed name without `--` in its datasets, agents and MCP row actions, this item's counterpart in the CLI: [CLI-M51](../../../cli/maintenance/the-tuis-row-actions-reach-a-dash-led-row.md).
 
 ## Links
 
@@ -217,5 +219,6 @@ All hermetic: scripted runners and jobs, recorded documents, no window, no binar
   - [APP-M22](a-jobs-notes-reach-the-person.md), the done note;
   - [CLI-M45](../../../cli/maintenance/a-collection-is-named-not-pathed-at-every-reader.md), whose completion change keeps the Graph list's `--` ask;
   - [CLI-M46](../../../cli/maintenance/a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md), whose create rule's refusal reaches the person only once the name follows `--`;
+  - [CLI-M48](../../../cli/maintenance/a-suggested-command-runs-as-printed.md) and [CLI-M51](../../../cli/maintenance/the-tuis-row-actions-reach-a-dash-led-row.md), the CLI's own printed commands and row actions that pass a dash-led name without `--`, and the other asides the probes found ([CLI-M52](../../../cli/maintenance/a-refused-scaffold-writes-nothing.md), [CLI-M53](../../../cli/maintenance/a-symphony-the-cli-writes-is-one-it-can-delete.md), [CLI-M55](../../../cli/maintenance/a-dataset-is-named-not-pathed-at-every-reader.md), [CLI-M56](../../../cli/maintenance/a-new-dataset-name-is-one-every-verb-reads.md));
   - [APP-7c](../../v0.2.4/every-place-against-a-server.md) and [APP-7d](../../v0.2.4/apogeekit-swift-package.md): land this before 7c records its argv baseline and 7d carves BusinessReads into ApogeeKit;
   - GUI 4g, `Argv`'s first rule; [ADR 0002](../../../../adrs/darwin/presentation-mvvm.md); [ADR 0004](../../../../adrs/darwin/module-schemes-and-previews.md).

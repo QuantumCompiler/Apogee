@@ -10,7 +10,7 @@
 | **Labels** | `jobs` `cli-parity` `silent-failure` `design` |
 | **Epic** | — |
 | **Blocked by** | — |
-| **Blocks** | — |
+| **Blocks** | [CLI-M58](../../../cli/maintenance/a-runs-notes-are-said-once-on-stderr.md) |
 | **Reporter** | The CLI-M45/M46 investigation (2026-11-22), then a sandboxed investigation, two skeptics and a critic (2026-11-26) |
 | **Created** | 2026-11-26 |
 
@@ -201,7 +201,7 @@ All hermetic: recorded output, scripted jobs, one real `/bin/sh` child, no windo
 | Read stderr as lines in Infrastructure, or only the tail at the end? | `[default]` | As lines, opt-in for supervised jobs only, each line capped. The tail measurably loses a head note. The 8 KiB tail and the busy sampler stay. |
 | Should a failed run also show the notes said before its failure line? | `[default]` | No. The failure path is unchanged, and CLI-M46's refusals rely on its last line. |
 | Which screens get the card? | `[default]` | Collections, Records and Graph, where the collection-name class lands. Training, Settings, Sessions, Downloads and the console are a follow-up, since a toast suffix without a card would break the shell's rule. |
-| Should this also cover warnings printed on stdout? | `[default]` | No. No shape marks them, so this rule can't catch them. A follow-up decides between the CLI saying them in the house voice on stderr (then no app change) and the app keeping every stdout line. The `graph-update-source-gone` guard names it. |
+| Should this also cover warnings printed on stdout? | `[default]` | No. No shape marks them, so this rule can't catch them. The follow-up chose the CLI side (2026-11-26): [CLI-M58](../../../cli/maintenance/a-runs-notes-are-said-once-on-stderr.md) says them in the house voice on stderr, so this rule keeps them with no app change, and it waits on this item so no note the app shows today goes unshown; [CLI-M59](../../../cli/maintenance/the-http-graph-jobs-say-what-the-cli-says.md) and [CLI-M60](../../../cli/maintenance/the-models-verbs-say-their-notes-on-stderr.md) do the same for the HTTP graph jobs and the models verbs. The `graph-update-source-gone` guard names it; re-recording it as a note once CLI-M58 ships is a chore for this queue. |
 | Does it wait on CLI-M45 or CLI-M46? | `[default]` | No: the rule keys on the shape, not the words. CLI-M46 now says its notes keep the house voice on stderr, its graph build's before-extraction note included. |
 
 ## Decision log
@@ -210,19 +210,21 @@ All hermetic: recorded output, scripted jobs, one real `/bin/sh` child, no windo
 |---|---|---|
 | 2026-11-26 | Specced from CLI-M46's Out of scope, a sandboxed investigation, two skeptics and a critic (Evidence). Placed in **Maintenance** as M22, its own item beside APP-M21 (different seam: the jobs core, not argv). Both edit `CollectionsViewModel.ingest()`, so they are built one after the other, with no gate. | the spec |
 | 2026-11-26 | **The design draws it here**, as M11 and M12 did: no design-queue sibling. | the spec |
+| 2026-11-26 | **Warnings on stdout go to the CLI** (CLI-M58, with M59 and M60): the CLI says them in the house voice on stderr, so this item's rule keeps them with no app change. **CLI-M58 waits on this item**: two of the notes it moves (knowledge reindex's note, and a nothing-to-extract rebuild's embedding warning) are the app's toast today, so moving them first would hide them until this item shows stderr notes. | the spec |
 
 ## Out of scope
 
 - **Every other done path** (Training, Settings' fix, Sessions' compact, the Downloads card, the console's tail) and a source check that every done path reads notes. They are a follow-up, "every done path shows its notes".
-- **Warnings on stdout** (Evidence 11). That follow-up is for the CLI queue, or for this app's every-done-path follow-up.
+- **Warnings on stdout** (Evidence 11): the CLI's [CLI-M58](../../../cli/maintenance/a-runs-notes-are-said-once-on-stderr.md), gated on this item, with [CLI-M59](../../../cli/maintenance/the-http-graph-jobs-say-what-the-cli-says.md) and [CLI-M60](../../../cli/maintenance/the-models-verbs-say-their-notes-on-stderr.md). Re-recording the `graph-update-source-gone` guard as a note once CLI-M58 ships is a chore for this queue.
 - **A remote job's notes** (APP-7c over CLI-59d): 7c fills `JobEnd.notes` from a server job's warnings.
 - **Names passed as flags**: [APP-M21](a-listed-name-reaches-the-verb-as-listed.md) and [APP-M23](every-name-the-app-passes-is-read-as-a-name.md).
 
 ## Links
 
-- **Blocked by:** — · **Blocks:** —
+- **Blocked by:** — · **Blocks:** [CLI-M58](../../../cli/maintenance/a-runs-notes-are-said-once-on-stderr.md), whose notes move to stderr only once this item shows them
 - **Relates to:**
   - [APP-M21](a-listed-name-reaches-the-verb-as-listed.md), which also edits `ingest()`;
   - [CLI-M46](../../../cli/maintenance/a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md), whose notes this item shows and whose refusals the failure path already shows;
   - [APP-7c](../../v0.2.4/every-place-against-a-server.md), a remote job's notes;
+  - [CLI-M59](../../../cli/maintenance/the-http-graph-jobs-say-what-the-cli-says.md) and [CLI-M60](../../../cli/maintenance/the-models-verbs-say-their-notes-on-stderr.md), the HTTP graph jobs' and the models verbs' notes;
   - 1b and 1i, the jobs core's records; the providers-register precedent; [ADR 0002](../../../../adrs/darwin/presentation-mvvm.md); [ADR 0004](../../../../adrs/darwin/module-schemes-and-previews.md).

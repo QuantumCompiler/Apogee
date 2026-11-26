@@ -166,4 +166,7 @@ Each fixture fails on today's binary (measured 2026-11-22).
   - [CLI-M42](stubs-read-the-words-as-the-shell-does.md), whose investigation found the spaced collection;
   - 5c0d514e, the path rule's first commit;
   - DEVELOPER.md's `embed` row ("the path is built, never accepted");
-  - [APP-M21](../../darwin/macos/maintenance/a-listed-name-reaches-the-verb-as-listed.md), whose Graph list relies on this item's completion offering dash names after `--`.
+  - [APP-M21](../../darwin/macos/maintenance/a-listed-name-reaches-the-verb-as-listed.md), whose Graph list relies on this item's completion offering dash names after `--`;
+  - [CLI-M55](a-dataset-is-named-not-pathed-at-every-reader.md), the same read rule for datasets: whichever lands second shares the helper;
+  - [CLI-M52](a-refused-scaffold-writes-nothing.md), whose dry run sits at the same agent add as this item's read rule;
+  - [CLI-M59](the-http-graph-jobs-say-what-the-cli-says.md), which also edits `admin_graph.cpp`: built one after the other.

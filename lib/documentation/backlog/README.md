@@ -12,9 +12,9 @@ The branch is `v0.2.1`; the last published release is v0.2.0.
 - **The Apple apps:** none; their three tracks for this release have shipped.
 - **The CLI:** none; its three tracks for this release have shipped.
 
-Outside the release, 15 maintenance items can be picked up any time: the CLI's M36–M47 (2026-11-22) and the Apple apps' M21–M23 (2026-11-26). Five wait on another maintenance item: the CLI's M42 on M37 and M41, M43 on M40, M44 on M43 and M46 on M45, and the Apple apps' M23 on M21. None of the 15 waits on a decision from you.
+Outside the release, 28 maintenance items can be picked up any time: the CLI's M36–M47 (2026-11-22) and M48–M60 (2026-11-26), and the Apple apps' M21–M23 (2026-11-26). Ten wait on another maintenance item: the CLI's M42 on M37 and M41, M43 on M40, M44 on M43, M46 on M45, M49 and M50 on M48, M56 on M55, M58 on the Apple apps' M22 and M60 on M58, and the Apple apps' M23 on M21. None of the 28 waits on a decision from you.
 
-**Can start today** (nothing gates it): no release item; any maintenance item below that waits on nothing (the CLI's M36–M41, M45 and M47; the Apple apps' M21 and M22).
+**Can start today** (nothing gates it): no release item; any maintenance item below that waits on nothing (the CLI's M36–M41, M45, M47, M48, M51–M55, M57 and M59; the Apple apps' M21 and M22).
 
 ### The design ([queue](design/README.md#index))
 
@@ -63,6 +63,19 @@ Maintenance items aren't tied to a release; any one can be picked up by name.
 | CLI | M45 | [A collection is named, not pathed, at every reader](cli/maintenance/a-collection-is-named-not-pathed-at-every-reader.md) | — |
 | CLI | M46 | [A collection the config can't hold is refused before it is written](cli/maintenance/a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md) | M45 |
 | CLI | M47 | [Config migrate carries every line the loader reads, or names the one it can't](cli/maintenance/config-migrate-carries-every-line-or-names-it.md) | — |
+| CLI | M48 | [A suggested command runs as printed, whatever the name or path in it](cli/maintenance/a-suggested-command-runs-as-printed.md) | — |
+| CLI | M49 | [A printed command names the binary and root that printed it](cli/maintenance/a-printed-command-names-the-binary-that-printed-it.md) | M48 |
+| CLI | M50 | [A backend name the editors refuse gets the rename door that reaches it](cli/maintenance/a-refused-backend-name-gets-the-rename-that-reaches-it.md) | M48 |
+| CLI | M51 | [The TUI's row actions reach a row whose name starts with a dash](cli/maintenance/the-tuis-row-actions-reach-a-dash-led-row.md) | — |
+| CLI | M52 | [A refused agent or MCP scaffold writes nothing](cli/maintenance/a-refused-scaffold-writes-nothing.md) | — |
+| CLI | M53 | [A symphony the CLI writes is one it can delete](cli/maintenance/a-symphony-the-cli-writes-is-one-it-can-delete.md) | — |
+| CLI | M54 | [Rename and HTTP GET find a config entry by its case-folded name](cli/maintenance/rename-and-get-find-an-entry-by-its-folded-name.md) | — |
+| CLI | M55 | [A dataset is named, not pathed, at every reader](cli/maintenance/a-dataset-is-named-not-pathed-at-every-reader.md) | — |
+| CLI | M56 | [A new dataset name is one every verb reads as a name](cli/maintenance/a-new-dataset-name-is-one-every-verb-reads.md) | M55 |
+| CLI | M57 | [A saved chat names only its own files](cli/maintenance/a-saved-chat-names-only-its-own-files.md) | — |
+| CLI | M58 | [A run's notes are said once, on stderr, as `apogee <verb>: …`](cli/maintenance/a-runs-notes-are-said-once-on-stderr.md) | the Apple apps' M22 |
+| CLI | M59 | [The HTTP graph jobs say what the CLI says, and build a mixed graph's code as the CLI does](cli/maintenance/the-http-graph-jobs-say-what-the-cli-says.md) | — |
+| CLI | M60 | [The models verbs say their notes in the house voice on stderr, and as notices on an open stream](cli/maintenance/the-models-verbs-say-their-notes-on-stderr.md) | M58 |
 | Apple apps | M21 | [A listed name reaches the verb as listed](darwin/macos/maintenance/a-listed-name-reaches-the-verb-as-listed.md) | — |
 | Apple apps | M22 | [A job's notes reach the person](darwin/macos/maintenance/a-jobs-notes-reach-the-person.md) | — |
 | Apple apps | M23 | [Every name the app passes is read as a name](darwin/macos/maintenance/every-name-the-app-passes-is-read-as-a-name.md) | M21 |

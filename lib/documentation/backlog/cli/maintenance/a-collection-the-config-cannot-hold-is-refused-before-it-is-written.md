@@ -201,6 +201,7 @@ Each fixture fails on today's binary unless marked as a guard (measured 2026-11-
 | 2026-11-22 | **The seam is admission, not the never-fatal policy.** The policy is recorded intent for trouble after the write. The certain refusal is asked first, by the edit that will run, as `check_registrations` does. | the spec |
 | 2026-11-22 | **Not a gate on CLI-M44**, but best built before or with it. Its dry run turns M44's new layout refusals into refusals before the write, instead of half-made stores with M44's words. | the spec |
 | 2026-11-26 | **Every note keeps the house voice on stderr**, the graph build's note before extraction included, and the tests pin the prefix. Added from the Mac app's investigation (APP-M22), which keeps exactly those lines as a finished run's notes. The "no app change" for refusals now holds only for a name that reaches the verb: a flag-shaped one needs APP-M21's `--` first. | the spec |
+| 2026-11-26 | **CLI-M48 renders every printed command through one renderer.** If it lands first, `check`'s two `embed ingest` remedies (`check.cpp:1764`, `:2123`, Evidence 8) are built through it rather than quoted by hand here; if this item lands first, M48 folds this quoting in. **CLI-M58 moves notes of the same code to stderr** and is built one after this item, the second routing the other's notes through its writer. No gate either way. | the spec |
 
 ## Out of scope
 
@@ -217,4 +218,8 @@ Each fixture fails on today's binary unless marked as a guard (measured 2026-11-
   - [CLI-M44](yaml-editor-refuses-the-layouts-it-does-not-write.md), whose refusals this item's dry run asks before the write;
   - CLI-59d (v0.2.3, [reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md)), which would relay today's exit 0 to devices;
   - [APP-M21](../../darwin/macos/maintenance/a-listed-name-reaches-the-verb-as-listed.md) and [APP-M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md), the Mac app's side;
+  - [CLI-M48](a-suggested-command-runs-as-printed.md), whose renderer builds `check`'s two `embed ingest` remedies that this item quotes by hand (Evidence 8);
+  - [CLI-M52](a-refused-scaffold-writes-nothing.md) and [CLI-M56](a-new-dataset-name-is-one-every-verb-reads.md), the same create-rule shape for agents and datasets; M52's dry run keeps this item's `--collection` refusal before the first write, whichever lands second;
+  - [CLI-M58](a-runs-notes-are-said-once-on-stderr.md), which moves the notes of the same `embed ingest` tail, graph build and knowledge core to stderr: built one after the other, the second routing the other's notes through one writer;
+  - [CLI-M59](the-http-graph-jobs-say-what-the-cli-says.md), which also edits `admin_graph.cpp`;
   - 55f (8d5aec51), the add rule; 92351332, the never-fatal registration; `check_registrations`, the precedent.
