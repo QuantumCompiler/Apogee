@@ -3710,14 +3710,24 @@ TEST_CASE("a submodule git reads through the work tree is confined as the reposi
         refused_both({{"repo", "super"}}, tools);
     }
     SECTION("its own config including an outside file") {
-        // The superproject's diff and status read a submodule's config too:
-        // an outside file that does not parse fails plain git's (the
-        // control). One that parses is refused by the tools before git runs.
+        // Git follows a submodule's own include: an outside file that does
+        // not parse fails plain git (the control), named in its error. Up
+        // to git 2.55 the superproject's work-tree diff reads the
+        // submodule's whole config and fails on it. Git 2.56 opens a
+        // submodule as a repository of its own and no longer loads that
+        // config for the diff (CI's macOS runner, git 2.56.1, 2026-11-26),
+        // so there the control is git run in the submodule, which loads it
+        // on every version. One that parses is refused by the tools before
+        // git runs, whichever git it is.
         const std::filesystem::path sub = box.embed("sub");
         const std::filesystem::path broken = world.temp.path() / "broken.cfg";
         std::ofstream{broken, std::ios::binary} << "[broken\n";
         git(sub, {"config", "include.path", broken.generic_string()});
-        CHECK(box.plain_diff().find("bad config line") != std::string::npos);
+        if (box.plain_diff().find("broken.cfg") == std::string::npos) {
+            WARN("this git reads no submodule config for a work-tree diff: " << plain_git_said(
+                     box.super, {"version"}));
+            CHECK(plain_git_said(sub, {"status"}).find("broken.cfg") != std::string::npos);
+        }
         const std::filesystem::path outside_cfg = world.temp.path() / "sub-extra.cfg";
         std::ofstream{outside_cfg, std::ios::binary} << "[core]\n\tabbrev = 12\n";
         // Edited as a file: reading the config would follow the broken include.

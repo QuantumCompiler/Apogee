@@ -537,6 +537,12 @@ TEST_CASE("session/resume reopens the chat and replays nothing; an unknown id is
 
 TEST_CASE("session/list answers the host's chats from the store, by folder, in one page",
           "[acp][server][sessions][saved]") {
+    if (!apogee::platform::supports_child_processes()) {
+        // `apogee acp` refuses to start here (acp_cmd.cpp), so no host ever
+        // asks; and the recorded chats' POSIX folders are not absolute paths
+        // on Windows, which the handler rightly refuses.
+        SKIP("apogee acp does not start on a platform that spawns no child processes");
+    }
     const apogee::testing::TempDir folder{"acp-server-" + std::to_string(std::random_device{}())};
     LockedSink out;
     LockedSink err;

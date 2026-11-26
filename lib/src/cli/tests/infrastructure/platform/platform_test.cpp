@@ -548,9 +548,22 @@ TEST_CASE("the Documents folder is the one the platform keeps", "[platform][57k]
     const std::filesystem::path documents = apogee::platform::documents_directory();
 #if defined(_WIN32)
     // The known folder: wherever a OneDrive or policy redirect put it, and so
-    // where install.ps1's GetFolderPath('MyDocuments') put its stub.
-    CHECK_FALSE(documents.empty());
-    CHECK(documents.is_absolute());
+    // where install.ps1's GetFolderPath('MyDocuments') put its stub. Both ask
+    // the shell to verify the folder exists, so both are empty for an account
+    // that has none -- as on CI's windows-arm64 runner (2026-11-26), where
+    // the folder is then the profile's own Documents, missing.
+    if (documents.empty()) {
+        const std::optional<std::string> profile =
+            apogee::platform::utf8_environment("USERPROFILE");
+        REQUIRE(profile.has_value());
+        const std::filesystem::path usual =
+            apogee::platform::path_from_utf8(*profile) / "Documents";
+        WARN("this account has no Documents folder: " << usual.string());
+        CHECK_FALSE(std::filesystem::is_directory(usual));
+    } else {
+        CHECK(documents.is_absolute());
+        CHECK(std::filesystem::is_directory(documents));
+    }
 #else
     const std::optional<std::string> home = apogee::platform::home_directory();
     REQUIRE(home.has_value());
