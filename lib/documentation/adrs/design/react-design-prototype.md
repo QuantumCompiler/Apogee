@@ -19,7 +19,7 @@ Measured by the recon of 2026-11-14, and re-checked on the `v0.2.1` branch at `b
 - **The canvas cannot host a compiled app.** A Design-type board must be `<x-dc>` markup, never built by script, with no iframes. A React root is UI built by script.
 - **The old prototype keeps moving.** Another session's work took it from 7,604 to 7,780 lines on 2026-11-14 alone, and 11a added a board on 2026-11-18. A port needs a reference that stands still.
 
-The user's calls, 2026-11-14 (track 1 of [the design queue](../../backlog/design/README.md#v021)):
+The user's calls, 2026-11-14 (track 1 of [the design queue](../../backlog/design/README.md#index)):
 - Rebuild the prototype in a compiled web framework, with the same layered architecture as the production GUIs, so a new app in a new framework ports from it. It stays the design's one cross-platform source of truth.
 - React, TypeScript and Vite.
 - It opens by double-clicking one file ("I just want to essentially be able to click main.html"). A browser blocks a `file://` page's separate scripts, so the build is one self-contained HTML file.

@@ -4,7 +4,7 @@ The standing rules of the mod's architecture, each written once, dated, and kept
 
 **Format.** The house shape (the CLI's discipline): one file per record, named for the decision alone; **Status**, **Date**, **Context**, **Decision**, **Consequences**, **Enforcement** — a rule with no teeth is a suggestion.
 
-**Scope.** This directory is the mod's (`lib/src/mod` — the Claude plugin). The CLI's records are at [`adrs/cli/`](../cli/README.md), the GUI's at [`adrs/darwin/`](../gui/README.md).
+**Scope.** This directory is the mod's (`lib/src/mod` — the Claude plugin). The CLI's records are at [`adrs/cli/`](../cli/README.md), the GUI's at [`adrs/gui/`](../gui/README.md).
 
 ## Index
 

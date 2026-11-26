@@ -850,6 +850,16 @@ Decisions taken (2026-11-21), each for veto:
 
 **Not run:** the app on the user's real store. The screen was drawn offscreen over its mirrored metadata; running it for real is the user's step.
 
+### 2026-10-31 — resizable sidebar and inspector (the user's own change, `b26550bb`, no backlog item)
+
+**Why.** Recorded by v0.2.1's pre-merge docs pass (2026-11-22), which found the change in the app with no entry here. It is the user's own commit, "v0.2.1 : Darwin UI Tweaks", and its wording is theirs to amend.
+
+- [x] **The sidebar and the Sessions inspector are dragged to width.** The sidebar's trailing edge drags it between 200 and 420 points (256 by default, `ShellViewModel.setSidebarWidth(_:)`), and the inspector's leading edge between 280 and 560 (360 by default, `SessionLibraryViewModel.setInspectorWidth(_:)`). Each width is kept in `Preferences` (`sidebarWidth`, `inspectorWidth`), so the window opens as the person left it.
+- [x] **The sidebar's place row scrolls sideways** rather than fitting its width: a horizontal `ScrollView` with its indicators hidden, each place's button padded by `Layout.placePadding` (12 points).
+- The same commit's Xcode re-save dropped `codeCoverageEnabled = "NO"` from the `Apogee`, `PresentationReview` and `PresentationShell` schemes; the docs pass put it back, as the user's call recorded with M2 (2026-10-21, Milestone C) did the last time Xcode dropped it.
+
+**Not done:** no design board draws the drag handles; whether the design app needs a counterpart is the user's call.
+
 ### 2026-11-21 — `confirmations-act-on-their-answer` (maintenance item M20): a confirmed action runs
 
 **Why.** The user reported on 2026-11-21 that deleting a session from its right-click menu never works: the dialog closed, the session stayed, and nothing was said. The cause was measured the same day. The CLI deletes: a sandboxed run of the installed 0.2.0, over copies of the user's three chats, ran `apogee chats delete <id>`, printed `deleted <id>` and removed the file. The app loses the answer: a throwaway probe of the real dialog (`swiftc`, the macOS 27 SDK, its Delete `NSButton` pressed by `performClick`) logged SwiftUI's order on a press. The button's action runs, then the dialog closes and calls its binding's `set(false)` -- `dismissPending()`, which clears the question -- and only then does the `Task` the action started run. `confirm()` found no question and returned. Every confirmation since the session library (1f) and the models library (1h) of 2026-10-20 was built that way: 23 buttons in 12 dialogs in 9 views. The view-model tests called the ask and then `confirm()`, an order the dialog never produces, so every one passed. One entry here for every place, since it is one cause, one change of shape and one check.

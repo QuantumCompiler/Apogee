@@ -6,7 +6,7 @@ The standing rules of the CLI's architecture, each written once, dated, and kept
 
 **Relation to the layer cards.** Each layer root in the source and test trees carries a short `CLAUDE.md` *summary card* ([A5](../../assistant/cli/MILESTONES.md#milestone-aa--the-four-layers)) that states its layer's law in a few lines and links here — the card is the context a model gets for free; this directory is the depth it reaches for. Cards summarize and point; only ADRs carry rationale.
 
-**Scope.** This directory is the CLI's (`lib/src/cli`). A sibling application's records live in its own docs home — the GUI's are at [`adrs/darwin/`](../gui/README.md) (since the 2026-10-20 per-application docs restructure).
+**Scope.** This directory is the CLI's (`lib/src/cli`). A sibling application's records live in its own folder beside this one (one folder per application inside `adrs/`, since the 2026-11-07 by-kind layout): the GUI's at [`adrs/gui/`](../gui/README.md) (what binds every GUI app) and [`adrs/darwin/`](../darwin/README.md) (the Apple apps' own), the mod's at [`adrs/mod/`](../mod/README.md) and the design's at [`adrs/design/`](../design/README.md).
 
 ## Index
 

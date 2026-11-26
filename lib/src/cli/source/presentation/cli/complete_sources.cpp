@@ -45,6 +45,7 @@
 #include "training/datasets.h"
 #include "training/kit.h"
 #include "training/mlx_convert.h"
+#include "training/pipeline.h"
 #include "training/python_env.h"
 #include "training/regime_specs.h"
 #include "training/script_runner.h"
@@ -439,6 +440,23 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
             list.names.push_back(run.id);
         }
         list.none = "no pipeline runs yet -- 'apogee train pipeline run'";
+    } else if (kind == kResumablePipelineRunValue) {
+        // The runs `pipeline status` lists, each read as resume reads it and
+        // held to resume's own test: no live holder (57g), not complete, no
+        // cycle pass (57h), its snapshot still there.
+        const training::TrainingStore store{harness::training_dir()};
+        for (const training::PipelineSummary& run : store.list_pipelines()) {
+            std::string unread;
+            const std::optional<training::PipelineRunManifest> manifest =
+                store.get_pipeline(run.id, unread);
+            if (manifest.has_value() && unread.empty() &&
+                training::resume_refusal(*manifest, harness::training_dir()).empty()) {
+                list.names.push_back(run.id);
+            }
+        }
+        list.none =
+            "no pipeline run 'train pipeline resume' takes -- 'apogee train pipeline status' "
+            "shows where each stands";
     } else if (kind == kTaskValue) {
         for (const tasks::Task& task : tasks::list_tasks(harness::tasks_dir())) {
             list.names.push_back(task.id);
@@ -770,6 +788,8 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         for (const std::string_view tool : tools::destructive_tool_names()) {
             list.names.emplace_back(tool);
         }
+    } else if (kind == kOfferedToolValue) {
+        list.names = offered_tool_names(context.child_processes, config.tools.disabled);
     } else if (kind == kAllowedHostValue) {
         list.names = config.tools.allowed_hosts;
         list.none = "no allowed hosts yet -- 'apogee config add-allowed-host'";
@@ -792,6 +812,23 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
         throw std::invalid_argument("no source for the name kind '" + std::string{kind} + "'");
     }
     return list;
+}
+
+std::vector<std::string> offered_tool_names(bool child_processes,
+                                            const std::vector<std::string>& disabled) {
+    // The writers a session's registry holds, registered as a session
+    // registers them: the registration is the test, so no rule is copied.
+    tools::ToolsetOptions options;
+    options.child_processes = child_processes;
+    options.disabled = disabled;
+    const std::vector<std::string> registered = tools::native_tool_names(options);
+    std::vector<std::string> out;
+    for (const std::string_view tool : tools::destructive_tool_names()) {
+        if (std::ranges::find(registered, tool) != registered.end()) {
+            out.emplace_back(tool);
+        }
+    }
+    return out;
 }
 
 CompletionSources default_completion_sources() {

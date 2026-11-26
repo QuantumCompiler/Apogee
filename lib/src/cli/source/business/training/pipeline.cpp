@@ -663,7 +663,16 @@ std::string resume_refusal(const PipelineRunManifest& existing,
         holder.has_value()) {
         return held_refusal(existing.pipeline_run_id, *holder);
     }
-    return resume_refusal(existing);
+    if (std::string refusal = resume_refusal(existing); !refusal.empty()) {
+        return refusal;
+    }
+    // The snapshot it trains from, deleted since it began (`models delete`):
+    // no spec brings it back.
+    std::error_code code;
+    if (!std::filesystem::is_directory(existing.base_model, code)) {
+        return "the run's snapshot is gone: " + existing.base_model;
+    }
+    return {};
 }
 
 std::string resume_check(const PipelineRunManifest& existing, const harness::PipelineSpec& spec,

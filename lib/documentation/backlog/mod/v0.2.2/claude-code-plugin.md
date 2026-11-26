@@ -92,7 +92,7 @@ All hermetic.
 
 | Question | Status | Answer |
 |---|---|---|
-| Where does the plugin live? | `[default]` | The plugin lives in `lib/src/mod/claude-code/`, sharing no code with the desktop mod; if mod 1a has not yet made `lib/src/mod/`, this item makes the folder. |
+| Where does the plugin live? | `[default]` | The plugin lives in `lib/src/mod/claude-code/`, sharing no code with the desktop mod (mod 1a made `lib/src/mod/`, 2026-11-21). |
 | How is the plugin released? | `[default]` | The marketplace serves from `stable`, so a release's merge is the plugin's release; no separate artifact. |
 | Does the plugin carry slash commands? | `[default]` | No slash commands; the desktop mod's `/apogee` set is the desktop app's, and Claude Code's skill plus the server cover the same ground. |
 
@@ -113,5 +113,5 @@ All hermetic.
 ## Links
 
 - **Blocked by:** [CLI 58a](../../cli/v0.2.2/mcp-serve-introduces-itself.md) (the server's instructions), [CLI 58c](../../cli/v0.2.2/mcp-serve-coding-host-profile.md) (the coding-host profile) · **Blocks:** —
-- **Relates to:** CLI 54a/54b (the server, `mcp presets`), CLI 58d (refresh calls), the mod's track 1 (the desktop half; mod 1a makes `lib/src/mod/`), [CLAUDE.md](../../../assistant/mod/CLAUDE.md), ADR 0001, ADR 0006
+- **Relates to:** CLI 54a/54b (the server, `mcp presets`), CLI 58d (refresh calls), the mod's track 1 (the desktop half, shipped 2026-11-21; mod 1a made `lib/src/mod/`), [CLAUDE.md](../../../assistant/mod/CLAUDE.md), ADR 0001, ADR 0006
 - **Follows from:** the user's idea and "both hosts" call, and the spike, 2026-11-07

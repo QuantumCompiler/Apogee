@@ -33,4 +33,8 @@ Apogee's capabilities reach people through its own front ends (CLI, TUI, the mac
 
 ## Success criteria
 
-- _TODO:_ written when the first items ship — shaped as: Claude completes a prompt through a local backend mid-conversation; `/apogee check` shows the doctor's rows; the pane survives a training run without blocking a turn.
+- Claude completes a prompt through a local backend mid-conversation (`apogee_complete`, 1b).
+- `/apogee check` shows the doctor's rows (1b).
+- The pane survives a training run without blocking a turn (1c).
+
+Written 2026-11-22, at v0.2.1's pre-merge docs pass, in the words the shape was recorded in, since 1a–1d have shipped; the live look at each, on Claude Code 2.1.326 or newer, is still to come (ROADMAP 1a–1c).

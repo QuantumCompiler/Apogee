@@ -11,6 +11,7 @@
 #include "cli/command.h"
 #include "contracts/config.h"
 #include "contracts/paths.h"
+#include "platform/child_process.h"
 
 /// The hidden `apogee __complete` verb — the shell-completion protocol.
 ///
@@ -147,6 +148,10 @@ struct CompletionContext {
     /// when a flag repeats. A flag that takes no value is here with an empty
     /// one, so a list can ask whether it was given (`--mlx`).
     std::map<std::string, std::string> flags;
+    /// Whether this build can start other programs (57k), for a kind that
+    /// offers only what a session registers (`OFFERED_TOOL`). The platform's
+    /// answer by default; a test sets it to see either side on any host.
+    bool child_processes = platform::supports_child_processes();
 };
 
 /// The names of one kind that exist now.

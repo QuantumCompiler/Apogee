@@ -18,10 +18,11 @@
 #     `build <target>` jobs and `apogee-<target>` artifacts: keep both names;
 #   - a required matrix job never gets a job-level `if:` (see `changes`).
 #
-# Everything here builds, tests, packages and releases ONE deliverable: the
-# `apogee` command-line executable. It is the "CLI pipeline" (user decision,
-# 2026-09-25), named so because it will not stay the only one: the GUI
-# applications, and whatever else ships later, get pipelines of their own.
+# Everything here builds, tests and packages ONE deliverable: the `apogee`
+# command-line executable. It is the "CLI pipeline" (user decision,
+# 2026-09-25), named so because it is not the only one: the macOS app
+# (darwin.yml) and the mod (mod.yml) have pipelines of their own. Its release
+# job also carries the macOS app that darwin.yml built (GUI M17, 2026-10-31).
 # The CLI pipeline runs only when what the CLI is built from has changed since
 # the latest release -- lib/scripts/changed.sh declares that, once -- and when
 # it has not, the CLI is COPIED from that release instead: into this run's
@@ -69,8 +70,9 @@
 #
 # One pipeline (user decision, 2026-10-04, M8): this is the only workflow that
 # releases. (Since 2026-10-20 the macOS app's own pipeline, darwin.yml, runs
-# beside it on pull requests; it builds, tests and packages the app, and
-# publishes nothing.)
+# beside it on pull requests, and since 2026-11-21 the mod's, mod.yml; each
+# builds, tests and packages its application and publishes nothing. The
+# release this workflow publishes carries the app darwin.yml built.)
 # The separate manual release workflow, its `v*` tag trigger and its second
 # copy of the matrix are gone, so a release is published only by a merge --
 # or by the RE-CUT, this workflow dispatched on `stable` with `publish`

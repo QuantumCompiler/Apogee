@@ -804,13 +804,13 @@ void bind_session_flags(CLI::App& command, const std::shared_ptr<SessionFlags>& 
                   "in a place gone with the run");
     cmd->add_option("--allow", flags->allow,
                     "Allow a tool for this chat without asking (repeatable, with --tools)")
-        ->type_name(kToolValue)
+        ->type_name(kOfferedToolValue)
         ->expected(1)
         ->allow_extra_args(false)
         ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
     cmd->add_option("--deny", flags->deny,
                     "Refuse a tool or website for this chat without asking (repeatable)")
-        ->type_name(kToolValue)
+        ->type_name(kOfferedToolValue)
         ->expected(1)
         ->allow_extra_args(false)
         ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);

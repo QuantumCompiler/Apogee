@@ -3048,7 +3048,7 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         "Continue a pipeline after its last passed stage, from that stage's fused weights; an "
         "earlier stage that failed its gate stays as it is, and a cycle pass is never resumed");
     pipe_resume->add_option("id", *resume_id, "The pipeline run id")
-        ->type_name(kPipelineRunValue)
+        ->type_name(kResumablePipelineRunValue)
         ->required();
     pipe_resume
         ->add_option("--pipeline", *resume_spec,
@@ -3235,7 +3235,8 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             }
             // What no spec changes, before one is looked for (57h): a live
             // holder, a complete run, a cycle pass -- whose own spec would
-            // otherwise be found and trained on the wrong data.
+            // otherwise be found and trained on the wrong data -- and a
+            // snapshot gone since. Completion offers by the same test.
             if (const std::string refusal =
                     training::resume_refusal(*existing, harness::training_dir());
                 !refusal.empty()) {
@@ -3255,15 +3256,12 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             } else {
                 fail_user(found.problem + " -- pass --pipeline <spec> to resume " + *resume_id);
             }
-            // Refused while a live process runs it (57g), naming the process.
+            // Refused while a live process runs it (57g), naming the process,
+            // or once its snapshot is gone -- each read again after the spec.
             if (const std::string refusal =
                     training::resume_check(*existing, spec, harness::training_dir());
                 !refusal.empty()) {
                 fail_user(refusal);
-            }
-            std::error_code code;
-            if (!std::filesystem::is_directory(existing->base_model, code)) {
-                fail_user("the run's snapshot is gone: " + existing->base_model);
             }
             drive_pipeline(config, spec, ref, std::move(existing), *resume_continue, *resume_judge,
                            *resume_trainer);

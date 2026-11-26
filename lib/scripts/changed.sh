@@ -61,6 +61,11 @@ paths_of() {
             # The logo its icon is made from: the suite holds the committed
             # icon set to it.
             echo "lib/design/assets/Logo.png"
+            # Read by the app's parity tests, which hold its table to them
+            # (2026-11-22): the CLI's refusals and the Apple apps' backlog
+            # index, where every gap is queued.
+            echo "lib/src/cli/source/presentation/cli/tui_parity.cpp"
+            echo "lib/documentation/backlog/darwin/README.md"
             # Its pipeline's own definition.
             echo ".github/workflows/darwin.yml"
             ;;
@@ -71,7 +76,7 @@ paths_of() {
             echo "lib/src/mod/"
             # This declaration.
             echo "lib/scripts/changed.sh"
-            # Its pipeline's own definition (the mod's 1d adds the file).
+            # Its pipeline's own definition.
             echo ".github/workflows/mod.yml"
             ;;
         *)

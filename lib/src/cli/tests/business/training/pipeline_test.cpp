@@ -420,6 +420,40 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "a run whose snapshot is gone is refused whatever spec is named, after what its record and "
+    "its holder say",
+    "[training][pipeline][lock]") {
+    Fixture fixture;
+    PipelineRunManifest run;
+    run.pipeline_run_id = "pipe-32";
+    run.status = std::string{apogee::training::kPipelineAborted};
+    run.base_model = fixture.snap.string();
+    CHECK(apogee::training::resume_refusal(run, fixture.training).empty());
+
+    // Deleted since the run began (`models delete`): no spec brings it back,
+    // so the refusal is the record's, before any spec is looked for.
+    std::filesystem::remove_all(fixture.snap);
+    const std::string gone = "the run's snapshot is gone: " + fixture.snap.string();
+    CHECK(apogee::training::resume_refusal(run, fixture.training) == gone);
+    CHECK(apogee::training::resume_check(run, fixture.spec, fixture.training) == gone);
+    // The pure checks read nothing on disk.
+    CHECK(apogee::training::resume_refusal(run).empty());
+    CHECK(apogee::training::resume_check(run, fixture.spec).empty());
+
+    // A complete run is said to be complete, and a held one held.
+    PipelineRunManifest complete = run;
+    complete.status = std::string{apogee::training::kPipelineComplete};
+    CHECK(apogee::training::resume_refusal(complete, fixture.training).find("already complete") !=
+          std::string::npos);
+    apogee::platform::PidLock::Refusal refusal;
+    const std::optional<apogee::platform::PidLock> held = apogee::platform::PidLock::acquire(
+        fixture.training / "pipelines" / "pipe-32" / "pipeline.lock", "pipe-32", false, refusal);
+    REQUIRE(held.has_value());
+    CHECK(apogee::training::resume_refusal(run, fixture.training).find("running now") !=
+          std::string::npos);
+}
+
+TEST_CASE(
     "a resume reads the manifest again once it holds the lock: a holder that finished "
     "meanwhile is not run over",
     "[training][pipeline][lock]") {

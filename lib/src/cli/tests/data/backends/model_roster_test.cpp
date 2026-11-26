@@ -76,11 +76,12 @@ TEST_CASE("the CLIs that print no list are read from the binary, never saved, an
     for (const RosterModel& model : claude->models) {
         ids.push_back(model.id);
     }
-    for (const char* id : {"claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5",
-                           "claude-haiku-5-5", "claude-fable-5", "claude-opus-5"}) {
+    for (const char* id :
+         {"claude-fable-5-2", "claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5",
+          "claude-haiku-5-5", "claude-fable-5", "claude-opus-5"}) {
         CHECK(std::find(ids.begin(), ids.end(), id) != ids.end());
     }
-    CHECK(claude->models.front().name == "Claude Fable 5.1");
+    CHECK(claude->models.front().name == "Claude Fable 5.2");
     const ProviderRoster* gemini = known.roster_for("gemini-cli");
     REQUIRE(gemini != nullptr);
     CHECK(gemini->models.size() == 3);

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Project context for coding agents working on **the Apogee mod** — the Claude plugin. Read this before making changes. You arrived here from the [documentation router](../../CLAUDE.md); CLI work belongs in [`cli/`](../cli/CLAUDE.md) and the desktop apps in [`gui/`](../darwin/CLAUDE.md). This file tells you **how to work here**; the sibling documents tell you **what** and **why**.
+Project context for coding agents working on **the Apogee mod** — the Claude plugin. Read this before making changes. You arrived here from the [documentation router](../../CLAUDE.md); CLI work belongs in [`cli/`](../cli/CLAUDE.md) and the desktop apps in [`darwin/`](../darwin/CLAUDE.md). This file tells you **how to work here**; the sibling documents tell you **what** and **why**.
 
 ## Reading order & the docs system
 
@@ -37,7 +37,7 @@ Enforced by: the CLI's conformance suites on the contract side; mod-side, the la
 
 ## Codebase Map
 
-The plugin at `lib/src/mod/` ([ADR 0001](../../adrs/mod/layer-enforcement.md): four layers, dependencies down, each package at `src/<layer>/<package>/`, its tests at `tests/<layer>/<package>/`). As built by 1a, 1b and 1c; the planned growth is in the last column.
+The plugin at `lib/src/mod/` ([ADR 0001](../../adrs/mod/layer-enforcement.md): four layers, dependencies down, each package at `src/<layer>/<package>/`, its tests at `tests/<layer>/<package>/`). As built by 1a, 1b, 1c and 1d; the planned growth is in the last column.
 
 | Path | Contents | Planned |
 |------|----------|---------|

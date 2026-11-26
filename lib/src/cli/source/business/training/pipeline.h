@@ -247,7 +247,10 @@ struct PipelineOutcome {
 /// trains, overwrites or promotes it.
 [[nodiscard]] std::string resume_refusal(const PipelineRunManifest& existing);
 
-/// The same, and first whether a live process runs the pipeline now (57g).
+/// The same, and first whether a live process runs the pipeline now (57g),
+/// and last whether the snapshot the run trains from is still there -- one
+/// deleted since, no spec brings back. What `train pipeline resume` refuses
+/// before it looks for a spec, and what its completion offers by.
 [[nodiscard]] std::string resume_refusal(const PipelineRunManifest& existing,
                                          const std::filesystem::path& training_dir);
 
@@ -260,7 +263,8 @@ struct PipelineOutcome {
 /// The same, and first whether a live process runs the pipeline now (57g),
 /// read from its lock under `training_dir`: a resume under its holder would
 /// train the same stage in the same directory and rewrite the record the
-/// holder is writing. The refusal names the process.
+/// holder is writing. The refusal names the process. With it, whether the
+/// snapshot is still there: `resume_refusal(existing, training_dir)` first.
 [[nodiscard]] std::string resume_check(const PipelineRunManifest& existing,
                                        const harness::PipelineSpec& spec,
                                        const std::filesystem::path& training_dir);

@@ -1,11 +1,14 @@
 #include "cli/complete_sources.h"
 
+#include <CLI/CLI.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -14,11 +17,13 @@
 #include <vector>
 
 #include "agentloop/retriever.h"
+#include "cli/chat_session.h"
 #include "cli/command.h"
 #include "cli/config_cmd.h"
 #include "cli/embed.h"
 #include "cli/helpers.h"
 #include "cli/models_pull.h"
+#include "cli/permissions.h"
 #include "cli/registry.h"
 #include "cli/root.h"
 #include "cli/task_cmd.h"
@@ -33,16 +38,19 @@
 #include "models/quantize.h"
 #include "modelstore/store.h"
 #include "platform/child_process.h"
+#include "platform/pid_lock.h"
 #include "secrets/resolve.h"
 #include "support/draft_head_configs.h"
 #include "support/env_guard.h"
 #include "support/mlx_model.h"
 #include "tasks/ledger.h"
 #include "tasks/task.h"
+#include "tools/toolsets.h"
 #include "training/convert.h"
 #include "training/datasets.h"
 #include "training/manifest.h"
 #include "training/mlx_convert.h"
+#include "training/pipeline.h"
 #include "training/python_env.h"
 #include "training/trainer.h"
 
@@ -570,6 +578,242 @@ TEST_CASE("resume offers the unfinished tasks started in the folder it runs in",
             CHECK(said.find(refusal) != std::string::npos);
         }
     }
+}
+
+TEST_CASE("pipeline resume offers only the runs resume takes, and status every run",
+          "[commands][completion][sources][train][pipeline]") {
+    // `train pipeline resume` refuses, before it looks for a spec, a run a
+    // live process holds (57g), a complete run, a cycle pass (57h) and a run
+    // whose snapshot is gone; Tab offers none of them -- by the verb's own
+    // test -- while `pipeline status` reads every run. Found by the v0.2.1
+    // docs pass's completion audit.
+    const Home home;
+    namespace tr = apogee::training;
+    const std::filesystem::path pipelines = apogee::harness::training_dir() / tr::kPipelinesDirName;
+    // The snapshot each run trains from, and one deleted since a run began.
+    const std::filesystem::path snapshot = home.home / "snapshot";
+    write_file(snapshot / "config.json", "{}");
+    const std::filesystem::path deleted = home.home / "deleted-snapshot";
+    std::vector<tr::PipelineRunManifest> runs;
+    const auto save = [&](const std::string& id, std::string_view status,
+                          const std::filesystem::path& base) {
+        tr::PipelineRunManifest run;
+        run.pipeline_run_id = id;
+        run.spec_name = "skills";
+        run.status = std::string{status};
+        run.base_model = base.string();
+        run.started_at = "2026-11-22T09:00:00Z";
+        REQUIRE(tr::write_pipeline_manifest(pipelines / id, run).empty());
+        runs.push_back(run);
+        return id;
+    };
+    const std::string complete = save("pipe-20261122-090000", tr::kPipelineComplete, snapshot);
+    const std::string cycle = save("cycle-20261122-090000", tr::kPipelineAborted, snapshot);
+    const std::string held = save("pipe-20261122-100000", tr::kPipelineRunning, snapshot);
+    const std::string failed = save("pipe-20261122-110000", tr::kPipelineFailed, snapshot);
+    // A run whose process died mid-run: its lock names a process that is
+    // gone, so a resume takes it over (57g).
+    const std::string crashed = save("pipe-20261122-120000", tr::kPipelineRunning, snapshot);
+    // A failed run whose snapshot was deleted since (`models delete`): no
+    // spec brings it back.
+    const std::string gone = save("pipe-20261122-130000", tr::kPipelineFailed, deleted);
+    write_file(pipelines / crashed / tr::kPipelineLockFileName, "999999999\n" + crashed + "\n");
+    apogee::platform::PidLock::Refusal refusal;
+    const std::optional<apogee::platform::PidLock> lock = apogee::platform::PidLock::acquire(
+        pipelines / held / tr::kPipelineLockFileName, held, false, refusal);
+    REQUIRE(lock.has_value());
+
+    const c::CommandSpec tree = c::specs_from_app(c::RootCommand{c::default_registry()}.app());
+    const auto offered = [&](const std::string& verb) {
+        return c::complete_words({.words = {"train", "pipeline", verb}, .current = ""}, home.config,
+                                 tree, c::default_completion_sources())
+            .candidates;
+    };
+    const std::vector<std::string> resumable = offered("resume");
+    CHECK(resumable.size() == 2);
+    CHECK(has(resumable, failed));
+    CHECK(has(resumable, crashed));
+    CHECK_FALSE(has(resumable, complete));
+    CHECK_FALSE(has(resumable, cycle));
+    CHECK_FALSE(has(resumable, held));
+    CHECK_FALSE(has(resumable, gone));
+    // Status reads every one.
+    const std::vector<std::string> every = offered("status");
+    CHECK(every.size() == runs.size());
+    for (const tr::PipelineRunManifest& run : runs) {
+        CHECK(has(every, run.pipeline_run_id));
+    }
+
+    // The verb, both ways: an offered run gets past every refusal of its
+    // record (here, to the spec it cannot find); any other is refused by
+    // exactly the test completion asked. What is left after the record --
+    // a spec found or named, its stage count -- needs a spec, which
+    // completion cannot know without one (the line RESUMABLE_TASK draws).
+    const std::filesystem::path config_path = home.home / "config" / "config.yaml";
+    write_file(config_path, "backends:\n  m:\n    type: mock\nmodels:\n  default: m\n");
+    for (const tr::PipelineRunManifest& run : runs) {
+        INFO(run.pipeline_run_id << " " << run.status);
+        std::string said;
+        CHECK(run_apogee({"--config", config_path.string(), "train", "pipeline", "resume",
+                          run.pipeline_run_id},
+                         &said) == 1);
+        const std::string why = tr::resume_refusal(run, apogee::harness::training_dir());
+        if (has(resumable, run.pipeline_run_id)) {
+            CHECK(why.empty());
+            CHECK(said.find("pass --pipeline <spec> to resume " + run.pipeline_run_id) !=
+                  std::string::npos);
+        } else {
+            REQUIRE_FALSE(why.empty());
+            CHECK(said.find(why) != std::string::npos);
+        }
+    }
+    std::string said;
+    CHECK(run_apogee({"--config", config_path.string(), "train", "pipeline", "resume", gone},
+                     &said) == 1);
+    CHECK(said.find("the run's snapshot is gone: " + deleted.string()) != std::string::npos);
+}
+
+TEST_CASE("allow and deny offer the tools this build offers, and set-permission every tool",
+          "[commands][completion][sources][permissions][57k]") {
+    // Where no program can be started (Windows, today) run_command is never
+    // registered, so `--allow`, `--deny` and a task's grant refuse it (57k):
+    // their offer lacks it there. `config set-permission` takes it on every
+    // host, so TOOL keeps it. The kind reads the build's answer from the
+    // context -- the platform's by default -- which the test sets to see
+    // either side on any host.
+    const Home home;
+    namespace tl = apogee::tools;
+    const auto offered = [&](bool programs) {
+        c::CompletionContext context;
+        context.config = &home.config;
+        context.child_processes = programs;
+        return c::list_names(c::kOfferedToolValue, context).names;
+    };
+    CHECK_FALSE(has(offered(false), "run_command"));
+    CHECK(has(offered(false), "write_file"));
+    CHECK(has(offered(true), "run_command"));
+    for (const bool programs : {false, true}) {
+        c::CompletionContext context;
+        context.config = &home.config;
+        context.child_processes = programs;
+        CHECK(has(c::list_names(c::kToolValue, context).names, "run_command"));
+    }
+    // Unset, the context holds the platform's answer.
+    CHECK(home.names(c::kOfferedToolValue).names ==
+          offered(apogee::platform::supports_child_processes()));
+
+    // The offer is the contract, on either side: each offered tool is one
+    // the build registers, so --allow and --deny take it; each other writer
+    // is refused saying why -- the words a task's grant refuses with too.
+    for (const bool programs : {false, true}) {
+        tl::ToolsetOptions options;
+        options.child_processes = programs;
+        const std::vector<std::string> registered = tl::native_tool_names(options);
+        const std::vector<std::string> names = offered(programs);
+        for (const std::string_view tool : tl::destructive_tool_names()) {
+            INFO(tool << (programs ? " where programs start" : " where none can"));
+            const bool is_offered = has(names, tool);
+            CHECK(c::name_gated(tool, registered, false, programs).error.empty() == is_offered);
+            CHECK(tl::why_not_offered(tool, programs).empty() == is_offered);
+        }
+    }
+}
+
+TEST_CASE("allow and deny offer no tool of a toolset the config switches off",
+          "[commands][completion][sources][permissions]") {
+    // `tools.disabled` keeps a toolset out of every session's registry, on
+    // every host: --allow and --deny refuse its tools as none the run asks
+    // about, and a task's grant as none of the task's. TOOL keeps them --
+    // a `permissions:` entry may name a tool switched off today.
+    const Home home;
+    const std::string yaml =
+        "models:\n  default: m\nbackends:\n  m:\n    type: mock\ntools:\n  disabled: [fs]\n";
+    const std::filesystem::path config_path = home.home / "config" / "config.yaml";
+    write_file(config_path, yaml);
+    const apogee::harness::Config config = apogee::harness::parse_config(yaml, "test");
+    c::CompletionContext context;
+    context.config = &config;
+    const std::vector<std::string> offered = c::list_names(c::kOfferedToolValue, context).names;
+    for (const std::string_view tool : {"write_file", "edit_file", "delete_file"}) {
+        INFO(tool);
+        CHECK_FALSE(has(offered, tool));
+        CHECK(has(c::list_names(c::kToolValue, context).names, tool));
+    }
+    CHECK(has(offered, "write_note"));
+    CHECK(has(offered, "delete_note"));
+
+    // The verbs, both ways, on this host: each offered writer is taken by
+    // --allow and --deny, each other refused; and a task's grant of one
+    // left out is refused before any task is made.
+    for (const std::string_view tool : apogee::tools::destructive_tool_names()) {
+        const bool is_offered = has(offered, tool);
+        for (const std::string flag : {"--allow", "--deny"}) {
+            INFO(flag << " " << tool);
+            std::string said;
+            const int code = run_apogee({"--config", config_path.string(), "complete", "--tools",
+                                         flag, std::string{tool}, "hi"},
+                                        &said);
+            INFO(said);
+            CHECK((code == 0) == is_offered);
+        }
+        if (!is_offered) {
+            INFO("task run --allow " << tool);
+            std::string said;
+            CHECK(run_apogee({"--config", config_path.string(), "task", "run", "Write the report",
+                              "--tools", "--allow", std::string{tool}},
+                             &said) == 1);
+            CHECK(said.find("--allow " + std::string{tool} + ": ") != std::string::npos);
+            CHECK(apogee::tasks::list_tasks(apogee::harness::tasks_dir()).empty());
+        }
+    }
+}
+
+TEST_CASE("each flag that takes less than its neighbours declares its own kind",
+          "[commands][completion][sources][names]") {
+    // ADR 0007's offer-is-a-contract rule, at the declaration: the narrower
+    // kinds above mean nothing unless the arguments that take less declare
+    // them -- and the ones that take more keep the wider kind.
+    const c::CommandSpec tree = c::specs_from_app(c::RootCommand{c::default_registry()}.app());
+    const auto node = [&](const std::vector<std::string>& path) {
+        const c::CommandSpec* at = &tree;
+        for (const std::string& name : path) {
+            const auto next = std::ranges::find(at->subcommands, name, &c::CommandSpec::name);
+            REQUIRE(next != at->subcommands.end());
+            at = &*next;
+        }
+        return at;
+    };
+    const auto flag_kind = [](const c::CommandSpec& spec, const std::string& flag) {
+        const auto value = spec.values.find(flag);
+        REQUIRE(value != spec.values.end());
+        return value->second.source;
+    };
+    const auto first_positional_kind = [](const c::CommandSpec* spec) {
+        REQUIRE_FALSE(spec->positionals.empty());
+        return spec->positionals.front().source;
+    };
+
+    for (const std::string verb : {"chat", "execute", "acp", "tui", "complete"}) {
+        INFO(verb);
+        const c::CommandSpec* spec = node({verb});
+        CHECK(flag_kind(*spec, "--allow") == c::kOfferedToolValue);
+        CHECK(flag_kind(*spec, "--deny") == c::kOfferedToolValue);
+    }
+    // The in-shell sessions bind the same table on an app of their own.
+    for (const c::SessionMode mode : {c::SessionMode::Chat, c::SessionMode::Execute}) {
+        CLI::App app;
+        c::bind_session_flags(app, std::make_shared<c::SessionFlags>(), mode);
+        const c::CommandSpec spec = c::specs_from_app(app);
+        CHECK(flag_kind(spec, "--allow") == c::kOfferedToolValue);
+        CHECK(flag_kind(spec, "--deny") == c::kOfferedToolValue);
+    }
+    CHECK(flag_kind(*node({"task", "run"}), "--allow") == c::kOfferedToolValue);
+    // A permissions: entry may name run_command on any host.
+    CHECK(first_positional_kind(node({"config", "set-permission"})) == c::kToolValue);
+
+    CHECK(first_positional_kind(node({"train", "pipeline", "resume"})) ==
+          c::kResumablePipelineRunValue);
+    CHECK(first_positional_kind(node({"train", "pipeline", "status"})) == c::kPipelineRunValue);
 }
 
 TEST_CASE("symphonies edit offers names, delete only config entries",

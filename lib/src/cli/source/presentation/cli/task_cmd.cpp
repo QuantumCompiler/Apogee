@@ -1265,7 +1265,7 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
                     "Grant a tool that writes for this task's life, so it runs without asking -- "
                     "each tool named, every use recorded, never wider than the config or the "
                     "agent allows (repeatable, with --tools)")
-        ->type_name(kToolValue)
+        ->type_name(kOfferedToolValue)
         ->expected(1)
         ->allow_extra_args(false)
         ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);

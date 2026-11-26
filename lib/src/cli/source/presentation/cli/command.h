@@ -78,6 +78,11 @@ inline constexpr const char* kModelSuiteOrOffValue = "MODEL_SUITE_OR_OFF";
 inline constexpr const char* kRunValue = "RUN";
 /// A pipeline run id.
 inline constexpr const char* kPipelineRunValue = "PIPELINE_RUN";
+/// A pipeline run `train pipeline resume` continues: not complete, no cycle
+/// pass (57h), no live process holding it (57g), and its snapshot still
+/// there -- by resume's own test (`training::resume_refusal`). `pipeline
+/// status` keeps `PIPELINE_RUN`.
+inline constexpr const char* kResumablePipelineRunValue = "RESUMABLE_PIPELINE_RUN";
 /// A task's id (27h).
 inline constexpr const char* kTaskValue = "TASK";
 /// A task `task halt` stops, and one `task cancel` does -- each by the verb's
@@ -161,6 +166,10 @@ inline constexpr const char* kGitRemoteValue = "REMOTE";
 inline constexpr const char* kConfigKeyValue = "KEY";
 /// A tool a `permissions:` entry can name.
 inline constexpr const char* kToolValue = "TOOL";
+/// A tool this build offers -- --allow, --deny and a task's grant (57k: no
+/// shell or git tool where no program can be started), and none of a
+/// toolset `tools.disabled` switches off.
+inline constexpr const char* kOfferedToolValue = "OFFERED_TOOL";
 /// A host in `tools.allowed_hosts`.
 inline constexpr const char* kAllowedHostValue = "ALLOWED_HOST";
 /// A provider the last scan found to register (M33): `providers register`'s
@@ -169,7 +178,7 @@ inline constexpr const char* kProviderValue = "PROVIDER";
 
 /// Every name kind above, for the protocol to recognise and a test to hold
 /// each to a source.
-inline constexpr std::array<std::string_view, 51> kNameValues{kCollectionValue,
+inline constexpr std::array<std::string_view, 53> kNameValues{kCollectionValue,
                                                               kCollectionListValue,
                                                               kGraphValue,
                                                               kNamedGraphValue,
@@ -184,6 +193,7 @@ inline constexpr std::array<std::string_view, 51> kNameValues{kCollectionValue,
                                                               kModelSuiteOrOffValue,
                                                               kRunValue,
                                                               kPipelineRunValue,
+                                                              kResumablePipelineRunValue,
                                                               kTaskValue,
                                                               kHaltableTaskValue,
                                                               kCancellableTaskValue,
@@ -206,6 +216,7 @@ inline constexpr std::array<std::string_view, 51> kNameValues{kCollectionValue,
                                                               kGitRemoteValue,
                                                               kConfigKeyValue,
                                                               kToolValue,
+                                                              kOfferedToolValue,
                                                               kAllowedHostValue,
                                                               kProviderValue,
                                                               kSymphonyValue,

@@ -7835,6 +7835,13 @@ Both `...Reviewed` dates moved to 2026-10-16.
 
 Both `...Reviewed` dates moved to 2026-10-19.
 
+**Reviewed 2026-11-22, at v0.2.1's pre-merge docs pass**, since that branch touched the backends (the second bug sweep's failure fixes, and M34's Claude CLI errors). Claude Code's list gained one row, and the Gemini CLI's is unchanged:
+- Anthropic's models overview now lists **Claude Fable 5.2** (`claude-fable-5-2`) first among its four latest models, beside Opus 5.5, Sonnet 5.5 and Haiku 5.5. It is the new first row, so 14 ids are carried. Fable 5.1 stays, Active on the deprecations page like every other row.
+- Claude Sonnet 4.5 has a row in the overview's table too, but the deprecations page has it deprecated on 2026-09-30 and retiring on 2026-11-30, `claude-sonnet-4-5` with it, so it is not carried. The three Claude Mythos models now have rows, marked limited availability with no API id printed, so they are still not carried.
+- The installed Gemini CLI, still 0.46.0, aliases `pro`, `flash` and `flash-lite` beside `auto`.
+
+Both `...Reviewed` dates moved to 2026-11-22, and the roster test names `claude-fable-5-2` and holds it first (it failed on the old list before the row went in). Not done: the recipe's one-turn proof, `apogee complete -m claude-fable-5-2 "Reply with OK"`, spends a turn on the user's subscription, so it is the user's.
+
 ### 2026-10-10 — `models-list-sections` (backlog item 36): cloud by provider, local by format
 
 **Why.** With item 35's rows in place, the user's `models list` was one table of 50 rows: local GGUFs, three vendor CLIs and their sub-models, sorted together by name. Their ask was cloud backends tabled by provider, adaptable to any number of providers and backends, and local backends split by format: SafeTensors, GGUF, then MLX.
@@ -13480,3 +13487,37 @@ The bare listing costs 11.2 ms on this checkout (3,001 files) and 34.4 ms on 100
 - **A live pass is the user's.** The next time Claude Code's login lapses, a turn on `apogee-dev` (terminal or app) should end with the `/login` hint. No real `claude` was run here.
 - **`apogee check` probing the Claude login** is out of scope by the default above.
 - **The macOS app** shows whatever the `error` event says and needs no change of its own. Its pipeline was not run.
+
+### 2026-11-22 — the completion audit at v0.2.1's docs pass: resume and the tool grants offer what they take
+
+**Why.** ADR 0007 holds completion to both directions, and makes the pre-MR docs pass audit the branch's verbs, flags and name kinds against it. v0.2.1's audit, and the review of its fix, found kinds offering more than their verbs accept:
+- `train pipeline resume <TAB>` offered every pipeline run. Resume refuses a complete run, a cycle pass (57h), a run a live process holds (57g) and a run whose snapshot is gone.
+- `--allow` and `--deny` (chat, execute, acp, tui, complete, the in-shell sessions) and `task run --allow` offered `run_command` where no program can be started (Windows, 57k), and every tool of a toolset `tools.disabled` switches off.
+
+**What was fixed** (`presentation/cli/`, and `business/training/pipeline`)
+
+- [x] **`train pipeline resume` offers only the runs it resumes**: `RESUMABLE_PIPELINE_RUN`, each run read as resume reads it and kept when `training::resume_refusal(manifest, training_dir)` is empty.
+  - The snapshot check moved into that refusal from the verb. So resume now refuses a run whose snapshot is gone before it looks for a spec (it used to ask for `--pipeline <spec>` first), and completion offers by the same call.
+  - A crashed run, whose lock names a dead process, is offered, since resume takes it over.
+  - `pipeline status` keeps `PIPELINE_RUN`.
+- [x] **`--allow`, `--deny` and a task's grant offer the tools this build and config register**: `OFFERED_TOOL`, through `offered_tool_names(child_processes, disabled)`, which uses the registration itself (`tools::native_tool_names`). `CompletionContext::child_processes` lets a test see the Windows side on any host. `config set-permission` keeps `TOOL`, which takes any writer on every host.
+- [x] **`--help` shows the narrower type names** (`OFFERED_TOOL`, `RESUMABLE_PIPELINE_RUN`), as a type name names what completes (2026-10-06). Chat's and execute's goldens changed in exactly their `--allow`/`--deny` help lines.
+
+**Decisions** (each recorded for veto)
+
+| Decision | Choice | Why |
+|---|---|---|
+| The pipeline offer's reads | **The manifest, the lock and the snapshot**, per run; not the spec checks (a spec found or named, its stage count) *(2026-11-22)* | What resume refuses before it looks for a spec; the rest needs a spec. |
+| Where the snapshot refusal lives | **`training::resume_refusal(existing, training_dir)`** *(2026-11-22)* | One refusal for the verb and its completion; no spec brings a deleted snapshot back. |
+| The tool filter | **The registration (`native_tool_names`) under the context's child processes and `tools.disabled`** *(2026-11-22)* | The registry `name_gated` checks against, so no rule is copied. |
+| The test seam | **`CompletionContext::child_processes`**, the platform's answer by default *(2026-11-22)* | `ToolsetOptions`' own pattern, so a Mac test sees the Windows side through the kind. |
+| A task's narrower grant | **Not its own kind yet** *(2026-11-22)* | A task's grant also refuses a tool `permissions.<tool>: deny` names, one outside `--agent`'s policy and one outside the suite's toolset pin on the task's backend, which chat's `--allow` accepts. An exact kind needs the backend and the agent resolved from flags that may follow on the line: a design of its own, left for a later item. |
+
+**Verified.**
+- Four new or extended tests in `complete_sources_test` and one in `pipeline_test`, each red first on behaviour, then green. The pipeline case drives the real `__complete` path over five runs and the verb on each, both ways; the tools cases hold each offer to `name_gated`, `why_not_offered`, `complete --allow/--deny` and `task run --allow`; a declarations case reads the bound CLI11 tree.
+- Tag runs on the final binary: [completion] 84 cases, [sources] 27, [names] 13, [train] 50, [pipeline] 50, [training] 221, [permissions] 47, [57k] 19, [task] 51, [acp] 50, [execute] 57, [chat] 210, [tui] 143, [golden] 43, [commands] 804, all passing.
+- clang-format clean, and Homebrew clang `-Wall -Wextra` clean on every changed file. The whole suite ran in the docs pass's gate.
+
+**Not done:**
+- **`--deny` offers no website names**, though it takes them. That predates this branch; the other direction of ADR 0007, for a later item.
+- **A task's grant kind**, above.

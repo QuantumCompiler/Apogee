@@ -2,7 +2,7 @@
 
 The design of Apogee's GUI applications: an interactive prototype of the whole app, built from the CLI's own recorded output, with a gallery of every screen and state, the foundations (color tokens, type, components) and the build pages that map the design to the CLI's machine-mode contract.
 
-It is a reference for building the apps under `lib/src/darwin/`, `linux/` and `windows/`, not an input to any build, and CI never reads it.
+It is a reference for building the apps under `lib/src/darwin/`, `linux/` and `windows/`, not an input to any build, and CI never reads it. The logo beside it is the one exception: `assets/Logo.png` is the master the macOS app's icon is made from, and that app's suite reads it on CI (so `changed.sh gui-darwin` counts it).
 
 ## Opening it
 
