@@ -11,6 +11,7 @@
 #include <random>
 #include <set>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "agent/tool.h"
@@ -264,7 +265,12 @@ TEST_CASE("a dangling file link out of the root is refused, and its target never
     }
     CHECK(asked == 0);  // refused before the gate, never asked about
     CHECK_FALSE(std::filesystem::exists(box.outside / "planted.txt"));
-    CHECK(std::filesystem::is_symlink(box.root / "notes.txt"));
+    // The link is left as it was. Asked of the platform, which reads a
+    // Windows symlink's reparse tag: Windows x64's library answers no link
+    // there whatever is on disk (57k).
+    std::error_code code;
+    CHECK(apogee::platform::is_link(box.root / "notes.txt", code));
+    CHECK_FALSE(code);
 }
 
 TEST_CASE("a dangling folder link out of the root is refused, and nothing is made through it",

@@ -22,6 +22,10 @@
 
 #if defined(_WIN32)
 #include <windows.h>
+// After windows.h: the Documents known folder (57k), and the allocator that
+// frees the path the shell hands back.
+#include <objbase.h>
+#include <shlobj.h>
 #include <winioctl.h>
 #endif
 
@@ -547,19 +551,26 @@ TEST_CASE("a file link is seen as itself, resolves to its target and is removed 
 TEST_CASE("the Documents folder is the one the platform keeps", "[platform][57k]") {
     const std::filesystem::path documents = apogee::platform::documents_directory();
 #if defined(_WIN32)
-    // The known folder: wherever a OneDrive or policy redirect put it, and so
-    // where install.ps1's GetFolderPath('MyDocuments') put its stub. Both ask
-    // the shell to verify the folder exists, so both are empty for an account
-    // that has none -- as on CI's windows-arm64 runner (2026-11-26), where
-    // the folder is then the profile's own Documents, missing.
+    // The known folder, as the shell itself answers it: wherever a OneDrive
+    // or policy redirect put it, and so where install.ps1's
+    // GetFolderPath('MyDocuments') put its stub. Both ask the shell, which
+    // verifies the folder, so both are empty where the shell answers no
+    // Documents folder for the account. CI's Windows runners do (2026-11-26):
+    // C:\Users\runneradmin\Documents exists, and the shell still answers an
+    // error. Uninstall then looks under <home>/Documents alone.
+    // FOLDERID_Documents, spelled as platform.cpp spells it.
+    static constexpr GUID kDocuments{
+        0xfdd39ad0, 0x238f, 0x46af, {0xad, 0xb4, 0x6c, 0x85, 0x48, 0x03, 0x69, 0xc7}};
+    PWSTR said = nullptr;
+    const HRESULT result = SHGetKnownFolderPath(kDocuments, 0, nullptr, &said);
+    const std::filesystem::path shell = SUCCEEDED(result) && said != nullptr
+                                            ? std::filesystem::path{std::wstring{said}}
+                                            : std::filesystem::path{};
+    CoTaskMemFree(said);
+    CHECK(documents == shell);
     if (documents.empty()) {
-        const std::optional<std::string> profile =
-            apogee::platform::utf8_environment("USERPROFILE");
-        REQUIRE(profile.has_value());
-        const std::filesystem::path usual =
-            apogee::platform::path_from_utf8(*profile) / "Documents";
-        WARN("this account has no Documents folder: " << usual.string());
-        CHECK_FALSE(std::filesystem::is_directory(usual));
+        WARN("the shell answers no Documents folder for this account, HRESULT "
+             << static_cast<unsigned long>(result));
     } else {
         CHECK(documents.is_absolute());
         CHECK(std::filesystem::is_directory(documents));
