@@ -6,7 +6,7 @@ How we work: features get discussed in chat, written up here, given their own do
 
 ---
 
-## Up next
+## In progress
 
 ### v0.2.1 — Track 1, the design prototype in React
 

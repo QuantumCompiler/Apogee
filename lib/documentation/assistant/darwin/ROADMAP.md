@@ -8,13 +8,7 @@ How we work: features get discussed in chat, written up here (and in [SPEC.md](.
 
 ## Shipped releases
 
-*(Nothing shipped yet — the first tagged release carrying GUI work starts this board.)*
-
----
-
-## In progress
-
-### v0.2.0 — The GUI effort opens
+### v0.2.0 — The GUI effort opens *(released 2026-10-31 · [release notes](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.2.0))*
 
 The documentation tree was restructured per application (2026-10-20, the user's call): CLI docs under `documentation/cli/`, this system scaffolded under `documentation/gui/`, the [router](../../CLAUDE.md) between them.
 
@@ -36,7 +30,7 @@ The documentation tree was restructured per application (2026-10-20, the user's 
 - [x] **ADR 0004** *(adopted 2026-10-21 — [MILESTONES → Milestone A](MILESTONES.md#milestone-a--the-macos-application))* — every Presentation module of the macOS app has its own shared scheme, and every view it draws a hermetic `#Preview` over the binary's recorded documents (the user's call, 2026-10-21), held by the layering check.
 - See the [`backlog/`](../../backlog/darwin/README.md) index for the work queue.
 
-### v0.2.0 — Track 2, CLI parity
+### v0.2.0 — Track 2, CLI parity *(released 2026-10-31 · [release notes](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.2.0))*
 
 Opened 2026-10-20 (the user's call, from the first hands-on run: the GUI does everything the CLI and TUI do — the SPEC's Full-parity principle, same day). The audit against the TUI's classification found eight command families with no GUI place and no law holding coverage; the split closes the law first, then the families. The same evening the user's next run found the store's verbs unreached: Models listed backends, and nothing could convert, quantize or register stored weights. That became 2h–2i, after the design grew its Stored weights view.
 
@@ -50,7 +44,7 @@ Opened 2026-10-20 (the user's call, from the first hands-on run: the GUI does ev
 - [x] **The model store** *(2h, shipped 2026-10-21 — [MILESTONES → Milestone C](MILESTONES.md#milestone-c--cli-parity))* — Backends and Stored weights apart, as the design draws them: every set by its handle, with made-from links; register one or all, remove a backend, delete with or without its backends, rename.
 - [x] **Convert, quantize and check as jobs** *(2i, shipped 2026-10-21 — [MILESTONES → Milestone C](MILESTONES.md#milestone-c--cli-parity))* — the sheets build the CLI's own chain, with names as the CLI gives them; each run is supervised on the Jobs tab, using the G18 and G20 fallbacks.
 
-### v0.2.0 — Track 3, MLX kinds in the app
+### v0.2.0 — Track 3, MLX kinds in the app *(released 2026-10-31 · [release notes](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.2.0))*
 
 Opened 2026-10-21 from the CLI's MLX-for-every-kind spike (the user's call): the CLI's 53e–53m make MLX directories of six kinds and add MLX engines for video and voice, and drafters for Gemma 4. The app follows what the binary states.
 
@@ -58,7 +52,7 @@ Opened 2026-10-21 from the CLI's MLX-for-every-kind spike (the user's call): the
 - [x] **MLX engines and drafters** *(3b, shipped 2026-10-22 — [Milestone D](MILESTONES.md#milestone-d--mlx-kinds-in-the-app))* — drafters paired with their bases, and the clip and say sheets naming their engine.
 
 
-### v0.2.0 — Track 4, the CLI/GUI audit's findings
+### v0.2.0 — Track 4, the CLI/GUI audit's findings *(released 2026-10-31 · [release notes](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.2.0))*
 
 Opened 2026-10-22 (the user's call): a thorough bug and feature-disparity audit over the CLI and GUI, 14 dimensions, probes against the branch binary and a three-lens adversarial panel per finding. 111 of 112 findings survived; the GUI's 68 (11 high) land here as twelve items. The CLI's 43 are its track 55.
 
@@ -77,7 +71,7 @@ Opened 2026-10-22 (the user's call): a thorough bug and feature-disparity audit 
 
 ---
 
-## Up next
+## In progress
 
 ### v0.2.1 — Track 5, Apogee in Xcode
 
@@ -105,6 +99,10 @@ Opened 2026-10-31 (the user's call): a second bug sweep over the CLI and GUI —
 Opened 2026-11-14 (the user's call): `lib/design/assets/Logo.png` becomes the macOS app's icon and Apogee's official logo. Until then the app showed macOS's generic icon.
 
 - [x] **The Apogee logo is the app's icon and the official logo** *(11a, shipped 2026-11-18 — [Milestone H](MILESTONES.md#milestone-h--the-apps-logo))* — every macOS icon size generated from the one master by a script into the app's asset catalog, the app target naming it, a check that fails on a stale or incomplete set, and the logo shown in the README and on the design canvas.
+
+---
+
+## Up next
 
 ### v0.2.4 — Track 7, the Mac as a client, and track 10, the server window
 
