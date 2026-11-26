@@ -101,7 +101,10 @@ struct TasksViewModelTests {
         runner.reading(["task", "list"], #"{"object":"list","data":[{"goal":"say hello","id":"\#(id)","rounds_budget":8,"rounds_used":2,"status":"exhausted"}],"total":1}"#)
         runner.reading(["task", "status"], recordedStatus)
         job.end(status: 1)
-        #expect(await eventually { model.tasks.count == 1 })
+        // The read-back is the list, then the selected task's status:
+        // `refresh()` fills `tasks` before it asks for the status, so wait
+        // for that second read too, not only for the list to land.
+        #expect(await eventually { model.tasks.count == 1 && runner.calls.last == "read task status \(id)" })
         #expect(runner.calls.suffix(2) == ["read task list", "read task status \(id)"])
     }
 
