@@ -214,7 +214,7 @@ Each fixture fails on today's binary unless marked as a guard (measured 2026-11-
 
 - **Blocked by:** [CLI-M45](a-collection-is-named-not-pathed-at-every-reader.md) · **Blocks:** —
 - **Relates to:**
-  - [CLI-M42](stubs-read-the-words-as-the-shell-does.md), whose investigation found the spaced collection;
+  - [CLI-M42](../../../assistant/cli/MILESTONES.md#2026-11-27--stubs-read-the-words-as-the-shell-does-maintenance-item-m42-a-quoted-word-completes-and-a-name-lands-as-one-word-in-every-shell), whose investigation found the spaced collection;
   - [CLI-M44](yaml-editor-refuses-the-layouts-it-does-not-write.md), whose refusals this item's dry run asks before the write;
   - CLI-59d (v0.2.3, [reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md)), which would relay today's exit 0 to devices;
   - [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed) and [APP-M22](../../../assistant/darwin/MILESTONES.md#2026-11-26--jobs-notes-reach-the-person-maintenance-item-m22-a-jobs-notes-reach-the-person), the Mac app's side;

@@ -3,11 +3,20 @@
 _apogee() {
     local -a lines
     local directive=:files
-    # Quoted with (@): an unquoted array drops empty elements, and the word
-    # under the cursor is empty at a fresh <TAB> -- so `apogee models <TAB>`
-    # arrived as `__complete models`, "still typing models", and no verb
-    # below the top level ever completed.
-    lines=(${(f)"$(APOGEE_COMPLETION_PROTOCOL=2 apogee __complete "${(@)words[2,CURRENT]}" 2>/dev/null)"})
+    # The protocol matches words literally, and compsys' words are the line's
+    # syntax ('models', my\ notes, 'cl): each is sent with one level of its
+    # quoting removed by (Q), which never evaluates -- $(...), $VAR and ~
+    # stay as typed. The word under the cursor is PREFIX and SUFFIX, inside
+    # the quote compstate[quote] says it opened, rewrapped because (Q) leaves
+    # an unbalanced 'cl as it is. compadd quotes each candidate for the line.
+    # Each quoted, the words with (@): unquoted, an empty word is dropped --
+    # a typed '' among the words, or the word under the cursor, empty at a
+    # fresh <TAB> -- so `apogee models <TAB>` once arrived as `__complete
+    # models`, "still typing models", and no verb below the top level ever
+    # completed.
+    local q=$compstate[quote]
+    lines=(${(f)"$(APOGEE_COMPLETION_PROTOCOL=2 apogee __complete "${(@Q)words[2,CURRENT-1]}" \
+        "${(Q)${:-$q$PREFIX$SUFFIX${q#\$}}}" 2>/dev/null)"})
     # The first line says what the rest mean. A binary too old to send one
     # sends bare candidates, which is `:values` -- or nothing, which is files.
     if [[ ${lines[1]} == :* ]]; then

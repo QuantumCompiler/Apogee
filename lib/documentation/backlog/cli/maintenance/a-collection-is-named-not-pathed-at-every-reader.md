@@ -163,7 +163,7 @@ Each fixture fails on today's binary (measured 2026-11-22).
 
 - **Blocked by:** — · **Blocks:** [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md), which adds the create rule beside this read rule
 - **Relates to:**
-  - [CLI-M42](stubs-read-the-words-as-the-shell-does.md), whose investigation found the spaced collection;
+  - [CLI-M42](../../../assistant/cli/MILESTONES.md#2026-11-27--stubs-read-the-words-as-the-shell-does-maintenance-item-m42-a-quoted-word-completes-and-a-name-lands-as-one-word-in-every-shell), whose investigation found the spaced collection;
   - 5c0d514e, the path rule's first commit;
   - DEVELOPER.md's `embed` row ("the path is built, never accepted");
   - [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose Graph list relies on this item's completion offering dash names after `--`;

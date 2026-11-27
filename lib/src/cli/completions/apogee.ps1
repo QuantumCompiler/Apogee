@@ -9,6 +9,9 @@ Register-ArgumentCompleter -Native -CommandName apogee -ScriptBlock {
     # cursor is in or touches is the word being typed, cut at the cursor. Cut
     # by the elements' own extents, which share the cursor's offsets, so text
     # before the command (`cd x; apogee ...`) or a doubled space shifts nothing.
+    # Each word as the command will get it, since the protocol matches words
+    # literally: a string's value, its quotes and escapes removed and no
+    # variable replaced ('models', "Be brief", my` notes); anything else as typed.
     $words = @()
     $current = ''
     $typing = $null
@@ -21,7 +24,24 @@ Register-ArgumentCompleter -Native -CommandName apogee -ScriptBlock {
             $typing = $elements[$i]
             break
         }
-        $words += $extent.Text
+        if ($elements[$i] -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
+            $elements[$i] -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) {
+            $words += $elements[$i].Value
+        } else {
+            $words += $extent.Text
+        }
+    }
+    # A string under the cursor is sent as its value too: whole, when the
+    # cursor is at its end, or else cut there, its opening quote dropped and
+    # a doubled quote undoubled -- so `-m 'cl` sends `cl`.
+    $oneToken = ($typing -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
+        $typing -is [System.Management.Automation.Language.ExpandableStringExpressionAst])
+    $opened = $oneToken -and ($current.StartsWith("'") -or $current.StartsWith('"'))
+    if ($oneToken -and $cursorPosition -ge $typing.Extent.EndOffset) {
+        $current = $typing.Value
+    } elseif ($opened) {
+        $quote = $current.Substring(0, 1)
+        $current = $current.Substring(1).Replace($quote + $quote, $quote)
     }
     # Windows PowerShell 5.1, pwsh 7.0-7.2 (unless 7.2's experimental argument
     # passing is on) and Legacy passing drop an empty argument to a program, so
@@ -39,8 +59,6 @@ Register-ArgumentCompleter -Native -CommandName apogee -ScriptBlock {
     # string -- quoted, or a comma escaped -- is one token, replaced whole.
     $kept = ''
     $comma = $current.LastIndexOf([char]',')
-    $oneToken = ($typing -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
-        $typing -is [System.Management.Automation.Language.ExpandableStringExpressionAst])
     if ($comma -ge 0 -and -not $oneToken) { $kept = $current.Substring(0, $comma + 1) }
     & apogee __complete @words 2>$null | ForEach-Object {
         $candidate = [string]$_
@@ -48,7 +66,16 @@ Register-ArgumentCompleter -Native -CommandName apogee -ScriptBlock {
             $candidate = $candidate.Substring($kept.Length)
         }
         if ($candidate) {
-            [System.Management.Automation.CompletionResult]::new($candidate, $candidate, 'ParameterValue', $candidate)
+            # Inserted as the line will read it: single-quoted, any quote in
+            # it doubled, where a bare word would not run as this one word or
+            # would be expanded (pwsh globs and expands `~` in a native
+            # command's bare words off Windows), or where the typed word opened
+            # a quote. Listed by its name.
+            $text = $candidate
+            if ($opened -or $candidate -match '[\s`$&;,(){}@#|<>''"*?\[\]]|^~') {
+                $text = "'" + $candidate.Replace("'", "''") + "'"
+            }
+            [System.Management.Automation.CompletionResult]::new($text, $candidate, 'ParameterValue', $candidate)
         }
     }
 }

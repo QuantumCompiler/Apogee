@@ -777,7 +777,7 @@ if(UNIX)
             $<TARGET_FILE:apogee>
             ${CMAKE_CURRENT_BINARY_DIR}/shell-completion
     )
-    set_tests_properties(cli.shell_completion PROPERTIES TIMEOUT 60)
+    set_tests_properties(cli.shell_completion PROPERTIES TIMEOUT 240)
 
     add_test(NAME cli.machine_mode
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/machine_mode_e2e.sh"

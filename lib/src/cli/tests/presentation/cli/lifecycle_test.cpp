@@ -22,6 +22,7 @@
 #include "backends/model_roster.h"
 #include "cli/complete_protocol.h"
 #include "cli/complete_sources.h"
+#include "cli/line_tokens.h"
 #include "cli/registry.h"
 #include "cli/root.h"
 #include "cli/uninstall.h"
@@ -1684,6 +1685,14 @@ constexpr std::array kPowerShellLines{
                    .sent = "[config][add-suite][s][--consultable][vision,ut]"},
     PowerShellLine{.typed = "apogee config add-suite s --consultable vision,^",
                    .sent = "[config][add-suite][s][--consultable][vision,]"},
+    // CLI-M42: a word as the command will get it, its quotes removed -- a
+    // string's value before the cursor, and under it while a quote is open.
+    PowerShellLine{.typed = "apogee 'models' ^", .sent = "[models][]"},
+    PowerShellLine{.typed = "apogee \"models\" ^", .sent = "[models][]"},
+    PowerShellLine{.typed = "apogee chat --system 'Be brief' -m ^",
+                   .sent = "[chat][--system][Be brief][-m][]"},
+    PowerShellLine{.typed = "apogee chat -m 'cl^", .sent = "[chat][-m][cl]"},
+    PowerShellLine{.typed = "apogee chat -m \"cl^", .sent = "[chat][-m][cl]"},
 };
 
 /// A line the fake `apogee` answers with `answer`, and what PowerShell then
@@ -1709,12 +1718,43 @@ constexpr std::array kPowerShellAnswers{
                      .answer = "vision,utility",
                      .offered = "utility",
                      .chosen = "apogee config add-suite s --consultable vision,utility"},
-    // A quoted word is one token, which PowerShell replaces whole: no trim.
+    // A quoted word is one token, which PowerShell replaces whole: no trim,
+    // and the candidate back inside the quote it opened (CLI-M42).
     PowerShellAnswer{.label = "quoted",
                      .typed = "apogee config add-suite s --consultable 'vision,ut'^",
-                     .answer = "'vision,utility",
-                     .offered = "'vision,utility",
-                     .chosen = "apogee config add-suite s --consultable 'vision,utility"},
+                     .answer = "vision,utility",
+                     .offered = "'vision,utility'",
+                     .chosen = "apogee config add-suite s --consultable 'vision,utility'"},
+    // CLI-M42: a candidate inserted as the line will read it -- quoted where
+    // a bare word would not run as this one word, or where the typed word
+    // opened a quote, any quote in it doubled.
+    PowerShellAnswer{.label = "a space",
+                     .typed = "apogee embed query my^",
+                     .answer = "my notes",
+                     .offered = "'my notes'",
+                     .chosen = "apogee embed query 'my notes'"},
+    PowerShellAnswer{.label = "a quote",
+                     .typed = "apogee embed query it^",
+                     .answer = "it's",
+                     .offered = "'it''s'",
+                     .chosen = "apogee embed query 'it''s'"},
+    // Off Windows pwsh globs a native command's bare word and expands a
+    // leading `~`: a candidate holding either is quoted too.
+    PowerShellAnswer{.label = "a glob",
+                     .typed = "apogee config delete-allowed-host ^",
+                     .answer = "*.example.com",
+                     .offered = "'*.example.com'",
+                     .chosen = "apogee config delete-allowed-host '*.example.com'"},
+    PowerShellAnswer{.label = "a tilde",
+                     .typed = "apogee embed query ^",
+                     .answer = "~x",
+                     .offered = "'~x'",
+                     .chosen = "apogee embed query '~x'"},
+    PowerShellAnswer{.label = "an open quote",
+                     .typed = "apogee chat -m 'cl^",
+                     .answer = "claudy",
+                     .offered = "'claudy'",
+                     .chosen = "apogee chat -m 'claudy'"},
 };
 
 /// `typed` without its `^`, and the column the `^` marked.
@@ -1737,15 +1777,17 @@ constexpr std::array kPowerShellAnswers{
     return quoted + "'";
 }
 
-/// What one Tab offered: the texts in order, the first one's type, and the
-/// line once the first is chosen -- PowerShell's own replacement range applied.
+/// What one Tab offered: the texts it inserts in order, the names it lists
+/// (the candidates as answered), the first one's type, and the line once the
+/// first is chosen -- PowerShell's own replacement range applied.
 struct TabOffer {
     std::string texts;
+    std::string items;
     std::string type;
     std::string chosen;
 };
 
-/// The driver's lines, `<label>\t<texts>\t<type>\t<chosen>`, by label.
+/// The driver's lines, `<label>\t<texts>\t<items>\t<type>\t<chosen>`, by label.
 [[nodiscard]] std::map<std::string, TabOffer, std::less<>> tab_offers(const std::string& out) {
     std::map<std::string, TabOffer, std::less<>> offers;
     std::istringstream lines{out};
@@ -1763,9 +1805,9 @@ struct TabOffer {
             }
             start = tab + 1;
         }
-        if (fields.size() == 4) {
-            offers[fields[0]] =
-                TabOffer{.texts = fields[1], .type = fields[2], .chosen = fields[3]};
+        if (fields.size() == 5) {
+            offers[fields[0]] = TabOffer{
+                .texts = fields[1], .items = fields[2], .type = fields[3], .chosen = fields[4]};
         }
     }
     return offers;
@@ -1824,6 +1866,7 @@ function Show([string]$Label, [string]$Line, [int]$Column) {
     $found = TabExpansion2 -inputScript $Line -cursorColumn $Column
     $offered = @($found.CompletionMatches | Where-Object { $_.CompletionText })
     $texts = ($offered | ForEach-Object { $_.CompletionText }) -join '|'
+    $items = ($offered | ForEach-Object { $_.ListItemText }) -join '|'
     $type = ''
     $chosen = ''
     if ($offered.Count -gt 0) {
@@ -1831,7 +1874,7 @@ function Show([string]$Label, [string]$Line, [int]$Column) {
         $chosen = $Line.Substring(0, $found.ReplacementIndex) + $offered[0].CompletionText +
             $Line.Substring($found.ReplacementIndex + $found.ReplacementLength)
     }
-    [Console]::Out.WriteLine("$Label`t$texts`t$type`t$chosen")
+    [Console]::Out.WriteLine("$Label`t$texts`t$items`t$type`t$chosen")
 }
 )ps";
     // The table twice: Standard passing (pwsh 7.3 and later), then Legacy --
@@ -1895,7 +1938,8 @@ function Show([string]$Label, [string]$Line, [int]$Column) {
             INFO(mode << " passing, Tab at the ^ of `" << line.typed << "`");
             const auto found = offers.find(std::string{mode} + ":" + std::to_string(index));
             REQUIRE(found != offers.end());
-            CHECK(found->second.texts == "[__complete]" + std::string{line.sent});
+            // The name listed is the fake's answer, the words it was sent.
+            CHECK(found->second.items == "[__complete]" + std::string{line.sent});
             CHECK(found->second.type == "ParameterValue");
         }
     }
@@ -1917,72 +1961,116 @@ function Show([string]$Label, [string]$Line, [int]$Column) {
 namespace {
 
 /// One Tab in bash (CLI-M41): what the caller's shell has set and the line or
-/// words bash hands `_apogee`, as bash text run in a subshell of its own, and
+/// words bash hands `_apogee`, as bash text run in a subshell of its own, the
+/// call bash makes (with readline's word as `$2` where a row says so), and
 /// what `COMPREPLY` then holds, joined with `|`. A Tab the fake `apogee` does
 /// not answer replies with the words the stub sent it, one bracket a word --
 /// so `[models][]` is two words arriving split, and `[models ]` one joined.
+/// That reply is a candidate like any other, so since CLI-M42 it comes back
+/// escaped as the line must read it: `\[models\]\[\]`.
 struct BashTab {
     std::string_view label;
     std::string_view setup;
+    std::string_view call = "_apogee";
     std::string_view replied;
 };
 
 constexpr std::array kBashTabs{
-    BashTab{.label = "a fresh word", .setup = "COMP_LINE='apogee '", .replied = "[__complete][]"},
+    BashTab{.label = "a fresh word",
+            .setup = "COMP_LINE='apogee '",
+            .replied = R"(\[__complete\]\[\])"},
     BashTab{.label = "below the top level",
             .setup = "COMP_LINE='apogee models '",
-            .replied = "[__complete][models][]"},
+            .replied = R"(\[__complete\]\[models\]\[\])"},
     BashTab{.label = "a flag's value",
             .setup = "COMP_LINE='apogee chat -m '",
-            .replied = "[__complete][chat][-m][]"},
+            .replied = R"(\[__complete\]\[chat\]\[-m\]\[\])"},
     BashTab{.label = "a value being typed",
             .setup = "COMP_LINE='apogee chat -m cl'",
-            .replied = "[__complete][chat][-m][cl]"},
+            .replied = R"(\[__complete\]\[chat\]\[-m\]\[cl\])"},
     // Mid-line: the words up to the cursor, never past it.
     BashTab{.label = "mid-line",
             .setup = "COMP_LINE='apogee chat -m cl --tools'; COMP_POINT=17",
-            .replied = "[__complete][chat][-m][cl]"},
+            .replied = R"(\[__complete\]\[chat\]\[-m\]\[cl\])"},
     // No COMP_LINE -- a caller driving the function by hand: COMP_WORDS.
     BashTab{.label = "from COMP_WORDS",
             .setup = "unset COMP_LINE COMP_POINT; COMP_WORDS=(apogee chat -m ''); COMP_CWORD=3",
-            .replied = "[__complete][chat][-m][]"},
+            .replied = R"(\[__complete\]\[chat\]\[-m\]\[\])"},
     // Two candidates are two words, never one line of both pasted in.
     BashTab{.label = "two candidates",
             .setup = R"(export APOGEE_FAKE_ANSWER=$':values\nchat\nconfig'; COMP_LINE='apogee c')",
             .replied = "chat|config"},
-    // Past a `:`, each candidate loses what bash will not replace.
+    // A binary too old to say what its lines are sends bare candidates.
+    BashTab{.label = "a binary with no directive line",
+            .setup = R"(export APOGEE_FAKE_ANSWER=$'chat\nconfig'; COMP_LINE='apogee c')",
+            .replied = "chat|config"},
+    // Past a `:`, each candidate loses what bash will not replace: readline's
+    // word, `$2` -- found as readline finds it when a caller passes none.
     BashTab{
         .label = "past a word-break",
         .setup =
             R"(export APOGEE_FAKE_ANSWER=$':values\nllama3.2:3b\nllama3.2:1b'; COMP_LINE='apogee models pull llama3.2:')",
         .replied = "3b|1b"},
+    BashTab{
+        .label = "past a word-break, readline's word given",
+        .setup =
+            R"(export APOGEE_FAKE_ANSWER=$':values\nllama3.2:3b\nllama3.2:1b'; COMP_LINE='apogee models pull llama3.2:')",
+        .call = "_apogee apogee '' :",
+        .replied = "3b|1b"},
+    // CLI-M42: an escaped `:` is no word-break, so readline replaces the whole
+    // word, and the candidate keeps it -- never `3b`, which would destroy it.
+    BashTab{
+        .label = "an escaped colon",
+        .setup =
+            R"(export APOGEE_FAKE_ANSWER=$':values\nllama3.2:3b'; COMP_LINE='apogee models pull llama3.2\:')",
+        .call = R"(_apogee apogee 'llama3.2\:' pull)",
+        .replied = "llama3.2:3b"},
+    BashTab{
+        .label = "an escaped colon, by hand",
+        .setup =
+            R"(export APOGEE_FAKE_ANSWER=$':values\nllama3.2:3b'; COMP_LINE='apogee models pull llama3.2\:')",
+        .replied = "llama3.2:3b"},
+    // Inside a quote, readline's word starts after it, `:` and all.
+    BashTab{
+        .label = "a colon inside a quote",
+        .setup =
+            R"(export APOGEE_FAKE_ANSWER=$':values\nllama3.2:3b'; COMP_LINE="apogee models pull 'llama3.2:")",
+        .call = "_apogee apogee llama3.2: pull",
+        .replied = "llama3.2:3b"},
     // An answer line is a candidate as it stands, never matched against the
-    // folder, which holds fileA.txt and fileB.txt.
+    // folder, which holds fileA.txt and fileB.txt -- and, since CLI-M42,
+    // escaped, so the line does not glob it either.
     BashTab{
         .label = "a candidate shaped like a glob",
         .setup =
             R"(export APOGEE_FAKE_ANSWER=$':values\nfile*'; COMP_LINE='apogee chat --attach f')",
-        .replied = "file*"},
+        .replied = R"(file\*)"},
     // What the caller's own shell has set changes nothing.
     BashTab{.label = "a caller's IFS",
             .setup = R"(IFS=$'\n'; COMP_LINE='apogee chat -m ')",
-            .replied = "[__complete][chat][-m][]"},
+            .replied = R"(\[__complete\]\[chat\]\[-m\]\[\])"},
     BashTab{
         .label = "a caller's nullglob",
         .setup =
             R"(shopt -s nullglob; export APOGEE_FAKE_ANSWER=$':values\nnomatch*\nchat'; COMP_LINE='apogee c')",
-        .replied = "nomatch*|chat"},
+        .replied = R"(nomatch\*|chat)"},
     BashTab{
         .label = "a caller's failglob",
         .setup =
             R"(shopt -s failglob; export APOGEE_FAKE_ANSWER=$':values\nnomatch*'; COMP_LINE='apogee c')",
-        .replied = "nomatch*"},
+        .replied = R"(nomatch\*)"},
     BashTab{.label = "a caller's set -u, and an empty answer",
             .setup = "set -u; export APOGEE_FAKE_ANSWER=:values; COMP_LINE='apogee models list '",
             .replied = ""},
     BashTab{.label = "a caller's set -u, and no answer at all",
             .setup = "set -u; export APOGEE_FAKE_ANSWER=none; COMP_LINE='apogee chat --attach '",
             .replied = ""},
+    BashTab{
+        .label = "a caller's set -u, and a quoted line",
+        .setup =
+            R"(set -u; export APOGEE_FAKE_ANSWER=$':values\nit\'s'; COMP_LINE="apogee embed query 'it")",
+        .call = "_apogee apogee it query",
+        .replied = R"(it'\''s)"},
     // A caller's `set -e`: a Tab never closes the shell -- not when the
     // binary fails, nor where bash 3.2 has no compopt.
     BashTab{.label = "a caller's set -e, and a binary that fails",
@@ -1992,6 +2080,76 @@ constexpr std::array kBashTabs{
     BashTab{.label = "a caller's set -e, and an empty answer",
             .setup = "set -e; export APOGEE_FAKE_ANSWER=:values; COMP_LINE='apogee models list '",
             .replied = ""},
+    // CLI-M42: each word sent as the command will get it -- one level of
+    // quoting removed, nothing expanded or run.
+    BashTab{.label = "a quoted verb",
+            .setup = R"(COMP_LINE="apogee 'models' ")",
+            .replied = R"(\[__complete\]\[models\]\[\])"},
+    BashTab{.label = "a quoted value with a blank",
+            .setup = R"(COMP_LINE="apogee chat --system 'Be brief' -m ")",
+            .replied = R"(\[__complete\]\[chat\]\[--system\]\[Be\ brief\]\[-m\]\[\])"},
+    BashTab{.label = "an escaped blank",
+            .setup = R"(COMP_LINE='apogee embed query my\ notes ')",
+            .replied = R"(\[__complete\]\[embed\]\[query\]\[my\ notes\]\[\])"},
+    BashTab{.label = "double quotes' four escapes",
+            .setup = R"(COMP_LINE='apogee chat --system "a\"b\\c\$d\`e\f" -m ')",
+            .replied = R"(\[__complete\]\[chat\]\[--system\]\[a\"b\\c\$d\`e\\f\]\[-m\]\[\])"},
+    BashTab{
+        .label = "a substitution, never run",
+        .setup = R"sh(COMP_LINE='apogee chat --system "$(touch EVALUATED)" $HOME -m ')sh",
+        .replied =
+            R"(\[__complete\]\[chat\]\[--system\]\[\$\(touch\ EVALUATED\)\]\[\$HOME\]\[-m\]\[\])"},
+    // The word under the cursor, inside the quote it opened, and the reply
+    // inside it too, for readline to close.
+    BashTab{.label = "an open single quote",
+            .setup = R"(COMP_LINE="apogee chat -m 'cl")",
+            .call = "_apogee apogee cl -m",
+            .replied = "[__complete][chat][-m][cl]"},
+    BashTab{.label = "an open double quote",
+            .setup = R"(COMP_LINE='apogee chat -m "a\"b')",
+            .call = R"(_apogee apogee 'a\"b' -m)",
+            .replied = R"([__complete][chat][-m][a\"b])"},
+    BashTab{.label = "an open $' quote",
+            .setup = R"(COMP_LINE="apogee chat -m \$'cl")",
+            .call = "_apogee apogee cl -m",
+            .replied = "[__complete][chat][-m][cl]"},
+    // Readline takes the `'` after `it\` for a closing quote, so its word is
+    // the whole `$'it\'s`, replaced quote and all: the reply lands bare.
+    BashTab{.label = "a $' quote readline reads as closed",
+            .setup = R"(COMP_LINE="apogee chat -m \$'it\\'s")",
+            .call = R"(_apogee apogee "\$'it\\'s" -m)",
+            .replied = R"(\[__complete\]\[chat\]\[-m\]\[it\'s\])"},
+    // Each candidate quoted for where it lands.
+    BashTab{
+        .label = "a candidate with a blank",
+        .setup =
+            R"(export APOGEE_FAKE_ANSWER=$':values\nmy notes'; COMP_LINE='apogee embed query my')",
+        .replied = R"(my\ notes)"},
+    BashTab{
+        .label = "a candidate a bare line would split",
+        .setup =
+            R"(export APOGEE_FAKE_ANSWER=$':values\nhttps://x.test/a?b=1&c=2'; COMP_LINE='apogee config delete-allowed-host ht')",
+        .replied = R"(https://x.test/a\?b=1\&c=2)"},
+    BashTab{.label = "a candidate with a leading tilde",
+            .setup = R"(export APOGEE_FAKE_ANSWER=$':values\n~x'; COMP_LINE='apogee embed query ')",
+            .replied = R"(\~x)"},
+    BashTab{
+        .label = "a comma list, kept bare",
+        .setup =
+            R"(export APOGEE_FAKE_ANSWER=$':values\nvision,utility'; COMP_LINE='apogee config add-suite s --consultable vision,ut')",
+        .replied = "vision,utility"},
+    BashTab{
+        .label = "a candidate inside a double quote",
+        .setup =
+            R"(export APOGEE_FAKE_ANSWER=$':values\nsay "$x" `y` \\'; COMP_LINE='apogee chat --system "sa')",
+        .call = "_apogee apogee sa --system",
+        .replied = R"(say \"\$x\" \`y\` \\)"},
+    BashTab{
+        .label = "a candidate inside a $' quote",
+        .setup =
+            R"(export APOGEE_FAKE_ANSWER=$':values\nit\'s \\ "q"'; COMP_LINE="apogee chat --system \$'it")",
+        .call = "_apogee apogee it --system",
+        .replied = R"(it\'s \\ "q")"},
 };
 
 /// A bash on this host, and the version it says it is.
@@ -2075,8 +2233,8 @@ show() {
 }
 )sh";
     for (std::size_t index = 0; index < kBashTabs.size(); ++index) {
-        driver += "(\n" + std::string{kBashTabs[index].setup} + "\n_apogee\nshow " +
-                  std::to_string(index) + "\n)\n";
+        driver += "(\n" + std::string{kBashTabs[index].setup} + "\n" +
+                  std::string{kBashTabs[index].call} + "\nshow " + std::to_string(index) + "\n)\n";
     }
     driver += "exit 0\n";
 
@@ -2097,14 +2255,106 @@ show() {
         REQUIRE(ran.status == 0);
         const std::map<std::string, std::string, std::less<>> replies = bash_replies(ran.out);
 
+        // Nothing on a line is run: the substitution stayed text.
+        CHECK_FALSE(std::filesystem::exists(work.path() / "EVALUATED"));
         for (std::size_t index = 0; index < kBashTabs.size(); ++index) {
             const BashTab& tab = kBashTabs[index];
-            INFO("Tab with " << tab.label << ": " << tab.setup);
+            INFO("Tab with " << tab.label << ": " << tab.setup << "; " << tab.call);
             const auto found = replies.find(std::to_string(index));
             CHECK(found != replies.end());
             if (found != replies.end()) {
                 CHECK(found->second == tab.replied);
             }
         }
+    }
+}
+
+namespace {
+
+/// Closed lines, split by the binary's one splitter (`line_tokens`) and by the
+/// bash stub's tokenizer (CLI-M42): the same words from both, so the stub
+/// sends what the exec line would run.
+constexpr std::array<std::string_view, 15> kClosedLines{
+    "a 'b c' d",
+    R"("x\"y")",
+    R"(a\ b)",
+    "''",
+    R"("$HOME")",
+    "a'b c'd",
+    R"('a\b')",
+    R"("a\"b" "c\\d" "e\$f" "g\h" "i\`j")",
+    R"(a\ b c\'d)",
+    "$HOME ~ *.txt `x`",
+    "  a\tb  ",
+    R"(x '' "" y)",
+    "models pull ",
+    R"sh(chat --system "$(touch EVALUATED)" -m cl)sh",
+    R"('it'\''s' "it's" 'say "hi"')",
+};
+
+}  // namespace
+
+TEST_CASE("the bash stub splits a line as the binary's splitter does",
+          "[commands][completion][bash][tokens]") {
+    if (!apogee::platform::supports_child_processes()) {
+        SKIP("no child processes on this platform");
+    }
+    const std::vector<HostBash> bashes = host_bashes();
+    if (bashes.empty()) {
+        SKIP("no bash on PATH or at /bin/bash: the bash stub cannot run here");
+    }
+    const std::filesystem::path stub =
+        std::filesystem::path{APOGEE_SOURCE_DIR}.parent_path() / "completions" / "apogee.bash";
+    REQUIRE(std::filesystem::exists(stub));
+    const apogee::testing::TempDir work{"lifecycle-tokens-" +
+                                        std::to_string(std::random_device{}())};
+
+    // Each line's words as the binary splits it, one bracket a word, with the
+    // empty word a trailing blank begins -- the word the stub completes.
+    std::vector<std::string> expected;
+    for (const std::string_view line : kClosedLines) {
+        const apogee::commands::LineTokens split = apogee::commands::line_tokens(line);
+        INFO("line_tokens on `" << line << "`");
+        REQUIRE(split.error.empty());
+        std::string words;
+        for (const std::string& word : split.words) {
+            words += "[" + word + "]";
+        }
+        if (split.trailing_space) {
+            words += "[]";
+        }
+        expected.push_back(words);
+    }
+
+    const std::string driver = R"sh(source "$1"
+shift
+for line in "$@"; do
+    __apogee_words "$line"
+    out=
+    for word in "${words[@]}"; do out="$out[$word]"; done
+    printf '%s\n' "$out"
+done
+)sh";
+    for (const HostBash& bash : bashes) {
+        apogee::platform::ChildCommand command;
+        command.program = bash.program;
+        command.arguments = {"--norc", "--noprofile", "-c", driver, "_", stub.string()};
+        command.arguments.insert(command.arguments.end(), kClosedLines.begin(), kClosedLines.end());
+        command.working_directory = work.path().string();
+        command.unset_environment = {"BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS"};
+        const apogee::platform::CapturedRun ran = apogee::platform::run_captured(
+            command, apogee::platform::CapturedLimits{.timeout = std::chrono::minutes{1}});
+        INFO("bash " << bash.version << " at " << bash.program);
+        INFO("its run: " << ran.error);
+        INFO("its stderr: " << ran.tail);
+        REQUIRE(ran.status == 0);
+        std::istringstream lines{ran.out};
+        std::string got;
+        for (std::size_t index = 0; index < kClosedLines.size(); ++index) {
+            INFO("the stub's tokenizer on `" << kClosedLines[index] << "`");
+            REQUIRE(std::getline(lines, got));
+            CHECK(got == expected[index]);
+        }
+        CHECK_FALSE(std::filesystem::exists(work.path() / "EVALUATED"));
     }
 }
