@@ -212,7 +212,7 @@ Each case fails on today's binary unless marked as a guard. The child cases run 
 | Does every argv carry the `--`, or only one whose name starts with `-`? | `[default]` | Every one. No one sees the argv, CLI11 reads a plain name the same after `--`, and one shape per act leaves nothing to decide per name (a row named `--` included). |
 | Does `t`'s prefill spell every key with `shell_word`, or only a dash-led one? | `[default]` | Every key. `shell_word` leaves a word in its bare set as it is, and every name `mcp create` makes is in that set, so a plain key opens as today. A hand-written key holding a blank or a quote then reads back as itself through `line_tokens`, instead of splitting into a server and a tool. |
 | Built before CLI-M48, how does the prefill spell a key that needs quoting? | `[default]` | As today: the key raw, with `-- ` before it when it starts with `-`. No private quoter is written here. Whichever item lands second wires the prefill to `shell_word`. |
-| What do the asks say for a dash-led row (`Delete dataset -x ('apogee datasets delete -x')?`)? | `(consumed decision)` | CLI-M48, whose renderer spells every printed command, the TUI's confirm texts included (`tui_training.cpp:186-191`, `:272-275`; `tui_agents.cpp:136-140`). |
+| What do the asks say for a dash-led row (`Delete dataset -x ('apogee datasets delete -x')?`)? | `(consumed decision)` | CLI-M48, whose renderer spells every printed command, the TUI's confirm texts included: CLI-M48 routes the Datasets confirm (`tui_training.cpp:272-275`), and CLI-M61 the Train and Agents confirms (`tui_training.cpp:186-191`; `tui_agents.cpp:136-140`). |
 | Should a new dataset name starting with `-` be refused? | `(consumed decision)` | CLI-M56, whose create rule refuses a leading `-` for new names and keeps existing ones deletable (ADR 0006). This item makes an existing one deletable from the shell. |
 | What way out does a hand-written agent, MCP server or backend get once the verb refuses it? | `(consumed decision)` | CLI-M50. It gives a backend the rename door, and records that agents and MCP servers have no rename verb. |
 
@@ -228,7 +228,7 @@ Each case fails on today's binary unless marked as a guard. The child cases run 
 
 ## Out of scope
 
-- **The asks' words**, such as `('apogee datasets delete -x')`, and the program word they print: [CLI-M48](a-suggested-command-runs-as-printed.md) and [CLI-M49](a-printed-command-names-the-binary-that-printed-it.md).
+- **The asks' words**, such as `('apogee datasets delete -x')`, and the program word they print: [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md) for the Datasets ask, [CLI-M61](every-printed-command-goes-through-the-renderer.md) for the Train and Agents asks, and [CLI-M49](a-printed-command-names-the-binary-that-printed-it.md).
 - **Creation rules for dataset names**: [CLI-M56](a-new-dataset-name-is-one-every-verb-reads.md) for new names, and [CLI-M55](a-dataset-is-named-not-pathed-at-every-reader.md) for the readers.
 - **A way out for a hand-written entry the editors refuse**: [CLI-M50](a-refused-backend-name-gets-the-rename-that-reaches-it.md) for backends. The gap for agents and MCP servers, which have no rename verb, is recorded there.
 - **The Mac app's argv**: [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed) for its Training datasets delete and the other rows where a person meets harm today, and [APP-M23](../../../assistant/darwin/MILESTONES.md#2026-11-27--every-name-the-app-passes-is-read-as-a-name-maintenance-item-m23-every-name-the-app-passes-is-read-as-a-name) for every other site.
@@ -239,7 +239,7 @@ Each case fails on today's binary unless marked as a guard. The child cases run 
 
 - **Blocked by:** — · **Blocks:** —
 - **Relates to:**
-  - [CLI-M48](a-suggested-command-runs-as-printed.md), which owns the asks' words and `shell_word`, which the `t` prefill consumes;
+  - [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md), which owns `shell_word`, which the `t` prefill consumes, and the Datasets ask's words; [CLI-M61](every-printed-command-goes-through-the-renderer.md), which owns the Train and Agents asks' words;
   - [CLI-M50](a-refused-backend-name-gets-the-rename-that-reaches-it.md), the way out a hand-written backend meets once its row's act reaches the verb;
   - [CLI-M55](a-dataset-is-named-not-pathed-at-every-reader.md), whose read rule keeps every listed dataset, `-h` included, readable and deletable by name, and which leaves the shell's `--` to this item (its Open questions);
   - [CLI-M56](a-new-dataset-name-is-one-every-verb-reads.md), whose create rule stops new dash-led datasets, while existing ones still need this item;

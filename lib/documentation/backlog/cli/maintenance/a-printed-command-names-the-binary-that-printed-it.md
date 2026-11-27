@@ -9,7 +9,7 @@
 | **Component** | Output › the program word and root flag of every printed command (`contracts/paths`, CLI-M48's `contracts/suggested_command`) |
 | **Labels** | `remedies` `dev-channel` `root-flags` |
 | **Epic** | — (maintenance has no track) |
-| **Blocked by** | [M48](a-suggested-command-runs-as-printed.md) |
+| **Blocked by** | [M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md) |
 | **Blocks** | — |
 | **Reporter** | The investigation of the APP-M21 and APP-M22 probes' CLI asides (2026-11-26): a sandboxed investigator, then two skeptics, one of whom found this case, and a critic the same day |
 | **Created** | 2026-11-26 |
@@ -111,10 +111,10 @@ All measured or read 2026-11-26 with the binary named above. Labels prefixed `c:
 
    So today a remedy pasted into the dev app's Console runs on `apogee-dev` by accident, while the same text pasted into a terminal runs the release binary.
 6. **Fully literal printed commands are outside CLI-M48's renderer.**
-   - M48's sweep and its source check find a string literal followed by a name (about 190 sites).
+   - M48's sweep and CLI-M61's source check find a string literal followed by a name (about 190 sites).
    - A command with nothing joined to it is in neither. A grep over `source/` finds about 425 string literals in 98 files that hold `apogee <word>` with nothing joined after them, comment lines and the `apogee <verb>: ` voice left out. Help text and prose are included in that count; how many are remedies was not counted.
    - Examples that are remedies: `check.cpp:439` and `:863` above, the compat notice's `'apogee config migrate'` (`root.cpp:233`), the config conflict's (`paths.cpp:264`), and the setup remedies `kVideoSetupRemedy`, `kVoiceSetupRemedy`, `kMlxVideoSetupRemedy` and `kMlxAudioSetupRemedy` (`business/video/runtime.h:183`, `:200`, `:204`, `:254`).
-7. **Blast radius.** Once M48 routes them, every printed command goes through one renderer:
+7. **Blast radius.** Once M48 and CLI-M61 route them, every printed command goes through one renderer:
    - the CLI's stderr and stdout;
    - `check`'s text and its JSON `remedy`;
    - the HTTP admin graph bodies (`http01`: `GET /v1/admin/graph/-y/neighbors?node=Fox` answers 404 with `no graph built for '-y' -- run: apogee graph build -y`);
@@ -146,7 +146,7 @@ All measured or read 2026-11-26 with the binary named above. Labels prefixed `c:
 - **The version line keeps `apogee`.** Its first word is the product's: the release scripts read line one (M10's record), and the Mac app accepts a binary only when that word is `apogee` (`BinaryDiscovery.swift:94`).
 - **One answer, in contracts.** The program words come from one function in `paths.h`, beside `channel_flag`. No site spells a channel's binary name. The three names are CMake's `OUTPUT_NAME`s (`source/CMakeLists.txt:106-110`), and `paths_test` holds them at compile time, as it holds the channel names.
 - **The flag is read, never decided again.** The renderer reads `root_flag()`, which the root command already keeps for the run. Nothing new is recorded, and `RootFlag::spelling()` stays the messages' spelling.
-- **A printed command runs as printed** (CLI-M48's invariant). The program words go through `shell_word` like every other word, so a `--custom` file holding a space is quoted.
+- **A printed command runs as printed** (CLI-M48's renderer, CLI-M61's invariant). The program words go through `shell_word` like every other word, so a `--custom` file holding a space is quoted.
 - **Development runs on the dev channel** ([CLAUDE.md](../../../assistant/cli/CLAUDE.md#development-runs-on-the-dev-channel), `:289-298`). A dev build's printed command never sends the developer to `apogee` over `~/.apogee`. Live passes and "try it" steps name `apogee-dev`.
 - **Tests stay hermetic and put back what they change.** `APOGEE_HOME` is a temp folder, or, for a run under `--dev`, `HOME` and `USERPROFILE` are a temp folder with `APOGEE_HOME` and `APOGEE_CONFIG` unset. `BakedChannelGuard` restores the baked channel, and `RootFlagScope` restores the flag.
 - **Layers** ([ADR 0001](../../../adrs/cli/layer-enforcement.md)): the words live in Data (`contracts`), reached downward by the Business sites (`navigate.cpp:564`) and by Presentation.
@@ -163,7 +163,7 @@ Paths under `lib/src/cli/`.
 | `source/data/contracts/paths.h`, `paths.cpp` | `channel_program(Channel)`, constexpr beside `channel_flag`: `apogee`, `apogee-dev`, `apogee-test`. `program_words()`: `channel_program(baked_channel())`, then the words of `root_flag()` when a flag is in force. Those words are the channel flag, or `--custom` and its file made absolute and normalized. They are returned unquoted: the renderer quotes. `RootFlag::spelling()` is unchanged. |
 | `source/data/contracts/suggested_command.h`, `.cpp` (CLI-M48's) | A command's program word, `apogee` by default in M48, becomes `program_words()`, each word through `shell_word`. A command that names its own program (check's `chmod`) keeps it. |
 | `source/presentation/cli/check.cpp`, `root.cpp`, `source/data/contracts/paths.cpp`, `source/business/video/runtime.h`, `.cpp`, and every other file holding a fully literal printed command | Each such command is built through the renderer. That includes check's Config row (`check.cpp:439`), the chmod rows' `(or: apogee check --fix)` (`:863`, `:1323`, `:1354`, `:1582`, `:1841`), the compat notice (`root.cpp:233`), the config conflict (`paths.cpp:264`), the four setup remedies (`runtime.h:183`, `:200`, `:204`, `:254`), and the rest the source check names. The house voice before each is untouched. |
-| `tests/scripts/cmake/one_suggested_command.cmake` (CLI-M48's) | Also fails on a fully literal printed command outside the renderer: a string literal holding `apogee ` and a lower-case word not followed by `:`. Help text, completion descriptions and prose naming a verb in passing go on a list of this rule's own, each with its reason and each checked to name a line that exists, so M48's allowlist for joined literals stays empty, as M48 ships it. It still refuses to pass when it matches nothing. |
+| `tests/scripts/cmake/one_suggested_command.cmake` (CLI-M61's) | Also fails on a fully literal printed command outside the renderer: a string literal holding `apogee ` and a lower-case word not followed by `:`. Help text, completion descriptions and prose naming a verb in passing go on a list of this rule's own, each with its reason and each checked to name a line that exists, so M61's allowlist for joined literals stays empty, as M61 ships it. It still refuses to pass when it matches nothing. |
 | `tests/data/contracts/paths_test.cpp` | `channel_program`'s three names at compile time. `program_words()` for each baked channel with no flag, with each channel flag, and with `--custom` (a relative file made absolute). |
 | `tests/data/contracts/suggested_command_test.cpp`, `tests/presentation/cli/suggested_command_test.cpp` (both CLI-M48's), `tests/presentation/httpserver/admin_graph_navigate_test.cpp` | The fixtures under Testing. |
 
@@ -194,7 +194,7 @@ Choices behind the design:
 - **From the baked channel, never from `argv[0]` or `executable_path()`.** A printed command names the install a person types. A build-tree path or a symlink's name is not one. `acp registration` prints the path only because Xcode needs an executable.
 - **The root flags go between the program word and the verb**, where the root command reads them, as 56d puts them ahead of `acp`.
 - **The flag needs no new record.** `root.cpp` already holds it in force for the run (`:203`), behind one lock that `serve`'s threads read (`paths.cpp:19-29`). A refused root never reaches a command, so no remedy can print a flag the chain refused.
-- **Consumed from CLI-M48:** the renderer, `shell_word` and its word rules, the order of options and `--`, the shell-replayed parse-back harness, and `cli.one_suggested_command`. A literal M48 already routed needs nothing here.
+- **Consumed from CLI-M48:** the renderer, `shell_word` and its word rules, the order of options and `--`, and the shell-replayed parse-back harness. **From CLI-M61:** `cli.one_suggested_command`. A literal M48 already routed needs nothing here.
 
 **Reference.**
 - `acp registration` (56d, `acp_registration.cpp:55-64`): the root flag ahead of the verb, and `--custom`'s file made absolute (`:14-18`). It also carries a typed `--config` (`:65-71`), which this item does not (Open questions).
@@ -203,7 +203,7 @@ Choices behind the design:
 - For tests: `BakedChannelGuard` (`tests/support/channel_guard.h`), and `root_test.cpp`'s `Sandbox` (`:179-186`) for a run under `--dev`.
 
 **Docs when it ships:**
-- CLAUDE.md: M48's invariant gains "and names the binary and root that printed it". The "Which root, chosen once" sub-rule's "A channel changes the root and the binary's name" gains that every command it prints names that binary.
+- CLAUDE.md: M61's invariant gains "and names the binary and root that printed it". The "Which root, chosen once" sub-rule's "A channel changes the root and the binary's name" gains that every command it prints names that binary.
 - DEVELOPER.md: the `contracts/paths_test.cpp` row and M48's `suggested_command_test` rows.
 - `reference/cli/machine-mode.md` (check's `remedy`, `mcp presets`' `register`) and `reference/cli/http-api.md`: a printed command names the binary and root that printed it.
 - MILESTONES: a dated entry.
@@ -242,9 +242,9 @@ Every test is hermetic. `APOGEE_HOME` is a temp folder, or, for a run under `--d
 |---|---|---|
 | A release binary run with `--dev`: should its printed commands echo `apogee --dev`, or print `apogee-dev`? | `[default]` | Echo what was typed: `apogee --dev`. An `apogee-dev` build prints `apogee-dev`, which is the name the dev channel's law gives it. A flag naming the build's own channel is echoed too (`apogee-dev --dev …`): redundant, but it runs as printed and keeps one rule. |
 | Should `--custom <path>` be echoed? | `[default]` | Yes, as two words, `--custom` and the file, each quoted by `shell_word`, the file made absolute as `acp registration` prints it (`acp_registration.cpp:62`), so the command runs from any folder. A remedy without it runs against another root. |
-| Do the fully literal printed commands take the program word in this item? | `[default]` | Yes. Every command the output tells a person to run is built through the renderer, literal or not: a remedy, a door, a `Run:` or `run:` hint, `check`'s remedies. So `apogee check --fix` and `apogee config migrate` stop sending a dev build's user to `~/.apogee`. Help text, completion descriptions and prose that names a verb in passing keep `apogee`, each on the source check's list for this rule with its reason, apart from M48's allowlist, which stays empty. |
+| Do the fully literal printed commands take the program word in this item? | `[default]` | Yes. Every command the output tells a person to run is built through the renderer, literal or not: a remedy, a door, a `Run:` or `run:` hint, `check`'s remedies. So `apogee check --fix` and `apogee config migrate` stop sending a dev build's user to `~/.apogee`. Help text, completion descriptions and prose that names a verb in passing keep `apogee`, each on the source check's list for this rule with its reason, apart from M61's allowlist, which stays empty. |
 | Should `--config <file>` be echoed beside the root flag? | `[default]` | No, not in this item. It names a config file, not the root (M10's record), and it was not measured. A follow-up that wants it has 56d's shape: `--config <absolute file>` beside a channel flag or none, never beside `--custom` (`acp_registration.cpp:65-71`). |
-| How a word is quoted, where `--` goes, and the Windows rule | `(consumed decision)` | [CLI-M48](a-suggested-command-runs-as-printed.md) owns them. This item's words go through its `shell_word`. |
+| How a word is quoted, where `--` goes, and the Windows rule | `(consumed decision)` | [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md) owns them. This item's words go through its `shell_word`. |
 
 ## Decision log
 
@@ -252,7 +252,7 @@ Every test is hermetic. `APOGEE_HOME` is a temp folder, or, for a run under `--d
 |---|---|---|
 | 2026-11-26 | Specced from the investigation of the APP-M21 and APP-M22 probes' CLI asides, from runs under `--dev` (`v1`–`v11`, re-run as `c:d1`–`c:d8`; Evidence). **The seam is which binary and root a printed command names**, not how its words are quoted. | the spec |
 | 2026-11-26 | Placed in **Maintenance** as M49, by the user's call to spec the APP-M21/M22 CLI asides as maintenance items from M48, grouped only where they share one seam. It is its own item rather than part of CLI-M48: M48 decides how a printed command's words are spelled so that it parses, and this item decides which program and root flag the command starts with. This item touches the dev channel's law and the Mac app's Console, which M48 does not. | the user |
-| 2026-11-26 | **Blocked by CLI-M48**, which supplies the one renderer. Without it, the program word would be changed by hand at each of about 190 sites, then rewritten by M48. When M48 is split, the gate is its Pass A, as M48 records: the renderer and `shell_word` are there. Pass B moves the remaining name sites and ships `cli.one_suggested_command`. Built before Pass B, this item moves onto the renderer, with no other change, any site Pass B has not moved yet (as CLI-M50 does), and starts `one_suggested_command.cmake` with this item's rule, which Pass B then extends. | the spec |
+| 2026-11-26 | **Blocked by CLI-M48**, which supplies the one renderer. Without it, the program word would be changed by hand at each of about 190 sites, then rewritten by M48. M48 was split on 2026-11-27, and the gate is its Pass A, which kept the id M48: the renderer and `shell_word` are there. Pass B, [CLI-M61](every-printed-command-goes-through-the-renderer.md), moves the remaining name sites and ships `cli.one_suggested_command`. Built before Pass B, this item moves onto the renderer, with no other change, any site Pass B has not moved yet (as CLI-M50 does), and starts `one_suggested_command.cmake` with this item's rule, which Pass B then extends. | the spec |
 | 2026-11-26 | **The flag is echoed as typed, and the binary's name comes from the build** (the first two Open questions). `APOGEE_HOME` adds nothing, since the shell that pastes the command keeps it. | default |
 | 2026-11-26 | **The fully literal printed commands are in scope** (Evidence 6). The investigation sized this item as one small session, on the belief that every remedy passes through M48's renderer. About 425 literals do not, among them `check --fix` and `config migrate`, which write. The build may run past one session. The source check names each literal, so nothing is left to memory. | the spec |
 | 2026-11-26 | **No gate on the Mac app's Console.** The release app is unchanged while it drives the release `apogee`, its first candidate. It falls back to `apogee-dev`, then `apogee-test`, only when no `apogee` answers (`BinaryDiscovery.swift:38-43`), and its Console then meets the same word. The dev app's Console strips only `apogee`, so a pasted `apogee-dev …` line stops running there until a GUI follow-up strips the channel's word too. The dev app is a development tool, and the harm this item removes, a dev build pointing at `~/.apogee`, is the worse one. | the spec |
@@ -260,7 +260,7 @@ Every test is hermetic. `APOGEE_HOME` is a temp folder, or, for a run under `--d
 
 ## Out of scope
 
-- **How a printed command's words are quoted and ordered**, the renderer itself, its source check and the quoter folds: [CLI-M48](a-suggested-command-runs-as-printed.md).
+- **How a printed command's words are quoted and ordered**, the renderer itself and the quoter folds: [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md). Its source check: [CLI-M61](every-printed-command-goes-through-the-renderer.md).
 - **The rename door** a refused backend name is pointed to: [CLI-M50](a-refused-backend-name-gets-the-rename-that-reaches-it.md).
 - **The TUI's row actions** passing a dash-led name: [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md).
 - **The house voice and the version line** (`apogee <verb>: `, `apogee: `, `apogee 0.2.0 …`), CLI11's usage line (the app named `apogee`, `root.cpp:91`), and help text. They keep `apogee`.
@@ -273,9 +273,9 @@ Every test is hermetic. `APOGEE_HOME` is a temp folder, or, for a run under `--d
 
 ## Links
 
-- **Blocked by:** [CLI-M48](a-suggested-command-runs-as-printed.md) · **Blocks:** —
+- **Blocked by:** [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md) · **Blocks:** —
 - **Sibling:**
-  - [CLI-M48](a-suggested-command-runs-as-printed.md), the renderer this item names the binary in;
+  - [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md), the renderer this item names the binary in, and [CLI-M61](every-printed-command-goes-through-the-renderer.md), which moves the remaining sites onto it and ships the source check this item extends;
   - [CLI-M50](a-refused-backend-name-gets-the-rename-that-reaches-it.md), whose door is built through the same renderer and takes the program word with no change of its own;
   - [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md), the TUI's argv builders.
 - **Relates to:**

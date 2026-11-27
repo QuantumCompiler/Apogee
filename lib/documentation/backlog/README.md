@@ -12,7 +12,7 @@ The branch is `v0.2.2`; the last published release is [v0.2.1](https://github.co
 - **The Apple apps:** none in this release; their next is v0.2.4.
 - **The design:** none planned yet.
 
-Outside the release, 13 maintenance items can be picked up any time: the CLI's M48–M60 (2026-11-26); the Apple apps have none. Four wait on another maintenance item: the CLI's M49 and M50 on M48, M56 on M55, and M60 on M58. None of the 13 waits on a decision from you.
+Outside the release, 14 maintenance items can be picked up any time: the CLI's M48–M61 (2026-11-26, M48 split into M48 and M61 on 2026-11-27); the Apple apps have none. Five wait on another maintenance item: the CLI's M49, M50 and M61 on M48, M56 on M55, and M60 on M58. None of the 14 waits on a decision from you.
 
 **Can start today** (nothing gates them): [CLI 58b](cli/v0.2.2/mcp-serve-graphs-and-knowledge.md), [CLI 58c](cli/v0.2.2/mcp-serve-coding-host-profile.md), [CLI 58d](cli/v0.2.2/mcp-serve-opt-in-refresh.md) and [CLI 64a](cli/v0.2.2/apogee-update.md); and any maintenance item below that waits on nothing (the CLI's M48, M51–M55 and M57–M59).
 
@@ -54,7 +54,7 @@ Maintenance items aren't tied to a release; any one can be picked up by name.
 
 | Product | # | Item | Waits on |
 |---|---|---|---|
-| CLI | M48 | [A suggested command runs as printed, whatever the name or path in it](cli/maintenance/a-suggested-command-runs-as-printed.md) | — |
+| CLI | M48 | [A suggested command runs as printed, for every name the CLI makes](cli/maintenance/a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md) | — |
 | CLI | M49 | [A printed command names the binary and root that printed it](cli/maintenance/a-printed-command-names-the-binary-that-printed-it.md) | M48 |
 | CLI | M50 | [A backend name the editors refuse gets the rename door that reaches it](cli/maintenance/a-refused-backend-name-gets-the-rename-that-reaches-it.md) | M48 |
 | CLI | M51 | [The TUI's row actions reach a row whose name starts with a dash](cli/maintenance/the-tuis-row-actions-reach-a-dash-led-row.md) | — |
@@ -67,6 +67,7 @@ Maintenance items aren't tied to a release; any one can be picked up by name.
 | CLI | M58 | [A run's notes are said once, on stderr, as `apogee <verb>: …`](cli/maintenance/a-runs-notes-are-said-once-on-stderr.md) | — |
 | CLI | M59 | [The HTTP graph jobs say what the CLI says, and build a mixed graph's code as the CLI does](cli/maintenance/the-http-graph-jobs-say-what-the-cli-says.md) | — |
 | CLI | M60 | [The models verbs say their notes in the house voice on stderr, and as notices on an open stream](cli/maintenance/the-models-verbs-say-their-notes-on-stderr.md) | M58 |
+| CLI | M61 | [Every printed command goes through the renderer](cli/maintenance/every-printed-command-goes-through-the-renderer.md) | M48 |
 
 ## Later releases
 

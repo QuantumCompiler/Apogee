@@ -1,4 +1,4 @@
-# CLI-M48 · A suggested command runs as printed, whatever the name or path in it
+# CLI-M48 · A suggested command runs as printed, for every name the CLI makes
 
 | Field | Value |
 |---|---|
@@ -6,26 +6,26 @@
 | **Project** | CLI |
 | **Status** | 🟢 Ready |
 | **Fix version** | Maintenance (any time) |
-| **Component** | Remedies › every command Apogee prints for a person to run: a renderer in `contracts/`, `check`'s doors and chmod rows, the graph, models, symphonies, datasets and training hints, the HTTP graph bodies, the graph tools and the TUI's confirms |
-| **Labels** | `split-first` `remedies` `shell-quoting` `source-check` |
+| **Component** | Remedies › a renderer in `contracts/`, and every command printed for a name the CLI makes: the graph, collection, symphony and dataset hints, the path hints under the home, `check`'s chmod, collection, graph and set-backend rows, the backend doors, the HTTP graph bodies, the graph tools and the TUI's dataset confirm |
+| **Labels** | `remedies` `shell-quoting` |
 | **Epic** | — (maintenance has no track) |
 | **Blocked by** | — |
-| **Blocks** | [M49](a-printed-command-names-the-binary-that-printed-it.md), [M50](a-refused-backend-name-gets-the-rename-that-reaches-it.md) |
-| **Reporter** | The APP-M21 probes' CLI asides (2026-11-26), then a sandboxed investigation, two skeptics and a critic the same day |
+| **Blocks** | [M49](a-printed-command-names-the-binary-that-printed-it.md), [M50](a-refused-backend-name-gets-the-rename-that-reaches-it.md), [M61](every-printed-command-goes-through-the-renderer.md) |
+| **Reporter** | The APP-M21 probes' CLI asides (2026-11-26), then a sandboxed investigation, two skeptics and a critic the same day; groomed on 2026-11-27 as Pass A of the split-first item, by the group run |
 | **Created** | 2026-11-26 |
 
 ---
 
 ## Summary
 
-`apogee graph show -- -x Fox` says `run: apogee graph build -x`, and that line, pasted, exits 109. For a collection named `a;b` the pasted line builds collection `a` and then runs `b`. For a hand-written backend `a;b`, `models delete`'s remedy deletes backend `a`. No function renders a printed command: about 226 name holes at about 189 sites join a name or path in raw, and five private quoters each solve part of the job, differently. The item adds one renderer in contracts, folds the quoters into it, routes every site through it, and guards it with a source check. It is split first, into two passes.
+`apogee graph show -- -x Fox` says `run: apogee graph build -x`, and that line, pasted, exits 109. For a collection named `a;b` the pasted line builds collection `a` and then runs `b`. For a hand-written backend `a;b`, `models delete`'s remedy deletes backend `a`. No function renders a printed command: about 226 name holes at about 189 sites join a name or path in raw, and five private quoters each solve part of the job, differently. This item, Pass A of a split, adds one renderer in contracts and folds the quoters into it. It routes through the renderer every site that a name reaches with no hand edit, plus the backend doors. [CLI-M61](every-printed-command-goes-through-the-renderer.md) routes the remaining sites and guards the renderer with a source check.
 
 ## Description
 
 ### User story
 
 **As** someone who copies a command Apogee prints (a `run:` line, a `check` remedy, a hint after a success),
-**I want** it to run exactly as printed in my shell, whatever the name or path in it,
+**I want** it to run exactly as printed in my shell, whatever collection, graph, symphony, dataset or home path is in it, and whatever backend a door names,
 **so that** following Apogee's advice never builds or deletes the wrong thing, never prints help and exits 0, and never fails to parse.
 
 ### Steps to reproduce
@@ -56,7 +56,7 @@ The sandbox, 2026-11-26, with the built binary `apogee 0.2.0 (33ea685d, 2026-11-
 
 ### Expected result
 
-Every printed command, pasted whole into sh, bash or zsh, and read by the CLI's own splitter, runs the named verb on the named thing. A plain name prints exactly the bytes it prints today.
+Every printed command at the sites this item routes, pasted whole into sh, bash or zsh, and read by the CLI's own splitter, runs the named verb on the named thing. A plain name prints exactly the bytes it prints today.
 
 3. `run: apogee graph build -- -x` (and `-- -h`, `-- --graph`, `-- --`), `run: apogee graph build "a;b"`, `run: apogee graph build "=ls"`, `run: apogee graph build "my notes"` and `run: apogee graph build "it's"`. Each builds its own graph.
 4. `Play it:  apogee symphonies play --input "…" -- -q` and `Edit it:  apogee symphonies edit -- -q`.
@@ -94,7 +94,11 @@ The design is one pure renderer in `source/data/contracts/`, the lowest layer ev
 - **Order.** It keeps today's order when nothing needs it changed, so a plain name prints today's bytes. Only for a dash-led operand, or an option with no limit sitting directly before an operand, does it move the options first and add `--`.
 - **Words.** A word stays bare when only safe characters make it up. Otherwise it gets 53c's double quotes where they read back whole, and single quotes everywhere else.
 - **Folds.** The five quoters fold into it.
-- **A source check.** It keeps a sixth from starting, as `cli.one_key_resolver` does for secrets.
+- **A source check.** It keeps a sixth from starting, as `cli.one_key_resolver` does for secrets. That is [CLI-M61](every-printed-command-goes-through-the-renderer.md)'s.
+
+The item was specced whole and marked split first: about 190 sites, six chmod rows, five quoters to fold, three test layers and a source check are more than one focused session. On 2026-11-27 it was groomed into two documents (Decision log):
+- **This one, Pass A**, keeps the id M48. It takes the renderer, the folds, the tests that pin it, and every site a name reaches with no hand edit: collections and graphs, symphonies, datasets with a leading `-`, and path values under the home. It also takes the backend doors, where a wrong target is measured (`m09`).
+- **[CLI-M61](every-printed-command-goes-through-the-renderer.md), Pass B**, takes the remaining sites, `cli.one_suggested_command` and the CLAUDE.md invariant. It is gated on this item.
 
 ### Evidence
 
@@ -212,31 +216,6 @@ All measured 2026-11-26 by an investigator, two skeptics and a critic, each in i
     - **Display-only clients.** The Mac app, the design prototype and the mod only display remedies (`SettingsView.swift:279-280`; the mod's `render.ts:72-73`). Their recorded documents hold plain words only (the mod's `tests/support/recorded.ts`, the app's `PreviewDocuments.swift`), so a byte-identical plain rendering changes none of them.
     - **55f's add rule** keeps new odd names out of backends, graph entries, suites, agents and MCP servers (`kb1`–`kb5`, `gr1`).
 
-### Split first
-
-This document is the item's whole design. It is built as two documents, each one focused session. Final ids are assigned when it is split.
-
-1. **Pass A: one renderer, and every name the CLI makes** (`a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md`, no gate). This part includes:
-   - `suggested_command.h/.cpp` with the order and word rules, and the five quoters and the hand-typed `""` folded into it;
-   - fixtures (1) and (2) under Testing, and the `pwsh` case;
-   - every site a name reaches with no hand edit:
-     - collections and graphs: every `graph.cpp` site, `embed.cpp`'s three, `config_cmd.cpp`'s two graph lines, `navigate.cpp`'s `build_hint`, `query.cpp`'s note, `graph_report.cpp`, and check's collection and graph rows, CLI-M46's `:1764` and `:2123` among them;
-     - symphonies: `symphonies_cmd.cpp`, `business/symphony/runner.cpp`, `tools.cpp` and `chat_play.cpp`;
-     - datasets: `datasets.cpp`'s hints and the TUI's dataset confirm;
-     - path values under the home: the models and datasets path hints, the drafter's door (`mlx_local.cpp:474`), and `symphonies edit`'s rename door;
-     - check's six chmod rows;
-   - the backend doors (`backend_doors`, `models_pull.cpp`'s delete-backend doors, check's set-backend row, `backend_fields.cpp`), since `m09`'s wrong target is measured.
-
-   Its acceptance criteria are every one below but the source check's.
-2. **Pass B: every printed command goes through the renderer** (`every-printed-command-goes-through-the-renderer.md`, gated on Pass A). This part includes:
-   - the remaining sites, each with no other behaviour change: the kinds reached only by a hand edit or an older config (the other backend holes, suites, agents, MCP servers), model refs and handles, and run and task ids. That covers `train.cpp`, `models.cpp`, `business/video/runtime.cpp`, the TUI's agent and rollback confirms, the rest of the sweep, and its non-name holes;
-   - `cli.one_suggested_command`, whose allowlist must reach empty before it ships;
-   - the CLAUDE.md invariant and its enforcement.
-
-   Its acceptance criteria are the source check's, and the plain-bytes guard over the sites it moves.
-
-When the item is split, CLI-M49 and CLI-M50 are re-gated on Pass A, which holds the renderer they build on.
-
 ## Acceptance criteria
 
 - [ ] **Given** a collection `-x` (and `-h`, `--graph`, `--`), **when** `graph show -- <n> Fox` fails, **then** it prints `run: apogee graph build -- <n>`, and that line pasted into sh, bash and zsh exits 0 and builds `<n>`. It never exits 106, 109 or 114, never prints help, and never says `which graph?` (today `p03`, `r2`, `r3`, `c:k05`).
@@ -252,8 +231,7 @@ When the item is split, CLI-M49 and CLI-M50 are re-gated on Pass A, which holds 
 - [ ] **Given** a collection whose name holds a newline, **when** graph show fails, **then** the remedy holds the name as one single-quoted word, so no line of it names another collection (today `c:n02` prints `run: apogee graph build n`, then `l`).
 - [ ] **Given** only plain names, and paths made only of bare characters, **then** every remedy's bytes are unchanged: the existing pins and goldens pass unedited. The one exception is `check_test.cpp:3089-3094`, whose two code-exec lines now read `"/opt/my python/bin/python3"` and `"/opt/it's/python3"`. On Windows, the five pins that join a temp path raw (Evidence 14) build the word by the rule, as 53c's did.
 - [ ] **Given** the table's words, **then** the Data test's shell replay and the Presentation test's `line_tokens` round trip each return the word exactly, a word with a newline renders single-quoted, and a word with `!` renders single-quoted.
-- [ ] **Given** the tree after the item, **then** no file but `suggested_command.cpp` quotes a word of a printed command. The `shell_word` copies in `code_exec_server.cpp`, `check.cpp` and `backend_fields.cpp` are gone, and `spell_adapters`, `adapter_argument` and the hand-typed `""` go through the renderer.
-- [ ] **Given** a planted `"apogee graph build " + name`, a `?:` operand or a `<<` chain outside the renderer, **then** `cli.one_suggested_command` fails naming the line. On the shipped tree it passes, with an empty allowlist.
+- [ ] **Given** the tree after the item, **then** no file but `suggested_command.cpp` quotes a word of a printed command. The `shell_word` copies in `code_exec_server.cpp`, `check.cpp` and `backend_fields.cpp` are gone, and `spell_adapters`, `adapter_argument` and the hand-typed `""` go through the renderer. The one quote this leaves is CLI-M40's hand-wrapped `delete-allowed-host '<entry>'` remedy in `check.cpp`, shipped 2026-11-27, after the sweep. It is a site of [CLI-M61](every-printed-command-goes-through-the-renderer.md)'s, whose source check finds it.
 
 ## Constraints
 
@@ -276,17 +254,19 @@ Paths under `lib/src/cli/`.
 |---|---|
 | `source/data/contracts/suggested_command.h`, `.cpp` (new), `source/data/CMakeLists.txt` | `shell_word`, `SuggestedCommand`, `render` and `render_all`, with the order and word rules below. |
 | `source/presentation/operations/code_exec_server.cpp` | Drop its `shell_word` (`:12-26`). `mcp_create_line` (`:47-53`) renders through the renderer. |
-| `source/presentation/cli/check.cpp` | Drop its `shell_word` (`:1033-1038`). Every name hole goes through the renderer (38 sites), among them `:539-544` (the options first only for a dash-led name), `promote_again_door` (`:1046-1067`) and its `&&` (`:1064`), `:1764` and `:2123` (CLI-M46's), and `:2729-2781` with `:2750`'s `&&`. The chmod rows at `:863`, `:1323`, `:1354`, `:1582`, `:1841` and `:2001` take the program word `chmod`. |
+| `source/presentation/cli/check.cpp` | Drop its `shell_word` (`:1033-1038`). The collection and graph rows go through the renderer, `:1764` and `:2123` (CLI-M46's) among them, and so does the set-backend row at `:539-544` (the options first only for a dash-led name). The chmod rows at `:863`, `:1323`, `:1354`, `:1582`, `:1841` and `:2001` take the program word `chmod`. Its other name holes of the 38 are CLI-M61's, `promote_again_door` (`:1046-1067`) with its `&&` (`:1064`) and `:2729-2781` with `:2750`'s `&&` among them. |
 | `source/presentation/operations/backend_fields.cpp` | Drop its `shell_word` (`:72-78`). `set_backend_command` and `adapters_take_off` (`:308-320`), and the two role doors (`:372-375`, `:377-380`), are built on the renderer. |
 | `source/data/backends/adapters.cpp`, `mlx_local.cpp`, `source/presentation/operations/store_references.cpp` | `spell_adapters` (`:259-274`) quotes its joined set with `shell_word`. `adapter_argument`'s set (`:131-140`, joined at `:421` and `:425-426`), the door at `:409`, and the doors at `mlx_local.cpp:474` and `:569-570` go through the renderer. |
 | `source/presentation/cli/graph.cpp`, `source/presentation/render/graph_report.cpp` | All 22 `graph.cpp` sites, among them `:163-164`, `:356`, `:579-580`, `:610-611`, `:614-616`, `:1013-1019`, `:1102-1127`, `:1196`, `:1535-1536` and `:1637-1640`. `graph_report.cpp:212` and `:220`. |
 | `source/business/graph/navigate.cpp`, `source/business/knowledge/query.cpp` | `build_hint` (`:564`) and the record note (`query.cpp:163-164`). The HTTP bodies, the graph tools and the CLI's graph navigation verbs follow with no code of their own. |
-| `source/presentation/cli/models_pull.cpp`, `models.cpp`, `source/data/modelstore/snapshot.cpp` | 31 and 13 sites: `backend_doors` (`:416-419`), `:869-874`, `:2867-2870`, `:2911-2914`, `:3195-3198`, `:3400-3401`, and the path hints `:267-268`, `:1450-1452`, `:1479-1481` and `:1510-1512`. In `snapshot.cpp`, `:499`, `:510` and `:580`. |
-| `source/presentation/cli/symphonies_cmd.cpp`, `datasets.cpp`, `embed.cpp`, `config_cmd.cpp`, `train.cpp`, `chat_play.cpp`, `tui_agents.cpp`, `tui_training.cpp`, `source/business/symphony/runner.cpp`, `tools.cpp`, `source/business/video/runtime.cpp`, and the rest of the sweep | Symphonies: `:392-396`, `:484-487`, `:500-505`, `:759-761`. Datasets: `:128-131`, `:367-368`, `:520`. `train.cpp`: 19 sites. `runtime.cpp`: 7. The TUI confirms: `tui_agents.cpp:138-139`, `tui_training.cpp:188-191`, `:273-274`. Then 1 to 4 sites in each remaining file. |
+| `source/presentation/cli/models_pull.cpp` | `backend_doors` (`:416-419`), the delete-backend doors (`:869-874`, `:2867-2870`, `:2911-2914`, `:3195-3198`), and the path hints `:267-268`, `:1450-1452`, `:1479-1481` and `:1510-1512`. The rest of its 31 sites, `:3400-3401` among them, are CLI-M61's, as are `models.cpp`'s 13 and `snapshot.cpp`'s. |
+| `source/presentation/cli/symphonies_cmd.cpp`, `chat_play.cpp`, `source/business/symphony/runner.cpp`, `tools.cpp` | Symphonies: `:392-396`, `:484-487` (`symphonies edit`'s rename door), `:500-505`, `:759-761`, and the symphony sites in `chat_play.cpp`, `runner.cpp` and `tools.cpp`. |
+| `source/presentation/cli/datasets.cpp`, `tui_training.cpp` | Datasets: `:128-131`, `:367-368`, `:520`. The TUI's dataset confirm, `tui_training.cpp:273-274`. |
+| `source/presentation/cli/embed.cpp`, `config_cmd.cpp` | `embed.cpp`'s three sites and `config_cmd.cpp`'s two graph lines. |
+| `source/presentation/cli/train.cpp` | Its take-off door, `set-backend <key> --adapters ""` (`:1054-1056`), goes through the renderer, since its hand-typed `""` is one of the folds. Its other sites, among the 19, are CLI-M61's. |
 | `tests/data/contracts/suggested_command_test.cpp` (new) | Fixture (1). |
 | `tests/presentation/cli/suggested_command_test.cpp` (new), `tests/presentation/cli/check_test.cpp`, `tests/support/cli_home.h`, `.cpp` | Fixture (2). `doors_of` (`:3436-3459`) splits outside quotes. The two code-exec pins (`:3089-3094`) read double quotes. `CliHome` gains a folder name, so a home's path can hold a space and a `'`. |
 | `tests/presentation/operations/store_references_test.cpp`, `tests/presentation/cli/datasets_test.cpp`, `tests/data/backends/mlx_local_test.cpp`, `tests/presentation/cli/models_mlx_test.cpp` | The pins at `:348`, `:574`, `:1828`, `:290` and `:465` build a joined path with the rule, as `check_test.cpp:73`'s `printed` does, so they hold on Windows. |
-| `tests/scripts/cmake/one_suggested_command.cmake` (new), `tests/CMakeLists.txt` | Fixture (3), registered as `cli.one_suggested_command` beside `cli.one_key_resolver` (`:698-703`). |
 
 **The interface**, a sketch the build may shape:
 
@@ -349,7 +329,7 @@ Worked examples:
 | `graph build`, greedy option `--source <dir>`, operand `-x` | `apogee graph build --source <dir> -- -- -x` |
 | program `chmod`, verb `700`, operand `…/it's home/config` | `chmod 700 "…/it's home/config"` |
 
-**Sites.** Each site builds a `SuggestedCommand` where it built a string, and keeps the words around it. For example, `graph.cpp:1535-1536` becomes `"no graph built for '" + target.name + "' -- run: " + render({.verbs = {"graph", "build"}, .parts = {operand(target.name)}})`. The display quotes around a name in prose (`'" + target.name + "'`) are not a command and stay. `render_all` joins `check.cpp:1064`'s and `:2750`'s `&&` pairs.
+**Sites.** Each site builds a `SuggestedCommand` where it built a string, and keeps the words around it. For example, `graph.cpp:1535-1536` becomes `"no graph built for '" + target.name + "' -- run: " + render({.verbs = {"graph", "build"}, .parts = {operand(target.name)}})`. The display quotes around a name in prose (`'" + target.name + "'`) are not a command and stay. `render_all` is for the `&&` pairs at `check.cpp:1064` and `:2750`, two sites that CLI-M61 moves onto it.
 
 **The quoters fold.**
 - `code_exec_server.cpp`'s line renders `{mcp, create, <name>, --command <interpreter>, --args <script>}`.
@@ -357,19 +337,15 @@ Worked examples:
 - `spell_adapters` quotes its joined set with `shell_word`, which `data/backends` may include.
 - `adapter_argument`'s joined set and the hand-typed `""` become words.
 
-**The source check.** `cli.one_suggested_command` is the sibling of `one_key_resolver.cmake`.
-- It fails on a string literal holding `apogee <verb> ` or `chmod ` that is followed by a non-literal through `+`, `<<` or a `?:` operand.
-- It also fails on a command literal that wraps its operand in quotes by hand (`"chmod 700 '" + path`).
-- It reads a statement across its lines, since most chains span two or three (`graph.cpp:1535-1536`). Comments are exempt. The house voice (`apogee <verb>: `) is not a command and doesn't match.
-- Its allowlist gives a reason per line, and every entry must name a line that exists. It fails when it scanned no sources.
-- It ships (Pass B) with the allowlist empty: every site, the non-name holes included, goes through the renderer. A non-name value is just a word that renders bare.
+**The source check** is [CLI-M61](every-printed-command-goes-through-the-renderer.md)'s. `cli.one_suggested_command` ships there, with an empty allowlist, once every remaining site is on the renderer. This item adds no check of its own.
 
 **What it builds on and hands on.**
 - CLI-M46's decision row (2026-11-26) records the order between the two: whichever lands first, check's two `embed ingest` remedies (`:1764`, `:2123`) end up built through the renderer.
 - CLI-M49 sets the renderer's `program` field.
 - CLI-M50 chooses which door a backend site renders.
-- CLI-M51's TUI argv takes no rendering, but its rows' confirm texts are this item's. The MCP view's `t` prefill (`tui_agents.cpp:212`) spells its key with `shell_word`: if CLI-M51 has landed first, this item wires that prefill to it.
+- CLI-M51's TUI argv takes no rendering, but its rows' confirm texts are the split's. The Datasets view's (`tui_training.cpp:273-274`) is this item's, and the Train and Agents views' are CLI-M61's. The MCP view's `t` prefill (`tui_agents.cpp:212`) spells its key with this item's `shell_word`. If CLI-M51 has landed first, CLI-M61 wires that prefill to it, beside the Agents view's confirm.
 - The creation rules (CLI-M46, CLI-M53, CLI-M56) stop new odd names and change nothing here.
+- CLI-M61, gated on this item, moves every remaining site onto the renderer with no other behaviour change, and ships `cli.one_suggested_command` and the CLAUDE.md invariant.
 
 **Reference.** In-house precedents:
 - `mcp_create_line` (`code_exec_server.cpp:47-53`) already renders a whole argv as one copyable line.
@@ -382,8 +358,8 @@ Worked examples:
 The one deliberate divergence from 53c is the single-quote branch, for the words its double quotes break.
 
 **Docs when it ships:**
-- CLAUDE.md: a `⚠` invariant, "A printed command runs as printed": rendered by `suggested_command`, enforced by `cli.one_suggested_command` and the two fixtures (Pass B). Also the Codebase Map line for the new file.
-- DEVELOPER.md: the contracts row for `suggested_command.h/.cpp`, and the test rows for the two tests and the source check, beside `cli.one_key_resolver`'s.
+- CLAUDE.md: the Codebase Map line for the new file. The `⚠` invariant "A printed command runs as printed" lands with CLI-M61, which enforces it.
+- DEVELOPER.md: the contracts row for `suggested_command.h/.cpp`, and the test rows for the two tests.
 - MILESTONES: the entry, and a dated revision of 53c's quoting (`MILESTONES.md:128`) for the words it broke.
 - `reference/cli/machine-mode.md:1708-1712`: a door's words may be quoted, and ` to ` and `, or ` are read outside quotes.
 
@@ -409,7 +385,6 @@ Every fixture is hermetic: a `CliHome` or a temporary `APOGEE_HOME`, mock backen
   - The command table: the worked examples above, placeholders verbatim, `""` kept, and a plain name's exact bytes.
 - **Pinned spellings** (guard). The existing pins and goldens pass unedited, but for the two code-exec lines (`check_test.cpp:3089-3094`). On Windows, the five pins that join a temp path raw build the word by the rule, as 53c's four did.
 - **PowerShell.** A case gated on `pwsh` and on child processes, as CLI-M37's: it runs on the Linux unit-test rows, whose image carries PowerShell 7.6.10, and skips on the Windows rows, which start no child. It replays the PowerShell renderings through `pwsh -NoProfile -NonInteractive` with a fake `apogee` that prints its argv, and settles whether `--` and `""` reach a native command. If either is dropped, the test names it, and so does this item's record. The rule takes its platform as a parameter, so the case can run off Windows.
-- **The source check** (fixture (3), Pass B). It passes on the tree after the item. It fails on a planted `"apogee graph build " + name`, a `?:` operand and a `<<` chain, each named by file and line.
 - **The house voice** (guard). Every refusal and note these runs print keeps its `apogee <verb>: ` prefix and its stream; only the command inside it changes.
 - **Gate:** `lib/scripts/cicd.sh --app cli --test`, clang-format, and the MinGW scan of the changed files.
 
@@ -420,7 +395,6 @@ Every fixture is hermetic: a `CliHome` or a temporary `APOGEE_HOME`, mock backen
 | What should the renderer print on Windows for a word that holds `'` together with `$`, a backtick, `"`, `!` or a doubled or trailing backslash? And do `--`, `""`, a bare `,` and a leading `@` reach `apogee.exe` from PowerShell? | `[default]` | One rule on every platform: its double quotes read the same in PowerShell, cmd and the POSIX shells. On `_WIN32`, a bare `,` or a leading `@` moves the word to double quotes, and the remaining cases use PowerShell single quotes with `''`. `line_tokens`, the TUI's exec line, reads `''` as nothing, so on Windows that rare spelling round-trips through PowerShell and not the exec line, and a test says so. `install.ps1` and `apogee.ps1` make PowerShell the person's shell. `run_command`'s `cmd /C` (`shell.cpp:26`) expands `%VAR%` inside and outside quotes (by reading): a known gap, named by a test. The `pwsh` case under Testing settles `--` and `""`. PowerShell was not run on this host. |
 | Should a site that sets a command off in single quotes keep them when the command holds a quoted word? (First raised as the user's call; it changes no behaviour, so it is a default.) | `[default]` | Keep each site's delimiter. Most inner quoting under this rule is double quotes (`'apogee config delete-backend "my model"'`), so single quotes nest only for words with `$`, a backtick, `"` or `!`. Tests assert that the message contains the rendering, rather than parsing the prose. No house rule covers delimiters, and the choice changes no behaviour. |
 | What should a remedy print for a name that holds a newline or a tab? | `[default]` | Single quotes. They round-trip whole in every POSIX shell and in `line_tokens` (`c:rt`). Not `$'…'`, which `line_tokens` and PowerShell can't read. CLI-M46's create rule stops new collection names like this. |
-| Should every site land in one item, or the reachable kinds first? | `[default]` | One item, built in two passes (Split first). Pass A: the renderer, the quoters, the tests, and every site a name reaches with no hand edit, plus the backend doors. Pass B: the remaining sites and the source check. |
 | How does a site know that an option is greedy? | `[default]` | The caller marks it. Today no remedy puts a greedy option before an operand: `graph.cpp:1013-1019` and `:1108-1112` print `--source <dir> --graph NAME`. The Data test pins the rendering, and the parse-back covers the sites that name `--source`. |
 | Should HTTP error bodies and tool results carry the rendered command? | `[default]` | Yes, the same text the CLI prints (ADR 0002). It comes from `navigate.cpp`'s `build_hint`, and needs no code per surface. |
 | Should a printed command name `apogee-dev` on the dev channel, or the root flag a run was given? | `(consumed decision)` | [CLI-M49](a-printed-command-names-the-binary-that-printed-it.md) owns it. This item gives the renderer a `program` field, `apogee` by default, and changes nothing else about it. |
@@ -439,12 +413,14 @@ Every fixture is hermetic: a `CliHome` or a temporary `APOGEE_HOME`, mock backen
 | 2026-11-26 | **53c's quoting is revised for the words it broke** (`MILESTONES.md:128`): `;`, `$`, backticks, `a"b`, a UNC path, a path ending in a backslash, and the empty word `check.cpp` printed as nothing. Code-exec's single quotes become double quotes for the two pinned words. A dated MILESTONES line records it (ADR 0006). | the spec |
 | 2026-11-26 | **Blocks CLI-M49 and CLI-M50**, both built on the renderer. **No gate with CLI-M46**: its own decision row says whichever lands first, and its two hand-quoted check remedies end up built through the renderer either way. **Independent of CLI-M45 and of APP-M21/M23**, the app's argv. | the spec |
 | 2026-11-26 | **The rename-backend door is CLI-M50's, not this item's.** Choosing a door is a different change from rendering one, and the door sites don't know `yaml_plain_key`. 55f's record says "existing odd names reached by `rename-backend`" (`MILESTONES.md:11232`). | the spec |
+| 2026-11-27 | **Split into Pass A, this item (CLI-M48), and Pass B, [CLI-M61](every-printed-command-goes-through-the-renderer.md)**, taking the item's own recorded default (its Open question "Should every site land in one item, or the reachable kinds first?": one item, built in two passes), which the grooming consumes. Pass A keeps the id M48: the maintenance sequence's numbers ascend down the rows, and CLI-M49 and CLI-M50 already gate on M48 and build on Pass A's renderer, so keeping M48 for Pass A keeps both the ascent and their gate. Pass B takes the next id, M61 (M60 was the highest ever assigned), and its row goes at the end of the Maintenance table, gated on M48. Pass A takes every acceptance criterion but the source check's. The run could not confirm the split with the user, who had been told of the plan and invited to object, so the split is flagged for their veto in the run's report. | default (the group run's grooming) |
 
 ## Out of scope
 
+- **Pass B: the remaining sites, the source check and the invariant.** The kinds reached only by a hand edit or an older config (the other backend holes, suites, agents, MCP servers), model refs and handles, and run and task ids, each moved with no other behaviour change. That covers `train.cpp`, `models.cpp`, `business/video/runtime.cpp`, the TUI's agent and rollback confirms, the rest of the sweep and its non-name holes. Also `cli.one_suggested_command`, whose allowlist must reach empty before it ships, and the CLAUDE.md invariant with its enforcement. That is [CLI-M61](every-printed-command-goes-through-the-renderer.md).
 - **The program word and root a printed command names** (`apogee-dev`, `--dev`): [CLI-M49](a-printed-command-names-the-binary-that-printed-it.md).
 - **Offering `rename-backend` to a backend the editors refuse**, and the dead ends for graph entries, suites, agents and MCP servers: [CLI-M50](a-refused-backend-name-gets-the-rename-that-reaches-it.md).
-- **The TUI's argv without `--`** (its row actions on a dash-led row): [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md). This item renders those rows' confirm texts.
+- **The TUI's argv without `--`** (its row actions on a dash-led row): [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md). This item renders the Datasets view's confirm text, and CLI-M61 the Train and Agents views'.
 - **Creation rules**: [CLI-M46](../../../assistant/cli/MILESTONES.md#2026-11-27--a-collection-the-config-cannot-hold-is-refused-before-it-is-written-maintenance-item-m46-a-collection-the-config-cannot-hold-is-refused-before-it-is-written) (shipped 2026-11-27) for collections, [CLI-M53](a-symphony-the-cli-writes-is-one-it-can-delete.md) for a symphony with a leading `-`, [CLI-M56](a-new-dataset-name-is-one-every-verb-reads.md) for a dataset with a leading `-`.
 - **`graph build -- <odd collection>`'s post-build `could not register` and `could not set graph.enabled` notes** (`c:z05`, `c:k06`): CLI-M46.
 - **The TUI's exec line not stripping a leading `apogee`** (`tui_runner.cpp:73-88`, `c:w01`): an aside, not in this item.
@@ -453,12 +429,12 @@ Every fixture is hermetic: a `CliHome` or a temporary `APOGEE_HOME`, mock backen
 
 ## Links
 
-- **Blocked by:** — · **Blocks:** [CLI-M49](a-printed-command-names-the-binary-that-printed-it.md) and [CLI-M50](a-refused-backend-name-gets-the-rename-that-reaches-it.md), both built on the renderer (re-gated on Pass A when the item is split)
+- **Blocked by:** — · **Blocks:** [CLI-M49](a-printed-command-names-the-binary-that-printed-it.md) and [CLI-M50](a-refused-backend-name-gets-the-rename-that-reaches-it.md), both built on the renderer, and [CLI-M61](every-printed-command-goes-through-the-renderer.md), Pass B of the split, which moves the remaining sites onto it and adds the source check
 - **Relates to:**
-  - [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md), the TUI's row actions, whose confirm texts this item renders;
+  - [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md), the TUI's row actions, whose Datasets confirm text this item renders (CLI-M61 renders the Train and Agents views');
   - [CLI-M46](../../../assistant/cli/MILESTONES.md#2026-11-27--a-collection-the-config-cannot-hold-is-refused-before-it-is-written-maintenance-item-m46-a-collection-the-config-cannot-hold-is-refused-before-it-is-written) (shipped 2026-11-27), whose two `embed ingest` remedies (`check.cpp:1764`, `:2123`) this item builds, whichever lands first; [CLI-M45](../../../assistant/cli/MILESTONES.md#2026-11-27--a-collection-is-named-not-pathed-at-every-reader-maintenance-item-m45-a-collection-is-named-not-pathed-at-every-reader) (shipped 2026-11-27), independent: its read rule refuses only a name that escapes the folder, so every odd name here still reads;
   - [CLI-M53](a-symphony-the-cli-writes-is-one-it-can-delete.md) and [CLI-M56](a-new-dataset-name-is-one-every-verb-reads.md), the creation rules for a dash-led symphony and dataset;
-  - [CLI-M40](../../../assistant/cli/MILESTONES.md#2026-11-27--delete-allowed-host-removes-what-the-list-holds-maintenance-item-m40-the-verb-removes-an-entry-as-written-and-every-spelling-of-a-host) (shipped 2026-11-27), whose `delete-allowed-host '<entry>'` remedy is built through this renderer once it ships. If M40 lands first, Pass B's source check finds its hand-wrapped quotes;
+  - [CLI-M40](../../../assistant/cli/MILESTONES.md#2026-11-27--delete-allowed-host-removes-what-the-list-holds-maintenance-item-m40-the-verb-removes-an-entry-as-written-and-every-spelling-of-a-host) (shipped 2026-11-27), whose `delete-allowed-host '<entry>'` remedy is built through this renderer by CLI-M61. M40 landed first, so CLI-M61's source check finds its hand-wrapped quotes;
   - [CLI-M42](../../../assistant/cli/MILESTONES.md#2026-11-27--stubs-read-the-words-as-the-shell-does-maintenance-item-m42-a-quoted-word-completes-and-a-name-lands-as-one-word-in-every-shell) and [CLI-M37](../../../assistant/cli/MILESTONES.md#2026-11-27--powershell-completes-the-word-at-the-cursor-maintenance-item-m37-a-tab-completes-the-word-at-the-cursor-on-every-powershell), the shell stubs: a different seam, the same POSIX and PowerShell facts, and M37's `pwsh` case as this item's pattern;
   - [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose CLI aside this item answers, and whose `Argv.shown` prints `--` by the same rule on the app's side; [APP-M22](../../../assistant/darwin/MILESTONES.md#2026-11-26--jobs-notes-reach-the-person-maintenance-item-m22-a-jobs-notes-reach-the-person), the house voice this item keeps; [APP-M23](../../../assistant/darwin/MILESTONES.md#2026-11-27--every-name-the-app-passes-is-read-as-a-name-maintenance-item-m23-every-name-the-app-passes-is-read-as-a-name), the app's own argv, independent;
   - [ADR 0002](../../../adrs/cli/mode-parity.md) and [ADR 0006](../../../adrs/cli/backwards-compatibility.md).

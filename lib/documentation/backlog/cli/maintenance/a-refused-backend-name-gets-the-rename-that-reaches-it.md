@@ -9,7 +9,7 @@
 | **Component** | Remedies › every door that names `config set-backend` or `config delete-backend` on a configured backend: `check`, `models delete`, `models pull` and `convert`, `config set-backend`'s adapter refusals, `train promote`, and a load's adapter and drafter refusals |
 | **Labels** | `remedies` `backends` `config` `check` |
 | **Epic** | — (maintenance has no track) |
-| **Blocked by** | [M48](a-suggested-command-runs-as-printed.md) |
+| **Blocked by** | [M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md) |
 | **Blocks** | — |
 | **Reporter** | The investigation of the APP-M21 and APP-M22 probes' CLI asides (2026-11-26): found by its sandboxed investigator, then two skeptics and a critic the same day |
 | **Created** | 2026-11-26 |
@@ -215,7 +215,7 @@ Each site keeps its own words around the door:
 
 For a plain name, both renderings print exactly what CLI-M48 prints for the door alone. The helper sits in `contracts` (Data) because it is reached from Data (`adapters.cpp`, `mlx_local.cpp`) and from Presentation, and `backends` already links `contracts`. It reads nothing: the name alone decides.
 
-CLI-M48 is marked split first. Its Pass A moves the measured backend doors onto the renderer (`backend_doors`, `models_pull.cpp`'s delete-backend doors, `check`'s set-backend row, `backend_fields.cpp`), and M48 re-gates this item on Pass A. Its Pass B moves the rest (`train.cpp` among them). If this item is built before Pass B, any site in the table that Pass B has not moved yet is moved onto the renderer here, with no other change, so no door is built by hand.
+CLI-M48 was split on 2026-11-27. Its Pass A, which kept the id M48, moves the measured backend doors onto the renderer (`backend_doors`, `models_pull.cpp`'s delete-backend doors, `check`'s set-backend row, `backend_fields.cpp`), and is this item's gate. Its Pass B, [CLI-M61](every-printed-command-goes-through-the-renderer.md), moves the rest (`train.cpp` among them). If this item is built before Pass B, any site in the table that Pass B has not moved yet is moved onto the renderer here, with no other change, so no door is built by hand.
 
 The item consumes three decisions:
 - From **CLI-M48**: the renderer, its placeholders and its parse-back.
@@ -259,7 +259,7 @@ Each case runs in a `CliHome` under a temporary `APOGEE_HOME`. Each fails once C
 | How does a `check` row's `remedy` carry the rename? Its doors are `, or `-joined commands, each before ` to <what it does>` (`machine-mode.md:1711-1713`). | `[default]` | Each door chains it: `apogee config rename-backend <name> <new name> && <the door on <new name>>`, with CLI-M48's `--` before a dash-led name, as the re-promote door already chains two commands (`check.cpp:1064`). Every door stays one command line before ` to `, and each runs alone on the state it was named for. A sentence (`models delete`'s refusal, the kept-backend line, a load's refusal) says `rename it first: <rename>, then <door>` instead, which is the item's wording. |
 | In a YAML config, the line editor finds a hand-written odd key and edits it (`config_edit_test.cpp:2344-2353`). Should the door lead with the rename there too? | `[default]` | Yes. It is one rule, by name, in both formats, as 55f and 57e say it ("not one both config formats can edit"). The door gains a step there, and every step still runs: the YAML rename is pinned at `config_edit_test.cpp:2351-2352`. No door reads the config's format. |
 | `models pull` and `models convert`'s registration refusals: lead with the rename there, when the chain can't register under that name anyway? | `[default]` | Yes, one rule at every editor door: it removes the entry, as the door says. Keep "or register this one by hand under another name", which is how the model gets registered. Once the entry is gone, `check_registrations`' dry run refuses the chain's own registration under that name in 55f's words, which is today's rule. |
-| How a suggested command is rendered: `--`, quoting, option order, placeholders. | `(consumed decision)` | [CLI-M48](a-suggested-command-runs-as-printed.md). |
+| How a suggested command is rendered: `--`, quoting, option order, placeholders. | `(consumed decision)` | [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md). |
 | The program word and root a door begins with (`apogee`, `apogee --dev`, `apogee-dev`). | `(consumed decision)` | [CLI-M49](a-printed-command-names-the-binary-that-printed-it.md). The rename door takes whatever word the renderer gives. |
 
 ## Decision log
@@ -268,14 +268,14 @@ Each case runs in a `CliHome` under a temporary `APOGEE_HOME`. Each fails once C
 |---|---|---|
 | 2026-11-26 | **The diagnosis.** The door sites never ask `yaml_plain_key`. Since 57e every config editor refuses a name outside it and points at `rename-backend` without arguments, so a door naming `set-backend` or `delete-backend` on such a name can't run as printed, even once CLI-M48 adds its `--`. Only `rename-backend` reaches the name (Evidence). | the spec |
 | 2026-11-26 | **Placed in Maintenance as M50.** The user's call was to spec the APP-M21/M22 CLI asides as maintenance items from M48, grouped only where they share one seam. This is its own item because choosing which door to print is a different change from rendering one, so the investigation split it from CLI-M48 rather than drop it. CLI-M48 renders whatever door a site names. This item changes which door a site names, for a backend the editors refuse. | the user |
-| 2026-11-26 | **Blocked by CLI-M48.** The rename door and the doors on `<new name>` are printed by M48's renderer. Without it, the rename door for `-x` would itself print as `rename-backend -x …`, which the parser refuses, and a name like `a;b` would run the wrong command. When M48 is split, the gate is its Pass A, as M48 records, and any site Pass B has not yet moved is moved here. | the spec |
+| 2026-11-26 | **Blocked by CLI-M48.** The rename door and the doors on `<new name>` are printed by M48's renderer. Without it, the rename door for `-x` would itself print as `rename-backend -x …`, which the parser refuses, and a name like `a;b` would run the wrong command. M48 was split on 2026-11-27, and the gate is its Pass A, which kept the id M48; any site Pass B ([CLI-M61](every-printed-command-goes-through-the-renderer.md)) has not yet moved is moved here. | the spec |
 | 2026-11-26 | **Not gated with CLI-M49 or CLI-M54.** CLI-M49 changes the program word every rendered command begins with, the rename door's included, and either can land first. CLI-M54 makes `rename-backend` find a key in any case. Until it ships, this item names the key as stored, so the door runs either way. | the spec |
 | 2026-11-26 | **The scope is every door naming the two editors on a configured backend.** That is the six sites the investigation named and the ten more found by reading at HEAD (Evidence 11), all through one helper. Doors on a backend not in the config (`add-backend`), and doors naming other verbs on a backend, are left out (Out of scope). | the spec |
 | 2026-11-26 | **No recorded intent is reversed.** 57e's refusal and 55f's add rule stand. M14's "The doctor's doors run as printed" is what this item makes true for these names. | the spec |
 
 ## Out of scope
 
-- **Rendering a printed command**: `--`, quoting, option order, the five quoters and `a;b` naming another target. That is [CLI-M48](a-suggested-command-runs-as-printed.md).
+- **Rendering a printed command**: `--`, quoting, option order, the five quoters and `a;b` naming another target. That is [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md).
 - **The editors' own refusal** keeps 57e's words, `rename it with 'apogee config rename-backend'`. It already names the way out. It is also what a person sees when the TUI's row actions ([CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md)) or the Mac app ([APP-M23](../../../assistant/darwin/MILESTONES.md#2026-11-27--every-name-the-app-passes-is-read-as-a-name-maintenance-item-m23-every-name-the-app-passes-is-read-as-a-name)'s default) reach the verb with such a name.
 - **The program word and root** a door names: [CLI-M49](a-printed-command-names-the-binary-that-printed-it.md).
 - **Dead ends for other config kinds** (graph entries, suites, agents, MCP servers) and **a rename verb for them**. Recorded as a gap (Open questions).
@@ -288,7 +288,7 @@ Each case runs in a `CliHome` under a temporary `APOGEE_HOME`. Each fails once C
 
 ## Links
 
-- **Blocked by:** [CLI-M48](a-suggested-command-runs-as-printed.md), which renders the rename door and the door on `<new name>` · **Blocks:** —
+- **Blocked by:** [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md), which renders the rename door and the door on `<new name>` · **Blocks:** —
 - **Sibling:** [CLI-M49](a-printed-command-names-the-binary-that-printed-it.md), the program word the rename door begins with; [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md), the TUI's row actions, from the same investigation.
 - **Relates to:**
   - [CLI-M54](rename-and-get-find-an-entry-by-its-folded-name.md), which makes `rename-backend` find a key in any case;
