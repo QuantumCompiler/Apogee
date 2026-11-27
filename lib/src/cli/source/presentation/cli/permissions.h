@@ -124,6 +124,11 @@ struct GatedName {
     /// A native tool this build never offers (57k: a shell or git tool where
     /// no program can be started); `error` says so rather than naming the set.
     bool unoffered = false;
+    /// A website no list knows whose canonical name is a toolset's word
+    /// (`shell`, `web`, `mcp`) or a gated tool's (`run_command.`): that word,
+    /// so the surface says the name was taken as a website and what refuses
+    /// the tool (CLI-M39). Empty for any other name, and for a known host.
+    std::string shares{};
 };
 
 /// Whether a name that is no gated tool reads as a website (57o): dotted,
@@ -133,14 +138,54 @@ struct GatedName {
 /// has to accept it.
 [[nodiscard]] bool website_shaped(std::string_view name) noexcept;
 
-/// `child_processes` is the platform's answer by default; a test sets it to
-/// see either side on any host. Takes every host `--allow-host` takes (57o).
+/// **The one function every no path reads a name through** (`--deny`,
+/// `/deny`, `/allow`, `/revoke`, and the offers of each). In order: a gated
+/// tool is that tool; a native tool this build never offers is refused
+/// saying why (57k); then, unless `websites` is false (`--allow`, 26o), a
+/// name whose canonical host `known` holds (`host_listed`) is that website
+/// whatever its shape, so a listed or answered `my_host` is deniable
+/// (CLI-M39); a website-shaped name is a website (57o), `shares` set when it
+/// is named like a toolset or a gated tool; anything else is the typo, its
+/// refusal naming `<name>.` when that spelling is a website. `known` is the
+/// run's known hosts (`known_hosts`). `child_processes` is the platform's
+/// answer by default; a test sets it to see either side on any host.
 /// `unstarted` ends the listing of `gated` in a refusal decided before the
 /// MCP servers were started (`unstarted_servers_clause`, CLI-M38).
 [[nodiscard]] GatedName name_gated(std::string_view name, const std::vector<std::string>& gated,
-                                   bool websites = true,
+                                   const std::vector<std::string>& known, bool websites = true,
                                    bool child_processes = platform::supports_child_processes(),
                                    std::string_view unstarted = {});
+
+/// The hosts a run already knows (CLI-M39), which `name_gated` takes as
+/// websites whatever their shape: `listed` -- the gate's own list,
+/// `listed_hosts` -- then those the session allowed and denied.
+[[nodiscard]] std::vector<std::string> known_hosts(const std::vector<std::string>& listed,
+                                                   const SessionApprovals& approvals);
+
+/// Which verb a pointer is said for (CLI-M39).
+enum class PointerVerb : std::uint8_t {
+    /// `--deny`, at launch.
+    LaunchDeny,
+    /// `/deny`, in chat.
+    ChatDeny,
+    /// `/allow`, in chat.
+    ChatAllow,
+};
+
+/// What a website named like a toolset or a gated tool (`GatedName::shares`)
+/// points to instead, in `verb`'s words (CLI-M39): the deny or allow of the
+/// set's writers and, to refuse, `tools.disabled` -- `to refuse the shell's
+/// tool, --deny run_command, or leave the toolset out with tools.disabled:
+/// [shell]`; that a set's tools only read; `web`'s per-website ask; `mcp`'s
+/// per-tool names; or the tool itself for a tool's name. Empty for an empty
+/// `shares`.
+[[nodiscard]] std::string shared_name_pointer(std::string_view shares, PointerVerb verb);
+
+/// The launch's note for a deny taken as such a website (CLI-M39): `'<given>'
+/// is taken as a website` (`as the website <key>` when the canonical name
+/// differs), then the pointer -- what stderr says in text and a `notice` in
+/// machine mode. Empty when `name.shares` is.
+[[nodiscard]] std::string shared_name_note(std::string_view given, const GatedName& name);
 
 /// What a refusal's listing of the tools that ask ends with when it was
 /// decided before `servers` -- the MCP servers the run would dial -- were
@@ -156,12 +201,25 @@ void deny_for_session(SessionApprovals& approvals, const GatedName& name);
 /// `/revoke`: the session's own answer forgotten; false when it had none.
 bool revoke_for_session(SessionApprovals& approvals, const GatedName& name);
 
-/// Seeds a run's answers from its flags. The first refusal, or empty;
-/// `unstarted` as `name_gated` takes it.
-[[nodiscard]] std::string seed_approvals(SessionApprovals& approvals,
-                                         const PermissionPresets& presets,
-                                         const std::vector<std::string>& gated,
-                                         std::string_view unstarted = {});
+/// What seeding a run's answers said (CLI-M39).
+struct SeededPresets {
+    /// The first refusal, or empty.
+    std::string refused{};
+    /// A note for each `--deny` taken as a website named like a toolset or a
+    /// gated tool (`shared_name_note`), in the flags' order.
+    std::vector<std::string> notes{};
+};
+
+/// Seeds a run's answers from its flags: `--allow`, then `--allow-host`,
+/// then `--deny`, each name read by `name_gated` with the run's known hosts
+/// -- `listed` (`listed_hosts` of the run's config) and what the session
+/// holds by then, the `--allow-host` hosts among them. `unstarted` as
+/// `name_gated` takes it.
+[[nodiscard]] SeededPresets seed_approvals(SessionApprovals& approvals,
+                                           const PermissionPresets& presets,
+                                           const std::vector<std::string>& gated,
+                                           const std::vector<std::string>& listed,
+                                           std::string_view unstarted = {});
 
 /// **The flags' verdict before any MCP server starts** (CLI-M38):
 /// `seed_approvals` into answers thrown away, over every `--allow-host` and
@@ -171,9 +229,12 @@ bool revoke_for_session(SessionApprovals& approvals, const GatedName& name);
 /// verdict cannot depend on a server, so this is the seed's own refusal in
 /// its own words, the listing ending with `servers` by prefix; empty, and
 /// the full seed after the dial judges the MCP names, exactly as before.
+/// `listed` as `seed_approvals` takes it; the notes are the full seed's to
+/// say.
 [[nodiscard]] std::string preflight_presets(const PermissionPresets& presets,
                                             const std::vector<std::string>& gated_native,
-                                            const std::vector<std::string>& servers);
+                                            const std::vector<std::string>& servers,
+                                            const std::vector<std::string>& listed);
 
 /// `/permissions`: each gated tool's effective answer and where it comes
 /// from -- the config, this session, the mode, or the default -- then the

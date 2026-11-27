@@ -1460,8 +1460,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         if (const PermissionPresets presets{
                 .allow = flags->allow, .deny = flags->deny, .allow_hosts = flags->allow_hosts};
             !presets.empty()) {
-            if (const std::string refused = preflight_presets(presets, gated_tools(registry),
-                                                              mcp_servers_dialled(tool_options));
+            if (const std::string refused =
+                    preflight_presets(presets, gated_tools(registry),
+                                      mcp_servers_dialled(tool_options), listed_hosts(config));
                 !refused.empty()) {
                 fail_user(mode, refused);
             }
@@ -1646,9 +1647,15 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                       "--allow, --deny and --allow-host need --tools: without tools, nothing "
                       "is asked");
         }
-        if (const std::string refused = seed_approvals(*approvals, presets, gated);
-            !refused.empty()) {
-            fail_user(mode, refused);
+        const SeededPresets seeded =
+            seed_approvals(*approvals, presets, gated, listed_hosts(config));
+        if (!seeded.refused.empty()) {
+            fail_user(mode, seeded.refused);
+        }
+        // A deny taken as a website named like a toolset or a tool says so
+        // (CLI-M39): on stderr, or a `notice` once the session event is out.
+        for (const std::string& note : seeded.notes) {
+            suite_note(ansi::Role::Warning, note);
         }
     }
 
@@ -2521,12 +2528,25 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         }
                         break;
                     }
-                    const GatedName name = name_gated(argument, gated);
+                    // The hosts this chat knows are websites whatever their
+                    // shape (CLI-M39): the config's list, and the session's
+                    // own answers.
+                    const GatedName name =
+                        name_gated(argument, gated, known_hosts(listed_hosts(config), *approvals));
                     if (!name.error.empty()) {
                         out.print_line(style.tag(ansi::Role::Error) + " " + name.error);
                         break;
                     }
                     const std::string what = name.host ? "website " + name.key : name.key;
+                    // A website named like a toolset or a tool points at the
+                    // tool, in this verb's words (CLI-M39).
+                    const std::string pointer =
+                        spec->id == ChatVerb::Revoke
+                            ? std::string{}
+                            : shared_name_pointer(name.shares, spec->id == ChatVerb::Allow
+                                                                   ? PointerVerb::ChatAllow
+                                                                   : PointerVerb::ChatDeny);
+                    const std::string pointed = pointer.empty() ? "" : "; " + pointer;
                     if (spec->id == ChatVerb::Allow) {
                         allow_for_session(*approvals, name);
                         const bool config_denies =
@@ -2537,11 +2557,11 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                             (config_denies
                                  ? " stays denied: the config says deny, and a chat never "
                                    "loosens that"
-                                 : " allowed for this chat"));
+                                 : " allowed for this chat" + pointed));
                     } else if (spec->id == ChatVerb::Deny) {
                         deny_for_session(*approvals, name);
                         out.print_line(style.tag(ansi::Role::Apogee) + " " + what +
-                                       " denied for this chat");
+                                       " denied for this chat" + pointed);
                     } else if (revoke_for_session(*approvals, name)) {
                         out.print_line(style.tag(ansi::Role::Apogee) + " " + what +
                                        ": asked again from now on");

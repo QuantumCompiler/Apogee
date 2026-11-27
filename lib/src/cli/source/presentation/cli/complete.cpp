@@ -3,6 +3,7 @@
 #include <CLI/CLI.hpp>
 
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -97,17 +98,23 @@ struct CompleteFlags {
 
 /// The run's answers, given at invocation (26o), checked against the tools
 /// that ask. A name that is neither a gated tool nor a website fails the run:
-/// a typo must not quietly grant nothing.
-std::shared_ptr<SessionApprovals> seeded_approvals(const CompleteFlags& flags,
-                                                   const agent::ToolRegistry& registry) {
+/// a typo must not quietly grant nothing. A host the config lists is a
+/// website whatever its shape, and a deny taken as a website named like a
+/// toolset or a tool is said through `say` (CLI-M39).
+std::shared_ptr<SessionApprovals> seeded_approvals(
+    const CompleteFlags& flags, const harness::Config& config, const agent::ToolRegistry& registry,
+    const std::function<void(const std::string&)>& say) {
     auto approvals = std::make_shared<SessionApprovals>();
-    if (const std::string refused = seed_approvals(
-            *approvals,
-            PermissionPresets{
-                .allow = flags.allow, .deny = flags.deny, .allow_hosts = flags.allow_hosts},
-            gated_tools(registry));
-        !refused.empty()) {
-        fail_user(refused);
+    const SeededPresets seeded = seed_approvals(
+        *approvals,
+        PermissionPresets{
+            .allow = flags.allow, .deny = flags.deny, .allow_hosts = flags.allow_hosts},
+        gated_tools(registry), listed_hosts(config));
+    if (!seeded.refused.empty()) {
+        fail_user(seeded.refused);
+    }
+    for (const std::string& note : seeded.notes) {
+        say(note);
     }
     return approvals;
 }
@@ -279,7 +286,8 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
             if (const std::string refused = preflight_presets(
                     presets, gated_tools(pin_toolset(native_tools, config, model)),
                     dials_mcp ? mcp_servers_dialled(BuiltInToolOptions{.config = &config})
-                              : std::vector<std::string>{});
+                              : std::vector<std::string>{},
+                    listed_hosts(config));
                 !refused.empty()) {
                 fail_user(refused);
             }
@@ -368,8 +376,10 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
             // The config's levels and the run's own answers (26o): a one-shot
             // driver cannot be asked, so anything else that asks is a deny,
             // exactly as on a pipe.
-            machine_options.permission =
-                make_permission_checker(config, seeded_approvals(flags, machine_registry));
+            machine_options.permission = make_permission_checker(
+                config, seeded_approvals(
+                            flags, config, machine_registry,
+                            [&reporter](const std::string& note) { reporter.on_notice(note); }));
             // No AskFn: a one-shot driver has no way to answer a question
             // mid-turn. The loop's rule then applies unchanged -- ask_user is
             // never advertised, rather than advertised and unanswerable.
@@ -557,7 +567,11 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         // means the tool never appears in the request at all -- and a null
         // ConfirmFn, on a pipe, means a destructive tool's `ask` is a deny.
         loop_options.ask = terminal_ask_fn(reporter.status(), reporter_options.style);
-        const std::shared_ptr<SessionApprovals> approvals = seeded_approvals(flags, registry);
+        const std::shared_ptr<SessionApprovals> approvals =
+            seeded_approvals(flags, config, registry, [&](const std::string& note) {
+                reporter.status().print_line(reporter_options.style.tag(ansi::Role::Warning) + " " +
+                                             note);
+            });
         loop_options.permission = make_permission_checker(config, approvals);
         loop_options.confirm =
             terminal_confirm_fn(reporter.status(), reporter_options.style, config_path, approvals);

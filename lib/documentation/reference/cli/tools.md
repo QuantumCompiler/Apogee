@@ -158,7 +158,18 @@ fetch that is not made leaves the review to what is already here, said as
 `Not fetched: ...` in the answer's header, or refused when the ref is not
 here at all.
 `--deny`, `/deny` and `/revoke` take every host `--allow-host` takes,
-`localhost` and IPv6 literals such as `[::1]` included.
+`localhost` and IPv6 literals such as `[::1]` included, and every host the
+config lists or the session answered, whatever its shape: a listed `my_host`
+is denied by its own name (CLI-M39). Any other name with a `_` and no dot is
+read as a mistyped tool and refused, the refusal naming the spelling that
+denies the website, `'my_host.' is the website my_host`. A toolset's word or
+a tool's name is still taken as a website, so `--deny git` keeps refusing an
+intranet host named `git`, but it says so, since the tool still runs:
+`--deny shell` prints `'shell' is taken as a website; to refuse the shell's
+tool, --deny run_command, or leave the toolset out with tools.disabled:
+[shell]` (on stderr, and as a `notice` in machine mode), and in chat
+`/deny shell` and `/allow shell` add the same pointer in their own words. A
+host the config lists or the session answered is yours, and is said plainly.
 
 **The question shows what will run, whole and as it is** (57p). The prompt
 for `run_command` shows the whole command, however long, and the folder it

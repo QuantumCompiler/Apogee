@@ -10,11 +10,15 @@
 #include <vector>
 
 #include "agent/web_search.h"
+#include "agentloop/member_call.h"
+#include "agentloop/question.h"
+#include "agentloop/tool_selection.h"
 #include "ansi/inert.h"
 #include "contracts/config_edit.h"
 #include "contracts/errors.h"
 #include "contracts/host.h"
 #include "contracts/text_diff.h"
+#include "contracts/todo.h"
 #include "machine/driver_input.h"
 #include "mcp/types.h"
 #include "platform/platform.h"
@@ -452,8 +456,62 @@ bool website_shaped(std::string_view name) noexcept {
     return dotted || bracketed || ipv6 || single_label;
 }
 
-GatedName name_gated(std::string_view name, const std::vector<std::string>& gated, bool websites,
-                     bool child_processes, std::string_view unstarted) {
+namespace {
+
+/// Whether `word` is one a suite member's `toolset:` takes (`fs` ... `mcp`).
+bool toolset_word(std::string_view word) {
+    return std::ranges::find(harness::suite_toolset_names(), word) !=
+           harness::suite_toolset_names().end();
+}
+
+/// The tools a toolset holds that ask: `destructive_tool_names` filed under
+/// it, in that list's order.
+std::vector<std::string> toolset_writers(std::string_view toolset) {
+    std::vector<std::string> out;
+    for (const std::string_view tool : tools::destructive_tool_names()) {
+        if (tools::toolset_of(tool) == toolset) {
+            out.emplace_back(tool);
+        }
+    }
+    return out;
+}
+
+/// Whether `name` is a tool's own name: a native toolset's, `fetch_url`'s or
+/// `web_search`'s, an MCP tool's (`toolset_of`), or one the loop registers
+/// beside them -- never a website a typo's refusal should point to.
+bool names_a_tool(std::string_view name) {
+    return !tools::toolset_of(name).empty() || name == agentloop::kQuestionToolName ||
+           name == agentloop::kConsultToolName || name == agentloop::kDelegateToolName ||
+           name == harness::kTodoToolName;
+}
+
+/// `a`, `a and b`, `a, b and c`.
+std::string and_list(const std::vector<std::string>& items) {
+    std::string out;
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        if (i > 0) {
+            out += i + 1 == items.size() ? " and " : ", ";
+        }
+        out += items[i];
+    }
+    return out;
+}
+
+/// `--deny a`, `--deny a and --deny b`, `--deny a, --deny b and --deny c`.
+std::string each_with(std::string_view verb, const std::vector<std::string>& tools) {
+    std::vector<std::string> said;
+    said.reserve(tools.size());
+    for (const std::string& tool : tools) {
+        said.push_back(std::string{verb} + " " + tool);
+    }
+    return and_list(said);
+}
+
+}  // namespace
+
+GatedName name_gated(std::string_view name, const std::vector<std::string>& gated,
+                     const std::vector<std::string>& known, bool websites, bool child_processes,
+                     std::string_view unstarted) {
     GatedName out;
     if (std::ranges::find(gated, name) != gated.end()) {
         out.key = std::string{name};
@@ -466,18 +524,31 @@ GatedName name_gated(std::string_view name, const std::vector<std::string>& gate
         out.unoffered = true;
         return out;
     }
+    const std::optional<std::string> host = harness::canonical_host(name);
+    // A host the run already knows -- the config's list, the session's own
+    // answers -- is that website whatever its shape, matched as the checker
+    // matches it (CLI-M39): a listed `my_host` is reached unasked, so a no
+    // must reach it too. The person's own host says nothing more, even one
+    // spelled like a toolset.
+    if (websites && host.has_value() && harness::host_listed(known, *host)) {
+        out.key = *host;
+        out.host = true;
+        return out;
+    }
     // A website, by the host it names -- as a session's own answer keeps it,
     // and as `--allow-host` takes it (57o): any name `canonical_host` accepts,
     // `localhost`, an intranet name and an IPv6 literal included, except a
     // dotless one with a `_`, which is shaped like a tool -- so a mistyped
-    // `write_flie` is still caught as one.
-    if (websites && website_shaped(name)) {
-        if (const std::optional<std::string> host = harness::canonical_host(name);
-            host.has_value()) {
-            out.key = *host;
-            out.host = true;
-            return out;
+    // `write_flie` is still caught as one. One named like a toolset or a
+    // gated tool stays a website, by the user's call (CLI-M39: an intranet
+    // `git` is denied so today), and carries the word so the surface says so.
+    if (websites && host.has_value() && website_shaped(name)) {
+        out.key = *host;
+        out.host = true;
+        if (toolset_word(*host) || std::ranges::find(gated, *host) != gated.end()) {
+            out.shares = *host;
         }
+        return out;
     }
     std::string listed;
     for (const std::string& tool : gated) {
@@ -491,25 +562,85 @@ GatedName name_gated(std::string_view name, const std::vector<std::string>& gate
     } else {
         asked = " -- it has none (--tools)";
     }
+    // A name shaped like a tool that is a website's name too: the spelling
+    // that takes it as one (CLI-M39) -- never for a tool's own name, in any
+    // case, which that spelling would deny as a website and leave running.
+    std::string spelling;
+    if (websites && host.has_value() && !names_a_tool(*host) &&
+        std::ranges::find(gated, *host) == gated.end()) {
+        spelling = " -- '" + *host + ".' is the website " + *host;
+    }
     out.error = "'" + std::string{name} + "' is not a tool this chat asks about" + asked +
                 std::string{unstarted} +
-                (websites ? "; or name a website, like docs.python.org" : "");
+                (websites ? "; or name a website, like docs.python.org" + spelling : "");
     return out;
+}
+
+std::vector<std::string> known_hosts(const std::vector<std::string>& listed,
+                                     const SessionApprovals& approvals) {
+    std::vector<std::string> known = listed;
+    known.insert(known.end(), approvals.hosts.begin(), approvals.hosts.end());
+    known.insert(known.end(), approvals.denied_hosts.begin(), approvals.denied_hosts.end());
+    return known;
+}
+
+std::string shared_name_pointer(std::string_view shares, PointerVerb verb) {
+    if (shares.empty()) {
+        return {};
+    }
+    const bool allow = verb == PointerVerb::ChatAllow;
+    std::string_view spelled = "/allow";
+    if (verb == PointerVerb::LaunchDeny) {
+        spelled = "--deny";
+    } else if (verb == PointerVerb::ChatDeny) {
+        spelled = "/deny";
+    }
+    const std::string word{shares};
+    const std::string to = allow ? "to allow" : "to refuse";
+    if (word == "web") {
+        return "fetch_url and web_search are asked about per website -- name the website, like "
+               "docs.python.org";
+    }
+    if (word == "mcp") {
+        return std::string{allow ? "allow" : "refuse"} +
+               " an MCP tool by its name, mcp__<server>__<tool>";
+    }
+    if (!toolset_word(word)) {
+        // A gated tool's own name, taken as a website.
+        return to + " the tool, " + std::string{spelled} + " " + word;
+    }
+    // To refuse, the toolset can be left out too; nothing allows a read.
+    const std::string disabled = "tools.disabled: [" + word + "]";
+    const std::vector<std::string> writers = toolset_writers(word);
+    if (writers.empty()) {
+        return word + "'s tools only read and never ask" +
+               (allow ? "" : " -- leave them out with " + disabled);
+    }
+    return to + " the " + word + (writers.size() == 1 ? "'s tool, " : " tools, ") +
+           each_with(spelled, writers) +
+           (allow ? "" : ", or leave the toolset out with " + disabled);
+}
+
+std::string shared_name_note(std::string_view given, const GatedName& name) {
+    if (name.shares.empty()) {
+        return {};
+    }
+    return "'" + std::string{given} + "' is taken as " +
+           (given == name.key ? std::string{"a website"} : "the website " + name.key) + "; " +
+           shared_name_pointer(name.shares, PointerVerb::LaunchDeny);
 }
 
 std::string unstarted_servers_clause(const std::vector<std::string>& servers) {
     if (servers.empty()) {
         return {};
     }
-    std::string prefixes;
-    for (std::size_t i = 0; i < servers.size(); ++i) {
-        if (i > 0) {
-            prefixes += i + 1 == servers.size() ? " and " : ", ";
-        }
-        prefixes += mcp::namespaced_name(servers[i], "*");
+    std::vector<std::string> prefixes;
+    prefixes.reserve(servers.size());
+    for (const std::string& server : servers) {
+        prefixes.push_back(mcp::namespaced_name(server, "*"));
     }
-    return "; and " + prefixes + ", whose " + (servers.size() == 1 ? "server" : "servers") +
-           " a refused run does not start";
+    return "; and " + and_list(prefixes) + ", whose " +
+           (servers.size() == 1 ? "server" : "servers") + " a refused run does not start";
 }
 
 void allow_for_session(SessionApprovals& approvals, const GatedName& name) {
@@ -539,39 +670,50 @@ bool revoke_for_session(SessionApprovals& approvals, const GatedName& name) {
     return (approvals.tools.erase(name.key) + approvals.denied_tools.erase(name.key)) > 0;
 }
 
-std::string seed_approvals(SessionApprovals& approvals, const PermissionPresets& presets,
-                           const std::vector<std::string>& gated, std::string_view unstarted) {
+SeededPresets seed_approvals(SessionApprovals& approvals, const PermissionPresets& presets,
+                             const std::vector<std::string>& gated,
+                             const std::vector<std::string>& listed, std::string_view unstarted) {
     const bool child_processes = platform::supports_child_processes();
+    SeededPresets seeded;
     for (const std::string& tool : presets.allow) {
-        // `--allow` is for tools; a website has `--allow-host`.
-        const GatedName name = name_gated(tool, gated, false, child_processes, unstarted);
+        // `--allow` is for tools; a website has `--allow-host`, so no host
+        // is known to it.
+        const GatedName name = name_gated(tool, gated, {}, false, child_processes, unstarted);
         if (!name.error.empty()) {
-            return "--allow: " + name.error +
-                   (name.unoffered ? "" : " (a website takes --allow-host)");
+            seeded.refused = "--allow: " + name.error +
+                             (name.unoffered ? "" : " (a website takes --allow-host)");
+            return seeded;
         }
         allow_for_session(approvals, name);
     }
     for (const std::string& host : presets.allow_hosts) {
         const std::optional<std::string> canonical = harness::canonical_host(host);
         if (!canonical.has_value()) {
-            return "--allow-host: '" + host + "' is not a website's name";
+            seeded.refused = "--allow-host: '" + host + "' is not a website's name";
+            return seeded;
         }
         allow_for_session(approvals, GatedName{.key = *canonical, .host = true});
     }
     // Denials last: when a run says both, no wins.
     for (const std::string& entry : presets.deny) {
-        const GatedName name = name_gated(entry, gated, true, child_processes, unstarted);
+        const GatedName name = name_gated(entry, gated, known_hosts(listed, approvals), true,
+                                          child_processes, unstarted);
         if (!name.error.empty()) {
-            return "--deny: " + name.error;
+            seeded.refused = "--deny: " + name.error;
+            return seeded;
         }
         deny_for_session(approvals, name);
+        if (std::string note = shared_name_note(entry, name); !note.empty()) {
+            seeded.notes.push_back(std::move(note));
+        }
     }
-    return {};
+    return seeded;
 }
 
 std::string preflight_presets(const PermissionPresets& presets,
                               const std::vector<std::string>& gated_native,
-                              const std::vector<std::string>& servers) {
+                              const std::vector<std::string>& servers,
+                              const std::vector<std::string>& listed) {
     // An MCP tool's name waits for its server, the only one that knows
     // whether it exists and writes, and whether the config's level binds it
     // (57o). Every other name is the flags' alone.
@@ -586,7 +728,8 @@ std::string preflight_presets(const PermissionPresets& presets,
                           PermissionPresets{.allow = native(presets.allow),
                                             .deny = native(presets.deny),
                                             .allow_hosts = presets.allow_hosts},
-                          gated_native, unstarted_servers_clause(servers));
+                          gated_native, listed, unstarted_servers_clause(servers))
+        .refused;
 }
 
 std::vector<std::string> describe_permissions(const harness::Config& config,

@@ -820,7 +820,7 @@ TEST_CASE("allow and deny offer the tools this build offers, and set-permission 
         for (const std::string_view tool : tl::destructive_tool_names()) {
             INFO(tool << (programs ? " where programs start" : " where none can"));
             const bool is_offered = has(names, tool);
-            CHECK(c::name_gated(tool, registered, false, programs).error.empty() == is_offered);
+            CHECK(c::name_gated(tool, registered, {}, false, programs).error.empty() == is_offered);
             CHECK(tl::why_not_offered(tool, programs).empty() == is_offered);
         }
     }
@@ -1099,11 +1099,12 @@ TEST_CASE("deny offers each host the gate lists, once and canonical, as the verb
           "[commands][completion][sources][permissions][outbound][CLI-M36]") {
     // `--deny` takes a website too -- the one way to refuse, for a session, a
     // host the config lets through -- and Tab offered none (2026-11-22). The
-    // raw list would offer what --deny refuses (a URL, a tool-shaped name)
-    // and a host as written rather than as it is kept. So each listed host
-    // `name_gated` reads as a website is offered by its canonical name, once.
+    // raw list would offer what --deny refuses (a URL) and a host as
+    // written rather than as it is kept. So each listed host `name_gated`
+    // reads as a website is offered by its canonical name, once.
     const GrantHome grant;
-    const std::vector<std::string> hosts{"127.0.0.1", "docs.python.org", "example.com"};
+    const std::vector<std::string> hosts{"127.0.0.1", "docs.python.org", "example.com", "my_host",
+                                         "side_door"};
     for (const std::string verb : {"chat", "execute", "acp", "tui", "complete"}) {
         INFO(verb);
         const std::vector<std::string> offered =
@@ -1130,19 +1131,19 @@ TEST_CASE("deny offers each host the gate lists, once and canonical, as the verb
         CHECK(grant.run({"complete", "--tools", "--deny", host, "hi"}, &said) == 0);
         // Denied, it is refused though the config lists it.
         const auto approvals = std::make_shared<c::SessionApprovals>();
-        REQUIRE(
-            c::seed_approvals(*approvals, c::PermissionPresets{.deny = {host}}, writers_without())
-                .empty());
+        REQUIRE(c::seed_approvals(*approvals, c::PermissionPresets{.deny = {host}},
+                                  writers_without(), c::listed_hosts(grant.config))
+                    .refused.empty());
         const apogee::agent::GateRequest reach{"fetch_url", host, "", true};
         CHECK(c::make_permission_checker(grant.config, nullptr)(reach) ==
               apogee::agent::Permission::Allow);
         CHECK(c::make_permission_checker(grant.config, approvals)(reach) ==
               apogee::agent::Permission::Deny);
     }
-    // `side_door.` is taken as written, but its canonical name, `side_door`,
-    // is shaped like a tool and refused: Tab offers neither, never a name
-    // the verb refuses (until CLI-M39 takes every listed host).
-    for (const std::string listed : {"https://not-a-host.example/path", "my_host", "side_door"}) {
+    // A URL is no website's name: Tab never offers it, since the verb
+    // refuses it. (`my_host` and `side_door.`'s `side_door`, shaped like
+    // tools, are offered and taken since CLI-M39: the config lists them.)
+    for (const std::string listed : {"https://not-a-host.example/path"}) {
         INFO(listed);
         std::string said;
         CHECK(grant.run({"complete", "--tools", "--deny", listed, "hi"}, &said) == 1);

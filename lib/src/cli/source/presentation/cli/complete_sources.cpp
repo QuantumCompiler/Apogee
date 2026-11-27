@@ -414,20 +414,23 @@ void voice_models(const models::StoreRoots& roots, NameList& list) {
 
 /// What `--deny` takes from a closed set (`TOOL_OR_WEBSITE`): the tools
 /// chat-style flags take, then each host the gate lists that `name_gated`
-/// reads as a website -- by its canonical name, once. A URL, a name shaped
-/// like a tool and any other entry the verb refuses are left out; a host no
-/// list names is typed (CLI-M36).
+/// reads as a website -- by its canonical name, once, a listed name shaped
+/// like a tool (`side_door`) included, since the verb takes a known host
+/// whatever its shape (CLI-M39). A URL and any other entry the verb refuses
+/// are left out; a host no list names is typed (CLI-M36).
 [[nodiscard]] std::vector<std::string> tool_or_website_names(const CompletionContext& context,
                                                              const harness::Config& config) {
     std::vector<std::string> names = session_tool_names(context, config);
     const std::vector<std::string> tools = names;
-    for (const std::string& entry : listed_hosts(config)) {
-        const GatedName name = name_gated(entry, tools, true, context.child_processes);
-        // Offered by its canonical name only when the verb takes that name
-        // too: `side_door.` is a website, but `side_door` is shaped like a
-        // tool and refused.
+    const std::vector<std::string> listed = listed_hosts(config);
+    for (const std::string& entry : listed) {
+        const GatedName name = name_gated(entry, tools, listed, true, context.child_processes);
+        // Offered by its canonical name only when the verb takes that name as
+        // the same website: a listed `write_file.` is a website, but
+        // `write_file` names the tool.
         const GatedName offered =
-            name.host ? name_gated(name.key, tools, true, context.child_processes) : GatedName{};
+            name.host ? name_gated(name.key, tools, listed, true, context.child_processes)
+                      : GatedName{};
         if (name.error.empty() && name.host && offered.host && offered.key == name.key &&
             std::ranges::find(names, name.key) == names.end()) {
             names.push_back(name.key);

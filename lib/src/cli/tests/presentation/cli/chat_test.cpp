@@ -1652,6 +1652,139 @@ TEST_CASE("a chat's --deny, /deny and /revoke take every host --allow-host takes
           std::string::npos);
 }
 
+namespace {
+
+/// How many `notice` events in `stream` say `text`, exactly: a note decided
+/// before the servers start and again after must still be said once.
+[[nodiscard]] std::size_t notices_saying(const std::string& stream, const std::string& text) {
+    std::size_t count = 0;
+    std::istringstream lines{stream};
+    for (std::string line; std::getline(lines, line);) {
+        const nlohmann::json event = nlohmann::json::parse(line, nullptr, false);
+        if (event.is_object() && event.value("type", "") == "notice" &&
+            event.value("text", "") == text) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+}  // namespace
+
+TEST_CASE("a toolset's name given to --deny stays a website deny, and says how to refuse the tool",
+          "[chat][cli][permissions][presets][M39]") {
+    // CLI-M39: `--deny shell` was taken silently as the website `shell`, and
+    // the shell's tool still ran. By the user's call it stays a website deny
+    // (an intranet `git` or `web` is denied that way today), and now says so.
+    const std::string fs_note =
+        "'fs' is taken as a website; to refuse the fs tools, --deny write_file, --deny edit_file "
+        "and --deny delete_file, or leave the toolset out with tools.disabled: [fs]";
+    HelperChat chat{writes_a_file(), {"unused"}, "", "permissions:\n  write_file: allow\n"};
+    sandboxed(chat);
+    REQUIRE(chat.run({"complete", "--tools", "--deny", "fs", "write it"}) == 0);
+    CHECK(occurrences(chat.err, fs_note) == 1);
+    // The tool's behaviour is unchanged: the config's allow still writes.
+    CHECK(std::filesystem::exists(chat.home.path() / "work" / "out.txt"));
+
+    // In machine mode the note is a notice, and nothing on stderr.
+    REQUIRE(chat.run({"complete", "--tools", "--deny", "git", "--output-format", "stream-json",
+                      "write it"}) == 0);
+    CHECK(notices_saying(chat.out,
+                         "'git' is taken as a website; git's tools only read and never ask -- "
+                         "leave them out with tools.disabled: [git]") == 1);
+    CHECK(chat.err.find("taken as a website") == std::string::npos);
+    const std::string driven = std::string{R"({"type":"user","text":"write it"})"} + "\n";
+    REQUIRE(chat.run({"chat", "--tools", "--deny", "web", "--input-format", "stream-json",
+                      "--output-format", "stream-json"},
+                     driven) == 0);
+    CHECK(notices_saying(chat.out,
+                         "'web' is taken as a website; fetch_url and web_search are asked about "
+                         "per website -- name the website, like docs.python.org") == 1);
+
+    // A chat stores the deny as the website, by its canonical name, and says
+    // the given spelling.
+    REQUIRE(chat.run({"chat", "--tools", "--deny", "SHELL", "--deny", "run_command."},
+                     "/permissions\n") == 0);
+    std::string said = chat.out + chat.err;
+    CHECK(said.find("website shell: deny (this session)") != std::string::npos);
+    CHECK(said.find("website run_command: deny (this session)") != std::string::npos);
+    CHECK(occurrences(said,
+                      "'SHELL' is taken as the website shell; to refuse the shell's tool, "
+                      "--deny run_command, or leave the toolset out with tools.disabled: "
+                      "[shell]") == 1);
+    CHECK(said.find("'run_command.' is taken as the website run_command; to refuse the tool, "
+                    "--deny run_command") != std::string::npos);
+
+    // The slash verbs say the website, as before, and the same pointer in
+    // the chat's own words -- until the chat has answered for the host,
+    // which then is its own, said plainly.
+    REQUIRE(chat.run({"chat", "--tools"},
+                     "/allow shell\n/revoke shell\n/deny shell\n/deny mcp\n/allow shell\n") == 0);
+    said = chat.out + chat.err;
+    CHECK(said.find("website shell allowed for this chat\n") != std::string::npos);
+    CHECK(said.find("website shell denied for this chat; to refuse the shell's tool, /deny "
+                    "run_command, or leave the toolset out with tools.disabled: [shell]") !=
+          std::string::npos);
+    CHECK(said.find("website shell allowed for this chat; to allow the shell's tool, /allow "
+                    "run_command") != std::string::npos);
+    CHECK(said.find("website mcp denied for this chat; refuse an MCP tool by its name, "
+                    "mcp__<server>__<tool>") != std::string::npos);
+
+    // Where programs start: the shell's tool still runs under --deny shell,
+    // and the note says how to refuse it.
+    if (apogee::tools::ToolsetOptions{}.child_processes) {
+        HelperChat shell{
+            nlohmann::json::array({{{"tool_calls",
+                                     {{{"name", "run_command"},
+                                       {"arguments", {{"command", "echo RAN_SHELL_MARKER"}}}}}}},
+                                   {{"text", "DONE<{{last_tool_result}}>"}}}),
+            {"unused"},
+            "",
+            "permissions:\n  run_command: allow\n"};
+        sandboxed(shell);
+        REQUIRE(shell.run({"complete", "--tools", "--deny", "shell", "hi"}) == 0);
+        CHECK(shell.out.find("RAN_SHELL_MARKER") != std::string::npos);
+        CHECK(shell.err.find("'shell' is taken as a website; to refuse the shell's tool, --deny "
+                             "run_command, or leave the toolset out with tools.disabled: "
+                             "[shell]") != std::string::npos);
+    }
+}
+
+TEST_CASE("a host the config lists or the session answered is deniable whatever its shape",
+          "[chat][cli][permissions][presets][M39]") {
+    // CLI-M39: `config add-allowed-host my_host` is accepted and reached
+    // unasked, but `--deny my_host` was refused as a mistyped tool.
+    const nlohmann::json fetches_my_host = nlohmann::json::array(
+        {{{"tool_calls", {{{"name", "fetch_url"}, {"arguments", {{"url", "http://my_host/"}}}}}}},
+         {{"text", "{{last_tool_result}}"}}});
+    HelperChat listed{fetches_my_host, {"unused"}, "", "tools:\n  allowed_hosts:\n    - my_host\n"};
+    REQUIRE(listed.run({"complete", "--tools", "--deny", "my_host", "hi"}) == 0);
+    CHECK(listed.out.find("permission to reach my_host was not given, so nothing was sent to it") !=
+          std::string::npos);
+    CHECK(listed.err.find("taken as a website") == std::string::npos);
+
+    // Answered for the session -- `--allow-host`, as the prompt's `s` gives
+    // one -- it is taken back by /deny and forgotten by /revoke.
+    HelperChat answered{fetches_my_host, {"Title"}};
+    REQUIRE(answered.run({"chat", "--tools", "--allow-host", "my_host", "--deny", "my_host"},
+                         "/permissions\n") == 0);
+    CHECK((answered.out + answered.err).find("website my_host: deny (this session)") !=
+          std::string::npos);
+    REQUIRE(answered.run({"chat", "--tools", "--allow-host", "my_host"},
+                         "/deny my_host\n/permissions\n/revoke my_host\n/permissions\n") == 0);
+    const std::string said = answered.out + answered.err;
+    CHECK(said.find("website my_host denied for this chat") != std::string::npos);
+    CHECK(said.find("website my_host: deny (this session)") != std::string::npos);
+    CHECK(said.find("website my_host: asked again from now on") != std::string::npos);
+    CHECK(said.find("is not a tool this chat asks about") == std::string::npos);
+
+    // Known to nothing, it is still refused as shaped like a tool, naming the
+    // spelling that works.
+    CHECK(answered.run({"complete", "--tools", "--deny", "my_host", "hi"}) != 0);
+    CHECK(answered.err.find("'my_host' is not a tool this chat asks about") != std::string::npos);
+    CHECK(answered.err.find("'my_host.' is the website my_host") != std::string::npos);
+}
+
 TEST_CASE("the slash verbs answer for the chat, and /permissions says from where",
           "[chat][cli][permissions][presets]") {
     HelperChat chat{texts({"fine"}), {"Title"}, "", "permissions:\n  delete_file: allow\n"};

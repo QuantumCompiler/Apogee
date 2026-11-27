@@ -1583,10 +1583,10 @@ TaskGate compose_task_gate(const harness::Config& config, const agent::ToolRegis
     // through chat's own seeding and chat's own checker (26o), so the order
     // stays the gate's -- the config's no, then its yes, then the grant.
     const auto approvals = std::make_shared<SessionApprovals>();
-    if (std::string refused = seed_approvals(*approvals, PermissionPresets{.allow = policy.grants},
-                                             gated_tools(out.tools));
-        !refused.empty()) {
-        out.refusal = std::move(refused);
+    if (SeededPresets seeded = seed_approvals(*approvals, PermissionPresets{.allow = policy.grants},
+                                              gated_tools(out.tools), listed_hosts(config));
+        !seeded.refused.empty()) {
+        out.refusal = std::move(seeded.refused);
         return out;
     }
     out.gate.permission = make_permission_checker(config, approvals);

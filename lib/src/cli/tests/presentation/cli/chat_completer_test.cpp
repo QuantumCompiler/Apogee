@@ -709,8 +709,9 @@ TEST_CASE("/deny offers the listed and allowed websites, /allow the denied ones,
     // offered the tools alone. Now /deny offers the hosts the gate lists and
     // those this chat allowed -- the websites a no changes something for --
     // and /allow the ones this chat denied, each as `name_gated` reads it:
-    // canonical, and never a URL or a name shaped like a tool, which the
-    // verb refuses.
+    // canonical, and never a URL, which the verb refuses. A listed or
+    // answered host shaped like a tool (`my_host`, `side_door.`'s
+    // `side_door`) is offered since the verb takes it (CLI-M39).
     ChatCompletionSources sources = project();
     const std::vector<std::string> gated{"run_command", "write_file"};
     sources.gated_tools = [gated] { return gated; };
@@ -720,20 +721,25 @@ TEST_CASE("/deny offers the listed and allowed websites, /allow the denied ones,
     sources.denied_hosts = [] { return std::vector<std::string>{"evil.example"}; };
     const std::vector<std::string> denied = texts(suggest_chat_input("/deny ", sources));
     CHECK(denied == std::vector<std::string>{"run_command", "write_file", "docs.python.org",
-                                             "example.com", "127.0.0.1", "wiki.internal"});
+                                             "example.com", "my_host", "side_door", "127.0.0.1",
+                                             "wiki.internal"});
     const std::vector<std::string> allowed = texts(suggest_chat_input("/allow ", sources));
     CHECK(allowed == std::vector<std::string>{"run_command", "write_file", "evil.example"});
     CHECK(texts(suggest_chat_input("/deny e", sources)) == std::vector<std::string>{"example.com"});
     CHECK(texts(suggest_chat_input("/allow e", sources)) ==
           std::vector<std::string>{"evil.example"});
-    // Each one offered is one the verb takes.
+    // Each one offered is one the verb takes, with the hosts the chat knows.
+    std::vector<std::string> known = sources.listed_hosts;
+    for (const char* host : {"wiki.internal", "my_host", "evil.example"}) {
+        known.emplace_back(host);
+    }
     for (const std::string& name : denied) {
         INFO(name);
-        CHECK(apogee::commands::name_gated(name, gated).error.empty());
+        CHECK(apogee::commands::name_gated(name, gated, known).error.empty());
     }
     for (const std::string& name : allowed) {
         INFO(name);
-        CHECK(apogee::commands::name_gated(name, gated).error.empty());
+        CHECK(apogee::commands::name_gated(name, gated, known).error.empty());
     }
     // /revoke is unchanged: the chat's own answers.
     sources.session_permissions = [] { return std::vector<std::string>{"write_file"}; };

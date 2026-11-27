@@ -552,25 +552,31 @@ std::vector<NamedChoice> argument_choices(ArgumentValues values,
             }
             // The websites a yes or a no changes something for (CLI-M36):
             // for /deny the ones the gate lists and those this chat allowed,
-            // for /allow those it denied -- each as the verb reads it, so a
-            // URL or a name shaped like a tool, which it refuses, is never
-            // offered, and a host is offered once, by its canonical name.
+            // for /allow those it denied -- each as the verb reads it, with
+            // the hosts the chat knows (CLI-M39), so a URL, which it refuses,
+            // is never offered, and a host is offered once, by its canonical
+            // name.
+            const std::vector<std::string> allowed =
+                sources.allowed_hosts ? sources.allowed_hosts() : std::vector<std::string>{};
+            const std::vector<std::string> denied =
+                sources.denied_hosts ? sources.denied_hosts() : std::vector<std::string>{};
+            std::vector<std::string> known = sources.listed_hosts;
+            known.insert(known.end(), allowed.begin(), allowed.end());
+            known.insert(known.end(), denied.begin(), denied.end());
             std::vector<std::string> hosts;
             if (values == ArgumentValues::DenyNames) {
                 hosts = sources.listed_hosts;
-                if (sources.allowed_hosts) {
-                    for (std::string& host : sources.allowed_hosts()) {
-                        hosts.push_back(std::move(host));
-                    }
-                }
-            } else if (sources.denied_hosts) {
-                hosts = sources.denied_hosts();
+                hosts.insert(hosts.end(), allowed.begin(), allowed.end());
+            } else {
+                hosts = denied;
             }
             for (const std::string& host : hosts) {
-                const GatedName name = name_gated(host, gated);
-                // Its canonical name must be taken too: `side_door.` is a
-                // website, `side_door` a name shaped like a tool.
-                const GatedName offered = name.host ? name_gated(name.key, gated) : GatedName{};
+                const GatedName name = name_gated(host, gated, known);
+                // Its canonical name must be taken as the same website: a
+                // listed `write_file.` is a website, but `write_file` names
+                // the tool.
+                const GatedName offered =
+                    name.host ? name_gated(name.key, gated, known) : GatedName{};
                 if (name.error.empty() && name.host && offered.host && offered.key == name.key &&
                     std::ranges::none_of(choices, [&name](const NamedChoice& choice) {
                         return choice.name == name.key;

@@ -13,6 +13,7 @@
 #include <memory>
 #include <optional>
 #include <random>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -662,8 +663,8 @@ TEST_CASE("a preset resolves exactly as the session answer it gives early",
         INFO("config level " << (level.has_value() ? static_cast<int>(*level) : -1));
         const auto seeded = std::make_shared<SessionApprovals>();
         REQUIRE(apogee::commands::seed_approvals(
-                    *seeded, PermissionPresets{.allow = {"write_file"}}, gated())
-                    .empty());
+                    *seeded, PermissionPresets{.allow = {"write_file"}}, gated(), {})
+                    .refused.empty());
         const auto answered = std::make_shared<SessionApprovals>();
         answered->tools.insert("write_file");  // what the prompt's `s` does
         const Permission by_flag =
@@ -682,18 +683,19 @@ TEST_CASE("a session's no tightens, even over the config's allow",
     config.permissions.levels["write_file"] = PermissionLevel::Allow;
     config.tools.allowed_hosts = {"docs.python.org"};
     const auto approvals = std::make_shared<SessionApprovals>();
-    REQUIRE(apogee::commands::seed_approvals(
-                *approvals, PermissionPresets{.deny = {"write_file", "docs.python.org"}}, gated())
-                .empty());
+    REQUIRE(
+        apogee::commands::seed_approvals(
+            *approvals, PermissionPresets{.deny = {"write_file", "docs.python.org"}}, gated(), {})
+            .refused.empty());
     const apogee::agent::PermissionChecker check = make_permission_checker(config, approvals);
     CHECK(check(GateRequest{"write_file", "x"}) == Permission::Deny);
     CHECK(check(website("docs.python.org")) == Permission::Deny);
     // Both said in one run: no wins.
     const auto both = std::make_shared<SessionApprovals>();
-    REQUIRE(
-        apogee::commands::seed_approvals(
-            *both, PermissionPresets{.allow = {"run_command"}, .deny = {"run_command"}}, gated())
-            .empty());
+    REQUIRE(apogee::commands::seed_approvals(
+                *both, PermissionPresets{.allow = {"run_command"}, .deny = {"run_command"}},
+                gated(), {})
+                .refused.empty());
     CHECK(make_permission_checker({}, both)(GateRequest{"run_command", "x"}) == Permission::Deny);
 }
 
@@ -701,8 +703,8 @@ TEST_CASE("an --allow-host preset answers one website's ask, and no other",
           "[commands][permissions][presets]") {
     const auto approvals = std::make_shared<SessionApprovals>();
     REQUIRE(apogee::commands::seed_approvals(
-                *approvals, PermissionPresets{.allow_hosts = {"Example.org"}}, gated())
-                .empty());
+                *approvals, PermissionPresets{.allow_hosts = {"Example.org"}}, gated(), {})
+                .refused.empty());
     const apogee::agent::PermissionChecker check = make_permission_checker({}, approvals);
     CHECK(check(website("example.org")) == Permission::Allow);
     CHECK(check(website("other.org")) == Permission::Ask);
@@ -713,20 +715,21 @@ TEST_CASE("a name that is neither a gated tool nor a website is refused, naming 
           "[commands][permissions][presets]") {
     SessionApprovals approvals;
     const std::string typo = apogee::commands::seed_approvals(
-        approvals, PermissionPresets{.allow = {"wrte_file"}}, gated());
+                                 approvals, PermissionPresets{.allow = {"wrte_file"}}, gated(), {})
+                                 .refused;
     CHECK(typo.find("--allow: 'wrte_file' is not a tool this chat asks about") !=
           std::string::npos);
     CHECK(typo.find("delete_file, run_command, write_file") != std::string::npos);
     // `--allow` is for tools: a website has its own flag.
     CHECK(apogee::commands::seed_approvals(approvals, PermissionPresets{.allow = {"example.org"}},
-                                           gated())
-              .find("--allow-host") != std::string::npos);
+                                           gated(), {})
+              .refused.find("--allow-host") != std::string::npos);
     CHECK_FALSE(apogee::commands::seed_approvals(
-                    approvals, PermissionPresets{.allow_hosts = {"not a host"}}, gated())
-                    .empty());
+                    approvals, PermissionPresets{.allow_hosts = {"not a host"}}, gated(), {})
+                    .refused.empty());
     CHECK(approvals.tools.empty());
-    CHECK(apogee::commands::name_gated("example.org", gated()).host);
-    CHECK_FALSE(apogee::commands::name_gated("example.org", gated(), false).error.empty());
+    CHECK(apogee::commands::name_gated("example.org", gated(), {}).host);
+    CHECK_FALSE(apogee::commands::name_gated("example.org", gated(), {}, false).error.empty());
 }
 
 TEST_CASE("the launch flag and the slash verbs deny every host --allow-host takes",
@@ -744,7 +747,7 @@ TEST_CASE("the launch flag and the slash verbs deny every host --allow-host take
              {"docs.python.org", "docs.python.org"},
              {"a_b.example", "a_b.example"}}) {
         INFO(given);
-        const GatedName name = apogee::commands::name_gated(given, gated());
+        const GatedName name = apogee::commands::name_gated(given, gated(), {});
         CHECK(name.error.empty());
         CHECK(name.host);
         CHECK(name.key == key);
@@ -754,25 +757,25 @@ TEST_CASE("the launch flag and the slash verbs deny every host --allow-host take
     // Tool-shaped names are still typos, and a gated tool is still a tool.
     for (const char* typo : {"write_flie", "mcp__srv__echo", "run_comand"}) {
         INFO(typo);
-        const GatedName name = apogee::commands::name_gated(typo, gated());
+        const GatedName name = apogee::commands::name_gated(typo, gated(), {});
         CHECK_FALSE(name.host);
         CHECK(name.error.find("is not a tool this chat asks about") != std::string::npos);
     }
-    CHECK_FALSE(apogee::commands::name_gated("write_file", gated()).host);
+    CHECK_FALSE(apogee::commands::name_gated("write_file", gated(), {}).host);
     // Not a host at all: refused as before.
-    CHECK_FALSE(apogee::commands::name_gated("not a host", gated()).error.empty());
-    CHECK_FALSE(apogee::commands::name_gated("[::1", gated()).error.empty());
+    CHECK_FALSE(apogee::commands::name_gated("not a host", gated(), {}).error.empty());
+    CHECK_FALSE(apogee::commands::name_gated("[::1", gated(), {}).error.empty());
     // `--allow` stays tools only.
-    CHECK_FALSE(apogee::commands::name_gated("localhost", gated(), false).error.empty());
+    CHECK_FALSE(apogee::commands::name_gated("localhost", gated(), {}, false).error.empty());
 
     // The launch flag, and what the checker then does in each mode: a
     // session's no comes before bypass.
     for (const char* host : {"localhost", "[::1]", "::1", "intranet"}) {
         INFO(host);
         const auto approvals = std::make_shared<SessionApprovals>();
-        REQUIRE(
-            apogee::commands::seed_approvals(*approvals, PermissionPresets{.deny = {host}}, gated())
-                .empty());
+        REQUIRE(apogee::commands::seed_approvals(*approvals, PermissionPresets{.deny = {host}},
+                                                 gated(), {})
+                    .refused.empty());
         approvals->mode = apogee::commands::PermissionMode::Bypass;
         const apogee::agent::PermissionChecker check = make_permission_checker({}, approvals);
         CHECK(check(website(*apogee::harness::canonical_host(host))) == Permission::Deny);
@@ -781,8 +784,8 @@ TEST_CASE("the launch flag and the slash verbs deny every host --allow-host take
     }
     SessionApprovals approvals;
     CHECK(apogee::commands::seed_approvals(approvals, PermissionPresets{.deny = {"write_flie"}},
-                                           gated())
-              .starts_with("--deny: 'write_flie' is not a tool this chat asks about"));
+                                           gated(), {})
+              .refused.starts_with("--deny: 'write_flie' is not a tool this chat asks about"));
 
     // A session's yes for localhost -- the prompt's `s` -- is taken back.
     const auto answered = std::make_shared<SessionApprovals>();
@@ -791,7 +794,7 @@ TEST_CASE("the launch flag and the slash verbs deny every host --allow-host take
     asked.outbound = true;
     REQUIRE(apogee::commands::answer_permission("s", asked, {}, answered, note));
     CHECK(answered->hosts.contains("localhost"));
-    const GatedName localhost = apogee::commands::name_gated("localhost", gated());
+    const GatedName localhost = apogee::commands::name_gated("localhost", gated(), {});
     apogee::commands::deny_for_session(*answered, localhost);
     CHECK(make_permission_checker({}, answered)(website("localhost")) == Permission::Deny);
     CHECK(apogee::commands::revoke_for_session(*answered, localhost));
@@ -1134,6 +1137,226 @@ TEST_CASE("a config level on an MCP tool binds even when its server calls it rea
     }
 }
 
+TEST_CASE("a toolset's or a gated tool's name stays a website deny, and says what refuses the tool",
+          "[commands][permissions][presets][M39]") {
+    // CLI-M39: `--deny shell` was taken silently as the website `shell`, and
+    // the tool the person meant still ran. By the user's call it stays a
+    // website deny, compared in canonical form, and carries the word it
+    // shares so every surface can say so.
+    for (const char* word : {"fs", "shell", "git", "notes", "rag", "graph", "web", "mcp"}) {
+        INFO(word);
+        const GatedName name = apogee::commands::name_gated(word, gated(), {});
+        CHECK(name.error.empty());
+        CHECK(name.host);
+        CHECK(name.key == word);
+        CHECK(name.shares == word);
+    }
+    for (const auto& [given, key] :
+         std::vector<std::pair<std::string, std::string>>{{"Shell", "shell"},
+                                                          {"SHELL", "shell"},
+                                                          {"shell.", "shell"},
+                                                          {"run_command.", "run_command"},
+                                                          {"RUN_COMMAND.", "run_command"}}) {
+        INFO(given);
+        const GatedName name = apogee::commands::name_gated(given, gated(), {});
+        CHECK(name.host);
+        CHECK(name.key == key);
+        CHECK(name.shares == key);
+    }
+    // Any other website shares nothing: no note.
+    for (const char* host :
+         {"intranet", "localhost", "shel", "docs.python.org", "[::1]", "delegate", "write_note."}) {
+        INFO(host);
+        const GatedName name = apogee::commands::name_gated(host, gated(), {});
+        CHECK(name.host);
+        CHECK(name.shares.empty());
+        CHECK(apogee::commands::shared_name_note(host, name).empty());
+    }
+
+    // The note, in the words the item's default set.
+    const auto note = [](const std::string& given) {
+        return apogee::commands::shared_name_note(given,
+                                                  apogee::commands::name_gated(given, gated(), {}));
+    };
+    CHECK(note("shell") ==
+          "'shell' is taken as a website; to refuse the shell's tool, --deny run_command, or "
+          "leave the toolset out with tools.disabled: [shell]");
+    CHECK(note("SHELL") ==
+          "'SHELL' is taken as the website shell; to refuse the shell's tool, --deny "
+          "run_command, or leave the toolset out with tools.disabled: [shell]");
+    CHECK(note("fs") ==
+          "'fs' is taken as a website; to refuse the fs tools, --deny write_file, --deny "
+          "edit_file and --deny delete_file, or leave the toolset out with tools.disabled: [fs]");
+    CHECK(note("notes") ==
+          "'notes' is taken as a website; to refuse the notes tools, --deny write_note and "
+          "--deny delete_note, or leave the toolset out with tools.disabled: [notes]");
+    CHECK(note("git") ==
+          "'git' is taken as a website; git's tools only read and never ask -- leave them out "
+          "with tools.disabled: [git]");
+    CHECK(note("rag") ==
+          "'rag' is taken as a website; rag's tools only read and never ask -- leave them out "
+          "with tools.disabled: [rag]");
+    CHECK(note("graph") ==
+          "'graph' is taken as a website; graph's tools only read and never ask -- leave them "
+          "out with tools.disabled: [graph]");
+    CHECK(note("web") ==
+          "'web' is taken as a website; fetch_url and web_search are asked about per website -- "
+          "name the website, like docs.python.org");
+    CHECK(note("mcp") ==
+          "'mcp' is taken as a website; refuse an MCP tool by its name, mcp__<server>__<tool>");
+    CHECK(note("run_command.") ==
+          "'run_command.' is taken as the website run_command; to refuse the tool, --deny "
+          "run_command");
+
+    // The chat's verbs say the same pointer in their own words.
+    using apogee::commands::PointerVerb;
+    using apogee::commands::shared_name_pointer;
+    CHECK(shared_name_pointer("shell", PointerVerb::ChatDeny) ==
+          "to refuse the shell's tool, /deny run_command, or leave the toolset out with "
+          "tools.disabled: [shell]");
+    CHECK(shared_name_pointer("shell", PointerVerb::ChatAllow) ==
+          "to allow the shell's tool, /allow run_command");
+    CHECK(shared_name_pointer("fs", PointerVerb::ChatAllow) ==
+          "to allow the fs tools, /allow write_file, /allow edit_file and /allow delete_file");
+    CHECK(shared_name_pointer("git", PointerVerb::ChatAllow) ==
+          "git's tools only read and never ask");
+    CHECK(shared_name_pointer("web", PointerVerb::ChatAllow) ==
+          "fetch_url and web_search are asked about per website -- name the website, like "
+          "docs.python.org");
+    CHECK(shared_name_pointer("mcp", PointerVerb::ChatAllow) ==
+          "allow an MCP tool by its name, mcp__<server>__<tool>");
+    CHECK(shared_name_pointer("run_command", PointerVerb::ChatAllow) ==
+          "to allow the tool, /allow run_command");
+    CHECK(shared_name_pointer("", PointerVerb::LaunchDeny).empty());
+
+    // The launch flag: the deny lands on the website, unchanged, and the seed
+    // hands back one note per such name, in the flags' order.
+    const auto approvals = std::make_shared<SessionApprovals>();
+    const apogee::commands::SeededPresets seeded = apogee::commands::seed_approvals(
+        *approvals, PermissionPresets{.deny = {"run_command.", "docs.python.org", "Shell"}},
+        gated(), {});
+    CHECK(seeded.refused.empty());
+    CHECK(seeded.notes == std::vector<std::string>{note("run_command."), note("Shell")});
+    CHECK(approvals->denied_hosts ==
+          std::set<std::string, std::less<>>{"docs.python.org", "run_command", "shell"});
+    CHECK(approvals->denied_tools.empty());
+    Config config;
+    config.permissions.levels["run_command"] = PermissionLevel::Allow;
+    const apogee::agent::PermissionChecker check = make_permission_checker(config, approvals);
+    CHECK(check(GateRequest{"run_command", "x"}) == Permission::Allow);
+    CHECK(check(website("shell")) == Permission::Deny);
+    // `--allow` is tools only: a note is never a seed's for a grant.
+    CHECK(apogee::commands::seed_approvals(*approvals, PermissionPresets{.allow = {"shell"}},
+                                           gated(), {})
+              .notes.empty());
+}
+
+TEST_CASE("a host the run knows is deniable whatever its shape; an unknown one names the spelling",
+          "[commands][permissions][presets][M39]") {
+    // CLI-M39: a listed `my_host` is reached unasked, but `--deny my_host`
+    // was refused as a mistyped tool. A host the config lists or the session
+    // answered is now that website, matched as the checker matches it.
+    for (const auto& [given, known] :
+         std::vector<std::pair<std::string, std::string>>{{"my_host", "my_host"},
+                                                          {"My_Host", "my_host"},
+                                                          {"my_host", "My_Host."},
+                                                          {"git", "git"}}) {
+        INFO(given << " known as " << known);
+        const GatedName name = apogee::commands::name_gated(given, gated(), {known});
+        CHECK(name.error.empty());
+        CHECK(name.host);
+        CHECK(name.key == *apogee::harness::canonical_host(given));
+        // The person's own host: no note, even spelled like a toolset.
+        CHECK(name.shares.empty());
+    }
+    // A gated tool still comes first, and `--allow` stays tools only (26o).
+    CHECK_FALSE(apogee::commands::name_gated("run_command", gated(), {"run_command"}).host);
+    CHECK_FALSE(apogee::commands::name_gated("my_host", gated(), {"my_host"}, false).error.empty());
+    // Only a known host: any other name shaped like a tool is still a typo.
+    for (const char* typo : {"write_flie", "run_comand", "mcp__srv__echo"}) {
+        INFO(typo);
+        const GatedName name = apogee::commands::name_gated(typo, gated(), {"my_host"});
+        CHECK_FALSE(name.host);
+        CHECK(name.error.find("is not a tool this chat asks about") != std::string::npos);
+    }
+
+    // Unknown, it is refused as before, the refusal naming the spelling that
+    // works -- never for an MCP tool's name or a gated tool's other case.
+    const GatedName unknown = apogee::commands::name_gated("my_host", gated(), {});
+    CHECK_FALSE(unknown.host);
+    CHECK(unknown.error ==
+          "'my_host' is not a tool this chat asks about -- the ones it asks about: delete_file, "
+          "run_command, write_file; or name a website, like docs.python.org -- 'my_host.' is the "
+          "website my_host");
+    CHECK(apogee::commands::name_gated("write_flie", gated(), {})
+              .error.ends_with("-- 'write_flie.' is the website write_flie"));
+    CHECK(apogee::commands::name_gated("mcp__srv__echo", gated(), {})
+              .error.find("'mcp__srv__echo.'") == std::string::npos);
+    // Nor for any other tool's name: following it would deny a website and
+    // leave the tool running (the review's finding).
+    for (const char* tool : {"Run_Command", "fetch_url", "web_search", "read_file", "git_log",
+                             "graph_query", "todo_write", "ask_user", "MCP__srv__echo"}) {
+        INFO(tool);
+        const GatedName refused = apogee::commands::name_gated(tool, gated(), {});
+        CHECK_FALSE(refused.error.empty());
+        CHECK(refused.error.find("is the website") == std::string::npos);
+    }
+    CHECK(apogee::commands::name_gated("my_host", gated(), {}, false).error.find("my_host.") ==
+          std::string::npos);
+    // And the spelling it names is taken.
+    CHECK(apogee::commands::name_gated("my_host.", gated(), {}).host);
+
+    // The launch flag over the config's list: denied for the session though
+    // listed, through the checker's own list.
+    Config config;
+    config.tools.allowed_hosts = {"my_host"};
+    const std::vector<std::string> listed = apogee::commands::listed_hosts(config);
+    const auto approvals = std::make_shared<SessionApprovals>();
+    const apogee::commands::SeededPresets seeded = apogee::commands::seed_approvals(
+        *approvals, PermissionPresets{.deny = {"my_host"}}, gated(), listed);
+    CHECK(seeded.refused.empty());
+    CHECK(seeded.notes.empty());
+    CHECK(make_permission_checker(config, nullptr)(website("my_host")) == Permission::Allow);
+    CHECK(make_permission_checker(config, approvals)(website("my_host")) == Permission::Deny);
+    // Before any server starts, the same verdict (CLI-M38).
+    CHECK(apogee::commands::preflight_presets(PermissionPresets{.deny = {"my_host"}}, gated(), {},
+                                              listed)
+              .empty());
+    CHECK_FALSE(
+        apogee::commands::preflight_presets(PermissionPresets{.deny = {"my_host"}}, gated(), {}, {})
+            .empty());
+
+    // An `--allow-host` is seeded first, so the same run's `--deny` takes it;
+    // and `my_host.` still denies with nothing listed, beside it or alone.
+    for (const PermissionPresets& presets :
+         {PermissionPresets{.deny = {"my_host"}, .allow_hosts = {"my_host"}},
+          PermissionPresets{.deny = {"my_host."}, .allow_hosts = {"my_host"}},
+          PermissionPresets{.deny = {"my_host."}}}) {
+        const auto answers = std::make_shared<SessionApprovals>();
+        CHECK(apogee::commands::seed_approvals(*answers, presets, gated(), {}).refused.empty());
+        CHECK(answers->denied_hosts.contains("my_host"));
+        CHECK(make_permission_checker({}, answers)(website("my_host")) == Permission::Deny);
+    }
+
+    // In chat: a session's answer makes the host known to /deny, /allow and
+    // /revoke, through `known_hosts`.
+    const auto session = std::make_shared<SessionApprovals>();
+    std::string said;
+    REQUIRE(apogee::commands::answer_permission("s", website("my_host"), {}, session, said));
+    const std::vector<std::string> known =
+        apogee::commands::known_hosts({"docs.python.org"}, *session);
+    CHECK(known == std::vector<std::string>{"docs.python.org", "my_host"});
+    const GatedName answered = apogee::commands::name_gated("my_host", gated(), known);
+    REQUIRE(answered.host);
+    apogee::commands::deny_for_session(*session, answered);
+    CHECK(apogee::commands::known_hosts({}, *session) == std::vector<std::string>{"my_host"});
+    CHECK(apogee::commands::name_gated("my_host", gated(),
+                                       apogee::commands::known_hosts({}, *session))
+              .host);
+    CHECK(apogee::commands::revoke_for_session(*session, answered));
+    CHECK(apogee::commands::known_hosts({}, *session).empty());
+}
+
 TEST_CASE("a shell or git tool this build never offers is refused saying why, not as a typo",
           "[commands][permissions][presets][57k]") {
     // On a build that cannot start a program (Windows, today) run_command and
@@ -1142,18 +1365,19 @@ TEST_CASE("a shell or git tool this build never offers is refused saying why, no
     // refusal says why it is not here, and never sends the user to
     // --allow-host.
     const std::vector<std::string> without = {"delete_file", "write_file"};
-    const GatedName shell = apogee::commands::name_gated("run_command", without, true, false);
+    const GatedName shell = apogee::commands::name_gated("run_command", without, {}, true, false);
     CHECK(shell.unoffered);
     CHECK(shell.key.empty());
     CHECK(shell.error.find("'run_command' is a shell tool") != std::string::npos);
     CHECK(shell.error.find("cannot start other programs") != std::string::npos);
-    CHECK(apogee::commands::name_gated("git_log", without, false, false).unoffered);
+    CHECK(apogee::commands::name_gated("git_log", without, {}, false, false).unoffered);
     // A typo is still a typo there, and run_command where programs start is
     // the plain refusal naming the set.
-    const GatedName typo = apogee::commands::name_gated("wrte_file", without, true, false);
+    const GatedName typo = apogee::commands::name_gated("wrte_file", without, {}, true, false);
     CHECK_FALSE(typo.unoffered);
     CHECK(typo.error.find("is not a tool this chat asks about") != std::string::npos);
-    const GatedName elsewhere = apogee::commands::name_gated("run_command", without, true, true);
+    const GatedName elsewhere =
+        apogee::commands::name_gated("run_command", without, {}, true, true);
     CHECK_FALSE(elsewhere.unoffered);
     CHECK(elsewhere.error.find("delete_file, write_file") != std::string::npos);
 
@@ -1161,20 +1385,22 @@ TEST_CASE("a shell or git tool this build never offers is refused saying why, no
     // the reason above, the refusal says it, with no website hint.
     if (!apogee::tools::ToolsetOptions{}.child_processes) {
         SessionApprovals approvals;
-        const std::string allowed = apogee::commands::seed_approvals(
-            approvals, PermissionPresets{.allow = {"run_command"}}, without);
+        const std::string allowed =
+            apogee::commands::seed_approvals(approvals, PermissionPresets{.allow = {"run_command"}},
+                                             without, {})
+                .refused;
         CHECK(allowed.starts_with("--allow: 'run_command' is a shell tool"));
         CHECK(allowed.find("--allow-host") == std::string::npos);
         CHECK(apogee::commands::seed_approvals(approvals, PermissionPresets{.deny = {"git_log"}},
-                                               without)
-                  .starts_with("--deny: 'git_log' is a git tool"));
+                                               without, {})
+                  .refused.starts_with("--deny: 'git_log' is a git tool"));
     }
 }
 
 TEST_CASE("revoke forgets the session's own answer, never the config's",
           "[commands][permissions][presets]") {
     SessionApprovals approvals;
-    const GatedName tool = apogee::commands::name_gated("run_command", gated());
+    const GatedName tool = apogee::commands::name_gated("run_command", gated(), {});
     apogee::commands::allow_for_session(approvals, tool);
     CHECK(approvals.tools.contains("run_command"));
     apogee::commands::deny_for_session(approvals, tool);
@@ -1186,7 +1412,7 @@ TEST_CASE("revoke forgets the session's own answer, never the config's",
     CHECK(apogee::commands::revoke_for_session(approvals, tool));
     CHECK_FALSE(apogee::commands::revoke_for_session(approvals, tool));
     CHECK(approvals.tools.empty());
-    const GatedName host = apogee::commands::name_gated("docs.python.org", gated());
+    const GatedName host = apogee::commands::name_gated("docs.python.org", gated(), {});
     apogee::commands::allow_for_session(approvals, host);
     CHECK(apogee::commands::revoke_for_session(approvals, host));
     CHECK(approvals.hosts.empty());
@@ -1200,9 +1426,9 @@ TEST_CASE("/permissions says each answer and where it comes from",
     config.tools.allowed_hosts = {"api.github.com"};
     SessionApprovals approvals;
     apogee::commands::allow_for_session(approvals,
-                                        apogee::commands::name_gated("write_file", gated()));
+                                        apogee::commands::name_gated("write_file", gated(), {}));
     apogee::commands::deny_for_session(approvals,
-                                       apogee::commands::name_gated("example.org", gated()));
+                                       apogee::commands::name_gated("example.org", gated(), {}));
     const std::vector<std::string> lines =
         apogee::commands::describe_permissions(config, approvals, gated());
     CHECK(lines == std::vector<std::string>{"delete_file  allow  (config)",
@@ -1498,9 +1724,9 @@ TEST_CASE(
         Config config;
         config.tools.allowed_hosts = {"127.0.0.1"};
         const auto approvals = std::make_shared<SessionApprovals>();
-        REQUIRE(apogee::commands::seed_approvals(*approvals,
-                                                 PermissionPresets{.deny = {"127.0.0.1"}}, gated())
-                    .empty());
+        REQUIRE(apogee::commands::seed_approvals(
+                    *approvals, PermissionPresets{.deny = {"127.0.0.1"}}, gated(), {})
+                    .refused.empty());
         apogee::agent::DispatchContext context;
         context.permission = make_permission_checker(config, approvals);
         context.confirm = counting_confirm(true);

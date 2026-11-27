@@ -12,9 +12,9 @@ The branch is `v0.2.2`; the last published release is [v0.2.1](https://github.co
 - **The Apple apps:** none in this release; their next is v0.2.4.
 - **The design:** none planned yet.
 
-Outside the release, 22 maintenance items can be picked up any time: the CLI's M39–M47 (2026-11-22) and M48–M60 (2026-11-26); the Apple apps have none. Eight wait on another maintenance item: the CLI's M42 on M41, M43 on M40, M44 on M43, M46 on M45, M49 and M50 on M48, M56 on M55, and M60 on M58. None of the 22 waits on a decision from you.
+Outside the release, 21 maintenance items can be picked up any time: the CLI's M40–M47 (2026-11-22) and M48–M60 (2026-11-26); the Apple apps have none. Eight wait on another maintenance item: the CLI's M42 on M41, M43 on M40, M44 on M43, M46 on M45, M49 and M50 on M48, M56 on M55, and M60 on M58. None of the 21 waits on a decision from you.
 
-**Can start today** (nothing gates them): [CLI 58b](cli/v0.2.2/mcp-serve-graphs-and-knowledge.md), [CLI 58c](cli/v0.2.2/mcp-serve-coding-host-profile.md), [CLI 58d](cli/v0.2.2/mcp-serve-opt-in-refresh.md) and [CLI 64a](cli/v0.2.2/apogee-update.md); and any maintenance item below that waits on nothing (the CLI's M39–M41, M45, M47, M48, M51–M55 and M57–M59).
+**Can start today** (nothing gates them): [CLI 58b](cli/v0.2.2/mcp-serve-graphs-and-knowledge.md), [CLI 58c](cli/v0.2.2/mcp-serve-coding-host-profile.md), [CLI 58d](cli/v0.2.2/mcp-serve-opt-in-refresh.md) and [CLI 64a](cli/v0.2.2/apogee-update.md); and any maintenance item below that waits on nothing (the CLI's M40, M41, M45, M47, M48, M51–M55 and M57–M59).
 
 ### The CLI ([queue](cli/README.md#v022))
 
@@ -54,7 +54,6 @@ Maintenance items aren't tied to a release; any one can be picked up by name.
 
 | Product | # | Item | Waits on |
 |---|---|---|---|
-| CLI | M39 | [Deny takes every host a yes takes, and says when a tool's name became a website](cli/maintenance/deny-takes-every-host-a-yes-takes.md) | — |
 | CLI | M40 | [Delete-allowed-host removes what the list holds](cli/maintenance/delete-allowed-host-removes-what-the-list-holds.md) | — |
 | CLI | M41 | [macOS's bash 3.2 completes every word](cli/maintenance/bash-3-2-completes-every-word.md) | — |
 | CLI | M42 | [The completion stubs read the words as the shell does](cli/maintenance/stubs-read-the-words-as-the-shell-does.md) | M41 |
